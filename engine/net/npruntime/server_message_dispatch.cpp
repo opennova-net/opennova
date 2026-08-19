@@ -1898,6 +1898,14 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 		if (&c == &joined || !is_in_match(c) || c.link.transport == nullptr) continue;
 		c.link.transport->host_send(s2c::PLAYER_SYNC, body);
 	}
+	// Retail's host-client reads the server's player-slot table in-process, so
+	// no self-0x46 exists on its wire. Our host's client view is fed over the
+	// type-2 loopback instead (ADR 0011 §3; the D-NET-114 self-stream), and it
+	// never runs the joiner's C2S 0x22 walk — carry the loopback player's OWN
+	// sync so the host-side roster (D-HUD-24) binds its slot and its 0x16 rows
+	// are accepted rather than dropped as unknown.
+	if (joined.type == 2 && joined.link.transport != nullptr)
+		joined.link.transport->host_send(s2c::PLAYER_SYNC, body);
 }
 
 } // namespace opennova::np

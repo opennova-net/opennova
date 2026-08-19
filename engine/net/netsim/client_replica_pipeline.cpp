@@ -183,6 +183,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::PLAYER_LIST: // §5.20 the Tab scoreboard (0x16)
+		apply_player_list(body);
+		break;
+	case s2c::PLAYER_SYNC: // §5.21 the connection-slot roster (0x46)
+		apply_player_sync(body);
+		break;
 	case s2c::GAME_EVENT: // §5.26 the kill/objective/medic feed lane (0x1E)
 		apply_game_event(body);
 		break;

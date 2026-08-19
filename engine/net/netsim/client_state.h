@@ -11,6 +11,83 @@
 
 namespace opennova::netsim {
 
+// One connection-slot roster binding, folded from S2C 0x46 player-sync. This
+// is the scoreboard's NAME-JOIN table, keyed by CONNECTION SLOT — a different
+// key from the entity handle the feed resolves names by; entity_slot is the
+// join between the two. The entity binding lands UNCONDITIONALLY on every
+// non-removal sync (it is not bitmask-gated) [orig: the slot+36/slot+15
+// stores @0x431477/@0x431480]; the named fields land per-bit last-write-wins
+// [orig: the bit-gated stores in NapiNPClientMsg_PlayerSync @0x431370].
+// A removal DEACTIVATES the slot and wipes it [orig: PlayerSlot_ClearAndUnlink
+// @0x434730 zeroes active/team/names/entity; a re-bind re-inits every field
+// @0x4346c0, and an unbound slot is never read (its 0x16 rows are dropped),
+// so the clan/quality bytes ClearAndUnlink happens to skip are unobservable
+// and the fold resets the whole slot].
+struct ClientRosterSlot {
+	bool bound = false;
+	std::string name;         // 0x0001
+	std::string clan;         // 0x0002 (the serializer's "team string"; retail ships "")
+	uint8_t team = 0;         // 0x0004 [orig: @0x4315f7]; every accepted 0x16 row
+	                          // refreshes it too [orig: @0x42fc7c]
+	uint8_t quality = 0;      // 0x0400, clamped 4 [orig: @0x43170d] — the connection-icon band
+	int16_t entity_slot = -1; // pool-0 slot this connection drives; -1 = none
+	                          // [orig: the no-entity -1 store @0x431489]
+};
+
+// The decoded S2C 0x16 scoreboard. Rows arrive PRE-SORTED by the server (team
+// modes by the accumulated points, others by the mode stat [orig:
+// Player_ComputeScore @0x500A80 feeding Server_BuildAndBroadcastScoreboard
+// @0x50D960]) and the client never re-sorts — the drawer walks the records in
+// wire order [orig: HUD_DrawKillList @0x423A30]; slot_id is authoritative, not
+// row position. Every well-formed update applies UNCONDITIONALLY: retail
+// zeroes its row count before the row loop and parses the team table and
+// trailer even for a zero-row list [orig: @0x42fb46], and the drawer shows
+// whatever is stored — an empty update yields an empty board. Name/clan are
+// copied INTO the row at apply time (retail joins them into its 56-byte
+// records inside the parser [orig: @0x42fd4c..0x42fd8f]), so a later roster
+// removal does not blank rows already on the board.
+struct ClientScoreboardRow {
+	uint8_t slot_id = 0;
+	uint16_t status_flags = 0;  // the glyph bitfield, NOT a ping [orig: store @0x42fdb4]
+	uint16_t score1 = 0;        // the mode's primary stat — the only score the
+	                            // Tab list draws [orig: @0x423e76]
+	uint16_t score2 = 0;        // accumulated points/EXP (the server's team-mode
+	                            // sort key; the retail client never reads it)
+	uint8_t team = 0;           // flags >> 1
+	bool spectator = false;     // flags bit0
+	std::string name;           // joined from the roster at apply time
+	std::string clan;
+};
+
+// One team-table row. The u16 pair carries the SAME two stats as the player
+// rows — the mode stat and the accumulated points [orig: the team stores
+// @0x50dcb8/@0x50dce4] — and the byte pair is mode-specific: the KOTH hold
+// byte (game type 0x10001 [orig: @0x50dc62]) and the CTF flag state (types
+// 0x10002/0x90002/0x10004 [orig: @0x50dd30]). The old player_count/alive_count
+// names were decode-era guesses.
+struct ClientScoreboardTeam {
+	uint16_t score1 = 0;
+	uint16_t score2 = 0;
+	uint8_t koth_hold = 0;
+	uint8_t ctf_flag = 0;
+};
+
+struct ClientScoreboard {
+	bool known = false;
+	bool team_mode = false;   // flags bit0 -> g_scoreboard_flags
+	bool timed = false;       // flags bit1 — set only for solo KOTH (game type 1)
+	                          // [orig: @0x50dd54]
+	uint8_t in_game_count = 0;
+	uint8_t spectator_count = 0;
+	std::vector<ClientScoreboardRow> rows;
+	std::vector<ClientScoreboardTeam> teams;  // T0 neutral + one per team
+	// Rows skipped because their connection slot has no roster binding yet.
+	// Retail drops these too and queues a C2S 0x22 {slot, 0x1CF7} retry
+	// [orig: @0x42fc05..0x42fc3a]; the retry send is a D-HUD-24 residual.
+	std::uint32_t rows_dropped_unknown_slot = 0;
+	std::uint64_t revision = 0;
+};
+
 // One decoded S2C 0x0A tag-2 fire descriptor, lifted into absolute fixed-point
 // coordinates. It is a remote ROUND SPAWN, not a hit/impact notification: the
 // receiving client re-simulates it visually and authority remains on the host.
@@ -537,6 +614,10 @@ struct ClientState {
 	ClientMountedAmmoState mounted_ammo;
 	ClientMinimapState minimap;
 	std::array<ClientGuidedMissile, kGuidedMissileCapacity> guided{};
+	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
+	// connection-slot roster it joins names from.
+	ClientScoreboard scoreboard;
+	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

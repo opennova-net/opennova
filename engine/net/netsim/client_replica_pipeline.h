@@ -291,6 +291,8 @@ private:
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 	// The live placed-device lifecycle (client_replica_placed_device.cpp).
 	void apply_game_event(const std::vector<uint8_t> &body);   // 0x1E (the feed)
+	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
+	void apply_player_sync(const std::vector<uint8_t> &body);  // 0x46 (its name join)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12

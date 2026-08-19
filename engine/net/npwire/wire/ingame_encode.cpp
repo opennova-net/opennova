@@ -760,13 +760,13 @@ std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &play
 	w.u8(static_cast<uint8_t>(players.size()));  // row count
 	for (const PlayerListEntry &e : players) {
 		w.u8(e.slot);
-		w.u16(0); // ping
-		w.u16(0); // score
-		w.u16(0); // deaths
+		w.u16(0); // statusFlags (the glyph bitfield; zero until stats exist)
+		w.u16(0); // score1 (the mode stat)
+		w.u16(0); // score2 (accumulated points)
 		w.u8(static_cast<uint8_t>(e.team << 1)); // bits1+ team, bit0 SPECTATOR (unmodeled 0)
 	}
 	w.u8(0x02); // team_count = 2 (matches retail)
-	for (int i = 0; i < 3; ++i) { // (team_count + 1) blocks {score, deaths, kothHold, ctfFlag}
+	for (int i = 0; i < 3; ++i) { // (team_count + 1) blocks {score1, score2, kothHold, ctfFlag}
 		w.u16(0); w.u16(0);
 		w.u8(0); w.u8(0);
 	}
