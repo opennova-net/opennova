@@ -115,6 +115,87 @@ func test_cptless_project_data_does_not_build_render_terrain() -> void:
 	assert_eq(terrain.get_patches_active(), 0, "CPT-less data should not create render patch instances.")
 
 
+# A BHD-era terrain authors ONE detail texture (`polytrn_detailmap`) and no
+# `polytrn_detailmap_c1..c3`/`detailmapdist`, and ships `terrain_name ""`.
+# Opening it must promote that single detail into Detail A/B/C + the far
+# target (so a JO/DFX export bakes the detail instead of the gray placeholder)
+# and name the terrain after the file stem; an authored splat set is untouched.
+func test_legacy_single_detail_trn_promotes_into_splat_slots() -> void:
+	var legacy_dir := _output_dir().path_join("legacy")
+	DirAccess.make_dir_recursive_absolute(legacy_dir)
+	for filename in ["Dvxi5_c.tga", "Dvxi5_dm.tga", "Dvxi5_m.pcx", "Dvxi5_f.pcx", "TRNTILE10.TGA"]:
+		assert_eq(DirAccess.copy_absolute(_fixture_path(filename), legacy_dir.path_join(filename)), OK,
+			"%s should copy next to the legacy .trn." % filename)
+	var legacy_trn := FileAccess.open(legacy_dir.path_join("Oldmap.trn"), FileAccess.WRITE)
+	legacy_trn.store_string("\n".join([
+		'terrain_name     ""',
+		"water_height      0",
+		"polytrn_colormap    Dvxi5_c.tga",
+		"polytrn_detailmap    Dvxi5_dm.tga",
+		"polytrn_tilestrip        trntile10.tga",
+		"polytrn_charmap      Dvxi5_m.pcx",
+		"polytrn_foliagemap   Dvxi5_f.pcx",
+		"polytrn_detaildensity         128",
+		"polytrn_sectorcount	        8",
+		"polytrn_wrapx	        1",
+		"polytrn_wrapy	        1",
+		"polytrn_origin			-4	-4",
+		"",
+	]))
+	legacy_trn.close()
+
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
+	assert_eq(editor.open_trn(legacy_dir.path_join("Oldmap.trn")), OK, "Legacy single-detail .trn should open through the editor.")
+	assert_true(editor.is_dirty, "Promotion changes the document relative to disk.")
+	assert_eq(editor.get_terrain_name_value(), "Oldmap", "An empty terrain_name is seeded from the .trn file stem.")
+
+	var detail := Image.new()
+	assert_eq(detail.load(_fixture_path("Dvxi5_dm.tga")), OK)
+	var expected := detail.get_pixel(3, 5).to_html(false)
+	var placeholder := TerrainEditorSlots.FAR_DETAIL_PLACEHOLDER_COLOR.to_html(false)
+	assert_ne(expected, placeholder, "Fixture detail must be distinguishable from the export placeholder.")
+	for slot_id in ["detail_c1", "detail_c2", "detail_c3", "detailmapdist"]:
+		var texture: Texture2D = editor.get_slot_texture(slot_id)
+		assert_not_null(texture, "%s should be seeded from the single detail texture." % slot_id)
+		if texture == null:
+			continue
+		assert_eq(texture.get_image().get_pixel(3, 5).to_html(false), expected,
+			"%s should carry the single detail's pixels." % slot_id)
+
+	# The preview must bind an all-A blend map on TerrainData (not only the
+	# material): a null u_blendmap samples Godot's white default and sums all
+	# three layers into a x3 blow-out on the x4 splat stage.
+	var bound_blend: Texture2D = editor.terrain_mesh.get_material().get_shader_parameter("u_blendmap")
+	assert_not_null(bound_blend, "A blend-map-less terrain still binds a blend map after the surface-inputs rebuild.")
+	if bound_blend != null:
+		assert_eq(bound_blend.get_image().get_pixel(3, 5).to_html(false), Color(1, 0, 0).to_html(false),
+			"The default blend map selects layer A everywhere (retail's no-blend-map outcome).")
+	assert_not_null(editor.get_data().get_detailblendmap(), "TerrainData carries the default blend map so rebuilds keep it.")
+
+	# The saved splat set bakes that detail, not the gray placeholder. Project
+	# save writes the texture assets through the same pipeline as export (the
+	# save dir's basename is the terrain name), without needing CPT depth data.
+	var out_dir := _output_dir().path_join("Oldmap")
+	assert_eq(editor.save_project(out_dir), OK)
+	for filename in ["Oldmap_dc1.tga", "Oldmap_dc2.tga", "Oldmap_dc3.tga", "Oldmap_dmd.tga"]:
+		var exported := Image.new()
+		assert_eq(exported.load(out_dir.path_join(filename)), OK, "%s should export." % filename)
+		assert_eq(exported.get_pixel(3, 5).to_html(false), expected, "%s should bake the promoted detail." % filename)
+	assert_true(FileAccess.file_exists(out_dir.path_join("Dvxi5_dm.tga")),
+		"The authored detail stays exported under its own name as the JO coefficient source.")
+
+	# An authored splat set (Dvxi5 itself) is never overwritten by the promotion.
+	assert_eq(editor.open_trn(_fixture_path("Dvxi5.trn")), OK)
+	assert_false(editor.is_dirty, "A fully authored JO terrain must not be promoted or renamed.")
+	var c2 := Image.new()
+	assert_eq(c2.load(_fixture_path("Dvxi5_dc2.tga")), OK)
+	assert_eq(editor.get_slot_texture("detail_c2").get_image().get_pixel(3, 5).to_html(false),
+		c2.get_pixel(3, 5).to_html(false), "Authored Detail B stays the authored texture.")
+
+	_cleanup_dir(out_dir)
+	_cleanup_dir(legacy_dir)
+
+
 func test_extensionless_tileinfo_filename_resolves_til_sidecar() -> void:
 	DirAccess.make_dir_recursive_absolute(_output_dir())
 

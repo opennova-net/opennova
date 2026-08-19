@@ -649,9 +649,12 @@ func capture_trn_resource(resource: TerrainData) -> void:
 	_clamp_foliage_selection()
 
 
-func apply_loaded_textures_from_data(material: ShaderMaterial) -> void:
+# Returns true when the load promoted a legacy single-detail terrain into the
+# splat slots (see _promote_legacy_single_detail) — the document changed
+# relative to disk and the caller marks it dirty.
+func apply_loaded_textures_from_data(material: ShaderMaterial) -> bool:
 	if data == null:
-		return
+		return false
 	var source_dir := String(data.get_trn_path()).get_base_dir()
 	var loaded_colormap := _load_source_image(source_dir, String(data.get_trn_texture_filename("colormap")))
 	if loaded_colormap == null and data.get_colormap():
@@ -664,6 +667,18 @@ func apply_loaded_textures_from_data(material: ShaderMaterial) -> void:
 		loaded_blendmap = TerrainEditorSlots.texture_to_image(data.get_detailblendmap())
 	if loaded_blendmap != null:
 		set_blendmap_image(material, loaded_blendmap)
+	else:
+		# No authored blend map (a BHD-era .trn, or a project that never painted
+		# layers): the default all-A blend map must reach TerrainData too, not
+		# only the material — the surface-inputs rebuild re-binds u_blendmap
+		# from TerrainData, and a null sampler falls back to Godot's white
+		# default, which sums all three layers (x3, then the x4 splat stage: the
+		# blown-out white/yellow terrain). All-A is the retail no-blend-map
+		# outcome (the PSBasic tier: colormap x4 one detail).
+		var default_blend := blendmap_image
+		if default_blend == null:
+			default_blend = _create_color_image(HM_SIZE, HM_SIZE, Color(1.0, 0.0, 0.0, 1.0))
+		set_blendmap_image(material, default_blend)
 
 	for slot_id in TerrainEditorSlots.get_slot_ids():
 		var slot: Dictionary = TerrainEditorSlots.get_slot(String(slot_id))
@@ -676,8 +691,36 @@ func apply_loaded_textures_from_data(material: ShaderMaterial) -> void:
 		var texture := TerrainEditorSlots.get_slot_texture(data, String(slot_id))
 		if texture != null or slot_id == "detailmap" or slot_id == "detailmap2" or slot_id == "detailmapdist2":
 			TerrainEditorSlots.apply_slot_texture(material, data, String(slot_id), texture)
+	var promoted := _promote_legacy_single_detail(material)
 	surface_map = _surface_map_from_slot(data.get_pcx_slot_state("charmap"))
 	sync_material_from_data(material)
+	return promoted
+
+
+# BHD-era terrains author ONE detail texture (`polytrn_detailmap`) that the
+# old terrain shader multiplied over the colormap; JO/DFX read that key as the
+# ps.1.1 coefficient source and draw the splat layers `polytrn_detailmap_c1..c3`
+# blended by the blend map instead. Loading such a .trn leaves Detail A/B/C at
+# their placeholders, so a JO/DFX export baked flat mid-gray detail. Seed the
+# three splat layers (and the far target, when unauthored) from that single
+# detail: with the all-red default blend map JO's splat resolves to layer A
+# everywhere, i.e. `colormap x detail` — the BHD look. Only fires when NO splat
+# layer is authored, so a partially-authored JO terrain is left alone.
+func _promote_legacy_single_detail(material: ShaderMaterial) -> bool:
+	if data == null:
+		return false
+	for slot_id in TerrainEditorSlots.DETAIL_SLOT_IDS:
+		var trn_key := String(TerrainEditorSlots.get_slot(String(slot_id)).get("trn_key", ""))
+		if not String(data.get_trn_texture_filename(trn_key)).is_empty():
+			return false
+	var detail_image := TerrainEditorSlots.texture_to_image(data.get_detailmap())
+	if detail_image == null:
+		return false
+	for slot_id in TerrainEditorSlots.DETAIL_SLOT_IDS:
+		TerrainEditorSlots.apply_slot_image(material, data, String(slot_id), detail_image.duplicate())
+	if String(data.get_trn_texture_filename("detailmapdist")).is_empty():
+		TerrainEditorSlots.apply_slot_image(material, data, "detailmapdist", detail_image.duplicate())
+	return true
 
 
 func load_texture_slot(material: ShaderMaterial, slot_id: String, path: String) -> bool:
