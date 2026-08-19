@@ -220,6 +220,26 @@ func test_object_data_open_3dp_preserves_material_indices_for_live_preview() -> 
 	assert_eq(_texture_name_for_slot(material_defs.get(4, {}), 1).to_lower(), "aus1_hg1.tga", "Preview material 4 should keep US01's final material.")
 
 
+func test_object_data_open_bare_ase_adopts_scene_materials() -> void:
+	# A bare .ase has no project material list. The OED session seeds its material table from
+	# the scene at conversion but re-seeds it from the PROJECT on every build/export, so an
+	# unseeded project compiles an empty MTRL chunk (an untextured object). Opening an .ase
+	# must adopt the scene materials into the project -- and the export must carry them.
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_ASE_FIXTURE)), OK)
+	assert_eq(data.get_source_kind(), "ase")
+	assert_gt(data.get_material_count(), 0, "A bare .ase should keep its scene materials.")
+	var first: Dictionary = data.get_material_info(0)
+	assert_ne(String(first.get("diffuse_a", "")), "", "Scene material 0 should keep its diffuse bitmap.")
+
+	var export_dir := _output_dir().path_join("bird_ase_export")
+	assert_eq(DirAccess.make_dir_recursive_absolute(export_dir), OK)
+	assert_eq(data.export_3di_to_dir(export_dir), OK)
+	var reopened := ObjectData.new()
+	assert_eq(reopened.open_file(export_dir.path_join("Bird1.3di")), OK)
+	assert_eq(reopened.get_material_count(), data.get_material_count(), "The exported 3DI should carry every scene material.")
+
+
 func test_object_data_open_3dp_render_signature_matches_exported_3di() -> void:
 	var live := _open_us01_project_data()
 	var export_dir := _output_dir().path_join("us01_export")

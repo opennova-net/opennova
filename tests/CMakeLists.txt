@@ -652,6 +652,11 @@ target_link_libraries(oed_error_test PRIVATE opennova_formats)
 target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME oed_error COMMAND oed_error_test)
 
+add_executable(oed_skinned_tangents_test oed/skinned_tangents_test.cpp)
+target_link_libraries(oed_skinned_tangents_test PRIVATE opennova_formats)
+target_include_directories(oed_skinned_tangents_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME oed_skinned_tangents COMMAND oed_skinned_tangents_test)
+
 # Object renderer/shader tests
 foreach(test light_runtime light_scene material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order

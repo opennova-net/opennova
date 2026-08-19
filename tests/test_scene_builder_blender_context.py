@@ -4,9 +4,12 @@ These tests intentionally load ``bpy`` in the parent pytest process. The
 standalone ``bpy`` package corrupts subsequent subprocess imports once it's
 been loaded, so ``import bpy`` is deferred to inside each test function.
 That lets the dispatcher-based integration tests (which spawn workers) run
-first in the same pytest session without interference.
+first in the same pytest session without interference; conftest.py orders
+``USES_INPROCESS_BPY`` modules after them.
 """
 from __future__ import annotations
+
+USES_INPROCESS_BPY = True
 
 
 def test_bpy_dependency_is_blender_5() -> None:

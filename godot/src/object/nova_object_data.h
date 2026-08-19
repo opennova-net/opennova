@@ -120,6 +120,7 @@ private:
 	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
 	Error _open_3dp(const String &p_path);
 	Error _open_ase(const String &p_path);
+	void _seed_project_materials_from_ase_session();
 	Error _build_model_from_project_session(const char *p_model_name, uint8_t p_dirty_mask = 0);
 	Error _rebuild_oed_session_from_project(uint8_t p_dirty_mask = 0);
 	Error _export_project_backed_3di(const String &p_path, uint8_t p_update_mask);
