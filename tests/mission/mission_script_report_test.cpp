@@ -92,7 +92,25 @@ int main() {
 	world.add_system(&ai);
 	world.load_systems();
 
-	for (int t = 0; t < ticks; ++t) world.run_logic_tick(/*is_authority=*/true);
+	// Record the tick each event FIRST fires. "Which events fire" was not enough
+	// to compare against retail: 05TRcoop's ten scripted kills all land inside
+	// the first second, while retail's capture carries its twelve partway through
+	// the session, and only a timestamp distinguishes "fires unconditionally at
+	// boot" from "fires when the player gets there".
+	std::vector<int> first_fire(events.events().size(), -1);
+	std::vector<int> death_tick;
+	size_t seen_deaths = 0;
+	for (int t = 0; t < ticks; ++t) {
+		world.run_logic_tick(/*is_authority=*/true);
+		for (size_t i = 0; i < first_fire.size(); ++i)
+			if (first_fire[i] < 0 && events.event_fired(i)) first_fire[i] = t;
+		// Nothing drains the death list headless, so its growth timestamps the
+		// kills themselves rather than merely the events that ordered them.
+		while (seen_deaths < world.round_sim.deaths.size()) {
+			death_tick.push_back(t);
+			++seen_deaths;
+		}
+	}
 
 	// Zone health. A within-area trigger whose zone id resolves to nothing (or
 	// to a degenerate box) is NEUTERED at load and can never fire again - retail
@@ -209,6 +227,57 @@ int main() {
 	// the difference between a broken evaluator and a mission waiting on a
 	// player. Zone triggers print the zone's centre so a test round can put the
 	// player there deliberately.
+	// The scripted kills: when they land, and what let them through. Retail's
+	// baseline shows twelve of these partway through a session; if ours all fire
+	// at boot with no player, their triggers are passing when they should not.
+	{
+		// Who is in group 1? Players carry commandGroup 1, so a group-1 area
+		// trigger is meant to mean "a player got here". If AUTHORED AI also sit
+		// in group 1 the trigger fires with no player at all, which is what a
+		// boot-time scripted kill would look like.
+		{
+			std::vector<w::EntityHandle> g1;
+			world.registry.by_group(1, g1);
+			std::printf("group 1 membership: %zu entit(ies)", g1.size());
+			int shown_g = 0;
+			for (w::EntityHandle h : g1) {
+				const w::Entity *e = world.registry.get(h);
+				if (e == nullptr || shown_g >= 6) continue;
+				++shown_g;
+				std::printf("\n    net_id %d team %d alive %d pos (%.0f, %.0f)",
+				            e->net_id, e->team, e->alive ? 1 : 0, e->position.x,
+				            e->position.y);
+				// Retail skips a pool-0 entity with Flags & 1 - carried by a
+				// vehicle, or standing on something destroyed. We do not model
+				// bit 0x1 at all. [orig: Entity_IsTeamInTriggerBounds @0x43c730
+				//  `(entity[36] & 1) == 0`; set by Entity_AttachToVehicle]
+				if ((e->flags & 1u) != 0) std::printf("  [Flags&1 - retail skips]");
+			}
+			std::printf("\n");
+		}
+		std::printf("scripted kills: %zu death(s) raised", death_tick.size());
+		if (!death_tick.empty())
+			std::printf(", ticks %d..%d (%.1f s..%.1f s)", death_tick.front(),
+			            death_tick.back(), death_tick.front() / 62.0,
+			            death_tick.back() / 62.0);
+		std::printf("\n");
+		for (size_t i = 0; i < evs.size(); ++i) {
+			bool kills = false;
+			for (const bms::Action &a : evs[i].actions)
+				if (a.action_type == bms::ActionType::KillGroup) kills = true;
+			if (!kills || first_fire[i] < 0) continue;
+			std::printf("  event %zu fired at tick %d (%.1f s):", i, first_fire[i],
+			            first_fire[i] / 62.0);
+			if (evs[i].triggers.empty()) std::printf("  NO TRIGGERS (fires unconditionally)");
+			for (const bms::Trigger &t : evs[i].triggers)
+				std::printf(" [main %d sub %d p(%d,%d,%d) cond 0x%x%s]",
+				            static_cast<int32_t>(t.main_type), t.sub_type,
+				            t.param1, t.param2, t.param3, t.condition_flags,
+				            (t.condition_flags & bms::Trigger::kConditionNegated) ? " NEGATED" : "");
+			std::printf("\n");
+		}
+	}
+
 	std::printf("gates on the AI-vs-AI redirects (never-fired events only):\n");
 	int shown = 0;
 	for (size_t i = 0; i < evs.size() && shown < 12; ++i) {
