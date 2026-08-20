@@ -19,13 +19,26 @@ var _shot_ssn := OS.get_environment("NW_SHOT_SSN").to_int()
 var _shot_cam: Camera3D = null
 var _shot_n := 0
 
+# One-shot teleport probe (NW_TP_BMS + NW_TP_DX/NW_TP_DY [+ NW_TP_AT s]):
+# displaces that entity by a mission-space offset mid-round — the frozen-clump
+# environmental-pin experiment (does a pinned soldier walk once moved clear?).
+var _tp_bms := OS.get_environment("NW_TP_BMS").to_int()
+var _tp_dx := OS.get_environment("NW_TP_DX").to_float()
+var _tp_dy := OS.get_environment("NW_TP_DY").to_float()
+var _tp_at := maxf(OS.get_environment("NW_TP_AT").to_float(), 1.0) \
+		if not OS.get_environment("NW_TP_AT").is_empty() else 60.0
+var _tp_elapsed := 0.0
+var _tp_done := false
+
 func tick(world: GameWorld, delta: float) -> void:
 	if world == null or (_path.is_empty() and _shot_dir.is_empty()):
 		return
+	_tp_elapsed += delta
 	_accum += delta
 	if _accum < INTERVAL_S:
 		return
 	_accum = 0.0
+	_tp_tick(world)
 	_shot_tick(world)
 	if _path.is_empty():
 		return
@@ -117,3 +130,29 @@ func _shot_tick(world: GameWorld) -> void:
 	_shot_cam.global_position = target + Vector3(18.0, 9.0, 18.0)
 	_shot_cam.look_at(target)
 	_shot_n += 1
+
+
+func _tp_tick(world: GameWorld) -> void:
+	if _tp_done or _tp_bms == 0 or _tp_elapsed < _tp_at:
+		return
+	var sim: Simulation = world.get_sim()
+	if sim == null:
+		return
+	for i in range(int(sim.get_entity_count())):
+		var card: Dictionary = sim.get_entity_debug(i)
+		if card.is_empty() or int(card.get("bms_id", 0)) != _tp_bms:
+			continue
+		# The card position is presenter-space (x, up, z); mission space is
+		# (x, -z, up). debug_set_entity_position takes mission coordinates.
+		var p: Vector3 = card.get("position", Vector3.ZERO)
+		var mission := Vector3(p.x + _tp_dx, -p.z + _tp_dy, p.y)
+		var err := sim.debug_set_entity_position(i, mission)
+		_tp_done = true
+		if not _path.is_empty():
+			var f := FileAccess.open(_path, FileAccess.READ_WRITE)
+			if f != null:
+				f.seek_end()
+				f.store_line(JSON.stringify({"tp": {"bms": _tp_bms, "i": i,
+						"to": [mission.x, mission.y, mission.z], "err": err}}))
+				f.close()
+		return
