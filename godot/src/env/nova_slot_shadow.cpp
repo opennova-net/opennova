@@ -118,6 +118,8 @@ void SlotShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
 	ClassDB::bind_static_method("SlotShadow",
 			D_METHOD("get_capture_layer_mask"), &SlotShadow::capture_layer_mask);
+	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_drape_material"),
+			&SlotShadow::get_drape_material);
 }
 
 void SlotShadow::set_environment_node(MissionEnvironment *p_environment) {
