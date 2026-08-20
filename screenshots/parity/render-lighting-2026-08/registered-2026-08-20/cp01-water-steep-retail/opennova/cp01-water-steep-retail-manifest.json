@@ -1,0 +1,232 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "cp01-water-steep-retail-m0930-beauty",
+			"png_path": "cp01-water-steep-retail-m0930-beauty.png",
+			"png_sha256": "835321d7372a32e47b29488c4fea19a29b0c821f6426fb4079826422444d5abd",
+			"source_state_sha256": "83a1306fbc766dc21172d72d914e3facbed2d1bb9842f8567a8db1c4e3159644",
+			"state_path": "cp01-water-steep-retail-m0930-beauty.state.json",
+			"state_sha256": "13e341e4a5ecf3dc846df12f25097227c00834752acbaf16bf532b1f2cd9763a",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp01-water-steep-retail-m0930-shadows_off",
+			"png_path": "cp01-water-steep-retail-m0930-shadows_off.png",
+			"png_sha256": "382db60f60bbc2ab05d0dc29ebb99673d4e2e5fd348ace81651f45e7b770eb6d",
+			"source_state_sha256": "f56d099b94aa6f9435c47600c1ffcd4bbaed82148d316109c3a9443125d54a90",
+			"state_path": "cp01-water-steep-retail-m0930-shadows_off.state.json",
+			"state_sha256": "8a32309d78a8de5a945655b4505ecf9a321a226f6d9b462ad276e02d88e4c8d8",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp01-water-steep-retail-m0930-lighting_only",
+			"png_path": "cp01-water-steep-retail-m0930-lighting_only.png",
+			"png_sha256": "c02da0161fd8b2bf03e6a7f73e5c38ac3d7e4ca613f9aef15153e36133cc4aa1",
+			"source_state_sha256": "e2ccd7638621f4caff06ca217d010314694d15a766e8880df8b8f78c184c480e",
+			"state_path": "cp01-water-steep-retail-m0930-lighting_only.state.json",
+			"state_sha256": "242739872070d2204c78194b975553947f9422e8a23fdca7aa7cf65c15d8620d",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp01-water-steep-retail-m0930-unshaded",
+			"png_path": "cp01-water-steep-retail-m0930-unshaded.png",
+			"png_sha256": "c71ba49da62c457effdf807ea754458f3dbc4e1e8db066a14414a0f233920157",
+			"source_state_sha256": "c10ab1a9c86bdd057d4e0e86f13acb7a9d63932dbd56d947372dc2cec474076f",
+			"state_path": "cp01-water-steep-retail-m0930-unshaded.state.json",
+			"state_sha256": "fe6d5353c7378ba2433a51563a212f629c5e504e3a41269a6b33ed91c36e6229",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp01-water-steep-retail-m0930-directional_shadow_atlas",
+			"png_path": "cp01-water-steep-retail-m0930-directional_shadow_atlas.png",
+			"png_sha256": "b035a0bcb00ad3279b1a02421ff9369fd45bb7b6b94431566090038ceb99a32b",
+			"source_state_sha256": "d95a15702587f501b041526f0b2ff713e5d51a34d08cfbc12a8730384e72fa93",
+			"state_path": "cp01-water-steep-retail-m0930-directional_shadow_atlas.state.json",
+			"state_sha256": "f25eff9a5d773da9e443528636250ae075876ca6e1922bbb9ad0d038650b9651",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				1.0,
+				0.0,
+				0.0
+			],
+			[
+				0.0,
+				0.939692616462708,
+				-0.342020124197006
+			],
+			[
+				0.0,
+				0.342020124197006,
+				0.939692616462708
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": -20.0,
+			"position": [
+				-738.843835662086,
+				-754.929882986667,
+				22.1641359628738
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 0.0
+		},
+		"camera_position_godot": [
+			-738.843811035156,
+			22.1641368865967,
+			754.929870605469
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				-738.84423828125,
+				-754.754211425781,
+				21.3999996185303
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": -20.0,
+				"position": [
+					-738.84423828125,
+					-754.754211425781,
+					21.3999996185303
+				],
+				"yaw_deg": 0.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": -20.0,
+			"position": [
+				-738.843835662086,
+				-754.929882986667,
+				22.1641359628738
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 0.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"water_surface",
+			"broad_reflection_response"
+		],
+		"expected_water_height": 21.0,
+		"id": "cp01-water-steep-retail",
+		"minutes_of_day": [
+			930.0
+		],
+		"mission": "CP01.bms",
+		"retail_player_bms": {
+			"applied": [
+				-738.844223,
+				-754.754196,
+				21.4
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "CP01.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "476219276170c1b26bcc5c2d9eb5aafdcfaccb583aad843f89867cb1f93b9863",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "eb6574e6f0b873ececc009591888053c4460fc7b"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

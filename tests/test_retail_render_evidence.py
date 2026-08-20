@@ -28,17 +28,17 @@ CAPTION_FONT_BOLD = (
 )
 PUBLISHED_EVIDENCE_ROOT = (
     ROOT / "screenshots" / "parity" / "render-lighting-2026-08"
-    / "registered-2026-08-16"
+    / "registered-2026-08-20"
 )
 LEGACY_CATALOG_SHA256 = (
     "6948682efc5e58d0ea887728e1318dd3c618b286a322b1bce430e9fbfff6ebf2"
 )
 CURRENT_CATALOG_PATH = (
-    ROOT / "docs" / "render" / "render-fixtures-retail-v2.json"
+    ROOT / "docs" / "render" / "render-fixtures-retail-v3.json"
 )
 CURRENT_EVIDENCE_ROOT = PUBLISHED_EVIDENCE_ROOT
 CURRENT_CATALOG_SHA256 = (
-    "607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8"
+    "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c"
 )
 
 
@@ -64,7 +64,7 @@ if _PROBE_PNG is not None and _lfs_pointer_stub(_PROBE_PNG):
         "--include=screenshots/**`)",
         allow_module_level=True,
     )
-CURRENT_SOURCE_COMMIT = "2cde75ad029be14d1c6e0dd8b034efc5fef017b5"
+CURRENT_SOURCE_COMMIT = "eb6574e6f0b873ececc009591888053c4460fc7b"
 PUBLISHED_FIXTURE_IDS = frozenset({
     "00tra-armory-glass-retail",
     "00tra-courtyard-retail",
