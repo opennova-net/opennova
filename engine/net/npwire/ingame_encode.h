@@ -364,5 +364,19 @@ std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 //  Server_SendOverlayActionToAlive @0x50a1b0 with send_mask 128 (alive players)]
 std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd);
 
+// The two water-crossing effect names retail fans through 0x34, both witnessed
+// in the Base Assault baseline capture (BODYWATER1 x24, SURFACE_WTR x15, all at
+// the water plane z=12/13 around the boat positions). Retail picks between them
+// on the crossing entity's 0x2000 flag — the airborne/swimming selector — so a
+// hull arriving through the air gets the body-impact effect and one already in
+// surface contact gets the wake. Which name binds to which branch is the ONE
+// piece not yet pinned by a witness: both globals are only ever read in the
+// decompilation, never assigned, and the names live in an executable table
+// rather than in game data.
+// [orig: the water block of Entity_ProcessWheeledVehiclePhysics —
+//  `if (Flags & 0x2000) send(dword_24E09B0) else send(dword_24E09B4)`]
+inline constexpr char kWaterCrossBodyEffect[] = "BODYWATER1";
+inline constexpr char kWaterCrossSurfaceEffect[] = "SURFACE_WTR";
+
 
 } // namespace opennova
