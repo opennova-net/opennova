@@ -916,6 +916,58 @@ int main() {
         cai.root_motion = nullptr;
     }
 
+    // ---- the blocked latch: a hull-stalled boarder still attaches ----
+    // Interior seat points (helo cabins) leave the walker pressed against the
+    // hull outside the 2u seat ring. Retail arms pad_368[1] from the collision
+    // push and widens the ring to bound+1u; our latch arms on a stalled think.
+    // Model the hull stall by cutting root motion once the walker is inside the
+    // widened ring but outside the seat ring. [orig: @0x4b9910 push block +
+    // the board leg's `pad_368[1] ? *target + 0x10000 : 0x20000` ring pick]
+    {
+        bms::File cm{};
+        cm.items.push_back(item(/*type_id=*/1294, 30 << 16, 0, 0));
+        cm.items[0].id = 11;
+        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/125, /*wp_num=*/11));
+        cm.organics[0].id = 1;
+
+        mission::PromoteOptions co{};
+        mission::ItemSeatSpec seats{};
+        seats.type_id = 1294;
+        Seat s{};
+        s.type = SeatType::Passenger;
+        s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        seats.seats.push_back(s);
+        co.item_seat_specs.push_back(seats);
+
+        World cw;
+        AiSystem cai;
+        mission::promote_mission(cm, cw, cai, co);
+        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+        CHECK(occ != nullptr && !occ->mounted);
+
+        TestSource walk_src(0x4000);
+        TestSource hull_src(0);     // "pressed against the hull": clips, no motion
+        cai.root_motion = &walk_src;
+        TickContext c;
+        c.world = &cw;
+        c.is_authority = true;
+        bool cut = false;
+        for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
+            // Cut displacement once inside the widened 4u ring but still outside
+            // the 2u seat ring (seat at x=32 -> cut past x=29).
+            if (!cut && cai.at(0)->pos[0] > (29 << 16)) {
+                cai.root_motion = &hull_src;
+                cut = true;
+            }
+            c.logic_tick = static_cast<uint32_t>(t);
+            cai.tick(cw, c);
+        }
+        CHECK(cut);                              // the stall actually happened
+        CHECK(occ != nullptr && occ->mounted);   // the latch widened the ring and boarded
+        CHECK(occ != nullptr && occ->mount_type == SeatType::Passenger);
+        cai.root_motion = nullptr;
+    }
+
     if (failures == 0) std::printf("promote: all tests passed\n");
     return failures ? 1 : 0;
 }

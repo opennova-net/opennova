@@ -144,6 +144,8 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
         // dead-target fallbacks — hold at spawn / the >8u-from-spawn self-kill —
         // are D-INF-2 residuals.) [orig: @0x4b9910 the CanEnterVehicle==0 legs]
         slot.f[36] = 0;
+        inf.board_blocked = false;
+        inf.board_progress_valid = false;
         return;
     }
     slot.f[36] = static_cast<int32_t>(th.packed) + 1;
@@ -177,6 +179,27 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
         radius = 0x40000;
     }
 
+    // The blocked latch: retail arms pad_368[1] from the collision
+    // push-response (the hull pressing back against the walker) and, while
+    // latched, widens the arrival ring from the 2.0u seat ring to the target's
+    // bound radius + 1.0u — pressed against the fuselage counts as arrived, so
+    // interior seat points (helo cabins, boat wells) stay boardable. Our motor
+    // has no push signal; the latch arms when an ORDERED board walk makes under
+    // half a walk-step of progress across a think, and the widened ring is 4.0u
+    // (the bound radius is unmodeled — a D-INF-2 stand-in).
+    // [orig: pad_368[1] set @0x4b9910 push block (displacement >= 768);
+    //  ring pick `pad_368[1] ? *target + 0x10000 : 0x20000` in the board leg]
+    if (inf.board_progress_valid) { // a walk was ordered last think
+        const int32_t pdx = e.pos[0] - inf.board_progress_pos[0];
+        const int32_t pdy = e.pos[1] - inf.board_progress_pos[1];
+        const int64_t moved2 = static_cast<int64_t>(pdx) * pdx +
+                               static_cast<int64_t>(pdy) * pdy;
+        constexpr int64_t kStallStep = 0x8000; // half a 16-tick walk stride
+        if (moved2 < kStallStep * kStallStep) inf.board_blocked = true;
+    }
+    inf.board_progress_valid = false;
+    if (inf.board_blocked) radius = std::max(radius, 0x40000);
+
     const int32_t dist = board_dist(e.pos, goal);
     if (dist > radius) {
         inf.move_mode = 3;
@@ -190,8 +213,12 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
         // [orig: waypointLooping = 1 on the board walk @0x4b9910 LABEL_308]
         inf.at_final_oneshot = true;
         inf.target_heading = board_bearing_to(goal[0] - e.pos[0], goal[1] - e.pos[1]);
+        inf.board_progress_pos[0] = e.pos[0];
+        inf.board_progress_pos[1] = e.pos[1];
+        inf.board_progress_valid = true;
         return;
     }
+    inf.board_blocked = false;
 
     // ARRIVED -> board. A full or filtered-out vehicle leaves the soldier
     // standing at the goal (no seat -> no attach). The modeled admit gate is

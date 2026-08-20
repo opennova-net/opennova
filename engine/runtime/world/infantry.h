@@ -292,6 +292,18 @@ struct InfantryState {
     int32_t move_target[3] = {};
     bool at_final_oneshot = false;
 
+    // Board-approach blocked latch. Retail arms entity pad_368[1] from the
+    // collision push-response (displacement >= 768/tick presses the walker
+    // against a hull) and the board leg widens its arrival ring while latched;
+    // our motor exposes no push signal, so the latch arms on a stalled think
+    // (per-think displacement under half the walk step while a board walk is
+    // ordered) — a stand-in cited on D-INF-2.
+    // [orig: pad_368[1] set @0x4b9910 push block; ring pick `pad_368[1] ?
+    //  bound+1u : 0x20000` in the board leg]
+    bool board_blocked = false;
+    bool board_progress_valid = false;
+    int32_t board_progress_pos[2] = {};
+
     int anim_state = anim_state::kIdle;   // entity[175]
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
