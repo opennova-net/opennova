@@ -119,7 +119,26 @@ Profile parse_profile(const uint8_t *text, size_t size) {
             else if (v == "organic") prof.type = 3;
             continue;
         }
-        if (prof.type != 2) continue; // GROUND-only key set (see header note)
+        // The HELO (type 1) flight set — shared keys (view/radar/priorities/
+        // react/EVADE_FLAGS/weapons) fall through to the common dispatch below;
+        // the flight-specific keys are handled here first. GROUND (2) takes the
+        // common set; ORGANIC (3) accepts nothing.
+        // [orig: the type-1 branch of AIProfile_ParseProperty — profile
+        //  +200..+244; the shared keys are the same rows both types write]
+        if (prof.type == 1) {
+            if (key == "patrol_speed") { prof.helo_patrol_speed = parse_int(value); continue; }
+            if (key == "patrol_altitude") { prof.helo_patrol_altitude = parse_int(value) << 16; continue; }
+            if (key == "patrol_climb") { prof.helo_patrol_climb = parse_int(value); continue; }
+            if (key == "combat_speed") { prof.helo_combat_speed = parse_int(value); continue; }
+            if (key == "combat_altitude") { prof.helo_combat_altitude = parse_int(value) << 16; continue; }
+            if (key == "combat_climb") { prof.helo_combat_climb = parse_int(value); continue; }
+            if (key == "turn_rate") { prof.turn_rate_bam_tick = 11930464 * parse_int(value) / 62; continue; }
+            if (key == "accel_time") { prof.accel_ticks = 62 * parse_int(value); continue; }
+            if (key == "use_waypoint_z") { prof.use_waypoint_z = parse_int(value); continue; }
+            if (key == "min_agl") { prof.min_agl = parse_int(value) << 16; continue; }
+            if (key == "min_speed") { prof.min_speed = parse_int(value); continue; }
+        }
+        if (prof.type != 2 && prof.type != 1) continue; // see header note
 
         // Re-shape to the retail token layout (toks[1] = key, toks[2] = value)
         // used by the flag/weapon helpers.
