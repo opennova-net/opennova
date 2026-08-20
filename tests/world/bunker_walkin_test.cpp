@@ -167,14 +167,24 @@ int main() {
 	s.kind = w::EntityKind::Organic;
 	s.net_id = 70001;
 	s.alive = true;
-	s.position = {159.7f, 323.8f, 35.1f}; // live pinned garrison (233), on the slab
+	// Endpoints are env-overridable so any live pin can be replayed without a
+	// rebuild: NW_WALK_FROM_X/Y[/Z] and NW_WALK_TO_X/Y (mission coordinates).
+	const auto envf = [](const char *k, double dflt) {
+		const char *v = std::getenv(k);
+		return (v != nullptr && v[0] != 0) ? std::atof(v) : dflt;
+	};
+	const double from_x = envf("NW_WALK_FROM_X", 159.7);
+	const double from_y = envf("NW_WALK_FROM_Y", 323.8);
+	const double from_z = envf("NW_WALK_FROM_Z", 35.1);
+	s.position = {static_cast<float>(from_x), static_cast<float>(from_y),
+	              static_cast<float>(from_z)};
 	const w::EntityHandle soldier = world.registry.spawn(0, s);
 	for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
 	// Walk toward the authored node (the bunker interior) at the live root
 	// step (~0.09u/tick), resolving every step like the infantry tick.
-	const double nx = 159.8, ny = 319.7;
-	int32_t pos[3] = {fx(159.7), fx(323.8), fx(35.1)};
+	const double nx = envf("NW_WALK_TO_X", 159.8), ny = envf("NW_WALK_TO_Y", 319.7);
+	int32_t pos[3] = {fx(from_x), fx(from_y), fx(from_z)};
 	int32_t vel[3] = {0, 0, 0};
 	int16_t health = 100;
 	w::CollisionWorld::ResolveState state;
@@ -218,7 +228,12 @@ int main() {
 				w::collision_matrix_from_heading(heading, bp);
 		w::CollisionMatrix inv;
 		mat.invert_into(inv);
-		const int32_t col[3] = {fx(155.3), fx(318.2), fx(35.1)};
+		// Column to inspect: NW_COL_X/Y (defaults to the historical spawn probe).
+		const char *cx = std::getenv("NW_COL_X"), *cy = std::getenv("NW_COL_Y");
+		const double colx = (cx && cx[0]) ? std::atof(cx) : 155.3;
+		const double coly = (cy && cy[0]) ? std::atof(cy) : 318.2;
+		const int32_t col[3] = {fx(colx), fx(coly), fx(35.1)};
+		std::printf("column (%.1f, %.1f):\n", colx, coly);
 		int32_t local[3];
 		w::detail::transform_translate_then_rotate(inv.m, col, local);
 		std::printf("spawn column local=(%.2f, %.2f, %.2f)\n", local[0] / 65536.0,
