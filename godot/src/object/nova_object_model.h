@@ -236,7 +236,9 @@ private:
 	bool interior_section_lighting_ = false;
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
-	Ref<ShaderMaterial> shadow_receiver_material_;
+	bool slot_shadow_person_ = false;
+	String slot_shadow_decal_texture_;
+	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
 	int env_stagger_slot_ = 0;
 	Dictionary submission_registry_;
@@ -375,7 +377,6 @@ private:
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index,
 			int p_lighting_context);
 	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
-	Ref<ShaderMaterial> get_shadow_receiver_material();
 	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
@@ -431,6 +432,16 @@ public:
 	bool is_shadow_caster_enabled() const;
 	void set_static_shadow_caster_enabled(bool p_enabled);
 	bool is_static_shadow_caster_enabled() const;
+	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
+	// drapes elongate 4x; vehicles may author an items.def `shadow` blob
+	// decal fallback (retail: itemdef type 3 / the +0xA0 decal, see
+	// docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
+	void set_slot_shadow_person(bool p_person);
+	bool is_slot_shadow_person() const;
+	void set_slot_shadow_decal(const String &p_texture, const Vector4 &p_dims);
+	String get_slot_shadow_decal_texture() const;
+	Vector4 get_slot_shadow_decal_dims() const;
+	void update_slot_shadow_group();
 	void set_environment_state(const Ref<EnvLightState> &p_state);
 	Ref<EnvLightState> get_environment_state() const { return env_state_; }
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
@@ -537,8 +548,6 @@ public:
 			bool p_interior_lerp, float p_interior_daylight);
 	static void apply_environment_values(const Ref<ShaderMaterial> &p_material,
 			const Ref<EnvLightValues> &p_values);
-	static bool material_supports_projected_shadow_receiver(int p_blend_mode,
-			int p_material_flags);
 };
 
 } // namespace godot

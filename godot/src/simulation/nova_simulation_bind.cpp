@@ -168,6 +168,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &Simulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &Simulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &Simulation::get_local_player_anim_key);
+	ClassDB::bind_method(D_METHOD("get_local_player_stance_latch"),
+			&Simulation::get_local_player_stance_latch);
 	ClassDB::bind_method(D_METHOD("get_local_player_stance"), &Simulation::get_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_body_debug"), &Simulation::get_local_player_body_debug);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &Simulation::get_local_player_anim_phase_ticks);

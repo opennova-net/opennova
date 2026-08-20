@@ -70,6 +70,7 @@ void SunShadow::_apply_projection_masks() {
 	if (projection_mode_ == PROJECTION_STATIC_TERRAIN) {
 		set_cull_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
 		set_shadow_caster_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
+		set_shadow(true);
 	} else {
 		// Receivers: both world-entity layers plus the hidden FP body (its
 		// silhouette must land on the world the player sees).
@@ -77,6 +78,11 @@ void SunShadow::_apply_projection_masks() {
 				Water::VISUAL_LAYER_WORLD_NO_MIRROR |
 				Water::VISUAL_LAYER_FP_BODY_SHADOW_ONLY);
 		set_shadow_caster_mask(Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
+		// The SlotShadow capture pipeline renders the live entity ground
+		// shadows (retail's per-slot RT + terrain drape, see
+		// docs/render/render-lighting-re.md); the dynamic light keeps the
+		// direction law but no longer needs its own shadow map.
+		set_shadow(false);
 	}
 }
 
@@ -104,15 +110,18 @@ void SunShadow::_update_direction() {
 	set_visible(true);
 	// The environment serves the DIRECT retail getter tuple g = (-Y_bms,
 	// Z_bms, X_bms); presentation-world surface->light is the (g2, g1, g0)
-	// reduction [orig: Environment_GetLightDirectionFloat @ 0x57d870;
-	// Math_BuildFixedPointToFloatMatrix4x4 @ 0x612402..0x612457]. Retail's
+	// reduction (retail: Environment_GetLightDirectionFloat @0x57d870;
+	// Math_BuildFixedPointToFloatMatrix4x4 @0x612402..0x612457). Retail's
 	// entity shadow projection additionally clamps the vertical component to
 	// 0.25 before negating into the slot's light->surface direction, so a
 	// grazing sun never stretches an entity silhouette past 4x height
-	// [orig: render_shadow_pass @ 0x5d7b70 — GetLightDirectionFloat into
+	// (retail: render_shadow_pass @0x5d7b70 — GetLightDirectionFloat into
 	// RenderSlot_DefaultLightDir*, `if (y < 0.25) y = 0.25`, then negate all
-	// three]. A DirectionalLight3D emits along local -Z, so emission is that
-	// negated form (docs/render/render-lighting-re.md, D-RLIT-9).
+	// three; the law lives portable in renderer::slot_projection_direction —
+	// see docs/render/render-lighting-re.md). A DirectionalLight3D emits
+	// along local -Z, so emission is that negated form. The SlotShadow
+	// capture pipeline owns the entity ground shadows; this light remains
+	// the direction-law reference and the static-terrain bake device.
 	const Vector3 surface_to_light(light_tuple.z,
 			std::max(light_tuple.y, real_t(0.25)), light_tuple.x);
 	const Vector3 emission = -surface_to_light.normalized();

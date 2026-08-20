@@ -61,6 +61,14 @@ private:
 		String render_function;
 		String disk_function;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
+		// Authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
+		// (retail ItemDef+0xA0 / +0x11C..+0x128; consumed by the render-slot
+		// drape fallback — docs/render/render-lighting-re.md).
+		String shadow_texture;
+		float shadow_width = 0.0f;
+		float shadow_length = 0.0f;
+		float shadow_offset_x = 0.0f;
+		float shadow_offset_y = 0.0f;
 		float light_transfer = 0.0f; // ItemDef+0x218 interior daylight fraction
 		float damage_reduc_pp = 0.0f;
 		float damage_reduc_max = 0.0f;
@@ -273,6 +281,10 @@ public:
 	// render-occlusion weld pass reads bit 6 ("weldable") [orig: the +88 >> 6 read in
 	// Terrain_RegisterExteriorPortalFaces @ 0x5c5cce].
 	uint32_t get_attrib2(int id) const;
+	// The authored items.def `shadow` blob decal as {texture: String,
+	// width/length/offset_x/offset_y: float}; empty Dictionary when the item
+	// authors none. Consumed by the placer's slot-shadow profile.
+	Dictionary get_shadow_decal(int id) const;
 	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
 	// deceleration, turn_rate, turn_rate2, unit_type]; empty for unknown ids. Feeds the sim's
 	// world::VehicleTraits table (resolve_item_traits). [orig: ItemDef_ParsePhysicsProperty

@@ -86,6 +86,7 @@ signal minimap_water_changed(mask: ImageTexture)
 var _dispatcher: FoliageDispatcher
 var _tile_overlay: TerrainTileOverlay
 var _sun_shadow: SunShadow
+var _slot_shadow: SlotShadow
 var _terrain_data: TerrainData
 var _resource_root: ResourceRoot
 var _mission_tile_info: TerrainTileInfo
@@ -270,6 +271,13 @@ func _ready() -> void:
 	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child(_sun_shadow)
 	_sun_shadow.set_environment_node(_env)
+	# The render-slot entity ground shadows: the per-slot silhouette capture
+	# device + the terrain drape publisher (retail's per-entity RT pipeline —
+	# engine/runtime/renderer/render_slot_shadow.h carries the witness map).
+	_slot_shadow = SlotShadow.new()
+	_slot_shadow.name = "SlotShadow"
+	add_child(_slot_shadow)
+	_slot_shadow.set_environment_node(_env)
 	# The retained water renderer starts dormant until a successful load chooses
 	# its runtime mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
@@ -1426,6 +1434,22 @@ func render_light_frame() -> void:
 	_light_director.render_frame(
 			viewport.get_camera_3d() if viewport != null else null,
 			viewmodel_parts, viewmodel_owner)
+	# Feed the render-slot shadow device the same point-light context (its
+	# per-slot dominant-light pick reads the shared pool) plus the local
+	# player state for the retail priority/drape gates.
+	if _slot_shadow != null:
+		_slot_shadow.set_light_scene(_light_director.scene())
+		_slot_shadow.set_light_context(_light_director.light_gain(),
+				Time.get_ticks_msec(), get_node_or_null(NodePath("Weather")))
+		if _resource_root != null:
+			_slot_shadow.set_resource_root(_resource_root)
+		if _local_view_presenter != null:
+			_slot_shadow.set_local_player_model(_local_view_presenter.avatar())
+			_slot_shadow.set_local_player_first_person(
+					not _local_view_presenter.is_third_person())
+		if sim != null:
+			_slot_shadow.set_local_player_prone(
+					sim.get_local_player_stance_latch() == 2)
 
 
 func get_effect_light_report() -> EffectLightReport:
@@ -2643,6 +2667,10 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# flicker phase freezes with the weather ring, matching the phase
 	# contract).
 	render_light_frame()
+	# Re-plan the render-slot ground shadows for the moved capture camera
+	# (slot priority and the capture poses are camera-relative).
+	if _slot_shadow != null:
+		_slot_shadow.advance_frame()
 	update_clear_frame()
 	return OK
 

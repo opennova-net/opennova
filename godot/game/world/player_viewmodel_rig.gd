@@ -355,7 +355,12 @@ static func set_visual_layers(root: Node, layer_mask: int,
 		preserve_shadow_caster_layers: bool = true) -> void:
 	if root is VisualInstance3D:
 		var visual := root as VisualInstance3D
-		var caster_layers := visual.layers & Water.VISUAL_LAYER_SHADOW_CASTER_MASK \
+		# Preserve the render-slot capture channel beside the caster marker:
+		# SlotShadow assigns it per frame and these per-frame presenter stamps
+		# must not strip an admitted body's capture bit.
+		var preserved := Water.VISUAL_LAYER_SHADOW_CASTER_MASK \
+				| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
+		var caster_layers := visual.layers & preserved \
 				if preserve_shadow_caster_layers else 0
 		visual.layers = layer_mask | caster_layers
 	for child in root.get_children():

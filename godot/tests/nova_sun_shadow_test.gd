@@ -90,6 +90,9 @@ func test_dynamic_projection_separates_live_casters_from_world_receivers() -> vo
 			"live shadows reach both world-entity layers and the hidden FP body")
 	assert_eq(light.shadow_caster_mask,
 			Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
+	assert_false(light.shadow_enabled,
+			"the SlotShadow capture pipeline owns the entity ground shadows;"
+			+ " the dynamic light keeps the direction law without a shadow map")
 
 
 func test_low_sun_projection_clamps_the_vertical_component() -> void:
@@ -133,3 +136,5 @@ func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
 			Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER)
 	assert_eq(light.shadow_caster_mask,
 			Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+	assert_true(light.shadow_enabled,
+			"the static-terrain bake device still renders a shadow map")

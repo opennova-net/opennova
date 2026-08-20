@@ -785,6 +785,36 @@ int main(void) {
     }
     def_free_items(&damage_items);
 
+    /* The authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
+       [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c — name +0xA0, atof
+       floats +0x11C..+0x128; absent tokens read as 0]. */
+    static const char shadow_def[] =
+        "begin Hind\n id 1\n shadow hindshdw.tga 6 8.5 0 -1.25\nend\n"
+        "begin Jeep\n id 2\n shadow jeepshdw.tga\nend\n"
+        "begin Crate\n id 3\nend\n";
+    DefItemsFile shadow_items;
+    memset(&shadow_items, 0, sizeof(shadow_items));
+    if (def_parse_items_memory((const uint8_t *)shadow_def, sizeof(shadow_def) - 1,
+                               &shadow_items) != 0 || shadow_items.count != 3) {
+        fprintf(stderr, "FAIL: inline shadow-decal block did not parse\n");
+        def_free_items(&shadow_items);
+        return 1;
+    }
+    const DefItemDef *s0 = &shadow_items.entries[0];
+    const DefItemDef *s1 = &shadow_items.entries[1];
+    const DefItemDef *s2 = &shadow_items.entries[2];
+    if (strcmp(s0->shadow_texture, "hindshdw.tga") != 0 ||
+        s0->shadow_width != 6.0f || s0->shadow_length != 8.5f ||
+        s0->shadow_offset_x != 0.0f || s0->shadow_offset_y != -1.25f ||
+        strcmp(s1->shadow_texture, "jeepshdw.tga") != 0 ||
+        s1->shadow_width != 0.0f || s1->shadow_length != 0.0f ||
+        s2->shadow_texture[0] != '\0') {
+        fprintf(stderr, "FAIL: shadow decal parse semantics mismatch\n");
+        def_free_items(&shadow_items);
+        return 1;
+    }
+    def_free_items(&shadow_items);
+
     printf("PASS: items parsing OK\n");
     return 0;
 }

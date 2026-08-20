@@ -660,6 +660,7 @@ add_test(NAME oed_skinned_tangents COMMAND oed_skinned_tangents_test)
 # Object renderer/shader tests
 foreach(test light_runtime light_scene material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order
+        render_slot_shadow
         state_vectors tracer_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)

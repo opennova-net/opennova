@@ -191,17 +191,28 @@ func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 ## parts (owner = the local player, so its own muzzle glow reaches the arms).
 ## The FLICKER phase reads the live weather wave ring; the ambient scale is
 ## the env light-state gain (the ported EffectWorld_AmbientScale channel).
-func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
-		viewmodel_owner: int = 0) -> void:
-	if camera == null:
-		_scene.clear_render_output()
-		return
+## Typed accessors for co-consumers of the shared pool (the render-slot
+## shadow device's dominant-light pick reads the same LightScene).
+func scene() -> LightScene:
+	return _scene
+
+
+func light_gain() -> Vector3:
 	var gain := Vector3.ONE
 	var env: MissionEnvironment = _world.get_environment_node()
 	if env != null:
 		var state: EnvLightState = env.get_light_state()
 		if state != null and state.get_values() != null:
 			gain = state.get_values().get_gain()
+	return gain
+
+
+func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
+		viewmodel_owner: int = 0) -> void:
+	if camera == null:
+		_scene.clear_render_output()
+		return
+	var gain := light_gain()
 	var weather: Node = _world.get_node_or_null(NodePath("Weather"))
 	var cam_pos := camera.get_camera_transform().origin
 	var models: Array[Node3D] = []

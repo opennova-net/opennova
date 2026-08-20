@@ -66,6 +66,15 @@ public:
 			const PackedInt64Array &p_owner_entities,
 			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
 
+	// The render-slot dominant-light query (SlotShadow's per-slot pick):
+	// entity-centered collect + group-gated params, no D3D-fill boost
+	// (retail: RenderSlot_UpdateEntityLight @0x5d6a30, see
+	// docs/render/render-lighting-re.md). Entries: position (Godot world),
+	// color (Vector3), attenuation (Vector4 D3D form), handle (int64).
+	TypedArray<Dictionary> slot_shadow_lights(const Vector3 &p_world_pos,
+			float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
+			Object *p_weather);
+
 	int live_count() const;
 	Dictionary get_report() const;
 

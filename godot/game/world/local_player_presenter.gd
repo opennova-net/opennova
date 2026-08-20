@@ -129,10 +129,14 @@ func setup(world: GameWorld, camera: Camera3D,
 	# marker layers must remain admitted even though SHADOWS_ONLY geometry on
 	# those layers is absent from the beauty pass.
 	if _camera != null:
+		# The slot-capture channels are per-slot silhouette layers only the
+		# SlotShadow capture cameras may cull to; the beauty camera excludes
+		# them so the layer-hidden FP body never leaks through a capture bit.
 		_camera.cull_mask = (
 				_camera.cull_mask
 				& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-						| Water.VISUAL_LAYER_VIEWMODEL)
+						| Water.VISUAL_LAYER_VIEWMODEL
+						| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK)
 				) | Water.VISUAL_LAYER_SHADOW_CASTER_MASK
 	_viewmodel_rig.setup(world, self, camera)
 	_reset_state()
@@ -201,6 +205,10 @@ func is_third_person() -> bool:
 # and effect anchors against the presentation nodes (the FP viewmodel parts —
 # rig-owned, delegated here — the 3P gun, the camera). These expose exactly the
 # state it reads, so no cross-object _private access crosses the seam.
+func avatar() -> ObjectModel:
+	return _avatar
+
+
 func vm_parts() -> Array[ObjectModel]:
 	return _viewmodel_rig.vm_parts()
 
@@ -484,9 +492,11 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	var draw_held_weapon := _third_person or debug_body_in_first_person
 	PlayerViewmodelRig.set_visual_layers(_held_weapon, Water.VISUAL_LAYER_WORLD
 			if draw_held_weapon else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+	# Always camera-renderable: first person hides by LAYER alone so the
+	# render-slot capture cameras still photograph the silhouette
+	# (SHADOWS_ONLY geometry is invisible to every camera).
 	PlayerViewmodelRig.set_shadow_casting(_held_weapon,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON if draw_held_weapon
-			else GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -626,9 +636,10 @@ func _update_avatar(pos: Vector3) -> void:
 	var draw_avatar := _third_person or debug_body_in_first_person
 	PlayerViewmodelRig.set_visual_layers(_avatar, Water.VISUAL_LAYER_WORLD
 			if draw_avatar else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+	# Always camera-renderable: hidden by LAYER alone (see the held-weapon
+	# stamp above) so the slot capture cameras see the body.
 	PlayerViewmodelRig.set_shadow_casting(_avatar,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON if draw_avatar
-			else GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	_update_held_weapon(overlay)
 	var sim = _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""

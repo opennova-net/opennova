@@ -39,16 +39,6 @@ void ObjectModel::build_material_defs() {
 	}
 }
 
-bool ObjectModel::material_supports_projected_shadow_receiver(int p_blend_mode,
-		int p_material_flags) {
-	// The simple attenuation next-pass has no access to the source material's
-	// alpha coverage or two-sided raster state; keep the approximation on
-	// coverage-complete one-sided opaque surfaces only.
-	return p_blend_mode == static_cast<int32_t>(renderer::ObjectBlendMode::Opaque) &&
-			(p_material_flags & (THREEDI_MATERIAL_FLAG_ALPHA_TEST |
-										THREEDI_MATERIAL_FLAG_TWO_SIDED)) == 0;
-}
-
 Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index,
 		int p_lighting_context) {
 	const int64_t cache_key =
@@ -175,21 +165,14 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_local_light_intensity", 1.0f);
 	material->set_shader_parameter("u_local_light_atten_start", 0.0f);
 	material->set_shader_parameter("u_local_light_atten_end", 5.0f);
-	if (material_supports_projected_shadow_receiver(blend_mode, material_flags)) {
-		material->set_next_pass(get_shadow_receiver_material());
-	}
+	// No shadow-receiver next pass on world models: retail's render-slot
+	// entity ground shadows drape TERRAIN-FOLLOWING patches only — a live
+	// silhouette never lands on another model (retail:
+	// RenderSlot_DrawAllDrapes @0x5d6e20 draws the slot's terrain patch via
+	// render_sector_model @0x5d5ca0; see docs/render/render-lighting-re.md).
+	// The terrain material carries the drape pass (SlotShadow).
 	apply_default_environment_to_material(material);
 	return material;
-}
-
-Ref<ShaderMaterial> ObjectModel::get_shadow_receiver_material() {
-	if (shadow_receiver_material_.is_null()) {
-		shadow_receiver_material_.instantiate();
-		shadow_receiver_material_->set_shader(
-				ResourceLoader::get_singleton()->load(
-						"res://shaders/sun_shadow_catcher.gdshader", "Shader"));
-	}
-	return shadow_receiver_material_;
 }
 
 Ref<Texture2D> ObjectModel::load_texture_for_slot(const Dictionary &p_material_def,

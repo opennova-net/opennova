@@ -39,7 +39,7 @@ scalar function in this record; the GUT env vectors
 | Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: Foliage_RenderFarPatches @ 0x609de0]` (renamed 2026-08-15, ex render_terrain_lightmaps); foliage.gdshader header updated |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / reimpl-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the reimpl's real per-pixel lights serve the intent (D-RLIT-6 note) |
 | Cubemap sources (CubeEnvironment / CubeRotSpecular / CubeNormalize) | witnessed (the D-RORD-5 specular-cube question CLOSED) | live scene cube re-rendered 6 faces per 128 frames `[orig: update_environment_cubemap @ 0x6106a0]`; the static sun-glint cube (white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular) `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; the analytic 5-light sky fill is caller-less dead code |
-| Render-slot (entity ground shadow) lighting | PARTIAL (direction law + terrain reception device-translated 2026-08-20; slot pipeline out of REN port scope) | frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, dominant-light pick + terrain shadow-anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting (D3D light 4, NTSC-weighted negated colors into PS c21-23) `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]` — the Shadow_/Scar_ family exclusion (ADR 0023); the ported seam is D-RLIT-9 (`nova_sun_shadow.cpp` emission + the terrain catcher next-pass; GUT `nova_sun_shadow_test`) |
+| Render-slot (entity ground shadow) pipeline | **PORTED (2026-08-20)** | the full slot family is witnessed and hosted: frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, slot registration + LOD `[orig: RenderSlot_AllocSlot @ 0x5d5690]`, priority scoring / 24-patch / 12-RT assignment `[orig: RenderSlot_SortAndAssign @ 0x5d6530]`, RT size chain `[orig: RenderSlot_InitTextureChain @ 0x5d5320]`, dominant-light pick + anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]`, refresh cadence `[orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690]`, and the terrain drape + authored blob decal `[orig: RenderSlot_DrawAllDrapes @ 0x5d6e20; RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0; RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]`. Planning/color laws portable in `engine/runtime/renderer/render_slot_shadow` (ctest `renderer_render_slot_shadow`); device capture + drape in `godot/src/env/nova_slot_shadow.cpp` + `godot/shaders/slot_shadow_drape.gdshader` (GUT `slot_shadow_test`, `nova_sun_shadow_test`). This supersedes the earlier ADR-0023-era "Shadow_/Scar_ family exclusion" note for the RenderSlot_* half; the Scar_ decal family remains out of REN scope. |
 
 ## Witness map
 
@@ -451,43 +451,119 @@ holds an analytic 5-light sky fill (blue-from-above 0.3/pow2, warm ground
 bounce 0.25/pow3, three warm pow-50/60 sun lobes) — **caller-less dead
 code** in retail JO.
 
-**The render-slot (entity ground shadow) side** — witnessed; the slot RT
-pipeline itself stays out of REN port scope (ADR 0023 excludes the
-Shadow_/Scar_ family), but its projection-direction law and its terrain
-reception are ported at the device seam (D-RLIT-9, 2026-08-20).
-`render_shadow_pass @ 0x5d7b70` opens each frame's slot pass by loading the
-sun into the slot default (`Environment_GetLightDirectionFloat @ 0x57d870`
-into `RenderSlot_DefaultLightDir* @ 0x2bebd68`), **clamping the vertical
+**The render-slot (entity ground shadow) side** — witnessed end to end and
+PORTED (2026-08-20; the earlier ADR-0023-era "Shadow_/Scar_ family
+exclusion" is superseded for the RenderSlot_* half — the Scar_ decal family
+alone remains out of REN scope).
+
+*Registration* — `Entity_InitFromModel @ 0x40E1C8..0x40E1F7`: persons
+always, items via the `DynamicShadow` attrib2 bit, gated on the
+shadow-detail option (`dword_24D2054`); the local player registers via
+`PlayerClass_InitEntity @ 0x4b10f1`. `RenderSlot_AllocSlot @ 0x5d5690`
+(ex `shadow_decal_alloc_slot`) finds or allocates the entity's 128-byte
+record in the 256-slot `RenderSlot_Table @ 0x2be3d30`. Both JO callers pass
+shadow type 1 (dynamic silhouette); the type-0 blob-only alloc leg is
+caller-less. LOD at alloc: `(boundRadius >> 15) + 1` (2·radius + 1 u)
+clamped [6, 20]; the dead type-0 leg reads `max(shadow w, l) + 7` clamped
+[2, 20] from the authored decal size.
+
+*Frame open* — `render_shadow_pass @ 0x5d7b70` loads the sun into the slot
+default (`Environment_GetLightDirectionFloat @ 0x57d870` into
+`RenderSlot_DefaultLightDir* @ 0x2bebd68`), **clamping the vertical
 component to 0.25** — the SAME grazing floor the static tile collector
 applies (`@ 0x60d325..0x60d341`) — and negating all three into the
 light→surface form, so a low sun never stretches an entity silhouette past
 4× height (at the 03TR 06:30 fixture's 7° sun, retail projects entity
-shadows as if the sun sat at ~14.5°). It then assigns slots
-(`terrain_sort_and_assign_render_slots @ 0x5d6530`) and renders each live
-slot (`RenderSlot_RenderEntityAndChildren @ 0x5d7690`).
-`RenderSlot_UpdateEntityLight @ 0x5d6a30` (ex `Entity_UpdateRenderState`)
-updates a 128-byte slot record (`RenderSlot_Table @ 0x2be3d30`): default
-light = the clamped sun trio, then the brightest passing point light near
-the entity wins (luminance 0.3R + 0.6G + 0.1B over distance² attenuation;
-an interior-parented entity zeroes the win threshold), and the shadow
-anchor marches from the entity (or its rotated model anchor point when
-entity flag +9 is clear) along the light direction down to the terrain
-(`Terrain_GetHeightAtPosition @ 0x606720`; the vertical step clamps to
-≥ 0.5 u = fixed −32768 per iteration), storing the anchor and a
-grazing-scaled slot LOD clamped 6..20 (`@ 0x5d6d5c..0x5d6dac`).
-`RenderSlot_SetupNextLighting @ 0x5d7250` (ex `setup_entity_render_lighting`)
-pops the next pending slot (`RenderSlot_PendingList @ 0x2be3a98`), sets
-D3DRS_AMBIENT white, and lights the slot render with either the entity's
+shadows as if the sun sat at ~14.5°).
+
+*Assignment* — `RenderSlot_SortAndAssign @ 0x5d6530` (ex
+`terrain_sort_and_assign_render_slots`) scores every record:
+2D camera distance ÷ 4 (fixed, `flt_7C333C`) × (1.5 − the view-alignment
+dot, Q16 98304), halved for the local player or its parent vehicle;
+excluded (score 0x40000000): dead entities, seat-parented entities
+(parentSlot 1/2/5, or 3 with a live parent — they render as CHILDREN in
+the parent's slot), entities standing on a vehicle-type ground entity
+(itemdef +0x5C == 1), and anything whose base score exceeds 0x500000 — the
+**320 u bind horizon**. Bubble-sorted ascending, the best 24 bind drape
+patches (441-vertex terrain-patch VB regions at `441·patchIndex`,
+first-free of 24; `RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130` rebuilds
+each bound patch), and the first 12 take silhouette RT orders 0..11 —
+dword1 = has-RT, dword2 = order, dword3 = dirty **only when the order
+changed** (sticky captures).
+
+*RT chain* — `RenderSlot_InitTextureChain @ 0x5d5320`: 12 RTs, base 256 px
+(512 at shadow detail ≥ 2, 1024 at ≥ 4), halving after every second slot
+down to a 32 px floor (`RenderSlot_TextureTable @ 0x2be3c94`).
+
+*Per-slot light + anchor* — `RenderSlot_UpdateEntityLight @ 0x5d6a30`
+(ex `Entity_UpdateRenderState`): default = the clamped sun trio, then the
+brightest passing point light near the entity (the same
+`collect_nearby_zones_by_aabb @ 0x5aa250` pool as D-RLIT-4, queried at
+position ± boundRadius) wins when NTSC luminance 0.3R + 0.6G + 0.1B over
+`dist²·quadratic + constant` exceeds 0.1 (zeroed for an interior-parented
+entity); the winning direction is `normalize(entity − light)`. The shadow
+anchor then marches from the entity (or its rotated bbox-center anchor
+when the entity flag word is zero) along the light direction in unit-planar
+steps down to `Terrain_GetHeightAtPosition @ 0x606720`, the vertical step
+clamped to ≥ 0.5 u of drop (fixed −32768) per iteration — for suns below
+~30° the march descends steeper than the true projection, so the anchor
+only PLACES the drape patch; the projected UV matrices land the silhouette.
+The slot LOD refreshes grazing-scaled: `(0.5 + |0.5/dirY|)·baseLod`
+clamped [6, 20] (`@ 0x5d6d5c..0x5d6dac`).
+
+*Silhouette render* — `RenderSlot_RenderEntityAndChildren @ 0x5d7690`
+renders the entity plus its standing/mounted children into the slot RT
+(ortho extent = radius·1.25 clamped radius + 0.75,
+`setup_shadow_cascade_matrices @ 0x58d300`), on the detail-scaled refresh
+cadence: `(frame & mask) == (slotIndex & mask)` with mask 7 below detail 2,
+3 at 2, 1 at 3, every frame at 4+; the local player (or its parent) skips
+only below detail 3; the dirty bit forces. Lighting via
+`RenderSlot_SetupNextLighting @ 0x5d7250` (ex
+`setup_entity_render_lighting`): D3DRS_AMBIENT white, then either the
 attached light (D3D light 4 + luminance-weighted NEGATED colors
-`(c+lum)/2 × −3` into PS c21..c23 — the shadow darkening math) or a white
-directional with 0.75 ambient material. Slot admission is entity init:
-persons always, items via the `DynamicShadow` attrib2 bit
-(`Entity_InitFromModel @ 0x40E1BC..0x40E1F7`), gated on the shadow-detail
-option (`dword_24D2054`). Vehicles additionally author a fallback blob
-decal in items.def — `shadow <name>.tga width length offx offy`, parsed to
-ItemDef `+0xA0` (texture name) and floats `+0x11C/+0x120/+0x124/+0x128`
-(`ItemDef_ParseProperty @ 0x49f3a5..0x49f44c`); its runtime consumer is
-unwalked (residual on D-RLIT-9).
+`(c+lum)/2 × −3` into PS c21..c23 — the silhouette darkening math) or a
+white directional with 0.75 ambient material.
+
+*Drape* — `RenderSlot_DrawAllDrapes @ 0x5d6e20` (detail > 0, dead entities
+skip; the LOCAL player in first person skips while prone-latched
+(`g_PlayerStanceProneLatch @ 0xb76484`) or below detail 2): a dynamic slot
+with a live RT draws `RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0` — the
+silhouette projected over the 21×21 terrain-following patch, distance fade
+`f = clamp((d − 40 u)/40 u)` with a hard skip at ≥ 80 u, person-type
+entities (itemdef +0x5C == 3) elongated 4× along the projection direction
+(`flt_7C44B8`), and the **sun ambient law** per channel:
+`ambient_c = 1 − (1−f)·L_c·|dirY| / (L_c·|dirY| + S_c)` with
+`L = Env_LightBlock`, `S = Env_SkyBlock` — the shadow removes only the
+direct sun term scaled by the projection vertical, never the sky ambient
+(attached-light slots instead light the patch with the color scaled
+`−(c+lum)·(1−f)`). A bound slot WITHOUT a live RT draws
+`RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0` — the items.def
+`shadow <name>.tga w l ox oy` decal (name → ItemDef +0xA0, floats →
++0x11C/+0x120/+0x124/+0x128, `ItemDef_ParseProperty @ 0x49f3a5..0x49f44c`;
+resolved texture at +0x114) heading-rotated over the same patch at 1/w,
+1/l UV scale with the authored UV offset + 0.5, black-ambient material
+(plain multiply), no distance fade. Entity ground shadows therefore land
+on TERRAIN ONLY — the patches are terrain-following meshes.
+
+*The port* — planning and color laws are portable in
+`engine/runtime/renderer/render_slot_shadow.{h,cpp}` (direction clamp,
+alloc/grazing LOD, RT chain, cadence, scoring/24-12 assignment with sticky
+captures, dominant-light pick, anchor march, fade + ambient/darkening
+laws; ctest `renderer_render_slot_shadow` pins each). The device half
+(`godot/src/env/nova_slot_shadow.cpp` + `slot_shadow_drape.gdshader` on
+the terrain material; `engine/formats/def` parses the `shadow` line;
+GUT `slot_shadow_test`) realizes the capture as 12 per-slot SubViewports
+at the witnessed chain sizes culling per-slot capture layers, and the
+drape as a per-pixel projection over the terrain surface. Device folds,
+each serving the same observable: the terrain surface stands in for the
+21×21 patch mesh and the projection is evaluated per pixel, so the anchor
+march (retail's patch-PLACEMENT approximation of that projection) needs no
+separate device leg; standing/mounted children capture through their own
+slots rather than the parent's RT child-walk (the silhouette still draws
+once and drapes at the same place); and the attached-light drape folds the
+light's attenuation at the entity into the per-slot term (retail varies it
+per patch vertex). The packaged runtime serves shadow detail 4 (the top
+retail option: every-frame refresh, 1024-base chain).
 
 ## The ported chain (REN-5)
 
@@ -510,6 +586,16 @@ unwalked (residual on D-RLIT-9).
   `u_hemi_sky_color/u_hemi_ground_color/u_dir_light_dir/u_dir_light_color/
   u_color_src_global_gain` (D-RMAT-5 closed in
   [render-material-re.md](render-material-re.md)).
+- `engine/runtime/renderer/render_slot_shadow`: the render-slot entity
+  ground-shadow planner (2026-08-20) — direction clamp, alloc/grazing LOD,
+  RT chain, refresh cadence, priority scoring + 24-patch/12-capture
+  assignment with sticky orders, dominant-light pick, anchor march, drape
+  fade + the per-channel sun ambient law + the attached-light darkening
+  constants — ctest `renderer_render_slot_shadow`. Device:
+  `godot/src/env/nova_slot_shadow.cpp` (12 capture SubViewports +
+  per-slot layers + uniform push) + `godot/shaders/slot_shadow_drape.gdshader`
+  (the terrain drape next pass); `engine/formats/def` parses the authored
+  `shadow` decal line.
 - `terrain_lighting.gdshaderinc`: c0/c1 corrected to (sky, light) — the
   prior combined/fill pairing was a gobj-era stand-in. Its tile-alpha path also
   preserves EnvFile's direct retail getter tuple and applies the witnessed
@@ -527,7 +613,6 @@ unwalked (residual on D-RLIT-9).
 | D-RLIT-5 | Glass/env reflection = the hemisphere sampled along the reflected view; phong specular = a pow-16 lobe in the witnessed light color | glass GLOW samples CubeRotSpecular (the static sun-glint cube) via MatRotSpecular; NORMAL techniques sample the LIVE CubeEnvironment scene cube; VS_PHONG* samples the PhongMap texture `[orig: @ 0x58f290; @ 0x6106a0; Glass.fx]` | OPEN (approximation) — the cube CONTENTS are witnessed (this record); hosting a live scene cube / the glint cube is the D-RORD-5 bloom-wiring residual's substrate |
 | D-RLIT-6 | No baked mission lightmap TGA draped (the below-water terrain water-noise modulation FIXED 2026-08-13 via D-TERRAIN-8 — the top-tier dp3-input swap; terrain-re.md carries the selector decode) | camera-below-water terrain swaps the LIVE stage-3 input to `Water_NoiseColorTexture`; the mission lightmap TGA separately drapes tiles/billboards `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; lightmap load @ 0x604A90]` | OPEN — narrowed to mission-lightmap hosting (terrain-record scope); static model sun shadows are the separate D-TERRAIN-7 tile-composition path |
 | D-RLIT-7 | Static mission objects (the placer's MultiMesh batches) froze the env lighting harvested at load — the throwaway template's materials had no live owner, so TOD/weather/iris advances relit animated models but not the static world (the load-time snapshot even carried the pre-first-iris-tick modulator: gain 1.0 vs the settled 60/64) | retail relights EVERY entity from the current lighting block each frame `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 ← CRenderBatchQueue_FlushBatches]` | **FIXED (2026-07-06, the model-parity slice)**: the placer registers every harvested batch ShaderMaterial and re-stamps them from the live env (`mission_object_placer.update_environment`, driven per frame by the container's `mission_batch_env_stamper`, generation-gated like the per-model stamp; values/push single-sourced as `ObjectModel.environment_values_from`/`apply_environment_values`); verified batch uniforms == live-model uniforms after settle (dir 159/255, gain 60/64) |
-| D-RLIT-9 | Entity ground shadows ride the Godot shadow map: `SunShadow` (the dynamic-projection DirectionalLight3D) emits along the witnessed slot-projection direction — the presentation reduction `(g2, max(g1, 0.25), g0)` of the direct getter tuple, negated — and the terrain material carries the shared black ATTENUATION catcher as a next pass, so live entity silhouettes (persons + `DynamicShadow` items) land on terrain and world models with the retail direction/length law | Retail renders each eligible entity into a per-entity render-slot RT (LOD 6..20) lit from the slot direction — the sun with vertical clamped to 0.25 then negated, overridden by the dominant nearby point light — and drapes it at a terrain anchor marched down-light from the entity `[orig: render_shadow_pass @ 0x5d7b70; RenderSlot_UpdateEntityLight @ 0x5d6a30; Terrain_GetHeightAtPosition @ 0x606720; RenderSlot_RenderEntityAndChildren @ 0x5d7690; admission Entity_InitFromModel @ 0x40E1BC..0x40E1F7]`; vehicles also author a `shadow <tga> w l ox oy` decal fallback (ItemDef `+0xA0`/`+0x11C..+0x128`, parser `@ 0x49f3a5..0x49f44c`) whose consumer is unwalked | **OPEN, device-translated (2026-08-20)** — the direction law (clamp + frame reduction) and terrain reception are live (`godot/src/env/nova_sun_shadow.cpp`, terrain catcher next-pass in `godot/src/terrain/nova_terrain.cpp`; pinned by `nova_sun_shadow_test.gd`); unhosted: the slot RT pipeline itself (per-entity silhouette texture + anchored drape), the dominant point-light override, the anchor march (Godot projects from the light frustum instead), per-slot LOD, the slot darkening constants, and the authored blob-decal fallback (our def lib does not parse the `shadow` line) |
 | D-RLIT-8 | The object per-material hemisphere mixed color spaces: `hemi_sky` came from `MissionEnvironment.get_sky_ambient()` = the RAW TOD keyframe (never smoothed, never iris-modulated) while `dir_color`/`hemi_ground` came from the smoothed+modulated weather writeback — off-noon the modulator brightens every block toward the exposure target but the un-modulated sky half stays dark (the sky-facing half of every building too dark at night; the terrain/foliage GLOBALS path was already correct via `get_smooth_sky()`) | retail feeds ALL entity lighting from the post-modulator block render colors — the world-block writer fills [8..10] ← `Env_SkyBlock[0]` ÷255 exactly like light/ground `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; the blocks smooth + modulate in the weather tick @ 0x57ef97..0x57f03c]` | **FIXED (2026-07-06, the REN-6 session)**: the sky block joins the per-tick env writeback seam — `Weather` pushes `get_smooth_sky()` through the new `MissionEnvironment.set_sky_ambient_rt` (mirroring fill/sun/fog, generation-gated), `get_sky_ambient()` serves the smoothed current and re-seeds from the keyframe on discrete TOD recomputes (the `_fill_light` contract); GUT pins the seam (`env_parity_vectors_test.test_sky_ambient_serves_smoothed_writeback`); golden env grid/weather rows byte-identical (the grid collects bare env nodes; the weather checkpoints already read `get_smooth_sky`) |
 
 ## IDB changes made during the session
@@ -557,6 +642,15 @@ unwalked (residual on D-RLIT-9).
 | 0x2732dfc / 0x2732e00 | dword_* | Light_ActiveD3DList / Light_ActiveD3DCount | the ≤4 enabled-light shortlist |
 | 0x8437e0..e8 | dword_8437E0.. | g_DefaultLightDirX/Y/Z | {0, 1, 0} — D3D light 0 direction fallback |
 | 0x2be3d30 | unk_2BE3D30 | RenderSlot_Table | 128-B shadow-slot records |
+| 0x5d5690 | shadow_decal_alloc_slot | RenderSlot_AllocSlot | find-or-alloc + the LOD-at-alloc laws (2026-08-20) |
+| 0x5d6530 | terrain_sort_and_assign_render_slots | RenderSlot_SortAndAssign | scoring, exclusions, 24-patch/12-RT binding (2026-08-20) |
+| 0x5d5320 | init_render_target_chain | RenderSlot_InitTextureChain | the 12-RT halving size chain (2026-08-20) |
+| 0x5d5130 | terrain_tile_rebuild_vertex_buffer | RenderSlot_RebuildPatchVertexBuffer | the 441-vertex terrain drape patch build (2026-08-20) |
+| 0x5d6e20 | sub_5D6E20 | RenderSlot_DrawAllDrapes | the per-slot drape walk + local-FP/prone gates (2026-08-20) |
+| 0x5d5ca0 | render_sector_model | RenderSlot_DrawSilhouetteDrape | the projected silhouette drape: fade, person 4x, the sun ambient law (2026-08-20) |
+| 0x5d59d0 | render_minimap_tile_overlay | RenderSlot_DrawAuthoredBlobDecal | the items.def `shadow` decal drape (2026-08-20) |
+| 0x2be3c0c | dword_2BE3C0C | RenderSlot_DetailLevel | the shadow-detail level driving chain size + cadence (2026-08-20) |
+| 0x2be3bb4 | dword_2BE3BB4 | RenderSlot_Count | live slot-record count (2026-08-20) |
 | 0x2be3a90/94/98 | dword_* / frameState | RenderSlot_PendingCursor/Count/PendingList | the slot iteration state |
 | 0x2be3c94 / 0x2be3a48 | dword_* | RenderSlot_TextureTable / RenderSlot_Shader | slot render targets + shader |
 | 0x2bebd68..70 | outDir / dword_* | RenderSlot_DefaultLightDirX/Y/Z | the sun default for slot lighting |
