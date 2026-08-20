@@ -721,6 +721,7 @@ OPEN work only; full detail in the named record + git history):
 Closed: **D-TIL-1** -> `FIXED` — `TIL_FLAG_OUTLINE` (0x08): the LINELIST outline is jodemo-only; retail JO's render (`render_water_quad @ 0x604700`) omits it and so do we (flag preserved for round-trip, no outline drawn) (full detail: til-re.md + git history).
 Closed 2026-07-15: **D-TIL-2** -> `FIXED` — `ROTATE_90` was the CW transpose `(v, 1−u)`; retail rotates CCW `(1−v, u)` (corner cycle @ `render_water_quad 0x6047d4..0x604806`) (full detail: til-re.md + git history).
 Closed 2026-08-17: **D-TIL-3** -> `FIXED` — The page composer now reproduces overlay render-target alpha recurrence before the additive DOT3 alpha pass, instead of blending `.til` RGB while retaining bare-ground alpha (full detail: til-re.md + git history).
+Closed 2026-08-20: **D-TIL-4** -> `FIXED` — Flip/rotate composition order: retail mirrors the corner UVs first and applies `ROTATE_90` as a corner-assignment cycle over the mirrored values (= rotate-then-flip in sampling-function form); flip-then-rotate drew rotate+single-flip tiles (`0x05`/`0x06`) 180° off — the 00TRa driving-course fork the `00tra-tire-marks-retail` fixture exposed (MAE 16.35 → 12.17) (full detail: til-re.md + git history).
 
 ### Foliage — [foliage/foliage-re.md](foliage/foliage-re.md) (D-FOLIAGE catalog; PAR-R2)
 
