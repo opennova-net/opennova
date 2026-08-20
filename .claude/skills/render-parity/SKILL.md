@@ -1,6 +1,6 @@
 ---
 name: render-parity
-description: Refreshes this repo's registered retail/OpenNova render-parity screenshots — the T3 headline evidence under screenshots/parity/render-lighting-2026-08/ — by freezing a commit, capturing the fixture catalog through the Godot probe, re-registering the retail bundles, building the side-by-side sheets, and repointing every doc and test that names the publication. Use when asked to refresh, update, recapture, or republish the render parity screenshots or side-by-sides, when a render slice needs its retail comparison re-shot, or when the published evidence names a commit that is no longer on master.
+description: Refreshes this repo's registered retail/OpenNova render-parity screenshots — the T3 headline evidence under screenshots/parity/render-lighting-2026-08/ — by freezing a commit, capturing the fixture catalog through the Godot probe, re-registering the retail bundles, building the side-by-side sheets, and repointing every doc and test that names the publication. Also covers retaking single fixtures (the fast iteration loop against the published retail frames) and growing the set with a new fixture from an in-game debug snapshot. Use when asked to refresh, update, retake, recapture, or republish the render parity screenshots or side-by-sides, when asked to add a parity fixture or screenshot a newly spotted mismatch, when a render slice needs its retail comparison re-shot, or when the published evidence names a commit that is no longer on master.
 ---
 
 # Refresh the registered render-parity publication
@@ -14,7 +14,17 @@ pass is the gate, MAE/RMS are descriptive, tolerances never widen.
 ## 1. Scope the refresh
 
 Read `docs/render/README.md` for the current publication path, frozen source
-commit, and catalog. Then answer three questions before touching anything:
+commit, and catalog. Then classify the ask -- each has its own runbook path:
+
+- **Iterating on a render fix?** One fixture against the published retail
+  frame, no registration: `scripts/render/retake_fixture.py` (runbook 2b).
+  Not evidence; stop there until the fix is done.
+- **Adding a fixture at a newly spotted mismatch?** The snapshot->fixture flow
+  (runbook section 7): dump a debug snapshot in-game, append the pose to the
+  catalog, ONE retail capture, then the standard publication flow.
+- **Refreshing the publication?** The full flow below.
+
+For a refresh, answer three questions before touching anything:
 
 - **Is the published frozen source still on `master`?** `git merge-base
   --is-ancestor <sha> master`. A squash-merged PR SHA is the usual reason a
@@ -29,7 +39,9 @@ commit, and catalog. Then answer three questions before touching anything:
   the OpenNova leg to be recaptured against it. The whole re-shoot is scripted:
   `retail_capture_driver.py --no-correct --fresh-process`, then
   `mint_retail_catalog.py`, then a smoke registration.
-- **Where are the retained bundles?** Search for `capture-result.json` siblings
+- **Where are the retained bundles?** `OPENNOVA_RETAIL_EVIDENCE_ROOT` in
+  `.claude/settings.local.json` `env` names the durable root on a configured
+  machine; otherwise search for `capture-result.json` siblings
   and read the absolute path inside one. A usable bundle has all seven artifacts
   per fixture. Verify the four provenance binaries still hash to the runbook's
   pinned values before planning around them.
@@ -85,8 +97,9 @@ Runbook sections 3a (or 3b), 4. Two things are easy to get wrong:
 
 `scripts/render/publish_registered_comparisons.py` assembles the fixture
 directories and generates the publication README's identity and metric tables.
-Do not hand-write those tables. Delete the superseded publication directory in
-the same commit.
+Do not hand-write those tables. A new publication directory retires the old
+one in the same commit; a same-day republish replaces the current directory in
+place with `--force`.
 
 ## 5. Repoint and verify
 

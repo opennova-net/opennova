@@ -55,7 +55,12 @@ build produces; each publication records its own pair, so read them back from a
 registration rather than pinning them here.
 
 The onHook build lives in the separate `opennova-int` repository, never in this
-one. Retail install paths and the raw bundle root are local state.
+one. Retail install paths and the raw bundle root are local state; on a
+configured machine, `.claude/settings.local.json` `env` records them as
+`NOVA_MISSION_RESOURCE_DIR`, `NOVA_RUNTIME_RESOURCE_DIR`, and
+`OPENNOVA_RETAIL_EVIDENCE_ROOT` (the durable bundle root the retained-bundle
+path re-registers from). If they are unset, ask the user -- never guess or
+commit a machine path.
 
 ### Building and deploying onHook
 
@@ -191,7 +196,7 @@ Rules the probe enforces, so do not fight them:
   `unshaded`, `directional_shadow_atlas`), five `.state.json` sidecars, and one
   `<fixture-id>-manifest.json`.
 
-**Smoke exactly one fixture before sweeping all fifteen.** The probe fail-closes
+**Smoke exactly one fixture before sweeping the catalog.** The probe fail-closes
 on the matched-presentation runtime witness: `WPN_M16BURST` with 30 loaded and
 270 in reserve, character `0x0402`, bare `IndoArms.3di` arms with camo
 `[1,0,0]`, `gameplay_hud_visible=false` while the HUD `CanvasLayer` stays active
@@ -512,9 +517,51 @@ git check-attr filter -- screenshots/parity/render-lighting-2026-08/registered-<
 pointer stubs, so confirm the run actually exercised the publication-pinned
 tests rather than skipping the whole module.
 
-The gate itself is the by-eye retail pass over each of the fifteen sheets,
+The gate itself is the by-eye retail pass over every sheet,
 recorded scene by scene in the slice PR (ADR 0023 section 4). MAE and RMS are
 descriptive measurements and never a threshold.
+
+## 7. Growing the set: a fixture from a debug snapshot
+
+When a mismatch is spotted in-game, one debug snapshot turns the spot into a
+registered fixture. This is how `00tra-tire-marks-retail` (the D-TERRAIN-7
+`.til` tire-mark measurement) was added.
+
+1. **Dump the pose in-game.** F3 debug overlay -> Player page -> "Dump
+   snapshot". The file lands under `user://debug/snapshots/` --
+   `%APPDATA%\Godot\app_userdata\OpenNova\debug\snapshots\<mission>_<utc>_*.json`
+   (`godot/game/debug/debug_snapshot_writer.gd`,
+   `opennova.debug_snapshot.v1`). Its BMS position and mission yaw/pitch use
+   the same conventions as the catalog's fixture fields.
+2. **Append the fixture to the catalog.** New entry with
+   `retail_player_bms.applied` = the snapshot's `player.position_bms`,
+   `camera_bms` yaw/pitch from `player.orientation_mission_deg` plus the
+   standard `vertical_fov_deg` 53.4468 and a placeholder position (the mint
+   replaces it), `minutes_of_day` = the mission's authored start minute from
+   the catalog's `clock` table, and coverage tags naming what it measures.
+   Recompute `catalog_sha256` (`mint_retail_catalog.canonical_sha256`). If the
+   mission is new to the catalog, add its loose-`.bms` SHA-256 to `missions`
+   and its authored start minute to `clock.start_minutes` first.
+   Inside an unmerged PR, extend the current catalog file in place; once a
+   revision has shipped, mint the next one instead.
+3. **One retail capture** of just the new fixture
+   (`retail_capture_driver.py --no-correct --fresh-process <mission>` into the
+   SAME durable evidence root as the existing bundles), then re-run the mint
+   with `--base` = the extended catalog and `--bundles` = that root: the
+   existing fixtures re-solve to their unchanged cameras, the new one gets its
+   registered camera. Smoke-register the new bundle; sanity-view its
+   `retail.png` to confirm the subject is in frame.
+4. **The usual flow from there** -- commit the catalog (freeze), full OpenNova
+   sweep (the catalog sha changed, so every manifest must rebind), register
+   all fixtures (the pre-existing bundles re-register in place, section 3a),
+   compare, republish `--force`.
+5. **Scale the pins.** The publisher derives its README and inventory from the
+   rows; the tracked pins move by hand:
+   `tests/test_retail_render_evidence.py` -- add the id to
+   `PUBLISHED_FIXTURE_IDS` (NOT to `LEGACY_FIXTURE_IDS`, which pins the
+   archived v1 catalog) and bump the counts (files = 19 x N + 1, PNGs = 10 x N,
+   JSON = 9 x N); the runbook's pinned table (fixture count, catalog sha);
+   `docs/render/README.md` and the session record (counts, sha, MAE spans).
 
 ## Failure triage
 
