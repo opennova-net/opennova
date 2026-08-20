@@ -257,6 +257,17 @@ bool ObjectModel::is_slot_shadow_person() const {
 	return slot_shadow_person_;
 }
 
+void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
+	slot_shadow_capture_with_ = p_owner != nullptr
+			? ObjectID(p_owner->get_instance_id())
+			: ObjectID();
+}
+
+ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
+	return Object::cast_to<ObjectModel>(
+			ObjectDB::get_instance(slot_shadow_capture_with_));
+}
+
 void ObjectModel::set_slot_shadow_decal(const String &p_texture,
 		const Vector4 &p_dims) {
 	slot_shadow_decal_texture_ = p_texture;
@@ -1103,6 +1114,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_slot_shadow_person);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_decal", "texture", "dims"),
 			&ObjectModel::set_slot_shadow_decal);
+	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
+			&ObjectModel::set_slot_shadow_capture_with);
 	ClassDB::bind_method(D_METHOD("get_slot_shadow_decal_texture"),
 			&ObjectModel::get_slot_shadow_decal_texture);
 	ClassDB::bind_method(D_METHOD("get_slot_shadow_decal_dims"),

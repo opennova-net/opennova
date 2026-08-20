@@ -237,6 +237,7 @@ private:
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
 	bool slot_shadow_person_ = false;
+	ObjectID slot_shadow_capture_with_;
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
@@ -438,6 +439,12 @@ public:
 	// docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
+	// Capture-with link: this model renders into ANOTHER caster's slot
+	// (retail renders held weapons and mounted/standing children inside the
+	// parent entity's slot RT — the RenderSlot_RenderEntityAndChildren
+	// child walk); it never takes a slot of its own.
+	void set_slot_shadow_capture_with(ObjectModel *p_owner);
+	ObjectModel *get_slot_shadow_capture_with() const;
 	void set_slot_shadow_decal(const String &p_texture, const Vector4 &p_dims);
 	String get_slot_shadow_decal_texture() const;
 	Vector4 get_slot_shadow_decal_dims() const;

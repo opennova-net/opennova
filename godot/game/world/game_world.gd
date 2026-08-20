@@ -1585,6 +1585,11 @@ func build_local_player_held_weapon(graphic: String) -> ObjectModel:
 			graphic, "", self, "")
 	if model != null:
 		model.set_shadow_caster_enabled(true)
+		# The 3P gun silhouettes inside the AVATAR's render slot, exactly like
+		# retail's child walk (RenderSlot_RenderEntityAndChildren renders the
+		# held weapon with the person) — never in a slot of its own.
+		if _local_view_presenter != null:
+			model.set_slot_shadow_capture_with(_local_view_presenter.avatar())
 	return model
 
 

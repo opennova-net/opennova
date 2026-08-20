@@ -115,5 +115,9 @@ void fragment() {
 			factor *= mix(vec3(1.0), s.rgb, s.a);
 		}
 	}
-	ALBEDO = factor;
+	// Retail's drape multiplies the 8-bit sRGB framebuffer directly (the
+	// D3D8-era fixed pipeline has no linear stage); Godot's blend_mul runs
+	// in LINEAR space, so the composed sRGB factor folds through the
+	// transfer curve to darken the displayed value by the same law.
+	ALBEDO = pow(factor, vec3(2.2));
 }

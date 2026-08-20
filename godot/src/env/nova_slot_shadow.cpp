@@ -372,8 +372,9 @@ void SlotShadow::advance_frame() {
 		// A caster parented under another caster renders with its parent in
 		// retail (the seat/standing child walk of the parent's slot RT);
 		// its own slot is excluded.
-		state.seat_parented = false;
-		for (Node *ancestor = model->get_parent(); ancestor != nullptr;
+		state.seat_parented = model->get_slot_shadow_capture_with() != nullptr;
+		for (Node *ancestor = model->get_parent();
+				!state.seat_parented && ancestor != nullptr;
 				ancestor = ancestor->get_parent()) {
 			ObjectModel *parent_model = Object::cast_to<ObjectModel>(ancestor);
 			if (parent_model != nullptr &&
@@ -433,6 +434,17 @@ void SlotShadow::advance_frame() {
 		uint32_t &applied = applied_bits_[assignment.id];
 		if (want_bit != 0 || applied != 0) {
 			_apply_capture_layers(model, want_bit);
+			// The retail child walk: models linked capture-with this caster
+			// (held weapons, mounted children) render into the same slot RT
+			// (retail: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6).
+			for (const CasterInfo &linked : casters) {
+				if (linked.model != model &&
+						linked.model->get_slot_shadow_capture_with() == model) {
+					_apply_capture_layers(linked.model, want_bit);
+					applied_bits_[uint64_t(
+							linked.model->get_instance_id())] = want_bit;
+				}
+			}
 			applied = want_bit;
 		}
 		if (assignment.bound && !assignment.excluded) {
@@ -610,6 +622,7 @@ void SlotShadow::advance_frame() {
 
 	drape->set_shader_parameter("u_slot_term", silhouette_terms);
 	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
+
 }
 
 Dictionary SlotShadow::get_report() const {
