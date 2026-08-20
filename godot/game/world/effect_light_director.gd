@@ -250,18 +250,37 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 			weather)
 	_scene.render_model_frame(models, owners, gain, Time.get_ticks_msec(),
 			weather)
-	_render_coronas(camera, gain, weather)
+	_render_coronas(camera, gain, weather, models, owners, env)
 
 
 ## The corona device leg: fetch this frame's additive quads from the portable
 ## walk and rebuild the MultiMesh (instance origin = segment center, uniform
 ## scale = half-size, instance color = the premultiplied additive color).
-func _render_coronas(camera: Camera3D, gain: Vector3, weather: Node) -> void:
+## The models/owners arrays are the per-model pass's own walk — models with
+## an occlusion section-mask verdict gate their owned coronas on the
+## visible-section bit [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960];
+## the env fog rides in as the fog-to-black fold
+## [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
+func _render_coronas(camera: Camera3D, gain: Vector3, weather: Node,
+		models: Array[Node3D], owners: PackedInt64Array,
+		env: MissionEnvironment) -> void:
 	_corona_frame = (_corona_frame + 1) & 3
+	var fog: Dictionary = {}
+	if env != null:
+		var state: EnvLightState = env.get_light_state()
+		if state != null and state.get_values() != null:
+			var values: EnvLightValues = state.get_values()
+			fog = {
+				"enabled": values.get_fog_enabled(),
+				"type": values.get_fog_type(),
+				"start": values.get_fog_start(),
+				"end": values.get_fog_end(),
+			}
 	var rows: Array = _scene.collect_corona_rows(
 			camera.get_camera_transform().origin,
 			-camera.get_camera_transform().basis.z, gain,
-			Time.get_ticks_msec(), _corona_frame, weather)
+			Time.get_ticks_msec(), _corona_frame, weather, models, owners,
+			fog)
 	var instance := _ensure_corona_instance()
 	if instance == null:
 		return
@@ -368,7 +387,10 @@ func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 
 ## One presented round impact whose ammo authors light_impact [orig:
 ## AmmoDef_ProcessImpactEffect @ 0x40a2b3 — spawned radius/2 above the
-## impact, mode 2 fade]. The unwitnessed render flag 0x100 is not carried.
+## impact, mode 2 fade, render flag 0x100]. The 0x100 flag's one witnessed
+## reader is the corona walk: the billboards re-center radius/2 below the
+## light, back onto the impact point [orig: EffectWorld_RenderLightCoronas
+## @ 0x5ab037..0x5ab05c].
 func on_impact_light(world_pos: Vector3, radius: float, color: Color,
 		duration_ticks: int) -> void:
 	if radius <= 0.0:
@@ -379,6 +401,7 @@ func on_impact_light(world_pos: Vector3, radius: float, color: Color,
 		"color": color,
 		"fade_mode": 2,
 		"fade_duration": duration_ticks,
+		"corona_lower_half_radius": true,
 	})
 
 

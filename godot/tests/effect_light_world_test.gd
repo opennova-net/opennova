@@ -337,8 +337,10 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 		"position": Vector3(0.0, 1.0, 0.0),
 		"atten_end": 4.0,
 	}), 0)
+	var no_models: Array[Node3D] = []
 	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null)
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), {})
 	assert_eq(rows.size(), 3, "an enabled corona draws three segments")
 	if rows.size() == 3:
 		var first: Dictionary = rows[0]
@@ -356,9 +358,21 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 		"disable_corona": true,
 	}), 0)
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null)
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), {})
 	assert_eq(rows.size(), 3,
 			"a corona-disabled record contributes no quads")
+	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
+	# past the fog end the corona color folds to black but the quads remain.
+	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(),
+			{"enabled": true, "type": 1, "start": 2.0, "end": 8.0})
+	assert_eq(rows.size(), 3)
+	if rows.size() == 3:
+		var fogged: Color = rows[0].get("color")
+		assert_almost_eq(fogged.r, 0.0, 0.0001,
+				"a corona past the fog end fades fully to black")
 
 
 func test_director_null_camera_clears_output_without_destroying_the_pool() -> void:

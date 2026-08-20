@@ -696,6 +696,83 @@ int main() {
                "coronas cull beyond 100 wu from the camera");
     }
 
+    // Corona owner visible-section gate [orig: the sectorFilter leg
+    // @ 0x5ab027 -> Terrain_IsBuildingSectionBitSet @ 0x5c6960]: an owned
+    // corona draws only when its owner's section bit is set; owners absent
+    // from the mask table pass like retail's non-pool-2 owners.
+    {
+        LightScene scene;
+        LightSpawnParams params;
+        params.position_fixed = {0, 0, 0};
+        params.radius_fixed = 4 << 16;
+        params.rgb = {255, 255, 255};
+        params.owner_entity = 42;
+        params.owner_section = 2;
+        scene.spawn(params);
+
+        LightCoronaFrameInputs inputs;
+        inputs.camera_fixed = {0, 0, 10 << 16};
+        inputs.depth_plane_normal = {0.0f, 0.0f, -1.0f};
+        inputs.depth_plane_w = 10.0f;
+        std::vector<LightCoronaQuad> quads;
+        expect(scene.collect_corona_quads(inputs, quads) == 3,
+               "an owned corona with no mask table passes the gate");
+        LightCoronaOwnerMask mask_row{42, ~(1u << 2)};
+        inputs.owner_masks = &mask_row;
+        inputs.owner_mask_count = 1;
+        expect(scene.collect_corona_quads(inputs, quads) == 0,
+               "a hidden owner section suppresses the owned corona");
+        mask_row.section_mask = 1u << 2;
+        expect(scene.collect_corona_quads(inputs, quads) == 3,
+               "a visible owner section admits the owned corona");
+    }
+
+    // The flag-0x100 impact re-center [orig: @ 0x5ab037..0x5ab05c] and the
+    // fog-to-black fold [orig: CD3DDevice_SetFogAndBlendMode(dev, 2)
+    // @ 0x5aafb6].
+    {
+        LightScene scene;
+        LightSpawnParams params;
+        params.position_fixed = {0, 0, 0};
+        params.radius_fixed = 4 << 16;
+        params.rgb = {128, 128, 128};
+        params.corona_lower_half_radius = true;
+        scene.spawn(params);
+
+        LightCoronaFrameInputs inputs;
+        inputs.camera_fixed = {0, 0, 10 << 16};
+        inputs.depth_plane_normal = {0.0f, 0.0f, -1.0f};
+        inputs.depth_plane_w = 10.0f;
+        std::vector<LightCoronaQuad> quads;
+        expect(scene.collect_corona_quads(inputs, quads) == 3,
+               "the re-centered corona still draws its segments");
+        // The light drops radius/2 = 2 wu on the height axis, then marches
+        // toward the camera: first segment at -2 + step.
+        expect(quads[0].center[2] < -1.0f,
+               "flag-0x100 coronas re-center radius/2 below the light");
+
+        // Fog type 1 (linear, authored start): start 5, end 15; the first
+        // segment sits ~11.6 wu from the camera (the drop moved the light
+        // away) -> visibility (15 - 11.6) / 10 = 0.34.
+        inputs.fog_enabled = true;
+        inputs.fog_type = 1;
+        inputs.fog_start = 5.0f;
+        inputs.fog_end = 15.0f;
+        std::vector<LightCoronaQuad> fogged;
+        scene.collect_corona_quads(inputs, fogged);
+        expect(fogged.size() == 3, "fogged coronas keep their segments");
+        expect(nearly_equal(fogged[0].rgb[0], quads[0].rgb[0] * 0.34f,
+                       quads[0].rgb[0] * 0.02f),
+               "the fog-to-black fold scales the corona color by the "
+               "primary fog factor");
+        // Past the fog end the corona is fully black.
+        inputs.fog_end = 8.0f;
+        inputs.fog_start = 2.0f;
+        scene.collect_corona_quads(inputs, fogged);
+        expect(fogged[0].rgb[0] == 0.0f && fogged[0].rgb[1] == 0.0f,
+               "a corona past the fog end fades fully out");
+    }
+
     std::cout << "light_scene_test passed\n";
     return 0;
 }

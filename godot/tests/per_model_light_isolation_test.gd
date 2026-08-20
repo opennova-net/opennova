@@ -148,6 +148,45 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 			"u_point_light_count")), 1.0)
 
 
+## The corona owner visible-section gate [orig: the sectorFilter leg of
+## EffectWorld_RenderLightCoronas @ 0x5ab027 -> Terrain_IsBuildingSectionBitSet
+## @ 0x5c6960]: an owned corona draws only while its owner's section bit is
+## set in the occlusion verdict mask; owners without a verdict pass.
+func test_owned_corona_gates_on_owner_section_visibility() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var owner_model := _placed_model(container, Vector3.ZERO)
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(0.0, 1.0, 0.0),
+		"atten_end": 4.0,
+		"owner_entity": owner_model.get_instance_id(),
+		"owner_section": 2,
+	}), 0)
+	var models: Array[Node3D] = [owner_model]
+	var owners := PackedInt64Array([owner_model.get_instance_id()])
+	# No occlusion verdict yet (mask -1): the owner is not in the table and
+	# the corona passes like retail's non-building owners.
+	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
+			owners, {})
+	assert_eq(rows.size(), 3,
+			"an owner without an occlusion verdict passes the gate")
+	# The occlusion pass hides section 2: the owned corona disappears.
+	owner_model.set_section_visibility_mask(~(1 << 2))
+	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
+			owners, {})
+	assert_eq(rows.size(), 0,
+			"a hidden owner section suppresses the owned corona")
+	owner_model.set_section_visibility_mask(1 << 2)
+	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
+			owners, {})
+	assert_eq(rows.size(), 3,
+			"a visible owner section admits the owned corona")
+
+
 func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
 	var scene := LightScene.new()
 	var container := Node3D.new()

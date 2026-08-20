@@ -6,8 +6,9 @@ shader_type spatial;
 // [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40, fog+blend mode 2
 // additive, depth-tested, no depth write]); the MultiMesh instance carries
 // center (origin) + half_size (uniform basis scale), the instance COLOR the
-// premultiplied additive color. The fog-to-black additive fold is a tracked
-// residual (coronas cull at 100 wu, far inside every authored fog start).
+// premultiplied additive color — the segment fade, the owner
+// visible-section gate, and the fog-to-black fold (mode 2 forces FOGCOLOR
+// black [orig: @ 0x677740 case 2]) are already folded in by the collect.
 render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
 
 // Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
