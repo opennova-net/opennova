@@ -45,7 +45,7 @@ try:
 except ImportError:  # invoked from scripts/render directly
     import build_retail_side_by_side as builder  # type: ignore[no-redef]
 
-DEFAULT_CATALOG = "docs/render/render-fixtures-retail-v3.json"
+DEFAULT_CATALOG = "docs/render/render-fixtures-retail-v4.json"
 DEFAULT_PUBLISHED = (
     "screenshots/parity/render-lighting-2026-08/registered-2026-08-20"
 )

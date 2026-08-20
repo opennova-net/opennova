@@ -1,0 +1,123 @@
+{
+  "game_config": {
+    "changed_keys": [
+      "object_texdetail"
+    ],
+    "effective_sha256": "e7bd7d27d6dcb22c8b58e3daa6ef543e2489f0600ffee28ffcb9a53d79806ed3",
+    "effective_values": {
+      "NoBlood": 0,
+      "NoCasings": 0,
+      "NoSmoke": 0,
+      "antialias_mode": 2,
+      "display_16x9": 1,
+      "fbeffects_level": 3,
+      "force_vsync": 0,
+      "gamma": 0.8,
+      "lock_framerate": 0,
+      "no_anim": 0,
+      "object_polydetail": 3,
+      "object_texdetail": 3,
+      "particle_density": 2,
+      "reduce_mouselag": 1,
+      "shader_usage_level": 2,
+      "shadow_quality": 3,
+      "terrain_polydetail": 3,
+      "terrain_texdetail": 3,
+      "texcompression_level": 2,
+      "texfilter_level": 3,
+      "video_res": "1920x1200",
+      "water_quality": 3,
+      "windowed": 0
+    },
+    "file_name": "game.cfg",
+    "hud_detail": {
+      "effective": 0,
+      "original": 0,
+      "unchanged": true
+    },
+    "original_sha256": "556880e9ec85d60021f2ce17d584bde30702a6ae3ecfba6a1e6eb54402c8cad3",
+    "original_values": {
+      "NoBlood": 0,
+      "NoCasings": 0,
+      "NoSmoke": 0,
+      "antialias_mode": 2,
+      "display_16x9": 1,
+      "fbeffects_level": 3,
+      "force_vsync": 0,
+      "gamma": 0.8,
+      "lock_framerate": 0,
+      "no_anim": 0,
+      "object_polydetail": 3,
+      "object_texdetail": 1,
+      "particle_density": 2,
+      "reduce_mouselag": 1,
+      "shader_usage_level": 2,
+      "shadow_quality": 3,
+      "terrain_polydetail": 3,
+      "terrain_texdetail": 3,
+      "texcompression_level": 2,
+      "texfilter_level": 3,
+      "video_res": "1920x1200",
+      "water_quality": 3,
+      "windowed": 0
+    },
+    "preserved_values": {
+      "enable_gameplaytips": 1,
+      "enable_keyboardtips": 1,
+      "hud_detail": 0,
+      "hw3d_deviceno": 0,
+      "hw3d_guid": "D7B71EE2-55C1-11CF-63740273A5C2ED35",
+      "hw3d_name": "AMD Radeon(TM) Graphics"
+    }
+  },
+  "profile": {
+    "id": "retail_reference_highest_retail_selectable_v2",
+    "required_values": {
+      "NoBlood": 0,
+      "NoCasings": 0,
+      "NoSmoke": 0,
+      "antialias_mode": 2,
+      "display_16x9": 1,
+      "fbeffects_level": 3,
+      "force_vsync": 0,
+      "gamma": 0.8,
+      "lock_framerate": 0,
+      "no_anim": 0,
+      "object_polydetail": 3,
+      "object_texdetail": 3,
+      "particle_density": 2,
+      "reduce_mouselag": 1,
+      "shader_usage_level": 2,
+      "shadow_quality": 3,
+      "terrain_polydetail": 3,
+      "terrain_texdetail": 3,
+      "texcompression_level": 2,
+      "texfilter_level": 3,
+      "video_res": "1920x1200",
+      "water_quality": 3,
+      "windowed": 0
+    },
+    "video_option_catalog_id": "joint-operations-revx02-video-options-v1",
+    "video_option_catalog_sha256": "371d95a8caccb85b89ca0e0a10bc87e60ba37f632f9724c7f14036b06a2f8ff4"
+  },
+  "schema": "opennova.retail-presentation-stage.v3",
+  "tool_version": "3.0.0",
+  "weapon_profile": {
+    "blue": {
+      "avatar_a": 2,
+      "avatar_b": 0,
+      "avatar_packed": 1026,
+      "player_class": 9
+    },
+    "blue_selected_kit_contains_wpn_m16burst": true,
+    "file_name": "weapon.sav",
+    "red": {
+      "avatar_a": 7,
+      "avatar_b": 0,
+      "avatar_packed": 33287,
+      "player_class": 9
+    },
+    "sha256": "f4907820a58505a6988f140a27638dae7dbaaea2cc446642f0bc44c868905623",
+    "slot": 0
+  }
+}

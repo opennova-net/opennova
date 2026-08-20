@@ -1255,6 +1255,14 @@ static func realized_reflection_pose_matches(diagnostics: Dictionary) -> bool:
 		return false
 	if not bool(water["render_active"]):
 		return true
+	if not water.has("mesh_visible"):
+		return false
+	if not bool(water["mesh_visible"]):
+		# Occlusion hid the water strip for this pose (an interior fixture with
+		# the sea culled): Water::advance_frame early-outs before the mirror
+		# retarget, and the cleared strip means the stale mirror is never
+		# sampled, so its pose carries no pixel obligation for this frame.
+		return true
 	var reflection_value: Variant = water.get("reflection")
 	if not (reflection_value is Dictionary):
 		return false

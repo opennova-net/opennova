@@ -245,9 +245,10 @@ point-light gap.
 ### Maximum-video publication contract (2026-08-18; unchanged for 2026-08-20)
 
 New evidence uses the current catalog revision --
-[`render-fixtures-retail-v3.json`](render-fixtures-retail-v3.json), whose
+[`render-fixtures-retail-v4.json`](render-fixtures-retail-v4.json), whose
 comparison, profile, and presentation contracts are identical to v2's (only
-`camera_bms` was recalibrated from the 2026-08-20 capture session) -- and the
+`camera_bms` recalibration and fixture/mission growth separate the revisions)
+-- and the
 sole profile `retail_reference_highest_retail_selectable_v2`. All terrain/object
 geometry and texture controls are Highest; water, shadows, particles, framebuffer
 effects, and shaders are at their top menu values; filtering is Anisotropic
@@ -284,33 +285,34 @@ clock as evidence for the next one.
 
 The current publication is indexed at
 [`screenshots/parity/render-lighting-2026-08/registered-2026-08-20/`](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md).
-It contains all 16 registered pairs, 16 overlays, 16 absolute-difference
-images, 16 normalized OpenNova images, and 80 raw OpenNova diagnostic images
-with portable evidence records. The sixteenth pair,
-`00tra-tire-marks-retail`, was added 2026-08-20 from an OpenNova debug
-snapshot at the crossing ground tire tracks and measures the ordered `.til`
-overlay composition divergence (D-TERRAIN-7). All rows bind frozen source
-`3ada00e96b055075db4442ac7724ee08fee19325` (the D-TIL-4 flip/rotate
-composition-order fix, refreshed 2026-08-20 over the same catalog and retained
-retail bundles; the set's original frozen source
-`3232a5c86b28a29160494286fe9282545e4b8bdb` from the rebase-merged PR #520 is
-kept reachable by the tag `render-evidence/2026-08-20` — master's rebased twin
-`e11d2da04` is tree-identical, mirroring the 2026-08-16 precedent), fixture
-catalog v3 at SHA-256
-`8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` — minted by
+It contains all 18 registered pairs, 18 overlays, 18 absolute-difference
+images, 18 normalized OpenNova images, and 90 raw OpenNova diagnostic images
+with portable evidence records. Three pairs are snapshot-derived growth:
+`00tra-tire-marks-retail` (2026-08-20, the crossing ground tire tracks,
+measuring the ordered `.til` overlay composition divergence D-TERRAIN-7),
+`00tra-armory-lght-retail` (2026-08-20, the lamp-lit armory interior wall,
+measuring the D-RLIT-4 model-`LGHT` delivery residuals: corona billboards,
+Target/spot cones, static-batch owner scope), and `03tr-sun-sky-retail`
+(2026-08-20, the low-sun 03TR airfield vista, measuring sun/sky-dome/ambient
+response across D-RLIT-2, D-RLIT-5, and the deferred env #16 table). All rows
+bind frozen source `30f3e194b9f7aaea6053492f7797c9940f8039ed` (the catalog-v4
+growth commit; the earlier frozen sources `3ada00e96…` and `3232a5c86…` were
+orphaned from master ancestry by rebase merges of PR #520/#521 — the tag
+`render-evidence/2026-08-20` keeps `3232a5c86…` reachable — which is what
+prompted this full re-take), fixture catalog v4 at SHA-256
+`e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
-this session's verbatim fresh-process captures, v2's applied poses kept
-exactly —
+verbatim fresh-process captures, every applied pose kept exactly —
 stage/restore v3 (tool 3.0.0), raw capture bundle v4 from bridge 1.4/onHook 0.5.0,
 registered capture v5 (tool 4.0.0), and comparison v6 (tool 4.0.0).
 
 Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
-contains the matched HUD-hidden game composite. Across its 15 comparison-v6
-manifests, full-frame MAE spans `5.037678`–`21.001876`, `world_center` MAE
-spans `2.493596`–`23.876309`, and `viewmodel_arms` MAE spans
-`6.092216`–`29.890922`. These are descriptive deltas rather than parity
+contains the matched HUD-hidden game composite. Across its 18 comparison-v6
+manifests, full-frame MAE spans `5.071006`–`26.338288`, `world_center` MAE
+spans `2.493591`–`23.970676`, and `viewmodel_arms` MAE spans
+`6.103721`–`34.217820`. These are descriptive deltas rather than parity
 thresholds; no metric from a superseded set is carried forward as if it
 described these images.
 
@@ -598,7 +600,7 @@ inventory:
    GDExtension, retail executable, MCP/proxy/forwarder, packed mission/archive,
    same-PID frame, pose/projection, and catalog facts retained by registration;
 4. the mission, final fixture ID, current catalog hash
-   `8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef`,
+   `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1`,
    exact fixture-result FOV/TOD/mission bindings, authored minute, raw
    resolutions, declared 2000→1920 transform, capture modes, captions, and the
    matched HUD-hidden M16/bare-arms/viewmodel/terrain contract;

@@ -34,11 +34,11 @@ LEGACY_CATALOG_SHA256 = (
     "6948682efc5e58d0ea887728e1318dd3c618b286a322b1bce430e9fbfff6ebf2"
 )
 CURRENT_CATALOG_PATH = (
-    ROOT / "docs" / "render" / "render-fixtures-retail-v3.json"
+    ROOT / "docs" / "render" / "render-fixtures-retail-v4.json"
 )
 CURRENT_EVIDENCE_ROOT = PUBLISHED_EVIDENCE_ROOT
 CURRENT_CATALOG_SHA256 = (
-    "8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef"
+    "e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1"
 )
 
 
@@ -64,7 +64,7 @@ if _PROBE_PNG is not None and _lfs_pointer_stub(_PROBE_PNG):
         "--include=screenshots/**`)",
         allow_module_level=True,
     )
-CURRENT_SOURCE_COMMIT = "3ada00e96b055075db4442ac7724ee08fee19325"
+CURRENT_SOURCE_COMMIT = "30f3e194b9f7aaea6053492f7797c9940f8039ed"
 # The archived v1 catalog predates the tire-marks fixture; its id set is
 # pinned separately from the current publication's.
 LEGACY_FIXTURE_IDS = frozenset({
@@ -86,6 +86,8 @@ LEGACY_FIXTURE_IDS = frozenset({
 })
 PUBLISHED_FIXTURE_IDS = LEGACY_FIXTURE_IDS | {
     "00tra-tire-marks-retail",
+    "00tra-armory-lght-retail",
+    "03tr-sun-sky-retail",
 }
 PUBLISHED_VARIANTS = frozenset({
     "beauty",
@@ -1236,9 +1238,9 @@ def test_current_max_quality_publication_has_the_complete_portable_inventory(
     published_files = [
         path for path in CURRENT_EVIDENCE_ROOT.rglob("*") if path.is_file()
     ]
-    assert len(published_files) == 305
-    assert sum(path.suffix == ".png" for path in published_files) == 160
-    assert sum(path.suffix == ".json" for path in published_files) == 144
+    assert len(published_files) == 343
+    assert sum(path.suffix == ".png" for path in published_files) == 180
+    assert sum(path.suffix == ".json" for path in published_files) == 162
     assert sum(path.suffix == ".md" for path in published_files) == 1
 
 

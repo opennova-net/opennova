@@ -28,9 +28,9 @@ tracked files. The values below are the authoritative capture machine's.
 
 | Parameter | Value |
 |---|---|
-| Publication catalog | `docs/render/render-fixtures-retail-v3.json` |
-| Catalog SHA-256 | `8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` |
-| Fixtures | 16 (`00TRa` x6, `CP01` x6, `CP04` x1, `CP12` x3) |
+| Publication catalog | `docs/render/render-fixtures-retail-v4.json` |
+| Catalog SHA-256 | `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` |
+| Fixtures | 18 (`00TRa` x7, `CP01` x6, `CP04` x1, `CP12` x3, `03TR` x1) |
 | OpenNova capture size | 2000x1200, vertical FOV 53.4468 |
 | Retail backbuffer | 1920x1200 (one horizontal bicubic squeeze at comparison time) |
 | Loose mission root | `NOVA_MISSION_RESOURCE_DIR`, the loose `.bms` corpus |
@@ -157,7 +157,7 @@ if (git status --porcelain) { throw "capture worktree is not source-frozen" }
 
 $env:NOVA_EVIDENCE_SOURCE_COMMIT = $sourceCommit
 $env:NOVA_GDEXTENSION_BINARY     = (Resolve-Path "godot\bin\libopennova.windows.template_debug.x86_64.dll").Path
-$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v3.json"
+$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v4.json"
 $env:NOVA_RENDER_CAPTURE_MODE    = "hud_hidden"
 $env:NOVA_MISSION_RESOURCE_DIR   = "<loose .bms corpus>"
 $env:NOVA_RUNTIME_RESOURCE_DIR   = "<retail install>"
@@ -320,7 +320,7 @@ per-fixture `retail-stage.json`:
 
 ```powershell
 uv run python scripts/render/register_retail_capture.py `
-  --catalog docs/render/render-fixtures-retail-v3.json `
+  --catalog docs/render/render-fixtures-retail-v4.json `
   --fixture-id <fixture-id> `
   --raw-state       .scratch\retail\raw\<fixture-id>\retail.state.json `
   --raw-image       .scratch\retail\raw\<fixture-id>\retail.png `
@@ -405,7 +405,7 @@ ever be re-registered from (section 0). The `--run-root` must be new per sweep
 ```powershell
 uv run python scripts/render/retail_capture_driver.py --no-correct `
   --fresh-process CP01.bms `
-  --catalog docs/render/render-fixtures-retail-v3.json `
+  --catalog docs/render/render-fixtures-retail-v4.json `
   --output C:\evidence\retail-<date> `
   --run-root C:\evidence\retail-<date>\_runs `
   --onhook-mcp <opennova-int>\onhook\onhook-mcp.exe `
@@ -441,7 +441,7 @@ catalog and the new bundles.
 
 ```powershell
 uv run python scripts/render/build_retail_side_by_side.py `
-  --catalog docs/render/render-fixtures-retail-v3.json `
+  --catalog docs/render/render-fixtures-retail-v4.json `
   --fixture-id <fixture-id> `
   --opennova-manifest .scratch\golden\render\fixtures\<fixture-id>\<fixture-id>-manifest.json `
   --retail-bundle .scratch\retail\raw\<fixture-id>\registered.json `
@@ -461,7 +461,7 @@ Then assemble the publication and generate its index:
 
 ```powershell
 uv run python scripts/render/publish_registered_comparisons.py `
-  --catalog docs/render/render-fixtures-retail-v3.json `
+  --catalog docs/render/render-fixtures-retail-v4.json `
   --opennova-root .scratch\golden\render\fixtures `
   --retail-root .scratch\retail\raw `
   --comparison-root .scratch\publication `

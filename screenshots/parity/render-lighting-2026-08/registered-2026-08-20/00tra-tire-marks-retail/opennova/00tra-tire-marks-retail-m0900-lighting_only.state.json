@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 12406702.0,
+		"captured_at_ticks_usec": 12002709.0,
 		"height": 1200.0,
-		"id": "00tra-tire-marks-retail-m0900-lighting_only-12406702-f254",
+		"id": "00tra-tire-marks-retail-m0900-lighting_only-12002709-f263",
 		"label": "00tra-tire-marks-retail-m0900-lighting_only",
 		"mime": "image/png",
 		"png_path": "00tra-tire-marks-retail-m0900-lighting_only.png",
-		"png_sha256": "beea4458926132ab350b4adc92b88eb91468f6d1ae590966cb8fb08a473ba7db",
-		"process_frame": 254.0,
+		"png_sha256": "2ef44c75f55e6ce3f60ed50ae258a3eec27348db4162cfa9a4c14f096c75121f",
+		"process_frame": 263.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -172,8 +172,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 504.0,
-			"light_state_generation": 166.0,
+			"generation": 496.0,
+			"light_state_generation": 158.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 255.0,
-			"process": 254.0,
-			"ticks_usec": 12406826.0
+			"physics": 247.0,
+			"process": 263.0,
+			"ticks_usec": 12002810.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -309,9 +309,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							1.11328125,
-							1.11328125,
-							1.11328125,
+							1.08984375,
+							1.08984375,
+							1.08984375,
 							1.0
 						],
 						"handle": 753667.0,
@@ -482,10 +482,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 1556.0,
+					"tick_us": 1160.0,
 					"voice_writes": 9.0
 				},
-				"audio_us": 1598.0,
+				"audio_us": 1207.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -508,7 +508,7 @@
 					"detail_vertices": 18522.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 244.0,
+					"frame_calls": 253.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -535,13 +535,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 244.0
+					"terrain_scene_counter": 253.0
 				},
-				"foliage_us": 1040.0,
+				"foliage_us": 1055.0,
 				"runtime": {
 					"did_tick": true,
 					"effects_us": 3.0,
-					"present_us": 985.0,
+					"present_us": 882.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +565,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 1047.0,
-					"tick_us": 1332.0,
+					"sim_us": 952.0,
+					"tick_us": 1188.0,
 					"ticks": 1.0
 				},
-				"runtime_us": 2035.0,
-				"tick_us": 12011.0
+				"runtime_us": 1837.0,
+				"tick_us": 11267.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -835,7 +835,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 10769.0,
+				"cache_hits": 11056.0,
 				"cache_misses": 299.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -843,7 +843,7 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 8727.0,
+				"frame_compose_us": 10578.0,
 				"frame_output_hash": 89067366370795808.0,
 				"frame_output_pages": 1.0,
 				"frame_ready_hits": 54.0,
@@ -1171,7 +1171,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "2fdd4913985f66df72e48218a31732abb4203426604b1d522443d0039cc2ecab",
+		"source_state_sha256": "c76f668703d4ddacaf6fb538867f1d8ba9e0d8d57780ede0be5ff67cf0f487e8",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

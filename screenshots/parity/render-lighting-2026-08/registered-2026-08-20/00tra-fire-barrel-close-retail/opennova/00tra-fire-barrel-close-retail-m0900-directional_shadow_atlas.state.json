@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 14891618.0,
+		"captured_at_ticks_usec": 14215179.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas-14891618-f299",
+		"id": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas-14215179-f299",
 		"label": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas.png",
-		"png_sha256": "93e8e6c1e7424ef953cdf25d902f5284fb3dba5eab17aee892ab9587cac978d3",
+		"png_sha256": "45547623d9b662ef3da318f2ce54c953682f75d4a1d6cc505e81dc903945568f",
 		"process_frame": 299.0,
 		"width": 2000.0
 	},
@@ -172,8 +172,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 509.0,
-			"light_state_generation": 171.0,
+			"generation": 495.0,
+			"light_state_generation": 157.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 321.0,
+			"physics": 305.0,
 			"process": 299.0,
-			"ticks_usec": 14891733.0
+			"ticks_usec": 14215281.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -482,10 +482,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 2468.0,
+					"tick_us": 2688.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 2573.0,
+				"audio_us": 2729.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -537,11 +537,11 @@
 					],
 					"terrain_scene_counter": 283.0
 				},
-				"foliage_us": 497.0,
+				"foliage_us": 454.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 660.0,
+					"effects_us": 1.0,
+					"present_us": 687.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +565,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2002.0,
-					"tick_us": 2202.0,
+					"sim_us": 1725.0,
+					"tick_us": 1968.0,
 					"ticks": 1.0
 				},
-				"runtime_us": 2664.0,
-				"tick_us": 10366.0
+				"runtime_us": 2413.0,
+				"tick_us": 14324.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1171,7 +1171,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "87109c79b42ced601a81b1bf1e89517106caf8421f5169c1963df89e8fc072ba",
+		"source_state_sha256": "6e8777d5d728e3e7a0bf4288ad8f9c75be6641723c150bdc52ed4433009dcd4e",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

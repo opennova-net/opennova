@@ -15,7 +15,7 @@ version, because a publication that mixes provenance is not evidence.
 Usage::
 
     uv run python scripts/render/publish_registered_comparisons.py \
-      --catalog docs/render/render-fixtures-retail-v3.json \
+      --catalog docs/render/render-fixtures-retail-v4.json \
       --opennova-root .scratch/golden/render/fixtures \
       --retail-root .scratch/retail/raw \
       --comparison-root .scratch/publication \
@@ -69,6 +69,14 @@ RESIDUALS = """\
 - Ground tire marks and other ordered .til overlay contributions diverge in
   placement and blend (the open D-TERRAIN-7 tile-composition producer gap,
   measured by the tire-marks fixture).
+- Model-authored `LGHT` lamp delivery diverges: corona billboards are not
+  drawn, Target/spot cones are dropped, and batched static buildings lose the
+  authored subobject owner scope (the open D-RLIT-4 residual tail, measured by
+  the armory-lght fixture).
+- Sun, sky-dome, and ambient response diverge at low sun: iris/ambient
+  sampling (D-RLIT-2), the sun-glint/reflection stand-ins (D-RLIT-5), and the
+  deferred overcast/TOD first-pass table (env #16), measured by the 03TR
+  sun-sky fixture.
 """
 
 

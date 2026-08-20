@@ -1905,6 +1905,7 @@ func test_active_water_capture_requires_the_exact_mirrored_camera_pose() -> void
 		},
 		"water": {
 			"render_active": true,
+			"mesh_visible": true,
 			"height": 20.0,
 			"reflection": {
 				"available": true,
@@ -1932,6 +1933,18 @@ func test_active_water_capture_requires_the_exact_mirrored_camera_pose() -> void
 	inactive.water.render_active = false
 	assert_true(Probe.realized_reflection_pose_matches(inactive),
 			"missions without rendered water have no mirror-pose precondition")
+
+	var hidden := diagnostics.duplicate(true)
+	hidden.water.mesh_visible = false
+	hidden.water.reflection.camera.global_transform = Transform3D(
+			Basis.IDENTITY, Vector3(999.0, 15.0, 31.0))
+	assert_true(Probe.realized_reflection_pose_matches(hidden),
+			"an occluded strip is never sampled, so a stale mirror is no defect")
+
+	var unwitnessed := diagnostics.duplicate(true)
+	(unwitnessed.water as Dictionary).erase("mesh_visible")
+	assert_false(Probe.realized_reflection_pose_matches(unwitnessed),
+			"diagnostics without the strip-visibility witness cannot claim a capture")
 
 
 func test_capture_requires_the_single_player_post_spawn_equivalent() -> void:
