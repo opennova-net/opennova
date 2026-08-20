@@ -449,7 +449,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                      vehicle_family_uses_direct_air_mover(vt->family));
             if (locomotion_enabled && !motor_driven) {
                 apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
-                apply_ground_clamp(e); // vertical: snap pos[2] onto the terrain (no-op if unwired)
+                apply_ground_clamp(e, &world); // vertical: snap pos[2] onto ground (no-op if unwired)
             }
         }
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
@@ -1039,12 +1039,45 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
 
 // Drive the vertical off the terrain sampler. See the header. Snap model for the un-reversed
 // vertical driver: SET kWorkPosZ + the entity's pos[2] to ground + ground_stand_offset.
-void AiSystem::apply_ground_clamp(AiEntity &e) {
+void AiSystem::apply_ground_clamp(AiEntity &e, World *world) {
     if (terrain == nullptr) return;
     GroundClearance clearance = ground_clearance;
     clearance.has_physics = e.has_physics;                    // [orig: entity+368 gate]
     clearance.use_dead = (e.health <= 0);                     // [orig: health<=0 dead path]
-    const int32_t ground = calc_average_ground_height(*terrain, e.pos, 0x50000, clearance);
+    constexpr int32_t kSampleRadius = 0x50000;
+    int32_t ground;
+    if (world != nullptr && collision != nullptr && collision->instance_count() != 0) {
+        // The witnessed 5-tap average with MODEL-AWARE rays: each tap is the
+        // ray from the tap column + 1.0u lift, 48u drop, clipped by terrain and
+        // by candidate models, so a brain standing on a building deck grounds
+        // on the deck. Weights/order/clamps are the same as the terrain-only
+        // path below (they are the same function in retail).
+        // [orig: Entity_CalcAverageGroundHeight @0x457230 — the four
+        //  Entity_RaycastGroundHeight(AndObject)(entity, dx, dy, 0x10000,
+        //  0x300000) taps + the doubled centre/max fold]
+        const auto tap = [&](int32_t dx, int32_t dy) {
+            return collision->raycast_ground(*world, e.handle, e.pos, dx, dy,
+                                             0x10000, 0x300000, nullptr);
+        };
+        int32_t max_h = 0;                       // [orig: maxHeight = 0]
+        const int32_t north = tap(0, kSampleRadius);
+        if (north > 0) max_h = north;            // [orig: if (north > 0) max = north]
+        const int32_t south = tap(0, -kSampleRadius);
+        if (south > max_h) max_h = south;
+        const int32_t east = tap(kSampleRadius, 0);
+        if (east > max_h) max_h = east;
+        const int32_t west = tap(-kSampleRadius, 0);
+        if (west > max_h) max_h = west;
+        const int32_t centre = tap(0, 0);
+        if (centre > max_h) max_h = centre;
+        ground = (north + south + east + west + 2 * (centre + 2 * max_h)) / 10;
+        if (ground < centre) ground = centre;    // [orig: clamp >= centre]
+        if (clearance.has_physics && terrain->has_water && terrain->water_y > ground)
+            ground = terrain->water_y;           // [orig: the occupant water clamp]
+        ground += clearance.use_dead ? clearance.dead_offset : clearance.alive_offset;
+    } else {
+        ground = calc_average_ground_height(*terrain, e.pos, kSampleRadius, clearance);
+    }
     if (ground == INT32_MIN) return;                          // no terrain coverage -> leave Z
     const int32_t z = ground + ground_stand_offset;           // [orig: brain[131] = ground + 0x50000]
     e.brain.f[AiBrain::kWorkPosZ] = z;                        // mover output field stays faithful

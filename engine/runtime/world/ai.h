@@ -867,7 +867,9 @@ public:
     // snap the entity's pos[2] to ground + ground_stand_offset. SET (not max) because our lean
     // waypoint mover (update_waypoint_movement) leaves kWorkPosZ stale, so a max would strand a
     // floating spawn. No-op when `terrain` is null or the column has no terrain coverage.
-    void apply_ground_clamp(AiEntity &e);
+    // `world` enables the MODEL-AWARE tap rays (a brain on a building deck
+    // grounds on the deck); null keeps the terrain-only average.
+    void apply_ground_clamp(AiEntity &e, World *world = nullptr);
 
     // Seat-follow phase for a LIVE mounted occupant. Infantry callers keep running
     // death, perception, combat, and animation around it and suppress only ordinary
