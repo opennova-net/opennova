@@ -29,7 +29,7 @@ environment or parameters -- never tracked defaults.
 param(
     # Fixture ids to capture; omitted = every fixture in the catalog.
     [string[]]$Ids = @(),
-    [string]$Catalog = "docs/render/render-fixtures-retail-v3.json",
+    [string]$Catalog = "docs/render/render-fixtures-retail-v4.json",
     # The frozen source commit the manifests bind. Defaults to HEAD, which is
     # only valid for evidence when the tree is clean and unrebuilt.
     [string]$SourceCommit = "",
