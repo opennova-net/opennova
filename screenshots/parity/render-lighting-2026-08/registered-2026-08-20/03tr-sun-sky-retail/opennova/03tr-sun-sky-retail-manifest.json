@@ -1,0 +1,232 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "03tr-sun-sky-retail-m0390-beauty",
+			"png_path": "03tr-sun-sky-retail-m0390-beauty.png",
+			"png_sha256": "0af0bd25a32fdae70d34207701c2e243f6e5b6d0e909395ae787e632b1856ef6",
+			"source_state_sha256": "42cf07c786f55b2b1b6eacdd1dad63405cd61af10d444485d1efaf3fe63157cf",
+			"state_path": "03tr-sun-sky-retail-m0390-beauty.state.json",
+			"state_sha256": "4b057e4c819634cc1de894ed92d14fda4ab25772448386b7d096b07bf3044ff3",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "03tr-sun-sky-retail-m0390-shadows_off",
+			"png_path": "03tr-sun-sky-retail-m0390-shadows_off.png",
+			"png_sha256": "9cbc95a524f999940a3473a9d7e6c3447363259d1349b95d29b58825c0171eaa",
+			"source_state_sha256": "94b99b41d132031eb1a8bffa35e6a6c948e5ec7b7c51d4e24b12c67aae6d6c2e",
+			"state_path": "03tr-sun-sky-retail-m0390-shadows_off.state.json",
+			"state_sha256": "da3225ea07dce6ecf900ba22072ac377a4186a8cb47a95f2c5d60ca7df2cdbee",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "03tr-sun-sky-retail-m0390-lighting_only",
+			"png_path": "03tr-sun-sky-retail-m0390-lighting_only.png",
+			"png_sha256": "ed5b47d1a398ed18e738d0d2563eb9f98c0fb774d7f371710051b6a087970f3c",
+			"source_state_sha256": "b39e956437520de97cd5679645c073ac52fb5a3af77b3856766514891652b9bf",
+			"state_path": "03tr-sun-sky-retail-m0390-lighting_only.state.json",
+			"state_sha256": "280b6e2fddccac91afcab79abf8ac1637550357e8a2a979f1e4c6f93b476424e",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "03tr-sun-sky-retail-m0390-unshaded",
+			"png_path": "03tr-sun-sky-retail-m0390-unshaded.png",
+			"png_sha256": "2b06975f809382d3f76efa3455aee5be83325c74ccba1861e01f6f2b700b8e56",
+			"source_state_sha256": "3553a7dd9e0cd7aa30ba9f9f6252e9da7fc1b83a5470c708d625e18aca776d95",
+			"state_path": "03tr-sun-sky-retail-m0390-unshaded.state.json",
+			"state_sha256": "b1859f202c06705840d39b128fa3695ee007d78cca732a4e4184cf944086dc7f",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "03tr-sun-sky-retail-m0390-directional_shadow_atlas",
+			"png_path": "03tr-sun-sky-retail-m0390-directional_shadow_atlas.png",
+			"png_sha256": "242922dea4e21405f9646b930b50cc6261818012c169c542ea83039306d30bba",
+			"source_state_sha256": "cdee981badcc15b478f7ddcb7fdfc9ac74d197fc50a3b36afc6c25abaf4b54e6",
+			"state_path": "03tr-sun-sky-retail-m0390-directional_shadow_atlas.state.json",
+			"state_sha256": "b97553d79233770fed3998ea508ad09be3599bc10ffee7fb8bbb42431cccca76",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				-0.0000000437113882867379,
+				0.0,
+				1.0
+			],
+			[
+				0.0,
+				1.0,
+				0.0
+			],
+			[
+				-1.0,
+				0.0,
+				-0.0000000437113882867379
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": 0.0,
+			"position": [
+				-606.053955078125,
+				-1070.25,
+				4.21702575683594
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 90.0
+		},
+		"camera_position_godot": [
+			-606.053955078125,
+			4.21702575683594,
+			1070.25
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				-606.159057617188,
+				-1070.06896972656,
+				3.3687744140625
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": 0.0,
+				"position": [
+					-606.159057617188,
+					-1070.06896972656,
+					3.3687744140625
+				],
+				"yaw_deg": 90.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": 0.0,
+			"position": [
+				-606.053955078125,
+				-1070.25,
+				4.21702575683594
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 90.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"sky_dome",
+			"sun_sky_lighting",
+			"horizon"
+		],
+		"id": "03tr-sun-sky-retail",
+		"minutes_of_day": [
+			390.0
+		],
+		"mission": "03TR.bms",
+		"retail_player_bms": {
+			"applied": [
+				-606.159057617188,
+				-1070.06896972656,
+				3.3687744140625
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "03TR.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "c22c4e431f56561c9a15f994e34464765ad8f19d1c3c11a583dda7ca95f41083",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "30f3e194b9f7aaea6053492f7797c9940f8039ed"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

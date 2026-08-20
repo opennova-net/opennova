@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 13743342.0,
+		"captured_at_ticks_usec": 13088317.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-close-retail-m0900-lighting_only-13743342-f291",
+		"id": "00tra-fire-barrel-close-retail-m0900-lighting_only-13088317-f291",
 		"label": "00tra-fire-barrel-close-retail-m0900-lighting_only",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-close-retail-m0900-lighting_only.png",
-		"png_sha256": "8b5529d071aa9c7343b8d9ce7f63028c249781f8618698ff82714c6d48c8ec5c",
+		"png_sha256": "1016136660f4c99447eb00338f64de1b61d50ae72b8e02a5c2c449a17c866843",
 		"process_frame": 291.0,
 		"width": 2000.0
 	},
@@ -172,8 +172,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 509.0,
-			"light_state_generation": 171.0,
+			"generation": 495.0,
+			"light_state_generation": 157.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 297.0,
+			"physics": 281.0,
 			"process": 291.0,
-			"ticks_usec": 13743451.0
+			"ticks_usec": 13088378.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -482,10 +482,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 2468.0,
+					"tick_us": 2688.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 2573.0,
+				"audio_us": 2729.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -537,11 +537,11 @@
 					],
 					"terrain_scene_counter": 281.0
 				},
-				"foliage_us": 684.0,
+				"foliage_us": 806.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 660.0,
+					"effects_us": 1.0,
+					"present_us": 687.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +565,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2002.0,
-					"tick_us": 2202.0,
+					"sim_us": 1725.0,
+					"tick_us": 1968.0,
 					"ticks": 1.0
 				},
-				"runtime_us": 2664.0,
-				"tick_us": 10366.0
+				"runtime_us": 2413.0,
+				"tick_us": 14324.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -843,17 +843,17 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 26108.0,
-				"frame_output_hash": 2856433230502269400.0,
-				"frame_output_pages": 3.0,
+				"frame_compose_us": 8472.0,
+				"frame_output_hash": 4391637335300634600.0,
+				"frame_output_pages": 1.0,
 				"frame_ready_hits": 60.0,
 				"frame_requests": 60.0,
 				"frame_selected_ready_pages": 60.0,
 				"frame_shadow_alpha_changed_bytes": 0.0,
-				"frame_shadow_base_nonzero_alpha_bytes": 196605.0,
+				"frame_shadow_base_nonzero_alpha_bytes": 65536.0,
 				"frame_shadow_rgb_changed_bytes": 0.0,
 				"frame_stale_hits": 0.0,
-				"frame_uploads": 3.0,
+				"frame_uploads": 1.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 60.0,
 				"resident_output_hash": -8416350020912902100.0,
@@ -901,12 +901,12 @@
 				"shadow_provider_frame_multiply_triangles": 0.0,
 				"shadow_provider_frame_opaque_triangles": 0.0,
 				"shadow_provider_frame_pages_with_draws": 26.0,
-				"shadow_provider_frame_plan_compiles": 3.0,
-				"shadow_provider_frame_plan_count": 63.0,
+				"shadow_provider_frame_plan_compiles": 1.0,
+				"shadow_provider_frame_plan_count": 61.0,
 				"shadow_provider_frame_plan_failures": 0.0,
 				"shadow_provider_frame_projection_draws": 668.0,
-				"shadow_provider_frame_raster_count": 3.0,
-				"shadow_provider_frame_receiver_cache_hits": 3.0,
+				"shadow_provider_frame_raster_count": 1.0,
+				"shadow_provider_frame_receiver_cache_hits": 1.0,
 				"shadow_provider_frame_receiver_cache_misses": 0.0,
 				"shadow_provider_frame_triangles": 0.0,
 				"shadow_provider_frame_unsupported_attribution": [],
@@ -1171,7 +1171,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "a32c8326b4f50a7f84fc846096dc02c912969faaf3b429d5d82df5cdbd7c23e3",
+		"source_state_sha256": "13a5e9b26f2e7f6a3d327fe1d90cbdca3ae6ed31e3b26b1f242ca0d863722f52",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"
