@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "00tra-tire-marks-retail-m0900-beauty",
 			"png_path": "00tra-tire-marks-retail-m0900-beauty.png",
-			"png_sha256": "688c126038216dfb15e4a1fe9f3e016b41f2c234f18e36b98ad4e693abba0cbe",
-			"source_state_sha256": "66f9beced27127add2674e46814033529b910319a936b64507c0149af49ee804",
+			"png_sha256": "eec94e76b72ac5834dc6db1b7b6365824f09f57b1b0f18ee31f6ae6652e86103",
+			"source_state_sha256": "f8f1321754d4b7dc9fe87881a504d2b669cd35d41f678bcbd74c5aea9f97c6d2",
 			"state_path": "00tra-tire-marks-retail-m0900-beauty.state.json",
-			"state_sha256": "6f5048172adc3a66e3ba578cc362d76d6a011cf8ef7502e748bf0bceb81ae06a",
+			"state_sha256": "635f9d1315bc026cc3f31c3d990aecc3aa51e06bd3e6bc90e0507ba89d329730",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "00tra-tire-marks-retail-m0900-shadows_off",
 			"png_path": "00tra-tire-marks-retail-m0900-shadows_off.png",
-			"png_sha256": "9fa5aa26e818e20d3a38fb402c2d169e4aab9d1c88441cd3523790ceeccecf2f",
-			"source_state_sha256": "4b2919cdc8f8f0d7c57cb4c9dd1163dea9e371af836e60d52e2d1300480b4f61",
+			"png_sha256": "4ddd2e9f7719f823da9b1275d2e727c1f8296843b74327f80e1afd5a27085849",
+			"source_state_sha256": "4f353bee1fe3ff17fc0d39f1948af642a3e15808e0dcac38fa52b27ed8efd0dd",
 			"state_path": "00tra-tire-marks-retail-m0900-shadows_off.state.json",
-			"state_sha256": "6eb1e813a8652018f1c9afb626030f54996dd4da7424c7696c5e150ba7336795",
+			"state_sha256": "c45ce0954808ff49448b1318108604f9ed9128cb0eea699b5c3709229297851b",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "00tra-tire-marks-retail-m0900-lighting_only",
 			"png_path": "00tra-tire-marks-retail-m0900-lighting_only.png",
-			"png_sha256": "3e8a759d28babfd0d8de1b5ee2a9f73a2fee23da6d6d9836092781d98965148b",
-			"source_state_sha256": "a0efcbec8d252749f92e374f3a6b795cbaad9002d6e0e46b4f6ff852a4f5d0b8",
+			"png_sha256": "beea4458926132ab350b4adc92b88eb91468f6d1ae590966cb8fb08a473ba7db",
+			"source_state_sha256": "2fdd4913985f66df72e48218a31732abb4203426604b1d522443d0039cc2ecab",
 			"state_path": "00tra-tire-marks-retail-m0900-lighting_only.state.json",
-			"state_sha256": "05d9259dec5f1db7c3b9eb7a53f2ea626455864a140b160acc0d717c03c9e168",
+			"state_sha256": "b0d9d4b57dc823a79acbf796daf224e73736059f3ee935543f5bbb1668fefb45",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "00tra-tire-marks-retail-m0900-unshaded",
 			"png_path": "00tra-tire-marks-retail-m0900-unshaded.png",
-			"png_sha256": "ad427b7f8938e9b64916934cd10e1f3e996d75239b6a26165196ab33adb85e4e",
-			"source_state_sha256": "1d4c23cacde414a4aa45800e5df3e0ef1826a96b635a5031bc1477cf4d93eb7e",
+			"png_sha256": "485934d4090d00f5e237fc2d625fede27a6eab5d82ba2496d3d5dda5f32e483c",
+			"source_state_sha256": "20b9cc939b1e94753ee67b16a69643a05e8ffa98103e95fd2710f49f912ce930",
 			"state_path": "00tra-tire-marks-retail-m0900-unshaded.state.json",
-			"state_sha256": "4934c66a438795df9bf49d042161827bc35ebf03ad10689c3792827904bddda1",
+			"state_sha256": "df1c49bb6b4b654227e3655f9e28173f7821a5a0afff70387dfdb3199b919f92",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "00tra-tire-marks-retail-m0900-directional_shadow_atlas",
 			"png_path": "00tra-tire-marks-retail-m0900-directional_shadow_atlas.png",
-			"png_sha256": "d6507cc56fcc39b2714018121fe70dd2869352094738b78021441757dc9e3c3c",
-			"source_state_sha256": "7d692679cfabd08226b2aba1575c272753241273d4ebe9d51f7df9748f9b1b3d",
+			"png_sha256": "74990a8692d8ae5b4898f767de303c857c054ca7179ff7bd6393710da0dc1b12",
+			"source_state_sha256": "cee5bb6bf68894d7d3f49db1297dc244d1e24e8ffcfedae79b32669188d0e797",
 			"state_path": "00tra-tire-marks-retail-m0900-directional_shadow_atlas.state.json",
-			"state_sha256": "8a8137a8ddee0a35ba9920baf7a5229dcb65f987ad707dad8204fa9eae9e3adf",
+			"state_sha256": "d265014464c8e09daa6f48d5a55ba7ef648a41dcd89e4e2cdd7b8f7d7fd9adce",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -222,10 +222,10 @@
 	},
 	"provenance": {
 		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
-		"gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
+		"gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb"
+		"source_commit": "3ada00e96b055075db4442ac7724ee08fee19325"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

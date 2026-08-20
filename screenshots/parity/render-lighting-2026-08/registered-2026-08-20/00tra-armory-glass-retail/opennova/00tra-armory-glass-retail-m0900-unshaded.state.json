@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 13348105.0,
+		"captured_at_ticks_usec": 14075472.0,
 		"height": 1200.0,
-		"id": "00tra-armory-glass-retail-m0900-unshaded-13348105-f301",
+		"id": "00tra-armory-glass-retail-m0900-unshaded-14075472-f289",
 		"label": "00tra-armory-glass-retail-m0900-unshaded",
 		"mime": "image/png",
 		"png_path": "00tra-armory-glass-retail-m0900-unshaded.png",
-		"png_sha256": "0ca25ef0d382ca899f87cef597210efb426158f06bbaa6dfa78a8ce98bf5883c",
-		"process_frame": 301.0,
+		"png_sha256": "bd3b0e02428972a47fa86d596b8c1dd6e6d5d1b1d0f495c6af1f63ea5b591159",
+		"process_frame": 289.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -172,8 +172,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 496.0,
-			"light_state_generation": 158.0,
+			"generation": 505.0,
+			"light_state_generation": 167.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 281.0,
-			"process": 301.0,
-			"ticks_usec": 13348195.0
+			"physics": 297.0,
+			"process": 289.0,
+			"ticks_usec": 14075584.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -292,9 +292,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							1.35351574420929,
-							1.33007824420929,
-							1.28320324420929,
+							1.34765636920929,
+							1.31250011920929,
+							1.27148449420929,
 							1.0
 						],
 						"handle": 622593.0,
@@ -309,8 +309,8 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							1.38867199420929,
-							1.35937511920929,
+							1.39453136920929,
+							1.36523449420929,
 							1.33007824420929,
 							1.0
 						],
@@ -482,10 +482,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 1006.0,
+					"tick_us": 851.0,
 					"voice_writes": 9.0
 				},
-				"audio_us": 1055.0,
+				"audio_us": 908.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -508,7 +508,7 @@
 					"detail_vertices": 34398.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 288.0,
+					"frame_calls": 276.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -535,13 +535,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 288.0
+					"terrain_scene_counter": 276.0
 				},
-				"foliage_us": 605.0,
+				"foliage_us": 663.0,
 				"runtime": {
 					"did_tick": true,
 					"effects_us": 2.0,
-					"present_us": 604.0,
+					"present_us": 636.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +565,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 853.0,
-					"tick_us": 1008.0,
+					"sim_us": 1729.0,
+					"tick_us": 1906.0,
 					"ticks": 1.0
 				},
-				"runtime_us": 1459.0,
-				"tick_us": 7197.0
+				"runtime_us": 2367.0,
+				"tick_us": 10155.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -666,7 +666,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371934513756200.0,
+					"instance_id": -9223371934463424500.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -676,7 +676,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371934463424500.0,
+					"instance_id": -9223371934413092900.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -835,7 +835,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 11714.0,
+				"cache_hits": 11360.0,
 				"cache_misses": 322.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -856,7 +856,7 @@
 				"frame_uploads": 0.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 59.0,
-				"resident_output_hash": 3636724901579473400.0,
+				"resident_output_hash": -4787628865952550900.0,
 				"resident_output_pages": 59.0,
 				"shadow_alpha_changed_bytes": 517802.0,
 				"shadow_base_nonzero_alpha_bytes": 7570548.0,
@@ -1171,7 +1171,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "594a91d21845e5299b2e091900bf0019424a416fc7875769318293c2afcff448",
+		"source_state_sha256": "5cee171af00bd30bf09393c637ffa8d59f894da956a342f0c14d64bf0085a5e0",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

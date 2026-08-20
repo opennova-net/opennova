@@ -290,11 +290,13 @@ with portable evidence records. The sixteenth pair,
 `00tra-tire-marks-retail`, was added 2026-08-20 from an OpenNova debug
 snapshot at the crossing ground tire tracks and measures the ordered `.til`
 overlay composition divergence (D-TERRAIN-7). All rows bind frozen source
-`3232a5c86b28a29160494286fe9282545e4b8bdb` (an ancestor of the PR #520
-branch; PR #520 was rebase-merged, so that commit is kept reachable by the tag
-`render-evidence/2026-08-20` — master's rebased twin `e11d2da04` is
-tree-identical, mirroring the 2026-08-16 precedent), fixture catalog v3 at
-SHA-256
+`3ada00e96b055075db4442ac7724ee08fee19325` (the D-TIL-4 flip/rotate
+composition-order fix, refreshed 2026-08-20 over the same catalog and retained
+retail bundles; the set's original frozen source
+`3232a5c86b28a29160494286fe9282545e4b8bdb` from the rebase-merged PR #520 is
+kept reachable by the tag `render-evidence/2026-08-20` — master's rebased twin
+`e11d2da04` is tree-identical, mirroring the 2026-08-16 precedent), fixture
+catalog v3 at SHA-256
 `8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
 this session's verbatim fresh-process captures, v2's applied poses kept
@@ -306,9 +308,9 @@ Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 15 comparison-v6
-manifests, full-frame MAE spans `5.102488`–`21.026561`, `world_center` MAE
-spans `2.493608`–`23.971735`, and `viewmodel_arms` MAE spans
-`6.086196`–`30.619130`. These are descriptive deltas rather than parity
+manifests, full-frame MAE spans `5.037678`–`21.001876`, `world_center` MAE
+spans `2.493596`–`23.876309`, and `viewmodel_arms` MAE spans
+`6.092216`–`29.890922`. These are descriptive deltas rather than parity
 thresholds; no metric from a superseded set is carried forward as if it
 described these images.
 
