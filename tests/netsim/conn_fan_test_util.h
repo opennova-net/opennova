@@ -19,9 +19,9 @@ namespace opennova::netsim::test {
 
 // The authority host's top-of-tick C2S drain over a connection table (a joiner, is_authority == 0,
 // never drains — the original gates on g_napi_np_ctx.is_authority).
-inline void drain_all(world::World &world, const std::vector<Connection> &conns, bool is_authority) {
+inline void drain_all(world::World &world, std::vector<Connection> &conns, bool is_authority) {
 	if (!is_authority) return;
-	for (const Connection &c : conns) drain_connection_c2s(world, c);
+	for (Connection &c : conns) drain_connection_c2s(world, c);
 }
 
 // Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every connection

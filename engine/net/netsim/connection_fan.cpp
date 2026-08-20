@@ -508,9 +508,24 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				          double(dzh) * double(dzh)));
 		const int32_t distance_tiles = int32_t(dist >> 16);
 
-		// Distance gate [orig: @0x50e925]: skip unless within 1124 tiles, a tracked-handle
-		// priority floor holds it (tracked handles unmodeled -> 0), or age force-admits.
-		if (distance_tiles > 1124 && age < 50) continue;
+		// The recipient's requested-interest floor: a row named by one of its 4
+		// tracked slots keeps that score as a priority floor and passes the
+		// distance gate regardless of range. The invalid-slot 0x12 despawn leg
+		// of the original's walk stays a D-NET-139 residual.
+		// [orig: the tracked-slot walk @0x50e5f4.. -> priorPriority]
+		int32_t prior_priority = 0;
+		for (int t = 0; t < 4; ++t) {
+			if (conn.tracked_handle[t] != 0xFFFF &&
+			    conn.tracked_handle[t] == e.wire_handle) {
+				prior_priority = conn.tracked_score[t];
+				break;
+			}
+		}
+
+		// Distance gate [orig: @0x50e925]: skip unless within 1124 tiles, the
+		// tracked-handle priority floor holds it, or age force-admits
+		// [orig: `dist <= 1124 || priorPriority || age >= 50` @0x50e93a].
+		if (distance_tiles > 1124 && prior_priority == 0 && age < 50) continue;
 
 		// ---- Score, full terms (D-NET-139 port 2026-08-06)
 		// [orig: pool-0 @0x50eb5f, pool-1 @0x50f008 — both expand to
@@ -617,6 +632,10 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		v += 3 * int64_t(speed_delta) + 2 * int64_t(heading_delta);
 
 		if ((e.state_flags & 0x01) != 0) v >>= 4; // [orig: @0x50eb83]
+		// The tracked-handle floor lands AFTER the bit0 damp, before the age
+		// key composition [orig: `if (priorPriority > v48) v48 = priorPriority`
+		// @0x50eb8c].
+		if (prior_priority > v) v = prior_priority;
 		if (v < 0) v = 0; // CPairList keys are unsigned; a behind-the-viewer negative floors
 		const bool own = conn.owned_entity.valid() &&
 		                 e.wire_handle == conn.owned_entity.packed &&
@@ -817,7 +836,7 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 // Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport. Takes the
 // whole Connection (not a bare transport) so it can enforce the per-connection owner gate and
 // null-checks the transport internally — symmetric with emit_connection_s2c.
-void drain_connection_c2s(world::World &world, const Connection &conn) {
+void drain_connection_c2s(world::World &world, Connection &conn) {
 	if (conn.transport == nullptr) return;
 	Datagram dg;
 	while (conn.transport->host_recv(dg)) {
@@ -867,6 +886,14 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 		intent.analog_z = static_cast<int8_t>(up.analog_z); // controller's axes [orig: @0x48b783]
 		intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
 		apply_player_intent(world, intent);
+
+		// Store the sender's 4 requested-interest pairs for the 0x0A priority
+		// build's tracked-handle floor [orig: the 0x0C read-apply stores at
+		// playerState+94346/+94356 @0x4c09c0 — owner-gated like the intent].
+		conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
+		                       up.priority_handle_2, up.priority_handle_3};
+		conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
+		                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
 	}
 }
 

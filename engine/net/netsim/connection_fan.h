@@ -35,7 +35,7 @@ namespace opennova::netsim {
 // with emit_connection_s2c). Only sub_op 0x0A (extended) this increment; 0x0B compact is deferred.
 // Only the host (authority) receives C2S — a joiner never drains one
 // [orig: dispatch_entity_packet_callback @0x4D6A80 gates on g_napi_np_ctx.is_authority].
-void drain_connection_c2s(world::World &world, const Connection &conn);
+void drain_connection_c2s(world::World &world, Connection &conn);
 
 // The per-frame 0x0A byte cap, header included [orig: g_entity_send_budget
 // @0xC8FC50, default 600, runtime-set by the BANDWIDTH server command clamped

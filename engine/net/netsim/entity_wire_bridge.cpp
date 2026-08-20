@@ -1,6 +1,9 @@
 #include "netsim/entity_wire_bridge.h"
 
+#include <algorithm>  // std::stable_sort (uplink pairlist)
 #include <cmath>      // std::lround
+
+#include <netsim/connection_fan.h> // view_distance_units (uplink pairlist gate)
 
 #include <npwire/game_type.h>     // kObjectiveBit (pinned below)
 #include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
@@ -795,6 +798,134 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	return true;
 }
 
+namespace {
+
+// The sender's own top-4 interest pairs for the C2S 0x0C tail: score every
+// OTHER live entity against the local player's view, sort descending, take 4.
+// A structural translation of the client's op-3 pairlist build; the host
+// stores the pairs and floors those rows' 0x0A priority with them.
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50df20, called from the
+//  0x0C write leg @0x4c1be9. Residuals: boundRadius (entity+0) unmodeled = 0
+//  like the 0x50e590 fan port; the player TARGET terms (playerEntity+0x28 /
+//  +0x16C override) ride the carrier below and the aim-target term stays 0
+//  (aim targets are not modeled joiner-side); pool-0's is_visible reads the
+//  target itemDef flag — 1 with no target, kept.]
+// The cdq/xor/sub abs idiom — abs(INT_MIN) stays negative, the witnessed
+// retail singularity kept by the fan port too [orig: the abs32 idiom @0x50e9e2].
+inline int32_t prio_iabs32(int32_t v) {
+	const int32_t s = v >> 31;
+	return (v ^ s) - s;
+}
+
+void fill_uplink_priority_pairs(const world::World &w, const world::Entity &self,
+                                const world::AiEntity &ae, PlayerExtendedUplink &up) {
+	struct Pair {
+		int64_t priority;
+		uint16_t handle;
+	};
+	std::vector<Pair> pairs;
+	const int32_t sx = ae.pos[0], sy = ae.pos[1], sz = ae.pos[2];
+	const int32_t view_yaw = ae.heading;
+	const int32_t view_pitch = ae.pitch;
+	// The 15*25 carrier term: retail's `ptr` compare — the entity the player
+	// rides/stands on scores +375 inside the bracket, which is why v26's ridden
+	// buggy led the list (D-NET-151 witness).
+	world::EntityHandle carrier;
+	if (self.mounted && self.mount_target.valid()) carrier = self.mount_target;
+	else if (self.ground_target.valid()) carrier = self.ground_target;
+
+	w.registry.for_each([&](const world::Entity &o) {
+		if (o.handle.pool() > 1) return;              // pools 0/1 only
+		if (o.handle == self.handle) return;          // skip self
+		if (!o.alive) return;
+		if ((o.flags & 0x01u) != 0) return;           // [orig: the bit0 gate — its
+		                                              // later >>4 damp is unreachable]
+		const int64_t dx = int64_t(world::to_fixed(o.position.x)) - sx;
+		const int64_t dy = int64_t(world::to_fixed(o.position.y)) - sy;
+		const int64_t dzh = (int64_t(world::to_fixed(o.position.z)) - sz) >> 1;
+		const int32_t dist_tiles = int32_t(static_cast<int64_t>(
+				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy) +
+		                  double(dzh) * double(dzh))) >> 16);
+		if (dist_tiles > 2048) return;                // [orig: the 2048 skip]
+		const int64_t dist_priority = dist_tiles < 1124 ? (1124 - dist_tiles) : 0;
+
+		// View-angle score — the same fpatan fold as the 0x0A build
+		// [orig: @0x50e00b.. mirrors @0x50e94a..; BAM deltas, yaw fold past 64].
+		const double planar =
+				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy));
+		const int32_t bearing_bam = static_cast<int32_t>(
+				std::llround(std::atan2(double(dy), double(dx)) * 683565275.5764316));
+		const int32_t elev_bam = static_cast<int32_t>(std::llround(
+				std::atan2(double((int64_t(world::to_fixed(o.position.z)) - sz)),
+		                   planar) * 683565275.5764316));
+		int32_t yaw_term = prio_iabs32(static_cast<int32_t>(
+				uint32_t(bearing_bam) - uint32_t(view_yaw))) >> 24;
+		if (yaw_term > 64) yaw_term += 64;
+		const int32_t pitch_term = prio_iabs32(static_cast<int32_t>(
+				uint32_t(elev_bam) - uint32_t(view_pitch))) >> 25;
+		const int64_t angle = 256 - pitch_term - yaw_term;
+
+		const bool enemy = o.team != 0 && o.team != self.team;
+		bool los = false;
+		if (angle > 128 && view_distance_units() > 0 &&
+		    dist_tiles < view_distance_units() && w.ai != nullptr) {
+			const int32_t a3[3] = {sx, sy, sz};
+			const int32_t b3[3] = {world::to_fixed(o.position.x),
+			                       world::to_fixed(o.position.y),
+			                       world::to_fixed(o.position.z)};
+			los = w.ai->line_of_sight_clear(const_cast<world::World &>(w), a3, b3,
+			                                self.handle, o.handle);
+		}
+		const bool is_carrier = carrier.valid() && o.handle == carrier;
+
+		int64_t priority;
+		if (o.handle.pool() == 0) {
+			// [orig: dist + 2*(angle + 25*(enemy + 15*carrier
+			//        + 2*(los + isVisible + 10*aimTarget) + flagBit8)) @0x50e0??;
+			// aimTarget unmodeled 0, isVisible = 1 (no target case)]
+			priority = dist_priority +
+			           2 * (angle + 25 * ((enemy ? 1 : 0) + 15 * (is_carrier ? 1 : 0) +
+			                              2 * (int64_t(los ? 1 : 0) + 1) +
+			                              ((o.flags >> 8) & 1)));
+		} else {
+			// [orig: dist + 2*(angle + 25*(enemy + 15*carrier
+			//        + 2*(los + 2*(aimTarget + occupied + 4*aimTarget))))]
+			const bool occupied = o.primary_occupant.valid();
+			priority = dist_priority +
+			           2 * (angle + 25 * ((enemy ? 1 : 0) + 15 * (is_carrier ? 1 : 0) +
+			                              2 * (int64_t(los ? 1 : 0) +
+			                                   2 * int64_t(occupied ? 1 : 0))));
+		}
+		if (view_distance_units() > 0 && dist_tiles < view_distance_units())
+			priority += 200; // [orig: the inside-view bonus]
+		if (priority < 0) priority = 0;
+		pairs.push_back({priority, o.handle.packed});
+	});
+
+	// Descending, take 4, clamp scores past u16 to 0xFFFF; pad -1/0
+	// [orig: CPairList_ShellSortByValue + the output clamp/pad tail @0x50e2b0..].
+	std::stable_sort(pairs.begin(), pairs.end(),
+	                 [](const Pair &a, const Pair &b) { return a.priority > b.priority; });
+	const uint16_t out_h[4] = {
+			pairs.size() > 0 ? pairs[0].handle : uint16_t(0xFFFF),
+			pairs.size() > 1 ? pairs[1].handle : uint16_t(0xFFFF),
+			pairs.size() > 2 ? pairs[2].handle : uint16_t(0xFFFF),
+			pairs.size() > 3 ? pairs[3].handle : uint16_t(0xFFFF)};
+	const auto clamp16 = [](int64_t v) {
+		return v > 0xFFFF ? uint16_t(0xFFFF) : uint16_t(v);
+	};
+	up.priority_handle_0 = out_h[0];
+	up.priority_handle_1 = out_h[1];
+	up.priority_handle_2 = out_h[2];
+	up.priority_handle_3 = out_h[3];
+	up.priority_score_0 = pairs.size() > 0 ? clamp16(pairs[0].priority) : 0;
+	up.priority_score_1 = pairs.size() > 1 ? clamp16(pairs[1].priority) : 0;
+	up.priority_score_2 = pairs.size() > 2 ? clamp16(pairs[2].priority) : 0;
+	up.priority_score_3 = pairs.size() > 3 ? clamp16(pairs[3].priority) : 0;
+}
+
+} // namespace
+
 PlayerExtendedUplink build_player_uplink(const world::World &world,
                                          const world::Entity &e,
                                          const world::AiEntity &ae) {
@@ -860,6 +991,9 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	// the spawn default (WPN_M4AUTO) until joiner-side weapon switching exports a live value.
 	// [orig: the client fills byte 24 from entity+0x2B0; case-4 store @0x4C20A3] (D-NET-143)
 	up.equipped_adm_index = e.equipped_adm_index;
+	// The top-4 interest pairs the host floors our 0x0A priorities with
+	// [orig: op3 @0x4c1be9 -> Server_BuildEntityPriorityListForPlayer @0x50df20].
+	fill_uplink_priority_pairs(world, e, ae, up);
 	return up;
 }
 

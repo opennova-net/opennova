@@ -104,8 +104,39 @@ bool run_field_mapping() {
 	if (!expect(up.state_flags_byte == 0x38u,
 	            "state flags = the RAW entity+0x24 low byte, unmasked on the write side"))
 		return false;
-	if (!expect(up.priority_handle_0 == 0 && up.priority_score_0 == 0,
-	            "anti-cheat counters 0 (host receive ignores them)")) return false;
+	// An EMPTY world scores no interest pairs: the builder pads -1/0
+	// [orig: the @0x50df20 output pad tail].
+	if (!expect(up.priority_handle_0 == 0xFFFF && up.priority_score_0 == 0,
+	            "interest pairs pad -1/0 with nothing to score")) return false;
+	return true;
+}
+
+// The top-4 interest pairs name the scored world: with one other live entity, it
+// leads the list; self is never listed. [orig: the C2S 0x0C tail pairs from
+// Server_BuildEntityPriorityListForPlayer @0x50df20 via the op3 write @0x4c1be9;
+// D-NET-151 witnessed the ridden buggy's handle scored first.]
+bool run_interest_pairs() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity self_seed{};
+	self_seed.kind = w::EntityKind::Organic;
+	const w::EntityHandle self_h = world.registry.spawn(0, self_seed);
+	w::Entity other_seed{};
+	other_seed.kind = w::EntityKind::Organic;
+	other_seed.position = {10.0f, 0.0f, 0.0f};
+	const w::EntityHandle other_h = world.registry.spawn(0, other_seed);
+	if (!expect(self_h.valid() && other_h.valid(), "pair-test entities spawned"))
+		return false;
+
+	w::Entity *self_e = world.registry.get(self_h);
+	w::AiEntity ae{};
+	const nw::PlayerExtendedUplink up = ns::build_player_uplink(world, *self_e, ae);
+	if (!expect(up.priority_handle_0 == other_h.packed,
+	            "the one other entity leads the interest pairs")) return false;
+	if (!expect(up.priority_score_0 > 0, "the leading pair carries its score"))
+		return false;
+	if (!expect(up.priority_handle_1 == 0xFFFF && up.priority_score_1 == 0,
+	            "remaining slots pad -1/0")) return false;
 	return true;
 }
 
@@ -490,6 +521,7 @@ bool run_equipped_adm_ingest_gate() {
 int main() {
 	bool ok = true;
 	ok = run_field_mapping() && ok;
+	ok = run_interest_pairs() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
 	ok = run_ground_target_carrier_roundtrip() && ok;
