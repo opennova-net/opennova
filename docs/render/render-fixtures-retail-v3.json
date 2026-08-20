@@ -1,6 +1,6 @@
 {
   "schema": "opennova.render-fixtures.v2",
-  "catalog_sha256": "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c",
+  "catalog_sha256": "8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef",
   "purpose": "Registered retail/OpenNova side-by-side poses. OpenNova renders the exact retail aspect-1.667 frustum at 2000x1200; comparison normalization performs one declared horizontal squeeze to the retail 1920x1200 backbuffer.",
   "comparison_contract": {
     "capture_mode": "hud_hidden",
@@ -587,6 +587,38 @@
         "hud",
         "viewmodel",
         "caster_context"
+      ]
+    },
+    {
+      "id": "00tra-tire-marks-retail",
+      "mission": "00TRa.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [
+          318.885681152344,
+          -375.672058105469,
+          27.8687744140625
+        ],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix"
+      },
+      "camera_bms": {
+        "position": [
+          319.07715099723487,
+          -375.5838766052519,
+          28.714560053267178
+        ],
+        "yaw_deg": 14.26025390625,
+        "pitch_deg": -1.7138671875,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [
+        900
+      ],
+      "coverage": [
+        "retail_side_by_side",
+        "til_tile_composition",
+        "ground_tire_marks"
       ]
     }
   ],

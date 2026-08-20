@@ -66,6 +66,9 @@ RESIDUALS = """\
   ground sampling, vehicle/material response, and live NPC or flag phase.
 - The M16 and bare-arm identity is matched, but viewmodel placement, lighting,
   material response, and animation phase remain different.
+- Ground tire marks and other ordered .til overlay contributions diverge in
+  placement and blend (the open D-TERRAIN-7 tile-composition producer gap,
+  measured by the tire-marks fixture).
 """
 
 
