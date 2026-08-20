@@ -39,6 +39,7 @@ func tick(world: GameWorld, delta: float) -> void:
 		return
 	_accum = 0.0
 	_tp_tick(world)
+	_tp_player_tick(world)
 	_shot_tick(world)
 	if _path.is_empty():
 		return
@@ -173,3 +174,32 @@ func _tp_tick(world: GameWorld) -> void:
 						"to": [mission.x, mission.y, mission.z], "err": err}}))
 				f.close()
 		return
+
+
+# One-shot LOCAL-PLAYER teleport (NW_TP_PLAYER_X/Y[/Z], mission coords, at
+# NW_TP_AT seconds). 05TRcoop starts its two AI sides ~857u apart, so an
+# unattended round never produces contact; dropping the firing client into the
+# enemy base is how the combat path gets exercised without a human.
+var _tpp_done := false
+
+func _tp_player_tick(world: GameWorld) -> void:
+	if _tpp_done or OS.get_environment("NW_TP_PLAYER_X").is_empty():
+		return
+	if _tp_elapsed < _tp_at:
+		return
+	var sim: Simulation = world.get_sim()
+	if sim == null:
+		return
+	var mission := Vector3(
+			OS.get_environment("NW_TP_PLAYER_X").to_float(),
+			OS.get_environment("NW_TP_PLAYER_Y").to_float(),
+			OS.get_environment("NW_TP_PLAYER_Z").to_float() if not OS.get_environment("NW_TP_PLAYER_Z").is_empty() else 40.0)
+	var err := sim.debug_teleport_local_player(mission, 0.0, 0.0)
+	_tpp_done = true
+	if not _path.is_empty():
+		var f := FileAccess.open(_path, FileAccess.READ_WRITE)
+		if f != null:
+			f.seek_end()
+			f.store_line(JSON.stringify({"tp_player": {
+					"to": [mission.x, mission.y, mission.z], "err": err}}))
+			f.close()
