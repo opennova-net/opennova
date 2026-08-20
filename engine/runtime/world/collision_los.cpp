@@ -51,7 +51,20 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
         const float wz = -static_cast<float>(ray.start[1]) / 65536.0f; // engine Y -> sampler z
         const float h = terrain::height_field_height_world_bilinear(*terrain, wx, wz);
         const int32_t ground = static_cast<int32_t>(h * 65536.0f);
-        if (ground > ray.end[2] && ground <= ray.start[2]) ray.end[2] = ground;
+        // The column height lands in the hit point UNCONDITIONALLY — including
+        // when it sits ABOVE the ray start (a body momentarily under the
+        // surface). The march's return value reports whether the ray was
+        // blocked; the hit point it writes is the terrain either way, and the
+        // caller passes ray_end and hitPoint as the SAME pointer, so the ground
+        // read is always the column height. Conditioning this on
+        // `ground <= start` (the previous reading) left a submerged body with
+        // its ground pinned a full drop-length beneath it every tick — it then
+        // fell forever instead of being lifted back onto the surface.
+        // [orig: Terrain_RaycastHeightmapLoRes @0x4245e6 — the vertical-ray
+        //  branch writes hitPoint[2] = Terrain_SampleHeightBilinear before any
+        //  comparison; the callers pass rayEnd as hitPoint
+        //  @0x413785/Terrain_RaycastHeightmapHiRes_0]
+        ray.end[2] = ground;
     }
     ray.refresh();
 
