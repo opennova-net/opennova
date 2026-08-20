@@ -39,6 +39,15 @@ func tick(world: GameWorld, delta: float) -> void:
 			"pos": [pos.x, pos.y, pos.z],
 			"yaw": float(card.get("yaw_deg", 0.0)),
 			"anim": int(card.get("anim_state", -1)),
+			# think state: why a soldier is (not) walking
+			"mm": int(card.get("infantry_move_mode", -1)),
+			"ch": int(card.get("wp_channel", -1)),
+			"node": int(card.get("wp_node", -1)),
+			"wpd": int(card.get("wp_distance", -1)),
+			"spd": int(card.get("out_speed", -1)),
+			"st": int(card.get("state", -1)),
+			"adm": String(card.get("adm_name", "")),
+			"inf": bool(card.get("infantry", false)),
 		})
 	if cards.is_empty():
 		return
