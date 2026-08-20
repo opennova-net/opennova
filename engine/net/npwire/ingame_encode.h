@@ -366,17 +366,18 @@ std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd);
 
 // The two water-crossing effect names retail fans through 0x34, both witnessed
 // in the Base Assault baseline capture (BODYWATER1 x24, SURFACE_WTR x15, all at
-// the water plane z=12/13 around the boat positions). Retail picks between them
-// on the crossing entity's 0x2000 flag — the airborne/swimming selector — so a
-// hull arriving through the air gets the body-impact effect and one already in
-// surface contact gets the wake. Which name binds to which branch is the ONE
-// piece not yet pinned by a witness: both globals are only ever read in the
-// decompilation, never assigned, and the names live in an executable table
-// rather than in game data.
-// [orig: the water block of Entity_ProcessWheeledVehiclePhysics —
-//  `if (Flags & 0x2000) send(dword_24E09B0) else send(dword_24E09B4)`]
-inline constexpr char kWaterCrossBodyEffect[] = "BODYWATER1";
-inline constexpr char kWaterCrossSurfaceEffect[] = "SURFACE_WTR";
+// the water plane z=12/13). Which name goes with which crossing is settled by
+// PROXIMITY in that same capture, not by inference: correlating every 0x34
+// against the absolute entity positions in the surrounding frames gives
+// BODYWATER1 a nearest-infantry median of 1.2u (nearest vehicle 9.1u) and
+// SURFACE_WTR a nearest-vehicle median of 3.4u (nearest infantry 163u). So a
+// BODY entering water fans BODYWATER1 and a HULL disturbing the surface fans
+// SURFACE_WTR - which is what the authored names say.
+// [orig: the fan is Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128);
+//  the vehicle-side caller is the water block of
+//  Entity_ProcessWheeledVehiclePhysics and its light/tracked twins]
+inline constexpr char kWaterCrossBodyEffect[] = "BODYWATER1";     // infantry
+inline constexpr char kWaterCrossSurfaceEffect[] = "SURFACE_WTR"; // vehicles
 
 
 } // namespace opennova
