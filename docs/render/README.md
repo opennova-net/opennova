@@ -147,338 +147,39 @@ contrast, and viewmodel pose/light differences remain visible. Those
 historical values are
 descriptive measurements, not parity thresholds.
 
-## Reproducible three-mission fixture capture
+## Capture procedures
 
-The exact-pose harness is the
-[`render_fixture_capture_probe.tscn`](../../godot/tests/render_fixture_capture_probe.tscn)
-scene driven by the versioned
-[`render-fixtures-v1.json`](render-fixtures-v1.json) catalog. It boots the
-production `MainGame` world, dismisses the start-mission splash, and then
-fail-closes until the single-player auto-spawn has produced a local player,
+The operator procedure for both tiers lives in
+[render-parity-runbook.md](render-parity-runbook.md): worktree preflight, the
+frozen-commit rule, the OpenNova probe and its environment contract, retail
+staging/registration (including re-registering retained bundles against a new
+commit), the comparison build, publication assembly, and failure triage. This
+page states what the evidence must prove; the runbook states how to produce it.
+
+The exact-pose harness both tiers drive is
+[`render_fixture_capture_probe.tscn`](../../godot/tests/render_fixture_capture_probe.tscn).
+It boots the production `MainGame` world, dismisses the start-mission splash,
+and fail-closes until single-player auto-spawn has produced a local player,
 gameplay camera, and active world input with no spawn/menu shell remaining.
 Only then does it wait the declared settle frames, realize the catalog camera
-and minute, freeze simulation and weather, and capture the diagnostic variants
-in their declared order.
+and minute, freeze simulation and weather, and capture the declared variants in
+order. Each selected fixture/minute emits five lossless PNGs and five
+`.state.json` sidecars sampled in the same completed draw callback as their
+PNG, plus one `<fixture-id>-manifest.json` per invocation.
 
-Run it **windowed** from the repository root. The verified entry point is the
-`.tscn` as the positional scene, with the canonical resolution on the command
-line. Do not pass the `.gd` file to `-s`, and do not add `--headless`:
-
-```powershell
-$env:GODOT_BIN = "C:\path\to\godot.windows.editor.x86_64.exe"
-$env:NOVA_RENDER_FIXTURE_ID = "00tra-fire-barrel"
-$env:NOVA_MISSION_RESOURCE_DIR = "C:\path\to\loose-missions"
-$env:NOVA_RUNTIME_RESOURCE_DIR = "C:\path\to\packed-runtime-root"
-$env:NOVA_EXPANSION = "jox01"
-$env:NOVA_RENDER_FIXTURE_OUTPUT = (Join-Path (Resolve-Path ".").Path ".scratch\golden\render\fixtures\00tra-fire-barrel")
-$env:NOVA_RENDER_FIXTURE_MINUTE = "1320"
-$env:NOVA_RENDER_CAPTURE_MODE = "world_only"
-$env:NOVA_EVIDENCE_SOURCE_COMMIT = (git rev-parse HEAD).Trim()
-$env:NOVA_GDEXTENSION_BINARY = (Resolve-Path "godot\bin\libopennova.windows.template_debug.x86_64.dll").Path
-
-& $env:GODOT_BIN --path godot --resolution 1600x900 res://tests/render_fixture_capture_probe.tscn
-```
-
-Only the path values are installation-specific. The invocation and environment
-contract are:
-
-| Variable | Requirement |
-|---|---|
-| `GODOT_BIN` | A Godot 4.6.1 editor binary capable of windowed rendering. This is the shell launcher; the probe does not read it. |
-| `NOVA_RENDER_FIXTURE_ID` | **Required.** One exact `id` from the catalog, for example `00tra-fire-barrel`. |
-| `NOVA_MISSION_RESOURCE_DIR` | **Required for reproducible evidence.** A valid loose-mission root containing the catalog mission as a loose `.bms`. The probe has a persisted-setting fallback for interactive convenience; evidence runs must set this explicitly. |
-| `NOVA_RUNTIME_RESOURCE_DIR` | **Required.** A valid packed runtime resource root. |
-| `NOVA_EXPANSION` | Optional; defaults to `jox01`. |
-| `NOVA_RENDER_FIXTURE_CATALOG` | Optional; defaults to `res://../docs/render/render-fixtures-v1.json`. An override remains subject to the same schema, resolution, mission-hash, and variant-order checks. |
-| `NOVA_RENDER_FIXTURE_OUTPUT` | Optional; defaults to `res://../.scratch/golden/render/fixtures/<fixture-id>`. An override must be a dedicated strict descendant of this repository's `.scratch` directory; the probe rejects `.scratch` itself, paths outside it, and any linked/reparse ancestor. |
-| `NOVA_RENDER_FIXTURE_MINUTE` | Optional strict integer selector. It must be one of the selected fixture's declared `minutes_of_day`; empty captures all declared minutes. Values such as `720.0` and undeclared minutes are rejected. |
-| `NOVA_RENDER_CAPTURE_MODE` | Optional verifier. If set, it must equal the selected fixture's declared `world_only`, `full_frame`, or `hud_hidden` mode; it cannot relabel a fixture. |
-| `NOVA_EVIDENCE_SOURCE_COMMIT` | **Required.** The lowercase full 40-character commit that produced the capture. Capture only after that commit is frozen; do not identify a dirty or subsequently rebuilt tree with its current `HEAD`. |
-| `NOVA_GDEXTENSION_BINARY` | **Required.** Absolute path to the exact GDExtension binary loaded by this Godot build. The manifest hashes it together with the Godot executable. |
-
-The catalog fixes the viewport at 1600×900, vertical FOV at 50.534 degrees,
-mission hashes, pose, settle counts, and the exact variant order: `beauty`,
-`shadows_off`, `lighting_only`, `unshaded`, and
-`directional_shadow_atlas`. The probe rejects a catalog/driver mismatch, a
-mission hash mismatch, a missing production gameplay camera, a viewport-size
-mismatch, a source/build provenance failure, a capture-mode mismatch, or any
-drift from the requested integer minute/fixed24 state.
-
-Fixture anchors record both serialized and runtime identity. The nested
-`entity.bms_record` distinguishes the BMS `write_order_index` from the
-`mission_kind` pool (`item`, `building`, `marker`, or `organic`) and its
-kind-local `kind_index`; `bms_id` remains the stable authored identity check.
-Do not interpret the write-order index as an item-pool index.
-
-Each selected fixture/minute emits five lossless PNGs and five `.state.json`
-sidecars; each fixture invocation also emits one
-`<fixture-id>-manifest.json`. Sidecars are sampled in the same completed draw
-callback as their PNG and carry the realized camera, environment, water/sky,
-active lights, shadows, pass counts, and renderer state.
-
-Raw capture bundles, retail tool transcripts, and full baseline sets remain
-under `.scratch` according to the
-[asset-gated evidence policy](../asset-gated-tests.md). Published captures and
-generated comparison sheets live under `screenshots/parity/` with their
-portable manifests and metric policy intact. Use
+Two catalogs drive it. [`render-fixtures-v1.json`](render-fixtures-v1.json) is
+the `world_only` diagnostic catalog at 1600x900 / vertical FOV 50.534, for
+within-run subsystem isolation via
 [`build_render_comparison.ps1`](../../scripts/render/build_render_comparison.ps1)
-with `-ComparisonMode subsystem-ab` for honest within-run comparisons such as
-`beauty` / `shadows_off` / `lighting_only`. Cross-engine comparisons use the
-registered workflow below, not the legacy `retail-parity` mode or free-form
-side-by-side script. The capture probe never writes directly to a tracked or
-external evidence root; those are publication targets only after the scratch
-bundle passes the registered validation workflow.
+`-ComparisonMode subsystem-ab`.
+[`render-fixtures-retail-v2.json`](render-fixtures-retail-v2.json) is the
+registered publication catalog at 2000x1200 / vertical FOV 53.4468. The
+diagnostic workflow is never a substitute for a registered HUD-hidden retail
+comparison, and the legacy `retail-parity` comparison mode is not sanctioned
+for cross-engine evidence.
 
-## Registered retail/OpenNova comparison capture
-
-The registered comparison catalog is
-[`render-fixtures-retail-v2.json`](render-fixtures-retail-v2.json), canonical
-SHA-256
-`607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8`.
-The final CP01/CP12 review poses are `cp01-water-oblique-retail`,
-`cp12-yard-road-retail`, and `cp12-yard-tanks-retail`. Use the catalog payload
-verbatim; an old screenshot, pose sidecar, or renamed fixture is not evidence
-for one of these rows.
-
-### 1. Freeze and capture OpenNova
-
-Capture from a clean, immutable commit and use that same full SHA at retail
-registration. The manifest also hashes the exact Godot executable and loaded
-GDExtension, so rebuilding either binary requires a new OpenNova capture.
-
-```powershell
-$sourceCommit = (git rev-parse HEAD).Trim()
-if (git status --porcelain) { throw "capture worktree is not source-frozen" }
-$env:NOVA_EVIDENCE_SOURCE_COMMIT = $sourceCommit
-$env:NOVA_GDEXTENSION_BINARY = (Resolve-Path "godot\bin\libopennova.windows.template_debug.x86_64.dll").Path
-$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v2.json"
-$env:NOVA_RENDER_FIXTURE_ID = "cp01-water-oblique-retail"
-$env:NOVA_RENDER_CAPTURE_MODE = "hud_hidden"
-$env:NOVA_RENDER_FIXTURE_OUTPUT = (Join-Path (Resolve-Path ".").Path ".scratch\golden\render\fixtures\cp01-water-oblique-retail")
-
-& $env:GODOT_BIN --path godot --resolution 2000x1200 res://tests/render_fixture_capture_probe.tscn
-```
-
-The probe must produce one raw 2000x1200 beauty artifact and a manifest whose
-catalog hash, mission hash, fixture payload, capture mode, camera, source
-commit, Godot hash, and GDExtension hash all survive the comparison preflight.
-For this catalog, preflight also requires the catalog comparison contract
-verbatim and a runtime witness sampled after pose settle and before fixture
-freeze. The witness must report `WPN_M16BURST`, 30 rounds loaded and 270 in
-reserve, character `0x0402`, bare `IndoArms.3di` arms with camo `[1,0,0]`,
-`gameplay_hud_visible=false` while the HUD `CanvasLayer` remains active and
-visible, active player-view effects and viewmodel, available and visible
-terrain, hipfire/no ADS, no big map, and the requested catalog player pose.
-Every emitted state sidecar must carry that same witness.
-
-### 2. Stage highest-quality retail and capture the exact process
-
-Before launching retail, stage the sole publishable
-`retail_reference_highest_retail_selectable_v2` profile and bind the active
-slot-0 profile. Staging never changes `hud_detail`, device identity, or
-keyboard/gameplay tip preferences. The sanitized manifest must be a portable
-sibling of the later registration; its derived restore token and caller-owned
-backup are local-only.
-
-```powershell
-uv run python scripts/render/stage_retail_presentation.py stage `
-  --game-cfg C:\GAMES\JOTAC\Game\JO\game.cfg `
-  --weapon-sav C:\GAMES\JOTAC\Game\JO\expansion\revx02\weapon.sav `
-  --backup C:\evidence-local\game.cfg.original `
-  --manifest C:\evidence\retail\retail-presentation-stage.json
-```
-
-The stage record must contain this exact effective map (there are no lower
-publication profiles):
-
-```text
-windowed=0                 video_res=1920x1200       gamma=0.8
-terrain_polydetail=3       terrain_texdetail=3       object_polydetail=3
-object_texdetail=3         display_16x9=1            water_quality=3
-shadow_quality=3           particle_density=2        antialias_mode=2
-texfilter_level=3          fbeffects_level=3         shader_usage_level=2
-texcompression_level=2     lock_framerate=0          force_vsync=0
-reduce_mouselag=1          NoBlood=0                 NoCasings=0
-NoSmoke=0                  no_anim=0
-```
-
-On the authoritative capture machine, token `antialias_mode=2` is a one-based
-ordinal into RevX02's runtime AA list, not a sample count. It must prove
-effective `D3DMULTISAMPLE_4_SAMPLES` at quality 0; retail's selectable list is
-exactly `[2,4]`, with 4x selected as its highest entry. The separate D3D9
-color/depth intersection must prove hardware-usable maskable samples `[2,4,8]`
-and a hardware maximum of 8x. Hardware-only 8x is not a retail-selectable
-setting and is therefore not admissible as the reference path. The stage
-manifest records original/effective typed maps, exact changed keys, preserved
-adapter/tip/HUD values, and the video-option catalog hash. The approved active
-`weapon.sav` SHA-256 is
-`f4907820a58505a6988f140a27638dae7dbaaea2cc446642f0bc44c868905623`.
-That profile decodes slot 0 as blue class/avatar `9/2/0/0x0402`, red
-`9/7/0/0x8207`, with `WPN_M16BURST` in the selected blue kit.
-
-Launch the freshly built external onHook MCP and keep all artifacts under one
-create-new evidence directory. The MCP interaction is deliberately explicit:
-
-The authoritative session must be launched operationally as
-`C:\GAMES\JOTAC\Game\JO\Jointops.exe /exp revx02 /w`. Registration does not
-mislabel command-line arguments as native runtime telemetry: the same-frame D3D
-witness proves effective windowed mode, while the selected RevX02 archives and
-profile are corroborated by engine-VFS resolution plus the exact-PID mission
-log. Preserve the owned runner's recorded launch argv with the local raw
-session, but do not publish it as a frame-correlated engine witness.
-
-1. Launch the exact argv above through the owned mission session; retain its
-   exact `instance_id` and PID.
-2. Save `onhook_instances()` structured content and require that the same
-   instance/PID reports proxy mode, `capture_bundle_supported=true`,
-   `render_fixture_supported=true`, a ready 1920x1200 backbuffer, and available
-   render state.
-3. If the deployment/control-point overlay is present, activate the window
-   owned by that exact PID and press SPACE once. Never send SPACE to a process
-   selected only by executable name or to whichever retail window happens to
-   be foreground. Re-read `onhook_instances()` and continue only with the
-   original instance/PID after the deployment shell is visibly gone and
-   gameplay is capture-ready.
-4. Call `onhook_apply_render_fixture` for that same `instance_id`, using the
-   catalog `retail_player_bms.applied`, yaw, pitch, `vertical_fov_degrees`,
-   the sole `minutes_of_day` value multiplied by 60 as
-   `time_of_day_seconds`, exact `mission_file` and catalog `mission_sha256`,
-   and `camera_mode: "first_person"`; save the exact result and require
-   `exact=true`. All of those fields are mandatory on every fixture call and
-   must be reapplied when fixtures run sequentially; a value inherited from a
-   prior fixture is not evidence. This is the shared requested teleport source
-   named by `comparison_contract.player_pose_source`; it is not a claim that retail's
-   later observed body position remains byte-for-byte equal after physics
-   settles.
-5. Call `onhook_capture_retail_reference({instance_id, path, fixture_id})`
-   immediately.
-   It arms at Present N and snapshots exactly frame N+1 at the exact RevX02
-   `world_labels` (`0x5CAB26`) or `pre_feed` (`0x5CAB34`) callsite, performs one
-   `EndScene`/`BeginScene` split around that snapshot, and then executes the
-   original retail UI call exactly once without modification. It saves nothing
-   unless the whole transaction succeeds; if neither cutpoint executes, capture
-   fails closed. Retain its create-new PNG,
-   `.state.json`, and same-process log.
-
-Capture `cp01-waterline-below-retail` in an isolated fresh retail process.
-Dismiss deployment for that exact PID, apply the underwater pose, and capture
-its bundle immediately before breath expiry; do not queue another fixture or
-reuse a surfaced/damaged process. Registration still decides validity from
-the correlated observed state and camera matrices, not from equality between
-the later player position and the requested teleport.
-
-The capture is pre-onHook-overlay, retains the viewmodel, terrain,
-post-processing, and all live effects, and has no gameplay HUD. Bundle v4 binds
-the image hash and frame/QPC to the exact 21 quality/effect engine runtime
-globals, adapter/device and backbuffer formats, the effective highest-retail-
-selectable MSAA mode plus the distinct hardware-usable domain, and the
-pre-HUD snapshot proof. The D3D frame identity equals the root snapshot
-cutpoint; the presentation proof requires armed N, target N+1, and
-`armed_qpc < frame_qpc <= target_qpc`, one scene split, and one unmodified UI
-call. `windowed` and
-`video_res` remain mandatory members of the 23-key staged profile; their
-effective values are proven by that same-frame D3D windowed/backbuffer witness,
-not mislabeled as engine runtime globals. Missing, extra, lower, unavailable,
-stale, post-HUD, repeated-snapshot, failed-scene-restoration, or modified-UI
-witnesses fail closed. Ordinary retail HUD and ImGui FPS remain visible throughout.
-Only bridge protocol 1.4 with onHook 0.5.0 can supply a registerable raw-v4
-bundle; raw v3, policy v1, and late `main_hud_fallback` evidence are rejected.
-
-### 3. Register the retail bundle
-
-Save the exact same-instance tool results, then run:
-
-```powershell
-uv run python scripts/render/register_retail_capture.py `
-  --catalog docs/render/render-fixtures-retail-v2.json `
-  --fixture-id cp01-water-oblique-retail `
-  --raw-state C:\evidence\retail\frame.state.json `
-  --raw-image C:\evidence\retail\frame.png `
-  --instance-status C:\evidence\retail\instances.json `
-  --fixture-result C:\evidence\retail\fixture-result.json `
-  --capture-result C:\evidence\retail\capture-result.json `
-  --onhook-log C:\evidence\retail\onhook.log `
-  --game-dir C:\GAMES\JOTAC\Game\JO --expansion revx02 `
-  --retail-executable C:\GAMES\JOTAC\Game\JO\Jointops.exe `
-  --onhook-mcp C:\path\to\fresh\onhook-mcp.exe `
-  --onhook-proxy C:\GAMES\JOTAC\Game\JO\binkw32.dll `
-  --onhook-forwarder C:\GAMES\JOTAC\Game\JO\binkw32_.dll `
-  --opennova-source-commit $sourceCommit `
-  --retail-stage-manifest C:\evidence\retail\retail-presentation-stage.json `
-  --confirm-retail-presentation-contract `
-  --output C:\evidence\retail\registered.json
-```
-
-Registration fail-closes on a catalog, video profile, effective D3D mode,
-presentation transaction, fixture, process, frame, camera, projection, mission,
-source, or build mismatch. The saved capture result must
-carry the exact v2 highest-retail-selectable profile ID and selected catalog
-fixture ID, then bind the selected colocated PNG and state paths, byte counts,
-exact process-start instance, frame serial, and QPC. That frame must follow the
-exact fixture-application frame by no more than 120 frames. The catalog camera
-is recovered from the inverse correlated retail view matrix, never from the
-legacy eye-offset lead. Registration resolves the logical BMS through the
-engine VFS, verifies its catalog hash and exact-instance launch log, and
-records hashes for the ordered retail archives/version marker, retail
-executable, external MCP, proxy, and forwarder. The executable, proxy, and
-forwarder must resolve to `Jointops.exe`, `binkw32.dll`, and `binkw32_.dll`
-inside the selected game directory; the explicitly selected MCP remains an
-external retained build. A caller-only fixture label or legacy uncorrelated
-sidecar cannot be registered by itself.
-
-Registration must run before restoration. It independently hashes the
-still-staged live `game.cfg` and active expansion `weapon.sav`, requires exact
-agreement with the sanitized stage record and catalog profile contracts, and
-embeds the stage and runtime witnesses. After successful registration, restore
-the exact original config bytes:
-
-```powershell
-uv run python scripts/render/stage_retail_presentation.py restore `
-  --game-cfg C:\GAMES\JOTAC\Game\JO\game.cfg `
-  --backup C:\evidence-local\game.cfg.original `
-  --manifest C:\evidence\retail\retail-presentation-stage.json
-```
-
-At contract definition time the authoritative original `game.cfg` SHA-256 is
-`556880e9ec85d60021f2ce17d584bde30702a6ae3ecfba6a1e6eb54402c8cad3`;
-applying the maximum profile produces
-`e7bd7d27d6dcb22c8b58e3daa6ef543e2489f0600ffee28ffcb9a53d79806ed3`.
-That authoritative original already has `antialias_mode=2`; staging changes
-only `object_texdetail` from 1 to 3 and preserves ordinary `hud_detail`.
-The new capture must record and verify its own hashes. Do not publish the
-backup, absolute-path restore token, or restore receipt.
-
-### 4. Build the registered comparison
-
-```powershell
-uv run python scripts/render/build_retail_side_by_side.py `
-  --catalog docs/render/render-fixtures-retail-v2.json `
-  --fixture-id cp01-water-oblique-retail `
-  --opennova-manifest .scratch\golden\render\fixtures\cp01-water-oblique-retail\cp01-water-oblique-retail-manifest.json `
-  --retail-bundle C:\evidence\retail\registered.json `
-  --output-dir C:\evidence\published\cp01-water-oblique-retail `
-  --opennova-caption "HUD hidden - bare arms - M16 Burst 30/270 - terrain" `
-  --retail-caption "Pre-HUD snapshot - bare arms - M16 Burst - terrain - frame-correlated" `
-  --roi world_center=240,180,1320,420 `
-  --roi viewmodel_arms=850,700,900,500
-```
-
-The builder accepts only a raw 2000x1200 OpenNova image and raw 1920x1200
-retail image. It fail-closes unless the catalog, OpenNova manifest and selected
-OpenNova state carry the same matched presentation contract and runtime
-witness, and unless retail registration carries the operator-observed contract
-bound to the selected image hash. It performs exactly one full-source
-HighQualityBicubic horizontal normalization from 2000x1200 to 1920x1200: no
-crop, translation, vertical scale, or second normalization. It writes
-create-new normalized, side-by-side, 50/50 overlay, absolute-difference, and
-manifest artifacts with hashes, dimensions, captions, tool version, transform
-metadata, and the matched-presentation provenance.
-
-Every full-frame cross-engine metric is labeled
-`qualitative_only_matched_hud_hidden_cross_engine`. The production catalog
-requires both `world_center=[240,180,1320,420]` and
-`viewmodel_arms=[850,700,900,500]`; ROI and mask metrics are labeled
-`descriptive_explicit_presentation_regions` and are not pixel-parity gates.
-The independent `world_only` diagnostic workflow above remains valid for
-same-run subsystem isolation, but it is not a substitute for a registered
-HUD-hidden retail comparison.
+Raw capture bundles, retail tool transcripts, and full baseline sets stay under
+`.scratch` per the
+[asset-gated evidence policy](../asset-gated-tests.md). The capture probe never
+writes directly to a tracked or external evidence root; publication happens
+only after the scratch bundle passes the registered validation workflow.
