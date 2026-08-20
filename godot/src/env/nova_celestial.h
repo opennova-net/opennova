@@ -9,6 +9,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/templates/vector.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
 #include <environment/celestial_frame.h>
@@ -58,6 +59,31 @@ public:
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
+	// The frozen-fixture glare settle (GameWorld's capture-refresh seam):
+	// the occlusion brightness needs ~4 frames to fill the 8-sample window
+	// and up to 16 more to step +-16 onto the dead-band target
+	// (retail: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md), so a single
+	// zero-delta advance leaves a fresh accumulator dark at any pose. Runs
+	// ONLY the witnessed per-frame occlusion leg (two jittered rays + tick)
+	// until the dead-band holds across a full window turnover (frame cap
+	// p_max_frames); the next advance_frame publishes the settled
+	// brightness. Returns the settled brightness.
+	int settle_glare_occlusion(int p_max_frames = 64);
+
+	// Read-only celestial diagnostics for the render-diagnostics snapshot:
+	// glare occlusion brightness/window, the sun-veil pair, and per-body
+	// opacity/visibility (the last advanced frame's values).
+	Dictionary get_diagnostics() const;
+
+	// The last advanced frame's sun-veil outputs (retail: // Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, see docs/env/env-tod-re.md): the fullscreen
+	// white veil alpha (0..1 after the > 2 draw gate — consumed by the
+	// PlayerViewEffects veil rect via the opennova_sun_veil_alpha shader
+	// global this node pushes) and the modulator-2 exposure stop-down input
+	// (0..40 — the world's veil leg forwards it to
+	// Weather.set_sun_veil_stopdown).
+	float get_sun_veil_alpha() const;
+	int get_sun_veil_stopdown() const;
+
 	void _ready() override;
 	void _process(double p_delta) override;
 
@@ -70,10 +96,15 @@ private:
 		Vector<Ref<ShaderMaterial>> materials;
 		// "sun" or "moon" — which TOD color tints this body.
 		String tint;
+		// The last advanced frame's submit opacity (diagnostics).
+		float last_opacity = 0.0f;
 	};
 
 	MissionEnvironment *_env_node();
 	Ref<EnvFile> _env_data();
+	// The active render camera (cached; re-resolved when it leaves the tree
+	// or loses currency) — the advance_frame/settle shared resolution.
+	Camera3D *_resolve_camera();
 	void _rebuild_if_needed();
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	Ref<ShaderMaterial> _make_celestial_material(bool p_additive,
@@ -87,6 +118,15 @@ private:
 			const Variant &p_value);
 	bool _glare_ray_clear(const Vector3 &p_from, const Vector3 &p_sun_dir,
 			float p_ray_length, const Vector3 &p_jitter);
+	// Terrain line-of-sight between two points (the water-glint visibility
+	// rays) — the same clear-when-miss form as _glare_ray_clear.
+	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
+	// One frame of the water-glint leg (retail: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md):
+	// tick the accumulator at this camera, place the mirrored glint body,
+	// return its submit alpha (0 hides it).
+	float _advance_water_glint(const opennova::env::EnvironmentState &p_state,
+			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
+			const Vector3 &p_forward, Body &p_body);
 
 	NodePath environment_path_;
 	Ref<TerrainData> terrain_data_;
@@ -101,6 +141,12 @@ private:
 	ObjectID cached_cam_id_;
 	Ref<Shader> celestial_shader_;
 	Ref<Shader> celestial_additive_shader_;
+	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
+	int sun_veil_glare_ = 0;
+	int sun_veil_stopdown_ = 0;
+	// The water-reflected sun glint accumulator
+	// (retail: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md).
+	opennova::env::WaterGlintState water_glint_;
 };
 
 } // namespace godot

@@ -99,6 +99,28 @@ public:
 	// back without advancing wind, lightning, rain, or the mission clock.
 	void resync_colors_now(EnvironmentState *env);
 
+	// The sun-veil exposure stop-down (0..40) — forwarded once per render
+	// frame to modulator-2's witnessed target writer
+	// (env::ModulatorChain::set_sun_veil_stopdown carries the cites).
+	void set_sun_veil_stopdown(int stopdown) {
+		core_.modulator_chain.set_sun_veil_stopdown(stopdown);
+	}
+
+	// The frozen-fixture exposure settle (capture/refresh seam only — live
+	// play reaches the same state through the normal per-tick chase): run
+	// ONLY the witnessed per-tick exposure legs — the iris retarget
+	// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538], the
+	// modulator-chain tick, and every color block's modulate stage
+	// [orig: Environment_UpdateWeatherTick block sequence
+	// @ 0x57ef97..0x57f03c] — to the chase's fixed point at the current pose,
+	// then write back. Retail re-targets every render pass, so a steady
+	// camera converges onto the iris target asymptotically; the iteration
+	// count covers the worst-case 12.20 chase distance. Wind, lightning,
+	// rain, scalar springs, cloud-scroll accumulators, and the mission clock
+	// are deliberately untouched: this settles exposure, it does not advance
+	// weather time.
+	void settle_exposure(EnvironmentState *env);
+
 	// The witnessed wire-unit packing (q16 = round(x*65536),
 	// cloud_scroll_rate_target = sky_speed << 10, fixed24 TOD). Returns false
 	// when no loaded environment backs the snapshot.
@@ -173,6 +195,10 @@ public:
 
 private:
 	void reset_for_environment(EnvironmentState *env, bool world_tick_driven);
+	// The per-tick iris exposure retarget shared by tick_weather and
+	// settle_exposure [orig: Environment_ApplyFogAndAmbient
+	// @ 0x57e512..0x57e538].
+	void feed_exposure_target(EnvironmentState *env);
 	void write_weather_state(EnvironmentState &env);
 
 	WeatherCore core_;

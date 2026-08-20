@@ -121,6 +121,81 @@ func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 			_world_driven_weather_state(fresh, fresh_env))
 
 
+func test_frozen_fixture_exposure_settle_publishes_a_non_identity_gain() -> void:
+	# The capture-refresh seam (the D-RLIT-2 fixture starvation): a frozen
+	# fixture never runs the weather tick, so the modulator chain holds its
+	# mission-reset identity snap and the published exposure gain stays flat.
+	# settle_exposure must chase the stamped iris target to its fixed point
+	# [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538] while
+	# leaving every time-owning weather leg (cloud scroll, wind, the mission
+	# clock) untouched.
+	var fixture := _world_driven_weather_fixture()
+	var env := fixture[0] as MissionEnvironment
+	var weather := fixture[1] as Weather
+	env.configure_mission_clock(0x0540, 60)
+	assert_eq(env.get_color_src_gain(), Vector3.ONE,
+			"the frozen fixture starts at the mission-reset identity gain")
+
+	var scroll_before: Vector2 = weather.get_cloud_uv_offset1(0.0, 0.0)
+	var sway_phase_before: float = weather.get_sway_phase()
+	var clock_before: int = env.get_mission_time_fixed24()
+	# Indoor-no-data samples pin the curve's 255 clamp — a target that can
+	# never alias the identity 64, whatever the fixture's TOD colors serve
+	# [orig: the pool_entry[12] == 0 skip @ 0x5c7652].
+	weather.iris_samples = PackedInt32Array([-2, -2, -2])
+	weather.settle_exposure()
+
+	var gain: Vector3 = env.get_color_src_gain()
+	assert_ne(gain, Vector3.ONE,
+			"the settled fixture publishes the chased iris gain, not identity")
+	assert_almost_eq(gain.x, gain.y, 1.5 / 64.0)
+	assert_almost_eq(gain.x, gain.z, 1.5 / 64.0)
+	assert_eq(weather.get_cloud_uv_offset1(0.0, 0.0), scroll_before,
+			"the settle may not advance the cloud-scroll accumulators")
+	assert_eq(weather.get_sway_phase(), sway_phase_before,
+			"the settle may not advance the wind oscillator")
+	assert_eq(env.get_mission_time_fixed24(), clock_before,
+			"the settle may not advance the mission clock")
+
+
+func test_sun_veil_stopdown_dims_and_releases_the_published_gain() -> void:
+	# Modulator-2's only witnessed target writer [orig:
+	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0]: stop-down 40
+	# chases modulator-2 to bytes 4 over 8 ticks (the whole published gain
+	# stops down through the chain), and release returns it to identity over
+	# 124 ticks.
+	# The control fixture runs the identical tick count with no stop-down:
+	# the modulator itself legitimately chases the iris target during the
+	# run, so "released" means "matches a fixture that never stopped down",
+	# not "matches the pre-run snapshot".
+	var control_fixture := _world_driven_weather_fixture()
+	var control_env := control_fixture[0] as MissionEnvironment
+	var control := control_fixture[1] as Weather
+	var fixture := _world_driven_weather_fixture()
+	var env := fixture[0] as MissionEnvironment
+	var weather := fixture[1] as Weather
+
+	# The block chase is exponential (delta = dist >> 3, rate-clamped), so
+	# landing takes ~35 ticks; retail rewrites the target every frame.
+	for _tick in range(64):
+		weather.set_sun_veil_stopdown(40)
+		weather.tick_fixed()
+		control.tick_fixed()
+	var stopped: Vector3 = env.get_color_src_gain()
+	assert_lt(stopped.x, control_env.get_color_src_gain().x * 0.2,
+			"a full stop-down collapses the published gain through modulator-2")
+
+	# Release is the slow 124-tick asymptotic recovery (retail rewrites the
+	# identity target every frame while not staring at the sun).
+	for _tick in range(700):
+		weather.set_sun_veil_stopdown(0)
+		weather.tick_fixed()
+		control.tick_fixed()
+	assert_almost_eq(env.get_color_src_gain().x,
+			control_env.get_color_src_gain().x, 2.0 / 64.0,
+			"the release chase restores the un-stopped gain")
+
+
 func test_mission_start_prewarm_advances_exactly_255_weather_ticks() -> void:
 	var fixture := _world_driven_weather_fixture()
 	var env := fixture[0] as MissionEnvironment

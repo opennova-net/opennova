@@ -197,6 +197,64 @@ void WeatherRuntime::set_iris_samples(const int32_t *samples, int count) {
 	iris_samples_.assign(samples, samples + std::max(count, 0));
 }
 
+void WeatherRuntime::feed_exposure_target(EnvironmentState *env) {
+	if (env == nullptr || env->config() == nullptr) {
+		return;
+	}
+	// The iris auto-exposure target (env #17): the marched in-world gain
+	// when the shell stamps samples, else the outdoor fallback — chased by
+	// the modulator over 62 ticks; retail re-targets every render pass,
+	// i.e. every tick
+	// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
+	//  compute_ambient_light_along_direction @ 0x5c7a00;
+	//  curve terrain_sector_compute_lighting @ 0x5c7550].
+	const Vec3 sun_dir = env->sun_direction();
+	core_.set_exposure_from_iris_samples(iris_samples_.data(),
+			static_cast<int>(iris_samples_.size()),
+			packed_to_rgb01(core_.sky_color_blocks.ceiling.pre_mod_color),
+			packed_to_rgb01(core_.sky_color_blocks.floor.pre_mod_color),
+			sun_dir.x, sun_dir.y, sun_dir.z,
+			env->config()->iris_percent, env->config()->iris_center);
+}
+
+void WeatherRuntime::settle_exposure(EnvironmentState *env) {
+	if (env == nullptr || !env->is_loaded()) {
+		return;
+	}
+	// A frozen fixture never runs tick_weather, so the modulator chain holds
+	// its mission-reset identity snap and every published color keeps the
+	// flat gain (the D-RLIT-2 fixture starvation). Iterate the witnessed
+	// per-tick exposure legs to their fixed point at this pose. The retarget
+	// recomputes the 62-tick step deltas from the shrinking distance every
+	// iteration — the live asymptotic chase — so the worst-case 12.20
+	// distance (255 render bytes) needs ~1000 iterations to quantize onto
+	// the target; 1024 covers it.
+	// A zero-tick pass first: claim the currents and run any pending
+	// resync snap exactly like a live tick would before the chase.
+	tick_weather(env, 0);
+	constexpr int kExposureSettleIterations = 1024;
+	for (int i = 0; i < kExposureSettleIterations; ++i) {
+		feed_exposure_target(env);
+		// Modulator-2, the modulator, then every color block against the
+		// fresh modulator — the witnessed same-tick order, minus the
+		// sequencer/scalar/cloud-scroll legs this seam freezes
+		// [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f03c].
+		core_.modulator_chain.tick(core_.rain.intensity);
+		const uint32_t modulator_packed = core_.modulator_chain.render_color();
+		core_.sun_block.tick(modulator_packed, core_.rain.intensity);
+		core_.sky_block.tick(modulator_packed, core_.rain.intensity);
+		core_.fill_block.tick(modulator_packed, core_.rain.intensity);
+		core_.fog_block.tick(modulator_packed, core_.rain.intensity);
+		core_.sky_color_blocks.tick_skyfog(modulator_packed,
+				core_.rain.intensity);
+		core_.sky_color_blocks.tick_statics(modulator_packed,
+				core_.rain.intensity);
+		core_.sky_color_blocks.tick_dome(modulator_packed,
+				core_.rain.intensity);
+	}
+	write_weather_state(*env);
+}
+
 void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 	if (env == nullptr || !env->is_loaded()) {
 		return;
@@ -243,20 +301,7 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 		// lightning_rgb is a global parser color, so it takes the same
 		// envscale engine view as the world-driven static blocks and water.
 		lightning_packed = pack_rgb(env->lightning_color_target());
-		// The iris auto-exposure target (env #17): the marched in-world gain
-		// when the shell stamps samples, else the outdoor fallback — chased by
-		// the modulator over 62 ticks; retail re-targets every render pass,
-		// i.e. every tick
-		// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
-		//  compute_ambient_light_along_direction @ 0x5c7a00;
-		//  curve terrain_sector_compute_lighting @ 0x5c7550].
-		const Vec3 sun_dir = env->sun_direction();
-		core_.set_exposure_from_iris_samples(iris_samples_.data(),
-				static_cast<int>(iris_samples_.size()),
-				packed_to_rgb01(core_.sky_color_blocks.ceiling.pre_mod_color),
-				packed_to_rgb01(core_.sky_color_blocks.floor.pre_mod_color),
-				sun_dir.x, sun_dir.y, sun_dir.z,
-				env->config()->iris_percent, env->config()->iris_center);
+		feed_exposure_target(env);
 	}
 	// The smoothers chase the TOD keyframe targets, never their own written-
 	// back output [orig: Environment_ComputeTimeOfDayColors @ 0x57de40
