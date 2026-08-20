@@ -2347,6 +2347,10 @@ add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
 # bluekills/greenkills source, the humans count, the SP auto-lose condition
 # [orig: Server_CheckWinConditions @0x51ad40], the round-end latch + host effect
 # [orig: Server_ProcessRoundEnd @0x5164f0], and the post-round respawn hold.
+add_executable(npruntime_death_broadcast_test npruntime/death_broadcast_test.cpp)
+target_link_libraries(npruntime_death_broadcast_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_death_broadcast COMMAND npruntime_death_broadcast_test)
+
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
 target_link_libraries(npruntime_round_end_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_round_end COMMAND npruntime_round_end_test)
