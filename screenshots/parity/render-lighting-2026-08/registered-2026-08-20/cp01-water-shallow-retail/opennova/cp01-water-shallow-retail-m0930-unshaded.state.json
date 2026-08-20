@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 14589241.0,
+		"captured_at_ticks_usec": 14648520.0,
 		"height": 1200.0,
-		"id": "cp01-water-shallow-retail-m0930-unshaded-14589241-f324",
+		"id": "cp01-water-shallow-retail-m0930-unshaded-14648520-f326",
 		"label": "cp01-water-shallow-retail-m0930-unshaded",
 		"mime": "image/png",
 		"png_path": "cp01-water-shallow-retail-m0930-unshaded.png",
-		"png_sha256": "0c8d8ebd64c1c7c560e7e351d6943d79505bfbaf1c7433c9456cbe9c20d01a33",
-		"process_frame": 324.0,
+		"png_sha256": "9be8d3c9d1ce2346da2a6d44579f6b35db99e7b872dd0385460f2bb5a22e63b6",
+		"process_frame": 326.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 346.0,
-			"process": 324.0,
-			"ticks_usec": 14589344.0
+			"physics": 350.0,
+			"process": 326.0,
+			"ticks_usec": 14648612.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -413,10 +413,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 141.0,
 					"physical_channels": 8.0,
-					"tick_us": 6495.0,
+					"tick_us": 5551.0,
 					"voice_writes": 16.0
 				},
-				"audio_us": 6539.0,
+				"audio_us": 5594.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -439,7 +439,7 @@
 					"detail_vertices": 20898.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 2.0,
-					"frame_calls": 311.0,
+					"frame_calls": 313.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -466,13 +466,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 311.0
+					"terrain_scene_counter": 313.0
 				},
-				"foliage_us": 471.0,
+				"foliage_us": 468.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 3.0,
-					"present_us": 2415.0,
+					"effects_us": 2.0,
+					"present_us": 2859.0,
 					"sim": {
 						"ai_count": 126.0,
 						"listen_server": true,
@@ -496,12 +496,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 3208.0,
-					"tick_us": 3585.0,
-					"ticks": 3.0
+					"sim_us": 2603.0,
+					"tick_us": 2862.0,
+					"ticks": 2.0
 				},
-				"runtime_us": 5626.0,
-				"tick_us": 18665.0
+				"runtime_us": 5464.0,
+				"tick_us": 17245.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -766,7 +766,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 10611.0,
+				"cache_hits": 10572.0,
 				"cache_misses": 380.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1102,7 +1102,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "917e732242e68a8ccff5c70068d39f667a6539bcbbaeef97bb1b93921818715f",
+		"source_state_sha256": "1cb052ce607013b19eb1177d7bf0e3f3b126f06a49256f5572bab8f04fef61e7",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

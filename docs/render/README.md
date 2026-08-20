@@ -11,7 +11,7 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 | [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0) |
 | [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 | [`render-occlusion-re.md`](render-occlusion-re.md) | **landed 2026-07-16** (outside the original three REN slices) | D-OCC | blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, the GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, and the sound-occlusion witness (which closed D-SND-7). Sound occlusion (2026-07-16, `CollisionWorld` + `engine/runtime/terrain_query`), the indoor frame gates (2026-07-16, `OcclusionFramePass`), and the section-mask/portal engine (init, mask build, traversal, occluder culling — 2026-07-17, `engine/runtime/world/src/occlusion.cpp`) are all ported; residuals ride the D-OCC rows |
-| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; max-quality publication refreshed 2026-08-20** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [15 current comparisons](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
+| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; max-quality publication refreshed 2026-08-20** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [16 current comparisons](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
 sky/water shader gaps grow [env/env-tod-re.md](../env/env-tod-re.md) — in
@@ -101,7 +101,7 @@ The review remains scene-by-scene:
 
 The current publication catalog is
 [`render-fixtures-retail-v3.json`](render-fixtures-retail-v3.json), SHA-256
-`ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c` — minted by
+`8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
 the 2026-08-20 verbatim retail session: v2's applied poses kept exactly, each
 fixture's `camera_bms` recalibrated from that session's registered inverse
@@ -110,9 +110,9 @@ view matrix. The final CP01/CP12 anchors are `cp01-water-oblique-retail`,
 context frames are not substitutes for these fixtures.
 
 The current 2026-08-20 max-quality publication contains
-[all 15 registered pairs and 75 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
+[all 16 registered pairs and 80 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
 captured from frozen source
-`eb6574e6f0b873ececc009591888053c4460fc7b`. The fixture index links every
+`3232a5c86b28a29160494286fe9282545e4b8bdb`. The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
 uses fixture catalog v3,
@@ -134,13 +134,15 @@ re-shootable — its `camera_bms` values bind its own capture session's physics
 (the [runbook](render-parity-runbook.md) section 3b carries the full
 constraint table).
 
-Across the 15 current comparison-v6 manifests, full-frame MAE spans
-`5.009684`–`21.022220`, `world_center` MAE spans
-`2.493603`–`23.978190`, and `viewmodel_arms` MAE spans
-`6.079321`–`29.923836`. These are descriptive deltas, not parity thresholds.
+Across the 16 current comparison-v6 manifests, full-frame MAE spans
+`5.102488`–`21.026561`, `world_center` MAE spans
+`2.493608`–`23.971735`, and `viewmodel_arms` MAE spans
+`6.086196`–`30.619130`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
 night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
-differences remain visible.
+differences remain visible. The `00tra-tire-marks-retail` fixture (added
+2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
+tire-mark divergence — the open D-TERRAIN-7 tile-composition producer gap.
 
 ## Capture procedures
 

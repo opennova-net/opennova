@@ -38,7 +38,7 @@ CURRENT_CATALOG_PATH = (
 )
 CURRENT_EVIDENCE_ROOT = PUBLISHED_EVIDENCE_ROOT
 CURRENT_CATALOG_SHA256 = (
-    "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c"
+    "8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef"
 )
 
 
@@ -64,8 +64,10 @@ if _PROBE_PNG is not None and _lfs_pointer_stub(_PROBE_PNG):
         "--include=screenshots/**`)",
         allow_module_level=True,
     )
-CURRENT_SOURCE_COMMIT = "eb6574e6f0b873ececc009591888053c4460fc7b"
-PUBLISHED_FIXTURE_IDS = frozenset({
+CURRENT_SOURCE_COMMIT = "3232a5c86b28a29160494286fe9282545e4b8bdb"
+# The archived v1 catalog predates the tire-marks fixture; its id set is
+# pinned separately from the current publication's.
+LEGACY_FIXTURE_IDS = frozenset({
     "00tra-armory-glass-retail",
     "00tra-courtyard-retail",
     "00tra-fire-barrel-close-retail",
@@ -82,6 +84,9 @@ PUBLISHED_FIXTURE_IDS = frozenset({
     "cp12-yard-road-retail",
     "cp12-yard-tanks-retail",
 })
+PUBLISHED_FIXTURE_IDS = LEGACY_FIXTURE_IDS | {
+    "00tra-tire-marks-retail",
+}
 PUBLISHED_VARIANTS = frozenset({
     "beauty",
     "directional_shadow_atlas",
@@ -1200,9 +1205,9 @@ def test_previous_registered_evidence_catalog_is_rejected() -> None:
             ),
         }
     assert {fixture["id"] for fixture in catalog["fixtures"]} \
-        == PUBLISHED_FIXTURE_IDS
+        == LEGACY_FIXTURE_IDS
 
-    fixture_id = sorted(PUBLISHED_FIXTURE_IDS)[0]
+    fixture_id = sorted(LEGACY_FIXTURE_IDS)[0]
     with pytest.raises(
         evidence_builder.EvidenceError,
         match="unsupported fixture catalog schema",
@@ -1231,9 +1236,9 @@ def test_current_max_quality_publication_has_the_complete_portable_inventory(
     published_files = [
         path for path in CURRENT_EVIDENCE_ROOT.rglob("*") if path.is_file()
     ]
-    assert len(published_files) == 286
-    assert sum(path.suffix == ".png" for path in published_files) == 150
-    assert sum(path.suffix == ".json" for path in published_files) == 135
+    assert len(published_files) == 305
+    assert sum(path.suffix == ".png" for path in published_files) == 160
+    assert sum(path.suffix == ".json" for path in published_files) == 144
     assert sum(path.suffix == ".md" for path in published_files) == 1
 
 

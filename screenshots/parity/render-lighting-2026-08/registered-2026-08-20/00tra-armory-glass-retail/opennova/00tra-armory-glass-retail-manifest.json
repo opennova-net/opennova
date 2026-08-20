@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "00tra-armory-glass-retail-m0900-beauty",
 			"png_path": "00tra-armory-glass-retail-m0900-beauty.png",
-			"png_sha256": "e24b90574515ab9a8d834b913085088ce3b6abc0d65739003ea40f72aac57e3f",
-			"source_state_sha256": "e0e43d94cfe4c0df453885ef230c1d5d7ad26495fdb232c47108f095534bff3f",
+			"png_sha256": "7f2ab9256e48238657e181323cb7e23fcbe6ae14981f10b0ee119b1b5df1edb4",
+			"source_state_sha256": "595c7b3f13cc14617fe91fef362ce6a4e726ee2f453e843b3e8cc428b9de3a2f",
 			"state_path": "00tra-armory-glass-retail-m0900-beauty.state.json",
-			"state_sha256": "d6e252b4ed4e5152e323c4ea2688d90c947c4c9d898e40eec527c21c4bb755fb",
+			"state_sha256": "a509d8e16a87d74d7fdff70b1292fc396fdf2796635767a98e60def2b6de41cb",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "00tra-armory-glass-retail-m0900-shadows_off",
 			"png_path": "00tra-armory-glass-retail-m0900-shadows_off.png",
-			"png_sha256": "3c47d7a2468435b2f03088dfd4a4a66257003078d02192af25143db849ce9e0b",
-			"source_state_sha256": "6794d00d7379de0739254404e835cf4ad709601b9f8bb79ac5f8dce30c566e95",
+			"png_sha256": "5c765f86a35f2c66d0adfd90e94498c2d29676eb2839fc08555b2c32ca810be9",
+			"source_state_sha256": "3bd77d477b1af6177fb661b92b40ec894f427404e5c238fa41c919c6456ebeda",
 			"state_path": "00tra-armory-glass-retail-m0900-shadows_off.state.json",
-			"state_sha256": "b799f982150856c053e4e4915935e9540876ae8b9404657450c1df94bd32440a",
+			"state_sha256": "2488c6ac5aee05ab633c96f5011580eabcb01e884b3750876dc112933a97754c",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "00tra-armory-glass-retail-m0900-lighting_only",
 			"png_path": "00tra-armory-glass-retail-m0900-lighting_only.png",
-			"png_sha256": "2a9a7ba9a39e28a5328423a8754de65daca7957568a724992a276ab5b40025e3",
-			"source_state_sha256": "8b6d4ceda1cace02d8e401874ba5fa8c1c742dacfd530fb47e3cfca6fb30640a",
+			"png_sha256": "9318f62c7808ff820be3baa37bde2cd77f322ca0cf5ec43f6223ea9fa1e78d25",
+			"source_state_sha256": "fcada65bc1f53b637be1bf66713dbcece74f6e8416c60a3c327f83156547be1d",
 			"state_path": "00tra-armory-glass-retail-m0900-lighting_only.state.json",
-			"state_sha256": "3aacc27786e92022110d7fd6297190ce61220042b2aa3ced9fef21d99f4ed763",
+			"state_sha256": "648a051972e68500b248bee478ac6b1d1401cb2c7336cdabb49960fbbdbaadd6",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "00tra-armory-glass-retail-m0900-unshaded",
 			"png_path": "00tra-armory-glass-retail-m0900-unshaded.png",
-			"png_sha256": "5e712e5b35904fc934971ef82ca61c8684e959c1e306470167efee5f594a3caf",
-			"source_state_sha256": "8dbe345f9c047851a78f0efb5d5a3e06ecd34ff3351884f02966de7e9e4966b9",
+			"png_sha256": "0ca25ef0d382ca899f87cef597210efb426158f06bbaa6dfa78a8ce98bf5883c",
+			"source_state_sha256": "594a91d21845e5299b2e091900bf0019424a416fc7875769318293c2afcff448",
 			"state_path": "00tra-armory-glass-retail-m0900-unshaded.state.json",
-			"state_sha256": "c2232405ac5a16e554b3ee14e682708b38876ad12daf100ebf531f2ac4142643",
+			"state_sha256": "6f93a6c18362e73023a233fe7437fac6767a8d0286a150d30450b661ccbd2a72",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "00tra-armory-glass-retail-m0900-directional_shadow_atlas",
 			"png_path": "00tra-armory-glass-retail-m0900-directional_shadow_atlas.png",
-			"png_sha256": "3b66af1037d6284405838791aa76c81200aa9f08e1a17d772cb89f8487640515",
-			"source_state_sha256": "3c2c61cad3d680b4a5a763e8840438c18eb13fe759eb42095960349858dc2b86",
+			"png_sha256": "889ccc4d8e4dfe06d41567f2cfc9b79c48e3f1915313b8aeb9ff1bd3efa98918",
+			"source_state_sha256": "ce38ba2d309ff9b2e7925c59dff2531616a11d6e256d531198e0a8ec30e471ba",
 			"state_path": "00tra-armory-glass-retail-m0900-directional_shadow_atlas.state.json",
-			"state_sha256": "01cfa71cc8c663906cee4e397eb6094b6193c9f11b77ae1e710230b2db743fe8",
+			"state_sha256": "995dc0af93739936364fd8f0386ba5f7403e24f47070f636794b01cd01c4f47e",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -180,7 +180,7 @@
 		"world_only": false
 	},
 	"catalog_schema": "opennova.render-fixtures.v2",
-	"catalog_sha256": "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c",
+	"catalog_sha256": "8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef",
 	"fixture": {
 		"camera_bms": {
 			"pitch_deg": -7.5,
@@ -226,7 +226,7 @@
 		"gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "eb6574e6f0b873ececc009591888053c4460fc7b"
+		"source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 13243773.0,
+		"captured_at_ticks_usec": 13326233.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-close-retail-m0900-unshaded-13243773-f284",
+		"id": "00tra-fire-barrel-close-retail-m0900-unshaded-13326233-f291",
 		"label": "00tra-fire-barrel-close-retail-m0900-unshaded",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-close-retail-m0900-unshaded.png",
-		"png_sha256": "7c93fdffbe5d675e34a2b39c0c6b70505d22707e692e9b84840262b26dd984c8",
-		"process_frame": 284.0,
+		"png_sha256": "ec55493eb0024ad7e144f0c127dd73174ad7fdc81b691390801de98b7de888c4",
+		"process_frame": 291.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 288.0,
-			"process": 284.0,
-			"ticks_usec": 13243871.0
+			"physics": 289.0,
+			"process": 291.0,
+			"ticks_usec": 13326313.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -309,9 +309,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							1.37695324420929,
-							1.37695324420929,
-							1.37695324420929,
+							0.984375,
+							0.984375,
+							0.984375,
 							1.0
 						],
 						"handle": 753667.0,
@@ -482,10 +482,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 2106.0,
+					"tick_us": 2185.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 2215.0,
+				"audio_us": 2230.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -508,7 +508,7 @@
 					"detail_vertices": 14904.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 271.0,
+					"frame_calls": 278.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -535,13 +535,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 271.0
+					"terrain_scene_counter": 278.0
 				},
-				"foliage_us": 426.0,
+				"foliage_us": 410.0,
 				"runtime": {
-					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 641.0,
+					"did_tick": false,
+					"effects_us": 0.0,
+					"present_us": 502.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +565,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 835.0,
-					"tick_us": 1016.0,
-					"ticks": 1.0
+					"sim_us": 0.0,
+					"tick_us": 0.0,
+					"ticks": 0.0
 				},
-				"runtime_us": 1478.0,
-				"tick_us": 9634.0
+				"runtime_us": 502.0,
+				"tick_us": 11454.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -835,7 +835,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 11222.0,
+				"cache_hits": 11407.0,
 				"cache_misses": 353.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1171,7 +1171,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "d31c0931ea010250b2f085b1ee1f1f7783daca49899f3c2b1ac3b03723b24443",
+		"source_state_sha256": "8c1883c751b342154ab35d8726c3153be2b6978d4d1faf145c7f2e97b75a0f9a",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

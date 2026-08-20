@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 10371733.0,
+		"captured_at_ticks_usec": 10435914.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-close-retail-m0900-beauty-10371733-f198",
+		"id": "00tra-fire-barrel-close-retail-m0900-beauty-10435914-f205",
 		"label": "00tra-fire-barrel-close-retail-m0900-beauty",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-close-retail-m0900-beauty.png",
-		"png_sha256": "46a9ff7a169ba6925cb4ecf5b6788cef773b128411ed065734a7b26a1b25a10c",
-		"process_frame": 198.0,
+		"png_sha256": "bf7aefba55835d1121fae6ec41501db1448cc8b1cb7cf2b1a19716a39c013af3",
+		"process_frame": 205.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 201.0,
-			"process": 198.0,
-			"ticks_usec": 10371846.0
+			"physics": 202.0,
+			"process": 205.0,
+			"ticks_usec": 10436006.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -309,9 +309,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							1.27734386920929,
-							1.27734386920929,
-							1.27734386920929,
+							1.19531261920929,
+							1.19531261920929,
+							1.19531261920929,
 							1.0
 						],
 						"handle": 753667.0,
@@ -482,10 +482,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 2106.0,
+					"tick_us": 2185.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 2215.0,
+				"audio_us": 2230.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -508,7 +508,7 @@
 					"detail_vertices": 14904.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 194.0,
+					"frame_calls": 201.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -535,13 +535,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 194.0
+					"terrain_scene_counter": 201.0
 				},
-				"foliage_us": 513.0,
+				"foliage_us": 596.0,
 				"runtime": {
-					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 641.0,
+					"did_tick": false,
+					"effects_us": 0.0,
+					"present_us": 502.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +565,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 835.0,
-					"tick_us": 1016.0,
-					"ticks": 1.0
+					"sim_us": 0.0,
+					"tick_us": 0.0,
+					"ticks": 0.0
 				},
-				"runtime_us": 1478.0,
-				"tick_us": 9634.0
+				"runtime_us": 502.0,
+				"tick_us": 11454.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -835,7 +835,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 9545.0,
+				"cache_hits": 9715.0,
 				"cache_misses": 233.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -843,17 +843,17 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 39896.0,
-				"frame_output_hash": 8223171363719223300.0,
-				"frame_output_pages": 4.0,
+				"frame_compose_us": 18474.0,
+				"frame_output_hash": 6801575985083386900.0,
+				"frame_output_pages": 2.0,
 				"frame_ready_hits": 60.0,
 				"frame_requests": 60.0,
 				"frame_selected_ready_pages": 60.0,
 				"frame_shadow_alpha_changed_bytes": 0.0,
-				"frame_shadow_base_nonzero_alpha_bytes": 261263.0,
+				"frame_shadow_base_nonzero_alpha_bytes": 131072.0,
 				"frame_shadow_rgb_changed_bytes": 0.0,
 				"frame_stale_hits": 0.0,
-				"frame_uploads": 4.0,
+				"frame_uploads": 2.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 60.0,
 				"resident_output_hash": -3896659411805177900.0,
@@ -901,13 +901,13 @@
 				"shadow_provider_frame_multiply_triangles": 0.0,
 				"shadow_provider_frame_opaque_triangles": 0.0,
 				"shadow_provider_frame_pages_with_draws": 26.0,
-				"shadow_provider_frame_plan_compiles": 4.0,
-				"shadow_provider_frame_plan_count": 64.0,
+				"shadow_provider_frame_plan_compiles": 2.0,
+				"shadow_provider_frame_plan_count": 62.0,
 				"shadow_provider_frame_plan_failures": 0.0,
 				"shadow_provider_frame_projection_draws": 668.0,
-				"shadow_provider_frame_raster_count": 4.0,
+				"shadow_provider_frame_raster_count": 2.0,
 				"shadow_provider_frame_receiver_cache_hits": 0.0,
-				"shadow_provider_frame_receiver_cache_misses": 4.0,
+				"shadow_provider_frame_receiver_cache_misses": 2.0,
 				"shadow_provider_frame_triangles": 0.0,
 				"shadow_provider_frame_unsupported_attribution": [],
 				"shadow_provider_frame_unsupported_attribution_truncated": 0.0,
@@ -1171,7 +1171,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "a82ae752ee2f6d096263f62f122b4ab85ca4e4b2b9211ab6869402385cd895eb",
+		"source_state_sha256": "3516d9d10a90a08cae487c910557d71d01a3d013d4c17558b2ce24e79a71b2a9",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"
