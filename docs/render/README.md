@@ -151,9 +151,12 @@ tire-mark composition; the D-TIL-4 flip/rotate composition-order fix in this
 revision dropped its full-frame MAE `16.354421` → `12.135816`, and the
 remaining delta rides the open D-TERRAIN-7 tile-composition items. The
 `00tra-armory-lght-retail` fixture (added 2026-08-20 from a debug snapshot)
-measures model-authored `LGHT` lamp delivery inside the armory - corona
-billboards, Target/spot cones, and static-batch owner scope ride the open
-D-RLIT-4 residual tail. The `03tr-sun-sky-retail` fixture (same session)
+measures model-authored `LGHT` lamp delivery inside the armory - the
+2026-08-20 slice landed vertex-rate point shading, static-source owner
+scope, and corona billboards, and refuted the Target/spot-cone premise
+(the spot spawner is caller-less dead code); interior groups, batch draw
+contexts, and the terrain/foliage legs ride the open D-RLIT-4 residual
+tail. The `03tr-sun-sky-retail` fixture (same session)
 measures low-sun sky-dome/sun/ambient response on the 03TR airfield; its
 deltas ride D-RLIT-2, D-RLIT-5, and the deferred env #16 first-pass TOD
 table.

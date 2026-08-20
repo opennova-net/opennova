@@ -58,6 +58,14 @@ varying vec3 v_world_normal;
 varying vec3 v_geom_normal;
 varying vec3 v_world_tangent;
 varying vec3 v_world_binormal;
+// EffectWorld point-light diffuse, evaluated at the VERTEX rate like retail's
+// D3D vertex-lighting pipeline (the enabled <=4 pool lights join the vertex
+// diffuse and Gouraud-interpolate across the triangle; a large low-poly face
+// whose vertices all sit outside a light's range stays dark — the witnessed
+// armory-wall falloff) [orig: update_light_slots @ 0x5abc50 /
+// Light_ApplyAsD3DLight @ 0x5abd50 — D3D LightEnable, fixed-function VERTEX
+// lights; Light_FillD3DPointLight @ 0x5aa450 fills a D3DLIGHT9 POINT].
+varying vec3 v_point_light_diffuse;
 
 // Full D3D COUNT2 affine transform. Coefficient rows preserve SET, shear,
 // scroll, scale, and center rotation. [orig: compute_uv_transform_matrix @ 0x5B1990]
@@ -76,10 +84,15 @@ vec3 obj_hemi(vec3 normal_ws) {
 
 // The EffectWorld point-light contribution to the same vertex-diffuse sum the
 // D3D lights joined: per selected light, color * ndotl / (1 + atten2 * d^2)
-// inside the range cutoff. Per-pixel here vs retail's per-vertex — the same
-// evaluation-rate divergence the hemi/directional port already carries.
-// [orig: enable <=4 @ update_light_slots 0x5abc50; params
-// @ Light_GetPointLightParams 0x5a9180 / Light_FillD3DPointLight 0x5aa450]
+// inside the range cutoff. Called from the VERTEX stage (vertex_*.gdshaderinc
+// fills v_point_light_diffuse) so the falloff Gouraud-interpolates exactly
+// like the fixed-function pipeline the pool lights ride — evaluating this
+// per-pixel painted a crisp circular pool retail never draws (the
+// 00tra-armory-lght-retail fixture). The hemi/directional terms stay
+// per-pixel: they are spatially smooth, so the rate is visually equivalent.
+// [orig: enable <=4 @ update_light_slots 0x5abc50 / Light_ApplyAsD3DLight
+// @ 0x5abd50; params @ Light_GetPointLightParams 0x5a9180 /
+// Light_FillD3DPointLight 0x5aa450]
 vec3 obj_point_light_one(vec3 world_pos, vec3 normal_ws, vec4 posr, vec4 col) {
 	vec3 to_light = posr.xyz - world_pos;
 	float dist = length(to_light);
@@ -119,7 +132,7 @@ vec3 obj_ff_lighting(vec3 base_rgb, vec3 normal_ws) {
 	vec3 to_light = normalize(-u_dir_light_dir);
 	float ndotl = max(dot(normal, to_light), 0.0);
 	return base_rgb * min(obj_hemi(normal) + u_dir_light_color * ndotl
-			+ obj_point_light_sum(v_world_pos, normal), vec3(1.0)) * 2.0;
+			+ v_point_light_diffuse, vec3(1.0)) * 2.0;
 }
 
 vec3 obj_self_lit(vec3 base_rgb) {

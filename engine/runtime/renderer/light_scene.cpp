@@ -3,6 +3,7 @@
 #include <renderer/material_eval.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 
@@ -445,6 +446,195 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 		out[d].count = select(handles.data(), count, draw.groups, options,
 				ambient_scale, flicker, d3d_light_path, out[d].lights);
 	}
+}
+
+size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
+		std::vector<LightCoronaQuad> &out) const {
+	out.clear();
+	// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40]. Constants decoded
+	// from the binary: 1/65536 @ 0x7c3310, 0.5 @ 0x7c3b94, 1/16 @ 0x7c486c,
+	// 0.1 @ 0x7c69f4, 0.66 @ 0x7d3e68, the 100-wu cull 0x640000 fixed
+	// @ 0x5ab143.
+	constexpr double kMaxDistanceFixed = 0x640000;   // 100 wu
+	constexpr float kColorScale = 0.0625f;           // 1/16
+	constexpr float kStepFactor = 0.1f;
+	constexpr float kSegmentShrink = 0.66f;
+	constexpr int kSegments = 3;
+	// The witnessed device fog policy (the object/terrain shaders' shared
+	// implementation): exp(-d * ln64/end) for type 0, linear (end - d) /
+	// (end - start) with start = passed (type 1), end/2 (type 2), end/4
+	// (type 3) [orig: Render_SetFogState @ 0x58a950;
+	// CD3DDevice_SetFogParameters @ 0x677960].
+	const auto fog_visibility = [&inputs](float dist) -> float {
+		if (!inputs.fog_enabled) {
+			return 1.0f;
+		}
+		const float safe_end = std::max(inputs.fog_end, 1.0f);
+		if (inputs.fog_type == 0) {
+			constexpr float kLn64 = 4.1588830833596715f;
+			return std::clamp(
+					std::exp(-std::max(dist, 0.0f) * (kLn64 / safe_end)),
+					0.0f, 1.0f);
+		}
+		float start = inputs.fog_start;
+		if (inputs.fog_type == 2) {
+			start = safe_end * 0.5f;
+		} else if (inputs.fog_type == 3) {
+			start = safe_end * 0.25f;
+		}
+		return std::clamp((safe_end - dist) / std::max(safe_end - start, 1.0f),
+				0.0f, 1.0f);
+	};
+	const std::array<float, 3> camera_world = {
+		static_cast<float>(inputs.camera_fixed[0]) / 65536.0f,
+		static_cast<float>(inputs.camera_fixed[1]) / 65536.0f,
+		static_cast<float>(inputs.camera_fixed[2]) / 65536.0f,
+	};
+	for (const Slot &slot : slots_) {
+		if (!slot.live || slot.hidden || slot.params.disable_corona) {
+			continue; // [orig: flag bits 2 / 0x200 skipped @ 0x5ab027]
+		}
+		// The owned-light visible-section gate: an owned corona draws only
+		// when its owner building's section bit is set this frame; an owner
+		// absent from the table passes unconditionally (retail: a
+		// non-pool-2 owner index falls outside g_BuildingSectionVisMask and
+		// the test returns TRUE) [orig: the sectorFilter gate @ 0x5ab027 ->
+		// Terrain_IsBuildingSectionBitSet @ 0x5c6960; both live callers
+		// pass the filter enabled @ 0x5c96ab / 0x5c85fb].
+		if (slot.params.owner_entity != 0) {
+			bool passes = true;
+			for (size_t i = 0; i < inputs.owner_mask_count; ++i) {
+				const LightCoronaOwnerMask &row = inputs.owner_masks[i];
+				if (row.owner_entity == slot.params.owner_entity) {
+					const uint32_t section = static_cast<uint32_t>(
+							slot.params.owner_section) & 31u;
+					passes = (row.section_mask & (1u << section)) != 0;
+					break;
+				}
+			}
+			if (!passes) {
+				continue;
+			}
+		}
+		std::array<int32_t, 3> pos_fixed = slot.params.position_fixed;
+		// The impact-flash re-center (retail render flag 0x100): the light
+		// spawned radius/2 above the impact; its corona drops back down
+		// [orig: @ 0x5ab037..0x5ab05c].
+		if (slot.params.corona_lower_half_radius) {
+			pos_fixed[2] = clamp_i32(static_cast<int64_t>(pos_fixed[2]) -
+					(static_cast<int64_t>(slot.params.radius_fixed) >> 1));
+		}
+		// The per-frame sub-centimeter jitter: +-512 fixed on x (frames
+		// 0/1) or y (frames 2/3) [orig: the frame & 3 switch @ 0x5ab06e].
+		switch (inputs.frame_index & 3u) {
+			case 0: pos_fixed[0] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[0]) + 512); break;
+			case 1: pos_fixed[0] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[0]) - 512); break;
+			case 2: pos_fixed[1] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[1]) + 512); break;
+			default: pos_fixed[1] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[1]) - 512); break;
+		}
+		// Camera distance cull at 100 wu, in fixed units like retail's
+		// float-of-fixed sqrt [orig: @ 0x5ab0b7..0x5ab143].
+		double dist_sq = 0.0;
+		for (int axis = 0; axis < 3; ++axis) {
+			const double delta = static_cast<double>(pos_fixed[axis]) -
+					static_cast<double>(inputs.camera_fixed[axis]);
+			dist_sq += delta * delta;
+		}
+		if (std::sqrt(dist_sq) > kMaxDistanceFixed) {
+			continue;
+		}
+		const std::array<float, 3> light_world = {
+			static_cast<float>(pos_fixed[0]) / 65536.0f,
+			static_cast<float>(pos_fixed[1]) / 65536.0f,
+			static_cast<float>(pos_fixed[2]) / 65536.0f,
+		};
+		const float radius_world =
+				static_cast<float>(slot.params.radius_fixed) / 65536.0f;
+		const float base_half = radius_world * 0.5f;
+		if (base_half <= 0.0f) {
+			continue;
+		}
+		// Color: record rgb (bytes /256 at spawn) x live blend x ambient
+		// scale x 1/16, then the RgbGen multiply — the same gen evaluation
+		// the point-light select runs [orig: @ 0x5ab149..0x5ab1b8].
+		std::array<float, 3> rgb = {
+			static_cast<float>(slot.params.rgb[0]) / 256.0f *
+					slot.blend * inputs.ambient_scale[0] * kColorScale,
+			static_cast<float>(slot.params.rgb[1]) / 256.0f *
+					slot.blend * inputs.ambient_scale[1] * kColorScale,
+			static_cast<float>(slot.params.rgb[2]) / 256.0f *
+					slot.blend * inputs.ambient_scale[2] * kColorScale,
+		};
+		if (slot.params.has_gen && slot.params.gen.style != 0) {
+			const int32_t ctrl = light_flicker_value(
+					slot.params.position_fixed, inputs.flicker);
+			const LightRuntime gen = eval_light_runtime(slot.params.gen.style,
+					slot.params.gen.phase, slot.params.gen.rate,
+					slot.params.gen.color_start, slot.params.gen.color_end,
+					inputs.flicker.time_ms, ctrl);
+			rgb[0] *= gen.r * gen.intensity;
+			rgb[1] *= gen.g * gen.intensity;
+			rgb[2] *= gen.b * gen.intensity;
+		}
+		// The toward-camera march: step = 0.1 x radius along
+		// normalize(cam - light) [orig: @ 0x5ab28b..0x5ab2c4].
+		std::array<float, 3> to_camera = {
+			camera_world[0] - light_world[0],
+			camera_world[1] - light_world[1],
+			camera_world[2] - light_world[2],
+		};
+		const float to_camera_len = std::sqrt(to_camera[0] * to_camera[0] +
+				to_camera[1] * to_camera[1] + to_camera[2] * to_camera[2]);
+		if (to_camera_len > 0.0f) {
+			const float step = radius_world * kStepFactor / to_camera_len;
+			to_camera[0] *= step;
+			to_camera[1] *= step;
+			to_camera[2] *= step;
+		} else {
+			to_camera = {0.0f, 0.0f, 0.0f};
+		}
+		float half = base_half;
+		std::array<float, 3> center = light_world;
+		for (int segment = 0; segment < kSegments; ++segment) {
+			center[0] += to_camera[0];
+			center[1] += to_camera[1];
+			center[2] += to_camera[2];
+			// Per-segment fade: camera-plane depth over the BASE half-size,
+			// clamped 0..1; <= 0 skips the quad [orig: the fdivr 1/half
+			// @ 0x5ab2cf and the plane compare @ 0x5ab2f8..0x5ab33c].
+			const float depth =
+					inputs.depth_plane_normal[0] * center[0] +
+					inputs.depth_plane_normal[1] * center[1] +
+					inputs.depth_plane_normal[2] * center[2] +
+					inputs.depth_plane_w;
+			const float fade = std::clamp(depth / base_half, 0.0f, 1.0f);
+			if (fade > 0.0f) {
+				// The fog-to-black fold: the corona pass runs the primary
+				// device fog with FOGCOLOR forced black, so additive quads
+				// fade OUT with distance [orig: CD3DDevice_SetFogAndBlendMode
+				// (dev, 2) @ 0x5aafb6 -> case 2 @ 0x677740]. D3D fogs the
+				// vertices; the segment center is the same distance to
+				// within a half-size.
+				const float seg_dx = center[0] - camera_world[0];
+				const float seg_dy = center[1] - camera_world[1];
+				const float seg_dz = center[2] - camera_world[2];
+				const float fog = fog_visibility(std::sqrt(
+						seg_dx * seg_dx + seg_dy * seg_dy + seg_dz * seg_dz));
+				const float scale = fade * fog;
+				LightCoronaQuad quad;
+				quad.center = center;
+				quad.half_size = half;
+				quad.rgb = {rgb[0] * scale, rgb[1] * scale, rgb[2] * scale};
+				out.push_back(quad);
+			}
+			half *= kSegmentShrink; // [orig: x0.66 @ 0x5ab71f]
+		}
+	}
+	return out.size();
 }
 
 LightSceneReport LightScene::inspect() const {

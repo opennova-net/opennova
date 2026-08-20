@@ -466,6 +466,11 @@ public:
 			const Vector4 *p_color);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
+	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
+	// sections visible). Read by the corona owner-section gate.
+	int64_t get_section_visibility_mask() const {
+		return section_visibility_mask_;
+	}
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
 	Array get_surface_materials() const;
 	Dictionary get_material_defs() const;
