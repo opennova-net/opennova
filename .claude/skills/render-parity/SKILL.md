@@ -19,19 +19,23 @@ commit, and catalog. Then answer three questions before touching anything:
 - **Is the published frozen source still on `master`?** `git merge-base
   --is-ancestor <sha> master`. A squash-merged PR SHA is the usual reason a
   refresh is needed at all.
-- **Does retail need re-shooting?** Almost never. Retail pixels do not change
-  when our source changes, and the retained raw bundles re-register against a
-  new commit with no game launch. Only a change to the catalog poses, the video
-  profile contract, the capture-mode contract, onHook, or the retail install
-  forces a fresh capture — and that needs the onHook MCP server registered and
-  the client restarted first, so it cannot start mid-session.
-- **Where are the retained bundles?** Search prior worktree `.scratch` trees for
-  `registered.json` siblings. A usable bundle has all seven artifacts per
-  fixture (runbook section 0). Verify the four provenance binaries still hash to
-  the runbook's pinned values before planning around them.
+- **Does retail need re-shooting?** Retail pixels do not change when our source
+  changes, so retained raw bundles can be re-registered against a new commit
+  with no game launch — but only **in place**. `capture-result.json` records the
+  absolute paths onHook wrote, and registration rejects any copy (runbook
+  section 0). If the only bundles live in a disposable worktree's `.scratch`,
+  reuse means writing into that worktree; if that is not acceptable, retail must
+  be re-shot. A fresh capture needs the onHook MCP registered at user scope and
+  the client restarted first, so it cannot start mid-session — say so early
+  rather than discovering it at the registration step.
+- **Where are the retained bundles?** Search for `capture-result.json` siblings
+  and read the absolute path inside one. A usable bundle has all seven artifacts
+  per fixture. Verify the four provenance binaries still hash to the runbook's
+  pinned values before planning around them.
 
-Report the answers before starting; a refresh that silently re-shoots retail
-costs hours.
+Report the answers before starting. Whichever path is chosen, capture fresh
+bundles into a durable evidence root outside every worktree so the next refresh
+has a real choice.
 
 ## 2. Land the slice's changes FIRST, then freeze
 
