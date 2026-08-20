@@ -199,7 +199,14 @@ and visible, live player-view effects and viewmodel, terrain available and
 visible, hipfire with no ADS, no big map, and the catalog pose. Armory,
 customization or viewmodel drift on the branch shows up here first.
 
-Then loop the remaining fourteen fixture ids from the catalog.
+Then sweep the rest with the tracked loop (same environment contract,
+success judged by the 11-file output, PASS/FAIL summary):
+
+```powershell
+.\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $sourceCommit
+```
+
+`-Ids <id>[,<id>...]` restricts it to a subset (see "Retaking fixtures").
 
 ### The probe's environment contract
 
@@ -237,6 +244,50 @@ subsystem isolation rather than cross-engine comparison: 1600x900, vertical FOV
 workflow is independent and is never a substitute for a registered HUD-hidden
 retail comparison. The legacy `retail-parity` mode of that script and the
 free-form side-by-side script are not sanctioned for cross-engine evidence.
+
+## 2b. Retaking fixtures (skip the full sweep)
+
+Three cases, in increasing cost. Only the last needs a full sweep.
+
+**Iteration -- "did my change move this fixture toward retail?"**
+`scripts/render/retake_fixture.py` is the fast loop while working on a render
+divergence: ~90 s per fixture, dirty tree fine, no retail process, no
+registration.
+
+```powershell
+uv run python scripts/render/retake_fixture.py 00tra-tire-marks-retail
+```
+
+It captures just that fixture at the current `HEAD`, normalizes it through
+the registered builder's own `normalize_opennova_for_retail.ps1`, and computes
+full-frame + ROI MAE with the builder's own difference math against the
+PUBLISHED retail frame -- so the printed published->retake deltas are
+apples-to-apples with the publication's numbers (movements within ~0.5 MAE
+are capture noise: foliage sway, particle phase). The sheet and capture land
+under `.scratch/retake/`, captioned `ITERATION <commit>[+dirty] - NOT
+EVIDENCE`; nothing under `screenshots/` is touched. Replacing the published
+sheets still requires the publication flow below.
+
+**Publication-grade retake, same frozen commit** (a bad capture: flicker, bad
+settle). Every stage's per-fixture scratch artifacts persist
+(`.scratch/golden/render/fixtures/`, the retail evidence root,
+`.scratch/publication/`), so a subset retake composes with the untouched rows:
+
+1. `capture_opennova_fixtures.ps1 -SourceCommit <frozen> -Ids <id>` --
+   requires the frozen commit still checked out and the binaries unrebuilt.
+2. Re-run the section-3a registration and section-4 comparison commands for
+   just those ids.
+3. Re-run `publish_registered_comparisons.py` with `--force` -- it re-verifies
+   and re-copies EVERY row from the scratch roots, so untouched rows carry
+   over and any missing or provenance-mixed row fails the whole publication.
+   That fail-closed sweep is the guard: a partial retake needs the other
+   rows' scratch artifacts intact.
+
+**The source changed.** The one-frozen-commit invariant is deliberate: a
+publication mixing source commits is exactly what the publisher exists to
+prevent. Run the full refresh (sections 2-5); the retail leg stays cheap
+(in-place re-registration), and the OpenNova sweep is one
+`capture_opennova_fixtures.ps1` invocation.
 
 ## 3a. Retail: re-register retained bundles
 

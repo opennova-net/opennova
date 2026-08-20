@@ -65,7 +65,12 @@ engines must mount the same install and the same expansion (`revx02`); the
 probe's `jox01` default belongs to a different catalog and a different install,
 and the witness passes either way, so nothing but that field catches it.
 
-Only then loop the remaining fourteen catalog ids.
+Only then sweep the rest: `scripts/render/capture_opennova_fixtures.ps1
+-SourceCommit <frozen>` (add `-Ids` for a subset). For the fast loop while
+iterating on a render fix -- one fixture against the PUBLISHED retail frame,
+no registration, dirty tree fine -- use
+`scripts/render/retake_fixture.py <id>` instead; its output is never
+evidence (runbook section 2b).
 
 ## 4. Retail, comparisons, publication
 
@@ -104,7 +109,7 @@ when one does.
 
 ## 6. Attest
 
-Look at all fifteen side-by-sides. T3 is a maintainer attestation, not a metric
+Look at every side-by-side. T3 is a maintainer attestation, not a metric
 threshold: write the scene-by-scene read into the PR description, naming what
 still diverges (water reflection and noise, fire particles, vegetation and live
 actors, night exposure, viewmodel pose and lighting are the known residuals).
