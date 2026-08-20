@@ -137,7 +137,14 @@ func _shot_tick(world: GameWorld) -> void:
 		_shot_cam.far = 8000.0
 		world.add_child(_shot_cam)
 	_shot_cam.make_current()
-	_shot_cam.global_position = target + Vector3(18.0, 9.0, 18.0)
+	# Camera offset is tunable (NW_SHOT_DX/DY/DZ) so a subject inside a
+	# building can be framed from within the room instead of through a wall.
+	var ofs := Vector3(18.0, 9.0, 18.0)
+	if not OS.get_environment("NW_SHOT_DX").is_empty():
+		ofs = Vector3(OS.get_environment("NW_SHOT_DX").to_float(),
+				OS.get_environment("NW_SHOT_DY").to_float(),
+				OS.get_environment("NW_SHOT_DZ").to_float())
+	_shot_cam.global_position = target + ofs
 	_shot_cam.look_at(target)
 	_shot_n += 1
 

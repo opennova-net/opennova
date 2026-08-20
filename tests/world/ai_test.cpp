@@ -926,6 +926,145 @@ static void test_mounted_gunner_acquires_and_fires() {
     CHECK(fired);
 }
 
+// A solid axis-aligned box collision model — the carrier hull the LOS test
+// needs. (Local copy of the collision suite's builder; ai_test has no shared
+// fixture header.)
+static CollisionModel box_model_for_ai(int32_t type, uint32_t flags, double hx,
+                                       double hy, double height) {
+	const auto q = [](double v) { return static_cast<int32_t>(v * 65536.0); };
+	CollisionModel m;
+	const auto plane = [&](int nx, int ny, int nz, double d) {
+		CollisionPlane p;
+		p.nx = static_cast<int16_t>(nx);
+		p.ny = static_cast<int16_t>(ny);
+		p.nz = static_cast<int16_t>(nz);
+		p.dist = q(d);
+		m.planes.push_back(p);
+	};
+	plane(16384, 0, 0, -hx);
+	plane(-16384, 0, 0, -hx);
+	plane(0, 16384, 0, -hy);
+	plane(0, -16384, 0, -hy);
+	plane(0, 0, 16384, -height);
+	plane(0, 0, -16384, 0.0);
+	CollisionVolume v;
+	v.type = type;
+	v.flags = flags;
+	v.min_x = q(-hx); v.max_x = q(hx);
+	v.min_y = q(-hy); v.max_y = q(hy);
+	v.min_z = 0;      v.max_z = q(height);
+	v.plane_start = 0;
+	v.plane_count = 6;
+	m.volumes.push_back(v);
+	CollisionSection sec;
+	sec.volume_start = 0;
+	sec.volume_count = 1;
+	m.sections.push_back(sec);
+	// Without derived section AABB/bound-sphere the candidate broad phase
+	// rejects the model outright and nothing ever blocks.
+	m.finalize_sections();
+	return m;
+}
+
+// A rider must SEE past its own carrier. Retail resolves each LOS endpoint
+// through the entity's parent links before the model walk, so a soldier riding
+// a boat is not blinded by the boat's own hull; without that, every perception
+// scan from inside a vehicle is blocked by the vehicle and mounted riders never
+// acquire a target (the "boats drive but nobody shoots" report).
+// [orig: raycast_find_collision_entity endpoint resolve — the entity[154] /
+//  entity[91] folds, called from Entity_CheckLineOfSightTerrainAndEntities
+//  @0x53b130]
+static void test_mounted_rider_sees_past_its_own_carrier() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity enemy_seed{};
+    enemy_seed.kind = EntityKind::Organic;
+    enemy_seed.has_item_def = true;
+    enemy_seed.item_type = 3;
+    enemy_seed.team = 2;
+    enemy_seed.health = 100;
+    enemy_seed.net_id = 0x21;
+    enemy_seed.group_id = 2;
+    enemy_seed.position = Vec3{12.0f, 0.0f, 0.0f};
+    const EntityHandle enemy_h = w->registry.spawn(0, enemy_seed);
+
+    // The carrier: a seated vehicle whose collision model is a solid box big
+    // enough to swallow the rider's eye point.
+    Entity boat{};
+    boat.kind = EntityKind::Item;
+    boat.team = 1;
+    boat.net_id = 0x31;
+    boat.yaw = 90;
+    boat.alive = true;
+    boat.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    // Seat the rider BEHIND the hull (-X) so the carrier's own box sits
+    // between its eye point and a target on +X — the geometry that makes
+    // the endpoint resolve load-bearing.
+    seat.seat_local = Vec3{0.0f, -6.0f, 1.0f};
+    boat.seats.push_back(seat);
+    const EntityHandle boat_h = w->registry.spawn(1, boat);
+    w->weapons.entries.resize(2);
+    w->weapons.entries[1].name.assign(1, 'x');
+    w->weapons.entries[1].ammo_index = 1;
+    w->weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->weapons.entries[1]);
+
+    Entity rider_seed{};
+    rider_seed.kind = EntityKind::Organic;
+    rider_seed.team = 1;
+    rider_seed.health = 100;
+    rider_seed.net_id = 0x11;
+    const EntityHandle rider_h = w->registry.spawn(0, rider_seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    // A flat terrain field: line_of_sight_clear short-circuits to "clear" when
+    // no terrain is wired, which would make this test vacuous.
+    struct FlatField {
+        enum { kDim = 256 };
+        std::vector<uint16_t> heightmap;
+        std::vector<int> sector_grid;
+        opennova::terrain::TerrainHeightField field;
+        FlatField() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+            field.heightmap = heightmap.data();
+            field.dim = kDim;
+            field.layout.sector_grid = sector_grid.data();
+            field.layout.origin_x = 0;
+            field.layout.origin_y = 0;
+        }
+    };
+    static FlatField flat;
+    ai.terrain = &flat.field;
+    CollisionWorld collision;
+    collision.terrain = &flat.field;
+    ai.collision = &collision;
+    const int32_t hull = collision.add_model(box_model_for_ai(1, 0, 3.0, 3.0, 3.0));
+    collision.assign_entity(boat_h, hull);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(*w);
+
+    AiEntity &rider = *ai.at(ai.attach(rider_h));
+    configure_rifleman(rider, 0x11, 1);
+    // The scan radius is half the sight range, and a calm NPC halves the
+    // range first, so a target at 12 u needs ~48 u+ of authored sight.
+    rider.slot.f[17] = 120 << 16;
+    CHECK(w->commands.mount(0x11, 0x31));
+
+    // Park the rider at its seat pose so the hull is between it and the target.
+    ai.pose_if_mounted(rider, *w);
+    std::printf("  [rider-los] rider at (%.1f, %.1f, %.1f), hull +/-3, enemy at 12\n",
+                rider.pos[0] / 65536.0, rider.pos[1] / 65536.0,
+                rider.pos[2] / 65536.0);
+    // The scan runs on the 32-tick perception cadence.
+    ai.infantry_combat_think(rider, *w, 0);
+    CHECK(rider.inf.combat_target == enemy_h);
+}
+
 static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
@@ -2646,6 +2785,7 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_mounted_rider_sees_past_its_own_carrier();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();
