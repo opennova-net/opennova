@@ -638,13 +638,18 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     const int32_t water = world.env.water_z;
     if (water == 0) return; // our no-water-world sentinel (retail worlds always carry a plane)
 
-    const uint32_t flags = tick_entity->flags;
+    // Retail has one Flags word; we carry two mirrors, so read their union and
+    // write both — the same discipline the jump stamp and the ladder unlatch use.
+    const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
     const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
     const int32_t entry_z = e.pos[2] + (was_afloat ? 0 : kWaterFloatHysteresis);
     if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
-        tick_entity->flags = flags & ~kEntityFlagDrowning; // [orig: the 0xFFDF7FFF clear —
-        return;                                            //  its 0x200000 half is the player's
-    }                                                      //  dive latch, which org1 never sets]
+        // [orig: the 0xFFDF7FFF clear — its 0x200000 half is the player's dive
+        //  latch, which org1 never sets]
+        tick_entity->flags &= ~kEntityFlagDrowning;
+        tick_entity->engine_flags &= ~kEntityFlagDrowning;
+        return;
+    }
 
     // The float target: the plane, plus a shallow bob whose phase is seeded from
     // the body's own XY so a squad in the water is not in lockstep, minus half
@@ -666,7 +671,9 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
         world.water_crossings.add(e.pos[0], e.pos[1], water,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
-    tick_entity->flags = (flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
+    tick_entity->flags = (tick_entity->flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
+    tick_entity->engine_flags =
+            (tick_entity->engine_flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
     e.inf.airborne = false; // the motor-side mirror of the 0x2000 clear
 
     // The vertical is a QUARTER-step toward the target, not a snap: that is what

@@ -1053,16 +1053,26 @@ static void test_infantry_floats_and_splashes_once() {
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Now the same body arrives from the AIR. Same family, same plane, DIFFERENT
-    // sound - the selector retail actually uses.
-    ent->flags |= kEntityFlagInAir;
+    // sound - the selector retail actually uses. The bit goes on the engine_flags
+    // mirror ALONE on purpose: retail has one Flags word and we carry two, so a
+    // block that reads or writes only one of them silently loses the state.
+    ent->engine_flags |= kEntityFlagInAir;
     npc.pos[2] = w->env.water_z - to_fixed(1.0);
     ai.infantry_water_block(npc, *w, ent, 0, 21);
     CHECK(w->water_crossings.events.size() == 1);
     CHECK(w->water_crossings.events[0].airborne);
     // Landing in water ends the fall: retail clears 0x2000 with the same store
-    // that sets the float latch.
+    // that sets the float latch. Both mirrors, or the body stays "airborne"
+    // forever to every other reader.
     CHECK((ent->flags & kEntityFlagInAir) == 0);
+    CHECK((ent->engine_flags & kEntityFlagInAir) == 0);
     CHECK(!npc.inf.airborne);
+
+    // The exit clear has to reach both mirrors too.
+    npc.pos[2] = w->env.water_z + to_fixed(0.5);
+    ai.infantry_water_block(npc, *w, ent, 0, 22);
+    CHECK((ent->flags & kEntityFlagDrowning) == 0);
+    CHECK((ent->engine_flags & kEntityFlagDrowning) == 0);
 }
 
 // A guard with no route must still notice an enemy. Live rounds showed only
