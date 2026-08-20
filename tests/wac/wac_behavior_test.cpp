@@ -267,6 +267,27 @@ static void test_local_player_condition_family() {
     w.load_systems();
     run(w, chain_sys, 1);
     CHECK(w.vars.get_mission(3) == 2);
+
+    // The seated fold: a player riding an emplacement CHILD of a vehicle is on
+    // that vehicle's chain — the 05TRcoop convoy root trigger (Single/sub42
+    // p1=10000 p2=21, "the player rides the Stryker") must evaluate true for a
+    // gunner via mount_target -> emplacement_parent.
+    // [orig: Entity_IsOnTopOfChain @0x4f19a0 — one +0x28 carrier link covers
+    //  standing-on, seated-in, and emplacement-child alike]
+    Entity gun_seed{};
+    gun_seed.alive = true;
+    gun_seed.net_id = 700;
+    gun_seed.item_id = 2016;
+    const EntityHandle gun = w.registry.spawn(1, gun_seed);
+    w.registry.get(gun)->emplacement_parent = aav;
+    Entity *pl = w.registry.get(player);
+    pl->item_id = 5305; // the retail player item gate (ItemTypeIndex != 0)
+    pl->mounted = true;
+    pl->mount_target = gun;
+    CHECK(w.commands.ssn_on_chain_of(10000, 700)); // player -> the gun itself
+    CHECK(w.commands.ssn_on_chain_of(10000, 615)); // player -> gun -> AAV
+    CHECK(w.commands.ssn_on_chain_of(10000, 18));  // -> AAV -> deck (3rd hop)
+    CHECK(!w.commands.ssn_on_chain_of(10000, 691)); // unrelated boat: false
 }
 
 

@@ -617,13 +617,27 @@ bool EntityCommands::group_holding_group(int holder_group, int held_group) const
 bool EntityCommands::ssn_on_chain_of(uint16_t ssn, uint16_t target_ssn) const {
     // [orig: Entity_IsOnTopOfChain @0x4f19a0 — both resolved + ItemTypeIndex
     // gates; A's groundEntity(+0x28) chain, up to 3 hops, == B]
+    // Retail's +0x28 is ONE carrier link that covers standing-on, seated-in,
+    // and emplacement-child-of alike (a seated gunner's +0x28 is his seat
+    // entity, the seat's +0x28 its hull). Our model splits those into
+    // mount_target / emplacement_parent / ground_target, so the hop re-folds
+    // them — without the fold, "the player rides the Stryker" (the 05TRcoop
+    // convoy root trigger, Single/sub42 p1=10000) never evaluated true for a
+    // seated player and the chain stayed dead.
+    const auto carrier_of = [this](const Entity &e) -> const Entity * {
+        if (e.mounted && e.mount_target.valid())
+            return world_.registry.get(e.mount_target);
+        if (e.emplacement_parent.valid())
+            return world_.registry.get(e.emplacement_parent);
+        return world_.registry.get(e.ground_target);
+    };
     const Entity *a = world_.registry.get(resolve_ssn(ssn));
     const Entity *b_probe = world_.registry.get(resolve_ssn(target_ssn));
     if (!a || !b_probe || a->item_id == 0 || b_probe->item_id == 0) return false;
-    const Entity *hop = world_.registry.get(a->ground_target);
+    const Entity *hop = carrier_of(*a);
     for (int i = 0; i < 3 && hop != nullptr; ++i) {
         if (hop == b_probe) return true;
-        hop = world_.registry.get(hop->ground_target);
+        hop = carrier_of(*hop);
     }
     return false;
 }
