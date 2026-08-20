@@ -3,6 +3,7 @@
 #include <renderer/material_eval.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 
@@ -445,6 +446,129 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 		out[d].count = select(handles.data(), count, draw.groups, options,
 				ambient_scale, flicker, d3d_light_path, out[d].lights);
 	}
+}
+
+size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
+		std::vector<LightCoronaQuad> &out) const {
+	out.clear();
+	// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40]. Constants decoded
+	// from the binary: 1/65536 @ 0x7c3310, 0.5 @ 0x7c3b94, 1/16 @ 0x7c486c,
+	// 0.1 @ 0x7c69f4, 0.66 @ 0x7d3e68, the 100-wu cull 0x640000 fixed
+	// @ 0x5ab143.
+	constexpr double kMaxDistanceFixed = 0x640000;   // 100 wu
+	constexpr float kColorScale = 0.0625f;           // 1/16
+	constexpr float kStepFactor = 0.1f;
+	constexpr float kSegmentShrink = 0.66f;
+	constexpr int kSegments = 3;
+	const std::array<float, 3> camera_world = {
+		static_cast<float>(inputs.camera_fixed[0]) / 65536.0f,
+		static_cast<float>(inputs.camera_fixed[1]) / 65536.0f,
+		static_cast<float>(inputs.camera_fixed[2]) / 65536.0f,
+	};
+	for (const Slot &slot : slots_) {
+		if (!slot.live || slot.hidden || slot.params.disable_corona) {
+			continue; // [orig: flag bits 2 / 0x200 skipped @ 0x5ab027]
+		}
+		// The per-frame sub-centimeter jitter: +-512 fixed on x (frames
+		// 0/1) or y (frames 2/3) [orig: the frame & 3 switch @ 0x5ab06e].
+		std::array<int32_t, 3> pos_fixed = slot.params.position_fixed;
+		switch (inputs.frame_index & 3u) {
+			case 0: pos_fixed[0] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[0]) + 512); break;
+			case 1: pos_fixed[0] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[0]) - 512); break;
+			case 2: pos_fixed[1] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[1]) + 512); break;
+			default: pos_fixed[1] = clamp_i32(
+					static_cast<int64_t>(pos_fixed[1]) - 512); break;
+		}
+		// Camera distance cull at 100 wu, in fixed units like retail's
+		// float-of-fixed sqrt [orig: @ 0x5ab0b7..0x5ab143].
+		double dist_sq = 0.0;
+		for (int axis = 0; axis < 3; ++axis) {
+			const double delta = static_cast<double>(pos_fixed[axis]) -
+					static_cast<double>(inputs.camera_fixed[axis]);
+			dist_sq += delta * delta;
+		}
+		if (std::sqrt(dist_sq) > kMaxDistanceFixed) {
+			continue;
+		}
+		const std::array<float, 3> light_world = {
+			static_cast<float>(pos_fixed[0]) / 65536.0f,
+			static_cast<float>(pos_fixed[1]) / 65536.0f,
+			static_cast<float>(pos_fixed[2]) / 65536.0f,
+		};
+		const float radius_world =
+				static_cast<float>(slot.params.radius_fixed) / 65536.0f;
+		const float base_half = radius_world * 0.5f;
+		if (base_half <= 0.0f) {
+			continue;
+		}
+		// Color: record rgb (bytes /256 at spawn) x live blend x ambient
+		// scale x 1/16, then the RgbGen multiply — the same gen evaluation
+		// the point-light select runs [orig: @ 0x5ab149..0x5ab1b8].
+		std::array<float, 3> rgb = {
+			static_cast<float>(slot.params.rgb[0]) / 256.0f *
+					slot.blend * inputs.ambient_scale[0] * kColorScale,
+			static_cast<float>(slot.params.rgb[1]) / 256.0f *
+					slot.blend * inputs.ambient_scale[1] * kColorScale,
+			static_cast<float>(slot.params.rgb[2]) / 256.0f *
+					slot.blend * inputs.ambient_scale[2] * kColorScale,
+		};
+		if (slot.params.has_gen && slot.params.gen.style != 0) {
+			const int32_t ctrl = light_flicker_value(
+					slot.params.position_fixed, inputs.flicker);
+			const LightRuntime gen = eval_light_runtime(slot.params.gen.style,
+					slot.params.gen.phase, slot.params.gen.rate,
+					slot.params.gen.color_start, slot.params.gen.color_end,
+					inputs.flicker.time_ms, ctrl);
+			rgb[0] *= gen.r * gen.intensity;
+			rgb[1] *= gen.g * gen.intensity;
+			rgb[2] *= gen.b * gen.intensity;
+		}
+		// The toward-camera march: step = 0.1 x radius along
+		// normalize(cam - light) [orig: @ 0x5ab28b..0x5ab2c4].
+		std::array<float, 3> to_camera = {
+			camera_world[0] - light_world[0],
+			camera_world[1] - light_world[1],
+			camera_world[2] - light_world[2],
+		};
+		const float to_camera_len = std::sqrt(to_camera[0] * to_camera[0] +
+				to_camera[1] * to_camera[1] + to_camera[2] * to_camera[2]);
+		if (to_camera_len > 0.0f) {
+			const float step = radius_world * kStepFactor / to_camera_len;
+			to_camera[0] *= step;
+			to_camera[1] *= step;
+			to_camera[2] *= step;
+		} else {
+			to_camera = {0.0f, 0.0f, 0.0f};
+		}
+		float half = base_half;
+		std::array<float, 3> center = light_world;
+		for (int segment = 0; segment < kSegments; ++segment) {
+			center[0] += to_camera[0];
+			center[1] += to_camera[1];
+			center[2] += to_camera[2];
+			// Per-segment fade: camera-plane depth over the BASE half-size,
+			// clamped 0..1; <= 0 skips the quad [orig: the fdivr 1/half
+			// @ 0x5ab2cf and the plane compare @ 0x5ab2f8..0x5ab33c].
+			const float depth =
+					inputs.depth_plane_normal[0] * center[0] +
+					inputs.depth_plane_normal[1] * center[1] +
+					inputs.depth_plane_normal[2] * center[2] +
+					inputs.depth_plane_w;
+			const float fade = std::clamp(depth / base_half, 0.0f, 1.0f);
+			if (fade > 0.0f) {
+				LightCoronaQuad quad;
+				quad.center = center;
+				quad.half_size = half;
+				quad.rgb = {rgb[0] * fade, rgb[1] * fade, rgb[2] * fade};
+				out.push_back(quad);
+			}
+			half *= kSegmentShrink; // [orig: x0.66 @ 0x5ab71f]
+		}
+	}
+	return out.size();
 }
 
 LightSceneReport LightScene::inspect() const {

@@ -65,6 +65,38 @@
 //  - round glow [orig: RoundData_SpawnRound @ 0x4ec8da]: ammo `light_move`
 //    radius/color, mode 1 / duration -1, terrain disabled (flag 1024), handle
 //    at round+0x1B4, follows the round per tick and clears on release.
+// CORONAS (witnessed 2026-08-20): every alive, un-hidden instance without
+// render flag 512 draws additive camera-facing billboards
+// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 (ex
+// CEffect_RenderFoliageBillboards — misnamed; renamed in the IDB), called
+// once per world scene @ 0x5c96ad and once per mirror scene @ 0x5c85fd]:
+// THREE segments marching toward the camera (step 0.1 x radius along
+// normalize(cam - light)), half-sizes 0.5 x radius shrinking x0.66 per
+// segment, color = record rgb x blend x EffectWorld_AmbientScale x 1/16
+// then the RgbGen multiply, per-segment alpha = clamp(camera-plane depth /
+// (0.5 x radius), 0..1) with <= 0 skipped, admission = camera distance
+// <= 100 wu (0x640000 fixed) and a +-512-fixed x/y jitter phased on
+// frame & 3; texture = the procedural 128x128 "texlightcrn" radial
+// (intensity = 255 x (0.4 - 0.45 x d), d = sqrt(((x-64)/64)^2 +
+// ((y-64)/64)^2), border texels 0) via Light_CoronaShader @ 0x2732db8
+// [orig: Lighting_InitTextures @ 0x5a94f0], fog+blend mode 2 (additive).
+// Owned lights additionally gate on the owner building's visible section
+// bits (Terrain_IsBuildingSectionBitSet) — unported, with the flag-0x100
+// impact recentering (corona drops radius/2 — the only witnessed reader of
+// the impact spawn's 0x100 flag) and the fog-to-black fold (D-RLIT-4).
+//
+// SPOT/TARGET DELIVERY IS DEAD CODE IN JO (witnessed 2026-08-20): the only
+// spawner that marks an instance as a spot projector (flag 0x10000, the
+// projection matrix at bytes 88..152, direction floats 38..40, near/far
+// 41/42) is caller-less [orig: LightPool_SpawnSpotProjectorEffect
+// @ 0x5a9fd0 — zero xrefs and zero data refs in Jointops.exe].
+// Entity_SpawnGlowEffects passes only position + radius, so a model LGHT
+// record's falloff byte, rotation, and view_proj never reach the runtime —
+// every model light renders as an omni point light, and the spotlight
+// projected-texture legs in CRenderBatchQueue_FlushBatches
+// (Light_IsSpotlight @ 0x5a9040 -> get_light_projection_info @ 0x5aa5c0)
+// are unreachable. LightSpawnParams therefore carries no spot fields.
+//
 // Divergences tracked on D-RLIT-4: retail's setters write through stale
 // handles into reused slots; OpenNova's generation lease intentionally
 // rejects those writes. Retail derives the ambient scale from
@@ -186,6 +218,30 @@ struct LightSceneReport {
 	size_t last_selected = 0;
 };
 
+// One additive corona billboard quad, camera-facing at `center` with
+// `half_size` world-unit extents along the camera right/up axes and the
+// premultiplied additive color (segment fade folded in)
+// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40, ex
+// CEffect_RenderFoliageBillboards — renamed 2026-08-20].
+struct LightCoronaQuad {
+	std::array<float, 3> center{};  // mission-space float world units
+	float half_size = 0.0f;
+	std::array<float, 3> rgb{};
+};
+
+// The corona pass inputs. The depth plane is retail's batch-sort camera
+// plane in mission space: depth(p) = dot(normal, p) + w, growing in front of
+// the camera — each segment's alpha is clamp(depth / base_half_size, 0..1)
+// [orig: g_BatchSortDepthPlane reads @ 0x5ab2f8..0x5ab33c].
+struct LightCoronaFrameInputs {
+	std::array<int32_t, 3> camera_fixed{};
+	std::array<float, 3> depth_plane_normal{};
+	float depth_plane_w = 0.0f;
+	std::array<float, 3> ambient_scale{1.0f, 1.0f, 1.0f};
+	LightFlickerInputs flicker{};
+	uint32_t frame_index = 0;  // the witnessed frame & 3 jitter phase
+};
+
 // One draw context for the per-draw selection pass: the draw's query AABB
 // (mission 16.16) plus its active owner/interior groups — the shape retail
 // hands update_light_slots per rendered entity [orig: update_light_slots
@@ -268,6 +324,22 @@ public:
 			const LightFlickerInputs &flicker,
 			bool d3d_light_path,
 			LightDrawSelection *out) const;
+
+	// The corona billboard walk [orig: EffectWorld_RenderLightCoronas
+	// @ 0x5aaf40, called per world scene @ 0x5c96ad and per mirror scene
+	// @ 0x5c85fd]: every alive, un-hidden instance without the authored
+	// corona-disable draws THREE additive camera-facing quads marching
+	// toward the camera — step 0.1 x radius along normalize(cam - light),
+	// half-sizes 0.5 x radius shrinking x0.66 per segment, color =
+	// record rgb x blend x ambient scale x 1/16 (then the RgbGen multiply),
+	// each segment scaled by clamp(camera-plane depth / (0.5 x radius), 0..1)
+	// and skipped at <= 0. Admission: camera distance <= 100 wu (0x640000
+	// fixed) and a per-frame +-512-fixed x/y jitter phased on frame & 3.
+	// Residual gaps (doc'd on D-RLIT-4): the owner visible-section gate
+	// (Terrain_IsBuildingSectionBitSet on owned lights), the flag-0x100
+	// impact recentering, and the fog-to-black additive fold.
+	size_t collect_corona_quads(const LightCoronaFrameInputs &inputs,
+			std::vector<LightCoronaQuad> &out) const;
 
 	LightSceneReport inspect() const;
 

@@ -12,9 +12,11 @@ extends RefCounted
 ## update_light_slots @ 0x5abc50]. The object pass now runs per rendered
 ## model: one draw context per visible ObjectModel with its entity as the
 ## owner group, so owned lights (muzzle glow, subobject records) light only
-## their owner exactly as retail's update_light_slots gates them. Remaining
-## D-RLIT-4 residuals: interior groups, corona, terrain projected-texture
-## light, foliage sampling, and subobject bone following.
+## their owner exactly as retail's update_light_slots gates them. Corona
+## billboards draw per frame from the portable corona walk [orig:
+## EffectWorld_RenderLightCoronas @ 0x5aaf40]. Remaining D-RLIT-4 residuals:
+## interior groups, terrain projected-texture light, foliage sampling, and
+## subobject bone following.
 
 ## Model gather half-extent around the camera. Light ranges are authored
 ## small (atten_end 8 on the fire barrels), so any model a pool light could
@@ -42,6 +44,12 @@ var _spawned_nodes: Dictionary = {}
 var _muzzle_handles: Dictionary = {}
 # round presentation id -> pool light handle (the light_move follow).
 var _round_handles: Dictionary = {}
+# The corona billboard presenter: one MultiMesh of additive camera-facing
+# quads rebuilt per frame from the portable corona walk
+# [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 — the witness map lives on
+# renderer::LightScene::collect_corona_quads].
+var _corona_instance: MultiMeshInstance3D
+var _corona_frame := 0
 
 
 func setup(world: GameWorld, static_sources: Callable) -> void:
@@ -59,6 +67,7 @@ func reset() -> void:
 	_spawned_nodes.clear()
 	_muzzle_handles.clear()
 	_round_handles.clear()
+	_clear_coronas()
 
 
 ## Mission start / sim-restart: reset, then respawn from the restored entity
@@ -80,8 +89,19 @@ func reattach() -> void:
 		var data: ObjectData = source.get("object_data")
 		if data == null:
 			continue
+		# Batched statics are entities too: retail attaches the owner whenever
+		# the record's attach bone != 0, for every spawning entity kind
+		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity,
+		# bone)]. There is no node to borrow an id from, so each static source
+		# owns a synthetic negative id (never issued by owner_id_for_node,
+		# never declared by a draw context) — its subobject-attached lights
+		# stay scoped to their building instead of leaking as unscoped world
+		# lights. Batch draws do not take per-draw light selections yet, so
+		# these lights reach nothing until that leg lands (D-RLIT-4 residual);
+		# retail scopes them to exactly the owner's draws.
 		var handles := _spawn_model_lights(data,
-				source.get("world_transform", Transform3D.IDENTITY))
+				source.get("world_transform", Transform3D.IDENTITY),
+				-(source_index + 1))
 		if not handles.is_empty():
 			_spawned_static[source_index] = handles
 
@@ -154,14 +174,14 @@ func _spawn_model_lights(data: ObjectData, world_transform: Transform3D,
 
 ## One authored light record (the get_light_info dictionary shape) becomes one
 ## pool instance. Public: the GUT seam test feeds records directly. A record
-## attached to a subobject retains retail's owner metadata for future per-draw
-## selection (interior cabin lights)
-## [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwner(entity, bone) when the
-## record's attach bone != 0; the blink-box interior leg is a tracked
-## residual]. Batched static sources have no individual owner node: their
-## owner_id remains zero and they are mission-start world lights. The current
-## camera-global object pass admits nonzero owners unscoped, so it does not yet
-## enforce self-only illumination.
+## attached to a subobject carries retail's owner metadata into the group gate
+## [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity, bone)
+## when the record's attach bone != 0; the blink-box interior leg is a tracked
+## residual]. Every caller supplies an owner id — live nodes their wire
+## handle/instance id, batched static sources a synthetic negative id — so a
+## subobject-attached light passes the per-draw select only for its owner's
+## draws (per_model_light_isolation_test pins both directions). A record with
+## subobject 0 spawns unowned: a mission-start world light.
 func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 		owner_id: int = 0) -> int:
 	if info.is_empty():
@@ -195,6 +215,7 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		viewmodel_owner: int = 0) -> void:
 	if camera == null:
 		_scene.clear_render_output()
+		_clear_coronas()
 		return
 	var gain := Vector3.ONE
 	var env: MissionEnvironment = _world.get_environment_node()
@@ -229,6 +250,90 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 			weather)
 	_scene.render_model_frame(models, owners, gain, Time.get_ticks_msec(),
 			weather)
+	_render_coronas(camera, gain, weather)
+
+
+## The corona device leg: fetch this frame's additive quads from the portable
+## walk and rebuild the MultiMesh (instance origin = segment center, uniform
+## scale = half-size, instance color = the premultiplied additive color).
+func _render_coronas(camera: Camera3D, gain: Vector3, weather: Node) -> void:
+	_corona_frame = (_corona_frame + 1) & 3
+	var rows: Array = _scene.collect_corona_rows(
+			camera.get_camera_transform().origin,
+			-camera.get_camera_transform().basis.z, gain,
+			Time.get_ticks_msec(), _corona_frame, weather)
+	var instance := _ensure_corona_instance()
+	if instance == null:
+		return
+	var mesh: MultiMesh = instance.multimesh
+	mesh.instance_count = rows.size()
+	instance.visible = not rows.is_empty()
+	for i in range(rows.size()):
+		var row: Dictionary = rows[i]
+		var half := float(row.get("half_size", 0.0))
+		var center: Vector3 = row.get("position", Vector3.ZERO)
+		var color: Color = row.get("color", Color.BLACK)
+		mesh.set_instance_transform(i, Transform3D(
+				Basis.IDENTITY.scaled(Vector3(half, half, half)), center))
+		mesh.set_instance_color(i, color)
+
+
+func _clear_coronas() -> void:
+	if _corona_instance != null and is_instance_valid(_corona_instance):
+		_corona_instance.multimesh.instance_count = 0
+		_corona_instance.visible = false
+
+
+func _ensure_corona_instance() -> MultiMeshInstance3D:
+	if _corona_instance != null and is_instance_valid(_corona_instance):
+		return _corona_instance
+	if _world == null:
+		return null
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "EffectLightCoronas"
+	var mesh := MultiMesh.new()
+	mesh.transform_format = MultiMesh.TRANSFORM_3D
+	mesh.use_colors = true
+	var quad := QuadMesh.new()
+	quad.size = Vector2(2.0, 2.0)  # VERTEX.xy in [-1, 1] x half_size
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/light_corona.gdshader")
+	material.set_shader_parameter("u_corona_tex", _corona_texture())
+	quad.material = material
+	mesh.mesh = quad
+	mmi.multimesh = mesh
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Coronas draw in the mirror scene too [orig: the
+	# Water_RenderReflectedWorldScene call @ 0x5c85fd].
+	mmi.layers = Water.VISUAL_LAYER_WORLD
+	# The quads billboard in-shader; keep them from being frustum-culled by
+	# their degenerate static AABB.
+	mmi.custom_aabb = AABB(Vector3(-512, -512, -512), Vector3(1024, 1024, 1024))
+	_world.add_child(mmi)
+	_corona_instance = mmi
+	return mmi
+
+
+## The procedural corona texture [orig: Lighting_InitTextures @ 0x5a94f0 —
+## "texlightcrn": 128x128, intensity = 255 x (0.4 - 0.45 x d) clamped >= 0,
+## d = sqrt(((x-64)/64)^2 + ((y-64)/64)^2), border texels forced 0].
+static var _corona_texture_cache: ImageTexture
+
+
+static func _corona_texture() -> ImageTexture:
+	if _corona_texture_cache != null:
+		return _corona_texture_cache
+	var image := Image.create(128, 128, false, Image.FORMAT_RGB8)
+	for y in range(128):
+		for x in range(128):
+			var value := 0.0
+			if x != 0 and x != 127 and y != 0 and y != 127:
+				var dx := absf(x - 64.0) / 64.0
+				var dy := absf(y - 64.0) / 64.0
+				value = maxf(0.4 - 0.45 * sqrt(dx * dx + dy * dy), 0.0)
+			image.set_pixel(x, y, Color(value, value, value))
+	_corona_texture_cache = ImageTexture.create_from_image(image)
+	return _corona_texture_cache
 
 
 ## The 62 Hz lifecycle decay [orig: EffectWorld_TickInstancesAndLightScale

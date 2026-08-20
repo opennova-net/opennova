@@ -620,6 +620,82 @@ int main() {
         }
     }
 
+    // Corona quads [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40]:
+    // three shrinking segments marching toward the camera, the plane fade,
+    // the disable gate, the 100-wu cull, and the frame jitter.
+    {
+        LightScene scene;
+        LightSpawnParams params;
+        params.position_fixed = {0, 0, 0};
+        params.radius_fixed = 4 << 16;  // radius 4 -> base half-size 2
+        params.rgb = {128, 64, 32};
+        const LightHandle handle = scene.spawn(params);
+        expect(scene.alive(handle), "the corona light spawns");
+
+        LightCoronaFrameInputs inputs;
+        inputs.camera_fixed = {0, 0, 10 << 16};  // 10 wu away along +z
+        // Depth plane facing the light from the camera: depth grows away
+        // from the camera along -z.
+        inputs.depth_plane_normal = {0.0f, 0.0f, -1.0f};
+        inputs.depth_plane_w = 10.0f;
+        std::vector<LightCoronaQuad> quads;
+        expect(scene.collect_corona_quads(inputs, quads) == 3,
+               "an enabled corona draws the witnessed three segments");
+        // Segment centers march 0.1 x radius = 0.4 wu toward the camera.
+        expect(nearly_equal(quads[0].center[2], 0.4f, 0.01f) &&
+                       nearly_equal(quads[1].center[2], 0.8f, 0.01f) &&
+                       nearly_equal(quads[2].center[2], 1.2f, 0.01f),
+               "segments step 0.1 x radius toward the camera");
+        // Half-sizes: 2.0, then x0.66 per segment.
+        expect(nearly_equal(quads[0].half_size, 2.0f) &&
+                       nearly_equal(quads[1].half_size, 1.32f) &&
+                       nearly_equal(quads[2].half_size, 0.8712f),
+               "segment half-sizes start at radius/2 and shrink x0.66");
+        // Deep in front of the plane the fade clamps to 1: color =
+        // bytes/256 x 1/16.
+        expect(nearly_equal(quads[0].rgb[0], 128.0f / 256.0f / 16.0f) &&
+                       nearly_equal(quads[0].rgb[1], 64.0f / 256.0f / 16.0f) &&
+                       nearly_equal(quads[0].rgb[2], 32.0f / 256.0f / 16.0f),
+               "corona color is record rgb x 1/16 at full fade");
+        // The x jitter rides frame & 3 (512 fixed = 1/128 wu).
+        inputs.frame_index = 1;
+        scene.collect_corona_quads(inputs, quads);
+        // The march toward the camera adds a sub-millimeter x component on
+        // top of the jitter; assert within half the jitter magnitude.
+        expect(nearly_equal(quads[0].center[0], -512.0f / 65536.0f, 4e-3f) &&
+                       quads[0].center[0] < 0.0f,
+               "odd frames jitter x by -512 fixed");
+
+        // A camera plane near the light fades the segments by
+        // depth / (radius/2) and skips non-positive depths.
+        inputs.frame_index = 0;
+        inputs.depth_plane_w = -0.6f;  // depth(z) = -z - 0.6 + 10 - 10...
+        inputs.depth_plane_normal = {0.0f, 0.0f, 1.0f};
+        // depth(center) = z - 0.6: segment 1 at 0.4 -> -0.2 skipped,
+        // segment 2 at 0.8 -> 0.2 -> fade 0.1, segment 3 at 1.2 -> 0.6 ->
+        // fade 0.3.
+        expect(scene.collect_corona_quads(inputs, quads) == 2,
+               "segments behind the camera plane are skipped");
+        expect(nearly_equal(quads[0].rgb[0], 128.0f / 256.0f / 16.0f * 0.1f,
+                       1e-4f),
+               "the plane fade scales the corona color by depth/(radius/2)");
+
+        // The authored corona disable and the 100-wu cull.
+        LightSpawnParams disabled = params;
+        disabled.position_fixed = {8 << 16, 0, 0};
+        disabled.disable_corona = true;
+        scene.spawn(disabled);
+        inputs.depth_plane_normal = {0.0f, 0.0f, -1.0f};
+        inputs.depth_plane_w = 10.0f;
+        expect(scene.collect_corona_quads(inputs, quads) == 3,
+               "a corona-disabled record draws no quads");
+        LightSpawnParams far_light = params;
+        far_light.position_fixed = {0, 0, -(120 << 16)};  // 130 wu away
+        scene.spawn(far_light);
+        expect(scene.collect_corona_quads(inputs, quads) == 3,
+               "coronas cull beyond 100 wu from the camera");
+    }
+
     std::cout << "light_scene_test passed\n";
     return 0;
 }

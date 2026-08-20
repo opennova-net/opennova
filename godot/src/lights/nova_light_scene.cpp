@@ -304,6 +304,57 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 	return lit_models;
 }
 
+TypedArray<Dictionary> LightScene::collect_corona_rows(
+		const Vector3 &p_camera_pos, const Vector3 &p_camera_forward,
+		const Vector3 &p_ambient_scale, int p_time_ms, int p_frame_index,
+		Object *p_weather) {
+	renderer::LightCoronaFrameInputs inputs;
+	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
+	// The camera depth plane in mission space: depth grows in front of the
+	// camera, zero at the camera origin (the batch-sort plane retail feeds
+	// the fade [orig: @ 0x5ab2f8..0x5ab33c]; the small near-plane offset is
+	// folded into the clamp).
+	const Vector3 forward = p_camera_forward.normalized();
+	const std::array<float, 3> normal_mission = {
+		static_cast<float>(forward.x),
+		static_cast<float>(-forward.z),
+		static_cast<float>(forward.y),
+	};
+	const std::array<int32_t, 3> &cam = inputs.camera_fixed;
+	inputs.depth_plane_normal = normal_mission;
+	inputs.depth_plane_w =
+			-(normal_mission[0] * static_cast<float>(cam[0]) / 65536.0f +
+					normal_mission[1] * static_cast<float>(cam[1]) / 65536.0f +
+					normal_mission[2] * static_cast<float>(cam[2]) / 65536.0f);
+	inputs.ambient_scale = {
+		static_cast<float>(p_ambient_scale.x),
+		static_cast<float>(p_ambient_scale.y),
+		static_cast<float>(p_ambient_scale.z),
+	};
+	inputs.frame_index = static_cast<uint32_t>(p_frame_index);
+	inputs.flicker.time_ms = static_cast<uint32_t>(p_time_ms);
+	const Weather *weather = Object::cast_to<Weather>(p_weather);
+	if (weather != nullptr) {
+		const opennova::env::WeatherOscillator &oscillator =
+				weather->runtime().core().oscillator;
+		inputs.flicker.amp_ring = oscillator.amp_ring;
+		inputs.flicker.amp_ring_size =
+				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
+		inputs.flicker.ring_index = oscillator.ring_index;
+	}
+	std::vector<renderer::LightCoronaQuad> quads;
+	scene_.collect_corona_quads(inputs, quads);
+	TypedArray<Dictionary> rows;
+	for (const renderer::LightCoronaQuad &quad : quads) {
+		Dictionary row;
+		row["position"] = godot_from_mission_float(quad.center);
+		row["half_size"] = quad.half_size;
+		row["color"] = Color(quad.rgb[0], quad.rgb[1], quad.rgb[2]);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
 int LightScene::live_count() const {
 	return static_cast<int>(scene_.inspect().live);
 }
@@ -359,6 +410,9 @@ void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_model_frame", "models",
 			"owner_entities", "ambient_scale", "time_ms", "weather"),
 			&LightScene::render_model_frame);
+	ClassDB::bind_method(D_METHOD("collect_corona_rows", "camera_pos",
+			"camera_forward", "ambient_scale", "time_ms", "frame_index",
+			"weather"), &LightScene::collect_corona_rows);
 	ClassDB::bind_method(D_METHOD("live_count"), &LightScene::live_count);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 }

@@ -66,6 +66,17 @@ public:
 			const PackedInt64Array &p_owner_entities,
 			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
 
+	// The corona billboard rows for this frame [orig:
+	// EffectWorld_RenderLightCoronas @ 0x5aaf40 — witness comment on
+	// renderer::LightScene::collect_corona_quads]: one Dictionary per
+	// additive camera-facing quad, keys position (Vector3 Godot world),
+	// half_size (float world units), color (Color, premultiplied additive
+	// including the segment fade). The presenter (effect_light_director.gd)
+	// feeds them into a MultiMesh; marshalling only.
+	TypedArray<Dictionary> collect_corona_rows(const Vector3 &p_camera_pos,
+			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+			int p_time_ms, int p_frame_index, Object *p_weather);
+
 	int live_count() const;
 	Dictionary get_report() const;
 

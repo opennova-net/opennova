@@ -88,6 +88,66 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	assert_eq(report.owner_isolation, "per_model")
 
 
+## Batched static sources spawn through reattach() with a synthetic owner:
+## a subobject-attached record must be owner-scoped (retail attaches the
+## spawning entity whenever the record's attach bone != 0 [orig:
+## Entity_SpawnGlowEffects @ 0x56c8ae]) — before the fix it spawned unowned
+## and leaked onto every nearby draw. A subobject-0 record stays a world
+## light every draw receives.
+func test_static_source_subobject_light_is_owner_scoped() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	var container: Node = world.get_node_or_null("MissionObjects")
+	if container == null:
+		container = Node3D.new()
+		container.name = "MissionObjects"
+		world.add_child(container)
+	# House.3di carries no light records: these draws only ever see what the
+	# static source spawns.
+	var model_a := _placed_model(container, Vector3(0.0, 0.0, 0.0))
+	var model_b := _placed_model(container, Vector3(3.0, 0.0, 0.0))
+	# Shed.3di carries one authored record (atten 0..3); attach it to
+	# subobject 2 in-memory to model the armory lamp shape.
+	var lit := _fixture_object_data("Shed.3di")
+	assert_eq(lit.get_light_count(), 1)
+	assert_true(lit.set_light_field(0, "subobject", 2))
+	var director := EffectLightDirector.new()
+	director.setup(world, func() -> Array:
+		return [{
+			"object_data": lit,
+			"world_transform": Transform3D(Basis.IDENTITY,
+					Vector3(1.5, 0.0, 0.0)),
+		}])
+	director.reattach()
+	assert_eq(director.get_report().live, 1,
+			"the static source spawns its subobject-attached record")
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(1.5, 1.0, 6.0)
+	director.render_frame(camera)
+	var surface_a := _surface_instance(model_a)
+	var surface_b := _surface_instance(model_b)
+	if surface_a == null or surface_b == null:
+		return
+	assert_eq(float(surface_a.get_instance_shader_parameter(
+			"u_point_light_count")), 0.0,
+			"a static subobject light is scoped to its own building, " +
+			"not a nearby draw")
+	assert_eq(float(surface_b.get_instance_shader_parameter(
+			"u_point_light_count")), 0.0,
+			"no bystander draw receives the owned static light")
+	# The same record detached (subobject 0) is a mission-start world light.
+	assert_true(lit.set_light_field(0, "subobject", 0))
+	director.reattach()
+	director.render_frame(camera)
+	assert_eq(float(surface_a.get_instance_shader_parameter(
+			"u_point_light_count")), 1.0,
+			"a subobject-0 static record lights every nearby draw")
+	assert_eq(float(surface_b.get_instance_shader_parameter(
+			"u_point_light_count")), 1.0)
+
+
 func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
 	var scene := LightScene.new()
 	var container := Node3D.new()
