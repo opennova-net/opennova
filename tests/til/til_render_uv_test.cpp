@@ -46,6 +46,45 @@ int main() {
 	if (!expect_close(rotated.corners[0].u, 0.5f - 0.5f / 128.0f, "ROTATE_90 TL U should land on the cell right edge, biased inward")) return 1;
 	if (!expect_close(rotated.corners[0].v, 0.5f / 64.0f, "ROTATE_90 TL V should stay on the cell top edge, biased positive")) return 1;
 
+	// D-TIL-4: retail mirrors the corner UVs first and THEN applies the
+	// rotate as a corner-assignment cycle over the mirrored values; in
+	// sampling-function form that is rotate-then-flip. The orders differ
+	// exactly for rotate plus a single flip (0x05/0x06) — flip-then-rotate
+	// rendered those tiles 180 degrees off (the 00TRa driving-course fork).
+	// [orig: render_water_quad @ 0x604700 — mirrors @ 0x604782/0x6047a9,
+	// rotate cycle @ 0x6047d4..0x604806]
+	// 0x05 (FLIP_X|ROTATE_90): T(x,z) = (z, x).
+	{
+		const opennova::TilUv tl = opennova::til_transform_local_uv(
+		    {0.0f, 0.0f}, opennova::TIL_FLAG_FLIP_X | opennova::TIL_FLAG_ROTATE_90);
+		const opennova::TilUv tr = opennova::til_transform_local_uv(
+		    {1.0f, 0.0f}, opennova::TIL_FLAG_FLIP_X | opennova::TIL_FLAG_ROTATE_90);
+		if (!expect_close(tl.u, 0.0f, "0x05 TL U is z")) return 1;
+		if (!expect_close(tl.v, 0.0f, "0x05 TL V is x")) return 1;
+		if (!expect_close(tr.u, 0.0f, "0x05 TR U is z")) return 1;
+		if (!expect_close(tr.v, 1.0f, "0x05 TR V is x")) return 1;
+	}
+	// 0x06 (FLIP_Y|ROTATE_90): T(x,z) = (1-z, 1-x).
+	{
+		const opennova::TilUv tl = opennova::til_transform_local_uv(
+		    {0.0f, 0.0f}, opennova::TIL_FLAG_FLIP_Y | opennova::TIL_FLAG_ROTATE_90);
+		const opennova::TilUv tr = opennova::til_transform_local_uv(
+		    {1.0f, 0.0f}, opennova::TIL_FLAG_FLIP_Y | opennova::TIL_FLAG_ROTATE_90);
+		if (!expect_close(tl.u, 1.0f, "0x06 TL U is 1-z")) return 1;
+		if (!expect_close(tl.v, 1.0f, "0x06 TL V is 1-x")) return 1;
+		if (!expect_close(tr.u, 1.0f, "0x06 TR U is 1-z")) return 1;
+		if (!expect_close(tr.v, 0.0f, "0x06 TR V is 1-x")) return 1;
+	}
+	// 0x07 (both flips |ROTATE_90): T(x,z) = (z, 1-x) — identical under both
+	// orders, which is why the CP12 flags-7 oracles were blind to D-TIL-4.
+	{
+		const opennova::TilUv tl = opennova::til_transform_local_uv(
+		    {0.0f, 0.0f}, opennova::TIL_FLAG_FLIP_X | opennova::TIL_FLAG_FLIP_Y |
+		        opennova::TIL_FLAG_ROTATE_90);
+		if (!expect_close(tl.u, 0.0f, "0x07 TL U is z")) return 1;
+		if (!expect_close(tl.v, 1.0f, "0x07 TL V is 1-x")) return 1;
+	}
+
 	std::printf("OK: tile render UVs include original half-texel correction\n");
 	return 0;
 }

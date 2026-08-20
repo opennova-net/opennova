@@ -291,7 +291,10 @@ with portable evidence records. The sixteenth pair,
 snapshot at the crossing ground tire tracks and measures the ordered `.til`
 overlay composition divergence (D-TERRAIN-7). All rows bind frozen source
 `3232a5c86b28a29160494286fe9282545e4b8bdb` (an ancestor of the PR #520
-branch), fixture catalog v3 at SHA-256
+branch; PR #520 was rebase-merged, so that commit is kept reachable by the tag
+`render-evidence/2026-08-20` — master's rebased twin `e11d2da04` is
+tree-identical, mirroring the 2026-08-16 precedent), fixture catalog v3 at
+SHA-256
 `8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
 this session's verbatim fresh-process captures, v2's applied poses kept

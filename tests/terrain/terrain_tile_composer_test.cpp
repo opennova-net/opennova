@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -336,18 +337,21 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 	if (!expect_pixel(page, 16, 192, edge_result,
 			"page-edge clipping keeps the first covered row")) return false;
 
-	// FLIP_X then retail ROTATE_90 maps destination TL/TR/BL/BR to source
-	// BR/TR/BL/TL. Interior probes avoid interpolation across quadrant seams.
-	if (!expect_pixel(page, 80, 80, overlay_pixel(base, tile_br, tint),
-			"combined flags map destination TL to source BR")) return false;
-	if (!expect_pixel(page, 112, 80, overlay_pixel(base, tile_tr, tint),
-			"combined flags preserve the transformed top-right sample")) return false;
-	if (!expect_pixel(page, 80, 112, overlay_pixel(base, tile_bl, tint),
-			"output rows follow world +Z through the transformed atlas")) return false;
-	if (!expect_pixel(page, 112, 112, overlay_pixel(base, tile_tl, tint),
-			"tile index and transform map destination BR to source TL")) return false;
+	// FLIP_X|ROTATE_90 (0x05) under retail's mirror-then-corner-cycle order is
+	// T(x,z) = (z, x) — a transpose: destination TL/TR/BL/BR sample source
+	// TL/BL/TR/BR (D-TIL-4). Interior probes avoid interpolation across
+	// quadrant seams. [orig: render_water_quad @ 0x604700 — mirrors
+	// @ 0x604782/0x6047a9, rotate cycle @ 0x6047d4..0x604806]
+	if (!expect_pixel(page, 80, 80, overlay_pixel(base, tile_tl, tint),
+			"combined flags map destination TL to source TL")) return false;
+	if (!expect_pixel(page, 112, 80, overlay_pixel(base, tile_bl, tint),
+			"combined flags map destination TR to source BL")) return false;
+	if (!expect_pixel(page, 80, 112, overlay_pixel(base, tile_tr, tint),
+			"output rows follow world +Z through the transposed atlas")) return false;
+	if (!expect_pixel(page, 112, 112, overlay_pixel(base, tile_br, tint),
+			"combined flags map destination BR to source BR")) return false;
 	if (!expect(pixel(page, 80, 80)[3] ==
-			overlay_pixel(base, tile_br, tint)[3],
+			overlay_pixel(base, tile_tl, tint)[3],
 			"overlay target alpha is written before the additive DOT3 pass")) return false;
 
 	std::array<uint8_t, 4> overlay_target = base;
@@ -411,12 +415,12 @@ uint64_t fnv_byte(uint64_t hash, uint8_t value) {
 	return (hash ^ value) * UINT64_C(1099511628211);
 }
 
-bool cp12_entry_oracle(const opennova::TilOverlayEntry &entry,
+bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 		const Rgba8Image &tilestrip, int entry_index,
+		const opennova::TerrainTilePageKey &page_key,
 		uint64_t expected_rgb_hash, uint64_t expected_alpha_hash) {
 	opennova::TilFile single;
 	single.entries.push_back(entry);
-	const opennova::TerrainTilePageKey page_key{-512, -2048, 0, 256, 2};
 	const Rgba8Image colormap = solid_image(2, 2, {0, 0, 0, 255});
 	// A neutral normal/light pair quantizes the later DOT3 pass to zero. This
 	// isolates the alpha written by retail's preceding SRCALPHA/INVSRCALPHA
@@ -432,21 +436,25 @@ bool cp12_entry_oracle(const opennova::TilOverlayEntry &entry,
 	sources.light_bytes = {128, 128, 128};
 	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
 			cold_job(2, page_key), sources);
-	if (!expect(page.is_valid(), "CP12 entry page composes")) return false;
+	if (!expect(page.is_valid(), "til entry page composes")) return false;
 
 	std::vector<uint8_t> baked;
 	if (!expect(opennova::til_bake_overlay_rgba(single,
 				tilestrip.pixels.data(), static_cast<int>(tilestrip.width),
 				static_cast<int>(tilestrip.height), 1024, 1024, baked),
-			"CP12 entry bakes through the established full-atlas oracle")) {
+			"til entry bakes through the established full-atlas oracle")) {
 		return false;
 	}
 	const int origin_x = static_cast<int>(std::lround(
 			opennova::til_world_x_from_fixed(entry.x_fixed)));
 	const int origin_z = static_cast<int>(std::lround(
 			opennova::til_world_z_from_fixed(entry.z_fixed)));
-	const int page_x = origin_x + 512;
-	const int page_y = origin_z + 1792;
+	// A lod-2 page spans 256 world units over 256 texels, so page texel
+	// coords are world minus the page's world origin.
+	const int page_x = origin_x -
+			(page_key.sector_origin_x + page_key.page_local_x);
+	const int page_y = origin_z -
+			(page_key.sector_origin_z + page_key.page_local_z);
 	uint64_t hash = UINT64_C(1469598103934665603);
 	uint64_t actual_alpha_hash = UINT64_C(1469598103934665603);
 	uint64_t retail_alpha_hash = UINT64_C(1469598103934665603);
@@ -466,7 +474,7 @@ bool cp12_entry_oracle(const opennova::TilOverlayEntry &entry,
 						baked[baked_offset + channel] *
 						static_cast<float>(alpha) / 255.0f));
 				if (!expect(std::abs(static_cast<int>(actual) - expected) <= 1,
-						"CP12 page agrees with full-atlas placement/orientation")) {
+						"til page agrees with full-atlas placement/orientation")) {
 					return false;
 				}
 				hash = fnv_byte(hash, actual);
@@ -480,14 +488,14 @@ bool cp12_entry_oracle(const opennova::TilOverlayEntry &entry,
 		}
 	}
 	if (!expect(hash == expected_rgb_hash,
-			"CP12 entry RGB hash pins atlas cell, flags, and TGA row orientation")) {
+			"til entry RGB hash pins atlas cell, flags, and TGA row orientation")) {
 		std::fprintf(stderr, "  entry=%d actual_hash=%016llx expected_hash=%016llx\n",
 				entry_index, static_cast<unsigned long long>(hash),
 				static_cast<unsigned long long>(expected_rgb_hash));
 		return false;
 	}
 	if (!expect(retail_alpha_hash == expected_alpha_hash,
-			"CP12 source alpha hash pins the retail TGA channel and blend equation")) {
+			"til source alpha hash pins the retail TGA channel and blend equation")) {
 		std::fprintf(stderr,
 				"  entry=%d retail_hash=%016llx expected_hash=%016llx\n",
 				entry_index,
@@ -497,7 +505,7 @@ bool cp12_entry_oracle(const opennova::TilOverlayEntry &entry,
 	}
 	if (!expect(alpha_mismatches == 0 &&
 			actual_alpha_hash == expected_alpha_hash,
-			"CP12 page preserves retail overlay alpha before the DOT3 add")) {
+			"til page preserves retail overlay alpha before the DOT3 add")) {
 		std::fprintf(stderr,
 				"  entry=%d alpha_mismatches=%d actual_hash=%016llx "
 				"retail_hash=%016llx\n",
@@ -506,7 +514,7 @@ bool cp12_entry_oracle(const opennova::TilOverlayEntry &entry,
 				static_cast<unsigned long long>(retail_alpha_hash));
 		return false;
 	}
-	std::printf("PASS: CP12 entry %d RGB/alpha hashes %016llx/%016llx\n",
+	std::printf("PASS: til entry %d RGB/alpha hashes %016llx/%016llx\n",
 			entry_index, static_cast<unsigned long long>(hash),
 			static_cast<unsigned long long>(actual_alpha_hash));
 	return true;
@@ -559,12 +567,250 @@ bool test_optional_cp12_assets() {
 				opennova::til_world_z_from_fixed(entry_1013.z_fixed))) == -1576 &&
 			entry_1013.tile_index == 41 && entry_1013.flags == 7,
 			"CP12 entry 1013 matches the witnessed tile/flags/placement")) return false;
-	return cp12_entry_oracle(entry_53, tilestrip, 53,
+	const opennova::TerrainTilePageKey cp12_key{-512, -2048, 0, 256, 2};
+	return til_entry_oracle(entry_53, tilestrip, 53, cp12_key,
 			UINT64_C(0x2d98d83388a18b7f),
 			UINT64_C(0x3a3fe23216506883)) &&
-			cp12_entry_oracle(entry_1013, tilestrip, 1013,
+			til_entry_oracle(entry_1013, tilestrip, 1013, cp12_key,
 					UINT64_C(0x67c1b609d0d0ff60),
 					UINT64_C(0x3a3fe23216506883));
+}
+
+// D-TIL-4 oracle: the 00TRa driving-course fork retail draws through the
+// 00tra-tire-marks-retail fixture camera is built from ROTATE_90-plus-single-
+// flip entries (0x05/0x06) — exactly the combos where retail's mirror-then-
+// corner-cycle order diverges from flip-then-rotate. The CP12 oracles are
+// flags-7 and blind to that order, so this leg pins one entry of each combo.
+// Gated like the CP12 leg (docs/asset-gated-tests.md).
+bool test_optional_00tra_fork_oracle() {
+	const char *root = std::getenv("OPENNOVA_JO_DIR");
+	if (root == nullptr || root[0] == '\0') {
+		std::printf("SKIP: OPENNOVA_JO_DIR not set (00TRa fork oracle)\n");
+		return true;
+	}
+
+	opennova::Vfs vfs;
+	if (!expect(vfs.mount_game(root, "revx02", opennova::VfsMountMode::Packed),
+			"OPENNOVA_JO_DIR mounts for the 00TRa fork oracle")) return false;
+	std::vector<uint8_t> til_bytes;
+	std::vector<uint8_t> tga_bytes;
+	if (!vfs.read_file("00TRA.TIL", til_bytes) ||
+			!vfs.read_file("TRNTILE10.TGA", tga_bytes)) {
+		std::printf("SKIP: mounted install lacks 00TRA.TIL/TRNTILE10.TGA\n");
+		return true;
+	}
+	opennova::TilFile tiles;
+	std::string error;
+	if (!expect(opennova::load_til(
+				til_bytes.data(), til_bytes.size(), tiles, error),
+			"00TRA.TIL parses for the fork oracle")) return false;
+	Rgba8Image tilestrip;
+	if (!expect(decode_uncompressed_tga_rgba(tga_bytes, tilestrip),
+			"TRNTILE10.TGA decodes for the fork oracle")) return false;
+	if (!expect(tiles.entries.size() > 781,
+			"00TRa contains witnessed fork entries 761 and 781")) return false;
+
+	const opennova::TilOverlayEntry &entry_761 = tiles.entries[761];
+	const opennova::TilOverlayEntry &entry_781 = tiles.entries[781];
+	if (!expect(static_cast<int>(std::lround(
+				opennova::til_world_x_from_fixed(entry_761.x_fixed))) == 317 &&
+			static_cast<int>(std::lround(
+				opennova::til_world_z_from_fixed(entry_761.z_fixed))) == 350 &&
+			entry_761.tile_index == 42 && entry_761.flags == 0x05,
+			"00TRa entry 761 matches the witnessed tile/flags/placement")) return false;
+	if (!expect(static_cast<int>(std::lround(
+				opennova::til_world_x_from_fixed(entry_781.x_fixed))) == 308 &&
+			static_cast<int>(std::lround(
+				opennova::til_world_z_from_fixed(entry_781.z_fixed))) == 363 &&
+			entry_781.tile_index == 42 && entry_781.flags == 0x06,
+			"00TRa entry 781 matches the witnessed tile/flags/placement")) return false;
+	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
+	return til_entry_oracle(entry_761, tilestrip, 761, fork_key,
+			UINT64_C(0x9bd9ceb8ff8a85b1),
+			UINT64_C(0xd88858b8092111d7)) &&
+			til_entry_oracle(entry_781, tilestrip, 781, fork_key,
+					UINT64_C(0x7c7aa42a36f35e03),
+					UINT64_C(0x7bc3040e0ef8c534));
+}
+
+// DIAGNOSTIC (D-TERRAIN-7 tire-marks investigation): compose the pages around
+// the 00tra-tire-marks-retail fixture pose at every lod and report how many
+// texels the .til overlays touched per page, dumping PPMs to .scratch. Gated
+// like the CP12 leg. Set OPENNOVA_TIL_PROBE_DIR to enable the dump.
+bool test_optional_00tra_tire_probe() {
+	const char *root = std::getenv("OPENNOVA_JO_DIR");
+	const char *probe_dir = std::getenv("OPENNOVA_TIL_PROBE_DIR");
+	if (root == nullptr || root[0] == '\0' || probe_dir == nullptr ||
+			probe_dir[0] == '\0') {
+		std::printf("SKIP: 00TRa tire probe (needs OPENNOVA_JO_DIR + "
+				"OPENNOVA_TIL_PROBE_DIR)\n");
+		return true;
+	}
+
+	opennova::Vfs vfs;
+	if (!expect(vfs.mount_game(root, "revx02", opennova::VfsMountMode::Packed),
+			"OPENNOVA_JO_DIR mounts for the 00TRa tire probe")) return false;
+	std::vector<uint8_t> til_bytes;
+	if (!vfs.read_file("00TRA.TIL", til_bytes)) {
+		std::printf("SKIP: mounted install lacks 00TRA.TIL\n");
+		return true;
+	}
+	opennova::TilFile tiles;
+	std::string error;
+	if (!expect(opennova::load_til(
+				til_bytes.data(), til_bytes.size(), tiles, error),
+			"00TRA.TIL parses")) return false;
+	std::printf("probe: 00TRA.TIL entries=%zu\n", tiles.entries.size());
+
+	// The tile-set name lives in the BMS header at +0x118
+	// [orig: Terrain_LoadEnvironmentConfig @ 0x610940, Bms_TileSetName].
+	Rgba8Image tilestrip;
+	std::vector<uint8_t> bms_bytes;
+	if (vfs.read_file("00TRA.BMS", bms_bytes) && bms_bytes.size() > 0x138) {
+		std::string tileset;
+		for (size_t i = 0x118; i < 0x138 && bms_bytes[i] != 0; ++i) {
+			tileset.push_back(static_cast<char>(
+					std::toupper(static_cast<unsigned char>(bms_bytes[i]))));
+		}
+		std::printf("probe: BMS tile set = '%s'\n", tileset.c_str());
+		std::vector<uint8_t> tga_bytes;
+		if (!tileset.empty() &&
+				vfs.read_file((tileset + ".TGA").c_str(), tga_bytes)) {
+			if (!decode_uncompressed_tga_rgba(tga_bytes, tilestrip)) {
+				tilestrip = Rgba8Image{};
+			}
+		}
+	}
+	const bool real_strip = tilestrip.is_valid();
+	if (!real_strip) {
+		// Coverage-only fallback: placement geometry is tilestrip-independent.
+		tilestrip = solid_image(1024, 1024, {255, 255, 255, 255});
+		std::printf("probe: using solid tilestrip (coverage only)\n");
+	} else {
+		std::printf("probe: real tilestrip %ux%u\n", tilestrip.width,
+				tilestrip.height);
+	}
+
+	// Real colormap when available (00TRa terrain dvxg6 -> polytrn_colormap
+	// dvxg6_c.tga in DVXG6.TRN) so the page BASE pass is diagnosable too;
+	// solid fallback keeps the overlay-coverage half meaningful without it.
+	Rgba8Image colormap;
+	{
+		std::vector<uint8_t> colormap_bytes;
+		if (!vfs.read_file("DVXG6_C.TGA", colormap_bytes) ||
+				!decode_uncompressed_tga_rgba(colormap_bytes, colormap)) {
+			colormap = Rgba8Image{};
+		}
+	}
+	const bool real_colormap = colormap.is_valid();
+	if (real_colormap) {
+		std::printf("probe: real colormap %ux%u\n", colormap.width,
+				colormap.height);
+	} else {
+		colormap = solid_image(2, 2, {96, 128, 64, 255});
+		std::printf("probe: using solid colormap (coverage only)\n");
+	}
+	const Rgba8Image normal = solid_image(2, 2, {128, 128, 128, 128});
+
+	// Fixture pose: player BMS (318.9, -375.7) => terrain world (318.9, 375.7).
+	// Probe the sector-0 rect around it at every page lod.
+	int rect_entries = 0;
+	for (const opennova::TilOverlayEntry &entry : tiles.entries) {
+		const float ex = opennova::til_world_x_from_fixed(entry.x_fixed);
+		const float ez = opennova::til_world_z_from_fixed(entry.z_fixed);
+		if (ex >= 224.0f && ex < 448.0f && ez >= 256.0f && ez < 480.0f) {
+			++rect_entries;
+		}
+	}
+	std::printf("probe: entries in rect x[224,448) z[256,480) = %d\n",
+			rect_entries);
+
+	for (uint8_t lod = 1; lod <= 4; ++lod) {
+		const int span =
+				opennova::TerrainTileCompositionCache::page_world_span(lod);
+		for (int page_z = 256; page_z < 448; page_z += span) {
+			for (int page_x = 256; page_x < 384; page_x += span) {
+				const int local_x = page_x - (page_x / 512) * 512;
+				const int local_z = page_z - (page_z / 512) * 512;
+				const opennova::TerrainTilePageKey key{
+						(page_x / 512) * 512, (page_z / 512) * 512,
+						local_x, local_z, lod};
+				// Runtime parity: the device forwards the CPT tile's absolute
+				// source coords as the source-atlas origin
+				// (terrain_frame source_page_x/z = tile.tile_x/tile_y).
+				// 00TRa (dvxg6) is a wrapped 8x8-sector world built from a
+				// 2x2-source atlas; world sectors (0..1, 0..1) route through
+				// the .trn sector grid (origin -4,-4) to sector ids
+				// [[4,2],[3,1]] -> atlas quadrants. Reproduce that routing so
+				// the base pass samples the quadrant the runtime samples.
+				static const int kQuadrantOx[2][2] = {{512, 0}, {512, 0}};
+				static const int kQuadrantOz[2][2] = {{512, 512}, {0, 0}};
+				const int world_sx = page_x / 512;
+				const int world_sz = page_z / 512;
+				const int source_origin_x =
+						kQuadrantOx[world_sz & 1][world_sx & 1] +
+						(page_x & 511);
+				const int source_origin_z =
+						kQuadrantOz[world_sz & 1][world_sx & 1] +
+						(page_z & 511);
+
+				opennova::terrain::TerrainTilePageSourceView with;
+				with.colormap = &colormap;
+				with.heightfield_normal = &normal;
+				with.tile_info = &tiles;
+				with.tilestrip = &tilestrip;
+				with.light_bytes = {128, 128, 128};
+				with.tile_overlay_tint = {254.0f / 255.0f, 254.0f / 255.0f,
+						254.0f / 255.0f};
+				const Rgba8Image page = opennova::terrain::
+						compose_terrain_tile_page(
+								cold_job(lod, key, source_origin_x,
+										source_origin_z), with);
+
+				opennova::terrain::TerrainTilePageSourceView without = with;
+				without.tile_info = nullptr;
+				const Rgba8Image bare = opennova::terrain::
+						compose_terrain_tile_page(
+								cold_job(lod, key, source_origin_x,
+										source_origin_z), without);
+
+				if (!expect(page.is_valid() && bare.is_valid(),
+						"00TRa probe pages compose")) {
+					return false;
+				}
+				int touched = 0;
+				for (size_t i = 0; i + 3 < page.pixels.size(); i += 4) {
+					if (page.pixels[i] != bare.pixels[i] ||
+							page.pixels[i + 1] != bare.pixels[i + 1] ||
+							page.pixels[i + 2] != bare.pixels[i + 2] ||
+							page.pixels[i + 3] != bare.pixels[i + 3]) {
+						++touched;
+					}
+				}
+				std::printf("probe: lod=%d page=(%d,%d) span=%d "
+						"overlay_texels=%d/%d\n",
+						lod, page_x, page_z, span, touched,
+						static_cast<int>(page.width * page.height));
+
+				char name[256];
+				std::snprintf(name, sizeof(name),
+						"%s/page-lod%d-x%04d-z%04d.ppm", probe_dir, lod,
+						page_x, page_z);
+				std::FILE *out = std::fopen(name, "wb");
+				if (out != nullptr) {
+					std::fprintf(out, "P6\n%u %u\n255\n", page.width,
+							page.height);
+					for (size_t i = 0; i + 3 < page.pixels.size(); i += 4) {
+						std::fputc(page.pixels[i], out);
+						std::fputc(page.pixels[i + 1], out);
+						std::fputc(page.pixels[i + 2], out);
+					}
+					std::fclose(out);
+				}
+			}
+		}
+	}
+	return true;
 }
 
 } // namespace
@@ -575,6 +821,8 @@ int main() {
 	if (!test_source_orientation_quadrant_clamp_and_dot3()) return 1;
 	if (!test_overlay_atlas_flags_tint_clipping_and_order()) return 1;
 	if (!test_optional_cp12_assets()) return 1;
+	if (!test_optional_00tra_fork_oracle()) return 1;
+	if (!test_optional_00tra_tire_probe()) return 1;
 	std::printf("OK: terrain tile page composition\n");
 	return 0;
 }

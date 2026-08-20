@@ -129,14 +129,26 @@ inline TilUv til_transform_local_uv(TilUv uv, uint8_t flags) {
 	// (1-v, u), a 90-degree CCW image rotation. The prior (v, 1-u) reading was
 	// the CW transpose — every ROTATE_90 tile rendered 180 degrees off
 	// (docs/tiles/til-re.md D-TIL-2, FIXED).
+	//
+	// Composition order (docs/tiles/til-re.md D-TIL-4): retail mirrors the
+	// CORNER UV variables
+	// first (bit 0 @ 0x604782, bit 1 @ 0x6047a9) and only then applies the
+	// rotate as a corner-ASSIGNMENT cycle over those already-mirrored values
+	// (@ 0x6047d4). Permuting corner assignments is the inverse mapping of
+	// transforming the sampling function, so in sampling-function form the
+	// faithful order is ROTATE FIRST, THEN FLIPS. The two orders agree for
+	// pure rotate (0x04), pure flips, and rotate+both flips (0x07), but for
+	// rotate plus exactly one flip (0x05/0x06) flip-then-rotate renders the
+	// art 180 degrees off — witnessed against the 00TRa driving-course fork
+	// (entries 731/746/761/781) that retail draws through the fixture camera.
+	if (flags & TIL_FLAG_ROTATE_90) {
+		uv = TilUv{1.0f - uv.v, uv.u};
+	}
 	if (flags & TIL_FLAG_FLIP_X) {
 		uv.u = 1.0f - uv.u;
 	}
 	if (flags & TIL_FLAG_FLIP_Y) {
 		uv.v = 1.0f - uv.v;
-	}
-	if (flags & TIL_FLAG_ROTATE_90) {
-		uv = TilUv{1.0f - uv.v, uv.u};
 	}
 	return uv;
 }

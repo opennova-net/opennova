@@ -22,7 +22,7 @@ the format and transforms against the **retail** render path
 | Overlay entry (12 B: x, z, tile_index, flags) | **MATCHING** | `PolyTrn_RenderTile @ 0x60df0d` reads `g_TerrainTileArray` in 12-B strides — `x @+0`, `z @+4` (stored **negated**), `tile_index @+8` (byte), `flags @+9` (byte); our `TilOverlayEntry` is `int32 x_fixed / int32 z_fixed / u8 tile_index / u8 flags / u16 reserved` |
 | Foliage exclusion AABB | **MATCHING** | `Foliage_PathBlockedByPlacedTile @ 0x606490` linearly scans this same array with an inclusive candidate-square/16x16-entry overlap; `til_blocks_foliage` pins boundary and stored-negated-Z vectors |
 | Atlas UV mapping | **MATCHING** | retail `col = tile_index % dword_319F7B8`, `row = tile_index / dword_319F7B8`, `u = col·step_u (flt_319F7C0)`, `v = row·step_v (flt_319F7C4)`; our `til_build_entry_uv_quad` (`tile_index % tiles_x` / `/ tiles_x`, `·step_u`/`·step_v`) |
-| Flip/rotate flags (0x01/0x02/0x04) | **MATCHING (rotate direction corrected 2026-07-15, D-TIL-2)** | `render_water_quad @ 0x604700`: `flags & 1` swaps U (@ 0x604782), `& 2` swaps V (@ 0x6047a9), `& 4` rotates the UV quad 90° **CCW** via the corner cycle `NW←NE, NE←SE, SE←SW, SW←NW` (@ 0x6047d4..0x604806) = per-corner `(u,v) → (1−v, u)`. The reimpl's prior `(v, 1−u)` was the CW transpose — every ROTATE_90 tile drew 180° off (visible as disoriented tire-track tiles on 00TRa) |
+| Flip/rotate flags (0x01/0x02/0x04) | **MATCHING (rotate direction corrected 2026-07-15, D-TIL-2; composition order corrected 2026-08-20, D-TIL-4)** | `render_water_quad @ 0x604700`: `flags & 1` swaps U (@ 0x604782), `& 2` swaps V (@ 0x6047a9), `& 4` rotates the UV quad 90° **CCW** via the corner cycle `NW←NE, NE←SE, SE←SW, SW←NW` (@ 0x6047d4..0x604806) = per-corner `(u,v) → (1−v, u)`. The mirrors run FIRST and the rotate permutes the mirrored corner assignments — in sampling-function form: rotate, then flips (D-TIL-4). Full combo table: `0x04 → (1−z, x)`, `0x05 → (z, x)`, `0x06 → (1−z, 1−x)`, `0x07 → (z, 1−x)` |
 | Half-texel UV shift | **MATCHING** | retail `u += ±0.5·flt_319F7C8`, `v += ±0.5·flt_319F7CC` (one uniform sign pair from the post-flag corner min/max comparison, applied to all four corners), like `til_build_entry_render_uv_quad`'s half-texel |
 | Z world-convention negation | **MATCHING** | retail stores `z` and reads `-z` (`waterOverlayCount = -*(v20-1)`); our `til_world_z_from_fixed` returns `-z_fixed/…` |
 | Tile-cache render-target alpha | **FIXED 2026-08-17 (D-TIL-3)** | base pass clears A; mode `0x631` blends overlay RGBA with `SRCALPHA/INVSRCALPHA`; the later DOT3 pass is additive `ONE/ONE`. The page composer formerly blended RGB only, leaving opaque CP12 road tiles at terrain-light A instead of retail's saturated A |
@@ -49,6 +49,15 @@ applies the flip/rotate flags to the UV corners.
   UVs permute `A←B, B←D, D←C, C←A` (@ `0x6047d4..0x604806`), i.e. per corner
   `(u,v) → (1−v, u)` = `TIL_FLAG_ROTATE_90` (reimpl corrected 2026-07-15;
   D-TIL-2).
+- Composition order: the flag blocks run in bit order 1 → 2 → 4, so the
+  mirrors rewrite the corner UV variables FIRST and the rotate then permutes
+  the already-mirrored assignments. Corner-assignment permutation is the
+  inverse mapping of a sampling-function transform, so the faithful
+  sampling-function order is **rotate, then flips** — the orders differ
+  exactly for rotate + a single flip (`0x05 → T(x,z)=(z,x)`,
+  `0x06 → (1−z,1−x)`); rotate + both flips (`0x07 → (z,1−x)`) and all
+  flag singletons agree under either order (D-TIL-4, reimpl corrected
+  2026-08-20).
 - then a ±half-texel bias (`flt_319F7C8`/`flt_319F7CC`): ONE sign pair,
   chosen from the post-flag corner min/max comparison, applied uniformly to
   all four corners.
@@ -104,12 +113,43 @@ exclusion, and listen-server initial state.
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
+| D-TIL-4 | A | **FIXED 2026-08-20** | Flip/rotate **composition order**: retail mirrors the corner UV variables first (`&1` @ 0x604782, `&2` @ 0x6047a9) and then applies the rotate as a corner-**assignment** cycle over those already-mirrored values (@ 0x6047d4). Permuting corner assignments is the inverse of transforming the sampling function, so in sampling-function form the faithful order is **rotate, then flips**. The two orders agree for `0x04`, pure flips, and `0x07` — but for rotate + exactly one flip (`0x05` → `T(x,z)=(z,x)`, `0x06` → `(1−z,1−x)`) the reimpl's flip-then-rotate drew the art 180° off. Witnessed against 00TRa's driving-course fork (entries 731/746/761/781, tiles 40/42) which retail draws through the `00tra-tire-marks-retail` camera; the fix dropped that fixture's full-frame MAE 16.35 → 12.17. The CP12 oracles are flags-`0x07` and were blind to this; `terrain_tile_composer` now pins 00TRa entries 761 (`0x05`) and 781 (`0x06`), and `til_render_uv` pins the `0x05/0x06/0x07` transform functions. Same shared helper (`til_transform_local_uv`) — all consumers inherit. |
 | D-TIL-3 | A | **FIXED 2026-08-17** | The runtime page composer reproduced `.til` source-over in RGB but preserved bare-ground DOT3 A. Retail blends all four target channels before additively drawing DOT3, so CP12's opaque road-marking tiles saturate cache A and receive the witnessed lighting; composing ordered overlay A before the DOT3 add restores that result. |
 | D-TIL-2 | A | **FIXED 2026-07-15** | `ROTATE_90` rotated the wrong way: the reimpl applied the CW transpose `(v, 1−u)` where retail's corner cycle @ `render_water_quad 0x6047d4..0x604806` is the CCW `(1−v, u)` — every rotated tile rendered 180° off, scrambling multi-tile tire-track curves (user-reported on 00TRa). One shared helper (`til_transform_local_uv`) fixed; overlay bake, ONED preview, and the GDScript binding all inherit it. |
 | D-TIL-1 | B | **FIXED (faithful) 2026-07-05** | `TIL_FLAG_OUTLINE` (0x08): the LINELIST perimeter-outline pass is **jodemo-only** (`Terrain_DrawTileOverlays2D @ 0x5C79C0`). Retail JO's tile-overlay render `render_water_quad @ 0x604700` (via `PolyTrn_RenderTile @ 0x60df0d`) handles only bits 0/1/2 and draws a single TRIANGLESTRIP — no outline. Our code likewise **parses/preserves** the flag (in `TIL_FLAG_AUTHORED_MASK`, for round-trip) but renders no outline — so we already match retail JO (both omit it). Faithful, not a divergence; the flag is unconsumed-in-retail-JO (legitimately closed per the faithful-vs-open axis). |
 
 Everything else (entry layout, atlas UV, flip/rotate, half-texel, Z negation,
 the 128-LRU cache, and foliage AABB scan) is byte/behaviour-exact against retail.
+
+## The tile-set atlas source (witnessed 2026-08-20)
+
+The overlay pass samples the texture `Terrain_LoadTileSetAtlas @ 0x604a90`
+loads — the **tile-set strip**, not a lightmap: `Terrain_LoadEnvironmentConfig @ 0x610940` copies
+`Bms_TileSetName` (the BMS header's `+0x118` name, e.g. `trntile10`) into the
+terrain-config string slot `configData+0xD00` (@ 0x6109d8) and appends `.TGA`;
+`PolyTrn_InitTextures @ 0x60aaa0` passes that slot (@ 0x60c5b9) to the loader,
+which derives `Terrain_TileSetTilesX = width/64` and the `flt_319F7C0/C4`
+UV steps plus the `flt_319F7C8/CC` half-texel factors — the exact atlas math
+the overlay draw consumes (@ 0x60dec3..0x60dee5). The cluster's historical
+`Terrain_Lightmap*` misnomer names were renamed to `Terrain_TileSet*` in the
+IDB and every doc citation on 2026-08-20.
+
+Two sibling systems witnessed while isolating the overlay producer, neither
+of which contributes authored `.til` content:
+
+- **Scorch decals**: the second overlay loop in `PolyTrn_RenderTile`
+  (@ 0x60df71..0x60e0af) walks `dword_319A2D4` 20-byte rect records at
+  `unk_31A1870` (x0,z0,x1,z1 in 16.16 + a pass index into `dword_319F910[]`,
+  textures loaded by `Terrain_LoadScorchTextures @ 0x604ce0`) and draws each
+  as a full-rect quad, diffuse white (gray `0xFF808080` when `dword_319FBB8`).
+  These are runtime damage decals — the record array is empty in a fresh
+  session, so registered render fixtures never see them (unhosted; noted at
+  D-TERRAIN-7's ordered-contributions item).
+- **`<tileset>.TSD`**: `configData+0xE00` holds the tileset name with the
+  `TSD` extension (@ 0x7DF3E4); `PolyTrn_InitTextures` parses it via
+  `File_ParseASCIIFile` with callback `sub_604C00 @ 0x604c00`, mapping
+  `INDEX_<n> <TSD_NAME>` lines into the 256-entry per-tile-index surface-type
+  table `byte_319F7D8`. Surface classification only — no render contribution.
 
 ## Cross-references
 

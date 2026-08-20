@@ -349,7 +349,7 @@ detail-average × ramp — ×2 combined on the non-multitexture path — diffuse
 0), and draws 4 quadrants per sector through the lightmap TILE cache
 (`Terrain_FindSectorPatchRT @ 0x6042a0`; the planar world→tile-UV matrix stored @ 0x3266b88
 feeds the wind VS's c7/c8 projection). The mission lightmap TGA
-(`Terrain_LoadLightmapTexture @ 0x604a90`: 64-px tiles, dims + reciprocals
+(`Terrain_LoadTileSetAtlas @ 0x604a90`: 64-px tiles, dims + reciprocals
 @ 0x319f7b0..) is sampled by `render_foliage_billboards @ 0x607b30` and
 `PolyTrn_RenderTile @ 0x60da70` via the view @ 0x319f7d4. The CPU-side
 1024×1024 premultiplied colormap (`PolyTrn_ColormapPixels @ 0x319f79c`) is
@@ -539,7 +539,7 @@ directional with 0.75 ambient material.
 | 0x2bebd68..70 | outDir / dword_* | RenderSlot_DefaultLightDirX/Y/Z | the sun default for slot lighting |
 | 0x31a182c / 0x31a183c | flt_* | PolyTrn_PSConstC1_LightColorR / PolyTrn_PSConstC0_SkyColorR | the terrain PS constants (c1 = light, c0 = sky) |
 | 0x849930 | dword_849930 | PolyTrn_SunToBlendRatioColor | packed sun/combined ratio for the tile renderers |
-| 0x319f7d0/d4, 0x319f7b0..bc | dword_* | Terrain_LightmapTexture/TexView, Terrain_LightmapWidth/Height/TilesX/TilesY | the mission lightmap TGA set |
+| 0x319f7d0/d4, 0x319f7b0..bc | dword_* | Terrain_TileSetTexture/TexView, Terrain_TileSetAtlasWidth/Height/TilesX/TilesY | the terrain tile-set overlay atlas (`Bms_TileSetName` + `.TGA`; renamed 2026-08-20 from the `Terrain_Lightmap*` misnomers — see tiles/til-re.md, tile-set atlas source) |
 | 0x319f79c | dword_319F79C | PolyTrn_ColormapPixels | the CPU 1024×1024 premultiplied colormap |
 | 0x2721364..78 | dword_* / srcHeight | Render_Clip1DTexture/PhongMapTexture/AngleMapTexture/CubeNormalizeTexture/CubeRotSpecularTexture/CubeEnvironmentTexture | the shared texture set (slots 196-206); `srcHeight` was a kong misnomer on the ENV CUBE |
 | 0x2732db0..e0 | dword_* | Light_DOT3PixelShader, Light_Tex{Light2D,Spot2D,Spot1D,DepthGradW,DepthGradT,Corner} | the Lighting_InitTextures resource set |
