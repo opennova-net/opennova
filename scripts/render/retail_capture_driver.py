@@ -27,7 +27,7 @@ should be derived from.
 
 Retail also pins a player who is already in water: float/settle physics
 overrides the applied z and the residual repeats bit-for-bit. Only the first
-teleport of a process lands, so water fixtures need ``--fresh-host``.
+teleport of a process lands, so water fixtures need ``--fresh-process``.
 
 See docs/render/render-parity-runbook.md.
 """
@@ -225,12 +225,15 @@ def main(argv: list[str] | None = None) -> int:
              "registrar will not accept against that same catalog",
     )
     parser.add_argument(
-        "--fresh-host", metavar="MISSION.bms",
+        "--fresh-process", metavar="MISSION.bms",
         help="launch a dedicated retail process per fixture; required for "
              "water fixtures, where a player already in water is pinned",
     )
     parser.add_argument("--run-root", type=Path,
-                        help="run artifact root for --fresh-host launches")
+                        help="run artifact root for --fresh-process launches")
+    parser.add_argument("--onhook-log", type=Path,
+                        help="log path of an already-running instance; "
+                             "required without --fresh-process")
     parser.add_argument("fixtures", nargs="+")
     args = parser.parse_args(argv)
 
@@ -238,13 +241,13 @@ def main(argv: list[str] | None = None) -> int:
     client = Client(args.onhook_mcp)
     failures: list[str] = []
     try:
-        if args.fresh_host:
+        if args.fresh_process:
             run_root = args.run_root or (args.output / "_runs")
             for fixture_id in args.fixtures:
                 run_id = f"rp-{fixture_id}"[:60]
-                print(f"launching fresh host for {fixture_id} ...")
-                host = client.tool("onhook_host_lan", {
-                    "mission": args.fresh_host,
+                print(f"launching a dedicated retail process for {fixture_id} ...")
+                retail_host = client.tool("onhook_host_lan", {
+                    "mission": args.fresh_process,
                     "game_dir": str(args.game_dir),
                     "expansion": args.expansion,
                     "windowed": True,
@@ -259,12 +262,12 @@ def main(argv: list[str] | None = None) -> int:
                     instances = client.tool("onhook_instances", {})
                     if not capture_fixture(
                         client, catalog, fixture_id, args,
-                        host["instance_id"], instances,
-                        Path(host["log_path"]),
+                        retail_host["instance_id"], instances,
+                        Path(retail_host["log_path"]),
                     ):
                         failures.append(fixture_id)
                 finally:
-                    client.tool("onhook_stop_run", {"run_id": host["run_id"]})
+                    client.tool("onhook_stop_run", {"run_id": retail_host["run_id"]})
                     time.sleep(3)
         else:
             instances = client.tool("onhook_instances", {})
@@ -273,12 +276,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise DriverError(
                     f"expected exactly 1 capture-ready instance, got {len(live)}"
                 )
-            if not args.run_root:
+            if not args.onhook_log:
                 raise DriverError(
-                    "--run-root is required without --fresh-host, to locate "
-                    "the running host's onhook.log"
+                    "--onhook-log is required without --fresh-process: pass the "
+                    "log path the running instance reported at launch"
                 )
-            log_path = args.run_root / "host" / "onhook.log"
+            log_path = args.onhook_log
             print(f"instance {live[0]['instance_id']} pid {live[0]['pid']}")
             for fixture_id in args.fixtures:
                 if not capture_fixture(
