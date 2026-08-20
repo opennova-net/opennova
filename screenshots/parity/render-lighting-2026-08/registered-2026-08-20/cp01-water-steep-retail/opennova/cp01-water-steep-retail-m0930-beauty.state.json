@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 11758610.0,
+		"captured_at_ticks_usec": 11741924.0,
 		"height": 1200.0,
-		"id": "cp01-water-steep-retail-m0930-beauty-11758610-f210",
+		"id": "cp01-water-steep-retail-m0930-beauty-11741924-f210",
 		"label": "cp01-water-steep-retail-m0930-beauty",
 		"mime": "image/png",
 		"png_path": "cp01-water-steep-retail-m0930-beauty.png",
-		"png_sha256": "835321d7372a32e47b29488c4fea19a29b0c821f6426fb4079826422444d5abd",
+		"png_sha256": "1181df02faef1ee3127ef4c7892f89a5c3c37f535e980f25bb3aed03af9a5ad9",
 		"process_frame": 210.0,
 		"width": 2000.0
 	},
@@ -172,8 +172,8 @@
 			"fog_end": 250.0,
 			"fog_start": 62.5,
 			"fog_type": 3.0,
-			"generation": 469.0,
-			"light_state_generation": 181.0,
+			"generation": 468.0,
+			"light_state_generation": 180.0,
 			"loaded": true,
 			"mission_minute_of_day": 930.0,
 			"mission_time_fixed24": 260046848.0,
@@ -276,9 +276,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 244.0,
+			"physics": 242.0,
 			"process": 210.0,
-			"ticks_usec": 11758698.0
+			"ticks_usec": 11741983.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -413,10 +413,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 141.0,
 					"physical_channels": 8.0,
-					"tick_us": 5664.0,
+					"tick_us": 6112.0,
 					"voice_writes": 16.0
 				},
-				"audio_us": 5726.0,
+				"audio_us": 6153.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -468,11 +468,11 @@
 					],
 					"terrain_scene_counter": 206.0
 				},
-				"foliage_us": 640.0,
+				"foliage_us": 818.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 3.0,
-					"present_us": 2785.0,
+					"effects_us": 4.0,
+					"present_us": 2778.0,
 					"sim": {
 						"ai_count": 126.0,
 						"listen_server": true,
@@ -496,12 +496,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2200.0,
-					"tick_us": 2471.0,
+					"sim_us": 2331.0,
+					"tick_us": 2678.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 4988.0,
-				"tick_us": 18325.0
+				"runtime_us": 5113.0,
+				"tick_us": 17800.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -766,7 +766,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 8637.0,
+				"cache_hits": 8662.0,
 				"cache_misses": 262.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -774,7 +774,7 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 27524.0,
+				"frame_compose_us": 27420.0,
 				"frame_output_hash": -7742074160444882900.0,
 				"frame_output_pages": 2.0,
 				"frame_ready_hits": 53.0,
@@ -1102,7 +1102,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "83a1306fbc766dc21172d72d914e3facbed2d1bb9842f8567a8db1c4e3159644",
+		"source_state_sha256": "acaeb104277d7291b816981da97e8dae26a7eb8f63241993fe9ed7ec496e6cd6",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

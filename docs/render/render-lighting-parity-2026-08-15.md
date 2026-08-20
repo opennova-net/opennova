@@ -284,12 +284,15 @@ clock as evidence for the next one.
 
 The current publication is indexed at
 [`screenshots/parity/render-lighting-2026-08/registered-2026-08-20/`](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md).
-It contains all 15 registered pairs, 15 overlays, 15 absolute-difference
-images, 15 normalized OpenNova images, and 75 raw OpenNova diagnostic images
-with portable evidence records. All rows bind frozen source
-`eb6574e6f0b873ececc009591888053c4460fc7b` (an ancestor of the PR #520
+It contains all 16 registered pairs, 16 overlays, 16 absolute-difference
+images, 16 normalized OpenNova images, and 80 raw OpenNova diagnostic images
+with portable evidence records. The sixteenth pair,
+`00tra-tire-marks-retail`, was added 2026-08-20 from an OpenNova debug
+snapshot at the crossing ground tire tracks and measures the ordered `.til`
+overlay composition divergence (D-TERRAIN-7). All rows bind frozen source
+`3232a5c86b28a29160494286fe9282545e4b8bdb` (an ancestor of the PR #520
 branch), fixture catalog v3 at SHA-256
-`ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c` — minted by
+`8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
 this session's verbatim fresh-process captures, v2's applied poses kept
 exactly —
@@ -300,9 +303,9 @@ Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 15 comparison-v6
-manifests, full-frame MAE spans `5.009684`–`21.022220`, `world_center` MAE
-spans `2.493603`–`23.978190`, and `viewmodel_arms` MAE spans
-`6.079321`–`29.923836`. These are descriptive deltas rather than parity
+manifests, full-frame MAE spans `5.102488`–`21.026561`, `world_center` MAE
+spans `2.493608`–`23.971735`, and `viewmodel_arms` MAE spans
+`6.086196`–`30.619130`. These are descriptive deltas rather than parity
 thresholds; no metric from a superseded set is carried forward as if it
 described these images.
 
@@ -590,7 +593,7 @@ inventory:
    GDExtension, retail executable, MCP/proxy/forwarder, packed mission/archive,
    same-PID frame, pose/projection, and catalog facts retained by registration;
 4. the mission, final fixture ID, current catalog hash
-   `ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c`,
+   `8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef`,
    exact fixture-result FOV/TOD/mission bindings, authored minute, raw
    resolutions, declared 2000→1920 transform, capture modes, captions, and the
    matched HUD-hidden M16/bare-arms/viewmodel/terrain contract;

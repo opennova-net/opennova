@@ -19,7 +19,7 @@
     "retail": "Pre-HUD snapshot - bare arms - M16 Burst - terrain - frame-correlated"
   },
   "capture_mode": "hud_hidden",
-  "catalog_sha256": "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c",
+  "catalog_sha256": "8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef",
   "comparison_presentation": {
     "contract": {
       "ads_active": false,
@@ -402,15 +402,15 @@
       ],
       "gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "928478c02b671ae983b07ec552bebddde6da36beeb4fff7095f748439b92c4e0",
-      "sha256": "b0c3be50138b643bfe74ee2e694283f49724b4f77e5755e13d1db8452886358e",
-      "source_commit": "eb6574e6f0b873ececc009591888053c4460fc7b",
+      "manifest_sha256": "f5829864a76e2599b8c706ebc3834dc8063fafa43fcc774b7e0ac4861b45ccce",
+      "sha256": "0b8e0c93bb34ed64ea33cb8d0c0c4c8f40f269aa73a884229538c2f9a2b2ed20",
+      "source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
       "source_name": "cp01-water-shallow-retail-m0930-beauty.png",
       "state_name": "cp01-water-shallow-retail-m0930-beauty.state.json",
-      "state_sha256": "e36ec67831fd6e572497863b33118d885fbf586a8bace7f51ebbe3dbf8b48fdb"
+      "state_sha256": "c3dbf2cab505605b6cda8f9f91874ab5bb44ab7a6e08e9cf824dd8316c036e35"
     },
     "retail": {
-      "bundle_sha256": "97bfaeb9b0035c29ec8c76c2ab943a0a8c1b7f785a5b26326e4c398184200b04",
+      "bundle_sha256": "616bbc9fc777f13e9a646149b30bd3fa12797240f2ab5dc495fde5b07d09e1a0",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "eb6574e6f0b873ececc009591888053c4460fc7b",
+      "opennova_source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -604,7 +604,7 @@
     "full_frame": {
       "channel_count": 6912000,
       "max_channel_delta": 245,
-      "mean_abs_channel_delta": 15.943913,
+      "mean_abs_channel_delta": 15.934659,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,13 +612,13 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 29.878848
+      "root_mean_square_channel_delta": 29.871317
     },
     "regions": [
       {
         "channel_count": 1663200,
         "max_channel_delta": 242,
-        "mean_abs_channel_delta": 17.662695,
+        "mean_abs_channel_delta": 17.662294,
         "name": "world_center",
         "pixel_count": 554400,
         "region": [
@@ -627,13 +627,13 @@
           1320,
           420
         ],
-        "root_mean_square_channel_delta": 30.659972,
+        "root_mean_square_channel_delta": 30.659359,
         "type": "roi"
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 221,
-        "mean_abs_channel_delta": 28.730992,
+        "max_channel_delta": 220,
+        "mean_abs_channel_delta": 28.72975,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 45.02687,
+        "root_mean_square_channel_delta": 45.052285,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "cp01-water-shallow-retail-absolute-diff.png",
-      "sha256": "25815339bf4ebb3972dd9b4963f9ffb2fbb962747ab5da49a8de9043970c4c46"
+      "sha256": "9600c3e313f23c383875340d39e3a67e7f1873b27dd9cae708587e35330c8e70"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "cp01-water-shallow-retail-opennova-normalized.png",
-      "sha256": "1c20f2ca156ecc9d170de91e2f866664d696b7dd7fc207d9c594748b65245959"
+      "sha256": "dc72904e5a6e2835292a09d1181d469aba3733f052baf277c725c17da2b6c7ea"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "cp01-water-shallow-retail-overlay-50.png",
-      "sha256": "27dfb3ae7191974efc6b06ed1520630fa55e53de20615d97bbc41f58dab77a73"
+      "sha256": "fa2c049ad5e4d233fc0b9bae1354e944329e412ab617caf7fa299f31ba3817e6"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "cp01-water-shallow-retail-side-by-side.png",
-      "sha256": "c7f24f55d33f2cb7704d0e35fb18ca0ab967a67fd6a70382e3c50339b4a427a4"
+      "sha256": "c58e164aad7fb0ee36c3ba723c9d3123a12275f72f822e9af6497d49c3d0c449"
     }
   },
   "presentations": {

@@ -3,7 +3,7 @@
     "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
     "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
     "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-    "opennova_source_commit": "eb6574e6f0b873ececc009591888053c4460fc7b",
+    "opennova_source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
     "retail_executable_sha256": "b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac"
   },
   "camera_bms": {
@@ -32,7 +32,7 @@
     "video_profile_id": "retail_reference_highest_retail_selectable_v2",
     "width": 1920
   },
-  "catalog_sha256": "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c",
+  "catalog_sha256": "8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef",
   "comparison_presentation": {
     "contract": {
       "ads_active": false,
