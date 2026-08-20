@@ -80,6 +80,10 @@ func tick(world: GameWorld, delta: float) -> void:
 			"cdx": int(card.get("res_dx", 0)),
 			"cdy": int(card.get("res_dy", 0)),
 			"citem": int(card.get("contact_item", 0)),
+			# fall-through instrument
+			"gc": int(card.get("ground_cache", 0)),
+			"gv": bool(card.get("ground_valid", false)),
+			"air": bool(card.get("airborne", false)),
 			"alert": int(card.get("alert", -1)),
 			"tgt": bool(card.get("combat_target_valid", false)),
 		})
