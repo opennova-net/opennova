@@ -133,8 +133,9 @@ int64_t LightScene::spawn_glow(const Dictionary &p_config) {
 	params.disable_terrain = p_config.get("disable_terrain", false);
 	params.disable_objects = p_config.get("disable_objects", false);
 	// Retail render flag 0x100 (the impact flash): the corona re-centers
-	// radius/2 below the light [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3
-	// sets it; EffectWorld_RenderLightCoronas @ 0x5ab037 reads it].
+	// radius/2 below the light (retail: AmmoDef_ProcessImpactEffect @0x40a2b3
+	// sets it; EffectWorld_RenderLightCoronas @0x5ab037 reads it, see
+	// docs/render/render-lighting-re.md).
 	params.corona_lower_half_radius =
 			p_config.get("corona_lower_half_radius", false);
 	return encode_handle(scene_.spawn(params));
@@ -318,8 +319,9 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	// Owner visible-section masks from the same model/owner walk the
 	// per-model light pass runs: a model with an occlusion verdict (mask
 	// != -1) contributes its owner row; everything else passes the gate
-	// like retail's non-pool-2 owners [orig: Terrain_IsBuildingSectionBitSet
-	// @ 0x5c6960 returns TRUE outside the mask array].
+	// like retail's non-pool-2 owners (retail: Terrain_IsBuildingSectionBitSet
+	// @0x5c6960 returns TRUE outside the mask array, see
+	// docs/render/render-lighting-re.md).
 	std::vector<renderer::LightCoronaOwnerMask> owner_masks;
 	const int64_t model_count = p_models.size();
 	owner_masks.reserve(static_cast<size_t>(model_count));
@@ -341,8 +343,9 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	}
 	inputs.owner_masks = owner_masks.data();
 	inputs.owner_mask_count = owner_masks.size();
-	// The fog-to-black fold [orig: CD3DDevice_SetFogAndBlendMode(dev, 2)
-	// @ 0x5aafb6]: primary fog params, color forced black engine-side.
+	// The fog-to-black fold (retail: CD3DDevice_SetFogAndBlendMode(dev, 2)
+	// @0x5aafb6, see docs/render/render-lighting-re.md): primary fog params,
+	// color forced black engine-side.
 	inputs.fog_enabled = p_fog.get("enabled", false);
 	inputs.fog_type = static_cast<int32_t>(
 			static_cast<int>(p_fog.get("type", 0)));
@@ -351,7 +354,7 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
 	// The camera depth plane in mission space: depth grows in front of the
 	// camera, zero at the camera origin (the batch-sort plane retail feeds
-	// the fade [orig: @ 0x5ab2f8..0x5ab33c]; the small near-plane offset is
+	// the fade (retail: @0x5ab2f8..0x5ab33c); the small near-plane offset is
 	// folded into the clamp).
 	const Vector3 forward = p_camera_forward.normalized();
 	const std::array<float, 3> normal_mission = {
