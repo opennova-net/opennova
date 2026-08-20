@@ -1,0 +1,232 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "00tra-armory-glass-retail-m0900-beauty",
+			"png_path": "00tra-armory-glass-retail-m0900-beauty.png",
+			"png_sha256": "e24b90574515ab9a8d834b913085088ce3b6abc0d65739003ea40f72aac57e3f",
+			"source_state_sha256": "e0e43d94cfe4c0df453885ef230c1d5d7ad26495fdb232c47108f095534bff3f",
+			"state_path": "00tra-armory-glass-retail-m0900-beauty.state.json",
+			"state_sha256": "d6e252b4ed4e5152e323c4ea2688d90c947c4c9d898e40eec527c21c4bb755fb",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-armory-glass-retail-m0900-shadows_off",
+			"png_path": "00tra-armory-glass-retail-m0900-shadows_off.png",
+			"png_sha256": "3c47d7a2468435b2f03088dfd4a4a66257003078d02192af25143db849ce9e0b",
+			"source_state_sha256": "6794d00d7379de0739254404e835cf4ad709601b9f8bb79ac5f8dce30c566e95",
+			"state_path": "00tra-armory-glass-retail-m0900-shadows_off.state.json",
+			"state_sha256": "b799f982150856c053e4e4915935e9540876ae8b9404657450c1df94bd32440a",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-armory-glass-retail-m0900-lighting_only",
+			"png_path": "00tra-armory-glass-retail-m0900-lighting_only.png",
+			"png_sha256": "2a9a7ba9a39e28a5328423a8754de65daca7957568a724992a276ab5b40025e3",
+			"source_state_sha256": "8b6d4ceda1cace02d8e401874ba5fa8c1c742dacfd530fb47e3cfca6fb30640a",
+			"state_path": "00tra-armory-glass-retail-m0900-lighting_only.state.json",
+			"state_sha256": "3aacc27786e92022110d7fd6297190ce61220042b2aa3ced9fef21d99f4ed763",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-armory-glass-retail-m0900-unshaded",
+			"png_path": "00tra-armory-glass-retail-m0900-unshaded.png",
+			"png_sha256": "5e712e5b35904fc934971ef82ca61c8684e959c1e306470167efee5f594a3caf",
+			"source_state_sha256": "8dbe345f9c047851a78f0efb5d5a3e06ecd34ff3351884f02966de7e9e4966b9",
+			"state_path": "00tra-armory-glass-retail-m0900-unshaded.state.json",
+			"state_sha256": "c2232405ac5a16e554b3ee14e682708b38876ad12daf100ebf531f2ac4142643",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-armory-glass-retail-m0900-directional_shadow_atlas",
+			"png_path": "00tra-armory-glass-retail-m0900-directional_shadow_atlas.png",
+			"png_sha256": "3b66af1037d6284405838791aa76c81200aa9f08e1a17d772cb89f8487640515",
+			"source_state_sha256": "3c2c61cad3d680b4a5a763e8840438c18eb13fe759eb42095960349858dc2b86",
+			"state_path": "00tra-armory-glass-retail-m0900-directional_shadow_atlas.state.json",
+			"state_sha256": "01cfa71cc8c663906cee4e397eb6094b6193c9f11b77ae1e710230b2db743fe8",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				0.70710676908493,
+				0.0,
+				-0.70710676908493
+			],
+			[
+				-0.0922959595918655,
+				0.991444885730743,
+				-0.0922959595918655
+			],
+			[
+				0.701057374477386,
+				0.130526199936867,
+				0.701057374477386
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": -7.5,
+			"position": [
+				294.375513944598,
+				-418.795945299267,
+				32.5141615252141
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": -45.0
+		},
+		"camera_position_godot": [
+			294.375518798828,
+			32.51416015625,
+			418.795959472656
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				294.3193359375,
+				-419.289215087891,
+				31.0900001525879
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": -7.5,
+				"position": [
+					294.3193359375,
+					-419.289215087891,
+					31.0900001525879
+				],
+				"yaw_deg": -45.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": -7.5,
+			"position": [
+				294.375513944598,
+				-418.795945299267,
+				32.5141615252141
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": -45.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"ffp_glass",
+			"cutout",
+			"building_shadows"
+		],
+		"id": "00tra-armory-glass-retail",
+		"minutes_of_day": [
+			900.0
+		],
+		"mission": "00TRa.bms",
+		"retail_player_bms": {
+			"applied": [
+				294.319338,
+				-419.289213,
+				31.09
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "00TRa.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "64dd18b3122a6c4ee4e173cac1b9a12d19004c32572bd2f1ad113a475fe57407",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "eb6574e6f0b873ececc009591888053c4460fc7b"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

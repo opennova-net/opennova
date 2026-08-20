@@ -16,8 +16,8 @@ refactor, and the evidence plumbing used to compare them across three missions:
 - replacement of runtime-composed object shader source with typed pipeline
   descriptors and finite checked-in technique resources; and
 - frame-correlated diagnostics, capture bundles, exact post-spawn fixtures,
-  and the [current 15-pair max-quality registered review set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-16/README.md),
-  refreshed 2026-08-18.
+  and the [current 15-pair max-quality registered review set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
+  refreshed 2026-08-20.
 
 It does **not** claim that glass/environment cubemaps, sky-dome rendering,
 EffectWorld point lights, or every material technique now match retail. Those
@@ -242,11 +242,13 @@ The barrel fixture retains `FireBrl3.3di`'s single authored `LGHT` identity
 location; it explicitly exposes rather than closes the unhosted EffectWorld
 point-light gap.
 
-### 2026-08-18 maximum-video publication contract
+### Maximum-video publication contract (2026-08-18; unchanged for 2026-08-20)
 
-New evidence uses
-[`render-fixtures-retail-v2.json`](render-fixtures-retail-v2.json) and the sole
-profile `retail_reference_highest_retail_selectable_v2`. All terrain/object
+New evidence uses the current catalog revision --
+[`render-fixtures-retail-v3.json`](render-fixtures-retail-v3.json), whose
+comparison, profile, and presentation contracts are identical to v2's (only
+`camera_bms` was recalibrated from the 2026-08-20 capture session) -- and the
+sole profile `retail_reference_highest_retail_selectable_v2`. All terrain/object
 geometry and texture controls are Highest; water, shadows, particles, framebuffer
 effects, and shaders are at their top menu values; filtering is Anisotropic
 High; compression is Minimal; and effective antialiasing must prove the
@@ -278,19 +280,19 @@ sole authored minute multiplied by 60 as seconds, and the catalog mission
 filename/SHA pair; sequential capture never treats a prior fixture's FOV or
 clock as evidence for the next one.
 
-### Current 2026-08-18 max-quality registered publication
+### Current 2026-08-20 max-quality registered publication
 
 The current publication is indexed at
-[`screenshots/parity/render-lighting-2026-08/registered-2026-08-16/`](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-16/README.md).
-It replaces the lower-quality material that formerly occupied that path and
-contains all 15 registered pairs, 15 overlays, 15 absolute-difference images,
-15 normalized OpenNova images, and 75 raw OpenNova diagnostic images with
-portable evidence records. All rows bind frozen source
-`2cde75ad029be14d1c6e0dd8b034efc5fef017b5` — a pre-land sibling of master's
-`7fb987951` (the two single-commit squashes differ across ~273 files), kept
-reachable by the tag `render-evidence/2026-08-16` so pruning the side branch
-cannot orphan the provenance — fixture catalog v2 at SHA-256
-`607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8`,
+[`screenshots/parity/render-lighting-2026-08/registered-2026-08-20/`](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md).
+It contains all 15 registered pairs, 15 overlays, 15 absolute-difference
+images, 15 normalized OpenNova images, and 75 raw OpenNova diagnostic images
+with portable evidence records. All rows bind frozen source
+`eb6574e6f0b873ececc009591888053c4460fc7b` (an ancestor of the PR #520
+branch), fixture catalog v3 at SHA-256
+`ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c` — minted by
+[`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
+this session's verbatim fresh-process captures, v2's applied poses kept
+exactly —
 stage/restore v3 (tool 3.0.0), raw capture bundle v4 from bridge 1.4/onHook 0.5.0,
 registered capture v5 (tool 4.0.0), and comparison v6 (tool 4.0.0).
 
@@ -298,11 +300,19 @@ Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 15 comparison-v6
-manifests, full-frame MAE spans `6.089059`–`21.948388`, `world_center` MAE spans
-`3.870290`–`32.554461`, and `viewmodel_arms` MAE spans
-`4.142536`–`26.971500`. These are descriptive deltas rather than parity
-thresholds; no metric from the superseded set is carried forward as if it
+manifests, full-frame MAE spans `5.009684`–`21.022220`, `world_center` MAE
+spans `2.493603`–`23.978190`, and `viewmodel_arms` MAE spans
+`6.079321`–`29.923836`. These are descriptive deltas rather than parity
+thresholds; no metric from a superseded set is carried forward as if it
 described these images.
+
+The superseded 2026-08-16/18 publication (catalog v2, frozen source
+`2cde75ad029be14d1c6e0dd8b034efc5fef017b5` — a pre-land sibling of master's
+`7fb987951`, kept reachable by the tag `render-evidence/2026-08-16` so pruning
+the side branch cannot orphan the provenance) is retained only in repository
+history. Its frozen source is not an ancestor of master, which is what
+prompted this refresh; catalog v2 itself is kept as the record of the poses v3
+inherits and is not re-shootable (runbook section 3b).
 
 ### Archived 2026-08-17 HUD-hidden registered side-by-side workflow
 
@@ -567,8 +577,8 @@ Unselected raw bundles, retail tool transcripts, and full baseline sets remain
 machine-local under `.scratch` according to the
 [asset-gated evidence policy](../asset-gated-tests.md); the selected published
 captures and derivatives do not. The current
-[2026-08-18 max-quality registered set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-16/README.md)
-supplies the following catalog-v2/stage-v3/raw-v4/registered-v5/comparison-v6
+[2026-08-20 max-quality registered set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md)
+supplies the following catalog-v3/stage-v3/raw-v4/registered-v5/comparison-v6
 inventory:
 
 1. selected within-run OpenNova `subsystem-ab` sheets and heatmaps committed
@@ -580,7 +590,7 @@ inventory:
    GDExtension, retail executable, MCP/proxy/forwarder, packed mission/archive,
    same-PID frame, pose/projection, and catalog facts retained by registration;
 4. the mission, final fixture ID, current catalog hash
-   `607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8`,
+   `ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c`,
    exact fixture-result FOV/TOD/mission bindings, authored minute, raw
    resolutions, declared 2000→1920 transform, capture modes, captions, and the
    matched HUD-hidden M16/bare-arms/viewmodel/terrain contract;
