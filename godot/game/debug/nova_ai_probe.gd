@@ -48,6 +48,9 @@ func tick(world: GameWorld, delta: float) -> void:
 			"st": int(card.get("state", -1)),
 			"adm": String(card.get("adm_name", "")),
 			"inf": bool(card.get("infantry", false)),
+			"flags": int(card.get("engine_flags", 0)),
+			"alert": int(card.get("alert", -1)),
+			"tgt": bool(card.get("combat_target_valid", false)),
 		})
 	if cards.is_empty():
 		return
