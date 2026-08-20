@@ -301,11 +301,20 @@ int main() {
 					for (const bms::Action &a : ev2.events()[i].actions)
 						(*acts)[action_name(a.action_type)] += 1;
 			}
+			// An event running a KillGroup does not mean anyone DIED - the group may
+			// be empty or already dead. Deaths accumulate here because nothing drains
+			// them headless (the host's route_round_deaths is what clears the list),
+			// so the final size is the run's death total. Retail's baseline capture
+			// shows twelve, so this is the number to compare against.
+			if (acts != nullptr)
+				(*acts)["<deaths raised>"] = static_cast<int>(w2.round_sim.deaths.size());
 			return n;
 		};
-		const int base = run_tour({}, nullptr);
-		std::printf("zone tour (%d ticks per stop): baseline with no player = %d events\n",
-		            hop_ticks, base);
+		std::map<std::string, int> base_acts;
+		const int base = run_tour({}, &base_acts);
+		std::printf("zone tour (%d ticks per stop): baseline with no player = %d events,"
+		            " deaths raised %d\n",
+		            hop_ticks, base, base_acts["<deaths raised>"]);
 		std::vector<int> tour;
 		int have = base;
 		for (int step = 0; step < 8; ++step) {
@@ -328,7 +337,7 @@ int main() {
 			std::printf("  stop %d: zone id %2d centre (%6.0f, %6.0f) -> %d events",
 			            step + 1, world.registry.area(best)->zone_id,
 			            centre[best].first, centre[best].second, have);
-			for (const char *k : {"RedirectGroupTo", "ChangeGroupAI", "KillGroup", "SubGoalWon"})
+			for (const char *k : {"RedirectGroupTo", "ChangeGroupAI", "KillGroup", "<deaths raised>"})
 				if (acts.count(k)) std::printf("  %s x%d", k, acts[k]);
 			std::printf("\n");
 		}
