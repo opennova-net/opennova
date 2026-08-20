@@ -82,6 +82,14 @@ int main() {
 	driver.type = w::SeatType::Driver;
 	stryker_seats.seats.push_back(driver);
 	opts.item_seat_specs.push_back(stryker_seats);
+	// The Blackhawk (2010) needs its control seat AT promote so the vehicle
+	// brain exists for the flight leg.
+	mission::ItemSeatSpec helo_seats;
+	helo_seats.type_id = 2010;
+	w::Seat helo_ctrl;
+	helo_ctrl.type = w::SeatType::Controller;
+	helo_seats.seats.push_back(helo_ctrl);
+	opts.item_seat_specs.push_back(helo_seats);
 	const mission::PromoteResult promo = mission::promote_mission(m, world, ai, opts);
 	expect(promo.nav_channels > 0, "nav channels promoted");
 
@@ -157,6 +165,72 @@ int main() {
 		       "the Stryker drove its route (>25 u from the parking spot)");
 		expect(brain->brain.f[w::AiBrain::kWpNode] >= 20,
 		       "the route was substantially traversed");
+	}
+
+	// ---- The helo AI flight: an AI pilot in the Blackhawk's control seat
+	// flies route 6 (the mission's authored helo route, RedirectGroupTo group 9
+	// -> list 6) with altitude gain. Exercises chel_ai_drive + the shared
+	// aircraft mover's authority leg end to end on the real mission data.
+	// [orig: the CHel AI leg of Entity_UpdateAircraftPhysics @0x490310]
+	{
+		const w::EntityHandle helo = world.registry.find_by_net_id(420);
+		w::Entity *hv = world.registry.get(helo);
+		if (expect(hv != nullptr, "helo SSN 420 promoted")) {
+			// The item db is absent in a bare engine world: supply the traits
+			// row (family Helicopter) and a control seat, as the live game
+			// derives from items.def.
+			w::VehicleTraits ht;
+			ht.family = w::VehicleFamily::Helicopter;
+			ht.player_control = true;
+			ht.turn_rate = 8000000;
+			ht.acceleration = 1200;
+			// The air vertical clamp [+cs, -2cs] — zero pins the climb servo
+			// to the ground; the live game reads itemDef+0x920.
+			ht.climb_speed = 30000;
+			world.vehicle_traits.set(hv->item_id, ht);
+			if (hv->seats.empty()) {
+				w::Seat ctrl;
+				ctrl.type = w::SeatType::Controller;
+				hv->seats.push_back(ctrl);
+			}
+			// An AI pilot seated in control.
+			w::Entity pilot_seed{};
+			pilot_seed.alive = true;
+			pilot_seed.net_id = 61001;
+			pilot_seed.item_id = 2063;
+			pilot_seed.kind = w::EntityKind::Organic;
+			pilot_seed.position = hv->position;
+			world.registry.spawn(0, pilot_seed);
+			expect(world.commands.mount(61001, 420), "AI pilot mounts the helo");
+			// The mission's authored helo route order.
+			expect(world.commands.set_ssn_waypoint(420, 6, 0),
+			       "route 6 lands on the helo");
+
+			const float hx = hv->position.x, hy = hv->position.y,
+			            hz = hv->position.z;
+			for (int t = 0; t < 3000; ++t)
+				world.run_logic_tick(/*is_authority=*/true);
+
+			const w::Entity *ha = world.registry.get(helo);
+			const float dx = ha->position.x - hx;
+			const float dy = ha->position.y - hy;
+			std::printf("diag helo: moved=(%.1f, %.1f) climb=%.1f\n",
+			            dx, dy, ha->position.z - hz);
+			{
+				const w::AiEntity *hb = ai.for_handle(helo);
+				std::printf("diag helo2: brain=%d wpType=%d ch=%d cmd=%d alt=%d "
+				            "engine=%d yawSeeded=%d\n",
+				            int(hb != nullptr),
+				            hb ? hb->brain.f[w::AiBrain::kWpType] : -1,
+				            hb ? hb->brain.f[w::AiBrain::kWpChannel] : -1,
+				            ha->veh.cmd_speed, ha->veh.net_alt_target,
+				            int(ha->veh.net_engine_on), int(ha->veh.yaw_seeded));
+			}
+			expect(dx * dx + dy * dy > 25.0f * 25.0f,
+			       "the helo flew its route (>25 u horizontal)");
+			expect(ha->position.z - hz > 10.0f,
+			       "the helo climbed (>10 u altitude gain)");
+		}
 	}
 
 	if (failures == 0) std::printf("coop convoy: the Stryker departs on the player's mount\n");

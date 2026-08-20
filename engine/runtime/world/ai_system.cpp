@@ -470,17 +470,12 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != 1) return;
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            // Ground/water rows are selector-gated. Direct CHel/cpln rows are
+            // admitted regardless of the selector — they branch to the shared
+            // aircraft mover below, never through tick_vehicle_motor.
             if (traits == nullptr) return;
-            // Direct CHel/cpln rows own a different callback (the helo mover
-            // @0x48FA70's caller is the unported residual); they ride the
-            // pass for its tail only, below — never through tick_vehicle_motor
-            // even if an authored def sets physics.
-            if (vehicle_family_uses_direct_air_mover(traits->family)) {
-                vehicle_pass_handles_.push_back(e.handle);
-                return;
-            }
-            // This is the selector-gated ground-family authority port.
-            if (traits->physics == 0) return;
+            if (traits->physics == 0 &&
+                !vehicle_family_uses_direct_air_mover(traits->family)) return;
             vehicle_pass_handles_.push_back(e.handle);
         });
         for (const EntityHandle h : vehicle_pass_handles_) {
@@ -501,6 +496,36 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
             // stamps every mover carries; rider deltas read (current - saved)].
             stamp_saved_live_pose(*veh);
+            // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
+            // class table routes them to the shared aircraft mover, whose AI
+            // brain leg and physics live in one function. A live PLAYER pilot
+            // drives through the predicted path instead. [orig: the class table
+            // dispatch -> Entity_UpdateAircraftPhysics @0x490310, never the
+            // ground core @0x48af00]
+            if (vehicle_family_uses_direct_air_mover(traits->family)) {
+                if (!veh->veh.net_predicted) {
+                    Entity *actrl = resolve_vehicle_controller(world, *veh);
+                    const bool actrl_alive = actrl != nullptr && actrl->alive &&
+                                             actrl->health > 0;
+                    const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
+                                         actrl->player_class != 0;
+                    if (!aplayer) {
+                        chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
+                                      *traits);
+                        aircraft_client_tick(world, *veh, *traits);
+                    }
+                }
+                if (AiEntity *ve = for_handle(h)) {
+                    ve->pos[0] = to_fixed(veh->position.x);
+                    ve->pos[1] = to_fixed(veh->position.y);
+                    ve->pos[2] = to_fixed(veh->position.z);
+                    ve->heading = veh->veh.yaw_seeded
+                            ? veh->veh.yaw_bam
+                            : bam_heading_from_mission_yaw_deg(
+                                      static_cast<double>(veh->yaw));
+                }
+                continue;
+            }
             // Stage the drive input class the motor will consume: a live PLAYER controller
             // keeps the occupant leg; an AI controller (or none) routes through the brain
             // (state stamps + the witnessed steer/speed leg). [orig: the occupant class

@@ -923,6 +923,18 @@ public:
     void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits, VehicleDriveCmd &out);
 
+    // The CHel AI flight drive: stage this tick's flight commands (fwd/lat
+    // cyclic, steer heading, target altitude, engine flag) into the aircraft
+    // motor's registers and raise VehicleMotorState::ai_drive. Retail computes
+    // this INSIDE the aircraft physics; the split to the decision layer
+    // mirrors vehicle_ai_drive. Body in ai_waypoints.cpp.
+    // [orig: the AI leg of Entity_UpdateAircraftPhysics @0x490310 — parked
+    //  state-14 block, the crewed 14->7 transition, waypoint target + turn
+    //  budget, cyclic (132*sin/cos)>>22 with the near-ground 1/8 damp,
+    //  collective from the altitude error, the AGL floor avgGround + bound/4]
+    void chel_ai_drive(World &world, Entity &veh, const Entity *controller,
+                       const VehicleTraits &traits);
+
     // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
     // and wrapping SUB for every other nonzero direction. Clamp/stop only on
     // strict upper/negative overshoot; an exact endpoint remains active.

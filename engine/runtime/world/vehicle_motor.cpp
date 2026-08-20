@@ -1958,7 +1958,13 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
 
 void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
-    if (!m.net_predicted) return;
+    // Authority AI flight: chel_ai_drive staged this tick's commands; run the
+    // same servos/integration the predicted path uses, skipping the client
+    // interp/mirror blocks. Retail is ONE function for both.
+    // [orig: Entity_UpdateAircraftPhysics @0x490310]
+    const bool ai_drive = m.ai_drive;
+    m.ai_drive = false;
+    if (!m.net_predicted && !ai_drive) return;
     if (!m.yaw_seeded) {
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;
@@ -1986,7 +1992,8 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
     // snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
     // {8,10,15,20,25,32}, yaw (d+10)/20 over 20 ticks, Z stepped like X/Y.
-    if (m.net_interp_progress == 0) {
+    // The authority AI leg skips it: no wire targets exist on the host row.
+    if (!ai_drive && m.net_interp_progress == 0) {
         const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
         const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
         const int64_t dz = int64_t(m.net_smooth_target[2]) - pz;
@@ -2037,7 +2044,7 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
                     io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         }
     }
-    {
+    if (!ai_drive) {
         const int16_t progress = m.net_interp_progress;
         if (progress < 20)
             m.yaw_bam = io::bam_add(m.yaw_bam, m.net_smooth_heading);
@@ -2063,8 +2070,11 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // lateral [orig: the occupantEntity == g_local_player_entity leg —
     // `([2C4]+[220])>>1 -> [220]; ([2C8]+[21C])>>1 -> [21C]`
     // @0x491546..0x491568; the input block is stage_air_vehicle_input above].
-    if (Entity *local_pilot =
-                resolve_local_vehicle_controller(world, veh, traits)) {
+    if (ai_drive) {
+        // Commands already staged by AiSystem::chel_ai_drive — the AI leg fills
+        // the same registers the pilot input block does. [orig: one function]
+    } else if (Entity *local_pilot =
+                       resolve_local_vehicle_controller(world, veh, traits)) {
         stage_air_vehicle_input(veh, *local_pilot, traits, ground, pz);
         m.cmd_speed = io::bam_sar(
                 io::bam_add(m.cmd_speed, m.net_recv_speed), 1);

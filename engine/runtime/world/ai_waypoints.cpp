@@ -480,5 +480,105 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     // moot until the boarding think lands) stays a tracked deferral (D-NET-161).
 }
 
+// The CHel AI flight drive — see the ai.h declaration. Retail computes this
+// inside the aircraft physics; the registers this stages are exactly the ones
+// the mover's servos consume (cmd_speed/cmd_lateral fwd+lat cyclic,
+// steer_target_bam, net_alt_target, net_engine_on).
+// [orig: the AI leg of Entity_UpdateAircraftPhysics @0x490310]
+void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller,
+                             const VehicleTraits &traits) {
+    (void)traits;
+    AiEntity *ve = for_handle(veh.handle);
+    if (ve == nullptr) return;
+    AiBrain &b = ve->brain;
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+        m.yaw_seeded = true;
+    }
+    m.ai_drive = true;
+    const int32_t ground =
+            m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
+
+    const bool wrecked = veh.health <= 0 || !veh.alive ||
+                         (veh.flags & kEntityFlagDead) != 0;
+    const bool crewed =
+            controller != nullptr && controller->alive && controller->health > 0;
+    if (!crewed || wrecked) {
+        // Parked. [orig: the state-14 block — thrust slots zeroed, altitude
+        // pinned below ground (collective off), engine flag cleared; our
+        // shared parked stamp is 22 like the ground movers' player/parked leg]
+        b.f[AiBrain::kCurState] = 22;
+        b.f[AiBrain::kPendState] = 22;
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.steer_target_bam = m.yaw_bam;
+        m.net_alt_target = ground - 0x4000;
+        m.net_engine_on = false;
+        return;
+    }
+
+    // Crewed: parked -> FOLLOWWP. [orig: `if (brain[16] == 14) brain[16] = 7`]
+    if (b.f[AiBrain::kCurState] == 22) {
+        b.f[AiBrain::kCurState] = 16;
+        b.f[AiBrain::kPendState] = 16;
+    }
+    m.net_engine_on = true;
+
+    // The patrol height stand-in until the HELO .aip profile rows are plumbed
+    // to vehicle brains (stage-1 parse landed; patrol_altitude authored ~40u).
+    constexpr int32_t kPatrolAglStandIn = 40 << 16;
+
+    if (b.f[AiBrain::kWpType] == 0) {
+        // No route: hover at patrol height. [orig: the no-target leg holds
+        // heading sweeps + def altitude; the sweep cadence is a follow-up]
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.steer_target_bam = m.yaw_bam;
+        m.net_alt_target = ground + kPatrolAglStandIn;
+        return;
+    }
+
+    // Waypoint target through the shared SM mover: refreshes bearing/distance,
+    // marks arrivals, advances nodes, honors one-shot ends.
+    // [orig: AIWaypoint_UpdateTarget from inside the physics @0x490310, with
+    //  the same turn-budget seed (f[35]>>15)+32 the ground mover uses]
+    update_waypoint_movement(*ve, world);
+    if (b.f[AiBrain::kWpType] == 0) { // the route just completed (one-shot end)
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.steer_target_bam = m.yaw_bam;
+        m.net_alt_target = ground + kPatrolAglStandIn;
+        return;
+    }
+    const int32_t bearing = b.f[AiBrain::kWpBearing];
+    m.steer_target_bam = bearing;
+
+    // Cyclic pair from the heading error [orig: (132 * sin/cos) >> 22 over the
+    // Q22 trig of the target bearing; forward dominates as the nose lines up].
+    const double rad = static_cast<double>(io::bam_sub(bearing, m.yaw_bam)) *
+                       (3.14159265358979323846 / 2147483648.0);
+    const int32_t cos_q22 = static_cast<int32_t>(std::cos(rad) * 4194304.0);
+    const int32_t sin_q22 = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+    int32_t fwd = static_cast<int32_t>((132LL * cos_q22) >> 22);
+    int32_t lat = static_cast<int32_t>((132LL * sin_q22) >> 22);
+    if (fwd < 0) fwd = 0; // behind the nose: turn in place, no reverse thrust
+    // Near-ground damp [orig: the <<13 >>16 (x1/8) fold under 6.0u AGL].
+    if (ve->pos[2] - ground < 0x60000) {
+        fwd >>= 3;
+        lat >>= 3;
+    }
+    m.cmd_speed = fwd;
+    m.cmd_lateral_speed = lat;
+
+    // Target altitude: patrol height AGL. Retail flies the node's authored Z
+    // only when the .aip profile's use-waypoint-z key says so [orig: the
+    // slope-based target + the AGL floor avgGround + bound/4]; until the HELO
+    // profile rows are plumbed to vehicle brains, hold the AGL stand-in —
+    // feeding node Z unconditionally sends the hull to authored-garbage
+    // altitudes on routes that never meant to fly it.
+    m.net_alt_target = ground + kPatrolAglStandIn;
+}
+
 
 } // namespace opennova::world
