@@ -240,6 +240,25 @@ int main() {
 		}
 	}
 
+	// ---- Raw BVOL dump at the column: does the RAW 3DI carry a volume whose
+	// top sits at local ~-7.66 (world 35.1) that the conversion drops?
+	{
+		const int32_t lx = fx(4.64), ly = fx(1.46); // the column, model-local
+		std::printf("raw BVOLs containing the column XY (of %zu total):\n",
+		            m3->collision->volume_count);
+		for (size_t i = 0; i < m3->collision->volume_count; ++i) {
+			const ThreediBoundingVolume &v = m3->collision->volumes[i];
+			if (lx < v.min_x_fp16 || lx > v.max_x_fp16 || ly < v.min_y_fp16 ||
+			    ly > v.max_y_fp16)
+				continue;
+			std::printf("  raw[%zu] type=%d flags=0x%x localZ=[%.2f..%.2f] "
+			            "planes=%d\n",
+			            i, v.collidable_type, unsigned(v.flags),
+			            v.min_z_fp16 / 65536.0, v.max_z_fp16 / 65536.0,
+			            v.plane_count);
+		}
+	}
+
 	// ---- Direct ground-probe check: from just above retail's interior spawn
 	// point, does raycast_ground find the bunker's floor slab (retail z 35.1)?
 	{
