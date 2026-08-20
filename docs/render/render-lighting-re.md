@@ -558,12 +558,16 @@ drape as a per-pixel projection over the terrain surface. Device folds,
 each serving the same observable: the terrain surface stands in for the
 21×21 patch mesh and the projection is evaluated per pixel, so the anchor
 march (retail's patch-PLACEMENT approximation of that projection) needs no
-separate device leg; standing/mounted children capture through their own
-slots rather than the parent's RT child-walk (the silhouette still draws
-once and drapes at the same place); and the attached-light drape folds the
-light's attenuation at the entity into the per-slot term (retail varies it
-per patch vertex). The packaged runtime serves shadow detail 4 (the top
-retail option: every-frame refresh, 1024-base chain).
+separate device leg; held weapons ride their owner's slot via the
+capture-with link (`ObjectModel.set_slot_shadow_capture_with` — the
+`RenderSlot_RenderEntityAndChildren` child walk) while tree-parented
+riders fold into the ancestor exclusion; the attached-light drape folds
+the light's attenuation at the entity into the per-slot term (retail
+varies it per patch vertex); and the drape factor folds through the sRGB
+transfer curve (`pow(factor, 2.2)`) — retail's multiply runs on the 8-bit
+framebuffer (no linear stage in the D3D8-era pipeline) while Godot's
+blend_mul runs in linear space. The packaged runtime serves shadow
+detail 4 (the top retail option: every-frame refresh, 1024-base chain).
 
 ## The ported chain (REN-5)
 
