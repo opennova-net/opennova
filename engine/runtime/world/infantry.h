@@ -583,6 +583,16 @@ struct InfantryState {
     int32_t dbg_root_dx = 0, dbg_root_dy = 0;
     int32_t dbg_res_dx = 0, dbg_res_dy = 0;
     int32_t dbg_contact_item = 0; // last resolve's contact source item type
+    // Fire-aim instrument: how many rounds this body fired with a valid aim
+    // solution vs falling back to the body heading (a live engagement showed
+    // ~half of all AI shots leaving 180 deg off the target).
+    // Once an aim solution has been computed, the heading PERSISTS - retail
+    // keeps it in the entity's aimHeading field and fires along the posed
+    // weapon bone that follows it, so a tick without a fresh solution still
+    // shoots at the target rather than wherever the body happens to face.
+    bool aim_established = false;
+    int32_t dbg_fires_aimed = 0;
+    int32_t dbg_fires_body = 0;
 
     // Local-player stance input. NPC org1 selection does not consume this field.
     // [orig: entity+0x12C prone bit 0x100, crouch bit 0x200; player body @0x4b40e0]

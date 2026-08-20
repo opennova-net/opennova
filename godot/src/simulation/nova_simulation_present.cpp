@@ -944,6 +944,8 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["res_dx"] = e->inf.dbg_res_dx;
 	out["res_dy"] = e->inf.dbg_res_dy;
 	out["contact_item"] = e->inf.dbg_contact_item;
+	out["fires_aimed"] = e->inf.dbg_fires_aimed;
+	out["fires_body"] = e->inf.dbg_fires_body;
 	// The fall-through instrument: the sim's own ground value under this body
 	// and whether it is airborne (a body whose ground sits far below it every
 	// tick falls forever).

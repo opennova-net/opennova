@@ -2089,6 +2089,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     const double adz = static_cast<double>(led[2]) + (t_origin[2] - tpos[2]) - eye[2];
     const double horiz = std::sqrt(adx * adx + ady * ady);
     inf.aim_heading = bearing_to(static_cast<int32_t>(adx), static_cast<int32_t>(ady)) + err_a;
+    inf.aim_established = true;
     inf.aim_pitch = static_cast<int32_t>(std::atan2(adz, horiz) * kBamPerRadian) + err_b;
     inf.aim_valid = true;
 
@@ -2205,7 +2206,19 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     // anim-event fire block @0x4bf326..0x4bf425]).
     int32_t origin[3];
     AiSystem::weapon_fire_origin(e, logic_tick, origin);
-    const int32_t yaw = inf.aim_valid ? inf.aim_heading : e.heading;
+    // Fire along the LAST computed aim, not the body heading: retail's
+    // aimHeading is a persistent entity field (set from targetHeading while
+    // engaging; only the dragged-body branch at animState 139 assigns it the
+    // body heading) and the round leaves along the posed weapon bone that
+    // follows it. Discarding the solution on any tick without a fresh one sent
+    // 61% of AI rounds off along the body facing - measured live, half of them
+    // a full 180 deg from the target.
+    // [orig: entity->aimHeading writes in Entity_UpdateInfantryAI @0x4b9910
+    //  (= targetHeading while engaging, = bodyHeading only in the drag branch);
+    //  the fire site passes the posed bone matrix to
+    //  WeaponSlot_FireAndSpawnEffects, never a body-heading scalar]
+    const int32_t yaw = inf.aim_established ? inf.aim_heading : e.heading;
+    if (inf.aim_established) ++inf.dbg_fires_aimed; else ++inf.dbg_fires_body;
     const int32_t pitch = io::bam_add(
             inf.aim_valid ? inf.aim_pitch : 0, inf.recoil_pitch);
 
