@@ -90,7 +90,8 @@ var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
-var _ai_probe := NovaAiProbe.new()
+const NovaAiProbeScript := preload("res://game/debug/nova_ai_probe.gd")
+var _ai_probe := NovaAiProbeScript.new()
 var _world_load_pending := false
 # End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
 # Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
