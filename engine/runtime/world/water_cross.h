@@ -26,10 +26,20 @@ struct WaterCrossEvent {
     int32_t x = 0; // 16.16 world
     int32_t y = 0;
     int32_t water_z = 0;
-    // Which authored effect name the fan should carry. The binding is witnessed
-    // by capture proximity: a body entering water fans BODYWATER1, a hull
-    // disturbing the surface fans SURFACE_WTR (npwire's kWaterCross* constants).
-    bool by_hull = true;
+    // Which of the two authored sounds the fan should carry. The SELECTOR is
+    // witnessed and is NOT hull-vs-body: every crossing site in the original —
+    // wheeled, light, tracked, platform, aircraft, the player body and the AI
+    // soldier alike — passes the same pair of sound globals and picks between
+    // them on the crossing entity's own Flags & 0x2000 (kEntityFlagInAir), i.e.
+    // whether the thing was AIRBORNE when it met the plane. A soldier who walks
+    // into a river and a boat that idles onto a sandbar take the same sound; a
+    // soldier who jumps off a bridge and a truck that launches off a bank take
+    // the other. The name-to-global binding stays capture-derived (npwire's
+    // kWaterCross* constants).
+    // [orig: `if (entity->Flags & 0x2000) send(dword_24E09B0) else
+    //  send(dword_24E09B4)` @0x482c8b (wheeled), @0x49254e (aircraft),
+    //  @0x4b8020 (player body), @0x4bfb87 (AI soldier), and their twins]
+    bool airborne = false;
 };
 
 // Per-tick queue; the host fan drains it after the motor pass, exactly as it
@@ -41,9 +51,9 @@ struct WaterCrossQueue {
 
     std::vector<WaterCrossEvent> events;
 
-    void add(int32_t x, int32_t y, int32_t water_z, bool by_hull) {
+    void add(int32_t x, int32_t y, int32_t water_z, bool airborne) {
         if (events.size() >= kMax) return;
-        events.push_back(WaterCrossEvent{x, y, water_z, by_hull});
+        events.push_back(WaterCrossEvent{x, y, water_z, airborne});
     }
     void clear() { events.clear(); }
 };
