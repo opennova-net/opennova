@@ -74,6 +74,11 @@ func tick(world: GameWorld, delta: float) -> void:
 			"inf": bool(card.get("infantry", false)),
 			"flags": int(card.get("engine_flags", 0)),
 			"bflags": int(card.get("bms_flags", 0)),
+			# frozen-clump instrument: root step vs resolver correction
+			"rdx": int(card.get("root_dx", 0)),
+			"rdy": int(card.get("root_dy", 0)),
+			"cdx": int(card.get("res_dx", 0)),
+			"cdy": int(card.get("res_dy", 0)),
 			"alert": int(card.get("alert", -1)),
 			"tgt": bool(card.get("combat_target_valid", false)),
 		})

@@ -937,6 +937,12 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 			? String::utf8(infantry_anim_.adm_name(e->inf.adm_id).c_str())
 			: String();
 	out["infantry_move_mode"] = e->inf.move_mode;
+	// The frozen-clump instrument: this tick's integrated root step vs the
+	// collision resolver's horizontal correction (16.16 fixed).
+	out["root_dx"] = e->inf.dbg_root_dx;
+	out["root_dy"] = e->inf.dbg_root_dy;
+	out["res_dx"] = e->inf.dbg_res_dx;
+	out["res_dy"] = e->inf.dbg_res_dy;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
 	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the

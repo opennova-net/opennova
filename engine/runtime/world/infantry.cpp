@@ -1497,6 +1497,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         e.pos[2] += dz;
         root_wx = wx;
         root_wy = wy;
+        inf.dbg_root_dx = wx + inf.vel[0]; // debug-card tap (frozen-clump instrument)
+        inf.dbg_root_dy = wy + inf.vel[1];
     }
 
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
@@ -1558,6 +1560,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // (standing on buildings) [orig: collision resolver
         // @0x4b2bd0; burns down D-INF-3's terrain-only stand-in]. Without one, the
         // terrain-cache clearance stands (headless tests, no placed objects).
+        const int32_t pre_resolve_x = e.pos[0]; // debug-card tap
+        const int32_t pre_resolve_y = e.pos[1];
         int32_t foot_clearance;
         if (collision != nullptr && collision->instance_count() != 0) {
             // The climb-motor channels the resolver's CL legs read and write:
@@ -1587,6 +1591,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // Entity_RaycastGroundHeightAndObject @ 0x414370]
             if (Entity *self = world.registry.get(e.handle)) self->ground_target = EntityHandle{};
         }
+        inf.dbg_res_dx = e.pos[0] - pre_resolve_x; // debug-card tap
+        inf.dbg_res_dy = e.pos[1] - pre_resolve_y;
         // The post-resolve latch state: the resolver cleared and possibly
         // re-latched the CL bit this tick; every leg below keys on the live value.
         const bool on_ladder_now =

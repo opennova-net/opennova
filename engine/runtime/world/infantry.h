@@ -576,6 +576,13 @@ struct InfantryState {
     int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160
 
+    // Debug-card taps (not engine state): this tick's integrated root step and
+    // the collision resolver's horizontal correction — the frozen-clump
+    // instrument (a soldier whose root step is nonzero while root+resolve nets
+    // zero is being cancelled by push-out).
+    int32_t dbg_root_dx = 0, dbg_root_dy = 0;
+    int32_t dbg_res_dx = 0, dbg_res_dy = 0;
+
     // Local-player stance input. NPC org1 selection does not consume this field.
     // [orig: entity+0x12C prone bit 0x100, crouch bit 0x200; player body @0x4b40e0]
     enum class Stance : uint8_t { kStand = 0, kCrouch = 1, kProne = 2 };
