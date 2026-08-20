@@ -790,12 +790,28 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// @0x4f97a0 — zero @0x4f97c6, +1 per active human slot @0x4f98b1; called from
 	// Server_TickUpdate @0x51d89a before the WAC pre-pass]
 	{
+		// Retail counts ENTITIES, not connections: it walks pool 0 and takes every
+		// slot that has an item type, carries the player classifier (Flags 0x100),
+		// and is not hidden inside something else (Flags 0x1 — set when a body is
+		// attached to a vehicle). A connection that exists but whose player has no
+		// entity in the world is not a human by this measure.
+		//
+		// The difference is not cosmetic now that script_may_advance() reads this:
+		// counting connections made a host "occupied" from the moment it accepted
+		// its own loopback, so the mission script advanced before anyone had
+		// actually spawned into the world.
+		// [orig: Server_BuildEntitySlotLists @0x4f97a0 — wac_var_humans = 0
+		//  @0x4f97c6, the walk's gates `entity+32 != 0`, `Flags & 0x100`,
+		//  `(Flags & 1) == 0`, then ++wac_var_humans @0x4f98b1]
 		int32_t humans = 0;
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			// Entity ownership stands in for the original's slot-state-6 check —
-			// the SP host's loopback owns its player from the spawn on, while its
-			// in-match phase flag rides the burst bookkeeping.
-			if (conn.link.owned_entity.valid()) ++humans;
+		for (int slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
+			const world::Entity *e =
+					world.registry.get(world::EntityHandle::make(0, slot));
+			if (e == nullptr || !e->has_item_def) continue;
+			const uint32_t f = e->flags | e->engine_flags;
+			if ((f & world::kEntityFlagPlayer) == 0) continue;
+			if ((f & 1u) != 0) continue;
+			++humans;
 		}
 		world.cached.humans = humans;
 	}

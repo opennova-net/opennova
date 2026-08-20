@@ -114,8 +114,16 @@ func tick(world: GameWorld, delta: float) -> void:
 			nfired += 1
 			if fired_idx.size() < 80:
 				fired_idx.append(i)
+	# The WAC `humans` count. It now gates the whole mission script
+	# (World::script_may_advance), so when the script advances earlier than
+	# expected this is the first number to look at.
+	var humans := -1
+	var outcome: Dictionary = sim.get_round_outcome_debug()
+	if outcome.has("humans"):
+		humans = int(outcome["humans"])
 	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards,
-			"ev": {"n": nfired, "of": fired.size(), "idx": fired_idx}}))
+			"ev": {"n": nfired, "of": fired.size(), "idx": fired_idx},
+			"humans": humans}))
 	f.close()
 
 
