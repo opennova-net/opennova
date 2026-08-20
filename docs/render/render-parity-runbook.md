@@ -41,19 +41,49 @@ tracked files. The values below are the authoritative capture machine's.
 | Staged `game.cfg` | `e7bd7d27d6dcb22c8b58e3daa6ef543e2489f0600ffee28ffcb9a53d79806ed3` |
 | Approved `weapon.sav` | `f4907820a58505a6988f140a27638dae7dbaaea2cc446642f0bc44c868905623` |
 
-Binaries that registration hashes into every record. Keep them byte-stable
-across a refresh or the identity rows churn for no reason:
+Registration hashes four binaries into every record. Only two are stable:
 
 | Binary | SHA-256 |
 |---|---|
 | `Jointops.exe` | `b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac` |
-| onHook proxy `binkw32.dll` | `928905bffc39d2880dc027f1ae09c3fdbab328c939ae724ff05dab32511708b7` |
 | onHook forwarder `binkw32_.dll` | `d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9` |
-| onHook MCP `onhook-mcp.exe` | `e0306c402c21e47e7d87e2344958297634ee74fdce9569923112fc26f6cd8b70` |
 | Godot editor binary | `.godot-bin/Godot_v4.6.1-stable_win64.exe` |
 
+The forwarder is the original Bink DLL under a new name and never changes. The
+onHook proxy `binkw32.dll` and `onhook-mcp.exe` hash to whatever the deployed
+build produces; each publication records its own pair, so read them back from a
+registration rather than pinning them here.
+
 The onHook build lives in the separate `opennova-int` repository, never in this
-one. Retail install paths and the retained bundle root are local state.
+one. Retail install paths and the raw bundle root are local state.
+
+### Building and deploying onHook
+
+The proxy and the MCP are one build and must be deployed as a pair. From the
+`opennova-int` checkout, with the msys2 i686 toolchain:
+
+```bash
+MSYSTEM=MINGW32 /c/msys64/usr/bin/bash -lc   "cd /c/.../opennova-int/onhook && ./build_onhook.sh --debug --proxy"
+```
+
+`--debug` is what produces `onhook-mcp.exe` at all; release builds omit it
+deliberately. `--proxy` builds `binkw32.dll` rather than the injectable
+`onhook.dll`. A plain `bash -lc` resets PATH and the configure step fails with
+`no acceptable C compiler found`; `MSYSTEM=MINGW32` is what puts
+`i686-w64-mingw32-gcc` on it.
+
+Back up the installed proxy, copy the new `binkw32.dll` into the retail game
+directory, and leave `binkw32_.dll` alone. Then register the MCP at **user
+scope** and restart the client:
+
+```
+claude mcp add onhook --scope user -- <abs path>/opennova-int/onhook/onhook-mcp.exe
+```
+
+Never put that path in the tracked `.mcp.json`. Confirm with `claude mcp list`
+that it reports Connected with its tools loaded, not just Connected -- a tool
+fetch failure there means the capture tools are unavailable no matter how the
+handshake looks.
 
 ## 0. Decide the retail path before anything else
 
@@ -273,9 +303,11 @@ receipt.
 
 ## 3b. Retail: a fresh capture (only when the contract changed)
 
-Everything in 3a applies, plus the capture itself. Register the onHook MCP with
-your MCP client and restart it first; a server added mid-session is not
-discoverable. Register it at user scope with an absolute path to the build you
+Everything in 3a applies, plus the capture itself. Build, deploy and register
+onHook first (see "Building and deploying onHook" above) and restart the client;
+a server added mid-session is not discoverable, and a stale build may simply not
+expose `onhook_capture_retail_reference` -- check the tool list, not the file
+date. Register it at user scope with an absolute path to the build you
 intend to use -- never in the tracked `.mcp.json`, which must stay free of
 machine-specific paths.
 
@@ -401,6 +433,8 @@ descriptive measurements and never a threshold.
 | Every fixture in a sweep fails, leaving only `<id>.publication-transaction/owner.json` | The captures ran without an interactive desktop. Re-run them in the foreground and delete the stale transaction directories first. |
 | `capture result does not bind the selected raw pair` | The raw bundle was moved. Register it at the absolute path `capture-result.json` records, or re-shoot retail. |
 | `raw retail image must be colocated under the registered bundle directory` | `--output` is outside the bundle directory. Write `registered.json` beside `retail.png`. |
+| `claude mcp list` says Connected but tools fetch failed | The server is up but its tool list was rejected; the capture tools are unavailable. Fix the server, do not proceed. |
+| `onhook_capture_retail_reference` missing from the tool list | The deployed onHook predates the frame-correlated capture tooling. `onhook_capture_bundle` is not a substitute -- registration needs the v4 presentation proof. Rebuild. |
 | Sheets pair but content differs structurally | Check `mission.expansion` in the OpenNova manifest against retail's `/exp`. A `jox01` OpenNova frame against a `revx02` retail frame is not a comparison. |
 | Registration rejects the mission | The loose `.bms` under `NOVA_MISSION_RESOURCE_DIR` does not hash to the catalog value. Repoint at the correct corpus. |
 | Every command in the shell is refused | The persistent shell was `cd`-ed into the shared checkout. Re-enter the current worktree to unwedge it. |
