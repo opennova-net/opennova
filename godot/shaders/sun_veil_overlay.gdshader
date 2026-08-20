@@ -3,7 +3,7 @@
 // @ 0x5ad8b0 -> render_fullscreen_decal_quad @ 0x5ad94f — quad color
 // (glare << 24) + 0xFFFFFF, alpha-blended]. Celestial pushes the global once
 // per advanced frame (draw gate glare > 2 baked into the pushed value);
-// PlayerViewEffects hosts the rect.
+// PlayerViewEffects owns the rect.
 shader_type canvas_item;
 
 global uniform float opennova_sun_veil_alpha;
