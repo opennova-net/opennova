@@ -101,7 +101,21 @@ func tick(world: GameWorld, delta: float) -> void:
 		f = FileAccess.open(_path, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards}))
+	# Which mission events have fired. Without this a live round can only be
+	# compared to the headless report by inference - and the two DISAGREED (the
+	# offline zone tour reaches the scripted KillGroups; a live round walking the
+	# same route did not), which is exactly the kind of gap that stays invisible
+	# until the live side is instrumented too.
+	var fired: PackedByteArray = sim.get_fired_events_snapshot()
+	var nfired := 0
+	var fired_idx: Array = []
+	for i in range(fired.size()):
+		if fired[i] != 0:
+			nfired += 1
+			if fired_idx.size() < 80:
+				fired_idx.append(i)
+	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards,
+			"ev": {"n": nfired, "of": fired.size(), "idx": fired_idx}}))
 	f.close()
 
 
