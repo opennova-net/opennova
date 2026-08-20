@@ -19,6 +19,7 @@ var _world: GameWorld = null
 var _presenter: LocalPlayerPresenter = null
 var _input_source := Callable()
 var _fire_was_held := false
+var _autofire_env := OS.get_environment("NW_LAN_AUTOFIRE")
 var _reload_was_down := false
 var _scope_was_down := false
 var _look_delta := Vector2.ZERO
@@ -121,6 +122,12 @@ func _sample_weapon_input(frame_input: MissionFrameInput,
 	var captured := gameplay_input_active \
 			and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	# Test automation (net-capture branch): NW_LAN_AUTOFIRE holds the trigger in
+	# bursts so an unattended self-test session exercises the fire -> damage ->
+	# death -> S2C 0x13/0x1E chain. This mission's combat is player-driven, so a
+	# passive bot joiner can never reach that path. Inert without the env var.
+	if not _autofire_env.is_empty():
+		fire_held = int(Time.get_ticks_msec() / 400) % 3 != 0
 	var fire_edge := fire_held and not _fire_was_held
 	_fire_was_held = fire_held
 	var reload_down := captured and ControlsBindings.pressed("magazine")
