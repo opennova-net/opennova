@@ -164,6 +164,44 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
 
     // ---- comparison / value functions ----
+    // ---- the local-player condition family (the co-op choreography gates:
+    // 05TRcoop's vehicle chains are `if area(N) and eq(vX,..) and not
+    // meride(SSN) then set(vX,..)` — with these unimplemented every chain
+    // evaluated false and no scripted vehicle ever received its drive order).
+    // Schema rows: area idx111 @0x4ED0C0, meride idx116 @0x4F1260, SSNonSSN
+    // idx16 @0x4F19A0 (engine/runtime/wac/tools/wac_commands.schema.json).
+    if (ieq(n, "area")) {
+        // Local player inside area-trigger index A(0). [orig: handler @0x4ED0C0
+        // (body absent from the decompilation dump — IDA verify pending); the
+        // area test itself is the ported ssn_in_area core]
+        const world::Entity *lp = w.registry.get(w.cached.local_player);
+        return (lp != nullptr && cmds.ssn_in_area(lp->net_id, A(0))) ? 1 : 0;
+    }
+    if (ieq(n, "meride")) {
+        // The local player rides SSN A(0) — the mount-chain membership test.
+        // [orig: Entity_IsInLocalPlayerMountChain @0x4F1260 — the mount or its
+        // +40 child == the resolved entity. NB: the schema's @0x4F1260 and the
+        // BMS predicate cites (sub 38 @0x4f10d0 / sub 39 @0x4f1260) disagree on
+        // which address is seated-vs-standing; the SEMANTICS used here is the
+        // seated mount chain, matching the handler's decompiled body. Cite
+        // permutation flagged for a grill, behavior is the witnessed one.]
+        return cmds.local_player_attached_to_ssn(static_cast<uint16_t>(A(0))) ? 1 : 0;
+    }
+    if (ieq(n, "SSNonSSN")) {
+        // [orig: Entity_IsOnTopOfChain @0x4F19A0 — B reachable from A's
+        // groundEntity chain within 3 hops]
+        return cmds.ssn_on_chain_of(static_cast<uint16_t>(A(0)),
+                                    static_cast<uint16_t>(A(1))) ? 1 : 0;
+    }
+    if (ieq(n, "GroupSpawn")) {
+        // [orig: WacScript_SetEntityWaypoint @0x4F7AE0 (IDB misnomer) — for
+        // every pool-0 entity with commandGroup +284 == A(0), write the respawn
+        // quota entity+0x35E = A(1). The +0x35E NPC respawn system is an
+        // unported D-AI-9 residual, so the write has no consumer yet; the
+        // builtin is catalogued as a no-op returning success until the wave
+        // respawn lands.]
+        return 1;
+    }
     if (ieq(n, "eq")) return A(0) == A(1) ? 1 : 0;
     if (ieq(n, "ne")) return A(0) != A(1) ? 1 : 0;
     if (ieq(n, "lt")) return A(0) < A(1) ? 1 : 0;
