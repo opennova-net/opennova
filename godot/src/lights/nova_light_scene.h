@@ -66,6 +66,26 @@ public:
 			const PackedInt64Array &p_owner_entities,
 			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
 
+	// The corona billboard rows for this frame (retail:
+	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
+	// renderer::LightScene::collect_corona_quads): one Dictionary per
+	// additive camera-facing quad, keys position (Vector3 Godot world),
+	// half_size (float world units), color (Color, premultiplied additive
+	// including the segment fade and the fog-to-black fold). models/
+	// owner_entities are the SAME parallel arrays the per-model light pass
+	// walks — models carrying an occlusion section-mask verdict gate their
+	// owned coronas on the visible-section bit; fog is
+	// {enabled, type, start, end} (primary device fog, color forced black
+	// (retail: CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6)). The
+	// presenter (effect_light_director.gd) feeds the rows into a MultiMesh;
+	// marshalling only.
+	TypedArray<Dictionary> collect_corona_rows(const Vector3 &p_camera_pos,
+			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+			int p_time_ms, int p_frame_index, Object *p_weather,
+			const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities,
+			const Dictionary &p_fog);
+
 	int live_count() const;
 	Dictionary get_report() const;
 

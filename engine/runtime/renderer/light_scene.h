@@ -58,13 +58,53 @@
 //  - impact flash [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3]: ammo
 //    `light_impact` radius/color/ticks, spawned radius/2 above the impact,
 //    mode 2, gated on the impact-effect leg actually presenting; also sets
-//    render flag 0x100 (no witnessed reader — not carried).
+//    render flag 0x100 — read by the corona walk, which re-centers the
+//    billboards radius/2 below the light (carried as
+//    corona_lower_half_radius; witnessed 2026-08-20 @ 0x5ab037..0x5ab05c).
 //  - death flash [orig: Entity_SpawnDeathPieces @ 0x49351a]: husk deaths
 //    above water, non-decorations — 2x the piece model's bound radius, color
 //    0xFFC080, mode 2, duration 31, corona disabled (flag 512).
 //  - round glow [orig: RoundData_SpawnRound @ 0x4ec8da]: ammo `light_move`
 //    radius/color, mode 1 / duration -1, terrain disabled (flag 1024), handle
 //    at round+0x1B4, follows the round per tick and clears on release.
+// CORONAS (witnessed 2026-08-20): every alive, un-hidden instance without
+// render flag 512 draws additive camera-facing billboards
+// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 (ex
+// CEffect_RenderFoliageBillboards — misnamed; renamed in the IDB), called
+// once per world scene @ 0x5c96ad and once per mirror scene @ 0x5c85fd]:
+// THREE segments marching toward the camera (step 0.1 x radius along
+// normalize(cam - light)), half-sizes 0.5 x radius shrinking x0.66 per
+// segment, color = record rgb x blend x EffectWorld_AmbientScale x 1/16
+// then the RgbGen multiply, per-segment alpha = clamp(camera-plane depth /
+// (0.5 x radius), 0..1) with <= 0 skipped, admission = camera distance
+// <= 100 wu (0x640000 fixed) and a +-512-fixed x/y jitter phased on
+// frame & 3; texture = the procedural 128x128 "texlightcrn" radial
+// (intensity = 255 x (0.4 - 0.45 x d), d = sqrt(((x-64)/64)^2 +
+// ((y-64)/64)^2), border texels 0) via Light_CoronaShader @ 0x2732db8
+// [orig: Lighting_InitTextures @ 0x5a94f0], fog+blend mode 2 (additive
+// with FOGCOLOR forced black @ 0x677740 case 2 — fog fades coronas OUT,
+// never toward the fog color). Owned lights additionally gate on the owner
+// building's visible-section bits [orig: Terrain_IsBuildingSectionBitSet
+// @ 0x5c6960 over g_BuildingSectionVisMask @ 0x297f250 — the
+// OcclusionWorld::section_mask domain; a non-pool-2 owner passes
+// unconditionally @ 0x5c6978], and a render-flag-0x100 instance (the
+// impact flash, spawned radius/2 above the impact) re-centers its corona
+// by dropping radius/2 — the flag's only witnessed reader
+// [orig: @ 0x5ab037..0x5ab05c]. All three legs are ported in
+// collect_corona_quads.
+//
+// SPOT/TARGET DELIVERY IS DEAD CODE IN JO (witnessed 2026-08-20): the only
+// spawner that marks an instance as a spot projector (flag 0x10000, the
+// projection matrix at bytes 88..152, direction floats 38..40, near/far
+// 41/42) is caller-less [orig: LightPool_SpawnSpotProjectorEffect
+// @ 0x5a9fd0 — zero xrefs and zero data refs in Jointops.exe].
+// Entity_SpawnGlowEffects passes only position + radius, so a model LGHT
+// record's falloff byte, rotation, and view_proj never reach the runtime —
+// every model light renders as an omni point light, and the spotlight
+// projected-texture legs in CRenderBatchQueue_FlushBatches
+// (Light_IsSpotlight @ 0x5a9040 -> get_light_projection_info @ 0x5aa5c0)
+// are unreachable. LightSpawnParams therefore carries no spot fields.
+//
 // Divergences tracked on D-RLIT-4: retail's setters write through stale
 // handles into reused slots; OpenNova's generation lease intentionally
 // rejects those writes. Retail derives the ambient scale from
@@ -118,6 +158,12 @@ struct LightSpawnParams {
 	bool disable_corona = false;
 	bool disable_terrain = false;
 	bool disable_objects = false;
+	// Render flag 0x100 (the impact-flash spawn): the light rides radius/2
+	// above the impact, and the corona walk re-centers its billboards by
+	// dropping radius/2 — the flag's only witnessed reader
+	// [orig: set @ AmmoDef_ProcessImpactEffect 0x40a2b3; read @
+	// EffectWorld_RenderLightCoronas 0x5ab037..0x5ab05c].
+	bool corona_lower_half_radius = false;
 };
 
 // The low value preserves retail's slot | 0x8000 handle form
@@ -184,6 +230,55 @@ struct LightSceneReport {
 	size_t high_water = 0;
 	size_t last_query = 0;
 	size_t last_selected = 0;
+};
+
+// One additive corona billboard quad, camera-facing at `center` with
+// `half_size` world-unit extents along the camera right/up axes and the
+// premultiplied additive color (segment fade folded in)
+// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40, ex
+// CEffect_RenderFoliageBillboards — renamed 2026-08-20].
+struct LightCoronaQuad {
+	std::array<float, 3> center{};  // mission-space float world units
+	float half_size = 0.0f;
+	std::array<float, 3> rgb{};
+};
+
+// One owner's live section-visibility mask for the corona walk: bit N set =
+// COBJ section N draws this frame (the OcclusionWorld::section_mask domain)
+// [orig: g_BuildingSectionVisMask @ 0x297f250, tested per owned corona via
+// Terrain_IsBuildingSectionBitSet @ 0x5c6960].
+struct LightCoronaOwnerMask {
+	uint64_t owner_entity = 0;
+	uint32_t section_mask = 0;
+};
+
+// The corona pass inputs. The depth plane is retail's batch-sort camera
+// plane in mission space: depth(p) = dot(normal, p) + w, growing in front of
+// the camera — each segment's alpha is clamp(depth / base_half_size, 0..1)
+// [orig: g_BatchSortDepthPlane reads @ 0x5ab2f8..0x5ab33c].
+// Fog: the corona pass runs the PRIMARY device fog with the fog color forced
+// BLACK (additive fades out, never toward the fog color)
+// [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6 -> case 2
+// FOGCOLOR 0xFF000000 @ 0x677740]; the factor is the witnessed device
+// policy (exp ln64/end for type 0, linear with the type-derived starts for
+// 2/3) shared with the object/terrain shaders.
+struct LightCoronaFrameInputs {
+	std::array<int32_t, 3> camera_fixed{};
+	std::array<float, 3> depth_plane_normal{};
+	float depth_plane_w = 0.0f;
+	std::array<float, 3> ambient_scale{1.0f, 1.0f, 1.0f};
+	LightFlickerInputs flicker{};
+	uint32_t frame_index = 0;  // the witnessed frame & 3 jitter phase
+	bool fog_enabled = false;
+	int32_t fog_type = 0;
+	float fog_start = 0.0f;
+	float fog_end = 0.0f;
+	// Owned coronas gate on their owner's visible-section bits; an owner
+	// absent from this table passes (retail: a non-pool-2 owner index falls
+	// outside the mask array and Terrain_IsBuildingSectionBitSet returns
+	// TRUE @ 0x5c6978).
+	const LightCoronaOwnerMask *owner_masks = nullptr;
+	size_t owner_mask_count = 0;
 };
 
 // One draw context for the per-draw selection pass: the draw's query AABB
@@ -268,6 +363,25 @@ public:
 			const LightFlickerInputs &flicker,
 			bool d3d_light_path,
 			LightDrawSelection *out) const;
+
+	// The corona billboard walk [orig: EffectWorld_RenderLightCoronas
+	// @ 0x5aaf40, called per world scene @ 0x5c96ad and per mirror scene
+	// @ 0x5c85fd]: every alive, un-hidden instance without the authored
+	// corona-disable draws THREE additive camera-facing quads marching
+	// toward the camera — step 0.1 x radius along normalize(cam - light),
+	// half-sizes 0.5 x radius shrinking x0.66 per segment, color =
+	// record rgb x blend x ambient scale x 1/16 (then the RgbGen multiply),
+	// each segment scaled by clamp(camera-plane depth / (0.5 x radius), 0..1)
+	// and skipped at <= 0. Admission: camera distance <= 100 wu (0x640000
+	// fixed), the owned-light visible-section gate (inputs.owner_masks
+	// [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960, gated @ 0x5ab027]),
+	// and a per-frame +-512-fixed x/y jitter phased on frame & 3. A
+	// corona_lower_half_radius instance (retail render flag 0x100) drops
+	// radius/2 first [orig: @ 0x5ab053..0x5ab05c], and the fog-to-black
+	// fold multiplies the color by the primary device fog factor per
+	// segment [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
+	size_t collect_corona_quads(const LightCoronaFrameInputs &inputs,
+			std::vector<LightCoronaQuad> &out) const;
 
 	LightSceneReport inspect() const;
 

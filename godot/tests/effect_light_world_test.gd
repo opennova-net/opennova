@@ -327,6 +327,54 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	director.render_frame(null)
 
 
+## Corona billboards (the D-RLIT-4 corona leg): the binding surfaces the
+## portable walk's quads [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
+## three segments toward the camera, the authored corona-disable, the
+## 100-wu cull; semantics pinned by ctest renderer_light_scene].
+func test_corona_rows_surface_the_witnessed_segments() -> void:
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(0.0, 1.0, 0.0),
+		"atten_end": 4.0,
+	}), 0)
+	var no_models: Array[Node3D] = []
+	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), {})
+	assert_eq(rows.size(), 3, "an enabled corona draws three segments")
+	if rows.size() == 3:
+		var first: Dictionary = rows[0]
+		# Segments march 0.1 x radius toward the camera; half-size radius/2.
+		assert_almost_eq(float(first.get("half_size")), 2.0, 0.001)
+		var pos: Vector3 = first.get("position")
+		assert_almost_eq(pos.z, 0.4, 0.02,
+				"the first segment steps 0.1 x radius toward the camera")
+		var color: Color = first.get("color")
+		# White record color x 1/16 at full fade.
+		assert_almost_eq(color.r, 255.0 / 256.0 / 16.0, 0.002)
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(2.0, 1.0, 0.0),
+		"atten_end": 4.0,
+		"disable_corona": true,
+	}), 0)
+	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), {})
+	assert_eq(rows.size(), 3,
+			"a corona-disabled record contributes no quads")
+	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
+	# past the fog end the corona color folds to black but the quads remain.
+	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(),
+			{"enabled": true, "type": 1, "start": 2.0, "end": 8.0})
+	assert_eq(rows.size(), 3)
+	if rows.size() == 3:
+		var fogged: Color = rows[0].get("color")
+		assert_almost_eq(fogged.r, 0.0, 0.0001,
+				"a corona past the fog end fades fully to black")
+
+
 func test_director_null_camera_clears_output_without_destroying_the_pool() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
