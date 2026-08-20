@@ -234,6 +234,78 @@ int main() {
 		}
 		std::printf("\n");
 	}
+	// ZONE SWEEP. Most of what stays shut in a headless run is waiting on a
+	// player standing somewhere, and guessing which zone matters costs a
+	// three-minute live round each time. So do it offline: for every authored
+	// zone, re-run the mission with one stand-in group-1 body parked at that
+	// zone's centre and report how many additional events fire. A zone that
+	// unlocks a RedirectGroupTo is the one worth spending a live round on.
+	//
+	// Players carry commandGroup 1 (player_spawn.cpp), and retail's
+	// Entity_IsTeamInTriggerBounds @0x43c730 scans the player pool as well as
+	// the AI pool, so a pool-1 body with group_id 1 is exactly what the
+	// group-in-area triggers look for.
+	{
+		const char *sweep_env = std::getenv("OPENNOVA_ZONE_SWEEP");
+		const int sweep_ticks = (sweep_env && *sweep_env) ? std::atoi(sweep_env) : 6000;
+		std::printf("zone sweep (%d ticks per zone, one stand-in player per run):\n",
+		            sweep_ticks);
+		auto run_with_player = [&](bool place, float px, float py,
+		                           std::map<std::string, int> *unlocked_actions) {
+			w::World w2;
+			w::AiSystem ai2;
+			w2.ai = &ai2;
+			mission::BmsEventSystem ev2;
+			ev2.load(m.events, m.triggers, m.actions);
+			mission::promote_mission(m, w2, ai2, {});
+			if (place) {
+				w2.registry.configure_pool(1, 4);
+				w::Entity p{};
+				p.kind = w::EntityKind::Organic;
+				p.team = 1;
+				p.health = 100;
+				p.alive = true;
+				p.group_id = 1;
+				p.net_id = 0x7000;
+				p.position = w::Vec3{px, py, 0.0f};
+				p.flags = 0x100u; // the player classifier, movement gate CLEAR
+				w2.registry.spawn(1, p);
+			}
+			w2.add_system(&ev2);
+			w2.add_system(&ai2);
+			w2.load_systems();
+			for (int t = 0; t < sweep_ticks; ++t) w2.run_logic_tick(true);
+			int n = 0;
+			for (size_t i = 0; i < ev2.events().size(); ++i) {
+				if (!ev2.event_fired(i)) continue;
+				++n;
+				if (unlocked_actions != nullptr)
+					for (const bms::Action &a : ev2.events()[i].actions)
+						(*unlocked_actions)[action_name(a.action_type)] += 1;
+			}
+			return n;
+		};
+		const int base = run_with_player(false, 0, 0, nullptr);
+		std::printf("  baseline (no player): %d events fire\n", base);
+		int registered = 0;
+		while (world.registry.area(registered) != nullptr) ++registered;
+		for (int i = 0; i < registered; ++i) {
+			const w::Area *a = world.registry.area(i);
+			const float cx = 0.5f * (a->bounds.min.x + a->bounds.max.x);
+			const float cy = 0.5f * (a->bounds.min.y + a->bounds.max.y);
+			std::map<std::string, int> acts;
+			const int n = run_with_player(true, cx, cy, &acts);
+			if (n <= base) continue;
+			std::printf("  zone id %2d centre (%6.0f, %6.0f): +%d events",
+			            a->zone_id, cx, cy, n - base);
+			if (acts.count("RedirectGroupTo"))
+				std::printf("   <== unlocks RedirectGroupTo x%d", acts["RedirectGroupTo"]);
+			if (acts.count("ChangeGroupAI"))
+				std::printf("   ChangeGroupAI x%d", acts["ChangeGroupAI"]);
+			std::printf("\n");
+		}
+	}
+
 	std::printf("mission script report: done (diagnostic only)\n");
 	return 0;
 }
