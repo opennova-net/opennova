@@ -165,7 +165,14 @@ func _tp_tick(world: GameWorld) -> void:
 		# The card position is presenter-space (x, up, z); mission space is
 		# (x, -z, up). debug_set_entity_position takes mission coordinates.
 		var p: Vector3 = card.get("position", Vector3.ZERO)
-		var mission := Vector3(p.x + _tp_dx, -p.z + _tp_dy, p.y)
+		# NW_TP_Z sets an ABSOLUTE mission height; without it the subject keeps
+		# its own. Keeping the source height is a trap when moving between areas
+		# at different elevations — the subject lands in mid-air and terrain then
+		# blocks every sightline, which reads as broken perception.
+		var tz: float = p.y
+		if not OS.get_environment("NW_TP_Z").is_empty():
+			tz = OS.get_environment("NW_TP_Z").to_float()
+		var mission := Vector3(p.x + _tp_dx, -p.z + _tp_dy, tz)
 		var err := sim.debug_set_entity_position(i, mission)
 		_tp_done = true
 		if not _path.is_empty():
