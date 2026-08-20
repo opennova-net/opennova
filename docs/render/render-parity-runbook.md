@@ -330,7 +330,7 @@ leg must be recaptured against the new revision too. Budget both legs.
 apply and the capture back-to-back on one MCP connection (3-5 frames apart
 instead of the 500-1800 an operator or agent achieves by hand), solves the
 camera from each frame's own view matrix, and writes the six bundle sidecars.
-Use `--fresh-host` for water fixtures: a player already in water is pinned by
+Use `--fresh-process` for water fixtures: a player already in water is pinned by
 float/settle physics, the applied z is overridden, and the residual repeats
 bit-for-bit -- only the first teleport of a process lands. Ground snap can also
 offer only discrete eye heights that straddle the target; the camera x and y
@@ -472,7 +472,7 @@ descriptive measurements and never a threshold.
 | `fixture application position does not match catalog` | The applied pose was corrected to chase the camera. Registration pins it at 1e-5; recapture with `--no-correct` and mint a catalog revision. |
 | `retail capture is more than 120 frames after fixture application` | Apply and capture were issued separately. Use `retail_capture_driver.py`, which pairs them on one connection. |
 | `onhook_host_lan` times out with an empty log | The run's `output_dir` was reused. The hook log is create-new; give every run its own directory. |
-| Water frames come out submerged | The player is pinned in a swim state. Capture that fixture in a dedicated process (`--fresh-host`). |
+| Water frames come out submerged | The player is pinned in a swim state. Capture that fixture in a dedicated process (`--fresh-process`). |
 | Sheets pair but content differs structurally | Check `mission.expansion` in the OpenNova manifest against retail's `/exp`. A `jox01` OpenNova frame against a `revx02` retail frame is not a comparison. |
 | Registration rejects the mission | The loose `.bms` under `NOVA_MISSION_RESOURCE_DIR` does not hash to the catalog value. Repoint at the correct corpus. |
 | Every command in the shell is refused | The persistent shell was `cd`-ed into the shared checkout. Re-enter the current worktree to unwedge it. |
