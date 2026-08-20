@@ -400,17 +400,17 @@
         2000,
         1200
       ],
-      "gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
+      "gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "14904d8563792ed839bc9f9fca47cd136eeebfc25b1a25e4a29655e9c66bc20e",
-      "sha256": "8639ca9d422347b17bb6f4bd79aa7e38e0054ee602741ca732218ff28c3c4633",
-      "source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
+      "manifest_sha256": "32cd2d8ab598f1250476fb3a725279f5bff4028ad5fd9b62b7fc184c6d1e4bb8",
+      "sha256": "dc53e1542b5a16ffeff68b4fa6c17d93fa8cee0a96b928189e661e17f2364f11",
+      "source_commit": "3ada00e96b055075db4442ac7724ee08fee19325",
       "source_name": "cp04-checkpoint-fires-retail-m0120-beauty.png",
       "state_name": "cp04-checkpoint-fires-retail-m0120-beauty.state.json",
-      "state_sha256": "23c7902d98d644925cf95f9ae8ac291271911cb1453f866833a393ddf051657a"
+      "state_sha256": "28deb0d80c255b530477188ec8a5a2f32a3a500993c50da4a9165abe928ca16c"
     },
     "retail": {
-      "bundle_sha256": "511f3cb9b533e6a863a09ec9f3e384cbfce34d09bc0744853a29f9e9b220f319",
+      "bundle_sha256": "767078f07ead1dab9a569c018b52f69165716c9184b92dda8d3288f4599f06fa",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
+      "opennova_source_commit": "3ada00e96b055075db4442ac7724ee08fee19325",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -604,7 +604,7 @@
     "full_frame": {
       "channel_count": 6912000,
       "max_channel_delta": 255,
-      "mean_abs_channel_delta": 10.004225,
+      "mean_abs_channel_delta": 9.964115,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,13 +612,13 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 15.909941
+      "root_mean_square_channel_delta": 15.776689
     },
     "regions": [
       {
         "channel_count": 1663200,
         "max_channel_delta": 255,
-        "mean_abs_channel_delta": 13.596139,
+        "mean_abs_channel_delta": 13.434408,
         "name": "world_center",
         "pixel_count": 554400,
         "region": [
@@ -627,13 +627,13 @@
           1320,
           420
         ],
-        "root_mean_square_channel_delta": 21.810981,
+        "root_mean_square_channel_delta": 21.411659,
         "type": "roi"
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 184,
-        "mean_abs_channel_delta": 12.82005,
+        "max_channel_delta": 186,
+        "mean_abs_channel_delta": 12.814006,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 19.695121,
+        "root_mean_square_channel_delta": 19.686008,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "cp04-checkpoint-fires-retail-absolute-diff.png",
-      "sha256": "f54ab153b6587857596fd395657d79537fa1941efae45d474816cc26a41d9b88"
+      "sha256": "caaa3760ba804af13879390ab604ba7e98904c7e8f94a434630ba9b703c11866"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "cp04-checkpoint-fires-retail-opennova-normalized.png",
-      "sha256": "775d0ab00f6ce25413bc4c80d93baddf9231c67b412c26e466749b6f2098cfb7"
+      "sha256": "97d2566bc97f77c0306ce8cf38fdecc3d6eb5dcfb6ff03e59040464c20f30967"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "cp04-checkpoint-fires-retail-overlay-50.png",
-      "sha256": "e76aa3cc29b8d44bfdcdb74f14d0f00a0708322e526307f29a0c7f591a7f59aa"
+      "sha256": "bbe44ba1ffba2a37576dfe1661786e29f3dffa4968df07e6e63f926b52e49bd4"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "cp04-checkpoint-fires-retail-side-by-side.png",
-      "sha256": "d7dc3053180fec653913fe5aedd789d33c2bcd6c9d1b9dba1405d2f8be71605f"
+      "sha256": "7349aeef8ad696ab7ff9f5169fa562fb0bd549c869ba475752ee0eb57dd1b0f0"
     }
   },
   "presentations": {

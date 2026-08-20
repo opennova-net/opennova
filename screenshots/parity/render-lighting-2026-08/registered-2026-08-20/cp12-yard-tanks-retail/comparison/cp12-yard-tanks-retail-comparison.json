@@ -400,17 +400,17 @@
         2000,
         1200
       ],
-      "gdextension_sha256": "489f11aa2e82f292f0a92653bb2b12a72abb259fc7fd7bef33b9006c8cc3a21d",
+      "gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "16008fca6c354b48789c199001ed0b24dfb9ed70d1800fe6648fdee45567b73e",
-      "sha256": "9fb08ed5aae2de240a8aca30a08d4163a1697e4405311ed845e806942d27b9d4",
-      "source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
+      "manifest_sha256": "2350af174d16ee86143901817db6f72068fbd2e6d9a73f6d0fbb87923dc8e4a7",
+      "sha256": "a554692319b8f618deb538ffc0b68d07127c3051ffb9259ba45c5aa8d90d9d75",
+      "source_commit": "3ada00e96b055075db4442ac7724ee08fee19325",
       "source_name": "cp12-yard-tanks-retail-m1260-beauty.png",
       "state_name": "cp12-yard-tanks-retail-m1260-beauty.state.json",
-      "state_sha256": "bd38feb12c65252a4028aebf0c907c796823d640e05e2f37b0b9a89fdc794a8d"
+      "state_sha256": "bc3ef18724201769a64ca87da8efba8e140d9d7ab1e66157aa6dd0d1b16f2da6"
     },
     "retail": {
-      "bundle_sha256": "d79f018a8384a24acb46614160c9f9b5dd7fbcbfb6042b66b4829c6ae0cd1d8c",
+      "bundle_sha256": "aa8a3f9ac226a992667a9700f7b005ccc2b12228fc06255c17c90bf7244aec25",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "3232a5c86b28a29160494286fe9282545e4b8bdb",
+      "opennova_source_commit": "3ada00e96b055075db4442ac7724ee08fee19325",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -604,7 +604,7 @@
     "full_frame": {
       "channel_count": 6912000,
       "max_channel_delta": 96,
-      "mean_abs_channel_delta": 6.60754,
+      "mean_abs_channel_delta": 6.614629,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,7 +612,7 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 9.650132
+      "root_mean_square_channel_delta": 9.665825
     },
     "regions": [
       {
@@ -632,8 +632,8 @@
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 85,
-        "mean_abs_channel_delta": 8.393763,
+        "max_channel_delta": 87,
+        "mean_abs_channel_delta": 8.429986,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 12.417451,
+        "root_mean_square_channel_delta": 12.479768,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "cp12-yard-tanks-retail-absolute-diff.png",
-      "sha256": "a4ad1e72c7f69aad1b0ba15600b369a7f9f179781a60c65943a965ab4ff32fcc"
+      "sha256": "72007fa3aad976e735c7c3d7b655da28c78209f69774ccf5bcedf7f7a57bf1a0"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "cp12-yard-tanks-retail-opennova-normalized.png",
-      "sha256": "47136c961ddf914b864b91b4c0772f2cd07e9f7b4a7e43a36829c78fe73c3f5e"
+      "sha256": "e935d805fb8526e9d69f0f9bb9760c61be6da12599cb45c1f5c6ef20d7e94ebd"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "cp12-yard-tanks-retail-overlay-50.png",
-      "sha256": "e39e443d289407d70f304bef119ab1cf4f518107ce6780a216b62bc52ebde27a"
+      "sha256": "23cda8ed13b651efd83774dc402679ee0f32c47fcf58b64055925571d21cf360"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "cp12-yard-tanks-retail-side-by-side.png",
-      "sha256": "bdcbe5e41dc6cb7b583449bb443f7e0754ca5cacef5d0f8eb0109b1e9576ac73"
+      "sha256": "a13401894d19ed568868a98d92a2b23e73bbbf759ab4659430e21bac0a726413"
     }
   },
   "presentations": {

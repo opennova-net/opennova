@@ -112,7 +112,9 @@ context frames are not substitutes for these fixtures.
 The current 2026-08-20 max-quality publication contains
 [all 16 registered pairs and 80 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
 captured from frozen source
-`3232a5c86b28a29160494286fe9282545e4b8bdb`. The fixture index links every
+`3ada00e96b055075db4442ac7724ee08fee19325` (the D-TIL-4 flip/rotate
+composition-order fix; the prior 2026-08-20 frozen source `3232a5c86…` is
+kept reachable by the `render-evidence/2026-08-20` tag). The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
 uses fixture catalog v3,
@@ -135,14 +137,16 @@ re-shootable — its `camera_bms` values bind its own capture session's physics
 constraint table).
 
 Across the 16 current comparison-v6 manifests, full-frame MAE spans
-`5.102488`–`21.026561`, `world_center` MAE spans
-`2.493608`–`23.971735`, and `viewmodel_arms` MAE spans
-`6.086196`–`30.619130`. These are descriptive deltas, not parity thresholds.
+`5.037678`–`21.001876`, `world_center` MAE spans
+`2.493596`–`23.876309`, and `viewmodel_arms` MAE spans
+`6.092216`–`29.890922`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
 night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
 differences remain visible. The `00tra-tire-marks-retail` fixture (added
 2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
-tire-mark divergence — the open D-TERRAIN-7 tile-composition producer gap.
+tire-mark composition; the D-TIL-4 flip/rotate composition-order fix in this
+revision dropped its full-frame MAE `16.354421` → `12.135816`, and the
+remaining delta rides the open D-TERRAIN-7 tile-composition items.
 
 ## Capture procedures
 
