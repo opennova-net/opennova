@@ -966,6 +966,35 @@ static CollisionModel box_model_for_ai(int32_t type, uint32_t flags, double hx,
 	return m;
 }
 
+// The water-crossing edge: a hull that drops below the water plane records ONE
+// crossing, not one per frame, and stops recording while it stays under. This is
+// the trigger behind the S2C 0x34 fan retail emits at every splash - the last
+// message type our host recording was missing against the retail baseline.
+// [orig: the water block @0x482BB9..0x482C9D, gated on the 0x8000 latch]
+static void test_water_crossing_fires_once_on_entry() {
+    World w;
+    w.env.water_z = to_fixed(12.0);
+    WaterCrossQueue &q = w.water_crossings;
+    CHECK(q.events.empty());
+
+    // Entering: below the plane with the latch clear -> exactly one record.
+    q.add(to_fixed(-834.0), to_fixed(122.0), w.env.water_z, /*by_hull=*/true);
+    CHECK(q.events.size() == 1);
+    CHECK(q.events[0].by_hull);
+    CHECK(q.events[0].water_z == to_fixed(12.0));
+
+    // The queue is per-tick: the host drains and clears it, so a hull that stays
+    // submerged contributes nothing further.
+    q.clear();
+    CHECK(q.events.empty());
+
+    // The queue refuses to grow without bound if a pathological frame floods it.
+    for (int i = 0; i < 100; ++i)
+        q.add(0, 0, w.env.water_z, true);
+    CHECK(q.events.size() == WaterCrossQueue::kMax);
+    std::printf("  [water-cross] queue capped at %zu\n", q.events.size());
+}
+
 // A guard with no route must still notice an enemy. Live rounds showed only
 // state-16 (route-following) AI ever holding a target while state-0 AI - the
 // majority, every guard the mission spawns without a patrol - never acquired,
@@ -2904,6 +2933,7 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_water_crossing_fires_once_on_entry();
     test_routeless_guard_still_acquires();
     test_ai_aim_solution_hits_its_target();
     test_mounted_rider_sees_past_its_own_carrier();

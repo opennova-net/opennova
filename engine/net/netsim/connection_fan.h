@@ -63,6 +63,13 @@ int view_distance_units();
 // that slot's live entity; there is no pre-spawn/map fallback frame.
 // [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient eye
 // reference @0x517BF5..0x517C13, ++playerSlot+100566 @0x517BE8]
+// Drain the world's water-surface crossings into S2C 0x34 messages for one
+// connection. Retail fans these to ALIVE players only (send_mask 128) the moment
+// a hull or body crosses the plane, positioned at the water surface.
+// [orig: Server_SendOverlayActionToAlive @0x50a1b0]
+std::vector<std::vector<uint8_t>> build_water_cross_messages(
+        const world::World &world);
+
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type = 0,

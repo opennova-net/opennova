@@ -1165,7 +1165,19 @@ void watercraft_platform_solve(World &world, Entity &veh,
     if (W == 0 || draft + v210 >= W) {
         m.plat_afloat = false; // [orig: @0x482DB7; emitter release deferred]
     } else {
-        // Splash FX on entry = cited deferral [orig: @0x482BB9..0x482C9D].
+        // Entry edge: the hull was above the plane and is now under it. Retail
+        // spawns the splash emitter and fans the positioned effect ONCE here,
+        // gated on the same latch, placing it at the water plane rather than at
+        // the hull's own Z. The local emitter stays a deferral; the network fan
+        // is recorded for the host to drain.
+        // [orig: @0x482BB9..0x482C9D — the `(Flags & 0x8000) == 0` gate,
+        //  `dest[6] = Env_WaterHeightFixed`, then
+        //  Server_SendOverlayActionToAlive @0x50a1b0]
+        if (!m.plat_afloat) {
+            world.water_crossings.add(to_fixed(veh.position.x),
+                                      to_fixed(veh.position.y), W,
+                                      /*by_hull=*/true);
+        }
         m.plat_afloat = true; // [orig: @0x482CA5]
     }
     veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
