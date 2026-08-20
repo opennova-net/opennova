@@ -1337,6 +1337,15 @@ add_test(NAME collision COMMAND collision_test)
 # Cbunker2 collision at the mission pose, a capsule walking the authored
 # route into it. Diagnostic/report-only while the frozen-clump divergence is
 # open; skip-as-pass without a JO install.
+# Asset-gated (OPENNOVA_JO_DIR): mission-script report — which authored BMS
+# events fire in a headless run and what the unfired ones would have done.
+# Diagnostic; never fails on unfired events.
+add_executable(mission_script_report_test mission/mission_script_report_test.cpp)
+target_link_libraries(mission_script_report_test PRIVATE opennova_runtime)
+target_include_directories(mission_script_report_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_script_report_test PRIVATE cxx_std_17)
+add_test(NAME mission_script_report COMMAND mission_script_report_test)
+
 add_executable(bunker_walkin_test world/bunker_walkin_test.cpp)
 target_link_libraries(bunker_walkin_test PRIVATE opennova_runtime)
 target_include_directories(bunker_walkin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
