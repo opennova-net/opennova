@@ -2,6 +2,8 @@
 
 #include <godot_cpp/classes/rendering_server.hpp>
 
+#include <algorithm>
+
 #include "env/nova_mission_environment.h"
 #include "env/nova_water.h"
 
@@ -94,16 +96,26 @@ void SunShadow::_update_direction() {
 		set_visible(false);
 		return;
 	}
-	const Vector3 light_direction = env->get_light_direction();
-	if (light_direction.length_squared() <= 1.0e-6) {
+	const Vector3 light_tuple = env->get_light_direction();
+	if (light_tuple.length_squared() <= 1.0e-6) {
 		set_visible(false);
 		return;
 	}
 	set_visible(true);
-	// The environment serves surface -> light; a DirectionalLight3D emits
-	// along local -Z, so its ray direction is the negative (the engine light
-	// chain's WorldLightingBlock.dir is the same negated form).
-	const Vector3 emission = -light_direction.normalized();
+	// The environment serves the DIRECT retail getter tuple g = (-Y_bms,
+	// Z_bms, X_bms); presentation-world surface->light is the (g2, g1, g0)
+	// reduction [orig: Environment_GetLightDirectionFloat @ 0x57d870;
+	// Math_BuildFixedPointToFloatMatrix4x4 @ 0x612402..0x612457]. Retail's
+	// entity shadow projection additionally clamps the vertical component to
+	// 0.25 before negating into the slot's light->surface direction, so a
+	// grazing sun never stretches an entity silhouette past 4x height
+	// [orig: render_shadow_pass @ 0x5d7b70 — GetLightDirectionFloat into
+	// RenderSlot_DefaultLightDir*, `if (y < 0.25) y = 0.25`, then negate all
+	// three]. A DirectionalLight3D emits along local -Z, so emission is that
+	// negated form (docs/render/render-lighting-re.md, D-RLIT-9).
+	const Vector3 surface_to_light(light_tuple.z,
+			std::max(light_tuple.y, real_t(0.25)), light_tuple.x);
+	const Vector3 emission = -surface_to_light.normalized();
 	if (emission.is_equal_approx(last_emission_direction_)) {
 		return;
 	}

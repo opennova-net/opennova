@@ -819,6 +819,24 @@ bool Terrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
+	// Terrain receives the LIVE entity ground shadows: retail projects each
+	// dynamic render slot's silhouette onto the terrain at a marched anchor
+	// [orig: render_shadow_pass @ 0x5d7b70; RenderSlot_UpdateEntityLight
+	// @ 0x5d6a30 — anchor march via Terrain_GetHeightAtPosition @ 0x606720;
+	// slot draw RenderSlot_RenderEntityAndChildren @ 0x5d7690]. The device
+	// translation is the shared ATTENUATION catcher pass over the unshaded
+	// surface (the same seam world models use), with the SunShadow light
+	// carrying the witnessed clamped projection direction. Static building
+	// silhouettes stay page-alpha only — buildings are not on the dynamic
+	// caster layer, so they never double-darken here
+	// (docs/render/render-lighting-re.md, D-RLIT-9).
+	{
+		Ref<ShaderMaterial> shadow_catcher;
+		shadow_catcher.instantiate();
+		shadow_catcher->set_shader(ResourceLoader::get_singleton()->load(
+				"res://shaders/sun_shadow_catcher.gdshader", "Shader"));
+		terrain_material->set_next_pass(shadow_catcher);
+	}
 
 	tile_infos.resize(cpt.tiles.size());
 

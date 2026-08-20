@@ -12,9 +12,19 @@ func _environment_at(time_of_day: int, node_name: String) -> MissionEnvironment:
 	return environment
 
 
+func _expected_emission(environment: MissionEnvironment) -> Vector3:
+	# The environment serves the direct retail getter tuple g; presentation
+	# surface->light is the (g2, g1, g0) reduction, and the entity shadow
+	# projection clamps the vertical component to 0.25 before negating
+	# [orig: Environment_GetLightDirectionFloat @ 0x57d870;
+	#  render_shadow_pass @ 0x5d7b70].
+	var g := environment.get_light_direction()
+	return -Vector3(g.z, maxf(g.y, 0.25), g.x).normalized()
+
+
 func _assert_tracks_environment(
 		light: SunShadow, environment: MissionEnvironment, context: String) -> void:
-	var expected_ray := -environment.get_light_direction().normalized()
+	var expected_ray := _expected_emission(environment)
 	var actual_ray := -light.global_basis.z.normalized()
 	assert_true(actual_ray.is_equal_approx(expected_ray), context)
 
@@ -80,6 +90,38 @@ func test_dynamic_projection_separates_live_casters_from_world_receivers() -> vo
 			"live shadows reach both world-entity layers and the hidden FP body")
 	assert_eq(light.shadow_caster_mask,
 			Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
+
+
+func test_low_sun_projection_clamps_the_vertical_component() -> void:
+	# 06:30 sunrise: the getter tuple's vertical is ~0.1227, well under the
+	# witnessed 0.25 slot-projection clamp, so retail projects entity shadows
+	# as if the sun sat at ~14.5 deg — silhouettes never stretch past 4x
+	# height [orig: render_shadow_pass @ 0x5d7b70 clamp; same constant as the
+	# static collector @ 0x60d33f..0x60d341].
+	var environment := _environment_at(630, "SunriseEnvironment")
+	var light := SunShadow.new()
+	light.set_environment_node(environment)
+	add_child_autofree(light)
+
+	var g := environment.get_light_direction()
+	assert_lt(g.y, 0.25, "the sunrise fixture must sit under the clamp")
+	var emission := -light.global_basis.z.normalized()
+	assert_true(emission.is_equal_approx(
+			-Vector3(g.z, 0.25, g.x).normalized()),
+			"a grazing sun projects at the clamped 0.25 vertical")
+
+
+func test_high_sun_projection_uses_the_unclamped_tuple() -> void:
+	var environment := _environment_at(1200, "NoonEnvironment")
+	var light := SunShadow.new()
+	light.set_environment_node(environment)
+	add_child_autofree(light)
+
+	var g := environment.get_light_direction()
+	assert_gt(g.y, 0.25, "the noon fixture must sit above the clamp")
+	var emission := -light.global_basis.z.normalized()
+	assert_true(emission.is_equal_approx(-Vector3(g.z, g.y, g.x).normalized()),
+			"above the clamp the presentation reduction (g2,g1,g0) passes through")
 
 
 func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
