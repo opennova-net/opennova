@@ -1905,6 +1905,12 @@ func test_active_water_capture_requires_the_exact_mirrored_camera_pose() -> void
 		},
 		"water": {
 			"render_active": true,
+			# The mirror-pose obligation exists only while the strip is
+			# actually drawn: an occlusion-culled strip never samples the
+			# stale mirror (Water::advance_frame early-outs before the
+			# retarget), so the fixture must declare its strip visible to
+			# arm the gate.
+			"mesh_visible": true,
 			"height": 20.0,
 			"reflection": {
 				"available": true,
@@ -1932,6 +1938,12 @@ func test_active_water_capture_requires_the_exact_mirrored_camera_pose() -> void
 	inactive.water.render_active = false
 	assert_true(Probe.realized_reflection_pose_matches(inactive),
 			"missions without rendered water have no mirror-pose precondition")
+
+	var occluded := stale.duplicate(true)
+	occluded.water.mesh_visible = false
+	assert_true(Probe.realized_reflection_pose_matches(occluded),
+			"an occlusion-culled strip never samples the stale mirror, so its"
+			+ " pose carries no obligation")
 
 
 func test_capture_requires_the_single_player_post_spawn_equivalent() -> void:
