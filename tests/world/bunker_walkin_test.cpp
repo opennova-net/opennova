@@ -167,14 +167,14 @@ int main() {
 	s.kind = w::EntityKind::Organic;
 	s.net_id = 70001;
 	s.alive = true;
-	s.position = {150.0f, 318.0f, 34.2f}; // the live clump majority (1813/2392)
+	s.position = {159.7f, 323.8f, 35.1f}; // live pinned garrison (233), on the slab
 	const w::EntityHandle soldier = world.registry.spawn(0, s);
 	for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
 	// Walk toward the authored node (the bunker interior) at the live root
 	// step (~0.09u/tick), resolving every step like the infantry tick.
 	const double nx = 159.8, ny = 319.7;
-	int32_t pos[3] = {fx(150.0), fx(318.0), fx(34.2)};
+	int32_t pos[3] = {fx(159.7), fx(323.8), fx(35.1)};
 	int32_t vel[3] = {0, 0, 0};
 	int16_t health = 100;
 	w::CollisionWorld::ResolveState state;
