@@ -72,10 +72,25 @@ fixture-result.json     capture-result.json     onhook.log
 retail-stage.json
 ```
 
-**Re-shoot retail** only when the catalog poses, the video profile contract, the
-capture-mode contract, onHook, or the retail install actually change. That path
-needs the onHook MCP server registered with your MCP client and the client
-restarted before any capture can run; see section 3b.
+**A retained bundle is pinned to the absolute path it was captured at.** Its
+`capture-result.json` records the absolute `path` and `state_path` onHook wrote,
+and registration fail-closes unless `--raw-image` and `--raw-state` resolve to
+exactly those, with `--output` inside the same directory
+(`capture result does not bind the selected raw pair`, then
+`raw retail image must be colocated under the registered bundle directory`).
+A copy elsewhere is not registerable. Re-registration therefore happens **in
+place**, in the directory the bundle was originally captured into.
+
+That makes the capture destination a long-lived decision: **write raw bundles to
+a durable local evidence root, never into a worktree's `.scratch`.** A worktree
+is disposable; a bundle captured inside one can only ever be re-registered from
+inside that same worktree, for as long as it survives.
+
+**Re-shoot retail** when the catalog poses, the video profile contract, the
+capture-mode contract, onHook, or the retail install change -- or when the only
+retained bundles are stranded in a worktree you are not willing to write into.
+That path needs the onHook MCP server registered with your MCP client and the
+client restarted before any capture can run; see section 3b.
 
 ## 1. Worktree preflight
 
@@ -126,6 +141,16 @@ Rules the probe enforces, so do not fight them:
   frame. The manifest's `mission.expansion` is the receipt -- check it.
 - Run the `.tscn` positionally. Never pass the `.gd` to `-s`, never add
   `--headless` — the capture needs a real window.
+- Run captures in the **foreground of an interactive desktop session**. A
+  detached or background shell has no usable desktop, so the probe takes its
+  `<fixture-id>.publication-transaction` lock and aborts having written only
+  `owner.json`. A sweep launched that way fails every fixture with no
+  explanation; the leftover transaction directories are the signature. Delete
+  them before retrying.
+- Do not judge success from stdout. Under PowerShell 5.1 a `2>&1` redirect of
+  the Godot executable wraps its stderr in `NativeCommandError` records, and the
+  non-console binary may deliver nothing to a redirected pipe at all. Check the
+  output directory instead: a good run leaves exactly 11 files.
 - `NOVA_RENDER_FIXTURE_OUTPUT` must be a strict descendant of this repository's
   `.scratch`.
 - Omit `NOVA_RENDER_FIXTURE_MINUTE`: every retail fixture declares exactly one
@@ -250,7 +275,14 @@ receipt.
 
 Everything in 3a applies, plus the capture itself. Register the onHook MCP with
 your MCP client and restart it first; a server added mid-session is not
-discoverable. Then, per fixture:
+discoverable. Register it at user scope with an absolute path to the build you
+intend to use -- never in the tracked `.mcp.json`, which must stay free of
+machine-specific paths.
+
+Capture into a **durable evidence root outside every worktree**, one directory
+per fixture. The absolute path you choose is baked into `capture-result.json`
+and is the only place those bundles can ever be re-registered from (section 0).
+Then, per fixture:
 
 1. Launch `<game dir>\Jointops.exe /exp revx02 /w` through the owned mission
    session and retain the exact `instance_id` and PID.
@@ -366,6 +398,9 @@ descriptive measurements and never a threshold.
 | Parse errors naming `Nova*` classes | Missing or stale GDExtension. Rebuild with `scripts/build_godot.sh` and fully restart Godot; registration does not hot-reload and a running editor holds the DLL lock. |
 | `live game.cfg hash does not match the staged effective config` | Retail is unstaged, or restored mid-run. Re-stage before registering. |
 | `OpenNova build does not match retail pairing bundle` | The registration and the OpenNova manifest name different source commits. Re-register at the frozen commit. |
+| Every fixture in a sweep fails, leaving only `<id>.publication-transaction/owner.json` | The captures ran without an interactive desktop. Re-run them in the foreground and delete the stale transaction directories first. |
+| `capture result does not bind the selected raw pair` | The raw bundle was moved. Register it at the absolute path `capture-result.json` records, or re-shoot retail. |
+| `raw retail image must be colocated under the registered bundle directory` | `--output` is outside the bundle directory. Write `registered.json` beside `retail.png`. |
 | Sheets pair but content differs structurally | Check `mission.expansion` in the OpenNova manifest against retail's `/exp`. A `jox01` OpenNova frame against a `revx02` retail frame is not a comparison. |
 | Registration rejects the mission | The loose `.bms` under `NOVA_MISSION_RESOURCE_DIR` does not hash to the catalog value. Repoint at the correct corpus. |
 | Every command in the shell is refused | The persistent shell was `cd`-ed into the shared checkout. Re-enter the current worktree to unwedge it. |
