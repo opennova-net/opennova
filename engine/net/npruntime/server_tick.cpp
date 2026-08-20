@@ -979,6 +979,32 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 	}
 
+	// (2d) Water-surface crossings: S2C 0x34 to every ALIVE in-match player, one
+	// message per crossing the motor recorded this tick. Retail fans the splash
+	// with send_mask 128 (alive players) the moment a hull crosses the plane, so
+	// clients spawn the same effect at the same spot; the queue is drained and
+	// cleared every tick whether or not anyone is listening, because a crossing
+	// is presentation, never simulation state.
+	// [orig: Server_SendOverlayActionToAlive @0x50a1b0, send_mask 128]
+	if (ctx.is_in_session && !world.water_crossings.events.empty()) {
+		const std::vector<std::vector<uint8_t>> splashes =
+				netsim::build_water_cross_messages(world);
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+			if (conn.link.mode == netsim::TransportMode::Loopback) continue;
+			bool alive = true;
+			if (conn.link.owned_entity.valid()) {
+				const world::Entity *e = world.registry.get(conn.link.owned_entity);
+				alive = e != nullptr && e->health > 0;
+			}
+			if (!alive) continue; // the mask-128 alive filter
+			for (const std::vector<uint8_t> &body : splashes)
+				conn.link.transport->host_send(s2c::PLAY_SOUND, body,
+				                               /*reliable=*/false);
+		}
+	}
+	world.water_crossings.clear();
+
 	// (3) serialize-after — SESSION-ONLY [D-NET-120]: the original's per-frame replicate/broadcast
 	// blocks are each gated on is_in_session (+0x58) inside Server_TickUpdate (@0x51d9ab..0x51e3f3),
 	// while the C2S recv pump above is not — so a World kept alive past match-end (is_in_session 0,
