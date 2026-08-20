@@ -60,7 +60,7 @@ class Client:
         )
         self.seq = 0
         self.call("initialize", {
-            "protocolVersion": "2025-11-25", "capabilities": {},
+            "protocolVersion": "2026-07-28", "capabilities": {},
             "clientInfo": {"name": "retail-capture-driver", "version": "1"},
         })
         self.notify("notifications/initialized")
