@@ -11,13 +11,24 @@ const INTERVAL_S := 5.0
 var _path := OS.get_environment("NW_AI_PROBE")
 var _accum := 0.0
 
+# Screenshot hook (NW_SHOT_DIR + NW_SHOT_SSN): each interval a chase camera
+# tracks the target entity and the main viewport is dumped to PNG, so the
+# self-test loop hands out a human-checkable frame. Inert without the envs.
+var _shot_dir := OS.get_environment("NW_SHOT_DIR")
+var _shot_ssn := OS.get_environment("NW_SHOT_SSN").to_int()
+var _shot_cam: Camera3D = null
+var _shot_n := 0
+
 func tick(world: GameWorld, delta: float) -> void:
-	if _path.is_empty() or world == null:
+	if world == null or (_path.is_empty() and _shot_dir.is_empty()):
 		return
 	_accum += delta
 	if _accum < INTERVAL_S:
 		return
 	_accum = 0.0
+	_shot_tick(world)
+	if _path.is_empty():
+		return
 	var sim: Simulation = world.get_sim()
 	if sim == null:
 		return
@@ -66,3 +77,43 @@ func tick(world: GameWorld, delta: float) -> void:
 		return
 	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards}))
 	f.close()
+
+
+func _shot_tick(world: GameWorld) -> void:
+	if _shot_dir.is_empty() or _shot_ssn == 0:
+		return
+	var sim: Simulation = world.get_sim()
+	if sim == null:
+		return
+	var stride: int = sim.get_present_stride()
+	if stride <= 0:
+		return
+	var snap: PackedFloat32Array = sim.get_present_snapshot()
+	var target := Vector3.ZERO
+	var found := false
+	var count: int = snap.size() / stride
+	for i in range(count):
+		var base := i * stride
+		if int(snap[base + Simulation.PF_BMS_ID]) == _shot_ssn:
+			target = Vector3(
+					snap[base + Simulation.PF_POS_X],
+					snap[base + Simulation.PF_POS_Y],
+					snap[base + Simulation.PF_POS_Z])
+			found = true
+			break
+	if not found:
+		return
+	# Capture the frame the previous placement rendered before re-aiming, so
+	# every saved PNG shows the tracked entity, not a mid-swing camera.
+	if _shot_cam != null and is_instance_valid(_shot_cam) and _shot_n > 0:
+		var img: Image = world.get_viewport().get_texture().get_image()
+		if img != null:
+			img.save_png(_shot_dir.path_join("shot.%03d.png" % _shot_n))
+	if _shot_cam == null or not is_instance_valid(_shot_cam):
+		_shot_cam = Camera3D.new()
+		_shot_cam.far = 8000.0
+		world.add_child(_shot_cam)
+	_shot_cam.make_current()
+	_shot_cam.global_position = target + Vector3(18.0, 9.0, 18.0)
+	_shot_cam.look_at(target)
+	_shot_n += 1
