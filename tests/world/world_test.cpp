@@ -312,6 +312,54 @@ int main() {
     w.run_logic_tick(true, false);
     CHECK(w.registry.get(blast_victim)->health == restored_health);
 
+    // A SCRIPTED group kill has to reach the wire. Retail never fans deaths from
+    // the damage pass: each motor's per-entity update carries the edge
+    // `Health <= 0 && (Flags & 2) == 0` and notifies there, so the script's
+    // KillGroup is noticed exactly like a bullet. And because the killer lives on
+    // the VICTIM (entity+704) and the script never stamps it, retail's own
+    // baseline capture shows those deaths with killerSource=0 - a burst of
+    // consecutive slots with no killer. This pins both halves.
+    {
+        World kw;
+        kw.registry.configure_pool(0, 8);
+        Entity a; a.net_id = 900; a.group_id = 9; a.alive = true; a.health = 150;
+        Entity b; b.net_id = 901; b.group_id = 9; b.alive = true; b.health = 150;
+        const EntityHandle ha = kw.registry.spawn(0, a);
+        kw.registry.spawn(0, b);
+        CHECK(kw.round_sim.deaths.empty());
+        CHECK(kw.commands.kill_group(9) == 2);
+        CHECK(kw.round_sim.deaths.size() == 2);
+        if (kw.round_sim.deaths.size() == 2) {
+            CHECK(kw.round_sim.deaths[0].victim_handle == ha.packed);
+            // Unstamped killer - the signature that separates a scripted kill
+            // from a shot one in the capture.
+            CHECK(kw.round_sim.deaths[0].killer_handle == 0);
+            CHECK(kw.round_sim.deaths[1].killer_handle == 0);
+        }
+        CHECK(kw.commands.group_dead(9));
+
+        // Killing an already-dead group must not notify twice: retail's
+        // `(Flags & 2) == 0` half of the edge.
+        kw.round_sim.deaths.clear();
+        kw.commands.kill_group(9);
+        CHECK(kw.round_sim.deaths.empty());
+
+        // Zeroing a group's health is the same edge by another name - the motor
+        // only ever sees the zero.
+        Entity c; c.net_id = 902; c.group_id = 11; c.alive = true; c.health = 150;
+        kw.registry.spawn(0, c);
+        kw.commands.set_group_hp(11, 0);
+        CHECK(kw.round_sim.deaths.size() == 1);
+        if (!kw.round_sim.deaths.empty())
+            CHECK(kw.round_sim.deaths[0].killer_handle == 0);
+        // A non-lethal set stays silent.
+        kw.round_sim.deaths.clear();
+        Entity d; d.net_id = 903; d.group_id = 12; d.alive = true; d.health = 150;
+        kw.registry.spawn(0, d);
+        kw.commands.set_group_hp(12, 75);
+        CHECK(kw.round_sim.deaths.empty());
+    }
+
     std::printf(failures ? "WORLD TESTS FAILED (%d)\n" : "world tests passed\n", failures);
     return failures ? 1 : 0;
 }

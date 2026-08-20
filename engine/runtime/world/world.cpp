@@ -767,13 +767,45 @@ bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
     return adiff <= 0x15555540; // 30.0000 deg in BAM32
 }
 
+// A scripted group kill has to reach the WIRE, not just zero the health. Retail
+// never fans deaths from the damage pass: every motor's per-entity update carries
+// the edge `Health <= 0 && (Flags & 2) == 0` and calls Entity_CheckAndProcessDeath
+// there, so ANY writer of zero health — a bullet, or this action — is noticed and
+// notified. The killer rides on the VICTIM (entity+704, read by
+// BuildDeathNotifyPayload), which is why retail's own baseline capture shows its
+// scripted kills as `killerSource=0`: the script never stamps that field. Ours
+// leaves the killer handle unset for the same reason, and the burst matches.
+//
+// SHAPE NOTE: raising the death here rather than from a health<=0 sweep in the
+// motor is narrower than the original — a future health-zeroing path would have
+// to remember to do the same. Converging on the sweep is worth doing when the
+// death path is next opened up; it needs the killer moved onto the entity first.
+// [orig: the edge @0x4bfxxx (org1) / @0x4b73xx (org2) -> Entity_CheckAndProcessDeath
+//  @0x51b550 -> BuildDeathNotifyPayload @0x5036e0, send_mask 0x90]
+static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
+    RoundDeath d;
+    d.victim = h;
+    d.victim_handle = h.packed;
+    // killer_handle stays at its default: retail's unstamped entity+704.
+    d.killer_handle = 0;
+    world.round_sim.deaths.push_back(d);
+    e.alive = false;
+    e.health = 0;
+}
+
 int EntityCommands::kill_group(int group) {
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
     int n = 0;
     for (EntityHandle h : members) {
         Entity *e = world_.registry.get(h);
-        if (e) { e->alive = false; e->health = 0; ++n; }
+        if (!e) continue;
+        // Only the LIVING cross the edge — retail's `(Flags & 2) == 0` half. A
+        // group killed twice must not notify twice.
+        if (e->health > 0 && (e->flags & kEntityFlagDead) == 0)
+            raise_scripted_death(world_, *e, h);
+        else { e->alive = false; e->health = 0; }
+        ++n;
     }
     return n;
 }
@@ -796,7 +828,18 @@ int EntityCommands::set_group_hp(int group, int32_t hp) {
     int n = 0;
     for (EntityHandle h : members) {
         Entity *e = world_.registry.get(h);
-        if (e) { e->health = hp; e->alive = hp > 0; ++n; }
+        if (!e) continue;
+        // Setting a group to zero health is a kill by another name, and retail's
+        // motor edge cannot tell the two apart — it only sees the zero. Same
+        // notify, same unstamped killer.
+        if (hp <= 0 && e->health > 0 && (e->flags & kEntityFlagDead) == 0) {
+            raise_scripted_death(world_, *e, h);
+            ++n;
+            continue;
+        }
+        e->health = hp;
+        e->alive = hp > 0;
+        ++n;
     }
     return n;
 }
