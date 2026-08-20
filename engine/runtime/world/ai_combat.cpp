@@ -347,7 +347,28 @@ void AiSystem::weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t 
 bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle from, EntityHandle to) const {
     if (terrain == nullptr || !terrain->valid()) return true;
-    if (collision != nullptr) return collision->raycast_clear(world, a, b, from, to);
+    if (collision != nullptr) {
+        // Retail resolves each LOS endpoint through its parent links (the
+        // +0x268 link, then the +0x16C carrier overriding) so a rider's own
+        // vehicle never occludes its sight — a boat passenger sees and is seen
+        // through its own hull. Persons carry no collision instance, so
+        // substituting the carrier keeps the effective exclusion identical.
+        // One link level (carrier, else emplacement parent); the two-level
+        // gunner-on-emplaced-child chain is a tracked follow-up.
+        // [orig: raycast_find_collision_entity endpoint resolve — the
+        //  entity[154] / entity[91] folds before the model walk]
+        const auto resolve_exclude = [&](EntityHandle h) {
+            const Entity *ent = world.registry.get(h);
+            if (ent != nullptr) {
+                if (ent->mounted && ent->mount_target.valid())
+                    return ent->mount_target;
+                if (ent->emplacement_parent.valid()) return ent->emplacement_parent;
+            }
+            return h;
+        };
+        return collision->raycast_clear(world, a, b, resolve_exclude(from),
+                                        resolve_exclude(to));
+    }
     return !los_terrain_blocked(*terrain, a, b);
 }
 
