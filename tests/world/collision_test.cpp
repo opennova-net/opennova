@@ -1017,12 +1017,18 @@ void test_slice_cadence_and_invuln() {
     cw.build_initial_tables(world);
     CHECK(cw.tick_tables_ready());
     CHECK(cw.static_count() == 1);
-    CHECK(cw.candidate_count(soldier) == 0);
+    // Mission init builds the candidate slices IMMEDIATELY — retail's load
+    // path calls the slice builder directly, so no sliceless boot window
+    // exists (spawned entities ground on building floors from tick 1).
+    // [orig: Game_TryLoadSavedGame -> Entity_BuildProximityListsFromPools
+    //  @0x4b8eb0; the 17-tick cadence @0x4c240f governs steady-state
+    //  REBUILDS only — the builder resets the counter itself]
+    CHECK(cw.candidate_count(soldier) == 1);
     for (int i = 0; i < 16; ++i) {
-        cw.build_tick_tables(world);
-        CHECK(cw.candidate_count(soldier) == 0);
+        cw.build_tick_tables(world); // cadence skip ticks keep the built slices
+        CHECK(cw.candidate_count(soldier) == 1);
     }
-    cw.build_tick_tables(world); // the 17th call builds
+    cw.build_tick_tables(world); // the 17th call rebuilds
     CHECK(cw.candidate_count(soldier) == 1);
 
     // Spawn/restore can invalidate an already-authoritative mission-init pool
@@ -1057,11 +1063,9 @@ void test_slice_cadence_and_invuln() {
         const int32_t ray_b[3] = {fx(10.0), 0, fx(1.0)};
         CHECK(!refresh_cw.raycast_clear(refresh_world, ray_a, ray_b,
                                         EntityHandle{}, EntityHandle{}));
-        CHECK(refresh_cw.candidate_count(source) == 0);
-        for (int i = 0; i < 16; ++i) {
-            refresh_cw.build_tick_tables(refresh_world);
-            CHECK(refresh_cw.candidate_count(source) == 0);
-        }
+        // The spawn/restore refresh forces the cadence gate: the NEXT logic
+        // tick publishes the new slices (retail's spawn/teleport paths call
+        // the @0x4b8eb0 builder; our refresh arms the rebuild for the tick).
         refresh_cw.build_tick_tables(refresh_world);
         CHECK(refresh_cw.candidate_count(source) == 1);
     }
@@ -4462,9 +4466,10 @@ void test_entity_sun_visibility_rays_and_eligibility() {
     const int32_t sun[3] = {0, 0, fx(200.0)};
     Entity *p = world.registry.get(person);
     CHECK(p != nullptr);
-    // Before the first slice epoch (retail: 16 sliceless mission-start
-    // ticks) nothing rays — the +0x1C0 gate.
-    CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 0);
+    // Mission init builds the slices immediately (retail's load path calls
+    // the @0x4b8eb0 builder directly), so the roofed person's rays block
+    // from the first query — no sliceless boot window.
+    CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 3);
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
     CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 3);
     Entity *o = world.registry.get(open_person);

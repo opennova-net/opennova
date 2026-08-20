@@ -1284,11 +1284,24 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // 4. Ground resample (every 8 ticks). [orig: dump 319-326, cache entity+676]
+    // The radius-0 leg of the retail sampler is ONE model-aware center probe:
+    // ray from pos + 1.0u lift, 48u drop, clipped by terrain AND candidate
+    // models — a soldier on a building floor grounds on the FLOOR, not the
+    // terrain under it (the frozen-bunker-garrison fix). Without a collision
+    // world (headless tests) the terrain average stands as before.
+    // [orig: Entity_CalcAverageGroundHeight @0x457230 radius==0 ->
+    //  Entity_RaycastGroundHeightAndObject(entity, 0, 0, 0x10000, 0x300000)
+    //  -> raycast_entity_collision @0x413760 (terrain + candidate models)]
     if (terrain != nullptr && ((key & 7u) == 0 || !inf.ground_cache_valid)) {
-        GroundClearance clearance = ground_clearance;
-        clearance.has_physics = e.has_physics;
-        clearance.use_dead = (e.health <= 0);
-        inf.ground_cache = calc_average_ground_height(*terrain, e.pos, 0, clearance);
+        if (collision != nullptr && collision->instance_count() != 0) {
+            inf.ground_cache = collision->raycast_ground(
+                world, e.handle, e.pos, 0, 0, 0x10000, 0x300000, nullptr);
+        } else {
+            GroundClearance clearance = ground_clearance;
+            clearance.has_physics = e.has_physics;
+            clearance.use_dead = (e.health <= 0);
+            inf.ground_cache = calc_average_ground_height(*terrain, e.pos, 0, clearance);
+        }
         inf.ground_cache_valid = true;
     }
 
