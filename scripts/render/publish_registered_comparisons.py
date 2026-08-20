@@ -15,11 +15,11 @@ version, because a publication that mixes provenance is not evidence.
 Usage::
 
     uv run python scripts/render/publish_registered_comparisons.py \
-      --catalog docs/render/render-fixtures-retail-v2.json \
+      --catalog docs/render/render-fixtures-retail-v3.json \
       --opennova-root .scratch/golden/render/fixtures \
       --retail-root .scratch/retail/raw \
       --comparison-root .scratch/publication \
-      --output screenshots/parity/render-lighting-2026-08/registered-2026-08-19
+      --output screenshots/parity/render-lighting-2026-08/registered-<date>
 
 See docs/render/render-parity-runbook.md section 4.
 """

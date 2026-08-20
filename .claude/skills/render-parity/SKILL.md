@@ -23,11 +23,12 @@ commit, and catalog. Then answer three questions before touching anything:
   changes, so retained raw bundles can be re-registered against a new commit
   with no game launch — but only **in place**. `capture-result.json` records the
   absolute paths onHook wrote, and registration rejects any copy (runbook
-  section 0). If the only bundles live in a disposable worktree's `.scratch`,
-  reuse means writing into that worktree; if that is not acceptable, retail must
-  be re-shot. A fresh capture needs the onHook MCP registered at user scope and
-  the client restarted first, so it cannot start mid-session — say so early
-  rather than discovering it at the registration step.
+  section 0). If the bundles are gone or stranded, retail is re-shot — and a
+  re-shoot **always mints a new catalog revision** (the catalog pins the applied
+  pose and the resulting camera to one session; runbook section 3b) and forces
+  the OpenNova leg to be recaptured against it. The whole re-shoot is scripted:
+  `retail_capture_driver.py --no-correct --fresh-process`, then
+  `mint_retail_catalog.py`, then a smoke registration.
 - **Where are the retained bundles?** Search for `capture-result.json` siblings
   and read the absolute path inside one. A usable bundle has all seven artifacts
   per fixture. Verify the four provenance binaries still hash to the runbook's

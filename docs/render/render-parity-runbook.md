@@ -28,8 +28,8 @@ tracked files. The values below are the authoritative capture machine's.
 
 | Parameter | Value |
 |---|---|
-| Publication catalog | `docs/render/render-fixtures-retail-v2.json` |
-| Catalog SHA-256 | `607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8` |
+| Publication catalog | `docs/render/render-fixtures-retail-v3.json` |
+| Catalog SHA-256 | `ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c` |
 | Fixtures | 15 (`00TRa` x5, `CP01` x6, `CP04` x1, `CP12` x3) |
 | OpenNova capture size | 2000x1200, vertical FOV 53.4468 |
 | Retail backbuffer | 1920x1200 (one horizontal bicubic squeeze at comparison time) |
@@ -119,8 +119,10 @@ inside that same worktree, for as long as it survives.
 **Re-shoot retail** when the catalog poses, the video profile contract, the
 capture-mode contract, onHook, or the retail install change -- or when the only
 retained bundles are stranded in a worktree you are not willing to write into.
-That path needs the onHook MCP server registered with your MCP client and the
-client restarted before any capture can run; see section 3b.
+A re-shoot always mints a new catalog revision and recaptures the OpenNova leg
+against it (the constraint table in section 3b explains why); the whole path is
+scripted -- `retail_capture_driver.py` then `mint_retail_catalog.py` (section
+3b).
 
 ## 1. Worktree preflight
 
@@ -150,7 +152,7 @@ if (git status --porcelain) { throw "capture worktree is not source-frozen" }
 
 $env:NOVA_EVIDENCE_SOURCE_COMMIT = $sourceCommit
 $env:NOVA_GDEXTENSION_BINARY     = (Resolve-Path "godot\bin\libopennova.windows.template_debug.x86_64.dll").Path
-$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v2.json"
+$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v3.json"
 $env:NOVA_RENDER_CAPTURE_MODE    = "hud_hidden"
 $env:NOVA_MISSION_RESOURCE_DIR   = "<loose .bms corpus>"
 $env:NOVA_RUNTIME_RESOURCE_DIR   = "<retail install>"
@@ -262,7 +264,7 @@ per-fixture `retail-stage.json`:
 
 ```powershell
 uv run python scripts/render/register_retail_capture.py `
-  --catalog docs/render/render-fixtures-retail-v2.json `
+  --catalog docs/render/render-fixtures-retail-v3.json `
   --fixture-id <fixture-id> `
   --raw-state       .scratch\retail\raw\<fixture-id>\retail.state.json `
   --raw-image       .scratch\retail\raw\<fixture-id>\retail.png `
@@ -326,56 +328,64 @@ retail actually produced as the new `camera_bms`, and publish that pair. That
 changes the catalog SHA, and every OpenNova manifest binds it, so the OpenNova
 leg must be recaptured against the new revision too. Budget both legs.
 
-`scripts/render/retail_capture_driver.py` performs the capture. It issues the
-apply and the capture back-to-back on one MCP connection (3-5 frames apart
-instead of the 500-1800 an operator or agent achieves by hand), solves the
-camera from each frame's own view matrix, and writes the six bundle sidecars.
-Use `--fresh-process` for water fixtures: a player already in water is pinned by
-float/settle physics, the applied z is overridden, and the residual repeats
-bit-for-bit -- only the first teleport of a process lands. Ground snap can also
-offer only discrete eye heights that straddle the target; the camera x and y
-each have 0.05 of slack, and sweeping it finds a shelf that lands.
+Build, deploy and register onHook first (see "Building and deploying onHook"
+above); a stale build may simply not expose `onhook_capture_retail_reference`
+-- check the tool list, not the file date. Retail must be staged (section 3a's
+stage command) before any capture.
 
+**Capture.** `scripts/render/retail_capture_driver.py` does the whole retail
+leg: it issues the fixture apply and the reference capture back-to-back on one
+MCP connection (3-5 frames apart, against the registrar's 120-frame limit),
+solves the camera from each frame's own view matrix, and writes the six bundle
+sidecars. Run it once per mission, with `--fresh-process` so every fixture gets
+its own retail process -- a player already in water is pinned by float/settle
+physics and only the first teleport of a process lands verbatim, and even land
+fixtures drift in an aged process (measured 0.11-0.99 vs 0.003-0.13 fresh).
+Capture into a **durable evidence root outside every worktree**; the absolute
+path is baked into `capture-result.json` and is the only place the bundles can
+ever be re-registered from (section 0). The `--run-root` must be new per sweep
+-- the hook log is create-new.
 
-Everything in 3a applies, plus the capture itself. Build, deploy and register
-onHook first (see "Building and deploying onHook" above) and restart the client;
-a server added mid-session is not discoverable, and a stale build may simply not
-expose `onhook_capture_retail_reference` -- check the tool list, not the file
-date. Register it at user scope with an absolute path to the build you
-intend to use -- never in the tracked `.mcp.json`, which must stay free of
-machine-specific paths.
+```powershell
+uv run python scripts/render/retail_capture_driver.py --no-correct `
+  --fresh-process CP01.bms `
+  --catalog docs/render/render-fixtures-retail-v3.json `
+  --output C:\evidence\retail-<date> `
+  --run-root C:\evidence\retail-<date>\_runs `
+  --onhook-mcp <opennova-int>\onhook\onhook-mcp.exe `
+  --game-dir "<game dir>" `
+  --stage-manifest .scratch\retail\stage\retail-presentation-stage.json `
+  cp01-water-wide-retail cp01-water-shallow-retail cp01-water-steep-retail
+```
 
-Capture into a **durable evidence root outside every worktree**, one directory
-per fixture. The absolute path you choose is baked into `capture-result.json`
-and is the only place those bundles can ever be re-registered from (section 0).
-Then, per fixture:
+(The catalog named here is the revision being superseded -- its applied fields
+are what the captures replay verbatim; only `camera_bms` changes in the mint.)
 
-1. Launch `<game dir>\Jointops.exe /exp revx02 /w` through the owned mission
-   session and retain the exact `instance_id` and PID.
-2. Save `onhook_instances()` and require that same instance to report proxy
-   mode, `capture_bundle_supported=true`, `render_fixture_supported=true`, a
-   ready 1920x1200 backbuffer, and available render state.
-3. If the deployment or control-point overlay is up, activate the window owned
-   by that exact PID and press SPACE once. Never target a window chosen by
-   executable name or by whichever retail window is foreground.
-4. `onhook_apply_render_fixture` for that instance with the catalog
-   `retail_player_bms.applied`, yaw, pitch, `vertical_fov_degrees`, the single
-   `minutes_of_day` times 60 as `time_of_day_seconds`, the exact `mission_file`
-   and catalog `mission_sha256`, and `camera_mode: "first_person"`. Require
-   `exact=true`. Every field is mandatory on every call; nothing inherits from a
-   prior fixture.
-5. `onhook_capture_retail_reference({instance_id, path, fixture_id})`
-   immediately. Save its PNG, `.state.json` and same-process log.
+**Mint.** `scripts/render/mint_retail_catalog.py` turns those bundles into the
+next catalog revision: applied fields kept verbatim (verified against each
+bundle's `fixture-result.json` at the registrar's own 1e-5), `camera_bms`
+replaced with each frame's solved camera, canonical `catalog_sha256`
+recomputed:
 
-`cp01-waterline-below-retail` needs an isolated fresh process: dismiss
-deployment for that PID, apply the underwater pose, and capture before breath
-expiry. Do not reuse a surfaced or damaged process.
+```powershell
+uv run python scripts/render/mint_retail_catalog.py `
+  --base docs/render/render-fixtures-retail-v3.json `
+  --bundles C:\evidence\retail-<date> `
+  --output docs/render/render-fixtures-retail-v4.json
+```
+
+Smoke-register ONE bundle against the minted file (any well-formed 40-hex
+source commit; delete the throwaway `registered.json` after) to prove the
+registrar's recovered camera lands, then commit the new catalog -- it must be
+in the frozen source commit before the OpenNova leg runs (section 2). From
+there the flow rejoins section 3a's registration loop, pointed at the new
+catalog and the new bundles.
 
 ## 4. Build the comparisons and publish
 
 ```powershell
 uv run python scripts/render/build_retail_side_by_side.py `
-  --catalog docs/render/render-fixtures-retail-v2.json `
+  --catalog docs/render/render-fixtures-retail-v3.json `
   --fixture-id <fixture-id> `
   --opennova-manifest .scratch\golden\render\fixtures\<fixture-id>\<fixture-id>-manifest.json `
   --retail-bundle .scratch\retail\raw\<fixture-id>\registered.json `
@@ -395,7 +405,7 @@ Then assemble the publication and generate its index:
 
 ```powershell
 uv run python scripts/render/publish_registered_comparisons.py `
-  --catalog docs/render/render-fixtures-retail-v2.json `
+  --catalog docs/render/render-fixtures-retail-v3.json `
   --opennova-root .scratch\golden\render\fixtures `
   --retail-root .scratch\retail\raw `
   --comparison-root .scratch\publication `

@@ -3,7 +3,7 @@
 Example:
 
 uv run python scripts/render/build_retail_side_by_side.py \
-  --catalog docs/render/render-fixtures-retail-v2.json \
+  --catalog docs/render/render-fixtures-retail-v3.json \
   --fixture-id FIXTURE --opennova-manifest OPENNOVA-MANIFEST.json \
   --retail-bundle REGISTERED.json --output-dir OUTPUT \
   --opennova-caption "HUD hidden, bare arms, M16 Burst, frozen" \
