@@ -29,8 +29,8 @@ tracked files. The values below are the authoritative capture machine's.
 | Parameter | Value |
 |---|---|
 | Publication catalog | `docs/render/render-fixtures-retail-v3.json` |
-| Catalog SHA-256 | `ec69de10bf9477554c40f51ce4d507df629ca86e76990e3ce152c3c5dcc6a62c` |
-| Fixtures | 15 (`00TRa` x5, `CP01` x6, `CP04` x1, `CP12` x3) |
+| Catalog SHA-256 | `8b21c2a0feed2e55ac11fd555f9ad96b9c533d49069c6ce0780b2984d62982ef` |
+| Fixtures | 16 (`00TRa` x6, `CP01` x6, `CP04` x1, `CP12` x3) |
 | OpenNova capture size | 2000x1200, vertical FOV 53.4468 |
 | Retail backbuffer | 1920x1200 (one horizontal bicubic squeeze at comparison time) |
 | Loose mission root | `NOVA_MISSION_RESOURCE_DIR`, the loose `.bms` corpus |
@@ -369,9 +369,9 @@ recomputed:
 
 ```powershell
 uv run python scripts/render/mint_retail_catalog.py `
-  --base docs/render/render-fixtures-retail-v3.json `
+  --base docs/render/render-fixtures-retail-v<N>.json `
   --bundles C:\evidence\retail-<date> `
-  --output docs/render/render-fixtures-retail-v4.json
+  --output docs/render/render-fixtures-retail-v<N+1>.json
 ```
 
 Smoke-register ONE bundle against the minted file (any well-formed 40-hex
