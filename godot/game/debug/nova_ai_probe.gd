@@ -189,26 +189,40 @@ func _tp_tick(world: GameWorld) -> void:
 # NW_TP_AT seconds). 05TRcoop starts its two AI sides ~857u apart, so an
 # unattended round never produces contact; dropping the firing client into the
 # enemy base is how the combat path gets exercised without a human.
-var _tpp_done := false
+var _tpp_hop := 0
 
 func _tp_player_tick(world: GameWorld) -> void:
-	if _tpp_done or OS.get_environment("NW_TP_PLAYER_X").is_empty():
+	# Up to two hops (NW_TP_PLAYER_X/Y/Z at NW_TP_AT, then NW_TP_PLAYER_X2/Y2/Z2
+	# at NW_TP_AT2). A linear mission opens each phase with the previous one, so
+	# ONE placement only ever unlocks the first gate — the offline zone tour in
+	# mission_script_report_test finds the route, and this walks a live player
+	# along it so the later phases (the scripted KillGroups) actually run.
+	if _tpp_hop >= 2:
 		return
-	if _tp_elapsed < _tp_at:
+	var sfx := "" if _tpp_hop == 0 else "2"
+	if OS.get_environment("NW_TP_PLAYER_X" + sfx).is_empty():
+		_tpp_hop = 2
+		return
+	var at := _tp_at
+	if _tpp_hop == 1:
+		var at2 := OS.get_environment("NW_TP_AT2")
+		at = at2.to_float() if not at2.is_empty() else (_tp_at * 3.0)
+	if _tp_elapsed < at:
 		return
 	var sim: Simulation = world.get_sim()
 	if sim == null:
 		return
+	var zs := OS.get_environment("NW_TP_PLAYER_Z" + sfx)
 	var mission := Vector3(
-			OS.get_environment("NW_TP_PLAYER_X").to_float(),
-			OS.get_environment("NW_TP_PLAYER_Y").to_float(),
-			OS.get_environment("NW_TP_PLAYER_Z").to_float() if not OS.get_environment("NW_TP_PLAYER_Z").is_empty() else 40.0)
+			OS.get_environment("NW_TP_PLAYER_X" + sfx).to_float(),
+			OS.get_environment("NW_TP_PLAYER_Y" + sfx).to_float(),
+			zs.to_float() if not zs.is_empty() else 40.0)
 	var err := sim.debug_teleport_local_player(mission, 0.0, 0.0)
-	_tpp_done = true
+	_tpp_hop += 1
 	if not _path.is_empty():
 		var f := FileAccess.open(_path, FileAccess.READ_WRITE)
 		if f != null:
 			f.seek_end()
-			f.store_line(JSON.stringify({"tp_player": {
+			f.store_line(JSON.stringify({"tp_player": {"hop": _tpp_hop,
 					"to": [mission.x, mission.y, mission.z], "err": err}}))
 			f.close()

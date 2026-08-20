@@ -18,6 +18,7 @@
 #include "world/ai.h"
 #include "world/world.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -234,31 +235,39 @@ int main() {
 		}
 		std::printf("\n");
 	}
-	// ZONE SWEEP. Most of what stays shut in a headless run is waiting on a
-	// player standing somewhere, and guessing which zone matters costs a
-	// three-minute live round each time. So do it offline: for every authored
-	// zone, re-run the mission with one stand-in group-1 body parked at that
-	// zone's centre and report how many additional events fire. A zone that
-	// unlocks a RedirectGroupTo is the one worth spending a live round on.
-	//
-	// Players carry commandGroup 1 (player_spawn.cpp), and retail's
-	// Entity_IsTeamInTriggerBounds @0x43c730 scans the player pool as well as
-	// the AI pool, so a pool-1 body with group_id 1 is exactly what the
+	// ZONE SWEEP, then a TOUR. Most of what stays shut in a headless run is
+	// waiting on a player standing somewhere, and guessing which zone costs a
+	// three-minute live round per guess. Do it offline instead: run the mission
+	// with a stand-in group-1 body visiting zone centres and report what extra
+	// script that unlocks. Players carry commandGroup 1 (player_spawn.cpp), and
+	// retail's Entity_IsTeamInTriggerBounds @0x43c730 scans the player pool as
+	// well as the AI pool, so a pool-1 body with group_id 1 is exactly what the
 	// group-in-area triggers look for.
+	//
+	// A single-zone sweep only ever finds the mission's FIRST gate, because a
+	// linear mission opens each phase with the previous one. So the tour moves
+	// the body from zone to zone, and a greedy search picks each next hop by how
+	// much it unlocks - walking the mission forward the way a player would.
 	{
 		const char *sweep_env = std::getenv("OPENNOVA_ZONE_SWEEP");
-		const int sweep_ticks = (sweep_env && *sweep_env) ? std::atoi(sweep_env) : 6000;
-		std::printf("zone sweep (%d ticks per zone, one stand-in player per run):\n",
-		            sweep_ticks);
-		auto run_with_player = [&](bool place, float px, float py,
-		                           std::map<std::string, int> *unlocked_actions) {
+		const int hop_ticks = (sweep_env && *sweep_env) ? std::atoi(sweep_env) : 4000;
+		int registered = 0;
+		while (world.registry.area(registered) != nullptr) ++registered;
+		std::vector<std::pair<float, float>> centre(registered);
+		for (int i = 0; i < registered; ++i) {
+			const w::Area *a = world.registry.area(i);
+			centre[i] = {0.5f * (a->bounds.min.x + a->bounds.max.x),
+			             0.5f * (a->bounds.min.y + a->bounds.max.y)};
+		}
+		auto run_tour = [&](const std::vector<int> &stops, std::map<std::string, int> *acts) {
 			w::World w2;
 			w::AiSystem ai2;
 			w2.ai = &ai2;
 			mission::BmsEventSystem ev2;
 			ev2.load(m.events, m.triggers, m.actions);
 			mission::promote_mission(m, w2, ai2, {});
-			if (place) {
+			w::EntityHandle body{};
+			if (!stops.empty()) {
 				w2.registry.configure_pool(1, 4);
 				w::Entity p{};
 				p.kind = w::EntityKind::Organic;
@@ -267,41 +276,65 @@ int main() {
 				p.alive = true;
 				p.group_id = 1;
 				p.net_id = 0x7000;
-				p.position = w::Vec3{px, py, 0.0f};
-				p.flags = 0x100u; // the player classifier, movement gate CLEAR
-				w2.registry.spawn(1, p);
+				p.flags = 0x100u; // player classifier, movement gate CLEAR
+				p.position = w::Vec3{centre[stops[0]].first, centre[stops[0]].second, 0.0f};
+				body = w2.registry.spawn(1, p);
 			}
 			w2.add_system(&ev2);
 			w2.add_system(&ai2);
 			w2.load_systems();
-			for (int t = 0; t < sweep_ticks; ++t) w2.run_logic_tick(true);
+			const size_t hops = stops.empty() ? 1u : stops.size();
+			for (size_t h = 0; h < hops; ++h) {
+				if (!stops.empty()) {
+					if (w::Entity *e = w2.registry.get(body)) {
+						e->position.x = centre[stops[h]].first;
+						e->position.y = centre[stops[h]].second;
+					}
+				}
+				for (int t = 0; t < hop_ticks; ++t) w2.run_logic_tick(true);
+			}
 			int n = 0;
 			for (size_t i = 0; i < ev2.events().size(); ++i) {
 				if (!ev2.event_fired(i)) continue;
 				++n;
-				if (unlocked_actions != nullptr)
+				if (acts != nullptr)
 					for (const bms::Action &a : ev2.events()[i].actions)
-						(*unlocked_actions)[action_name(a.action_type)] += 1;
+						(*acts)[action_name(a.action_type)] += 1;
 			}
 			return n;
 		};
-		const int base = run_with_player(false, 0, 0, nullptr);
-		std::printf("  baseline (no player): %d events fire\n", base);
-		int registered = 0;
-		while (world.registry.area(registered) != nullptr) ++registered;
-		for (int i = 0; i < registered; ++i) {
-			const w::Area *a = world.registry.area(i);
-			const float cx = 0.5f * (a->bounds.min.x + a->bounds.max.x);
-			const float cy = 0.5f * (a->bounds.min.y + a->bounds.max.y);
+		const int base = run_tour({}, nullptr);
+		std::printf("zone tour (%d ticks per stop): baseline with no player = %d events\n",
+		            hop_ticks, base);
+		std::vector<int> tour;
+		int have = base;
+		for (int step = 0; step < 8; ++step) {
+			int best = -1, best_n = have;
+			for (int z = 0; z < registered; ++z) {
+				if (std::find(tour.begin(), tour.end(), z) != tour.end()) continue;
+				std::vector<int> cand = tour;
+				cand.push_back(z);
+				const int n = run_tour(cand, nullptr);
+				if (n > best_n) { best_n = n; best = z; }
+			}
+			if (best < 0) {
+				std::printf("  no further zone unlocks anything - tour ends at %d events\n", have);
+				break;
+			}
+			tour.push_back(best);
+			have = best_n;
 			std::map<std::string, int> acts;
-			const int n = run_with_player(true, cx, cy, &acts);
-			if (n <= base) continue;
-			std::printf("  zone id %2d centre (%6.0f, %6.0f): +%d events",
-			            a->zone_id, cx, cy, n - base);
-			if (acts.count("RedirectGroupTo"))
-				std::printf("   <== unlocks RedirectGroupTo x%d", acts["RedirectGroupTo"]);
-			if (acts.count("ChangeGroupAI"))
-				std::printf("   ChangeGroupAI x%d", acts["ChangeGroupAI"]);
+			run_tour(tour, &acts);
+			std::printf("  stop %d: zone id %2d centre (%6.0f, %6.0f) -> %d events",
+			            step + 1, world.registry.area(best)->zone_id,
+			            centre[best].first, centre[best].second, have);
+			for (const char *k : {"RedirectGroupTo", "ChangeGroupAI", "KillGroup", "SubGoalWon"})
+				if (acts.count(k)) std::printf("  %s x%d", k, acts[k]);
+			std::printf("\n");
+		}
+		if (!tour.empty()) {
+			std::printf("  tour route (mission coords):");
+			for (int z : tour) std::printf(" (%.0f,%.0f)", centre[z].first, centre[z].second);
 			std::printf("\n");
 		}
 	}
