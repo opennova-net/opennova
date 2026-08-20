@@ -39,7 +39,7 @@ scalar function in this record; the GUT env vectors
 | Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: Foliage_RenderFarPatches @ 0x609de0]` (renamed 2026-08-15, ex render_terrain_lightmaps); foliage.gdshader header updated |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / reimpl-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the reimpl's real per-pixel lights serve the intent (D-RLIT-6 note) |
 | Cubemap sources (CubeEnvironment / CubeRotSpecular / CubeNormalize) | witnessed (the D-RORD-5 specular-cube question CLOSED) | live scene cube re-rendered 6 faces per 128 frames `[orig: update_environment_cubemap @ 0x6106a0]`; the static sun-glint cube (white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular) `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; the analytic 5-light sky fill is caller-less dead code |
-| Render-slot (character shadow) lighting | witnessed / out of REN port scope | dominant-light pick + terrain shadow-anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting (D3D light 4, NTSC-weighted negated colors into PS c21-23) `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]` — the Shadow_/Scar_ family exclusion (ADR 0023) |
+| Render-slot (entity ground shadow) lighting | PARTIAL (direction law + terrain reception device-translated 2026-08-20; slot pipeline out of REN port scope) | frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, dominant-light pick + terrain shadow-anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting (D3D light 4, NTSC-weighted negated colors into PS c21-23) `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]` — the Shadow_/Scar_ family exclusion (ADR 0023); the ported seam is D-RLIT-9 (`nova_sun_shadow.cpp` emission + the terrain catcher next-pass; GUT `nova_sun_shadow_test`) |
 
 ## Witness map
 
@@ -451,21 +451,43 @@ holds an analytic 5-light sky fill (blue-from-above 0.3/pow2, warm ground
 bounce 0.25/pow3, three warm pow-50/60 sun lobes) — **caller-less dead
 code** in retail JO.
 
-**The render-slot (character shadow) side** — witnessed, out of REN port
-scope (ADR 0023 excludes the Shadow_/Scar_ family).
+**The render-slot (entity ground shadow) side** — witnessed; the slot RT
+pipeline itself stays out of REN port scope (ADR 0023 excludes the
+Shadow_/Scar_ family), but its projection-direction law and its terrain
+reception are ported at the device seam (D-RLIT-9, 2026-08-20).
+`render_shadow_pass @ 0x5d7b70` opens each frame's slot pass by loading the
+sun into the slot default (`Environment_GetLightDirectionFloat @ 0x57d870`
+into `RenderSlot_DefaultLightDir* @ 0x2bebd68`), **clamping the vertical
+component to 0.25** — the SAME grazing floor the static tile collector
+applies (`@ 0x60d325..0x60d341`) — and negating all three into the
+light→surface form, so a low sun never stretches an entity silhouette past
+4× height (at the 03TR 06:30 fixture's 7° sun, retail projects entity
+shadows as if the sun sat at ~14.5°). It then assigns slots
+(`terrain_sort_and_assign_render_slots @ 0x5d6530`) and renders each live
+slot (`RenderSlot_RenderEntityAndChildren @ 0x5d7690`).
 `RenderSlot_UpdateEntityLight @ 0x5d6a30` (ex `Entity_UpdateRenderState`)
 updates a 128-byte slot record (`RenderSlot_Table @ 0x2be3d30`): default
-light = the sun direction trio (`RenderSlot_DefaultLightDir* @ 0x2bebd68`),
-then the brightest passing point light near the entity wins (luminance
-0.3R + 0.6G + 0.1B over distance² attenuation), and the shadow anchor
-marches from the entity along the light direction to the terrain
-(`Terrain_GetHeightAtPosition @ 0x606720`), with a slot LOD 6..20.
+light = the clamped sun trio, then the brightest passing point light near
+the entity wins (luminance 0.3R + 0.6G + 0.1B over distance² attenuation;
+an interior-parented entity zeroes the win threshold), and the shadow
+anchor marches from the entity (or its rotated model anchor point when
+entity flag +9 is clear) along the light direction down to the terrain
+(`Terrain_GetHeightAtPosition @ 0x606720`; the vertical step clamps to
+≥ 0.5 u = fixed −32768 per iteration), storing the anchor and a
+grazing-scaled slot LOD clamped 6..20 (`@ 0x5d6d5c..0x5d6dac`).
 `RenderSlot_SetupNextLighting @ 0x5d7250` (ex `setup_entity_render_lighting`)
 pops the next pending slot (`RenderSlot_PendingList @ 0x2be3a98`), sets
 D3DRS_AMBIENT white, and lights the slot render with either the entity's
 attached light (D3D light 4 + luminance-weighted NEGATED colors
 `(c+lum)/2 × −3` into PS c21..c23 — the shadow darkening math) or a white
-directional with 0.75 ambient material.
+directional with 0.75 ambient material. Slot admission is entity init:
+persons always, items via the `DynamicShadow` attrib2 bit
+(`Entity_InitFromModel @ 0x40E1BC..0x40E1F7`), gated on the shadow-detail
+option (`dword_24D2054`). Vehicles additionally author a fallback blob
+decal in items.def — `shadow <name>.tga width length offx offy`, parsed to
+ItemDef `+0xA0` (texture name) and floats `+0x11C/+0x120/+0x124/+0x128`
+(`ItemDef_ParseProperty @ 0x49f3a5..0x49f44c`); its runtime consumer is
+unwalked (residual on D-RLIT-9).
 
 ## The ported chain (REN-5)
 
@@ -505,6 +527,7 @@ directional with 0.75 ambient material.
 | D-RLIT-5 | Glass/env reflection = the hemisphere sampled along the reflected view; phong specular = a pow-16 lobe in the witnessed light color | glass GLOW samples CubeRotSpecular (the static sun-glint cube) via MatRotSpecular; NORMAL techniques sample the LIVE CubeEnvironment scene cube; VS_PHONG* samples the PhongMap texture `[orig: @ 0x58f290; @ 0x6106a0; Glass.fx]` | OPEN (approximation) — the cube CONTENTS are witnessed (this record); hosting a live scene cube / the glint cube is the D-RORD-5 bloom-wiring residual's substrate |
 | D-RLIT-6 | No baked mission lightmap TGA draped (the below-water terrain water-noise modulation FIXED 2026-08-13 via D-TERRAIN-8 — the top-tier dp3-input swap; terrain-re.md carries the selector decode) | camera-below-water terrain swaps the LIVE stage-3 input to `Water_NoiseColorTexture`; the mission lightmap TGA separately drapes tiles/billboards `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; lightmap load @ 0x604A90]` | OPEN — narrowed to mission-lightmap hosting (terrain-record scope); static model sun shadows are the separate D-TERRAIN-7 tile-composition path |
 | D-RLIT-7 | Static mission objects (the placer's MultiMesh batches) froze the env lighting harvested at load — the throwaway template's materials had no live owner, so TOD/weather/iris advances relit animated models but not the static world (the load-time snapshot even carried the pre-first-iris-tick modulator: gain 1.0 vs the settled 60/64) | retail relights EVERY entity from the current lighting block each frame `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 ← CRenderBatchQueue_FlushBatches]` | **FIXED (2026-07-06, the model-parity slice)**: the placer registers every harvested batch ShaderMaterial and re-stamps them from the live env (`mission_object_placer.update_environment`, driven per frame by the container's `mission_batch_env_stamper`, generation-gated like the per-model stamp; values/push single-sourced as `ObjectModel.environment_values_from`/`apply_environment_values`); verified batch uniforms == live-model uniforms after settle (dir 159/255, gain 60/64) |
+| D-RLIT-9 | Entity ground shadows ride the Godot shadow map: `SunShadow` (the dynamic-projection DirectionalLight3D) emits along the witnessed slot-projection direction — the presentation reduction `(g2, max(g1, 0.25), g0)` of the direct getter tuple, negated — and the terrain material carries the shared black ATTENUATION catcher as a next pass, so live entity silhouettes (persons + `DynamicShadow` items) land on terrain and world models with the retail direction/length law | Retail renders each eligible entity into a per-entity render-slot RT (LOD 6..20) lit from the slot direction — the sun with vertical clamped to 0.25 then negated, overridden by the dominant nearby point light — and drapes it at a terrain anchor marched down-light from the entity `[orig: render_shadow_pass @ 0x5d7b70; RenderSlot_UpdateEntityLight @ 0x5d6a30; Terrain_GetHeightAtPosition @ 0x606720; RenderSlot_RenderEntityAndChildren @ 0x5d7690; admission Entity_InitFromModel @ 0x40E1BC..0x40E1F7]`; vehicles also author a `shadow <tga> w l ox oy` decal fallback (ItemDef `+0xA0`/`+0x11C..+0x128`, parser `@ 0x49f3a5..0x49f44c`) whose consumer is unwalked | **OPEN, device-translated (2026-08-20)** — the direction law (clamp + frame reduction) and terrain reception are live (`godot/src/env/nova_sun_shadow.cpp`, terrain catcher next-pass in `godot/src/terrain/nova_terrain.cpp`; pinned by `nova_sun_shadow_test.gd`); unhosted: the slot RT pipeline itself (per-entity silhouette texture + anchored drape), the dominant point-light override, the anchor march (Godot projects from the light frustum instead), per-slot LOD, the slot darkening constants, and the authored blob-decal fallback (our def lib does not parse the `shadow` line) |
 | D-RLIT-8 | The object per-material hemisphere mixed color spaces: `hemi_sky` came from `MissionEnvironment.get_sky_ambient()` = the RAW TOD keyframe (never smoothed, never iris-modulated) while `dir_color`/`hemi_ground` came from the smoothed+modulated weather writeback — off-noon the modulator brightens every block toward the exposure target but the un-modulated sky half stays dark (the sky-facing half of every building too dark at night; the terrain/foliage GLOBALS path was already correct via `get_smooth_sky()`) | retail feeds ALL entity lighting from the post-modulator block render colors — the world-block writer fills [8..10] ← `Env_SkyBlock[0]` ÷255 exactly like light/ground `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; the blocks smooth + modulate in the weather tick @ 0x57ef97..0x57f03c]` | **FIXED (2026-07-06, the REN-6 session)**: the sky block joins the per-tick env writeback seam — `Weather` pushes `get_smooth_sky()` through the new `MissionEnvironment.set_sky_ambient_rt` (mirroring fill/sun/fog, generation-gated), `get_sky_ambient()` serves the smoothed current and re-seeds from the keyframe on discrete TOD recomputes (the `_fill_light` contract); GUT pins the seam (`env_parity_vectors_test.test_sky_ambient_serves_smoothed_writeback`); golden env grid/weather rows byte-identical (the grid collects bare env nodes; the weather checkpoints already read `get_smooth_sky`) |
 
 ## IDB changes made during the session
