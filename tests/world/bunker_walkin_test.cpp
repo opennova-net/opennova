@@ -21,7 +21,9 @@
 #include "simassets/model_builders.h"
 #include "simassets/sim_model_cache.h"
 #include "world/ai.h"
+#include "world/angle.h"
 #include "world/collision.h"
+#include "world/collision_detail.h"
 #include "world/world.h"
 
 #include <cmath>
@@ -199,6 +201,45 @@ int main() {
 			            t, pos[0] / 65536.0, pos[1] / 65536.0, pos[2] / 65536.0, d,
 			            cw.dbg_last_contact_item);
 	}
+	// ---- Column dump: which type-1 volumes contain the spawn column's local
+	// XY, and where do their tops sit in WORLD z? (Yaw-only rotation leaves z
+	// untouched, so world top = bunker z + local max_z.) Uses the exact
+	// target_view matrix path (bam heading from mission yaw).
+	{
+		const Threedi3di3 *bm = cache.model_for("Cbunker2");
+		w::CollisionModel cm;
+		simassets::collision_model_from_3di(bm->collision, cm,
+		                                    simassets::model_has_collision(*bm));
+		int32_t bp[3] = {fx(be->position.x), fx(be->position.y),
+		                 fx(be->position.z)};
+		const int32_t heading = w::bam_heading_from_mission_yaw_deg(
+				static_cast<double>(be->yaw));
+		const w::CollisionMatrix mat =
+				w::collision_matrix_from_heading(heading, bp);
+		w::CollisionMatrix inv;
+		mat.invert_into(inv);
+		const int32_t col[3] = {fx(155.3), fx(318.2), fx(35.1)};
+		int32_t local[3];
+		w::detail::transform_translate_then_rotate(inv.m, col, local);
+		std::printf("spawn column local=(%.2f, %.2f, %.2f)\n", local[0] / 65536.0,
+		            local[1] / 65536.0, local[2] / 65536.0);
+		for (size_t si = 0; si < cm.sections.size(); ++si) {
+			const w::CollisionSection &sec = cm.sections[si];
+			for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
+				const w::CollisionVolume &vol = cm.volumes[sec.volume_start + vi];
+				if (local[0] < vol.min_x || local[0] > vol.max_x ||
+				    local[1] < vol.min_y || local[1] > vol.max_y)
+					continue;
+				std::printf("  s%zu v%d type=%d localZ=[%.2f..%.2f] "
+				            "worldZ=[%.2f..%.2f]\n",
+				            si, vi, vol.type, vol.min_z / 65536.0,
+				            vol.max_z / 65536.0,
+				            be->position.z + vol.min_z / 65536.0,
+				            be->position.z + vol.max_z / 65536.0);
+			}
+		}
+	}
+
 	// ---- Direct ground-probe check: from just above retail's interior spawn
 	// point, does raycast_ground find the bunker's floor slab (retail z 35.1)?
 	{
