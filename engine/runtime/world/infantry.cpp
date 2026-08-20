@@ -92,6 +92,15 @@ constexpr int32_t kTerminalVelZ = -32768;
 // [orig: jump launch vel_z impulse, Entity_UpdateInfantryPlayerBody @0x4b7ee5
 // mov [esi+0A0h], 1600h; the in-air flag entity+0x24 |= 0x2000 the same block sets]
 constexpr int32_t kJumpImpulseVelZ = 0x1600;
+// The org1 float model (see infantry_water_block). The hysteresis gap and the
+// sink are 16.16 (0.625u and ~0.0187u); the bob shares the sink's magnitude, so
+// a floating body rides between the plane and 0.037u under it — a ripple, not a
+// visible heave. [orig: the 0xA000 entry bias @0x4bfb84, -0x4C9 @0x4bfbf1, the
+// sin amplitude dbl_7C9C28 and the phase pair flt_7C6950 * dbl_7C9BD0]
+constexpr int32_t kWaterFloatHysteresis = 0xA000;
+constexpr int32_t kWaterFloatSink = 1225;
+constexpr double kWaterBobAmplitude = 1224.0;
+constexpr double kWaterBobPhaseScale = 3.14159265358979323846 / 256.0;
 // The org2 jump gate's exact entity Flags mask: in-air (0x2000), dead (0x2),
 // drowning/water (0x8000), and the second witnessed water-state bit (0x10000).
 // Carried (0x40) is tested separately immediately afterward. The reimpl keeps
@@ -599,6 +608,70 @@ void infantry_weapon_weight_spread_tick(
             inf.weapon_weight_spread,
             io::bam_sar(io::bam_add(inf.weapon_weight_spread, 4), 4));
     if (inf.weapon_weight_spread <= 0x300) inf.weapon_weight_spread = 0;
+}
+
+// The org1 water block: an AI body that meets the water plane FLOATS on it
+// rather than continuing to fall, and fans one splash on the way in.
+//
+// Entry is hysteretic on purpose. A body that is not yet floating has to get
+// 0.625u BELOW the plane before the latch takes; once floating it keeps the
+// latch until it is back at or above the plane. Without that gap a body resting
+// at the surface would toggle the latch every tick and re-fan the splash with
+// it. A body latched to a ladder never floats — the climb owns its vertical.
+//
+// While the latch is set, the gravity column is skipped: that is the same
+// kEntityFlagDrowning half of the 0x108000 gate the fall path already reads, so
+// setting the flag here is what stops the body sinking, and the quarter-chase
+// below is what moves it. (The flag's name is ours and is narrower than the bit:
+// retail uses it as the generic afloat latch, not only for drowning.)
+//
+// [orig: Entity_UpdateInfantryAI @0x4bfb84..0x4bfc7a — entry
+//  `z - 0xA000*((Flags>>15)&1) + 0xA000 >= water || (Flags & 0x100000)`, the
+//  exit clear `Flags &= 0xFFDF7FFF`, the float target, the splash edge
+//  @0x4bfb87 gated on `(Flags & 0x8000) == 0`, the latch
+//  `(Flags & ~0x2000) | 0x8000` @0x4bfc48 and the quarter-chase tail @0x4bfc65.
+//  The player twin @0x4b8020 carries the same shape plus swim control and a
+//  second, shallower dive edge (Flags 0x200000) — both stay with D-INF-3.]
+void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
+                                    int32_t capsule_bottom, uint32_t logic_tick) {
+    if (tick_entity == nullptr) return;
+    const int32_t water = world.env.water_z;
+    if (water == 0) return; // our no-water-world sentinel (retail worlds always carry a plane)
+
+    const uint32_t flags = tick_entity->flags;
+    const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
+    const int32_t entry_z = e.pos[2] + (was_afloat ? 0 : kWaterFloatHysteresis);
+    if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
+        tick_entity->flags = flags & ~kEntityFlagDrowning; // [orig: the 0xFFDF7FFF clear —
+        return;                                            //  its 0x200000 half is the player's
+    }                                                      //  dive latch, which org1 never sets]
+
+    // The float target: the plane, plus a shallow bob whose phase is seeded from
+    // the body's own XY so a squad in the water is not in lockstep, minus half
+    // the eye offset and a fixed sink, plus the anim frame's capsule bottom when
+    // that hangs below the origin.
+    int32_t depth = capsule_bottom;
+    if (depth > 0) depth = 0;                       // [orig: the `> 0 -> 0` clamp]
+    const int32_t phase =
+            ((e.pos[1] + e.pos[0]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
+    const int32_t bob = static_cast<int32_t>(
+            std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * kWaterBobAmplitude);
+    const int32_t target = water + bob - (tick_entity->eye_offset_z >> 1)
+                         - kWaterFloatSink + depth;
+
+    // The entry edge, fanned once. Which of the two sounds it takes is the body's
+    // own airborne bit: a soldier who WADED in and one who JUMPED in are heard
+    // differently. Position is the body's XY at the PLANE, not at its own Z.
+    if (!was_afloat) {
+        world.water_crossings.add(e.pos[0], e.pos[1], water,
+                                  /*airborne=*/(flags & kEntityFlagInAir) != 0);
+    }
+    tick_entity->flags = (flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
+    e.inf.airborne = false; // the motor-side mirror of the 0x2000 clear
+
+    // The vertical is a QUARTER-step toward the target, not a snap: that is what
+    // makes a body entering water settle over a few ticks instead of popping.
+    e.pos[2] += (target - e.pos[2] + 2) >> 2;
 }
 
 // The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
@@ -1750,6 +1823,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // press, the climb_up/climb_top select. Body in infantry_ladder.cpp.
         // [orig: Entity_UpdateInfantryAI @ 0x4bf907-0x4bfad8]
         infantry_ladder_org1_block(e, world, tick_entity);
+
+        // org1 water (NPC, immediately after the ladder block, same as retail):
+        // float on the plane instead of walking along the riverbed, and fan the
+        // splash once on entry.
+        if (!inf.is_local_player)
+            infantry_water_block(e, world, tick_entity, frame.capsule_bottom, logic_tick);
     }
 
     finish_infantry_tick(e, world);

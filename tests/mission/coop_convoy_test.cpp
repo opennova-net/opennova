@@ -233,6 +233,40 @@ int main() {
 		}
 	}
 
+	// ---- Pinned-garrison node dump (diagnostic, not asserted): the three
+	// soldiers that still fail to walk on a live host all stand INSIDE the east
+	// bunker (item 1359 at 159.9, 319.7). Print each one's authored route node
+	// so the geometry question — is the node behind an interior wall? — can be
+	// answered from the shipped mission instead of guessed.
+	{
+		for (const int32_t ssn : {233, 1254, 2393}) {
+			const w::EntityHandle h = world.registry.find_by_net_id(ssn);
+			const w::AiEntity *sb = h.valid() ? ai.for_handle(h) : nullptr;
+			if (sb == nullptr) {
+				std::printf("diag pinned %d: no brain\n", ssn);
+				continue;
+			}
+			const int32_t ch = sb->slot.f[37];
+			const int32_t node = sb->slot.f[38];
+			std::printf("diag pinned %d: pos=(%.1f, %.1f, %.1f) slotCh=%d slotNode=%d\n",
+			            ssn, sb->pos[0] / 65536.0, sb->pos[1] / 65536.0,
+			            sb->pos[2] / 65536.0, ch, node);
+			const w::NavChannel *nc = ai.nav.channel(ch);
+			if (nc == nullptr) continue;
+			for (int32_t i = 0; i < nc->count && i < 32; ++i) {
+				const w::NavEntry *ne = ai.nav.entry(nc->entries[i]);
+				if (ne == nullptr) continue;
+				const double nx = ne->f[1] / 65536.0, ny = ne->f[2] / 65536.0;
+				// Only nodes near the bunker matter for the wall question.
+				const double bdx = nx - 159.9, bdy = ny - 319.7;
+				if (bdx * bdx + bdy * bdy > 20.0 * 20.0) continue;
+				std::printf("    ch%d node%d = (%.1f, %.1f, %.1f) radius=%.2f%s\n",
+				            ch, i, nx, ny, ne->f[3] / 65536.0, ne->f[0] / 65536.0,
+				            i == node ? "  <== current target" : "");
+			}
+		}
+	}
+
 	if (failures == 0) std::printf("coop convoy: the Stryker departs on the player's mount\n");
 	return failures ? 1 : 0;
 }

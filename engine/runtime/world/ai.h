@@ -1036,6 +1036,9 @@ public:
     // select. Dormant in game until the AI climb-order writer lands.
     // [orig: Entity_UpdateInfantryAI @0x4bf907-0x4bfad8]
     void infantry_ladder_org1_block(AiEntity &e, World &world, Entity *tick_entity);
+    // The org1 float/splash block — body and witness in infantry.cpp.
+    void infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
+                              int32_t capsule_bottom, uint32_t logic_tick);
     // The torso-roll producer (entity+0x2DC), every body tick: prone idle 48 decays it
     // toward level (torso -= (torso+8)>>4); the combat rolls 41/42 RAMP it
     // -/+0x4000000 (5.625 deg) per tick — the FP barrel-roll view; otherwise it

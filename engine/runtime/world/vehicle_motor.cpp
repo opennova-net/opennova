@@ -1174,9 +1174,9 @@ void watercraft_platform_solve(World &world, Entity &veh,
         //  `dest[6] = Env_WaterHeightFixed`, then
         //  Server_SendOverlayActionToAlive @0x50a1b0]
         if (!m.plat_afloat) {
-            world.water_crossings.add(to_fixed(veh.position.x),
-                                      to_fixed(veh.position.y), W,
-                                      /*by_hull=*/true);
+            world.water_crossings.add(
+                    to_fixed(veh.position.x), to_fixed(veh.position.y), W,
+                    /*airborne=*/(veh.flags & kEntityFlagInAir) != 0);
         }
         m.plat_afloat = true; // [orig: @0x482CA5]
     }
