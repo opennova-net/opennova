@@ -872,6 +872,22 @@ std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list) {
 
 // [orig: Server_ChangeEntityTeam @ 0x518D70; the client field order is the read
 //  order of NapiNPClientMsg_TeamAssign (0x50) @ 0x431910]
+std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd) {
+	// [orig: NetPacket_WriteOverlayAction @0x505d50 — the type byte, the def's
+	//  name copied as a C string, then (type 1 only) the three i16 coordinates
+	//  taken from the caller's position triple.]
+	std::vector<uint8_t> out;
+	out.push_back(cmd.flag);
+	out.insert(out.end(), cmd.sound_name.begin(), cmd.sound_name.end());
+	out.push_back(0);
+	if (cmd.flag == 1) {
+		opennova::io::append_u16_le(out, static_cast<uint16_t>(cmd.pos_x));
+		opennova::io::append_u16_le(out, static_cast<uint16_t>(cmd.pos_y));
+		opennova::io::append_u16_le(out, static_cast<uint16_t>(cmd.pos_z));
+	}
+	return out;
+}
+
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	std::vector<uint8_t> out;
 	Writer w{out};

@@ -1022,6 +1022,32 @@ int check_S_34_play_sound() {
 	PlaySoundCommand flat;
 	EXPECT(decode_play_sound(w0.b.data(), w0.b.size(), flat));
 	EXPECT(!flat.has_pos);
+
+	// ENCODER parity against a REAL retail frame. The baseline capture carries
+	// `[0x34] flag=1 sound="BODYWATER1" pos=(-834, 122, 12)` in an 18-byte body;
+	// our encoder must produce those exact bytes, since a host that emits this
+	// is talking to stock clients.
+	// [orig: NetPacket_WriteOverlayAction @0x505d50]
+	PlaySoundCommand retail;
+	retail.flag = 1;
+	retail.sound_name = "BODYWATER1";
+	retail.has_pos = true;
+	retail.pos_x = -834;
+	retail.pos_y = 122;
+	retail.pos_z = 12;
+	const std::vector<uint8_t> bytes = encode_play_sound(retail);
+	EXPECT(bytes.size() == 18); // 1 type + 11 cstr + 6 position
+	PlaySoundCommand round_tripped;
+	EXPECT(decode_play_sound(bytes.data(), bytes.size(), round_tripped));
+	EXPECT(round_tripped.sound_name == "BODYWATER1");
+	EXPECT(round_tripped.pos_x == -834 && round_tripped.pos_y == 122 &&
+	       round_tripped.pos_z == 12);
+	// A flat (non-positioned) sound must NOT append the position block.
+	PlaySoundCommand flat_out;
+	flat_out.flag = 0;
+	flat_out.sound_name = "s";
+	EXPECT(encode_play_sound(flat_out).size() == 3);
+
 	cover('S', 0x34);
 	return 0;
 }

@@ -354,4 +354,15 @@ std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list);
 //  stores them back @0x431b3a / @0x431b46]
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 
+// §5.50 S2C 0x34 — positioned sound. The host fans a sound-profile NAME plus an
+// optional world position; clients look the name up in their loaded profiles and
+// play it in 3D. Byte layout, witnessed exactly: [u8 actionType][cstr name], and
+// for actionType 1 three i16 world-unit coordinates (the engine's 16.16 fixed
+// positions shifted down 16). Retail's writer copies the name from the referenced
+// def's +4 field and appends the position triple only for type 1.
+// [orig: NetPacket_WriteOverlayAction @0x505d50; fanned by
+//  Server_SendOverlayActionToAlive @0x50a1b0 with send_mask 128 (alive players)]
+std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd);
+
+
 } // namespace opennova
