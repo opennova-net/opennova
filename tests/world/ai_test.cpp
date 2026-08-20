@@ -966,6 +966,79 @@ static CollisionModel box_model_for_ai(int32_t type, uint32_t flags, double hx,
 	return m;
 }
 
+// Does an AI's OWN aim solution actually hit? The fire machinery and the
+// damage machinery are both covered elsewhere; what was never pinned is the
+// join between them — the aim yaw/pitch the combat think computes, fed to the
+// round spawn, arriving at the target. A live 3-minute engagement had three AI
+// fire 126 rounds at a client 18 u away without landing one hit, which is the
+// symptom this test exists to catch deterministically.
+static void test_ai_aim_solution_hits_its_target() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity target_seed{};
+    target_seed.kind = EntityKind::Organic;
+    target_seed.has_item_def = true;
+    target_seed.item_type = 3;
+    target_seed.team = 1;
+    target_seed.health = 150;
+    target_seed.net_id = 0x51;
+    target_seed.position = Vec3{18.0f, 0.0f, 0.0f}; // the live standoff distance
+    const EntityHandle target_h = w->registry.spawn(0, target_seed);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 2;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x52;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x52, 2);
+    npc.inf.combat_target = target_h;
+    npc.inf.aim_point[0] = to_fixed(18.0);
+    npc.inf.aim_point[1] = 0;
+    npc.inf.aim_point[2] = 0;
+
+    // Give the target a collision body so a round can strike it, mirroring the
+    // projectile suite's rig (one section, 1 u box at torso height).
+    CollisionWorld collision;
+    CollisionModel model;
+    model.sections.resize(1);
+    for (CollisionSection &sec : model.sections) {
+        sec.authored_bounds = true;
+        sec.min_x = sec.min_y = sec.min_z = -0x10000;
+        sec.max_x = sec.max_y = sec.max_z = 0x10000;
+        sec.radius = 0x10000;
+    }
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(target_h, model_id);
+    std::vector<CollisionMatrix> mats;
+    const int32_t centre[3] = {to_fixed(18.0), 0, 58982};
+    mats.push_back(collision_matrix_from_heading(0, centre));
+    CHECK(collision.publish_entity_section_matrices(target_h, std::move(mats)));
+    collision.build_tick_tables(*w);
+    w->collision = &collision;
+    ai.collision = &collision;
+
+    // Fire straight down the AI's aim line and let the round fly.
+    const int32_t origin[3] = {0, 0, 58982};
+    // Straight down +X is BAM 0 (the engine's heading zero).
+    const int32_t yaw = 0;
+    CHECK(ai.fire_ai_round(*w, npc, origin, yaw, 0, /*ammo_index=*/1));
+    for (int t = 0; t < 40; ++t) w->round_sim.tick(*w, nullptr);
+
+    const Entity *victim = w->registry.get(target_h);
+    CHECK(victim != nullptr);
+    std::printf("  [ai-aim] target health after 40 ticks: %d (was 150)\n",
+                victim ? int(victim->health) : -1);
+    CHECK(victim != nullptr && victim->health < 150);
+}
+
 // A rider must SEE past its own carrier. Retail resolves each LOS endpoint
 // through the entity's parent links before the model walk, so a soldier riding
 // a boat is not blinded by the boat's own hull; without that, every perception
@@ -2785,6 +2858,7 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_ai_aim_solution_hits_its_target();
     test_mounted_rider_sees_past_its_own_carrier();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_mounted_look_traverses_before_fire_request();
