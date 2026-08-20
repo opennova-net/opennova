@@ -1333,6 +1333,16 @@ target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
 add_test(NAME collision COMMAND collision_test)
 
+# Asset-gated (OPENNOVA_JO_DIR): the 05TRcoop bunker walk-in repro — the real
+# Cbunker2 collision at the mission pose, a capsule walking the authored
+# route into it. Diagnostic/report-only while the frozen-clump divergence is
+# open; skip-as-pass without a JO install.
+add_executable(bunker_walkin_test world/bunker_walkin_test.cpp)
+target_link_libraries(bunker_walkin_test PRIVATE opennova_runtime)
+target_include_directories(bunker_walkin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(bunker_walkin_test PRIVATE cxx_std_17)
+add_test(NAME bunker_walkin COMMAND bunker_walkin_test)
+
 # Authoritative projectile consequences through RoundSim's CollisionWorld seam:
 # pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
 add_executable(projectile_combat_test world/projectile_combat_test.cpp)
