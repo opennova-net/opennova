@@ -841,6 +841,11 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["team"] = ent ? static_cast<int>(ent->team) : -1;
 	out["pool"] = ent ? ent->handle.pool() : -1;
 	out["engine_flags"] = ent ? static_cast<int64_t>(ent->engine_flags) : 0;
+	// The BMS/gameplay flags word is a SEPARATE store from engine_flags, and the
+	// motor's suppression gates read the union (ladder zeroes the horizontal root
+	// pair, drowning the vertical) — a card exposing only engine_flags cannot
+	// explain a body that animates without translating.
+	out["bms_flags"] = ent ? static_cast<int64_t>(ent->flags) : 0;
 	out["waypoint_id"] = ent ? static_cast<int>(ent->waypoint_id) : 0;
 	out["wp_number"] = ent ? ent->wp_number : 0;
 	out["health"] = ent ? ent->health : 0;
