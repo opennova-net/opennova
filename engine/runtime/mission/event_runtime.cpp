@@ -605,6 +605,13 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
             if ((static_cast<uint32_t>(se.event.flags) & pre_bit) != 0) update_entry(w, se);
         return;
     }
+    // An empty host does not advance the mission. Retail wraps the WAC tick, the
+    // idle sweep and this pump in one condition whose live half is
+    // `wac_var_humans || !wac_var_ticks` — see World::script_may_advance. The
+    // pre-mission pass above is deliberately OUTSIDE it, matching retail, where
+    // that pass runs from Game_StartMission rather than the server tick.
+    if (!w.script_may_advance()) return;
+
     // Normal events (neither flag): every 16th tick process ONE QUARTER of the
     // list, round-robin — each entry is evaluated once per 64 ticks, which is why
     // the timers decrement in 64-unit quanta. [orig: Server_TickUpdate @0x51d7e0

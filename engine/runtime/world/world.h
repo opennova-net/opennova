@@ -231,6 +231,10 @@ struct CachedFrameState {
     // @0xC6EB14 — Server_BuildEntitySlotLists @0x4f97a0: zero @0x4f97c6, +1 per
     // active human slot @0x4f98b1]
     int32_t humans = 0;
+    // The WAC VM's execution counter, republished here so the script-advance gate
+    // can read it without reaching into the VM — retail keeps it in the same
+    // global bag as `humans`. [orig: wac_var_ticks]
+    int32_t wac_ticks = 0;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value
@@ -538,6 +542,29 @@ public:
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
+
+    // May the mission script advance this tick? Retail wraps its WAC tick, the
+    // idle-timer sweep and the BMS event pump in ONE condition, and the half that
+    // matters here is `wac_var_humans || !wac_var_ticks`: once the VM has run at
+    // all, the whole script HOLDS until a human player is in the world. An empty
+    // host does not burn through its mission.
+    //
+    // That gate is the difference between a scripted kill reaching a client and
+    // firing into an empty session: 05TRcoop kills ten AI a fifth of a second in,
+    // and without this an unattended host runs that before anyone can join.
+    //
+    // Unmodeled halves of the same condition: retail also requires
+    // `!g_preround_delay_timer` (the pre-round countdown) and
+    // `!g_epilog_screen_active` (the end-of-round screen); we have neither
+    // concept yet, and both only ever ADD holds, so omitting them cannot make the
+    // script run where retail would not.
+    // [orig: the wrapper @0x51b8xx region — `if (!g_preround_delay_timer &&
+    //  (wac_var_humans || !wac_var_ticks) && !g_epilog_screen_active)` around
+    //  WacScript_AdvanceTick + Server_UpdateEntityIdleTimers +
+    //  EventTrigger_UpdateQuarterRoundRobin @0x454d50]
+    bool script_may_advance() const {
+        return cached.humans > 0 || cached.wac_ticks == 0;
+    }
 
     void add_system(ISystem *sys);
     void load_systems();       // calls on_load for each

@@ -12,6 +12,11 @@
 
 namespace opennova::wac {
 
+// Publishes the VM execution counter into the world and answers the shared
+// script-advance gate. Out of line because this header only forward-declares
+// World. [orig: wac_var_ticks + the wrapper at World::script_may_advance]
+bool wac_publish_ticks_and_gate(opennova::world::World &world, uint32_t runs);
+
 class WacSystem : public opennova::world::ISystem {
 public:
 	struct RuntimeState {
@@ -64,6 +69,12 @@ public:
         if (ctx.pre_mission) return;   // WAC does not participate in the BMS pre-mission pass
         if (!vm_.loaded()) return;     // no program installed (e.g. a BMS-only mission)
         if (paused) return;            // [orig: dword_C6EB28 gate]
+        // Republish the execution counter, then apply the shared script-advance
+        // gate — retail reads both out of the same global bag, and the WAC tick
+        // sits under the same `if` as the BMS event pump.
+        // [orig: wac_var_ticks @0x4f81d3; the wrapper described at
+        //  World::script_may_advance]
+        if (!wac_publish_ticks_and_gate(world, runs_)) return;
         if (++accum_ < kTicksPerExecution) return; // [orig: dword_C6EAD4 ++ / cmp 0x3E]
         accum_ = 0;
         vm_.execute(world);

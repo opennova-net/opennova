@@ -19,6 +19,11 @@ static int failures = 0;
 
 static World make_world() {
     World w;
+    // A mission only advances while a human is in the world - retail holds the
+    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
+    // so they stand a player up; the empty-server hold has its own test.
+    w.cached.humans = 1;
     w.registry.configure_pool(0, 64);
     return w;
 }
