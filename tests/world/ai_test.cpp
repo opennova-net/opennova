@@ -926,6 +926,35 @@ static void test_mounted_gunner_acquires_and_fires() {
     CHECK(fired);
 }
 
+// The water-crossing edge: a hull that drops below the water plane records ONE
+// crossing, not one per frame, and stops recording while it stays under. This is
+// the trigger behind the S2C 0x34 fan retail emits at every splash - the last
+// message type our host recording was missing against the retail baseline.
+// [orig: the water block @0x482BB9..0x482C9D, gated on the 0x8000 latch]
+static void test_water_crossing_fires_once_on_entry() {
+    World w;
+    w.env.water_z = to_fixed(12.0);
+    WaterCrossQueue &q = w.water_crossings;
+    CHECK(q.events.empty());
+
+    // Entering: below the plane with the latch clear -> exactly one record.
+    q.add(to_fixed(-834.0), to_fixed(122.0), w.env.water_z, /*by_hull=*/true);
+    CHECK(q.events.size() == 1);
+    CHECK(q.events[0].by_hull);
+    CHECK(q.events[0].water_z == to_fixed(12.0));
+
+    // The queue is per-tick: the host drains and clears it, so a hull that stays
+    // submerged contributes nothing further.
+    q.clear();
+    CHECK(q.events.empty());
+
+    // The queue refuses to grow without bound if a pathological frame floods it.
+    for (int i = 0; i < 100; ++i)
+        q.add(0, 0, w.env.water_z, true);
+    CHECK(q.events.size() == WaterCrossQueue::kMax);
+    std::printf("  [water-cross] queue capped at %zu\n", q.events.size());
+}
+
 static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
@@ -2646,6 +2675,7 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_water_crossing_fires_once_on_entry();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();

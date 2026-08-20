@@ -873,6 +873,29 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 // Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. anchor_for_connection
 // is file-static; the per-connection emit body is shared by the legacy listen-server binding and
 // npruntime's Server_TickUpdate fan over connection_list.
+std::vector<std::vector<uint8_t>> build_water_cross_messages(
+        const world::World &world) {
+	// One positioned message per crossing recorded this tick. The name binding
+	// is witnessed by capture proximity (npwire's kWaterCross* constants): a
+	// hull disturbing the surface fans SURFACE_WTR, a body entering water fans
+	// BODYWATER1. Coordinates are world UNITS (the wire's i16), so the 16.16
+	// fixed positions shift down 16 - the same convention the decode documents.
+	// [orig: NetPacket_WriteOverlayAction @0x505d50 via
+	//  Server_SendOverlayActionToAlive @0x50a1b0]
+	std::vector<std::vector<uint8_t>> out;
+	for (const world::WaterCrossEvent &ev : world.water_crossings.events) {
+		PlaySoundCommand cmd;
+		cmd.flag = 1; // positioned
+		cmd.sound_name = ev.by_hull ? kWaterCrossSurfaceEffect : kWaterCrossBodyEffect;
+		cmd.has_pos = true;
+		cmd.pos_x = static_cast<int16_t>(ev.x >> 16);
+		cmd.pos_y = static_cast<int16_t>(ev.y >> 16);
+		cmd.pos_z = static_cast<int16_t>(ev.water_z >> 16);
+		out.push_back(encode_play_sound(cmd));
+	}
+	return out;
+}
+
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type,
