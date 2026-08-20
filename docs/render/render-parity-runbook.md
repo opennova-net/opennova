@@ -303,6 +303,40 @@ receipt.
 
 ## 3b. Retail: a fresh capture (only when the contract changed)
 
+**Read this before re-shooting: a re-shoot forces a new catalog revision.**
+The catalog constrains both ends of the retail leg, and they are only
+simultaneously satisfiable by the session that minted them:
+
+| Check | Where | Tolerance |
+|---|---|---|
+| capture frame follows fixture application | `register_retail_capture.py` | <= 120 frames |
+| applied player position == `retail_player_bms.applied` | `register_retail_capture.py` | 1e-5 |
+| registered camera == `camera_bms` | `build_retail_side_by_side.py` | 0.05 per axis |
+
+`onhook_apply_render_fixture` cannot set a camera, only the player pose; retail
+derives the camera from it. So hitting `camera_bms` means correcting the applied
+pose, and a corrected pose fails the 1e-5 applied-position check. Measured on
+2026-08-20 at the catalog's own applied positions, the resulting camera missed
+`camera_bms` by 0.11-0.99 on land, and the CP01 water rows put the camera 2.7 m
+BELOW the player.
+
+The honest resolution is to mint a new catalog revision: capture with
+`--no-correct` so the applied positions stay verbatim, record the cameras
+retail actually produced as the new `camera_bms`, and publish that pair. That
+changes the catalog SHA, and every OpenNova manifest binds it, so the OpenNova
+leg must be recaptured against the new revision too. Budget both legs.
+
+`scripts/render/retail_capture_driver.py` performs the capture. It issues the
+apply and the capture back-to-back on one MCP connection (3-5 frames apart
+instead of the 500-1800 an operator or agent achieves by hand), solves the
+camera from each frame's own view matrix, and writes the six bundle sidecars.
+Use `--fresh-host` for water fixtures: a player already in water is pinned by
+float/settle physics, the applied z is overridden, and the residual repeats
+bit-for-bit -- only the first teleport of a process lands. Ground snap can also
+offer only discrete eye heights that straddle the target; the camera x and y
+each have 0.05 of slack, and sweeping it finds a shelf that lands.
+
+
 Everything in 3a applies, plus the capture itself. Build, deploy and register
 onHook first (see "Building and deploying onHook" above) and restart the client;
 a server added mid-session is not discoverable, and a stale build may simply not
@@ -435,6 +469,10 @@ descriptive measurements and never a threshold.
 | `raw retail image must be colocated under the registered bundle directory` | `--output` is outside the bundle directory. Write `registered.json` beside `retail.png`. |
 | `claude mcp list` says Connected but tools fetch failed | The server is up but its tool list was rejected; the capture tools are unavailable. Fix the server, do not proceed. |
 | `onhook_capture_retail_reference` missing from the tool list | The deployed onHook predates the frame-correlated capture tooling. `onhook_capture_bundle` is not a substitute -- registration needs the v4 presentation proof. Rebuild. |
+| `fixture application position does not match catalog` | The applied pose was corrected to chase the camera. Registration pins it at 1e-5; recapture with `--no-correct` and mint a catalog revision. |
+| `retail capture is more than 120 frames after fixture application` | Apply and capture were issued separately. Use `retail_capture_driver.py`, which pairs them on one connection. |
+| `onhook_host_lan` times out with an empty log | The run's `output_dir` was reused. The hook log is create-new; give every run its own directory. |
+| Water frames come out submerged | The player is pinned in a swim state. Capture that fixture in a dedicated process (`--fresh-host`). |
 | Sheets pair but content differs structurally | Check `mission.expansion` in the OpenNova manifest against retail's `/exp`. A `jox01` OpenNova frame against a `revx02` retail frame is not a comparison. |
 | Registration rejects the mission | The loose `.bms` under `NOVA_MISSION_RESOURCE_DIR` does not hash to the catalog value. Repoint at the correct corpus. |
 | Every command in the shell is refused | The persistent shell was `cd`-ed into the shared checkout. Re-enter the current worktree to unwedge it. |
