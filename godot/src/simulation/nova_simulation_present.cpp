@@ -943,6 +943,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["root_dy"] = e->inf.dbg_root_dy;
 	out["res_dx"] = e->inf.dbg_res_dx;
 	out["res_dy"] = e->inf.dbg_res_dy;
+	out["contact_item"] = e->inf.dbg_contact_item;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
 	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the

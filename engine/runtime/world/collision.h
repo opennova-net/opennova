@@ -699,6 +699,11 @@ struct ProjectileHit {
 // ----------------------------------------------------------------------------
 class CollisionWorld {
 public:
+    // Debug-card tap: the last resolve_entity's strongest-contact source (the
+    // candidate whose model produced push-out force) — the frozen-clump
+    // instrument. Reset at each resolve; single-threaded like the resolver.
+    EntityHandle dbg_last_contact{};
+    int32_t dbg_last_contact_item = 0;
     // Opt-in, per-tick projectile-trace profile: the probe/F3 attribution
     // surface for sustained-fire cost. Times are microseconds; *_survivors
     // count geometric broad-phase passes and *_faces count CFAC face-set sizes

@@ -290,6 +290,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
     auto it = candidates_.find(source.packed);
+    dbg_last_contact = EntityHandle{};
+    dbg_last_contact_item = 0;
     if (it != candidates_.end()) {
         const CandidateSlice slice = it->second;
         CollisionTargetView view;
@@ -324,6 +326,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 // [orig: fold @ 0x4b3002-0x4b30af / @ 0x4b3603-0x4b36b9 before
                 //  the dispatch @ 0x4b30b7; the f[2]<0 gate @ 0x4b3010]
                 if (contact && !suppress_model_force) {
+                    dbg_last_contact = ch; // debug-card tap
+                    if (const Entity *ce = world.registry.get(ch))
+                        dbg_last_contact_item = ce->item_id;
                     int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
                     if (f[2] < 0) {
                         if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {

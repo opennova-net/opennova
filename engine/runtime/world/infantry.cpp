@@ -1593,6 +1593,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         inf.dbg_res_dx = e.pos[0] - pre_resolve_x; // debug-card tap
         inf.dbg_res_dy = e.pos[1] - pre_resolve_y;
+        inf.dbg_contact_item =
+            collision != nullptr ? collision->dbg_last_contact_item : 0;
         // The post-resolve latch state: the resolver cleared and possibly
         // re-latched the CL bit this tick; every leg below keys on the live value.
         const bool on_ladder_now =

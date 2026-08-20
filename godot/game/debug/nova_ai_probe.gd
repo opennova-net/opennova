@@ -79,6 +79,7 @@ func tick(world: GameWorld, delta: float) -> void:
 			"rdy": int(card.get("root_dy", 0)),
 			"cdx": int(card.get("res_dx", 0)),
 			"cdy": int(card.get("res_dy", 0)),
+			"citem": int(card.get("contact_item", 0)),
 			"alert": int(card.get("alert", -1)),
 			"tgt": bool(card.get("combat_target_valid", false)),
 		})
