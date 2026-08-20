@@ -51,8 +51,8 @@ and the render-fixture capture probe family (`render_fixture_capture_probe.gd`
 `NOVA_RENDER_FIXTURE_OUTPUT`, `NOVA_RENDER_CAPTURE_MODE` /
 `NOVA_RENDER_CAPTURE_PROFILE`, `NOVA_MISSION_RESOURCE_DIR` /
 `NOVA_RUNTIME_RESOURCE_DIR` / `NOVA_EXPANSION`, `NOVA_EVIDENCE_SOURCE_COMMIT`,
-and `NOVA_RENDER_STATIC_SHADOW_SUPPRESS_BMS_IDS` — documented in detail in
-[docs/render/README.md](render/README.md).
+and `NOVA_RENDER_STATIC_SHADOW_SUPPRESS_BMS_IDS` — the full contract table lives in
+[docs/render/render-parity-runbook.md](render/render-parity-runbook.md).
 
 ## Local setup
 
