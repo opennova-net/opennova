@@ -127,12 +127,6 @@ struct PromoteOptions {
     // TextResource_FindEntryBySectionAndKey("PeopleNames") -> strncpy(+0xF4, 15)]
     std::function<std::string(int32_t)> people_name_resolver;
 
-    // Command 123/124/125 authored spawn attachment: Entity_UpdateInfantryAI @0x4B9910
-    // resolves slot+152 (BMS wp_number) as a target entity serial, then walks/attaches to a
-    // vehicle seat. Until the full walk-to-seat staging is ported, promotion only attaches actors
-    // already authored near the target; this mirrors EntityCommands::mount_best's proximity guard.
-    float command_mount_radius = 20.0f;
-
     // Per-pool registry capacities, defaulted to the witnessed retail g_pool_list
     // sizes [orig: EntityPool_Allocate @0x442168].
     size_t pool_capacities[world::kEntityPoolCount] = {

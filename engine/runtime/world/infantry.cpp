@@ -257,9 +257,18 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     inf.at_final_oneshot = false;
 
     const int32_t ch = slot.f[37]; // [orig: slot+148 = waypoint channel / command]
-    // Reserved command range [orig: dump 1341-1407]: 126 guard/hold, 127 follow local
-    // player, 123/124/125 scripted move orders. (D-INF-2: order sources not wired yet.)
-    if (ch >= 123 && ch <= 127) return;
+    // The board-target/carrier cache survives only under command 125 — every
+    // other think clears it. [orig: @0x4b9910 think head — aiComp[36] = 0
+    // unless aiComp[37] == 125]
+    if (ch != 125) slot.f[36] = 0;
+    // Reserved command range: 123/124/125 Goto-SSN-and-board, 126 goto-group
+    // hold, 127 follow the local player — dispatched in infantry_board.cpp,
+    // BEFORE the has-route gate like the original (retires the D-INF-2
+    // early-return). [orig: the @0x4b9910 command dispatch on aiComp+148]
+    if (ch >= 123 && ch <= 127) {
+        infantry_command_think(e, world);
+        return;
+    }
     // [orig: dump 1409 — needs the has-route flag (slot+140) and no hold cooldown]
     if (ch == 0 || slot.f[35] == 0 || inf.wait_cooldown > 0) return;
 

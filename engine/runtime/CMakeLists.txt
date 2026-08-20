@@ -142,6 +142,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/occlusion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_weapon_channel.cpp # the secondary AnimMap channel (§14.8)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
