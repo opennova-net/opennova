@@ -966,6 +966,52 @@ static CollisionModel box_model_for_ai(int32_t type, uint32_t flags, double hx,
 	return m;
 }
 
+// A guard with no route must still notice an enemy. Live rounds showed only
+// state-16 (route-following) AI ever holding a target while state-0 AI - the
+// majority, every guard the mission spawns without a patrol - never acquired,
+// even with an enemy well inside their authored sight radius (one had a 400 u
+// range and an intruder 22 u away). Perception lives in the infantry think, not
+// the state machine, so brain state must not gate it.
+static void test_routeless_guard_still_acquires() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity enemy_seed{};
+    enemy_seed.kind = EntityKind::Organic;
+    enemy_seed.has_item_def = true;
+    enemy_seed.item_type = 3;
+    enemy_seed.team = 1;
+    enemy_seed.health = 100;
+    enemy_seed.net_id = 0x61;
+    enemy_seed.position = Vec3{10.0f, 0.0f, 0.0f};
+    const EntityHandle enemy_h = w->registry.spawn(0, enemy_seed);
+
+    Entity guard_seed{};
+    guard_seed.kind = EntityKind::Organic;
+    guard_seed.team = 2;
+    guard_seed.health = 100;
+    guard_seed.net_id = 0x62;
+    const EntityHandle guard_h = w->registry.spawn(0, guard_seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    AiEntity &guard = *ai.at(ai.attach(guard_h));
+    configure_rifleman(guard, 0x62, 2);
+    guard.slot.f[17] = 120 << 16; // calm radius 30u; the enemy sits at 10u
+    // The state a mission guard actually spawns in: 0, the nullsub/uninitialised
+    // brain state (no route was ever ordered).
+    guard.brain.f[AiBrain::kCurState] = 0;
+    guard.brain.f[AiBrain::kPendState] = 0;
+
+    ai.infantry_combat_think(guard, *w, 0);
+    std::printf("  [routeless-guard] state=%d target=%s\n",
+                guard.brain.f[AiBrain::kCurState],
+                guard.inf.combat_target.valid() ? "acquired" : "NONE");
+    CHECK(guard.inf.combat_target == enemy_h);
+}
+
 // Does an AI's OWN aim solution actually hit? The fire machinery and the
 // damage machinery are both covered elsewhere; what was never pinned is the
 // join between them — the aim yaw/pitch the combat think computes, fed to the
@@ -2858,6 +2904,7 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_routeless_guard_still_acquires();
     test_ai_aim_solution_hits_its_target();
     test_mounted_rider_sees_past_its_own_carrier();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
