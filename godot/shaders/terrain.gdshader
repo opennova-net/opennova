@@ -26,6 +26,9 @@ instance uniform bool u_instance_tile_cache_ready = false;
 instance uniform float u_instance_tile_cache_layer = 0.0;
 // world origin X/Z, inverse world span, world span (diagnostic mirror).
 instance uniform vec4 u_instance_tile_cache_origin_span = vec4(0.0);
+// The pool slot this patch instance reads its light-pool rows from (draw-list
+// index == pool slot, fixed per instance; terrain_lighting.gdshaderinc).
+instance uniform float u_instance_light_slot = 0.0;
 
 varying vec2 v_colormap_uv;
 varying vec2 v_detail_uv;
@@ -94,6 +97,11 @@ void fragment() {
 	}
 	vec3 result = terrain_surface_color_from_colormap(
 		colormap, v_colormap_uv, v_detail_uv, u_instance_source_quadrant);
+
+	// The pool lights' additive re-draws, summed before the fog so each pool
+	// fades with distance like the batch it re-draws (the per-light pass's own
+	// fog state is the open half of the 0x600 shader's REN-4 decode).
+	result += terrain_point_light_pool(v_world_pos, u_instance_light_slot);
 
 	result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
 

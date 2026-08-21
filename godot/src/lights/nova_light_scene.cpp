@@ -514,6 +514,136 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	return rows;
 }
 
+namespace {
+
+void fill_flicker(renderer::LightFlickerInputs &flicker, int p_time_ms,
+		const Weather *p_weather) {
+	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
+	if (p_weather != nullptr) {
+		const opennova::env::WeatherOscillator &oscillator =
+				p_weather->runtime().core().oscillator;
+		flicker.amp_ring = oscillator.amp_ring;
+		flicker.amp_ring_size =
+				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
+		flicker.ring_index = oscillator.ring_index;
+	}
+}
+
+} // namespace
+
+size_t LightScene::collect_terrain_light_rows(
+		const opennova::renderer::TerrainLightPatchBounds *p_patches,
+		size_t p_patch_count, const Vector3 &p_ambient_scale, int p_time_ms,
+		Weather *p_weather, uint32_t p_recip_packed,
+		opennova::renderer::TerrainLightPatchRows *r_rows) const {
+	opennova::renderer::TerrainLightPassInputs inputs;
+	// EffectWorld_AmbientScale = the env light-state gain the object pass
+	// already feeds; flt_2732DA{C,8,4} = the loaded recip unpacked once
+	// (retail: EffectWorld_TickInstancesAndLightScale @0x5aa1ef..0x5aa23f).
+	inputs.ambient_scale = {
+		static_cast<float>(p_ambient_scale.x),
+		static_cast<float>(p_ambient_scale.y),
+		static_cast<float>(p_ambient_scale.z),
+	};
+	inputs.terrain_factor =
+			opennova::renderer::terrain_per_channel_factor(p_recip_packed);
+	fill_flicker(inputs.flicker, p_time_ms, p_weather);
+	// The normal pass: the pixel-shader terrain path is the one we render, the
+	// per-light loop is never skipped, and the 0.4/r alternate projection rides
+	// render-mode bit 0x100, which this shell never sets (retail: @0x6095e4,
+	// @0x60983f, @0x609890).
+	inputs.alt_pass = false;
+	inputs.pixel_shader_path = true;
+	inputs.light_pass_disabled = false;
+	return scene_.collect_terrain_pass_rows(p_patches, p_patch_count, inputs,
+			r_rows);
+}
+
+Array LightScene::collect_terrain_light_rows_for_bounds(
+		const TypedArray<AABB> &p_world_aabbs, const Vector3 &p_ambient_scale,
+		int p_time_ms, Weather *p_weather, int p_recip_packed) const {
+	const int64_t patch_count = p_world_aabbs.size();
+	std::vector<opennova::renderer::TerrainLightPatchBounds> patches;
+	patches.reserve(static_cast<size_t>(patch_count));
+	for (int64_t i = 0; i < patch_count; ++i) {
+		const AABB box = p_world_aabbs[i];
+		const Vector3 lo = box.position;
+		const Vector3 hi = box.position + box.size;
+		const float aabb_min[3] = {
+			static_cast<float>(lo.x), static_cast<float>(lo.y),
+			static_cast<float>(lo.z)
+		};
+		const float aabb_max[3] = {
+			static_cast<float>(hi.x), static_cast<float>(hi.y),
+			static_cast<float>(hi.z)
+		};
+		patches.push_back(opennova::renderer::terrain_patch_light_bounds(
+				aabb_min, aabb_max, 0.0f, 0.0f));
+	}
+	std::vector<opennova::renderer::TerrainLightPatchRows> rows(patches.size());
+	collect_terrain_light_rows(patches.data(), patches.size(), p_ambient_scale,
+			p_time_ms, p_weather, static_cast<uint32_t>(p_recip_packed),
+			rows.data());
+	Array out;
+	for (const opennova::renderer::TerrainLightPatchRows &patch : rows) {
+		Array patch_rows;
+		for (size_t i = 0; i < patch.count; ++i) {
+			const opennova::renderer::TerrainLightRow &row = patch.rows[i];
+			Dictionary d;
+			d["position"] = godot_from_mission_float(row.position);
+			d["inv_scale"] = row.inv_scale;
+			d["color"] = Vector3(row.pixel_rgb[0], row.pixel_rgb[1],
+					row.pixel_rgb[2]);
+			d["handle"] = encode_handle(row.handle);
+			patch_rows.push_back(d);
+		}
+		out.push_back(patch_rows);
+	}
+	return out;
+}
+
+int LightScene::terrain_light_texture_size() {
+	return opennova::renderer::kFalloffTextureSize;
+}
+
+int LightScene::terrain_light_strip_rows() {
+	return opennova::renderer::kFalloffSpot1DRows;
+}
+
+namespace {
+
+PackedByteArray argb_words_to_rgba8(int width, int height,
+		uint32_t (*texel)(int, int)) {
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(width) * height * 4);
+	uint8_t *out = bytes.ptrw();
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			const uint32_t argb = texel(x, y);
+			uint8_t *px = out + (static_cast<size_t>(y) * width + x) * 4;
+			px[0] = static_cast<uint8_t>((argb >> 16) & 0xFFu);
+			px[1] = static_cast<uint8_t>((argb >> 8) & 0xFFu);
+			px[2] = static_cast<uint8_t>(argb & 0xFFu);
+			px[3] = static_cast<uint8_t>(argb >> 24);
+		}
+	}
+	return bytes;
+}
+
+} // namespace
+
+PackedByteArray LightScene::terrain_light_disc_rgba8() {
+	const int size = opennova::renderer::kFalloffTextureSize;
+	return argb_words_to_rgba8(size, size,
+			&opennova::renderer::falloff_texture_light2d_argb);
+}
+
+PackedByteArray LightScene::terrain_light_strip_rgba8() {
+	return argb_words_to_rgba8(opennova::renderer::kFalloffTextureSize,
+			opennova::renderer::kFalloffSpot1DRows,
+			&opennova::renderer::falloff_texture_spot1d_argb);
+}
+
 int LightScene::live_count() const {
 	return static_cast<int>(scene_.inspect().live);
 }
@@ -578,6 +708,22 @@ void LightScene::_bind_methods() {
 			&LightScene::corona_texture_size);
 	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_rgba8"),
 			&LightScene::corona_texture_rgba8);
+	ClassDB::bind_method(D_METHOD("collect_terrain_light_rows_for_bounds",
+			"world_aabbs", "ambient_scale", "time_ms", "weather",
+			"recip_packed"),
+			&LightScene::collect_terrain_light_rows_for_bounds);
+	ClassDB::bind_static_method("LightScene",
+			D_METHOD("terrain_light_texture_size"),
+			&LightScene::terrain_light_texture_size);
+	ClassDB::bind_static_method("LightScene",
+			D_METHOD("terrain_light_strip_rows"),
+			&LightScene::terrain_light_strip_rows);
+	ClassDB::bind_static_method("LightScene",
+			D_METHOD("terrain_light_disc_rgba8"),
+			&LightScene::terrain_light_disc_rgba8);
+	ClassDB::bind_static_method("LightScene",
+			D_METHOD("terrain_light_strip_rgba8"),
+			&LightScene::terrain_light_strip_rgba8);
 	ClassDB::bind_method(D_METHOD("live_count"), &LightScene::live_count);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 }

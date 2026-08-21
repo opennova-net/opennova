@@ -3,6 +3,8 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -13,6 +15,7 @@
 #include <vector>
 
 #include <renderer/light_scene.h>
+#include <renderer/light_terrain_pass.h>
 #include <renderer/render_slot_shadow.h>
 
 namespace godot {
@@ -114,6 +117,41 @@ public:
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
 			const Dictionary &p_fog);
+
+	// The terrain leg of the pool: per terrain patch, the <= 16 world lights
+	// whose AABB overlaps the patch and which the authored terrain flag admits,
+	// as the rows the terrain shader re-draws the patch with (retail: the
+	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
+	// Light_SetupTerrainProjectedPass @0x5AA830 — the collect, the gates and
+	// the pixel constants live portable in renderer::LightScene::
+	// collect_terrain_pass_rows, see docs/render/render-lighting-re.md). A C++
+	// seam for the Terrain device: patch bounds in mission 16.16 (the helper
+	// renderer::terrain_patch_light_bounds folds the render frame), the env
+	// light-state gain, the time + weather the flicker reads, and the packed
+	// Env_TerrainColorRecip the recip factor unpacks. Returns the row total.
+	size_t collect_terrain_light_rows(
+			const opennova::renderer::TerrainLightPatchBounds *p_patches,
+			size_t p_patch_count, const Vector3 &p_ambient_scale, int p_time_ms,
+			Weather *p_weather, uint32_t p_recip_packed,
+			opennova::renderer::TerrainLightPatchRows *r_rows) const;
+	// The same leg over Godot-world AABBs (one per patch), rows as
+	// Dictionaries {position (Vector3 Godot world), inv_scale, color (Vector3,
+	// the c4..c6 pixel constants), handle} — the GUT seam the terrain device
+	// test drives without a built Terrain.
+	Array collect_terrain_light_rows_for_bounds(
+			const TypedArray<AABB> &p_world_aabbs, const Vector3 &p_ambient_scale,
+			int p_time_ms, Weather *p_weather, int p_recip_packed) const;
+
+	// The two procedural textures the terrain pass samples, as RGBA8 bytes:
+	// "texlight2d" (terrain_light_texture_size() square, the disc on the ground
+	// plane) and "texlightspot1d" (terrain_light_texture_size() x
+	// terrain_light_strip_rows(), the height strip). The laws live portable in
+	// renderer::falloff_texture_light2d_argb / _spot1d_argb; this only unpacks
+	// the words for Image::create_from_data.
+	static int terrain_light_texture_size();
+	static int terrain_light_strip_rows();
+	static PackedByteArray terrain_light_disc_rgba8();
+	static PackedByteArray terrain_light_strip_rgba8();
 
 	int live_count() const;
 	Dictionary get_report() const;
