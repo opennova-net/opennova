@@ -934,6 +934,10 @@ public:
     //  state-14 block, the crewed 14->7 transition, waypoint target + turn
     //  budget, cyclic (132*sin/cos)>>22 with the near-ground 1/8 damp,
     //  collective from the altitude error, the AGL floor avgGround + bound/4]
+    // True while a live, unmounted body is still walking over to board this
+    // vehicle and a seat remains free — the hold behind the witnessed
+    // wait-for-boarders gate. Body and witness in ai_waypoints.cpp.
+    bool vehicle_waits_for_boarders(World &world, const Entity &veh);
     void chel_ai_drive(World &world, Entity &veh, const Entity *controller,
                        const VehicleTraits &traits);
 

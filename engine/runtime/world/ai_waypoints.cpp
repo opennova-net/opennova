@@ -485,6 +485,41 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 // the mover's servos consume (cmd_speed/cmd_lateral fwd+lat cyclic,
 // steer_target_bam, net_alt_target, net_engine_on).
 // [orig: the AI leg of Entity_UpdateAircraftPhysics @0x490310]
+// Is anyone still walking over to board this vehicle? Retail asks only while the
+// vehicle can still take someone (Entity_CanEnterVehicle), then walks pool 0 for
+// a live, unmounted body whose AI is running the BOARD order at this hull.
+//
+// The three brain slots are the ones the board think already writes: f[37] is
+// the command (125 = "Goto SSN and board"), f[38] the target's authored id.
+// [orig: the shared wait-for-boarders block — air @ kong 94590, watercraft
+//  @0x48E75B; gates `entity[7] != 0`, `(Flags & 3) == 0`, aiComp non-null,
+//  aiComp[37] == 125, aiComp[38] == entity->DcbId, and `!entity[90]` (unmounted)]
+bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
+    // Seats full -> nobody can still be coming, so nothing holds it.
+    // [orig: the enclosing `if (Entity_CanEnterVehicle(nullptr, entity))`]
+    bool has_free_seat = false;
+    for (const Seat &s : veh.seats) {
+        if (!s.occupant.valid()) { has_free_seat = true; break; }
+    }
+    if (!has_free_seat) return false;
+
+    bool waiting = false;
+    world.registry.for_each([&](const Entity &e) {
+        if (waiting) return;
+        if (e.handle.pool() != 0) return;      // [orig: the pool-0 walk]
+        if (!e.has_item_def) return;           // [orig: entity[7] != 0]
+        // [orig: (entity[36] & 3) == 0 — hidden (bit0) or dead (bit1) are skipped]
+        if ((e.flags & 3u) != 0) return;
+        if (e.mounted) return;                 // [orig: !entity[90]]
+        const AiEntity *b = for_handle(e.handle);
+        if (b == nullptr) return;              // [orig: the aiComp null test]
+        if (b->brain.f[37] != 125) return;     // not running the board order
+        if (b->brain.f[38] != static_cast<int32_t>(veh.net_id)) return; // not THIS hull
+        waiting = true;
+    });
+    return waiting;
+}
+
 void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits) {
     (void)traits;
@@ -578,6 +613,25 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // feeding node Z unconditionally sends the hull to authored-garbage
     // altitudes on routes that never meant to fly it.
     m.net_alt_target = ground + kPatrolAglStandIn;
+
+    // WAIT FOR BOARDERS. A vehicle whose seats are not yet full HOLDS while any
+    // live, unmounted body is still walking over to board it: heading pinned to
+    // its own, both command words zeroed, and the powered bit dropped. The
+    // ENGINE is untouched, and the rotor is gated on the occupant rather than on
+    // power, so the blades keep turning while it waits — a helicopter spools up
+    // where it stands instead of leaving the moment its first passenger climbs
+    // in. Retail runs this AFTER the flight computation, overriding it, so the
+    // override lives at the tail here too.
+    // [orig: Entity_ProcessAirVehiclePhysics, the Entity_CanEnterVehicle block
+    //  (kong line 94590) — work_heading = entity->Yaw, aiComp[136]/[137] = 0,
+    //  Flags &= ~0x80; identical twins in the watercraft (@0x48E75B), light,
+    //  infantry and mounted-infantry movers]
+    if (vehicle_waits_for_boarders(world, veh)) {
+        m.steer_target_bam = m.yaw_bam;
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.net_engine_on = false; // the wire's Flags 0x80 [orig: `Flags &= ~0x80u`]
+    }
 }
 
 
