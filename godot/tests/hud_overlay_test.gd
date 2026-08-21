@@ -726,3 +726,102 @@ func test_player_view_effects_tracks_exact_underwater_murk_pass() -> void:
 
 	env.set_underwater_overlay_view(false)
 	assert_false(murk.visible, "Surfacing retires the murk quad synchronously.")
+
+
+# The mounted-vehicle panel: the rider's VEHICLE_HUD block lands the interface
+# silhouette at the HUDVEHSTANCEPOS anchor (plus the stance offset), loaded per
+# sid through the real VFS path. With no Simulation the seat rows stay empty
+# (the set_scoreboard shape); the silhouette is the panel's one witnessed gate
+# [orig: HUD_DrawVehicleHealthBars @0x5a5038 — no interface texture, no panel].
+func test_vehicle_panel_draws_the_block_silhouette() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"HUDVEHSTANCEPOS 0 272",
+		"HUDSTANCE 0 0 0 stance_1.tga STAND",
+		"VEHICLE_HUD ",
+		"  sid dbuggy1 ",
+		"  interface h_buggya.tga",
+		"  driver 16,196",
+		"  seats 1,38,196",
+		"VEHICLE_END",
+	]), PackedStringArray(["h_buggya.tga", "stance_1.tga"]),
+			{"h_buggya.tga": Vector2i(40, 30)})
+	var hud := _make_overlay()
+	var layout: HudPos = fixture["layout"]
+	hud.configure(layout, fixture["root"])
+	var block: Dictionary = layout.get_vehicle_hud("dbuggy1")
+	assert_false(block.is_empty(), "The fixture's VEHICLE_HUD block resolves by sid.")
+	var before := int(hud.get_draw_list_stats()["quads_textured"])
+	hud.set_vehicle_panel(true, block, 0, null)
+	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before + 1,
+			"The panel adds exactly the interface silhouette quad.")
+	await get_tree().process_frame
+	hud.set_vehicle_panel(false, {}, 0, null)
+	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before,
+			"Hiding the panel removes the silhouette.")
+	# A block whose interface art is missing draws NO panel at all.
+	var missing := block.duplicate()
+	missing["sid"] = "nosuch"
+	missing["interface"] = "missing.tga"
+	hud.set_vehicle_panel(true, missing, 0, null)
+	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before,
+			"Without the interface texture the panel is skipped entirely.")
+
+
+# The Recent Messages (J) window lists the CHAT ring with NO expiry gate: a
+# chat line that has already faded off the HUD feed still lists in the window
+# [orig: HUD_DrawMessageLog @0x5b9d70 walks slots 16..1 of both rings].
+func test_message_log_lists_expired_lines() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"HUDCHATTEXT 142 , 711",
+	]), PackedStringArray())
+	_copy_font_into(fixture["dir"])
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture["layout"], root)
+	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.push_chat_line("Taylor: moving to bravo", -1)
+	assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+			"A pushed chat line lays out glyph quads on the HUDCHATTEXT feed.")
+	await get_tree().process_frame
+	# Past the 930-tick life the feed loop drops the line...
+	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
+	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+			"The 930-tick life expires the chat line off the feed.")
+	# ...but the window still lists it.
+	hud.set_message_log_title("Recent Messages")
+	hud.set_message_log_shown(true)
+	assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+			"The Recent Messages window lists the expired chat line (no expiry gate).")
+	await get_tree().process_frame
+	hud.set_message_log_shown(false)
+	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+			"Closing the window hides the history again.")
+
+
+# The AAS zone status panel's device seam: the anchor + atlases load through
+# the real VFS path, a null Simulation leaves no zone rows (nothing draws),
+# and hiding clears the state [orig: HUD_DrawZoneStatusPanel @0x5a2480 draws
+# nothing without a contested zone].
+func test_lfp_panel_device_seam() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"LFP_FLAGS 1020 , 27",
+	]), PackedStringArray(["JO_LFP.tga", "R_LFP.tga", "N_LFP.tga", "lfp_alf.tga"]),
+			{"JO_LFP.tga": Vector2i(64, 256), "R_LFP.tga": Vector2i(64, 256),
+			 "N_LFP.tga": Vector2i(64, 256), "lfp_alf.tga": Vector2i(36, 36)})
+	_copy_font_into(fixture["dir"])
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture["layout"], root)
+	var before: Dictionary = hud.get_draw_list_stats()
+	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, 0,
+			{"under_attack": "!Under\nAttack!!", "ready": "!Ready for\nTakeover!"}, null)
+	var shown: Dictionary = hud.get_draw_list_stats()
+	assert_eq(int(shown["elements_drawn"]), int(before["elements_drawn"]),
+			"With no zone rows the panel draws nothing.")
+	await get_tree().process_frame
+	hud.set_lfp_panel(false, 0, 0, 0, {}, null)
+	assert_true(is_instance_valid(hud), "Hiding the zone panel is safe.")
