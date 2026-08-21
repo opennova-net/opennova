@@ -23,13 +23,15 @@ namespace opennova::world {
 // the noage flag. That leg is the live world/round_sim.cpp port
 // (`max_age_ticks`, `kAmmoFlagNoAge`, the expiry test).
 
-// The emitter is spawned LAZILY [orig: the guided leg @0x4E9F58..0x4E9F94;
-//  the ballistic leg @0x4EA8AE..]: an authored effect (ammo +0x70) @0x4E9F58,
-// no handle yet (+0x1CC == 0) @0x4E9F63, life still nonzero (+0x2AC != 0)
-// @0x4E9F70 — the decrement runs before this test, so a round retiring next
-// tick spawns nothing — and NOT clipped by water, the same ClipWaterFx + z
-// test as the release @0x4E9F7D..0x4E9F8E. All four must hold, so a round
-// can never quietly acquire a second emitter.
+// The emitter is spawned LAZILY [orig: the `useownmove` leg @0x4E9F58..
+//  0x4E9F94; the ballistic leg @0x4EA8AE..0x4EA8D3]: an authored effect
+// (ammo +0x70) @0x4E9F58, no handle yet (+0x1CC == 0) @0x4E9F63, life still
+// nonzero (+0x2AC != 0) @0x4E9F70 — on the useownmove leg the decrement runs
+// before this test, so a round retiring next tick spawns nothing; the
+// ballistic leg reads it BEFORE its own decrement @0x4EAA7F — and, on the
+// useownmove leg ONLY, NOT clipped by water, the same ClipWaterFx + z test as
+// the release @0x4E9F7D..0x4E9F8E. The ballistic test has no water term. All
+// four must hold, so a round can never quietly acquire a second emitter.
 inline bool round_effect_should_spawn(bool has_effect, bool has_handle,
 		int32_t life_ticks, bool clipped_by_water) {
 	return has_effect && !has_handle && life_ticks != 0 && !clipped_by_water;
@@ -39,11 +41,12 @@ inline bool round_effect_clips_water(uint32_t ammo_flags) {
 	return (ammo_flags & kAmmoFlagClipWaterFx) != 0u;
 }
 
-// A round carrying ClipWaterFx whose z reaches the water plane RELEASES its
-// emitter instead of re-posing it [orig: @0x4EA01D..0x4EA036 — `z >
-//  Env_WaterHeightFixed` re-poses via CEffect_UpdateEmitterTransform
+// A `useownmove` round carrying ClipWaterFx whose z reaches the water plane
+// RELEASES its emitter instead of re-posing it [orig: @0x4EA01D..0x4EA036 —
+//  `z > Env_WaterHeightFixed` re-poses via CEffect_UpdateEmitterTransform
 //  @0x4EA039, else ammo flags (+0x114) & 0x20000000 detaches via
-//  Entity_ReleaseEffectEmitter @0x4EA031]. The release CLEARS the handle
+//  Entity_ReleaseEffectEmitter @0x4EA031; the ballistic leg's handle branch
+//  @0x4EA963..0x4EA96D only re-poses]. The release CLEARS the handle
 // [orig: @0x5F7607], so a round that surfaces again SPAWNS A NEW ONE rather
 // than resuming the old.
 //

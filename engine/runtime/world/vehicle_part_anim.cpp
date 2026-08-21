@@ -32,7 +32,16 @@ RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &t
 
 void vehicle_part_anim_tick(World &world, Entity &veh, const VehicleTraits &traits) {
 	Entity::VehicleMotorState &m = veh.veh;
-	const RotorMachine machine = machine_for(world, veh, traits);
+	// A WATERCRAFT runs neither machine: Entity_UpdateWatercraftPhysics
+	// @0x48D480..0x48EF74 has no call to @0x4928B0 or @0x48FA70 (the ground
+	// machine's callers are the infantry, air, light, mounted-infantry, tank
+	// and ground movers @0x46F99E/@0x4700F5/@0x4869EA/@0x4889F5/@0x48AE3D/
+	// @0x48D42B; the helo twin's only caller is @0x4905A6) — so a boat never
+	// draws the rotor roll from the shared stream; only its wheel phase
+	// advances @0x48E9F0..0x48E9F9.
+	const RotorMachine machine = traits.family == VehicleFamily::Watercraft
+			? RotorMachine::None
+			: machine_for(world, veh, traits);
 	if (machine != RotorMachine::None) {
 		// The engine-running latch: the +0x170 occupantEntity read @0x4928E8 is
 		// the claimant that Entity::primary_occupant mirrors (attach/detach own

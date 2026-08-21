@@ -326,7 +326,34 @@ void test_helo_family_decays_at_the_helo_rate() {
 
 } // namespace
 
+// A WATERCRAFT runs no rotor machine — its mover never calls either — so a
+// non-player-control boat draws NOTHING from the shared stream and its spin
+// state stays zero; only the wheel phase advances, once per tick, from the
+// forward command.
+void test_watercraft_runs_no_rotor_machine() {
+	Rig r;
+	VehicleTraits t = buggy_traits(false);
+	t.family = VehicleFamily::Watercraft;
+	Entity &veh = r.veh();
+	veh.veh.cmd_speed = 3;
+	const uint32_t prng0 = r.w.prng16_state;
+	for (int i = 0; i < 5; ++i) vehicle_part_anim_tick(r.w, veh, t);
+	CHECK(r.w.prng16_state == prng0, "a boat never draws the rotor roll");
+	CHECK(veh.veh.part_spin.rate == 0 && veh.veh.part_spin.speed == 0 &&
+					veh.veh.part_spin.angle == 0,
+			"a boat's spin state stays zero");
+	CHECK(veh.veh.wheel_phase == 5 * (3 << 13),
+			"the wheel phase rides the forward command, once per tick");
+	// The authority boat tick runs the part-anim exactly once.
+	t.physics = 1;
+	veh.veh.wheel_phase = 0;
+	tick_watercraft_motor(r.w, veh, t, nullptr);
+	CHECK(veh.veh.wheel_phase == (veh.veh.cmd_speed << 13),
+			"one authority tick advances the phase by one step");
+}
+
 int main() {
+	test_watercraft_runs_no_rotor_machine();
 	test_player_control_rotor_symmetry();
 	test_rolled_rate();
 	test_spawn_full();

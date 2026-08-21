@@ -199,24 +199,32 @@ void test_rate_pick_and_dt_are_the_witnessed_pair() {
 void test_crash_tests() {
 	const VehicleTraits t = sprung_traits();
 	const int32_t flip_q16 = vehicle_flip_threshold_q16(t);
-	CHECK(flip_q16 == 29490, "flip 45 -> ftol(45 * 0.01 * 65535) = 29490");
+	CHECK(flip_q16 == 29491, "flip 45 -> ftol(45 * 0.01 * 65536) = 29491");
 	{
 		// (a) tipped past the flip angle while airborne.
 		World w = make_world(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.fresh_2f1 = 1;
-		vehicle_suspension_crash_tests(w, veh, t, 20000);
+		vehicle_suspension_crash_tests(w, veh, t, 20000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0, "tipped but grounded: no request");
 		veh.flags |= kEntityFlagInAir;
-		vehicle_suspension_crash_tests(w, veh, t, 20000);
+		vehicle_suspension_crash_tests(w, veh, t, 20000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1 && veh.veh.fresh_2f1 == 0,
 				"tipped and airborne: request, +0x2F1 cleared");
 		veh.veh.crash_request = 0;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0, "upright and airborne: no request");
+		// The bound is on |up.z|: an INVERTED hull is not "tipped".
+		vehicle_suspension_crash_tests(w, veh, t, -60000, SuspensionFamily::Tracked);
+		CHECK(veh.veh.crash_request == 0, "inverted and airborne: |up.z| is over the bound");
+		vehicle_suspension_crash_tests(w, veh, t, -20000, SuspensionFamily::Tank);
+		CHECK(veh.veh.crash_request == 1, "|up.z| under the bound tips either way up");
+		veh.veh.crash_request = 0;
 		veh.flags |= kEntityFlagSuspensionCrashed;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tank);
+		CHECK(veh.veh.crash_request == 0, "the tank's tip test has no bit alternative");
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1, "the replicated bit while airborne requests too");
 	}
 	{
@@ -225,17 +233,17 @@ void test_crash_tests() {
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.slide_z = -0x7001;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1, "the authority: |vz| > 0x7000 requests");
 		World wc = make_world(false);
 		EntityHandle hc;
 		Entity &cv = spawn_veh(wc, hc);
 		cv.veh.fresh_2f1 = 1;
 		cv.veh.slide_z = -0x7001;
-		vehicle_suspension_crash_tests(wc, cv, t, 60000);
+		vehicle_suspension_crash_tests(wc, cv, t, 60000, SuspensionFamily::Tracked);
 		CHECK(cv.veh.crash_request == 0, "a client never reads the fall test");
 		cv.flags |= kEntityFlagInAir | kEntityFlagSuspensionCrashed;
-		vehicle_suspension_crash_tests(wc, cv, t, 60000);
+		vehicle_suspension_crash_tests(wc, cv, t, 60000, SuspensionFamily::Tracked);
 		CHECK(cv.veh.crash_request == 1, "a client: airborne with the bit requests");
 	}
 	{
@@ -244,29 +252,45 @@ void test_crash_tests() {
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		w.logic_tick = 100;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0,
 				"grounded: the window does not open (tick - 0 >= 10)");
 		CHECK(veh.veh.fresh_2f1 == 1, "and a never-airborne fresh row is marked respawned");
 		veh.veh.fresh_2f1 = 0;
 		veh.flags |= kEntityFlagInAir;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.airborne_stamp_2f8 == 100 && veh.veh.crash_request == 1,
 				"airborne: the stamp takes the tick and the window requests");
 		vehicle_suspension_tick_tail(veh, t);
 		w.logic_tick = 109;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1, "nine ticks in: still requesting");
 		vehicle_suspension_tick_tail(veh, t);
 		w.logic_tick = 110;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0 &&
 						veh.veh.fresh_2f1 == 1,
 				"ten ticks: the window closes, the stamp clears, +0x2F1 raises");
 		w.logic_tick = 111;
-		vehicle_suspension_crash_tests(w, veh, t, 60000);
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0,
 				"a respawned row never re-opens the window");
+	}
+	{
+		// (c) the TANK window also waits on the settle latch; the tracked one
+		// does not read it.
+		World w = make_world(false);
+		EntityHandle h;
+		Entity &veh = spawn_veh(w, h);
+		w.logic_tick = 100;
+		veh.flags |= kEntityFlagInAir;
+		veh.veh.settle_2f0 = 1;
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tank);
+		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0,
+				"a settling tank does not open the window");
+		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
+		CHECK(veh.veh.crash_request == 1 && veh.veh.airborne_stamp_2f8 == 100,
+				"a settling tracked row does");
 	}
 }
 
@@ -466,20 +490,44 @@ void test_post_contact_and_tail() {
 	World w = make_world(true);
 	EntityHandle h;
 	Entity &veh = spawn_veh(w, h);
-	for (int k = 0; k < 4; ++k) veh.veh.plat_acc[k] = 5;
-	const bool three[4] = {true, true, true, false};
-	vehicle_suspension_post_contact(veh, three, 4, 10);
-	CHECK(veh.veh.plat_acc[3] == 5, "one pad off: no reset");
-	const bool all[4] = {true, true, true, true};
-	vehicle_suspension_post_contact(veh, all, 4, 0);
-	CHECK(veh.veh.plat_acc[3] == 5, "no positive penetration: no reset");
+	const auto reseed = [&veh]() {
+		for (int k = 0; k < 4; ++k) veh.veh.plat_acc[k] = 5;
+		veh.veh.landing_2ee = 1;
+		veh.veh.byte_2ef = 1;
+	};
+	reseed();
+	// A pad in contact zeroes ITS sink; nothing else moves.
+	const bool one[4] = {true, false, false, false};
+	vehicle_suspension_post_contact(veh, one, 4, 60000);
+	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[1] == 5 && veh.veh.plat_acc[3] == 5,
+			"a pad in contact zeroes its own sink only");
+	CHECK(veh.veh.landing_2ee == 1 && veh.veh.byte_2ef == 1, "and clears no latch");
+	// An ADJACENT pair is not the gate.
+	reseed();
+	const bool adjacent[4] = {true, true, false, false};
+	vehicle_suspension_post_contact(veh, adjacent, 4, 60000);
+	CHECK(veh.veh.plat_acc[2] == 5 && veh.veh.plat_acc[3] == 5 && veh.veh.landing_2ee == 1,
+			"an adjacent pair is not a diagonal: no clear");
+	// A DIAGONAL pair clears — on an upright, uncrashed hull.
+	reseed();
+	const bool diagonal[4] = {false, true, false, true};
+	vehicle_suspension_post_contact(veh, diagonal, 4, -60000);
+	CHECK(veh.veh.plat_acc[0] == 5 && veh.veh.landing_2ee == 1, "inverted: no clear");
 	veh.veh.crashed = 1;
-	vehicle_suspension_post_contact(veh, all, 4, 10);
-	CHECK(veh.veh.plat_acc[3] == 5, "crashed: no reset");
+	vehicle_suspension_post_contact(veh, diagonal, 4, 60000);
+	CHECK(veh.veh.plat_acc[0] == 5 && veh.veh.landing_2ee == 1, "crashed: no clear");
 	veh.veh.crashed = 0;
-	vehicle_suspension_post_contact(veh, all, 4, 10);
-	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[3] == 0,
-			"every pad back in contact resets the sinks");
+	vehicle_suspension_post_contact(veh, diagonal, 4, 60000);
+	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[2] == 0 &&
+					veh.veh.landing_2ee == 0 && veh.veh.byte_2ef == 0,
+			"a diagonal pair on an upright hull clears every sink, the landing marker and +0x2EF");
+	// A two-wheel row pairs its two wheels.
+	reseed();
+	vehicle_suspension_post_contact(veh, one, 2, 60000);
+	CHECK(veh.veh.plat_acc[1] == 5, "one wheel of two: no clear");
+	vehicle_suspension_post_contact(veh, adjacent, 2, 60000);
+	CHECK(veh.veh.plat_acc[1] == 0 && veh.veh.plat_acc[3] == 0 && veh.veh.landing_2ee == 0,
+			"both wheels down: the clear");
 
 	veh.veh.crash_request = 1;
 	veh.veh.spring_energy = 7;

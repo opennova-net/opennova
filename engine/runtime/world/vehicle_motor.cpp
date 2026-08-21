@@ -1719,8 +1719,11 @@ static void watercraft_motor_core(World &world, Entity &veh,
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
-    // The part-animation accumulators — the client-executed cbot mover calls
-    // the same tail [orig: @0x48D42B].
+    // The wheel phase — the watercraft mover's inline form, run by every
+    // machine that executes the core [orig: `+0x2B8 += +0x220 << 13`
+    //  @0x48E9F0..0x48E9F9 inside Entity_UpdateWatercraftPhysics; the mover
+    //  calls no rotor machine]. The ONE call per tick: the authority tick
+    // below runs this core and adds nothing.
     vehicle_part_anim_tick(world, veh, traits);
 }
 
@@ -1817,9 +1820,8 @@ void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &trait
     // Movement-sound presentation, same per-tick site as the ground core's tail
     // [orig: the cbot movement-sound call in step 18 @0x48ED76..].
     update_ground_vehicle_sound(world, veh, traits, wrecked, /*collided=*/false);
-    // The part-animation accumulators [orig: the call @0x48D42B in the cbot
-    // mover].
-    vehicle_part_anim_tick(world, veh, traits);
+    // The part-animation tick is the core's (@0x48E9F0..0x48E9F9 runs once
+    // per mover pass); a second call here would double the wheel phase.
 }
 
 // The GROUND-family prediction leg (net-re §5.38e B-facet): run the shared
