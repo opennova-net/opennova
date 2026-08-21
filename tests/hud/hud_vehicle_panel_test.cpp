@@ -54,9 +54,26 @@ void test_geometry() {
 }
 } // namespace
 
+void test_base_anchor() {
+	// The base is the HUDVEHSTANCEPOS anchor plus the CURRENT stance offset,
+	// so the panel tracks the stance icon instead of sitting at a fixed corner.
+	int x = 0, y = 0;
+	vehicle_panel_base(300, 400, 0, 0, x, y);
+	CHECK(x == 300 && y == 400, "a zero stance offset leaves the anchor alone");
+
+	vehicle_panel_base(300, 400, -12, 6, x, y);
+	CHECK(x == 288 && y == 406, "the stance offset shifts the whole panel");
+
+	// The seat markers ride the base, so a stance change moves them with it.
+	int x0, y0, x1, y1;
+	seat_marker_rect(x, y, 5, 7, x0, y0, x1, y1);
+	CHECK(x0 == 293 && y0 == 413, "seat offsets are relative to the moved base");
+}
+
 int main() {
 	test_bands();
 	test_geometry();
+	test_base_anchor();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;
