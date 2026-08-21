@@ -206,6 +206,13 @@ class DefItemDef(ctypes.Structure):
         ("pitch_velocity", ctypes.c_int),
         ("bob", ctypes.c_int),
         ("flip", ctypes.c_int),
+        # The suspension spring block (mirror def.h: spring/spring_comp/shock/
+        # top_heavy, raw tokens; ItemDef_ParsePhysicsProperty stores
+        # @0x49db5c/@0x49dbd4/@0x49dc10/@0x49db98).
+        ("spring", ctypes.c_int),
+        ("spring_comp", ctypes.c_int),
+        ("shock", ctypes.c_int),
+        ("top_heavy", ctypes.c_int),
         ("critical_hp", ctypes.c_int),
         ("critical_drain", ctypes.c_int),
         ("radar_sig", ctypes.c_int),

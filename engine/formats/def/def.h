@@ -587,6 +587,19 @@ typedef struct DefItemDef {
     int pitch_velocity;
     int bob;
     int flip;
+    /* The suspension spring block — raw atol like the rest of the physics block
+       [orig: ItemDef_ParsePhysicsProperty stores: spring @0x49db5c (+0x8FC),
+        spring_comp @0x49dbd4 (+0x900), shock @0x49dc10 (+0x904),
+        top_heavy @0x49db98 (+0x918)]. Consumers: spring = the per-wheel spring
+       constant k of Suspension_CompressWheelQuadratic @0x45CFB0; spring_comp =
+       the travel PERCENTAGE (100 - spring_comp scales 0xFFFF) @0x47C51F..0x47C544;
+       shock = the landing damp (11 - shock)/11, clamped [0,10] in place by
+       Suspension_OscillateWheelFast @0x45D18F..0x45D1A2; top_heavy: consumer
+       not yet witnessed. vehicle-client-movers-re.md §7.3. */
+    int spring;
+    int spring_comp;
+    int shock;
+    int top_heavy;
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */

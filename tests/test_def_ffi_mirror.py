@@ -138,8 +138,11 @@ def test_item_air_family_params_present_in_both_mirrors():
     speedpitch trio).
     """
     expected_run = ["slip_slope", "climb_speed", "turn_roll", "speed_pitch", "turn_rate"]
+    # The suspension spring block inserted 2026-08-21 between flip and the
+    # burn thresholds (def.h spring/spring_comp/shock/top_heavy; raw tokens).
     platform_run = ["torque", "mass", "lean", "lean_velocity", "pitch",
-                    "pitch_velocity", "bob", "flip", "critical_hp"]
+                    "pitch_velocity", "bob", "flip", "spring", "spring_comp",
+                    "shock", "top_heavy", "critical_hp"]
     # The AI engage-cap pair inserted 2026-08-13 (def+0x178/+0x17A radarsig/heatsig).
     sig_run = ["critical_hp", "critical_drain", "radar_sig", "heat_sig", "unit_type"]
     blender = _load_blender_def_ffi()
@@ -153,7 +156,8 @@ def test_item_air_family_params_present_in_both_mirrors():
         assert names[start:start + len(platform_run)] == platform_run
         start = names.index("critical_hp")
         assert names[start:start + len(sig_run)] == sig_run
-        for field in ("radar_sig", "heat_sig"):
+        for field in ("radar_sig", "heat_sig", "spring", "spring_comp", "shock",
+                      "top_heavy"):
             assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
 
 

@@ -323,6 +323,13 @@ public:
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
     bool teammates_disabled = false;
+    // The per-tick authority role the vehicle solves consult for their
+    // role-picked constants (the suspension disable-rate pick reads
+    // g_napi_np_ctx.is_authority once when the parked latch sets
+    // [orig: @0x46B1B9..0x46B1DB]). Stamped from run_logic_tick's argument
+    // so the solves — which take only World& — see the same role the tick
+    // was run with.
+    bool vehicle_authority = true;
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
     // authoritative multiplayer FatBullets trace owned by a remote player.
     // These explicit host-fed gates keep that option out of ordinary/SP rays.
