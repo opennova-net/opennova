@@ -6,6 +6,8 @@
 #include <npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
 #include <world/vehicle_motor.h> // carrier_pose_fixed — the mounted camera's carrier read
 
+#include <cmath>
+
 using namespace novasim;
 
 void Simulation::reset_local_player_view_effects() {
@@ -253,6 +255,20 @@ void Simulation::tick_local_player_view() {
 		opennova::world::carrier_pose_fixed(*carrier, mount.carrier_pos_q16,
 				mount.carrier_yaw_bam, pitch_bam, roll_bam);
 		mount.control_seat = true;
+		// The carrier's unit forward for the 6 u look-ahead. Retail takes the
+		// chassis matrix's first column (parentMatrix +0xB4 x (6,0,0)); this seam
+		// reads the carrier through carrier_pose_fixed, whose yaw is the one
+		// attitude term every mover family stamps, so the forward is the
+		// yaw-only form (sin yaw, cos yaw, 0) in mission space — the pitch/roll
+		// fold of the full chassis matrix is not composed here (retail:
+		// Camera_ComputeThirdPersonView @0x438811..0x4388b5, see
+		// docs/world/world-wac-ai-re.md §14.6).
+		const double forward_yaw_rad =
+				opennova::world::mission_yaw_deg_from_bam_heading(
+						mount.carrier_yaw_bam) * (3.14159265358979323846 / 180.0);
+		mount.carrier_forward[0] = static_cast<float>(std::sin(forward_yaw_rad));
+		mount.carrier_forward[1] = static_cast<float>(std::cos(forward_yaw_rad));
+		mount.carrier_forward[2] = 0.0f;
 		mount.bound_radius = carrier->bound_radius;
 		mount.watercraft = carrier->item_unit_type == 3 ||
 				carrier->item_unit_type == 4;
