@@ -807,7 +807,7 @@ int main() {
         bool has_clip(int /*adm_id*/, int id) const override {
             return gait(id) || id == anim_state::kIdle || id == anim_state::kStop;
         }
-        int32_t clip_length_ticks(int, int) const override { return -1; }
+        int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
         bool advance(int /*adm_id*/, int id, int32_t &phase, RootMotionFrame &out) override {
             if (!has_clip(0, id)) return false;
             ++phase;

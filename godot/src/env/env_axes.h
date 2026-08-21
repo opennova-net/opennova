@@ -34,4 +34,16 @@ inline opennova::env::Vec3 godot_to_render_float(const Vector3 &v) {
 			static_cast<float>(v.y), static_cast<float>(v.x)};
 }
 
+// Mission fixed axes (x east, y north, z up) <-> Godot world (x east, y up,
+// z south): (x, y, z)_mission -> (x, z, -y)_godot. The engine/formats/env
+// glint and veil laws take mission-axis tuples.
+inline Vector3 mission_to_godot(const opennova::env::Vec3 &v) {
+	return Vector3(v.x, v.z, -v.y);
+}
+
+inline opennova::env::Vec3 godot_to_mission(const Vector3 &v) {
+	return opennova::env::Vec3{static_cast<float>(v.x),
+			static_cast<float>(-v.z), static_cast<float>(v.y)};
+}
+
 } // namespace godot

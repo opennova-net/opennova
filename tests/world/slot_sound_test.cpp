@@ -54,7 +54,7 @@ struct TestSource : IRootMotionSource {
     uint32_t events = 0;
     int32_t capsule_bottom = 0;
     bool has_clip(int, int id) const override { return clips.count(id) != 0; }
-    int32_t clip_length_ticks(int, int) const override { return -1; }
+    int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         if (clips.count(id) == 0) return false;
         ++phase;

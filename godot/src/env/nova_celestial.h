@@ -106,6 +106,9 @@ private:
 	// or loses currency) — the advance_frame/settle shared resolution.
 	Camera3D *_resolve_camera();
 	void _rebuild_if_needed();
+	// No sun model / no loaded environment: publish a zero veil so the
+	// overlay never holds the previous mission's alpha across a load.
+	void _publish_idle_veil();
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	Ref<ShaderMaterial> _make_celestial_material(bool p_additive,
 			int p_priority);

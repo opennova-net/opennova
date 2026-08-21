@@ -32,7 +32,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 	var weather: Weather = world.get_weather_node()
 	var water: Water = world.get_water_node()
 	var sky := world.get_node_or_null("SkyDome") as SkyDome
-	var celestial := world.get_node_or_null("Celestial") as Celestial
+	var celestial: Celestial = world.get_celestial_node()
 	var dynamic_shadow := world.get_node_or_null("SunShadow") as SunShadow
 	var terrain: Terrain = world.get_terrain_node()
 	var clear := world.get_node_or_null("ClearColor") as WorldEnvironment

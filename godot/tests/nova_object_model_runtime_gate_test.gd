@@ -257,8 +257,6 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 		assert_eq(mesh.layers & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0)
 
 
-
-
 func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 	var model := ObjectModel.new()
 	add_child_autofree(model)

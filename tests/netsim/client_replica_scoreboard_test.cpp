@@ -281,6 +281,25 @@ void test_row_team_refreshes_entity() {
 	CHECK(view.state().revision == rev_after_list + 1);
 }
 
+// The roster is presenter state like the rows (the board projects name/
+// clan/quality/entity binding from the LIVE slot), so an applied 0x46 —
+// field write or removal — moves ClientState.revision too.
+void test_roster_sync_bumps_revision() {
+	ClientReplicaPipeline view;
+	const std::uint64_t rev0 = view.state().revision;
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "GHOST", 5));
+	CHECK(view.state().revision == rev0 + 1); // the bind + name
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "GHOST", 5));
+	CHECK(view.state().revision == rev0 + 1); // a same-value restamp holds
+	view.apply(s2c::PLAYER_SYNC,
+			make_sync(3, 5, kPlayerSyncHasQuality, nullptr, nullptr, -1, 2));
+	CHECK(view.state().revision == rev0 + 2); // the quality byte
+	view.apply(s2c::PLAYER_SYNC, make_sync_removal(3));
+	CHECK(view.state().revision == rev0 + 3); // the live slot vanished
+	view.apply(s2c::PLAYER_SYNC, make_sync_removal(3));
+	CHECK(view.state().revision == rev0 + 3); // removing an unbound slot holds
+}
+
 // ---- the draw-time projection (netsim::project_scoreboard) ----
 
 // The projection joins "clan name" in the parser's order, reads the LIVE
@@ -397,6 +416,7 @@ int main() {
 	test_roster_fields_are_last_write_wins_per_bit();
 	test_team_table_fields();
 	test_row_team_refreshes_entity();
+	test_roster_sync_bumps_revision();
 	test_projection_joins_and_counts();
 	test_projection_tracks_live_slot();
 	test_overlay_label_key_map();

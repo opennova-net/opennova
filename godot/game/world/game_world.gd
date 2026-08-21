@@ -81,6 +81,8 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _terrain: Terrain = $Terrain
 @onready var _env: MissionEnvironment = get_node_or_null("MissionEnvironment")
 @onready var _water: Water = get_node_or_null("Water")
+@onready var _weather: Weather = get_node_or_null("Weather")
+@onready var _celestial: Celestial = get_node_or_null("Celestial")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: FoliageDispatcher
@@ -767,12 +769,11 @@ func _load_environment(env_path: String) -> bool:
 	# GameWorld retains one Weather node across loads. A replacement ENV is
 	# a discrete state change: retail snaps every color block to the new mission
 	# targets instead of easing over from the previous mission's currents.
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.resync_colors()
-	var celestial: Celestial = get_node_or_null("Celestial")
-	if celestial != null:
-		celestial.set_resource_root(_resource_root)
+	if _celestial != null:
+		_celestial.set_resource_root(_resource_root)
 	return true
 
 
@@ -816,13 +817,13 @@ func is_water_render_active() -> bool:
 
 
 func _set_weather_world_tick_driven(enabled: bool) -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.set_world_tick_driven(enabled)
 
 
 func _prepare_world_driven_weather() -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.prepare_world_driven()
 	else:
@@ -830,7 +831,7 @@ func _prepare_world_driven_weather() -> void:
 
 
 func _prepare_autonomous_weather() -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.prepare_autonomous()
 	else:
@@ -841,13 +842,13 @@ func _prepare_autonomous_weather() -> void:
 # weather device (Weather.run_mission_start_boundary): T0 seed publication,
 # authority WAC direct execution, the 255-tick settle, republication, seal.
 func _run_mission_start_environment_boundary() -> void:
-	var weather := get_node_or_null("Weather") as Weather
+	var weather: Weather = _weather
 	if weather != null:
 		weather.run_mission_start_boundary(get_sim())
 
 
 func _apply_join_network_environment_update() -> void:
-	var weather := get_node_or_null("Weather") as Weather
+	var weather: Weather = _weather
 	if weather != null:
 		weather.apply_join_network_update(get_sim())
 
@@ -1015,11 +1016,10 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.terrain_data = data
 	_terrain.build()
 	if _water != null:
-		_water.set("terrain_data", data)
-	var celestial_node := get_node_or_null("Celestial")
-	if celestial_node != null:
+		_water.terrain_data = data
+	if _celestial != null:
 		# The glare occlusion rays march this terrain (env #14).
-		celestial_node.set("terrain_data", data)
+		_celestial.terrain_data = data
 	_configure_foliage()
 	return true
 
@@ -1229,7 +1229,7 @@ func advance_weather_frame() -> void:
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 	if (_world_ready and _runtime != null and _runtime.is_playing()
 			and _env != null):
-		var weather := get_node_or_null("Weather") as Weather
+		var weather: Weather = _weather
 		if weather != null:
 			weather.advance_world_driven(_frame_delta, get_sim())
 	if _placer != null:
@@ -1346,10 +1346,20 @@ func render_sun_veil_frame() -> void:
 	if not _world_ready:
 		return
 	var veil_weather := get_weather_node()
-	var veil_celestial := get_node_or_null("Celestial") as Celestial
-	if veil_weather == null or veil_celestial == null:
+	if veil_weather == null or _celestial == null:
 		return
-	veil_weather.set_sun_veil_stopdown(veil_celestial.get_sun_veil_stopdown())
+	veil_weather.set_sun_veil_stopdown(_celestial.get_sun_veil_stopdown())
+
+
+## The render-slot ground-shadow plan for this camera (GameFramePipeline,
+## after the material frame: render_light_frame pushed this frame's
+## LightScene and light context into the device, the material frame may
+## have rebuilt the model subtrees the capture channels are stamped on, and
+## slot priority plus the capture poses are camera-relative)
+## [orig: render_shadow_pass @ 0x5d7b70 once per main scene frame].
+func render_slot_shadow_frame() -> void:
+	if _slot_shadow != null:
+		_slot_shadow.advance_frame()
 
 
 func mix_audio_frame(ticks_run: int) -> void:
@@ -1455,7 +1465,7 @@ func render_light_frame() -> void:
 	if _slot_shadow != null:
 		_slot_shadow.set_light_scene(_light_director.scene())
 		_slot_shadow.set_light_context(_light_director.light_gain(),
-				Time.get_ticks_msec(), get_node_or_null(NodePath("Weather")))
+				Time.get_ticks_msec(), _weather)
 		if _resource_root != null:
 			_slot_shadow.set_resource_root(_resource_root)
 		if _local_view_presenter != null:
@@ -2423,7 +2433,7 @@ func _on_runtime_simulation_restarted() -> void:
 
 
 func _republish_network_environment() -> void:
-	var weather := get_node_or_null("Weather") as Weather
+	var weather: Weather = _weather
 	if weather != null:
 		weather.push_network_environment(get_sim())
 
@@ -2605,7 +2615,7 @@ func get_environment_node() -> MissionEnvironment:
 
 
 func get_weather_node() -> Weather:
-	return get_node_or_null("Weather")
+	return _weather
 
 
 ## Hosted mission-clock knob used by F3 and runtime MCP. MissionEnvironment owns
@@ -2661,15 +2671,14 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# it first at the frozen pose so the settled glare brightness, the veil
 	# alpha global, and this frame's stop-down all exist before the exposure
 	# settle chases them.
-	var celestial := get_node_or_null("Celestial") as Celestial
-	if celestial != null:
+	if _celestial != null:
 		# The glare occlusion brightness accumulates over ~a dozen live
 		# frames; a frozen fixture gets exactly one zero-delta advance, which
 		# left the sun glow invisible at any pose (the D-RLIT-2 fixture
 		# starvation's other half). Settle the witnessed ray/window/step leg
 		# at this pose first, then publish it through the normal frame.
-		celestial.settle_glare_occlusion()
-		celestial.advance_frame(0.0)
+		_celestial.settle_glare_occlusion()
+		_celestial.advance_frame(0.0)
 	render_sun_veil_frame()
 	_stamp_iris_samples(_frame_camera_xform)
 	var settle_weather := get_weather_node()
@@ -2715,14 +2724,17 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	render_light_frame()
 	# Re-plan the render-slot ground shadows for the moved capture camera
 	# (slot priority and the capture poses are camera-relative).
-	if _slot_shadow != null:
-		_slot_shadow.advance_frame()
+	render_slot_shadow_frame()
 	update_clear_frame()
 	return OK
 
 
 func get_water_node() -> Water:
 	return _water
+
+
+func get_celestial_node() -> Celestial:
+	return _celestial
 
 
 ## One typed read-only renderer snapshot for MCP, visual probes, and comparison
@@ -2787,7 +2799,7 @@ func _music_var_pump() -> void:
 # lives in occlusion_frame_pass.gd; the iris march stays here as the weather
 # feed.
 func _stamp_iris_samples(camera_xform: Transform3D) -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	var sim := get_sim()
 	if weather == null or sim == null:
 		return

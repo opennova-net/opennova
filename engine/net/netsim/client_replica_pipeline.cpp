@@ -840,7 +840,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			es.net_anim_current >= 0 && target_state != es.rm_state) {
 		const int trans =
 				world::gait_stance_transition_clip(es.rm_state, target_state);
-		if (trans >= 0 && src.clip_length_ticks(es.rm_adm_id, trans) >= 0) {
+		if (trans >= 0 && src.clip_length_ticks(es.rm_adm_id, trans, 0) >= 0) {
 			es.net_anim_pending = static_cast<int16_t>(target_state);
 			es.net_anim_pending_boundary = -1;
 			es.net_anim_current = static_cast<int16_t>(trans);
@@ -884,7 +884,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// the shipped hold-wedge safety, recorded inside D-NET-209.
 	if (es.net_anim_pending != 0) {
 		if (es.net_anim_pending_boundary < 0) {
-			const int32_t len = src.clip_length_ticks(es.rm_adm_id, es.rm_state);
+			const int32_t len = src.clip_length_ticks(es.rm_adm_id, es.rm_state, 0);
 			if (len <= 0) {
 				es.net_anim_pending_boundary = es.rm_phase;
 			} else if (src.clip_loops(es.rm_adm_id, es.rm_state)) {

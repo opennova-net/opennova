@@ -1238,7 +1238,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 41/42, flags 0x285) could never land. [orig: AnimMap_UpdateEntity @0x40b77b
     // promotes the queued state on the channel end flag]
     if (inf.anim_pending != 0 && root_motion != nullptr) {
-        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
+        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state, 0);
         if (len >= 0 && inf.clip_phase >= len) {
             const int next = inf.anim_pending;
             // Consume the deferral first: the promoted retarget runs the same
@@ -2452,7 +2452,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         if (death_transition >= 0) {
             inf.begin_body_transition(death_transition);
         } else if (inf.anim_pending != 0) {
-            const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
+            const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state, 0);
             if (len >= 0 && inf.clip_phase >= len) {
                 const int next = inf.anim_pending;
                 inf.anim_pending = 0; // consumed; the insert may re-arm it

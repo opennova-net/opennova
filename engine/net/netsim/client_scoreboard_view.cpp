@@ -12,11 +12,9 @@ ClientScoreboardHeader header_of(const ClientScoreboard &sb) {
 	h.spectators = sb.spectator_count;
 	h.in_game = sb.in_game_count;
 	// Accepted rows minus the trailer's spectator count — the witnessed
-	// header arithmetic [orig: @0x4231dd]. Retail never clamps: rows and the
-	// trailer come from the same serializer, but a clamp keeps a malformed
-	// trailer from drawing a negative count.
+	// header arithmetic [orig: @0x4231dd], unclamped like retail (rows and
+	// the trailer come from the same serializer).
 	h.players = static_cast<int>(sb.rows.size()) - h.spectators;
-	if (h.players < 0) h.players = 0;
 	return h;
 }
 
@@ -36,9 +34,10 @@ ClientScoreboardHeader project_scoreboard(
 		e.team = r.team;
 		e.spectator = r.spectator;
 		// The board's name is the ROW-carried join in the parser's own order
-		// — "clan name" [orig: sprintf("%s %s", clan, name) @0x42fd46 into
-		// the 56-byte record] — which is what keeps a leaver's line readable
-		// after the 0x46 slot wipe.
+		// — "clan name" [orig: the non-empty guard @0x42fd38, then
+		// sprintf("%s %s", clan, name) @0x42fd46..0x42fd4c into the 56-byte record; an
+		// empty first string copies the name alone @0x42fd6a] — which is
+		// what keeps a leaver's line readable after the 0x46 slot wipe.
 		e.name = r.clan.empty() ? r.name : r.clan + " " + r.name;
 		// The connection icon and the team-mode draw gate read the LIVE slot:
 		// a wiped slot's 0 quality draws no icon [orig: the out-of-band gate

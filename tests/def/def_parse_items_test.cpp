@@ -791,11 +791,12 @@ int main(void) {
     static const char shadow_def[] =
         "begin Hind\n id 1\n shadow hindshdw.tga 6 8.5 0 -1.25\nend\n"
         "begin Jeep\n id 2\n shadow jeepshdw.tga\nend\n"
-        "begin Crate\n id 3\nend\n";
+        "begin Crate\n id 3\nend\n"
+        "begin Long\n id 4\n shadow averyverylongshadowname.tga 1 2 3 4\nend\n";
     DefItemsFile shadow_items;
     memset(&shadow_items, 0, sizeof(shadow_items));
     if (def_parse_items_memory((const uint8_t *)shadow_def, sizeof(shadow_def) - 1,
-                               &shadow_items) != 0 || shadow_items.count != 3) {
+                               &shadow_items) != 0 || shadow_items.count != 4) {
         fprintf(stderr, "FAIL: inline shadow-decal block did not parse\n");
         def_free_items(&shadow_items);
         return 1;
@@ -803,12 +804,18 @@ int main(void) {
     const DefItemDef *s0 = &shadow_items.entries[0];
     const DefItemDef *s1 = &shadow_items.entries[1];
     const DefItemDef *s2 = &shadow_items.entries[2];
+    const DefItemDef *s3 = &shadow_items.entries[3];
     if (strcmp(s0->shadow_texture, "hindshdw.tga") != 0 ||
         s0->shadow_width != 6.0f || s0->shadow_length != 8.5f ||
         s0->shadow_offset_x != 0.0f || s0->shadow_offset_y != -1.25f ||
         strcmp(s1->shadow_texture, "jeepshdw.tga") != 0 ||
         s1->shadow_width != 0.0f || s1->shadow_length != 0.0f ||
-        s2->shadow_texture[0] != '\0') {
+        s1->shadow_offset_x != 0.0f || s1->shadow_offset_y != 0.0f ||
+        s2->shadow_texture[0] != '\0' ||
+        /* The 16-byte slot keeps 15 chars + NUL (retail copies unguarded into
+           ItemDef+0xA0; no shipped items.def authors a name that long). */
+        strcmp(s3->shadow_texture, "averyverylongsh") != 0 ||
+        s3->shadow_width != 1.0f || s3->shadow_offset_y != 4.0f) {
         fprintf(stderr, "FAIL: shadow decal parse semantics mismatch\n");
         def_free_items(&shadow_items);
         return 1;

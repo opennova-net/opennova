@@ -1521,13 +1521,14 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 
 	uint32_t words[16] = {};
 	const int n = infantry_anim_.scan_triggers(adm->second, p_anim_state,
-			p_from_phase, p_to_phase, words, 16);
+			p_from_phase, p_to_phase, words, 16, /*variant=*/0);
 	if (n <= 0) return;
 	// The dip belongs to the frame the playhead ended on (a multi-frame
 	// catch-up dips all its words by the final frame's bottom — the scan
 	// carries no per-word phases).
 	const int32_t capsule_bottom =
-			infantry_anim_.capsule_bottom_at(adm->second, p_anim_state, p_to_phase);
+			infantry_anim_.capsule_bottom_at(adm->second, p_anim_state, p_to_phase,
+					/*variant=*/0);
 	// Godot (x, y, z) -> mission (x, -z, y) 16.16, the drain's own convention.
 	const int32_t body[3] = { static_cast<int32_t>(p_pos.x * 65536.0f),
 		                      static_cast<int32_t>(-p_pos.z * 65536.0f),

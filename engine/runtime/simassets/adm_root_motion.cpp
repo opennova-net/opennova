@@ -306,10 +306,6 @@ bool AdmRootMotion::advance_blended(
 	return true;
 }
 
-int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id) const {
-	return clip_length_ticks(adm_id, state_id, 0);
-}
-
 int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id,
                                          int variant) const {
 	// Half-frame ticks, the advance() playhead convention (frame_count * 2). -1 when the

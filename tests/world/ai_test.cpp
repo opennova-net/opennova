@@ -283,7 +283,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
         bool has_clip(int, int id) const override {
             return id == anim_state::kIdle || id == anim_state::kAttack;
         }
-        int32_t clip_length_ticks(int, int) const override { return -1; }
+        int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
         bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
             if (!has_clip(0, id)) return false;
             ++phase;
@@ -504,7 +504,7 @@ struct AttackEventSource final : IRootMotionSource {
         return id == anim_state::kIdle || id == anim_state::kAttack ||
                (id >= 67 && id <= 75) || (id >= 173 && id <= 239);
     }
-    int32_t clip_length_ticks(int, int) const override { return -1; }
+    int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         if (!has_clip(0, id)) return false;
         ++phase;
@@ -540,7 +540,7 @@ struct DeathTransitionRootSource final : IRootMotionSource {
     bool has_clip(int, int id) const override {
         return id == anim_state::kIdle || (id >= 173 && id <= 239);
     }
-    int32_t clip_length_ticks(int, int) const override { return -1; }
+    int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         if (!has_clip(0, id)) return false;
         ++phase;
@@ -2533,7 +2533,7 @@ int main() {
             bool has_clip(int, int id) const override {
                 return id == anim_state::kIdle || id == anim_state::kAttack;
             }
-            int32_t clip_length_ticks(int, int) const override { return -1; }
+            int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
             bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
                 if (!has_clip(0, id)) return false;
                 ++phase;

@@ -562,7 +562,7 @@ struct WalkSource final : public opennova::world::IRootMotionSource {
 		if (state == opennova::world::anim_state::kWalkForward) out.dx = step;
 		return true;
 	}
-	int32_t clip_length_ticks(int, int) const override { return 62; }
+	int32_t clip_length_ticks(int, int, int /*variant*/) const override { return 62; }
 };
 
 struct StanceSource final : public opennova::world::IRootMotionSource {
@@ -580,7 +580,7 @@ struct StanceSource final : public opennova::world::IRootMotionSource {
 		out.capsule_top = out.capsule_bottom + (1 << 16);
 		return true;
 	}
-	int32_t clip_length_ticks(int, int) const override { return 62; }
+	int32_t clip_length_ticks(int, int, int /*variant*/) const override { return 62; }
 };
 
 struct ResetBottomSource final : public opennova::world::IRootMotionSource {
@@ -596,7 +596,7 @@ struct ResetBottomSource final : public opennova::world::IRootMotionSource {
 		out.capsule_top = 2 << 16;
 		return true;
 	}
-	int32_t clip_length_ticks(int, int) const override { return 62; }
+	int32_t clip_length_ticks(int, int, int /*variant*/) const override { return 62; }
 };
 
 struct FlatTerrain {

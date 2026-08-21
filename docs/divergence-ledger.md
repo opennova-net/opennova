@@ -929,6 +929,21 @@ retail feeds all entity lighting from the post-modulator block colors
 writeback seam (`set_sky_ambient_rt`, mirroring fill/sun/fog); details in
 the catalog below.
 
+Minted-and-closed 2026-08-20 (the 03tr-sun-sky fixture slice; id minted
+2026-08-21 by the post-merge tidy, which found the closure recorded without
+one): **D-RLIT-9** -> `FIXED` — several Godot device seams consumed the
+render-float (D3D-world) celestial/light tuple as if it were Godot world;
+the two bases differ by the x/z swap `godot = (z, y, x)_render`
+`[orig: Math_FixedPointToFloat3_YNegated @ 0x611210; the glint submit matrix
+update_sun_glare @ 0x5ad1ba..0x5ad213]`, so every low-sun frame front-lit
+where retail backlights. Fixed via one mapping seam
+(`godot/src/env/env_axes.h`) at every consumer — the environment direction
+getters, the object directional term, sun/moon/glare/glint placement, the
+glare jitter plane, the sun-veil dot, the dome uniforms and the star
+placement — with the raw tuple deliberately left on the terrain/foliage
+globals, which re-swizzle it themselves (byte-parity-verified in that basis).
+Measured by the registered `03tr-sun-sky` fixture; details in the record.
+
 Updated 2026-08-19 (the viewmodel-parity slice): D-RLIT-3 closed — the
 outdoor per-entity 3-radius sun-visibility feed is live beside the 2026-07-29
 interior transfer. The earlier model-light correction stands: retail's

@@ -16,7 +16,7 @@ in maturity_baseline.json:
                         engine behavior still living in the binding layer.
                         The burn-down class: push-downs bank the decrease,
                         and this one CAN legitimately reach zero.
-  adapter_cpp_orig_cites_device  "[orig:" citations in the rest of godot/src
+  adapter_cpp_orig_cites_device  "[orig:" + "(retail:" citations in the rest of godot/src
                         (env, terrain, hud, mnu, particle, network, ...) --
                         the retail-D3D-to-Godot device-leg mappings ADR 0035
                         sanctions. Ratcheted so it cannot grow, but its floor
@@ -90,7 +90,12 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
 # The push-down population: witnessed gameplay/format behavior in the binding
 # layer with a named engine/ destination (godot/src/CLAUDE.md). Everything
 # else under godot/src is the device population — seam contracts that stay.
+# The push-down counter counts only the literal `[orig:` marker (converting a
+# note to the adjudicated `(retail: ...)` form IS the sanctioned exit); the
+# device counter counts BOTH forms, so its "must not shrink" floor survives
+# the convention and only a deleted device witness moves it.
 ADAPTER_PUSHDOWN_DIRS = ("simulation", "object", "mission")
+ADAPTER_DEVICE_MARKERS = ("[orig:", "(retail:")
 
 
 def _count_adapter_cites(pushdown: bool) -> int:
@@ -109,7 +114,10 @@ def _count_adapter_cites(pushdown: bool) -> int:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        count += text.count("[orig:")
+        if pushdown:
+            count += text.count("[orig:")
+        else:
+            count += sum(text.count(marker) for marker in ADAPTER_DEVICE_MARKERS)
     return count
 
 

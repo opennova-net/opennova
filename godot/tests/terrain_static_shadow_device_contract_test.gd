@@ -200,7 +200,7 @@ func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> v
 	var rasterizer_source := _source(
 			"res://src/terrain/nova_terrain_static_shadow_rasterizer.cpp")
 	assert_false(rasterizer_source.contains("slot_shadow_drape"),
-		"The page-alpha result replaces the legacy final-RGB static overlay.")
+		"The static rasterizer must never route through the dynamic drape pass.")
 
 
 func test_capture_variants_control_page_shadows_without_a_static_shadow_map() -> void:

@@ -188,14 +188,22 @@ def test_pyopennova_items_stride_reads_every_entry():
         # Buggy's authored signatures are the canary.
         assert ifl.entries[0].radar_sig == 500
         assert ifl.entries[0].heat_sig == 650
-        # The appended launchups_closeattack field rides the far end of the
-        # stride: the wire rifleman's authored AI muzzle name is the canary.
+        # The launchups_closeattack field rides deep in the stride: the wire
+        # rifleman's authored AI muzzle name is the canary.
         launchups = {
             ifl.entries[i].display_name.decode(): (
                 ifl.entries[i].launchups_closeattack.decode())
             for i in range(ifl.count)
         }
         assert launchups["Wire Test Rifleman"] == "mflash01"
+        # The 2026-08-20 shadow-decal tail (shadow_texture[16] + four floats)
+        # is the far end of the stride: the ATV Quad's authored blob (entry 1,
+        # past the always-fine entry 0) is the canary.
+        atv = ifl.entries[1]
+        assert atv.display_name.decode() == "ATV Quad"
+        assert atv.shadow_texture.decode() == "atvshdw.tga"
+        assert (atv.shadow_width, atv.shadow_length) == (3.0, 4.5)
+        assert (atv.shadow_offset_x, atv.shadow_offset_y) == (0.0, -0.75)
     finally:
         py_def.free_items_def(ifl)
     assert names == ITEMS_HEAD

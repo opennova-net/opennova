@@ -78,6 +78,23 @@ uint32_t slot_refresh_mask(int shadow_detail) {
 	return shadow_detail < 4 ? 1 : 0;
 }
 
+uint32_t slot_refresh_mask_for(int shadow_detail,
+		bool is_local_player_or_parent) {
+	// [orig: @ 0x5d7713..0x5d7734 — the local player's slot (or its parent
+	// vehicle's) takes mask 0 (every frame) from detail 3 up].
+	if (is_local_player_or_parent && shadow_detail >= 3) {
+		return 0;
+	}
+	return slot_refresh_mask(shadow_detail);
+}
+
+bool local_first_person_drape_skipped(bool first_person, bool prone,
+		int shadow_detail) {
+	// [orig: RenderSlot_DrawAllDrapes @ 0x5d6e70..0x5d6e90 — the first-person
+	// local player draws no own drape while prone-latched or below detail 2].
+	return first_person && (prone || shadow_detail < 2);
+}
+
 bool slot_refresh_due(int slot_index, uint32_t frame, uint32_t mask,
 		bool dirty) {
 	// [orig: @ 0x5d771b..0x5d7748 — `(frame & mask) == (handle & mask)` or
@@ -91,15 +108,17 @@ bool slot_refresh_due(int slot_index, uint32_t frame, uint32_t mask,
 float drape_fade(float camera_distance_units) {
 	// [orig: render_sector_model @ 0x5d5d30..0x5d5d53 — 0 below 40 u
 	// (0x280000), (d - 40) / 40 beyond (flt_7DC668 = 1/2621440)].
-	if (camera_distance_units < 40.0f) {
+	if (camera_distance_units < kDrapeFadeStartUnits) {
 		return 0.0f;
 	}
-	return std::min((camera_distance_units - 40.0f) / 40.0f, 1.0f);
+	return std::min((camera_distance_units - kDrapeFadeStartUnits) /
+					(kDrapeFadeEndUnits - kDrapeFadeStartUnits),
+			1.0f);
 }
 
 bool drape_culled(float camera_distance_units) {
 	// [orig: @ 0x5d5d3b..0x5d5d40 — >= 80 u (0x500000) skips the draw].
-	return camera_distance_units >= 80.0f;
+	return camera_distance_units >= kDrapeFadeEndUnits;
 }
 
 std::array<float, 3> drape_shadow_term(const std::array<float, 3> &sun_rgb,
@@ -212,7 +231,7 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 	const float step_x = direction[0] / planar_len;
 	const float step_z = direction[2] / planar_len;
 	float step_y = direction[1] / planar_len;
-	if (step_y >= 0.0f || step_y > -0.5f) {
+	if (step_y > -0.5f) {
 		step_y = -0.5f;
 	}
 	for (int i = 0; i < max_steps && terrain_height(x, z) < y; ++i) {
@@ -223,21 +242,28 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 	return {x, z};
 }
 
+static bool slot_excluded(const SlotCandidateState &state) {
+	// [orig: terrain_sort_and_assign_render_slots @ 0x5d6581..0x5d6627 —
+	// dead, seat-parented, or standing on a vehicle; the silhouette-render
+	// leg re-checks the same predicates @ 0x5d774e..0x5d77b3].
+	return state.dead || state.seat_parented || state.on_vehicle;
+}
+
 int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
 		const std::array<float, 2> &view_dir2d,
 		const SlotCandidateState &state) {
 	// [orig: terrain_sort_and_assign_render_slots @ 0x5d6535..0x5d6871].
-	if (state.dead || state.seat_parented || state.on_vehicle) {
+	if (slot_excluded(state)) {
 		return kSlotScoreExcluded;
 	}
 	const float dx = state.pos2d[0] - camera_pos2d[0];
 	const float dz = state.pos2d[1] - camera_pos2d[1];
 	const float dist = std::sqrt(dx * dx + dz * dz);
 	// base = dist_fixed * 0.25 (flt_7C333C); beyond 0x500000 the record is
-	// dropped [orig: @ 0x5d668f..0x5d66b4] — the 320 u slot-bind horizon.
+	// dropped [orig: @ 0x5d668f..0x5d66b4] — base > 0x500000 IS dist > 320,
+	// the slot-bind horizon.
 	const float base = dist * 65536.0f * 0.25f;
-	if (base > static_cast<float>(kSlotScoreExcluded) ||
-			dist > kSlotBindMaxDistance) {
+	if (dist > kSlotBindMaxDistance) {
 		return kSlotScoreExcluded;
 	}
 	// weight = 1.5 - dot(view_unit, to_entity_unit) (98304 Q16); a
@@ -254,35 +280,47 @@ int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
 		// [orig: @ 0x5d6864..0x5d6868 — priority >> 1].
 		score *= 0.5f;
 	}
-	score = std::min(score, static_cast<float>(kSlotScoreExcluded - 1));
+	// The horizon bounds base at 0x500000 and the weight (1.5 - dot) at
+	// 2.5, so the score never reaches the exclusion sentinel.
 	return static_cast<int32_t>(score);
 }
 
 bool RenderSlotPlan::register_entity(uint64_t id) {
-	for (const Record &record : records_) {
-		if (record.id == id) {
+	// [orig: shadow_decal_alloc_slot @ 0x5d5690 — a registered entity keeps
+	// its index for life; retail appends at the high-water count]. The
+	// lowest-free reuse is the device fold the header describes.
+	int free_index = -1;
+	for (int i = 0; i < kSlotRecordCount; ++i) {
+		const Record &record = records_[static_cast<size_t>(i)];
+		if (record.live && record.id == id) {
 			return true;
 		}
+		if (!record.live && free_index < 0) {
+			free_index = i;
+		}
 	}
-	if (records_.size() >= kSlotRecordCount) {
-		// [orig: shadow_decal_alloc_slot @ 0x5d56d6 — a full table refuses].
+	if (free_index < 0) {
+		// [orig: @ 0x5d56d6 — a full table refuses].
 		return false;
 	}
-	Record record;
+	Record &record = records_[static_cast<size_t>(free_index)];
+	record = Record{};
 	record.id = id;
-	records_.push_back(record);
+	record.live = true;
+	++live_count_;
 	return true;
 }
 
 void RenderSlotPlan::release_entity(uint64_t id) {
-	for (size_t i = 0; i < records_.size(); ++i) {
-		if (records_[i].id != id) {
+	for (Record &record : records_) {
+		if (!record.live || record.id != id) {
 			continue;
 		}
-		if (records_[i].patch_index >= 0) {
-			patch_used_[records_[i].patch_index] = false;
+		if (record.patch_index >= 0) {
+			patch_used_[static_cast<size_t>(record.patch_index)] = false;
 		}
-		records_.erase(records_.begin() + static_cast<ptrdiff_t>(i));
+		record = Record{};  // the index stays put for the next registration
+		--live_count_;
 		return;
 	}
 }
@@ -293,25 +331,38 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 		const std::function<SlotCandidateState(uint64_t)> &state_for) {
 	struct Scored {
 		size_t record;
+		size_t out;
 		int32_t score;
 		SlotCandidateState state;
 	};
 	std::vector<Scored> scored;
-	scored.reserve(records_.size());
+	scored.reserve(live_count_);
 	for (size_t i = 0; i < records_.size(); ++i) {
+		if (!records_[i].live) {
+			continue;
+		}
 		Scored entry;
 		entry.record = i;
+		entry.out = scored.size();
 		entry.state = state_for(records_[i].id);
 		entry.score = slot_priority_score(camera_pos2d, view_dir2d,
 				entry.state);
 		scored.push_back(entry);
+	}
+	// One row per live record in table order; the exclusion classification
+	// reads only the state [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..].
+	std::vector<SlotAssignment> out(scored.size());
+	for (const Scored &entry : scored) {
+		SlotAssignment &assignment = out[entry.out];
+		assignment.id = records_[entry.record].id;
+		assignment.record_index = static_cast<int>(entry.record);
+		assignment.excluded = slot_excluded(entry.state);
 	}
 	// Ascending bubble sort in retail; stable ascending here
 	// [orig: @ 0x5d6890..0x5d68d9].
 	std::stable_sort(scored.begin(), scored.end(),
 			[](const Scored &a, const Scored &b) { return a.score < b.score; });
 
-	std::vector<SlotAssignment> out(records_.size());
 	// Pass 1: release everything excluded or past the 24-patch horizon
 	// [orig: @ 0x5d68ed..0x5d693c].
 	for (size_t rank = 0; rank < scored.size(); ++rank) {
@@ -320,7 +371,8 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 				rank >= static_cast<size_t>(kSlotPatchCount)) {
 			if (record.bound) {
 				if (record.patch_index >= 0) {
-					patch_used_[record.patch_index] = false;
+					patch_used_[static_cast<size_t>(record.patch_index)] =
+							false;
 				}
 				record.bound = false;
 				record.patch_index = -1;
@@ -329,7 +381,9 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 		}
 	}
 	// Pass 2: bind the leading 24 and hand the first 12 their capture RTs
-	// [orig: @ 0x5d6944..0x5d69ef].
+	// [orig: @ 0x5d6944..0x5d69ef]; a bound slot with a live silhouette RT
+	// drapes it, a bound slot without one drapes the authored blob
+	// [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4].
 	int capture_count = 0;
 	for (size_t rank = 0;
 			rank < scored.size() &&
@@ -339,12 +393,12 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 			continue;
 		}
 		Record &record = records_[scored[rank].record];
-		SlotAssignment &assignment = out[scored[rank].record];
+		SlotAssignment &assignment = out[scored[rank].out];
 		if (!record.bound) {
 			record.bound = true;
 			for (int k = 0; k < kSlotPatchCount; ++k) {
-				if (!patch_used_[k]) {
-					patch_used_[k] = true;
+				if (!patch_used_[static_cast<size_t>(k)]) {
+					patch_used_[static_cast<size_t>(k)] = true;
 					record.patch_index = k;
 					break;
 				}
@@ -365,26 +419,12 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 		} else {
 			record.capture_order = -1;
 		}
-	}
-	// Classification [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4 —
-	// a bound slot with a live silhouette RT drapes it; a bound slot
-	// without one drapes the authored blob].
-	for (size_t i = 0; i < records_.size(); ++i) {
-		SlotAssignment &assignment = out[i];
-		assignment.id = records_[i].id;
-		assignment.record_index = static_cast<int>(i);
-		const SlotCandidateState state = state_for(records_[i].id);
-		assignment.excluded =
-				state.dead || state.seat_parented || state.on_vehicle;
-		if (!assignment.bound || assignment.excluded) {
-			assignment.draws_silhouette = false;
-			assignment.draws_blob = false;
-			continue;
+		if (!assignment.excluded) {
+			assignment.draws_silhouette =
+					scored[rank].state.dynamic && assignment.capture_order >= 0;
+			assignment.draws_blob = !assignment.draws_silhouette &&
+					scored[rank].state.has_blob_texture;
 		}
-		assignment.draws_silhouette =
-				state.dynamic && assignment.capture_order >= 0;
-		assignment.draws_blob =
-				!assignment.draws_silhouette && state.has_blob_texture;
 	}
 	return out;
 }

@@ -12,7 +12,7 @@
     "vfs"
   ],
   "counters": {
-    "adapter_cpp_orig_cites_device": 122,
+    "adapter_cpp_orig_cites_device": 173,
     "adapter_cpp_orig_cites_pushdown": 371,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
@@ -45,8 +45,6 @@
     "effect_world.gd|func get_debug_draw_list_report()",
     "game_render_diagnostics.gd|func to_json_value()",
     "effect_light_report.gd|func to_json_value()",
-    "render_capture_variant.gd|func to_json_value()",
-    "shadow_caster_diagnostic.gd|func to_json_value()",
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",

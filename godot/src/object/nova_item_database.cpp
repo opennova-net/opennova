@@ -80,7 +80,6 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &ItemDatabase::get_particle_effects);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &ItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &ItemDatabase::get_attrib2);
-	ClassDB::bind_method(D_METHOD("get_shadow_decal", "id"), &ItemDatabase::get_shadow_decal);
 	ClassDB::bind_method(D_METHOD("get_item", "id"), &ItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
 	ClassDB::bind_method(D_METHOD("get_items"), &ItemDatabase::get_items);
@@ -418,18 +417,16 @@ uint32_t ItemDatabase::get_attrib2(int id) const {
 	return it == items.end() ? 0u : it->second.attrib2;
 }
 
-Dictionary ItemDatabase::get_shadow_decal(int id) const {
-	Dictionary out;
+bool ItemDatabase::get_shadow_decal(int id, String &r_texture,
+		Vector4 &r_dims) const {
 	const auto it = items.find(id);
 	if (it == items.end() || it->second.shadow_texture.is_empty()) {
-		return out;
+		return false;
 	}
-	out["texture"] = it->second.shadow_texture;
-	out["width"] = it->second.shadow_width;
-	out["length"] = it->second.shadow_length;
-	out["offset_x"] = it->second.shadow_offset_x;
-	out["offset_y"] = it->second.shadow_offset_y;
-	return out;
+	r_texture = it->second.shadow_texture;
+	r_dims = Vector4(it->second.shadow_width, it->second.shadow_length,
+			it->second.shadow_offset_x, it->second.shadow_offset_y);
+	return true;
 }
 
 PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {

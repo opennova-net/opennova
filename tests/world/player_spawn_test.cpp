@@ -29,7 +29,7 @@ struct DirectionalClip : IRootMotionSource {
     int32_t step;
     explicit DirectionalClip(int32_t s) : step(s) {}
     bool has_clip(int, int) const override { return true; }
-    int32_t clip_length_ticks(int, int) const override { return -1; } // looping doubles
+    int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; } // looping doubles
     bool advance(int, int state_id, int32_t &phase, RootMotionFrame &out) override {
         phase += 1;
         out = RootMotionFrame{};

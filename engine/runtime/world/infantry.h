@@ -256,17 +256,13 @@ public:
     // deferred-state promotion fires when the playhead reaches this — the original's
     // clip-end channel flag [orig: the 0x20000 end-flag promotion in
     // AnimMap_UpdateEntity @ 0x40b77b; witness world-wac-ai-re.md §14.8.1].
-    virtual int32_t clip_length_ticks(int adm_id, int state_id) const = 0;
     // Ringed rows serve per-entry clips whose lengths may differ, and the served
     // entry's length is the promotion clock: the state-entry ring rotate re-inits
     // the channel from the served entry, so every later length/keyframe read runs
     // on that clip [orig: table rotate @0x40b740-0x40b749; the channel's own
-    // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. The default
-    // routes to the variant-less length so providers without rings need no changes.
-    virtual int32_t clip_length_ticks(int adm_id, int state_id, int variant) const {
-        (void)variant;
-        return clip_length_ticks(adm_id, state_id);
-    }
+    // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. The body
+    // channel has no ring and passes variant 0; a provider without rings ignores it.
+    virtual int32_t clip_length_ticks(int adm_id, int state_id, int variant) const = 0;
     // Whether the state's track loops — the channel's own loop bit, seeded from
     // the clip data flags [orig: AnimChannel_InitFromData flag word @0x410577;
     // AnimChannel_AdvancePlayback wraps on it @0x40b16a]. A LOOPING current

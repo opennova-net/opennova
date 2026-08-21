@@ -361,7 +361,7 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
 			PackedInt64Array(), {})
 	assert_eq(rows.size(), 3,
-			"a corona-disabled record contributes no quads")
+			"the corona-disabled record adds nothing to the first light's three segments")
 	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
 	# past the fog end the corona color folds to black but the quads remain.
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),

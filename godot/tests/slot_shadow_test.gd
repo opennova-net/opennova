@@ -38,6 +38,19 @@ func _caster_at(z: float) -> ObjectModel:
 	return model
 
 
+## A fresh device planned once against an empty group: the caster group is
+## scene-tree wide, so every absolute count in this suite guards against a
+## caster another test left enabled.
+func _fresh_shadow(environment: MissionEnvironment) -> SlotShadow:
+	var shadow := SlotShadow.new()
+	add_child_autofree(shadow)
+	shadow.set_environment_node(environment)
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["registered"]), 0,
+			"no caster from another test is still in the slot group")
+	return shadow
+
+
 func test_caster_flag_joins_and_leaves_the_slot_group() -> void:
 	var model := _caster_at(5.0)
 	assert_true(model.is_in_group("nova_slot_shadow_casters"),
@@ -51,9 +64,7 @@ func test_admission_caps_follow_the_retail_patch_and_capture_budgets() -> void:
 	var environment := _environment()
 	var camera := _camera()
 	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
-	var shadow := SlotShadow.new()
-	add_child_autofree(shadow)
-	shadow.set_environment_node(environment)
+	var shadow := _fresh_shadow(environment)
 	for i in range(30):
 		var _model := _caster_at(4.0 + 2.0 * float(i))
 	shadow.advance_frame()
@@ -69,9 +80,7 @@ func test_admitted_casters_carry_exactly_one_capture_channel() -> void:
 	var environment := _environment()
 	var camera := _camera()
 	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
-	var shadow := SlotShadow.new()
-	add_child_autofree(shadow)
-	shadow.set_environment_node(environment)
+	var shadow := _fresh_shadow(environment)
 	var near_model := _caster_at(5.0)
 	var mesh := near_model.get_child(0) as VisualInstance3D
 	var before := mesh.layers
@@ -90,6 +99,45 @@ func test_admitted_casters_carry_exactly_one_capture_channel() -> void:
 			"a released caster loses its capture channel")
 
 
+func _child_shares_parent_channel(parent_first: bool) -> void:
+	# The retail child walk renders a capture-with child (held weapon, mounted
+	# child) into its PARENT's slot RT (RenderSlot_RenderEntityAndChildren
+	# @0x5d78ef..0x5d79d6); the child's own slot is excluded. Registration
+	# order must not matter: the child's own (excluded) row once cleared the
+	# bit the parent's row had just stamped.
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var parent: ObjectModel
+	var child: ObjectModel
+	if parent_first:
+		parent = _caster_at(5.0)
+		child = _caster_at(5.5)
+	else:
+		child = _caster_at(5.5)
+		parent = _caster_at(5.0)
+	child.set_slot_shadow_capture_with(parent)
+	shadow.advance_frame()
+	var parent_mesh := parent.get_child(0) as VisualInstance3D
+	var child_mesh := child.get_child(0) as VisualInstance3D
+	var parent_bits: int = parent_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
+	var order := "parent first" if parent_first else "child first"
+	assert_ne(parent_bits, 0, "the parent captures (%s)" % order)
+	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, parent_bits,
+			"the linked child renders into its parent's slot RT (%s)" % order)
+	assert_eq(int(shadow.get_report()["captures"]), 1,
+			"the child's own slot is excluded (%s)" % order)
+
+
+func test_capture_with_child_rides_its_parent_slot_parent_registered_first() -> void:
+	_child_shares_parent_channel(true)
+
+
+func test_capture_with_child_rides_its_parent_slot_child_registered_first() -> void:
+	_child_shares_parent_channel(false)
+
+
 func test_local_player_first_person_drape_gates() -> void:
 	# Retail skips the local player's own drape in first person while
 	# prone-latched or below shadow detail 2
@@ -97,9 +145,7 @@ func test_local_player_first_person_drape_gates() -> void:
 	var environment := _environment()
 	var camera := _camera()
 	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
-	var shadow := SlotShadow.new()
-	add_child_autofree(shadow)
-	shadow.set_environment_node(environment)
+	var shadow := _fresh_shadow(environment)
 	var body := _caster_at(2.0)
 	shadow.set_local_player_model(body)
 	shadow.set_local_player_first_person(true)

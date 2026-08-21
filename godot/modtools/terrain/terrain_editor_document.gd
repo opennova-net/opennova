@@ -906,8 +906,9 @@ func cdep_ranges_valid(image: Image) -> bool:
 		# Artist-facing: JO/DFX cap how much height one 256-pixel run of the
 		# heightmap may span (the CDEP per-block raw16 limit).
 		push_error(("Terrain is too steep to export in %d area(s): " +
-				"flatten the marked regions — JO/DFX limit how much height " +
-				"a 256-pixel run of the heightmap may span") % violations)
+				"flatten the steepest areas by hand (the export's automatic " +
+				"clamp could not bring them within range). JO/DFX limit how " +
+				"much height a 256-pixel run of the heightmap may span") % violations)
 		return false
 	return true
 

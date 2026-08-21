@@ -279,12 +279,6 @@ func _sim() -> Simulation:
 	return runtime.get_sim() if runtime != null else null
 
 
-## The per-frame device leg (GameFramePipeline, after iris, before the
-## material frame): one draw context per visible ObjectModel near the camera
-## (owner group = that model's entity id) plus the first-person viewmodel
-## parts (owner = the local player, so its own muzzle glow reaches the arms).
-## The FLICKER phase reads the live weather wave ring; the ambient scale is
-## the env light-state gain (the ported EffectWorld_AmbientScale channel).
 ## Typed accessors for co-consumers of the shared pool (the render-slot
 ## shadow device's dominant-light pick reads the same LightScene).
 func scene() -> LightScene:
@@ -301,6 +295,12 @@ func light_gain() -> Vector3:
 	return gain
 
 
+## The per-frame device leg (GameFramePipeline, after iris, before the
+## material frame): one draw context per visible ObjectModel near the camera
+## (owner group = that model's entity id) plus the first-person viewmodel
+## parts (owner = the local player, so its own muzzle glow reaches the arms).
+## The FLICKER phase reads the live weather wave ring; the ambient scale is
+## the env light-state gain (the ported EffectWorld_AmbientScale channel).
 func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		viewmodel_owner: int = 0) -> void:
 	if camera == null:
@@ -309,7 +309,7 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		return
 	var gain := light_gain()
 	var env: MissionEnvironment = _world.get_environment_node()
-	var weather: Node = _world.get_node_or_null(NodePath("Weather"))
+	var weather: Weather = _world.get_weather_node()
 	var cam_pos := camera.get_camera_transform().origin
 	var models: Array[Node3D] = []
 	var owners := PackedInt64Array()
@@ -406,7 +406,7 @@ func _local_player_interior_group() -> Array:
 ## visible-section bit [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960];
 ## the env fog rides in as the fog-to-black fold
 ## [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
-func _render_coronas(camera: Camera3D, gain: Vector3, weather: Node,
+func _render_coronas(camera: Camera3D, gain: Vector3, weather: Weather,
 		models: Array[Node3D], owners: PackedInt64Array,
 		env: MissionEnvironment) -> void:
 	_corona_frame = (_corona_frame + 1) & 3
@@ -470,32 +470,29 @@ func _ensure_corona_instance() -> MultiMeshInstance3D:
 	# Coronas draw in the mirror scene too [orig: the
 	# Water_RenderReflectedWorldScene call @ 0x5c85fd].
 	mmi.layers = Water.VISUAL_LAYER_WORLD
-	# The quads billboard in-shader; keep them from being frustum-culled by
-	# their degenerate static AABB.
+	# The quads billboard in-shader from rows anywhere in the world; the
+	# static AABB only seeds Godot's sort and the cull margin keeps the
+	# instance from being frustum-culled once the camera leaves that box
+	# (the StarField precedent in Celestial).
 	mmi.custom_aabb = AABB(Vector3(-512, -512, -512), Vector3(1024, 1024, 1024))
+	mmi.extra_cull_margin = 1.0e6
 	_world.add_child(mmi)
 	_corona_instance = mmi
 	return mmi
 
 
-## The procedural corona texture [orig: Lighting_InitTextures @ 0x5a94f0 —
-## "texlightcrn": 128x128, intensity = 255 x (0.4 - 0.45 x d) clamped >= 0,
-## d = sqrt(((x-64)/64)^2 + ((y-64)/64)^2), border texels forced 0].
+## The procedural corona texture "texlightcrn": the law (the 128x128
+## 0.4 - 0.45 d falloff, truncated, the transparent border) lives portable
+## in renderer::corona_texture_argb; this only wraps the bytes in a texture.
 static var _corona_texture_cache: ImageTexture
 
 
 static func _corona_texture() -> ImageTexture:
 	if _corona_texture_cache != null:
 		return _corona_texture_cache
-	var image := Image.create(128, 128, false, Image.FORMAT_RGB8)
-	for y in range(128):
-		for x in range(128):
-			var value := 0.0
-			if x != 0 and x != 127 and y != 0 and y != 127:
-				var dx := absf(x - 64.0) / 64.0
-				var dy := absf(y - 64.0) / 64.0
-				value = maxf(0.4 - 0.45 * sqrt(dx * dx + dy * dy), 0.0)
-			image.set_pixel(x, y, Color(value, value, value))
+	var size: int = LightScene.corona_texture_size()
+	var image := Image.create_from_data(size, size, false, Image.FORMAT_RGBA8,
+			LightScene.corona_texture_rgba8())
 	_corona_texture_cache = ImageTexture.create_from_image(image)
 	return _corona_texture_cache
 

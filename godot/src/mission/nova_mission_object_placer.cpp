@@ -1417,13 +1417,10 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	// docs/render/render-lighting-re.md).
 	p_model->set_slot_shadow_person(
 			item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON);
-	const Dictionary decal = item_db_->get_shadow_decal(p_item_id);
-	if (!decal.is_empty()) {
-		p_model->set_slot_shadow_decal(decal.get("texture", String()),
-				Vector4(float(decal.get("width", 0.0f)),
-						float(decal.get("length", 0.0f)),
-						float(decal.get("offset_x", 0.0f)),
-						float(decal.get("offset_y", 0.0f))));
+	String decal_texture;
+	Vector4 decal_dims;
+	if (item_db_->get_shadow_decal(p_item_id, decal_texture, decal_dims)) {
+		p_model->set_slot_shadow_decal(decal_texture, decal_dims);
 	}
 	// The static tile pass must ignore the visible model's portal/section
 	// mask; eligible mission entities get independent all-section siblings

@@ -337,15 +337,32 @@ Camera3D *Celestial::_resolve_camera() {
 	return cam;
 }
 
+void Celestial::_publish_idle_veil() {
+	// The retail veil writer is gated on the sun model
+	// (retail: Environment_ApplySunVeilAndExposureStopdown @0x5ad8ba, see
+	// docs/env/env-tod-re.md): no bodies, no veil. Clear the pair and push a
+	// zero alpha so a reload never inherits the last mission's veil. The
+	// global is process-wide (another Celestial may have written it), so
+	// there is no per-instance latch — one RS call per idle frame.
+	sun_veil_glare_ = 0;
+	sun_veil_stopdown_ = 0;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs != nullptr) {
+		rs->global_shader_parameter_set("opennova_sun_veil_alpha", 0.0f);
+	}
+}
+
 void Celestial::advance_frame(double p_delta) {
 	if (bodies_.is_empty()) {
 		_rebuild_if_needed();
 		if (bodies_.is_empty()) {
+			_publish_idle_veil();
 			return;
 		}
 	}
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
+		_publish_idle_veil();
 		return;
 	}
 	const opennova::env::EnvironmentState &state = env->state();
@@ -441,7 +458,7 @@ void Celestial::advance_frame(double p_delta) {
 	// sun model, see docs/env/env-tod-re.md): dot(view_forward, sun) in 16.16 through the witnessed
 	// dot^32/dot^128 chain (env::sun_veil_from_dot), plus the water-reflected
 	// SECONDARY term at the glint brightness >> 2 when water exists, both
-	// sums clamped 192 (retail: @ 0x5ad8dc..0x5ad916, see docs/env/env-tod-re.md). The veil alpha global
+	// sums clamped 192 (env::sun_veil_combine). The veil alpha global
 	// feeds the PlayerViewEffects white overlay; the stop-down is read back
 	// by the world's veil leg into Weather.
 	sun_veil_glare_ = 0;
@@ -460,18 +477,12 @@ void Celestial::advance_frame(double p_delta) {
 			// The secondary reflected-sun ray: direction to the UNJITTERED
 			// glint point (view_z 0 (retail: @ 0x5ad628, see docs/env/env-tod-re.md)), brightness >> 2
 			// (retail: @ 0x5ad6a7, see docs/env/env-tod-re.md).
-			const opennova::env::Vec3 cam_m{
-					static_cast<float>(cam_pos.x),
-					static_cast<float>(-cam_pos.z),
-					static_cast<float>(cam_pos.y)};
-			const opennova::env::Vec3 sun_m{
-					static_cast<float>(sun_dir.x),
-					static_cast<float>(-sun_dir.z),
-					static_cast<float>(sun_dir.y)};
+			const opennova::env::Vec3 cam_m = godot_to_mission(cam_pos);
+			const opennova::env::Vec3 sun_m = godot_to_mission(sun_dir);
 			opennova::env::Vec3 point_m;
 			if (opennova::env::water_glint_point(cam_m, sun_m,
 					state.water_height(), 0.0f, point_m)) {
-				const Vector3 point_g(point_m.x, point_m.z, -point_m.y);
+				const Vector3 point_g = mission_to_godot(point_m);
 				const Vector3 to_glint = (point_g - cam_pos).normalized();
 				const int dot2 = static_cast<int>(
 						forward.dot(to_glint) * 65536.0f);
@@ -479,8 +490,7 @@ void Celestial::advance_frame(double p_delta) {
 						opennova::env::sun_veil_from_dot(dot2,
 								water_glint_.brightness >> 2, sun_dim_fixed,
 								overcast_fixed);
-				veil.glare = MIN(veil.glare + secondary.glare, 192);
-				veil.stopdown = MIN(veil.stopdown + secondary.stopdown, 192);
+				veil = opennova::env::sun_veil_combine(veil, secondary);
 			}
 		}
 		sun_veil_glare_ = veil.glare;
@@ -495,13 +505,16 @@ void Celestial::advance_frame(double p_delta) {
 }
 
 float Celestial::get_sun_veil_alpha() const {
-	// The witnessed draw gate + byte clamp (retail: @ 0x5ad925..0x5ad931 —
-	// glare <= 2 draws nothing; the quad color is (glare << 24) + 0xFFFFFF, see docs/env/env-tod-re.md).
-	if (sun_veil_glare_ <= 2) {
+	// The draw gate (env::sun_veil_draws) and the quad's alpha byte. The glare
+	// stays <= 255 over the authored domain: sun_veil_from_dot caps at 255
+	// before a SunDim fold that only scales down for SunDim >= 0 (stock data
+	// never writes it), and the water term clamps the sum at 192. A float
+	// alpha past 1 would saturate in the blend exactly as a 255 byte does,
+	// so no device clamp is added.
+	if (!opennova::env::sun_veil_draws(sun_veil_glare_)) {
 		return 0.0f;
 	}
-	const int byte = sun_veil_glare_ > 255 ? 255 : sun_veil_glare_;
-	return static_cast<float>(byte) / 255.0f;
+	return static_cast<float>(sun_veil_glare_) / 255.0f;
 }
 
 int Celestial::get_sun_veil_stopdown() const {
@@ -709,14 +722,8 @@ float Celestial::_advance_water_glint(
 		p_body.model->set_visible(false);
 		return 0.0f;
 	}
-	const opennova::env::Vec3 cam_m{
-			static_cast<float>(p_cam_pos.x),
-			static_cast<float>(-p_cam_pos.z),
-			static_cast<float>(p_cam_pos.y)};
-	const opennova::env::Vec3 sun_m{
-			static_cast<float>(p_sun_dir.x),
-			static_cast<float>(-p_sun_dir.z),
-			static_cast<float>(p_sun_dir.y)};
+	const opennova::env::Vec3 cam_m = godot_to_mission(p_cam_pos);
+	const opennova::env::Vec3 sun_m = godot_to_mission(p_sun_dir);
 	const float view_z_jitter =
 			0.25f * static_cast<float>(water_glint_.frame_index & 3u);
 	opennova::env::Vec3 point_m;
@@ -727,7 +734,7 @@ float Celestial::_advance_water_glint(
 		// x (godot x) and mission z = height (godot y).
 		point_m.x += (water_glint_.frame_index & 1u) ? 2.0f : -2.0f;
 		point_m.z += (water_glint_.frame_index & 2u) ? 2.0f : -2.0f;
-		const Vector3 point_g(point_m.x, point_m.z, -point_m.y);
+		const Vector3 point_g = mission_to_godot(point_m);
 		visible = _segment_clear(point_g,
 						  p_cam_pos + p_sun_dir * 2048.0f) &&
 				_segment_clear(point_g, p_cam_pos);

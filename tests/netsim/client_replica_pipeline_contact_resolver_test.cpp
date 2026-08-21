@@ -39,7 +39,7 @@ bool expect(bool cond, const char *msg) {
 struct StillSource final : public opennova::world::IRootMotionSource {
 	int32_t dx = 0; // settable forward root step (the ledge-carry legs)
 	bool has_clip(int, int) const override { return true; }
-	int32_t clip_length_ticks(int, int) const override { return 1024; }
+	int32_t clip_length_ticks(int, int, int /*variant*/) const override { return 1024; }
 	bool advance(int, int, int32_t &phase,
 	             opennova::world::RootMotionFrame &out) override {
 		phase += 1024;

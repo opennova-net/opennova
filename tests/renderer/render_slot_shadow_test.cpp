@@ -282,6 +282,63 @@ int main() {
 		CHECK(plan.registered_count() == 29);
 	}
 
+	// --- the per-slot refresh mask and the first-person drape gate
+	// [orig: @ 0x5d7713..0x5d7734; RenderSlot_DrawAllDrapes
+	// @ 0x5d6e70..0x5d6e90].
+	{
+		CHECK(slot_refresh_mask_for(2, false) == 3);
+		CHECK(slot_refresh_mask_for(2, true) == 3);  // below detail 3: no exception
+		CHECK(slot_refresh_mask_for(3, false) == 1);
+		CHECK(slot_refresh_mask_for(3, true) == 0);  // the local player: every frame
+		CHECK(slot_refresh_mask_for(4, false) == 0);
+		CHECK(local_first_person_drape_skipped(true, true, 4));
+		CHECK(local_first_person_drape_skipped(true, false, 1));
+		CHECK(!local_first_person_drape_skipped(true, false, 2));
+		CHECK(!local_first_person_drape_skipped(false, true, 1));
+	}
+
+	// --- fixed-index records: a release never re-phases the slots behind
+	// it [orig: shadow_decal_alloc_slot @ 0x5d5690 — an entity's index is
+	// its own for life]; the freed index is the next one claimed (the device
+	// fold render_slot_shadow.h describes — retail never releases).
+	{
+		RenderSlotPlan plan;
+		for (uint64_t id = 1; id <= 5; ++id) {
+			CHECK(plan.register_entity(id));
+		}
+		const auto state_for = [](uint64_t id) {
+			SlotCandidateState state;
+			state.pos2d = {0.0f, static_cast<float>(id) * 2.0f};
+			return state;
+		};
+		const std::array<float, 2> cam{0.0f, 0.0f};
+		const std::array<float, 2> view{0.0f, 1.0f};
+		auto out = plan.assign(cam, view, state_for);
+		CHECK(out.size() == 5 && out[4].id == 5 && out[4].record_index == 4);
+		plan.release_entity(2);
+		CHECK(plan.registered_count() == 4);
+		out = plan.assign(cam, view, state_for);
+		CHECK(out.size() == 4);
+		int index_of_5 = -1;
+		for (const auto &a : out) {
+			if (a.id == 5) {
+				index_of_5 = a.record_index;
+			}
+		}
+		CHECK(index_of_5 == 4);
+		CHECK(plan.register_entity(9));
+		out = plan.assign(cam, view, state_for);
+		int index_of_9 = -1;
+		for (const auto &a : out) {
+			if (a.id == 9) {
+				index_of_9 = a.record_index;
+			}
+		}
+		CHECK(index_of_9 == 1);
+		CHECK(plan.register_entity(9));  // idempotent on a live record
+		CHECK(plan.registered_count() == 5);
+	}
+
 	// --- registration cap [orig: shadow_decal_alloc_slot @ 0x5d56d6].
 	{
 		RenderSlotPlan plan;

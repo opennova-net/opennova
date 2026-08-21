@@ -7,8 +7,11 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/projection.hpp>
+
+#include <vector>
 
 #include <renderer/render_slot_shadow.h>
 
@@ -18,6 +21,7 @@ class LightScene;
 class MissionEnvironment;
 class ObjectModel;
 class ResourceRoot;
+class Weather;
 
 // The render-slot entity ground-shadow device (the Godot half of
 // engine/runtime/renderer/render_slot_shadow.h — the planner carries the
@@ -36,6 +40,10 @@ class ResourceRoot;
 // mounted/standing children capture through their own slots rather than the
 // parent's RT walk; the attached-light drape darkening folds the light's
 // attenuation at the entity into the per-slot term.
+//
+// Driven once per display frame by GameFramePipeline through
+// GameWorld.render_slot_shadow_frame(), after the light select has pushed
+// this frame's LightScene and context into it — never self-clocked.
 class SlotShadow : public Node3D {
 	GDCLASS(SlotShadow, Node3D)
 
@@ -56,7 +64,7 @@ public:
 	void set_environment_node(MissionEnvironment *p_environment);
 	void set_light_scene(const Ref<LightScene> &p_scene);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
-			Object *p_weather);
+			Weather *p_weather);
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.
@@ -70,15 +78,14 @@ public:
 	void set_local_player_first_person(bool p_first_person);
 	void set_local_player_prone(bool p_prone);
 
+	// One display frame: plan, stamp the capture channels, steer the capture
+	// cameras, publish the drape terms.
 	void advance_frame();
 	Dictionary get_report() const;
 
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
-
-public:
-	void _process(double p_delta) override;
 
 private:
 	struct CasterInfo {
@@ -99,6 +106,8 @@ private:
 	// instance id -> applied capture bit (for removal on churn).
 	HashMap<uint64_t, uint32_t> applied_bits_;
 	HashMap<String, Ref<Texture2D>> blob_textures_;
+	// The per-slot dominant-light query buffer (reused across frames).
+	std::vector<renderer::SlotPointLight> slot_lights_;
 	ObjectID environment_node_id_;
 	Ref<LightScene> light_scene_;
 	Vector3 light_gain_ = Vector3(1, 1, 1);

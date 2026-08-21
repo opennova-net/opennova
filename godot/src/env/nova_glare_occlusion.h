@@ -27,8 +27,8 @@ protected:
 
 public:
 	// World-space offsets (Godot basis) for this frame's two ray endpoints
-	// (retail: jitter @ 0x5ace3b..0x5ace61 — engine Y +-16/+-8 (Godot -x),
-	// height +-16 (Godot +y), see docs/env/env-tod-re.md).
+	// (retail: jitter @ 0x5ace3b..0x5ace61 — mission Y (north) +-16/+-8
+	// (Godot -z), height +-16 (Godot +y), see docs/env/env-tod-re.md).
 	Vector3 get_ray_jitter_a() const;
 	Vector3 get_ray_jitter_b() const;
 
