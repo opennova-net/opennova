@@ -103,13 +103,31 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	vertices.resize(static_cast<int64_t>(list.vertices.size()));
 	uvs.resize(static_cast<int64_t>(list.vertices.size()));
 	colors.resize(static_cast<int64_t>(list.vertices.size()));
+	// Two frames, two swaps. A shared-ring (world) slot is mission space, so it
+	// takes the world fold mission (x, y, z) -> Godot (x, z, -y). An entity-ring
+	// slot is SECTION-LOCAL: the hit went through the inverse of the live
+	// collision section matrix, whose local side is the decoded model space the
+	// collision model and the render parts share (engine/runtime/simassets —
+	// "decoded model space is (-source y, source z, source x)"), and the
+	// section node's mesh is that same space through the model builder's
+	// godot_position = (-x, y, z). The world swap applied to a section-local
+	// slot would land the quad rotated off the struck face on every vehicle and
+	// item, so the entity-local batches take the model fold instead.
+	std::vector<bool> entity_local_vertex(list.vertices.size(), false);
+	for (const renderer::ScarDrawBatch &b : list.batches) {
+		if (!b.entity_local) {
+			continue;
+		}
+		const size_t end = b.first_vertex + b.vertex_count;
+		for (size_t k = b.first_vertex; k < end && k < entity_local_vertex.size(); ++k) {
+			entity_local_vertex[k] = true;
+		}
+	}
 	for (size_t i = 0; i < list.vertices.size(); ++i) {
 		const renderer::ScarVertex &v = list.vertices[i];
-		// Mission (x, y, z) -> Godot (x, z, -y) for world-space slots; the
-		// section-local slots of an entity ring take the same axis swap into the
-		// section node's local frame (the model builder applies it to the
-		// model's own vertices).
-		vertices[static_cast<int64_t>(i)] = Vector3(v.x, v.z, -v.y);
+		vertices[static_cast<int64_t>(i)] = entity_local_vertex[i]
+				? Vector3(-v.x, v.y, v.z)
+				: Vector3(v.x, v.z, -v.y);
 		uvs[static_cast<int64_t>(i)] = Vector2(v.u, v.v);
 		colors[static_cast<int64_t>(i)] = color_from_argb(v.argb);
 	}

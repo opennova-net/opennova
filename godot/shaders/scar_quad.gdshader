@@ -2,7 +2,8 @@ shader_type spatial;
 // The impact-scar quad: the one-texture mode the retail drawer applies per
 // texture strip — unshaded, the vertex colour (Env_TerrainLightCombined) as the
 // modulate, the strip's own TGA with clamp wrap, alpha-tested at ref 128, fog
-// on, blend mode 0 (retail: Scar_DrawBatches @0x5ccd10 under
+// on, blend mode 0 (retail: the scar batch drawer Terrain_RenderFoliageBatches
+// @0x5ccd10 — a kong misnomer, IDB rename to Scar_DrawBatches proposed — under
 // Scar_RenderAllCaches @0x5CDF70, see docs/world/world-wac-ai-re.md §24.9).
 // Both faces draw: retail submits the six vertices without a cull change.
 render_mode unshaded, cull_disabled, depth_draw_never;
