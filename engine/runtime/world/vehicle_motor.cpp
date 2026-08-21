@@ -12,6 +12,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/geom.h"
+#include "world/vehicle_part_anim.h"
 #include "world/vehicle_sound.h"
 #include "world/world.h"
 
@@ -91,6 +92,17 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
             (speed_bits ^ sign_mask) - sign_mask;
     out.speed = static_cast<int32_t>(
             std::min(magnitude, uint32_t{0x10000}));
+
+    // The part-animation words [orig: Entity_CacheVehicleHUDStats @0x4929B0 —
+    // the rotor angle's +0x466 @0x492ACA..0x492ADE, the wheel phase's +0x2BA
+    // @0x4929B4]: the accumulators' high words, zero-extended like the steer
+    // word. The tail rotor publishes the rotor word until its own accumulator
+    // is witnessed (WITNESS PENDING, vehicle_part_anim.h).
+    out.rotor = static_cast<int32_t>(
+            static_cast<uint32_t>(state.part_spin.angle) >> 16);
+    out.tail_rotor = out.rotor;
+    out.wheels = static_cast<int32_t>(
+            static_cast<uint32_t>(state.wheel_phase) >> 16);
     return out;
 }
 
@@ -658,6 +670,9 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     // motor still needs to settle an unoccupied PlayerControl vehicle.
     // [orig: Entity_ProcessMovementSoundEffects call @0x48d181..0x48d25c]
     update_ground_vehicle_sound(world, veh, traits, wrecked, collided);
+    // The part-animation accumulators, at the mover's tail [orig: the
+    // Entity_UpdatePartSpinAccumulator call @0x48AE3D in this mover].
+    vehicle_part_anim_tick(world, veh, traits);
 }
 
 namespace {
@@ -1699,6 +1714,9 @@ static void watercraft_motor_core(World &world, Entity &veh,
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    // The part-animation accumulators — the client-executed cbot mover calls
+    // the same tail [orig: @0x48D42B].
+    vehicle_part_anim_tick(world, veh, traits);
 }
 
 // The AUTHORITY watercraft tick — the host-side cbot mover (the D-NET-161
@@ -1794,6 +1812,9 @@ void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &trait
     // Movement-sound presentation, same per-tick site as the ground core's tail
     // [orig: the cbot movement-sound call in step 18 @0x48ED76..].
     update_ground_vehicle_sound(world, veh, traits, wrecked, /*collided=*/false);
+    // The part-animation accumulators [orig: the call @0x48D42B in the cbot
+    // mover].
+    vehicle_part_anim_tick(world, veh, traits);
 }
 
 // The GROUND-family prediction leg (net-re §5.38e B-facet): run the shared
@@ -2311,6 +2332,9 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     veh.position.z = static_cast<float>(from_fixed(pz));
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    // The part-animation accumulators — the air mover's tail call [orig:
+    // Entity_UpdatePartSpinAccumulator @0x4928B0 from the CHel/cpln callback].
+    vehicle_part_anim_tick(world, veh, traits);
 }
 
 } // namespace opennova::world

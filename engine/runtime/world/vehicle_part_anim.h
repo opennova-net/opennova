@@ -1,11 +1,7 @@
 #pragma once
 
-#include <cstdint>
-
-namespace opennova::world {
-
-// VEHICLE PART ANIMATION REGISTERS — the accumulators that drive a model's
-// PANM tracks (HELO_ROTOR, HELO_TAILROTOR, VEHICLE_WHEELS).
+// VEHICLE PART ANIMATION — the accumulators that drive a model's PANM tracks
+// (HELO_ROTOR, HELO_TAILROTOR, VEHICLE_WHEELS).
 //
 // The model reads each track's register as the HIGH WORD of a dword
 // accumulator, so what these integrate is the full 32-bit value and the
@@ -19,12 +15,20 @@ namespace opennova::world {
 //  @0x48B7F8..0x48B80A]. So a peer integrating the same wire fields IS the
 // retail mechanism, not a stand-in.
 //
-// STAGED, NOT WIRED: the ground-motor speed and steer registers (+0x29C /
-// +0x2B4) are LIVE in world/vehicle_motor.cpp (the clamp tree, the < 48 stop
-// snap, the speed-dependent steer rate), and Entity_CacheVehicleHUDStats
-// @0x4929B0's steering/speed publication is the present-row
-// PF_VEHICLE_STEERING / PF_VEHICLE_SPEED pair. What lives here is what those
-// do not carry: the rotor spin machine and the wheel phase.
+// The ground-motor speed and steer registers (+0x29C / +0x2B4) are the
+// motor's own (world/vehicle_motor.cpp) and publish through
+// PF_VEHICLE_STEERING / PF_VEHICLE_SPEED; this TU owns what those do not
+// carry: the rotor spin machine and the wheel phase, published through
+// PF_VEHICLE_ROTOR / PF_VEHICLE_TAIL_ROTOR / PF_VEHICLE_WHEELS.
+
+#include <cstdint>
+
+#include "world/entity.h"
+
+namespace opennova::world {
+
+class World;
+struct VehicleTraits;
 
 // ---------------------------------------------------------------------------
 // ROTOR [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 — called from every
@@ -32,13 +36,7 @@ namespace opennova::world {
 //  @0x48D42B) and gated on the move-context class 2 @0x4928C9..0x4928D1].
 // ---------------------------------------------------------------------------
 
-// The three dwords the machine owns: +0x460 speed, +0x464 the angle
-// accumulator the PANM register samples, +0x468 the spin-up rate.
-struct RotorState {
-	int32_t speed = 0; // +0x460
-	int32_t angle = 0; // +0x464
-	int32_t rate = 0;  // +0x468
-};
+using RotorState = Entity::VehicleMotorState::PartSpin;
 
 // The spin-up rates. A PLAYER-CONTROL item (ItemDef attrib 0x40) always seeds
 // the full rate; every other item seeds one of three by a PRNG roll
@@ -58,8 +56,8 @@ inline constexpr int32_t kItemAttribPlayerControl = 0x40;
 // @0x4928DF and the `!(attrib & 0x40)` arm @0x492903]. A player-control item
 // never rolls; an unoccupied non-player-control item rolls EVERY tick, because
 // the unoccupied branch resets the rate to zero @0x492972.
-inline bool rotor_rate_needs_roll(const RotorState &s, int32_t attrib) {
-	return s.rate == 0 && (attrib & kItemAttribPlayerControl) == 0;
+inline bool rotor_rate_needs_roll(const RotorState &s, bool player_control) {
+	return s.rate == 0 && !player_control;
 }
 
 // The rolled rate from a PRNG word [orig: @0x49290E..0x492935].
@@ -72,10 +70,10 @@ inline int32_t rotor_rate_from_roll(uint16_t prng_word) {
 
 // Seed the rate when it is zero. `rolled_rate` is rotor_rate_from_roll's
 // result when rotor_rate_needs_roll said so, else ignored.
-inline void rotor_seed_rate(RotorState &s, int32_t attrib, bool occupied,
+inline void rotor_seed_rate(RotorState &s, bool player_control, bool occupied,
 		int32_t rolled_rate) {
 	if (s.rate != 0) return;
-	if ((attrib & kItemAttribPlayerControl) != 0) {
+	if (player_control) {
 		if (occupied) s.rate = kRotorRateFull; // @0x4928F3
 	} else {
 		s.rate = rolled_rate; // @0x492915 / @0x492930
@@ -114,7 +112,8 @@ inline void rotor_spawn_full(RotorState &s) {
 
 // The register the PANM feeder reads: the accumulator's HIGH WORD
 // [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the rotor angle's +0x466
-//  @0x492ACA..0x492ADE, the wheel phase's +0x2BA @0x4929B4].
+//  @0x492ACA..0x492ADE, the wheel phase's +0x2BA @0x4929B4; the same MOVZX
+//  idiom as the steer word @0x4929C0..0x4929D7].
 inline uint16_t part_register(int32_t accumulator) {
 	return static_cast<uint16_t>((static_cast<uint32_t>(accumulator) >> 16) &
 			0xFFFFu);
@@ -139,5 +138,15 @@ inline int32_t wheel_phase_step(int32_t phase, int32_t speed, int32_t slip_abs) 
 inline int32_t watercraft_wheel_phase_step(int32_t phase, int32_t forward) {
 	return phase + (forward << 13);
 }
+
+// ---------------------------------------------------------------------------
+// The per-tick entry every family mover calls at its tail. Runs the rotor
+// machine (seeding the rate from the shared PRNG when a non-player-control
+// item needs a roll — the seed path is the ONLY PRNG consumer here, and it
+// draws exactly once per unoccupied tick for such an item) and advances the
+// wheel phase from the motor's own speed register.
+// `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
+// occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
+void vehicle_part_anim_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world
