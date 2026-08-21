@@ -27,6 +27,7 @@ signal simulation_restarted()
 const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 const DestructionPresentPass := preload("res://game/world/destruction_present_pass.gd")
 const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.gd")
+const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
 # loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
@@ -43,6 +44,7 @@ var _fire_present: FirePresentPass    # non-local fire sound + muzzle + tracers;
 var _fire_listener := Callable()      # -> Vector3 camera listener, stamped into the sim per frame (world/fire_sound.h)
 var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck effects (every viewing peer); null without fire_audio
 var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
+var _scar_present: ScarPresentPass                # impact-scar rings as textured quads (every viewing peer)
 var _index: EntityIndex
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
 var _perf_tick_us: int = 0
@@ -320,6 +322,20 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		options.get("fire_fx", Callable()), options.get("effect_anchors"))
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))
+	# The impact-scar presentation pass (world-wac-ai-re §24.9): the sim's scar
+	# rings as textured quads — the shared ring as one world mesh, each entity
+	# ring under its carrier's struck section. Every viewing peer runs it: retail
+	# draws its own caches on every client from the same impact processor
+	# [orig: Scar_RenderAllCaches @0x5CDF70 from Terrain_CollectVisibleEntities
+	#  @0x5c91b7]. The camera + environment providers are the device inputs the
+	# renderer's cull and vertex colour read (fire_listener IS the camera).
+	_scar_present = ScarPresentPass.new()
+	_scar_present.setup(_sim, container, _index, _wire_present,
+		options.get("resource_root"),
+		options.get("fire_listener", Callable()),
+		options.get("environment_node", Callable()))
+	simulation_restarted.connect(
+		Callable(_scar_present, 'reset_runtime_state'))
 	# ADR 0035: the native session owns lifecycle/cadence and invokes one
 	# synchronous per-tick presentation sink. The camera remains a Godot device;
 	# a dedicated host has none.
@@ -539,6 +555,12 @@ func get_destruction_present_stats() -> RefCounted:
 	# loaded mission runs with the pass.
 	return _destruction_present.get_stats() if _destruction_present != null else null
 
+
+func get_scar_present_stats() -> RefCounted:
+	# ScarPresentPass.Stats (typed counters, ADR 0017); null until the
+	# presentation pass exists.
+	return _scar_present.get_stats() if _scar_present != null else null
+
 func get_sim() -> Simulation:
 	return _sim
 
@@ -628,6 +650,14 @@ func _present_frame(stats_on: bool) -> void:
 		if stats_on:
 			_frame_stats.add(FrameStatsBoard.PRESENT_THROWABLE,
 					Time.get_ticks_usec() - throwable_start)
+	# After the entity rows: the entity-ring meshes parent under section nodes
+	# the row passes may have just built.
+	if _scar_present != null:
+		var scar_start := Time.get_ticks_usec() if stats_on else 0
+		_scar_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_SCARS,
+					Time.get_ticks_usec() - scar_start)
 	_perf_present_us = Time.get_ticks_usec() - present_start
 
 
@@ -893,6 +923,12 @@ func _exit_tree() -> void:
 			simulation_restarted.disconnect(reset_throwable)
 		_throwable_present.teardown()
 		_throwable_present = null
+	if _scar_present != null:
+		var reset_scars := Callable(_scar_present, 'reset_runtime_state')
+		if simulation_restarted.is_connected(reset_scars):
+			simulation_restarted.disconnect(reset_scars)
+		_scar_present.teardown()  # frees the scar meshes under the owner models
+		_scar_present = null
 	if _sim != null and is_instance_valid(_sim):
 		_sim.free()
 		_sim = null
