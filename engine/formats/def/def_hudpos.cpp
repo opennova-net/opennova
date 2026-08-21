@@ -53,7 +53,12 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
     hud->agl_color.a = 255;
 
     int in_vehicle_block = 0;
-    size_t raw_cap = 0, stance_cap = 0, declut_cap = 0, sf_cap = 0;
+    /* The VEHICLE_HUD staging block: filled token by token inside a block and
+       committed at VEHICLE_END, mirroring retail's single staging global and
+       its memset reset [orig: HUD_ParseHudposToken @0x59F370]. */
+    DefVehicleHudBlock veh;
+    memset(&veh, 0, sizeof(veh));
+    size_t raw_cap = 0, stance_cap = 0, declut_cap = 0, sf_cap = 0, veh_cap = 0;
 
     LineIter it = {buf, file_len, 0};
     const char *line; size_t line_len;
@@ -70,19 +75,91 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
         size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
         to_lower_buf(lower, trimmed, ll);
 
-        /* Vehicle HUD blocks */
+        /* VEHICLE_HUD blocks. Parsed IN PARALLEL with the raw_lines passthrough:
+           every line still goes to raw_lines so the writer round-trips the file
+           byte for byte, and the typed block is built alongside it. */
         if (lower_starts_with(lower, ll, "vehicle_hud", 11)) {
             in_vehicle_block = 1;
+            memset(&veh, 0, sizeof(veh));   /* [orig: the 0xDC memset reset] */
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
             continue;
         }
         if (lower_starts_with(lower, ll, "vehicle_end", 11)) {
+            /* Commit. Retail resolves the sid against the item table here; the
+               parse keeps the sid string and leaves that join to the consumer.
+               A block with no sid never had a key, so it is dropped rather than
+               stored under an empty name. */
+            if (in_vehicle_block && veh.sid[0] != '\0')
+                DA_PUSH(hud->vehicle_huds, hud->vehicle_huds_count, veh_cap, veh);
             in_vehicle_block = 0;
+            memset(&veh, 0, sizeof(veh));
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
             continue;
         }
         if (in_vehicle_block) {
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
+            {
+                /* Same split the rest of the file uses (whitespace and commas). */
+                size_t vsp = 0;
+                while (vsp < tlen && !isspace((unsigned char)trimmed[vsp])) ++vsp;
+                size_t vvl;
+                const char *vpart = trim_span(trimmed + vsp, tlen - vsp, &vvl);
+                for (size_t ci = 0; ci + 1 < vvl; ++ci) {
+                    if (vpart[ci] == '/' && vpart[ci + 1] == '/') {
+                        vvl = ci;
+                        while (vvl > 0 && isspace((unsigned char)vpart[vvl - 1])) --vvl;
+                        break;
+                    }
+                }
+                Token vv[MAX_TOKENS];
+                int nvv = split_values(vpart, vvl, vv, MAX_TOKENS);
+                if (lower_starts_with(lower, ll, "sid", 3)) {
+                    if (nvv >= 1) safe_copy(veh.sid, sizeof(veh.sid), vv[0].s, vv[0].len);
+                } else if (lower_starts_with(lower, ll, "icon", 4)) {
+                    if (nvv >= 1) safe_copy(veh.icon, sizeof(veh.icon), vv[0].s, vv[0].len);
+                } else if (lower_starts_with(lower, ll, "interface", 9)) {
+                    if (nvv >= 1)
+                        safe_copy(veh.interface_texture, sizeof(veh.interface_texture),
+                                  vv[0].s, vv[0].len);
+                } else if (lower_starts_with(lower, ll, "statictexture", 13)) {
+                    if (nvv >= 1)
+                        safe_copy(veh.static_texture, sizeof(veh.static_texture),
+                                  vv[0].s, vv[0].len);
+                } else if (lower_starts_with(lower, ll, "driver", 6)) {
+                    if (nvv >= 2) {
+                        veh.driver_x = parse_int_n(vv[0].s, vv[0].len);
+                        veh.driver_y = parse_int_n(vv[1].s, vv[1].len);
+                    }
+                } else if (lower_starts_with(lower, ll, "emplace", 7)) {
+                    /* [count][x y]... -- retail caps the COUNT, then reads that
+                       many pairs; a short line yields fewer. */
+                    if (nvv >= 1) {
+                        int n = parse_int_n(vv[0].s, vv[0].len);
+                        if (n > DEF_VEHICLE_HUD_MAX_EMPLACE) n = DEF_VEHICLE_HUD_MAX_EMPLACE;
+                        if (n < 0) n = 0;
+                        int got = 0;
+                        for (int i = 0; i < n && 1 + 2 * i + 1 < nvv; ++i) {
+                            veh.emplace_x[i] = parse_int_n(vv[1 + 2 * i].s, vv[1 + 2 * i].len);
+                            veh.emplace_y[i] = parse_int_n(vv[2 + 2 * i].s, vv[2 + 2 * i].len);
+                            got = i + 1;
+                        }
+                        veh.emplace_count = got;
+                    }
+                } else if (lower_starts_with(lower, ll, "seats", 5)) {
+                    if (nvv >= 1) {
+                        int n = parse_int_n(vv[0].s, vv[0].len);
+                        if (n > DEF_VEHICLE_HUD_MAX_SEATS) n = DEF_VEHICLE_HUD_MAX_SEATS;
+                        if (n < 0) n = 0;
+                        int got = 0;
+                        for (int i = 0; i < n && 1 + 2 * i + 1 < nvv; ++i) {
+                            veh.seat_x[i] = parse_int_n(vv[1 + 2 * i].s, vv[1 + 2 * i].len);
+                            veh.seat_y[i] = parse_int_n(vv[2 + 2 * i].s, vv[2 + 2 * i].len);
+                            got = i + 1;
+                        }
+                        veh.seat_count = got;
+                    }
+                }
+            }
             continue;
         }
 
@@ -483,6 +560,7 @@ DEF_EXPORT void def_free_hudpos(DefHudPosFile *f) {
     free(f->hud.stances);
     free(f->hud.declutter);
     free(f->hud.static_frames);
+    free(f->hud.vehicle_huds);
     free(f->hud.raw_lines);
     memset(f, 0, sizeof(*f));
 }

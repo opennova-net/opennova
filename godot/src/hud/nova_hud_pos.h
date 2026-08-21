@@ -191,6 +191,8 @@ public:
 	Array get_stances() const;
 	// [{ texture:String, pos:Vector2i }]
 	Array get_static_frames() const;
+	// One VEHICLE_HUD block by items.def sid; empty when unknown.
+	Dictionary get_vehicle_hud(const String &p_sid) const;
 	Dictionary get_parachute_icon() const;
 	Dictionary get_armor_icon() const;
 	Rect2i get_spinmap_bounds() const;
