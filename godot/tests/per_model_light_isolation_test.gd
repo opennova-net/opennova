@@ -160,8 +160,8 @@ func test_owned_corona_gates_on_owner_section_visibility() -> void:
 	assert_gt(scene.spawn_model_light({
 		"position": Vector3(0.0, 1.0, 0.0),
 		"atten_end": 4.0,
-		"owner_entity": owner_model.get_instance_id(),
-		"owner_section": 2,
+		"attach_bone": 2,
+		"spawning_entity": owner_model.get_instance_id(),
 	}), 0)
 	var models: Array[Node3D] = [owner_model]
 	var owners := PackedInt64Array([owner_model.get_instance_id()])
@@ -200,7 +200,10 @@ func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
 	}), 0)
 	var models: Array[Node3D] = [near_model, far_model]
 	var owners := PackedInt64Array([0, 0])
-	assert_eq(scene.render_model_frame(models, owners, Vector3.ONE, 0, null),
+	var no_interior := PackedInt64Array([0, 0])
+	var no_sections := PackedInt32Array([0, 0])
+	assert_eq(scene.render_model_frame(models, owners, no_interior,
+			no_sections, Vector3.ONE, 0, null),
 			1, "one model sits inside the light's AABB")
 	var near_surface := _surface_instance(near_model)
 	if near_surface == null:
@@ -219,8 +222,95 @@ func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
 	assert_almost_eq(color.w, 10.0, 0.001, "color.w carries the range cutoff")
 	# The light dies; the next pass clears the instance count.
 	scene.clear()
-	assert_eq(scene.render_model_frame(models, owners, Vector3.ONE, 0, null),
+	assert_eq(scene.render_model_frame(models, owners, no_interior,
+			no_sections, Vector3.ONE, 0, null),
 			0, "a cleared pool lights nothing")
 	assert_eq(float(near_surface.get_instance_shader_parameter(
 			"u_point_light_count")), 0.0,
 			"a lit model returns to count zero when its lights die")
+
+
+## The blink-box owner + interior light group (the D-RLIT-4 interior close):
+## an unattached record spawned inside a building's blink volume binds to the
+## CONTAINING building + that volume's section, and each draw declares the
+## building it stands inside so the room's light reaches exactly the draws in
+## that room [orig: Entity_SpawnGlowEffects @ 0x56c8bd..0x56c8db;
+## setup_terrain_effect_for_entity @ 0x5c74a0 -> Lighting_SetInteriorLightGroup
+## @ 0x5a90e0; the gate Light_PassesActiveGroups @ 0x5a9120].
+func test_blink_owned_light_reaches_only_its_own_interior_section() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	# Three draws in the lamp's reach: the containing building, a model inside
+	# its section 2, and a model inside section 5 of the same building.
+	var building := _placed_model(container, Vector3.ZERO)
+	var in_room := _placed_model(container, Vector3(1.0, 0.0, 0.0))
+	var other_room := _placed_model(container, Vector3(2.0, 0.0, 0.0))
+	var building_id := building.get_instance_id()
+
+	var scene := LightScene.new()
+	# An unattached record (attach bone 0) spawned by a NON-building entity
+	# standing inside building/section 2: the containing building owns it.
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(1.0, 1.0, 0.0),
+		"atten_end": 8.0,
+		"attach_bone": 0,
+		"spawning_entity": in_room.get_instance_id(),
+		"spawner_is_building": false,
+		"blink_owner_entity": building_id,
+		"blink_section": 2,
+	}), 0)
+
+	var models: Array[Node3D] = [in_room, other_room, building]
+	var owners := PackedInt64Array([in_room.get_instance_id(),
+			other_room.get_instance_id(), building_id])
+	var interior_owners := PackedInt64Array([building_id, building_id, 0])
+	var interior_sections := PackedInt32Array([2, 5, 0])
+	assert_eq(scene.render_model_frame(models, owners, interior_owners,
+			interior_sections, Vector3.ONE, 0, null), 2,
+			"the room light reaches its own room and its owner building")
+
+	var in_room_surface := _surface_instance(in_room)
+	var other_surface := _surface_instance(other_room)
+	if in_room_surface == null or other_surface == null:
+		return
+	assert_eq(float(in_room_surface.get_instance_shader_parameter(
+			"u_point_light_count")), 1.0,
+			"a draw standing in the light's own section receives it")
+	assert_eq(float(other_surface.get_instance_shader_parameter(
+			"u_point_light_count")), 0.0,
+			"a draw in another section of the same building does not")
+
+	# Outdoors (no interior group at all): the interior lamp never leaks.
+	var outdoor_owners := PackedInt64Array([0, 0, 0])
+	var outdoor_sections := PackedInt32Array([0, 0, 0])
+	assert_eq(scene.render_model_frame(models, owners, outdoor_owners,
+			outdoor_sections, Vector3.ONE, 0, null), 1,
+			"only the owner building's own draw keeps the light outdoors")
+
+
+## Retail skips the blink query outright for a BUILDING, so a building's own
+## unattached records stay world lights even though its volumes contain them
+## [orig: the ItemType_Building gate @ 0x56c7ec].
+func test_a_buildings_own_unattached_record_stays_a_world_light() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var building := _placed_model(container, Vector3.ZERO)
+	var bystander := _placed_model(container, Vector3(2.0, 0.0, 0.0))
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(1.0, 1.0, 0.0),
+		"atten_end": 8.0,
+		"attach_bone": 0,
+		"spawning_entity": building.get_instance_id(),
+		"spawner_is_building": true,
+		# Even with a blink hit reported, the building gate suppresses it.
+		"blink_owner_entity": building.get_instance_id(),
+		"blink_section": 3,
+	}), 0)
+	var models: Array[Node3D] = [building, bystander]
+	var owners := PackedInt64Array([building.get_instance_id(),
+			bystander.get_instance_id()])
+	assert_eq(scene.render_model_frame(models, owners,
+			PackedInt64Array([0, 0]), PackedInt32Array([0, 0]),
+			Vector3.ONE, 0, null), 2,
+			"an unowned world light reaches every nearby draw")

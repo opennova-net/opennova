@@ -410,6 +410,12 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &Simulation::local_player_blink_flags);
 	ClassDB::bind_method(D_METHOD("local_player_interior_item_id"),
 	                     &Simulation::local_player_interior_item_id);
+	ClassDB::bind_method(D_METHOD("query_blink_owner_at", "world_pos"),
+	                     &Simulation::query_blink_owner_at);
+	ClassDB::bind_method(D_METHOD("get_entity_interior_groups"),
+	                     &Simulation::get_entity_interior_groups);
+	ClassDB::bind_method(D_METHOD("local_player_interior_group"),
+	                     &Simulation::local_player_interior_group);
 	BIND_CONSTANT(BLINK_INDOORS);
 	BIND_CONSTANT(BLINK_WATER_OFF);
 	ClassDB::bind_method(D_METHOD("compute_iris_samples", "cam_pos", "cam_forward", "light_dir"),

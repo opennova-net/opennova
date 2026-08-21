@@ -416,6 +416,42 @@ private:
 	mutable LightSceneReport report_{};
 };
 
+// The group a model LGHT record's pool instance is owned by. Retail decides
+// this once per record inside the spawner, in a fixed branch order
+// [orig: Entity_SpawnGlowEffects @ 0x56c89a..0x56c8db].
+struct ModelLightOwnerInputs {
+	// Record byte +32, the authored attach subobject [orig: @ 0x56c89a].
+	uint8_t attach_bone = 0;
+	// The entity whose model carries the record.
+	uint64_t spawning_entity = 0;
+	// Retail skips the blink query outright when the spawning entity's
+	// ItemDef type is Building, so a building's own unattached records stay
+	// world lights even though its blink volumes contain them (the query has
+	// no self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec].
+	bool spawner_is_building = false;
+	// The blink query at the SPAWNING ENTITY's position, run once before the
+	// record walk: whether it hit any blink volume, and slot 0's decoded
+	// owner/section [orig: Entity_QueryBlinkBoxesAtPoint @ 0x56c7fc, the
+	// count test @ 0x56c8bd, Pool_GetEntryUnchecked(2, hit >> 20) @ 0x56c8c9
+	// and (hit >> 12) & 0x1F @ 0x56c8db]. The packed-hit decode itself lives
+	// with the packing (world::BlinkAccum).
+	bool blink_hit = false;
+	uint64_t blink_owner_entity = 0;
+	int32_t blink_section = 0;
+};
+
+struct ModelLightOwner {
+	uint64_t entity = 0;  // 0 = unowned: a world light, gated by nothing
+	int32_t section = 0;
+};
+
+// An attached record is owned by its own entity + subobject (cabin
+// self-lights); an unattached record spawned INSIDE a blink box is owned by
+// the containing building + that volume's section (interior room lights);
+// every other record — the fire barrels — spawns unowned and lights the
+// world [orig: Entity_SpawnGlowEffects @ 0x56c89f / @ 0x56c8bd].
+ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
+
 // The witnessed flicker register value for one light: the position hash into
 // the weather wave ring [orig: Light_TickGenBlock @ 0x5a8ae0 -> the global
 // FLICKER ctrl slot 0x83FD00 = 0x83FCE8 + 8 * 3].
