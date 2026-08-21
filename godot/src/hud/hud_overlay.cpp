@@ -458,13 +458,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.game_info = pos_record4(p_hudpos->get_game_info_pos());
 	layout_.wpd_info = pos_record4(p_hudpos->get_wpd_info_pos());
 	layout_.chat_text = pos_record2(p_hudpos->get_chat_text_pos());
-	// The chat box's coordinate rows: retail's g_hudChatBoxCoords rows 1/2 are
-	// the authored HUDCHATTEXT pair, read back as the chat wrap width
-	// `x2 - (x1 - 4)` (retail: HUD_GetChatBoxCoord @0x5bbe90 <-
-	// Chat_AddMessageChannel1 @0x498673/@0x498688, see docs/interface/hud-re.md).
-	layout_.chat_box_x1 = layout_.chat_text.x;
-	layout_.chat_box_x2 = layout_.chat_text.y;
-	layout_.chat_box_present = layout_.chat_text.present;
+	// The chat box's coordinate rows (the chat wrap width `x2 - (x1 - 4)`)
+	// are NOT the HUDCHATTEXT anchor: retail's g_hudChatBoxCoords are written
+	// by a separate hud.def `chat_message x1 y1 x2 y2` / `sys_message` parser
+	// (retail: File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) @0x5be210..0x5be228,
+	// the callback @0x5bb7a0, stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841),
+	// and JO:CA ships no hud.def — the rows stay 0, the width is 4, and the
+	// wrapper returns 1 at the first character, so a retail chat line never
+	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
+	// title needs a formats/def reader (the file is SCR-encoded, key 0x2A5A8EAD).
 	layout_.sys_text = pos_record2(p_hudpos->get_sys_text_pos());
 	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_hudZonePanelX/Y).
 	{
@@ -593,24 +595,26 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		layout_.net_icon_texture_valid = icon.is_valid();
 	}
 	{
-		// The AAS zone status panel's three team-icon atlases and the
-		// other-team tile (retail: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga
-		// team 1, R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile
-		// for everyone else's zones @0x59e10e, see docs/interface/hud-re.md).
-		// The OWN-zone tile slot stays empty: its loader is unwitnessed (the
-		// textureId @0x27239D4 writer), and an unresolved slot draws no tile.
+		// The AAS zone status panel's three team-icon atlases and the two
+		// tiles (retail: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
+		// R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile for
+		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
+		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
+		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md).
 		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga");
 		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga");
 		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga");
+		const Ref<Texture2D> tile_own = load_hud_texture_("lfp_dlf.tga");
 		const Ref<Texture2D> tile_other = load_hud_texture_("lfp_alf.tga");
 		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
 		textures_[opennova::hud::kHudTexLfpTeam2] = team2;
 		textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
+		textures_[opennova::hud::kHudTexLfpTileOwn] = tile_own;
 		textures_[opennova::hud::kHudTexLfpTileOther] = tile_other;
 		layout_.lfp_icon_texture_valid[0] = team1.is_valid();
 		layout_.lfp_icon_texture_valid[1] = team2.is_valid();
 		layout_.lfp_icon_texture_valid[2] = neutral.is_valid();
-		layout_.lfp_tile_own_texture_valid = false;
+		layout_.lfp_tile_own_texture_valid = tile_own.is_valid();
 		layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
 	}
 
@@ -890,6 +894,11 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 		int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim) {
 	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
 	lp.local_team = p_local_team;
+	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
+	// HUD tick here; retail's g_hudFrameCounter increments once per MAIN FRAME
+	// (retail: Game_ProcessMainFrame @0x5265d5 -> Game_TickHudFrameCounters
+	// @0x434c23, see docs/interface/hud-re.md), so retail's blink is
+	// frame-rate dependent and matches this fold only at 62 fps.
 	lp.frame_counter = p_frame_counter;
 	// The conquest arm is the other branch of the same drawer and is
 	// unmodelled (retail: g_GameType == 0x50010 @0x5a24a1).
