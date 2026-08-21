@@ -263,6 +263,30 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 	}
 }
 
+// The kill-event scoring award [orig: GameEvent_ProcessScoring @ 0x52F550, case 3].
+// Retail's branch order inside the kill case, which this reproduces:
+//   1. self-kill (`entity == victimEntity`)                 -> SUICIDE  (slot 4, [78])
+//   2. same team (`attackerTeam == victimTeamPtr`)          -> FRIENDLYKILL (slot 2, [76])
+//   3. otherwise                                            -> ENEMYKILL (slot 3, [77])
+// The team comparison only happens for team game types (`g_GameType & 0x10000`,
+// @0x52f550 `attackerTeam` is left null otherwise); Co-op's 0x30020 has that bit, so
+// the team branches are live here.
+//
+// Awards land on the killer's SLOT score (retail: field id 28 on the per-slot stats
+// object, reached as `CPlayerStats_RecordEvent(28, value, 0, 0)`), which is the same
+// field the S2C 0x81 mirror publishes.
+//
+// NOT PORTED (declared, not invented): the carried-rider chain bonus that awards
+// `value >> 1` and `value >> 2` up the attacker's parent links @0x52f57e..0x52f5a8,
+// the per-TEAM award leg, and every non-kill event case. Those are separate ledger
+// work; nothing here guesses at them.
+int32_t kill_award(const world::ScoreRules &rules, bool self_kill, bool same_team) {
+	if (!rules.valid) return 0;
+	if (self_kill) return rules.suicide;
+	if (same_team) return rules.friendly_kill;
+	return rules.enemy_kill;
+}
+
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
@@ -289,6 +313,24 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			victim_is_player = true;
 			victim_is_host_player = (c.link.mode == netsim::TransportMode::Loopback);
 			break;
+		}
+
+		// Kill scoring [orig: GameEvent_ProcessScoring @ 0x52F550 case 3]. The award
+		// lands on the KILLER's slot; a kill with no owning connection (an AI killing
+		// an AI) scores nobody, exactly as retail's `if (attackerPlayer)` gate does.
+		{
+			const world::Entity *victim_e = world.registry.get(d.victim);
+			const world::Entity *killer_e = world.registry.get(d.killer);
+			for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+				if (!c.link.owned_entity.valid() ||
+						c.link.owned_entity.packed != d.killer_handle)
+					continue;
+				const bool self_kill = d.killer_handle == d.victim_handle;
+				const bool same_team = !self_kill && victim_e != nullptr &&
+						killer_e != nullptr && victim_e->team == killer_e->team;
+				c.score += kill_award(world.score_rules, self_kill, same_team);
+				break;
+			}
 		}
 
 		if (ctx.is_in_session) {
@@ -398,6 +440,35 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	const bool dead = !local->alive || (local->flags & 2u) != 0;
 	if (dead && (world.mission_attrib_flags & world::World::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
+}
+
+// The change-gated S2C 0x81 score mirror
+// [orig: Server_UpdateCaptureZoneProximity @ 0x5086A0]:
+//
+//   if (!g_spawn_success_gate)                       // round still running
+//     per slot with state 6 and a live entity:
+//       v = CRenderState_GetFieldByIndex(slot + 18, 0x1C);   // the score, field id 28
+//       if (slot[83] != v) { slot[83] = v; send 0x81 [i32 v]; }
+//
+// The BODY is the ABSOLUTE score, not a delta — the client derives the delta and
+// picks its hit-confirm sound tier [orig: _ScoreDeltaSound @ 0x42A0B0 ->
+// dword_A82300]. DIVERGENCE (placement only): retail runs this inside its 1 Hz
+// capture-zone proximity sweep; ours is its own per-tick pass because that sweep is
+// not ported. The change gate means the emitted bytes are identical either way —
+// only the latency between a score change and its send differs.
+void emit_score_mirror(NapiNPServerCtx &ctx, world::World &world) {
+	if (!ctx.is_in_session) return;
+	if (world.round_end.ended) return; // [orig: the !g_spawn_success_gate guard @0x5086a0]
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+		if (world.registry.get(conn.link.owned_entity) == nullptr) continue; // `!*slotPtr`
+		if (conn.score == conn.score_wire_mirror) continue;
+		conn.score_wire_mirror = conn.score;
+		std::vector<uint8_t> body;
+		put_u32le(body, static_cast<uint32_t>(conn.score));
+		conn.link.transport->host_send(s2c::SCORE_DELTA_SOUND, std::move(body),
+		                               /*reliable=*/true);
+	}
 }
 
 // The S2C 0x1D end-of-round scoreboard HEADER body.
@@ -911,6 +982,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 
 	// Queue per-peer retail maintenance before the ordinary 0x0A fan so the
 	// requests share HostSession's next open S2C boundary.
+	emit_score_mirror(ctx, world);
 	emit_periodic_session_maintenance(ctx, world);
 	emit_minimap_overlay_state(ctx, world);
 

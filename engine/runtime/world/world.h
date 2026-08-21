@@ -260,6 +260,21 @@ struct WacNamedValues {
 // [orig: g_spawn_success_gate @0x24c1928 (latched by Server_ProcessRoundEnd
 // @0x5168e4, cleared by Game_StartMission @0x524a1f), g_round_winning_team
 // @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D payload byte 0).]
+// The scoring awards for the session's game type, resolved from score.ini's row
+// for that type. Retail keeps the whole 452-byte row and indexes it as
+// `scoringTable[74 + slot]`; we carry only the awards the ported legs read, each
+// looked up BY NAME through engine/formats/score (the row-image layout is not
+// witnessed — see that lib's header). Slot numbers below are from the shipped
+// name table [orig: off_830348 @ 0x830348, read out of Jointops.exe: 38
+// {name, slot} pairs, slots 0..37].
+struct ScoreRules {
+    bool valid = false;      // false until the host resolves a row; every award is then 0
+    int32_t enemy_kill = 0;  // VAR "ENEMYKILL"    slot 3 -> scoringTable[77]
+    int32_t friendly_kill = 0; // VAR "FRIENDLYKILL" slot 2 -> scoringTable[76]
+    int32_t suicide = 0;     // VAR "SUICIDE"     slot 4 -> scoringTable[78]
+    int32_t death = 0;       // VAR "DEATH"       slot 5 -> scoringTable[79]
+};
+
 struct RoundEndState {
     bool ended = false;
     int32_t winner_team = 0;
@@ -404,6 +419,11 @@ public:
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
+
+    // Scoring awards for this session's game type (score.ini row). Populated by the
+    // host from the parsed config; zero/!valid until then, which makes every award
+    // a no-op rather than a guess.
+    ScoreRules score_rules;
 
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the

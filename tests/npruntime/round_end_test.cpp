@@ -242,6 +242,89 @@ int main() {
 		expect(again == 0, "the wire pass is one-shot on the ended edge");
 	}
 
+	// --- 7. Kill scoring + the change-gated S2C 0x81 score mirror.
+	// award [orig: GameEvent_ProcessScoring @0x52F550 case 3]; mirror
+	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0]. Fresh world so the
+	// round-over latch from section 5 does not gate the mirror.
+	{
+		w::World w3;
+		w3.registry.configure_pool(0, 16);
+		w::AiSystem ai3;
+		w3.ai = &ai3;
+		w3.score_rules.valid = true;   // Co-op row values, as score.ini ships them
+		w3.score_rules.enemy_kill = 5;
+		w3.score_rules.friendly_kill = 0;
+		w3.score_rules.suicide = 0;
+
+		w::PlayerSpawn ps3;
+		ps3.position = {0.0f, 0.0f, 10.0f};
+		ps3.team = 1;
+		ps3.net_id = 0xFFE0;
+		const w::EntityHandle shooter = w::spawn_player(w3, ps3);
+		w::Entity foe;
+		foe.team = 2;
+		foe.alive = true;
+		foe.net_id = 900;
+		const w::EntityHandle enemy = w3.registry.spawn_from(0, 0, foe);
+
+		ns::LoopbackChannel ch3;
+		np::NapiNPServerCtx c3;
+		c3.is_authority = 1;
+		c3.is_in_session = 1;
+		c3.world = &w3;
+		c3.np_protocol.connection_list.push_back(make_conn(
+				1, 1, &ch3, ns::TransportMode::Loopback, shooter, true));
+
+		np::Server_TickUpdate(c3);
+		ns::Datagram d3;
+		int saw81 = 0;
+		while (ch3.client_recv(d3))
+			if (d3.tag == 0x81) ++saw81;
+		expect(saw81 == 0, "no 0x81 until the score first changes [orig: the slot[83] gate]");
+
+		push_death(w3, enemy, shooter);
+		np::Server_TickUpdate(c3);
+		expect(c3.np_protocol.connection_list[0].score == 5,
+		       "enemy kill awards ENEMYKILL (score.ini Co-op = 5)");
+		int32_t body_score = -1;
+		while (ch3.client_recv(d3)) {
+			if (d3.tag != 0x81) continue;
+			++saw81;
+			if (d3.body.size() == 4)
+				body_score = static_cast<int32_t>(
+						uint32_t(d3.body[0]) | (uint32_t(d3.body[1]) << 8) |
+						(uint32_t(d3.body[2]) << 16) | (uint32_t(d3.body[3]) << 24));
+		}
+		expect(saw81 == 1, "one 0x81 on the score change");
+		expect(body_score == 5, "0x81 body is the ABSOLUTE score, not a delta");
+
+		np::Server_TickUpdate(c3);
+		int again81 = 0;
+		while (ch3.client_recv(d3))
+			if (d3.tag == 0x81) ++again81;
+		expect(again81 == 0, "the mirror is change-gated, not periodic");
+
+		w::Entity mate;
+		mate.team = 1;
+		mate.alive = true;
+		mate.net_id = 901;
+		const w::EntityHandle friendly = w3.registry.spawn_from(0, 1, mate);
+		push_death(w3, friendly, shooter);
+		np::Server_TickUpdate(c3);
+		expect(c3.np_protocol.connection_list[0].score == 5,
+		       "same-team kill takes the FRIENDLYKILL branch (Co-op 0)");
+
+		w::Entity foe2;
+		foe2.team = 2;
+		foe2.alive = true;
+		foe2.net_id = 902;
+		const w::EntityHandle enemy2 = w3.registry.spawn_from(0, 2, foe2);
+		push_death(w3, enemy2, enemy);
+		np::Server_TickUpdate(c3);
+		expect(c3.np_protocol.connection_list[0].score == 5,
+		       "a kill with no owning connection scores nobody");
+	}
+
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;
 }
