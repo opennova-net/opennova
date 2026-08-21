@@ -56,6 +56,7 @@
 #include <world/weapon_fsm.h>
 #include <world/weapon_inventory.h>
 #include <world/world.h>
+#include <score/score.h> // the retained score.ini parse (score_config_)
 
 #include "mission/nova_mission_data.h"
 #include <simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
@@ -995,6 +996,11 @@ private:
 	void resolve_client_row_adm_ids();
 	std::unordered_map<uint16_t, int> client_row_adm_by_type_;
 	Ref<ResourceRoot> infantry_adm_resource_root_;
+	// Retained score.ini parse; the row is re-resolved whenever the mission's
+	// attrib flags change (either load order is legal).
+	opennova::score::File score_config_;
+	bool score_config_loaded_ = false;
+	void refresh_score_rules();
 	Ref<ItemDatabase> infantry_adm_item_db_;
 	int infantry_adm_resolved_ai_count_ = 0;
 	void apply_root_motion_to_ai();
@@ -2386,6 +2392,18 @@ public:
 	// right after AnimDef_InitAll @0x5254b3]. Idempotent; call after load.
 	Error load_weapon_table(const Ref<class ResourceRoot> &p_resource_root,
 	                        const String &p_name = "weapon.def");
+
+	// Parse score.ini and install this session's scoring awards (world::World::score_rules).
+	// Retail builds 12 x 452-byte gametype rows with hardcoded defaults and then OVERLAYS
+	// the file onto them, writing the file out when it is absent
+	// [orig: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0].
+	// DECLARED GAP: the built-in defaults are NOT ported, so a missing score.ini leaves
+	// score_rules !valid (every award a no-op) where retail would still score from its
+	// defaults. The shipped file is the retail-parity path.
+	// Order-independent with the mission load: whichever of the two lands second
+	// re-resolves the row (see refresh_score_rules).
+	Error load_score_config(const Ref<class ResourceRoot> &p_resource_root,
+	                        const String &p_name = "score.ini");
 
 	// Parse ammo.def and install the ballistics/damage table (world::World::ammo), then
 	// resolve every armory entry's round_type to its ammo index — the authoritative round

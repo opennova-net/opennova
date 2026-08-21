@@ -538,6 +538,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &Simulation::load_weapon_table, DEFVAL(String("weapon.def")));
+	ClassDB::bind_method(D_METHOD("load_score_config", "resource_root", "name"),
+	                     &Simulation::load_score_config, DEFVAL(String("score.ini")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
 	                     &Simulation::load_ammo_table, DEFVAL(String("ammo.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &Simulation::get_infantry_clip_count);

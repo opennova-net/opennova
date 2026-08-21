@@ -405,6 +405,9 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	// The score row keys off the mission's game-mode bit, so re-resolve it now that
+	// the flags are known (the config may have loaded before OR after this).
+	refresh_score_rules();
 	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
 	// (witness at hud::HudMapControl::set_mission_map_zoom — the
 	// Player_InitPlayer derivation off the BMS header float).
@@ -662,6 +665,15 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		if (load_weapon_table(p_resource_root, "weapon.def") != OK)
 			UtilityFunctions::push_warning(
 					"MissionPresentation: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
+		// score.ini rides the same session-data step. DIVERGENCE (placement): retail
+		// loads it far earlier, when it builds the default gametype settings
+		// [orig: GameType_CreateDefaultSettings @0x52DD00], not at mission boot. The
+		// observable behaviour is the same because the session's row is re-resolved
+		// from the mission's game-mode bit in refresh_score_rules(), which finish_load
+		// also calls — so either order yields the same score_rules.
+		if (load_score_config(p_resource_root, "score.ini") != OK)
+			UtilityFunctions::push_warning(
+					"MissionPresentation: score.ini not loaded — kill scoring inert (no 0x81)");
 	};
 	steps.load_ammo_table = [&] {
 		if (load_ammo_table(p_resource_root, "ammo.def") == OK) return true;
@@ -1196,6 +1208,8 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
 	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
 	out["yaw"] = static_cast<int>(ent->yaw);
+	out["pitch"] = static_cast<int>(ent->pitch);
+	out["roll"] = static_cast<int>(ent->roll);
 	out["primary_weapon_clip"] = ent->primary_weapon_slot.clip;
 	out["primary_weapon_reserve"] = ent->primary_weapon_slot.reserve;
 	out["seat_count"] = static_cast<int>(ent->seats.size());
