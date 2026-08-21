@@ -83,6 +83,7 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _water: Water = get_node_or_null("Water")
 @onready var _weather: Weather = get_node_or_null("Weather")
 @onready var _celestial: Celestial = get_node_or_null("Celestial")
+@onready var _sky_dome: SkyDome = get_node_or_null("SkyDome")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: FoliageDispatcher
@@ -2703,9 +2704,8 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# These native devices normally self-refresh during a live frame. A fixture
 	# freezes their parent before moving the capture camera, so drive their
 	# public zero-delta frame seams explicitly after that move.
-	var sky := get_node_or_null("SkyDome") as SkyDome
-	if sky != null:
-		sky.advance_frame(0.0)
+	if _sky_dome != null:
+		_sky_dome.advance_frame(0.0)
 	if _water != null:
 		# Water's public frame seam retargets the mirror/strip and advances its
 		# render-noise counter exactly once. The fixture freezes immediately after
@@ -2735,6 +2735,18 @@ func get_water_node() -> Water:
 
 func get_celestial_node() -> Celestial:
 	return _celestial
+
+
+func get_sky_dome_node() -> SkyDome:
+	return _sky_dome
+
+
+func get_sun_shadow_node() -> SunShadow:
+	return _sun_shadow
+
+
+func get_clear_color_node() -> WorldEnvironment:
+	return _clear_color
 
 
 ## One typed read-only renderer snapshot for MCP, visual probes, and comparison

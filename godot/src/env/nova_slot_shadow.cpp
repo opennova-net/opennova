@@ -181,7 +181,7 @@ void SlotShadow::set_shadow_detail(int p_detail) {
 	shadow_detail_ = CLAMP(p_detail, 0, 4);
 }
 
-void SlotShadow::set_local_player_model(Node *p_model) {
+void SlotShadow::set_local_player_model(ObjectModel *p_model) {
 	local_player_id_ = p_model != nullptr ? ObjectID(p_model->get_instance_id())
 										  : ObjectID();
 }
@@ -646,24 +646,24 @@ void SlotShadow::advance_frame() {
 	drape->set_shader_parameter("u_slot_term", silhouette_terms);
 	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
 
-	// Linked children the full table refused (no assignment row of their
-	// own) still ride their parent's slot RT: retail's child walk follows
-	// the entity hierarchy, not the slot table
-	// (the RenderSlot_RenderEntityAndChildren walk the claim pass above cites).
-	for (const std::pair<uint64_t, uint64_t> &link : capture_links) {
-		if (rowed.has(link.first)) {
+	// Casters the full table refused (no assignment row of their own): a
+	// linked child still rides its parent's slot RT — retail's child walk
+	// follows the entity hierarchy, not the slot table (the
+	// RenderSlot_RenderEntityAndChildren walk the claim pass above cites) —
+	// and a row-less caster whose link dropped gives its inherited channel
+	// back (no row of its own ever clears it).
+	for (const CasterInfo &info : casters) {
+		const uint64_t id = uint64_t(info.model->get_instance_id());
+		if (rowed.has(id)) {
 			continue;
 		}
-		const uint32_t *claim = claimed.getptr(link.first);
+		const uint32_t *claim = claimed.getptr(id);
 		const uint32_t want_bit = claim != nullptr ? *claim : 0u;
-		uint32_t &applied = applied_bits_[link.first];
+		uint32_t &applied = applied_bits_[id];
 		if (want_bit == 0 && applied == 0) {
 			continue;
 		}
-		const size_t *index = caster_index.getptr(link.first);
-		if (index != nullptr) {
-			_apply_capture_layers(casters[*index].model, want_bit);
-		}
+		_apply_capture_layers(info.model, want_bit);
 		applied = want_bit;
 	}
 }

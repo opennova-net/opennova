@@ -37,9 +37,12 @@ class Weather;
 // Device folds (documented on docs/render/render-lighting-re.md): the drape
 // projects per-pixel — the retail 21x21 anchor-marched patch is that
 // projection's placement device, so the march needs no separate device leg;
-// mounted/standing children capture through their own slots rather than the
-// parent's RT walk; the attached-light drape darkening folds the light's
-// attenuation at the entity into the per-slot term.
+// capture-with linked children (held weapons, mounted riders) render into
+// their parent's slot RT through the per-frame claim pass — the
+// RenderSlot_RenderEntityAndChildren child walk — while tree-parented riders
+// fold into the ancestor exclusion and take the parent's subtree stamp; the
+// attached-light drape darkening folds the light's attenuation at the entity
+// into the per-slot term.
 //
 // Driven once per display frame by GameFramePipeline through
 // GameWorld.render_slot_shadow_frame(), after the light select has pushed
@@ -74,7 +77,7 @@ public:
 	// refresh exception, and the first-person drape gates (detail >= 2, not
 	// prone) (retail: RenderSlot_DrawAllDrapes @0x5d6e70..0x5d6e90, see
 	// docs/render/render-lighting-re.md).
-	void set_local_player_model(Node *p_model);
+	void set_local_player_model(ObjectModel *p_model);
 	void set_local_player_first_person(bool p_first_person);
 	void set_local_player_prone(bool p_prone);
 

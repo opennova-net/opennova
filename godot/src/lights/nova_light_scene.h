@@ -89,8 +89,8 @@ public:
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):
 	// entity-centered collect + group-gated params, no D3D-fill boost
 	// (retail: RenderSlot_UpdateEntityLight @0x5d6a30, see
-	// docs/render/render-lighting-re.md). A C++ seam: fills the planner's
-	// typed inputs (positions in Godot world) and returns the count.
+	// docs/render/render-lighting-re.md). A C++ seam (not script-bound):
+	// fills r_out with the planner's typed inputs (positions in Godot world).
 	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<renderer::SlotPointLight> &r_out);

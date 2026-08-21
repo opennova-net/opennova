@@ -505,9 +505,9 @@ func advance_fixed_tick() -> void:
 
 ## One weapon fire with the ammo MF_Light flag [orig: Entity_UpdateMuzzleGlow-
 ## Effect @ 0x56c960, called per shot from both fire arms]. Owner = the
-## shooter. The metadata is preserved, but the current camera-global object
-## pass admits it unscoped: the flash is visible and may light nearby objects
-## until per-draw grouping closes the tracked D-RLIT-4 residual.
+## shooter, so the per-draw owner select (render_model_frame) admits the glow
+## only on draws declaring that owner — the shooter's body, and the
+## first-person parts the world tags with the local player's id (D-AI-8d).
 func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 	var handle := int(_muzzle_handles.get(shooter_handle, 0))
 	if handle == 0:

@@ -7,22 +7,21 @@ namespace godot {
 
 class MissionEnvironment;
 
-// Shadow-only device leg: a DirectionalLight3D that casts Godot shadow maps
-// without contributing color lighting (the fixed-function terrain/object
-// shaders own all color; the light is visible only to a black ATTENUATION
-// catcher pass). It models retail's two independent shadow projection lists
+// The sun shadow-direction device leg: a DirectionalLight3D that contributes
+// no color (the fixed-function terrain/object shaders own all color) and
+// models retail's two independent shadow projection lists
 // (docs/render/render-lighting-re.md: the static collector admits pool-2
 // unless NoShadow and pool-1 only with attrib2 StaticShadow; dynamic slots
-// ride entity init) via a projection_mode enum — PROJECTION_DYNAMIC
-// (pose-derived live entity silhouettes onto world models + the hidden FP
-// body) and PROJECTION_STATIC_TERRAIN (static silhouettes onto terrain only)
-// — pairing light_cull_mask (receivers) with shadow_caster_mask (casters)
-// over the Water visual-layer bits. Each frame it reads the environment's
-// surface-to-light direction (the engine light chain already computes the
-// negated emission form: renderer::WorldLightingBlock.dir), orients via a
-// look-at basis with a degenerate-up fallback, and hides itself when the
-// environment is unloaded or the direction is near zero. Ported from
-// nova_sun_shadow.gd (2026-08-10 de-scripting).
+// ride entity init) via a projection_mode enum. PROJECTION_STATIC_TERRAIN
+// casts the Godot shadow map the static-terrain bake reads (static casters
+// onto terrain receivers); PROJECTION_DYNAMIC keeps the shadow map OFF — the
+// SlotShadow capture pipeline renders the live entity ground shadows — and
+// stays the direction-law reference (renderer::slot_projection_direction:
+// the 0.25 vertical clamp, then negate). Both pair light_cull_mask
+// (receivers) with shadow_caster_mask (casters) over the Water visual-layer
+// bits. Each frame it reads the environment's surface-to-light direction,
+// orients via a look-at basis with a degenerate-up fallback, and hides
+// itself when the environment is unloaded or the direction is near zero.
 class SunShadow : public DirectionalLight3D {
 	GDCLASS(SunShadow, DirectionalLight3D)
 
