@@ -15,7 +15,10 @@ witnessed engine behavior still living here — the burn-down class, and it
 can legitimately reach zero; `_device` (env/, terrain/, hud/, mnu/,
 particle/, network/, ...) is the retail-D3D→Godot device-leg mappings ADR
 0035 sanctions — it must not grow, but its floor is NON-ZERO BY DESIGN:
-deleting a device citation is a documentation regression, not a win.
+deleting a device citation is a documentation regression, not a win. The
+device counter counts both the `[orig:` marker and the adjudicated
+`(retail:` form below, so converting a note never shrinks it; only a
+deleted witness does.
 
 Citation convention (adjudicated): a witness note in `godot/src` is written as
 `(retail: Name @0xADDR, see docs/<record>)` — NEVER the literal `[orig:`
