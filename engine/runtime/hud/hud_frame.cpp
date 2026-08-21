@@ -95,15 +95,20 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 	if (text.empty()) {
 		return;
 	}
-	// The wrap: width `x2 - (x1 - 4)` of the chat box, the bold label font,
-	// current_x 0; a 0 count (no font) is 1 [orig: @0x498673..0x4986c5]. The
+	// The wrap: width `x2 - (x1 - 4)` of the chat box, the bold label font AT
+	// ITS NATIVE (design) SIZE, current_x 0; a 0 count (no font) is 1
+	// [orig: @0x498673..0x4986c5]. The wrapper measures the FONT OBJECT, not
+	// the HUD slot with its scale pair: sub_580980 dereferences *fontPtr
+	// @0x58098a and measures through CGameFont_GetTextExtent @0x5809ad /
+	// sub_674DC0 @0x5809db with no slot scale, against a width authored in
+	// design units — so the measure here is scale 1, never label_scale_. The
 	// wrapper walks the FULL message (the 119-char cap is per copied segment
 	// @0x498781, and on the raw ring @0x498621).
 	std::string buf = text;
 	int count = 0;
 	if (layout_.chat_box_present && label_font_bold_.font() != nullptr) {
 		const int width = layout_.chat_box_x2 - (layout_.chat_box_x1 - 4);
-		count = chat_wrap_text(label_font_bold_, label_scale_, buf, width, 0);
+		count = chat_wrap_text(label_font_bold_, 1.0f, buf, width, 0);
 	}
 	if (count <= 0) {
 		count = 1;
@@ -344,9 +349,11 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The AAS zone status panel draws BEFORE the map overlay in the retail
 	// walk [orig: HUD_RenderAllOverlays @0x5a8070 — HUD_DrawZoneStatusPanel
 	//  @0x5a8530, then draw_radar_blips @0x5a8535, the 3-D icon pass, and
-	//  HUD_DrawMapOverlay @0x5a87bb]. WITNESS PENDING: whether the panel has
-	//  a declutter-mask bit of its own (none is witnessed; it draws on the
-	//  shown flag alone here).
+	//  HUD_DrawMapOverlay @0x5a87bb]. The panel has NO declutter-mask bit of
+	//  its own: the call @0x5a8530 is unconditional (the render_capture_point_
+	//  labels / draw_radar_blips pair around it likewise) and the function's
+	//  head tests only g_GameType [orig: @0x5a248d..0x5a24c5], so it draws on
+	//  the shown flag alone here.
 	element_lfp_panel(state, surface_w, surface_h);
 	element_spinmap(state, surface_w, surface_h);
 	element_objectives(state, surface_w, surface_h);

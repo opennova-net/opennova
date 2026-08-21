@@ -1448,6 +1448,26 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 		if (q.texture == opennova::hud::kHudTexVehiclePanel) ++panel_quads;
 	CHECK(panel_quads == 0, "no silhouette quad without its texture");
 
+	// The digit and the X are CENTRED on their boxes: the text's top sits
+	// above the box centre by half the label height (centre + 1 - h/2), not
+	// AT the centre with the glyph hanging below it
+	// [orig: @0x5a52f0..0x5a5322 -- HUD_MeasureTextWH then
+	//  HUD_DrawTextCentered_HalfBright(&g_hudLabelFontBold, cx, cy + 1 - h/2)].
+	// Both labels here share centre y 418 (base 406 + seat y 7 + 11/2).
+	{
+		opennova::hud::GameFont gf;
+		gf.set_font(font);
+		int tw = 0, th = 0;
+		gf.measure("2", 1.0f, 1.0f, &tw, &th);
+		CHECK(!list.glyphs.empty(), "the empty seat prints its digit");
+		float min_top = 1e9f;
+		for (const auto &g : list.glyphs) min_top = std::min(min_top, g.y_top);
+		CHECK(min_top <= 419.0f - static_cast<float>(th / 2) + 0.01f,
+				"the label's top rises half its height above the box centre");
+		CHECK(min_top > 418.0f - static_cast<float>(th),
+				"and no further than its own height");
+	}
+
 	// With the texture present the silhouette lands at the STANCE-SHIFTED
 	// base (300-12, 400+6), not the raw anchor.
 	vp.silhouette_valid = true;
@@ -1628,11 +1648,12 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 	CHECK(icons.size() == 3, "one icon per contested zone");
 	if (icons.size() == 3) {
 		// Group 1 (two zones) is right-anchored: A at 1020 - 196, B at 1020 - 98,
-		// both on row 27 + 12; group 2 (one zone) at 1020 - 98, one row (86) down.
+		// both ON the anchor row (the +12 belongs to the status text only);
+		// group 2 (one zone) at 1020 - 98, one row (86) down.
 		CHECK(std::fabs(icons[0].x0 - (1020.0f - 196.0f)) < 0.01f, "A right-anchors the group");
 		CHECK(std::fabs(icons[1].x0 - (1020.0f - 98.0f)) < 0.01f, "B steps 98 across");
-		CHECK(std::fabs(icons[0].y0 - 39.0f) < 0.01f, "the first row is anchor + 12");
-		CHECK(std::fabs(icons[2].y0 - (39.0f + 86.0f)) < 0.01f, "the next team steps 86 down");
+		CHECK(std::fabs(icons[0].y0 - 27.0f) < 0.01f, "the first row IS the anchor");
+		CHECK(std::fabs(icons[2].y0 - (27.0f + 86.0f)) < 0.01f, "the next team steps 86 down");
 		CHECK(std::fabs(icons[2].x0 - (1020.0f - 98.0f)) < 0.01f, "a one-zone group ends at the same edge");
 		CHECK(icons[0].texture == opennova::hud::kHudTexLfpTeam1 &&
 				icons[2].texture == opennova::hud::kHudTexLfpTeam2,

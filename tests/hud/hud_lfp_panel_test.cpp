@@ -60,24 +60,37 @@ void test_frame_numbering() {
 
 void test_frame_selection() {
 	// Nothing special, outside the cylinder -> default.
-	CHECK(lfp_frame(0, 1, 5, 0, false, true) == LfpFrame::Default,
+	CHECK(lfp_frame(false, false, false, true) == LfpFrame::Default,
 			"a quiet neutral point draws the default frame");
 	// Inside the cylinder wins over default.
-	CHECK(lfp_frame(0, 1, 5, 0, true, true) == LfpFrame::InZone,
+	CHECK(lfp_frame(false, false, true, true) == LfpFrame::InZone,
 			"standing in the cylinder shows the in-zone frame");
 
 	// Your point draining, on phase A -> under attack.
-	CHECK(lfp_frame(1, 1, 5, -2, false, true) == LfpFrame::UnderAttack,
+	CHECK(lfp_frame(true, false, false, true) == LfpFrame::UnderAttack,
 			"an attacked point blinks its frame on phase A");
 	// ...and off phase A it falls back rather than sticking.
-	CHECK(lfp_frame(1, 1, 5, -2, false, false) != LfpFrame::UnderAttack,
+	CHECK(lfp_frame(true, false, false, false) != LfpFrame::UnderAttack,
 			"the attack frame is a BLINK, not a steady state");
 
 	// An enemy point at zero control shows ready on phase B.
-	CHECK(lfp_frame(2, 1, 0, 0, false, false) == LfpFrame::Ready,
+	CHECK(lfp_frame(false, true, false, false) == LfpFrame::Ready,
 			"a takeable point blinks ready on phase B");
-	CHECK(lfp_frame(2, 1, 0, 0, false, true) != LfpFrame::Ready,
+	CHECK(lfp_frame(false, true, false, true) != LfpFrame::Ready,
 			"and not on phase A — the two states alternate");
+	// Attack beats ready when both are raised on phase A; on phase B the
+	// ready blink shows through.
+	CHECK(lfp_frame(true, true, false, true) == LfpFrame::UnderAttack,
+			"attack wins the phase-A frame");
+	CHECK(lfp_frame(true, true, false, false) == LfpFrame::Ready,
+			"ready takes the phase-B frame");
+
+	// The attacked test itself is the caller's: the TIMER ENTRY's team must be
+	// the viewer's, not merely the zone byte — a draining entry owned by the
+	// other side is not "your point under attack".
+	CHECK(lfp_zone_under_attack(1, 1, -2), "own team's draining entry attacks");
+	CHECK(!lfp_zone_under_attack(2, 1, -2), "another team's entry does not");
+	CHECK(!lfp_zone_under_attack(1, 1, 0), "nor a non-draining one");
 }
 
 // Markers step ACROSS by 98 within a group, groups step DOWN by 86, and a
@@ -88,15 +101,15 @@ void test_stepping() {
 	// A three-zone group: k = 0 at panelX - 294.
 	lfp_marker_origin(1020, 250, 3, 0, 0, x, y);
 	CHECK(x == 1020 - 3 * 0x62, "the first marker sits 98 * count left of the anchor");
-	CHECK(y == 250 + kLfpRowDy, "on the first group's row");
+	CHECK(y == 250, "on the panel Y itself — no +12 on a marker");
 
 	lfp_marker_origin(1020, 250, 3, 2, 0, x, y);
 	CHECK(x == 1020 - 0x62, "the last marker ends one pitch short of the anchor");
-	CHECK(y == 250 + kLfpRowDy, "and stays on its group's row");
+	CHECK(y == 250, "and stays on its group's row");
 
 	// A one-zone group three groups down: no horizontal drift.
 	lfp_marker_origin(1020, 250, 1, 0, 3, x, y);
-	CHECK(y == 250 + kLfpRowDy + 3 * 0x56, "groups step DOWN by 86");
+	CHECK(y == 250 + 3 * 0x56, "groups step DOWN by 86");
 	CHECK(x == 1020 - 0x62, "a single-zone group sits one pitch left of the anchor");
 
 	// Right-anchoring: a bigger group grows LEFTWARD, the right edge stays put.
@@ -139,15 +152,17 @@ void test_offsets() {
 			"the enemy count sits right of the own count");
 }
 
-// The row cursor starts at the anchor + 12, and the MARKERS share that row
-// with the status text [orig: x_position = x_base + 12 @0x5a25bd, pushed as
-// the marker's y @0x5a2799 and the text's y @0x5a2652].
+// The MARKERS sit on the group's Y (the anchor for the first group); only the
+// STATUS TEXT takes the +12 [orig: the marker pushes the Y accumulator
+// [esp+y] @0x5a2799, seeded from g_hudZonePanelY @0x5a249d; the text draws
+// from ebx = y + 0Ch @0x5a25b9..0x5a25bd]. Putting the +12 on the markers
+// drops every icon 12 px below its authored row.
 void test_row_offset() {
 	int mx = 0, my = 0, tx = 0, ty = 0;
 	lfp_marker_origin(1020, 27, 2, 0, 0, mx, my);
 	lfp_status_text_origin(1020, 27, 2, 0, tx, ty);
-	CHECK(my == 27 + 12, "the first marker row is the anchor plus 12");
-	CHECK(ty == my, "the status text sits on the marker row");
+	CHECK(my == 27, "the first marker row IS the anchor");
+	CHECK(ty == my + 12, "the status text sits 12 below the marker row");
 	CHECK(tx == mx - 4, "and 4 px left of the group's first marker");
 }
 

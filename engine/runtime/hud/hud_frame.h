@@ -195,9 +195,18 @@ struct HudLayout {
 	// The chat box's x1/x2 columns — g_hudChatBoxCoords rows 1 and 2, the
 	// source of the chat wrap width `x2 - (x1 - 4)` [orig: HUD_GetChatBoxCoord
 	//  @0x5bbe90 reads dword_28E4DF8[index]; Chat_AddMessageChannel1 reads
-	//  rows 2 and 1 @0x498673/@0x498688]. WITNESS PENDING: the table's writer
-	//  (its only xrefs are the getter's two reads) — the layout builder
-	//  supplies HUDCHATTEXT x1/x2 here; absent, a line is never wrapped.
+	//  rows 2 and 1 @0x498673/@0x498688]. The table's ONLY writer is the
+	// hud.def line parser: `chat_message x1 y1 x2 y2` stores rows 1/2 (and
+	// the y pair to dword_28E51FC/dword_28E5200), `sys_message` rows 3/4
+	// [orig: the File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) registration
+	//  @0x5be210..0x5be228; the callback @0x5bb7a0 (no function boundary in
+	//  the IDB), stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841]. JO:CA ships
+	// NO hud.def (none in resource/localres/language.pff), so on the retail
+	// title the rows stay 0: the width is 4 and sub_580980 returns 1 at the
+	// first character (@0x5809ea..0x5809fc, no space yet) — a retail chat
+	// line NEVER wraps. These are NOT the HUDCHATTEXT pair (that is the feed
+	// anchor dword_27237A8/AC): a layout builder must leave them absent
+	// unless it parsed a hud.def, and absent, a line is never wrapped.
 	int chat_box_x1 = 0;
 	int chat_box_x2 = 0;
 	bool chat_box_present = false;

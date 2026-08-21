@@ -15,7 +15,9 @@
 
 namespace opennova::world {
 
-struct World;
+// World is a CLASS (world.h): the class-key must match, MSVC mangles it into
+// the symbol and a struct/class mismatch fails the GDExtension link.
+class World;
 
 struct FriendlyTagSource {
     EntityHandle entity;
