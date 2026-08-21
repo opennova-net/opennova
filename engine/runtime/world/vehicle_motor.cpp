@@ -96,8 +96,8 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
     // The part-animation words [orig: Entity_CacheVehicleHUDStats @0x4929B0 —
     // the rotor angle's +0x466 @0x492ACA..0x492ADE, the wheel phase's +0x2BA
     // @0x4929B4]: the accumulators' high words, zero-extended like the steer
-    // word. The tail rotor publishes the rotor word until its own accumulator
-    // is witnessed (WITNESS PENDING, vehicle_part_anim.h).
+    // word. The tail rotor publishes the same word: ordinal 47 reads the one
+    // +0x464 accumulator [orig: @0x492AD7].
     out.rotor = static_cast<int32_t>(
             static_cast<uint32_t>(state.part_spin.angle) >> 16);
     out.tail_rotor = out.rotor;
@@ -544,6 +544,11 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             // [orig: vZ = min(vZ, 0x4000) @0x48659b..0x48659d].
             if (m.slide_z > 0x4000) m.slide_z = 0x4000;
             m.slide_z -= kGravityStepBike; // [orig: @0x4865a6 `slideDecay -= 250`]
+            // The bike's "has been driven" byte: a leaning bike (Flags 0x20)
+            // above 0x1000 speed marks itself driven; the light solve's crash
+            // test over the spine probes reads it (vehicle_suspension.h)
+            // [orig: Entity_UpdateLightVehiclePhysics @0x48524c].
+            if ((veh.flags & 0x20u) != 0 && m.speed > 0x1000) m.has_been_driven = 1;
         } else if (traits.family == VehicleFamily::Tank) {
             // The tank shares the 250 step with the bike — no up-cap
             // [orig: `slideDecay += -250` @0x48a82c in

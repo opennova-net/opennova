@@ -355,8 +355,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             current.flip = parse_int_n(v, vl);
             parsed = 1;
         /* The suspension spring block — raw atol [orig: spring_comp @0x49dbd4,
-           spring @0x49db5c, shock @0x49dc10, top_heavy @0x49db98]. spring_comp
-           must match before its prefix `spring`. */
+           spring @0x49db5c, shock @0x49dc10, top_heavy @0x49db98 — the last is
+           parsed for PARITY only: retail never reads +0x918 outside the parser,
+           the allocator and the debug item editor]. spring_comp must match
+           before its prefix `spring`. */
         } else if (lower_match_key(lower, ll, "spring_comp", 11)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
             current.spring_comp = parse_int_n(v, vl);

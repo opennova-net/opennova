@@ -238,7 +238,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.spring = def->spring;
                 vt.spring_comp = def->spring_comp;
                 vt.shock = def->shock;
-                vt.top_heavy = def->top_heavy;
+                // def->top_heavy is parsed for parity but dead in retail —
+                // no consumer, so the traits do not carry it.
                 vt.player_control =
                         (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
                 // The per-frame physics mover is selected exclusively by the

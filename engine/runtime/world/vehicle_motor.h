@@ -123,12 +123,16 @@ struct VehicleTraits {
     int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
     int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
     // The suspension spring block (world/vehicle_suspension.cpp; raw tokens)
-    // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904, top_heavy +0x918
-    //  — ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10/@0x49db98].
+    // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904 —
+    //  ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10]. The def's
+    // top_heavy (+0x918) is parsed for parity but DEAD in retail (the parser,
+    // the allocator and the debug item editor are its only readers) — nothing
+    // here carries it.
     int32_t spring = 0;        // the per-wheel spring constant k
     int32_t spring_comp = 0;   // travel percentage: (100 - spring_comp) scales 0xFFFF
-    int32_t shock = 0;         // the landing damp (11 - shock)/11, clamped [0,10]
-    int32_t top_heavy = 0;     // consumer not yet witnessed
+    int32_t shock = 0;         // the landing damp (11 - shock)/11; the oscillator
+                               // clamps THIS field to [0,10] in place, as retail
+                               // clamps the def's (@0x45D18F..0x45D1A2)
     // Platform probe geometry from the model bound boxes (16.16 model space;
     // modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
     // witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
@@ -197,8 +201,8 @@ struct VehicleCtrlRegisters {
     // HELO_ROTOR and HELO_TAILROTOR, the wheel phase's for VEHICLE_WHEELS
     // [orig: Entity_CacheVehicleHUDStats @0x4929B0 — +0x466 @0x492ACA..
     //  0x492ADE, +0x2BA @0x4929B4]. Same MOVZX idiom as `steering`.
-    // WITNESS PENDING: whether HELO_TAILROTOR reads the same +0x464
-    // accumulator or a second one — until then both publish the rotor word.
+    // HELO_TAILROTOR (ordinal 47) reads the SAME +0x464 accumulator as
+    // HELO_ROTOR (46) [orig: the shared HIWORD(+0x464) store @0x492AD7].
     int32_t rotor = 0;
     int32_t tail_rotor = 0;
     int32_t wheels = 0;

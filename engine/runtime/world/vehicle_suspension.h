@@ -1,18 +1,74 @@
 #pragma once
 
-// THE GROUND-VEHICLE SUSPENSION SPRING LEG — the per-wheel spring state the
-// contact solves consume: the parked latch with its role-picked disable rate,
-// the compressing / oscillating step over each wheel's probe depth, and the
-// per-pad compression the probe points ride.
+// THE GROUND-VEHICLE SUSPENSION SPRING LEG — the per-wheel free-fall sinks,
+// the spring-energy loop that compresses and releases each wheel, the
+// per-tick crash request the family physics raises, and the crash latch it
+// arms. Sibling TU of vehicle_contact_solve.cpp (the oversize-TU ratchet); the
+// oscillator KERNEL is world/ground_conform.h, this file is everything around
+// it and owns the state bytes on Entity::VehicleMotorState.
 //
-// Sibling TU of vehicle_contact_solve.cpp (the oversize-TU ratchet); the
-// oscillator KERNEL is world/ground_conform.h (Suspension_CompressWheelQuadratic
-// / Suspension_OscillateWheelFast), this file is what calls it and owns the
-// latch + state bytes on Entity::VehicleMotorState.
-// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 — the latch pick
-//  @0x46B1A6..0x46B213; Entity_ProcessTrackedVehiclePhysics @0x47C1C0 — the
-//  spring dt pick @0x47C218..0x47C22B, the spring calls @0x47E2C1/@0x47E2D3
-//  /@0x47EB68/@0x47EB7C/@0x47EBBB; vehicle-client-movers-re.md §7.3]
+// THE STATE, by retail offset [orig: Entity_RespawnVehicle @0x45FF40 writes the
+//  family @0x45ffeb..0x46001e; vehicle-client-movers-re.md §7.3]:
+//   +0x2C4..+0x2D0  sink_k      the per-pad free-fall accumulators (grow while a
+//                               pad is off the ground; VehicleMotorState::plat_acc —
+//                               the boat platform solve's corner drops are the SAME
+//                               four dwords)
+//   +0x2D4..+0x2E0  comp_k      the wheel compression the pad probe rides
+//   +0x304+0x18k    osc_k       amplitude / extension / energy(force) / phase
+//   +0x300          spring_energy  the impact sink (+1.25·F on an impulse, drained
+//                               by every compress step)
+//   +0x2EC  crashed             the CRASHED / TIPPED state — the bike version ejects
+//                               its rider, the tank/tracked versions play the crash
+//                               sound at their own `+0x2EC = 1` sites
+//                               [orig: @0x478998 / @0x47e47b / @0x468b3b]
+//   +0x2ED  crash_request       a PER-TICK bool the family physics raises mid-tick and
+//                               every family tail clears unconditionally
+//                               [orig: tank @0x4795da, bike @0x47c0b6, tracked @0x47eeee]
+//   +0x2EE  landing_2ee         the hard-landing marker the catch-up sets
+//   +0x2EF  byte_2ef            zeroed at arming, set with the crash sound
+//   +0x2F0  settle_2f0          the wreck/settle latch (gates the airborne spring loop)
+//   +0x2F1  fresh_2f1           1 after Entity_RespawnVehicle, 0 after a BMS spawn (memset),
+//                               cleared by the crash tests, re-raised by the client window
+//   +0x2F2  settled_2f2         the sleep path's "settled upright" byte
+//   +0x2F8  airborne_stamp_2f8  the client crash window's airborne tick stamp
+//   +0x2FC  wreck_2fc           the crash latch (sinks zeroed with it)
+//   +0x3DE  has_been_driven     the bike's "has been driven" byte
+//
+// THE TICK, in the witnessed order inside each family contact solve:
+//   1. crash tests   — raise crash_request under the family's conditions
+//   2. sink growth   — `!contact_k && !crash_request && !crashed` → sink_k += growth
+//   3. spring loop   — grounded: the impulse / settle / compress / oscillate loop
+//                      whose resolved penetration lifts the corner quad; airborne:
+//                      the energy-driven compress + free decay, gated on !settle_2f0
+//   4. arming        — `crash_request && !crashed` → the role pick (1.25 authority /
+//                      1.75 client), Flags 0x10 (authority sets, a client arms only
+//                      if the bit arrived), crashed = 1
+//   5. post-contact  — all pads back in contact → sinks reset
+//   6. tail          — crash_request = 0; the amplitude/energy tail
+//
+// NAMED RESIDUALS (not ported; no D-row — they are the D-NET-196 crash/flip/
+// park/wreck latch machine the record already lists as deferred):
+//   - the arming IMPULSE: `sink_k × pick` dumped as −Z force slots (+0x368+0x14k)
+//     through Entity_ClearSuspensionForces → Vehicle_ComputeAveragedOrientation —
+//     a chassis TILT folded into the chassis matrix + the +0x534 quaternion
+//     [orig: @0x46b22e..0x46b30b, @0x463a3b..0x463a64]; our conform re-derives
+//     the attitude from the pad fit every tick and carries no chassis matrix;
+//   - Entity_ClearSuspensionState @0x4592B0's reset of that chassis matrix /
+//     quaternion (+0x4F4, +0x534..+0x540, +0x4EC/+0x4F0, +0x4E8, +0x3DC) — it
+//     never touches the sinks, compressions or oscillators, and the tank calls it
+//     every tick (@0x47606e); nothing of ours corresponds, so it is a no-op seam;
+//   - crash RECOVERY: the post-quad tail unlatch (tank @0x479437, tracked
+//     @0x47ee3b: `crashed = 0, settle_2f0 = 0`) whose conditions were not walked,
+//     and the authority's Flags-0x10 upkeep @0x47c3a0..0x47c3c6;
+//   - the tank's own spring pair (Suspension_CompressWheelLinear @0x45CEB0 /
+//     Suspension_OscillateWheel @0x45D240) — the tank gets the crash tests, the
+//     +250 sink growth and the arming only;
+//   - the bike crash tests that read unwalked locals: @0x47b14c (var_8 / var_29C),
+//     @0x47b6a7 (var_274), @0x47b6d1 / @0x47b6fb (var_280); only @0x47b375 is live.
+//     The bike's spring loop (@0x47b431 / @0x47bad0) is run with the tracked
+//     loop's shape — its own loop was not walked;
+//   - the +0x3DE clears outside arming (@0x4859e0, @0x47b63f) and the
+//     `+0x60 > 0` override freeze (never set here).
 
 #include <cstdint>
 
@@ -23,51 +79,116 @@ namespace opennova::world {
 class World;
 struct VehicleTraits;
 
-// The parked latch and its one-shot disable-rate pick. When the mover's
-// disable request (+0x2ED) and the latch (+0x2EC) are both clear, the solve
-// picks the wheel-solver disable-rate multiplier BY ROLE — 1.25 on the
-// authority, 1.75 off it — into the entity, zeroes +0x2EF, and sets the latch;
-// the authority also raises entity Flags 0x10 while a client merely READS it
-// (the latch is replicated through that bit), then +0x2EE clears and the
-// suspension state is reset [orig: gate @0x46B1A6..0x46B1B9, the pick
-//  @0x46B1C5..0x46B1DB (flt_7C6F14 = 1.75 / flt_7C6F18 = 1.25 by
-//  g_napi_np_ctx.is_authority), +0x2EF = 0, Flags |= 0x10 @0x46B1ED on the
-//  authority vs the `test Flags, 0x10` @0x46B1F3 on a client, +0x2EC = 1
-//  @0x46B1F9, +0x2EE = 0, Entity_ClearSuspensionState @0x4592B0].
-// Returns true when the latch set this tick.
-//
-// WITNESS PENDING — the leg is wired but ARMED OFF: read literally, the gate
-// `+0x2ED == 0 && +0x2EC == 0` fires on a fresh row's first tick, which would
-// park every vehicle at spawn and drop a landing bike by one parked step —
-// contradicting the witnessed mover. The +0x2ED disable-request producer
-// @0x48168D, the +0x2EC clears @0x480831/@0x481544/@0x48177C and any third
-// gate term settle it. Until they land, `suspension_leg_armed` stays false:
-// the latch never sets and the step runs with the unparked dt over
-// zero-state sinks exactly as before (the pad offsets stay 0 because the
-// compress arm is what grows them and it is part of the same armed leg).
-inline constexpr bool kSuspensionLegArmed = false;
-bool vehicle_suspension_latch(World &world, Entity &veh);
+// --- constants -----------------------------------------------------------
 
-// The spring dt the step integrates with: 0.75 while the latch is clear, 3.0
-// once parked — a parked vehicle settles its springs four times faster
-// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C218..0x47C22B — flt_7C3DC8
-//  @0x47C222 / flt_7C6F80 @0x47C21A].
-float vehicle_suspension_dt(const Entity::VehicleMotorState &m);
+// The wheel-solver DISABLE-rate multiplier picked ONCE at arming by role
+// [orig: flt_7C6F18 = 1.25 on the authority @0x46b1cd, flt_7C6F14 = 1.75 off
+//  it @0x46b1d5]. Stored for the (residual) impulse dump.
+inline constexpr float kSuspensionDisableRateAuthority = 1.25f;
+inline constexpr float kSuspensionDisableRateNonAuthority = 1.75f;
 
-// One tick of the four wheel springs over the solve's per-pad probe depths:
-// a wheel whose pad penetrates (d > 0) COMPRESSES by the dt step; a wheel in
-// the air OSCILLATES (free decay). Each wheel's compression is what the next
-// tick's pad probe point rides (+0x2D4 + 4k added to the pad body-frame Z).
-// Returns nothing; the state lives on `m`.
-// [orig: the per-wheel spring loop — compressing arm
-//  Suspension_CompressWheelQuadratic @0x47E2C1 / @0x47EB68 / @0x47EB7C,
-//  releasing arm Suspension_OscillateWheelFast @0x47E2D3 / @0x47EBBB]
-void vehicle_suspension_step(World &world, Entity &veh, const VehicleTraits &traits,
-                             const int32_t pad_depths[4]);
+// The tracked solve's spring dt: 0.75 normal, 3.0 CRASHED [orig: flt_7C3DC8
+//  @0x47c222 / flt_7C6F80 @0x47c21a, selected on +0x2EC @0x47c1de..0x47c218].
+// It scales the sink growth (ftol(dt·250)); the tank and the bike have no
+// select (their growth is the literal 250 / 100).
+inline constexpr float kSuspensionDtNormal = 0.75f;
+inline constexpr float kSuspensionDtCrashed = 3.0f;
+inline constexpr int32_t kSinkGrowthPerTick = 250; // flt_7C6F7C
+inline constexpr int32_t kSinkGrowthTank = 250;    // [orig: @0x478510..0x47852b]
+inline constexpr int32_t kSinkGrowthBike = 100;    // [orig: @0x47ab36..0x47abdc]
 
-// Reset every per-wheel spring field [orig: Entity_ClearSuspensionState
-//  @0x4592B0 — called at the latch edge @0x46B20E]. WITNESS PENDING: the
-// exact field set it zeroes; until then every field this TU owns resets.
-void vehicle_suspension_clear(Entity::VehicleMotorState &m);
+// The replicated crash/park bit: the authority raises it at arming, a client
+// arms only when it arrived [orig: Flags |= 0x10 @0x46b1ed / test @0x46b1f3].
+inline constexpr uint32_t kEntityFlagSuspensionCrashed = 0x10u;
+
+// Crash-test thresholds [orig: tracked @0x47d745..0x47d7a8 / tank
+//  @0x477760..0x4777bf]: the flip angle is the def's `flip` percent of 1.0 in
+//  Q16 (flt_7C56A8 = 0.01 × flt_7C32BC = 65535.0); the authority's hard-fall
+//  test reads |slide_z| against 0x7000.
+inline constexpr int32_t kCrashFallVzAbove = 0x7000;
+inline constexpr uint32_t kClientCrashWindowTicks = 10; // [orig: @0x478bc0 / @0x47e7d8]
+
+// The spring loop's literals [orig: the grounded loop @0x47E960..0x47EC1F]:
+// the compress step cap (dword_815180 >> 4), the impulse threshold select on
+// spring_comp, the hard-landing catch-up bound, and the oscillate ceiling on
+// the sinks.
+inline constexpr int32_t kSpringStepCap = 4095;
+inline constexpr int32_t kImpulseThresholdSoft = 1000; // spring_comp <= 10
+inline constexpr int32_t kImpulseThresholdHard = 5000;
+inline constexpr int32_t kHardLandingCatchupBelow = -5000; // 0xFFFFEC78
+inline constexpr int32_t kOscillateSinkCeiling = 2000;     // 0x7D0
+
+// --- state ---------------------------------------------------------------
+
+// Entity_RespawnVehicle's write set [orig: @0x45ffeb..0x46001e]. A BMS spawn
+// writes NONE of these (the record memset @0x40ea27 zeroes them, fresh_2f1 = 0).
+void vehicle_suspension_respawn(Entity::VehicleMotorState &m);
+
+// The flip angle as a Q16 up.z bound: ftol(flip × 0.01 × 65535.0).
+int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits);
+
+// --- the tick ------------------------------------------------------------
+
+// 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8 +
+//  the client window @0x47e793..0x47e7ee; tank @0x477760..0x4777bf +
+//  @0x478b6c..0x478bd6]: (a) tipped past the flip angle, or the replicated
+//  bit set, while airborne; (b) the authority: |slide_z| > 0x7000 — a client:
+//  airborne with the bit; (c) the CLIENT window: with fresh_2f1 == 0,
+//  !crashed, !settle_2f0: stamp the airborne tick once, request while the
+//  stamp is under 10 ticks old, else clear the stamp and raise fresh_2f1.
+void vehicle_suspension_crash_tests(World &world, Entity &veh,
+                                    const VehicleTraits &traits, int32_t up_z16);
+
+// 1b. The bike's live crash test [orig: @0x47b32d..0x47b375]: both wheels off
+//  the ground, the bike has been driven, and any of the three spine probes
+//  touches → request.
+void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
+                                        bool rear_contact, bool any_spine_contact);
+
+// 2. Sink growth [orig: tracked extend loop @0x47db70..0x47dbd1 with the
+//  pre-gate @0x47db76..0x47dba8 (skipped when !settled_2f2 && all sinks == 0
+//  && up.z < 0); tank @0x478510..0x47852b; bike @0x47ab36..0x47abdc with NO
+//  latch terms and its own +0x2F2 shape]. `latch_gated` selects the
+//  `!crash_request && !crashed` terms (tracked/tank) vs the bike's none.
+void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheels,
+                                   int32_t growth, bool latch_gated, bool pre_gate_skip);
+
+// 3a. The GROUNDED spring loop [orig: @0x47E960..0x47EC1F], per wheel with
+//  spring != 0: the free-fall catch-up (corner −= max(sink − growth, 0)), the
+//  landing IMPULSE (sink > thr && contact → energy += 0.5·mass·sink², the
+//  impact sink += 1.25·energy), the settle term (energy <= 0: e = depth −
+//  minDepth − amp_0 (wheel 0's amplitude — the witnessed unindexed read) →
+//  energy += spring·min(e,4095)²), then energy > 0 → compress by
+//  min(ftol(sqrt(energy/spring)), 4095) else amp != 0 && all sinks < 2000 →
+//  free decay; the resolved `depth −= Δ` lifts the corner. `depth` is
+//  in/out; `corner_adj` receives the catch-up term.
+void vehicle_suspension_grounded_loop(World &world, Entity &veh,
+                                      const VehicleTraits &traits, int wheels,
+                                      int32_t depth[4], const bool contact[4],
+                                      int32_t growth, int32_t corner_adj[4]);
+
+// 3b. The AIRBORNE spring loop [orig: @0x47E283..0x47E344], gated on
+//  settle_2f0 == 0: energy > 0 → compress by the full 4095 step, else amp != 0
+//  → free decay; then the catch-up under !crashed && !crash_request.
+void vehicle_suspension_airborne_loop(World &world, Entity &veh,
+                                      const VehicleTraits &traits, int wheels,
+                                      int32_t growth, int32_t corner_adj[4]);
+
+// 4. Arming — the seed all three families share [orig:
+//  Entity_ProcessWheeledVehicleSuspension @0x46b1a6..0x46b213; the tank twin
+//  @0x469933..0x46999e; the bike twin @0x468b00..0x468b3b which also EJECTS
+//  every occupant]. Returns true when the latch set this tick.
+bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants);
+
+// 5. After the conform [orig: tracked @0x47ed60]: every pad back in contact
+//  with a positive max penetration, not crashed → the sinks reset.
+void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
+                                     int32_t max_depth);
+
+// 6. The family tail [orig: crash_request = 0 unconditionally @0x47eeee /
+//  @0x4795da / @0x47c0b6; the amplitude tail @0x48178a..0x4817c4: all four
+//  amplitudes under ftol(0.01 · ftol(travel_locked)) with a nonzero impact
+//  sink → impact sink = 0].
+void vehicle_suspension_tick_tail(Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world

@@ -1,115 +1,314 @@
-// The ground-vehicle suspension spring leg: the parked latch with its
-// role-picked disable rate, the per-wheel compress/oscillate step over the
-// contact solve's pad depths, and the state reset.
-// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 latch
-//  @0x46B1A6..0x46B213; Entity_ProcessTrackedVehiclePhysics @0x47C1C0 spring
-//  dt @0x47C218..0x47C22B + the spring loop; Suspension_CompressWheelQuadratic
-//  @0x45CFB0; Suspension_OscillateWheelFast @0x45D110;
-//  Entity_ClearSuspensionState @0x4592B0]
+// The ground-vehicle suspension spring leg: crash tests, sink growth, the
+// spring-energy loop, the crash latch and the tick tail.
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 — the extend loop
+//  @0x47db70..0x47dbd1, the crash tests @0x47d745..0x47d7a8 + @0x47e793..
+//  0x47e7ee, the airborne loop @0x47E283..0x47E344, the grounded loop
+//  @0x47E960..0x47EC1F, the tail @0x47eeee; Entity_ProcessWheeledVehicleSuspension
+//  @0x46B140 — the seed @0x46b1a6..0x46b213; Entity_RespawnVehicle @0x45FF40;
+//  Suspension_CompressWheelQuadratic @0x45CFB0; Suspension_OscillateWheelFast
+//  @0x45D110]
 
 #include "world/vehicle_suspension.h"
 
 #include "world/ground_conform.h"
+#include "world/vehicle_attach.h"
 #include "world/vehicle_motor.h"
 #include "world/world.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 
 namespace opennova::world {
 
 namespace {
 
-// The parked-flow replication bit: the authority raises it at the latch edge
-// and a client reads it there [orig: Flags |= 0x10 @0x46B1ED / test
-// @0x46B1F3; D-NET-196's replicated Flags 0x10].
-constexpr uint32_t kEntityFlagSuspensionParked = 0x10u;
+// x86 IMUL low-dword results — the spring products wrap in the image.
+int32_t wrap_mul(int32_t a, int32_t b) {
+	return static_cast<int32_t>(static_cast<uint32_t>(a) * static_cast<uint32_t>(b));
+}
+
+// The oscillator kernel clamps the def's shock IN PLACE. Rows the traits
+// table knows clamp the shared entry exactly as retail clamps the shared def;
+// a row handed loose traits (tests, lib embedders) clamps the loose copy.
+int32_t &shock_field(World &world, const Entity &veh, const VehicleTraits &traits,
+                     int32_t &loose) {
+	if (VehicleTraits *entry = world.vehicle_traits.get_mutable(veh.item_id))
+		if (entry->shock == traits.shock) return entry->shock;
+	loose = traits.shock;
+	return loose;
+}
+
+ConformOscillator load_osc(const Entity::VehicleMotorState::WheelOsc &w) {
+	ConformOscillator o;
+	o.amplitude = w.amplitude;
+	o.extension = w.extension;
+	o.energy = w.energy;
+	o.phase = w.phase;
+	return o;
+}
+
+void store_osc(Entity::VehicleMotorState::WheelOsc &w, const ConformOscillator &o) {
+	w.amplitude = o.amplitude;
+	w.extension = o.extension;
+	w.energy = o.energy;
+	w.phase = o.phase;
+}
+
+// The free-fall catch-up [orig: @0x47e9c2..0x47ea2c grounded / @0x47e2ed..
+//  0x47e32c airborne]: the corner target drops by the sink beyond one growth
+//  step, and a drop past -5000 while falling marks the hard landing.
+void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded,
+              const bool contact[4], int32_t corner_adj[4]) {
+	int32_t c = m.plat_acc[k] - growth;
+	if (grounded) {
+		if (c < 0) c = 0; // [orig: jns / xor @0x47e9dc..0x47e9de]
+	} else if (c <= 0) {
+		return; // [orig: test/jle @0x47e307..0x47e309]
+	}
+	c = -c;
+	// `entity+0x60 > 0` is the override freeze (never set here); k < 4 always.
+	corner_adj[k] += c;
+	if (grounded) {
+		// A same-side pad pair in contact clears the marker instead
+		// [orig: @0x47e9f6..0x47ea12].
+		if ((contact[0] && contact[3]) || (contact[1] && contact[2])) {
+			m.landing_2ee = 0;
+			return;
+		}
+	}
+	if (c < kHardLandingCatchupBelow && m.slide_z < 0) m.landing_2ee = 1;
+}
 
 } // namespace
 
-void vehicle_suspension_clear(Entity::VehicleMotorState &m) {
-	// WITNESS PENDING: Entity_ClearSuspensionState @0x4592B0's exact field
-	// set. Every field this TU owns resets here.
-	for (int k = 0; k < 4; ++k) {
-		m.wheel_comp[k] = 0;
-		m.wheel_osc[k] = Entity::VehicleMotorState::WheelOsc{};
-	}
-	m.spring_energy = 0;
+void vehicle_suspension_respawn(Entity::VehicleMotorState &m) {
+	// [orig: Entity_RespawnVehicle @0x45FF40 — +0x2F0 @0x45ffeb, +0x2EC
+	//  @0x45fff1, +0x2EE @0x45fff7, +0x2F2 @0x45fffd, +0x2FC @0x46000c, +0x2F8
+	//  @0x460012, +0x2ED @0x460018, +0x2F1 = 1 @0x46001e]
+	m.settle_2f0 = 0;
+	m.crashed = 0;
+	m.landing_2ee = 0;
+	m.settled_2f2 = 0;
+	m.wreck_2fc = 0;
+	m.airborne_stamp_2f8 = 0;
+	m.crash_request = 0;
+	m.fresh_2f1 = 1;
 }
 
-bool vehicle_suspension_latch(World &world, Entity &veh) {
-	Entity::VehicleMotorState &m = veh.veh;
-	// WITNESS PENDING (see the header): armed off until the +0x2ED producer
-	// and the +0x2EC clears are witnessed — the literal gate parks every
-	// fresh row on its first tick.
-	if (!kSuspensionLegArmed) return false;
-	// The gate: the mover's disable request and the latch both clear
-	// [orig: @0x46B1A6..0x46B1B9].
-	if (m.susp_disable_req != 0 || m.susp_latched != 0) return false;
+int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits) {
+	// [orig: ftol(def->flip(+0x948) × flt_7C56A8 (0.01) × flt_7C32BC (65535.0))
+	//  @0x47d72e..0x47d745]
+	return static_cast<int32_t>(static_cast<float>(traits.flip) * 0.01f * 65535.0f);
+}
 
-	// The one-shot role pick [orig: @0x46B1C5..0x46B1DB]. Stored on the
-	// entity; the consumer is the per-wheel contact loop @0x46B22E (WITNESS
-	// PENDING: what it scales).
-	m.susp_rate_pick = world.vehicle_authority
-			? kSuspensionDisableRateAuthority
-			: kSuspensionDisableRateNonAuthority;
-	m.susp_byte_2ef = 0; // [orig: @0x46B1E0-region]
-	if (world.vehicle_authority) {
-		veh.flags |= kEntityFlagSuspensionParked; // [orig: @0x46B1ED]
-	} else if ((veh.flags & kEntityFlagSuspensionParked) == 0) {
-		// A client takes the latch only when the authority's bit says so
-		// [orig: the `test Flags, 0x10` @0x46B1F3 — the replicated park].
-		return false;
+void vehicle_suspension_crash_tests(World &world, Entity &veh,
+                                    const VehicleTraits &traits, int32_t up_z16) {
+	Entity::VehicleMotorState &m = veh.veh;
+	const bool airborne = (veh.flags & kEntityFlagInAir) != 0;
+	const bool bit = (veh.flags & kEntityFlagSuspensionCrashed) != 0;
+	if (m.crashed == 0) {
+		// (a) tipped past the flip angle, or the replicated bit, while airborne
+		// [orig: tracked @0x47d745..0x47d763; tank @0x477760..0x477776].
+		if ((up_z16 < vehicle_flip_threshold_q16(traits) || bit) && airborne) {
+			m.crash_request = 1;
+			m.fresh_2f1 = 0;
+		}
+		// (b) the authority's hard fall vs the client's replicated bit in the
+		// air [orig: tracked @0x47d771..0x47d7a8; tank @0x47778d..0x4777bf].
+		const bool fall = world.vehicle_authority
+				? std::abs(m.slide_z) > kCrashFallVzAbove
+				: (airborne && bit);
+		if (fall) {
+			m.crash_request = 1;
+			m.fresh_2f1 = 0;
+		}
 	}
-	m.susp_latched = 1;  // [orig: @0x46B1F9]
-	m.susp_byte_2ee = 0; // [orig: the store after the latch]
-	vehicle_suspension_clear(m); // [orig: Entity_ClearSuspensionState @0x4592B0 call @0x46B20E]
+	// (c) the client crash window [orig: tracked @0x47e793..0x47e7ee; tank
+	//  @0x478b6c..0x478bd6]: client-only, a fresh-spawned row that is neither
+	//  crashed nor settling stamps the tick it went airborne and requests for
+	//  the next ten ticks; past them the stamp clears and the row counts as
+	//  respawned.
+	if (!world.vehicle_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
+	    m.settle_2f0 == 0) {
+		if (airborne && m.airborne_stamp_2f8 == 0) m.airborne_stamp_2f8 = world.logic_tick;
+		if (world.logic_tick - m.airborne_stamp_2f8 < kClientCrashWindowTicks) {
+			m.crash_request = 1;
+		} else {
+			m.crash_request = 0;
+			m.airborne_stamp_2f8 = 0;
+			m.fresh_2f1 = 1;
+		}
+	}
+}
+
+void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
+                                        bool rear_contact, bool any_spine_contact) {
+	// [orig: Entity_ProcessLightVehiclePhysics @0x47b32d..0x47b375]
+	Entity::VehicleMotorState &m = veh.veh;
+	if (m.crashed != 0) return;
+	if (!front_contact && !rear_contact && m.has_been_driven != 0 && any_spine_contact)
+		m.crash_request = 1;
+}
+
+void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheels,
+                                   int32_t growth, bool latch_gated, bool pre_gate_skip) {
+	Entity::VehicleMotorState &m = veh.veh;
+	if (pre_gate_skip) return;
+	if (latch_gated && (m.crash_request != 0 || m.crashed != 0)) return;
+	for (int k = 0; k < wheels; ++k)
+		if (!contact[k]) m.plat_acc[k] += growth;
+}
+
+void vehicle_suspension_grounded_loop(World &world, Entity &veh,
+                                      const VehicleTraits &traits, int wheels,
+                                      int32_t depth[4], const bool contact[4],
+                                      int32_t growth, int32_t corner_adj[4]) {
+	Entity::VehicleMotorState &m = veh.veh;
+	if (traits.spring == 0) return; // [orig: @0x47e973 — no suspension def'd]
+	// minDepth over the wheel pads [orig: var_26C @0x47e8f0-region, 100000 init].
+	int32_t min_depth = 100000;
+	for (int k = 0; k < wheels; ++k) min_depth = std::min(min_depth, depth[k]);
+	const int32_t travel = conform_travel_from_def(traits.spring_comp);
+	const int32_t thr = traits.spring_comp <= 10 ? kImpulseThresholdSoft
+	                                             : kImpulseThresholdHard; // [orig: @0x47ea48..0x47ea5b]
+	int32_t loose_shock = 0;
+	int32_t &shock = shock_field(world, veh, traits, loose_shock);
+	for (int k = 0; k < wheels; ++k) {
+		// The catch-up runs only for a pad off the ground with no request
+		// pending; a crashed row skips the wheel entirely
+		// [orig: @0x47e9a1..0x47e9bc].
+		if (!contact[k] && m.crash_request == 0) {
+			if (m.crashed != 0) continue;
+			catch_up(m, k, growth, /*grounded=*/true, contact, corner_adj);
+		}
+		if (m.crashed != 0) continue; // [orig: @0x47ea33..0x47ea3a]
+		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		// The landing IMPULSE [orig: @0x47ea40..0x47eab2]: a sink past the
+		// threshold on a pad that just found contact.
+		if (m.plat_acc[k] > thr && contact[k]) {
+			const int32_t a = std::abs(m.plat_acc[k]);
+			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
+			osc.energy += static_cast<int32_t>(static_cast<float>(sq) * 0.5f);
+			if (osc.energy < 0) osc.energy = 0x1000000; // [orig: @0x47ea97..0x47ea99]
+			m.spring_energy += static_cast<int32_t>(
+					static_cast<float>(osc.energy) * 1.25f); // flt_7C6F18
+		} else if (m.spring_energy <= 0) {
+			// The settle term [orig: @0x47eab4..0x47eb21]: the pad's excess
+			// penetration over the shallowest pad, less WHEEL 0's amplitude
+			// (the witnessed unindexed `[esi+0x304]` read), capped at the step.
+			int32_t e = depth[k] - min_depth;
+			if (e > m.wheel_osc[0].amplitude) {
+				e -= m.wheel_osc[0].amplitude;
+				if (e > 0) {
+					if (e > kSpringStepCap) e = kSpringStepCap;
+					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
+					osc.energy += static_cast<int32_t>(static_cast<float>(sq) * 0.5f);
+				}
+			}
+		}
+		// Compress on stored energy, else free-decay on a live amplitude
+		// [orig: @0x47eb23..0x47ebc3].
+		int32_t delta = 0;
+		if (osc.energy > 0) {
+			const int32_t q = (2 * osc.energy) / (2 * traits.spring); // idiv @0x47eb37
+			int32_t step = static_cast<int32_t>(std::sqrt(static_cast<double>(q)));
+			if (step <= 0) osc.energy = 0; // [orig: @0x47eb48..0x47eb4c]
+			if (step > kSpringStepCap) step = kSpringStepCap;
+			delta = conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
+			                                step, travel, traits.spring);
+		} else if (osc.amplitude != 0 && m.plat_acc[0] < kOscillateSinkCeiling &&
+		           m.plat_acc[1] < kOscillateSinkCeiling &&
+		           m.plat_acc[2] < kOscillateSinkCeiling &&
+		           m.plat_acc[3] < kOscillateSinkCeiling) {
+			delta = conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
+			                                 shock, traits.spring, m.slide_z);
+		}
+		depth[k] -= delta; // [orig: @0x47ebc3]
+		store_osc(m.wheel_osc[k], osc);
+	}
+}
+
+void vehicle_suspension_airborne_loop(World &world, Entity &veh,
+                                      const VehicleTraits &traits, int wheels,
+                                      int32_t growth, int32_t corner_adj[4]) {
+	Entity::VehicleMotorState &m = veh.veh;
+	if (m.settle_2f0 != 0) return; // [orig: @0x47e283..0x47e28a]
+	const int32_t travel = conform_travel_from_def(traits.spring_comp);
+	int32_t loose_shock = 0;
+	int32_t &shock = shock_field(world, veh, traits, loose_shock);
+	const bool no_contact[4] = {false, false, false, false};
+	for (int k = 0; k < wheels; ++k) {
+		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		if (osc.energy > 0) {
+			(void)conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
+			                              kSpringStepCap, travel, traits.spring); // [orig: @0x47e2c1]
+		} else if (osc.amplitude != 0) {
+			(void)conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
+			                               shock, traits.spring, m.slide_z); // [orig: @0x47e2d3]
+		}
+		store_osc(m.wheel_osc[k], osc);
+		if (m.crashed == 0 && m.crash_request == 0)
+			catch_up(m, k, growth, /*grounded=*/false, no_contact, corner_adj);
+	}
+}
+
+bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants) {
+	Entity::VehicleMotorState &m = veh.veh;
+	// The gate: a crash request pending and not yet crashed
+	// [orig: `cmp [+2EDh],0; jz` @0x46b1a6 then `cmp [+2ECh],0; jnz` @0x46b1b9].
+	if (m.crash_request == 0 || m.crashed != 0) return false;
+	// The one-shot role pick [orig: @0x46b1c5..0x46b1db] — consumed by the
+	// (residual) impulse dump.
+	m.susp_rate_pick = world.vehicle_authority ? kSuspensionDisableRateAuthority
+	                                           : kSuspensionDisableRateNonAuthority;
+	m.byte_2ef = 0; // [orig: @0x46b1db]
+	if (world.vehicle_authority) {
+		veh.flags |= kEntityFlagSuspensionCrashed; // [orig: @0x46b1ed]
+	} else if ((veh.flags & kEntityFlagSuspensionCrashed) == 0) {
+		return false; // [orig: the `test Flags, 0x10` skip @0x46b1f3]
+	}
+	m.crashed = 1;     // [orig: @0x46b1f9]
+	m.landing_2ee = 0; // [orig: @0x46b20d]
+	// Entity_ClearSuspensionState @0x46b213: the chassis matrix / quaternion
+	// reset — nothing of ours corresponds (the header's residual list).
+	if (eject_occupants) {
+		// The bike twin ejects every rider at its latch
+		// [orig: Entity_EjectAllOccupants @0x468b3b].
+		for (Seat &s : veh.seats) {
+			if (!s.occupant.valid()) continue;
+			const EntityHandle occ = s.occupant;
+			(void)entity_detach_from_vehicle(world, occ);
+		}
+		m.has_been_driven = 0; // [orig: the bike seed's +0x3DE clear @0x468bb1]
+	}
 	return true;
 }
 
-float vehicle_suspension_dt(const Entity::VehicleMotorState &m) {
-	return m.susp_latched != 0 ? kSuspensionDtParked : kSuspensionDtUnparked;
+void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
+                                     int32_t max_depth) {
+	Entity::VehicleMotorState &m = veh.veh;
+	// [orig: tracked @0x47ed60 — every pad back in contact, a positive max
+	//  penetration, not crashed → the sinks reset]
+	bool all = true;
+	for (int k = 0; k < wheels; ++k) all = all && contact[k];
+	if (all && max_depth > 0 && m.crashed == 0)
+		for (int k = 0; k < 4; ++k) m.plat_acc[k] = 0;
 }
 
-void vehicle_suspension_step(World &world, Entity &veh, const VehicleTraits &traits,
-                             const int32_t pad_depths[4]) {
-	(void)world;
-	// WITNESS PENDING (see the header): the compress arm grows the pad
-	// offsets, and the rest Z of the live solves moves with them — armed
-	// together with the latch so the solves keep their witnessed zero-state
-	// rest until the park machine is complete.
-	if (!kSuspensionLegArmed) return;
+void vehicle_suspension_tick_tail(Entity &veh, const VehicleTraits &traits) {
 	Entity::VehicleMotorState &m = veh.veh;
-	// The travel bound from the def's spring_comp percentage and the dt by
-	// the latch [orig: @0x47C51F..0x47C544; @0x47C218..0x47C22B].
-	const int32_t travel = conform_travel_from_def(traits.spring_comp);
-	const float dt = vehicle_suspension_dt(m);
-	// One dt of compression in the kernel's 16.16 units: the step the
-	// compressing arm integrates is the per-step delta (dword_815180 >> 4)
-	// scaled by dt [orig: the `fmul dt; fistp` feeding the call @0x47E2C1].
-	const int32_t step = static_cast<int32_t>(static_cast<float>(kSuspStep) * dt);
-	for (int k = 0; k < 4; ++k) {
-		ConformOscillator osc;
-		osc.amplitude = m.wheel_osc[k].amplitude;
-		osc.extension = m.wheel_osc[k].extension;
-		osc.energy = m.wheel_osc[k].energy;
-		osc.phase = m.wheel_osc[k].phase;
-		if (pad_depths[k] > 0) {
-			// A penetrating pad compresses [orig: the d > 0 arm ->
-			// Suspension_CompressWheelQuadratic @0x47E2C1].
-			(void)conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
-			                              step, travel, traits.spring);
-		} else {
-			// A wheel in the air releases through the oscillator [orig: the
-			// else arm -> Suspension_OscillateWheelFast @0x47E2D3].
-			(void)conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
-			                               traits.shock, traits.spring, m.slide_z);
-		}
-		m.wheel_osc[k].amplitude = osc.amplitude;
-		m.wheel_osc[k].extension = osc.extension;
-		m.wheel_osc[k].energy = osc.energy;
-		m.wheel_osc[k].phase = osc.phase;
-	}
-	// WITNESS PENDING: the sink growth rates on airborne wheels (+250/tick
-	// wheeled @?, +187 tracked @0x47DB59..0x47DBE4, +100 bike) and the
-	// corner-lift feedback of the stepped compression into the conform.
+	m.crash_request = 0; // [orig: @0x47eeee / @0x4795da / @0x47c0b6 — unconditional]
+	// The amplitude tail [orig: @0x48178a..0x4817c4]: thr = ftol(0.01 ×
+	// ftol(travel_locked)), where travel_locked = ftol(0xFFFF × (100 −
+	// spring_comp) × 0.01) is the global dword_815184 the tracked solve stamps.
+	const int32_t locked = static_cast<int32_t>(
+			static_cast<float>(kSuspFull) *
+			static_cast<float>(100 - std::min(std::max(traits.spring_comp, 0), 100)) * 0.01f);
+	const int32_t thr = static_cast<int32_t>(static_cast<float>(locked) * 0.01f);
+	bool quiet = true;
+	for (int k = 0; k < 4; ++k) quiet = quiet && m.wheel_osc[k].amplitude <= thr;
+	if (quiet && m.spring_energy != 0) m.spring_energy = 0;
 }
 
 } // namespace opennova::world

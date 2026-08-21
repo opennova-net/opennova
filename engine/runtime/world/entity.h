@@ -775,6 +775,8 @@ struct Entity {
         uint32_t net_seen_revision = 0;    // last consumed row compact_revision
         // --- Boat platform-solve state (vehicle-client-movers-re.md §3; client subset).
         int32_t plat_acc[4] = {};          // per-corner drop accumulators [orig: +0x2C4..+0x2D0]
+                                           // — ALSO the ground spring leg's per-pad free-fall
+                                           // sinks: the same four dwords (vehicle_suspension.h)
         float plat_bob_phase = 0.0f;       // heave-bob phase, radians [orig: +0x318 float]
         bool plat_at_rest = false;         // bob arm latch [orig: byte +0x364]
         bool plat_porpoise = false;        // bow-dip cycle latch [orig: byte +0x365]
@@ -818,10 +820,19 @@ struct Entity {
         };
         WheelOsc wheel_osc[4];
         int32_t spring_energy = 0;   // +0x300 (the impact sink)
-        uint8_t susp_latched = 0;    // +0x2EC — the parked latch
-        uint8_t susp_disable_req = 0; // +0x2ED — the mover's disable request
-        uint8_t susp_byte_2ee = 0;   // +0x2EE
-        uint8_t susp_byte_2ef = 0;   // +0x2EF
+        // The crash latch bytes, named by retail offset (vehicle_suspension.h
+        // documents each; Entity_RespawnVehicle @0x45FF40 is the one writer of
+        // the whole set).
+        uint8_t crashed = 0;         // +0x2EC — the CRASHED / TIPPED state
+        uint8_t crash_request = 0;   // +0x2ED — the per-tick crash request
+        uint8_t landing_2ee = 0;     // +0x2EE — the hard-landing marker
+        uint8_t byte_2ef = 0;        // +0x2EF — zeroed at arming
+        uint8_t settle_2f0 = 0;      // +0x2F0 — the wreck/settle latch
+        uint8_t fresh_2f1 = 0;       // +0x2F1 — 1 after Entity_RespawnVehicle
+        uint8_t settled_2f2 = 0;     // +0x2F2 — settled upright (the sleep path)
+        uint8_t wreck_2fc = 0;       // +0x2FC — the crash latch
+        uint8_t has_been_driven = 0; // +0x3DE — the bike's driven byte
+        uint32_t airborne_stamp_2f8 = 0; // +0x2F8 — the client crash window's stamp
         float susp_rate_pick = 0.0f; // the one-shot 1.75/1.25 disable-rate pick
     };
     VehicleMotorState veh;

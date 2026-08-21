@@ -600,8 +600,10 @@ typedef struct DefItemDef {
        constant k of Suspension_CompressWheelQuadratic @0x45CFB0; spring_comp =
        the travel PERCENTAGE (100 - spring_comp scales 0xFFFF) @0x47C51F..0x47C544;
        shock = the landing damp (11 - shock)/11, clamped [0,10] in place by
-       Suspension_OscillateWheelFast @0x45D18F..0x45D1A2; top_heavy: consumer
-       not yet witnessed. vehicle-client-movers-re.md §7.3. */
+       Suspension_OscillateWheelFast @0x45D18F..0x45D1A2; top_heavy: DEAD in
+       retail — the parser, the def allocator and the debug item editor are the
+       only readers of +0x918; parsed for parity, carried by no consumer.
+       vehicle-client-movers-re.md §7.3. */
     int spring;
     int spring_comp;
     int shock;
