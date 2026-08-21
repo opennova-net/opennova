@@ -4,6 +4,7 @@
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
+#include <world/vehicle_motor.h> // carrier_pose_fixed — the mounted camera's carrier read
 
 using namespace novasim;
 
@@ -236,6 +237,28 @@ void Simulation::tick_local_player_view() {
 				world_->ai != nullptr ? world_->ai->terrain : nullptr,
 				(e->flags & opennova::world::kEntityFlagIndoors) != 0, eye);
 	}
+	// The mounted camera's carrier read, refreshed every tick: only a CONTROL
+	// seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
+	// carrier's pose/radius/class feed the chase target, the back-off and the
+	// watercraft eye drop (retail: Camera_ComputeThirdPersonView @0x437D10 —
+	// the +0x168 seat test, parentEntity +0x16C, boundRadius +0, the unitType
+	// +0x196 in {3,4} test @0x43861D..0x43864C; see world/player_view.h).
+	opennova::world::MountedCameraInput mount;
+	const opennova::world::Entity *carrier = e->mounted
+			? world_->registry.get(e->mount_target)
+			: nullptr;
+	if (carrier != nullptr &&
+			opennova::world::is_vehicle_control_seat(e->mount_type)) {
+		int32_t pitch_bam = 0, roll_bam = 0;
+		opennova::world::carrier_pose_fixed(*carrier, mount.carrier_pos_q16,
+				mount.carrier_yaw_bam, pitch_bam, roll_bam);
+		mount.control_seat = true;
+		mount.bound_radius = carrier->bound_radius;
+		mount.watercraft = carrier->item_unit_type == 3 ||
+				carrier->item_unit_type == 4;
+		mount.water_z = static_cast<float>(world_->env.water_z) / 65536.0f;
+	}
+	player_view_.mount = mount;
 	opennova::world::player_view_tick(player_view_, eye);
 }
 
@@ -273,6 +296,9 @@ Dictionary Simulation::get_local_player_view() const {
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
 	out["mounted"] = local != nullptr && local->mounted;
+	// The camera's mounted leg is engaged (a control seat with a live carrier —
+	// the per-tick carrier read in tick_local_player_view).
+	out["camera_mounted"] = player_view_.mount.control_seat;
 	// Structural proxy for Player_IsVehicleHasAttackCapability until mounted
 	// weapon inventory is modeled: these seat classes replace the on-foot
 	// upper-body weapon channel; passenger seats do not.
