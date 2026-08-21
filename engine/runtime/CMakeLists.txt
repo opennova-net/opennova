@@ -150,6 +150,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/ground_conform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/fire_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/friendly_tags.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp  # the stng pursuit integrator (D-NET-64)
