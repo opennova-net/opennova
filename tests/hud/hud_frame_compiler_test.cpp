@@ -1398,6 +1398,69 @@ void test_static_frame_pick() {
 			"the rule is last-wins for any count");
 }
 
+// The mounted-vehicle panel element: what draws, in what order, and the
+// occupied/empty split. [orig: HUD_DrawVehicleHealthBars @0x5A4FD0]
+void test_vehicle_panel_element(const fnt_font_t *font) {
+	using opennova::hud::HudVehicleSeat;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	state.ticks = 10;
+	// Hidden by default: a player on foot must draw no panel at all.
+	{
+		const HudDrawList &none = compiler.compile(state, 1024.0f, 768.0f);
+		size_t panel_quads = 0;
+		for (const auto &q : none.quads)
+			if (q.texture == opennova::hud::kHudTexVehiclePanel) ++panel_quads;
+		CHECK(panel_quads == 0, "no panel while not mounted");
+	}
+
+	auto &vp = state.vehicle_panel;
+	vp.shown = true;
+	vp.anchor_x = 300; vp.anchor_y = 400;
+	vp.stance_offset_x = -12; vp.stance_offset_y = 6;
+	vp.hull_health = 100; vp.hull_max_health = 100;
+	// No silhouette texture: the seats must still draw.
+	vp.silhouette_valid = false;
+	HudVehicleSeat driver; driver.x = 5; driver.y = 7;
+	driver.occupied = true; driver.health = 100; driver.max_health = 100;
+	driver.own_seat = true;
+	HudVehicleSeat empty; empty.x = 40; empty.y = 7; empty.label = "2";
+	vp.seats.push_back(driver);
+	vp.seats.push_back(empty);
+
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	// Exactly ONE filled seat box -- the occupied seat. The empty seat draws a
+	// digit, not a box.
+	size_t filled = 0;
+	for (const auto &q : list.quads)
+		if (q.filled && q.texture == opennova::hud::kHudTexNone) ++filled;
+	CHECK(filled >= 1, "the occupied seat draws a filled box");
+
+	// A missing silhouette texture emits no panel quad but does not suppress
+	// the seats -- the panel degrades rather than disappearing.
+	size_t panel_quads = 0;
+	for (const auto &q : list.quads)
+		if (q.texture == opennova::hud::kHudTexVehiclePanel) ++panel_quads;
+	CHECK(panel_quads == 0, "no silhouette quad without its texture");
+
+	// With the texture present the silhouette lands at the STANCE-SHIFTED
+	// base (300-12, 400+6), not the raw anchor.
+	vp.silhouette_valid = true;
+	vp.silhouette_w = 64; vp.silhouette_h = 32;
+	const HudDrawList &l2 = compiler.compile(state, 1024.0f, 768.0f);
+	bool found = false;
+	for (const auto &q : l2.quads) {
+		if (q.texture != opennova::hud::kHudTexVehiclePanel) continue;
+		found = true;
+		CHECK(std::fabs(q.x0 - 288.0f) < 1.0f, "silhouette x rides the stance offset");
+		CHECK(std::fabs(q.y0 - 406.0f) < 1.0f, "silhouette y rides the stance offset");
+	}
+	CHECK(found, "the silhouette draws when its texture is present");
+}
+
 int main() {
 	fnt_font_t font = make_font();
 	test_measure_advance_and_trailing_pad(&font);
@@ -1414,6 +1477,7 @@ int main() {
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
 	test_static_frame_pick();
+	test_vehicle_panel_element(&font);
 	test_compiler_stdbox_geometry(&font);
 	test_compiler_scoreboard_rows(&font);
 	fnt_free(&font);

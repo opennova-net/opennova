@@ -235,6 +235,10 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
 	element_friendly_tags(state, surface_w, surface_h);
+	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
+	// and the Tab board -- both of those are held-open surfaces that should
+	// cover it, not the other way round.
+	element_vehicle_panel(state, surface_w, surface_h);
 	element_feed(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
 	return draw_list_;
