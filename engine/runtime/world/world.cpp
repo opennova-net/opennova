@@ -1555,6 +1555,12 @@ void World::process_round_end(int32_t winning_team) {
     // game types 0x10000/65537/65540 @0x5168a0 and the MP-only 2790-tick linger
     // @0x5166c4 (drained by Server_TickUpdate -> exit reason 3 / the client frame ->
     // reason 4; SP never drains it — the epilog owns the SP exit).
+    // The draw flag on the team arm is the plain score equality; Co-op's
+    // g_GameType 0x30020 has bit 0x10000 set, so it takes that arm
+    // [orig: Server_BuildEndOfRoundScoreboard @0x508f30 — `team_data_ptr =
+    //  g_scoreTeamScore0 == g_scoreTeamScore1`, kong 213720]. The scores
+    // themselves stay 0 until the D2 scoring pass lands (see RoundEndState).
+    round_end.draw = round_end.team_scores[0] == round_end.team_scores[1];
     round_end.ended = true; // [orig: g_spawn_success_gate latch @0x5168e4]
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the

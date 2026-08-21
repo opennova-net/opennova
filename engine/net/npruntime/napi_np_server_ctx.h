@@ -131,6 +131,23 @@ struct NapiNPServerCtx {
 	// so a fresh mission reaches its first boundary after 311 calls. Mission
 	// start resets it through create_session; round init does not.
 	uint32_t scoreboard_broadcast_timer = 0;
+	// Round-end wire pass edge latch. Retail has no equivalent field because
+	// Server_ProcessRoundEnd @0x5164f0 IS the one-shot: it runs the per-slot
+	// wire block inline behind its own `if (!g_spawn_success_gate)` guard
+	// [orig: @0x516502] and latches the gate at the end [orig: @0x5168e4]. Our
+	// World::process_round_end owns that guard/latch on the sim side, so the
+	// NET side observes `round_end.ended` as a LEVEL and needs its own edge
+	// memory to fire the block exactly once. DIVERGENCE (placement only): the
+	// wire block runs from the server tick on the ended-edge rather than inline
+	// inside process_round_end, because the world layer holds no connection
+	// list. The emitted bytes and their order are unchanged.
+	bool round_end_wire_sent = false;
+	// [orig: g_endround_linger_timer @0xc8d820] MP-only, set to 2790 (45 s at
+	// the 62 Hz tick) BEFORE the per-slot loop and gated on is_in_session
+	// [orig: @0x5166c4]. Drained by Server_TickUpdate (authority) / the client
+	// frame; SP never drains it — the epilog owns the SP exit. Stored here, not
+	// in World, because it is a session-lifetime net timer.
+	uint32_t endround_linger_timer = 0;
 	// [orig: dword_24C10C0] The process-global family toggle. Executable initial
 	// storage is zero: false selects 0x31, true selects 0x30, then every boundary
 	// XORs it even when no player is eligible. Neither session nor round init

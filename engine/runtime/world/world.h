@@ -263,6 +263,22 @@ struct WacNamedValues {
 struct RoundEndState {
     bool ended = false;
     int32_t winner_team = 0;
+    // The two team totals the S2C 0x1D scoreboard header carries, and the draw
+    // flag derived from them. For every WAYPOINT-FAMILY game type (stock and
+    // objective Co-op — the `(fieldId & 0xFFFDFFFF) == 0x10020` arm, which is
+    // exactly game_type::is_waypoint_family) retail reads dword field 29 of the
+    // two per-team stats objects `dword_C87CA8` / `dword_C87DFC`
+    // [orig: Server_BuildEndOfRoundScoreboard @0x508f30 -> sub_52C850 @0x52c850];
+    // the draw flag is the plain equality, taken on the team arm because
+    // Co-op's g_GameType 0x30020 has bit 0x10000 set
+    // [orig: @0x508f30 draw leg, kong 213715-213730].
+    //
+    // UNPORTED SOURCE (ledger D2): retail's per-slot/per-team SCORE accounting
+    // (GameEvent_ProcessScoring @0x52f550) is not ported, so nothing writes
+    // these yet and the header ships them as 0. That is a DECLARED unported
+    // field, not a witnessed value — D2 lands the accounting and fills them.
+    int32_t team_scores[2] = {0, 0};
+    bool draw = false;
 };
 
 // The epilog/debrief exit timeout: both end screens (WIN score epilog and the

@@ -19,6 +19,7 @@
 #include <world/world.h>
 
 #include <cstdint>
+#include <vector>
 #include <cstdio>
 
 namespace {
@@ -174,7 +175,24 @@ int main() {
 	// respawn queue holds and the latch never double-fires. ---
 	world.mission_attrib_flags = 0;
 	push_death(world, player, red_person);
+	loop.clear(); // capture the round-end WIRE pass on its ended-edge (section 6)
 	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx);
+	int saw61 = 0, saw1d = 0;
+	bool marker_precedes_header = false;
+	std::vector<uint8_t> header;
+	{
+		ns::Datagram dg;
+		while (loop.client_recv(dg)) {
+			if (dg.tag == 0x61 && dg.body.size() == 4 && dg.body[0] == 0 &&
+					dg.body[1] == 0 && dg.body[2] == 0 && dg.body[3] == 0) {
+				++saw61;
+				if (saw1d == 0) marker_precedes_header = true;
+			} else if (dg.tag == 0x1D && dg.body.size() == 7) {
+				++saw1d;
+				header = dg.body;
+			}
+		}
+	}
 	expect(world.round_end.ended, "dead player without SP-respawn -> round over");
 	expect(world.round_end.winner_team == 2, "auto-lose winner is team 2 (red)");
 	expect(world.effects.count("round_end") == 1, "one round_end host effect");
@@ -184,6 +202,45 @@ int main() {
 	world.process_round_end(1);
 	expect(world.round_end.winner_team == 2, "the latch ignores a second round end");
 	expect(world.effects.count("round_end") == 1, "no second round_end effect");
+
+	// --- 6. The round-end WIRE pass [orig: Server_ProcessRoundEnd @0x5164f0,
+	// the state-6 slot loop @0x516790..0x51685e], captured on the ended-edge
+	// raised in section 5 and driven through the real tick so the call-site
+	// wiring is covered too. Per active slot: S2C 0x61 (4 zero bytes) then
+	// S2C 0x1D (the 7-byte scoreboard header), then game state 11. ---
+	expect(world.round_end.draw,
+	       "both team scores 0 -> draw flag [orig: the equality @0x508f30, kong 213720]");
+	expect(saw61 == 1, "one 0x61 round-end marker, 4 zero bytes [orig: @0x516790]");
+	expect(saw1d == 1, "one 7-byte 0x1D scoreboard header [orig: @0x516839]");
+	expect(marker_precedes_header, "0x61 precedes 0x1D, retail's per-slot order");
+	// [u8 winner][s16 score0][s16 score1][u8 draw][s8 myEntryIndex]
+	// [orig: EndRoundScoreboard_SerializeHeader @0x505280 — the 7-byte arm, which
+	//  Co-op always takes because g_GameType 0x30020 has bit 0x10000 set
+	//  (AI_GetTaskTypeFromFlags @0x40DAE0: attrib 0x1000000 -> task 2), matching
+	//  the 00TRg retail baseline capture's S 0x1D len=7]
+	if (expect(header.size() == 7, "header is 7 bytes")) {
+		expect(header[0] == 2, "winner byte = the winning team (auto-lose = 2)");
+		expect(header[1] == 0 && header[2] == 0, "teamScore0 — UNPORTED source, ledger D2");
+		expect(header[3] == 0 && header[4] == 0, "teamScore1 — UNPORTED source, ledger D2");
+		expect(header[5] == 1, "draw flag = (score0 == score1)");
+		expect(static_cast<int8_t>(header[6]) == 0, "myEntryIndex = this slot's row");
+	}
+	expect(ctx.np_protocol.connection_list[0].burst.game_state == 11,
+	       "slot moved to game state 11 [orig: CNetPlayer_SetGameState @0x516846]");
+	// The 2790-tick linger is MP-ONLY: gated on is_in_session, which this SP
+	// fixture leaves 0 [orig: @0x5166c4].
+	expect(ctx.endround_linger_timer == 0,
+	       "SP arms no end-round linger [orig: the is_in_session gate @0x5166c4]");
+	// One-shot: later ticks never re-emit the block.
+	loop.clear();
+	np::Server_TickUpdate(ctx);
+	{
+		ns::Datagram dg;
+		int again = 0;
+		while (loop.client_recv(dg))
+			if (dg.tag == 0x61 || (dg.tag == 0x1D && dg.body.size() == 7)) ++again;
+		expect(again == 0, "the wire pass is one-shot on the ended edge");
+	}
 
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;

@@ -400,6 +400,74 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 		world.process_round_end(2);
 }
 
+// The S2C 0x1D end-of-round scoreboard HEADER body.
+// [orig: EndRoundScoreboard_SerializeHeader @0x505280 — the kong banner name
+//  "WeaponOverlay_SerializeToBuffer" is a MISNOMER; trust the code, not the banner.]
+//
+// Branch gate: `!g_napi_np_ctx.is_in_session || (g_GameType & 0x10000) != 0`.
+// TRUE selects this 7-byte team/SP form; FALSE selects the non-team MP form
+// (3 winner-name NUL strings byte_24C1A98/B7C/C60 + 3 s16 + draw + index).
+// Co-op resolves to g_GameType 0x30020 [orig: AI_GetTaskTypeFromFlags @0x40DAE0
+// bit 0x1000000 -> task type 2 -> Game_StartMission @0x524360; ported as
+// game_type::for_mission_mode], and 0x30020 & 0x10000 is set — so Co-op always
+// takes the 7-byte arm regardless of is_in_session. That matches the retail
+// 00TRg baseline capture byte-for-byte (S 0x1D, len=7).
+//
+// Layout: [u8 winner][s16 teamScore0][s16 teamScore1][u8 draw][s8 myEntryIndex]
+// myEntryIndex = this slot's row in the entry table @0x24C1A94 (stride 57
+// dwords, count g_netPlayerCount @0x24C1A90), matched on *(slot+20); -1 when
+// absent [orig: the scan @0x505280 LABEL_35].
+std::vector<uint8_t> build_end_round_scoreboard_header(
+		const world::World &world, int32_t my_entry_index) {
+	std::vector<uint8_t> body;
+	body.reserve(7);
+	body.push_back(static_cast<uint8_t>(world.round_end.winner_team));
+	put_u16le(body, static_cast<uint16_t>(static_cast<int16_t>(world.round_end.team_scores[0])));
+	put_u16le(body, static_cast<uint16_t>(static_cast<int16_t>(world.round_end.team_scores[1])));
+	body.push_back(world.round_end.draw ? 1u : 0u);
+	body.push_back(static_cast<uint8_t>(static_cast<int8_t>(my_entry_index)));
+	return body;
+}
+
+// The round-end wire pass: retail's per-active-slot block inside
+// Server_ProcessRoundEnd [orig: @0x5164f0, the state-6 slot loop @0x516790..0x51685e].
+// Runs once on the round_end.ended edge (see NapiNPServerCtx::round_end_wire_sent
+// for the placement divergence).
+//
+// Per slot in state 6, in retail's order:
+//   1. slot bookkeeping reset (curSlot[24115]=stat_id, [24116]=0, [24119]=0,
+//      byte@+96480=0) — UNPORTED: those four slots have no modelled counterpart
+//      in NapiNPConnection and no wire effect. Declared, not invented.
+//   2. S2C 0x61, 4 zero bytes, send_mask 32 [orig: @0x516790]
+//   3. the winner-bonus scoring leg (GameEvent_ProcessScoring) — UNPORTED, ledger D2
+//   4. S2C 0x1D, EndRoundScoreboard_SerializeHeader body [orig: @0x516839]
+//   5. CNetPlayer_SetGameState(11) [orig: @0x516846]
+//   6. state 6 -> 7, zeroing curSlot[24386] on the 6 case [orig: @0x51685e]
+//
+// The per-team round-win counters [orig: @0x5168a0] are gated on
+// g_GameType == 0x10000 || 65537 || 65540; Co-op's 0x30020 is in none of them,
+// so that block is correctly inert here and is not ported for this row.
+void emit_round_end_wire(NapiNPServerCtx &ctx, world::World &world) {
+	if (!world.round_end.ended || ctx.round_end_wire_sent) return;
+	ctx.round_end_wire_sent = true;
+	// MP-only linger, set BEFORE the slot loop and gated on is_in_session
+	// [orig: @0x5166c4].
+	if (ctx.is_in_session) ctx.endround_linger_timer = 2790;
+
+	int32_t entry_index = 0;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+		conn.link.transport->host_send(s2c::TICK_SEED, {0x00, 0x00, 0x00, 0x00},
+		                               /*reliable=*/true); // 0x61 round-end marker
+		conn.link.transport->host_send(
+				s2c::SPAWN_SUCCESS_GATE, // 0x1D — retail's end-of-round scoreboard header
+				build_end_round_scoreboard_header(world, entry_index),
+				/*reliable=*/true);
+		conn.burst.game_state = 11; // [orig: CNetPlayer_SetGameState(netPlayer, 11) @0x516846]
+		++entry_index;
+	}
+}
+
 // Release due respawns: back to the spawn point at full health [orig:
 // Server_ProcessPlayerDeath -> Entity_ResetToSpawnState @0x4B9610; the D-NET-66
 // death/respawn teleport — a snap, never motion].
@@ -822,6 +890,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
 	world.run_logic_tick(/*is_authority=*/true);
+
+	// (2a') The round-end wire pass, on the round_end.ended edge raised by the
+	// script pass inside the tick above. Retail emits it inline from
+	// Server_ProcessRoundEnd during that same pass, so it lands ahead of this
+	// frame's death routing and 0x0A fan; keep it here for the same ordering.
+	emit_round_end_wire(ctx, world);
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
