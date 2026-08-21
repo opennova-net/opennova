@@ -92,9 +92,8 @@ func _find_target(sim, eye: Vector3) -> Dictionary:
 			best_dist = d
 			best = pick.duplicate()
 			best["dir"] = dir
-			# The struck face sits on the ray, inside the entity's bound sphere.
-			var radius := float(pick.get("bound_radius", 1.0))
-			best["hit_godot"] = eye + dir * maxf(1.0, d - radius)
+			# The struck face from the projectile trace itself.
+			best["hit_godot"] = pick.get("hit_position_godot", eye + dir)
 	return best
 
 
@@ -135,9 +134,11 @@ func _run() -> void:
 		return
 	var hit: Vector3 = target["hit_godot"]
 	var dir: Vector3 = target["dir"]
-	print("PROBE target: entity=%s at %s (%.1f u), blocked=%s" % [
-			str(target.get("entity_handle", -1)), str(hit), eye.distance_to(hit),
-			str(target.get("blocked", ""))])
+	print("PROBE target: entity=%s %s '%s' at %s (%.1f u) section=%s face=%s surface=%s material_flags=%s" % [
+			str(target.get("entity_handle", -1)), str(target.get("hit_class", "")),
+			str(target.get("name", "")), str(hit), eye.distance_to(hit),
+			str(target.get("section", -1)), str(target.get("face", -1)),
+			str(target.get("surface_type", -1)), str(target.get("material_flags", 0))])
 
 	# The volley: jittered around the pick direction so the quads spread and
 	# the ring wraps (more rounds than the 256-slot ring holds).
@@ -155,6 +156,18 @@ func _run() -> void:
 		await process_frame
 	await _wait_frames(120)
 
+	# Where the rounds stopped, from the sim's round debug trail.
+	var trail: Dictionary = sim.get_round_debug()
+	var by_kind := {}
+	var samples := []
+	for ev in trail.get("events", []):
+		var kind := String(ev.get("kind_name", "?"))
+		by_kind[kind] = int(by_kind.get(kind, 0)) + 1
+		if kind == "item face" and samples.size() < 3:
+			samples.append("%s s%s f%s m%s @%s" % [str(ev.get("entity_name", "")),
+					str(ev.get("section", -1)), str(ev.get("face", -1)),
+					str(ev.get("material", -1)), str(ev.get("hit", Vector3()))])
+	print("PROBE round stops: %s samples=%s" % [str(by_kind), str(samples)])
 	var stats = world.get_scar_present_stats()
 	if stats == null:
 		_fail("the runtime owns no scar presentation pass")
