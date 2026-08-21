@@ -330,6 +330,52 @@ int main(void) {
     def_free_hudpos(&hudpos_mem);
     printf("Memory-variant equivalence OK\n");
 
+    /* StaticFrame is NOT a list in retail: the handler copies each dispatched
+       line over the previous one, so the LAST authored line is the one that
+       draws [orig: HUD_ParseHudposToken @0x59F370 - name copy @0x5a0a4e-
+       0x5a0a62, x @0x5a0a73, y @0x5a0a8a]. We keep every line so the writer
+       round-trips, which makes "which one" a consumer policy -- pinned here so
+       the parser side of that contract (all lines recorded, IN ORDER) cannot
+       drift under hud_static_frame_index(). */
+    {
+        const char *two_frames =
+            "StaticFrame\tH_BlkHLin.tga  512,720\n"
+            "StaticFrame\tCompMark.tga  508,685\n";
+        DefHudPosFile multi;
+        memset(&multi, 0, sizeof(multi));
+        if (def_parse_hudpos_memory((const unsigned char *)two_frames,
+                                    strlen(two_frames), &multi) != 0) {
+            fprintf(stderr, "FAIL: two-StaticFrame memory parse failed\n");
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        if (multi.hud.static_frames_count != 2) {
+            fprintf(stderr, "FAIL: expected 2 StaticFrame entries, got %zu\n",
+                    multi.hud.static_frames_count);
+            def_free_hudpos(&multi);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        if (strcmp(multi.hud.static_frames[0].texture, "H_BlkHLin.tga") != 0 ||
+            strcmp(multi.hud.static_frames[1].texture, "CompMark.tga") != 0) {
+            fprintf(stderr, "FAIL: StaticFrame entries out of authored order\n");
+            def_free_hudpos(&multi);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        /* The one retail draws is the LAST: 508,685, not 512,720. */
+        if (multi.hud.static_frames[1].x != 508 ||
+            multi.hud.static_frames[1].y != 685) {
+            fprintf(stderr, "FAIL: last StaticFrame position wrong (%d,%d)\n",
+                    multi.hud.static_frames[1].x, multi.hud.static_frames[1].y);
+            def_free_hudpos(&multi);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&multi);
+        printf("StaticFrame last-wins ordering OK\n");
+    }
+
     def_free_hudpos(&hudpos);
     printf("PASS: hudpos parsing OK\n");
     return 0;

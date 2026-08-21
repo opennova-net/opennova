@@ -482,11 +482,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	const int chline = p_hudpos->get_hud_chline();
 	layout_.chat_lines = chline > 0 ? chline : 8;
 
-	// Static HUD frame background: the first authored HUDGFX record, like the
-	// ported shell drew.
+	// Static HUD frame background. Retail keeps ONE static frame and the LAST
+	// authored line wins, so the index comes from the engine-side policy rather
+	// than being assumed here (retail: HUD_ParseHudposToken @0x59F370, see
+	// engine/runtime/hud/hud_frame.h).
 	const Array frames = p_hudpos->get_static_frames();
-	if (frames.size() > 0) {
-		const Dictionary frame = frames[0];
+	const int frame_index =
+			opennova::hud::hud_static_frame_index(static_cast<int>(frames.size()));
+	if (frame_index >= 0) {
+		const Dictionary frame = frames[frame_index];
 		const Vector2i pos = frame.get("pos", Vector2i());
 		layout_.frame_pos = pos_record2(pos);
 		const Ref<Texture2D> tex = load_hud_texture_(frame.get("texture", String()));
