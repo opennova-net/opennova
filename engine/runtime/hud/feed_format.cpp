@@ -187,4 +187,50 @@ std::string feed_camp_wpname_key(uint8_t level_index) {
 	return std::string(key);
 }
 
+ChatSink chat_channel_sink(int channel) {
+	// [orig: Chat_DispatchToChannel @0x42b910 — case 0 and the default fall
+	//  to Chat_AddDebugMessage @0x42bb0c; 8 -> CMessageQueue_Enqueue @0x42bab8;
+	//  14 -> Chat_AddMessageChannel3 @0x42bb01; 1..7/9..13 ->
+	//  Chat_AddMessageChannel1; 13 ALSO calls HUD_SetTrackedEntityTarget(sender)
+	//  before posting (Phase W, no site address taken) -- that target write is a
+	//  world leg, not a ring leg, and is not folded here]
+	switch (channel) {
+		case 1: case 2: case 3: case 4: case 5: case 6: case 7:
+		case 9: case 10: case 11: case 12: case 13:
+			return ChatSink::Chat;
+		case 8:
+			return ChatSink::Queue;
+		case 14:
+			return ChatSink::Channel3;
+		default:
+			return ChatSink::System;
+	}
+}
+
+uint32_t chat_channel_color(int channel) {
+	// [orig: the per-case colour pushes — 1/4/5 g_hudColorLightBlue
+	//  @0x42ba5c; 9 dword_24C184C @0x42b9a5; 2 dword_24C183C @0x42b9c2;
+	//  11 dword_24C1860 @0x42ba26; 3 `color` @0x42ba43; 7 dword_24C1854
+	//  @0x42baa2; 12 dword_24C1850 @0x42baea; 0/6/10/13/14 and the default
+	//  g_hudColorTable[0] @0x42bb0c/@0x42ba86/@0x42b9de/@0x42bb01]
+	switch (channel) {
+		case 1: case 4: case 5:
+			return kHudColorLightBlue;
+		case 2:
+			return kHudColorGreen;
+		case 3:
+			return kHudColorYellow;
+		case 7:
+			return kHudColorOrange;
+		case 9:
+			return kHudColorSalmon;
+		case 11:
+			return kHudColorCyan;
+		case 12:
+			return kHudColorMagenta;
+		default:
+			return kHudColorWhite;
+	}
+}
+
 } // namespace opennova::hud

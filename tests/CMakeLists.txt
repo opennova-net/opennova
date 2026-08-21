@@ -1199,6 +1199,28 @@ target_link_libraries(hud_message_log_test PRIVATE opennova_runtime)
 target_include_directories(hud_message_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_message_log COMMAND hud_message_log_test)
 
+# The mounted-vehicle panel feed (world/vehicle_panel_feed): the re-rooted
+# vehicle, retail's slot-list order, and the per-marker rows.
+add_executable(vehicle_panel_feed_test world/vehicle_panel_feed_test.cpp)
+target_link_libraries(vehicle_panel_feed_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(vehicle_panel_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vehicle_panel_feed_test PRIVATE cxx_std_17)
+add_test(NAME vehicle_panel_feed COMMAND vehicle_panel_feed_test)
+
+# The AAS zone status panel feed (world/lfp_feed): list order, the timer join,
+# the viewer's distance/cylinder tests, the contest counts.
+add_executable(lfp_feed_test world/lfp_feed_test.cpp)
+target_link_libraries(lfp_feed_test PRIVATE opennova_runtime)
+target_include_directories(lfp_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(lfp_feed_test PRIVATE cxx_std_17)
+add_test(NAME lfp_feed COMMAND lfp_feed_test)
+
+# The player-chat lane (S2C 0x14) fold + the HUD channel table.
+add_executable(client_replica_chat_test netsim/client_replica_chat_test.cpp)
+target_link_libraries(client_replica_chat_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_replica_chat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_replica_chat COMMAND client_replica_chat_test)
+
 add_executable(impact_scar_test world/impact_scar_test.cpp)
 target_link_libraries(impact_scar_test PRIVATE opennova_runtime)
 target_include_directories(impact_scar_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

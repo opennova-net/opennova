@@ -127,6 +127,20 @@ struct ClientGameEvent {
 	uint8_t kind = 0;
 };
 
+// One folded S2C 0x14 chat line — the player-chat lane. The wire carries
+// [channel][sender_slot][cstr text] (D-NET-215); the text is already the
+// server-formatted "name(/squad): text" line. Which ring it lands in and which
+// colour it takes is the HUD's channel table (hud/feed_format.h
+// chat_channel_sink/color); the sender gate (a muted slot, or an unspawned
+// spectator while the spawn gate is down) reads the roster the embedder owns
+// [orig: NapiNPClientMsg_ChatMessage @0x42f240 -> Chat_DispatchToChannel
+//  @0x42b910 — the slot gate @0x42b923..0x42b943, the switch @0x42b95d].
+struct ClientChatLine {
+	int8_t channel = 0;      // body[0], sign-extended into the switch
+	uint8_t sender_slot = 0; // body[1], the roster index
+	std::string text;
+};
+
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the
 // present pass reads THIS, not the authoritative sim directly — so single-player
 // Vehicle compact flags_byte dead-pose/wreck bit — the vehicle-class analog of
