@@ -320,8 +320,10 @@ only the sections it sits in `[orig: @ 0x5c5f5a-0x5c5fa7]`;
 after — corroborating §15's sampler note (`terrain_sector_compute_lighting
 @ 0x5c7550`, confirm-only). Buildings fully below the water plane get the
 mirror clip matrix in the reflection scene `[orig: @ 0x5c5e75-0x5c5e9b]`.
-`g_BuildingSectionVisMask` is also read by the window-glow renderer
-(`terrain_render_sector_userpoints @ 0x5cd830`), the bit-query helper
+`g_BuildingSectionVisMask` is also read by the scar-cache renderer
+(`Scar_RenderCache @ 0x5cd830` — ex `terrain_render_sector_userpoints`,
+renamed 2026-08-21: it draws the per-entity bullet-scar ring, not window
+glows; world-wac-ai-re.md §24.9), the bit-query helper
 `[orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960]` (permissive out-of-range),
 and `sub_5F6D10 @ 0x5f6d10` — none decompiled this session (D-OCC-5).
 
@@ -376,7 +378,7 @@ added the reimpl-mapping divergences D-OCC-9..15.
 | D-OCC-2 | OPEN (witness detail) | Per-building flag bytes `+0x2CC` (has type-1) and `+0x2CE` (has type-5) are stamped at mission start but no reader was found (single-register modrm scan only; SIB-form reads unscanned). `+0x2CD` (has windows) is the witnessed outdoor-mask input. The port stamps all three (`OcclusionWorld::BuildingFlags`). |
 | D-OCC-3 | OPEN (witness detail) | Record type 0 vs 1 distinction beyond witnessed uses: both collect as occluder/glow slots; type 1 flags the building "open" (outside-in traversal + two-pass draw + occludes only when bit-31-marked, with viewthru exceptions); the authoring-side meaning (door vs window vs destroyed state, and what mutates the byte at runtime besides welding) is unwitnessed. The port's test fixtures use the derived side conventions (record normal points a→b; windows author A = interior, B = 0). |
 | D-OCC-4 | OPEN (witness detail) | `Terrain_InitBuildingPortals`'s register+weld half is gated on its arg; the sole call site pushes `ebp` (`Game_StartMission @ 0x525e11`) whose value was not traced — structurally assumed nonzero at mission start (the weld machinery is live in retail; the port defaults `do_register_weld = true`). |
-| D-OCC-5 | OPEN (witness detail) | `g_BuildingSectionVisMask` readers not decompiled: `terrain_render_sector_userpoints @ 0x5cd830` (window glows), `sub_5F6D10 @ 0x5f6d10`, and the `Terrain_RenderSectorEntities`/`BySide` interplay with the collect-time blink-hits gate. |
+| D-OCC-5 | OPEN (witness detail) | `g_BuildingSectionVisMask` readers not decompiled: ~~`terrain_render_sector_userpoints @ 0x5cd830` (window glows)~~ — decompiled 2026-08-21 as `Scar_RenderCache @ 0x5cd830`, the bullet-scar ring renderer (the mask gates attached-entity scars by building section; world-wac-ai-re.md §24.9); still open: `sub_5F6D10 @ 0x5f6d10`, and the `Terrain_RenderSectorEntities`/`BySide` interplay with the collect-time blink-hits gate. |
 | D-OCC-6 | OPEN (witness detail) | `Render_TerrainScene @ 0x610c80` receives the outdoors flag as arg 0; its consumption inside (frameless-callee arg pattern) is unwitnessed. |
 | D-OCC-7 | CLOSED-BY-DECISION (2026-07-17) | Only the GPM-path occlusion loader is witnessed; the 3DI3-path loader in Jointops was never located. The port promotes the 3DI3-parsed OCCL tables (identical disk family) into the witnessed 60 B runtime shape; the GPM/GP runtime path is deliberately unsupported (project decision: no `threedi_gp` runtime or ONED support). |
 | D-OCC-8 | OPEN (suffix-consumer reconciliation) | Super OED Manual v1.1 officially defines BB plus `W`/`S`/`V` as preserving water/sky/voxels; exporter reconstruction also accepts `L`/`O` and clears bits from initial 0x3E. Runtime consumption is separately witnessed: bit 0x2 indoors, 0x4 the D-OCC-1 state, 0x8 water suppress, 0x10/0x20 no frame consumer. Reconcile the author-facing sky/voxel split with those consumer bits; `L`/`O` expansions remain unverified. |

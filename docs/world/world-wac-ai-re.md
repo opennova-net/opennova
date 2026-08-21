@@ -1400,6 +1400,23 @@ parses do disagree, and only the former may be used for a runtime ADM index.
 
 ### 14.6 Port status (D-INF-11 — LOCAL 2026-07-08; SHARED MOUNTED SELECTOR 2026-07-19; FINAL BN17 ROW 2026-07-21)
 
+**2026-08-21 — the mounted camera legs, staged.** The chase camera's
+vehicle-specific constants — the anchor lift `max(1.0, 0.375·boundRadius)`
+`[orig: ThirdPersonCamera_Update @0x437b1f..0x437b4b]`, the mounted ease 1/16
+xy · 1/32 z `@0x437c56..0x437c79`, and in `Camera_ComputeThirdPersonView
+@0x437d10` the distance `1.0 + 1.5·r` `@0x438121..0x438136`, the quarter
+look-yaw `@0x4380a3`, the fixed `−0x8000000` pitch `@0x438150`, the water /
+terrain `+0x4000` floors `@0x438409..0x438456` (water only while the entity is
+above water + 0.25 `@0x438413`; terrain skipped under flag `0x800000`
+`@0x438422`), the 0x8000 slope march with the `0.333` margin
+(`flt_7C56A4 @0x4385f8..0x438619`), the aircraft `r >> 1` drop
+`@0x43861d..0x43864c` and the `6.0` look-ahead `@0x438767/@0x438785/@0x438835`,
+plus the `Camera_SetTrackedEntity @0x4391d0` / `Camera_ResetToLocalPlayer
+@0x4a3d30` seeds and the dead-target seed `@0x439275` — are pinned in
+`engine/runtime/world/tp_camera_mount.h` (ctest `tp_camera_mount`). They are
+NOT wired: `player_view_compose_camera`'s mode 1 is the on-foot leg; the
+mounted branch is the follow-up. net-re §5.39 carries the same note.
+
 The local controller train remains, and mounted selection is now an animation-owned shared seam:
 
 - **Blends + bone map**: `engine/runtime/anim/{include/anim,src}/aim_overlay.{h,cpp}` — exact int32 BAM
@@ -4829,6 +4846,13 @@ material-selected, positioned, directed transient effect row; the Godot pass
 no longer invents a six-spawn radial burst. Native `destruction` pins the
 150-face cadence, signed-centroid edge, transform, launch direction, and
 foliage/wood split; `destruction_present_pass_test` pins verbatim delivery.
+**Ownership (re-witnessed 2026-08-21):** the material-17 foliage effect is
+spawned OWNED by the entity `@0x43f839` (it dies with it) while the wood effect
+is spawned unowned `@0x43f84d` (it outlives it); `DestructionEffectEvent`
+carries no owner tag, which is the one fact the live port lacks — D-ITEM-16
+stays FIXED. The #549 `section_debris.h` restatement of this routine was a
+value-for-value duplicate of `sample_section_debris` and was deleted in the
+post-merge tidy.
 
 **The client fold (witnessed + ported 2026-08-05, D-NET-208).** The "a
 non-authority client destroys on phase 4" leg above is DRIVEN by two S2C
@@ -5102,6 +5126,31 @@ the FFI structs.
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
 
+2026-08-21 (the post-merge tidy; saved): `sub_5CC360` → `Scar_TextureForId`,
+`Terrain_GetSurfaceFriction @0x5cc3b0` → `Scar_RadiusForId`, `sub_5CC4C0` →
+`Scar_GetEntityCache`, `CTerrainRenderer_AdvanceFrameIndex @0x5cc1d0` →
+`Scar_AdvanceRingCursor`, `Terrain_AddDecalToSector @0x5cc830` →
+`Scar_AddEntry`, `terrain_render_sector_userpoints @0x5cd830` →
+`Scar_RenderCache`, `sub_5CDF70` → `Scar_RenderAllCaches`,
+`check_glass_impact_and_spawn_effects @0x5cf1b0` →
+`Impact_SpawnGlassEffectsOrScar`, `dword_8417A8` → `g_scarTable`;
+`CNapiTransport_DetachFromSession @0x5f75d0` → `Entity_ReleaseEffectEmitter`
+(the `+0x1CC` emitter release — callers `Entity_Destroy`,
+`Projectile_ReleaseEffects @0x4e82ba`, `Projectile_UpdatePhysics @0x4ea031`,
+`WacScript_SpawnEffectAtSsnEntity`); `Entity_UpdateGravityAccumulator
+@0x4928b0` → `Entity_UpdatePartSpinAccumulator` (the occupant-gated rotor /
+part spin-up whose `HIWORD(+0x464)` the PANM feed reads); `Vehicle_ApplyBrakingForce
+@0x45ceb0` / `sub_45CFB0` / `Entity_ApplyDamageOscillationFast @0x45d110` /
+`Entity_ApplyDamageOscillation @0x45d240` → `Suspension_CompressWheelLinear` /
+`Suspension_CompressWheelQuadratic` / `Suspension_OscillateWheelFast` /
+`Suspension_OscillateWheel` (vehicle-client-movers-re.md §7). Entry comments +
+`reimpl:` links on every one, on `Entity_SpawnSectionDebris @0x43f580`, the
+two camera functions, `NetPacket_SerializePlayerState @0x4c09c0` (the read-side
+goal stores), `Entity_UpdateInfantryPlayerBody @0x4b40e0` (the chase block
+bounds), `Entity_UpdateVehiclePhysics @0x48af00` (#551's sites) and
+`Entity_UpdateWatercraftPhysics @0x48d480` (the `+0x2B8` integrate that #551
+mis-cited as the aircraft form).
+
 Renames: `DeathPiece_AllocSlot @ 0x57b4f0` (ex `SoundEmitter_AllocSlot`),
 `PeriodicSound_ClearByEntity @ 0x57b3e0`, `DeathPiece_TickAll @ 0x57b900`,
 `DeathPiece_GetTypeDef @ 0x57b350`, `DeathPieceType_FindByName @ 0x57b310` (ex
@@ -5126,6 +5175,62 @@ huskFinal-first piece model (`@ 0x4934af`), the two-stage launch build
 (`@ 0x493718`), the piece gravity/water legs (`@ 0x492d80`), the three settle
 callbacks (`@ 0x461d30 / @ 0x493f70 / @ 0x494230`), and the vehicle contact
 mask (`@ 0x462a95`).
+
+### 24.9 Impact scars — the `Scar_*` family (witnessed 2026-08-21; policy staged)
+
+The marks ordinary ammo leaves on what it hits are NOT projected-volume decals:
+retail keeps a **256-slot ring per struck entity** and draws each slot as an
+oriented two-triangle square. Walked for #543 and re-witnessed in the tidy;
+every function below was IDB-renamed 2026-08-21 (the old names are in 24.8).
+
+- **Router** `Impact_SpawnGlassEffectsOrScar @0x5cf1b0` (sole caller
+  `AmmoDef_ProcessImpactEffect @0x40a264`): tries the `GLASS1..GLASS4`
+  userpoint effects (`Terrain_SpawnSurfaceEffectsAtUserPoints @0x5cea90`),
+  else — impact type `!= 2` — `Scar_AddEntry` with scar id **18** when the
+  hit record's surface (`+0x58`) is 15 (the non-glass-group glass face), else
+  id **1**, spin flag 1 `@0x5cf295..0x5cf2b2`.
+- **Table** `g_scarTable @0x8417a8` (named 2026-08-21): rows
+  `[id, minTex, maxTex, radiusQ16]`, `-1` terminated; id 1 = textures 0..3 at
+  radius `0x2000`, id 18 = texture 27 only at `0x1000`. `Scar_TextureForId
+  @0x5cc360` draws `PRNG_Next16 % (range + 1)` ONLY when `max > min` (the
+  fallback never touches the shared stream) and returns
+  `&aScorch1Tga[32·tex]` `@0x8413a8`; `Scar_RadiusForId @0x5cc3b0` returns
+  row[3] (ex `Terrain_GetSurfaceFriction`).
+- **Cache** `Scar_GetEntityCache @0x5cc4c0`: 128 caches × 0x4008 bytes at
+  `unk_29DB3C0..dword_2BDB7C0` keyed by entity pointer (header = entity, 256 ×
+  64-byte entries from +4, ring cursor at +0x4004); `alloc = 0` returns the
+  terrain cache `dword_2BDB7C0`; when all 128 are taken it returns NULL — **no
+  eviction**, the impact leaves no scar.
+- **Add** `Scar_AddEntry @0x5cc830` (ex `Terrain_AddDecalToSector`; args
+  `(entity, hitRec, arg2, hitPos, hitZ, scarId, spinFlag)`): gates `scarId
+  != 0`, a model, `hitZ > Env_WaterHeightFixed`, entity flag 4 clear, a face
+  without flag `0x400`; face normal ×4 → Q16 `@0x5cc938..0x5cc960`
+  (transformed for non-building entities); basis = the axis the normal is
+  LEAST aligned with — the seven-case `|x|/|y|/|z|` ladder `@0x5cc9da..0x5cca71`
+  (a zero tangent stays zero `@0x5ccac2..0x5ccacf`) — crossed twice with a
+  winding fix `@0x5ccb20`; `spinFlag` draws `PRNG_Next16 << 16` `@0x5ccb50`
+  and rotates the basis by the Q22 sin/cos `@0x5ccb54..0x5ccc65`; the slot is
+  `Scar_AdvanceRingCursor @0x5cc1d0` (compare-and-wrap at 256, ex
+  `CTerrainRenderer_AdvanceFrameIndex`); entry = normal, tangent, bitangent,
+  position (+36), radius (+48), texture index (+52), entity (+56), the
+  itemDef-type-5 flag (+60) and the bone index (+61).
+- **Render** `Scar_RenderAllCaches @0x5cdf70` (from
+  `Terrain_CollectVisibleEntities @0x5c91b7`) zeroes the 32 per-texture
+  batches `unk_2BDF84C..dword_2BDF9CC` then `Scar_RenderCache @0x5cd830` (ex
+  `terrain_render_sector_userpoints`) walks each cache: texture `< 0x20`,
+  fog-distance cull, the `g_BuildingSectionVisMask` gate (D-OCC-5's reader),
+  bone transform for attached entities, quad = centre ± tangent·r ±
+  bitangent·r in `Env_TerrainLightCombined | FF000000`, appended per texture
+  via `Terrain_ParseSectorTypeCallback @0x5cf390 (12·tex + 0x2BDF8C8, verts, 6)`.
+- **Clear** `Scar_ClearEntriesByEntity @0x5ccec0` on death (24.3).
+
+**Port status.** The selection/ring POLICY is staged in
+`engine/runtime/world/impact_scar.h` (scar id by surface, radii, the
+texture/spin PRNG discipline through `World::next_prng16`, the 256-ring slot,
+the seven-case basis ladder, the gates, the 128-cache no-eviction table; ctest
+`impact_scar`) and is NOT wired — `destruction.cpp` still carries "no decal
+system yet" `@destruction.cpp:568`. The cache, the renderer and the death
+clear remain unported (D-ITEM-6 narrowed).
 
 ## 25. Appendix: the tracer visual system — the trail emitter pool, style tables, and the ribbon renderer (grill-ida, 2026-07-18)
 

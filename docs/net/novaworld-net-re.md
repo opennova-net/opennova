@@ -1474,9 +1474,9 @@ pinned more fields, each named for the function that reveals it (`GamePlayerEnti
 - Callback refinement: `updateCallback` +0x1c4 is the per-frame update/physics fn ptr (`==
   Entity_UpdateShellBounce` for shells `[orig: Entity_IsShellProjectile @0x4e4040]`); `deathCallback` +0x1c8
   stays the death/lifecycle handler. **Polymorphic:** `animStateId` +0x2bc is invoked as a fire callback
-  on weapon entities (`Entity_InvokeFireCallback`); `ownerSession` +0x1cc is **resolved (2026-06-25) as
-  two disjoint meanings** — a `CNapiTransport` session ref on networked entities (`Entity_Destroy
-  @0x43e810`: `if (+0x1cc) CNapiTransport_DetachFromSession`) AND an **effect-emitter handle** on
+  on weapon entities (`Entity_InvokeFireCallback`); `ownerSession` +0x1cc is **one meaning (2026-08-21; the 2026-06-25
+  "two disjoint meanings" reading is refuted)** — the attached **effect-emitter handle** on every class: `Entity_Destroy
+  @0x43e810` calls `Entity_ReleaseEffectEmitter @0x5f75d0` (ex `CNapiTransport_DetachFromSession`, renamed 2026-08-21: it checks the emitter's back-pointer, releases it under `g_EffectWorld`, and zeroes +0x1cc `@0x5f7607`), the same routine `Projectile_ReleaseEffects @0x4e82ba` / `Projectile_UpdatePhysics @0x4ea031` / `WacScript_SpawnEffectAtSsnEntity @0x4f2410` call; also the handle on
   effect-bearing props (`sub_4540E0 @0x4540e0`: `entity[115] = CEffectWorld_SpawnEmitterAtPosition(...)`
   for rope-trail def type 6088). The `@0x453580` callback (kong-misnamed `Entity_ClearWeaponTarget`,
   renamed **`Entity_ClearOwnerSessionIfMatches`**) nulls `+0x1cc` when it still equals the dying emitter
@@ -2957,8 +2957,8 @@ Wire shape: `[u8 count][count × 6-byte entry]`.
 | 5 | 1 | source | slot+4 |
 
 Overlay X/Y/Z is read from the **resolved pool entity**, not the wire — the 0x40 packet carries
-no coordinates. The textual Under-Attack / Ready-for-Takeover HUD (`draw_capture_point_status_overlays
-@ 0x5A2480`) derives contest state locally from per-team proximity counts; tag 0x40 is the
+no coordinates. The textual Under-Attack / Ready-for-Takeover HUD (`HUD_DrawZoneStatusPanel
+@ 0x5A2480`, ex `draw_capture_point_status_overlays`, renamed 2026-08-21; hud-re.md §AAS zone status panel) derives contest state locally from per-team proximity counts; tag 0x40 is the
 authoritative minimap **color** channel.
 
 **The server producer (witnessed 2026-07-04):** `Server_BuildOverlayStateForPlayer
@@ -4646,6 +4646,23 @@ exists") and corrects three landing-column claims (§5.10 case-2, §5.13 read si
 Everything here is client-side (`is_authority == 0`); the host disposition of §5.38a
 (snap, never interpolate) is unchanged.
 
+**Correction 2026-08-21 (block bounds + the authority arm).** The org2 goal
+resolve runs `@0x4B42A7..0x4B464A` (the progress test `@0x4B42A7`, the 3D
+distance, snap `> 0x20000` `@0x4B431F`, deadband `< 0x2AAA` `@0x4B438E`, the
+local 0x30/0x200 buckets `@0x4B4490/@0x4B449E`, the 2D ladder
+`@0x4B44C4..0x4B4581`, the step `(d + n/2)/n` `@0x4B458A..0x4B45DF`, the client
+z-soften `sar` `< 0x5555` `@0x4B4626` / zero `< 0x2AAA` `@0x4B4635`) with the
+apply `@0x4B43E6..0x4B4445` (position while progress < bucket `@0x4B440D`,
+cap 0x200 `@0x4B4431`) — the `0x4B4470..0x4B46C0` range cited below and in
+`client_replica_pipeline.h` starts 0x1C9 bytes late. The AUTHORITY smoothing
+arm `@0x4B45E5..0x4B4618` (bucket 10 `@0x4B4466` — `edi` is `is_authority`;
+z step zeroed; x/y zeroed when `|entity+0xA0| > 0x686`) is unported (D-NET-196).
+The #548 `net_position_smoother.h` restatement of this block duplicated
+`tick_remote_motion` value-for-value (its `0x4C1157/0x4C116B/0x4C11C0` goal
+cites were the anim-state compare and a health clamp; the goal stores are the
+`@0x4C0FE4..0x4C0FFC` / `@0x4C2042..0x4C20A9` sites) and was deleted in the
+post-merge tidy.
+
 **1. The compact reads are STAGE-ONLY.** For an alive remote entity, none of the three
 compact applies writes the live pose — each stages the interp-target cluster and resets
 the progress counter, and the entity's own class mover moves the live pose one step per
@@ -4857,6 +4874,13 @@ timings, and replay/spectate source injection.
 
 The moving player's view, witnessed for a faithful first-person camera (the §5.38 player). All
 anchored (decompiled this session); read-only, no IDB writes.
+
+**2026-08-21:** the mounted legs' constants (anchor lift, 1/16·1/32 ease,
+`1 + 1.5r` distance, quarter look-yaw, `−0x8000000` pitch, water/terrain
+`+0x4000` floors, the 0.333 slope margin, the aircraft `r >> 1` drop, the 6.0
+look-ahead) are staged in `engine/runtime/world/tp_camera_mount.h`
+(world-wac-ai-re.md §14.6); the wiring into `player_view_compose_camera`
+follows.
 
 **Mode flag `dword_A890C8`** (set by `[orig: Camera_SetTrackedEntity @ 0x4391d0]`; tracked entity =
 `dword_A890CC`): **0 = first-person on-foot** (primary), 1 = vehicle/mounted (3P), 3 = spectator,
@@ -6416,7 +6440,7 @@ Both program per-zone-entity timer entries in `g_zone_timer_list @ 0x24E41B0` (1
 entity ptr, count at +0x1A00), advanced every client frame by `ZoneTimerList_AdvancePerTick @ 0x537D60`
 (value += rate, clamp [0, limit]) and consumed by the capture-point HUD — `HUD_DrawTakeoverStatus
 @ 0x59B630` draws the entry returned by `find_nearest_entity_in_proximity_list(g_zone_timer_list,
-&player.Position, …)`; `draw_capture_point_detail_panel` / `render_capture_point_labels` / the
+&player.Position, …)`; `HUD_DrawZoneMarker @ 0x5986F0` (ex `draw_capture_point_detail_panel`) / `render_capture_point_labels` / the
 death-screen overlays read the same list.
 - **0x6F ZONE-TIMER VALUE** (15 B) `[orig: NapiNPClientMsg_ZoneTimerValue @ 0x428D60 →
   ZoneTimerList_SetEntryValue @ 0x537EC0]`: `[u16 zoneHandle][u8 mode][i32 value][i32 limit][i16 rate]
@@ -9311,6 +9335,16 @@ listen host never pulls) `@0x430ad5..0x430b03`. So the full sequence on a
 retail server is 0x61 + 0x1D pushed at round end, then 0x2B{0} → 0x56{0..199}
 → 0x2B{200} → 0x56{200..399} → … until `offset + len >= total`.
 
+**Port status (2026-08-21).** The chunk fold is ported into `ClientState`
+(`netsim::client_replica_endround.cpp`): a chunk at offset 0 resets the
+retained stream (`CDataStream_SetMaxFrame(0)` `@0x431d79`, gated `test edi,edi`
+`@0x431d6d`), each chunk is written AT its offset `@0x431d8a/@0x431d96` and
+tested against its OWN `totalSize` (`add @0x431d9b`, `cmp @0x431d9d`, `jge
+@0x431d9f`); retail never resets the stream after the decode `@0x431e0b` —
+only the next offset-0 chunk does — so the fold retains it too. Unported: the
+C2S 0x2B pull `@0x431db3..0x431dc4`, the `g_spawn_success_gate` `@0x431d33`,
+and the `stat.mnu` surface.
+
 **Payload grammar** (the reassembled stream; every read is bounds-checked and
 yields 0/empty past the end — retail TOLERATES truncation, leaving a partly
 zeroed board):
@@ -9343,10 +9377,11 @@ and `decode_end_round_stats` (the reassembled board, WIRE-order stats, the
 signed counts) in `engine/net/npwire`, pinned by `nw_message_coverage_test`;
 `nw_pp` prints the envelope and a single-datagram board. One recorded
 divergence: the decoder follows the npwire protocol-cursor contract and
-REJECTS a short stream where retail zero-fills. **Not yet ported:** the C2S
-0x2B request leg (a consumer that decodes and never requests receives the
-first 200 bytes and nothing else), the fold into `ClientState`, and the
-`stat.mnu` screen.
+REJECTS a short stream where retail zero-fills. **Fold ported 2026-08-21**
+(the retained `ClientState` stream, see Port status above). **Not yet
+ported:** the C2S 0x2B request leg (a consumer that decodes and never requests
+receives the first 200 bytes and nothing else), the `g_spawn_success_gate`, and
+the `stat.mnu` screen.
 
 ## 6. Struct reference
 
