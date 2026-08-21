@@ -32,12 +32,12 @@
 //      (drape) @ 0x5d5ca0 / render_minimap_tile_overlay (authored blob)
 //      @ 0x5d59d0].
 //
-// This unit hosts every planning/selection/color law as a structural
+// This unit carries every planning/selection/color law as a structural
 // translation; the device half (godot/src) realizes the silhouette capture
 // and the terrain drape. The retail anchor march is the patch PLACEMENT for
 // the drape mesh — a per-pixel projective drape computes the same terrain
 // intersection the march approximates (its vertical step is clamped to
-// >= 0.5 u per planar unit), so a projective device hosts the march's
+// >= 0.5 u per planar unit), so a projective device realizes the march's
 // observable exactly; the march law is still ported here for parity tests.
 #pragma once
 
