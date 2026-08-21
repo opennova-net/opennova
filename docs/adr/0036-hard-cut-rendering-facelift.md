@@ -19,8 +19,11 @@ surface area without advancing the intended renderer.
 ## Decision
 
 1. The Godot device leg adopts a restrained modern relight as a hard cut. Ordinary
-   surfaces use Godot's native lit spatial pipeline and native light nodes. Water,
-   glass, sky, particles and ordering-sensitive effects may retain custom shaders.
+   surfaces use Godot's native lit spatial pipeline and native light nodes. The
+   sun uses a shadow-casting `DirectionalLight3D`, authored and transient lights
+   use pooled native clustered `OmniLight3D`/`SpotLight3D` nodes, and exposure is
+   fixed Filmic presentation policy. Water, glass, sky, particles and
+   ordering-sensitive effects may retain custom shaders.
 2. Canonical data semantics do not change. Parsers, geometry, texture-slot roles,
    material classification, UV/RGB/alpha animation, coverage, blend, cull, draw
    order, LOD, visibility and ENV/TOD inputs remain the renderer interface.
@@ -33,6 +36,11 @@ surface area without advancing the intended renderer.
 4. Authored and transient light records retain their decoded identity, transform,
    color animation, range and lifetime, but the fixed-function nearest-four
    selection and lighting equation are not compatibility requirements.
+   Retail render-slot planning and decoded shadow-admission semantics may remain
+   as a portable oracle, but the Godot `SlotShadow`/terrain-drape device does not
+   ship. Native directional shadows replace it. The retail fullscreen sun veil
+   and exposure stop-down likewise remain research history, not a second live
+   presentation path.
 5. The existing 18-fixture registered retail catalog,
    `docs/render/render-fixtures-retail-v4.json`, is recaptured unchanged as the
    comparison instrument. Retail pixels are a stable reference, not a facelift

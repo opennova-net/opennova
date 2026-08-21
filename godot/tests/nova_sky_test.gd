@@ -47,7 +47,8 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 			_linear_vec(ctx.env_node.get_cloud_edge() * 2.0), "c26 cloudedge in linear HDR")
 	assert_eq(mat.get_shader_parameter("u_sun_dir"), ctx.env_node.get_sun_direction(),
 		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
-	assert_eq(mat.get_shader_parameter("u_light_dir"), ctx.env_node.get_light_direction(),
+	assert_eq(mat.get_shader_parameter("u_light_dir"),
+		ctx.env_node.get_light_direction(),
 		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
 	assert_eq(mat.get_shader_parameter("u_fog_color"),
 			_linear_vec(ctx.env_node.get_skyfog_color()),

@@ -8,8 +8,8 @@
 
 namespace godot {
 
-// The sun-glare terrain-occlusion state of [orig: render_skybox_sun_glow
-// @ 0x5acd00] (env #14): two jittered rays per frame feed an 8-bit sliding
+// The sun-glare terrain-occlusion state of (retail: render_skybox_sun_glow
+// @ 0x5acd00, see docs/env/env-tod-re.md) (env #14): two jittered rays per frame feed an 8-bit sliding
 // visibility window; brightness steps +-16 (dead-band) toward
 // popcount * 32 * fog/1000. All math lives in engine/formats/env; the shell casts the
 // two rays (camera -> camera + sun_dir * 1024 + jitter) against terrain and
@@ -27,8 +27,8 @@ protected:
 
 public:
 	// World-space offsets (Godot basis) for this frame's two ray endpoints
-	// [orig: jitter @ 0x5ace3b..0x5ace61 — engine Y +-16/+-8 (Godot -x),
-	// height +-16 (Godot +y)].
+	// (retail: jitter @ 0x5ace3b..0x5ace61 — engine Y +-16/+-8 (Godot -z),
+	// height +-16 (Godot +y), see docs/env/env-tod-re.md).
 	Vector3 get_ray_jitter_a() const;
 	Vector3 get_ray_jitter_b() const;
 
@@ -38,8 +38,17 @@ public:
 	// Advance one frame with the two samples' visibility.
 	void tick(bool p_visible_a, bool p_visible_b, float p_fog_distance);
 
-	// The hysteresis brightness 0..256 [orig: Glare_OcclusionBrightness].
+	// The hysteresis brightness 0..256 (retail: Glare_OcclusionBrightness, see docs/env/env-tod-re.md).
 	int get_brightness() const;
+
+	// The 8-sample sliding visibility window bits (diagnostics)
+	// (retail: Glare_OcclusionWindow @ 0x27E2E34, see docs/env/env-tod-re.md).
+	int get_window() const;
+
+	// The per-frame jitter index (retail: Glare_JitterFrameIndex @ 0x27E5690, see docs/env/env-tod-re.md)
+	// BEFORE this frame's two sample increments — the coarse gate ray's
+	// start-lift selector (env_celestial.h glare_coarse_start_lift).
+	uint32_t get_frame_index() const { return state.jitter_index; }
 };
 
 } // namespace godot

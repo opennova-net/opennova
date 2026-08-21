@@ -49,6 +49,8 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resync_colors"), &Weather::resync_colors);
 	ClassDB::bind_method(D_METHOD("resync_colors_now"),
 			&Weather::resync_colors_now);
+	ClassDB::bind_method(D_METHOD("settle_exposure"),
+			&Weather::settle_exposure);
 
 	ClassDB::bind_method(D_METHOD("get_network_environment_snapshot"),
 			&Weather::get_network_environment_snapshot);
@@ -266,6 +268,12 @@ void Weather::resync_colors() {
 void Weather::resync_colors_now() {
 	MissionEnvironment *env = _env_node();
 	runtime_.resync_colors_now(env != nullptr ? &env->state() : nullptr);
+	_post_runtime(env);
+}
+
+void Weather::settle_exposure() {
+	MissionEnvironment *env = _env_node();
+	runtime_.settle_exposure(env != nullptr ? &env->state() : nullptr);
 	_post_runtime(env);
 }
 

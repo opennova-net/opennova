@@ -2578,7 +2578,12 @@ func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 ## Re-evaluates only camera-dependent production render state for an exact-pose
 ## visual capture. The caller must first make camera current and stop its normal
 ## presenter. This deliberately does not drive the mission session, weather
-## clock, material animation, particles, or audio.
+## clock, material animation, particles, or audio. Accumulator state that the
+## live pipeline needs many frames to reach (the iris exposure chase, the
+## glare occlusion window) is instead SETTLED at the capture pose through the
+## witnessed per-tick math, so a frozen fixture measures the steady state a
+## resting retail camera shows rather than a starved accumulator (D-RLIT-2
+## fixture starvation).
 func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	if not _world_ready or not is_inside_tree():
 		return ERR_UNAVAILABLE
@@ -2589,6 +2594,30 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 
 	_frame_camera_pos = camera.get_camera_transform().origin
 	_frame_camera_xform = camera.global_transform
+	# The frozen path never runs the live iris/exposure legs, so a fixture
+	# used to publish the modulator's mission-reset identity gain — the flat
+	# exposure half of the D-RLIT-2 fixture starvation. Stamp the marched
+	# samples for the capture pose and chase the modulator to its settled
+	# state through the witnessed math only (Weather.settle_exposure holds
+	# the freeze contract: no weather time, no mission clock).
+	_stamp_iris_samples(_frame_camera_xform)
+	var settle_weather := get_weather_node()
+	if settle_weather != null:
+		settle_weather.settle_exposure()
+	# Weather publishes the final color blocks before the native devices sample
+	# them in a live frame (Weather runs at process priority -10). Preserve that
+	# dependency while their parent is frozen for capture.
+	var celestial := get_node_or_null("Celestial") as Celestial
+	if celestial != null:
+		# The glare occlusion brightness accumulates over ~a dozen live
+		# frames; a frozen fixture gets exactly one zero-delta advance, which
+		# left the sun glow invisible at any pose (the D-RLIT-2 fixture
+		# starvation's other half). Settle the witnessed ray/window/step leg
+		# at this pose first, then publish it through the normal frame.
+		celestial.settle_glare_occlusion()
+		celestial.advance_frame(0.0)
+	if _sun_shadow != null:
+		_sun_shadow.advance_frame(0.0)
 	# Keep the same camera-producer order as GameFramePipeline, omitting every
 	# time-owning leg. Terrain publishes the detail-cell handoff consumed by
 	# foliage; occlusion then resolves the world visibility for this exact view.
@@ -2606,9 +2635,6 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	var sky := get_node_or_null("SkyDome") as SkyDome
 	if sky != null:
 		sky.advance_frame(0.0)
-	var celestial := get_node_or_null("Celestial") as Celestial
-	if celestial != null:
-		celestial.advance_frame(0.0)
 	if _water != null:
 		# Water's public frame seam retargets the mirror/strip and advances its
 		# render-noise counter exactly once. The fixture freezes immediately after

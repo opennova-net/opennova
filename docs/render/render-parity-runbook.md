@@ -8,6 +8,11 @@ operator procedure behind the contract described in
 [README.md](README.md); that page stays the record index and states what the
 evidence must prove, this page states how to produce it.
 
+The OpenNova leg always captures the one shipping presenter: native
+`DirectionalLight3D` shadows, pooled clustered effect lights, and fixed Filmic
+exposure. Do not enable or reconstruct the retired Godot `SlotShadow`/terrain-
+drape or fullscreen sun-veil paths for comparison capture.
+
 Two legs meet at a single frozen OpenNova commit:
 
 1. **OpenNova** — `godot/tests/render_fixture_capture_probe.tscn` renders each

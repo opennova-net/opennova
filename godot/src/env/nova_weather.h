@@ -51,6 +51,11 @@ public:
 	void tick_fixed();
 	void resync_colors();
 	void resync_colors_now();
+	// The frozen-fixture exposure settle (GameWorld's capture-refresh seam):
+	// chase the stamped iris samples' modulator target to its fixed point
+	// and republish, without advancing weather time (weather_runtime.h
+	// carries the cites and the freeze contract).
+	void settle_exposure();
 
 	Dictionary get_network_environment_snapshot();
 	void apply_network_environment_sample(const Dictionary &p_sample);

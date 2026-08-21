@@ -1316,6 +1316,66 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
 	return static_cast<int>(value * 65536.0);
 }
 
+void water_glint_tick(WaterGlintState &state, bool visible) {
+	// [orig: update_sun_glare @ 0x5ad1cd..0x5ad356] — one sample per frame
+	// into the 4-bit window (bit 8), then the plain +-16 step toward
+	// popcount * 64 (no dead-band, no fog scale — unlike the sky glow).
+	state.frame_index += 1;
+	state.window = static_cast<uint8_t>((state.window >> 1) |
+			(visible ? 0x8u : 0u));
+	int target = 0;
+	for (int bit = 0; bit < 4; ++bit) {
+		if (state.window & (1u << bit)) {
+			target += 64;
+		}
+	}
+	if (state.brightness < target) {
+		state.brightness += 16;
+	} else if (state.brightness > target) {
+		state.brightness -= 16;
+	}
+}
+
+bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
+                       float water_height, float view_z_jitter,
+                       Vec3 &out_mission) {
+	// [orig: sub_5AC040] — structural translation of the fixed/float mix:
+	// clip = 2*wh - cam_z - jitter; reject at clip >= wh; ratio =
+	// (wh - clip) / (cam_z + sun_z*2048 - clip); out = (cam_xy + sun_xy*2048
+	// * ratio, clip + sun_z*2048 * ratio).
+	const float clip = 2.0f * water_height - cam_mission.z - view_z_jitter;
+	if (clip >= water_height) {
+		return false;
+	}
+	const float denom = cam_mission.z + sun_mission.z * 2048.0f - clip;
+	if (denom == 0.0f) {
+		return false;
+	}
+	const float ratio = (water_height - clip) / denom;
+	out_mission.x = cam_mission.x + sun_mission.x * 2048.0f * ratio;
+	out_mission.y = cam_mission.y + sun_mission.y * 2048.0f * ratio;
+	out_mission.z = clip + sun_mission.z * 2048.0f * ratio;
+	return true;
+}
+
+int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
+                            int sun_dim_fixed) {
+	// [orig: update_sun_glare @ 0x5ad395..0x5ad41c] — (dot^4 - 28672/65536)
+	// x brightness >> 8, the SunDim fold (/25600), >> 2; the negative
+	// dot^4 region clamps to 0. No overcast fold.
+	int factor = 0;
+	if (view_dot_fixed > 0) {
+		const int squared = static_cast<int>(
+				(static_cast<int64_t>(view_dot_fixed) * view_dot_fixed + 0x8000) >> 16);
+		factor = static_cast<int>(
+				(static_cast<int64_t>(squared) * squared + 0x8000) >> 16) - 28672;
+	}
+	const int dim_scale = (0x640000 - sun_dim_fixed + 1) >> 8;
+	const int combined = dim_scale * ((brightness * factor) >> 8);
+	const int alpha = (combined / 25600) >> 2;
+	return clamp_int(alpha, 0, 0x10000);
+}
+
 GlareRayJitter glare_ray_jitter(uint32_t jitter_index) {
 	// [orig: render_skybox_sun_glow @ 0x5ace3b..0x5ace61].
 	GlareRayJitter jitter;

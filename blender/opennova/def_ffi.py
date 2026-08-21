@@ -262,6 +262,13 @@ class DefItemDef(ctypes.Structure):
         ("emplacement_c_slot", ctypes.c_int),
         # Building-interior daylight fraction (retail ItemDef+0x218).
         ("light_transfer", ctypes.c_float),
+        # Authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
+        # (mirror pyopennova/def_ffi.py / def.h).
+        ("shadow_texture", ctypes.c_char * 16),
+        ("shadow_width", ctypes.c_float),
+        ("shadow_length", ctypes.c_float),
+        ("shadow_offset_x", ctypes.c_float),
+        ("shadow_offset_y", ctypes.c_float),
     ]
 
 

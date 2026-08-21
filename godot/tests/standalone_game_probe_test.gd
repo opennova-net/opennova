@@ -25,6 +25,8 @@ const SELF_CONTAINED_PROBES: Array[String] = [
 const REMOVED_PIE_PROBES: Array[String] = [
 	"res://tests/destruction_probe.gd",
 	"res://tests/destruction_probe.tscn",
+	"res://tests/sun_shadow_catcher_probe.gd",
+	"res://tests/sun_shadow_catcher_probe.tscn",
 	"res://tests/perf_fire_probe.gd",
 	"res://tests/perf_fire_probe.tscn",
 ]

@@ -201,6 +201,10 @@ func is_third_person() -> bool:
 # and effect anchors against the presentation nodes (the FP viewmodel parts —
 # rig-owned, delegated here — the 3P gun, the camera). These expose exactly the
 # state it reads, so no cross-object _private access crosses the seam.
+func avatar() -> ObjectModel:
+	return _avatar
+
+
 func vm_parts() -> Array[ObjectModel]:
 	return _viewmodel_rig.vm_parts()
 

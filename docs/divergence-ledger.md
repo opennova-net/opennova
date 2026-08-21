@@ -685,7 +685,7 @@ not expose it, so the correction is pinned by non-flat 08:00 slope vectors.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-TERRAIN-7 | Retail's t0 is a dynamically composed per-tile render target. Runtime now hosts a current-frame 128-layer 256×256 cache shared by terrain and foliage: base RGB/A0, ordered `.til` source-over RGBA, additive TrnNMap/DOT3 A, and supported static selected-LOD/all-ROBJ A-only projections. Static source lifecycle follows destruction/husk/editor transforms; `TEX_TEAM` alpha flipbooks, content stamps, LRU/generation safety, required-overlay source readiness, and page-local unsupported attribution are typed and tested. The fixture-output gate rejects incomplete page realization and inexact static-source evidence; comparison registration remains separate. The former terrain-only directional surrogate is retired. Exact general c7/c8 projection, unsupported animated/skinned materials, one-sided/non-opaque overlap behavior, remaining ordered contributions, and final RT edge/mip behavior remain open; the retail refresh cadence is WITNESSED — the 128-slot hit compare keys only `(lod, tile, row, quadrant)` with a write-only TOD stamp, tiles refreshing solely via LRU turnover, so the reimpl's per-page content stamps + stale-while-recompose serve a strictly narrower stale window (deliberate; terrain-re.md carries the 2026-08-18 witness) `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; all-ROBJ submit @ 0x60D926..0x60D971; tile composite @ 0x60E0C6..0x60E19D; hit compare @ 0x60DAD1; TOD stamp @ 0x60DBC0]` | B | OPEN, narrowed producer gap | terrain/foliage re-grill |
+| D-TERRAIN-7 | Retail's t0 is a dynamically composed per-tile render target. Runtime now hosts a current-frame 128-layer 256×256 cache shared by terrain and foliage: base RGB/A0, ordered `.til` source-over RGBA, additive TrnNMap/DOT3 A, and supported static selected-LOD/all-ROBJ A-only projections. Static source lifecycle follows destruction/husk/editor transforms; `TEX_TEAM` alpha flipbooks, content stamps, LRU/generation safety, required-overlay source readiness, and page-local unsupported attribution are typed and tested. The fixture-output gate rejects incomplete page realization and inexact static-source evidence; comparison registration remains separate. The former terrain-only directional surrogate is retired. Exact general c7/c8 projection, unsupported animated/skinned materials, one-sided/non-opaque overlap behavior, remaining ordered contributions, and final RT edge/mip behavior remain open; the retail refresh cadence is WITNESSED — the 128-slot hit compare keys only `(lod, tile, row, quadrant)` with a write-only TOD stamp, tiles refreshing solely via LRU turnover, so the reimpl's per-page content stamps + stale-while-recompose serve a strictly narrower stale window (deliberate; terrain-re.md carries the 2026-08-18 witness); the composite ORDER is RESOLVED 2026-08-20 — on tiles where the static collector ran, `PolyTrn_RenderTile` SKIPS its own DOT3 add (`@ 0x60E1CE` gates on the collector result): the collector's Alt DOT3 pass fills the temp RT FIRST (`@ 0x60D794..0x60D7C0`) and silhouettes draw after it, i.e. DOT3-then-silhouettes — the composer's order (the earlier "silhouettes before DOT3" caveat misread the scorch-decal rect loop `@ 0x60E02E` as the silhouette loop). Still open on the low-sun leg: the 03tr-sun-sky 06:30 fixture measures our page silhouettes removing the full sun term (~17% darkening in the wedge next to the hangar) where retail's same-region silhouette effect is ≤3-11% — the retail density mechanism (PROJSHAD material blend vs `PolyTrn_SunToBlendRatioColor` vs composite tint 0xFF808080 on the `dword_319FBB8` path) is unwitnessed `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; all-ROBJ submit @ 0x60D926..0x60D971; tile composite @ 0x60E0C6..0x60E19D; DOT3 skip gate @ 0x60E1CE; hit compare @ 0x60DAD1; TOD stamp @ 0x60DBC0]` | B | OPEN, narrowed producer gap | terrain/foliage re-grill |
 | D-TERRAIN-9 | Runtime binds normalized DBlend and paired retail mip chains; the live editor preview still binds raw DBlend and raw C1/C2/C3 textures (its coefficient fallback is exact) | B | OPEN, editor-preview-only | terrain editor parity |
 
 The build → mesh-simplify → CPT data path remains byte-identical across the
@@ -929,16 +929,23 @@ retail feeds all entity lighting from the post-modulator block colors
 writeback seam (`set_sky_ambient_rt`, mirroring fill/sun/fog); details in
 the catalog below.
 
-Updated 2026-08-20 (the facelift hard cut): D-RLIT-3 remains closed — the
-outdoor per-entity 3-radius sun-visibility feed is live beside the 2026-07-29
-interior transfer. Retail's mission-start `Entity_SpawnGlowEffects` consumes
+Updated 2026-08-20 (the facelift hard cut): D-RLIT-3's witnessed outdoor
+per-entity 3-radius sun-visibility calculation remains closed and available as
+a semantic oracle beside the 2026-07-29 interior transfer, but native-lit
+surfaces no longer consume that custom direct-sun scale; the shipping
+`DirectionalLight3D` shadow map supplies sun occlusion. Retail's mission-start
+`Entity_SpawnGlowEffects` consumes
 model `LGHT` records into the EffectWorld pool; OpenNova still routes those
 records and the transient families through `LightScene`, but presents every
 evaluated live light through a pooled native clustered Omni/Spot adapter.
 The witnessed corona path remains live. Owner metadata survives for leases,
 diagnostics, and corona visibility; it no longer drives per-draw object-light
 selection. The response and ownership/content tails remain tracked by
-D-RLIT-4.
+D-RLIT-4. The portable `render_slot_shadow` planner and decoded admission data
+remain a retail oracle, but there is no Godot `SlotShadow`/terrain-drape device;
+native directional shadows prevail. Likewise, the witnessed fullscreen sun
+veil/stop-down is not live: the facelift uses fixed Filmic exposure and native
+bloom.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
@@ -954,7 +961,7 @@ OPEN work only; full detail in the named record + git history):
 
 Closed 2026-07-21: **D-RLIT-1** -> `FIXED` — Hosted weather ran only 4 color blocks through the modulator; retail modulates 16 in witnessed order (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` (full detail: render-lighting-re.md + git history).
 
-Closed 2026-08-19: **D-RLIT-3** -> `FIXED` — Interior `light_transfer` (2026-07-29) plus the outdoor per-entity sun feed: one 200-u sun segment at clip radii −0x2000/−0x5000/−0x8000 per drawn entity, walking the entity's OWN `+0x1BC`/`+0x1C0` proximity-candidate slice (only bubble-overlapping structures block; empty slice = full sun), dimming DirLightColor 1.0..0.25; contained entities/statics stay 1.0 and the FP parts keep the witnessed full-sun exemption `[orig: Entity_ComputeSunVisibility @ 0x5c6800; raycast_find_collision_entity @ 0x539a70; setup_terrain_effect_for_entity @ 0x5c74a0; the FP discard @ 0x4deeb0]`. Bounded residuals (joiner wire-present replicas at 1.0; D-COL-3 unscaled AABB midpoint; statics-only casts like D-RLIT-2; unsliced pool-1 items stay full sun) noted in the record (full detail: render-lighting-re.md + git history).
+Closed 2026-08-19: **D-RLIT-3** -> `FIXED` — Interior `light_transfer` (2026-07-29) plus the outdoor per-entity sun feed: one 200-u sun segment at clip radii −0x2000/−0x5000/−0x8000 per drawn entity, walking the entity's OWN `+0x1BC`/`+0x1C0` proximity-candidate slice (only bubble-overlapping structures block; empty slice = full sun), dimming DirLightColor 1.0..0.25; contained entities/statics stay 1.0 and the FP parts keep the witnessed full-sun exemption `[orig: Entity_ComputeSunVisibility @ 0x5c6800; raycast_find_collision_entity @ 0x539a70; setup_terrain_effect_for_entity @ 0x5c74a0; the FP discard @ 0x4deeb0]`. Bounded residuals (joiner wire-present replicas at 1.0; D-COL-3 unscaled AABB midpoint; statics-only casts like D-RLIT-2; unsliced pool-1 items stay full sun) noted in the record. This closure remains the portable semantic oracle/history; ADR 0036's native-lit device does not consume the custom per-entity scale (full detail: render-lighting-re.md + git history).
 
 ## Count-to-zero scoreboard
 

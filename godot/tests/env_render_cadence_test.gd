@@ -121,6 +121,43 @@ func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 			_world_driven_weather_state(fresh, fresh_env))
 
 
+func test_frozen_fixture_exposure_settle_publishes_a_non_identity_gain() -> void:
+	# The capture-refresh seam (the D-RLIT-2 fixture starvation): a frozen
+	# fixture never runs the weather tick, so the modulator chain holds its
+	# mission-reset identity snap and the published exposure gain stays flat.
+	# settle_exposure must chase the stamped iris target to its fixed point
+	# [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538] while
+	# leaving every time-owning weather leg (cloud scroll, wind, the mission
+	# clock) untouched.
+	var fixture := _world_driven_weather_fixture()
+	var env := fixture[0] as MissionEnvironment
+	var weather := fixture[1] as Weather
+	env.configure_mission_clock(0x0540, 60)
+	assert_eq(env.get_color_src_gain(), Vector3.ONE,
+			"the frozen fixture starts at the mission-reset identity gain")
+
+	var scroll_before: Vector2 = weather.get_cloud_uv_offset1(0.0, 0.0)
+	var sway_phase_before: float = weather.get_sway_phase()
+	var clock_before: int = env.get_mission_time_fixed24()
+	# Indoor-no-data samples pin the curve's 255 clamp — a target that can
+	# never alias the identity 64, whatever the fixture's TOD colors serve
+	# [orig: the pool_entry[12] == 0 skip @ 0x5c7652].
+	weather.iris_samples = PackedInt32Array([-2, -2, -2])
+	weather.settle_exposure()
+
+	var gain: Vector3 = env.get_color_src_gain()
+	assert_ne(gain, Vector3.ONE,
+			"the settled fixture publishes the chased iris gain, not identity")
+	assert_almost_eq(gain.x, gain.y, 1.5 / 64.0)
+	assert_almost_eq(gain.x, gain.z, 1.5 / 64.0)
+	assert_eq(weather.get_cloud_uv_offset1(0.0, 0.0), scroll_before,
+			"the settle may not advance the cloud-scroll accumulators")
+	assert_eq(weather.get_sway_phase(), sway_phase_before,
+			"the settle may not advance the wind oscillator")
+	assert_eq(env.get_mission_time_fixed24(), clock_before,
+			"the settle may not advance the mission clock")
+
+
 func test_mission_start_prewarm_advances_exactly_255_weather_ticks() -> void:
 	var fixture := _world_driven_weather_fixture()
 	var env := fixture[0] as MissionEnvironment

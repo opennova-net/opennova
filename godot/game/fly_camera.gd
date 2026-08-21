@@ -32,6 +32,12 @@ func _ready() -> void:
 	_yaw = rotation.y
 	_pitch = rotation.x
 	_pivot = global_position - global_transform.basis.z * _distance
+	# A beauty camera never draws the layer-hidden FP body/viewmodel. Native
+	# shadow collection intersects the camera mask, so keep both caster marker
+	# layers admitted even though SHADOWS_ONLY geometry stays out of beauty.
+	cull_mask = (cull_mask & ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
+			| Water.VISUAL_LAYER_VIEWMODEL)) \
+			| Water.VISUAL_LAYER_SHADOW_CASTER_MASK
 
 func set_gameplay_locked(locked: bool) -> void:
 	_gameplay_locked = locked

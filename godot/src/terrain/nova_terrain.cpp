@@ -821,7 +821,6 @@ bool Terrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
-
 	tile_infos.resize(cpt.tiles.size());
 
 	int total_verts = 0;

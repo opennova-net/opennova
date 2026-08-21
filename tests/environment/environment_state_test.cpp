@@ -7,6 +7,7 @@
 #include <environment/environment_state.h>
 #include <environment/water_frame.h>
 #include <environment/weather_runtime.h>
+#include <env/env_celestial.h>
 #include <env/env_weather.h>
 
 #include <cmath>
@@ -222,6 +223,110 @@ int main() {
 				"cloud scroll rate packs sky_speed << 10");
 		ok &= expect(snapshot.tod_fixed24 == env.mission_time_fixed24(),
 				"the snapshot carries the exact integer clock");
+	}
+
+	// --- settle_exposure: the frozen-fixture chase fixed point --------------
+	// The capture-refresh seam (D-RLIT-2 fixture starvation): a paused
+	// runtime never ticks, so the modulator holds its mission-reset identity;
+	// the settle must land it on the iris target through the witnessed chase
+	// while advancing neither the mission clock nor any other weather leg.
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		env.configure_mission_clock(0x0C00, 1440);
+		WeatherRuntime weather;
+		weather.prepare_world_driven(&env);
+		ok &= expect(near(weather.color_src_gain().r, 1.0f) &&
+						near(weather.color_src_gain().g, 1.0f) &&
+						near(weather.color_src_gain().b, 1.0f),
+				"a frozen fixture starts at the mission-reset identity gain");
+		const int32_t samples[3] = {8, 8, 8};
+		weather.set_iris_samples(samples, 3);
+		const opennova::env::CloudScrollState scroll_before =
+				weather.core().cloud_scroll;
+		const int clock_before = env.mission_time_fixed24();
+		weather.settle_exposure(&env);
+		// Expected: the outdoor iris gain over the byte-quantized snapped
+		// blocks [orig: terrain_sector_compute_lighting @ 0x5c7550;
+		// target chase @ 0x57e512..0x57e538].
+		const auto quant = [](const opennova::env::Rgb &c) {
+			const auto q = [](float v) {
+				const int b = static_cast<int>(v * 255.0f + 0.5f);
+				return static_cast<float>(b < 0 ? 0 : (b > 255 ? 255 : b)) /
+						255.0f;
+			};
+			return opennova::env::Rgb{q(c.r), q(c.g), q(c.b)};
+		};
+		const opennova::env::Vec3 sun_dir = env.sun_direction();
+		const int expected_gain = opennova::env::iris_gain(
+				quant(env.sun_light_target()), quant(env.sky_ambient_target()),
+				quant(env.fill_light_target()), sun_dir.x, sun_dir.y,
+				sun_dir.z, cfg.iris_center, cfg.iris_percent);
+		ok &= expect(expected_gain != 64,
+				"the fixture's iris target is not the identity gain");
+		const float settled = weather.color_src_gain().r * 64.0f;
+		ok &= expect(std::abs(settled - static_cast<float>(expected_gain)) <=
+						1.0f,
+				"settle_exposure lands the modulator on the iris target "
+				"(the 12.20 chase may truncate one LSB short)");
+		ok &= expect(env.mission_time_fixed24() == clock_before,
+				"the settle may not advance the mission clock");
+		ok &= expect(weather.core().cloud_scroll.rate == scroll_before.rate &&
+						weather.core().cloud_scroll.acc_l1_u ==
+								scroll_before.acc_l1_u &&
+						weather.core().cloud_scroll.acc_l1_v ==
+								scroll_before.acc_l1_v &&
+						weather.core().cloud_scroll.acc_l2_u ==
+								scroll_before.acc_l2_u &&
+						weather.core().cloud_scroll.acc_l2_v ==
+								scroll_before.acc_l2_v,
+				"the settle may not advance the cloud-scroll accumulators");
+	}
+
+	// --- water glint: window/chase, reflected point, submit alpha -----------
+	// [orig: update_sun_glare @ 0x5ad130; sub_5AC040].
+	{
+		opennova::env::WaterGlintState glint;
+		for (int i = 0; i < 20; ++i) {
+			opennova::env::water_glint_tick(glint, true);
+		}
+		ok &= expect(glint.window == 0xF && glint.brightness == 256,
+				"clear frames fill the 4-bit window and chase to 4 * 64");
+		opennova::env::water_glint_tick(glint, false);
+		ok &= expect(glint.window == 0x7 && glint.brightness == 240,
+				"an occluded frame shifts the window and steps down 16 "
+				"(no dead-band)");
+
+		opennova::env::Vec3 point;
+		const opennova::env::Vec3 low_cam{0.0f, 0.0f, 4.0f};
+		const opennova::env::Vec3 sun{0.9316f, 0.342f, 0.1227f};
+		ok &= expect(!opennova::env::water_glint_point(low_cam, sun, 10.0f,
+							 0.0f, point),
+				"a camera below the reflected-height clip serves no glint");
+		const opennova::env::Vec3 cam{0.0f, 0.0f, 30.0f};
+		ok &= expect(opennova::env::water_glint_point(cam, sun, 10.0f, 0.0f,
+							 point),
+				"an above-water camera serves the reflected point");
+		// clip = 2*10 - 30 = -10; ratio = 20 / (30 + 251.29 + 10);
+		// x = 0.9316*2048*ratio; z = -10 + 251.29*ratio (the witnessed
+		// structural form lands NEAR, not exactly on, the plane).
+		ok &= expect(near(point.x, 130.99f, 0.05f) &&
+						near(point.z, 7.26f, 0.05f),
+				"the interpolation matches the witnessed structural form");
+
+		ok &= expect(opennova::env::water_glint_alpha_fixed(0x10000, 256, 0) ==
+						9216,
+				"head-on full-brightness glint alpha is the witnessed 9216 "
+				"(dot^4 - 28672/65536 fold, >> 2)");
+		ok &= expect(opennova::env::water_glint_alpha_fixed(0x10000, 0, 0) == 0 &&
+						opennova::env::water_glint_alpha_fixed(-0x8000, 256, 0) ==
+								0,
+				"zero brightness or looking away serves no glint");
+		// dot^4 below 28672/65536 clamps at zero (the negative-factor region).
+		ok &= expect(opennova::env::water_glint_alpha_fixed(0xC000, 256, 0) == 0,
+				"the sub-threshold dot region clamps to zero");
 	}
 
 	// --- shader-global publication policy -----------------------------------

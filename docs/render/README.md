@@ -7,7 +7,10 @@ material, texture, order and lighting records kept here.
 presentation: one hard-cut Godot-native relight, no render profiles or inferred
 PBR maps, and unchanged source assets and decoded semantics. The 18 registered
 fixtures remain descriptive retail comparisons rather than a fixed-function
-pixel target.
+pixel target. The live device uses a native shadow-casting directional sun,
+pooled clustered effect lights, and fixed Filmic exposure; the retail
+render-slot planner remains only a portable oracle, with no Godot
+`SlotShadow`/drape or fullscreen sun-veil device.
 
 | Record | Lands at | Catalog | Covers |
 |---|---|---|---|

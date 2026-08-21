@@ -1377,6 +1377,43 @@ func test_exact_pose_refresh_retargets_a_frozen_water_mirror_without_advancing_t
 			"render-pose refresh may not tick the mission clock")
 
 
+func test_exact_pose_refresh_republishes_settled_sun_to_frozen_native_light() -> void:
+	var world := _make_world()
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	add_child_autofree(world)
+	camera.make_current()
+	world.set_playable(false)
+	_load_minimal_mission(world)
+
+	var runtime := world.get_runtime()
+	var environment := world.get_environment_node()
+	var sun_shadow := world.get_node_or_null("SunShadow") as SunShadow
+	assert_not_null(runtime)
+	assert_not_null(environment)
+	assert_not_null(sun_shadow)
+	if runtime == null or environment == null or sun_shadow == null:
+		return
+	runtime.pause()
+	world.process_mode = Node.PROCESS_MODE_DISABLED
+
+	# Two distinct sentinels expose both missing refresh and refresh-before-
+	# Weather: settle_exposure must replace the ENV current, and SunShadow must
+	# then sample that final publication while normal processing is disabled.
+	var stale_environment_sun := Vector3(7.0, 6.0, 5.0)
+	var stale_device_sun := Color(0.125, 0.875, 0.25)
+	environment.set_sun_light(stale_environment_sun)
+	sun_shadow.light_color = stale_device_sun
+
+	assert_eq(world.debug_refresh_render_pose(camera), OK)
+	var settled_sun: Vector3 = environment.get_sun_light()
+	assert_false(settled_sun.is_equal_approx(stale_environment_sun),
+			"the frozen refresh settles Weather's final sun publication")
+	assert_true(sun_shadow.light_color.is_equal_approx(Color(
+			settled_sun.x, settled_sun.y, settled_sun.z)),
+			"the native sun samples the final settled ENV color")
+
+
 func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	var world := _make_world()
 	var camera := Camera3D.new()
