@@ -657,8 +657,10 @@ void print_tag_2c_s2c(const std::vector<uint8_t> &body) {
 void print_tag_14(const std::vector<uint8_t> &body) {
 	ChatBroadcast m;
 	const bool clean = decode_chat_broadcast(body.data(), body.size(), m);
-	std::printf("        [0x14] slot=%u chan=%u text=\"%s\"%s\n",
-	            m.sender_slot, m.channel, m.text.c_str(),
+	// Printed in WIRE order (channel first) so a decode line reads like the
+	// bytes it came from; the channel is signed on the wire.
+	std::printf("        [0x14] chan=%d slot=%u text=\"%s\"%s\n",
+	            static_cast<int>(m.channel), m.sender_slot, m.text.c_str(),
 	            clean ? "" : " DECODE INCOMPLETE");
 }
 

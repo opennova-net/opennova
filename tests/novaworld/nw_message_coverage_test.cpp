@@ -951,8 +951,11 @@ int check_chat_pair() {
 	EXPECT(u.channel == 2 && u.text == "hi");
 	cover('C', 0x0D);
 	LE dn;
-	dn.u8(3);                 // sender slot
-	dn.u8(2);                 // channel
+	// [channel][sender_slot] -- the byte order the dispatcher's own signature
+	// settles [orig: NapiNPClientMsg_ChatMessage @0x42F240 ->
+	// Chat_DispatchToChannel @0x42B910]. Distinct values, so a re-swap fails.
+	dn.u8(2);                 // channel   (body[0])
+	dn.u8(3);                 // sender slot (body[1])
 	dn.u8('P'); dn.u8(':'); dn.u8('h'); dn.u8('i'); dn.u8(0);
 	ChatBroadcast b;
 	EXPECT(decode_chat_broadcast(dn.b.data(), dn.b.size(), b));

@@ -1646,8 +1646,12 @@ bool decode_chat_uplink(const uint8_t *body, size_t len, ChatUplink &out) {
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) {
 	out = ChatBroadcast{};
 	Cursor c{body, body + len, true};
+	// [channel][sender_slot][cstr] — the dispatcher takes the roster index
+	// FIRST and the switched channel SECOND, and the call passes body[1] then
+	// body[0] [orig: NapiNPClientMsg_ChatMessage @0x42F240 ->
+	// Chat_DispatchToChannel @0x42B910].
+	out.channel = static_cast<int8_t>(c.u8());
 	out.sender_slot = c.u8();
-	out.channel = c.u8();
 	out.text = c.cstr();
 	return c.ok && (c.p == c.end);
 }
