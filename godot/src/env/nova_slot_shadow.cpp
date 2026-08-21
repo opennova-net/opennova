@@ -283,10 +283,10 @@ Ref<Texture2D> SlotShadow::_blob_texture(const String &p_name) {
 
 // World -> (u, v, depth01) projector for a camera-style pose (local -Z
 // forward): the drape samples the capture along the same slot direction it
-// was rendered from (retail: the shared direction of the capture and drape
-// matrices, setup_shadow_cascade_matrices @0x58d300 /
-// build_shadow_cascade_uv_matrices @0x58cf10; person drapes stretch 4x
-// along-direction via the wider p_half_v — @0x5d5d85..0x5d5d95).
+// was rendered from (retail: the shared unscaled direction of the capture
+// and drape matrices, setup_shadow_cascade_matrices @0x58d300 /
+// build_shadow_cascade_uv_matrices @0x58cf10 lookat_dir1; the person 4x
+// belongs to the separate depth-clip stage — render_slot_shadow.h).
 Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 		float p_half_u, float p_half_v, float p_far) const {
 	const Transform3D view = p_pose.affine_inverse();
@@ -636,12 +636,9 @@ void SlotShadow::advance_frame() {
 					dir.y);
 			q = Vector3(term[0], term[1], term[2]);
 		}
-		const float along_scale = info.state.is_person
-				? renderer::kPersonDrapeElongation
-				: 1.0f;
 		drape->set_shader_parameter(slot_uniforms().mat[order],
-				_drape_projection(pose, half_extent,
-						half_extent * along_scale, slot_camera->get_far()));
+				_drape_projection(pose, half_extent, half_extent,
+						slot_camera->get_far()));
 		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
 		++report_captures_;
 	}

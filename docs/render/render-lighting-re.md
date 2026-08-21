@@ -511,7 +511,16 @@ code** in retail JO.
 **The render-slot (entity ground shadow) side** — witnessed end to end and
 PORTED (2026-08-20; the earlier ADR-0023-era "Shadow_/Scar_ family
 exclusion" is superseded for the RenderSlot_* half — the Scar_ decal family
-alone remains out of REN scope).
+alone remains out of REN scope) except the drape's depth-clip texture stage
+(`shadowztex`, the *Drape* paragraph below — re-witnessed 2026-08-21 while
+correcting the person-4× misread): the device draws the projected
+silhouette over the whole capture frustum where retail clips it by depth
+along the (person-steepened) clip direction, so low-sun shadows still run
+longer than retail's until that stage is ported. Porting it needs the
+stage-1 combine of the drape pass (`sub_679630(28, 29, ..., 0x1520000)`,
+sampler slots 12/12 and 12/13), the runtime-built flip matrix
+`flt_27219C0`, and `build_direction_look_at_matrix @ 0x612c90`'s frame
+(right = normalize(dir.z, 0, −dir.x), up = fwd × right).
 
 *Registration* — `Entity_InitFromModel @ 0x40E1C8..0x40E1F7`: persons
 always, items via the `DynamicShadow` attrib2 bit, gated on the
@@ -586,9 +595,18 @@ skip; the LOCAL player in first person skips while prone-latched
 (`g_PlayerStanceProneLatch @ 0xb76484`) or below detail 2): a dynamic slot
 with a live RT draws `RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0` — the
 silhouette projected over the 21×21 terrain-following patch, distance fade
-`f = clamp((d − 40 u)/40 u)` with a hard skip at ≥ 80 u, person-type
-entities (itemdef +0x5C == 3) elongated 4× along the projection direction
-(`flt_7C44B8`), and the **sun ambient law** per channel:
+`f = clamp((d − 40 u)/40 u)` with a hard skip at ≥ 80 u, a SECOND texture
+stage that clips the projection by depth — `shadowztex`
+(`shadow_system_init_resources @ 0x5d62d2`: a 32×4 white/black step, one
+gray texel at the boundary, row 3 all white) addressed by
+`build_shadow_cascade_uv_matrices @ 0x58cf10`'s detail matrix (u = depth
+along the clip direction × 0.5/half_size + 0.5, v = 0.333 × depth along the
+light direction + 0.5) — where person-type entities (itemdef +0x5C == 3)
+steepen the CLIP direction's vertical component 4× (`flt_7C44B8`
+@ 0x5d5d85: the copy at slot+108 feeding lookat_dir2 only; the silhouette
+projection keeps the unscaled lookat_dir1 — re-witnessed 2026-08-21, the
+earlier "elongated 4× along the projection direction" reading was wrong),
+and the **sun ambient law** per channel:
 `ambient_c = 1 − (1−f)·L_c·|dirY| / (L_c·|dirY| + S_c)` with
 `L = Env_LightBlock`, `S = Env_SkyBlock` — the shadow removes only the
 direct sun term scaled by the projection vertical, never the sky ambient
@@ -736,7 +754,7 @@ star directions share its axes).
 | 0x5d5320 | init_render_target_chain | RenderSlot_InitTextureChain | the 12-RT halving size chain (2026-08-20) |
 | 0x5d5130 | terrain_tile_rebuild_vertex_buffer | RenderSlot_RebuildPatchVertexBuffer | the 441-vertex terrain drape patch build (2026-08-20) |
 | 0x5d6e20 | sub_5D6E20 | RenderSlot_DrawAllDrapes | the per-slot drape walk + local-FP/prone gates (2026-08-20) |
-| 0x5d5ca0 | render_sector_model | RenderSlot_DrawSilhouetteDrape | the projected silhouette drape: fade, person 4x, the sun ambient law (2026-08-20) |
+| 0x5d5ca0 | render_sector_model | RenderSlot_DrawSilhouetteDrape | the projected silhouette drape: fade, the depth-clip stage (person 4x steepens its direction), the sun ambient law (2026-08-20; clip stage 2026-08-21) |
 | 0x5d59d0 | render_minimap_tile_overlay | RenderSlot_DrawAuthoredBlobDecal | the items.def `shadow` decal drape (2026-08-20) |
 | 0x2be3c0c | dword_2BE3C0C | RenderSlot_DetailLevel | the shadow-detail level driving chain size + cadence (2026-08-20) |
 | 0x2be3bb4 | dword_2BE3BB4 | RenderSlot_Count | live slot-record count (2026-08-20) |

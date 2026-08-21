@@ -83,10 +83,20 @@ int grazing_slot_lod(int base_lod, float dir_y);
 // @ 0x5d783e..0x5d7871 — slot float24/float25].
 float silhouette_half_extent(float bound_radius_units);
 
-// Person-type drapes elongate 4x along the projection direction
-// [orig: render_sector_model @ 0x5d5d7f..0x5d5d95, itemdef type 3 gate,
-// flt_7C44B8 = 4.0].
-inline constexpr float kPersonDrapeElongation = 4.0f;
+// Person-type entities (itemdef +0x5C == 3) do NOT stretch the drape. The
+// 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
+// direction, and that copy builds only the drape's SECOND texture matrix —
+// the depth-clip stage: "shadowztex" (shadow_system_init_resources
+// @ 0x5d62d2), a 32x4 white/black step addressed by depth along that
+// steepened direction, which clips the projected silhouette to the
+// half-space beyond the caster and, for a soldier, nearer its feet. The
+// silhouette projection itself uses the unscaled direction
+// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d7f..0x5d5de1 ->
+// build_shadow_cascade_uv_matrices @ 0x58cf10: lookat_dir1 (primary,
+// unscaled) vs lookat_dir2 (detail, y x4); re-witnessed 2026-08-21 — the
+// earlier "elongate 4x along the direction" reading drew every person
+// shadow four times its projected length]. The depth-clip stage is the
+// render-slot side's open residual (render-lighting-re.md).
 
 // ---------------------------------------------------------------------------
 // Render-target chain and refresh cadence (the retail texture budget)
@@ -233,7 +243,7 @@ struct SlotCandidateState {
 	bool interior = false;
 	bool dynamic = true;           // silhouette-class (person / DynamicShadow)
 	bool has_blob_texture = false; // authored items.def `shadow` decal
-	bool is_person = false;        // 4x drape elongation class
+	bool is_person = false;        // itemdef type 3: the depth-clip stage's steepened class
 };
 
 struct SlotAssignment {
