@@ -147,12 +147,29 @@ void Simulation::install_item_class_resolver() {
 }
 
 void Simulation::install_charattr_challenge_table() {
-	if (!runtime_) return;
-	if (charattr_challenge_loaded_) {
-		runtime_->set_charattr_challenge_table(charattr_challenge_table_);
-	} else {
-		runtime_->clear_charattr_challenge_table();
+	if (runtime_) {
+		if (charattr_challenge_loaded_) {
+			runtime_->set_charattr_challenge_table(charattr_challenge_table_);
+		} else {
+			runtime_->clear_charattr_challenge_table();
+		}
 	}
+	sync_class_attribute_flags();
+}
+
+void Simulation::sync_class_attribute_flags() {
+	if (!world_) return;
+	// The joiner's live copy carries every S2C 0x41 clear applied so far; a
+	// HostClient keeps the boot copy, and a failed/missing charattr.def leaves
+	// the all-zero table -- no class carries an attribute, retail's failed-load
+	// state (retail: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
+	// AnimMap_IsSlotActive @0x4125e0; see docs/interface/hud-re.md).
+	const opennova::np::CharAttrChallengeTable *live =
+			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
+	const opennova::np::CharAttrChallengeTable &table =
+			live != nullptr ? *live : charattr_challenge_table_;
+	world_->class_attribute_flags =
+			opennova::np::charattr_class_attribute_rows(table);
 }
 
 void Simulation::install_character_join_vars() {

@@ -547,6 +547,11 @@ void Simulation::joiner_pump() {
 	hooks.tick_view = [this] { tick_local_player_view(); };
 	hooks.tick_weapon = [this] { tick_local_player_weapon(); };
 	joiner_bridge_.pump(ctx, hooks);
+	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
+	// World's per-class ATTRIBUTES words follow it the same frame (retail: the
+	// HUD reads g_CharAttr directly, AnimMap_IsSlotActive @0x4125e0, so the
+	// clear is visible on the next draw; see docs/interface/hud-re.md).
+	sync_class_attribute_flags();
 }
 
 // Deposit received framed datagrams for this frame's recv pump.

@@ -137,6 +137,11 @@ void Simulation::reset_world() {
 	local_weapon_.first_person_model_adm = 0xFF;
 	world_ = std::make_unique<World>();
 	apply_character_traits_to_world();
+	// The fresh World's per-class ATTRIBUTES words (the medic plate / map
+	// marker feed) come from the retained charattr table (retail: the
+	// process-scoped g_CharAttr outlives every mission, CharAttr_LoadFromDef
+	// @0x412140 runs once at boot; see docs/interface/hud-re.md).
+	sync_class_attribute_flags();
 	world_->external_local_mounted_weapon_pump = true;
 	world_->projectile_authority = !joiner_;
 	world_->mp_session = host_listen_ || joiner_;

@@ -921,6 +921,13 @@ private:
 	void install_item_class_resolver();
 	// Install or clear the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_challenge_table();
+	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
+	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
+	// else the boot copy. Runs at world creation, at every table install, and
+	// after each net pump (retail: AnimMap_IsSlotActive @0x4125e0 reads the one
+	// g_CharAttr table CharAttr_LoadFromDef @0x412140 fills and the 0x41 arm
+	// AnimMap_SetSlotProperty @0x412890 clears; see docs/interface/hud-re.md).
+	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
 	// Install or clear the explicitly selected retail integrity corpus profile.

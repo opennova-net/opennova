@@ -312,6 +312,12 @@ public:
 		charattr_challenge_table_ = std::move(table);
 	}
 	void clear_charattr_challenge_table() { charattr_challenge_table_ = {}; }
+	// The LIVE table (post every S2C 0x41 applied so far) -- the HUD's
+	// per-class ATTRIBUTES words read from here, the same g_CharAttr the
+	// checksum hashes [orig: AnimMap_IsSlotActive @0x4125e0].
+	const CharAttrChallengeTable &charattr_challenge_table() const {
+		return charattr_challenge_table_;
+	}
 
 	// Install one exact retail-corpus anti-cheat source profile. Unknown ids
 	// clear any previous profile and return false. With no profile—or when a

@@ -507,8 +507,9 @@ public:
     // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
     // soldier class as retail indexes g_CharAttr — row (class - 1) & 0xF, the
     // dword at row offset 40. The embedder stamps it from its parsed table
-    // (the boot-soft charattr provider); zero rows carry no attribute, which is
-    // retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
+    // (np::charattr_class_attribute_rows over the boot-soft charattr table,
+    // re-stamped after every S2C 0x41 clear); zero rows carry no attribute,
+    // which is retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
     //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
     //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
     std::array<uint32_t, 16> class_attribute_flags{};
