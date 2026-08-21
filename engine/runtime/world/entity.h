@@ -789,6 +789,40 @@ struct Entity {
         // Entity_ProcessLightVehiclePhysics, reset in the both-wheels-off
         // branch].
         int32_t light_rear_contact_ticks = 0;
+        // --- Part-animation accumulators (world/vehicle_part_anim.h). The
+        // rotor spin machine's three dwords and the wheel phase; the PANM
+        // registers HELO_ROTOR/HELO_TAILROTOR/VEHICLE_WHEELS sample their
+        // HIGH words [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 owns
+        //  +0x460 speed / +0x464 angle / +0x468 rate; the wheel phase is
+        //  +0x2B8; Entity_CacheVehicleHUDStats @0x4929B0 reads +0x466 /
+        //  +0x2BA].
+        struct PartSpin {
+            int32_t speed = 0; // +0x460
+            int32_t angle = 0; // +0x464
+            int32_t rate = 0;  // +0x468
+        };
+        PartSpin part_spin;
+        int32_t wheel_phase = 0; // +0x2B8
+        // --- Suspension spring leg (world/vehicle_suspension.cpp +
+        // world/ground_conform.h). Per-wheel compression sinks, the four
+        // oscillator blocks, the spring energy word, and the park latch bytes
+        // [orig: +0x2D4..+0x2E0 compression; +0x304 + 0x18*i oscillators;
+        //  +0x300 energy; +0x2EC parked latch / +0x2ED mover disable request
+        //  / +0x2EE / +0x2EF; vehicle-client-movers-re.md §7.3].
+        int32_t wheel_comp[4] = {};
+        struct WheelOsc {
+            int32_t amplitude = 0; // +0
+            int32_t extension = 0; // +4
+            int32_t energy = 0;    // +8
+            float phase = 0.0f;    // +0x14
+        };
+        WheelOsc wheel_osc[4];
+        int32_t spring_energy = 0;   // +0x300 (the impact sink)
+        uint8_t susp_latched = 0;    // +0x2EC — the parked latch
+        uint8_t susp_disable_req = 0; // +0x2ED — the mover's disable request
+        uint8_t susp_byte_2ee = 0;   // +0x2EE
+        uint8_t susp_byte_2ef = 0;   // +0x2EF
+        float susp_rate_pick = 0.0f; // the one-shot 1.75/1.25 disable-rate pick
     };
     VehicleMotorState veh;
 };

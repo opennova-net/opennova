@@ -1216,6 +1216,13 @@ target_link_libraries(ground_conform_test PRIVATE opennova_runtime)
 target_include_directories(ground_conform_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME ground_conform COMMAND ground_conform_test)
 
+# The spring leg's WIRING (vehicle_suspension.cpp): def keys, the role-picked
+# parked latch + Flags 0x10 replication, the spring dt, the per-wheel step.
+add_executable(vehicle_suspension_test world/vehicle_suspension_test.cpp)
+target_link_libraries(vehicle_suspension_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(vehicle_suspension_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME vehicle_suspension COMMAND vehicle_suspension_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
@@ -1383,10 +1390,10 @@ target_link_libraries(aircraft_client_motor_test PRIVATE opennova_runtime)
 target_include_directories(aircraft_client_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME aircraft_client_motor COMMAND aircraft_client_motor_test)
 
-add_executable(vehicle_part_registers_test world/vehicle_part_registers_test.cpp)
-target_link_libraries(vehicle_part_registers_test PRIVATE opennova_runtime)
-target_include_directories(vehicle_part_registers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME vehicle_part_registers COMMAND vehicle_part_registers_test)
+add_executable(vehicle_part_anim_test world/vehicle_part_anim_test.cpp)
+target_link_libraries(vehicle_part_anim_test PRIVATE opennova_runtime)
+target_include_directories(vehicle_part_anim_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME vehicle_part_anim COMMAND vehicle_part_anim_test)
 
 add_executable(tp_camera_mount_test world/tp_camera_mount_test.cpp)
 target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)

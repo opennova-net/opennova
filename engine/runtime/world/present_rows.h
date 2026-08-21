@@ -112,6 +112,15 @@ enum PresentField : int {
 	PF_VEHICLE_MOTION_VALID,
 	PF_VEHICLE_STEERING,
 	PF_VEHICLE_SPEED,
+	// The part-animation registers the same callback publishes: the rotor
+	// angle accumulator's high word (HELO_ROTOR / HELO_TAILROTOR) and the
+	// wheel phase's (VEHICLE_WHEELS). Valid with PF_VEHICLE_MOTION_VALID.
+	// [orig: Entity_CacheVehicleHUDStats @0x4929B0; the +0x466 read
+	//  @0x492ACA..0x492ADE; the +0x2BA read @0x4929B4; the accumulators are
+	//  owned by Entity_UpdatePartSpinAccumulator @0x4928B0]
+	PF_VEHICLE_ROTOR,
+	PF_VEHICLE_TAIL_ROTOR,
+	PF_VEHICLE_WHEELS,
 	// Retail CTRL writers around a rendered world model. TEX_TEAM is written
 	// for every sector-model submission and again by the generic callback for
 	// numbered zones. TEAMSWING is owned by that zone callback. LFP is a

@@ -122,6 +122,13 @@ struct VehicleTraits {
     int32_t pitch_lift_vel = 0;// itemDef+0x938 ("pitch_velocity") — lift amount scale
     int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
     int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
+    // The suspension spring block (world/vehicle_suspension.cpp; raw tokens)
+    // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904, top_heavy +0x918
+    //  — ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10/@0x49db98].
+    int32_t spring = 0;        // the per-wheel spring constant k
+    int32_t spring_comp = 0;   // travel percentage: (100 - spring_comp) scales 0xFFFF
+    int32_t shock = 0;         // the landing damp (11 - shock)/11, clamped [0,10]
+    int32_t top_heavy = 0;     // consumer not yet witnessed
     // Platform probe geometry from the model bound boxes (16.16 model space;
     // modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
     // witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
@@ -186,6 +193,15 @@ struct VehicleDriveCmd {
 struct VehicleCtrlRegisters {
     int32_t steering = 0;
     int32_t speed = 0;
+    // The part-animation words: the rotor angle accumulator's high word for
+    // HELO_ROTOR and HELO_TAILROTOR, the wheel phase's for VEHICLE_WHEELS
+    // [orig: Entity_CacheVehicleHUDStats @0x4929B0 — +0x466 @0x492ACA..
+    //  0x492ADE, +0x2BA @0x4929B4]. Same MOVZX idiom as `steering`.
+    // WITNESS PENDING: whether HELO_TAILROTOR reads the same +0x464
+    // accumulator or a second one — until then both publish the rotor word.
+    int32_t rotor = 0;
+    int32_t tail_rotor = 0;
+    int32_t wheels = 0;
 };
 
 VehicleCtrlRegisters vehicle_ctrl_registers(
