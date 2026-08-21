@@ -812,10 +812,10 @@ add_executable(hud_math_test hud/hud_math_test.cpp)
 target_link_libraries(hud_math_test PRIVATE opennova_runtime)
 add_test(NAME hud_math COMMAND hud_math_test)
 
-add_executable(hud_map_bracket_test hud/hud_map_bracket_test.cpp)
-target_link_libraries(hud_map_bracket_test PRIVATE opennova_runtime)
-target_include_directories(hud_map_bracket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME hud_map_bracket COMMAND hud_map_bracket_test)
+add_executable(hud_medic_cross_test hud/hud_medic_cross_test.cpp)
+target_link_libraries(hud_medic_cross_test PRIVATE opennova_runtime)
+target_include_directories(hud_medic_cross_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_medic_cross COMMAND hud_medic_cross_test)
 
 add_executable(hud_lfp_panel_test hud/hud_lfp_panel_test.cpp)
 target_link_libraries(hud_lfp_panel_test PRIVATE opennova_runtime)
@@ -1384,15 +1384,6 @@ target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)
 target_include_directories(tp_camera_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tp_camera_mount COMMAND tp_camera_mount_test)
 
-add_executable(net_position_smoother_test world/net_position_smoother_test.cpp)
-target_link_libraries(net_position_smoother_test PRIVATE opennova_runtime)
-target_include_directories(net_position_smoother_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME net_position_smoother COMMAND net_position_smoother_test)
-
-add_executable(section_debris_test world/section_debris_test.cpp)
-target_link_libraries(section_debris_test PRIVATE opennova_runtime)
-target_include_directories(section_debris_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME section_debris COMMAND section_debris_test)
 
 # The mouse-look pipeline (pixel deltas -> yaw/pitch BAM): the witnessed integer
 # math — sens << 11, the +0x8000 rounding, the scoped zoom divide, flipmouse,

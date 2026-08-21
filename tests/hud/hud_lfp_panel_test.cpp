@@ -1,7 +1,7 @@
 // The AAS objective ("LFP") panel: zone state, frame selection, blink phase
 // and marker stepping.
-// [orig: HUD_DrawLfpObjectivePanel @0x5A2480; HUD_DrawLfpObjectiveMarker
-//  @0x5986F0; the state inputs @0x59890F..0x598934]
+// [orig: HUD_DrawZoneStatusPanel @0x5A2480; HUD_DrawZoneMarker @0x5986F0;
+//  the state inputs @0x598825..0x598934]
 
 #include <hud/hud_lfp_panel.h>
 
@@ -37,14 +37,14 @@ void test_zone_states() {
 	CHECK(!lfp_zone_under_attack(2, 1, -3), "an enemy point draining is not yours");
 }
 
-// The mask is NOT a 50/50 blink: phase A is 128 ms of every 512, phase B the
-// other 384. A half-and-half blink would be visibly wrong.
+// The mask is NOT a 50/50 blink: phase A is 128 counts of every 512, phase B
+// the other 384. A half-and-half blink would be visibly wrong.
 void test_blink_duty_cycle() {
 	int a = 0, b = 0;
 	for (int ms = 0; ms < 512; ++ms) {
 		if (lfp_blink_phase_a(ms)) ++a; else ++b;
 	}
-	CHECK(a == 128, "phase A is 128 ms of every 512");
+	CHECK(a == 128, "phase A is 128 of every 512");
 	CHECK(b == 384, "phase B is the other 384");
 	CHECK(b == a * 3, "so B runs three times as long as A");
 }
@@ -79,30 +79,46 @@ void test_frame_selection() {
 			"and not on phase A — the two states alternate");
 }
 
-// The two step pitches DIFFER: markers step 98 px across within a group, groups
-// step 86 px down. One shared step would drift the further you go.
+// Markers step ACROSS by 98 within a group, groups step DOWN by 86, and a
+// group is RIGHT-ANCHORED to the panel X: its first marker sits
+// 98 * zonesInGroup left of the anchor and the last ends one pitch short of it.
 void test_stepping() {
 	int x = 0, y = 0;
-	lfp_marker_origin(1020, 250, 0, 0, x, y);
-	CHECK(x == 1020 && y == 250, "the first marker sits on the anchor");
+	// A three-zone group: k = 0 at panelX - 294.
+	lfp_marker_origin(1020, 250, 3, 0, 0, x, y);
+	CHECK(x == 1020 - 3 * 0x62, "the first marker sits 98 * count left of the anchor");
+	CHECK(y == 250, "on the first group's row");
 
-	lfp_marker_origin(1020, 250, 2, 0, x, y);
-	CHECK(x == 1020 + 2 * 0x62, "markers step across by 98");
-	CHECK(y == 250, "and stay on their group's row");
+	lfp_marker_origin(1020, 250, 3, 2, 0, x, y);
+	CHECK(x == 1020 - 0x62, "the last marker ends one pitch short of the anchor");
+	CHECK(y == 250, "and stays on its group's row");
 
-	lfp_marker_origin(1020, 250, 0, 3, x, y);
-	CHECK(y == 250 + 3 * 0x56, "groups step down by 86");
-	CHECK(x == 1020, "without shifting across");
+	// A one-zone group three groups down: no horizontal drift.
+	lfp_marker_origin(1020, 250, 1, 0, 3, x, y);
+	CHECK(y == 250 + 3 * 0x56, "groups step DOWN by 86");
+	CHECK(x == 1020 - 0x62, "a single-zone group sits one pitch left of the anchor");
+
+	// Right-anchoring: a bigger group grows LEFTWARD, the right edge stays put.
+	int x1 = 0, y1 = 0, x4 = 0, y4 = 0;
+	lfp_marker_origin(1020, 250, 1, 0, 0, x1, y1);
+	lfp_marker_origin(1020, 250, 4, 3, 0, x4, y4);
+	CHECK(x1 == x4, "the last marker of any group ends at the same x");
+
+	// The status text sits 4 px left of the group's first marker, 12 px down.
+	lfp_status_text_origin(1020, 250, 3, 1, x, y);
+	CHECK(x == 1020 - 3 * 0x62 - 4, "status text x is the group start minus 4");
+	CHECK(y == 250 + 0x56 + 12, "status text y is the group row plus 12");
 
 	CHECK(kLfpStepX != kLfpStepY, "the two pitches are NOT the same value");
 }
 
-// Neutral is GREEN — an un-owned objective is not "no colour".
+// Neutral is GREEN — an un-owned objective is not "no colour". (The literal
+// ARGB values are placeholders for BSS-loaded globals; see the header.)
 void test_colors() {
-	CHECK(lfp_team_color(0) == 0xFF00FF00u, "neutral is green");
-	CHECK(lfp_team_color(1) == 0xFF80A0FFu, "team 1 blue");
-	CHECK(lfp_team_color(2) == 0xFFFF5050u, "team 2 red");
-	CHECK(lfp_team_color(7) == 0xFF00FF00u, "an unknown team falls to neutral");
+	CHECK(lfp_team_color(0) == kLfpColorNeutral, "neutral takes the neutral colour");
+	CHECK(lfp_team_color(1) == kLfpColorTeam1, "team 1 takes its colour");
+	CHECK(lfp_team_color(2) == kLfpColorTeam2, "team 2 takes its colour");
+	CHECK(lfp_team_color(7) == kLfpColorNeutral, "an unknown team falls to neutral");
 	// The icon modulate is a flat brightness, NOT a team tint.
 	CHECK(kLfpIconModulate == 0xFF7F7F7Fu, "the icon modulate is grey");
 }

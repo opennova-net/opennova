@@ -10,14 +10,16 @@ namespace opennova::hud {
 // item's VEHICLE_HUD block (engine/formats/def/def.h); this header carries the
 // per-marker POLICY -- which colour a seat takes and where its label sits.
 
-// The marker box, set once as constants rather than authored
-// [orig: dword_27237FC = 11 / dword_2723800 = 11 @0x5A3...].
+// The marker box, set once as constants rather than authored: both slots
+// take 11 at HUD init [orig: g_hudVehSeatMarkerW / g_hudVehSeatMarkerH = 11,
+//  stored from eax=0Bh @0x5A47B0 / @0x5A47B5 in HUD_InitOverlaySystem
+//  @0x5A4620; read throughout HUD_DrawVehicleHealthBars @0x5A4FD0].
 inline constexpr int kSeatMarkerW = 11;
 inline constexpr int kSeatMarkerH = 11;
 
 // A seat marker's colour band. The panel reuses the STANCE colour triple
-// rather than owning its own [orig: dword_2723ADC / g_stanceColorMiddle /
-// g_stanceColorBad at the three arms].
+// rather than owning its own [orig: g_stanceColorGood / g_stanceColorMiddle /
+// g_stanceColorBad at the three arms @0x5A5130 / @0x5A513B / @0x5A5095].
 enum class SeatHealthBand { Good, Middle, Bad };
 
 // Health -> band. The ratio is Q16: (health << 16) / maxHealth, with a zero

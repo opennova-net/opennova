@@ -1,11 +1,14 @@
 // The END-OF-ROUND stat board fold (S2C 0x56). The board does not fit one
 // datagram, so this pins the REASSEMBLY rules rather than the payload shape
 // (nw_message_coverage already pins that):
-//   * a chunk at offset 0 RESETS the buffer [orig: @0x431D80] — without it a
-//     re-sent board inherits the previous board's tail, which only shows up on
-//     the SECOND round of a session;
-//   * complete on offset + len >= total [orig: @0x431D9B], a >= not an ==;
-//   * chunks write AT their offset, so out-of-order arrival still assembles.
+//   * a chunk at offset 0 RESETS the stream [orig: @0x431D6D..0x431D79] —
+//     without it a re-sent board inherits the previous board's tail, which
+//     only shows up on the SECOND round of a session;
+//   * complete on offset + len >= total [orig: @0x431D9B..0x431D9F], a >= not
+//     an ==;
+//   * chunks write AT their offset [orig: @0x431D8A..0x431D96], so a repeated
+//     chunk overwrites in place;
+//   * the stream SURVIVES a completed decode — only offset 0 resets it.
 // [orig: NapiNPClientMsg_0x056 @0x431D10]
 #include <cstdio>
 #include <cstdint>
@@ -81,8 +84,6 @@ void test_single_chunk_board() {
 
 // Split across two chunks: the board is NOT known until the second arrives.
 void test_two_chunk_reassembly() {
-	// Heap-allocated: ClientState is far too large for the 1 MB Windows
-	// test stack (the same trap #515 fixed in ai_test).
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> board = make_board(4, "Bee", 22);
@@ -99,11 +100,9 @@ void test_two_chunk_reassembly() {
 
 // THE RESET RULE. A second board must not inherit the first board's tail: send
 // a long board, then a SHORTER one starting at offset 0. Without the reset the
-// leftover bytes would still be in the buffer and the shorter board would
+// leftover bytes would still be in the stream and the shorter board would
 // decode against them.
 void test_offset_zero_resets_the_buffer() {
-	// Heap-allocated: ClientState is far too large for the 1 MB Windows
-	// test stack (the same trap #515 fixed in ai_test).
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> longer = make_board(5, "LongerNameHere", 33);
@@ -125,7 +124,7 @@ void test_offset_zero_resets_the_buffer() {
 // offset satisfies `offset + len >= total` on its own, so the board completes
 // against a head that was never delivered and is still zero-filled. Retail's
 // stream does exactly this: it seeks, writes, and tests the byte count
-// [orig: @0x431D9B], with no record of which ranges actually arrived.
+// [orig: @0x431D9B..0x431D9F], with no record of which ranges actually arrived.
 //
 // A zero head decodes cleanly -- winner 0, no fields, ZERO players -- so the
 // result is a valid but EMPTY board, not a decode failure. Anything consuming
@@ -152,10 +151,31 @@ void test_completion_is_by_byte_count() {
 	CHECK(view.state().end_round.board.players.empty());
 }
 
+// THE STREAM SURVIVES COMPLETION. After a complete board, a retransmitted
+// tail chunk re-decodes against the bytes still in the stream and yields the
+// SAME board. Clearing the stream on completion would decode the tail against
+// a zero head and replace a good board with an empty one -- the bug this pins.
+void test_stream_survives_completion() {
+	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *view_owned;
+	const std::vector<uint8_t> board = make_board(8, "Eve", 66);
+	const uint16_t total = uint16_t(board.size());
+	const size_t half = board.size() / 2;
+	view.apply(s2c::END_ROUND_STATS, chunk_of(board, 0, board.size(), total));
+	CHECK(view.state().end_round.known);
+	CHECK(view.state().end_round.board.players[0].name == "Eve");
+
+	// The tail again, as a retransmit would deliver it.
+	view.apply(s2c::END_ROUND_STATS,
+			chunk_of(board, half, board.size() - half, total));
+	CHECK(view.state().end_round.known);
+	CHECK(view.state().end_round.board.players.size() == 1);
+	CHECK(view.state().end_round.board.players[0].name == "Eve");
+	CHECK(view.state().end_round.board.players[0].kills == 66);
+}
+
 // A malformed board leaves `known` false rather than publishing a half-board.
 void test_undecodable_board_is_dropped() {
-	// Heap-allocated: ClientState is far too large for the 1 MB Windows
-	// test stack (the same trap #515 fixed in ai_test).
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *view_owned;
 	LE e;
@@ -169,15 +189,11 @@ void test_undecodable_board_is_dropped() {
 } // namespace
 
 int main() {
-	std::printf("A\n"); std::fflush(stdout);
 	test_single_chunk_board();
-	std::printf("B\n"); std::fflush(stdout);
 	test_two_chunk_reassembly();
-	std::printf("C\n"); std::fflush(stdout);
 	test_offset_zero_resets_the_buffer();
-	std::printf("D\n"); std::fflush(stdout);
 	test_completion_is_by_byte_count();
-	std::printf("E\n"); std::fflush(stdout);
+	test_stream_survives_completion();
 	test_undecodable_board_is_dropped();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

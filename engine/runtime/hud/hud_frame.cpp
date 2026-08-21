@@ -4,6 +4,7 @@
 // [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
 
 #include "hud/hud_frame.h"
+#include "hud/hud_medic_cross.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1056,9 +1057,11 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 					run.quads.end());
 			if (tag.medic) {
 				// The red-cross-on-white medic plate, a fontH/2 square left of
-				// the text at the tag alpha [orig: rect @ 0x5a4309..0x5a436c;
-				// mesh = white quad + two red bars inset by an eighth,
-				// HUD_DrawMedicCrossQuad @ 0x59bcb0].
+				// the text at the tag alpha [orig: rect @ 0x5a4309..0x5a436c ->
+				// HUD_DrawMedicCrossQuad @ 0x59bcb0]. The quad itself is the
+				// shared primitive in hud/hud_medic_cross.h (the map medic marker
+				// and the help icons draw the same routine): the white field,
+				// then the two red bars, in the witnessed order.
 				int text_w = 0;
 				int text_h = 0;
 				lf.measure(resolved.c_str(), ls, ls, &text_w, &text_h);
@@ -1067,16 +1070,9 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				const float y0 = top_y - 0.5f;
 				const float x1 = x0 + font_h * 0.5f;
 				const float y1 = y0 + font_h * 0.5f;
-				const uint32_t a = argb & 0xFF000000u;
-				const float dx8 = (x1 - x0) * 0.125f;
-				const float dy8 = (y1 - y0) * 0.125f;
-				const float mid_x = (x0 + x1) * 0.5f;
-				const float mid_y = (y0 + y1) * 0.5f;
-				emit_rect(x0, y0, x1, y1, a | 0xFFFFFFu, true);
-				emit_rect(mid_x - dx8, y0 + dy8, mid_x + dx8, y1 - dy8,
-						a | 0xFF0000u, true);
-				emit_rect(x0 + dx8, mid_y - dy8, x1 - dx8, mid_y + dy8,
-						a | 0xFF0000u, true);
+				for (const MedicCrossQuad &q : medic_cross_quads(x0, y0, x1, y1,
+							 static_cast<int>(argb >> 24)))
+					emit_rect(q.x0, q.y0, q.x1, q.y1, q.color, true);
 			}
 		} else if (state.friendly_tag_mode == kFriendlyTagModeBrief) {
 			// The BRIEF tick: three 1-px vertical lines at x-1/x/x+1 spanning

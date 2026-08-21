@@ -564,9 +564,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 // Health write (park-move damage @0x477157.., spine-impact @0x47733f..,
 // underside-crush @0x477e6a-region, burn drain/emitters), the live per-wheel
 // spring machinery (sink growth +250/tick on airborne wheels, the
-// Vehicle_ApplyBrakingForce @0x45CEB0 decay, Entity_ApplyDamageOscillation
+// Suspension_CompressWheelLinear @0x45CEB0 step, Suspension_OscillateWheel
 // @0x45D240 — state identically zero here, so pads probe at box_z_lo + r and
-// the corner lifts consume raw d_k exactly like the zero-state original),
+// the corner lifts consume raw d_k exactly like the zero-state original; the
+// quadratic/fast pair the tracked and light solves call is the staged
+// world/ground_conform.h leg, unwired until the sinks land),
 // entity-entity collision + momentum exchange (mass-gated transfer at the
 // sev-3 leg and the entity-mass delta scaling — plat_terrain_probe carries
 // the terrain leg only), the crash/flip/park/wreck latch machine (the
@@ -915,7 +917,9 @@ void wheeled_contact_solve(World &world, Entity &veh,
 // Cited deferrals (same seams as §7/§8): authority impact/eject legs (the
 // head-on rider ejection ladder @0x47A343.., the belly-strike eject, the
 // underside crush), the wheelie/spring machinery (sinks grow +100/tick, the
-// sub_45CFB0 decay, Entity_ApplyDamageOscillationFast — zero state here),
+// Suspension_CompressWheelQuadratic @0x45CFB0 step and
+// Suspension_OscillateWheelFast @0x45D110 — zero state here; the pair is
+// ported as the staged world/ground_conform.h leg),
 // the tip-over/crash tumble (the parked bike's 298261 BAM/tick fall-over,
 // Entity_QueueSuspensionForce legs, the flip byte at the 0..100 def clamp),
 // the grounded heading/lean smoother (Entity_SmoothHeadingToTarget

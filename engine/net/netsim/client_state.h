@@ -586,20 +586,21 @@ struct ClientMinimapState {
 // post-compression (lossy, ~|v|>>11 quantization) — exactly what the original
 // client renders for its decoded peers. Callers must NOT "correct" them toward the
 // authoritative value.
-// The reassembly buffer plus the decoded board. The buffer is per-session
+// The reassembly stream plus the decoded board. The stream is per-session
 // state whose lifetime the decoder does not own, so it lives here -- retail
-// keeps the same thing in one global stream [orig: g_scoreReassemblyStream].
+// keeps the same thing in one global stream [orig: g_scoreReassemblyStream
+// @0xA82324, reset only by an offset-0 chunk @0x431D79 and otherwise kept
+// across completed decodes].
 struct ClientEndRoundStats {
 	// True once a complete board has been decoded at least once. A later
 	// partial chunk does not clear it, so the screen keeps showing the last
 	// complete board while the next one streams in.
 	bool known = false;
 	EndRoundStats board;
-	// In-flight reassembly. `expected` is the total_size the first chunk
-	// declared; `buffer` is filled at each chunk offset.
+	// The stream: filled at each chunk's offset, completion tested against
+	// each chunk's own declared total, retained after a decode.
 	std::vector<uint8_t> buffer;
-	uint16_t expected = 0;
-	// Chunks that arrived since the last completed board -- diagnostic only.
+	// Chunks that arrived since the last offset-0 reset -- diagnostic only.
 	uint32_t chunks_seen = 0;
 };
 

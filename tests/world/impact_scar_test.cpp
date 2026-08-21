@@ -1,6 +1,6 @@
 // Impact-scar selection and ring policy.
-// [orig: Scar_Apply @0x5CF1B0; Scar_SpawnQuad @0x5CC830; Scar_TextureForId
-//  @0x5CC360; the scar table @0x8413A8/@0x8417A8]
+// [orig: Impact_SpawnGlassEffectsOrScar @0x5CF1B0; Scar_AddEntry
+//  @0x5CC830; Scar_TextureForId @0x5CC360; the scar table @0x8413A8/@0x8417A8]
 
 #include <world/impact_scar.h>
 
@@ -68,6 +68,17 @@ void test_ring_wraps() {
 	CHECK(scar_ring_slot(256) == 0, "the 257th overwrites the first");
 	CHECK(scar_ring_slot(257) == 1, "and the ring continues");
 	CHECK(scar_ring_slot(1000) == 1000 % 256, "for any count");
+	// The cache geometry the cursor lives in.
+	CHECK(kScarCacheEntityBytes == 16392, "256 x 64 B slots + owner + cursor");
+	CHECK(kScarCacheEntities == 128, "128 entity rings in the cache");
+}
+
+// The slot writer's gates: no scar below the water plane, none on a husk.
+void test_gates() {
+	CHECK(scar_allowed(0x20000, 0x10000, false), "above water, live entity");
+	CHECK(!scar_allowed(0x10000, 0x10000, false), "at the water plane is NOT above it");
+	CHECK(!scar_allowed(0x8000, 0x10000, false), "below water takes no scar");
+	CHECK(!scar_allowed(0x20000, 0x10000, true), "a husk takes no scar");
 }
 
 // Every scar is spun about its normal — a full BAM16 turn mapped to radians.
@@ -79,22 +90,57 @@ void test_spin() {
 	CHECK(most > 6.28f && most < 6.284f, "the top of the range is nearly a turn");
 }
 
-// The quad basis takes the axis the normal is LEAST aligned with, so the cross
-// product cannot degenerate on an axis-aligned face — the common case for a
-// shot into a wall or floor.
-void test_basis_axis() {
-	CHECK(scar_basis_axis(1.0f, 0.0f, 0.0f) != 0,
-			"a +X normal must not build its basis from X");
-	CHECK(scar_basis_axis(0.0f, 1.0f, 0.0f) != 1,
-			"a +Y normal must not build its basis from Y");
-	CHECK(scar_basis_axis(0.0f, 0.0f, 1.0f) != 2,
-			"a +Z normal must not build its basis from Z");
-	// Sign must not matter — a wall facing either way behaves the same.
-	CHECK(scar_basis_axis(-1.0f, 0.0f, 0.0f) ==
-					scar_basis_axis(1.0f, 0.0f, 0.0f),
-			"the axis pick is sign-independent");
-	// A tilted normal picks its smallest component.
-	CHECK(scar_basis_axis(0.9f, 0.1f, 0.5f) == 1, "picks the smallest component");
+bool perpendicular(int32_t nx, int32_t ny, int32_t nz, const int32_t t[3]) {
+	const int64_t dot = int64_t(nx) * t[0] + int64_t(ny) * t[1] + int64_t(nz) * t[2];
+	const bool nonzero = t[0] != 0 || t[1] != 0 || t[2] != 0;
+	return dot == 0 && nonzero;
+}
+
+// THE TANGENT LADDER, case for case. The tie |ny| == |nx| zeroes X even when
+// Z is the smallest component — a "least aligned axis" pick would not.
+void test_tangent_ladder() {
+	int32_t t[3];
+	// |ny| < |nx|, |nx| > |nz|, |ny| > |nz| -> (ny, -nx, 0)
+	scar_tangent(10, 5, 1, t);
+	CHECK(t[0] == 5 && t[1] == -10 && t[2] == 0, "case A: (ny, -nx, 0)");
+	CHECK(perpendicular(10, 5, 1, t), "case A is perpendicular");
+	// |ny| < |nx|, |nx| > |nz|, |ny| <= |nz| -> (nz, 0, -nx)
+	scar_tangent(10, 1, 5, t);
+	CHECK(t[0] == 5 && t[1] == 0 && t[2] == -10, "case B: (nz, 0, -nx)");
+	CHECK(perpendicular(10, 1, 5, t), "case B is perpendicular");
+	// |ny| < |nx|, |nx| <= |nz| -> (-nz, 0, nx)
+	scar_tangent(5, 1, 10, t);
+	CHECK(t[0] == -10 && t[1] == 0 && t[2] == 5, "case C: (-nz, 0, nx)");
+	CHECK(perpendicular(5, 1, 10, t), "case C is perpendicular");
+	// |ny| == |nx| -> (0, -nz, ny), WHATEVER |nz| is.
+	scar_tangent(5, 5, 1, t);
+	CHECK(t[0] == 0 && t[1] == -1 && t[2] == 5,
+			"the tie zeroes X even though Z is the smallest component");
+	CHECK(perpendicular(5, 5, 1, t), "the tie case is perpendicular");
+	scar_tangent(-5, 5, 100, t);
+	CHECK(t[0] == 0 && t[1] == -100 && t[2] == 5, "the tie compares magnitudes");
+	// |ny| > |nx|, |ny| <= |nz| -> (0, -nz, ny)
+	scar_tangent(1, 5, 10, t);
+	CHECK(t[0] == 0 && t[1] == -10 && t[2] == 5, "case E: (0, -nz, ny)");
+	CHECK(perpendicular(1, 5, 10, t), "case E is perpendicular");
+	// |ny| > |nx|, |ny| > |nz|, |nx| > |nz| -> (-ny, nx, 0)
+	scar_tangent(5, 10, 1, t);
+	CHECK(t[0] == -10 && t[1] == 5 && t[2] == 0, "case F: (-ny, nx, 0)");
+	CHECK(perpendicular(5, 10, 1, t), "case F is perpendicular");
+	// |ny| > |nx|, |ny| > |nz|, |nx| <= |nz| -> (0, nz, -ny)
+	scar_tangent(1, 10, 5, t);
+	CHECK(t[0] == 0 && t[1] == 5 && t[2] == -10, "case G: (0, nz, -ny)");
+	CHECK(perpendicular(1, 10, 5, t), "case G is perpendicular");
+
+	// Axis-aligned normals — the common wall/floor case — never degenerate.
+	scar_tangent(0x10000, 0, 0, t);
+	CHECK(perpendicular(0x10000, 0, 0, t), "+X face");
+	scar_tangent(0, 0x10000, 0, t);
+	CHECK(perpendicular(0, 0x10000, 0, t), "+Y face");
+	scar_tangent(0, 0, 0x10000, t);
+	CHECK(perpendicular(0, 0, 0x10000, t), "+Z face");
+	scar_tangent(-0x10000, 0, 0, t);
+	CHECK(perpendicular(-0x10000, 0, 0, t), "-X face");
 }
 
 } // namespace
@@ -103,8 +149,9 @@ int main() {
 	test_scar_selection();
 	test_texture_roll_discipline();
 	test_ring_wraps();
+	test_gates();
 	test_spin();
-	test_basis_axis();
+	test_tangent_ladder();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

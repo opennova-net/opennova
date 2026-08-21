@@ -14,135 +14,117 @@ namespace opennova::world {
 //
 // The client runs this for EVERY vehicle it is not driving, seeding the drive
 // command straight from the wire [orig: Entity_UpdateVehiclePhysics @0x48AF00
-//  — the ctrl_forward and steer-target copies @0x48B7F0..0x48B80A]. So a peer
-// integrating the same wire fields IS the retail mechanism, not a stand-in.
+//  — `if (driver != g_local_player_entity)` @0x48B7F0, ctrl_forward (+0x220)
+//  from wire +0x2C4 and the steer target (+0x210) from wire +0x2CC
+//  @0x48B7F8..0x48B80A]. So a peer integrating the same wire fields IS the
+// retail mechanism, not a stand-in.
+//
+// STAGED, NOT WIRED: the ground-motor speed and steer registers (+0x29C /
+// +0x2B4) are LIVE in world/vehicle_motor.cpp (the clamp tree, the < 48 stop
+// snap, the speed-dependent steer rate), and Entity_CacheVehicleHUDStats
+// @0x4929B0's steering/speed publication is the present-row
+// PF_VEHICLE_STEERING / PF_VEHICLE_SPEED pair. What lives here is what those
+// do not carry: the rotor spin machine and the wheel phase.
 
 // ---------------------------------------------------------------------------
-// ROTOR [orig: RotorSpin_Update @0x4928B0]
+// ROTOR [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 — called from every
+//  vehicle mover (@0x46F99E, @0x4700F5, @0x4869EA, @0x4889F5, @0x48AE3D,
+//  @0x48D42B) and gated on the move-context class 2 @0x4928C9..0x4928D1].
 // ---------------------------------------------------------------------------
 
-// Player-control items (ItemDef attrib 0x40) use a FIXED acceleration and the
-// same magnitude for spin-down, so a rotor takes as long to stop as to start.
-inline constexpr int32_t kRotorAccel = 0x2D82D;
-inline constexpr int32_t kRotorSpeedMax = 0x0CCCCCC0;
-// A spawn flag seeds the rotor at FULL speed rather than spinning it up
-// [orig: Entity_InitFromBmsOrNetSpawn @0x40EE70..0x40EE9A] — a helicopter
-// spawned in flight has its rotor already turning.
-inline constexpr int32_t kSpawnRotorFullBit = 0x20000;
-// The ItemDef attribute that marks a player-controllable vehicle.
+// The three dwords the machine owns: +0x460 speed, +0x464 the angle
+// accumulator the PANM register samples, +0x468 the spin-up rate.
+struct RotorState {
+	int32_t speed = 0; // +0x460
+	int32_t angle = 0; // +0x464
+	int32_t rate = 0;  // +0x468
+};
+
+// The spin-up rates. A PLAYER-CONTROL item (ItemDef attrib 0x40) always seeds
+// the full rate; every other item seeds one of three by a PRNG roll
+// [orig: @0x4928E5..0x492935 — attrib & 0x40 with an occupant -> 186413
+//  @0x4928F3; no 0x40 -> PRNG_Next16() % 100: > 66 -> 139809, > 33 -> 163110,
+//  else 186413 @0x49290E..0x492935]. Spin-DOWN always uses the full rate
+// [orig: @0x49294F], so a player-control rotor takes as long to stop as to
+// start while a rolled one may stop faster than it started.
+inline constexpr int32_t kRotorRateFull = 186413; // 0x2D82D
+inline constexpr int32_t kRotorRateMid = 163110;  // 0x27D26
+inline constexpr int32_t kRotorRateLow = 139809;  // 0x22221
+inline constexpr int32_t kRotorSpeedMax = 0x0CCCCCC0; // 214748352
 inline constexpr int32_t kItemAttribPlayerControl = 0x40;
 
-// One tick of rotor speed. Occupied spins up to the cap; unoccupied decays by
-// the SAME step down to zero.
-inline int32_t rotor_step(int32_t speed, bool occupied) {
-	if (occupied) {
-		speed += kRotorAccel;
-		if (speed > kRotorSpeedMax) speed = kRotorSpeedMax;
+// Whether THIS tick's seed needs a draw from the shared PRNG stream: only a
+// zero rate on a non-player-control item rolls [orig: the `!rate` gate
+// @0x4928DF and the `!(attrib & 0x40)` arm @0x492903]. A player-control item
+// never rolls; an unoccupied non-player-control item rolls EVERY tick, because
+// the unoccupied branch resets the rate to zero @0x492972.
+inline bool rotor_rate_needs_roll(const RotorState &s, int32_t attrib) {
+	return s.rate == 0 && (attrib & kItemAttribPlayerControl) == 0;
+}
+
+// The rolled rate from a PRNG word [orig: @0x49290E..0x492935].
+inline int32_t rotor_rate_from_roll(uint16_t prng_word) {
+	const int pct = static_cast<int>(prng_word % 100u);
+	if (pct > 66) return kRotorRateLow;
+	if (pct > 33) return kRotorRateMid;
+	return kRotorRateFull;
+}
+
+// Seed the rate when it is zero. `rolled_rate` is rotor_rate_from_roll's
+// result when rotor_rate_needs_roll said so, else ignored.
+inline void rotor_seed_rate(RotorState &s, int32_t attrib, bool occupied,
+		int32_t rolled_rate) {
+	if (s.rate != 0) return;
+	if ((attrib & kItemAttribPlayerControl) != 0) {
+		if (occupied) s.rate = kRotorRateFull; // @0x4928F3
 	} else {
-		speed -= kRotorAccel;
-		if (speed < 0) speed = 0;
+		s.rate = rolled_rate; // @0x492915 / @0x492930
 	}
-	return speed;
+}
+
+// One tick [orig: occupied @0x492984..0x4929A7: speed += rate, cap, angle +=
+//  speed; unoccupied @0x492945..0x492972: speed -= 186413 floored at 0, angle
+//  += speed, rate = 0].
+inline void rotor_tick(RotorState &s, bool occupied) {
+	if (occupied) {
+		s.speed += s.rate;
+		if (s.speed > kRotorSpeedMax) s.speed = kRotorSpeedMax;
+		s.angle += s.speed;
+		return;
+	}
+	if (s.speed != 0) {
+		s.speed -= kRotorRateFull;
+		if (s.speed < 0) s.speed = 0;
+	}
+	s.angle += s.speed;
+	s.rate = 0;
+}
+
+// A spawn flag seeds the rotor at FULL speed rather than spinning it up
+// [orig: Entity_InitFromBmsOrNetSpawn @0x40EE70..0x40EE94 — record flag
+//  0x20000 sets entity Flags |= 0x80, rate = 0x2D82D, speed = 0x0CCCCCC0 and
+//  the ground speed register +0x29C = 0x10000] — a helicopter spawned in
+// flight has its rotor already turning. The +0x29C / Flags side effects
+// belong to the spawner, not this state.
+inline constexpr int32_t kSpawnRotorFullBit = 0x20000;
+inline void rotor_spawn_full(RotorState &s) {
+	s.rate = kRotorRateFull;
+	s.speed = kRotorSpeedMax;
 }
 
 // The register the PANM feeder reads: the accumulator's HIGH WORD
-// [orig: the +0x466 read @0x492ACA, +0x2BA @0x4929B4].
+// [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the rotor angle's +0x466
+//  @0x492ACA..0x492ADE, the wheel phase's +0x2BA @0x4929B4].
 inline uint16_t part_register(int32_t accumulator) {
 	return static_cast<uint16_t>((static_cast<uint32_t>(accumulator) >> 16) &
 			0xFFFFu);
 }
 
 // ---------------------------------------------------------------------------
-// GROUND MOTOR SPEED [orig: @0x48C1C6..0x48C32A]
-// ---------------------------------------------------------------------------
-
-// Below this magnitude a coasting vehicle SNAPS to a stop rather than creeping
-// [orig: @0x48C314]. Without it a vehicle drifts forever at sub-pixel speed.
-inline constexpr int32_t kGroundSpeedSnap = 48;
-
-// The commanded target, reduced by the hull's pitch: a vehicle facing up a
-// slope cannot command its full speed [orig: (cmd * cos^2(pitch)Q22) >> 22
-//  @0x48C1C6..0x48C1F6].
-inline int32_t ground_speed_target(int32_t cmd, int32_t cos2_pitch_q22) {
-	return static_cast<int32_t>(
-			(static_cast<int64_t>(cmd) * cos2_pitch_q22) >> 22);
-}
-
-// The raw acceleration toward the target, rounded [orig: (target - speed + 16)
-//  >> 5 @0x48C1FE..0x48C20B].
-inline int32_t ground_speed_accel(int32_t target, int32_t speed) {
-	return (target - speed + 16) >> 5;
-}
-
-// THE CLAMP DEPENDS ON WHAT THE DRIVER IS DOING, and the three cases are not
-// interchangeable:
-//   * a REVERSAL — target and speed on opposite sides of zero — integrates
-//     UNCLAMPED, so throwing a vehicle into reverse bites immediately
-//     [orig: @0x48C3D2..0x48C3EC -> @0x48C2FC];
-//   * a same-sign drive clamps to the def's acceleration [orig: @0x48C3F9];
-//   * a ZERO target clamps to the def's DECELERATION, which is a different
-//     field [orig: @0x48C442].
-// Collapsing these into one clamp makes reverse feel mushy and braking wrong.
-inline int32_t ground_speed_clamp(int32_t accel, int32_t target, int32_t speed,
-		int32_t accel_limit, int32_t decel_limit) {
-	const bool reversal = (target > 0 && speed < 0) || (target < 0 && speed > 0);
-	if (reversal) return accel; // unclamped
-	const int32_t limit = target == 0 ? decel_limit : accel_limit;
-	if (accel > limit) return limit;
-	if (accel < -limit) return -limit;
-	return accel;
-}
-
-// One tick of motor speed.
-inline int32_t ground_speed_step(int32_t speed, int32_t target,
-		int32_t accel_limit, int32_t decel_limit) {
-	int32_t accel = ground_speed_accel(target, speed);
-	accel = ground_speed_clamp(accel, target, speed, accel_limit, decel_limit);
-	// A zero acceleration SNAPS to the target rather than stalling short of it
-	// [orig: @0x48C2FC..0x48C32A].
-	if (accel == 0) return target;
-	speed += accel;
-	// The creep snap applies only when coasting to a stop.
-	if (target == 0) {
-		const int32_t mag = speed < 0 ? -speed : speed;
-		if (mag < kGroundSpeedSnap) speed = 0;
-	}
-	return speed;
-}
-
-// ---------------------------------------------------------------------------
-// STEER [orig: @0x48C0C5..0x48C14E]
-// ---------------------------------------------------------------------------
-
-// The effective turn rate falls off with speed: a vehicle at its top speed
-// turns at `min_rate`, one at rest at the full `turn_rate`.
-//
-// `min_rate` is turn_rate2 when the def gives one, else a QUARTER of turn_rate.
-inline int32_t steer_min_rate(int32_t turn_rate, int32_t turn_rate2) {
-	return turn_rate2 != 0 ? turn_rate2 : (turn_rate >> 2);
-}
-
-// The speed falloff factor, Q16: 0x10000 at rest, 0 at player_speed.
-inline int32_t steer_speed_factor(int32_t speed, int32_t player_speed) {
-	if (player_speed == 0) return 0x10000;
-	const int32_t f = 0x10000 - static_cast<int32_t>(
-			(static_cast<int64_t>(speed) << 16) / player_speed);
-	return f < 0 ? 0 : f;
-}
-
-// The effective rate, interpolated between min and full by that factor.
-inline int32_t steer_effective_rate(int32_t turn_rate, int32_t min_rate,
-		int32_t factor_q16) {
-	const int64_t span = static_cast<int64_t>(turn_rate - min_rate) * factor_q16;
-	return static_cast<int32_t>((span + 0x8000) >> 16) + min_rate;
-}
-
-// The steer register is the HIGH WORD of a SIGNED dword and is left UNCLAMPED
-// [orig: @0x4929C0 — the 0x10000 minimum there is dead code]. Clamping it
-// would flatten the extremes of a hard turn.
-
-// ---------------------------------------------------------------------------
-// WHEEL PHASE [orig: @0x48C4D0 / @0x48C4F4; the air form @0x48E9F0]
+// WHEEL PHASE (+0x2B8) [orig: Entity_UpdateVehiclePhysics @0x48C4C0..0x48C4D0
+//  (|slip| + (speed << 13)) and the +0x46C form @0x48C4D8..0x48C4F4; the
+//  watercraft mover adds its brain forward command instead,
+//  Entity_UpdateWatercraftPhysics @0x48E9F0..0x48E9F9 (`+0x220 << 13`)].
 // ---------------------------------------------------------------------------
 
 // Wheels advance by the speed scaled up, plus a slip kick on an active skid.
@@ -153,9 +135,8 @@ inline int32_t wheel_phase_step(int32_t phase, int32_t speed, int32_t slip_abs) 
 	return phase + slip_abs + (speed << 13);
 }
 
-// An aircraft's wheels ride the brain's forward command instead
-// [orig: Entity_UpdateAircraftPhysics @0x48E9F0..0x48E9F9].
-inline int32_t air_wheel_phase_step(int32_t phase, int32_t forward) {
+// A watercraft's phase rides the brain's forward command instead.
+inline int32_t watercraft_wheel_phase_step(int32_t phase, int32_t forward) {
 	return phase + (forward << 13);
 }
 
