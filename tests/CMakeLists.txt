@@ -1364,6 +1364,11 @@ target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(player_view_test PRIVATE cxx_std_17)
 add_test(NAME player_view COMMAND player_view_test)
 
+add_executable(tp_camera_mount_test world/tp_camera_mount_test.cpp)
+target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)
+target_include_directories(tp_camera_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tp_camera_mount COMMAND tp_camera_mount_test)
+
 # The mouse-look pipeline (pixel deltas -> yaw/pitch BAM): the witnessed integer
 # math — sens << 11, the +0x8000 rounding, the scoped zoom divide, flipmouse,
 # and the pitch clamps with the prone +40-degree up-limit.
