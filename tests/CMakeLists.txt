@@ -1369,6 +1369,11 @@ target_link_libraries(round_move_effect_test PRIVATE opennova_runtime)
 target_include_directories(round_move_effect_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME round_move_effect COMMAND round_move_effect_test)
 
+add_executable(air_attitude_test world/air_attitude_test.cpp)
+target_link_libraries(air_attitude_test PRIVATE opennova_runtime)
+target_include_directories(air_attitude_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME air_attitude COMMAND air_attitude_test)
+
 add_executable(vehicle_part_registers_test world/vehicle_part_registers_test.cpp)
 target_link_libraries(vehicle_part_registers_test PRIVATE opennova_runtime)
 target_include_directories(vehicle_part_registers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
