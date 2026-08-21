@@ -178,6 +178,57 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 	presenter.teardown()
 
 
+func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
+	# The sim's emitter liveness (round+0x1CC): a ClipWaterFx round dipping
+	# under the water plane RELEASES its emitter, and surfacing acquires a new
+	# one — the release is not latched [orig: Projectile_UpdatePhysics
+	# @0x4ea019..0x4ea03e; the lazy spawn @0x4e9f58..0x4e9f94].
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var fx := _make_fx()
+	var anchors := CaptureAnchors.new()
+	var presenter := ThrowablePresentPass.new()
+	presenter.setup(null, container, _round_placer(), _item_db,
+			func() -> Variant: return fx, anchors)
+	var row := {
+		"key": 3075,
+		"item_id": 1883,
+		"pos": Vector3(3, 1, 2),
+		"rotation_deg": Vector3.ZERO,
+		"move_effect": "Effect_SmokeToss",
+		"move_effect_live": true,
+	}
+	presenter.present_visuals([row])
+	assert_eq(fx.spawns.size(), 1, "a live emitter spawns its group")
+	var owner_key := "throwable-move:3075"
+
+	row["move_effect_live"] = false
+	row["pos"] = Vector3(3, -1, 2)
+	presenter.present_visuals([row])
+	assert_eq(fx.stopped, [91],
+			"the released emitter stops its group while the round stays live")
+	assert_eq(fx.released, [owner_key],
+			"the release drops the effect identity so the handle is forgotten")
+	assert_false(anchors.anchors.has(owner_key))
+	assert_eq(presenter.get_stats().move_effects, 0)
+	assert_eq(presenter.get_stats().move_effect_transforms, 0,
+			"a released round keeps no stale transform")
+
+	row["move_effect_live"] = true
+	row["pos"] = Vector3(3, 1.5, 2)
+	presenter.present_visuals([row])
+	assert_eq(fx.spawns.size(), 2,
+			"surfacing acquires a FRESH group for the same round")
+	assert_eq(int(presenter.get_stats().move_effects), 1)
+	assert_true(anchors.anchors.has(owner_key))
+	var resumed: Transform3D = (anchors.anchors[owner_key] as Callable).call()
+	assert_eq(resumed.origin, Vector3(3, 1.5, 2))
+
+	presenter.present_visuals([])
+	assert_eq(fx.stopped, [91, 92], "round removal stops the second group")
+	presenter.teardown()
+
+
 func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)

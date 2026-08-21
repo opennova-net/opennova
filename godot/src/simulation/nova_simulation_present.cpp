@@ -36,7 +36,7 @@ Array Simulation::get_throwable_visuals() const {
 	const double kDegPerBam = opennova::world::kDegreesPerBam;
 	auto push_entry = [&](int64_t key, int item_id, const opennova::world::Vec3 &pos,
 			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam,
-			const char *move_effect) {
+			const char *move_effect, bool move_effect_live) {
 		Dictionary d;
 		d["key"] = key;
 		d["item_id"] = item_id;
@@ -53,6 +53,13 @@ Array Simulation::get_throwable_visuals() const {
 		// @0x4e9f58/@0x4ea8ae/@0x5f7410], then releases it with the round
 		// [orig: Projectile_ReleaseEffects @0x4e8280].
 		d["move_effect"] = String(move_effect != nullptr ? move_effect : "");
+		// The round's emitter liveness (the +0x1CC handle mirror): the shell
+		// spawns while this is set and holds no handle, and retires + forgets
+		// the handle when it clears, so a round that dips under water releases
+		// its plume and re-acquires one on surfacing (retail:
+		// Projectile_UpdatePhysics @0x4ea019..0x4ea03e, the lazy spawn
+		// @0x4e9f58..0x4e9f94; see docs/world/world-wac-ai-re.md).
+		d["move_effect_live"] = move_effect_live;
 		out.push_back(d);
 	};
 	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
@@ -82,7 +89,7 @@ Array Simulation::get_throwable_visuals() const {
 				(generation << 10) | static_cast<uint64_t>(i));
 		push_entry(presentation_key, visible_item, r.pos, r.yaw_bam,
 				r.pitch_bam, r.roll_bam,
-				move_effect);
+				move_effect, r.move_effect_live);
 	}
 	uint8_t viewer_team = 0xFF;
 	if (const opennova::world::Entity *lp =
@@ -99,7 +106,7 @@ Array Simulation::get_throwable_visuals() const {
 				0x4000000000000000LL |
 				static_cast<int64_t>(d.entity.packed);
 		push_entry(device_key, item, d.pos, d.yaw_bam, d.pitch_bam,
-				d.roll_bam, "");
+				d.roll_bam, "", false);
 	}
 	return out;
 }
