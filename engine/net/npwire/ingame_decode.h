@@ -1883,6 +1883,82 @@ struct ChatBroadcast {
 };
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 
+// §5.61 S2C 0x56 — END-OF-ROUND STAT BOARD. Everything the post-round
+// stat.mnu screen shows arrives here, and it arrives CHUNKED: each datagram
+// is [u16 total_size][u16 chunk_offset][chunk], written into a reassembly
+// stream at its offset, and the board is complete once
+// chunk_offset + chunk_len >= total_size. A zero offset RESETS the stream, so
+// a re-sent board never merges with the previous one
+// [orig: NapiNPClientMsg_0x056 @0x431D10 — the envelope reads @0x431D42 /
+//  @0x431D61, the reset @0x431D80, the completion test @0x431D9B].
+//
+// Reassembly deliberately stays with the CALLER: the stream is per-session
+// state with a lifetime the decoder does not own, and retail keeps it in one
+// global for the same reason.
+struct EndRoundStatsChunk {
+	uint16_t total_size = 0;   // bytes in the whole board
+	uint16_t chunk_offset = 0; // where this chunk lands; 0 also means "restart"
+	std::vector<uint8_t> chunk;
+	// True when this chunk completes the board (offset + size >= total).
+	bool complete() const {
+		return size_t(chunk_offset) + chunk.size() >= size_t(total_size);
+	}
+};
+bool decode_end_round_stats_chunk(const uint8_t *body, size_t len,
+                                  EndRoundStatsChunk &out);
+
+// One player row of the reassembled board. The seven stat words are in WIRE
+// order, which is NOT the order retail stores them in (score is read fourth
+// but written to slot 5, captures fifth to slot 4) — the storage shuffle is
+// the screen's column layout, not the wire's
+// [orig: the row loop @0x431F3C..@0x4320E1].
+struct EndRoundPlayerRow {
+	uint8_t slot = 0;
+	std::string name;   // clipped to 31 chars + NUL by the copy loop
+	std::string clan;
+	std::string tag;    // the squad tag
+	uint8_t team = 0;
+	uint8_t side = 0;
+	int16_t kills = 0;
+	int16_t deaths = 0;
+	int16_t assists = 0;
+	int16_t score = 0;
+	int16_t captures = 0;
+	int16_t flags = 0;
+	int16_t special = 0;
+	// One score per declared team field, positional against `team_fields`.
+	std::vector<int16_t> per_team;
+	// The board draws "<clan> <name>" when a clan is present, else the bare
+	// name [orig: the sprintf @0x432119 vs the copy loop @0x43212F].
+	std::string display_name() const {
+		return clan.empty() ? name : clan + " " + name;
+	}
+};
+
+// The reassembled board.
+struct EndRoundStats {
+	// Stored into the winner-team global despite the decompiler naming it
+	// gameType [orig: the store @0x431E1E].
+	int8_t winner_team = 0;
+	int16_t team_score_0 = 0;
+	int16_t team_score_1 = 0;
+	// The declared team columns: one {field, enabled} pair each, and the count
+	// also sizes every row's per_team array and the trailing matrix's columns
+	// [orig: the pair loop @0x431E6E].
+	std::vector<std::pair<uint8_t, uint8_t>> team_fields;
+	std::vector<EndRoundPlayerRow> players;
+	// Trailing per-team score matrix: team_rows x team_fields.size()
+	// [orig: the row/col loops @0x4321A2..@0x4321D6].
+	std::vector<std::vector<int16_t>> team_rows;
+};
+
+// Parse a COMPLETE reassembled board. Retail tolerates truncation here — every
+// read is bounds-checked and yields 0/empty past the end, leaving a partly
+// zeroed board — but this decoder follows npwire's protocol-cursor contract
+// instead and rejects a short stream outright, so a truncated board cannot
+// half-decode into a plausible scoreboard.
+bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out);
+
 // §5.53 S2C 0x04 — SESSION SLOT CONFIG (24 B): four leading i32s the handler
 // skips, then [u8 sessionConfig][u8 teamMode][u8 maxPlayers] (maxPlayers drives
 // PlayerSlotTable_Reallocate), one more skipped i32, and a trailing byte.

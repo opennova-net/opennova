@@ -1652,6 +1652,84 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	return c.ok && (c.p == c.end);
 }
 
+// §5.61 S2C 0x56 envelope — [orig: NapiNPClientMsg_0x056 @0x431D10, the two
+// u16 reads @0x431D42 / @0x431D61]. The remainder of the datagram is the chunk.
+bool decode_end_round_stats_chunk(const uint8_t *body, size_t len,
+                                  EndRoundStatsChunk &out) {
+	out = EndRoundStatsChunk{};
+	Cursor c{body, body + len, true};
+	out.total_size = c.u16();
+	out.chunk_offset = c.u16();
+	if (!c.ok) return false;
+	out.chunk.assign(c.p, c.end);
+	return true;
+}
+
+// §5.61 the reassembled board — [orig: the parse from @0x431E0B].
+bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out) {
+	out = EndRoundStats{};
+	Cursor c{data, data + len, true};
+	out.winner_team = static_cast<int8_t>(c.u8());
+	out.team_score_0 = c.i16();
+	out.team_score_1 = c.i16();
+
+	// The declared team columns. This count sizes each row's per-team array
+	// AND the trailing matrix, so a bad count corrupts everything after it.
+	const uint8_t field_count = c.u8();
+	if (!c.ok) return false;
+	out.team_fields.reserve(field_count);
+	for (uint8_t i = 0; i < field_count; ++i) {
+		const uint8_t f0 = c.u8();
+		const uint8_t f1 = c.u8();
+		if (!c.ok) return false;
+		out.team_fields.emplace_back(f0, f1);
+	}
+
+	const uint8_t player_count = c.u8();
+	if (!c.ok) return false;
+	out.players.reserve(player_count);
+	for (uint8_t i = 0; i < player_count; ++i) {
+		EndRoundPlayerRow r;
+		r.slot = c.u8();
+		// Three NUL-terminated strings, each clipped to 31 chars by retail's
+		// 32-byte copy loops [orig: @0x431F5A / @0x431F9E / @0x431FE2].
+		r.name = c.cstr();
+		r.clan = c.cstr();
+		r.tag = c.cstr();
+		if (r.name.size() > 31) r.name.resize(31);
+		if (r.clan.size() > 31) r.clan.resize(31);
+		if (r.tag.size() > 31) r.tag.resize(31);
+		r.team = c.u8();
+		r.side = c.u8();
+		// WIRE order; retail's slot shuffle is the column layout, not this.
+		r.kills = c.i16();
+		r.deaths = c.i16();
+		r.assists = c.i16();
+		r.score = c.i16();
+		r.captures = c.i16();
+		r.flags = c.i16();
+		r.special = c.i16();
+		r.per_team.reserve(field_count);
+		for (uint8_t f = 0; f < field_count; ++f) r.per_team.push_back(c.i16());
+		if (!c.ok) return false;
+		out.players.push_back(std::move(r));
+	}
+
+	// The trailing per-team matrix. Retail reads its row count as a SIGNED
+	// byte and skips the loop when negative [orig: the `(char)` cast and the
+	// `> 0` test @0x4321A2].
+	const int8_t team_row_count = static_cast<int8_t>(c.u8());
+	if (!c.ok) return false;
+	for (int8_t rrow = 0; rrow < team_row_count; ++rrow) {
+		std::vector<int16_t> row;
+		row.reserve(field_count);
+		for (uint8_t f = 0; f < field_count; ++f) row.push_back(c.i16());
+		if (!c.ok) return false;
+		out.team_rows.push_back(std::move(row));
+	}
+	return c.ok;
+}
+
 // §5.53 S2C 0x04 — [orig: NapiNPClientMsg_SessionSlotConfig @ 0x425410]. Fixed 24 B.
 bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConfig &out) {
 	out = SessionSlotConfig{};

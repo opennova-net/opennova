@@ -594,6 +594,34 @@ void print_tag_18(const std::vector<uint8_t> &body) {
 }
 
 // S2C 0x58 SESSION-STATUS (§5.48) — server/mission names + up-time + scoring rules.
+// S2C 0x56 END-OF-ROUND STAT BOARD (§5.61). Chunked, so a lone datagram is
+// usually a fragment; the envelope is what a capture can show without
+// reassembling across datagrams.
+void print_tag_56(const std::vector<uint8_t> &body) {
+	EndRoundStatsChunk ch;
+	const bool clean = decode_end_round_stats_chunk(body.data(), body.size(), ch);
+	std::printf("        [0x56] total=%u off=%u chunk=%zu%s%s\n",
+	            ch.total_size, ch.chunk_offset, ch.chunk.size(),
+	            ch.complete() ? " COMPLETE" : "",
+	            clean ? "" : " DECODE INCOMPLETE");
+	// A single-datagram board is self-contained, so decode and show it.
+	if (!clean || !ch.complete() || ch.chunk_offset != 0) return;
+	EndRoundStats st;
+	if (!decode_end_round_stats(ch.chunk.data(), ch.chunk.size(), st)) {
+		std::printf("          (payload DECODE INCOMPLETE)\n");
+		return;
+	}
+	std::printf("          winner=%d scores=%d/%d fields=%zu players=%zu\n",
+	            int(st.winner_team), int(st.team_score_0), int(st.team_score_1),
+	            st.team_fields.size(), st.players.size());
+	for (const EndRoundPlayerRow &r : st.players) {
+		std::printf("          slot=%-3u %-24s k=%d d=%d a=%d s=%d c=%d f=%d x=%d\n",
+		            r.slot, r.display_name().c_str(), int(r.kills), int(r.deaths),
+		            int(r.assists), int(r.score), int(r.captures), int(r.flags),
+		            int(r.special));
+	}
+}
+
 void print_tag_58(const std::vector<uint8_t> &body) {
 	SessionStatusBlock s;
 	const bool clean = decode_session_status(body.data(), body.size(), s);
@@ -1858,6 +1886,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::DEPLOYED_ITEM) print_tag_59(payload);
 	else if (dir == 'S' && tag == s2c::TERRAIN_LOAD) print_tag_45(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_ROUTED) print_tag_44(payload);
+	else if (dir == 'S' && tag == s2c::END_ROUND_STATS) print_tag_56(payload);
 	else if (dir == 'S' && tag == s2c::SESSION_STATUS) print_tag_58(payload);
 	else if (dir == 'S' && tag == s2c::ZONE_TIMER_VALUE) print_tag_6f(payload);
 	else if (dir == 'S' && tag == s2c::ZONE_TIMER_WINDOW) print_tag_53(payload);
