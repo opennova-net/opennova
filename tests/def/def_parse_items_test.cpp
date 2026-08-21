@@ -241,8 +241,71 @@ static int test_phrase_set_presence(void) {
     return fails;
 }
 
+/* weathervane / minai / default_aip: three keys retail parses that we dropped
+   until 2026-08-22. The values are the Flyable Blackhawk's own (items.def id
+   102010), so a regression here is a regression against shipped data.
+   default_aip additionally RAISES the AIData attrib bit -- retail ORs 0x100000
+   in the same parse arm, so the first entry below carries AIData without ever
+   listing it on an attrib line.
+   [orig: ItemDef_ParsePhysicsProperty @0x49d870 weathervane/minai;
+    ItemDef_ParseProperty @0x49eb00 default_aip + `attrib |= 0x100000`] */
+static int test_weathervane_minai_default_aip(void) {
+    static const char snippet[] =
+        "begin \"Flyable Blackhawk\"\n"
+        "  id 102010\n"
+        "  type vehicle\n"
+        "  move_function chel\n"
+        "    weathervane 30\n"
+        "    minai\t\t1\n"
+        "  default_aip H_BHawk\n"
+        "  sound_profile SP_Blackhawk1\n"
+        "end\n"
+        "begin \"No AI Keys\"\n"
+        "  id 2\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet,
+                               sizeof(snippet) - 1, &items) != 0 ||
+        items.count != 2) {
+        fprintf(stderr, "FAIL: weathervane/minai snippet parse\n");
+        return 1;
+    }
+    int fails = 0;
+    if (items.entries[0].weathervane != 30) {
+        fprintf(stderr, "FAIL: weathervane %d != 30\n", items.entries[0].weathervane);
+        ++fails;
+    }
+    if (items.entries[0].min_ai != 1) {
+        fprintf(stderr, "FAIL: min_ai %d != 1\n", items.entries[0].min_ai);
+        ++fails;
+    }
+    fails += expect_str("default_aip", items.entries[0].default_aip, "H_BHawk");
+    if ((items.entries[0].attrib & DEF_ITEM_ATTRIB_AIDATA) == 0) {
+        fprintf(stderr, "FAIL: default_aip did not raise AIData\n");
+        ++fails;
+    }
+    fails += expect_str("sound_profile", items.entries[0].sound_profile,
+                        "SP_Blackhawk1");
+    if (items.entries[1].weathervane != 0 || items.entries[1].min_ai != 0 ||
+        items.entries[1].default_aip[0] != '\0' ||
+        (items.entries[1].attrib & DEF_ITEM_ATTRIB_AIDATA) != 0) {
+        fprintf(stderr, "FAIL: keys leaked into the next entry\n");
+        ++fails;
+    }
+    if (items.entries[0].raw_lines_count != 0) {
+        fprintf(stderr, "FAIL: a parsed key fell through to raw_lines\n");
+        ++fails;
+    }
+    def_free_items(&items);
+    return fails;
+}
+
 int main(void) {
     if (test_light_transfer() != 0) {
+        return 1;
+    }
+    if (test_weathervane_minai_default_aip() != 0) {
         return 1;
     }
     const char *repo_root = test_paths_repo_root(__FILE__);

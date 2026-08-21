@@ -143,6 +143,16 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             }
             consume_value_str(trimmed, tlen, 13, current.sound_profile, sizeof(current.sound_profile));
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "default_aip", 11)) {
+            /* Authoring the profile also RAISES AIData: retail ORs 0x100000 in
+               the same arm, so an item carrying default_aip is an AI item
+               whether or not its attrib line lists AIData.
+               [orig: ItemDef_ParseProperty @0x49eb00 -- the strcpy into
+                itemDef+0x8B8 followed by `attrib |= 0x100000`] */
+            consume_value_str(trimmed, tlen, 11, current.default_aip,
+                              sizeof(current.default_aip));
+            current.attrib |= DEF_ITEM_ATTRIB_AIDATA;
+            parsed = 1;
         /* [orig: ItemDef_ParseProperty @ 0x49eb00 -- "soundloop_" prefix @ 0x49fec4,
            nightshot/duskshot/dawnshot @ 0x49fdee; the 7-slot range matches the
            engine's Soundloop_1..7 sound-type table @ 0x7d0788] */
@@ -337,6 +347,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "mass", 4)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
             current.mass = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weathervane", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.weathervane = parse_int_n(v, vl); /* raw [orig: @0x49d8f2] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "minai", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.min_ai = parse_int_n(v, vl); /* raw [orig: @0x49d95e] */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "lean", 4)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
