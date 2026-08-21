@@ -1,0 +1,392 @@
+#include <renderer/render_slot_shadow.h>
+
+#include <algorithm>
+#include <cmath>
+
+namespace renderer {
+
+std::array<float, 3> slot_projection_direction(
+		const std::array<float, 3> &sun_surface_to_light) {
+	// [orig: render_shadow_pass @ 0x5d7bdc..0x5d7c30 — `if (y < 0.25)
+	// y = 0.25`, then negate x/y/z into RenderSlot_DefaultLightDir*].
+	const float y = std::max(sun_surface_to_light[1], 0.25f);
+	return {-sun_surface_to_light[0], -y, -sun_surface_to_light[2]};
+}
+
+int slot_lod_for_radius(float bound_radius_units) {
+	// (bound_radius_fixed >> 15) + 1 = 2 * radius + 1, clamped [6, 20]
+	// [orig: shadow_decal_alloc_slot @ 0x5d5773..0x5d578a].
+	const int lod = static_cast<int>(bound_radius_units * 2.0f) + 1;
+	return std::clamp(lod, 6, 20);
+}
+
+int slot_lod_for_blob(float width_units, float length_units) {
+	// max(w, l) + 7, clamped [2, 20] [orig: @ 0x5d572a..0x5d5767].
+	const int lod =
+			static_cast<int>(std::max(width_units, length_units)) + 7;
+	return std::clamp(lod, 2, 20);
+}
+
+int grazing_slot_lod(int base_lod, float dir_y) {
+	// (0.5 + |0.5 / dir_y|) * base_lod, clamped [6, 20]
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6d5c..0x5d6dac,
+	// flt_7C3B94 = 0.5].
+	if (dir_y == 0.0f) {
+		return 20;
+	}
+	const float scale = 0.5f + std::fabs(0.5f / dir_y);
+	const int lod = static_cast<int>(scale * static_cast<float>(base_lod));
+	return std::clamp(lod, 6, 20);
+}
+
+float silhouette_half_extent(float bound_radius_units) {
+	// radius * 1.25 clamped to radius + 0.75
+	// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d783e..0x5d7871 —
+	// 0.000019073486 = 1.25/65536, 0.000015258789 = 1/65536].
+	return std::min(bound_radius_units * 1.25f, bound_radius_units + 0.75f);
+}
+
+int slot_texture_size(int texture_order, int shadow_detail) {
+	// [orig: init_render_target_chain @ 0x5d5320 — base 256/512/1024 by the
+	// shadow-detail option, halving after every second slot, 32 px floor].
+	int size = 256;
+	if (shadow_detail >= 2) {
+		size = 512;
+	}
+	if (shadow_detail >= 4) {
+		size *= 2;
+	}
+	for (int i = 0; i < kSlotTextureCount; ++i) {
+		if (i == texture_order) {
+			return size;
+		}
+		if ((i & 1) != 0 && size > 32) {
+			size >>= 1;
+		}
+	}
+	return 32;
+}
+
+uint32_t slot_refresh_mask(int shadow_detail) {
+	// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d76d9..0x5d76fe].
+	if (shadow_detail < 2) {
+		return 7;
+	}
+	if (shadow_detail < 3) {
+		return 3;
+	}
+	return shadow_detail < 4 ? 1 : 0;
+}
+
+bool slot_refresh_due(int slot_index, uint32_t frame, uint32_t mask,
+		bool dirty) {
+	// [orig: @ 0x5d771b..0x5d7748 — `(frame & mask) == (handle & mask)` or
+	// the slot dirty bit].
+	if (dirty) {
+		return true;
+	}
+	return (frame & mask) == (static_cast<uint32_t>(slot_index) & mask);
+}
+
+float drape_fade(float camera_distance_units) {
+	// [orig: render_sector_model @ 0x5d5d30..0x5d5d53 — 0 below 40 u
+	// (0x280000), (d - 40) / 40 beyond (flt_7DC668 = 1/2621440)].
+	if (camera_distance_units < 40.0f) {
+		return 0.0f;
+	}
+	return std::min((camera_distance_units - 40.0f) / 40.0f, 1.0f);
+}
+
+bool drape_culled(float camera_distance_units) {
+	// [orig: @ 0x5d5d3b..0x5d5d40 — >= 80 u (0x500000) skips the draw].
+	return camera_distance_units >= 80.0f;
+}
+
+std::array<float, 3> drape_shadow_term(const std::array<float, 3> &sun_rgb,
+		const std::array<float, 3> &sky_rgb, float dir_y) {
+	// q_c = sun_c*|y| / (sun_c*|y| + sky_c)
+	// [orig: render_sector_model @ 0x5d5f63..0x5d6008 — fabs of the slot
+	// direction vertical, Env_LightBlock / Env_SkyBlock bytes; the byte
+	// scale cancels in the ratio].
+	const float ay = std::fabs(dir_y);
+	std::array<float, 3> q{};
+	for (int c = 0; c < 3; ++c) {
+		const float sun = sun_rgb[c] * ay;
+		const float denom = sun + sky_rgb[c];
+		q[c] = denom > 0.0f ? sun / denom : 0.0f;
+	}
+	return q;
+}
+
+std::array<float, 3> drape_sun_ambient(const std::array<float, 3> &sun_rgb,
+		const std::array<float, 3> &sky_rgb, float dir_y, float fade) {
+	// ambient_c = 1 - (1 - fade) * q_c [orig: @ 0x5d5fb0..0x5d6008].
+	const std::array<float, 3> q = drape_shadow_term(sun_rgb, sky_rgb, dir_y);
+	std::array<float, 3> ambient{};
+	for (int c = 0; c < 3; ++c) {
+		ambient[c] = 1.0f - (1.0f - fade) * q[c];
+	}
+	return ambient;
+}
+
+static float ntsc_luminance(const std::array<float, 3> &rgb) {
+	// [orig: flt_7D4B34 = 0.3, flt_7D8B88 = 0.6, flt_7C69F4 = 0.1].
+	return 0.3f * rgb[0] + 0.6f * rgb[1] + 0.1f * rgb[2];
+}
+
+std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb) {
+	// (c + lum) * 0.5 * -3 [orig: RenderSlot_SetupNextLighting
+	// @ 0x5d73d3..0x5d740d].
+	const float lum = ntsc_luminance(rgb);
+	std::array<float, 3> out{};
+	for (int c = 0; c < 3; ++c) {
+		out[c] = (rgb[c] + lum) * 0.5f * -3.0f;
+	}
+	return out;
+}
+
+std::array<float, 3> drape_attached_light_scale(
+		const std::array<float, 3> &rgb, float fade) {
+	// (c + lum) * 0.5 * -2 * (1 - fade) = -(c + lum) * (1 - fade)
+	// [orig: render_sector_model @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0].
+	const float lum = ntsc_luminance(rgb);
+	std::array<float, 3> out{};
+	for (int c = 0; c < 3; ++c) {
+		out[c] = -(rgb[c] + lum) * (1.0f - fade);
+	}
+	return out;
+}
+
+SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
+		const std::array<float, 3> &default_direction,
+		const SlotPointLight *lights, size_t light_count, bool interior) {
+	SlotLightPick pick;
+	pick.direction = default_direction;
+	pick.attached_handle = 0;
+	// Threshold 0.1, zeroed for interior-parented entities
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6ab7/0x5d6ae4].
+	float best = interior ? 0.0f : 0.1f;
+	for (size_t i = 0; i < light_count; ++i) {
+		const SlotPointLight &light = lights[i];
+		const float dx = entity_pos[0] - light.position[0];
+		const float dy = entity_pos[1] - light.position[1];
+		const float dz = entity_pos[2] - light.position[2];
+		const float dist_sq = dx * dx + dy * dy + dz * dz;
+		// lum / (dist^2 * quadratic + constant)
+		// [orig: @ 0x5d6bce..0x5d6c43].
+		const float denom =
+				dist_sq * light.attenuation[2] + light.attenuation[0];
+		if (denom <= 0.0f) {
+			continue;
+		}
+		const float weighted = ntsc_luminance(light.color) / denom;
+		if (weighted <= best) {
+			continue;
+		}
+		const float len = std::sqrt(dist_sq);
+		if (len <= 0.0f) {
+			continue;
+		}
+		best = weighted;
+		pick.direction = {dx / len, dy / len, dz / len};
+		pick.attached_handle = light.handle;
+	}
+	return pick;
+}
+
+std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
+		const std::array<float, 3> &direction,
+		const std::function<float(float, float)> &terrain_height,
+		int max_steps) {
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6c86..0x5d6d67 — planar step
+	// normalized to unit length (flt_7C32BC = 65536 fold), vertical step
+	// clamped to <= -0.5 u (-32768 fixed @ 0x5d6cdd)].
+	float x = start[0];
+	float z = start[2];
+	float y = start[1];
+	const float planar_len = std::sqrt(
+			direction[0] * direction[0] + direction[2] * direction[2]);
+	if (!(planar_len > 1.0e-6f) || !terrain_height) {
+		return {x, z};
+	}
+	const float step_x = direction[0] / planar_len;
+	const float step_z = direction[2] / planar_len;
+	float step_y = direction[1] / planar_len;
+	if (step_y >= 0.0f || step_y > -0.5f) {
+		step_y = -0.5f;
+	}
+	for (int i = 0; i < max_steps && terrain_height(x, z) < y; ++i) {
+		x += step_x;
+		z += step_z;
+		y += step_y;
+	}
+	return {x, z};
+}
+
+int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
+		const std::array<float, 2> &view_dir2d,
+		const SlotCandidateState &state) {
+	// [orig: terrain_sort_and_assign_render_slots @ 0x5d6535..0x5d6871].
+	if (state.dead || state.seat_parented || state.on_vehicle) {
+		return kSlotScoreExcluded;
+	}
+	const float dx = state.pos2d[0] - camera_pos2d[0];
+	const float dz = state.pos2d[1] - camera_pos2d[1];
+	const float dist = std::sqrt(dx * dx + dz * dz);
+	// base = dist_fixed * 0.25 (flt_7C333C); beyond 0x500000 the record is
+	// dropped [orig: @ 0x5d668f..0x5d66b4] — the 320 u slot-bind horizon.
+	const float base = dist * 65536.0f * 0.25f;
+	if (base > static_cast<float>(kSlotScoreExcluded) ||
+			dist > kSlotBindMaxDistance) {
+		return kSlotScoreExcluded;
+	}
+	// weight = 1.5 - dot(view_unit, to_entity_unit) (98304 Q16); a
+	// degenerate view or offset drops the alignment term
+	// [orig: @ 0x5d671b..0x5d6851].
+	float dot = 0.0f;
+	const float view_len = std::sqrt(
+			view_dir2d[0] * view_dir2d[0] + view_dir2d[1] * view_dir2d[1]);
+	if (view_len > 1.0e-6f && dist > 1.0e-6f) {
+		dot = (view_dir2d[0] * dx + view_dir2d[1] * dz) / (view_len * dist);
+	}
+	float score = base * (1.5f - dot);
+	if (state.is_local_player_or_parent) {
+		// [orig: @ 0x5d6864..0x5d6868 — priority >> 1].
+		score *= 0.5f;
+	}
+	score = std::min(score, static_cast<float>(kSlotScoreExcluded - 1));
+	return static_cast<int32_t>(score);
+}
+
+bool RenderSlotPlan::register_entity(uint64_t id) {
+	for (const Record &record : records_) {
+		if (record.id == id) {
+			return true;
+		}
+	}
+	if (records_.size() >= kSlotRecordCount) {
+		// [orig: shadow_decal_alloc_slot @ 0x5d56d6 — a full table refuses].
+		return false;
+	}
+	Record record;
+	record.id = id;
+	records_.push_back(record);
+	return true;
+}
+
+void RenderSlotPlan::release_entity(uint64_t id) {
+	for (size_t i = 0; i < records_.size(); ++i) {
+		if (records_[i].id != id) {
+			continue;
+		}
+		if (records_[i].patch_index >= 0) {
+			patch_used_[records_[i].patch_index] = false;
+		}
+		records_.erase(records_.begin() + static_cast<ptrdiff_t>(i));
+		return;
+	}
+}
+
+std::vector<SlotAssignment> RenderSlotPlan::assign(
+		const std::array<float, 2> &camera_pos2d,
+		const std::array<float, 2> &view_dir2d,
+		const std::function<SlotCandidateState(uint64_t)> &state_for) {
+	struct Scored {
+		size_t record;
+		int32_t score;
+		SlotCandidateState state;
+	};
+	std::vector<Scored> scored;
+	scored.reserve(records_.size());
+	for (size_t i = 0; i < records_.size(); ++i) {
+		Scored entry;
+		entry.record = i;
+		entry.state = state_for(records_[i].id);
+		entry.score = slot_priority_score(camera_pos2d, view_dir2d,
+				entry.state);
+		scored.push_back(entry);
+	}
+	// Ascending bubble sort in retail; stable ascending here
+	// [orig: @ 0x5d6890..0x5d68d9].
+	std::stable_sort(scored.begin(), scored.end(),
+			[](const Scored &a, const Scored &b) { return a.score < b.score; });
+
+	std::vector<SlotAssignment> out(records_.size());
+	// Pass 1: release everything excluded or past the 24-patch horizon
+	// [orig: @ 0x5d68ed..0x5d693c].
+	for (size_t rank = 0; rank < scored.size(); ++rank) {
+		Record &record = records_[scored[rank].record];
+		if (scored[rank].score == kSlotScoreExcluded ||
+				rank >= static_cast<size_t>(kSlotPatchCount)) {
+			if (record.bound) {
+				if (record.patch_index >= 0) {
+					patch_used_[record.patch_index] = false;
+				}
+				record.bound = false;
+				record.patch_index = -1;
+				record.capture_order = -1;
+			}
+		}
+	}
+	// Pass 2: bind the leading 24 and hand the first 12 their capture RTs
+	// [orig: @ 0x5d6944..0x5d69ef].
+	int capture_count = 0;
+	for (size_t rank = 0;
+			rank < scored.size() &&
+			rank < static_cast<size_t>(kSlotPatchCount);
+			++rank) {
+		if (scored[rank].score == kSlotScoreExcluded) {
+			continue;
+		}
+		Record &record = records_[scored[rank].record];
+		SlotAssignment &assignment = out[scored[rank].record];
+		if (!record.bound) {
+			record.bound = true;
+			for (int k = 0; k < kSlotPatchCount; ++k) {
+				if (!patch_used_[k]) {
+					patch_used_[k] = true;
+					record.patch_index = k;
+					break;
+				}
+			}
+		}
+		assignment.bound = true;
+		if (scored[rank].state.dynamic) {
+			if (capture_count < kSlotCaptureCount) {
+				const int order = capture_count++;
+				// Dirty only when the RT index changed
+				// [orig: @ 0x5d69c8..0x5d69d9].
+				assignment.capture_dirty = record.capture_order != order;
+				record.capture_order = order;
+				assignment.capture_order = order;
+			} else {
+				record.capture_order = -1;
+			}
+		} else {
+			record.capture_order = -1;
+		}
+	}
+	// Classification [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4 —
+	// a bound slot with a live silhouette RT drapes it; a bound slot
+	// without one drapes the authored blob].
+	for (size_t i = 0; i < records_.size(); ++i) {
+		SlotAssignment &assignment = out[i];
+		assignment.id = records_[i].id;
+		assignment.record_index = static_cast<int>(i);
+		const SlotCandidateState state = state_for(records_[i].id);
+		assignment.excluded =
+				state.dead || state.seat_parented || state.on_vehicle;
+		if (!assignment.bound || assignment.excluded) {
+			assignment.draws_silhouette = false;
+			assignment.draws_blob = false;
+			continue;
+		}
+		assignment.draws_silhouette =
+				state.dynamic && assignment.capture_order >= 0;
+		assignment.draws_blob =
+				!assignment.draws_silhouette && state.has_blob_texture;
+	}
+	return out;
+}
+
+}  // namespace renderer

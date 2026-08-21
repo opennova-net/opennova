@@ -597,8 +597,11 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
 Out of REN's scope (mint rows, never port): device/driver plumbing
 (swapchain, caps, device-reset, buffer management, the state/texture-format
 permutation caches); FrameFX post-processing beyond acknowledging its frame
-slots; shadows/scars/decals (the `Shadow_`/`Scar_` families — a future track
-candidate); particle LOOK (PTL's domain — REN provides the state substrate);
+slots; scars/decals (the `Scar_` family — a future track candidate; the
+render-slot ENTITY ground-shadow family left this exclusion on 2026-08-20
+when it was witnessed end to end and ported —
+`engine/runtime/renderer/render_slot_shadow`, render-lighting-re.md);
+particle LOOK (PTL's domain — REN provides the state substrate);
 2D/HUD/text/menu/loading draw; performance work beyond parity; runtime `.fx`
 parsing (the descriptor table stays canonical).
 

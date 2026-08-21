@@ -48,6 +48,7 @@ add_library(${TARGET_NAME} SHARED
     mission/nova_mission_object_placer.cpp
     env/nova_celestial.cpp
     env/nova_sky_dome.cpp
+    env/nova_slot_shadow.cpp
     env/nova_sun_shadow.cpp
     env/nova_water.cpp
     env/nova_weather.cpp

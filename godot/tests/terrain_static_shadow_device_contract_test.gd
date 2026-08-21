@@ -186,8 +186,21 @@ func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> v
 	var fog := runtime.find("result = apply_terrain_fog(")
 	assert_gt(fog, surface,
 		"Fog must still composite after the shadowed terrain light result.")
-	assert_false(device.contains("sun_shadow_catcher.gdshader"),
-		"The page-alpha result replaces the legacy final-RGB black shadow overlay.")
+	# STATIC silhouettes stay page-alpha only. The render-slot DRAPE next-pass
+	# on the terrain material serves the separate DYNAMIC entity ground
+	# shadows (retail drapes live silhouettes over terrain-following patches:
+	# RenderSlot_DrawAllDrapes @ 0x5d6e20 / render_sector_model @ 0x5d5ca0);
+	# it must be tied to that witness, and the static rasterizer must never
+	# route through it.
+	assert_true(device.contains("SlotShadow::get_drape_material()"),
+		"Dynamic render-slot ground shadows need the terrain drape pass.")
+	assert_true(device.contains("RenderSlot_DrawAllDrapes"),
+		"The terrain drape pass must carry the render-slot witness, not the"
+		+ " retired static overlay rationale.")
+	var rasterizer_source := _source(
+			"res://src/terrain/nova_terrain_static_shadow_rasterizer.cpp")
+	assert_false(rasterizer_source.contains("slot_shadow_drape"),
+		"The page-alpha result replaces the legacy final-RGB static overlay.")
 
 
 func test_capture_variants_control_page_shadows_without_a_static_shadow_map() -> void:

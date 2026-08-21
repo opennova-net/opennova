@@ -229,6 +229,57 @@ void ObjectModel::set_model_light_preview_enabled(bool p_enabled) {
 
 void ObjectModel::set_shadow_caster_enabled(bool p_enabled) {
 	set_shadow_caster_layer_enabled(LAYER_DYNAMIC_SHADOW_CASTER, p_enabled);
+	// Dynamic casters join the render-slot ground-shadow group the SlotShadow
+	// device plans over (retail: slot registration at entity init —
+	// Entity_InitFromModel, see docs/render/render-lighting-re.md).
+	update_slot_shadow_group();
+}
+
+void ObjectModel::update_slot_shadow_group() {
+	if (!is_inside_tree()) {
+		return;
+	}
+	const StringName group("nova_slot_shadow_casters");
+	if (is_shadow_caster_enabled()) {
+		if (!is_in_group(group)) {
+			add_to_group(group);
+		}
+	} else if (is_in_group(group)) {
+		remove_from_group(group);
+	}
+}
+
+void ObjectModel::set_slot_shadow_person(bool p_person) {
+	slot_shadow_person_ = p_person;
+}
+
+bool ObjectModel::is_slot_shadow_person() const {
+	return slot_shadow_person_;
+}
+
+void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
+	slot_shadow_capture_with_ = p_owner != nullptr
+			? ObjectID(p_owner->get_instance_id())
+			: ObjectID();
+}
+
+ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
+	return Object::cast_to<ObjectModel>(
+			ObjectDB::get_instance(slot_shadow_capture_with_));
+}
+
+void ObjectModel::set_slot_shadow_decal(const String &p_texture,
+		const Vector4 &p_dims) {
+	slot_shadow_decal_texture_ = p_texture;
+	slot_shadow_decal_dims_ = p_dims;
+}
+
+String ObjectModel::get_slot_shadow_decal_texture() const {
+	return slot_shadow_decal_texture_;
+}
+
+Vector4 ObjectModel::get_slot_shadow_decal_dims() const {
+	return slot_shadow_decal_dims_;
 }
 
 bool ObjectModel::is_shadow_caster_enabled() const {
@@ -709,6 +760,7 @@ void ObjectModel::_notification(int p_what) {
 		if (object_data_.is_valid()) {
 			rebuild();
 		}
+		update_slot_shadow_group();
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible must re-check the env generation missed while hidden.
 		wake_runtime_frame();
@@ -1056,6 +1108,18 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_static_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_static_shadow_caster_enabled"),
 			&ObjectModel::is_static_shadow_caster_enabled);
+	ClassDB::bind_method(D_METHOD("set_slot_shadow_person", "person"),
+			&ObjectModel::set_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
+			&ObjectModel::is_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("set_slot_shadow_decal", "texture", "dims"),
+			&ObjectModel::set_slot_shadow_decal);
+	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
+			&ObjectModel::set_slot_shadow_capture_with);
+	ClassDB::bind_method(D_METHOD("get_slot_shadow_decal_texture"),
+			&ObjectModel::get_slot_shadow_decal_texture);
+	ClassDB::bind_method(D_METHOD("get_slot_shadow_decal_dims"),
+			&ObjectModel::get_slot_shadow_decal_dims);
 	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
 			&ObjectModel::set_environment_state);
 	ClassDB::bind_method(D_METHOD("get_environment_state"),
@@ -1193,10 +1257,6 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("apply_environment_values", "material", "values"),
 			&ObjectModel::apply_environment_values);
-	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("material_supports_projected_shadow_receiver", "blend_mode",
-					"material_flags"),
-			&ObjectModel::material_supports_projected_shadow_receiver);
 
 	ADD_SIGNAL(MethodInfo("bounds_changed", PropertyInfo(Variant::AABB, "bounds")));
 

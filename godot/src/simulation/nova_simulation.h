@@ -1362,6 +1362,11 @@ public:
 	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
 	// shell plays it on the avatar via ObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
+	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
+	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
+	// (retail: RenderSlot_DrawAllDrapes @0x5d6e81 reads
+	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md).
+	int get_local_player_stance_latch() const { return stance_latch_; }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
 	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed

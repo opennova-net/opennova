@@ -121,19 +121,24 @@ func setup(world: GameWorld, camera: Camera3D,
 	# body in first person, and the water mirror never draws persons either
 	# (its reflected entity waves collect only vehicles above water and it has
 	# no player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
-	# @ 0x5c90a0]) — the layer keeps the body a shadow source only. It never
-	# draws the viewmodel layer either — the FP arms/weapon render through the
+	# @ 0x5c90a0]) — the body stays a silhouette source only. It never draws
+	# the viewmodel layer either — the FP arms/weapon render through the
 	# dedicated renderfov pass the rig builds (deferred; see
-	# PlayerViewmodelRig.setup for the "parent busy" boot shape). Godot's shadow
-	# collection also intersects the gameplay camera mask, so the two caster
-	# marker layers must remain admitted even though SHADOWS_ONLY geometry on
-	# those layers is absent from the beauty pass.
+	# PlayerViewmodelRig.setup for the "parent busy" boot shape). The camera
+	# also excludes the render-slot capture channels (only the SlotShadow
+	# capture cameras cull to them) AND the caster marker layers: the
+	# entity-shadow shadow map is retired (the slot pipeline owns entity
+	# shadows), so nothing needs the caster markers beauty-admitted any more —
+	# and the FP body/held weapon are now camera-renderable (cast ON, hidden
+	# by LAYER) so the slot capture cameras can photograph them; an admitted
+	# caster marker would leak them into the beauty pass.
 	if _camera != null:
 		_camera.cull_mask = (
 				_camera.cull_mask
 				& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-						| Water.VISUAL_LAYER_VIEWMODEL)
-				) | Water.VISUAL_LAYER_SHADOW_CASTER_MASK
+						| Water.VISUAL_LAYER_VIEWMODEL
+						| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
+						| Water.VISUAL_LAYER_SHADOW_CASTER_MASK))
 	_viewmodel_rig.setup(world, self, camera)
 	_reset_state()
 	# Attachment is the adoption boundary: discard presentation history produced
@@ -201,6 +206,10 @@ func is_third_person() -> bool:
 # and effect anchors against the presentation nodes (the FP viewmodel parts —
 # rig-owned, delegated here — the 3P gun, the camera). These expose exactly the
 # state it reads, so no cross-object _private access crosses the seam.
+func avatar() -> ObjectModel:
+	return _avatar
+
+
 func vm_parts() -> Array[ObjectModel]:
 	return _viewmodel_rig.vm_parts()
 
@@ -484,9 +493,13 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	var draw_held_weapon := _third_person or debug_body_in_first_person
 	PlayerViewmodelRig.set_visual_layers(_held_weapon, Water.VISUAL_LAYER_WORLD
 			if draw_held_weapon else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+	# Always camera-renderable: first person hides by LAYER alone so the
+	# render-slot capture cameras can photograph the silhouette
+	# (SHADOWS_ONLY geometry is invisible to every camera, capture
+	# viewports included; the beauty camera excludes both the FP layer and
+	# the capture channels at setup()).
 	PlayerViewmodelRig.set_shadow_casting(_held_weapon,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON if draw_held_weapon
-			else GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -626,9 +639,10 @@ func _update_avatar(pos: Vector3) -> void:
 	var draw_avatar := _third_person or debug_body_in_first_person
 	PlayerViewmodelRig.set_visual_layers(_avatar, Water.VISUAL_LAYER_WORLD
 			if draw_avatar else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+	# Always camera-renderable: hidden by LAYER alone (see the held-weapon
+	# stamp above) so the slot capture cameras see the posed body.
 	PlayerViewmodelRig.set_shadow_casting(_avatar,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON if draw_avatar
-			else GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	_update_held_weapon(overlay)
 	var sim = _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""

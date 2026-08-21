@@ -3,6 +3,7 @@
 #include "nova_terrain.h"
 #include "nova_terrain_surface_inputs.h"
 #include "nova_terrain_tile_info.h"
+#include "env/nova_slot_shadow.h"
 #include "env/nova_water.h"
 #include "mission/nova_mission_object_placer.h"
 
@@ -819,6 +820,18 @@ bool Terrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
+	// Terrain receives the LIVE entity ground shadows: the render-slot drape
+	// next pass multiplies each bound slot's silhouette capture (or authored
+	// blob decal) into the terrain along the slot projection direction with
+	// the per-channel ambient law and the 40..80 u fade. Retail drapes over
+	// 21x21 terrain-following patches; the terrain surface itself stands in
+	// for the patch mesh and the projection is evaluated per pixel (retail:
+	// RenderSlot_DrawAllDrapes @0x5d6e20, render_sector_model @0x5d5ca0 —
+	// engine/runtime/renderer/render_slot_shadow.h carries the witness map;
+	// SlotShadow is the capture device). Entity shadows land on TERRAIN ONLY,
+	// like retail's terrain-following patches; static building silhouettes
+	// stay page-alpha in the tile composer.
+	terrain_material->set_next_pass(SlotShadow::get_drape_material());
 
 	tile_infos.resize(cpt.tiles.size());
 

@@ -228,12 +228,13 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 	var materials: Array = model.get_surface_materials()
 	assert_gt(materials.size(), 0, "the fixture builds object materials")
 	for material in materials:
-		var receiver := (material as ShaderMaterial).next_pass as ShaderMaterial
-		assert_not_null(receiver,
-				"world models receive eligible entity silhouettes in a separate pass")
-		if receiver != null:
-			assert_true(receiver.shader.code.contains("1.0 - ATTENUATION"),
-					"the next pass consumes shadow attenuation only")
+		# Entity ground shadows drape TERRAIN ONLY: retail's render-slot
+		# patches are terrain-following meshes, so a live silhouette never
+		# lands on another model (RenderSlot_DrawAllDrapes @0x5d6e20 /
+		# render_sector_model @0x5d5ca0 — docs/render/render-lighting-re.md).
+		# The drape next pass lives on the terrain material (SlotShadow).
+		assert_null((material as ShaderMaterial).next_pass,
+				"world-model materials carry no shadow-receiver next pass")
 
 	model.set_shadow_caster_enabled(true)
 	for mesh in meshes:
@@ -256,21 +257,6 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 		assert_eq(mesh.layers & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0)
 
 
-func test_projected_shadow_receiver_rejects_incomplete_material_coverage() -> void:
-	assert_true(ObjectModel.material_supports_projected_shadow_receiver(
-			ObjectShaderCache.BLEND_OPAQUE, 0),
-			"a one-sided opaque surface can use the simple attenuation catcher")
-	assert_false(ObjectModel.material_supports_projected_shadow_receiver(
-			ObjectShaderCache.BLEND_ALPHA, 0),
-			"an alpha-blind next pass must not darken a transparent polygon")
-	assert_false(ObjectModel.material_supports_projected_shadow_receiver(
-			ObjectShaderCache.BLEND_OPAQUE,
-			ObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST),
-			"alpha-tested holes must not become a solid shadow card")
-	assert_false(ObjectModel.material_supports_projected_shadow_receiver(
-			ObjectShaderCache.BLEND_OPAQUE,
-			ObjectShaderCache.MATERIAL_FLAG_TWO_SIDED),
-			"the one-sided catcher cannot safely cover a two-sided base surface")
 
 
 func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:

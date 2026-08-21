@@ -80,6 +80,7 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &ItemDatabase::get_particle_effects);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &ItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &ItemDatabase::get_attrib2);
+	ClassDB::bind_method(D_METHOD("get_shadow_decal", "id"), &ItemDatabase::get_shadow_decal);
 	ClassDB::bind_method(D_METHOD("get_item", "id"), &ItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
 	ClassDB::bind_method(D_METHOD("get_items"), &ItemDatabase::get_items);
@@ -163,6 +164,11 @@ ItemDatabase::Item ItemDatabase::item_from_entry(const ::DefItemDef &entry) {
 	item.render_function = String(entry.render_function);
 	item.disk_function = String(entry.disk_function);
 	item.hp = entry.hp;
+	item.shadow_texture = String(entry.shadow_texture);
+	item.shadow_width = entry.shadow_width;
+	item.shadow_length = entry.shadow_length;
+	item.shadow_offset_x = entry.shadow_offset_x;
+	item.shadow_offset_y = entry.shadow_offset_y;
 	item.light_transfer = entry.light_transfer;
 	item.damage_reduc_pp = entry.damage_reduc_pp;
 	item.damage_reduc_max = entry.damage_reduc_max;
@@ -410,6 +416,20 @@ uint32_t ItemDatabase::get_attrib(int id) const {
 uint32_t ItemDatabase::get_attrib2(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? 0u : it->second.attrib2;
+}
+
+Dictionary ItemDatabase::get_shadow_decal(int id) const {
+	Dictionary out;
+	const auto it = items.find(id);
+	if (it == items.end() || it->second.shadow_texture.is_empty()) {
+		return out;
+	}
+	out["texture"] = it->second.shadow_texture;
+	out["width"] = it->second.shadow_width;
+	out["length"] = it->second.shadow_length;
+	out["offset_x"] = it->second.shadow_offset_x;
+	out["offset_y"] = it->second.shadow_offset_y;
+	return out;
 }
 
 PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {

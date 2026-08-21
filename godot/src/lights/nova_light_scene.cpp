@@ -228,6 +228,69 @@ int LightScene::render_frame(const Vector3 &p_camera_world,
 	return static_cast<int>(selected_count_);
 }
 
+TypedArray<Dictionary> LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
+		float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
+		Object *p_weather) {
+	// The render-slot dominant-light query: the witnessed per-entity collect
+	// over entity position +- bound radius, group-gated params, no D3D-fill
+	// boost (retail: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
+	// collect_nearby_zones_by_aabb @0x5aa250 and reads
+	// Light_GetPointLightParams @0x5a9180 directly — the pick itself lives
+	// portable in renderer::pick_dominant_light, see
+	// docs/render/render-lighting-re.md).
+	TypedArray<Dictionary> out;
+	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
+	const int64_t half =
+			static_cast<int64_t>(clamp_fixed(MAX(p_radius, 0.0f) * 65536.0));
+	std::array<int32_t, 3> qmin{};
+	std::array<int32_t, 3> qmax{};
+	for (int axis = 0; axis < 3; ++axis) {
+		qmin[axis] = clamp_int64(static_cast<int64_t>(center[axis]) - half);
+		qmax[axis] = clamp_int64(static_cast<int64_t>(center[axis]) + half);
+	}
+	std::array<renderer::LightHandle, renderer::LightScene::kQueryLimit>
+			handles{};
+	const size_t found = scene_.query(qmin, qmax, handles);
+	renderer::LightFlickerInputs flicker;
+	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
+	const Weather *weather = Object::cast_to<Weather>(p_weather);
+	if (weather != nullptr) {
+		const opennova::env::WeatherOscillator &oscillator =
+				weather->runtime().core().oscillator;
+		flicker.amp_ring = oscillator.amp_ring;
+		flicker.amp_ring_size =
+				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
+		flicker.ring_index = oscillator.ring_index;
+	}
+	const std::array<float, 3> ambient = {
+		static_cast<float>(p_ambient_scale.x),
+		static_cast<float>(p_ambient_scale.y),
+		static_cast<float>(p_ambient_scale.z),
+	};
+	renderer::LightSelectionOptions options;
+	options.target = renderer::LightSelectionTarget::Objects;
+	options.admit_owned_unscoped = false;
+	std::array<renderer::SelectedLight, renderer::LightScene::kSelectLimit>
+			selected{};
+	const size_t count = scene_.select(handles.data(), found,
+			renderer::LightActiveGroups{}, options, ambient, flicker,
+			/*d3d_light_path=*/false, selected);
+	for (size_t i = 0; i < count; ++i) {
+		const renderer::SelectedLight &light = selected[i];
+		Dictionary entry;
+		entry["position"] = godot_from_mission_float(light.position);
+		entry["color"] =
+				Vector3(light.color[0], light.color[1], light.color[2]);
+		entry["attenuation"] = Vector4(light.attenuation[0],
+				light.attenuation[1], light.attenuation[2],
+				light.attenuation[3]);
+		entry["handle"] = static_cast<int64_t>(light.handle.retail_value) |
+				(static_cast<int64_t>(light.handle.generation) << 16);
+		out.push_back(entry);
+	}
+	return out;
+}
+
 int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_owner_entities,
 		const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather) {
@@ -452,6 +515,9 @@ void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_model_frame", "models",
 			"owner_entities", "ambient_scale", "time_ms", "weather"),
 			&LightScene::render_model_frame);
+	ClassDB::bind_method(D_METHOD("slot_shadow_lights", "world_pos", "radius",
+			"ambient_scale", "time_ms", "weather"),
+			&LightScene::slot_shadow_lights);
 	ClassDB::bind_method(D_METHOD("collect_corona_rows", "camera_pos",
 			"camera_forward", "ambient_scale", "time_ms", "frame_index",
 			"weather", "models", "owner_entities", "fog"),

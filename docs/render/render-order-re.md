@@ -229,7 +229,11 @@ driver; camera above water shown — the sides mirror when underwater):
    @ 0x5c8090` arg 1), using the mirror matrix/CLIP machinery above and the
    mirror-winding byte — the full reflection spec is env #30 (REN-6).
 6. Player shadow/scar dispatch (`Render_DispatchShadowByType @ 0x584440` —
-   the Shadow_/Scar_ family; out of REN port scope), radar/scope overlays,
+   the Scar_ decal/overlay family; out of REN port scope. The render-slot
+   ENTITY ground shadows are a different family and are ported — they render
+   at frame open (step 1's slot pass) and drape during the terrain scene
+   walk via `RenderSlot_DrawAllDrapes @ 0x5d6e20`; see
+   render-lighting-re.md's render-slot section), radar/scope overlays,
    HUD (`HUD_RenderAllOverlays @ 0x5a8070`, mode-0 flushes for 3D HUD
    elements), fades, tips.
 7. `FrameFX_RenderBloomPass` (flush 4 = Q3), present,

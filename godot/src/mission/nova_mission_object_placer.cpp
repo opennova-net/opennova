@@ -1410,6 +1410,21 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	p_model->set_shadow_caster_enabled(item_casts_dynamic_shadow(
 			item_db_->get_item_type(p_item_id),
 			item_db_->get_attrib(p_item_id), item_db_->get_attrib2(p_item_id)));
+	// The render-slot ground-shadow profile: person-type drapes elongate 4x,
+	// and vehicles may author an items.def `shadow` blob decal — the drape
+	// fallback for a bound slot past the silhouette-capture budget (retail:
+	// itemdef type 3 gate @0x5d5d7f, the +0xA0 decal via @0x5d59d0; see
+	// docs/render/render-lighting-re.md).
+	p_model->set_slot_shadow_person(
+			item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON);
+	const Dictionary decal = item_db_->get_shadow_decal(p_item_id);
+	if (!decal.is_empty()) {
+		p_model->set_slot_shadow_decal(decal.get("texture", String()),
+				Vector4(float(decal.get("width", 0.0f)),
+						float(decal.get("length", 0.0f)),
+						float(decal.get("offset_x", 0.0f)),
+						float(decal.get("offset_y", 0.0f))));
+	}
 	// The static tile pass must ignore the visible model's portal/section
 	// mask; eligible mission entities get independent all-section siblings
 	// after their visible model is built.

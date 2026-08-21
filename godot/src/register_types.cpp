@@ -24,6 +24,7 @@
 #include "env/nova_celestial.h"
 #include "mission/nova_mission_object_placer.h"
 #include "env/nova_sky_dome.h"
+#include "env/nova_slot_shadow.h"
 #include "env/nova_sun_shadow.h"
 #include "env/nova_water.h"
 #include "env/nova_weather.h"
@@ -121,6 +122,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Celestial);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
+	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(WeatherCore);
 	GDREGISTER_CLASS(WaterCore);
@@ -206,6 +208,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	}
 
 	ObjectShaderCache::destroy_singleton();
+	SlotShadow::cleanup_statics();
 }
 
 extern "C" {

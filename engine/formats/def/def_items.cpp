@@ -444,6 +444,30 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                                                        [orig: Entity_DispatchDeathCallback
                                                        @0x493f23 vs table @0x815410] */
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "shadow", 6)) {
+            /* 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
+               blob decal: name -> +0xA0 (a 16-byte slot; retail copies
+               unguarded, we truncate), four atof floats ->
+               +0x11C/+0x120/+0x124/+0x128 (width/length world units, planar
+               offset x/y). Absent trailing tokens read as atof("") = 0 in
+               retail; zero-init matches. [orig: ItemDef_ParseProperty
+               @ 0x49f3a5..0x49f44c; consumer
+               RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            Token tok[5];
+            const int count = split_values(v, vl, tok, 5);
+            if (count >= 1)
+                safe_copy(current.shadow_texture, sizeof(current.shadow_texture),
+                          tok[0].s, tok[0].len);
+            if (count >= 2)
+                current.shadow_width = (float)parse_float_n(tok[1].s, tok[1].len);
+            if (count >= 3)
+                current.shadow_length = (float)parse_float_n(tok[2].s, tok[2].len);
+            if (count >= 4)
+                current.shadow_offset_x = (float)parse_float_n(tok[3].s, tok[3].len);
+            if (count >= 5)
+                current.shadow_offset_y = (float)parse_float_n(tok[4].s, tok[4].len);
+            parsed = 1;
         /* --- the destruction/husk block [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
         } else if (lower_match_key(lower, ll, "huskfinal", 9)) {
             consume_value_str(trimmed, tlen, 9, current.huskfinal, sizeof(current.huskfinal));

@@ -723,6 +723,22 @@ typedef struct DefItemDef {
        into retail ItemDef+0x218. Ihq01 authors 20 -> 0.2.
        [orig: ItemDef_ParseProperty @0x4A19FD..0x4A1A50] */
     float light_transfer;
+    /* items.def 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
+       blob decal. Appended for FFI mirror stability. Retail copies the name
+       UNGUARDED into the 16-byte slot at ItemDef+0xA0 (huskshadow starts at
+       +0xB0) and atofs the four floats to +0x11C/+0x120/+0x124/+0x128
+       (width/length in world units, planar offset x/y); the resolved texture
+       lands at +0x114. Consumed by the render-slot drape: a bound shadow slot
+       without a silhouette RT draws this decal heading-rotated over its
+       terrain patch (docs/render/render-lighting-re.md, the render-slot side).
+       [orig: parse ItemDef_ParseProperty @ 0x49f3a5..0x49f44c; consumer
+       RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0 — 1/w 1/l UV scale
+       itemDef+0x11C/+0x120, UV center offset +0x124/+0x128 + 0.5] */
+    char shadow_texture[16];
+    float shadow_width;
+    float shadow_length;
+    float shadow_offset_x;
+    float shadow_offset_y;
 } DefItemDef;
 
 typedef struct DefItemsFile {
