@@ -841,6 +841,107 @@ int main() {
                "a corona past the fog end fades fully out");
     }
 
+    // The model-light owner attach: attach bone, blink box, or unowned
+    // [orig: Entity_SpawnGlowEffects @ 0x56c7ec / @ 0x56c89f / @ 0x56c8bd].
+    {
+        ModelLightOwnerInputs in;
+        in.spawning_entity = 99;
+        in.attach_bone = 4;
+        in.blink_hit = true;
+        in.blink_owner_entity = 7;
+        in.blink_section = 2;
+        ModelLightOwner owner = resolve_model_light_owner(in);
+        expect(owner.entity == 99 && owner.section == 4,
+               "an attached record is owned by its own entity + subobject, "
+               "even inside a blink box");
+
+        // The same record without an attach bone takes the containing
+        // building + that volume's section.
+        in.attach_bone = 0;
+        owner = resolve_model_light_owner(in);
+        expect(owner.entity == 7 && owner.section == 2,
+               "an unattached record inside a blink box is owned by the "
+               "containing building + section");
+
+        // A building never runs the query, so its own unattached records stay
+        // world lights even though its blink volumes contain them.
+        in.spawner_is_building = true;
+        owner = resolve_model_light_owner(in);
+        expect(owner.entity == 0 && owner.section == 0,
+               "a building's unattached records spawn unowned");
+        // ...but its attached records still bind to itself.
+        in.attach_bone = 3;
+        owner = resolve_model_light_owner(in);
+        expect(owner.entity == 99 && owner.section == 3,
+               "a building's attached records still own themselves");
+
+        // Outdoors: no hit, no owner — the fire-barrel world light.
+        in.spawner_is_building = false;
+        in.attach_bone = 0;
+        in.blink_hit = false;
+        owner = resolve_model_light_owner(in);
+        expect(owner.entity == 0 && owner.section == 0,
+               "an unattached record outside every blink box lights the world");
+    }
+
+    // The interior group admits a blink-box-owned light onto the draws of the
+    // entities standing in that building section, and nothing else
+    // [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+    // Lighting_SetInteriorLightGroup @ 0x5a90e0; the gate
+    // Light_PassesActiveGroups @ 0x5a9120].
+    {
+        LightScene scene;
+        LightSpawnParams lamp = barrel_params(0, 0, 0);
+        // A ceiling lamp inside building 7, room section 2.
+        lamp.owner_entity = 7;
+        lamp.owner_section = 2;
+        scene.spawn(lamp);
+
+        const std::array<int32_t, 3> qmin{-(4 << 16), -(4 << 16), -(4 << 16)};
+        const std::array<int32_t, 3> qmax{4 << 16, 4 << 16, 4 << 16};
+        LightSelectionOptions options;
+        options.admit_owned_unscoped = false;
+        LightFlickerInputs flicker;
+        const std::array<float, 3> ambient{1.0f, 1.0f, 1.0f};
+
+        // Three draws in the lamp's reach: a soldier in room 2, a soldier in
+        // room 5 of the same building, and the building's own draw.
+        LightDrawContext draws[3];
+        for (LightDrawContext &draw : draws) {
+            draw.aabb_min_fixed = qmin;
+            draw.aabb_max_fixed = qmax;
+        }
+        draws[0].groups.owner_group_entity = 31;  // the soldier's own draw
+        draws[0].groups.interior_group_entity = 7;
+        draws[0].groups.interior_group_section = 2;
+        draws[1].groups.owner_group_entity = 32;
+        draws[1].groups.interior_group_entity = 7;
+        draws[1].groups.interior_group_section = 5;
+        draws[2].groups.owner_group_entity = 7;  // the building itself
+
+        LightDrawSelection selections[3];
+        scene.select_for_draws(draws, 3, options, ambient, flicker,
+                               /*d3d_light_path=*/true, selections);
+        expect(selections[0].count == 1,
+               "the lamp reaches the soldier standing in its own room");
+        expect(selections[1].count == 0,
+               "the lamp does not reach a soldier in another room of the "
+               "same building");
+        expect(selections[2].count == 1,
+               "the lamp reaches its owner building's own draw");
+
+        // An entity outside every blink box (no interior group) sees nothing.
+        LightDrawContext outdoor;
+        outdoor.aabb_min_fixed = qmin;
+        outdoor.aabb_max_fixed = qmax;
+        outdoor.groups.owner_group_entity = 33;
+        LightDrawSelection outdoor_selection;
+        scene.select_for_draws(&outdoor, 1, options, ambient, flicker,
+                               /*d3d_light_path=*/true, &outdoor_selection);
+        expect(outdoor_selection.count == 0,
+               "an interior lamp never leaks onto an outdoor draw");
+    }
+
     std::cout << "light_scene_test passed\n";
     return 0;
 }

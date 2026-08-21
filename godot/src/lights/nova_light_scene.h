@@ -29,8 +29,9 @@ public:
 	// config keys: position / direction (Vector3 Godot world), atten_start /
 	// atten_end (float world units), target (bool), spot_angle_degrees (float),
 	// color_start / color_end (Color), style / phase / rate (int), intensity
-	// (float), owner_entity / owner_section (int),
-	// disable_corona / disable_terrain / disable_objects (bool).
+	// (float), disable_corona / disable_terrain / disable_objects (bool), plus
+	// the owner-attach facts: attach_bone, spawning_entity,
+	// spawner_is_building, blink_owner_entity and blink_section.
 	int64_t spawn_model_light(const Dictionary &p_config);
 	// Transient glow spawn (muzzle / impact / death / round legs — the
 	// light_scene.h witness map). config keys: position (Vector3), radius

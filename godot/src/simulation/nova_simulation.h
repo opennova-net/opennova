@@ -474,6 +474,8 @@ private:
 	// Unlisted entities are quality 4 (factor 1.0), the node default.
 	std::unordered_map<int32_t, uint8_t> sun_quality_last_;
 	uint8_t local_sun_quality_ = 4;
+	// The pool-2 building a packed blink hit names, as a bms_id (0 = none).
+	int blink_hit_owner_bms_id(uint32_t p_hit) const;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
@@ -2230,6 +2232,18 @@ public:
 	// Lighting keys from hit PRESENCE, independently of the aggregate
 	// "indoors" flag bit.
 	int local_player_interior_item_id() const;
+
+	// The blink-box owner for a model-light spawn at a world point: retail runs
+	// ONE point query at the spawning entity's position before walking its LGHT
+	// records, and slot 0's packed hit names the containing building + section
+	// every unattached record binds to (retail: Entity_SpawnGlowEffects
+	// @0x56c7fc -> Entity_QueryBlinkBoxesAtPoint @0x4af350, decoded @0x56c8c9
+	// and @0x56c8db, see docs/render/render-lighting-re.md). Returns
+	// [containing bms_id, section], or an empty array when the point sits in no
+	// blink volume (or the containing entity carries no bms identity). The
+	// caller applies retail's ItemDef-type gate: a BUILDING never runs the
+	// query at all (retail: @0x56c7ec).
+	PackedInt64Array query_blink_owner_at(const Vector3 &p_world);
 
 	// Sound-occlusion distance inflation for the audio host [orig:
 	// Sound_ApplyOcclusionDistance @0x529970 — two LOS rays through terrain +

@@ -111,10 +111,27 @@ int64_t LightScene::spawn_model_light(const Dictionary &p_config) {
 		params.gen.color_end = {color_byte(end.b), color_byte(end.g),
 				color_byte(end.r), 255};
 	}
-	params.owner_entity = static_cast<uint64_t>(
-			static_cast<int64_t>(p_config.get("owner_entity", 0)));
-	params.owner_section = static_cast<int32_t>(
-			static_cast<int>(p_config.get("owner_section", 0)));
+	// The owner attach is the portable policy (renderer::resolve_model_light_owner
+	// carries the witness): the authored subobject wins, else the containing
+	// blink box, else the record lights the world. The caller supplies facts
+	// only — the record's attach bone, the spawning entity and whether it is a
+	// building, and the blink owner its position resolved to.
+	renderer::ModelLightOwnerInputs owner_inputs;
+	owner_inputs.attach_bone = static_cast<uint8_t>(
+			static_cast<int>(p_config.get("attach_bone", 0)) & 0xFF);
+	owner_inputs.spawning_entity = static_cast<uint64_t>(
+			static_cast<int64_t>(p_config.get("spawning_entity", 0)));
+	owner_inputs.spawner_is_building =
+			p_config.get("spawner_is_building", false);
+	owner_inputs.blink_owner_entity = static_cast<uint64_t>(
+			static_cast<int64_t>(p_config.get("blink_owner_entity", 0)));
+	owner_inputs.blink_section = static_cast<int32_t>(
+			static_cast<int>(p_config.get("blink_section", 0)));
+	owner_inputs.blink_hit = owner_inputs.blink_owner_entity != 0;
+	const renderer::ModelLightOwner owner =
+			renderer::resolve_model_light_owner(owner_inputs);
+	params.owner_entity = owner.entity;
+	params.owner_section = owner.section;
 	params.disable_corona = p_config.get("disable_corona", false);
 	params.disable_terrain = p_config.get("disable_terrain", false);
 	params.disable_objects = p_config.get("disable_objects", false);

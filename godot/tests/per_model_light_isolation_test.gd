@@ -109,6 +109,37 @@ func test_active_snapshot_realizes_native_omni_and_spot_nodes() -> void:
 	assert_eq(report.owner_isolation, "native_cull_mask")
 
 
+func test_owner_metadata_does_not_filter_the_native_snapshot() -> void:
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3.ZERO,
+		"atten_end": 8.0,
+		"attach_bone": 0,
+		"spawning_entity": 31,
+		"blink_owner_entity": 700,
+		"blink_section": 2,
+	}), 0)
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(2.0, 0.0, 0.0),
+		"atten_end": 8.0,
+		"attach_bone": 0,
+		"spawning_entity": 700,
+		"spawner_is_building": true,
+		"blink_owner_entity": 700,
+		"blink_section": 3,
+	}), 0)
+
+	var rows: Array = scene.collect_active_rows(0, null)
+	assert_eq(rows.size(), 2,
+			"ownership remains metadata; every live light reaches native admission")
+	assert_eq(int(rows[0].get("owner_entity", 0)), 700)
+	assert_eq(int(rows[0].get("owner_section", 0)), 2,
+			"an unattached light inside a blink box keeps the room owner")
+	assert_eq(int(rows[1].get("owner_entity", -1)), 0)
+	assert_eq(int(rows[1].get("owner_section", -1)), 0,
+			"an ItemDef Building skips its own enclosing blink box")
+
+
 func test_native_omni_pool_reuses_nodes_and_tracks_round_lifecycle() -> void:
 	var world := _world()
 	var director := _director(world)
@@ -205,8 +236,8 @@ func test_owned_corona_still_gates_on_owner_section_visibility() -> void:
 	assert_gt(scene.spawn_model_light({
 		"position": Vector3(0.0, 1.0, 0.0),
 		"atten_end": 4.0,
-		"owner_entity": owner_model.get_instance_id(),
-		"owner_section": 2,
+		"attach_bone": 2,
+		"spawning_entity": owner_model.get_instance_id(),
 	}), 0)
 	var models: Array[Node3D] = [owner_model]
 	var owners := PackedInt64Array([owner_model.get_instance_id()])

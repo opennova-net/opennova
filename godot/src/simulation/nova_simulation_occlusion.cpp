@@ -331,6 +331,35 @@ int Simulation::local_player_interior_item_id() const {
 					+ opennova::mission::kItemIdOffset;
 }
 
+// The pool-2 entity a packed blink hit names, as a bms_id. 0 = the hit's pool
+// slot holds no bms-identified entity (nothing to own a light).
+// (retail: Pool_GetEntryUnchecked(2, hit >> 20) @0x56c8c9, see
+// docs/render/render-lighting-re.md)
+int Simulation::blink_hit_owner_bms_id(uint32_t p_hit) const {
+	if (!world_ || p_hit == 0) return 0;
+	const opennova::world::EntityHandle building =
+			opennova::world::EntityHandle::make(
+					2, opennova::world::BlinkAccum::hit_pool_entity_index(p_hit));
+	const opennova::world::Entity *parent = world_->registry.get(building);
+	return parent == nullptr ? 0 : static_cast<int>(parent->bms_id);
+}
+
+PackedInt64Array Simulation::query_blink_owner_at(const Vector3 &p_world) {
+	PackedInt64Array out;
+	if (!world_) return out;
+	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
+	const int32_t point[3] = {opennova::world::to_fixed(p_world.x),
+	                          opennova::world::to_fixed(-p_world.z),
+	                          opennova::world::to_fixed(p_world.y)};
+	opennova::world::BlinkAccum blink;
+	collision_world_.query_blink_boxes_at_point(*world_, point, blink);
+	const int owner = blink_hit_owner_bms_id(blink.hits[0]);
+	if (owner == 0) return out;
+	out.push_back(owner);
+	out.push_back(opennova::world::BlinkAccum::hit_section(blink.hits[0]));
+	return out;
+}
+
 int64_t Simulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
                                                      const Vector3 &source_pos,
                                                      int64_t distance_q16,

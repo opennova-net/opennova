@@ -714,6 +714,28 @@ LightSceneReport LightScene::inspect() const {
 	return report;
 }
 
+ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs) {
+	ModelLightOwner owner;
+	// An authored attach subobject wins outright, for every spawning entity
+	// kind [orig: @ 0x56c89f -> LightInstance_SetOwnerGroup(entity, bone)
+	// @ 0x56c8ae].
+	if (inputs.attach_bone != 0) {
+		owner.entity = inputs.spawning_entity;
+		owner.section = static_cast<int32_t>(inputs.attach_bone);
+		return owner;
+	}
+	// A building never ran the query, so its own unattached records stay
+	// world lights [orig: the ItemType_Building gate @ 0x56c7ec].
+	if (inputs.spawner_is_building || !inputs.blink_hit) {
+		return owner; // [orig: the zero-count fall-through @ 0x56c8bd]
+	}
+	// Inside a blink box: the containing building + that volume's section
+	// [orig: @ 0x56c8c9..0x56c8db — only hit slot 0 is read].
+	owner.entity = inputs.blink_owner_entity;
+	owner.section = inputs.blink_section;
+	return owner;
+}
+
 int32_t light_flicker_value(const std::array<int32_t, 3> &position_fixed,
 		const LightFlickerInputs &flicker) {
 	// [orig: Light_TickGenBlock @ 0x5a8ae0 — index = (z >> 15) + (y >> 14) +

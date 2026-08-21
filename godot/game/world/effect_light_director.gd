@@ -95,15 +95,19 @@ func reattach() -> void:
 		var data: ObjectData = source.get("object_data")
 		if data == null:
 			continue
-		# Batched statics are entities too: retail attaches the owner whenever
-		# the record's attach bone != 0, for every spawning entity kind
-		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity,
-		# bone)]. There is no node to borrow an id from, so each static source
-		# owns a synthetic negative id. The facelift keeps that provenance for
-		# diagnostics/coronas while native illumination remains spatial.
-		var handles := _spawn_model_lights(data,
-				source.get("world_transform", Transform3D.IDENTITY),
-				-(source_index + 1))
+		# Batched statics have no ObjectModel identity, so each source owns a
+		# synthetic negative id. The exact ItemDef type decides whether retail
+		# skipped the one spawn-time blink query; native illumination stays
+		# spatial regardless of the retained owner metadata.
+		var xform: Transform3D = source.get(
+				"world_transform", Transform3D.IDENTITY)
+		var item_id := int(source.get("item_id", 0))
+		var is_building := _is_itemdef_building(item_id)
+		var blink_owner: Array = []
+		if not is_building:
+			blink_owner = _blink_owner_at(xform.origin)
+		var handles := _spawn_model_lights(data, xform,
+				-(source_index + 1), blink_owner, is_building)
 		if not handles.is_empty():
 			_spawned_static[source_index] = handles
 
@@ -120,7 +124,7 @@ static func owner_id_for_node(node: ObjectModel) -> int:
 	return wire if wire != 0 else node.get_instance_id()
 
 
-func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
+func on_wire_node_spawned(node: ObjectModel, _kind: int, item_id: int) -> void:
 	if node == null:
 		return
 	var node_id := node.get_instance_id()
@@ -129,8 +133,18 @@ func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
 	var data: ObjectData = node.get_object_data()
 	if data == null:
 		return
+	# Retail runs the blink query once per spawning entity, and skips it
+	# outright for a BUILDING — a building's own unattached records stay world
+	# lights even though its blink volumes contain them (the query has no
+	# self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec].
+	var ref: Dictionary = node.get_meta("entity_ref", {})
+	var resolved_item_id := item_id if item_id > 0 else int(ref.get("item_id", 0))
+	var is_building := _is_itemdef_building(resolved_item_id)
+	var blink_owner: Array = []
+	if not is_building:
+		blink_owner = _blink_owner_at(node.global_position)
 	var handles := _spawn_model_lights(data, node.global_transform,
-			owner_id_for_node(node))
+			owner_id_for_node(node), blink_owner, is_building)
 	if not handles.is_empty():
 		var on_exit := _on_wire_node_exiting.bind(node_id)
 		_spawned_nodes[node_id] = {
@@ -161,13 +175,14 @@ func _disconnect_wire_node_exit(record: Dictionary) -> void:
 
 
 func _spawn_model_lights(data: ObjectData, world_transform: Transform3D,
-		owner_id: int = 0) -> Array[int]:
+		owner_id: int = 0, blink_owner: Array = [],
+		spawner_is_building: bool = false) -> Array[int]:
 	var handles: Array[int] = []
 	if data == null:
 		return handles
 	for i in range(data.get_light_count()):
 		var handle := spawn_light_record(data.get_light_info(i), world_transform,
-				owner_id)
+				owner_id, blink_owner, spawner_is_building)
 		if handle != 0:
 			handles.append(handle)
 	return handles
@@ -175,19 +190,20 @@ func _spawn_model_lights(data: ObjectData, world_transform: Transform3D,
 
 ## One authored light record (the get_light_info dictionary shape) becomes one
 ## pool instance. Public: the GUT seam test feeds records directly. A record
-## attached to a subobject keeps its authored owner/section metadata for
-## diagnostics and the corona visibility gate. Native clustered illumination
-## is intentionally spatial rather than reconstructed per-draw group state.
-## A record with subobject 0 remains an unowned mission-start world light.
+## keeps the witnessed owner metadata for diagnostics and the corona visibility
+## gate: an authored subobject wins, otherwise an enclosing blink section owns
+## the record unless the spawning ItemDef is exactly Building. Native clustered
+## illumination remains spatial rather than reconstructed per-draw group state.
 func spawn_light_record(info: Dictionary, world_transform: Transform3D,
-		owner_id: int = 0) -> int:
+		owner_id: int = 0, blink_owner: Array = [],
+		spawner_is_building: bool = false) -> int:
 	if info.is_empty():
 		return 0
 	var world_pos: Vector3 = world_transform * Vector3(
 			info.get("position", Vector3.ZERO))
 	var local_direction: Vector3 = info.get("direction", Vector3(0.0, 0.0, -1.0))
 	var world_direction := (world_transform.basis * local_direction).normalized()
-	var subobject := int(info.get("subobject", 0))
+	var has_blink := blink_owner.size() >= 2
 	return int(_scene.spawn_model_light({
 		"position": world_pos,
 		"direction": world_direction,
@@ -200,12 +216,66 @@ func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 		"rate": int(info.get("colorgen_rate", 0)),
 		"color_start": info.get("color_start", Color.WHITE),
 		"color_end": info.get("color_end", Color.WHITE),
-		"owner_entity": owner_id if subobject != 0 else 0,
-		"owner_section": subobject,
+		"attach_bone": int(info.get("subobject", 0)),
+		"spawning_entity": owner_id,
+		"spawner_is_building": spawner_is_building,
+		"blink_owner_entity": int(blink_owner[0]) if has_blink else 0,
+		"blink_section": int(blink_owner[1]) if has_blink else 0,
 		"disable_corona": bool(info.get("disable_corona", false)),
 		"disable_terrain": bool(info.get("disable_lightterrain", false)),
 		"disable_objects": bool(info.get("disable_lightobjects", false)),
 	}))
+
+
+## The blink-box owner at one world point: retail runs ONE query at the
+## spawning entity's position before walking its LGHT records, and slot 0's hit
+## names the containing building + section every unattached record binds to
+## [orig: Entity_SpawnGlowEffects @ 0x56c7fc -> Entity_QueryBlinkBoxesAtPoint
+## @ 0x4af350]. Returns [owner id, section], or an empty array outdoors — and
+## also when the containing building has no presentation node to name, since a
+## batched building cannot be addressed in the per-model owner id space
+## (tracked on D-RLIT-4).
+func _blink_owner_at(world_pos: Vector3) -> Array:
+	var sim: Simulation = _sim()
+	if sim == null:
+		return []
+	var hit: PackedInt64Array = sim.query_blink_owner_at(world_pos)
+	if hit.size() < 2:
+		return []
+	var owner := _owner_id_for_bms(int(hit[0]))
+	return [owner, int(hit[1])] if owner != 0 else []
+
+
+## The presentation owner id a containing building's bms_id resolves to. The
+## corona visibility walk uses the same id domain as its ObjectModel rows.
+func _owner_id_for_bms(bms_id: int) -> int:
+	if bms_id == 0:
+		return 0
+	var runtime: MissionPresentation = _world.get_runtime() if _world != null else null
+	if runtime != null:
+		var registry: EntityIndex = runtime.get_registry()
+		if registry != null:
+			var node: ObjectModel = registry.resolve_single(bms_id)
+			if node != null:
+				return owner_id_for_node(node)
+	return 0
+
+
+## Retail gates on ItemDef.type == Building (5), not MissionData's placement
+## kind: that broader kind also contains Decoration/Foliage type 2.
+func _is_itemdef_building(item_id: int) -> bool:
+	if _world == null or item_id <= 0:
+		return false
+	var item_db: ItemDatabase = _world.get_item_db()
+	return item_db != null \
+			and item_db.get_item_type(item_id) == ItemDatabase.TYPE_BUILDING
+
+
+func _sim() -> Simulation:
+	if _world == null:
+		return null
+	var runtime: MissionPresentation = _world.get_runtime()
+	return runtime.get_sim() if runtime != null else null
 
 
 ## The per-frame device leg (GameFramePipeline, after iris, before the
