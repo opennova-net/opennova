@@ -30,7 +30,7 @@ constexpr uint32_t kKnownAiAttributeMask =
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::FlyingOrganic) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Coward) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Attribute17) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::EngineRunning) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::AdvancedAmmo) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Indestructible) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::NavigationWaypoint) |

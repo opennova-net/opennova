@@ -14,6 +14,7 @@
 #include "world/vehicle_attach.h"
 #include "world/vehicle_mount.h"
 #include "world/vehicle_motor.h"
+#include "world/vehicle_part_anim.h"
 #include "world/world.h"
 
 #include <cmath>
@@ -980,6 +981,38 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
     CHECK(mount.primary_weapon_slot.redirect_to_parent_slot);
 }
 
+// A HOST-crewed helicopter's rotor turns from the authority pass: the helo
+// mover is the unported residual, but retail runs the part-animation
+// accumulator from EVERY mover's tail, the helo mover included, so the pass
+// ticks it for a direct-air row at the point that tail would run — and the
+// HELO_ROTOR register (the angle's high word) advances while crewed, then
+// winds down at the helo machine's 46603/tick after the dismount.
+// [orig: the HELO twin @0x48FA70 from the aircraft mover's tail @0x4905A6]
+void test_host_crewed_helicopter_rotor_turns() {
+    Rig r;
+    VehicleTraits t = truck_traits();
+    t.family = VehicleFamily::Helicopter;
+    t.physics = 0; // a CHel def: no ground selector, no ground mover
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    const int ai_idx = r.sys.attach(r.veh_h);
+    r.sys.at(ai_idx)->profile.type = 1; // the helo profile class
+    CHECK(entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 1));
+    CHECK(r.veh().primary_occupant == r.player_h);
+    TickContext ctx{};
+    ctx.is_authority = true;
+    for (int i = 0; i < 3; ++i) r.sys.tick(r.w, ctx);
+    CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull);
+    CHECK(part_register(r.veh().veh.part_spin.angle) > 0);
+    CHECK(entity_detach_from_vehicle(r.w, r.player_h));
+    r.sys.tick(r.w, ctx);
+    CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo);
+    // A joiner never runs the authority pass for it.
+    ctx.is_authority = false;
+    const int32_t before = r.veh().veh.part_spin.speed;
+    r.sys.tick(r.w, ctx);
+    CHECK(r.veh().veh.part_spin.speed == before);
+}
+
 // The AI-driver leg: an NPC in the ctrl seat + a staged brain waypoint drives the truck
 // toward the node; no controller parks it (SM state 22, no movement).
 // [orig: @0x48bc12-0x48c034 / the parked stamp @0x48c002-0x48c02d]
@@ -1601,6 +1634,7 @@ void test_vehicle_hull_stops_at_building() {
 
 int main() {
     test_usegun_attach_presnaps_local_look();
+    test_host_crewed_helicopter_rotor_turns();
     test_remote_player_control_seat_preserves_wire_look();
     test_live_mounted_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();

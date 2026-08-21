@@ -11,6 +11,7 @@
 #include "world/body_anim.h"
 #include "world/vehicle_attach.h"
 #include "world/vehicle_motor.h"
+#include "world/vehicle_part_anim.h"
 #include "world/vehicle_sound.h"
 #include <algorithm>
 #include <cmath>
@@ -469,11 +470,17 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != 1) return;
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
-            // This is the selector-gated ground-family authority port. Direct
-            // CHel/cpln rows own a different callback; never feed them through
-            // tick_vehicle_motor even if an authored def sets physics.
-            if (traits == nullptr || traits->physics == 0 ||
-                vehicle_family_uses_direct_air_mover(traits->family)) return;
+            if (traits == nullptr) return;
+            // Direct CHel/cpln rows own a different callback (the helo mover
+            // @0x48FA70's caller is the unported residual); they ride the
+            // pass for its tail only, below — never through tick_vehicle_motor
+            // even if an authored def sets physics.
+            if (vehicle_family_uses_direct_air_mover(traits->family)) {
+                vehicle_pass_handles_.push_back(e.handle);
+                return;
+            }
+            // This is the selector-gated ground-family authority port.
+            if (traits->physics == 0) return;
             vehicle_pass_handles_.push_back(e.handle);
         });
         for (const EntityHandle h : vehicle_pass_handles_) {
@@ -481,6 +488,16 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
+            if (vehicle_family_uses_direct_air_mover(traits->family)) {
+                // The helo mover itself is the unported residual; retail runs
+                // the part-animation accumulator from EVERY mover's tail, the
+                // helo mover included, so a host-crewed helicopter's rotor
+                // turns here at the point that tail would run
+                // [orig: the HELO twin @0x48FA70 called from the aircraft
+                //  mover's tail @0x4905A6].
+                vehicle_part_anim_tick(world, *veh, *traits);
+                continue;
+            }
             // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
             // stamps every mover carries; rider deltas read (current - saved)].
             stamp_saved_live_pose(*veh);

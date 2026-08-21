@@ -403,7 +403,7 @@ public:
 	// / engine-internal) bits rather than clobber them. See MissionData::set_event.
 	int event_flag_mask() const;
 	// Per-entity AI attribute flags (bmsi_attributes), surfaced as inspector checkboxes. Lists only labeled
-	// author-facing bits; confirmed-but-unlabeled bits such as Attribute17 remain valid through the raw flag
+	// author-facing bits; confirmed-but-unlabeled bits such as EngineRunning remain valid through the raw flag
 	// value but are not exposed as checkboxes.
 	std::vector<MissionEnumEntry> ai_attribute_flag_bits() const;
 
