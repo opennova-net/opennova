@@ -481,7 +481,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-SND-3 | Parser strictness: rejects out-of-range/oversize rows the engine silently tolerates — deliberate authoring-side strictness | C | OPEN (kept; register candidate — ADR 0022) | PAR-UI |
 | D-SND-4 | Dialog playback serialized by a reimpl FIFO advanced on voice `finished` vs the engine's one-channel `dword_A895FC` gate + per-line countdown — no dialog overlap either way | C | OPEN (kept; permanent-register candidate — ADR 0022) | PAR-UI |
 | D-SND-5 | WAC `wave`/`pwave` ride one interrupting reimpl voice channel; positional `SSNwave`/`SSNradio` + the rest of the sound family stay parsed-but-unconsumed | A | OPEN (record tracks the follow-ups) | PAR-UI |
-| D-SND-6 | Persistent per-marker players RESUME loop position vs retail's stop-and-reopen transient channels (AUD1 native-loop semantics unwalked) | C | OPEN (kept; permanent-register candidate — ADR 0022) | PAR-UI |
+| D-SND-6 | STALE ROW CORRECTED 2026-08-20 — the divergence it describes no longer exists. `MissionAudio` already implements retail's TRANSIENT model: the mix keeps at most `MIX_CHANNELS` = 8 physical voices, a drop-out `stop()`s its player, nulls the bound stream and releases the slot, and a re-entrant is rebound and `play()`ed from the WAVE START rather than resuming a loop position `[orig: AudioChannel_ResetByHandle @0x767160 / AudioChannel_OpenSlotChecked @0x767060]`. The "persistent per-marker players that RESUME loop position" reading described the pre-D-SND-16 architecture and was not revisited when that port replaced it. Pinned by GUT `nova_mission_audio_test` ("a dropout releases its bound stream"; the eight-candidate replacement). Residual, unchanged and still open: whether a retail channel loops NATIVELY off an AUD1 descriptor flag or is re-registered per wrap is unwitnessed — next avenue is the mix kernel around `sub_7BD671 @0x7BD671`, which a second-hand report places the per-wrap pending-block reload inside; that has not been verified here | C | FIXED | PAR-UI |
 | D-SND-8 | Master fade / underwater duck / SFX volume / bearing pan map to bus routing + the Godot spatial panner; doppler unported | C | OPEN (reimpl playback territory; underwater/doppler on demand) | PAR-UI |
 | D-SND-9 | FIXED 2026-08-12: the BPLN flags word now rides the collision feed (`CollisionPlane::flags`) and the sound-occlusion entity clip selects per plane — a nonzero flags BYTE clamps the clip radius at 0 where flag-0 planes keep the raw (ray-2 −0x8000) radius `[orig: byte test @0x538d00; clamped arm @0x538d4b, raw arm @0x538dd6]`; ctest `collision` pins the flagged/flag-0 inflate split | A | FIXED | PAR-UI |
 | D-SND-10 | ChuteFlap/FreeFall per-tick refires coalesce into one exclusive voice vs retail's channel-steal pileup — audibly equivalent | C | OPEN (kept; permanent-register candidate — ADR 0022) | PAR-UI |
@@ -970,7 +970,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 18 | 0 | 6 | 24 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 53 | 4 | 4 | 61 | 7 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 38 | 0 | 3 | 41 | 13 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 37 | 0 | 3 | 40 | 14 |
 | Mission `.mis` | 0 | 1 | 1 | 2 | 1 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 1 | 0 | 0 | 1 | 0 |
@@ -983,7 +983,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 2 | 0 | 1 | 3 | 0 |
 | Render — lighting | 4 | 0 | 0 | 4 | 0 |
-| **Total** | **121** | **11** | **20** | **152** | 22 |
+| **Total** | **120** | **11** | **20** | **151** | 23 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
 
