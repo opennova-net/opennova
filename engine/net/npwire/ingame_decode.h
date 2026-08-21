@@ -1868,17 +1868,22 @@ struct ChatUplink {
 };
 bool decode_chat_uplink(const uint8_t *body, size_t len, ChatUplink &out);
 struct ChatBroadcast {
-	// CONTESTED HEADER ORDER (D-NET-215, unresolved): this decoder reads
-	// [sender_slot][channel], but a second RE pass reports the dispatcher as
-	// Chat_DispatchToChannel(body[1] = sender slot, body[0] = channel,
-	// &body[2] = text) [orig: NapiNPClientMsg_ChatMessage @0x42F240 ->
-	// @0x42B910] — i.e. SWAPPED. The only pin today is a synthetic fixture
-	// authored to match this reading, so it is not independent evidence.
-	// Nothing consumes chat yet, so the two orders are indistinguishable in
-	// behavior; resolve with a grill-ida pass over @0x42F240 before the chat
-	// channel is hosted, and swap both this struct and the fixture together.
-	uint8_t     sender_slot = 0; // body[0] under THIS reading
-	uint8_t     channel = 0;     // body[1] under THIS reading
+	// HEADER ORDER RESOLVED 2026-08-20 (closes D-NET-215): the wire is
+	// [channel][sender_slot][cstr text], NOT the reverse. The handler tail-jumps
+	// into the dispatcher as Chat_DispatchToChannel(body[1], (char)body[0],
+	// &body[2]) [orig: NapiNPClientMsg_ChatMessage @0x42F240], and the
+	// dispatcher's own signature settles which is which
+	// [orig: Chat_DispatchToChannel @0x42B910]: its FIRST parameter indexes the
+	// roster (PlayerSlotTable_GetActiveSlot) and gates the line on the sender
+	// being neither muted nor a spectator, while its SECOND is switched over
+	// 0..0xE to pick the line colour and sink. So body[1] is the sender and
+	// body[0] is the channel.
+	//
+	// The channel byte is read SIGNED at the call site (`*(char *)packetData`)
+	// and widened to int for the switch, so it is kept signed here rather than
+	// silently reinterpreted.
+	int8_t      channel = 0;     // body[0], sign-extended into the switch
+	uint8_t     sender_slot = 0; // body[1], the roster index
 	std::string text;            // formatted "name(/squad): text" line
 };
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
