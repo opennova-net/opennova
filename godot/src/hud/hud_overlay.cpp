@@ -5,6 +5,9 @@
 #include "simulation/nova_simulation.h"
 #include "terrain/nova_terrain_data.h"
 
+#include <def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
+#include <npwire/game_type.h> // the conquest arm of the zone panel
+
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -28,9 +31,10 @@ using opennova::hud::HudLayout;
 using opennova::hud::HudPosRecord;
 using opennova::hud::HudRectRecord;
 
-constexpr int kMinimapSnapshotVersion = 3;
+// v4 appends the local-team medic bit per row (Simulation::HUD_MINIMAP_*).
+constexpr int kMinimapSnapshotVersion = 4;
 constexpr int kMinimapSnapshotHeaderSize = 3;
-constexpr int kMinimapSnapshotMinStride = 16;
+constexpr int kMinimapSnapshotMinStride = 17;
 constexpr int kMinimapFootprintFeedVersion = 1;
 
 constexpr const char *kMinimapWaterShader = R"(
@@ -110,6 +114,42 @@ HudPosRecord pos_record2(const Vector2i &v) {
 	return r;
 }
 
+// HudPos::get_vehicle_hud's Dictionary back into the def block the engine
+// feed reads (field widths are the block's own: 16-byte sid, 32-byte names,
+// the 4/8 pair caps).
+void copy_fixed(char *dst, size_t cap, const String &src) {
+	const CharString utf8 = src.utf8();
+	snprintf(dst, cap, "%s", utf8.get_data());
+}
+
+DefVehicleHudBlock vehicle_hud_block_from_dict(const Dictionary &d) {
+	DefVehicleHudBlock block{};
+	copy_fixed(block.sid, sizeof(block.sid), d.get("sid", String()));
+	copy_fixed(block.icon, sizeof(block.icon), d.get("icon", String()));
+	copy_fixed(block.interface_texture, sizeof(block.interface_texture),
+			d.get("interface", String()));
+	copy_fixed(block.static_texture, sizeof(block.static_texture),
+			d.get("static_texture", String()));
+	const Vector2i driver = d.get("driver", Vector2i());
+	block.driver_x = driver.x;
+	block.driver_y = driver.y;
+	const Array emplace = d.get("emplace", Array());
+	for (int64_t i = 0; i < emplace.size() && i < DEF_VEHICLE_HUD_MAX_EMPLACE; ++i) {
+		const Vector2i p = emplace[i];
+		block.emplace_x[i] = p.x;
+		block.emplace_y[i] = p.y;
+		block.emplace_count = static_cast<int>(i) + 1;
+	}
+	const Array seats = d.get("seats", Array());
+	for (int64_t i = 0; i < seats.size() && i < DEF_VEHICLE_HUD_MAX_SEATS; ++i) {
+		const Vector2i p = seats[i];
+		block.seat_x[i] = p.x;
+		block.seat_y[i] = p.y;
+		block.seat_count = static_cast<int>(i) + 1;
+	}
+	return block;
+}
+
 HudRectRecord rect_record(const Rect2i &rect) {
 	HudRectRecord r;
 	r.x = static_cast<float>(rect.position.x);
@@ -148,6 +188,16 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("set_scoreboard", "shown", "game_type", "strings", "sim"),
 			&HudOverlay::set_scoreboard);
+	ClassDB::bind_method(D_METHOD("set_vehicle_panel", "shown", "block", "stance", "sim"),
+			&HudOverlay::set_vehicle_panel);
+	ClassDB::bind_method(D_METHOD("push_chat_line", "text", "argb"),
+			&HudOverlay::push_chat_line);
+	ClassDB::bind_method(D_METHOD("set_message_log_shown", "shown"),
+			&HudOverlay::set_message_log_shown);
+	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
+			&HudOverlay::set_message_log_title);
+	ClassDB::bind_method(D_METHOD("set_lfp_panel", "shown", "game_type", "local_team",
+			"frame_counter", "strings", "sim"), &HudOverlay::set_lfp_panel);
 	ClassDB::bind_method(D_METHOD("set_waypoint", "name", "distance_m",
 			"mission_position", "altitude_wu"),
 			&HudOverlay::set_waypoint, DEFVAL(Vector2()), DEFVAL(0.0f));
@@ -408,7 +458,23 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.game_info = pos_record4(p_hudpos->get_game_info_pos());
 	layout_.wpd_info = pos_record4(p_hudpos->get_wpd_info_pos());
 	layout_.chat_text = pos_record2(p_hudpos->get_chat_text_pos());
+	// The chat box's coordinate rows: retail's g_hudChatBoxCoords rows 1/2 are
+	// the authored HUDCHATTEXT pair, read back as the chat wrap width
+	// `x2 - (x1 - 4)` (retail: HUD_GetChatBoxCoord @0x5bbe90 <-
+	// Chat_AddMessageChannel1 @0x498673/@0x498688, see docs/interface/hud-re.md).
+	layout_.chat_box_x1 = layout_.chat_text.x;
+	layout_.chat_box_x2 = layout_.chat_text.y;
+	layout_.chat_box_present = layout_.chat_text.present;
 	layout_.sys_text = pos_record2(p_hudpos->get_sys_text_pos());
+	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_hudZonePanelX/Y).
+	{
+		const Vector2i lfp = p_hudpos->get_lfp_flags();
+		layout_.lfp_anchor_x = lfp.x;
+		layout_.lfp_anchor_y = lfp.y;
+		layout_.lfp_anchor_present = true;
+	}
+	// HUDVEHSTANCEPOS — the vehicle panel's base before the stance offset.
+	veh_stance_pos_ = p_hudpos->get_veh_stance_pos();
 	layout_.clip_pos = pos_record2(p_hudpos->get_clip_pos());
 	layout_.stance_pos = pos_record2(p_hudpos->get_stance_pos());
 	layout_.health_rect = rect_record(p_hudpos->get_health_rect());
@@ -473,6 +539,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.weapon_text = color_of("weapon_textcolor", layout_.weapon_text);
 	layout_.stance_tint = color_of("stanceicon_color", layout_.stance_tint);
 	layout_.heat_border = color_of("heat_border", layout_.heat_border);
+	// The whole stance colour triple: the vehicle panel bands its seats with the
+	// same three the stance bar reads (retail: the good/middle/bad arms of the
+	// seat loop in HUD_DrawVehicleHealthBars @0x5a4fd0, see docs/interface/hud-re.md).
+	layout_.stance_good = color_of("stancecolor_good", layout_.stance_good);
+	layout_.stance_middle = color_of("stancecolor_middle", layout_.stance_middle);
 	layout_.stance_bad = color_of("stancecolor_bad", layout_.stance_bad);
 
 	const Vector3 fade = p_hudpos->get_alpha_fade();
@@ -520,6 +591,27 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// constant (retail: the 4x4 cell grid, see docs/interface/hud-re.md).
 		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
+	}
+	{
+		// The AAS zone status panel's three team-icon atlases and the
+		// other-team tile (retail: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga
+		// team 1, R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile
+		// for everyone else's zones @0x59e10e, see docs/interface/hud-re.md).
+		// The OWN-zone tile slot stays empty: its loader is unwitnessed (the
+		// textureId @0x27239D4 writer), and an unresolved slot draws no tile.
+		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga");
+		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga");
+		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga");
+		const Ref<Texture2D> tile_other = load_hud_texture_("lfp_alf.tga");
+		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
+		textures_[opennova::hud::kHudTexLfpTeam2] = team2;
+		textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
+		textures_[opennova::hud::kHudTexLfpTileOther] = tile_other;
+		layout_.lfp_icon_texture_valid[0] = team1.is_valid();
+		layout_.lfp_icon_texture_valid[1] = team2.is_valid();
+		layout_.lfp_icon_texture_valid[2] = neutral.is_valid();
+		layout_.lfp_tile_own_texture_valid = false;
+		layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
 	}
 
 	// HUDSTANCE's explicit id addresses the retail slot arrays; file order is
@@ -724,6 +816,93 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 		p_sim->fill_scoreboard_rows(sb.rows);
 	} else {
 		sb.rows.clear();
+	}
+	queue_redraw();
+}
+
+void HudOverlay::set_vehicle_panel(bool p_shown, const Dictionary &p_block, int p_stance,
+		Simulation *p_sim) {
+	opennova::hud::HudVehiclePanelState &vp = state_.vehicle_panel;
+	if (!p_shown) {
+		vp = opennova::hud::HudVehiclePanelState{};
+		textures_[opennova::hud::kHudTexVehiclePanel] = Ref<Texture2D>();
+		vehicle_panel_sid_ = String();
+		queue_redraw();
+		return;
+	}
+	const DefVehicleHudBlock block = vehicle_hud_block_from_dict(p_block);
+	// The silhouette is per item: reload the slot when the rider's vehicle
+	// changes (the set_weapon per-weapon art idiom).
+	const String sid = p_block.get("sid", String());
+	if (sid != vehicle_panel_sid_ || textures_[opennova::hud::kHudTexVehiclePanel].is_null()) {
+		textures_[opennova::hud::kHudTexVehiclePanel] =
+				load_hud_texture_(p_block.get("interface", String()));
+		vehicle_panel_sid_ = sid;
+	}
+	const Ref<Texture2D> silhouette = textures_[opennova::hud::kHudTexVehiclePanel];
+	vp.silhouette_valid = silhouette.is_valid() && silhouette->get_width() > 0 &&
+			silhouette->get_height() > 0;
+	vp.silhouette_w = vp.silhouette_valid ? silhouette->get_width() : 0;
+	vp.silhouette_h = vp.silhouette_valid ? silhouette->get_height() : 0;
+	// The base is the HUDVEHSTANCEPOS anchor plus the rider's HUDSTANCE
+	// offset — the panel rides the stance icon.
+	const int stance = CLAMP(p_stance, 0, 5);
+	vp.anchor_x = veh_stance_pos_.x;
+	vp.anchor_y = veh_stance_pos_.y;
+	vp.stance_offset_x = layout_.stance_offset_x[static_cast<size_t>(stance)];
+	vp.stance_offset_y = layout_.stance_offset_y[static_cast<size_t>(stance)];
+	// Hull band + seat rows straight from the sim's feed, no script round-trip
+	// (the set_scoreboard shape: the state from the args, the rows from the
+	// sim; a null sim leaves the rows empty). The panel's one witnessed gate
+	// is the interface texture: without it the whole panel is skipped, seats
+	// included (retail: HUD_DrawVehicleHealthBars @0x5a5038 tests the loaded
+	// texture's w/h, see docs/interface/hud-re.md).
+	bool riding = true;
+	if (p_sim != nullptr) {
+		riding = p_sim->fill_vehicle_panel(block, vp);
+	} else {
+		vp.seats.clear();
+		vp.hull_health = 0;
+		vp.hull_max_health = 0;
+	}
+	vp.shown = vp.silhouette_valid && riding;
+	if (!vp.shown) vp.seats.clear();
+	queue_redraw();
+}
+
+void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
+	compiler_.push_chat_line(p_text.utf8().get_data(),
+			static_cast<uint32_t>(p_argb), state_.ticks);
+	queue_redraw();
+}
+
+void HudOverlay::set_message_log_shown(bool p_shown) {
+	state_.message_log_shown = p_shown;
+	queue_redraw();
+}
+
+void HudOverlay::set_message_log_title(const String &p_title) {
+	state_.message_log_title = p_title.utf8().get_data();
+	queue_redraw();
+}
+
+void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
+		int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim) {
+	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
+	lp.local_team = p_local_team;
+	lp.frame_counter = p_frame_counter;
+	// The conquest arm is the other branch of the same drawer and is
+	// unmodelled (retail: g_GameType == 0x50010 @0x5a24a1).
+	lp.conquest_mode = static_cast<uint32_t>(p_game_type) ==
+			opennova::game_type::kConquerAndControl;
+	lp.under_attack_text =
+			String(p_strings.get("under_attack", "")).utf8().get_data();
+	lp.ready_text = String(p_strings.get("ready", "")).utf8().get_data();
+	if (p_shown && p_sim != nullptr) {
+		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
+	} else {
+		lp.shown = false;
+		lp.zones.clear();
 	}
 	queue_redraw();
 }
@@ -953,6 +1132,9 @@ void HudOverlay::set_minimap_state(const Vector2 &p_mission_position,
 		marker.half_x_q16 = p_snapshot[base + 13];
 		marker.half_y_q16 = p_snapshot[base + 14];
 		marker.floor_px = static_cast<uint8_t>(p_snapshot[base + 15]);
+		// v4: the local-team medic bit the marker walk turns into the
+		// red-cross plate in place of the blip.
+		marker.medic = p_snapshot[base + 16] != 0 ? 1 : 0;
 		state_.minimap.markers.push_back(marker);
 	}
 	queue_redraw();

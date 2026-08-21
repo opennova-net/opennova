@@ -204,6 +204,11 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
 	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
+	ClassDB::bind_method(D_METHOD("drain_chat_lines"), &Simulation::drain_chat_lines);
+	ClassDB::bind_method(D_METHOD("get_vehicle_panel_view"),
+			&Simulation::get_vehicle_panel_view);
+	ClassDB::bind_method(D_METHOD("get_session_game_type"),
+			&Simulation::get_session_game_type);
 	ClassDB::bind_method(D_METHOD("get_scoreboard"), &Simulation::get_scoreboard);
 	ClassDB::bind_method(
 			D_METHOD("format_feed_line", "template", "attacker", "victim",

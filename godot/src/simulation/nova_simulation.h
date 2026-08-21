@@ -26,6 +26,7 @@
 
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
+#include <hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
 #include <hud/hud_minimap.h>
 #include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <terrain_query/height_field.h>
@@ -333,10 +334,14 @@ public:
 		DEFAULT_PLAYER_FOV_H_DEG = 80,
 		// Header {version, stride, row_count} for the retained minimap rows.
 		// v3 appends the client-resolved draw policy: {policy_flags (bit0
-		// rotate, bit1 footprint), half_x_q16, half_y_q16, floor_px}.
-		HUD_MINIMAP_SNAPSHOT_VERSION = 3,
+		// rotate, bit1 footprint), half_x_q16, half_y_q16, floor_px}; v4
+		// appends {medic} — the local-team charattr Medic bit the map marker
+		// pass draws the red-cross plate for (retail: draw_entity_labels_and_markers
+		// @0x5a49e0 — AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the
+		// local-team gate @0x5a4ac6/@0x5a4acf, see docs/interface/hud-re.md).
+		HUD_MINIMAP_SNAPSHOT_VERSION = 4,
 		HUD_MINIMAP_HEADER_SIZE = 3,
-		HUD_MINIMAP_STRIDE = 16,
+		HUD_MINIMAP_STRIDE = 17,
 	};
 
 	// Spawn-origin provenance (world/entity.h): (kind << 24) | (index &
@@ -1540,6 +1545,28 @@ public:
 	// runtime exists.
 	bool fill_scoreboard_rows(
 			std::vector<opennova::hud::ScoreboardEntry> &r_rows) const;
+	// The mounted-vehicle panel (hud/hud_vehicle_panel.h, world/vehicle_panel_feed.h):
+	// {shown, item_id} — the panel's root vehicle (the attached gun child
+	// re-roots to its parent), whose items.def sid the shell joins to its
+	// VEHICLE_HUD block. Read-only.
+	Dictionary get_vehicle_panel_view() const;
+	// The native panel handoff (NOT ClassDB-bound; HudOverlay::set_vehicle_panel
+	// calls it): the hull's health band + one row per authored seat pair
+	// (occupancy, rider health, the seat-select digit, the own seat). Returns
+	// false (rows cleared) when the local player rides nothing.
+	bool fill_vehicle_panel(const DefVehicleHudBlock &p_block,
+			opennova::hud::HudVehiclePanelState &r_state) const;
+	// The AAS zone status panel feed (world/lfp_feed.h), NOT ClassDB-bound:
+	// one HudLfpZone per spawn-zone list entry joined with the client
+	// runtime's zone-timer entry and the zone's transient minimap slot flags.
+	bool fill_lfp_zones(int p_local_team,
+			std::vector<opennova::hud::HudLfpZone> &r_zones);
+	// The in-match game type for every role (joiner header / HostClient view).
+	int64_t get_session_game_type() const;
+	// The S2C 0x14 player-chat lines since the last drain, each routed by the
+	// witnessed channel table: [{text, argb, sink, channel}] where sink 0 =
+	// the SYSTEM ring, 1 = the CHAT ring, 2 = the message queue, 3 = channel 3.
+	Array drain_chat_lines();
 	// Substitute actor names into a canned template (retail: Chat_FormatMessage
 	// @0x422C60): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so

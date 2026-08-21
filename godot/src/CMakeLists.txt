@@ -104,6 +104,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation_player_weapon.cpp
     simulation/nova_simulation_present.cpp
     simulation/nova_simulation_scars.cpp
+    simulation/nova_simulation_hud_feeds.cpp
     world/nova_scar_presenter.cpp
     wac/nova_wac_program.cpp
     lwf/nova_lwf_data.cpp

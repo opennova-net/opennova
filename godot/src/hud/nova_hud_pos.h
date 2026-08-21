@@ -174,6 +174,10 @@ public:
 	Rect2i get_powerbar_rect() const;
 	Vector2i get_stance_pos() const;
 	Vector2i get_veh_stance_pos() const;
+	// LFP_FLAGS — the AAS zone status panel's anchor pair (the group's right
+	// edge and its row base; retail g_hudZonePanelX/Y, written by the hudpos
+	// parse @0x5a0563/@0x5a057b).
+	Vector2i get_lfp_flags() const;
 	// The 4-field positioned-text records (x, y, hidden, align) — the parse
 	// and hidden-gate witnesses live at the pos4 helper in the .cpp.
 	Vector4i get_ammo_count_pos() const;

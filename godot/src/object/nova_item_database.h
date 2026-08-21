@@ -47,6 +47,10 @@ private:
 	struct Item {
 		int id = 0;
 		int type = 0;
+		// The items.def `sid` token — the key hudpos.def's VEHICLE_HUD blocks
+		// commit against (retail: HUD_ParseHudposToken @0x59F370 VEHICLE_END
+		// walks the item table by sid; see docs/interface/hud-re.md).
+		String sid;
 		uint32_t attrib = 0; // items.def ItemDefAttrib (+0x54); 0x100000 = AIData (AI class)
 		uint32_t attrib2 = 0; // items.def ItemDefAttrib2 (+0x58); bit 6 = portal-weldable
 		String display_name;

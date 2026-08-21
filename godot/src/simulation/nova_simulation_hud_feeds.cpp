@@ -1,0 +1,143 @@
+// The HUD panel feeds of the wire-up slice: the mounted-vehicle panel, the
+// AAS zone status panel, the player-chat ring, and the session game type the
+// shell's panel lanes gate on. Every witnessed rule lives in the engine
+// (world/vehicle_panel_feed.h, world/lfp_feed.h, hud/feed_format.h); this TU is
+// the Simulation seam that resolves the local player, the client runtime's
+// zone-timer table and minimap banks, and the replica pipeline's chat drain
+// for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape).
+
+#include "simulation/nova_simulation_internal.h"
+
+#include <hud/feed_format.h>
+#include <netsim/client_state.h>
+#include <world/entity.h>
+#include <world/lfp_feed.h>
+#include <world/vehicle_panel_feed.h>
+
+using namespace novasim;
+
+namespace godot {
+
+Dictionary Simulation::get_vehicle_panel_view() const {
+	// The panel describes the vehicle the local player rides — the attached
+	// gun child re-roots to its parent vehicle, and every mount qualifies
+	// (world::vehicle_panel_root carries the witness). The shell joins the
+	// root's items.def sid to its VEHICLE_HUD block; the panel's only gate is
+	// the block's interface texture (retail: HUD_DrawVehicleHealthBars
+	// @0x5a4fd0 draws nothing without it, see docs/interface/hud-re.md).
+	Dictionary out;
+	out["shown"] = false;
+	out["item_id"] = 0;
+	if (!world_ || !world_->cached.local_player.valid()) return out;
+	const opennova::world::Entity *local =
+			world_->registry.get(world_->cached.local_player);
+	if (local == nullptr) return out;
+	const opennova::world::EntityHandle root_h =
+			opennova::world::vehicle_panel_root(*world_, *local);
+	const opennova::world::Entity *root =
+			root_h.valid() ? world_->registry.get(root_h) : nullptr;
+	if (root == nullptr) return out;
+	out["shown"] = true;
+	out["item_id"] = root->item_id;
+	return out;
+}
+
+bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
+		opennova::hud::HudVehiclePanelState &r_state) const {
+	r_state.seats.clear();
+	r_state.hull_health = 0;
+	r_state.hull_max_health = 0;
+	if (!world_ || !world_->cached.local_player.valid()) return false;
+	const opennova::world::Entity *local =
+			world_->registry.get(world_->cached.local_player);
+	if (local == nullptr) return false;
+	const opennova::world::EntityHandle root_h =
+			opennova::world::vehicle_panel_root(*world_, *local);
+	const opennova::world::Entity *root =
+			root_h.valid() ? world_->registry.get(root_h) : nullptr;
+	if (root == nullptr) return false;
+	// The silhouette bands on the HULL's own health, not any rider's
+	// (retail: the root's health band @0x5a50d1).
+	r_state.hull_health = root->health;
+	r_state.hull_max_health = root->health_max;
+	opennova::world::fill_vehicle_panel_seats(*world_, root_h,
+			world_->cached.local_player, p_block, r_state.seats);
+	return true;
+}
+
+bool Simulation::fill_lfp_zones(int p_local_team,
+		std::vector<opennova::hud::HudLfpZone> &r_zones) {
+	r_zones.clear();
+	if (!world_ || !runtime_ || !world_->cached.local_player.valid()) return false;
+	const opennova::world::Entity *local =
+			world_->registry.get(world_->cached.local_player);
+	if (local == nullptr) return false;
+	// The zone-timer entry as the marker reads it: the client runtime's
+	// 13-DWORD image of the retail shared timer list (present only once a
+	// 0x6F value has arrived, which is when retail's CProximityList_FindEntryById
+	// @0x598730 finds one), plus the two contest bytes the same message carries.
+	const opennova::world::LfpZoneTimerLookup timer =
+			[this](opennova::world::EntityHandle h, opennova::world::LfpZoneTimer &t) {
+				const auto it = runtime_->zone_states().find(h.packed);
+				if (it == runtime_->zone_states().end() || !it->second.has_value)
+					return false;
+				const auto &e = it->second.entry;
+				t.team = e.mode_a;
+				t.value = e.value_current;
+				t.control = e.value_target;
+				t.limit = e.value_limit;
+				t.rate = e.value_rate;
+				t.active = e.value_active;
+				t.count_owner = e.contest_owner;
+				t.count_other = e.contest_other;
+				return true;
+			};
+	// The transient minimap slot's flag byte for the zone (+4 & 0xC0 gates the
+	// marker; retail walks the 1160-slot transient bank @0x5a2517..0x5a256e).
+	// The 0x6B ring slots land in the special bank here, so both are searched.
+	const opennova::world::LfpCaptureFlagsLookup capture_flags =
+			[this](opennova::world::EntityHandle h) -> uint8_t {
+				const opennova::netsim::ClientMinimapState &map =
+						runtime_->state().minimap;
+				for (const auto &slot : map.transient) {
+					if (slot.active && slot.handle == h.packed) return slot.flags;
+				}
+				for (const auto &slot : map.special) {
+					if (slot.active && slot.handle == h.packed) return slot.flags;
+				}
+				return 0;
+			};
+	opennova::world::build_lfp_zones(*world_, deploy_zone_registry(), *local,
+			p_local_team, timer, capture_flags, r_zones);
+	return true;
+}
+
+int64_t Simulation::get_session_game_type() const {
+	// The in-match game type for EVERY role — the joiner's decoded header or
+	// the HostClient view's own (retail g_GameType @0x24d2128); the AAS zone
+	// panel and the Tab board key their arms on it.
+	return runtime_ ? static_cast<int64_t>(runtime_->game_type()) : 0;
+}
+
+Array Simulation::drain_chat_lines() {
+	// The S2C 0x14 player-chat lines folded by the replica pipeline since the
+	// last drain, each already routed by the witnessed channel table
+	// (hud/feed_format.h): sink 0 = the SYSTEM ring, 1 = the CHAT ring,
+	// 2 = the message queue (no ring), 3 = channel 3 (the unported third ring).
+	Array out;
+	if (!runtime_) return out;
+	for (const opennova::netsim::ClientChatLine &line :
+			runtime_->view().drain_chat_lines()) {
+		Dictionary d;
+		d["text"] = String::utf8(line.text.c_str());
+		d["argb"] = static_cast<int64_t>(
+				opennova::hud::chat_channel_color(line.channel));
+		d["sink"] = static_cast<int>(
+				opennova::hud::chat_channel_sink(line.channel));
+		d["channel"] = static_cast<int>(line.channel);
+		out.push_back(d);
+	}
+	return out;
+}
+
+} // namespace godot
