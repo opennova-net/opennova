@@ -262,6 +262,26 @@ static void stage_player_vehicle_input(Entity &veh, Entity &occ,
     }
 }
 
+// The occupant whose input this machine should consume. Retail's gate is
+// `(occ->Flags & 0x100) && (occ == g_local_player_entity || is_authority)` — the
+// AUTHORITY runs the input block for ANY player occupant, not only its own local
+// player. That distinction is invisible on a listen host flying its own
+// aircraft, and decisive when a JOINER is the pilot: the host owns the mover, so
+// insisting on the host's local player left a remote pilot commanding nothing.
+// [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the ground twin is
+//  Entity_UpdateVehiclePhysics @0x48b0ff]
+static Entity *resolve_piloting_player(World &world, Entity &veh,
+                                       const VehicleTraits &traits) {
+    if (!traits.player_control) return nullptr;
+    Entity *occ = resolve_vehicle_controller(world, veh);
+    if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0 ||
+        !occ->alive || occ->health <= 0)
+        return nullptr;
+    const bool is_authority = world.ai != nullptr && world.ai->is_authority;
+    if (!is_authority && occ->handle != world.cached.local_player) return nullptr;
+    return occ;
+}
+
 static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
                                                 const VehicleTraits &traits) {
     if (!traits.player_control || !world.cached.local_player.valid()) return nullptr;
@@ -1982,7 +2002,7 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // to be admitted explicitly or the pilot commands nothing.
     // [orig: the class-table dispatch -> Entity_UpdateAircraftPhysics @0x490310]
     const bool player_piloted =
-            resolve_local_vehicle_controller(world, veh, traits) != nullptr;
+            resolve_piloting_player(world, veh, traits) != nullptr;
     if (!m.net_predicted && !ai_drive && !player_piloted) return;
     if (!m.yaw_seeded) {
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
@@ -2012,7 +2032,13 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
     // {8,10,15,20,25,32}, yaw (d+10)/20 over 20 ticks, Z stepped like X/Y.
     // The authority AI leg skips it: no wire targets exist on the host row.
-    if (!ai_drive && m.net_interp_progress == 0) {
+    // The interp block consumes RECEIVED state, so it belongs only to rows the
+    // wire drives. Before player pilots reached this function, `!ai_drive`
+    // implied net_predicted by construction; admitting them broke that
+    // invariant and snapped a locally-piloted hull to the never-received
+    // smooth target at the world origin. Gate it explicitly.
+    // [orig: @0x49095E..0x490C98 is the CLIENT interp leg]
+    if (m.net_predicted && !ai_drive && m.net_interp_progress == 0) {
         const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
         const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
         const int64_t dz = int64_t(m.net_smooth_target[2]) - pz;
@@ -2093,20 +2119,41 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         // Commands already staged by AiSystem::chel_ai_drive — the AI leg fills
         // the same registers the pilot input block does. [orig: one function]
     } else if (Entity *local_pilot =
-                       resolve_local_vehicle_controller(world, veh, traits)) {
+                       resolve_piloting_player(world, veh, traits)) {
         stage_air_vehicle_input(veh, *local_pilot, traits, ground, pz);
-        m.cmd_speed = io::bam_sar(
-                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
-        m.cmd_lateral_speed = io::bam_sar(
-                io::bam_add(m.cmd_lateral_speed, m.net_recv_lat), 1);
-    } else {
+        // The blend reconciles the pilot's staged command against what the
+        // SERVER echoed back, so it only means anything on a row the wire
+        // drives. An authority-owned hull receives nothing, and blending
+        // against a zero mirror halves the pilot's command every tick.
+        if (m.net_predicted) {
+            m.cmd_speed = io::bam_sar(
+                    io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+            m.cmd_lateral_speed = io::bam_sar(
+                    io::bam_add(m.cmd_lateral_speed, m.net_recv_lat), 1);
+        }
+    } else if (m.net_predicted) {
         m.cmd_speed = m.net_recv_speed;
         m.cmd_lateral_speed = m.net_recv_lat;
         m.steer_target_bam = m.net_recv_steer_bam;
     }
 
-    // ---- 2a. Client engine-off override [orig: LABEL_305 @0x491C95..0x491CC2].
-    if (!m.net_engine_on) {
+    // ---- 2a. Engine flag. Retail splits this by role: the AUTHORITY DERIVES the
+    // flag from the climb-above-ground register every tick, and only a CLIENT
+    // runs the engine-off override (`if (!is_authority) goto LABEL_305`). We
+    // fold [548] into the absolute target, so the climb is
+    // (net_alt_target - ground) and the derivation is the same test against it.
+    //
+    // Without this upkeep a player-piloted aircraft deadlocks: the override
+    // zeroes the cyclic because the engine reads off, and nothing ever turns the
+    // engine on. It was recorded as the deferred "authority engine-flag upkeep".
+    // [orig: LABEL_328 @0x491C7x — `if (brain[137]) Flags |= 0x80 else &= ~0x80`,
+    //  reached only when is_authority; LABEL_305 is the client override]
+    const bool motor_is_authority = world.ai != nullptr && world.ai->is_authority;
+    if (motor_is_authority) {
+        const int32_t climb =
+                ground != INT32_MIN ? io::bam_sub(m.net_alt_target, ground) : 0;
+        m.net_engine_on = climb != 0;
+    } else if (!m.net_engine_on) {
         if (ground != INT32_MIN) m.net_alt_target = ground - 0x2000;
         m.cmd_speed = 0;
         m.cmd_lateral_speed = 0;

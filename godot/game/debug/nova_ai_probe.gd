@@ -94,6 +94,11 @@ func tick(world: GameWorld, delta: float) -> void:
 				"rs": int(card.get("rotor_speed", 0)),
 				"rp": int(card.get("rotor_phase", 0)),
 				"vf": int(card.get("veh_family", -1)),
+				"cf": int(card.get("cmd_fwd", 0)),
+				"cl": int(card.get("cmd_lat", 0)),
+				"at": int(card.get("alt_tgt", 0)),
+				"eo": bool(card.get("engine_on", false)),
+				"pm": int(card.get("pilot_move", -1)),
 		})
 	if cards.is_empty():
 		return
@@ -208,7 +213,12 @@ func _crew_tick(world: GameWorld) -> void:
 		return
 	var pilot := OS.get_environment("NW_CREW_PILOT").to_int()
 	var veh := OS.get_environment("NW_CREW_VEHICLE").to_int()
-	var err := sim.debug_crew_vehicle(pilot, veh)
+	var err: int
+	if pilot == 0:
+		# NW_CREW_PILOT unset -> seat the LOCAL PLAYER as the pilot.
+		err = sim.debug_crew_local_player(veh)
+	else:
+		err = sim.debug_crew_vehicle(pilot, veh)
 	_crew_done = true
 	if not _path.is_empty():
 		var f := FileAccess.open(_path, FileAccess.READ_WRITE)

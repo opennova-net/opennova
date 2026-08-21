@@ -306,6 +306,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &Simulation::debug_set_entity_health);
 	ClassDB::bind_method(D_METHOD("debug_crew_vehicle", "occupant_ssn", "vehicle_ssn"),
 	                     &Simulation::debug_crew_vehicle);
+	ClassDB::bind_method(D_METHOD("debug_crew_local_player", "vehicle_ssn"),
+	                     &Simulation::debug_crew_local_player);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &Simulation::debug_set_entity_position);
 	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &Simulation::get_world_entity_debug);
 	ClassDB::bind_method(D_METHOD("get_client_entity_debug", "handle"), &Simulation::get_client_entity_debug);

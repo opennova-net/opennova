@@ -87,6 +87,22 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 	# so a player who opened the armory while running would keep running under it.
 	var state := _read_input_state() if gameplay_input_active else {}
 	var sim = _sim()
+	# Test automation (net-capture branch): NW_FLY_HOLD holds a movement key so an
+	# unattended session can fly a helicopter the player has been seated in.
+	# Value is a direction word: f/b/l/r. Inert without the env var.
+	var fly_hold := OS.get_environment("NW_FLY_HOLD")
+	if not fly_hold.is_empty():
+		# u/d ride the LEAN keys: retail packs lean_left/lean_right as MoveOrder
+		# bits 0x40/0x80, and the aircraft mover reads those same two bits as
+		# descend/ascend - the collective is the lean pair, overloaded.
+		state = {
+			"forward": fly_hold.contains("f"),
+			"back": fly_hold.contains("b"),
+			"left": fly_hold.contains("l"),
+			"right": fly_hold.contains("r"),
+			"lean_left": fly_hold.contains("d"),
+			"lean_right": fly_hold.contains("u"),
+		}
 	frame_input.set_movement(
 			_bool(state, "forward"),
 			_bool(state, "back"),

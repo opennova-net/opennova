@@ -941,6 +941,21 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 		const opennova::world::VehicleTraits *vt =
 				world_->vehicle_traits.get(ve->item_id);
 		out["veh_family"] = vt != nullptr ? int(vt->family) : -1;
+		// Flight-command chain, so a "the helicopter will not move" report can
+		// name WHICH link is dead: the pilot's packed MoveOrder, the staged
+		// cyclic pair, and the altitude target.
+		out["cmd_fwd"] = ve->veh.cmd_speed;
+		out["cmd_lat"] = ve->veh.cmd_lateral_speed;
+		out["alt_tgt"] = ve->veh.net_alt_target;
+		out["engine_on"] = ve->veh.net_engine_on;
+		int pilot_move = -1;
+		for (const opennova::world::Seat &st : ve->seats) {
+			if (!st.occupant.valid()) continue;
+			const opennova::world::Entity *oc = world_->registry.get(st.occupant);
+			if (oc != nullptr && oc->player_class != 0)
+				pilot_move = static_cast<int>(oc->net_move_input);
+		}
+		out["pilot_move"] = pilot_move;
 	}
 	out["infantry"] = e->inf.active;
 	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;

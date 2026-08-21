@@ -1055,6 +1055,21 @@ Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 // rotor only spins for a control-seat claimant, so a screenshot of turning
 // blades needs a pilot in the chair; 05TRcoop parks its five helicopters empty
 // until the (player-gated) script sends a crew.
+// Debug: seat the LOCAL PLAYER in a vehicle's control seat, by the vehicle's
+// authored SSN. Mounting by SSN is not enough for the player, whose entity is
+// spawned at deploy and carries no authored id, so this resolves it from the
+// world's cached local-player handle.
+Error Simulation::debug_crew_local_player(int p_vehicle_ssn) {
+	if (!world_) return ERR_UNAVAILABLE;
+	const opennova::world::Entity *lp =
+			world_->registry.get(world_->cached.local_player);
+	if (lp == nullptr) return ERR_UNAVAILABLE;
+	return world_->commands.mount(static_cast<uint16_t>(lp->net_id),
+	                              static_cast<uint16_t>(p_vehicle_ssn))
+			? OK
+			: ERR_INVALID_PARAMETER;
+}
+
 Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 	if (!world_) return ERR_UNAVAILABLE;
 	return world_->commands.mount(static_cast<uint16_t>(p_occupant_ssn),
