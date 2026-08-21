@@ -308,6 +308,30 @@ int main() {
 		}
 	}
 
+	// Every MisvarChange, fired or not, with its full trigger chain. 05TRcoop's
+	// WAC gates its whole co-op choreography on eq(vN,1), and retail starts the
+	// variables at ZERO (memset @0x4F91F0), so a BMS event has to seed them
+	// first. This shows which event that is and what holds it shut.
+	std::printf("MisvarChange events (var <- value, and the chain that gates them):\n");
+	for (size_t mi = 0; mi < evs.size(); ++mi) {
+		bool has_misvar = false;
+		for (const bms::Action &a : evs[mi].actions)
+			if (a.action_type == bms::ActionType::MisvarChange) has_misvar = true;
+		if (!has_misvar) continue;
+		std::printf("  event %3zu %-11s", mi,
+		            first_fire[mi] >= 0 ? "FIRED" : "never");
+		for (const bms::Action &a : evs[mi].actions)
+			if (a.action_type == bms::ActionType::MisvarChange)
+				std::printf(" [v%d <- %d]", a.param1, a.param2);
+		std::printf("  <=");
+		if (evs[mi].triggers.empty()) std::printf(" (no triggers: always true)");
+		for (const bms::Trigger &t : evs[mi].triggers)
+			std::printf(" {main %d sub %d p(%d,%d,%d) cond 0x%x}",
+			            static_cast<int32_t>(t.main_type), t.sub_type,
+			            t.param1, t.param2, t.param3, t.condition_flags);
+		std::printf("\n");
+	}
+
 	std::printf("gates on the AI-vs-AI redirects (never-fired events only):\n");
 	int shown = 0;
 	for (size_t i = 0; i < evs.size() && shown < 12; ++i) {
