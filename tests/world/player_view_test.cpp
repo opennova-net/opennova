@@ -511,6 +511,113 @@ void test_motion_lead_tracker() {
     CHECK(std::abs(out[2]) <= 4096);
 }
 
+// The FP camera shake: counter lifecycle and the three-slice IIR.
+// [orig: the mode-0 block in Camera_ComputeThirdPersonView @0x437D10; arms
+//  @0x4305c1 / @0x4AF837 / @0x57EB7D; decay @0x4DE590]
+void test_camera_shake() {
+    using namespace opennova::world;
+
+    // A zero counter produces NOTHING and leaves the filters untouched --
+    // retail gates the whole block, so a settled camera does not quietly
+    // keep filtering noise.
+    {
+        CameraShakeState st;
+        st.roll = 12345; st.pitch = -999; st.yaw = 777;
+        int32_t y = 1, pch = 1, r = 1;
+        camera_shake_sample(st, 0xDEADBEEFu, y, pch, r);
+        CHECK(y == 0 && pch == 0 && r == 0);
+        CHECK(st.roll == 12345 && st.pitch == -999 && st.yaw == 777);
+    }
+
+    // The store cap is 255, and arming saturates rather than wrapping.
+    {
+        CameraShakeState st;
+        camera_shake_arm(st, kShakeArmHealthDrop);
+        CHECK(st.counter == 10);
+        camera_shake_arm(st, kShakeArmNearMiss);
+        CHECK(st.counter == 30);
+        for (int i = 0; i < 40; ++i) camera_shake_arm(st, kShakeArmNearMiss);
+        CHECK(st.counter == kShakeStoreMax);
+    }
+
+    // Decay is -2 with a FLOOR, not a clamp: an odd count reaches exactly 0
+    // instead of idling at 1 forever.
+    {
+        CameraShakeState st;
+        st.counter = 5;
+        camera_shake_decay(st);  CHECK(st.counter == 3);
+        camera_shake_decay(st);  CHECK(st.counter == 1);
+        camera_shake_decay(st);  CHECK(st.counter == 0);
+        camera_shake_decay(st);  CHECK(st.counter == 0);
+    }
+
+    // Sampling clamps at 64 while the STORE cap is 255, so arming past 64
+    // buys DURATION, never amplitude: 64 and 255 must produce identical
+    // deltas from the same PRNG word and filter state.
+    {
+        CameraShakeState a; a.counter = 64;
+        CameraShakeState b; b.counter = kShakeStoreMax;
+        int32_t ay, ap, ar, by, bp, br;
+        camera_shake_sample(a, 0x12333333u, ay, ap, ar);
+        camera_shake_sample(b, 0x12333333u, by, bp, br);
+        CHECK(ay == by && ap == bp && ar == br);
+    }
+
+    // The three axes are slices of ONE word, so they differ from each other
+    // but are reproducible from the same input -- a re-run must match, and
+    // the axes must not be identical (which is what an accidental
+    // single-slice-for-all-three would produce).
+    {
+        CameraShakeState a; a.counter = 32;
+        CameraShakeState b; b.counter = 32;
+        int32_t ay, ap, ar, by, bp, br;
+        camera_shake_sample(a, 0x89ABCDEFu, ay, ap, ar);
+        camera_shake_sample(b, 0x89ABCDEFu, by, bp, br);
+        CHECK(ay == by && ap == bp && ar == br);
+        CHECK(!(ay == ap && ap == ar));
+    }
+
+    // The filter and slices, pinned by HAND-COMPUTED values rather than a
+    // convergence guess. With prng = 0x20 and a zeroed filter:
+    //   roll  n = (int32)(0x20 << 1)  >> 5 = 64      >> 5 = 2
+    //             s = (7*0 + 2)  >> 3 = 0   -> delta (64*0)     >> 6 = 0
+    //   pitch n = (int32)(0x20 << 17) >> 5 = 4194304 >> 5 = 131072
+    //             s = 131072     >> 3 = 16384 -> delta (64*16384) >> 6 = 16384
+    //   yaw   n = (int32)(0x20 << 9)  >> 5 = 16384   >> 5 = 512
+    //             s = 512        >> 3 = 64    -> delta (64*64)    >> 6 = 64
+    // A different slice order, shift, or filter constant moves these.
+    {
+        CameraShakeState st; st.counter = 64;
+        int32_t y, pch, r;
+        camera_shake_sample(st, 0x20u, y, pch, r);
+        CHECK(st.roll == 0 && st.pitch == 16384 && st.yaw == 64);
+        CHECK(r == 0 && pch == 16384 && y == 64);
+    }
+
+    // Feeding the same word again advances the filter by the same rule from
+    // its NEW state, so the second sample differs from the first -- the
+    // accumulators are state, not a per-call recompute.
+    {
+        CameraShakeState st; st.counter = 64;
+        int32_t y1, p1, r1, y2, p2, r2;
+        camera_shake_sample(st, 0x20u, y1, p1, r1);
+        camera_shake_sample(st, 0x20u, y2, p2, r2);
+        // yaw: s = (7*64 + 512) >> 3 = 120
+        CHECK(st.yaw == 120 && y2 == 120);
+        CHECK(y2 != y1);
+    }
+
+    // A respawn zeroes the COUNTER only; the filters survive by design.
+    {
+        CameraShakeState st; st.counter = 40;
+        int32_t y, pch, r;
+        camera_shake_sample(st, 0xA5A5A5A5u, y, pch, r);
+        const int32_t kept_yaw = st.yaw;
+        st.counter = 0;   // the respawn write
+        CHECK(st.yaw == kept_yaw);
+    }
+}
+
 int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
@@ -526,6 +633,7 @@ int main() {
     test_tp_effective_distance_march();
     test_compose_camera_first_person();
     test_compose_camera_terrain_floor();
+    test_camera_shake();
     test_compose_camera_third_person();
     test_bias_view_units();
     test_motion_lead_tracker();

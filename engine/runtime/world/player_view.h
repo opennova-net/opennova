@@ -250,6 +250,66 @@ float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam);
 // stay a tracked deferral (net-re §5.39).
 float player_view_tp_effective_distance(float distance);
 
+// THE FIRST-PERSON CAMERA SHAKE. A single counter drives an angular jitter on
+// the FP view rotation; there is no positional component and no flinch.
+//
+// The counter is stored 0..255 and armed from three sites: a HEALTH DROP adds
+// 10 [orig: @0x4305c1 — the `newHealth < Health` arm, capped @0x4305cb], an
+// explosive near-miss adds 20 [orig: @0x4AF837 — gated on the ammo def's +46
+// word and armed BEFORE the damage gate, so a near-miss that deals no damage
+// still shakes], and a quake HARD-SETS 32 [orig: @0x57EB7D]. It decays by 2
+// per tick with a floor rather than a clamp — at or below 1 it snaps to 0
+// [orig: @0x4DE590], so an odd count cannot idle at 1 forever. A respawn
+// zeroes the counter and NOTHING else [orig: @0x4B10D8]: the IIR
+// accumulators deliberately survive, so the first tick after a respawn
+// resumes from the previous filter state.
+inline constexpr int kShakeArmHealthDrop = 10;
+inline constexpr int kShakeArmNearMiss = 20;
+inline constexpr int kShakeQuakeLevel = 32;
+inline constexpr int kShakeDecayPerTick = 2;
+inline constexpr int kShakeStoreMax = 255;
+// Sampling clamps to 64 even though the STORE cap is 255, so the arms above
+// buy DURATION past 64, never amplitude [orig: the > 64 test @0x438...].
+inline constexpr int kShakeSampleMax = 64;
+
+// The three one-pole IIR accumulators, in BAM32. They persist across ticks
+// and across respawns.
+struct CameraShakeState {
+	int32_t counter = 0;  // the armed/decaying level
+	int32_t roll = 0;     // dword_A89158
+	int32_t pitch = 0;    // dword_A89154
+	int32_t yaw = 0;      // dword_A89150
+};
+
+// Arm the counter, saturating at the 255 STORE cap.
+inline void camera_shake_arm(CameraShakeState &st, int amount) {
+	st.counter += amount;
+	if (st.counter > kShakeStoreMax) st.counter = kShakeStoreMax;
+}
+
+// One tick of decay [orig: @0x4DE590]: at or below 1 the counter snaps to 0,
+// otherwise it drops by 2.
+inline void camera_shake_decay(CameraShakeState &st) {
+	if (st.counter <= 1) st.counter = 0;
+	else st.counter -= kShakeDecayPerTick;
+}
+
+// Advance the three filters from ONE weather-PRNG word and return the BAM32
+// deltas to add to the FP view rotation. A zero counter produces nothing and
+// does NOT advance the filters — retail gates the whole block on it.
+//
+// Each axis takes a different BIT SLICE of the SAME word, so the three are
+// correlated exactly as retail's are; drawing three independent randoms would
+// change the character of the shake even with identical per-axis statistics.
+// The slices are arithmetic on int32 (sign-propagating), the filter is
+// s = (7*s + n) >> 3, and the delta is (clamped * s) >> 6 with the multiply
+// left to WRAP as retail's imul does.
+// [orig: the block @0x438213.. — roll (p << 1) >> 5, pitch (p << 17) >> 5,
+//  yaw (p << 9) >> 5]
+void camera_shake_sample(CameraShakeState &st, uint32_t weather_prng,
+                         int32_t &d_yaw_bam, int32_t &d_pitch_bam,
+                         int32_t &d_roll_bam);
+
 // The head-bone eye's FIVE-SAMPLE terrain floor [orig:
 // Entity_UpdateInfantryPlayerBody @ 0x4b6c08..0x4b6ca4]: the eye Z is floored
 // at the MAX of the bilinear terrain height at the eye column and at
