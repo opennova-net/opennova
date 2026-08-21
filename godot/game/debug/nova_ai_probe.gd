@@ -138,8 +138,23 @@ func tick(world: GameWorld, delta: float) -> void:
 			# vehicle choreography through these (`if area(24) and eq(v2,1) and not
 			# meride(423) then set(v2,2)`), and the BMS misvar triggers turn them
 			# into the group orders. If they never move, no vehicle is ever ordered.
-			"mv": _mission_vars(sim)}))
+			"mv": _mission_vars(sim),
+				# Camera eye vs the player position: a mounted pilot's eye must be IN
+				# the cockpit, so a large offset here IS the wrong-view bug.
+				"cam": _camera_probe(sim)}))
 	f.close()
+
+
+func _camera_probe(sim: Simulation) -> Dictionary:
+	var v: Dictionary = sim.get_local_player_view()
+	var eye: Vector3 = v.get("camera_eye", Vector3.ZERO)
+	var pos: Vector3 = sim.get_local_player_position()
+	return {
+		"valid": bool(v.get("camera_pose_valid", false)),
+		"eye": [snappedf(eye.x, 0.1), snappedf(eye.y, 0.1), snappedf(eye.z, 0.1)],
+		"pos": [snappedf(pos.x, 0.1), snappedf(pos.y, 0.1), snappedf(pos.z, 0.1)],
+		"tp": bool(v.get("third_person", false)),
+	}
 
 
 func _mission_vars(sim: Simulation) -> Array:
