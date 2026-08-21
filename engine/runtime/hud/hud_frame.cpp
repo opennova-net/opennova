@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace opennova::hud {
 
@@ -84,7 +85,119 @@ void HudFrameCompiler::reset_runtime_state() {
 	flash_prev_rounds_ = -1;
 	flash_stamp_ = 0;
 	feed_lines_.clear();
+	chat_lines_.clear();
 	draw_list_ = HudDrawList{};
+}
+
+void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
+		int now_ticks) {
+	// The CHAT display-buffer sink [orig: Chat_AddMessageChannel1 @0x4985d0].
+	if (text.empty()) {
+		return;
+	}
+	// The wrap: width `x2 - (x1 - 4)` of the chat box, the bold label font,
+	// current_x 0; a 0 count (no font) is 1 [orig: @0x498673..0x4986c5]. The
+	// wrapper walks the FULL message (the 119-char cap is per copied segment
+	// @0x498781, and on the raw ring @0x498621).
+	std::string buf = text;
+	int count = 0;
+	if (layout_.chat_box_present && label_font_bold_.font() != nullptr) {
+		const int width = layout_.chat_box_x2 - (layout_.chat_box_x1 - 4);
+		count = chat_wrap_text(label_font_bold_, label_scale_, buf, width, 0);
+	}
+	if (count <= 0) {
+		count = 1;
+	}
+	// Slot 1's timer reads slot 2 AFTER the shift zeroed the new slots
+	// [orig: memset @0x498718, then dword_B3FF38 + 186 @0x498722..0x498734]:
+	// a one-segment post staggers against the previous newest line, a longer
+	// one against its own zeroed continuation slot.
+	const bool has_prev = !chat_lines_.empty();
+	const int prev_expire = has_prev ? chat_lines_.back().expire_tick : 0;
+	const int newest_expire = count == 1
+			? message_expire_tick(now_ticks, prev_expire, has_prev)
+			: message_expire_tick(now_ticks, 0, false);
+	// The segments: first highest, last in slot 1, continuation prefixed "  "
+	// [orig: the fill loop @0x498750..0x4987da].
+	size_t pos = 0;
+	for (int k = 0; k < count; ++k) {
+		const char *seg = buf.c_str() + pos;
+		const size_t seg_len = std::strlen(seg);
+		HudMessageLine line;
+		line.text = k == 0 ? std::string(seg, seg_len)
+						   : "  " + std::string(seg, seg_len);
+		if (line.text.size() > static_cast<size_t>(kMessageTextMax)) {
+			line.text.resize(static_cast<size_t>(kMessageTextMax));
+		}
+		line.color = argb;
+		// Timer 0 on every slot but slot 1: remaining life 0 from this tick.
+		line.expire_tick = k == count - 1 ? newest_expire : now_ticks;
+		chat_lines_.push_back(line);
+		pos += seg_len + 1;
+		if (pos > buf.size()) {
+			pos = buf.size();
+		}
+	}
+	while (chat_lines_.size() > static_cast<size_t>(kMessageSlotCount)) {
+		chat_lines_.erase(chat_lines_.begin());
+	}
+}
+
+int chat_wrap_text(const GameFont &font, float scale, std::string &text,
+		int max_width, int current_x) {
+	// [orig: sub_580980 @0x580980 — the recursion unrolled into a loop over
+	//  the remaining text; every test and step is the witnessed one]
+	if (font.font() == nullptr) {
+		return 0;
+	}
+	int lines = 0;
+	size_t pos = 0;
+	while (true) {
+		const char *seg = text.c_str() + pos;
+		int extent = 0;
+		int unused_h = 0;
+		font.measure(seg, scale, scale, &extent, &unused_h);
+		// The fit test adds current_x to the threshold while the walk below
+		// starts its cursor AT current_x — both as written [orig: @0x5809c1
+		//  vs @0x5809b6..0x5809ea].
+		if (extent < current_x + max_width) {
+			return lines + 1;
+		}
+		if (text[pos] == 0) {
+			// An empty remainder that fails the fit test (a non-positive
+			// width) would recurse forever in retail; it is one line here.
+			return lines + 1;
+		}
+		size_t cursor = pos;
+		size_t last_space = std::string::npos;
+		int x = current_x;
+		bool broke = false;
+		while (true) {
+			const unsigned char c = static_cast<unsigned char>(text[cursor]);
+			if (c == ' ') {
+				last_space = cursor;
+			}
+			x += font.char_width(c, scale) + 1;
+			if (x > max_width) {
+				broke = true;
+				break;
+			}
+			++cursor;
+			if (text[cursor] == 0) {
+				break;
+			}
+		}
+		if (broke) {
+			if (last_space == std::string::npos) {
+				return lines + 1;
+			}
+			text[last_space] = 0;
+			++lines;
+			cursor = last_space + 1;
+		}
+		pos = cursor;
+		current_x = 2 * font.char_width(static_cast<uint8_t>(' '), scale);
+	}
 }
 
 void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
@@ -228,6 +341,13 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_heat(state, surface_w, surface_h);
 	element_power(state, surface_w, surface_h);
 	element_waypoint(state, surface_w, surface_h);
+	// The AAS zone status panel draws BEFORE the map overlay in the retail
+	// walk [orig: HUD_RenderAllOverlays @0x5a8070 — HUD_DrawZoneStatusPanel
+	//  @0x5a8530, then draw_radar_blips @0x5a8535, the 3-D icon pass, and
+	//  HUD_DrawMapOverlay @0x5a87bb]. WITNESS PENDING: whether the panel has
+	//  a declutter-mask bit of its own (none is witnessed; it draws on the
+	//  shown flag alone here).
+	element_lfp_panel(state, surface_w, surface_h);
 	element_spinmap(state, surface_w, surface_h);
 	element_objectives(state, surface_w, surface_h);
 	element_attach_labels(state, surface_w, surface_h);
@@ -240,7 +360,15 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// and the Tab board -- both of those are held-open surfaces that should
 	// cover it, not the other way round.
 	element_vehicle_panel(state, surface_w, surface_h);
+	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
+	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
 	element_feed(state, surface_w, surface_h);
+	// The Recent Messages window draws from the frame drawer, not the overlay
+	// pass: after every HUD element and BEFORE the Tab board
+	// [orig: Server_DrawStatusScreen @0x50a2d0 — HUD_DrawMessageLog @0x50b21f,
+	//  then HUD_DrawClassRosterOverlay @0x50b23d and HUD_DrawPlayerScoreList
+	//  @0x50b281].
+	element_message_log(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
 	return draw_list_;
 }
@@ -1147,7 +1275,41 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 	if (font_.font() == nullptr) {
 		return;
 	}
-	// Fallback = the JO-authored HUDSYSTEXT anchor (hudpos.def "5 , 22").
+	const float row_h = static_cast<float>(kFeedLineStepDesign);
+	bool drew = false;
+
+	// THE CHAT RING — the FIRST loop [orig: HUD_DrawConsoleMessages
+	// @0x59ad30, the chat walk @0x59adbc..0x59ae2e]: anchored at HUDCHATTEXT
+	// (dword_27237A8/AC), slots 3..1 walked top-down, each line's alpha the
+	// fold `255 * timer / 186` clamped to 255 and SKIPPED (no rung consumed)
+	// at <= 0 [orig: @0x59add9..0x59adf4], folded over the stored RGB
+	// `(alpha << 24) + (color & 0xFFFFFF)` @0x59ae04, drawn with the bold
+	// label font. The timer is the slot's remaining life, so the alpha ramps
+	// down through the line's last 186 ticks.
+	{
+		const float cx = static_cast<float>(
+				layout_.chat_text.present ? layout_.chat_text.x : 5);
+		const float cy = static_cast<float>(
+				layout_.chat_text.present ? layout_.chat_text.y : 5);
+		const int n = static_cast<int>(chat_lines_.size());
+		const int first = std::max(0, n - kFeedVisibleRows);
+		float row_y = cy;
+		for (int i = first; i < n; ++i) {
+			const HudMessageLine &line = chat_lines_[static_cast<size_t>(i)];
+			const int remaining = line.expire_tick - state.ticks;
+			int alpha = 255 * remaining / kMessageExpiryStagger;
+			if (alpha <= 0) continue;
+			if (alpha > 255) alpha = 255;
+			emit_text(line.text.c_str(), cx, row_y, w, h,
+					(static_cast<uint32_t>(alpha) << 24) | (line.color & 0xFFFFFFu),
+					0u);
+			row_y += row_h;
+			drew = true;
+		}
+	}
+
+	// THE SYSTEM RING — the second loop. Fallback = the JO-authored HUDSYSTEXT
+	// anchor (hudpos.def "5 , 22").
 	const float ax = static_cast<float>(
 			layout_.sys_text.present ? layout_.sys_text.x : 5);
 	const float ay = static_cast<float>(
@@ -1158,21 +1320,20 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 			live.push_back(&line);
 		}
 	}
-	if (live.empty()) {
-		return;
+	if (!live.empty()) {
+		// The three most recent lines, oldest first so the oldest lands on the
+		// anchor and newer lines step downward.
+		const int visible = std::min(static_cast<int>(live.size()), kFeedVisibleRows);
+		const int first = static_cast<int>(live.size()) - visible;
+		float row_y = ay;
+		for (int i = first; i < static_cast<int>(live.size()); ++i) {
+			const HudMessageLine *line = live[static_cast<size_t>(i)];
+			emit_text(line->text.c_str(), ax, row_y, w, h, line->color, 0u);
+			row_y += row_h;
+		}
+		drew = true;
 	}
-	// The three most recent lines, oldest first so the oldest lands on the
-	// anchor and newer lines step downward.
-	const int visible = std::min(static_cast<int>(live.size()), kFeedVisibleRows);
-	const int first = static_cast<int>(live.size()) - visible;
-	const float row_h = static_cast<float>(kFeedLineStepDesign);
-	float row_y = ay;
-	for (int i = first; i < static_cast<int>(live.size()); ++i) {
-		const HudMessageLine *line = live[static_cast<size_t>(i)];
-		emit_text(line->text.c_str(), ax, row_y, w, h, line->color, 0u);
-		row_y += row_h;
-	}
-	++draw_list_.elements_drawn;
+	if (drew) ++draw_list_.elements_drawn;
 }
 
 

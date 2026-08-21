@@ -72,6 +72,34 @@ std::string feed_format_line(const std::string &tmpl, const std::string &attacke
                              const std::string &extra = std::string(),
                              const std::string &bonus_tmpl = std::string());
 
+// THE PLAYER-CHAT CHANNEL TABLE — where an S2C 0x14 line lands and which
+// colour it carries, by its channel byte [orig: Chat_DispatchToChannel
+// @0x42b910 — the 0..0xE switch @0x42b95d/@0x42ba17; every colour is a
+// g_hudColorTable entry written by HUD_InitTeamColorTable @0x51f245..0x51f2b3].
+enum class ChatSink : uint8_t {
+	System = 0,   // Chat_AddDebugMessage — the SYSTEM ring [orig: @0x42bb0c]
+	Chat = 1,     // Chat_AddMessageChannel1 — the CHAT ring
+	Queue = 2,    // channel 8: CMessageQueue_Enqueue @0x42bab8 (not a ring)
+	Channel3 = 3, // channel 14: Chat_AddMessageChannel3 @0x42bb01 (unported ring)
+};
+// The g_hudColorTable immediates the dispatcher reads [orig: @0x51f245..0x51f2b3].
+inline constexpr uint32_t kHudColorWhite = 0xFFFFFFFFu;     // table[0]
+inline constexpr uint32_t kHudColorGreen = 0xFF00FF00u;     // table[1]  dword_24C183C
+inline constexpr uint32_t kHudColorLightBlue = 0xFF80A0FFu; // table[3]  g_hudColorLightBlue
+inline constexpr uint32_t kHudColorYellow = 0xFFF0F000u;    // table[4]  `color` @0x24C1848
+inline constexpr uint32_t kHudColorSalmon = 0xFFFF5050u;    // table[5]  dword_24C184C
+inline constexpr uint32_t kHudColorMagenta = 0xFFFF40FFu;   // table[6]  dword_24C1850
+inline constexpr uint32_t kHudColorOrange = 0xFFFF8020u;    // table[7]  dword_24C1854
+inline constexpr uint32_t kHudColorCyan = 0xFF00EAE7u;      // table[10] dword_24C1860
+// channel -> sink: 0 and every channel outside 1..14 post to the SYSTEM ring
+// (the switch default @0x42baf8 -> @0x42bb0c); 8 enqueues; 14 is channel 3;
+// the rest are CHAT. Channel 13 additionally re-targets the HUD tracked
+// entity at the sender [orig: @0x42b9e8..0x42ba09] — a presenter leg.
+ChatSink chat_channel_sink(int channel);
+// channel -> colour: 1/4/5 light blue, 2 green, 3 yellow, 7 orange, 9 salmon,
+// 11 cyan, 12 magenta, 0/6/10/13/14/default white.
+uint32_t chat_channel_color(int channel);
+
 // Compose a camp line: the template's `%s` takes the camp level's WPNames
 // string [orig: sprintf(msg, GameText("Canned Msg", key),
 // GameText("WPNames", wpname_key)) @0x427327/@0x42736B, posted @0x42737F].

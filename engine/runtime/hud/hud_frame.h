@@ -56,6 +56,22 @@ enum HudTexture : int32_t {
 	kHudTexNetIcon,
 	// The mounted-vehicle panel silhouette (the block's `interface` texture).
 	kHudTexVehiclePanel,
+	// The AAS zone status panel's three team icons — 64x256 vertical 4-frame
+	// atlases [orig: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga -> dword_27231A4
+	//  (team 1), R_LFP.tga -> dword_27231A0 (team 2), N_LFP.tga -> dword_272319C
+	//  (neutral); selected @0x598945..0x598957 in HUD_DrawZoneMarker].
+	kHudTexLfpTeam1,
+	kHudTexLfpTeam2,
+	kHudTexLfpNeutral,
+	// The marker's 36x36 team tile behind the letter: one texture for the
+	// viewer's own zones, another for everyone else's [orig: the pick
+	//  @0x5989b9..0x5989d1 — textureId @0x27239D4 for team == local,
+	//  dword_27239C4 otherwise; the latter is lfp_alf.tga, HUD_LoadAllTextures
+	//  @0x59e10e]. WITNESS PENDING: the loader of textureId @0x27239D4 (no
+	//  visible writer in HUD_LoadAllTextures' xrefs) — an unresolved slot
+	//  draws no tile, the same degradation as the silhouette.
+	kHudTexLfpTileOwn,
+	kHudTexLfpTileOther,
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
 
@@ -176,6 +192,15 @@ struct HudLayout {
 	HudPosRecord game_info;
 	HudPosRecord wpd_info;
 	HudPosRecord chat_text;
+	// The chat box's x1/x2 columns — g_hudChatBoxCoords rows 1 and 2, the
+	// source of the chat wrap width `x2 - (x1 - 4)` [orig: HUD_GetChatBoxCoord
+	//  @0x5bbe90 reads dword_28E4DF8[index]; Chat_AddMessageChannel1 reads
+	//  rows 2 and 1 @0x498673/@0x498688]. WITNESS PENDING: the table's writer
+	//  (its only xrefs are the getter's two reads) — the layout builder
+	//  supplies HUDCHATTEXT x1/x2 here; absent, a line is never wrapped.
+	int chat_box_x1 = 0;
+	int chat_box_x2 = 0;
+	bool chat_box_present = false;
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
@@ -185,6 +210,16 @@ struct HudLayout {
 	bool box_texture_valid = false;
 	int box_tex_w = 0;
 	bool net_icon_texture_valid = false;
+	// The AAS zone status panel: the LFP_FLAGS anchor (the panel's right edge
+	// and its row base) and the three team-icon atlases + the two tile slots
+	// [orig: the hudpos writes g_hudZonePanelX/Y @0x5a0563/@0x5a057b; the
+	//  icon loads HUD_LoadAllTextures @0x59dda0].
+	int lfp_anchor_x = 0;
+	int lfp_anchor_y = 0;
+	bool lfp_anchor_present = false;
+	std::array<bool, 3> lfp_icon_texture_valid{}; // team 1, team 2, neutral
+	bool lfp_tile_own_texture_valid = false;
+	bool lfp_tile_other_texture_valid = false;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
 	HudPosRecord frame_pos;
@@ -359,6 +394,16 @@ struct HudVehicleSeat {
 	std::string label;
 	// The local player's own seat draws an X over the box, last.
 	bool own_seat = false;
+	// Which retail mountHandles slot this marker stands for: passenger seats
+	// 0..7 (the block's `seats` pairs), 8 the control/driver seat (the `driver`
+	// pair); -1 for an EMPLACEMENT marker (the block's `emplace` pairs, one per
+	// attached gun child) [orig: the three arms of HUD_DrawVehicleHealthBars
+	//  @0x5a5112..0x5a5364 (seats), @0x5a53b7..0x5a5547 (emplacements),
+	//  @0x5a568e..0x5a5793 (driver)].
+	int retail_slot = -1;
+	// An emplacement occupant bands through the clamped classifier
+	// (hud_vehicle_panel.h emplacement_health_band) [orig: @0x5a54d3..0x5a54e3].
+	bool is_emplacement = false;
 };
 
 struct HudVehiclePanelState {
@@ -379,8 +424,54 @@ struct HudVehiclePanelState {
 	std::vector<HudVehicleSeat> seats;
 };
 
+// One contestable AAS zone on the status panel, in the spawn-zone list's order
+// (hud/hud_lfp_panel.h owns the policy). The feed (world/lfp_feed.h) resolves
+// everything from the registry + the zone-timer entry; the element draws.
+struct HudLfpZone {
+	int letter_index = 0;   // 'A' + the spawn-zone list index
+	int team = 0;           // the zone entity's team byte (+0x162 & 0x1F)
+	// The zone-timer entry's fields the marker reads [orig: EntryById[1] team,
+	//  [8] value, [9] control target, [10] limit, [11] rate, [12] active].
+	bool timer_present = false;
+	int timer_team = 0;
+	int32_t control = 0;    // DWORD 9
+	int32_t rate = 0;       // DWORD 11
+	int32_t value = 0;      // DWORD 8
+	int32_t limit = 0;      // DWORD 10
+	bool active = false;    // DWORD 12
+	// The two in-radius contest counts as the 0x6F message carries them:
+	// +0x220 the owning side's, +0x221 the other side's.
+	uint8_t count_owner = 0;
+	uint8_t count_other = 0;
+	// The transient minimap slot's flag byte for this zone (+4 & 0xC0 gates
+	// the marker) [orig: the word_28E5620 walk @0x5a2517..0x5a256e].
+	uint8_t capture_flags = 0;
+	bool in_cylinder = false;
+	int distance_m = 0;     // after the witnessed subtrahend, metres
+};
+
+struct HudLfpPanelState {
+	bool shown = false;
+	int local_team = 0;
+	// The HUD frame counter the blink masks (g_hudFrameCounter & 0x18).
+	int frame_counter = 0;
+	// The game's AAS-vs-conquest arm: the conquest arm is unmodelled and the
+	// element draws nothing under it [orig: g_GameType == 0x50010 @0x5a24a1].
+	bool conquest_mode = false;
+	std::string under_attack_text; // Overlays/STROVER_UNDERATTACK
+	std::string ready_text;        // Overlays/STROVER_READYFORTAKEOVER
+	std::vector<HudLfpZone> zones;
+};
+
 struct HudFrameState {
 	int ticks = 0;
+	// THE RECENT MESSAGES (J) WINDOW: the OldMessages toggle and its stdbox
+	// title (Overlays/STROVER43, resolved by the embedder like the scoreboard's)
+	// [orig: g_showMessageLog @0x24C18C0; the title @0x5b9e54].
+	bool message_log_shown = false;
+	std::string message_log_title;
+	// THE AAS ZONE STATUS PANEL (hud/hud_lfp_panel.h owns its policy).
+	HudLfpPanelState lfp_panel;
 	float health_fraction = 1.0f;
 	int stance = 0;
 	bool binoculars_view_active = false;
@@ -526,6 +617,26 @@ public:
 	// expiry stagger; the packed ARGB is stored raw and drawn as stored (no
 	// fade on this ring).
 	void push_feed_line(const std::string &text, uint32_t argb, int now_ticks);
+	// Post one line to the CHAT ring — the player-chat channel every S2C 0x14
+	// line lands in [orig: Chat_DispatchToChannel @0x42b910 ->
+	// Chat_AddMessageChannel1 @0x4985d0]. What the ring holds is the DISPLAY
+	// buffer (byte_B3FDBC, slots 1..40, newest in slot 1): the line is
+	// word-wrapped with the bold label font to `x2 - (x1 - 4)` of the chat
+	// box [orig: @0x498673..0x4986c5, a 0 count is 1], the buffer shifts by
+	// that count @0x4986db..0x498701, the new slots are zeroed @0x498718,
+	// slot 1's timer is `max(930, slot2.timer + 186)` read right after the
+	// zeroing @0x498722..0x498734 (so a multi-line post's own continuation
+	// slot is the slot 2 it staggers against), and the segments land first
+	// segment highest, last segment in slot 1, every segment after the first
+	// prefixed "  " @0x498799, colour at +120 on each @0x4987c4. Continuation
+	// slots keep timer 0: they never draw on the feed, and always list in the
+	// Recent Messages window.
+	void push_chat_line(const std::string &text, uint32_t argb, int now_ticks);
+	// The two rings' live history for the message-log window: the newest
+	// `max_rows` lines, oldest first, NO expiry test [orig: HUD_DrawMessageLog
+	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
+	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
+	const std::vector<HudMessageLine> &feed_lines() const { return feed_lines_; }
 	void reset_runtime_state();
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,
@@ -579,6 +690,8 @@ private:
 	void element_friendly_tags(const HudFrameState &state, float w, float h);
 	void element_objective_line(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
+	void element_message_log(const HudFrameState &state, float w, float h);
+	void element_lfp_panel(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
 	void element_vehicle_panel(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
@@ -607,6 +720,19 @@ private:
 	int flash_prev_rounds_ = -1;
 	int flash_stamp_ = 0;
 	std::vector<HudMessageLine> feed_lines_;   // the SYSTEM ring
+	std::vector<HudMessageLine> chat_lines_;   // the CHAT ring (S2C 0x14)
 };
+
+// The chat word-wrap [orig: sub_580980 @0x580980]: the whole remaining text
+// measured first — it fits when `extent < current_x + max_width` @0x5809c1
+// (ONE line); otherwise the characters are walked from `current_x`, each
+// adding its width + 1 @0x5809e4, the last space noted @0x5809cf, and the
+// first overflow @0x5809ea breaks at that space (written as a NUL in place
+// @0x580a0b) — no space yet means no break @0x5809fc. The remainder recurses
+// with `current_x = 2 * width(' ')` @0x580a19..0x580a3e, the two-space
+// continuation prefix's width. Returns the segment count (0 without a font);
+// the segments are the NUL-separated runs left in `text`.
+int chat_wrap_text(const GameFont &font, float scale, std::string &text,
+		int max_width, int current_x);
 
 } // namespace opennova::hud

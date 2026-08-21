@@ -217,6 +217,10 @@ public:
 	// lane (client_replica_feed.cpp). Drained once per frame by the embedder,
 	// which owns the roster names the lines are formatted against.
 	std::vector<ClientGameEvent> drain_game_events();
+	// S2C 0x14 chat lines folded by apply() — the player-chat lane
+	// (client_replica_feed.cpp). Drained once per frame by the embedder, which
+	// routes each line by the HUD channel table and posts it to its ring.
+	std::vector<ClientChatLine> drain_chat_lines();
 	std::vector<WeaponReload> drain_weapon_reloads();
 	// S2C 0x13 entity-death notifies folded by apply(): the row's health drops to
 	// zero and the record is surfaced once so the embedding sim can run the
@@ -294,6 +298,7 @@ private:
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 	// The live placed-device lifecycle (client_replica_placed_device.cpp).
 	void apply_game_event(const std::vector<uint8_t> &body);   // 0x1E (the feed)
+	void apply_chat_broadcast(const std::vector<uint8_t> &body); // 0x14 (player chat)
 	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
 	void apply_player_sync(const std::vector<uint8_t> &body);  // 0x46 (its name join)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
@@ -332,6 +337,7 @@ private:
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;
 	std::vector<ClientGameEvent> pending_game_events_;
+	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<EntityDeathRecord> pending_entity_deaths_;
 	std::size_t unknown_tags_ = 0;

@@ -122,6 +122,12 @@ public:
 	// @ 0x580a80 — the friendly-tag line metric is the '0' glyph's height].
 	float char_height(uint8_t byte, float scale_y) const;
 
+	// One glyph's pixel width WITHOUT the spacing pad — the per-character
+	// extent the chat wrapper walks with [orig: CGameFont_GetCharExtent
+	// @0x674dc0, read as charSize[0] by sub_580980 @0x5809db]. Bytes the font
+	// does not carry measure 0.
+	int char_width(uint8_t byte, float scale_x) const;
+
 private:
 	struct Cursor;
 	const fnt_glyph_t *glyph_for_byte(uint8_t byte) const;

@@ -57,4 +57,22 @@ void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 	pending_game_events_.push_back(ev);
 }
 
+// THE PLAYER-CHAT LANE (S2C 0x14): [channel][sender_slot][cstr], the order
+// D-NET-215 settled. The fold carries the record; the ring/colour routing is
+// the HUD channel table and the sender gate is the roster's, both at the
+// embedder [orig: NapiNPClientMsg_ChatMessage @0x42f240 tail-jumps into
+//  Chat_DispatchToChannel(body[1], (char)body[0], &body[2]) @0x42b910].
+void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &body) {
+	ChatBroadcast rec;
+	if (!decode_chat_broadcast(body.data(), body.size(), rec)) {
+		++malformed_bodies_;
+		return;
+	}
+	ClientChatLine line;
+	line.channel = rec.channel;
+	line.sender_slot = rec.sender_slot;
+	line.text = rec.text;
+	pending_chat_lines_.push_back(std::move(line));
+}
+
 } // namespace opennova::netsim

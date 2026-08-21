@@ -6,7 +6,9 @@
 #include <hud/game_font.h>
 #include <hud/hud_frame.h>
 #include <hud/hud_math.h>
+#include <hud/hud_message_log.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1461,6 +1463,299 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 	CHECK(found, "the silhouette draws when its texture is present");
 }
 
+// The Recent Messages (J) window: both rings listed in one titled stdbox,
+// sixteen rows per column, NO expiry gate — a line that has faded off the
+// feed is still listed. [orig: HUD_DrawMessageLog @0x5b9d70]
+void test_message_log_element(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.box_texture_valid = true;
+	layout.box_tex_w = 128;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+
+	compiler.push_chat_line("alpha: hi", 0xFF80A0FFu, 0);
+	compiler.push_feed_line("alpha killed beta", 0xFFAFAFAFu, 0);
+	HudFrameState state;
+	state.ticks = 5000; // both lines are long expired on the feed
+	state.hud_detail_level = 0;
+
+	// Hidden: no box, no glyphs from either ring.
+	{
+		const HudDrawList &none = compiler.compile(state, 1024.0f, 768.0f);
+		size_t box = 0;
+		for (const HudQuad &q : none.quads)
+			if (q.texture == opennova::hud::kHudTexBoxBorder) ++box;
+		CHECK(box == 0, "no window box while the toggle is off");
+		CHECK(none.glyphs.empty(), "expired lines draw nothing on the feed");
+	}
+	state.message_log_shown = true;
+	state.message_log_title = "Recent Messages";
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	size_t box = 0;
+	for (const HudQuad &q : list.quads)
+		if (q.texture == opennova::hud::kHudTexBoxBorder) ++box;
+	CHECK(box > 0, "the window draws its stdbox");
+	// The expired lines are LISTED here even though the feed dropped them:
+	// glyphs in the chat line's colour AND the system line's colour.
+	size_t chat_glyphs = 0, sys_glyphs = 0;
+	// The chat column sits at 32*w/1024 + 2 = 34 px; the system column is
+	// right-aligned at 990 px, so its glyphs end left of 990.
+	float chat_x = 1e9f, sys_right = -1e9f;
+	for (const auto &g : list.glyphs) {
+		if (g.color == 0xFF80A0FFu) {
+			++chat_glyphs;
+			chat_x = std::min(chat_x, g.x_top_left);
+		}
+		if (g.color == 0xFFAFAFAFu) {
+			++sys_glyphs;
+			sys_right = std::max(sys_right, g.x_top_left);
+		}
+	}
+	CHECK(chat_glyphs > 0 && sys_glyphs > 0,
+			"both rings list their lines with no expiry gate");
+	CHECK(std::fabs(chat_x - 33.5f) < 1.0f, "the chat column starts at 32*w/1024 + 2");
+	CHECK(sys_right < 990.0f && sys_right > 900.0f,
+			"the system column is right-aligned at 990*w/1024");
+	// One line per ring: both land in the BOTTOM row (row 15), the top rows
+	// blank [orig: the walk paints slot 16 first; a short history pads at the top].
+	const float expected_y = static_cast<float>(
+			opennova::hud::message_log_text_top_px(1024) +
+			15 * opennova::hud::message_log_step_px(1024));
+	float chat_y = -1.0f;
+	for (const auto &g : list.glyphs)
+		if (g.color == 0xFF80A0FFu) chat_y = g.y_top;
+	CHECK(std::fabs(chat_y - (expected_y - 0.5f)) < 1.0f,
+			"a single line sits in the bottom row, not the top");
+}
+
+// The CHAT feed loop: three newest lines at HUDCHATTEXT, alpha folded from the
+// remaining life (255 * timer / 186, clamped), skipped at zero
+// [orig: HUD_DrawConsoleMessages @0x59ad30, the first loop @0x59adbc..0x59ae2e].
+void test_chat_feed_loop(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.chat_text = {5, 40, 0, 0, true};
+	compiler.configure(layout, font);
+
+	compiler.push_chat_line("a", 0xFF102030u, 0);   // expires at 930
+	HudFrameState state;
+	// Fresh: 930 ticks left -> alpha clamps to 255.
+	state.ticks = 0;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() == 1, "a fresh chat line draws");
+		CHECK(!list.glyphs.empty() && (list.glyphs[0].color >> 24) == 0xFFu,
+				"930 ticks of life clamp the alpha at 255");
+		CHECK(!list.glyphs.empty() && (list.glyphs[0].color & 0xFFFFFFu) == 0x102030u,
+				"the stored RGB survives the alpha fold");
+	}
+	// 93 ticks left -> 255 * 93 / 186 = 127.
+	state.ticks = 930 - 93;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() == 1 && (list.glyphs[0].color >> 24) == 127u,
+				"the last 186 ticks ramp the alpha down");
+	}
+	// Expired -> skipped, and no rung consumed.
+	state.ticks = 930;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.empty(), "an expired chat line draws nothing");
+	}
+	// Only the newest three of the ring show, oldest at the anchor.
+	for (int i = 0; i < 5; ++i) compiler.push_chat_line("b", 0xFFFFFFFFu, 2000);
+	state.ticks = 2000;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() == 3, "three chat rows are walked");
+	}
+}
+
+// The AAS zone status panel element: the first contested zone seeds the
+// walk, groups step down by team, markers step across right-anchored, and the
+// group's status text follows its markers.
+// [orig: HUD_DrawZoneStatusPanel @0x5a2480; HUD_DrawZoneMarker @0x5986f0]
+void test_lfp_panel_element(const fnt_font_t *font) {
+	using opennova::hud::HudLfpZone;
+	using opennova::hud::HudQuad;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.lfp_anchor_present = true;
+	layout.lfp_anchor_x = 1020;
+	layout.lfp_anchor_y = 27;
+	layout.lfp_icon_texture_valid = {true, true, true};
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+
+	HudFrameState state;
+	auto &lp = state.lfp_panel;
+	lp.shown = true;
+	lp.local_team = 1;
+	lp.frame_counter = 0; // phase A
+	const auto zone = [](int letter, int team, bool contested) {
+		HudLfpZone z;
+		z.letter_index = letter;
+		z.team = team;
+		z.timer_present = true;
+		z.timer_team = team;
+		z.capture_flags = contested ? 0x40 : 0;
+		return z;
+	};
+	// Nothing contested -> nothing drawn at all.
+	lp.zones = {zone(0, 1, false), zone(1, 2, false)};
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		size_t icons = 0;
+		for (const HudQuad &q : list.quads)
+			if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+					q.texture <= opennova::hud::kHudTexLfpNeutral) ++icons;
+		CHECK(icons == 0, "no contested zone seeds the walk: the panel is empty");
+	}
+	// Team 1 holds A and B (B under attack), team 2 holds C (ready).
+	HudLfpZone a = zone(0, 1, true);
+	HudLfpZone b = zone(1, 1, true);
+	b.rate = -3; // own point draining -> UNDER ATTACK
+	HudLfpZone c = zone(2, 2, true);
+	c.control = 0; // enemy point at zero control -> READY
+	lp.zones = {a, b, c};
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	std::vector<HudQuad> icons;
+	for (const HudQuad &q : list.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) icons.push_back(q);
+	CHECK(icons.size() == 3, "one icon per contested zone");
+	if (icons.size() == 3) {
+		// Group 1 (two zones) is right-anchored: A at 1020 - 196, B at 1020 - 98,
+		// both on row 27 + 12; group 2 (one zone) at 1020 - 98, one row (86) down.
+		CHECK(std::fabs(icons[0].x0 - (1020.0f - 196.0f)) < 0.01f, "A right-anchors the group");
+		CHECK(std::fabs(icons[1].x0 - (1020.0f - 98.0f)) < 0.01f, "B steps 98 across");
+		CHECK(std::fabs(icons[0].y0 - 39.0f) < 0.01f, "the first row is anchor + 12");
+		CHECK(std::fabs(icons[2].y0 - (39.0f + 86.0f)) < 0.01f, "the next team steps 86 down");
+		CHECK(std::fabs(icons[2].x0 - (1020.0f - 98.0f)) < 0.01f, "a one-zone group ends at the same edge");
+		CHECK(icons[0].texture == opennova::hud::kHudTexLfpTeam1 &&
+				icons[2].texture == opennova::hud::kHudTexLfpTeam2,
+				"each marker samples its team's atlas");
+		// Frames: B under attack on phase A -> frame 2 (v0 = 0.5); C ready on
+		// phase A -> NOT the ready frame (that blinks on phase B) -> frame 0.
+		CHECK(std::fabs(icons[1].v0 - 0.5f) < 1e-6f, "under attack draws frame 2 on phase A");
+		CHECK(std::fabs(icons[2].v0 - 0.0f) < 1e-6f, "ready waits for phase B");
+		CHECK(icons[0].color == 0xFF7F7F7Fu, "the icon modulate is the flat half-bright");
+	}
+	// Phase B flips C to frame 3 and clears B's attack frame.
+	lp.frame_counter = 8;
+	const HudDrawList &list_b = compiler.compile(state, 1024.0f, 768.0f);
+	icons.clear();
+	for (const HudQuad &q : list_b.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) icons.push_back(q);
+	if (icons.size() == 3) {
+		CHECK(std::fabs(icons[2].v0 - 0.75f) < 1e-6f, "ready draws frame 3 on phase B");
+		CHECK(std::fabs(icons[1].v0 - 0.0f) < 1e-6f, "the attack frame is a blink");
+	}
+	// The conquest arm draws nothing (unmodelled, never invented).
+	lp.conquest_mode = true;
+	const HudDrawList &list_c = compiler.compile(state, 1024.0f, 768.0f);
+	size_t conquest_icons = 0;
+	for (const HudQuad &q : list_c.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) ++conquest_icons;
+	CHECK(conquest_icons == 0, "the conquest arm stays unmodelled");
+}
+
+// The map medic marker: a local-team medic's blip is REPLACED by the
+// red-cross plate — three overlay quads (six tris), no sprite.
+// [orig: draw_entity_labels_and_markers @0x5a49e0 — the cross @0x5a4cd6..0x5a4d48]
+void test_spinmap_medic_marker(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.spinmap_rect = {810.0f, 552.0f, 210.0f, 210.0f, true};
+	compiler.configure(layout, font);
+	HudFrameState state;
+	opennova::hud::HudMinimapMarker plain;
+	plain.icon = 3;
+	plain.x = 8 << 16;
+	plain.color = 0xFF304080u;
+	plain.entity_known = 1;
+	state.minimap.markers.push_back(plain);
+	const HudDrawList &before = compiler.compile(state, 1024.0f, 768.0f);
+	const size_t sprites_before = before.map.sprites.size();
+	const size_t overlays_before = before.map.overlays.size();
+
+	state.minimap.markers[0].medic = 1;
+	const HudDrawList &after = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(after.map.sprites.size() == sprites_before - 1,
+			"the medic's blip sprite is replaced, not added to");
+	CHECK(after.map.overlays.size() == overlays_before + 6,
+			"the cross is three quads = six overlay triangles");
+	// White field first, then the two red bars.
+	if (after.map.overlays.size() >= overlays_before + 6) {
+		CHECK((after.map.overlays[overlays_before].color & 0xFFFFFFu) == 0xFFFFFFu,
+				"the field is white");
+		CHECK((after.map.overlays[overlays_before + 2].color & 0xFFFFFFu) == 0xFF0000u,
+				"the bars are red");
+		// The rect spans (px - 3.5)..(px + 4.5): 8 px wide.
+		float min_x = 1e9f, max_x = -1e9f;
+		for (size_t i = overlays_before; i < overlays_before + 2; ++i) {
+			for (const auto *v : {&after.map.overlays[i].a, &after.map.overlays[i].b,
+						 &after.map.overlays[i].c}) {
+				min_x = std::min(min_x, v->x);
+				max_x = std::max(max_x, v->x);
+			}
+		}
+		CHECK(std::fabs((max_x - min_x) - 8.0f) < 0.01f,
+				"the plate is the witnessed 8 px square");
+	}
+}
+
+// The chat wrap + display-buffer slots: the test font's glyphs are 8 px and
+// the walk adds 9 per character; a 44 px box breaks "aaaa bbbb cccc" after
+// the first word, and the remainder (walked from 2 * 8 = 16) finds no space
+// before overflowing, so it stays whole. The first segment is a continuation
+// slot with timer 0; the last carries the 930 life.
+// [orig: sub_580980 @0x580980; Chat_AddMessageChannel1 @0x4985d0]
+void test_chat_wrap_slots(const fnt_font_t *font) {
+	GameFont gf;
+	gf.set_font(font);
+	std::string buf = "aaaa bbbb cccc";
+	CHECK(opennova::hud::chat_wrap_text(gf, 1.0f, buf, 44, 0) == 2,
+			"a 44 px box wraps the line into two segments");
+	CHECK(buf.size() == 14 && buf[4] == 0,
+			"the break is a NUL written over the last space");
+	std::string fits = "aaaa";
+	CHECK(opennova::hud::chat_wrap_text(gf, 1.0f, fits, 44, 0) == 1,
+			"a line narrower than the box is one segment");
+	std::string no_space = "aaaaaaaaaa";
+	CHECK(opennova::hud::chat_wrap_text(gf, 1.0f, no_space, 44, 0) == 1,
+			"no space before the overflow means no break");
+
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.chat_box_x1 = 4;
+	layout.chat_box_x2 = 44;
+	layout.chat_box_present = true;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	compiler.push_chat_line("aaaa bbbb cccc", 0xFF00FF00u, 100);
+	const auto &ring = compiler.chat_lines();
+	CHECK(ring.size() == 2, "one display slot per segment");
+	if (ring.size() == 2) {
+		CHECK(ring[0].text == "aaaa", "the first segment sits highest, unprefixed");
+		CHECK(ring[1].text == "  bbbb cccc", "the last segment is prefixed two spaces");
+		CHECK(ring[0].expire_tick == 100, "a continuation slot carries timer 0");
+		CHECK(ring[1].expire_tick == 100 + 930, "slot 1 carries the 930 life");
+		CHECK(ring[0].color == 0xFF00FF00u && ring[1].color == 0xFF00FF00u,
+				"the colour lands on every slot");
+	}
+	// Without a chat box the line is never wrapped.
+	HudFrameCompiler plain;
+	plain.configure(HudLayout{}, font);
+	plain.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	plain.push_chat_line("aaaa bbbb cccc", 0xFFFFFFFFu, 0);
+	CHECK(plain.chat_lines().size() == 1, "no box, no wrap");
+}
+
 int main() {
 	fnt_font_t font = make_font();
 	test_measure_advance_and_trailing_pad(&font);
@@ -1480,6 +1775,11 @@ int main() {
 	test_vehicle_panel_element(&font);
 	test_compiler_stdbox_geometry(&font);
 	test_compiler_scoreboard_rows(&font);
+	test_message_log_element(&font);
+	test_chat_feed_loop(&font);
+	test_lfp_panel_element(&font);
+	test_spinmap_medic_marker(&font);
+	test_chat_wrap_slots(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

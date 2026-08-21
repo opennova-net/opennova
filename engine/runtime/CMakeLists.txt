@@ -58,6 +58,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_vehicle_panel.cpp # the mounted-vehicle seat markers
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_vehicle_panel.cpp # its compile element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_message_log.cpp   # the Recent Messages (J) window element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_lfp_panel.cpp     # the AAS zone status panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
@@ -156,6 +158,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/impact_scar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/fire_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/friendly_tags.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/lfp_feed.cpp           # the AAS zone status panel's zone rows
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_panel_feed.cpp # the mounted-vehicle panel's seat rows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp  # the stng pursuit integrator (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_sim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp

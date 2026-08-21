@@ -65,6 +65,17 @@ float GameFont::char_height(uint8_t byte, float scale_y) const {
 			fnt_design_scale(font_->design_width) * scale_y;
 }
 
+int GameFont::char_width(uint8_t byte, float scale_x) const {
+	// [orig: CGameFont_GetCharExtent @0x674dc0 — the glyph's u-extent on the
+	//  256-wide page, through the same design/scale fold the measurer uses]
+	const fnt_glyph_t *glyph = glyph_for_byte(byte);
+	if (glyph == nullptr) {
+		return 0;
+	}
+	return static_cast<int>((glyph->uv.u1 - glyph->uv.u0) * 256.0f *
+			fnt_design_scale(font_->design_width) * scale_x);
+}
+
 float GameFont::line_height(float scale_y) const {
 	if (font_ == nullptr) {
 		return 0.0f;
