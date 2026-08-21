@@ -1382,6 +1382,22 @@ void test_compiler_scoreboard_rows(const fnt_font_t *font) {
 			"an icon samples exactly one band of the strip");
 }
 
+// The hudpos StaticFrame pick: retail keeps one static frame and each authored
+// line overwrites the last, so the LAST entry draws. Our parser keeps them all
+// (writer round-trip), which makes this the consumer-side half of that contract.
+// [orig: HUD_ParseHudposToken @0x59F370 - the name copy @0x5a0a4e-0x5a0a62]
+void test_static_frame_pick() {
+	using opennova::hud::hud_static_frame_index;
+	CHECK(hud_static_frame_index(0) == -1,
+			"nothing authored draws no static frame");
+	CHECK(hud_static_frame_index(1) == 0,
+			"a single authored frame is the one that draws");
+	CHECK(hud_static_frame_index(2) == 1,
+			"the LAST authored frame wins, not the first");
+	CHECK(hud_static_frame_index(5) == 4,
+			"the rule is last-wins for any count");
+}
+
 int main() {
 	fnt_font_t font = make_font();
 	test_measure_advance_and_trailing_pad(&font);
@@ -1397,6 +1413,7 @@ int main() {
 	test_spinmap_mesh_layers_and_waypoint(&font);
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
+	test_static_frame_pick();
 	test_compiler_stdbox_geometry(&font);
 	test_compiler_scoreboard_rows(&font);
 	fnt_free(&font);

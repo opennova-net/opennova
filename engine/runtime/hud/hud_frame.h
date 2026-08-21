@@ -76,6 +76,25 @@ inline constexpr float kBoxBottomCrop = 0.9f;
 inline constexpr float kBoxTitlePad = 2.0f;
 inline constexpr float kBoxTitleTrim = 12.0f;
 
+// THE hudpos.def StaticFrame BACKGROUND. Retail keeps exactly ONE, and not in
+// an array: the handler copies the texture name into a single name buffer and
+// the position into two words, so every dispatched StaticFrame line OVERWRITES
+// the one before it and the LAST authored line is the one that draws
+// [orig: HUD_ParseHudposToken @0x59F370 — the name copy @0x5a0a4e-0x5a0a62,
+//  the x store @0x5a0a73, the y store @0x5a0a8a].
+//
+// Our def parser keeps every line so the writer round-trips, which makes the
+// pick a policy the consumer has to apply: taking entry 0 draws a frame retail
+// never shows when a def authors more than one. The name is only loaded when
+// non-empty [orig: the strlen skip @0x59df41-0x59df5b] and the draw is gated on
+// the slot having resolved [orig: the test @0x5a7c69], so an unresolvable name
+// draws nothing rather than falling back.
+//
+// Returns the index to draw, or -1 when nothing is authored.
+inline int hud_static_frame_index(int authored_count) {
+	return authored_count > 0 ? authored_count - 1 : -1;
+}
+
 struct HudQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;
