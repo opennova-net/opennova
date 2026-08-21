@@ -158,7 +158,8 @@ measures model-authored `LGHT` lamp delivery inside the armory - the
 scope, and corona billboards, and refuted the Target/spot-cone premise
 (the spot spawner is caller-less dead code); interior groups, batch draw
 contexts, and the terrain/foliage legs ride the open D-RLIT-4 residual
-tail. The `03tr-sun-sky-retail` fixture (same session)
+tail (the terrain projected-pass constants are staged 2026-08-21 in
+`light_terrain_pass.h`; the shader input is the open half). The `03tr-sun-sky-retail` fixture (same session)
 measures low-sun sky-dome/sun/ambient response on the 03TR airfield; its
 deltas ride D-RLIT-2, D-RLIT-5, and the deferred env #16 first-pass TOD
 table.
