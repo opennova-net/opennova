@@ -157,9 +157,11 @@ measures model-authored `LGHT` lamp delivery inside the armory - the
 2026-08-20 slice landed vertex-rate point shading, static-source owner
 scope, and corona billboards, and refuted the Target/spot-cone premise
 (the spot spawner is caller-less dead code); interior groups, batch draw
-contexts, and the terrain/foliage legs ride the open D-RLIT-4 residual
-tail (the terrain projected-pass constants are staged 2026-08-21 in
-`light_terrain_pass.h`; the shader input is the open half). The `03tr-sun-sky-retail` fixture (same session)
+contexts, and the foliage leg ride the open D-RLIT-4 residual
+tail (the per-light TERRAIN projected pass is ported 2026-08-21 end to end —
+`light_terrain_pass.h` rows, the procedural falloff textures, the additive
+two-stage fold in `terrain_lighting.gdshaderinc`; a dusk pool on the ground is
+the next fixture to register). The `03tr-sun-sky-retail` fixture (same session)
 measures low-sun sky-dome/sun/ambient response on the 03TR airfield; its
 deltas ride D-RLIT-2, D-RLIT-5, and the deferred env #16 first-pass TOD
 table.

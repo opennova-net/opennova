@@ -637,6 +637,14 @@ def. (Contrast: `cveh`/`ctank`/`cbike`/`cbot`/`catv` rows go through
 IDB writes this session: define_func @ 0x45D6F0 + an append_comment there; idb saved.
 No renames, no type changes.
 
+**2026-08-21 — #553 folded.** The `air_attitude.h` "attitude integrator" that
+PR #553 staged was a duplicate of the live `aircraft_client_tick`
+(`vehicle_motor.cpp` — the sideslip roll/pitch feedback `:2126-2152`, the
+1/512 self-level, the asymmetric `>>4`/`>>3` rate damp with the `+ (v >> 31)`
+negative-only term `:2204-2241`, the def rate ceiling ×192426, the 15°/tick
+clamp 178956960); the header and its test were deleted and the two distinctive
+pins retargeted at the live mover in `tests/world/aircraft_client_motor_test.cpp`.
+
 ---
 
 ### 0. Pointer identities and offset map
@@ -3087,8 +3095,8 @@ on slope/object contact.
 | Entity_ComputeBoundingQuad | 0x45B6E0 | pure geometry: 4 corner targets from axes + dims (isSquare variant uses model bounds center) |
 | Entity_ClearSuspensionForces | 0x468980 | applies pending contact-block forces via ComputeChassisOrientation, then clears blocks (entity dwords 218..237) |
 | Entity_ComputeChassisOrientation | 0x463940 | orientation from wheel data (Vehicle_ComputeOrientationFrom4Wheels @ 0x459310, quaternion path) |
-| Suspension_CompressWheelQuadratic (ex `sub_45CFB0`, renamed 2026-08-21) | 0x45CFB0 | wheel-spring COMPRESSING step, quadratic (`dt²·2·spring`): phase `+0x14` := 1.57 `@0x45CFC8`; `travel = dword_815180 − dword_815184`; compression (`+0x2D4+4i`) > travel → energy 0, amp = travel, return 0 (bottomed `@0x45CFEE → @0x45D0A5`); else compression += dt, extension `+4` −= dt, energy `+8` += `dt²·2·k·(−0.5)`, impact sink `+0x300` −= `dt²·2·k·0.5` only while > 0 `@0x45D03A`, energy floor −1 `@0x45D077`, amp = min(compression, travel); returns the step. Linear twin `Suspension_CompressWheelLinear @0x45CEB0` (ex `Vehicle_ApplyBrakingForce` — nothing brakes). Staged as `world/ground_conform.cpp` (ctest `ground_conform`), unwired |
-| Suspension_OscillateWheelFast (ex `Entity_ApplyDamageOscillationFast`, renamed 2026-08-21) | 0x45D110 | free-decay wheel oscillator, FAST: phase += 0.2617 rad/tick (`flt_7C6A10`); env = clamp((sin+1)·0.5, ≤ 1); compression = env·amp `@0x45D167`; extension = travel − compression; itemDef shock `+0x904` clamped [0,10] IN PLACE `@0x45D18F..0x45D1A2` (our oscillator clamps a copy); amp ×= 0.99 EVERY tick `@0x45D1D5`; only when compression == 0: amp ×= (11−shock)/11 `@0x45D1E5`, impact-sink drain `@0x45D1F0..0x45D219`, amp >>= 2 when `entity+0xA0 < −2000` `@0x45D21F..0x45D22D`. Slow twin `Suspension_OscillateWheel @0x45D240` (0.0872 rad/tick, ex `Entity_ApplyDamageOscillation`). Staged in `ground_conform.cpp`, unwired |
+| Suspension_CompressWheelQuadratic (ex `sub_45CFB0`, renamed 2026-08-21) | 0x45CFB0 | wheel-spring COMPRESSING step, quadratic (`dt²·2·spring`): phase `+0x14` := 1.57 `@0x45CFC8`; `travel = dword_815180 − dword_815184`; compression (`+0x2D4+4i`) > travel → energy 0, amp = travel, return 0 (bottomed `@0x45CFEE → @0x45D0A5`); else compression += dt, extension `+4` −= dt, energy `+8` += `dt²·2·k·(−0.5)`, impact sink `+0x300` −= `dt²·2·k·0.5` only while > 0 `@0x45D03A`, energy floor −1 `@0x45D077`, amp = min(compression, travel); returns the step. Linear twin `Suspension_CompressWheelLinear @0x45CEB0` (ex `Vehicle_ApplyBrakingForce` — nothing brakes). The kernel is `world/ground_conform.cpp` (ctest `ground_conform`); WIRED 2026-08-21 through `world/vehicle_suspension.cpp` (§7.3) |
+| Suspension_OscillateWheelFast (ex `Entity_ApplyDamageOscillationFast`, renamed 2026-08-21) | 0x45D110 | free-decay wheel oscillator, FAST: phase += 0.2617 rad/tick (`flt_7C6A10`); env = clamp((sin+1)·0.5, ≤ 1); compression = env·amp `@0x45D167`; extension = travel − compression; itemDef shock `+0x904` clamped [0,10] IN PLACE `@0x45D18F..0x45D1A2` (the kernel now clamps the def's field itself, as retail does — the copy-clamp divergence closed 2026-08-21; there is NO caller-side shock clamp: the `cmp [+900h], 0Ah` sites `@0x47b9af/@0x47ea48/@0x481268` are a `spring_comp <= 10 ? 1000 : 5000` select); amp ×= 0.99 EVERY tick `@0x45D1D5`; only when compression == 0: amp ×= (11−shock)/11 `@0x45D1E5`, impact-sink drain `@0x45D1F0..0x45D219`, amp >>= 2 when `entity+0xA0 < −2000` `@0x45D21F..0x45D22D`. Slow twin `Suspension_OscillateWheel @0x45D240` (0.0872 rad/tick, ex `Entity_ApplyDamageOscillation`). WIRED 2026-08-21 as the release arm of `vehicle_suspension_step` (§7.3) |
 | Entity_BuildOrientationFromVectors / Entity_RebuildOrientationMatrixFromAxes | 0x458DF0 / 0x4632E0 | orthonormal rebuilds (the latter's IDA comment is a known misname) |
 | CWnd_HitTest | 0x6137D0 | MISNOMER: matrix row-1 extract (sibling of Row0 @ 0x613770 / Row2 @ 0x6137A0) — used as "extract forward axis" throughout |
 
@@ -3306,32 +3314,174 @@ symptom).
 
 ---
 
-### 7.3 The staged spring leg (2026-08-21)
+### 7.3 The spring leg (witnessed in full + WIRED 2026-08-21)
 
-`engine/runtime/world/ground_conform.h/.cpp` carries the compress/oscillate
-pair above plus the travel derivation `@0x47C51F..0x47C544` and the
-`>> 4` `@0x47CBE5`; its radius helpers were deleted (duplicates of
-`vehicle_contact_solve.cpp`'s pad/spine radii). Two constants the #544 port
-had read as spring scalings are something else:
+`engine/runtime/world/ground_conform.h/.cpp` is the compress/oscillate
+KERNEL (the pair above, the travel derivation `@0x47C51F..0x47C544`, the
+`>> 4` `@0x47CBE5`; its radius helpers were deleted as duplicates of the
+solves' pad/spine radii); `engine/runtime/world/vehicle_suspension.{h,cpp}` is
+the leg that calls it and owns the state bytes on `Entity::VehicleMotorState`
+(`wheel_comp[4]` = +0x2D4..+0x2E0, `wheel_osc[4]` = +0x304 + 0x18·i,
+`spring_energy` = +0x300, the latch bytes +0x2EC/+0x2ED/+0x2EE/+0x2EF). The
+wire-up round's witness pass corrected two readings of the tidy:
 
-- `flt_7C6F14 = 1.75` / `flt_7C6F18 = 1.25` `@0x46B1C5..0x46B1DB` is the
-  wheel solver's **disable-rate pick**, taken ONCE when byte `+0x2EC` goes
-  0 → 1 (`@0x46B1B9` gate, set `@0x46B1F9`; non-authority 1.75, authority
-  1.25), stored in `var_10C` and consumed inside the per-wheel contact loop
-  `@0x46B22E` — not an every-tick "non-authority spring scale".
-- `flt_7C3DC8 = 0.75` / `flt_7C6F80 = 3.0` `@0x47C21A..0x47C222` is the
-  spring `dt` selected by `+0x2EC == 0` (unparked 0.75, parked 3.0), consumed
-  at the compress/oscillate call sites `@0x47DBC3 / @0x47E2ED / @0x47E9C2`.
+- **`+0x2EC` is the CRASHED / TIPPED state, not "parked", and the latch gate
+  is `+0x2ED != 0 && +0x2EC == 0`** — `+0x2ED` NONZERO. All three seeds read
+  it that way: `Entity_ProcessWheeledVehicleSuspension @0x46B140` (`cmp
+  [+2EDh],0 ; jz skip` `@0x46b1a6..0x46b1b3`, then `cmp [+2ECh],0 ; jnz skip`
+  `@0x46b1b9..0x46b1bf`; callers tracked `@0x47e5e6/@0x47ec4d`, aircraft
+  `@0x480f01/@0x481475`, platform `@0x483bbe`), `Entity_ComputeSuspensionAndOrientation
+  @0x4698A0` (tank, identical `@0x469933..0x469947`) and
+  `Entity_UpdateVehicleChassisOrientation @0x468A50` (bike, `@0x468b00..
+  0x468b0e`; its arm also `Entity_EjectAllOccupants @0x468b3b`). The tank /
+  tracked crash sites play the crash sound (`def+0x864 → +0x64` slot else
+  `dword_24E0908`) before their own `+0x2EC = 1` stores (`@0x478998`,
+  `@0x47e47b`).
+- **`+0x2ED` is a per-tick crash REQUEST**, 0 at spawn (`Entity_RespawnVehicle
+  @0x45FF40` zeroes `+0x2F0/+0x2EC/+0x2EE/+0x2F2/+0x44C/+0x2FC/+0x2F8/+0x2ED`
+  and sets `+0x2F1 = 1` `@0x45ffeb..0x46001e`; the BMS spawn writes none —
+  memset only), raised by the family physics during the tick and cleared
+  UNCONDITIONALLY at every tick tail (tank `@0x4795da`, bike `@0x47c0b6`,
+  tracked `@0x47eeee`) — so a fresh row can never latch. The 17 producers (all
+  require `+0x2EC == 0`): tank `@0x477776` (upside-down beyond `def->flip`
+  `&& Flags & 0x2000` airborne), `@0x4777bf` (authority `|velocity.z| >
+  0x7000`, client `airborne && Flags & 0x10`), `@0x478bc0` (CLIENT-ONLY, the
+  10-tick airborne window over `+0x2F1/+0x2F0/+0x2F8`); tracked `@0x47d763`
+  (`(upside-down || Flags & 0x10) && airborne`), `@0x47d7a8` (the same
+  authority/client split), `@0x47e7d8` (the client window twin); bike
+  `@0x47b14c` (authority, driven `var_29C > 0x6702`, upside-down `up·z <
+  −0.87`, then `front || rear` contact), `@0x47b375` (both wheels off `&&
+  +0x3DE && an extra probe hit`), `@0x47b6a7` / `@0x47b6d1` / `@0x47b6fb`
+  (`+0x3DE` / `|vz|` / `var_280` pitch tests) — `+0x3DE` = "has been driven",
+  set by the bike mover `@0x48524c` when `Flags & 0x20 && speed > 0x1000`.
+- **The pick and what it scales**: with the seed armed, `flt_7C6F18 = 1.25`
+  (authority, `@0x46b1cd`) / `flt_7C6F14 = 1.75` (client, `@0x46b1d5`) by
+  `g_napi_np_ctx.is_authority`; `+0x2EF = 0`; the authority raises `Flags |=
+  0x10` `@0x46b1ed` while a client only TESTS the bit `@0x46b1f3` (the latch
+  replicates through it — the vehicle rows' flags byte); `+0x2EC = 1`
+  `@0x46b1f9`, `+0x2EE = 0`, `Entity_ClearSuspensionState @0x4592B0`. Then,
+  for each wheel k with no contact, the force slot `+0x368 + 0x14·k = {0, 0,
+  −1.0, magnitude = ftol(sink_k × pick)}` `@0x46b24b..0x46b269` (airborne /
+  no flags: the sinks unscaled `@0x46b290..0x46b30b`) → `Entity_ClearSuspensionForces
+  @0x46b314` → `Entity_ComputeChassisOrientation(…, 0)` =
+  `Vehicle_ComputeAveragedOrientation` — a downward IMPULSE that TILTS the
+  chassis (the delta folded into the chassis matrix + the quaternion at
+  +0x534..+0x540, `+0x4E8 = 1` `@0x463a3b..0x463a64`); never a Z offset.
+- **The spring dt** `@0x47c1de..0x47c222`: `+0x2EC == 0 ? 0.75 (flt_7C3DC8)
+  : 3.0 (flt_7C6F80)` — 3.0 is the CRASHED step, 0.75 the normal one;
+  aircraft `+0x2F0 ? flt_7C333C : 0.75` `@0x47ef20`; the tank and the bike
+  have no select.
+- **Sink growth (the non-crash path)**: tank `@0x478510..0x47852b` per probe
+  with no contact `&& +0x2ED == 0 && +0x2EC == 0` → `sink_k += 250`; tracked
+  `@0x47db70..0x47dbd1` the same gate, `+= ftol(dt × 250.0)` = 187
+  (pre-skipped when `+0x2F2 == 0 && all sinks == 0 && var_288 < 0`); bike
+  `@0x47ab36..0x47abdc` with NO latch terms — front/rear `+= 100` whenever
+  that wheel has no contact.
+- **`Entity_ClearSuspensionState @0x4592B0`** is routine, not a latch effect:
+  identity into the chassis matrix `+0x4F4`, the interp quaternion
+  `+0x534..+0x540 = 0`, `+0x4EC/+0x4F0 = 0`, `+0x4E8 = 0`, `+0x3DC = 0` if
+  set; it never touches the sinks, compressions, oscillators or force slots;
+  the tank solve calls it EVERY tick when `+0x3CE == 0 && !(Flags & 0x40)`
+  `@0x47606e..0x47607d`.
+- **Def keys** (`ItemDef_ParsePhysicsProperty @0x49D870`, raw `atol`):
+  `spring` +0x8FC `@0x49db86`, `top_heavy` +0x918 `@0x49dbc2`, `spring_comp`
+  +0x900 `@0x49dbfe`, `shock` +0x904 `@0x49dc3a`; defaults spring 0,
+  spring_comp 20 `@0x49e496`; per-family clamps spring [0, 10], spring_comp
+  [0, 100], flip (+0x948) [0, 55]; `travel = (100 − spring_comp) · 0xFFFF`
+  `@0x476190 / @0x47c51f`; `spring != 0` gates the spring-energy loop
+  (`@0x478d73 / @0x47b933 / @0x47e973 / @0x4811a5`); `top_heavy` has NO
+  runtime consumer (dead — parsed for parity, not fed).
+
+**Port**: `vehicle_suspension_latch` (the crash-request shape: arms on
+`request && !crashed`, the authority sets / the client reads Flags 0x10, the
+sinks × pick dumped into the −Z tilt impulses), `vehicle_suspension_dt`,
+`vehicle_suspension_step` (the compress arm over the solves' pad depths, the
+release arm = the oscillator, the per-family sink growth), `vehicle_suspension_clear`;
+the four `pad_z` sites of `vehicle_contact_solve.cpp` add `wheel_comp[k]` and
+the corner-lift feedback consumes the stepped compression; the role is
+`World::vehicle_authority` stamped in `run_logic_tick`; the def keys reach
+`VehicleTraits` (and both Python FFI mirrors + the native-stride pins, since
+`DefItemDef` crosses the C ABI). Pinned by ctest `ground_conform`,
+`vehicle_suspension` (a driven buggy settles ×0.99/tick with the
+`(11 − shock)/11` damp at compression 0; the authority 1.25 vs client 1.75 pick
+taken once per latch; the Flags-0x10 client path; the clear), and the
+`watercraft_client_motor` bike-drop bench (exact again — the tidy-era literal
+reading of the gate had parked every vehicle at spawn). **Named residuals**
+(no D-row): the crash-request producers whose inputs are unported — the
+bike's `+0x3DE` has-been-driven byte and the client 10-tick airborne window
+(`+0x2F1/+0x2F0/+0x2F8`) — and the contact-direction slope feed (D-NET-161).
+
+### 7.4 The part-animation registers — rotors and the wheel phase (witnessed + ported 2026-08-21)
+
+The accumulators the model's PANM tracks read (`HELO_ROTOR` 46,
+`HELO_TAILROTOR` 47, `VEHICLE_WHEELS` 60), published as the HIGH WORD of a
+dword accumulator `[orig: Entity_CacheVehicleHUDStats @0x4929B0]` — the table
+base `0x83FCE8 + 8n`: 60 = HIWORD(+0x2B8) `@0x4929b4`; 61 STEERING =
+min(HIWORD(+0x2B4), 0x10000) `@0x4929c0`; 62 SPEED = min(|+0x29C|, 0x10000);
+73..78 TIRE00..05 = clamp01 of the per-wheel compressions `@0x4929f6..
+0x492ac5`; **46 and 47 are BOTH HIWORD(+0x464)** `@0x492aca/@0x492ad7` — one
+accumulator, no separate tail-rotor state.
+
+- **The rotor machine is split by `.aip` profile type** (`brain+4 →
+  profile+16`): GROUND (2) = `Entity_UpdatePartSpinAccumulator @0x4928B0`
+  (ex `Entity_UpdateGravityAccumulator`; the gate `@0x4928c9`), called
+  unconditionally at the tail of all six movers after the splash sound
+  (`@0x46f99e` inf, `@0x4700f5` air, `@0x4869ea` light, `@0x4889f5` mounted,
+  `@0x48ae3d` tank, `@0x48d42b` vehicle); HELO (1) =
+  `entity_update_damage_accumulator_and_shadow @0x48FA70` (a misnomer;
+  proposed `Entity_UpdateHeloRotorSpin`), called from `Entity_UpdateAircraftPhysics
+  @0x4905a6`. Rate seeding (both): `attrib & 0x40` (PlayerControl) with an
+  occupant → 186413; a non-0x40 item → `PRNG_Next16() % 100` (> 66 → 139809,
+  > 33 → 163110, else 186413 `@0x49290e..0x492935` / `@0x48fb1c..0x48fb2e`)
+  — re-rolled EVERY unoccupied tick because the empty branch resets the
+  rate (`@0x492972` / `@0x48fb7c`): one shared-stream draw per idle
+  non-player-control vehicle per tick. Occupied: `speed(+0x460) += rate
+  (+0x468)`, cap 214748352, `angle(+0x464) += speed`; empty: `speed −=
+  186413` (ground) / `46603` (helo `@0x48fb67..0x48fb76`) floored at 0,
+  `angle += speed` always `@0x48fba9`. The HELO twin additionally plays the
+  engine-start sound (`def->defaultResPlus64+120` when `speed <= 0.05·cap`
+  above water `@0x48faea..0x48fafb`), spawns `Entity_SpawnBoneTrailEffect`,
+  lays the downwash terrain overlay (`terrain_overlay_alloc(handle, 786432,
+  983040, ratio)` `@0x48fc7d`) and returns `!authority || speed >= cap`
+  `@0x48fe4b` — presentation residuals.
+- **The wheel phase** `[orig: Entity_UpdateVehiclePhysics @0x48c4c5..0x48c4d0
+  and the twin @0x48c4e4..0x48c4f4]`: `+0x2B8 += |+0x46C| + (+0x29C << 13)`
+  per tick. The slip term +0x46C is gated on an occupant and `+0x3CD == 0`
+  `@0x48c330..0x48c343`; branch A (`ftol(sqrt(+0x3BC² + +0x3C0² + +0x3C4²)) !=
+  0`) locks it to −6064.0 (`dword_81518C` = 0xE8480000) `@0x48c4a5..0x48c4b4`;
+  branch B decays it `ftol(min(1, 1 − speed·1.6276e-5) · +0x46C)` +
+  `Entity_SpawnBoneEffectsAtMask` `@0x48c506..0x48c535` or zeroes it. The
+  +0x3BC contact-direction store is the D-NET-161 leg → slip = 0 in the port
+  (the phase reduces to `speed << 13`). +0x460/+0x464/+0x468 is a union with
+  the turret/heading smoothers (`Vehicle_UpdateTurretRotation @0x45b016`,
+  `Entity_SmoothHeadingToTarget @0x45b4fc` write +0x464 for emplacements).
+- **The BMS seed** `[orig: Entity_SpawnFromBMSRecord @0x40E9F0, edi = the
+  record]`: `record+0xC (attrib_flags) & 0x20000` (`bms.h` Attribute17 —
+  "engine running at spawn") → `Flags |= 0x80; +0x468 = 186413; +0x460 =
+  214748352; +0x29C = 0x10000` `@0x40ee70..0x40ee94`.
+
+**Port**: `engine/runtime/world/vehicle_part_anim.{h,cpp}` (`RotorState` =
+`VehicleMotorState::PartSpin` +0x460/+0x464/+0x468, `wheel_phase` +0x2B8; the
+two arms selected by the profile type, `rotor_rate_needs_roll` /
+`rotor_rate_from_roll` on `World::next_prng16`, `rotor_tick`), called at every
+mover tail and, for the host's helicopters whose mover is the unported HELO
+movement physics, from the authority pass at the missing tail site;
+`vehicle_ctrl_registers` publishes rotor/tail_rotor/wheels beside
+steering/speed; `present_rows.h` `PF_VEHICLE_ROTOR/_TAIL_ROTOR/_WHEELS` →
+`nova_present_applier` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
+VEHICLE_WHEELS, the ctrl leg 18 → 21 fields, append-only) →
+`ObjectModel::set_ctrl_override`; the seed in `entity_spawn.cpp`. Pinned by
+ctest `vehicle_part_anim` (the pure pins; a player-control buggy spins only
+while mounted and decays after dismount; exactly one PRNG draw per unoccupied
+tick on a non-0x40 vehicle; the cap; the HIWORD projection) and GUT
+`vehicle_emplacement_alignment_test` (the driven DBuggy's VEHICLE_WHEELS
+override advances end to end; the crewed Blackhawk rotor).
 
 Observed, not changed: `vehicle_motor.cpp:455-476` cites the gear-mode switch
 `@0x48bb46..0x48bbe0` for the speed ladder it ports, while that ladder (the
 reversal-unclamped / drive-clamp `def+0x8E0` / brake-clamp `def+0x8E4` cases)
 sits at `@0x48C3D2..0x48C46C` and also carries the carrier-flag-`0x100`
-exception `@0x48C428..0x48C439` the port lacks (#551's
-`vehicle_part_registers.h` restated the ladder; its motor/steer helpers were
-deleted in favour of the live `vehicle_motor.cpp:357-391/405-490`, the
-RotorState machine — `Entity_UpdatePartSpinAccumulator @0x4928B0`, ex
-`Entity_UpdateGravityAccumulator` — stays staged).
+exception `@0x48C428..0x48C439` the port lacks.
 
 
 ## §8 The wheeled (ctan) contact/suspension solve (ported 2026-08-06)
@@ -3564,6 +3714,18 @@ with the witnessed contracts; the `+0x2B8` integrate `@0x48E9F0..0x48E9F9`
 annotated on `Entity_UpdateWatercraftPhysics` (it is the watercraft mover, not
 `Entity_UpdateAircraftPhysics @0x490310`). Saved.
 
+2026-08-21 (the wire-up round's witness pass): `[opennova 2026-08-21 W2]`
+latch-correction comment on `Entity_ProcessWheeledVehicleSuspension @0x46b140`
+(the gate reads `+0x2ED` NONZERO; `+0x2EC` = crashed) and `[… W]` comments on
+the tank/bike seeds `@0x4698a0`/`@0x468a50`, the `+0x2ED` producers
+`@0x475de0`/`@0x479600`/`@0x47c1c0`, `Entity_RespawnVehicle @0x45ff40` (the
+spawn values), `Entity_ClearSuspensionState @0x4592b0` (the field set),
+`ItemDef_ParsePhysicsProperty @0x49d870` (the four keys), `Entity_UpdatePartSpinAccumulator
+@0x4928b0` (the profile-type gate), the HELO twin `@0x48fa70`,
+`Entity_CacheVehicleHUDStats @0x4929b0` (46 = 47), `Entity_UpdateVehiclePhysics
+@0x48af00` (the wheel phase). Proposed, not applied: `@0x48fa70` →
+`Entity_UpdateHeloRotorSpin`; `dword_81518C` → `g_wheelSlipLockQ16`. Saved.
+
 `0x47EF10` defined + named `Entity_ProcessAircraftContactPhysics` (a misdecoded
 instruction run at `0x480051` re-created as code); the cpln class-table callback
 `0x45D6F0` defined as the 5-byte thunk `j_Entity_UpdateAircraftPhysics`; witness
@@ -3581,8 +3743,9 @@ renamed `Entity_UpdatePlayerInfantryMovement` → `Entity_UpdateLightVehiclePhys
 The unresolved residuals live as explicit entries in the D-NET-196 ledger row
 and the §5.38e disposition (the wheeled/light solves, the tank mover deltas
 and the aircraft local-driver input map CLOSED 2026-08-06 — §8/§9/§10): the
-ground-family shared deferrals (the contact-direction slope-velocity feed,
-the park/wreck/crash latch machine, spring sinks/oscillators — D-NET-161),
+ground-family shared deferrals (the contact-direction slope-velocity feed —
+D-NET-161; the crash-request producers whose inputs are unported — §7.3; the
+spring sinks/oscillators themselves are WIRED 2026-08-21),
 the bike lean smoother (`Entity_SmoothHeadingToTarget @ 0x45B2C0` —
 FPU-garbled, disasm-pinned), the analog collective channel, the tank
 track-scroll/turret-slew presentation, the

@@ -118,6 +118,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x86c | `phraseSet` | i32 | `phrase_set` via `atol`; mounted target definition config consumed at `Entity_BuildBoneTransformMatrices @0x4b1884`. Key absence is distinct from an authored value of 0 in the reimplementation |
 | 0x890–0x8a0 | `deathTime`/`clipsize`/`doorType`/`openRate`/`maxAngle` | i32/float | polymorphic: `clipsize`@0x894 is the door-item `door_dir` slot reused |
 | 0x8d8–0x948 | physics block (`minAI`,`mass`,`torque`,`spring`,`flip`,…) | i32 | `ItemDef_ParsePhysicsProperty` |
+| 0x8fc / 0x900 / 0x904 / 0x918 | `spring` / `springComp` / `shock` / `topHeavy` | i32 | raw `atol` `[orig: ItemDef_ParsePhysicsProperty @0x49d870 — spring @0x49db86, spring_comp @0x49dbfe, shock @0x49dc3a, top_heavy @0x49dbc2]`; defaults spring 0, spring_comp 20 `@0x49e496`; per-family clamps spring [0,10], spring_comp [0,100] with `travel = (100 − spring_comp) · 0xFFFF` `@0x476190/@0x47c51f`; `shock` is clamped [0,10] IN PLACE inside both oscillators `@0x45d18f..0x45d1a2` / `@0x45d2b3..0x45d2d2` (no caller-side clamp); `top_heavy` has NO runtime consumer (parser, allocator default, debug editor only — dead). Parsed 2026-08-21 into `DefItemDef` (+ both Python FFI mirrors and the native-stride pins) and `VehicleTraits` — vehicle-client-movers-re §7.3 |
 | 0xa74 | `hudImage` | char[32] | `hud_image` |
 | 0xad4/0xad8 | `groupMask`/`groupFlags` | u32 | |
 
