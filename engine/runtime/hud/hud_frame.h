@@ -18,6 +18,8 @@
 #include <array>
 #include <cstdint>
 #include <string>
+
+#include <hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
 
 namespace opennova::hud {
@@ -51,6 +53,8 @@ enum HudTexture : int32_t {
 	// The 16x16 connection-quality icon, a 4-row vertical atlas
 	// [orig: the quad @0x4241fb; the atlas load FUN_004c2cf0 @0x4c2cf0].
 	kHudTexNetIcon,
+	// The mounted-vehicle panel silhouette (the block's `interface` texture).
+	kHudTexVehiclePanel,
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
 
@@ -225,6 +229,13 @@ struct HudLayout {
 	uint32_t weapon_text = 0xFFFAD605u;
 	uint32_t stance_tint = 0xFFFFFFFFu;
 	uint32_t heat_border = 0xFFFFFFFFu;
+	// The stance colour TRIPLE. Only `bad` was pulled into the layout before,
+	// because the stance bar is the only element that needed it; the vehicle
+	// panel bands its seats with the same three [orig: the good/middle/bad arms
+	//  of the seat loop @0x5A4FD0], so all three are carried now. The def has
+	// parsed all three all along.
+	uint32_t stance_good = 0xFF05FA0Du;
+	uint32_t stance_middle = 0xFFFAA608u;
 	uint32_t stance_bad = 0xFFB00A0Au;
 	// ALPHAFADE (percent, percent, seconds) [orig: parse @ 0x5a086c].
 	float alpha_fade_base = 0.0f;
@@ -333,6 +344,40 @@ struct HudScoreboardState {
 	std::vector<ScoreboardEntry> rows;   // wire order; the server sorts
 };
 
+// One seat box on the mounted-vehicle panel.
+struct HudVehicleSeat {
+	int x = 0;          // design-space offset from the panel base
+	int y = 0;
+	// An OCCUPIED seat draws a filled box banded by its rider's health; an
+	// empty one draws its seat-select digit instead [orig: the two arms of the
+	//  slot loop @0x5A4FD0].
+	bool occupied = false;
+	int32_t health = 0;
+	int32_t max_health = 0;
+	// The seat-select key label an EMPTY seat shows. Empty string draws none.
+	std::string label;
+	// The local player's own seat draws an X over the box, last.
+	bool own_seat = false;
+};
+
+struct HudVehiclePanelState {
+	bool shown = false;
+	// The HUDVEHSTANCEPOS anchor and the rider's stance offset, joined by
+	// hud::vehicle_panel_base -- the panel rides the stance icon.
+	int anchor_x = 0;
+	int anchor_y = 0;
+	int stance_offset_x = 0;
+	int stance_offset_y = 0;
+	// The silhouette behind the seats: the block's `interface` texture, drawn
+	// tinted by the HULL's health band.
+	bool silhouette_valid = false;
+	int silhouette_w = 0;
+	int silhouette_h = 0;
+	int32_t hull_health = 0;
+	int32_t hull_max_health = 0;
+	std::vector<HudVehicleSeat> seats;
+};
+
 struct HudFrameState {
 	int ticks = 0;
 	float health_fraction = 1.0f;
@@ -362,6 +407,11 @@ struct HudFrameState {
 	HudWeaponState weapon;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
+	// THE MOUNTED-VEHICLE PANEL (hud/hud_vehicle_panel.h owns its policy).
+	// Present only while the local player rides something; the shell resolves
+	// the item's VEHICLE_HUD block and the live seat occupancy, because both
+	// need tables the compiler does not own.
+	HudVehiclePanelState vehicle_panel;
 	// The Tab board (hud/hud_scoreboard.h owns its policy).
 	HudScoreboardState scoreboard;
 	std::vector<HudAttachLabel> attach_labels;
@@ -529,6 +579,7 @@ private:
 	void element_objective_line(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
+	void element_vehicle_panel(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
 	void element_clip_indicator(const HudFrameState &state, float w, float h);
