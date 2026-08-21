@@ -1939,6 +1939,7 @@ public:
 	// ERR_UNAVAILABLE without a live sim, ERR_INVALID_PARAMETER for a missing
 	// AI index, and OK only after both authoritative mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
+	Error debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn);
 	// Probe seam: teleport an AI entity (mission-space coords) through both
 	// position stores, for probes defeated by mission geography. Uses the same
 	// truthful Error contract as debug_set_entity_health.

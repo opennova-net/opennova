@@ -19,6 +19,7 @@
 
 #include "world/ai.h"
 #include "world/player_spawn.h"
+#include "world/vehicle_motor.h"
 #include "world/vehicle_mount.h"
 #include "world/world.h"
 
@@ -230,6 +231,26 @@ int main() {
 			       "the helo flew its route (>25 u horizontal)");
 			expect(ha->position.z - hz > 10.0f,
 			       "the helo climbed (>10 u altitude gain)");
+
+			// The BLADES. 3000 ticks is well past the 1153-tick spool-up, so a
+			// crewed helo must be at the cap, its phase must be advancing, and
+			// the angle both rotor registers read must stay inside the 16 bits
+			// the model takes. A static rotor fails the first of these.
+			// [orig: RotorSpin_Update @0x4928B0]
+			expect(ha->veh.rotor_speed == 214748352,
+			       "the rotor reached full speed");
+			const int32_t phase_a = ha->veh.rotor_phase;
+			const int32_t reg_a = w::vehicle_ctrl_registers(ha->veh).rotor;
+			world.run_logic_tick(/*is_authority=*/true);
+			const w::Entity *hb2 = world.registry.get(helo);
+			expect(hb2->veh.rotor_phase != phase_a, "the blade phase advances");
+			expect(w::vehicle_ctrl_registers(hb2->veh).rotor != reg_a,
+			       "the rotor register the model reads changes tick to tick");
+			const int32_t reg_b = w::vehicle_ctrl_registers(hb2->veh).rotor;
+			expect(reg_a >= 0 && reg_a <= 0xFFFF && reg_b >= 0 && reg_b <= 0xFFFF,
+			       "the rotor register stays a u16");
+			std::printf("diag rotor: speed=%d phase=%d reg %d -> %d\n",
+			            hb2->veh.rotor_speed, hb2->veh.rotor_phase, reg_a, reg_b);
 		}
 	}
 

@@ -1051,6 +1051,18 @@ Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 	return OK;
 }
 
+// Debug: seat an AI body in a vehicle's control seat, by authored SSN. The
+// rotor only spins for a control-seat claimant, so a screenshot of turning
+// blades needs a pilot in the chair; 05TRcoop parks its five helicopters empty
+// until the (player-gated) script sends a crew.
+Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
+	if (!world_) return ERR_UNAVAILABLE;
+	return world_->commands.mount(static_cast<uint16_t>(p_occupant_ssn),
+	                              static_cast<uint16_t>(p_vehicle_ssn))
+			? OK
+			: ERR_INVALID_PARAMETER;
+}
+
 // The D-AI-6 muzzle seam: the present layer pushes each posed model's gun-flash
 // userpoint world position back to the sim once per frame; the AI fire pass spawns
 // rounds from it while fresh. Godot (x, up, z) -> mission (x, -gz, gy) in 16.16

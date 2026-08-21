@@ -39,6 +39,7 @@ func tick(world: GameWorld, delta: float) -> void:
 		return
 	_accum = 0.0
 	_tp_tick(world)
+	_crew_tick(world)
 	_tp_player_tick(world)
 	_shot_tick(world)
 	if _path.is_empty():
@@ -176,6 +177,34 @@ func _shot_tick(world: GameWorld) -> void:
 	_shot_cam.global_position = target + ofs
 	_shot_cam.look_at(target)
 	_shot_n += 1
+
+
+# One-shot debug crew (NW_CREW_PILOT=<occupant ssn> NW_CREW_VEHICLE=<vehicle ssn>
+# at NW_TP_AT s): seats an AI body in a vehicle's CONTROL seat. The rotor only
+# spins for a control-seat claimant, and 05TRcoop parks its helicopters empty
+# until the player-gated script crews them, so this is how an unattended round
+# gets turning blades to look at.
+var _crew_done := false
+
+func _crew_tick(world: GameWorld) -> void:
+	if _crew_done or OS.get_environment("NW_CREW_VEHICLE").is_empty():
+		return
+	if _tp_elapsed < _tp_at:
+		return
+	var sim: Simulation = world.get_sim()
+	if sim == null:
+		return
+	var pilot := OS.get_environment("NW_CREW_PILOT").to_int()
+	var veh := OS.get_environment("NW_CREW_VEHICLE").to_int()
+	var err := sim.debug_crew_vehicle(pilot, veh)
+	_crew_done = true
+	if not _path.is_empty():
+		var f := FileAccess.open(_path, FileAccess.READ_WRITE)
+		if f != null:
+			f.seek_end()
+			f.store_line(JSON.stringify({"crew": {"pilot": pilot, "vehicle": veh,
+					"err": err}}))
+			f.close()
 
 
 func _tp_tick(world: GameWorld) -> void:

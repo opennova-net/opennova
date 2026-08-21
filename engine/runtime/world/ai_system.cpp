@@ -496,6 +496,16 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
             // stamps every mover carries; rider deltas read (current - saved)].
             stamp_saved_live_pose(*veh);
+            // Rotor spin. Retail drives this from the entity update, so it runs
+            // on BOTH the authority and the joiner path (the twin below) and
+            // ahead of every mover bail: a parked helicopter still has to spin
+            // DOWN, and an unboarded one has to sit still.
+            // [orig: RotorSpin_Update @0x4928B0]
+            if (traits->family == VehicleFamily::Helicopter) {
+                rotor_spin_tick(veh->veh,
+                                resolve_vehicle_controller(world, *veh) != nullptr,
+                                /*is_vehicle=*/true, rotor_rng_);
+            }
             // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
             // class table routes them to the shared aircraft mover, whose AI
             // brain leg and physics live in one function. A live PLAYER pilot
