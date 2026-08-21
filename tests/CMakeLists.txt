@@ -1374,6 +1374,11 @@ target_link_libraries(net_position_smoother_test PRIVATE opennova_runtime)
 target_include_directories(net_position_smoother_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME net_position_smoother COMMAND net_position_smoother_test)
 
+add_executable(section_debris_test world/section_debris_test.cpp)
+target_link_libraries(section_debris_test PRIVATE opennova_runtime)
+target_include_directories(section_debris_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME section_debris COMMAND section_debris_test)
+
 # The mouse-look pipeline (pixel deltas -> yaw/pitch BAM): the witnessed integer
 # math — sens << 11, the +0x8000 rounding, the scoped zoom divide, flipmouse,
 # and the pitch clamps with the prone +40-degree up-limit.
