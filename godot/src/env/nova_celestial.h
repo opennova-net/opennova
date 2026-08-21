@@ -106,7 +106,7 @@ private:
 	// or loses currency) — the advance_frame/settle shared resolution.
 	Camera3D *_resolve_camera();
 	void _rebuild_if_needed();
-	// No sun model / no loaded environment: publish a zero veil once so the
+	// No sun model / no loaded environment: publish a zero veil so the
 	// overlay never holds the previous mission's alpha across a load.
 	void _publish_idle_veil();
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
@@ -147,7 +147,6 @@ private:
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
 	int sun_veil_stopdown_ = 0;
-	bool veil_idle_published_ = false;
 	// The water-reflected sun glint accumulator
 	// (retail: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md).
 	opennova::env::WaterGlintState water_glint_;

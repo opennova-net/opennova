@@ -774,16 +774,17 @@ int main() {
     }
 
     // The procedural corona texture [orig: Lighting_InitTextures
-    // @ 0x5a973a..0x5a97ff — ftol TRUNCATION, the border forced 0].
+    // @ 0x5a973a..0x5a97ff — ftol TRUNCATION, gray under alpha 255, the
+    // border written 0x00000000].
     {
-        expect(corona_texture_byte(64, 64) == 102,
-               "the corona center is trunc(255 * 0.4) = 102");
-        expect(corona_texture_byte(32, 64) == 44,
-               "half radius: trunc(255 * (0.4 - 0.225)) = 44, not rounded 45");
-        expect(corona_texture_byte(0, 64) == 0 && corona_texture_byte(64, 127) == 0,
-               "the border row/column is forced to 0");
-        expect(corona_texture_byte(1, 1) == 0,
-               "past the 0.4/0.45 radius the clamp holds 0");
+        expect(corona_texture_argb(64, 64) == 0xFF666666u,
+               "the corona center is trunc(255 * 0.4) = 102 = 0x66 under alpha 255");
+        expect(corona_texture_argb(32, 64) == 0xFF2C2C2Cu,
+               "half radius: trunc(255 * (0.4 - 0.225)) = 44 = 0x2C, not rounded 45");
+        expect(corona_texture_argb(0, 64) == 0u && corona_texture_argb(64, 127) == 0u,
+               "the border row/column is the transparent 0x00000000 word");
+        expect(corona_texture_argb(1, 1) == 0xFF000000u,
+               "past the 0.4/0.45 radius the clamp holds opaque black");
     }
 
     // The model-light owner attach: attach bone, blink box, or unowned

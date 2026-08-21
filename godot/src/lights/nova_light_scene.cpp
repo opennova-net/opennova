@@ -198,7 +198,7 @@ void LightScene::clear_render_output() {
 
 int LightScene::render_frame(const Vector3 &p_camera_world,
 		float p_query_radius, const Vector3 &p_ambient_scale, int p_time_ms,
-		Object *p_weather) {
+		Weather *p_weather) {
 	// Report/debug: ONE camera-global select. The gameplay object pass is
 	// render_model_frame (per-draw contexts, the witnessed shape); this path
 	// keeps the owned-light-unscoped approximation for census only and
@@ -220,7 +220,7 @@ int LightScene::render_frame(const Vector3 &p_camera_world,
 
 	renderer::LightFlickerInputs flicker;
 	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = Object::cast_to<Weather>(p_weather);
+	const Weather *weather = p_weather;
 	if (weather != nullptr) {
 		const opennova::env::WeatherOscillator &oscillator =
 				weather->runtime().core().oscillator;
@@ -249,26 +249,27 @@ int LightScene::corona_texture_size() {
 	return renderer::kCoronaTextureSize;
 }
 
-PackedByteArray LightScene::corona_texture_rgb8() {
+PackedByteArray LightScene::corona_texture_rgba8() {
 	PackedByteArray bytes;
 	const int size = renderer::kCoronaTextureSize;
-	bytes.resize(static_cast<int64_t>(size) * size * 3);
+	bytes.resize(static_cast<int64_t>(size) * size * 4);
 	uint8_t *out = bytes.ptrw();
 	for (int y = 0; y < size; ++y) {
 		for (int x = 0; x < size; ++x) {
-			const uint8_t value = renderer::corona_texture_byte(x, y);
-			uint8_t *texel = out + (static_cast<size_t>(y) * size + x) * 3;
-			texel[0] = value;
-			texel[1] = value;
-			texel[2] = value;
+			const uint32_t argb = renderer::corona_texture_argb(x, y);
+			uint8_t *texel = out + (static_cast<size_t>(y) * size + x) * 4;
+			texel[0] = static_cast<uint8_t>((argb >> 16) & 0xFFu);
+			texel[1] = static_cast<uint8_t>((argb >> 8) & 0xFFu);
+			texel[2] = static_cast<uint8_t>(argb & 0xFFu);
+			texel[3] = static_cast<uint8_t>(argb >> 24);
 		}
 	}
 	return bytes;
 }
 
-size_t LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
+void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 		float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
-		Object *p_weather, std::vector<renderer::SlotPointLight> &r_out) {
+		Weather *p_weather, std::vector<renderer::SlotPointLight> &r_out) {
 	// The render-slot dominant-light query: the witnessed per-entity collect
 	// over entity position +- bound radius, group-gated params, no D3D-fill
 	// boost (retail: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
@@ -291,7 +292,7 @@ size_t LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 	const size_t found = scene_.query(qmin, qmax, handles);
 	renderer::LightFlickerInputs flicker;
 	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = Object::cast_to<Weather>(p_weather);
+	const Weather *weather = p_weather;
 	if (weather != nullptr) {
 		const opennova::env::WeatherOscillator &oscillator =
 				weather->runtime().core().oscillator;
@@ -327,17 +328,16 @@ size_t LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 				(static_cast<uint32_t>(light.handle.generation) << 16);
 		r_out.push_back(point);
 	}
-	return count;
 }
 
 int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_owner_entities,
 		const PackedInt64Array &p_interior_owners,
 		const PackedInt32Array &p_interior_sections,
-		const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather) {
+		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather) {
 	renderer::LightFlickerInputs flicker;
 	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = Object::cast_to<Weather>(p_weather);
+	const Weather *weather = p_weather;
 	if (weather != nullptr) {
 		const opennova::env::WeatherOscillator &oscillator =
 				weather->runtime().core().oscillator;
@@ -430,7 +430,7 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 TypedArray<Dictionary> LightScene::collect_corona_rows(
 		const Vector3 &p_camera_pos, const Vector3 &p_camera_forward,
 		const Vector3 &p_ambient_scale, int p_time_ms, int p_frame_index,
-		Object *p_weather, const TypedArray<Node3D> &p_models,
+		Weather *p_weather, const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_owner_entities, const Dictionary &p_fog) {
 	renderer::LightCoronaFrameInputs inputs;
 	// Owner visible-section masks from the same model/owner walk the
@@ -492,7 +492,7 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	};
 	inputs.frame_index = static_cast<uint32_t>(p_frame_index);
 	inputs.flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = Object::cast_to<Weather>(p_weather);
+	const Weather *weather = p_weather;
 	if (weather != nullptr) {
 		const opennova::env::WeatherOscillator &oscillator =
 				weather->runtime().core().oscillator;
@@ -576,8 +576,8 @@ void LightScene::_bind_methods() {
 			&LightScene::collect_corona_rows);
 	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_size"),
 			&LightScene::corona_texture_size);
-	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_rgb8"),
-			&LightScene::corona_texture_rgb8);
+	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_rgba8"),
+			&LightScene::corona_texture_rgba8);
 	ClassDB::bind_method(D_METHOD("live_count"), &LightScene::live_count);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 }

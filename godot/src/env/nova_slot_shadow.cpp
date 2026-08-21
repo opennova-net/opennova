@@ -15,6 +15,7 @@
 
 #include "env/nova_mission_environment.h"
 #include "env/nova_water.h"
+#include "env/nova_weather.h"
 #include "lights/nova_light_scene.h"
 #include "object/nova_object_model.h"
 #include "resource_index/nova_resource_root.h"
@@ -70,8 +71,8 @@ struct SlotUniformNames {
 	}
 };
 
-static const SlotUniformNames &slot_uniforms() {
-	static const SlotUniformNames names;
+static SlotUniformNames &slot_uniforms() {
+	static SlotUniformNames names;
 	return names;
 }
 
@@ -112,6 +113,13 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 void SlotShadow::cleanup_statics() {
 	drape_material_.unref();
 	blob_material_.unref();
+	// Release the uniform-name table before the engine tears the StringName
+	// table down (the function-local static would otherwise outlive it).
+	SlotUniformNames &names = slot_uniforms();
+	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+		names.mat[i] = StringName();
+		names.tex[i] = StringName();
+	}
 }
 
 SlotShadow::SlotShadow() {}
@@ -154,7 +162,7 @@ void SlotShadow::set_light_scene(const Ref<LightScene> &p_scene) {
 }
 
 void SlotShadow::set_light_context(const Vector3 &p_gain, int p_time_ms,
-		Object *p_weather) {
+		Weather *p_weather) {
 	light_gain_ = p_gain;
 	light_time_ms_ = p_time_ms;
 	weather_id_ = p_weather != nullptr ? ObjectID(p_weather->get_instance_id())
@@ -447,7 +455,9 @@ void SlotShadow::advance_frame() {
 	// before or after the parent's in registration order, so resolve every
 	// claim first: child id -> the parent's capture bit this frame.
 	HashMap<uint64_t, uint32_t> claimed;
+	HashSet<uint64_t> rowed;
 	for (const renderer::SlotAssignment &assignment : assignments) {
+		rowed.insert(assignment.id);
 		if (!assignment.draws_silhouette || assignment.excluded) {
 			continue;
 		}
@@ -531,7 +541,8 @@ void SlotShadow::advance_frame() {
 		Vector3 attached_color;
 		float attached_atten = 0.0f;
 		if (light_scene_.is_valid()) {
-			Object *weather = ObjectDB::get_instance(weather_id_);
+			Weather *weather = Object::cast_to<Weather>(
+					ObjectDB::get_instance(weather_id_));
 			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
 					light_gain_, light_time_ms_, weather, slot_lights_);
 			pick = renderer::pick_dominant_light(
@@ -638,6 +649,26 @@ void SlotShadow::advance_frame() {
 	drape->set_shader_parameter("u_slot_term", silhouette_terms);
 	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
 
+	// Linked children the full table refused (no assignment row of their
+	// own) still ride their parent's slot RT: retail's child walk follows
+	// the entity hierarchy, not the slot table
+	// (the RenderSlot_RenderEntityAndChildren walk the claim pass above cites).
+	for (const std::pair<uint64_t, uint64_t> &link : capture_links) {
+		if (rowed.has(link.first)) {
+			continue;
+		}
+		const uint32_t *claim = claimed.getptr(link.first);
+		const uint32_t want_bit = claim != nullptr ? *claim : 0u;
+		uint32_t &applied = applied_bits_[link.first];
+		if (want_bit == 0 && applied == 0) {
+			continue;
+		}
+		const size_t *index = caster_index.getptr(link.first);
+		if (index != nullptr) {
+			_apply_capture_layers(casters[*index].model, want_bit);
+		}
+		applied = want_bit;
+	}
 }
 
 Dictionary SlotShadow::get_report() const {

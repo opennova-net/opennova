@@ -81,7 +81,7 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
 		"begin", "session", "local_view", "scene_environment", "terrain", "foliage", "network",
-		"weather", "occlusion", "iris", "sun_veil", "lights", "slot_shadows", "materials",
+		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "slot_shadows",
 		"particles", "audio:0", "clear", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,

@@ -341,17 +341,15 @@ void Celestial::_publish_idle_veil() {
 	// The retail veil writer is gated on the sun model
 	// (retail: Environment_ApplySunVeilAndExposureStopdown @0x5ad8ba, see
 	// docs/env/env-tod-re.md): no bodies, no veil. Clear the pair and push a
-	// zero alpha once so a reload never inherits the last mission's veil.
+	// zero alpha so a reload never inherits the last mission's veil. The
+	// global is process-wide (another Celestial may have written it), so
+	// there is no per-instance latch — one RS call per idle frame.
 	sun_veil_glare_ = 0;
 	sun_veil_stopdown_ = 0;
-	if (veil_idle_published_) {
-		return;
-	}
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs != nullptr) {
 		rs->global_shader_parameter_set("opennova_sun_veil_alpha", 0.0f);
 	}
-	veil_idle_published_ = true;
 }
 
 void Celestial::advance_frame(double p_delta) {
@@ -503,14 +501,16 @@ void Celestial::advance_frame(double p_delta) {
 		rs->global_shader_parameter_set("opennova_sun_veil_alpha",
 				get_sun_veil_alpha());
 	}
-	veil_idle_published_ = false;
 	(void)p_delta;
 }
 
 float Celestial::get_sun_veil_alpha() const {
-	// The draw gate (env::sun_veil_draws) and the quad's alpha byte: the glare
-	// is <= 255 by construction (the cap in sun_veil_from_dot, the 192 clamp
-	// in sun_veil_combine), so the byte is the glare itself.
+	// The draw gate (env::sun_veil_draws) and the quad's alpha byte. The glare
+	// stays <= 255 over the authored domain: sun_veil_from_dot caps at 255
+	// before a SunDim fold that only scales down for SunDim >= 0 (stock data
+	// never writes it), and the water term clamps the sum at 192. A float
+	// alpha past 1 would saturate in the blend exactly as a 255 byte does,
+	// so no device clamp is added.
 	if (!opennova::env::sun_veil_draws(sun_veil_glare_)) {
 		return 0.0f;
 	}

@@ -298,8 +298,9 @@ int main() {
 	}
 
 	// --- fixed-index records: a release never re-phases the slots behind
-	// it, and the freed index is the next one claimed
-	// [orig: shadow_decal_alloc_slot @ 0x5d5690 — first free record].
+	// it [orig: shadow_decal_alloc_slot @ 0x5d5690 — an entity's index is
+	// its own for life]; the freed index is the next one claimed (the device
+	// fold render_slot_shadow.h describes — retail never releases).
 	{
 		RenderSlotPlan plan;
 		for (uint64_t id = 1; id <= 5; ++id) {

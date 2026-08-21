@@ -281,9 +281,6 @@ public:
 	// render-occlusion weld pass reads bit 6 ("weldable") [orig: the +88 >> 6 read in
 	// Terrain_RegisterExteriorPortalFaces @ 0x5c5cce].
 	uint32_t get_attrib2(int id) const;
-	// The authored items.def `shadow` blob decal as {texture: String,
-	// width/length/offset_x/offset_y: float}; empty Dictionary when the item
-	// authors none. Consumed by the placer's slot-shadow profile.
 	// The authored items.def `shadow` blob decal (C++ seam for the placer):
 	// false when the item authors none; dims = (width, length, offset_x,
 	// offset_y) in the decal's own units.

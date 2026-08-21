@@ -4,11 +4,11 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
-#include <godot_cpp/variant/packed_byte_array.hpp>
 
 #include <vector>
 
@@ -63,7 +63,7 @@ public:
 	// witnessed <= 4 into the report rows. The gameplay object pass is
 	// render_model_frame below; this camera-global path publishes nothing.
 	int render_frame(const Vector3 &p_camera_world, float p_query_radius,
-			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
 	// The per-draw gameplay pass (retail: update_light_slots @0x5abc50 per
 	// draw context, see docs/render/render-lighting-re.md): one draw context
@@ -78,21 +78,21 @@ public:
 			const PackedInt64Array &p_owner_entities,
 			const PackedInt64Array &p_interior_owners,
 			const PackedInt32Array &p_interior_sections,
-			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
-	// The procedural corona texture "texlightcrn" as RGB8 bytes,
-	// corona_texture_size() square — renderer::corona_texture_byte carries
-	// the law; this only lays the gray bytes out for Image::create_from_data.
+	// The procedural corona texture "texlightcrn" as RGBA8 bytes,
+	// corona_texture_size() square — renderer::corona_texture_argb carries
+	// the law; this only unpacks the words for Image::create_from_data.
 	static int corona_texture_size();
-	static PackedByteArray corona_texture_rgb8();
+	static PackedByteArray corona_texture_rgba8();
 
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):
 	// entity-centered collect + group-gated params, no D3D-fill boost
 	// (retail: RenderSlot_UpdateEntityLight @0x5d6a30, see
 	// docs/render/render-lighting-re.md). A C++ seam: fills the planner's
 	// typed inputs (positions in Godot world) and returns the count.
-	size_t slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
-			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather,
+	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<renderer::SlotPointLight> &r_out);
 
 	// The corona billboard rows for this frame (retail:
@@ -110,7 +110,7 @@ public:
 	// marshalling only.
 	TypedArray<Dictionary> collect_corona_rows(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
-			int p_time_ms, int p_frame_index, Object *p_weather,
+			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
 			const Dictionary &p_fog);

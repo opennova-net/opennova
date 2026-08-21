@@ -243,14 +243,17 @@ struct LightCoronaQuad {
 	std::array<float, 3> rgb{};
 };
 
-// The procedural corona texture "texlightcrn": 128x128 gray, intensity =
-// trunc(255 x (0.4 - 0.45 x d)) clamped >= 0 with d = sqrt((|x-64|/64)^2 +
-// (|y-64|/64)^2), the border row/column forced 0, alpha 255
+// The procedural corona texture "texlightcrn": 128x128 ARGB words,
+// intensity = trunc(255 x (0.4 - 0.45 x d)) clamped >= 0 with
+// d = sqrt((|x-64|/64)^2 + (|y-64|/64)^2) filling the gray channels under
+// alpha 255, and the border row/column written as 0x00000000 (alpha 0 —
+// the gray there is already inside the clamp's zero region)
 // [orig: Lighting_InitTextures @ 0x5a973a..0x5a97ff — abs32 per axis times
 // flt_7C3DCC = 1/64, dbl_7DA050 = 0.4, dbl_7DA058 = 0.45, dbl_7D9F98 = 255,
-// ftol truncation, the < 0 clamp @ 0x5a9793]. One texel's byte.
+// ftol truncation, the < 0 clamp @ 0x5a9793, 0x010101 * i | 0xFF000000
+// @ 0x5a97a2, the border store @ 0x5a97a8]. One texel's word.
 inline constexpr int kCoronaTextureSize = 128;
-uint8_t corona_texture_byte(int x, int y);
+uint32_t corona_texture_argb(int x, int y);
 
 // One owner's live section-visibility mask for the corona walk: bit N set =
 // COBJ section N draws this frame (the OcclusionWorld::section_mask domain)

@@ -134,7 +134,7 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 		// edge-triggered, like the entity-team write.
 		const bool was_bound = slot.bound;
 		slot = ClientRosterSlot{};
-		if (was_bound) ++state_.revision;
+		if (was_bound) state_.mark_changed();
 		return;
 	}
 	bool changed = !slot.bound; // a (re)bind
@@ -158,8 +158,12 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 		slot.clan = sync.clan;
 	}
 	if ((sync.field_bitmask & kPlayerSyncHasTeamByte) != 0u) {
+		// The entity write edge-bumps on its own; a team change on a slot with
+		// no entity to write through still counts as a roster change.
+		const bool team_changed = slot.team != sync.team;
 		slot.team = sync.team;
-		apply_team_to_entity(state_, slot, sync.team); // [orig: @0x4315fc] — its own edge bump
+		apply_team_to_entity(state_, slot, sync.team); // [orig: @0x4315fc]
+		changed |= team_changed && slot.entity_slot < 0;
 	}
 	if ((sync.field_bitmask & kPlayerSyncHasQuality) != 0u) {
 		const uint8_t quality = sync.quality > 4u ? uint8_t{4} : sync.quality; // [orig: @0x43170d]
@@ -169,7 +173,7 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 	// The binding, name, clan and quality are what the board projects from
 	// the LIVE slot, so a change to any of them moves ClientState.revision
 	// like the entity rows do (edge-triggered; the team byte bumps above).
-	if (changed) ++state_.revision;
+	if (changed) state_.mark_changed();
 }
 
 } // namespace opennova::netsim

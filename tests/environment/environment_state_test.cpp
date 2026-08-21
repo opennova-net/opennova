@@ -306,6 +306,12 @@ int main() {
 		const opennova::env::SunVeil away = sun_veil_from_dot(-0x8000, 256, 0, 0);
 		ok &= expect(away.glare == 0 && away.stopdown == 0,
 				"looking away from the sun serves no veil");
+		// The fold's immediate is 0x640000, not 0x640001: SunDim = 1 (every
+		// residue 1 mod 256 while the spring sweeps) scales by 25599/25600
+		// [orig: @ 0x5ad80f — `mov ecx, 0x640000`].
+		const opennova::env::SunVeil one_lsb = sun_veil_from_dot(0x10000, 256, 1, 0);
+		ok &= expect(one_lsb.glare == 191 && one_lsb.stopdown == 39,
+				"SunDim 1 folds 192 * 25599 / 25600 = 191 and 40 * 25599 / 25600 = 39");
 		// SunDim above 100% (author-reachable; the spring is kUnclamped)
 		// turns the fold scale negative (here -13000): both lanes are one
 		// signed /25600 that truncates toward zero like retail's idiv

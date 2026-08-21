@@ -287,7 +287,12 @@ private:
 	// The fixed 256-record table: an entity keeps its index for its
 	// lifetime, so the refresh cadence keyed on it never re-phases when
 	// another record is released [orig: shadow_decal_alloc_slot @ 0x5d5690
-	// claims the first free record of RenderSlot_Table @ 0x2be3d30].
+	// appends at RenderSlot_Count into RenderSlot_Table @ 0x2be3d30, and the
+	// count only resets at subsystem init @ 0x5d61cb — retail binds a slot
+	// per entity for the mission and never releases]. Device fold: a Godot
+	// caster is an instance id that a respawn recreates, so release_entity
+	// exists and the lowest free index is reused to keep the table bounded;
+	// a live record's index is as stable as retail's.
 	std::array<Record, kSlotRecordCount> records_{};
 	size_t live_count_ = 0;
 	std::array<bool, kSlotPatchCount> patch_used_{};

@@ -70,7 +70,7 @@ int glare_brightness_step(int current, int target);
 inline constexpr float kCelestialBodyDistance = 64.0f;
 
 // Body alphas, 16.16 in/out like the originals:
-// sun = clamp((1 - overcast) * ((0x640000 - sun_dim + 1) / 100)), where
+// sun = clamp((1 - overcast) * ((0x640000 - sun_dim) / 100)), where
 // sun_dim is the 0..100 (16.16) Env_SunDimPct channel (default 0, no .env
 // parser writes it) [orig: @ 0x5acbc1..0x5acbfa].
 int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed);
@@ -178,8 +178,8 @@ inline float glare_coarse_start_lift(uint32_t frame_index) {
 // The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
 // main scene render from Terrain_RenderSceneWithReflection @ 0x5c96c0]: its
 // own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 3
-// (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no dead-band, no
-// fog scale — dword_27E2E28). The settled brightness draws the glare model
+// (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no
+// dead-band, no fog scale — dword_27E2E28). The settled brightness draws the glare model
 // mirrored below the eye (camera + sun * 128 with the HEIGHT term negated)
 // and, right-shifted 2, feeds the sun veil's secondary term
 // [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8dc..0x5ad916 —

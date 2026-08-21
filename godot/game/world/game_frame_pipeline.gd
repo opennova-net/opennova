@@ -58,12 +58,13 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	# the frame's ambient scale, before the lit material draws consume the
 	# pushed globals).
 	_world.render_light_frame()
-	# The render-slot ground shadows plan against the light select just
-	# published (the device reads this frame's LightScene and context).
-	_world.render_slot_shadow_frame()
 	# Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	# occlusion resolves visibility, before the particle composite over it.
 	_world.render_material_frame()
+	# The render-slot ground shadows plan against the light select published
+	# above and stamp the model subtrees the material frame just rebuilt
+	# (ex-self-clocked SlotShadow _process, which ran after the whole frame).
+	_world.render_slot_shadow_frame()
 	_world.render_particle_frame()
 	_world.mix_audio_frame(outcome.get_ticks_run() if outcome != null else 0)
 	_world.update_clear_frame()

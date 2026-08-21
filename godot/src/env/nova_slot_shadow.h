@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/projection.hpp>
 
@@ -20,6 +21,7 @@ class LightScene;
 class MissionEnvironment;
 class ObjectModel;
 class ResourceRoot;
+class Weather;
 
 // The render-slot entity ground-shadow device (the Godot half of
 // engine/runtime/renderer/render_slot_shadow.h — the planner carries the
@@ -62,7 +64,7 @@ public:
 	void set_environment_node(MissionEnvironment *p_environment);
 	void set_light_scene(const Ref<LightScene> &p_scene);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
-			Object *p_weather);
+			Weather *p_weather);
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.

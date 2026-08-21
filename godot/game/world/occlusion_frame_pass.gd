@@ -123,7 +123,7 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 		var sky: SkyDome = _world.get_node_or_null("SkyDome")
 		if sky != null:
 			sky.visible = not indoors
-		var celestial: Celestial = _world.get_node_or_null("Celestial")
+		var celestial: Celestial = _world.get_celestial_node()
 		if celestial != null:
 			celestial.visible = not indoors
 	# Accum bit 0x8 (the authored water letter): both water passes skipped.
@@ -384,7 +384,7 @@ func _reset_blink_frame_gates() -> void:
 		var sky: SkyDome = _world.get_node_or_null("SkyDome")
 		if sky != null:
 			sky.visible = true
-		var celestial: Celestial = _world.get_node_or_null("Celestial")
+		var celestial: Celestial = _world.get_celestial_node()
 		if celestial != null:
 			celestial.visible = true
 	if _blink_water_suppressed:

@@ -81,6 +81,7 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _terrain: Terrain = $Terrain
 @onready var _env: MissionEnvironment = get_node_or_null("MissionEnvironment")
 @onready var _water: Water = get_node_or_null("Water")
+@onready var _weather: Weather = get_node_or_null("Weather")
 @onready var _celestial: Celestial = get_node_or_null("Celestial")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
@@ -768,7 +769,7 @@ func _load_environment(env_path: String) -> bool:
 	# GameWorld retains one Weather node across loads. A replacement ENV is
 	# a discrete state change: retail snaps every color block to the new mission
 	# targets instead of easing over from the previous mission's currents.
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.resync_colors()
 	if _celestial != null:
@@ -816,13 +817,13 @@ func is_water_render_active() -> bool:
 
 
 func _set_weather_world_tick_driven(enabled: bool) -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.set_world_tick_driven(enabled)
 
 
 func _prepare_world_driven_weather() -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.prepare_world_driven()
 	else:
@@ -830,7 +831,7 @@ func _prepare_world_driven_weather() -> void:
 
 
 func _prepare_autonomous_weather() -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	if weather != null:
 		weather.prepare_autonomous()
 	else:
@@ -841,13 +842,13 @@ func _prepare_autonomous_weather() -> void:
 # weather device (Weather.run_mission_start_boundary): T0 seed publication,
 # authority WAC direct execution, the 255-tick settle, republication, seal.
 func _run_mission_start_environment_boundary() -> void:
-	var weather := get_node_or_null("Weather") as Weather
+	var weather: Weather = _weather
 	if weather != null:
 		weather.run_mission_start_boundary(get_sim())
 
 
 func _apply_join_network_environment_update() -> void:
-	var weather := get_node_or_null("Weather") as Weather
+	var weather: Weather = _weather
 	if weather != null:
 		weather.apply_join_network_update(get_sim())
 
@@ -1015,7 +1016,7 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.terrain_data = data
 	_terrain.build()
 	if _water != null:
-		_water.set("terrain_data", data)
+		_water.terrain_data = data
 	if _celestial != null:
 		# The glare occlusion rays march this terrain (env #14).
 		_celestial.terrain_data = data
@@ -1228,7 +1229,7 @@ func advance_weather_frame() -> void:
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 	if (_world_ready and _runtime != null and _runtime.is_playing()
 			and _env != null):
-		var weather := get_node_or_null("Weather") as Weather
+		var weather: Weather = _weather
 		if weather != null:
 			weather.advance_world_driven(_frame_delta, get_sim())
 	if _placer != null:
@@ -1351,10 +1352,11 @@ func render_sun_veil_frame() -> void:
 
 
 ## The render-slot ground-shadow plan for this camera (GameFramePipeline,
-## right after the light select: render_light_frame pushes this frame's
-## LightScene and light context into the device, and slot priority plus the
-## capture poses are camera-relative) [orig: render_shadow_pass @ 0x5d7b70
-## once per main scene frame].
+## after the material frame: render_light_frame pushed this frame's
+## LightScene and light context into the device, the material frame may
+## have rebuilt the model subtrees the capture channels are stamped on, and
+## slot priority plus the capture poses are camera-relative)
+## [orig: render_shadow_pass @ 0x5d7b70 once per main scene frame].
 func render_slot_shadow_frame() -> void:
 	if _slot_shadow != null:
 		_slot_shadow.advance_frame()
@@ -1463,7 +1465,7 @@ func render_light_frame() -> void:
 	if _slot_shadow != null:
 		_slot_shadow.set_light_scene(_light_director.scene())
 		_slot_shadow.set_light_context(_light_director.light_gain(),
-				Time.get_ticks_msec(), get_node_or_null(NodePath("Weather")))
+				Time.get_ticks_msec(), _weather)
 		if _resource_root != null:
 			_slot_shadow.set_resource_root(_resource_root)
 		if _local_view_presenter != null:
@@ -2431,7 +2433,7 @@ func _on_runtime_simulation_restarted() -> void:
 
 
 func _republish_network_environment() -> void:
-	var weather := get_node_or_null("Weather") as Weather
+	var weather: Weather = _weather
 	if weather != null:
 		weather.push_network_environment(get_sim())
 
@@ -2613,7 +2615,7 @@ func get_environment_node() -> MissionEnvironment:
 
 
 func get_weather_node() -> Weather:
-	return get_node_or_null("Weather")
+	return _weather
 
 
 ## Hosted mission-clock knob used by F3 and runtime MCP. MissionEnvironment owns
@@ -2731,6 +2733,10 @@ func get_water_node() -> Water:
 	return _water
 
 
+func get_celestial_node() -> Celestial:
+	return _celestial
+
+
 ## One typed read-only renderer snapshot for MCP, visual probes, and comparison
 ## tooling. Keeping camera/environment/water/shadow/pass sampling together
 ## guarantees every consumer sees the same fields and frame semantics.
@@ -2793,7 +2799,7 @@ func _music_var_pump() -> void:
 # lives in occlusion_frame_pass.gd; the iris march stays here as the weather
 # feed.
 func _stamp_iris_samples(camera_xform: Transform3D) -> void:
-	var weather: Weather = get_node_or_null("Weather")
+	var weather: Weather = _weather
 	var sim := get_sim()
 	if weather == null or sim == null:
 		return

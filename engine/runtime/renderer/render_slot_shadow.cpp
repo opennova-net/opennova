@@ -280,14 +280,15 @@ int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
 		// [orig: @ 0x5d6864..0x5d6868 — priority >> 1].
 		score *= 0.5f;
 	}
-	// The horizon bounds base at 0x500000 and the weight at 1.5, so the
-	// score never reaches the exclusion sentinel.
+	// The horizon bounds base at 0x500000 and the weight (1.5 - dot) at
+	// 2.5, so the score never reaches the exclusion sentinel.
 	return static_cast<int32_t>(score);
 }
 
 bool RenderSlotPlan::register_entity(uint64_t id) {
-	// [orig: shadow_decal_alloc_slot @ 0x5d5690 — the first free record of
-	// the 256-entry table; a registered entity keeps its index for life].
+	// [orig: shadow_decal_alloc_slot @ 0x5d5690 — a registered entity keeps
+	// its index for life; retail appends at the high-water count]. The
+	// lowest-free reuse is the device fold the header describes.
 	int free_index = -1;
 	for (int i = 0; i < kSlotRecordCount; ++i) {
 		const Record &record = records_[static_cast<size_t>(i)];

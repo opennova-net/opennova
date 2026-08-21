@@ -35,7 +35,7 @@ ClientScoreboardHeader project_scoreboard(
 		e.spectator = r.spectator;
 		// The board's name is the ROW-carried join in the parser's own order
 		// — "clan name" [orig: the non-empty guard @0x42fd38, then
-		// sprintf("%s %s", clan, name) @0x42fd4c into the 56-byte record; an
+		// sprintf("%s %s", clan, name) @0x42fd46..0x42fd4c into the 56-byte record; an
 		// empty first string copies the name alone @0x42fd6a] — which is
 		// what keeps a leaver's line readable after the 0x46 slot wipe.
 		e.name = r.clan.empty() ? r.name : r.clan + " " + r.name;

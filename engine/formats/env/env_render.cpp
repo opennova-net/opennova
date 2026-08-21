@@ -1280,7 +1280,7 @@ SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
                           int sun_dim_fixed, int overcast_blend_fixed) {
 	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610] — the exact 16.16
 	// chain: five squarings to dot^32, two more to dot^128, brightness >> 8,
-	// the x192 / x40 scales, then the SunDim (x(0x640000 - dim + 1)>>8,
+	// the x192 / x40 scales, then the SunDim (x(0x640000 - dim)>>8,
 	// /25600) and overcast (x(1 - overcast)) folds on BOTH outputs.
 	SunVeil veil;
 	int glare_value = 0;
@@ -1306,13 +1306,15 @@ SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
 			fog_value = 40; // @ 0x5ad802
 		}
 	}
-	// The SunDim fold [orig: @ 0x5ad822..0x5ad82c] — at SunDim 0 the scale is
-	// exactly 25600 and both folds are identity. Both lanes are one signed
+	// The SunDim fold [orig: @ 0x5ad80f..0x5ad82c — `mov ecx, 0x640000; sub
+	// ecx, SunDim; sar ecx, 8`; Hex-Rays prints the immediate as
+	// `&loc_63FFFF + 1`, which is NOT a +1 in the arithmetic] — at SunDim 0
+	// the scale is exactly 25600 and both folds are identity. Both lanes are one signed
 	// /25600: the glare lane compiles to the 1374389535 reciprocal multiply
 	// plus an UNSIGNED >>31 round-toward-zero fixup (the idiv idiom, not
 	// behavior), so a negative scale (SunDim above 100%) truncates toward
 	// zero in both.
-	const int view_dist_scale = (0x640000 - sun_dim_fixed + 1) >> 8;
+	const int view_dist_scale = (0x640000 - sun_dim_fixed) >> 8;
 	const int fog_scaled = fog_value * view_dist_scale / 25600;
 	const int glare_scaled = glare_value * view_dist_scale / 25600;
 	// The overcast folds [orig: @ 0x5ad893..0x5ad8a3].
@@ -1360,7 +1362,7 @@ int glare_brightness_step(int current, int target) {
 int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed) {
 	// [orig: render_celestial_bodies @ 0x5acbc1..0x5acbfa].
 	const int64_t fold = static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
-			((0x640000 - sun_dim_fixed + 1) / 100);
+			((0x640000 - sun_dim_fixed) / 100);
 	const int alpha = static_cast<int>((fold + 0x8000) >> 16);
 	return clamp_int(alpha, 0, 0x10000);
 }
@@ -1419,6 +1421,9 @@ bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
 	}
 	const float denom = cam_mission.z + sun_mission.z * 2048.0f - clip;
 	if (denom == 0.0f) {
+		// Retail's fdiv yields +-inf here and the visibility rays reject the
+		// point; returning "no glint" is the same observable without the
+		// inf round-trip.
 		return false;
 	}
 	const float ratio = (water_height - clip) / denom;
@@ -1440,7 +1445,7 @@ int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
 		factor = static_cast<int>(
 				(static_cast<int64_t>(squared) * squared + 0x8000) >> 16) - 28672;
 	}
-	const int dim_scale = (0x640000 - sun_dim_fixed + 1) >> 8;
+	const int dim_scale = (0x640000 - sun_dim_fixed) >> 8;
 	const int combined = dim_scale * ((brightness * factor) >> 8);
 	const int alpha = (combined / 25600) >> 2;
 	return clamp_int(alpha, 0, 0x10000);
@@ -1490,7 +1495,7 @@ int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blen
 	}
 	const int scaled = (brightness * dot_factor) >> 8;
 	const int64_t dim_fold = static_cast<int64_t>(scaled) *
-			((0x640000 - sun_dim_fixed + 1) >> 8) / 25600;
+			((0x640000 - sun_dim_fixed) >> 8) / 25600;
 	const int alpha = static_cast<int>(
 			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) * dim_fold + 0x8000) >> 16);
 	return clamp_int(alpha, 0, 0x10000);

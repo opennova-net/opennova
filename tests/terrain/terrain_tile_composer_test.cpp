@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -625,14 +624,16 @@ bool test_optional_00tra_fork_oracle() {
 			entry_781.tile_index == 42 && entry_781.flags == 0x06,
 			"00TRa entry 781 matches the witnessed tile/flags/placement")) return false;
 	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
-	// The RGB pins are the shipped rotate-then-flip composer's pages (the
-	// full-atlas bake agrees texel for texel): 0x05 -> T(x,z) = (z,x) hashes
-	// 5690c9449dabde0f and 0x06 -> (1-z,1-x) hashes a03140eb55c2e69d. The
-	// pre-fix flip-then-rotate order rendered 0x05 as (1-z,1-x) — it
-	// produces a03140eb55c2e69d for entry 761, which is how the two pins
-	// tell the orders apart. The constants this oracle first shipped with
-	// (9bd9ceb8ff8a85b1 / 7c7aa42a36f35e03) matched neither order on the
-	// retail atlas; re-witnessed 2026-08-21.
+	// The RGB pins are REGRESSION pins of the shipped rotate-then-flip order
+	// (the order itself is witnessed in til-re.md and pinned synthetically in
+	// til_render_uv_test; the bake comparison above shares
+	// til_transform_local_uv and cannot corroborate it): 0x05 -> T(x,z) =
+	// (z,x) hashes 5690c9449dabde0f and 0x06 -> (1-z,1-x) hashes
+	// a03140eb55c2e69d on the retail atlas. The pre-fix flip-then-rotate
+	// order rendered 0x05 as (1-z,1-x) — it produces a03140eb55c2e69d for
+	// entry 761 — which is how the two pins tell the orders apart. The
+	// constants this leg first shipped with (9bd9ceb8ff8a85b1 /
+	// 7c7aa42a36f35e03) matched neither order; re-pinned 2026-08-21.
 	return til_entry_oracle(entry_761, tilestrip, 761, fork_key,
 			UINT64_C(0x5690c9449dabde0f),
 			UINT64_C(0xd88858b8092111d7)) &&

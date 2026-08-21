@@ -62,17 +62,20 @@ void apply_rgb_gen(const LightSpawnParams &params,
 
 } // namespace
 
-uint8_t corona_texture_byte(int x, int y) {
+uint32_t corona_texture_argb(int x, int y) {
 	// [orig: Lighting_InitTextures @ 0x5a973a..0x5a97ff].
 	if (x <= 0 || x >= kCoronaTextureSize - 1 || y <= 0 ||
 			y >= kCoronaTextureSize - 1) {
-		return 0;
+		return 0u;  // the border store @ 0x5a97a8
 	}
 	const double dx = static_cast<double>(std::abs(x - 64)) * (1.0 / 64.0);
 	const double dy = static_cast<double>(std::abs(y - 64)) * (1.0 / 64.0);
 	const double d = std::sqrt(dx * dx + dy * dy);
-	const int intensity = static_cast<int>((0.4 - d * 0.45) * 255.0);
-	return static_cast<uint8_t>(intensity < 0 ? 0 : intensity);
+	int intensity = static_cast<int>((0.4 - d * 0.45) * 255.0);
+	if (intensity < 0) {
+		intensity = 0;  // @ 0x5a9793
+	}
+	return 0xFF000000u | (0x010101u * static_cast<uint32_t>(intensity));
 }
 
 LightHandle LightScene::spawn(const LightSpawnParams &params) {
