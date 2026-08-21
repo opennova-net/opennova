@@ -351,4 +351,52 @@ void player_view_compose_camera(const PlayerViewState &v,
     for (int i = 0; i < 3; ++i) out.eye[i] = eye[i] - fwd[i] * kFpEyePullback;
 }
 
+
+// [orig: the mode-0 shake block inside Camera_ComputeThirdPersonView
+//  @0x437D10 — the counter gate, the > 64 clamp, the three IIR updates and
+//  the three >> 6 applications]
+void camera_shake_sample(CameraShakeState &st, uint32_t weather_prng,
+                         int32_t &d_yaw_bam, int32_t &d_pitch_bam,
+                         int32_t &d_roll_bam) {
+	d_yaw_bam = 0;
+	d_pitch_bam = 0;
+	d_roll_bam = 0;
+	// Retail gates the ENTIRE block on a non-zero counter, so a settled camera
+	// leaves the filters exactly where they stopped rather than decaying them
+	// toward zero in the background.
+	if (st.counter == 0) return;
+
+	int32_t clamped = st.counter;
+	if (clamped > kShakeSampleMax) clamped = kShakeSampleMax;
+
+	// Three slices of ONE word. The shifts are arithmetic on int32 so the sign
+	// propagates, which is what makes each slice signed noise rather than a
+	// positive-only magnitude.
+	const int32_t p = static_cast<int32_t>(weather_prng);
+	const int32_t n_roll = static_cast<int32_t>(static_cast<uint32_t>(p) << 1) >> 5;
+	const int32_t n_pitch = static_cast<int32_t>(static_cast<uint32_t>(p) << 17) >> 5;
+	const int32_t n_yaw = static_cast<int32_t>(static_cast<uint32_t>(p) << 9) >> 5;
+
+	// s = (7s + n) >> 3 — a 1/8 one-pole low-pass, computed through uint32 so
+	// the intermediate wraps like the original imul/add rather than tripping
+	// signed-overflow UB.
+	auto step = [](int32_t s, int32_t n) -> int32_t {
+		const uint32_t acc = uint32_t(7) * static_cast<uint32_t>(s) +
+				static_cast<uint32_t>(n);
+		return static_cast<int32_t>(acc) >> 3;
+	};
+	st.roll = step(st.roll, n_roll);
+	st.pitch = step(st.pitch, n_pitch);
+	st.yaw = step(st.yaw, n_yaw);
+
+	// (clamped * s) >> 6, the multiply left to WRAP as the original imul does.
+	auto delta = [](int32_t c, int32_t s) -> int32_t {
+		const uint32_t m = static_cast<uint32_t>(c) * static_cast<uint32_t>(s);
+		return static_cast<int32_t>(m) >> 6;
+	};
+	d_roll_bam = delta(clamped, st.roll);
+	d_pitch_bam = delta(clamped, st.pitch);
+	d_yaw_bam = delta(clamped, st.yaw);
+}
+
 } // namespace opennova::world
