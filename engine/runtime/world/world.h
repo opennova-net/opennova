@@ -235,6 +235,10 @@ struct CachedFrameState {
     // can read it without reaching into the VM — retail keeps it in the same
     // global bag as `humans`. [orig: wac_var_ticks]
     int32_t wac_ticks = 0;
+    // The posed head as a BODY-RELATIVE delta, paired with local_head above.
+    // Lag-free by construction; see the seated eye restamp in infantry.cpp.
+    Vec3 local_head_offset;
+    bool local_head_offset_valid = false;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value

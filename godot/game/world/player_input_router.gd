@@ -112,15 +112,35 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 			_bool(state, "lean_right"),
 			_bool(state, "jump"))
 	frame_input.look_delta = _look_delta if gameplay_input_active else Vector2.ZERO
+	# NW_FLY_TURN=<mouse counts per second> feeds a steady yaw so an unattended
+	# session can fly a circuit. The pilot's steer target IS the look heading, so
+	# turning the look turns the aircraft - no separate steer channel exists.
+	var fly_turn := float(OS.get_environment("NW_FLY_TURN"))
+	if fly_turn != 0.0:
+		frame_input.look_delta = Vector2(fly_turn * delta, 0.0)
 	_look_delta = Vector2.ZERO
 	if sim != null:
 		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
 		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
 		# computed sim-side in the original @0x4b6bb3 — in the port, the render skeleton is
 		# the sample source (D-INF-18)].
+		# Feed the head RELATIVE TO THE AVATAR ROOT. The render skeleton is a
+		# frame behind the sim, so an absolute head point carries a frame of
+		# travel with it - invisible on foot, but 5-10 u in a helicopter, which
+		# put the cockpit camera behind the aircraft. A body-relative delta
+		# carries none and the sim re-anchors it to the live position.
 		var head: Vector3 = _presenter.avatar_head_world()
+		var root: Vector3 = _presenter.avatar_root_world()
 		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
+		# ...and the SAME sample as a body-relative delta. The render skeleton is
+		# a frame behind the sim, so an absolute head carries a frame of travel:
+		# invisible on foot, 5-10 u in a helicopter, which put the cockpit camera
+		# behind the aircraft. The delta carries none, and the sim re-anchors it
+		# to the live position for the seated eye.
+		var delta_ok := head != Vector3.INF and root != Vector3.INF
+		sim.set_local_player_eye_offset(head - root if delta_ok else Vector3.ZERO,
+				delta_ok)
 	_sample_weapon_input(frame_input, gameplay_input_active)
 	_sample_hud_input(gameplay_input_active)
 	return frame_input

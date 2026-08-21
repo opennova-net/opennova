@@ -306,6 +306,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &Simulation::debug_set_entity_health);
 	ClassDB::bind_method(D_METHOD("debug_crew_vehicle", "occupant_ssn", "vehicle_ssn"),
 	                     &Simulation::debug_crew_vehicle);
+	ClassDB::bind_method(D_METHOD("set_local_player_eye_offset", "offset", "valid"),
+	                     &Simulation::set_local_player_eye_offset);
 	ClassDB::bind_method(D_METHOD("local_player_fp_weapon_hidden"),
 	                     &Simulation::local_player_fp_weapon_hidden);
 	ClassDB::bind_method(D_METHOD("debug_crew_local_player", "vehicle_ssn"),

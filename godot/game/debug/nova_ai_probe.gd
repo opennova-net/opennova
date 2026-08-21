@@ -154,7 +154,24 @@ func _camera_probe(sim: Simulation) -> Dictionary:
 		"eye": [snappedf(eye.x, 0.1), snappedf(eye.y, 0.1), snappedf(eye.z, 0.1)],
 		"pos": [snappedf(pos.x, 0.1), snappedf(pos.y, 0.1), snappedf(pos.z, 0.1)],
 		"tp": bool(v.get("third_person", false)),
+		# Camera yaw vs the piloted hull's yaw: the objective check that the
+		# cockpit view looks down the nose instead of off the side.
+		"cy": snappedf(float(v.get("camera_yaw_deg", 0.0)), 0.1),
+		"cp": snappedf(float(v.get("camera_pitch_deg", 0.0)), 0.1),
+		"cr": snappedf(float(v.get("camera_roll_deg", 0.0)), 0.1),
+		"vy": snappedf(_piloted_vehicle_yaw(sim), 0.1),
 	}
+
+
+## Mission yaw of the vehicle the local player is piloting (NAN when on foot).
+func _piloted_vehicle_yaw(sim: Simulation) -> float:
+	var ssn := int(OS.get_environment("NW_CREW_VEHICLE"))
+	if ssn <= 0:
+		return NAN
+	var d: Dictionary = sim.get_world_entity_debug(ssn)
+	if d.is_empty():
+		return NAN
+	return float(int(d.get("yaw", 0)))
 
 
 func _mission_vars(sim: Simulation) -> Array:

@@ -2524,8 +2524,10 @@ void test_eye_offset_restamp() {
     run_ticks(ai, w, 4, 6);
     CHECK(reg->eye_offset_z == 0xD000);
 
-    // The local exact leg: a shell-fed head sample replaces the capsule formula
-    // with head - Position, all three lanes, stored UNfloored — the 0x2000
+    // The local exact leg: a shell-fed head sample replaces the capsule formula.
+    // The shell feeds it BODY-RELATIVE (head minus the skeleton origin) because
+    // its render skeleton is a frame behind the sim; an absolute sample would
+    // carry that frame of travel into the offset. Stored UNfloored — the 0x2000
     // floor belongs to the capsule legs; retail's on-foot leg terrain-floors
     // the head first (a no-op here: this AiSystem carries no height field).
     // [orig: Entity_UpdateInfantryPlayerBody on-foot @0x4b6bb3..0x4b6cc8;
@@ -2533,19 +2535,19 @@ void test_eye_offset_restamp() {
     e->pos[0] = fx(10);
     e->pos[1] = fx(20);
     e->pos[2] = fx(5);
-    w.cached.local_head = Vec3{10.25f, 19.5f, 6.4f};
-    w.cached.local_head_valid = true;
+    w.cached.local_head_offset = Vec3{0.25f, -0.5f, 1.4f}; // head - body root
+    w.cached.local_head_offset_valid = true;
     run_ticks(ai, w, 6, 8);
     CHECK(reg->eye_offset_x == fx(1) / 4);
     CHECK(reg->eye_offset_y == -fx(1) / 2);
     CHECK(std::abs(reg->eye_offset_z - (fx(1) + fx(1) * 2 / 5)) <= 2);
     // A head barely above Position stores the raw 0.05 u offset (no floor).
-    w.cached.local_head = Vec3{10.0f, 20.0f, 5.05f};
+    w.cached.local_head_offset = Vec3{0.0f, 0.0f, 0.05f};
     run_ticks(ai, w, 8, 10);
     CHECK(reg->eye_offset_x == 0);
     CHECK(reg->eye_offset_y == 0);
     CHECK(std::abs(reg->eye_offset_z - 3277) <= 3);
-    w.cached.local_head_valid = false; // sample lost -> capsule formula returns
+    w.cached.local_head_offset_valid = false; // sample lost -> capsule formula returns
     run_ticks(ai, w, 10, 12);
     CHECK(reg->eye_offset_z == 0xD000);
     CHECK(reg->eye_offset_x == 0); // stale head laterals reset with the sample

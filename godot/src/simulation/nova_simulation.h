@@ -1940,6 +1940,7 @@ public:
 	// AI index, and OK only after both authoritative mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
 	Error debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn);
+	void set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid);
 	bool local_player_fp_weapon_hidden() const;
 	Error debug_crew_local_player(int p_vehicle_ssn);
 	// Probe seam: teleport an AI entity (mission-space coords) through both

@@ -394,7 +394,7 @@ void test_compose_camera_first_person() {
     // recoil 1 deg (BAM), torso roll 2 deg, lean 4 deg -> roll 2 + 1 = 3 deg.
     const int32_t deg_bam = 11930465; // 2^32 / 360, rounded
     player_view_compose_camera(v, position, anchor, true, nullptr, false,
-            90.0f, 0.0f, deg_bam, 2 * deg_bam, 4 * deg_bam, pose);
+            90.0f, 0.0f, deg_bam, 2 * deg_bam, 4 * deg_bam, false, 0.0f, pose);
     CHECK(!pose.third_person);
     CHECK(near_eq(pose.yaw_deg, 90.0f));
     CHECK(near_eq(pose.pitch_deg, 2.0f, 0.01f)); // twice the 1-deg accumulator
@@ -407,12 +407,12 @@ void test_compose_camera_first_person() {
     // The floor: an anchor below position + 0.125 clamps up [orig: @ 0x4b6b98].
     const float low_anchor[3] = {10.0f, 20.0f, 5.0f};
     player_view_compose_camera(v, position, low_anchor, true, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 5.125f, 0.001f));
 
     // No anchor: the non-person +1.0 bump over position [orig: @ 0x437e8f].
     player_view_compose_camera(v, position, position, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
 }
 
@@ -440,26 +440,26 @@ void test_compose_camera_terrain_floor() {
     const float anchor[3] = {100.0f, -4.0f, 6.6f}; // below terrain 8.0
     PlayerCameraPose pose;
     player_view_compose_camera(v, position, anchor, true, &field, false,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     // yaw 0 pitch 0: fwd = (0, 1, 0); the pull-back rides Y, the Z is the
     // floored eye = 8.0 + 0.0625.
     CHECK(near_eq(pose.eye[2], 8.0625f, 0.001f));
 
     // INDOORS skips the floor [orig: the Flags & 0x800000 gate @ 0x4b6c08].
     player_view_compose_camera(v, position, anchor, true, &field, true,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 6.6f, 0.001f));
 
     // An eye already above the floored height passes through untouched.
     const float high_anchor[3] = {100.0f, -4.0f, 9.5f};
     player_view_compose_camera(v, position, high_anchor, true, &field, false,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 9.5f, 0.001f));
 
     // The non-person bump path has no terrain leg [orig: the fallback branch
     // @ 0x4b6b92 stores its offset with only the 0x2000 floor].
     player_view_compose_camera(v, position, position, false, &field, false,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
 
     // The neighbor probes: a ridge one column to +X raises the floor through
@@ -467,7 +467,7 @@ void test_compose_camera_terrain_floor() {
     // Column x=101 at 24.0u: probe x=100.25 -> 8 + (24-8)*0.25 = 12.0.
     for (int z = 0; z < kDim; ++z) heightmap[z * kDim + 101] = 24 * 256;
     player_view_compose_camera(v, position, anchor, true, &field, false,
-            0.0f, 0.0f, 0, 0, 0, pose);
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 12.0625f, 0.001f));
 }
 
@@ -487,7 +487,7 @@ void test_compose_camera_third_person() {
     const int32_t deg_bam = 11930465;
     player_view_compose_camera(v, position, anchor, true, nullptr, false,
             0.0f, 0.0f,
-            deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, pose);
+            deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, false, 0.0f, pose);
     CHECK(pose.third_person);
     CHECK(near_eq(pose.pitch_deg, kTpOrbitPitchDeg));
     CHECK(pose.roll_deg == 0.0f);

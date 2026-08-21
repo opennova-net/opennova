@@ -310,6 +310,21 @@ void Simulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) 
 	}
 }
 
+// The posed head as a BODY-RELATIVE delta (head minus the skeleton origin).
+// The absolute sample above is a frame stale, which is harmless on foot and
+// the whole cockpit-view bug at flight speed; the delta carries no travel, so
+// re-anchoring it to the live position reproduces retail's Position +
+// CameraOffset without importing the lag.
+// [orig: the mounted local eye leg @0x4b6908 stores head - Position from a
+//  skeleton posed in the SAME tick]
+void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot,
+		bool p_valid) {
+	if (!world_) return;
+	world_->cached.local_head_offset = opennova::world::Vec3{
+			p_offset_godot.x, -p_offset_godot.z, p_offset_godot.y};
+	world_->cached.local_head_offset_valid = p_valid;
+}
+
 Dictionary Simulation::get_local_player_view() const {
 	Dictionary out;
 	const opennova::world::WeaponSlotState *active_slot =
@@ -402,15 +417,50 @@ Dictionary Simulation::get_local_player_view() const {
 				}
 				const float position[3] = {e->position.x, e->position.y,
 						e->position.z};
+				// The eye is Position + CameraOffset, NOT an absolute head point.
+				// Retail restamps CameraOffset as (head - Position) from a
+				// skeleton it poses in the SAME tick, and the camera adds that
+				// delta back to the LIVE position every frame. Our head sample
+				// comes from the rendered avatar, so it is a frame stale as an
+				// absolute point -- 0.6 u of error on foot, but 5-7 u in a
+				// helicopter at ~69 u/s, which put the camera behind and below
+				// the aircraft looking at its own underside.
+				//
+				// Re-anchoring the stored OFFSET to the live position removes
+				// that: a seated pilot's offset barely changes between frames
+				// while his position moves a whole unit per tick.
+				// [orig: the MOUNTED local eye leg @0x4b6908 (selector
+				//  @0x4b66d0, unfloored) stores head-Position into +0x6C/+0x70/
+				//  +0x74; Camera_ComputeThirdPersonView @0x437fa5..0x437fb7 adds
+				//  the triple to the tracked entity's position]
+				float anchor_eye[3] = {local_weapon_.eye_mission[0],
+						local_weapon_.eye_mission[1],
+						local_weapon_.eye_mission[2]};
+				const bool seated_eye =
+						e->mounted && (e->eye_offset_x != 0 ||
+								e->eye_offset_y != 0 || e->eye_offset_z != 0);
+				if (seated_eye) {
+					anchor_eye[0] = position[0] +
+							static_cast<float>(opennova::world::from_fixed(e->eye_offset_x));
+					anchor_eye[1] = position[1] +
+							static_cast<float>(opennova::world::from_fixed(e->eye_offset_y));
+					anchor_eye[2] = position[2] +
+							static_cast<float>(opennova::world::from_fixed(e->eye_offset_z));
+				}
 				opennova::world::PlayerCameraPose pose;
 				opennova::world::player_view_compose_camera(player_view_,
-						position, local_weapon_.eye_mission,
-						local_weapon_.eye_valid,
+						position, anchor_eye,
+						seated_eye || local_weapon_.eye_valid,
 						world_->ai != nullptr ? world_->ai->terrain : nullptr,
 						(e->flags & opennova::world::kEntityFlagIndoors) != 0,
 						aim_yaw, aim_pitch,
 						p->inf.recoil_pitch, p->inf.torso_roll,
-						p->inf.lean_angle, pose);
+						p->inf.lean_angle,
+						// The carrier leg: a seated occupant's view rotation is
+						// the entity triple, and the person leg is jumped over
+						// entirely. The roll is the seat-carried hull bank the
+						// mount pose wrote, never the standing torso tilt.
+						seated_eye, static_cast<float>(e->roll), pose);
 				out["camera_pose_valid"] = true;
 				// mission (x,y,z) -> Godot (x, z, -y).
 				out["camera_eye"] = Vector3(pose.eye[0], pose.eye[2],

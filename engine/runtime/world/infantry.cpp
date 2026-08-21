@@ -1251,17 +1251,47 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // @0x4b66fc..0x4b68e5) is the tracked D-HUD-20 residue. The friendly-tag
     // anchor reads the mirrored z.
     if (have_clip) {
-        if (inf.is_local_player && world.cached.local_head_valid) {
-            float head[3] = {world.cached.local_head.x,
-                             world.cached.local_head.y,
-                             world.cached.local_head.z};
+        if (inf.is_local_player && world.cached.local_head_offset_valid) {
+            // The shell samples the head from the RENDER skeleton, which is a
+            // frame behind the sim (D-INF-18: retail poses the skeleton inside
+            // the tick and reads the head there, @0x4b6bb3 on foot and
+            // @0x4b6908 mounted). It therefore feeds the head RELATIVE TO THE
+            // AVATAR ROOT, and the offset is stored as-is instead of being
+            // derived by subtracting this tick's position.
+            //
+            // Subtracting a fresh position from a stale world-space head folds
+            // the whole frame of travel into the offset, so re-adding it just
+            // reproduces the stale point. Harmless at walking pace (0.6 u) and
+            // the entire cockpit-view bug in a helicopter at ~69 u/s, where the
+            // camera sat 5-10 u behind the aircraft looking at its underside.
+            // A body-relative delta carries no travel and stays correct at any
+            // speed, which is the property retail's same-tick pose gives it.
+            float head[3] = {world.cached.local_head_offset.x,
+                             world.cached.local_head_offset.y,
+                             world.cached.local_head_offset.z};
             const Entity *reg = world.registry.get(world.cached.local_player);
-            player_view_floor_eye_to_terrain(
-                terrain,
-                reg != nullptr && (reg->flags & kEntityFlagIndoors) != 0, head);
-            inf.eye_offset_x = to_fixed(head[0]) - e.pos[0];
-            inf.eye_offset_y = to_fixed(head[1]) - e.pos[1];
-            inf.eye_offset_z = to_fixed(head[2]) - e.pos[2];
+            // The terrain floor is an ABSOLUTE-space rule, so apply it to the
+            // absolute eye and fold the correction back into the delta. It is
+            // also on-foot only: the mounted leg is unfloored in retail
+            // [orig: the 0x2000 floors @0x4b68e7/@0x4b6b98 belong to the
+            //  capsule legs, and @0x4b6908 has no floor of any kind].
+            const bool seated = reg != nullptr && reg->mounted;
+            if (!seated) {
+                float abs_eye[3] = {from_fixed(e.pos[0]) + head[0],
+                                    from_fixed(e.pos[1]) + head[1],
+                                    from_fixed(e.pos[2]) + head[2]};
+                player_view_floor_eye_to_terrain(
+                        terrain,
+                        reg != nullptr &&
+                                (reg->flags & kEntityFlagIndoors) != 0,
+                        abs_eye);
+                head[0] = abs_eye[0] - from_fixed(e.pos[0]);
+                head[1] = abs_eye[1] - from_fixed(e.pos[1]);
+                head[2] = abs_eye[2] - from_fixed(e.pos[2]);
+            }
+            inf.eye_offset_x = to_fixed(head[0]);
+            inf.eye_offset_y = to_fixed(head[1]);
+            inf.eye_offset_z = to_fixed(head[2]);
         } else {
             const int32_t extent = frame.capsule_top - frame.capsule_bottom;
             const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)

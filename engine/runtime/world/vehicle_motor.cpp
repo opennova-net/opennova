@@ -1962,11 +1962,23 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
         if ((move_order & 0x40u) != 0) m.net_alt_target -= 0x4000;
         if ((move_order & 0x80u) != 0) m.net_alt_target += 0x4000;
         int32_t climb = m.net_alt_target - ground;
-        if (climb > 0x1000000) { // the 256 u ceiling
-            climb = 0x1000000;
-            m.net_alt_target = ground + climb;
+        // The ceiling is ABSOLUTE, not above-ground: retail tests
+        // `ground + climb > 0x1000000` and parks the target AT 0x1000000, so a
+        // helicopter over a 100 u ridge may only climb 156 u, not another 256.
+        // [orig: Entity_UpdateAircraftPhysics @0x4912a0 — the LABEL_175 clamp
+        //  pair, `v78 + [548] > 0x1000000 -> [548] = 0x1000000 - v78,
+        //  [524] = 0x1000000` with v78 the average ground height]
+        if (ground + climb > 0x1000000) {
+            climb = 0x1000000 - ground;
+            m.net_alt_target = 0x1000000;
         }
         if (climb < 0) {
+            // DIVERGENCE (unported half of the witnessed clamp pair): retail's
+            // companion clamp here is `[548] < 0 -> [548] = 0, [524] = ground`
+            // — a floor, not a shutdown; its landed reset lives in the separate
+            // not-airborne branch (`entity+36 >= 0` @0x490d5c) which we fold in
+            // here. Splitting them needs a landing round to validate, so it is
+            // the named next step, not a silent rewrite.
             // Landed: the engine-off reset — commands zero, steer holds the
             // hull's own heading, the target parks below ground level.
             m.net_alt_target = ground - 0x4000;

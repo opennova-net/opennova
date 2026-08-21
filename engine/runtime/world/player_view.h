@@ -431,6 +431,7 @@ void player_view_compose_camera(const PlayerViewState &v,
                                 float aim_yaw_deg, float aim_pitch_deg,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
+                                bool carrier_view, float carrier_roll_deg,
                                 PlayerCameraPose &out);
 
 } // namespace opennova::world
