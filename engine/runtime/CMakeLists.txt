@@ -62,6 +62,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp

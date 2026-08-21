@@ -1,6 +1,9 @@
 #pragma once
 
+#include <renderer/light_scene.h>
+
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::renderer {
@@ -9,24 +12,41 @@ namespace opennova::renderer {
 // puts a light's pool of illumination on the GROUND, as distinct from the
 // object shader's per-vertex term that `light_scene` already carries.
 //
-// Retail re-draws the terrain block once more PER LIGHT, additively, through a
-// two-stage projected-texture technique
-// [orig: render_terrain_sector_batch @0x6092A0 — the per-light loop
-//  @0x609870..0x6098BC: each handle passes
-//  LightInstance_IsAliveAndLightsTerrain @0x609880 (a live handle whose flags
-//  lack 0x400), then the render-mode dword_319FBD4 & 0x100 selects
-//  foliage_setup_render_matrices @0x6098A5 or the normal
-//  Light_SetupTerrainProjectedPass @0x6098B4 (ex `render_foliage_instance`:
-//  its argument is a Light_InstanceTable slot index @0x5AA857, not a foliage
-//  instance)].
+// Retail re-draws each terrain batch once more PER LIGHT, additively, through
+// a two-stage projected-texture technique
+// [orig: render_terrain_sector_batch @0x6092A0 — the batch collects the pool
+//  by its own AABB (sector origin ints + the batch record's float corners
+//  +0x18..+0x2C through Math_FloatToFixedPoint3_YNegated @0x609641/@0x609653)
+//  with collect_nearby_zones_by_aabb(min, max, &count, 16) @0x60966f — a cap
+//  of SIXTEEN, not the object pass's 64 — then CLEARS both light groups
+//  (Lighting_SetInteriorLightGroup(0,0) @0x60967c,
+//  Lighting_SetOwnerLightGroup(0,0) @0x609685), so only UNOWNED lights ever
+//  reach the terrain; a counting pass @0x609690..0x6096c9 keeps the light
+//  leg only when at least one handle passes Light_PassesActiveGroups
+//  @0x60969f AND LightInstance_IsAliveAndLightsTerrain @0x6096b3 (a live
+//  handle whose flags lack 0x400); the per-light loop @0x60984c..0x609953
+//  then re-draws the batch once per passing handle with NO four-light cap —
+//  the render-mode dword_319FBD4 & 0x100 @0x609890 selects
+//  foliage_setup_render_matrices @0x6098a5 (the 0.4/r alt pass) or the
+//  normal Light_SetupTerrainProjectedPass @0x6098b4 (ex
+//  `render_foliage_instance`: its argument is a Light_InstanceTable slot
+//  index @0x5AA857, not a foliage instance). The whole leg is skipped when
+//  PolyTrn_UsePixelShaderPath == 0 @0x6095e4 or dword_319FB84 != 0
+//  @0x60983f.]
 //
-// STAGED, NOT WIRED: this was the "terrain projected circles" residual
-// recorded against D-RLIT-4; the terrain shader still carries no point-light
-// input.
+// The engine half: LightScene::collect_terrain_pass_rows runs that collect +
+// gate per patch and publishes one row per passing light — position,
+// projection scale and the pixel constants — for the terrain shader. The
+// device half (the projected samples, the two-stage MODULATE2X combine and
+// the additive re-draw) is the presenter's.
 
 // The flag that keeps a light off the terrain pass (light_scene.h's "terrain
 // disabled (flag 1024)") [orig: LightInstance_IsAliveAndLightsTerrain @0x609880].
 inline constexpr uint32_t kLightFlagNoTerrain = 0x400u;
+
+// The per-batch collect cap [orig: the `push 10h` @0x609658 into
+// collect_nearby_zones_by_aabb @0x60966f].
+inline constexpr size_t kTerrainLightQueryLimit = 16;
 
 // The terrain pass's own literal [orig: flt_7D3E68 = 0.66000003 @0x5AA9C8 /
 // @0x5AA9E9 / @0x5AAA01] and the 0.5 that accompanies it on the Ambient
@@ -51,10 +71,10 @@ inline float terrain_light_published(float channel, float blend) {
 
 // The Ambient term as the original composes it
 // [orig: Light_SetupTerrainProjectedPass @0x5AA9C8..0x5AAA01 — record float
-//  +44/+48/+52 (rgb) * float +56 (blend) * EffectWorld_AmbientScale{R,G,B} *
-//  flt_2732DA{C,8,4} * 0.66, then * RgbGen_EvaluateColor when the record
-//  carries a gen block @0x5AAA05..0x5AAA5F, then * 0.5 into constants 4..6
-//  @0x5AAA9B..0x5AAAB3].
+//  +44/+48/+52 (rgb) * float +56 (blend) * EffectWorld_AmbientScale{R,G,B}
+//  @0x840b24.. * flt_2732DA{C,8,4} * 0.66, then * RgbGen_EvaluateColor when
+//  the record carries a gen block @0x5AAA05..0x5AAA5F, then * 0.5 into
+//  constants 4..6 @0x5AAA9B..0x5AAAB3].
 inline float terrain_light_ambient(float channel, float blend,
 		float ambient_scale, float per_channel_factor) {
 	return channel * blend * ambient_scale * per_channel_factor *
@@ -62,16 +82,20 @@ inline float terrain_light_ambient(float channel, float blend,
 }
 
 // THE PER-CHANNEL FACTOR is the environment's packed terrain colour
-// `Env_TerrainColorRecip` unpacked to floats ONCE per tick: red is byte 2 into
-// flt_2732DAC, green byte 1 into flt_2732DA8, blue byte 0 into flt_2732DA4,
-// each times flt_7C3DD4 = 1/128
-// [orig: EffectWorld_TickInstancesAndLightScale @0x5AA1EF..0x5AA23F]. It is
-// not the ambient scale, and the pass reads the three floats rather than
-// re-unpacking. The environment default 0x808080 [orig: Environment_InitDefaults
-// @0x57C050..0x57C065 — the same immediate seeds Env_CloudColorTarget and
-// Env_LightningColor] divides to exactly (1, 1, 1); if it did not, every
-// terrain light would be tinted by default. It is a factor, not a clamp: a
-// white terrain colour exceeds unity.
+// reciprocal `Env_TerrainColorRecip` unpacked to floats ONCE per tick: red is
+// byte 2 into flt_2732DAC, green byte 1 into flt_2732DA8, blue byte 0 into
+// flt_2732DA4, each times flt_7C3DD4 = 1/128
+// [orig: EffectWorld_TickInstancesAndLightScale @0x5AA21D..0x5AA23F]. It is
+// not the ambient scale (that is the modulator's 1/64 unpack,
+// EffectWorld_UnpackModulatorToAmbientScale @0x5AAF1D), and the pass reads the
+// three floats rather than re-unpacking. The environment default 0x808080
+// [orig: Environment_InitDefaults @0x57C050..0x57C065 — the same immediate
+// seeds Env_CloudColorTarget and Env_LightningColor] divides to exactly
+// (1, 1, 1); if it did not, every terrain light would be tinted by default.
+// It is a factor, not a clamp: a white recip byte exceeds unity. The recip
+// itself is env::terrain_color_recip_packed (TimeOfDay_ParseProperty
+// @0x57CA60..0x57CAE3) — EnvironmentState::terrain_color_recip_packed serves
+// the loaded value.
 inline constexpr uint32_t kTerrainFactorDefaultPacked = 0x808080u;
 inline constexpr float kTerrainFactorDivisor = 128.0f;
 
@@ -85,13 +109,14 @@ inline std::array<float, 3> terrain_per_channel_factor(uint32_t packed_rgb) {
 
 // THE PROJECTED TEXTURE's SCALE. The normal pass projects with
 // `32768.0 / record[+0x28]` [orig: Light_SetupTerrainProjectedPass
-//  @0x5AA864..0x5AA873], and +0x28 is the record's Q16 range — the same dword
-// Light_GetPointLightParams divides into pos.w = 65536 / range @0x5A91C8..0x5A91D4
-// — so the scale is 0.5 / radius: the texture's 0..1 span covers exactly one
-// diameter, centred by the +0.5 translation @0x5AA900/@0x5AA915. The alternate
-// pass under render-mode bit 0x100 scales by 26214.4 / range instead, i.e.
-// 0.4 / radius [orig: foliage_setup_render_matrices @0x6098A5]. A bigger light
-// casts a WIDER pool, not a brighter one.
+//  @0x5AA864..0x5AA873, flt_7C32B4 = 32768], and +0x28 is the record's Q16
+// range — the same dword Light_GetPointLightParams divides into pos.w =
+// 65536 / range @0x5A91C8..0x5A91D4 — so the scale is 0.5 / radius: the
+// texture's 0..1 span covers exactly one diameter, centred by the +0.5
+// translation @0x5AA900/@0x5AA915. The alternate pass under render-mode bit
+// 0x100 scales by 26214.4 / range instead, i.e. 0.4 / radius
+// [orig: foliage_setup_render_matrices @0x6098A5]. A bigger light casts a
+// WIDER pool, not a brighter one.
 inline constexpr float kTerrainProjectScale = 0.5f;      // 32768 / 65536
 inline constexpr float kTerrainProjectScaleAlt = 0.4f;   // 26214.4 / 65536
 
@@ -99,5 +124,128 @@ inline float terrain_project_scale(float radius, bool alt_pass = false) {
 	if (radius <= 0.0f) return 0.0f;
 	return (alt_pass ? kTerrainProjectScaleAlt : kTerrainProjectScale) / radius;
 }
+
+// ---------------------------------------------------------------------------
+// THE PROJECTION, in mission space.
+//
+// Retail builds two 4x4 texture matrices per light
+// [orig: Light_SetupTerrainProjectedPass @0x5AA885..0x5AA996]: the "xz"
+// matrix takes columns 0 and 2 of the camera matrix flt_27219C0 (its rows
+// [0..2] at +0x00/+0x10/+0x20 and +0x08/+0x18/+0x28, scaled by inv) with the
+// translation row 3 (flt_27219F0 - light.x, flt_27219F8 - light.z) * inv +
+// 0.5, and the "y" matrix takes column 1 (+0x04/+0x14/+0x24) with
+// (flt_27219F4 - light.y) * inv + 0.5 and a constant v of 0.5. flt_27219C0
+// is the per-frame camera->world matrix (written by
+// Render_SetViewAndProjectionMatrices @0x58D942, read by every world-space
+// transform helper), so a texture matrix built from its columns plus its
+// translation row re-projects a CAMERA-SPACE vertex position back to WORLD
+// space — the texgen source the pass samplers select — and the camera terms
+// cancel: each stage reduces to the light-relative world offset times inv,
+// plus 0.5.
+//
+// The D3D world frame the matrices live in is the Y-negated fold of mission
+// space [orig: Math_FixedPointToFloat3_YNegated @0x611210 — d3d.x = -m.y,
+//  d3d.y = m.z, d3d.z = m.x], so in MISSION terms:
+//   stage 0 (Light_TexLight2D, the 64x64 disc on the ground plane):
+//     u = (light.y - point.y) * inv + 0.5,  v = (point.x - light.x) * inv + 0.5
+//   stage 1 (Light_TexSpot1D, the 64x8 strip, height above/below the light):
+//     u = (point.z - light.z) * inv + 0.5,  v = 0.5
+// A point at the light samples (0.5, 0.5) — the disc's centre.
+struct TerrainLightUv {
+	float u = 0.0f;
+	float v = 0.0f;
+};
+
+TerrainLightUv terrain_light_uv_disc(const std::array<float, 3> &point_mission,
+		const std::array<float, 3> &light_mission, float inv_scale);
+TerrainLightUv terrain_light_uv_height(const std::array<float, 3> &point_mission,
+		const std::array<float, 3> &light_mission, float inv_scale);
+
+// ---------------------------------------------------------------------------
+// THE PROCEDURAL TEXTURES the two stages sample
+// [orig: Lighting_InitTextures @0x5A94F0 — "texlight2d" 64x64 from
+//  Texture_GenerateProceduralFalloffTexture(buf, 64, mode 2, rgb) @0x5A9553
+//  (create 64x64, flags 0x40001 = no mips @0x5A9558..0x5A956E);
+//  "texlightspot2d" 64x64 from mode 1 @0x5A9581 (flags 0x140001) — unused by
+//  the terrain pass (the spot legs are dead code in JO, light_scene.h);
+//  "texlightspot1d" 64x8 built inline @0x5A95A6..0x5A9612 (create 64 x 8
+//  @0x5A95FC/@0x5A95FE)].
+//
+// Texture_GenerateProceduralFalloffTexture @0x5A92C0: for a 64-wide buffer
+// the border texels (column or row 0 / 63) are 0x00000000; each interior
+// texel maps its column and row to x, y in (-1, 1) as
+//   x = ((col - 1) * 2 + 1) / 62 - 1       [orig: flt_7C3B90 = 2.0, inner
+//   y = ((row - 1) * 2 + 1) / 62 - 1        size width - 2 @0x5A92CC]
+// mode 2 (the disc): i = trunc(255 * exp(-4 x^2) * exp(-4 y^2))
+//   [orig: flt_7C44B8 = 4.0, dbl_7D9F98 = 255, the two x87 2^(k log2 e)
+//    expansions @0x5A934B..0x5A93A6, ftol @0x5A93A6, < 0 -> black
+//    0xFF000000 @0x5A93B7, > 255 -> 255 @0x5A93C7, texel = 0x010101 * i |
+//    0xFF000000 @0x5A93D2]
+// mode 1 (the spot disc): i = trunc(255 * (1 - (x^2 + y^2))), < 0 -> 0,
+//   texel = 0x01010101 * i (the ALPHA byte is i too — no 0xFF000000)
+//   [orig: @0x5A944F..0x5A94A0]
+// The 1D strip: row r in 0..7, column c in 0..63; c == 0 or 63 -> 0xFFFFFFFF,
+//   else texel = 0x010101 * ((c * (r + 1)) >> 1) | 0xFF000000
+//   [orig: @0x5A95B1..0x5A95E4 — the `imul esi, eax; sar esi, 1; imul esi,
+//    10101h; or esi, 0FF000000h` run]. Stage 1 samples it at v = 0.5.
+inline constexpr int kFalloffTextureSize = 64;
+inline constexpr int kFalloffSpot1DRows = 8;
+
+uint32_t falloff_texture_light2d_argb(int x, int y);
+uint32_t falloff_texture_spot2d_argb(int x, int y);
+uint32_t falloff_texture_spot1d_argb(int x, int row);
+
+// ---------------------------------------------------------------------------
+// THE PER-PATCH ROWS.
+
+// One terrain patch's collect volume, mission 16.16 — the same AABB the
+// object pass hands LightDrawContext. The helper folds the terrain frame's
+// float corners (the shell's render frame: x, y-up, z, with the patch mesh's
+// sector-local AABB offset by its 512-unit sector origin — the
+// traverse_quadtree world AABB) into mission fixed: mission.x = x,
+// mission.y = -z, mission.z = y, per-axis min/max re-ordered after the fold.
+struct TerrainLightPatchBounds {
+	std::array<int32_t, 3> aabb_min_fixed{};
+	std::array<int32_t, 3> aabb_max_fixed{};
+};
+
+TerrainLightPatchBounds terrain_patch_light_bounds(const float aabb_min[3],
+		const float aabb_max[3], float sector_ox, float sector_oz);
+
+// One passing light for one patch — what the shader needs to re-draw the
+// patch once more: the light's mission-space position, the projection scale
+// (0.5/r, or 0.4/r on the alt pass) and the three pixel constants c4..c6 the
+// pass uploads (the colour already folded by 0.5: the stage-0 MODULATE2X
+// restores it, stage 1's 2x is the device's to apply).
+struct TerrainLightRow {
+	std::array<float, 3> position{};   // mission-space float world units
+	float inv_scale = 0.0f;
+	std::array<float, 3> pixel_rgb{};  // constants 4..6 @0x5AAA9B..0x5AAAB3
+	::renderer::LightHandle handle{};
+};
+
+struct TerrainLightPatchRows {
+	std::array<TerrainLightRow, kTerrainLightQueryLimit> rows{};
+	size_t count = 0;
+};
+
+struct TerrainLightPassInputs {
+	// EffectWorld_AmbientScale{R,G,B} — the modulator unpack the presenter
+	// already feeds the object pass (the env light-state gain).
+	std::array<float, 3> ambient_scale{1.0f, 1.0f, 1.0f};
+	// flt_2732DA{C,8,4} — terrain_per_channel_factor(the loaded recip).
+	std::array<float, 3> terrain_factor{1.0f, 1.0f, 1.0f};
+	::renderer::LightFlickerInputs flicker{};
+	// Render-mode dword_319FBD4 & 0x100: the 0.4/r alt pass [orig: @0x609890].
+	bool alt_pass = false;
+	// PolyTrn_UsePixelShaderPath == 0 drops the light leg [orig: @0x6095e4].
+	bool pixel_shader_path = true;
+	// dword_319FB84 != 0 skips the per-light loop [orig: @0x60983f].
+	bool light_pass_disabled = false;
+};
+
+// The per-patch collect + gate + constant build is
+// renderer::LightScene::collect_terrain_pass_rows (light_scene.h), defined in
+// light_terrain_pass.cpp so it reads the same pool slots the object pass does.
 
 } // namespace opennova::renderer
