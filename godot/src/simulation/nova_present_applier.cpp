@@ -27,6 +27,11 @@ struct CtrlNames {
 	String eweap_gunpitch = String("EWEAP_GUNPITCH");
 	String vehicle_steering = String("VEHICLE_STEERING");
 	String vehicle_speed = String("VEHICLE_SPEED");
+	// The part-animation registers the same cveh callback publishes (catalog
+	// ordinals 46 / 47 / 60, engine/formats/threedi/threedi_ctrl_catalog.h).
+	String helo_rotor = String("HELO_ROTOR");
+	String helo_tailrotor = String("HELO_TAILROTOR");
+	String vehicle_wheels = String("VEHICLE_WHEELS");
 	String tex_team = String("TEX_TEAM");
 	String team_swing = String("TEAMSWING");
 	String lfp_camp_percent = String("LFP_CAMPPERCENT");
@@ -426,7 +431,17 @@ int vehicle_motion_apply_typed(ObjectModel *model,
 				field_i(p, base, Simulation::PF_VEHICLE_STEERING));
 		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed,
 				field_i(p, base, Simulation::PF_VEHICLE_SPEED));
-		return 2;
+		// The part-animation words are stored by the same callback, again as
+		// literal zero at rest (retail: Entity_CacheVehicleHUDStats @0x4929B0 —
+		// the rotor word @0x492ACA..0x492ADE for both rotor ordinals, the wheel
+		// word @0x4929B4; see docs/world/vehicle-client-movers-re.md §14).
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor,
+				field_i(p, base, Simulation::PF_VEHICLE_ROTOR));
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor,
+				field_i(p, base, Simulation::PF_VEHICLE_TAIL_ROTOR));
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels,
+				field_i(p, base, Simulation::PF_VEHICLE_WHEELS));
+		return 5;
 	}
 	vehicle_motion_clear_typed(model);
 	return 0;
@@ -436,6 +451,9 @@ void vehicle_motion_clear_typed(ObjectModel *model) {
 	const CtrlNames &n = names();
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels);
 }
 
 int zone_team_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
