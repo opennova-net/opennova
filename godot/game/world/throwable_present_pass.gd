@@ -129,8 +129,14 @@ func _sync_move_effects(visuals: Array) -> void:
 		var rot: Vector3 = entry.get("rotation_deg", Vector3.ZERO)
 		var transform := Transform3D(
 				MissionObjectPlacer.bms_to_godot_basis(rot), pos)
+		# The sim's emitter liveness (the round+0x1CC handle mirror): a row
+		# whose emitter is released — a ClipWaterFx round under the water
+		# plane — retires its group and forgets the handle, so the same round
+		# spawns a FRESH group on surfacing. The release is not latched.
+		# [orig: Projectile_UpdatePhysics @0x4ea019..0x4ea03e — the
+		#  ammoFlags & 0x20000000 release arm; the lazy spawn @0x4e9f58]
 		_present_move_effect(key, String(entry.get("move_effect", "")),
-				transform)
+				transform, bool(entry.get("move_effect_live", true)))
 	for key in _move_effects.keys():
 		if not seen.has(key):
 			_retire_move_effect(int(key))
@@ -141,9 +147,9 @@ func _move_effect_owner_key(key: int) -> String:
 
 
 func _present_move_effect(key: int, effect: String,
-		transform: Transform3D) -> void:
+		transform: Transform3D, live: bool = true) -> void:
 	var rec: Dictionary = _move_effects.get(key, {})
-	if effect.is_empty():
+	if effect.is_empty() or not live:
 		if not rec.is_empty():
 			_retire_move_effect(key)
 		else:
