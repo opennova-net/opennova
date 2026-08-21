@@ -263,6 +263,16 @@ void test_ctrl_register_projection() {
 
 // Forward drive: moving bit + dir 0 ramps speed by the accel clamp toward
 // player_speed and advances the position along the heading.
+// Boarding clears the player's impact-scar ring [orig: Entity_AttachToVehicle
+// @0x43c155 -> Scar_ClearEntriesByEntity @0x5ccec0].
+void test_boarding_clears_the_scar_ring() {
+    Rig r;
+    CHECK(r.w.scars.ring_for(r.drv_h, 1) != nullptr, "a scar ring leases before the mount");
+    CHECK(r.w.scars.find(r.drv_h) != nullptr, "and is found");
+    r.mount();
+    CHECK(r.w.scars.find(r.drv_h) == nullptr, "boarding released the player's scar ring");
+}
+
 void test_drive_forward() {
     Rig r;
     const VehicleTraits t = buggy_traits();
@@ -987,6 +997,7 @@ int main() {
     test_def_physics_scaling();
     test_def_decel_default();
     test_ctrl_register_projection();
+    test_boarding_clears_the_scar_ring();
     test_drive_forward();
     test_reverse();
     test_turn_in_place_holds();

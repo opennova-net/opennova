@@ -192,6 +192,9 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
 
     // 6. Writes [orig: Entity_AttachToVehicleSlot @0x4946D0 common tail @0x494752-75].
     attach_apply(world, *occ, *veh, seat_idx, bone);
+    // 7. Boarding clears the player's impact-scar ring [orig: Entity_AttachToVehicle
+    //    @0x43c155 -> Scar_ClearEntriesByEntity @0x5ccec0].
+    world.scars.clear_entity(player);
     return true;
 }
 
