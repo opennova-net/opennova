@@ -1202,31 +1202,46 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // `ignore` rounds only age.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
 
-        // The `move`-row emitter's lifecycle, tested after the aging decrement
-        // and BEFORE the move — both tests read the pre-move position, since
-        // the function's only Position.Z store sits after them [orig:
-        // Projectile_UpdatePhysics @0x4E9D70 — the decrement @0x4e9f41, the
-        // spawn test @0x4e9f58..0x4e9f8e (an authored effect, no live handle,
-        // life left, not at/below the water plane under ClipWaterFx), the
-        // handle branch @0x4ea019..0x4ea03e (`z > water` re-poses, else
-        // ClipWaterFx releases the emitter, unlatched, so it may respawn once
-        // above water), the z store @0x4eaa45]. The shell spawns/retires the
-        // emitter as this flag flips. The custom-motor (+452) leg @0x4e9f06
-        // precedes the decrement in the same pass, so thrown rounds take the
-        // same tests.
+        // The `move`-row emitter's lifecycle, tested BEFORE the move — every
+        // test reads the pre-move position, since the function's only
+        // Position.Z store sits after them [orig: Projectile_UpdatePhysics
+        // @0x4E9D70]. The two legs differ: the `useownmove` (flag 0x2000)
+        // leg runs the custom motor @0x4e9f06, the aging decrement @0x4e9f41,
+        // then the spawn test @0x4e9f58..0x4e9f8e (an authored effect, no
+        // live handle, life left, not at/below the water plane under
+        // ClipWaterFx) and the handle branch @0x4ea019..0x4ea03e (`z > water`
+        // re-poses, else ClipWaterFx releases the emitter, unlatched, so it
+        // may respawn once above water). The BALLISTIC leg branches past all
+        // of that @0x4e9f0c -> 0x4ea06a: its spawn test @0x4ea8ae..0x4ea8d3
+        // is effect && no handle && life != 0 with NO water term — read
+        // before that leg's own decrement @0x4eaa7f — and its handle branch
+        // @0x4ea963 only re-poses, so a ballistic plume is never released by
+        // the plane. The shell spawns/retires the emitter as this flag flips.
         {
             const bool has_move_effect =
                 ammo != nullptr && !ammo->impact_effects[1].effect.empty();
-            const int32_t life_ticks =
-                r.max_age_ticks == INT32_MAX ? INT32_MAX
-                                             : r.max_age_ticks - r.age_ticks;
-            const bool clipped = round_effect_should_release_for_water(
-                ammo_flags, to_fixed(r.pos.z), world.env.water_z);
-            if (clipped) {
-                r.move_effect_live = false;
-            } else if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
-                                                 life_ticks, clipped)) {
-                r.move_effect_live = true;
+            if ((ammo_flags & kAmmoFlagUseOwnMove) != 0) {
+                const int32_t life_ticks =
+                    r.max_age_ticks == INT32_MAX ? INT32_MAX
+                                                 : r.max_age_ticks - r.age_ticks;
+                const bool clipped = round_effect_should_release_for_water(
+                    ammo_flags, to_fixed(r.pos.z), world.env.water_z);
+                if (clipped) {
+                    r.move_effect_live = false;
+                } else if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
+                                                     life_ticks, clipped)) {
+                    r.move_effect_live = true;
+                }
+            } else {
+                // The life the ballistic test reads is this tick's
+                // pre-decrement value (age was stepped above).
+                const int32_t life_before =
+                    r.max_age_ticks == INT32_MAX ? INT32_MAX
+                                                 : r.max_age_ticks - (r.age_ticks - 1);
+                if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
+                                              life_before, /*clipped_by_water=*/false)) {
+                    r.move_effect_live = true;
+                }
             }
         }
         // `useownmove` rounds run ONLY their class motor — no stock ray,

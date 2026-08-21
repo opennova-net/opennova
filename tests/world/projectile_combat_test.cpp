@@ -1842,10 +1842,13 @@ void test_bullet_building_material_is_plain_plus_four() {
         CHECK(world.round_sim.impacts[0].effect_tag == 5); // material 1 + 4
 }
 
-// The in-flight `move` emitter's liveness through the round simulation: the
-// first flight tick arms it, the ClipWaterFx release fires on the tick whose
-// PRE-move z sits at/below the plane (the tests precede the function's only
-// position store), and a round back above water re-arms.
+// The in-flight `move` emitter's liveness through the round simulation, the
+// `useownmove` leg: the first flight tick arms it, the ClipWaterFx release
+// fires on the tick whose PRE-move z sits at/below the plane (the tests
+// precede the function's only position store), and a round back above water
+// re-arms. A useownmove round with no bound motor drifts unmoved, so the
+// round is repositioned between ticks to put its pre-move z on either side
+// of the plane.
 // [orig: Projectile_UpdatePhysics @0x4E9D70 — the spawn test @0x4e9f58..0x4e9f8e,
 //  the handle branch @0x4ea019..0x4ea03e, the z store @0x4eaa45]
 static void test_move_effect_water_release_reads_pre_move_z() {
@@ -1853,17 +1856,14 @@ static void test_move_effect_water_release_reads_pre_move_z() {
     rig.world.env.water_z = 0x8000; // water at 0.5
     AmmoTableEntry &ammo = rig.world.ammo.entries[0];
     ammo.impact_effects[1].effect = "Effect_Smoke";
-    ammo.flags |= kAmmoFlagClipWaterFx | kAmmoFlagNoGravity;
+    ammo.flags |= kAmmoFlagClipWaterFx | kAmmoFlagUseOwnMove;
     ammo.max_age_ticks = 200;
-    // A level flight that never CROSSES the plane mid-sweep (a crossing is a
-    // water stop); the round is repositioned between ticks to put its pre-move
-    // z on either side of the plane.
     RoundSpawnParams p;
     p.owner = rig.shooter;
     p.shooter_handle = rig.shooter.packed;
     p.origin = {0.0f, 0.0f, -5.0f}; // starts under the plane
     p.dir_yaw_bam = 0;
-    p.dir_pitch_bam = 0; // level, 10 u/tick along +x
+    p.dir_pitch_bam = 0;
     p.ammo_index = 0;
     const int idx = rig.world.round_sim.spawn(rig.world, p, RoundConsequenceMode::Authoritative);
     CHECK(idx >= 0);
@@ -1873,7 +1873,7 @@ static void test_move_effect_water_release_reads_pre_move_z() {
     rig.world.round_sim.tick(rig.world, nullptr);
     CHECK(r.active);
     CHECK(!r.move_effect_live); // pre-move z -5 <= 0.5 under ClipWaterFx: no spawn
-    // Above the plane (and past the target) the emitter arms.
+    // Above the plane the emitter arms.
     r.pos = {20.0f, 0.0f, 5.0f};
     rig.world.round_sim.tick(rig.world, nullptr);
     CHECK(r.active);
@@ -1889,6 +1889,38 @@ static void test_move_effect_water_release_reads_pre_move_z() {
     rig.world.round_sim.tick(rig.world, nullptr);
     CHECK(r.active);
     CHECK(r.move_effect_live);
+}
+
+// The BALLISTIC leg has no water term at all: a ballistic round's plume arms
+// on its first tick even under the plane, ClipWaterFx or not, and the plane
+// never releases it.
+// [orig: the ballistic spawn test @0x4ea8ae..0x4ea8d3 — effect, no handle,
+//  life — and the re-pose-only handle branch @0x4ea963..0x4ea96d]
+static void test_move_effect_ballistic_leg_ignores_the_water_plane() {
+    Rig rig;
+    rig.world.env.water_z = 0x8000; // water at 0.5
+    AmmoTableEntry &ammo = rig.world.ammo.entries[0];
+    ammo.impact_effects[1].effect = "Effect_Smoke";
+    ammo.flags |= kAmmoFlagClipWaterFx | kAmmoFlagNoGravity;
+    ammo.max_age_ticks = 200;
+    RoundSpawnParams p;
+    p.owner = rig.shooter;
+    p.shooter_handle = rig.shooter.packed;
+    p.origin = {0.0f, 0.0f, -5.0f}; // under the plane
+    p.dir_yaw_bam = 0;
+    p.dir_pitch_bam = 0; // level, along +x, never crossing the plane
+    p.ammo_index = 0;
+    const int idx = rig.world.round_sim.spawn(rig.world, p, RoundConsequenceMode::Authoritative);
+    CHECK(idx >= 0);
+    if (idx < 0) return;
+    LiveRound &r = rig.world.round_sim.rounds[static_cast<size_t>(idx)];
+    rig.world.round_sim.tick(rig.world, nullptr);
+    CHECK(r.active);
+    CHECK(r.move_effect_live); // armed under water: no water term on this leg
+    r.pos = {40.0f, 0.0f, -5.0f};
+    rig.world.round_sim.tick(rig.world, nullptr);
+    CHECK(r.active);
+    CHECK(r.move_effect_live); // and never released by the plane
 }
 
 int main() {
@@ -1919,6 +1951,7 @@ int main() {
     test_retail_aerodynamic_drag_vectors();
     test_consumed_hit_skips_post_sweep_forces();
     test_move_effect_water_release_reads_pre_move_z();
+    test_move_effect_ballistic_leg_ignores_the_water_plane();
     if (failures == 0) std::printf("projectile_combat_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

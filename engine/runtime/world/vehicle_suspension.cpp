@@ -97,20 +97,26 @@ void vehicle_suspension_respawn(Entity::VehicleMotorState &m) {
 }
 
 int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits) {
-	// [orig: ftol(def->flip(+0x948) × flt_7C56A8 (0.01) × flt_7C32BC (65535.0))
+	// [orig: ftol(def->flip(+0x948) × flt_7C56A8 (0.01) × flt_7C32BC (65536.0))
 	//  @0x47d72e..0x47d745]
-	return static_cast<int32_t>(static_cast<float>(traits.flip) * 0.01f * 65535.0f);
+	return static_cast<int32_t>(static_cast<float>(traits.flip) * 0.01f * 65536.0f);
 }
 
 void vehicle_suspension_crash_tests(World &world, Entity &veh,
-                                    const VehicleTraits &traits, int32_t up_z16) {
+                                    const VehicleTraits &traits, int32_t up_z16,
+                                    SuspensionFamily family) {
 	Entity::VehicleMotorState &m = veh.veh;
 	const bool airborne = (veh.flags & kEntityFlagInAir) != 0;
 	const bool bit = (veh.flags & kEntityFlagSuspensionCrashed) != 0;
 	if (m.crashed == 0) {
-		// (a) tipped past the flip angle, or the replicated bit, while airborne
-		// [orig: tracked @0x47d745..0x47d763; tank @0x477760..0x477776].
-		if ((up_z16 < vehicle_flip_threshold_q16(traits) || bit) && airborne) {
+		// (a) |up.z| under the flip bound — the ABSOLUTE value [orig: `cdq;
+		//  xor eax, edx; sub eax, edx` @0x47d722..0x47d726 / @0x477748..
+		//  0x477753] — or, tracked only, the replicated bit [orig: `test al,
+		//  10h` @0x47d749, no twin in the tank's @0x477760..0x477776], while
+		// airborne [orig: tracked @0x47d745..0x47d763; tank @0x477760..0x477776].
+		const bool tipped = std::abs(up_z16) < vehicle_flip_threshold_q16(traits);
+		const bool bit_alt = family == SuspensionFamily::Tracked && bit;
+		if ((tipped || bit_alt) && airborne) {
 			m.crash_request = 1;
 			m.fresh_2f1 = 0;
 		}
@@ -125,12 +131,14 @@ void vehicle_suspension_crash_tests(World &world, Entity &veh,
 		}
 	}
 	// (c) the client crash window [orig: tracked @0x47e793..0x47e7ee; tank
-	//  @0x478b6c..0x478bd6]: client-only, a fresh-spawned row that is neither
-	//  crashed nor settling stamps the tick it went airborne and requests for
-	//  the next ten ticks; past them the stamp clears and the row counts as
-	//  respawned.
+	//  @0x478b6c..0x478bd6]: client-only, a fresh-spawned row that is not
+	//  crashed (the tank also requires !settle_2f0 @0x478b8a; the tracked
+	//  gate @0x47e793..0x47e7a8 reads only +0x2F1 and +0x2EC) stamps the tick
+	//  it went airborne and requests for the next ten ticks; past them the
+	//  stamp clears and the row counts as respawned.
+	const bool settle_term = family == SuspensionFamily::Tank && m.settle_2f0 != 0;
 	if (!world.vehicle_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
-	    m.settle_2f0 == 0) {
+	    !settle_term) {
 		if (airborne && m.airborne_stamp_2f8 == 0) m.airborne_stamp_2f8 = world.logic_tick;
 		if (world.logic_tick - m.airborne_stamp_2f8 < kClientCrashWindowTicks) {
 			m.crash_request = 1;
@@ -286,14 +294,24 @@ bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants) {
 }
 
 void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
-                                     int32_t max_depth) {
+                                     int32_t up_z16) {
 	Entity::VehicleMotorState &m = veh.veh;
-	// [orig: tracked @0x47ed60 — every pad back in contact, a positive max
-	//  penetration, not crashed → the sinks reset]
-	bool all = true;
-	for (int k = 0; k < wheels; ++k) all = all && contact[k];
-	if (all && max_depth > 0 && m.crashed == 0)
+	// Each pad in contact zeroes its own sink [orig: tracked @0x47eced /
+	//  @0x47ecfb / @0x47ed09 / @0x47ed17 — `cmp pad, 0; jz; mov sink, 0`].
+	for (int k = 0; k < wheels; ++k)
+		if (contact[k]) m.plat_acc[k] = 0;
+	// Then a diagonal pair in contact [orig: (0 && 2) || (1 && 3)
+	//  @0x47ed1d..0x47ed2b], the hull upright [orig: `cmp ebp, 0; jle` on
+	//  up.z @0x47ed2d] and not crashed [orig: @0x47ed31] → the hard-landing
+	// marker, every sink and byte_2ef clear [orig: @0x47ed3a..0x47ed59; the
+	// `crashed = 0` @0x47ed60 is already true under the gate].
+	const bool pair = wheels >= 4 ? ((contact[0] && contact[2]) || (contact[1] && contact[3]))
+	                              : (contact[0] && contact[1]);
+	if (pair && up_z16 > 0 && m.crashed == 0) {
+		m.landing_2ee = 0;
 		for (int k = 0; k < 4; ++k) m.plat_acc[k] = 0;
+		m.byte_2ef = 0;
+	}
 }
 
 void vehicle_suspension_tick_tail(Entity &veh, const VehicleTraits &traits) {

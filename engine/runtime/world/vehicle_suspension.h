@@ -58,8 +58,13 @@
 //     never touches the sinks, compressions or oscillators, and the tank calls it
 //     every tick (@0x47606e); nothing of ours corresponds, so it is a no-op seam;
 //   - crash RECOVERY: the post-quad tail unlatch (tank @0x479437, tracked
-//     @0x47ee3b: `crashed = 0, settle_2f0 = 0`) whose conditions were not walked,
-//     and the authority's Flags-0x10 upkeep @0x47c3a0..0x47c3c6;
+//     @0x47ee3b..0x47ee49: `crashed = 0, byte_2ef = 0, settle_2f0 = 0`), gated
+//     on the tracked side by `!(Flags & 0x10) && up.z < 0` @0x47ed67..0x47ed73
+//     — an inverted hull WITHOUT the replicated bit — and preceded by
+//     Entity_RebuildOrientationMatrixFromAxes @0x47ed82 + the bounding quad
+//     @0x47ee2f (the righting leg, not ported); its client twin at the tail
+//     @0x47eea0..0x47eebc; and the authority's Flags-0x10 upkeep
+//     @0x47c3a0..0x47c3c6;
 //   - the tank's own spring pair (Suspension_CompressWheelLinear @0x45CEB0 /
 //     Suspension_OscillateWheel @0x45D240) — the tank gets the crash tests, the
 //     +250 sink growth and the arming only;
@@ -103,10 +108,17 @@ inline constexpr uint32_t kEntityFlagSuspensionCrashed = 0x10u;
 
 // Crash-test thresholds [orig: tracked @0x47d745..0x47d7a8 / tank
 //  @0x477760..0x4777bf]: the flip angle is the def's `flip` percent of 1.0 in
-//  Q16 (flt_7C56A8 = 0.01 × flt_7C32BC = 65535.0); the authority's hard-fall
+//  Q16 (flt_7C56A8 = 0.01 × flt_7C32BC = 65536.0); the authority's hard-fall
 //  test reads |slide_z| against 0x7000.
 inline constexpr int32_t kCrashFallVzAbove = 0x7000;
 inline constexpr uint32_t kClientCrashWindowTicks = 10; // [orig: @0x478bc0 / @0x47e7d8]
+
+// The two families that run the crash tests differ in two terms: the TRACKED
+// tip test (a) also fires on the replicated bit [orig: `test al, 10h`
+//  @0x47d749 — absent from the tank's @0x477760..0x477776], and the TANK
+// client window (c) also requires settle_2f0 == 0 [orig: `cmp [esi+2F0h], 0`
+//  @0x478b8a — absent from the tracked @0x47e793..0x47e7a8].
+enum class SuspensionFamily : uint8_t { Tracked, Tank };
 
 // The spring loop's literals [orig: the grounded loop @0x47E960..0x47EC1F]:
 // the compress step cap (dword_815180 >> 4), the impulse threshold select on
@@ -124,20 +136,24 @@ inline constexpr int32_t kOscillateSinkCeiling = 2000;     // 0x7D0
 // writes NONE of these (the record memset @0x40ea27 zeroes them, fresh_2f1 = 0).
 void vehicle_suspension_respawn(Entity::VehicleMotorState &m);
 
-// The flip angle as a Q16 up.z bound: ftol(flip × 0.01 × 65535.0).
+// The flip angle as a Q16 |up.z| bound: ftol(flip × 0.01 × 65536.0).
 int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits);
 
 // --- the tick ------------------------------------------------------------
 
 // 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8 +
 //  the client window @0x47e793..0x47e7ee; tank @0x477760..0x4777bf +
-//  @0x478b6c..0x478bd6]: (a) tipped past the flip angle, or the replicated
-//  bit set, while airborne; (b) the authority: |slide_z| > 0x7000 — a client:
+//  @0x478b6c..0x478bd6]: (a) |up.z| under the flip bound (the ABSOLUTE
+//  value: `cdq; xor; sub` @0x47d722..0x47d726 / @0x477748..0x477753 — an
+//  inverted hull does not tip-test), or — tracked only — the replicated bit
+//  set, while airborne; (b) the authority: |slide_z| > 0x7000 — a client:
 //  airborne with the bit; (c) the CLIENT window: with fresh_2f1 == 0,
-//  !crashed, !settle_2f0: stamp the airborne tick once, request while the
-//  stamp is under 10 ticks old, else clear the stamp and raise fresh_2f1.
+//  !crashed (and, tank only, !settle_2f0): stamp the airborne tick once,
+//  request while the stamp is under 10 ticks old, else clear the stamp and
+//  raise fresh_2f1.
 void vehicle_suspension_crash_tests(World &world, Entity &veh,
-                                    const VehicleTraits &traits, int32_t up_z16);
+                                    const VehicleTraits &traits, int32_t up_z16,
+                                    SuspensionFamily family);
 
 // 1b. The bike's live crash test [orig: @0x47b32d..0x47b375]: both wheels off
 //  the ground, the bike has been driven, and any of the three spine probes
@@ -180,10 +196,14 @@ void vehicle_suspension_airborne_loop(World &world, Entity &veh,
 //  every occupant]. Returns true when the latch set this tick.
 bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants);
 
-// 5. After the conform [orig: tracked @0x47ed60]: every pad back in contact
-//  with a positive max penetration, not crashed → the sinks reset.
+// 5. After the conform [orig: tracked @0x47ece9..0x47ed60]: each pad in
+//  contact zeroes its own sink @0x47eced..0x47ed17; then a DIAGONAL PAIR in
+//  contact ((0 && 2) || (1 && 3) @0x47ed1d..0x47ed2b), the hull upright
+//  (up.z > 0 @0x47ed2d) and not crashed @0x47ed31 → landing_2ee = 0, all
+//  four sinks = 0, byte_2ef = 0 (@0x47ed3a..0x47ed59; the `crashed = 0`
+//  @0x47ed60 is redundant under the gate). A two-wheel row pairs 0 && 1.
 void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
-                                     int32_t max_depth);
+                                     int32_t up_z16);
 
 // 6. The family tail [orig: crash_request = 0 unconditionally @0x47eeee /
 //  @0x4795da / @0x47c0b6; the amplitude tail @0x48178a..0x4817c4: all four

@@ -259,6 +259,13 @@ void test_add_entry() {
 			"scar_type 2 never reaches the ring fallback");
 	CHECK(world.prng16_state == untouched, "and neither draws a word");
 
+	// A hit the writer's gates reject leases NO ring — the lookup comes after
+	// the face gate, so the 128 entries are not spent on misses.
+	hit.face_index = -1;
+	CHECK(!scar_add_entry(world, hit, *target, 1), "a faceless hit takes no scar");
+	CHECK(world.scars.find(h) == nullptr, "and leases no ring");
+	hit.face_index = 7;
+
 	// A scorch on a pool-1 vehicle: the entity ring, two draws — the SPIN
 	// word first, then the texture word that picks the strip.
 	const uint32_t before = world.prng16_state;

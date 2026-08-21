@@ -176,17 +176,19 @@ bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target
 	// match — the one open residual, impact_scar.h.)
 
 	// The slot writer's gates in its order: the water plane @0x5CC865, the
-	// ring selection + lookup @0x5cc873..0x5cc88c, the husk flag @0x5CC894,
-	// the section/face indices and the face flag @0x5CC92B.
+	// ring SELECTION @0x5cc873..0x5cc88c, the husk flag @0x5CC894, the
+	// section/face indices and the face flag @0x5CC92B — and only then the
+	// ring LOOKUP [orig: Scar_GetEntityCache @0x5cc96f..0x5cc983, after the
+	//  face gate], so a rejected hit never leases one of the 128 rings.
 	if (hit.position_q16.z <= world.env.water_z) return false;
 	const bool entity_local = scar_uses_entity_ring(target.handle.pool(), target.item_attrib);
+	if ((target.engine_flags & kEntityFlagHusk) != 0u) return false;
+	if (hit.section_index < 0 || hit.face_index < 0) return false;
+	if ((hit.material_flags & 0x400u) != 0u) return false;
 	ScarRing *ring = entity_local
 			? world.scars.ring_for(target.handle, target.registry_spawn_id)
 			: &world.scars.world_ring();
 	if (ring == nullptr) return false;
-	if ((target.engine_flags & kEntityFlagHusk) != 0u) return false;
-	if (hit.section_index < 0 || hit.face_index < 0) return false;
-	if ((hit.material_flags & 0x400u) != 0u) return false;
 
 	// The id by surface, the radius by id [orig: @0x5CF295; Scar_RadiusForId
 	// @0x5CC3B0].
