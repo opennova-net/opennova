@@ -9,6 +9,7 @@
 #ifndef OPENNOVA_WORLD_WORLD_H
 #define OPENNOVA_WORLD_WORLD_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -502,6 +503,20 @@ public:
     // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
     audio::SoundProfileTable sound_profiles;
     CharacterTraitsTable character_traits;
+    // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
+    // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
+    // soldier class as retail indexes g_CharAttr — row (class - 1) & 0xF, the
+    // dword at row offset 40. The embedder stamps it from its parsed table
+    // (the boot-soft charattr provider); zero rows carry no attribute, which is
+    // retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
+    //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
+    //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
+    std::array<uint32_t, 16> class_attribute_flags{};
+    static constexpr uint32_t kCharAttrMedic = 0x8u;
+    bool class_has_attribute(uint8_t player_class, uint32_t bit) const {
+        const size_t row = static_cast<size_t>((player_class - 1) & 0xF);
+        return (class_attribute_flags[row] & bit) != 0;
+    }
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
 

@@ -27,6 +27,10 @@ struct FriendlyTagSource {
     // position.z + this + 0x4000 [orig: HUD_DrawEntityLabel @0x5a3a84..0x5a3a98].
     int32_t eye_offset_z = 0;
     bool player = false;
+    // The class's charattr Medic attribute — the red-cross plate feed
+    // [orig: AnimMap_IsSlotActive(entity+0x294 playerClass, 8) @0x4125e0,
+    //  read by HUD_DrawEntityLabel for the plate @0x5a4309].
+    bool medic = false;
 };
 
 // The pool-0 walk of the tags pass: non-player organics on the local team (or

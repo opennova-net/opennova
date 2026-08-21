@@ -123,6 +123,13 @@ struct HudMinimapMarker {
 	int32_t half_x_q16 = 0;
 	int32_t half_y_q16 = 0;
 	uint8_t floor_px = 6;
+	// A LOCAL-TEAM player whose class carries the charattr Medic attribute
+	// draws the red-cross plate IN PLACE of its blip. The producer resolves it
+	// (enemies never carry it — retail forces the bit off for the other team)
+	// [orig: draw_entity_labels_and_markers @0x5a49e0 — the team gate
+	//  @0x5a4ac6/@0x5a4acf, AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3,
+	//  the cross @0x5a4cd6..0x5a4d48 replacing the blip].
+	uint8_t medic = 0;
 };
 
 // One footprint-class entity's baked WORLD-SPACE polygon set (static

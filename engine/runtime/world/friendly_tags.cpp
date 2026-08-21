@@ -45,6 +45,9 @@ void collect_friendly_tags(World &world, const Entity &local,
                 (static_cast<int64_t>(std::max(0, e.health)) << 16) / max_health;
         src.health_ratio_fp16 =
                 static_cast<int32_t>(std::min<int64_t>(ratio, 0x10000));
+        // The medic plate keys on the class's charattr ATTRIBUTES & 8
+        // [orig: AnimMap_IsSlotActive(playerClass, 8) @0x4125e0].
+        src.medic = world.class_has_attribute(e.player_class, World::kCharAttrMedic);
         out.push_back(src);
     });
 }
