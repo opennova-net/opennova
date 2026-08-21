@@ -255,6 +255,23 @@ int main() {
 			}
 			std::printf("\n");
 		}
+		// Does this mission offer deploy-selectable spawn zones? If it does, retail
+		// marks EVERY joining player pending (Flags 0x1) until they pick one, which
+		// keeps them out of the humans count and so holds the whole script. If it
+		// does not, retail's host counts itself immediately and its script runs at
+		// boot exactly like ours - and the boot-time kills are parity, not a gap.
+		{
+			int zones = 0;
+			world.registry.for_each([&](const w::Entity &e) {
+				const int pool = e.handle.pool();
+				if ((pool == 1 || pool == 2) && e.is_spawn_point && e.alive) ++zones;
+			});
+			const char *note =
+					zones == 0
+							? "  (no deploy hold: retail's host counts itself from mission start too)"
+							: "  (retail holds every player pending until a pick)";
+			std::printf("deploy-selectable spawn zones: %d%s\n", zones, note);
+		}
 		std::printf("scripted kills: %zu death(s) raised", death_tick.size());
 		if (!death_tick.empty())
 			std::printf(", ticks %d..%d (%.1f s..%.1f s)", death_tick.front(),
