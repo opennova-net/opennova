@@ -44,6 +44,20 @@ inline bool seat_type_blocks_weapon_channel(SeatType type) {
     }
 }
 
+// A pilot cannot fire. Retail's local fire gate rejects parentSlot 2
+// (Controller) and 5 (Driver) outright -- a GUNNER (3) still fires, which is why
+// this is a strictly narrower set than seat_type_blocks_weapon_channel's {2,3,5}
+// viewmodel test. Nothing about it is attrib-driven: the `PilotOnly` token in
+// items.def is a BHD-lineage leftover retail's parser does not even know
+// [orig: no 'PilotOnly' entry in the attrib chain, string pool 0x7c8390..].
+// [orig: Player_CanFireWeapon @0x5cf780 -- `if (parentEntity) { seat =
+//  parentSlot; if (seat == 2 || seat == 5) return 0; }`]
+inline bool mount_blocks_firing(const Entity &occupant) {
+    if (!occupant.mounted) return false;
+    return occupant.mount_type == SeatType::Controller ||
+           occupant.mount_type == SeatType::Driver;
+}
+
 inline bool mount_blocks_weapon_channel(const Entity &entity) {
     return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
 }
