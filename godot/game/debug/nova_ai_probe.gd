@@ -150,7 +150,16 @@ func _mission_vars(sim: Simulation) -> Array:
 
 
 func _shot_tick(world: GameWorld) -> void:
-	if _shot_dir.is_empty() or _shot_ssn == 0:
+	if _shot_dir.is_empty():
+		return
+	# NW_SHOT_DIR with NO NW_SHOT_SSN: capture the PLAYER'S OWN view, untouched.
+	# The chase camera below would replace it, and the pilot's first-person view
+	# is exactly what a "does the cockpit still show a rifle" check needs.
+	if _shot_ssn == 0:
+		var img_fp: Image = world.get_viewport().get_texture().get_image()
+		if img_fp != null:
+			_shot_n += 1
+			img_fp.save_png(_shot_dir.path_join("fpv.%03d.png" % _shot_n))
 		return
 	var sim: Simulation = world.get_sim()
 	if sim == null:

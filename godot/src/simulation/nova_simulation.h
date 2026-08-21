@@ -1940,6 +1940,7 @@ public:
 	// AI index, and OK only after both authoritative mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
 	Error debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn);
+	bool local_player_fp_weapon_hidden() const;
 	Error debug_crew_local_player(int p_vehicle_ssn);
 	// Probe seam: teleport an AI entity (mission-space coords) through both
 	// position stores, for probes defeated by mission geography. Uses the same

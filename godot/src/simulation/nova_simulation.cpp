@@ -1059,6 +1059,20 @@ Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 // authored SSN. Mounting by SSN is not enough for the player, whose entity is
 // spawned at deploy and carries no authored id, so this resolves it from the
 // world's cached local-player handle.
+// Is the local player in a seat that suppresses the first-person weapon? A
+// helicopter pilot has no weapon in hand in retail; a passenger keeps his.
+// (retail: Player_RenderFirstPersonViewModel — see
+//  world::mount_hides_fp_viewmodel for the witnessed condition)
+bool Simulation::local_player_fp_weapon_hidden() const {
+	if (!world_) return false;
+	const opennova::world::Entity *lp =
+			world_->registry.get(world_->cached.local_player);
+	if (lp == nullptr || !lp->mounted) return false;
+	const opennova::world::Entity *carrier =
+			world_->registry.get(lp->mount_target);
+	return opennova::world::mount_hides_fp_viewmodel(*lp, carrier);
+}
+
 Error Simulation::debug_crew_local_player(int p_vehicle_ssn) {
 	if (!world_) return ERR_UNAVAILABLE;
 	const opennova::world::Entity *lp =

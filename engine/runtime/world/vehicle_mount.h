@@ -48,6 +48,32 @@ inline bool mount_blocks_weapon_channel(const Entity &entity) {
     return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
 }
 
+// Does the seat the local player occupies SUPPRESS the first-person weapon?
+//
+// Retail draws the viewmodel only when the player is NOT in a vehicle, or the
+// parent slot is outside {2, 3, 5}, or the carrier is an emplaced weapon that is
+// not player-controlled. A helicopter pilot therefore has no weapon in hand at
+// all -- the retail Black Hawk cockpit shows a clear screen, while ours drew a
+// scoped rifle over the instrument panel.
+//
+// Our SeatType values ARE retail's slot numbers (Passenger 1, Controller 2,
+// Gunner 3, Driver 5), so the {2,3,5} test is exactly the existing
+// seat_type_blocks_weapon_channel gate; a Passenger keeps the weapon and can
+// still shoot out.
+// [orig: Player_RenderFirstPersonViewModel @0x4bd2a0 (kong 179894) —
+//  `!vehicle || parentSlot not in {2,3,5} || (attrib & 0x20 && !(attrib & 0x40))`
+//  guards the whole draw; attrib 0x20 = EWEAP, 0x40 = PLAYERCONTROL]
+inline bool mount_hides_fp_viewmodel(const Entity &occupant,
+                                     const Entity *carrier) {
+    if (!occupant.mounted || carrier == nullptr) return false;
+    if (!seat_type_blocks_weapon_channel(occupant.mount_type)) return false;
+    const bool eweap = (carrier->item_attrib & kItemAttribEweap) != 0u;
+    const bool player_control =
+            (carrier->item_attrib & kItemAttribPlayerControl) != 0u;
+    if (eweap && !player_control) return false; // a static gun keeps its weapon
+    return true;
+}
+
 inline bool mount_collapses_right_hand_row(const Entity &entity) {
     // This terminal skeletal row is stricter than the secondary-channel gate:
     // retail requires a controller/gunner/driver parent slot AND no Flags 0x100.

@@ -162,6 +162,10 @@ enum class DeathMotionMode : uint8_t {
 // static_asserts against def.h live in npruntime/src/weapon_table_build.cpp.
 // [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155]
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
+// items.def PlayerControl — the occupant-input gate every player-driven mover
+// tests, and half of the first-person viewmodel suppression rule.
+// [orig: itemDef attrib bit 0x40]
+inline constexpr uint32_t kItemAttribPlayerControl = 0x40u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
 inline constexpr uint32_t kItemAttribSpawnPoint = 0x40000u;
