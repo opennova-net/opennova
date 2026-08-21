@@ -192,7 +192,7 @@ func _retire_move_effect(key: int) -> void:
 	if group_id > 0:
 		# Stop emission in the same presenter pass that observes round removal;
 		# already-live particles drain naturally. [orig:
-		# Projectile_ReleaseEffects @0x4e8280 -> @0x5f75d0.]
+		# Projectile_ReleaseEffects @0x4e8280 -> Entity_ReleaseEffectEmitter @0x5f75d0.]
 		fx.stop_group(group_id)
 	fx.release_effect_binding(owner_key)
 

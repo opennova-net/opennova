@@ -45,13 +45,14 @@ enum HudTexture : int32_t {
 	kHudTexMapRadar,
 	kHudTexMapWpIndicator, // WPIndctr.tga [orig: HUD_LoadAllTextures @0x59e079]
 	// The Tab board's stdbox: the 4x4 border stencil atlas and the tiled
-	// interior brush [orig: the panel call @0x423a72 -> FUN_0051efd0 ->
-	// FUN_0056b700, "stdbox" registered @0x51effa]. Inserted BEFORE the sights
+	// interior brush [orig: the panel call @0x423a72 -> HUD_DrawLabelBox
+	// @0x51efd0 -> render_hud_box_overlay @0x56b700, "stdbox" registered
+	// @0x51effa]. Inserted BEFORE the sights
 	// sentinel, which sizes the device slot array.
 	kHudTexBoxBorder,
 	kHudTexBoxTile,
 	// The 16x16 connection-quality icon, a 4-row vertical atlas
-	// [orig: the quad @0x4241fb; the atlas load FUN_004c2cf0 @0x4c2cf0].
+	// [orig: the quad @0x4241fb; the atlas load CNetworkIcons_LoadTextures @0x4c2cf0].
 	kHudTexNetIcon,
 	// The mounted-vehicle panel silhouette (the block's `interface` texture).
 	kHudTexVehiclePanel,

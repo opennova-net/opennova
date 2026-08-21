@@ -101,7 +101,7 @@ inline void rotor_tick(RotorState &s, bool occupied) {
 }
 
 // A spawn flag seeds the rotor at FULL speed rather than spinning it up
-// [orig: Entity_InitFromBmsOrNetSpawn @0x40EE70..0x40EE94 — record flag
+// [orig: Entity_SpawnFromBMSRecord @0x40E9F0, @0x40EE70..0x40EE94 — record flag
 //  0x20000 sets entity Flags |= 0x80, rate = 0x2D82D, speed = 0x0CCCCCC0 and
 //  the ground speed register +0x29C = 0x10000] — a helicopter spawned in
 // flight has its rotor already turning. The +0x29C / Flags side effects
