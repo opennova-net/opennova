@@ -1174,6 +1174,11 @@ target_include_directories(scoreboard_format_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(scoreboard_format_test PRIVATE cxx_std_17)
 add_test(NAME scoreboard_format COMMAND scoreboard_format_test)
 
+add_executable(hud_vehicle_panel_test hud/hud_vehicle_panel_test.cpp)
+target_link_libraries(hud_vehicle_panel_test PRIVATE opennova_runtime)
+target_include_directories(hud_vehicle_panel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_vehicle_panel COMMAND hud_vehicle_panel_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
