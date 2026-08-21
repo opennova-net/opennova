@@ -1369,6 +1369,11 @@ target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)
 target_include_directories(tp_camera_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tp_camera_mount COMMAND tp_camera_mount_test)
 
+add_executable(net_position_smoother_test world/net_position_smoother_test.cpp)
+target_link_libraries(net_position_smoother_test PRIVATE opennova_runtime)
+target_include_directories(net_position_smoother_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME net_position_smoother COMMAND net_position_smoother_test)
+
 # The mouse-look pipeline (pixel deltas -> yaw/pitch BAM): the witnessed integer
 # math — sens << 11, the +0x8000 rounding, the scoped zoom divide, flipmouse,
 # and the pitch clamps with the prone +40-degree up-limit.
