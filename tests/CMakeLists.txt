@@ -200,6 +200,14 @@ add_test(NAME menu_lwf COMMAND menu_lwf_test)
 
 # DBF dialog-bank tests: byte-exact round-trip + dlg-id -> def-id mapping over a
 # real JO fixture (fixtures/dbf/00TRg.DBF).
+# score — score.ini scoring config: parse, canonical write, and the witnessed
+# row-index ladder. Committed fixture is AUTHORED (fixtures/score/score_sample.ini),
+# not retail data; OPENNOVA_SCORE_INI adds a skip-and-pass retail sweep.
+add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
+target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME score_roundtrip COMMAND score_roundtrip_test)
+
 add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)
 target_link_libraries(dbf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
