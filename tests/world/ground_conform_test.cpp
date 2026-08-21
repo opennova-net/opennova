@@ -18,6 +18,30 @@ int failures = 0;
 		if (!(c)) { std::fprintf(stderr, "FAIL: %s\n", m); ++failures; }       \
 	} while (0)
 
+// The oscillator clamps the def's shock IN PLACE (it takes the field by
+// reference); the kernel pins below hand it a throwaway lvalue.
+int32_t oscillate(ConformOscillator &osc, int32_t &compression, int32_t &impact,
+		int32_t shock, int32_t spring, int32_t entity_a0) {
+	return conform_spring_oscillate(osc, compression, impact, shock, spring, entity_a0);
+}
+
+// The def's shock (+0x904) is clamped to [0, 10] through the reference, as
+// retail writes the clamp back into the item def [orig: @0x45D18F..0x45D1A2].
+void test_shock_clamps_in_place() {
+	ConformOscillator osc;
+	osc.amplitude = 1000;
+	int32_t compression = 0, impact = 0;
+	int32_t shock = 25;
+	(void)conform_spring_oscillate(osc, compression, impact, shock, 3, 0);
+	CHECK(shock == 10, "an over-range shock is written back as 10");
+	shock = -4;
+	(void)conform_spring_oscillate(osc, compression, impact, shock, 3, 0);
+	CHECK(shock == 0, "a negative shock is written back as 0");
+	shock = 7;
+	(void)conform_spring_oscillate(osc, compression, impact, shock, 3, 0);
+	CHECK(shock == 7, "an in-range shock is untouched");
+}
+
 // travel = 0xFFFF - ftol(0xFFFF * (100 - spring_comp) * 0.01)
 void test_travel_from_def() {
 	CHECK(conform_travel_from_def(100) == kSuspFull,
@@ -105,7 +129,7 @@ void test_oscillator_two_decays() {
 		osc.phase = 0.0f; // sin(0.2616) > 0, so env > 0.5 -> compression > 0
 		int32_t compression = 0;
 		int32_t impact = 0;
-		conform_spring_oscillate(osc, compression, impact, 10, 3, 0);
+		oscillate(osc, compression, impact, 10, 3, 0);
 		CHECK(compression > 0, "mid-bounce leaves the wheel compressed");
 		// 10000 * 0.99 = 9900, with no shock damp.
 		CHECK(osc.amplitude == 9900, "only the 0.99 decay applies mid-bounce");
@@ -119,7 +143,7 @@ void test_oscillator_two_decays() {
 		osc.phase = 4.4509f; // + 0.2617 = 3pi/2 -> sin = -1 -> env = 0
 		int32_t compression = 500;
 		int32_t impact = 0;
-		conform_spring_oscillate(osc, compression, impact, 0, 3, 0);
+		oscillate(osc, compression, impact, 0, 3, 0);
 		CHECK(compression == 0, "the wheel lands");
 		// shock 0: (11 - 0) * (1/11) * 9900 = 9900 (the damp is unity).
 		CHECK(osc.amplitude == 9900 || osc.amplitude == 9899,
@@ -131,7 +155,7 @@ void test_oscillator_two_decays() {
 		osc.phase = 4.4509f;
 		int32_t compression = 500;
 		int32_t impact = 0;
-		conform_spring_oscillate(osc, compression, impact, 10, 3, 0);
+		oscillate(osc, compression, impact, 10, 3, 0);
 		CHECK(compression == 0, "the wheel lands");
 		// shock 10: (11 - 10) * (1/11) * 9900 = 900 — the damp multiplies the
 		// DECAYED amplitude, not the original 10000 (which would give 909).
@@ -144,8 +168,8 @@ void test_oscillator_two_decays() {
 		a.amplitude = b.amplitude = 10000;
 		a.phase = b.phase = 4.4509f;
 		int32_t ca = 500, cb = 500, ia = 0, ib = 0;
-		conform_spring_oscillate(a, ca, ia, 25, 3, 0);
-		conform_spring_oscillate(b, cb, ib, 10, 3, 0);
+		oscillate(a, ca, ia, 25, 3, 0);
+		oscillate(b, cb, ib, 10, 3, 0);
 		CHECK(a.amplitude == b.amplitude, "shock above 10 clamps to 10");
 	}
 
@@ -156,25 +180,13 @@ void test_oscillator_two_decays() {
 		plain.amplitude = edge.amplitude = damped.amplitude = 10000;
 		plain.phase = edge.phase = damped.phase = 4.4509f;
 		int32_t cp = 500, ce = 500, cd = 500, ip = 0, ie = 0, id = 0;
-		conform_spring_oscillate(plain, cp, ip, 0, 3, 0);
-		conform_spring_oscillate(edge, ce, ie, 0, 3, -2000);
-		conform_spring_oscillate(damped, cd, id, 0, 3, -2001);
+		oscillate(plain, cp, ip, 0, 3, 0);
+		oscillate(edge, ce, ie, 0, 3, -2000);
+		oscillate(damped, cd, id, 0, 3, -2001);
 		CHECK(edge.amplitude == plain.amplitude, "-2000 exactly is not below");
 		CHECK(damped.amplitude == (plain.amplitude >> 2),
 				"below -2000 the landing is damped four times harder");
 	}
-}
-
-// The disable-rate multiplier is a role difference, not a spring scale: the
-// two roles get different values, neither is unity. The spring dt is the
-// parked latch's: a parked vehicle settles four times faster.
-void test_disable_rate_is_a_role_difference() {
-	CHECK(kSuspensionDisableRateNonAuthority == 1.75f, "1.75 off the authority");
-	CHECK(kSuspensionDisableRateAuthority == 1.25f, "1.25 on it");
-	CHECK(kSuspensionDisableRateNonAuthority != kSuspensionDisableRateAuthority,
-			"the two roles settle at different rates");
-	CHECK(kSuspensionDtParked == 4.0f * kSuspensionDtUnparked,
-			"parked springs step 3.0 against 0.75 unparked");
 }
 
 } // namespace
@@ -186,7 +198,7 @@ int main() {
 	test_spring_term_wraps_as_the_doubled_product();
 	test_impact_sink_is_one_directional();
 	test_oscillator_two_decays();
-	test_disable_rate_is_a_role_difference();
+	test_shock_clamps_in_place();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

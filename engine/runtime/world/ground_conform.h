@@ -38,24 +38,9 @@ namespace opennova::world {
 inline constexpr int32_t kSuspFull = 0xFFFF;
 inline constexpr int32_t kSuspStep = 0xFFF;
 
-// The wheel-solver DISABLE-rate multiplier, picked by role ONCE when the
-// parked latch +0x2EC goes 0 -> 1 (the mover's disable request +0x2ED with
-// the latch still clear) and consumed by the per-wheel contact loop
-// [orig: Entity_ProcessWheeledVehicleSuspension — gate @0x46B1B9, the pick
-//  @0x46B1C5..0x46B1DB (flt_7C6F14 = 1.75 off the authority, flt_7C6F18 =
-//  1.25 on it), the latch set @0x46B1F9, the use @0x46B22E;
-//  vehicle-client-movers-re.md §8/§9]. A witnessed role difference, not a
-// tuning value to normalise away — and NOT an every-tick spring scale.
-inline constexpr float kSuspensionDisableRateNonAuthority = 1.75f;
-inline constexpr float kSuspensionDisableRateAuthority = 1.25f;
-
-// The spring step's dt, by the parked latch: 0.75 while +0x2EC is clear,
-// 3.0 once parked [orig: Entity_ProcessTrackedVehiclePhysics @0x47C218..0x47C22B
-//  — flt_7C3DC8 @0x47C222 / flt_7C6F80 @0x47C21A into the local consumed by
-//  the spring calls @0x47DBC3 / @0x47E2ED / @0x47E9C2]. A parked vehicle
-// settles its springs four times faster than a moving one.
-inline constexpr float kSuspensionDtUnparked = 0.75f;
-inline constexpr float kSuspensionDtParked = 3.0f;
+// The disable-rate pick (1.75 / 1.25 by role) and the tracked solve's
+// spring dt (0.75 / 3.0 crashed) are the LEG's constants — they live with
+// the latch machine in vehicle_suspension.h, not with the kernel.
 
 // The wheel oscillator's constants [orig: Suspension_OscillateWheelFast
 //  @0x45D110 (ex `Entity_ApplyDamageOscillationFast` — no health is touched;
@@ -123,9 +108,10 @@ int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 // [orig: the compression == 0 arm @0x45D1D7..0x45D1EE, multiplying the
 //  ALREADY-decayed amplitude]. Applying the damp every tick kills the bounce
 // far too quickly. `entity_a0` is the entity+0xA0 field the hard-landing test
-// reads; retail also clamps the def's shock (+0x904) to [0, 10] IN PLACE
-// @0x45D18F..0x45D1A2 — the caller owns that write-back.
+// reads; `shock` is the def's field (+0x904), clamped to [0, 10] IN PLACE here
+// exactly as retail writes the clamp back into the item def
+// @0x45D18F..0x45D1A2 — pass the def's field, never a copy.
 int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression,
-		int32_t &impact, int32_t shock, int32_t spring, int32_t entity_a0);
+		int32_t &impact, int32_t &shock, int32_t spring, int32_t entity_a0);
 
 } // namespace opennova::world

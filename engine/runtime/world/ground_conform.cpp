@@ -55,7 +55,7 @@ int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 }
 
 int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression,
-		int32_t &impact, int32_t shock, int32_t spring, int32_t entity_a0) {
+		int32_t &impact, int32_t &shock, int32_t spring, int32_t entity_a0) {
 	osc.phase += kOscPhaseStep; // [orig: @0x45D11F..0x45D128]
 
 	// A raised sine, clamped at 1 — the wheel's travel envelope
@@ -69,11 +69,11 @@ int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression,
 	osc.extension = kSuspFull - compression; // [orig: @0x45D176]
 	const int32_t delta = compression - old; // [orig: @0x45D189]
 
-	// The def's shock is clamped to [0, 10] — retail writes the clamp back into
-	// the item def @0x45D18F..0x45D1A2; here the caller owns that.
-	int32_t s = shock;
-	if (s < 0) s = 0;
-	if (s > 10) s = 10;
+	// The def's shock is clamped to [0, 10] IN PLACE — retail writes the clamp
+	// back into the item def @0x45D18F..0x45D1A2, and so does this.
+	if (shock < 0) shock = 0;
+	if (shock > 10) shock = 10;
+	const int32_t s = shock;
 
 	// Amplitude decays EVERY tick [orig: amplitude * flt_7C6A00 @0x45D1C8..0x45D1D5].
 	osc.amplitude = static_cast<int32_t>(
