@@ -16,6 +16,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/infantry.h"
+#include "world/round_move_effect.h"
 #include "world/throwables.h"
 #include "world/weapon_table.h"
 #include "world/world.h"
@@ -1192,6 +1193,27 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 
         // `ignore` rounds only age.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
+
+        // The `move`-row emitter's LAZY spawn, tested after the aging decrement
+        // and before the move: an authored effect, no live handle, life still
+        // left, and not sitting at/below the water plane under ClipWaterFx.
+        // The shell spawns the emitter when this flips true. [orig: the guided
+        // leg @0x4E9F58..0x4E9F94 / the ballistic leg @0x4EA8AE; the z test
+        // reads the PRE-move position. WITNESS PENDING: whether the custom
+        // motor (+452) leg reaches a spawn site — ported as spawning so thrown
+        // rounds keep their authored plume]
+        {
+            const bool has_move_effect =
+                ammo != nullptr && !ammo->impact_effects[1].effect.empty();
+            const int32_t life_ticks =
+                r.max_age_ticks == INT32_MAX ? INT32_MAX
+                                             : r.max_age_ticks - r.age_ticks;
+            const bool clipped = round_effect_should_release_for_water(
+                ammo_flags, to_fixed(r.pos.z), world.env.water_z);
+            if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
+                                          life_ticks, clipped))
+                r.move_effect_live = true;
+        }
         // `useownmove` rounds run ONLY their class motor — no stock ray,
         // gravity, or drag [orig: the +452 motor leg of Projectile_UpdatePhysics
         // @ 0x4e9f06; the motor may convert the round into a placed device or
@@ -1264,6 +1286,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
             r.pos = vec_from_fixed(end_q16);
+            // The water RELEASE, on the POST-move z: a ClipWaterFx round at or
+            // below the plane drops its emitter (the shell detaches it); it is
+            // not latched — surfacing re-arms the spawn above. [orig:
+            // @0x4EA01D..0x4EA036 — `z > Env_WaterHeightFixed` re-poses, else
+            // flags & 0x20000000 -> Entity_ReleaseEffectEmitter @0x4EA031]
+            if (r.move_effect_live &&
+                round_effect_should_release_for_water(ammo_flags, end_q16.z,
+                                                      world.env.water_z))
+                r.move_effect_live = false;
             if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr)
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z);

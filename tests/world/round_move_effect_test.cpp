@@ -1,5 +1,7 @@
-// The in-flight round effect's lifecycle: lazy spawn, the water release and
-// the detach-on-death. The round's own life is the live round_sim port.
+// The in-flight round effect's lifecycle predicates: the lazy spawn and the
+// water release. The round simulation consumes them (see the round_sim pins
+// in tests/world/projectile_combat_test.cpp); the detach-on-death is the
+// shell's live leg (godot/tests/throwable_present_pass_test.gd).
 // [orig: the spawn @0x4E9F58..0x4E9F94 / @0x4EA8AE; the water gate
 //  @0x4EA01D..0x4EA036; Projectile_ReleaseEffects @0x4E8280]
 
@@ -36,8 +38,10 @@ void test_lazy_spawn() {
 // NEW emitter rather than resuming the old one — latching would suppress the
 // plume for the rest of a skipping round's flight.
 void test_water_release_is_not_latched() {
-	const uint32_t clips = kClipWaterFxFlag;
+	const uint32_t clips = kAmmoFlagClipWaterFx;
 	const uint32_t plain = 0u;
+	CHECK(kAmmoFlagClipWaterFx == 0x20000000u, "the witnessed ClipWaterFx bit");
+	CHECK(kAmmoFlagClipWater == 0x1000000u, "the witnessed ClipWater bit");
 
 	// Only rounds carrying the flag care about water at all.
 	CHECK(round_effect_clips_water(clips), "the flag is recognised");
@@ -60,21 +64,11 @@ void test_water_release_is_not_latched() {
 			"after a release the surfaced round can spawn a fresh emitter");
 }
 
-// ON DEATH THE EMITTER DETACHES rather than being destroyed, so the plume
-// lingers and dissipates BEHIND the impact instead of being cut off mid-air.
-void test_death_detaches_rather_than_destroys() {
-	CHECK(round_effect_end_kind() == RoundEffectEnd::Detach,
-			"a dying round DETACHES its emitter");
-	CHECK(round_effect_end_kind() != RoundEffectEnd::Destroy,
-			"it does not destroy the live particles");
-}
-
 } // namespace
 
 int main() {
 	test_lazy_spawn();
 	test_water_release_is_not_latched();
-	test_death_detaches_rather_than_destroys();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

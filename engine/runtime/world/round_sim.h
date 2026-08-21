@@ -256,6 +256,13 @@ struct LiveRound {
     // The round's trail channel [orig: round+0x2B4 <- CEffectEmitterPool_AllocSlot
     // @ 0x4ec774]; -1 = no visual (non-tracer, NoTracers rules, or pool full).
     int32_t trail_slot = -1;
+    // The `move`-row emitter's handle, as a liveness mirror of round+0x1CC:
+    // set by the lazy spawn test (an authored effect, no handle, life left,
+    // not water-clipped) and cleared by the ClipWaterFx release, un-latched,
+    // so a dipping round re-acquires one on surfacing. The shell owns the
+    // emitter and consumes this per row [orig: the spawn @0x4E9F58..0x4E9F94,
+    // the water release @0x4EA01D..0x4EA036; world/round_move_effect.h].
+    bool move_effect_live = false;
 
     // --- throwable state (zeroed on ballistic rounds; world-wac-ai-re §27) ---
     // Orientation + spin [orig: round +16/+20/+24 angles, +164/+168/+172 spin
