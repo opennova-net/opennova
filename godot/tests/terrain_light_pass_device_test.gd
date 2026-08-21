@@ -91,6 +91,75 @@ func test_an_owned_light_never_reaches_the_terrain() -> void:
 			"an owned pool light lights its owner's draws, never the ground")
 
 
+const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
+
+
+## The device end to end: a built Terrain handed the pool through
+## set_light_context re-draws the patches its own draw list overlaps with the
+## pool light (the rows texture row per slot), and a null context retires the
+## leg [orig: the per-batch collect @0x609658 over the batch's AABB].
+func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	add_child_autofree(viewport)
+	var data := TerrainData.new()
+	data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	assert_eq(data.load(), OK, "the Dvxi5 fixture terrain must load")
+	var terrain := Terrain.new()
+	viewport.add_child(terrain)
+	terrain.set_terrain_data(data)
+	terrain.build()
+	terrain.set_debug_no_frustum(true)
+	var camera := Camera3D.new()
+	viewport.add_child(camera)
+	camera.global_position = Vector3(64.0, 27.0, 64.0)
+	camera.make_current()
+
+	# A light centred on the camera with a radius that certainly spans the
+	# terrain height under it, and certainly not the far sectors.
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_glow({
+		"position": Vector3(64.0, 27.0, 64.0),
+		"radius": 96.0,
+		"color": Color.WHITE,
+	}), 0)
+	terrain.set_light_context(scene, 0)
+	terrain.render_frame()
+	assert_gt(terrain.get_patches_active(), 0, "the frame compiled patches")
+	assert_gt(terrain.get_light_rows_total(), 0,
+			"the patches under the light re-draw with it")
+	assert_gt(terrain.get_light_patches_lit(), 0)
+	assert_lt(terrain.get_light_patches_lit(), terrain.get_patches_active(),
+			"a far patch draws no pool")
+	var material: ShaderMaterial = terrain.get_terrain_material()
+	assert_true(bool(material.get_shader_parameter("u_terrain_light_enabled")),
+			"the shader gate opens while rows exist")
+	assert_not_null(material.get_shader_parameter("u_terrain_light_rows"),
+			"the rows texture is bound")
+	assert_not_null(material.get_shader_parameter("u_terrain_light_disc"))
+	assert_not_null(material.get_shader_parameter("u_terrain_light_strip"))
+
+	# The pixel end of the leg: the ground under the camera renders brighter
+	# with the pool than without it (the additive two-stage term).
+	camera.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var lit_image: Image = viewport.get_texture().get_image()
+	var lit := lit_image.get_pixel(160, 90)
+
+	# No pool: the leg retires and the gate closes.
+	terrain.set_light_context(null, 0)
+	terrain.render_frame()
+	assert_eq(terrain.get_light_rows_total(), 0)
+	assert_false(bool(material.get_shader_parameter("u_terrain_light_enabled")))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var dark_image: Image = viewport.get_texture().get_image()
+	var dark := dark_image.get_pixel(160, 90)
+	assert_gt(lit.get_luminance(), dark.get_luminance() + 0.02,
+			"the pool brightens the ground under the light (lit %s vs dark %s)" % [lit, dark])
+
+
 func test_the_two_procedural_textures_have_the_witnessed_shape() -> void:
 	var size: int = LightScene.terrain_light_texture_size()
 	var strip_rows: int = LightScene.terrain_light_strip_rows()
