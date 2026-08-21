@@ -176,6 +176,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_veh_stance_pos"), &HudPos::get_veh_stance_pos);
 	ClassDB::bind_method(D_METHOD("get_stances"), &HudPos::get_stances);
 	ClassDB::bind_method(D_METHOD("get_static_frames"), &HudPos::get_static_frames);
+	ClassDB::bind_method(D_METHOD("get_vehicle_hud", "sid"), &HudPos::get_vehicle_hud);
 	ClassDB::bind_method(D_METHOD("get_parachute_icon"), &HudPos::get_parachute_icon);
 	ClassDB::bind_method(D_METHOD("get_armor_icon"), &HudPos::get_armor_icon);
 	ClassDB::bind_method(D_METHOD("get_spinmap_bounds"), &HudPos::get_spinmap_bounds);
@@ -369,6 +370,37 @@ Array HudPos::get_static_frames() const {
 	}
 	for (size_t i = 0; i < file_.hud.static_frames_count; ++i) {
 		out.push_back(graphic_to_dict(file_.hud.static_frames[i]));
+	}
+	return out;
+}
+
+// One VEHICLE_HUD block by items.def sid, case-insensitively -- retail matches
+// the sid with _stricmp when it commits the block against the item table
+// (retail: HUD_ParseHudposToken @0x59F370, see docs/interface/hud-re.md).
+// An unknown sid returns an EMPTY dictionary rather than a default-filled one:
+// a vehicle with no authored panel draws none, which is what retail does for
+// the one shipped sid whose panel art is missing.
+Dictionary HudPos::get_vehicle_hud(const String &p_sid) const {
+	Dictionary out;
+	if (!loaded_ || p_sid.is_empty()) return out;
+	const String want = p_sid.to_lower();
+	for (size_t i = 0; i < file_.hud.vehicle_huds_count; ++i) {
+		const DefVehicleHudBlock &v = file_.hud.vehicle_huds[i];
+		if (String::utf8(v.sid).to_lower() != want) continue;
+		out["sid"] = String::utf8(v.sid);
+		out["icon"] = String::utf8(v.icon);
+		out["interface"] = String::utf8(v.interface_texture);
+		out["static_texture"] = String::utf8(v.static_texture);
+		out["driver"] = Vector2i(v.driver_x, v.driver_y);
+		Array emplace;
+		for (int e = 0; e < v.emplace_count; ++e)
+			emplace.push_back(Vector2i(v.emplace_x[e], v.emplace_y[e]));
+		out["emplace"] = emplace;
+		Array seats;
+		for (int st = 0; st < v.seat_count; ++st)
+			seats.push_back(Vector2i(v.seat_x[st], v.seat_y[st]));
+		out["seats"] = seats;
+		return out;
 	}
 	return out;
 }

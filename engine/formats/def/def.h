@@ -766,6 +766,36 @@ typedef struct DefHudGraphic {
     int x, y;
 } DefHudGraphic;
 
+/* One VEHICLE_HUD ... VEHICLE_END block: the mounted-vehicle panel layout for
+   one item, keyed by its items.def `sid`. Retail accumulates these into ONE
+   0xDC-byte staging block and commits it at VEHICLE_END against the item table
+   [orig: HUD_ParseHudposToken @0x59F370 - the token arms, the commit walk and
+   the memset(block, 0, 0xDC) reset].
+
+   Field widths are the staging block's own: a 16-byte sid and three 32-byte
+   texture names, derived from the global offsets (sid @+0x04, icon @+0x7C,
+   interface @+0x9C, statictexture @+0xBC, block end @+0xDC).
+
+   `emplace_count` / `seat_count` are OURS: retail caps the pair loops at 4 and
+   8 but does not store the authored count in the block -- its drawer derives
+   seat count from the entity. A consumer of the parsed block has no entity to
+   ask, so the authored count is retained here. Declared, not witnessed. */
+#define DEF_VEHICLE_HUD_MAX_EMPLACE 4
+#define DEF_VEHICLE_HUD_MAX_SEATS 8
+typedef struct DefVehicleHudBlock {
+    char sid[16];              /* +0x04 [orig: the "sid" arm] */
+    char icon[32];             /* +0x7C */
+    char interface_texture[32];/* +0x9C */
+    char static_texture[32];   /* +0xBC */
+    int driver_x, driver_y;    /* +0x14 / +0x18 */
+    int emplace_count;         /* authored pairs, capped at 4 by retail */
+    int emplace_x[DEF_VEHICLE_HUD_MAX_EMPLACE];  /* +0x1C */
+    int emplace_y[DEF_VEHICLE_HUD_MAX_EMPLACE];  /* +0x2C */
+    int seat_count;            /* authored pairs, capped at 8 by retail */
+    int seat_x[DEF_VEHICLE_HUD_MAX_SEATS];       /* +0x3C */
+    int seat_y[DEF_VEHICLE_HUD_MAX_SEATS];       /* +0x5C */
+} DefVehicleHudBlock;
+
 typedef struct DefDeclutterEntry {
     char name[64];
     int flags[4];
@@ -870,6 +900,11 @@ typedef struct DefHudPosDef {
     size_t static_frames_count;
     DefHudGraphic parachute_icon;
     DefHudGraphic armor_icon;
+
+    /* VEHICLE_HUD blocks, parsed IN PARALLEL with the raw_lines passthrough
+       below so writer round-trip is untouched. */
+    DefVehicleHudBlock *vehicle_huds;
+    size_t vehicle_huds_count;
 
     char (*raw_lines)[512];
     size_t raw_lines_count;

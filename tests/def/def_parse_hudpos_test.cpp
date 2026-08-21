@@ -376,6 +376,63 @@ int main(void) {
         printf("StaticFrame last-wins ordering OK\n");
     }
 
+    /* VEHICLE_HUD blocks parse IN PARALLEL with the raw_lines passthrough:
+       the typed blocks appear AND every line still round-trips through
+       raw_lines [orig: HUD_ParseHudposToken @0x59F370 - the token arms and
+       the VEHICLE_END commit]. The tracked fixture carries 28 blocks. */
+    if (hud->vehicle_huds_count == 0) {
+        fprintf(stderr, "FAIL: no VEHICLE_HUD blocks parsed\n");
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+    {
+        const DefVehicleHudBlock *buggy = NULL;
+        for (size_t i = 0; i < hud->vehicle_huds_count; ++i) {
+            if (strcmp(hud->vehicle_huds[i].sid, "dbuggy1") == 0) {
+                buggy = &hud->vehicle_huds[i];
+                break;
+            }
+        }
+        if (!buggy) {
+            fprintf(stderr, "FAIL: dbuggy1 VEHICLE_HUD block missing\n");
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        /* sid dbuggy1 / interface h_buggya.tga / driver 16,196 /
+           emplace 1,27,220 / seats 1,38,196 -- note the values are
+           COMMA-separated, which the shared splitter handles. */
+        if (strcmp(buggy->interface_texture, "h_buggya.tga") != 0) {
+            fprintf(stderr, "FAIL: interface texture = %s\n",
+                    buggy->interface_texture);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        if (buggy->driver_x != 16 || buggy->driver_y != 196) {
+            fprintf(stderr, "FAIL: driver pos = %d,%d\n",
+                    buggy->driver_x, buggy->driver_y);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        /* The leading value is a COUNT, not a coordinate: "emplace 1,27,220"
+           is one pair at (27,220), not three numbers. */
+        if (buggy->emplace_count != 1 || buggy->emplace_x[0] != 27 ||
+            buggy->emplace_y[0] != 220) {
+            fprintf(stderr, "FAIL: emplace = %d @ %d,%d\n",
+                    buggy->emplace_count, buggy->emplace_x[0], buggy->emplace_y[0]);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        if (buggy->seat_count != 1 || buggy->seat_x[0] != 38 ||
+            buggy->seat_y[0] != 196) {
+            fprintf(stderr, "FAIL: seats = %d @ %d,%d\n",
+                    buggy->seat_count, buggy->seat_x[0], buggy->seat_y[0]);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        printf("VEHICLE_HUD blocks parsed OK (%zu)\n",
+               hud->vehicle_huds_count);
+    }
+
     def_free_hudpos(&hudpos);
     printf("PASS: hudpos parsing OK\n");
     return 0;
