@@ -392,6 +392,32 @@ int main() {
 		            "even-channel tile-overlay factor recovers the packed color")) return 1;
 	}
 
+	// Terrain colour reciprocal [orig: TimeOfDay_ParseProperty @ 0x57ca60..
+	// 0x57cae3]: 0x7F80 / c truncating, clamp 255, 128 for a zero byte.
+	{
+		// White (the retail default terrain_rgb) divides to EXACTLY 128 per
+		// channel — which the terrain light pass then reads as factor 1.0.
+		if (!expect(terrain_color_recip_byte(255) == 128,
+		            "255 -> 32640/255 = 128 exactly")) return 1;
+		if (!expect(terrain_color_recip_packed(255, 255, 255) == 0x808080u,
+		            "white terrain_rgb packs to the 0x808080 boot default")) return 1;
+		if (!expect(terrain_color_recip_from_rgb(Rgb{1.0f, 1.0f, 1.0f}) ==
+		                    kTerrainColorRecipDefaultPacked,
+		            "the Rgb path agrees with the boot default")) return 1;
+		// A zero byte is not divided: it takes 0x80 outright.
+		if (!expect(terrain_color_recip_byte(0) == 0x80, "zero byte -> 0x80")) return 1;
+		// Truncation: 32640 / 200 = 163.2 -> 163; 32640 / 129 = 253.02 -> 253.
+		if (!expect(terrain_color_recip_byte(200) == 163, "idiv truncates")) return 1;
+		if (!expect(terrain_color_recip_byte(129) == 253, "253 stays under the clamp")) return 1;
+		// The clamp: 32640 / 128 = 255 exactly; anything darker saturates.
+		if (!expect(terrain_color_recip_byte(128) == 255, "128 -> 255 exactly")) return 1;
+		if (!expect(terrain_color_recip_byte(64) == 255 && terrain_color_recip_byte(1) == 255,
+		            "dark channels clamp at 255")) return 1;
+		// Pack order is r << 16 | g << 8 | b.
+		if (!expect(terrain_color_recip_packed(255, 128, 0) == 0x80FF80u,
+		            "packs r<<16 | g<<8 | b")) return 1;
+	}
+
 	// Iris auto-exposure — the witnessed curve [orig: terrain_sector_compute_lighting
 	// @ 0x5c7550]. lum = 0.25*(r+b) + 0.5*g; gain = 0.01*(pct*base/(2m) + (100-pct)*base).
 	{
@@ -1399,7 +1425,7 @@ int main() {
 	}
 
 	std::printf(
-	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
+	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/recip/iris"
 	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip/weathercore\n");
 	return 0;
 }

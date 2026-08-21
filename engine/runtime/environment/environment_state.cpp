@@ -347,6 +347,13 @@ Rgb EnvironmentState::tile_overlay_tint() const {
 	return tile_overlay_tint_factor(terrain_tint_from_rgb(tint));
 }
 
+uint32_t EnvironmentState::terrain_color_recip_packed() const {
+	if (config_ == nullptr) {
+		return kTerrainColorRecipDefaultPacked; // [orig: @ 0x57c065]
+	}
+	return terrain_color_recip_from_rgb(config_->terrain_rgb);
+}
+
 Rgb EnvironmentState::water_color() const {
 	if (config_ == nullptr) {
 		return Rgb{0.408f, 0.314f, 0.224f};
