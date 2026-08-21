@@ -1221,8 +1221,8 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 //
 // The monogram watermark pass is deliberately NOT drawn: its material carries
 // flag word 0x622, whose LOW NIBBLE selects ONE/ONE — pure additive
-// [orig: FUN_00680f00 @0x680f00 -> D3DRS 0x13/0x14/0x1B via FUN_006817d0
-// @0x6817d0], its diffuse is the darker alpha<<24 | 0x282828 [orig: the lea
+// [orig: decode_blend_mode_to_d3d_states @0x680f00 -> D3DRS 0x13/0x14/0x1B
+// via GfxBlend_ApplyToDevice @0x6817d0], its diffuse is the darker alpha<<24 | 0x282828 [orig: the lea
 // @0x56b8db], and the shipped monogram.tga is measured 100% pure black, so
 // the pass adds nothing. Drawing it as an opaque quad (the reading that
 // decodes only the colour op and never the blend nibble) paints a black slab

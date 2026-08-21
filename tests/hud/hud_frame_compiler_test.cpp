@@ -1173,8 +1173,8 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
 // the fill tiles at a fixed 32 px screen period off the BORDER atlas's own
 // cell (3,0), and the bottom row is cropped rather than squashed.
-// [orig: FUN_0056b700 @0x56b700; _DAT_007cfe3c = 0.000625; rec+0x180/+0x184;
-//  the bottom-row crop flag1 @0x56b456 with _DAT_007c459c = 0.9]
+// [orig: render_hud_box_overlay @0x56b700; flt_7CFE3C = 0.000625; rec+0x180/+0x184;
+//  the bottom-row crop flag1 @0x56b456 with flt_7C459C = 0.9]
 void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	using opennova::hud::HudQuad;
 	HudFrameCompiler compiler;

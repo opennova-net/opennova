@@ -48,7 +48,7 @@ inline int seat_label_y(int base_y, int slot_y) {
 // THE PANEL'S BASE CORNER. Every seat offset in the VEHICLE_HUD block is
 // relative to this, and it is NOT a fixed screen position: it is the authored
 // HUDVEHSTANCEPOS anchor plus the offset for the rider's CURRENT STANCE
-// [orig: baseX = dword_2723AF4 + dword_2723B24[byte_27235C0],
+// [orig: @0x5A509B..0x5A50B9 — baseX = dword_2723AF4 + dword_2723B24[byte_27235C0],
 //        baseY = dword_2723AF8 + dword_2723B44[byte_27235C0]].
 //
 // Both halves already exist on our side and are simply joined here: the

@@ -848,8 +848,8 @@ void wheeled_contact_solve(World &world, Entity &veh,
     // [orig: @0x478604 in the latch fall-through]. The corner quad lifts by
     // the four WHEEL d's only (belly/spine d's feed severity and the Z maxes)
     // in the zero-state spring loop [orig: `dest[corner].z += d_k`
-    // @0x478A16/@0x478A72-region; Vehicle_ApplyBrakingForce and the
-    // oscillator transfer are the deferred spring machinery].
+    // @0x478A16/@0x478A72-region; Suspension_CompressWheelLinear @0x45CEB0
+    // and the oscillator transfer are the deferred spring machinery].
     veh.flags &= ~kEntityFlagInAir;
     int32_t c[4][3];
     {
