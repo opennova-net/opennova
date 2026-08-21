@@ -1593,6 +1593,11 @@ func get_destruction_present_stats() -> RefCounted:
 	return _runtime.get_destruction_present_stats() if _runtime != null else null
 
 
+# Scar-presentation counters (ScarPresentPass.Stats, typed per ADR 0017).
+func get_scar_present_stats() -> RefCounted:
+	return _runtime.get_scar_present_stats() if _runtime != null else null
+
+
 ## Build a GameWorld-managed avatar model for the local player (which has no BMS placement of its
 ## own). The caller (LocalPlayerPresenter) positions it and swaps its visual/shadow policy per
 ## first/third person. In first person the body remains a live SHADOWS_ONLY source, but neither the

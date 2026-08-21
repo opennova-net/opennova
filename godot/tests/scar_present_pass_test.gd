@@ -341,7 +341,8 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	assert_eq(int(draw["rings_leased"]), 0)
 	var stats := rt.get_scar_present_stats()
 	assert_not_null(stats, "the runtime owns the scar presentation pass")
-	var no_sim := Simulation.new()
-	assert_true(no_sim.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE).is_empty(),
-			"no world: an empty dictionary, never a crash")
-	no_sim.free()
+	var fresh := Simulation.new()
+	var fresh_draw: Dictionary = fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
+	assert_eq((fresh_draw.get("batch_owner", PackedInt32Array()) as PackedInt32Array).size(), 0,
+			"an unbooted simulation lists no scars, never crashes")
+	fresh.free()
