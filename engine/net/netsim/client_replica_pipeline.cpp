@@ -183,6 +183,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::END_ROUND_STATS: // §5.61 the chunked post-round stat board (0x56)
+		apply_end_round_stats_chunk(body);
+		break;
 	case s2c::PLAYER_LIST: // §5.20 the Tab scoreboard (0x16)
 		apply_player_list(body);
 		break;

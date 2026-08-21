@@ -905,6 +905,11 @@ target_include_directories(client_replica_scoreboard_test PRIVATE ${CMAKE_CURREN
 target_compile_features(client_replica_scoreboard_test PRIVATE cxx_std_17)
 add_test(NAME client_replica_scoreboard COMMAND client_replica_scoreboard_test)
 
+add_executable(client_replica_endround_test netsim/client_replica_endround_test.cpp)
+target_link_libraries(client_replica_endround_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_replica_endround_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_replica_endround COMMAND client_replica_endround_test)
+
 # The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the

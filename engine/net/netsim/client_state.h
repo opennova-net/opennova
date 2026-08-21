@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <npwire/entity_class.h> // EntityClass
+#include <npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
 #include <world/guided_missile_flight.h> // the stng pursuit integrator (D-NET-64)
 
 namespace opennova::netsim {
@@ -585,6 +586,23 @@ struct ClientMinimapState {
 // post-compression (lossy, ~|v|>>11 quantization) — exactly what the original
 // client renders for its decoded peers. Callers must NOT "correct" them toward the
 // authoritative value.
+// The reassembly buffer plus the decoded board. The buffer is per-session
+// state whose lifetime the decoder does not own, so it lives here -- retail
+// keeps the same thing in one global stream [orig: g_scoreReassemblyStream].
+struct ClientEndRoundStats {
+	// True once a complete board has been decoded at least once. A later
+	// partial chunk does not clear it, so the screen keeps showing the last
+	// complete board while the next one streams in.
+	bool known = false;
+	EndRoundStats board;
+	// In-flight reassembly. `expected` is the total_size the first chunk
+	// declared; `buffer` is filled at each chunk offset.
+	std::vector<uint8_t> buffer;
+	uint16_t expected = 0;
+	// Chunks that arrived since the last completed board -- diagnostic only.
+	uint32_t chunks_seen = 0;
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -619,6 +637,11 @@ struct ClientState {
 	std::array<ClientGuidedMissile, kGuidedMissileCapacity> guided{};
 	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
 	// connection-slot roster it joins names from.
+	// The END-OF-ROUND STAT BOARD, reassembled from the chunked S2C 0x56 lane.
+	// Distinct from `scoreboard` above: that is the in-match Tab list refreshed
+	// every 311 ticks, this is the post-round board the stat.mnu screen reads
+	// [orig: NapiNPClientMsg_0x056 @0x431D10].
+	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
 	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
