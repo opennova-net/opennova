@@ -6,41 +6,34 @@ namespace opennova::world {
 
 // THE THIRD-PERSON CAMERA'S MOUNTED AND CLEARANCE LEGS.
 //
-// player_view.h already carries the on-foot chase: the quarter-step anchor
-// ease, the pivot nudge and the collision-march landing. What lives here is
-// what changes when the followed entity is a VEHICLE (mount state +0x168 == 2
-// or 5 with a carrier at +0x16C), plus the clearances that keep the eye out
-// of terrain and water.
+// player_view.h carries the on-foot chase: the quarter-step anchor ease, the
+// pivot nudge and the collision-march landing. What lives here is what
+// changes when the followed entity is a VEHICLE (mount state +0x168 == 2 or
+// 5 with a carrier at +0x16C — our SeatType Controller/Driver, the
+// Entity::is_vehicle_control_seat() test), plus the clearances that keep the
+// eye out of terrain and water. player_view_compose_camera's mounted fork
+// consumes these constants; player_view_tick integrates the mounted anchor.
 // [orig: ThirdPersonCamera_Update @0x437AF0 (the anchor); Camera_ComputeThirdPersonView
 //  @0x437D10 (the eye) — the clearances @0x438409..0x438456, the mounted slope
-//  march @0x43846E..0x438619, the aircraft drop @0x43861D..0x43864C]
-//
-// STAGED, NOT WIRED: player_view_compose_camera's mode 1 is the on-foot leg;
-// the mounted branch is the follow-up that consumes these constants.
+//  march @0x43846E..0x438619, the watercraft drop @0x43861D..0x43864C]
 //
 // Camera_RaycastCollisionOffset @0x4378B0 is deliberately NOT here: its only
 // callers sit in Camera_ComputeThirdPersonPositions @0x438B80, the mode-4
 // death/overview intro. It belongs to the death camera, not the chase.
 
 // ---------------------------------------------------------------------------
-// Seeds. The camera starts from DIFFERENT values depending on how it was
-// entered, which is why these are pairs rather than one.
+// Seeds. Following a new tracked entity starts further back and pitched up
+// than entering play does (the play reset is player_view.h's kTpDistance /
+// kTpOrbitPitchDeg). [orig: Camera_SetTrackedEntity @0x4391D0 — orbit yaw 0
+// @0x439209, orbit pitch 0x04000000 BAM (5.625 deg) @0x439213, distance
+// 0x30000 (3.0) @0x43921D; a DEAD target (Flags & 2) starts at 0xA0000 (10.0)
+// @0x439273..0x439275 and ThirdPersonCamera_Update reels it back to 3.0
+// @0x437CC0..0x437D02]. The tracked-entity/orbit state itself is a tracked
+// deferral (docs/correspondence.md, the Camera_SetTrackedEntity rows).
 // ---------------------------------------------------------------------------
-
-// Following a new tracked entity [orig: Camera_SetTrackedEntity @0x4391D0 —
-// orbit yaw 0 @0x439209, orbit pitch 0x04000000 BAM (5.625 deg) @0x439213,
-// distance 0x30000 (3.0) @0x43921D; a DEAD target (Flags & 2) starts at
-// 0xA0000 (10.0) @0x439273..0x439275 and ThirdPersonCamera_Update reels it
-// back to 3.0 @0x437CC0..0x437D02].
 inline constexpr float kTpTrackedDistance = 3.0f;
 inline constexpr float kTpTrackedOrbitPitchDeg = 5.625f;
 inline constexpr float kTpDeadTargetDistance = 10.0f;
-
-// Entering play as the local player [orig: Camera_ResetToLocalPlayer
-// @0x4A3D30 — distance 0x10000 @0x4A3D4C, orbit yaw/pitch 0 @0x4A3D56..0x4A3D5B]
-// — the tight over-the-shoulder view, orbit zeroed.
-inline constexpr float kTpPlayDistance = 1.0f;
-inline constexpr float kTpPlayOrbitPitchDeg = 0.0f;
 
 // ---------------------------------------------------------------------------
 // Mounted anchor. A vehicle is not framed like a soldier: the anchor lifts and
@@ -57,6 +50,11 @@ inline constexpr float kMountAnchorRadiusScale = 0.375f; // 24576 / 65536
 inline float mount_anchor_lift(float bound_radius) {
 	const float scaled = kMountAnchorRadiusScale * bound_radius;
 	return scaled > kMountAnchorMinLift ? scaled : kMountAnchorMinLift;
+}
+inline int32_t mount_anchor_lift_q16(int32_t bound_radius_q16) {
+	const int32_t scaled = static_cast<int32_t>(
+			(static_cast<int64_t>(24576) * bound_radius_q16 + 0x8000) >> 16);
+	return scaled < 0x10000 ? 0x10000 : scaled;
 }
 
 // The mounted anchor EASES SLOWER than the on-foot quarter step: a sixteenth
@@ -97,16 +95,18 @@ inline int32_t mount_look_yaw_bam(int32_t vehicle_yaw, int32_t look_yaw) {
 // @0x438150 = -0x08000000 BAM] — a vehicle is looked down on, not level with.
 inline constexpr float kMountPitchDeg = -11.25f;
 
-// An AIRCRAFT drops its eye by half the carrier's radius
-// [orig: @0x43861D..0x43864C — `itemDef+0x196 - 3 <= 1` (class byte 3 or 4)
-//  gates `carrierRadius >> 1` off both the eye z and the look-at z]. Which of
-// 3/4 is helicopter vs plane is not witnessed here.
-inline constexpr float kAircraftEyeDropScale = 0.5f;
-inline bool vehicle_class_byte_is_aircraft(uint8_t class_byte) {
-	return class_byte == 3 || class_byte == 4;
+// A WATERCRAFT drops its eye by half the carrier's radius
+// [orig: @0x43861D..0x43864C — `itemDef+0x196 - 3 <= 1` (unit_type 3 or 4)
+//  gates `carrierRadius >> 1` off both the eye z and the look-at z].
+// unit_type 3/4 are the watercraft classes — Entity_ClassifyForMinimap
+// @0x50FA70 maps 3/4 to the boat icon (11) and 5..8 to the helicopter icon
+// (15); the earlier "aircraft drop" reading was a misnomer.
+inline constexpr float kWatercraftEyeDropScale = 0.5f;
+inline bool vehicle_unit_type_is_watercraft(int unit_type) {
+	return unit_type == 3 || unit_type == 4;
 }
-inline float aircraft_eye_drop(float carrier_radius) {
-	return carrier_radius * kAircraftEyeDropScale;
+inline float watercraft_eye_drop(float carrier_radius) {
+	return carrier_radius * kWatercraftEyeDropScale;
 }
 
 // The mounted look-at point sits 6 units along the TRACKED ENTITY's yaw, on
@@ -144,14 +144,12 @@ inline float raise_above_water(float eye_z, float water_z, float entity_z) {
 	return raise_above(eye_z, water_z, kWaterClearance);
 }
 
-// The terrain floor is skipped for an entity carrying Flags bit 0x800000
+// The terrain floor is skipped for an entity carrying the INDOORS flag
+// (entity.h kEntityFlagIndoors = 0x800000 — the heightmap has no interiors)
 // [orig: `test [esi+24h], 800000h; jz sample` @0x438422..0x43842D — the
-//  floor is then 0 (the height-0 plane) rather than terrain + 0.25]. The
-// flag's producer is not witnessed here.
-inline constexpr uint32_t kEntityFlagCameraSkipsTerrainFloor = 0x800000u;
-inline float raise_above_terrain(float eye_z, float terrain_z, uint32_t entity_flags) {
-	if ((entity_flags & kEntityFlagCameraSkipsTerrainFloor) != 0u)
-		return eye_z < 0.0f ? 0.0f : eye_z;
+//  floor is then 0 (the height-0 plane) rather than terrain + 0.25].
+inline float raise_above_terrain(float eye_z, float terrain_z, bool indoors) {
+	if (indoors) return eye_z < 0.0f ? 0.0f : eye_z;
 	return raise_above(eye_z, terrain_z, kTerrainClearance);
 }
 

@@ -10,6 +10,8 @@
 
 #include "terrain_query/height_field.h"
 #include "world/angle.h"
+#include "world/geom.h"
+#include "world/tp_camera_mount.h"
 
 namespace opennova::world {
 
@@ -28,12 +30,35 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
             v.tp_anchor[0] = eye[0];
             v.tp_anchor[1] = eye[1];
             v.tp_anchor[2] = eye[2];
+            for (int i = 0; i < 3; ++i) v.tp_anchor_q16[i] = to_fixed(eye[i]);
             v.tp_anchor_valid = true;
+        } else if (v.mount.control_seat) {
+            // MOUNTED: the anchor chases the carrier position lifted
+            // max(1.0, 0.375 r), a sixteenth per tick on x/y and a
+            // thirty-second on z, in 16.16 with the half-step rounding
+            // [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B,
+            //  `(target - anchor + 8) >> 4` @0x437C56/@0x437C6A and
+            //  `(+ 16) >> 5` @0x437C79]. WITNESS PENDING: the ease target
+            // (ported as carrier position + lift; the seat/CameraOffset
+            // alternative is the open item).
+            const int32_t target[3] = {
+                v.mount.carrier_pos_q16[0],
+                v.mount.carrier_pos_q16[1],
+                v.mount.carrier_pos_q16[2] +
+                        mount_anchor_lift_q16(to_fixed(v.mount.bound_radius)),
+            };
+            for (int i = 0; i < 3; ++i) {
+                v.tp_anchor_q16[i] = mount_anchor_ease_q16(
+                        v.tp_anchor_q16[i], target[i],
+                        i == 2 ? kMountAnchorEaseShiftZ : kMountAnchorEaseShiftXY);
+                v.tp_anchor[i] = static_cast<float>(from_fixed(v.tp_anchor_q16[i]));
+            }
         } else {
             // Quarter-step ease per 62 Hz tick. [orig: @ 0x437c8d]
             v.tp_anchor[0] += (eye[0] - v.tp_anchor[0]) * kTpAnchorEase;
             v.tp_anchor[1] += (eye[1] - v.tp_anchor[1]) * kTpAnchorEase;
             v.tp_anchor[2] += (eye[2] - v.tp_anchor[2]) * kTpAnchorEase;
+            for (int i = 0; i < 3; ++i) v.tp_anchor_q16[i] = to_fixed(v.tp_anchor[i]);
         }
     } else {
         v.tp_anchor_valid = false;
@@ -234,6 +259,133 @@ void view_axes_mission(double yaw_deg, double pitch_deg, float fwd[3],
     }
 }
 
+// The heightmap sample the mounted clearances and the slope march read, in
+// the engine ground frame (x, y) -> the renderer atlas (x, -y) mapping the
+// head-bone floor uses.
+float terrain_height_at(const terrain::TerrainHeightField *terrain, float x, float y) {
+    return terrain::height_field_height_world_bilinear(*terrain, x, -y);
+}
+
+// THE MOUNTED THIRD-PERSON LEG [orig: the mount-state 2/5 arm of mode 1 in
+// Camera_ComputeThirdPersonView @0x437D10].
+void compose_mounted_camera(const PlayerViewState &v, const float position[3],
+                            const terrain::TerrainHeightField *terrain,
+                            bool indoors, float aim_yaw_deg,
+                            PlayerCameraPose &out) {
+    const MountedCameraInput &m = v.mount;
+    const float r = m.bound_radius;
+    const bool have_terrain = terrain != nullptr && terrain->valid();
+
+    // Yaw: the carrier's heading plus a QUARTER of the rider's look offset,
+    // as the arithmetic BAM shift [orig: @0x438138..0x43814A].
+    const int32_t aim_bam = bam_heading_from_mission_yaw_deg(aim_yaw_deg);
+    const int32_t yaw_bam = mount_look_yaw_bam(
+            m.carrier_yaw_bam,
+            m.carrier_yaw_bam + io::bam_sub(aim_bam, m.carrier_yaw_bam));
+    const double yaw_deg = mission_yaw_deg_from_bam_heading(yaw_bam);
+    // Pitch: the fixed downward -11.25 [orig: mov esi, 0F8000000h @0x438150].
+    // WITNESS PENDING: assigned (ported) rather than added to the aim pitch.
+    const double pitch_deg = kMountPitchDeg;
+
+    // The anchor: the eased mounted anchor (carrier + lift), or the carrier
+    // lifted directly before the first tick seeds it.
+    float anchor[3];
+    if (v.tp_anchor_valid) {
+        anchor[0] = v.tp_anchor[0];
+        anchor[1] = v.tp_anchor[1];
+        anchor[2] = v.tp_anchor[2];
+    } else {
+        anchor[0] = static_cast<float>(from_fixed(m.carrier_pos_q16[0]));
+        anchor[1] = static_cast<float>(from_fixed(m.carrier_pos_q16[1]));
+        anchor[2] = static_cast<float>(from_fixed(m.carrier_pos_q16[2])) +
+                    mount_anchor_lift(r);
+    }
+
+    // The eye: the anchor backed off 1.0 + 1.5 r along the view forward
+    // [orig: @0x438121..0x438136].
+    float fwd[3];
+    view_axes_mission(yaw_deg, pitch_deg, fwd, nullptr, nullptr);
+    const float distance = mount_distance(r);
+    float eye[3];
+    for (int i = 0; i < 3; ++i) eye[i] = anchor[i] - fwd[i] * distance;
+
+    // The clearances, water then terrain [orig: @0x438409..0x438456]: the
+    // water floor only while the entity itself sits above water + 0.25; the
+    // terrain floor skipped indoors (Flags & 0x800000 -> the height-0 plane).
+    eye[2] = raise_above_water(eye[2], m.water_z, position[2]);
+    if (have_terrain) {
+        const float ground = terrain_height_at(terrain, eye[0], eye[1]);
+        eye[2] = raise_above_terrain(eye[2], ground, indoors);
+    } else if (indoors) {
+        eye[2] = raise_above_terrain(eye[2], 0.0f, true);
+    }
+
+    // The slope raise [orig: @0x43846E..0x438619]: march from the anchor
+    // toward the eye in half-unit steps, keep the steepest rise-over-run, and
+    // floor the eye at anchor + slope * distance + 0.333 * distance.
+    if (have_terrain) {
+        const float dx = eye[0] - anchor[0];
+        const float dy = eye[1] - anchor[1];
+        const float horizontal = std::sqrt(dx * dx + dy * dy);
+        if (horizontal > 0.0f) {
+            const float ux = dx / horizontal;
+            const float uy = dy / horizontal;
+            float max_slope = -1.0e30f;
+            for (float run = kSlopeStep; run <= horizontal; run += kSlopeStep) {
+                const float h = terrain_height_at(terrain, anchor[0] + ux * run,
+                                                  anchor[1] + uy * run);
+                const float slope = (h - anchor[2]) / run;
+                if (slope > max_slope) max_slope = slope;
+            }
+            if (max_slope > -1.0e30f) {
+                const float floor_z = slope_raise_floor(anchor[2], horizontal, max_slope);
+                if (eye[2] < floor_z) eye[2] = floor_z;
+            }
+        }
+    }
+
+    // The watercraft drop: half the carrier radius off the eye AND the
+    // look-at [orig: @0x43861D..0x43864C, itemDef+0x196 in {3,4}].
+    const float drop = m.watercraft ? watercraft_eye_drop(r) : 0.0f;
+    eye[2] -= drop;
+
+    // The look-ahead point: 6 u along the yaw from the carrier, on the
+    // terrain + 1.0 or the carrier's own z, whichever is higher
+    // [orig: @0x438767..0x4387C9]; the final angles are the look-at from the
+    // eye to it. WITNESS PENDING: the yaw source (ported as the damped camera
+    // yaw) and the drop's application to the look-at (ported as applied).
+    const double sy = std::sin(yaw_deg * kRadPerDeg);
+    const double cy = std::cos(yaw_deg * kRadPerDeg);
+    const float carrier_x = static_cast<float>(from_fixed(m.carrier_pos_q16[0]));
+    const float carrier_y = static_cast<float>(from_fixed(m.carrier_pos_q16[1]));
+    const float carrier_z = static_cast<float>(from_fixed(m.carrier_pos_q16[2]));
+    float target[3] = {
+        carrier_x + static_cast<float>(sy) * kMountLookaheadDistance,
+        carrier_y + static_cast<float>(cy) * kMountLookaheadDistance,
+        carrier_z,
+    };
+    if (have_terrain) {
+        const float lifted =
+                terrain_height_at(terrain, target[0], target[1]) + kMountLookaheadTerrainLift;
+        if (lifted > target[2]) target[2] = lifted;
+    }
+    target[2] -= drop;
+
+    const double tx = static_cast<double>(target[0] - eye[0]);
+    const double ty = static_cast<double>(target[1] - eye[1]);
+    const double tz = static_cast<double>(target[2] - eye[2]);
+    const double flat = std::sqrt(tx * tx + ty * ty);
+    out.yaw_deg = flat > 0.0
+            ? static_cast<float>(normalize_mission_yaw_deg(std::atan2(tx, ty) / kRadPerDeg))
+            : static_cast<float>(yaw_deg);
+    out.pitch_deg = static_cast<float>(std::atan2(tz, flat) / kRadPerDeg);
+    out.roll_deg = 0.0f;
+    out.eye[0] = eye[0];
+    out.eye[1] = eye[1];
+    out.eye[2] = eye[2];
+    out.third_person = true;
+}
+
 } // namespace
 
 void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain,
@@ -320,6 +472,11 @@ void player_view_compose_camera(const PlayerViewState &v,
         eye[2] = position[2] + kNonPersonEyeBump;
     }
     out.third_person = v.third_person;
+    if (v.third_person && v.mount.control_seat) {
+        // The control-seat arm of mode 1 (world/tp_camera_mount.h).
+        compose_mounted_camera(v, position, terrain, indoors, aim_yaw_deg, out);
+        return;
+    }
     if (v.third_person) {
         // [orig: mode 1 @ 0x438100..0x4383e2 — the nudged pivot backs off the
         //  march-landed distance along the orbit forward; the final rotation is

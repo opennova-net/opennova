@@ -9,7 +9,9 @@
 #include <vector>
 
 #include "terrain_query/height_field.h"
+#include "world/angle.h"
 #include "world/player_view.h"
+#include "world/tp_camera_mount.h"
 #include "world/weapon_fsm.h"
 
 using namespace opennova::world;
@@ -453,6 +455,164 @@ void test_compose_camera_third_person() {
     CHECK(near_eq(pose.eye[2], 3.0f + 0.125f));
 }
 
+// THE MOUNTED LEG [orig: the mount-state 2/5 arm of mode 1 — the lift
+// @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79, the distance
+// @0x438121..0x438136, the quarter yaw @0x438138..0x43814A, the pitch
+// @0x438150, the clearances @0x438409..0x438456, the slope march
+// @0x43846E..0x438619, the watercraft drop @0x43861D..0x43864C].
+PlayerViewState mounted_state(float bound_radius, float carrier_z = 10.0f) {
+    PlayerViewState v;
+    v.third_person = true;
+    v.mount.control_seat = true;
+    v.mount.carrier_pos_q16[0] = 0;
+    v.mount.carrier_pos_q16[1] = 0;
+    v.mount.carrier_pos_q16[2] = static_cast<int32_t>(carrier_z * 65536.0f);
+    v.mount.carrier_yaw_bam = bam_heading_from_mission_yaw_deg(0.0); // mission yaw 0
+    v.mount.bound_radius = bound_radius;
+    v.mount.water_z = -1000.0f;
+    // The anchor as the tick would have settled it: carrier + lift.
+    v.tp_anchor_valid = true;
+    v.tp_anchor[0] = 0.0f;
+    v.tp_anchor[1] = 0.0f;
+    v.tp_anchor[2] = carrier_z + mount_anchor_lift(bound_radius);
+    for (int i = 0; i < 3; ++i)
+        v.tp_anchor_q16[i] = static_cast<int32_t>(v.tp_anchor[i] * 65536.0f);
+    return v;
+}
+
+void test_compose_camera_mounted() {
+    const float position[3] = {0.0f, 0.0f, 10.0f};
+    const float no_anchor[3] = {0.0f, 0.0f, 0.0f};
+    PlayerCameraPose pose;
+
+    // r = 4: lift 1.5 (above the 1.0 floor), distance 1 + 1.5 * 4 = 7.
+    PlayerViewState v = mounted_state(4.0f);
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(pose.third_person);
+    CHECK(pose.roll_deg == 0.0f);
+    // Looking straight ahead: the eye sits 7 u behind the anchor along the
+    // -11.25-degree forward (yaw 0 -> mission fwd = (0, cos p, sin p)).
+    const float p = -11.25f * 3.14159265f / 180.0f;
+    CHECK(near_eq(pose.eye[0], 0.0f, 0.001f));
+    CHECK(near_eq(pose.eye[1], -7.0f * std::cos(p), 0.001f));
+    CHECK(near_eq(pose.eye[2], 11.5f - 7.0f * std::sin(p), 0.001f));
+    // The final angles look at the point 6 u ahead of the carrier: the yaw
+    // stays on the carrier heading, the pitch looks DOWN at it.
+    CHECK(near_eq(pose.yaw_deg, 0.0f, 0.01f) || near_eq(pose.yaw_deg, 360.0f, 0.01f));
+    CHECK(pose.pitch_deg < 0.0f);
+
+    // The lift floor: r = 1 lifts 1.0, not 0.375; distance 2.5.
+    PlayerViewState small = mounted_state(1.0f);
+    player_view_compose_camera(small, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.eye[1], -2.5f * std::cos(p), 0.001f));
+    CHECK(near_eq(pose.eye[2], 11.0f - 2.5f * std::sin(p), 0.001f));
+
+    // The QUARTER look yaw: a 40-degree look offset swings the camera 10.
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            40.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.yaw_deg, 10.0f, 0.05f));
+    // ... and it is symmetric.
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            -40.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.yaw_deg, 350.0f, 0.05f));
+
+    // The WATERCRAFT drop: half the radius off the eye.
+    PlayerViewState boat = mounted_state(4.0f);
+    boat.mount.watercraft = true;
+    PlayerCameraPose boat_pose;
+    player_view_compose_camera(boat, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, boat_pose);
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(boat_pose.eye[2], pose.eye[2] - 2.0f, 0.001f));
+
+    // The water floor's polarity: with the water at 100 an entity ABOVE it
+    // (position z 200) gets the eye raised to 100.25, a submerged one keeps
+    // its underwater eye.
+    PlayerViewState wet = mounted_state(4.0f);
+    wet.mount.water_z = 100.0f;
+    const float above[3] = {0.0f, 0.0f, 200.0f};
+    player_view_compose_camera(wet, above, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.eye[2], 100.25f, 0.001f));
+    player_view_compose_camera(wet, position /* z 10, submerged */, no_anchor, false,
+            nullptr, false, 0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(pose.eye[2] < 100.0f);
+}
+
+// The mounted terrain legs: the +0.25 floor and the slope raise over a ramp.
+void test_compose_camera_mounted_terrain() {
+    constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap(kDim * kDim, 8 * 256); // flat at 8.0
+    std::vector<int> sector_grid(256, 1);
+    opennova::terrain::TerrainHeightField field;
+    field.heightmap = heightmap.data();
+    field.dim = kDim;
+    field.layout.sector_grid = sector_grid.data();
+    field.layout.origin_x = 0;
+    field.layout.origin_y = 0;
+
+    // The carrier at (100, -100, 10): the anchor is 11.5, the eye ~12.9.
+    PlayerViewState v = mounted_state(4.0f);
+    v.mount.carrier_pos_q16[0] = 100 * 0x10000;
+    v.mount.carrier_pos_q16[1] = -100 * 0x10000;
+    v.tp_anchor[0] = 100.0f;
+    v.tp_anchor[1] = -100.0f;
+    const float position[3] = {100.0f, -100.0f, 10.0f};
+    const float no_anchor[3] = {0.0f, 0.0f, 0.0f};
+    PlayerCameraPose flat;
+    player_view_compose_camera(v, position, no_anchor, false, &field, false,
+            0.0f, 0.0f, 0, 0, 0, flat);
+    // Flat ground far below: neither floor moves the eye.
+    const float p = -11.25f * 3.14159265f / 180.0f;
+    CHECK(near_eq(flat.eye[2], 11.5f - 7.0f * std::sin(p), 0.001f));
+
+    // Ground just above the eye: the terrain floor (+0.25) and the slope
+    // raise both apply and the eye ends above the ground.
+    for (auto &h : heightmap) h = 13 * 256;
+    PlayerCameraPose raised;
+    player_view_compose_camera(v, position, no_anchor, false, &field, false,
+            0.0f, 0.0f, 0, 0, 0, raised);
+    CHECK(raised.eye[2] >= 13.25f);
+
+    // A ramp rising BEHIND the carrier (the eye side, mission -y = atlas +z)
+    // raises the eye above the flat result.
+    for (int z = 0; z < kDim; ++z)
+        for (int x = 0; x < kDim; ++x)
+            heightmap[z * kDim + x] = static_cast<uint16_t>((8 * 256) + (z - 100) * 256 / 2);
+    PlayerCameraPose ramp;
+    player_view_compose_camera(v, position, no_anchor, false, &field, false,
+            0.0f, 0.0f, 0, 0, 0, ramp);
+    CHECK(ramp.eye[2] > flat.eye[2]);
+}
+
+// The mounted anchor ease in 16.16: a sixteenth per tick on x/y and a
+// thirty-second on z toward carrier + lift, mirrored into the float anchor.
+void test_tick_mounted_anchor_ease() {
+    PlayerViewState v;
+    v.third_person = true;
+    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    player_view_tick(v, eye); // seeds the anchor at the eye
+    CHECK(v.tp_anchor_valid);
+    v.mount.control_seat = true;
+    v.mount.carrier_pos_q16[0] = 16 * 0x10000;
+    v.mount.carrier_pos_q16[1] = 0;
+    v.mount.carrier_pos_q16[2] = 32 * 0x10000;
+    v.mount.bound_radius = 4.0f; // lift 1.5 -> target z 33.5
+    player_view_tick(v, eye);
+    // x: a sixteenth of 16 = 1.0; z: a thirty-second of 33.5 = 1.046875.
+    CHECK(v.tp_anchor_q16[0] == 0x10000);
+    CHECK(near_eq(v.tp_anchor[0], 1.0f));
+    CHECK(v.tp_anchor_q16[2] == (33 * 0x10000 + 0x8000 + 16) >> 5);
+    CHECK(near_eq(v.tp_anchor[2], 1.046875f, 0.0001f));
+    // Dismounting returns to the quarter-step float ease from where it was.
+    v.mount.control_seat = false;
+    player_view_tick(v, eye);
+    CHECK(near_eq(v.tp_anchor[0], 0.75f, 0.0001f));
+}
+
 // The view-frame bias: raw def units / 256 on the eased blend; the
 // NoCardSwitch reload suppression drops the ADS half (the hip offset).
 void test_bias_view_units() {
@@ -635,6 +795,9 @@ int main() {
     test_compose_camera_terrain_floor();
     test_camera_shake();
     test_compose_camera_third_person();
+    test_compose_camera_mounted();
+    test_compose_camera_mounted_terrain();
+    test_tick_mounted_anchor_ease();
     test_bias_view_units();
     test_motion_lead_tracker();
     if (failures == 0) std::printf("player_view_test: all passed\n");
