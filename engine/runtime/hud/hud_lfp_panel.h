@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 
 namespace opennova::hud {
 
@@ -26,12 +27,11 @@ namespace opennova::hud {
 // own row (Y += 86 per marker @0x5a2781) with the status text drawn per
 // marker — not modelled here.
 
-// Team colours, ARGB. The marker reads three runtime HUD colour globals
-// [orig: team 1 g_hudColorLightBlue @0x24C1844, team 2 dword_24C184C, neutral /
-//  other dword_24C183C — selected @0x598746..0x598751 in HUD_DrawZoneMarker].
-// Those globals are BSS (config-loaded; they read 0 in the image), so the
-// literal ARGB below are UNVERIFIED placeholders, not witnessed values — a live
-// read is owed before this panel is wired.
+// Team colours, ARGB — the three g_hudColorTable entries the marker reads
+// [orig: team 1 g_hudColorLightBlue @0x24C1844 = table[3], team 2
+//  dword_24C184C = table[5], neutral / other dword_24C183C = table[1] —
+//  selected @0x598746..0x598751 in HUD_DrawZoneMarker; the immediates written
+//  by HUD_InitTeamColorTable @0x51f26d / @0x51f259 / @0x51f263].
 inline constexpr uint32_t kLfpColorNeutral = 0xFF00FF00u;
 inline constexpr uint32_t kLfpColorTeam1 = 0xFF80A0FFu;
 inline constexpr uint32_t kLfpColorTeam2 = 0xFFFF5050u;
@@ -53,6 +53,13 @@ inline constexpr int kLfpCountOwnOffX = 0x10;  // own-side count, left aligned
 inline constexpr int kLfpCountOwnOffY = 0x42;
 inline constexpr int kLfpCountEnemyOffX = 0x2F; // other side, RIGHT aligned
 inline constexpr int kLfpCountEnemyOffY = 0x42;
+// The capture progress bar's rect [orig: (x+56, y+30)..(x+76, y+82)
+//  @0x598a41..0x598a5f] and its fraction: DWORD 8 / DWORD 10 of the timer
+// entry while DWORD 12 is set, else 0 [orig: @0x598a27..0x598a3a].
+inline constexpr int kLfpBarX1 = 0x38;
+inline constexpr int kLfpBarY1 = 0x1E;
+inline constexpr int kLfpBarX2 = 0x4C;
+inline constexpr int kLfpBarY2 = 0x52;
 
 // STEPPING [orig: HUD_DrawZoneStatusPanel @0x5A2480]. Markers step ACROSS
 // within a team group (`x += 0x62` after each marker @0x5a27a3) and each new
@@ -66,18 +73,23 @@ inline constexpr int kLfpCountEnemyOffY = 0x42;
 // The panel anchor is the hudpos-authored pair g_hudZonePanelX/Y
 // [orig: the hudpos writes @0x5a0563 / @0x5a057b].
 //
+// Every marker row AND its status text sit 12 px below the group's row base:
+// the Y cursor starts at `g_hudZonePanelY + 12` (`x_position = x_base + 12`
+// @0x5a25bd) and both the marker call (arg 1 @0x5a2799) and the text call take
+// that cursor, while the 86 step advances both [orig: @0x5a2667..0x5a2676].
+//
 // (Hex-Rays names the X accumulator "y_position" and the Y "x_base" in this
 // function; the pushes to HUD_DrawZoneMarker @0x5a2797..0x5a279b settle it:
 // x first.)
 inline constexpr int kLfpStepX = 0x62; // 98, marker pitch across a group
 inline constexpr int kLfpStepY = 0x56; // 86, group pitch down
+inline constexpr int kLfpRowDy = 12;   // the row cursor's +12 over the anchor
 
 // The group's status text ("!Under Attack!!" / "!Ready for Takeover!") sits
-// 4 px left of the group's first marker and 12 px below the group's row
-// [orig: `esi - 4` @0x5a2601, `ebx = y + 0xC` @0x5a25bd; drawn right-aligned
-//  via sub_580BC0 @0x5a2652 / @0x5a262b / @0x5a281a / @0x5a27f3].
+// 4 px left of the group's first marker, on the group's row cursor
+// [orig: `esi - 4` @0x5a2601; drawn right-aligned via sub_580BC0 @0x5a2652 /
+//  @0x5a262b / @0x5a281a / @0x5a27f3].
 inline constexpr int kLfpStatusTextDx = -4;
-inline constexpr int kLfpStatusTextDy = 12;
 
 // The icon quad's constant modulate [orig: CEffect_Begin_Debug @0x67BB50, a
 // thunk to draw_tiled_texture_strip @0x67AED0 (effect, rect[4], colour, frame);
@@ -126,48 +138,124 @@ inline bool lfp_zone_under_attack(int zone_team, int viewer_team, int rate) {
 // (gated on no suicide / no epilog) and the marker tests `counter & 0x18`
 // [orig: g_hudFrameCounter @0xA87064, ++ in Game_TickHudFrameCounters
 //  @0x434C00 from Game_ProcessMainFrame @0x5265d5; the tests @0x5988E8 /
-//  @0x5988FB / @0x59891D]. That mask is not a 50/50 blink: phase A is 128
-// counts of every 512 and phase B the remaining 384. This port drives it off
-// a millisecond clock (>>4, one count per 16 ms) as a device approximation of
-// the 62 Hz frame counter.
+//  @0x5988FB / @0x59891D]. That mask is not a 50/50 blink: phase A is 8
+// counts of every 32 and phase B the remaining 24.
+inline bool lfp_blink_phase_a_counter(int frame_counter) {
+	return (frame_counter & 0x18) == 0;
+}
+// The millisecond-clock form (>>4, one count per 16 ms) for a device that
+// clocks the panel off wall time rather than the frame counter.
 inline bool lfp_blink_phase_a(int64_t now_ms) {
-	return ((now_ms >> 4) & 0x18) == 0;
+	return lfp_blink_phase_a_counter(static_cast<int>(now_ms >> 4));
 }
 
-// Which frame a marker draws, given its state. `in_cylinder` is held false by
-// a client that cannot see the capture radius (entity+0x15E is not on the
-// wire) — a recorded gap, not a guess.
+// IN THE CYLINDER: the 2D distance to the zone is within its capture radius
+// (entity+0x15E, in whole units -> Q16) and the height difference within half
+// of it [orig: @0x5987f4..0x598810 — `dist2d <= radius << 16`, then
+//  `|dz| > (radius << 16) / 2` clears it]. The radius IS on the wire (the 0x0D
+// record's u16), so a client computes this like the host.
+inline bool lfp_in_cylinder(int32_t dist2d_q16, int32_t dz_q16, uint16_t radius) {
+	const int32_t r_q16 = static_cast<int32_t>(radius) << 16;
+	if (dist2d_q16 > r_q16) return false;
+	const int32_t adz = dz_q16 < 0 ? -dz_q16 : dz_q16;
+	return adz <= r_q16 / 2;
+}
+
+// Which frame a marker draws, given its state.
 inline LfpFrame lfp_frame(int zone_team, int viewer_team, int control, int rate,
-		bool in_cylinder, int64_t now_ms) {
+		bool in_cylinder, bool phase_a) {
 	const bool ready = lfp_zone_ready(zone_team, viewer_team, control);
 	const bool attacked = lfp_zone_under_attack(zone_team, viewer_team, rate);
 	// The two blinking states alternate on the pulse; when neither applies the
-	// in-cylinder frame wins over the default.
-	if (attacked && lfp_blink_phase_a(now_ms)) return LfpFrame::UnderAttack;
-	if (ready && !lfp_blink_phase_a(now_ms)) return LfpFrame::Ready;
+	// in-cylinder frame wins over the default [orig: @0x598915..0x598934].
+	if (attacked && phase_a) return LfpFrame::UnderAttack;
+	if (ready && !phase_a) return LfpFrame::Ready;
 	if (in_cylinder) return LfpFrame::InZone;
 	return LfpFrame::Default;
 }
 
+// THE POINT COLOUR LADDER the marker's tile, bar, distance text and the
+// caller's status text take, applied in this order to the team colour
+// [orig: @0x5988b7..0x59890d]:
+//   1. neither in the cylinder nor contested (the two counts equal) -> dimmed:
+//      (c>>1 & 0x7F7F7F) + (c>>3 & 0x1F1F1F) + alpha   @0x5988d6
+//   2. under attack on phase A -> pure yellow 0xFFFFFF00   @0x5988ea
+//   3. else ready on phase A -> halved: (c>>1 & 0x7F7F7F) + alpha   @0x59890d
+inline uint32_t lfp_point_color(uint32_t team_color, bool in_cylinder,
+		bool contested, bool attacked, bool ready, bool phase_a) {
+	uint32_t c = team_color;
+	if (!in_cylinder && !contested) {
+		c = ((c >> 1) & 0x7F7F7Fu) + ((c >> 3) & 0x1F1F1Fu) + (c & 0xFF000000u);
+	}
+	if (attacked) {
+		if (phase_a) c = 0xFFFFFF00u;
+	} else if (ready && phase_a) {
+		c = ((c >> 1) & 0x7F7F7Fu) + (c & 0xFF000000u);
+	}
+	return c;
+}
+
+// The capture fraction, Q16: DWORD 8 / DWORD 10 while DWORD 12, else 0
+// [orig: @0x598a27..0x598a3a].
+inline int32_t lfp_bar_fraction_q16(int32_t value, int32_t limit, bool active) {
+	if (!active || limit == 0) return 0;
+	int64_t f = (static_cast<int64_t>(value) << 16) / limit;
+	if (f < 0) f = 0;
+	if (f > 0x10000) f = 0x10000;
+	return static_cast<int32_t>(f);
+}
+
+// The two contest counts as the marker prints them: the OWN-side count is the
+// owner's count (+0x220) when the zone is the viewer's, else the other side's
+// (+0x221), and vice versa; printed only when either is nonzero
+// [orig: @0x598ff5..0x599037].
+inline void lfp_contest_counts(int zone_team, int viewer_team,
+		uint8_t count_owner, uint8_t count_other, int &own, int &other) {
+	if (zone_team == viewer_team) {
+		own = count_owner;
+		other = count_other;
+	} else {
+		own = count_other;
+		other = count_owner;
+	}
+}
+
+// The distance label: whole metres up to 1000, else kilometres to two places
+// [orig: "%1dm" @0x59914b for <= 1000, "%01.2fk" with x 0.001 @0x599133].
+inline int lfp_format_distance(char *buf, size_t len, int metres) {
+	if (metres <= 1000) return std::snprintf(buf, len, "%1dm", metres);
+	return std::snprintf(buf, len, "%01.2fk", static_cast<double>(metres) * 0.001);
+}
+
 // A marker's origin: the group is right-anchored to the panel X and steps
-// across by kLfpStepX per marker; each group steps down by kLfpStepY.
+// across by kLfpStepX per marker; each group steps down by kLfpStepY from the
+// row cursor (panel Y + 12).
 inline void lfp_marker_origin(int panel_x, int panel_y, int zones_in_group,
 		int index_in_group, int group_index, int &out_x, int &out_y) {
 	out_x = panel_x - zones_in_group * kLfpStepX + index_in_group * kLfpStepX;
-	out_y = panel_y + group_index * kLfpStepY;
+	out_y = panel_y + kLfpRowDy + group_index * kLfpStepY;
 }
 
-// Where a group's status text is drawn (right-aligned at this point).
+// Where a group's status text is drawn (right-aligned at this point): the
+// group's first marker x - 4, on the group's row cursor.
 inline void lfp_status_text_origin(int panel_x, int panel_y, int zones_in_group,
 		int group_index, int &out_x, int &out_y) {
 	out_x = panel_x - zones_in_group * kLfpStepX + kLfpStatusTextDx;
-	out_y = panel_y + group_index * kLfpStepY + kLfpStatusTextDy;
+	out_y = panel_y + kLfpRowDy + group_index * kLfpStepY;
 }
 
-// The colour a marker's objective takes.
+// The colour a team takes.
 inline uint32_t lfp_team_color(int zone_team) {
 	if (zone_team == 1) return kLfpColorTeam1;
 	if (zone_team == 2) return kLfpColorTeam2;
+	return kLfpColorNeutral;
+}
+// The OPPOSING side's colour as the marker resolves it for the other-side
+// count [orig: @0x598781..0x598792 — local 1 -> dword_24C184C, local 2 ->
+//  light blue, else neutral].
+inline uint32_t lfp_opposing_team_color(int viewer_team) {
+	if (viewer_team == 1) return kLfpColorTeam2;
+	if (viewer_team == 2) return kLfpColorTeam1;
 	return kLfpColorNeutral;
 }
 

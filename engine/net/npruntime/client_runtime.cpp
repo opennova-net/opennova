@@ -120,6 +120,10 @@ void ClientRuntime::apply_zone_timer_value(const ZoneTimerValue &value) {
 	entry.value_rate = value.rate; // i16 is sign-extended by the retail handler
 	entry.window_active = false;
 	entry.value_active = true;
+	// The contest counts ride the same message onto the zone entity
+	// [orig: @0x428e79/@0x428e7f].
+	entry.contest_owner = value.byte544;
+	entry.contest_other = value.byte545;
 }
 
 void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
