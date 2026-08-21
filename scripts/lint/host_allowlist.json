@@ -169,6 +169,7 @@
     "godot/tests/nova_debug_overlay_test.gd",
     "godot/tests/nova_debug_session_test.gd",
     "godot/tests/env_render_cadence_test.gd",
+    "godot/tests/vehicle_emplacement_alignment_test.gd",
     "godot/game/world/*",
     "godot/src/env/*",
     "engine/formats/env/*",
@@ -231,6 +232,8 @@
     "terrain_editor_workstation_test.gd|%PromptHost",
     "mus_var_names.gd|8: \"Host\"",
     "mus_var_names.gd|8=host",
-    "nova_debug_session_test.gd|state.reason, \"host\""
+    "nova_debug_session_test.gd|state.reason, \"host\"",
+    "vehicle_emplacement_alignment_test.gd|host-side aircraft mover unported",
+    "engine/runtime/hud/hud_lfp_panel.h|computes this like the host"
   ]
 }
