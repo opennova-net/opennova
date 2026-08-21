@@ -168,6 +168,50 @@ func test_below_water_swaps_the_stage3_input_to_the_water_noise() -> void:
 	assert_gt(swap, gate, "The noise swap must sit inside the detail2 gate.")
 
 
+func test_terrain_point_light_pool_is_the_two_stage_modulate2x_fold() -> void:
+	# The pool's terrain leg: per patch the <= 16 rows ride one RGBAF texture
+	# row per pool slot, each patch instance carries its slot, and the shader
+	# sums stage 0 (the ground disc) x2 and stage 1 (the height strip) x2 over
+	# the pixel constants that already carry the 0.5 — the explicit 2 * 2.
+	# [orig: render_terrain_sector_batch @0x6092A0 per-light else-arm ->
+	# Light_SetupTerrainProjectedPass @0x5AA830; textures Lighting_InitTextures
+	# @0x5a94f0; the 0x600 shader's CLAMP address mode @0x5a98eb..0x5a98f4]
+	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
+	var compact := _compact(shared)
+	assert_true(compact.contains(
+		"uniformsampler2Du_terrain_light_rows:filter_nearest,repeat_disable,hint_default_black;"),
+		"The rows texture must be fetched as texels (nearest, clamped, black when unbound).")
+	assert_true(compact.contains(
+		"uniformsampler2Du_terrain_light_disc:filter_linear,repeat_disable,hint_default_black;"),
+		"The ground disc must sample bilinear + CLAMP, no mips (the 0x600 shader's address mode).")
+	assert_true(compact.contains(
+		"uniformsampler2Du_terrain_light_strip:filter_linear,repeat_disable,hint_default_black;"),
+		"The height strip must sample bilinear + CLAMP, no mips.")
+	assert_true(compact.contains("uniformboolu_terrain_light_enabled=false;"),
+		"The pool leg must default off until the terrain binds its rows.")
+	assert_true(compact.contains("constintTERRAIN_LIGHT_ROWS_PER_PATCH=16;"),
+		"The per-patch cap is retail's 16-per-batch collect, not the object pass's 4.")
+	assert_true(compact.contains("vec3terrain_point_light_pool(vec3world_pos,floatslot)"),
+		"The pool sum must be the shared-include function both terrain shaders can call.")
+	assert_true(compact.contains("vec2disc_uv=vec2(d.z,d.x)*posr.w+0.5;"),
+		"The disc projection must be the mission (light.y - p.y, p.x - light.x) * inv + 0.5 contract in the Godot frame.")
+	assert_true(compact.contains("vec2strip_uv=vec2(d.y*posr.w+0.5,0.5);"),
+		"The strip projection must be the mission (p.z - light.z) * inv + 0.5 at v = 0.5.")
+	assert_true(compact.contains("sum+=2.0*2.0*pixel.rgb*disc*strip;"),
+		"Both stages are MODULATE2X: the explicit 2 * 2 over the 0.5-folded constants.")
+
+	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
+	assert_true(runtime.contains("instanceuniformfloatu_instance_light_slot=0.0;"),
+		"Each patch instance must carry the pool slot its rows live in.")
+	assert_true(runtime.contains(
+		"result+=terrain_point_light_pool(v_world_pos,u_instance_light_slot);"),
+		"Runtime terrain must add the pool sum over the composed surface colour.")
+	var pool := runtime.find("terrain_point_light_pool(v_world_pos")
+	var fog := runtime.find("apply_terrain_fog(result")
+	assert_gt(pool, 0, "The pool sum must be present in the runtime terrain shader.")
+	assert_gt(fog, pool, "The pool sum is added before the fog mix so it fades with the batch.")
+
+
 func test_runtime_and_oned_share_tile_overlay_composition() -> void:
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))

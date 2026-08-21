@@ -1460,6 +1460,9 @@ func render_light_frame() -> void:
 	_light_director.render_frame(
 			viewport.get_camera_3d() if viewport != null else null,
 			viewmodel_parts, viewmodel_owner)
+	# The terrain leg of the same pool: the next terrain frame re-draws its
+	# patches with the pool lights they overlap (terrain_light_leg.gd).
+	TerrainLightLeg.render_frame(_terrain, _light_director)
 	# Feed the render-slot shadow device the same point-light context (its
 	# per-slot dominant-light pick reads the shared pool) plus the local
 	# player state for the retail priority/drape gates.

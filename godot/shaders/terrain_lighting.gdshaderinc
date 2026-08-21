@@ -88,6 +88,64 @@ uniform float u_fog_start = 0.0;
 uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
 
+// --- The terrain leg of the EffectWorld light pool --------------------------
+// Retail re-draws each terrain batch once more PER pool light, additively,
+// through a two-stage projected-texture shader: stage 0 samples the 64x64
+// "texlight2d" disc projected on the ground plane around the light, stage 1
+// the 64x8 "texlightspot1d" strip by height above/below it, both MODULATE2X
+// over the pixel constants c4..c6 the pass uploads (the light colour already
+// folded by 0.5 so stage 0's 2x restores it; stage 1's 2x stays).
+// (retail: the per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
+//  Light_SetupTerrainProjectedPass @0x5AA830; the collect, the 16-per-batch
+//  cap, the authored terrain-disable gate and the constants are portable in
+//  renderer::LightScene::collect_terrain_pass_rows; the two textures are
+//  renderer::falloff_texture_light2d_argb / _spot1d_argb; the projection
+//  contract terrain_light_uv_disc / _height — see
+//  docs/render/render-lighting-re.md.)
+// Device fold: Godot instance uniforms take neither arrays nor samplers, so
+// the <= 16 rows per patch ride one RGBAF texture row per pool slot (two
+// texels per light: position.xyz + inv_scale, then c4..c6 + the patch's
+// count) and each patch instance carries its slot. The 0x600 shader retail
+// binds addresses CLAMP (sub_680720(this, clamp=1, 0, 0, 0)
+// @0x5a98eb..0x5a98f4) and both textures are created without mips, hence
+// filter_linear + repeat_disable here.
+uniform sampler2D u_terrain_light_rows : filter_nearest, repeat_disable, hint_default_black;
+uniform sampler2D u_terrain_light_disc : filter_linear, repeat_disable, hint_default_black;
+uniform sampler2D u_terrain_light_strip : filter_linear, repeat_disable, hint_default_black;
+uniform bool u_terrain_light_enabled = false;
+const int TERRAIN_LIGHT_ROWS_PER_PATCH = 16;
+
+vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
+	vec3 sum = vec3(0.0);
+	if (!u_terrain_light_enabled) {
+		return sum;
+	}
+	int row = int(slot + 0.5);
+	int count = int(texelFetch(u_terrain_light_rows, ivec2(1, row), 0).a + 0.5);
+	for (int k = 0; k < TERRAIN_LIGHT_ROWS_PER_PATCH; k++) {
+		if (k >= count) {
+			break;
+		}
+		vec4 posr = texelFetch(u_terrain_light_rows, ivec2(2 * k, row), 0);
+		vec4 pixel = texelFetch(u_terrain_light_rows, ivec2(2 * k + 1, row), 0);
+		vec3 d = world_pos - posr.xyz;
+		// The mission-space contract (d3d.x = -mission.y, d3d.y = mission.z,
+		// d3d.z = mission.x): disc u = (light.y - p.y) * inv + 0.5,
+		// v = (p.x - light.x) * inv + 0.5; strip u = (p.z - light.z) * inv +
+		// 0.5, v = 0.5. In the Godot frame (x, y-up, z = -mission.y) that is
+		// disc (p.z - light.z, p.x - light.x) and strip (p.y - light.y).
+		vec2 disc_uv = vec2(d.z, d.x) * posr.w + 0.5;
+		vec2 strip_uv = vec2(d.y * posr.w + 0.5, 0.5);
+		vec3 disc = texture(u_terrain_light_disc, disc_uv).rgb;
+		vec3 strip = texture(u_terrain_light_strip, strip_uv).rgb;
+		// Stage 0 MODULATE2X (c * disc) x2, stage 1 MODULATE2X (prev * strip)
+		// x2: the explicit 2 * 2 is the witnessed fold, with the 0.5 already
+		// inside pixel.rgb.
+		sum += 2.0 * 2.0 * pixel.rgb * disc * strip;
+	}
+	return sum;
+}
+
 vec2 retail_detail_uv_from_atlas(vec2 atlas_uv, float density) {
 	// Retail writes UV1 as source_position * (polytrn_detaildensity / 512).
 	// Runtime and ONED instead carry normalized UVs for the full 1024 terrain
