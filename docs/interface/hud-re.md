@@ -78,8 +78,8 @@ end).
 | Mounted-vehicle panel (VEHICLE_HUD silhouette + seat markers) | **ported end to end** (2026-08-21: `HudFrameCompiler` vehicle-panel leg + `hud_vehicle_panel.h` band/marker policy + the `def_hudpos` VEHICLE_HUD blocks + `world/vehicle_panel_feed` (the re-root, the slot list, the three marker arms) + `HudOverlay::set_vehicle_panel` (the per-sid `interface` upload) + `vehicle_panel_presenter.gd` — the device + lane landed 2026-08-21, D-HUD) | `[orig: HUD_DrawVehicleHealthBars @0x5a4fd0; Entity_BuildWeaponSlotList @0x434c60; Entity_GetMountSlotBoneIndex @0x546680; the VEHICLE_HUD arms of HUD_ParseHudposToken @0x59f370 (@0x59f380..0x59f5cb)]`; ctest `hud_vehicle_panel`, `hud_frame_compiler`, `vehicle_panel_feed`, `def_parse_hudpos` |
 | Recent Messages window (the J-key `OldMessages` history) | **ported** (2026-08-21: `hud_frame_message_log.cpp` over the two display-slot rings, `hud_message_log.h` layout; the `OldMessages` toggle lane `message_log_presenter.gd` landed 2026-08-21, D-HUD) | `[orig: HUD_DrawMessageLog @0x5b9d70]` (IDB-renamed 2026-08-21, ex `draw_credits_scroll`); the `g_showMessageLog`-only gate `[orig: Server_DrawStatusScreen @0x50b211..0x50b21f]`; ctest `hud_message_log`, `hud_frame_compiler` |
 | Message feed — the CHAT ring (player chat, S2C 0x14) | **ported** (2026-08-21: the netsim 0x14 fold → `ClientChatLine`, `HudFrameCompiler::push_chat_line` + `chat_wrap_text` (the display-slot sink), `hud::chat_channel_sink/color`, the HUDCHATTEXT first loop of `element_feed`; D-HUD-6 narrowed to the announce banner) | `[orig: Chat_AddMessageChannel1 @0x4985d0; Chat_DispatchToChannel @0x42b910; HUD_DrawConsoleMessages @0x59ad30 (first loop); HUD_GetChatBoxCoord @0x5bbe90]`; ctest `hud_frame_compiler`, `client_replica_chat` |
-| AAS zone status panel (LFP objective markers + Under Attack / Ready text) | **ported** (2026-08-21: `hud_frame_lfp_panel.cpp` + `hud_lfp_panel.h` + `world/lfp_feed` + the 0x6F contest bytes retained in `ZoneState`; `HudOverlay::set_lfp_panel` + `lfp_panel_presenter.gd` landed 2026-08-21, D-HUD; residuals in the section below) | `[orig: HUD_DrawZoneStatusPanel @0x5a2480; HUD_DrawZoneMarker @0x5986f0; HUD_LoadAllTextures @0x59e0a3..0x59e10e; ZoneTimerList_SetEntryValue @0x537ec0]` (IDB-renamed 2026-08-21, ex `draw_capture_point_*`); ctest `hud_lfp_panel`, `lfp_feed`, `hud_frame_compiler`, `npruntime_client_runtime` |
-| Map medic marker (the teammate-blip replacement) | **ported** (2026-08-21: `HudMinimapMarker::medic` from the charattr Medic bit → `medic_cross_quads` overlays in `hud_minimap.cpp`; snapshot v4 + the decoder landed 2026-08-21, D-HUD) | `[orig: draw_entity_labels_and_markers @0x5a49e0 (the call @0x5a4d40); AnimMap_IsSlotActive @0x4125e0; CharAttr_Parse @0x412140]`; ctest `hud_frame_compiler` (the spinmap medic case) |
+| AAS zone status panel (LFP objective markers + Under Attack / Ready text) | **ported** (2026-08-21: `hud_frame_lfp_panel.cpp` + `hud_lfp_panel.h` + `world/lfp_feed` + the 0x6F contest bytes retained in `ZoneState`; `HudOverlay::set_lfp_panel` + `lfp_panel_presenter.gd` landed 2026-08-21, D-HUD; residuals in the section below) | `[orig: HUD_DrawZoneStatusPanel @0x5a2480; HUD_DrawZoneMarker @0x5986f0; HUD_LoadAllTextures @0x59e0a3..0x59e11f; ZoneTimerList_SetEntryValue @0x537ec0]` (IDB-renamed 2026-08-21, ex `draw_capture_point_*`); ctest `hud_lfp_panel`, `lfp_feed`, `hud_frame_compiler`, `npruntime_client_runtime` |
+| Map medic marker (the teammate-blip replacement) | **ported** (2026-08-21: `HudMinimapMarker::medic` from the charattr Medic bit → `medic_cross_quads` overlays in `hud_minimap.cpp`; snapshot v4 + the decoder landed 2026-08-21, D-HUD; the charattr ATTRIBUTES loader behind `World::class_attribute_flags` — `CharAttr_LoadFromDef @0x412140` — is ported in this PR (R2): the field had no loader before the final review) | `[orig: draw_entity_labels_and_markers @0x5a49e0 (the call @0x5a4d40); AnimMap_IsSlotActive @0x4125e0; CharAttr_Parse @0x412140]`; ctest `hud_frame_compiler` (the spinmap medic case) |
 
 ## Render pipeline — the two-struct model
 
@@ -870,8 +870,11 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   (`medic_cross_quads`), which the plate and the map marker share — the map
   marker itself landed 2026-08-21 (`HudMinimapMarker::medic`, the charattr
   Medic bit replacing the teammate blip in `hud_minimap.cpp`; the feed is
-  `world::class_has_attribute` over the parsed charattr.def ATTRIBUTES, the
-  31-dword class records with the flags word at +28 `[orig: CharAttr_Parse
+  `world::class_has_attribute` over `World::class_attribute_flags` — the
+  parsed charattr.def ATTRIBUTES, the 31-dword class records with the flags
+  word at +28; the final review found that field had NO loader, so the
+  ATTRIBUTES reader (`CharAttr_LoadFromDef @0x412140`) is ported in this PR
+  (R2) `[orig: CharAttr_Parse
   @0x412140; the map test AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3,
   local team only @0x5a4ac6, enemies forced off @0x5a4acf, the blip replaced
   @0x5a4cd6..0x5a4d48 at (px−3.5, py−3.5)..(px+4.5, py+4.5) map px]`) —
@@ -928,7 +931,9 @@ completed in the wire-up round (the list builder, the gate, the label digits):
   0x5a5547`.
 - **Labels**: `sprintf("%1d", n)` (the format at `0x7d8e64`, IDB-labelled
   `off_7D8E64` — the dword 0x00643125 IS "%1d") centred half-bright white via
-  `HUD_DrawTextCentered_HalfBright`: a passenger seat = its 1-based list
+  `HUD_DrawTextCentered_HalfBright` in the BOLD label font, the text top at
+  `centre + 1 − h/2` `@0x5a52f0..0x5a5322` (the same rule for the seat digits
+  and the own-seat X): a passenger seat = its 1-based list
   position mod 10 `@0x5a5283`, an emplacement = i + 2 `@0x5a5602`, the driver =
   1 `@0x5a57ee`; the own seat draws the literal "X" (`0x7d9f4c`) `@0x5a586b`.
 - **Bands**: riders and the driver `(health << 16) / max` (max → 1) with the
@@ -988,8 +993,12 @@ four `@0x5a2797..0x5a279b`, cleanup folded `@0x5a27a0`.
 - **Layout**: HUD space, never a world projection. Markers step ACROSS 98 px
   within a team group (`x += 0x62 @0x5a27a3`), groups step DOWN 86 px
   (`y += 0x56 @0x5a2667/@0x5a2781`); the group is right-anchored: first marker
-  at `g_hudZonePanelX − 98·zonesInGroup` `@0x5a2589..0x5a259d`, status text at
-  `x − 4` / `y + 12` `@0x5a2601/@0x5a25bd`; the anchor is the `LFP_FLAGS`
+  at `g_hudZonePanelX − 98·zonesInGroup` `@0x5a2589..0x5a259d` and at the
+  group's OWN y = `g_hudZonePanelY + 86·group` (no offset); only the status
+  TEXT sits at `(x − 4, y + 12)` — `ebx = y + 0Ch` `@0x5a25b9..0x5a25bd` is
+  the text row, `x − 4` `@0x5a2601` (the final review corrected the port's
+  marker-row +12 and the "y − 4" slip; the IDB comment likewise); the anchor
+  is the `LFP_FLAGS`
   token (`g_hudZonePanelX/Y`, named 2026-08-21). The conquest arm
   (`g_GameType == 0x50010 @0x5a24a1`) is unmodelled.
 - **Marker** `@0x5986f0`: the sheet by the zone's `+0x162` team byte — 1 →
@@ -1010,13 +1019,17 @@ four `@0x5a2797..0x5a279b`, cleanup folded `@0x5a27a0`.
   off-blink phase `(g_hudFrameCounter & 0x18) == 0` `@0x59891a..0x598926`,
   **3 = another team's zone ready** (`entry[9] == 0`) on the on-blink phase
   `@0x59892d..0x598934` — 8 frames of phase A in every 32 (the counter is
-  `++` per main frame in `Game_TickHudFrameCounters @0x434c00`); colour:
+  `++` per MAIN FRAME in `Game_TickHudFrameCounters @0x434c00`, so retail's
+  blink is frame-rate dependent; the port's counter ticks at the 62 Hz logic
+  rate — a device fold, named here); colour:
   under-attack off-phase `0xFFFFFF00` `@0x5988ea`, ready on-phase half-bright
   `@0x5988fd..0x59890d`, out of range and no state quarter+half dim
   `@0x5988b9..0x5988d6`; the half-bright modulate `0xFF7F7F7F` pushed
   `@0x598975`; the flag tile `draw_textured_quad_centered(x+34, y+52, 36, 36,
-  zoneTeam == localTeam ? textureId : lfp_alf.tga (dword_27239C4), colour)`
-  `@0x5989de`; letter `'A' + index` at `(x+32, y+44)` `@0x5989ed`; progress
+  zoneTeam == localTeam ? lfp_dlf.tga (dword_27239D0/D4) : lfp_alf.tga
+  (dword_27239C0/C4), colour)` `@0x5989de` — both tiles loaded by
+  `HUD_LoadAllTextures @0x59e104..0x59e11f` (the own-zone tile is NOT the
+  team sheet; corrected in the final review); letter `'A' + index` at `(x+32, y+44)` `@0x5989ed`; progress
   bar `x+56..x+76 / y+30..y+82` with fraction `entry[8]/entry[10]` when
   `entry[12]` `@0x598a27..0x598a3a`; contest counts `entity[544]/[545]` at
   `(x+16, y+66)` / `(x+47, y+66)` — written by the 0x6F handler
@@ -1034,20 +1047,21 @@ four `@0x5a2797..0x5a279b`, cleanup folded `@0x5a27a0`.
   `hud_frame_lfp_panel.cpp` (the element: the group walk in
   `SpawnZoneRegistry` order, a new group when the team byte changes
   `@0x5a25f6`, the right-anchored 98-px marker pitch and the 86-px group pitch,
-  the status text at `x − 4` / `y + 12`, the four sheets, the rows/frames,
+  the status text at `(x − 4, y + 12)` under markers at the unshifted group
+  y, the three team sheets + the two flag tiles, the rows/frames,
   the bar, the counts, the distance) + `world/lfp_feed.{h,cpp}`
   (`build_lfp_zones` — the deploy-zone join WITHOUT the joiner gate, the
   in-cylinder test from the wire radius, the counts' sides by the viewer's
   team) + `ZoneState::Entry::contest_owner/other`; `HudOverlay::set_lfp_panel`
-  + the four texture uploads + `lfp_panel_presenter.gd` (shown iff the game
+  + the texture uploads + `lfp_panel_presenter.gd` (shown iff the game
   type is Advance-and-Secure `0x10010`) landed 2026-08-21 (D-HUD). Pinned by ctest
   `hud_lfp_panel`, `lfp_feed`, `hud_frame_compiler`, `npruntime_client_runtime`.
   **Residuals** (named at their sites, no D-row): the capture bar's FPU
   vertex positions and the count-differential arrows (n = min(|Δ|, 5),
   `x+76..x+90`, 7-px rows from `y+57 − (7n >> 1)`) `@0x598dc0..0x598fe4` are
-  not drawn; the letter font slot `dword_2723C74` and the panel's own
-  declutter bit (its caller in `HUD_RenderAllOverlays @0x5a8530`) are
-  unwitnessed; the conquest arm (`g_GameType == 0x50010`, every marker its own
+  not drawn; the letter font slot `dword_2723C74` is unwitnessed (the panel
+  has NO declutter bit: its call in `HUD_RenderAllOverlays @0x5a8530` is
+  unconditional and the head tests only `g_GameType`); the conquest arm (`g_GameType == 0x50010`, every marker its own
   row) is unmodelled and hidden.
 
 ### Gameplay prompts — `HUD_DrawGameplayOverlays @0x5bde60` (witnessed, deferred)
@@ -1890,8 +1904,8 @@ behind it.
 
 - **Zone status panel residuals** (2026-08-21): the capture bar's FPU vertex
   positions and the count-differential arrows `@0x598dc0..0x598fe4`; the
-  letter font slot `dword_2723C74`; the panel's own declutter bit; the
-  conquest arm (`g_GameType == 0x50010`).
+  letter font slot `dword_2723C74`; the conquest arm (`g_GameType ==
+  0x50010`). (No declutter bit — the `@0x5a8530` call is unconditional.)
 - **Recent Messages window**: `sub_5C0060 @0x5c0060` is a third, unwitnessed
   reader of the `OldMessages` toggle.
 - **Chat**: channel 13's `HUD_SetTrackedEntityTarget(sender)` (a world leg);
@@ -1952,9 +1966,12 @@ the system ring — behind ONE shared gate: the CHAT declutter mask bit
   (`byte_B3EA38`, slot 0 newest, colour +120, timer +124) AND a 41×128-byte
   DISPLAY buffer (`byte_B3FDBC`, slots 1..40) of font-wrapped lines: the
   newest message's LAST line sits in slot 1, its continuation lines above it
-  prefixed two spaces, the wrap width `box[2] − (box[1] − 4)` from the
-  HUDCHATTEXT rows of `g_hudChatBoxCoords` (`HUD_GetChatBoxCoord @0x5bbe90`;
-  the wrapper is `sub_580980` over `CGameFont_GetCharExtent`); only display
+  prefixed two spaces, the wrap width `box[2] − (box[1] − 4)` from
+  `g_hudChatBoxCoords` (`HUD_GetChatBoxCoord @0x5bbe90` — the `hud.def`
+  `chat_message x1 y1 x2 y2` / `sys_message` table, zero in retail, which
+  ships no `hud.def`: see Chat channel geometry below; the wrapper is
+  `sub_580980` over `CGameFont_GetCharExtent`, measuring the RAW font object,
+  not the label slot); only display
   slot 1's timer is written, `max(930, slot2.timer + 186)`, the continuation
   slots carry timer 0 — so the feed (first loop `[orig: display slots 3,2,1
   top→bottom, alpha = min(255, 255·timer/186), a slot with timer ≤ 0 skipped
@@ -2029,11 +2046,18 @@ centred at x=512 in the large HUD font for 186 ticks by the centre announce
 banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
 (D-HUD-6 residual).
 
-- **Chat channel geometry** — RESOLVED 2026-08-21: `g_hudChatBoxCoords
-  @0x28e4df8` (ex `dword_28E4DF8`; rows 1/2 chat, 3/4 system) is read through
-  `HUD_GetChatBoxCoord @0x5bbe90` and has no writer in the image, so the
-  authored hudpos `HUDCHATTEXT`/`HUDSYSTEXT` rows are the source
-  (`HudLayout::chat_box_x1/x2`).
+- **Chat channel geometry** — RESOLVED 2026-08-21, the writer found in the
+  final review: `g_hudChatBoxCoords @0x28e4df8` (ex `dword_28E4DF8`; rows 1/2
+  chat, 3/4 system) is read through `HUD_GetChatBoxCoord @0x5bbe90` and
+  WRITTEN by the `hud.def` parser — `File_ParseASCIIFile("hud.def", cb,
+  0x2A5A8EAD)` `@0x5be210..0x5be228`, callback `@0x5bb7a0`, the `chat_message
+  x1 y1 x2 y2` / `sys_message x1 y1 x2 y2` stores `@0x5bb7d1/@0x5bb7ed/
+  @0x5bb825/@0x5bb841` (`dword_28E51FC` is `chat_message`'s y1 — the earlier
+  "no writer in the image" / "never authored" readings were wrong). JO:CA
+  ships no `hud.def`, so the table stays zero and retail never wraps a chat
+  line; the port feeds the authored hudpos `HUDCHATTEXT`/`HUDSYSTEXT` rows
+  (`HudLayout::chat_box_x1/x2`) as its stand-in, so a long line wraps where
+  retail's does not — a named residual, no D-row.
 - **Crosshair color config** — `dword_25510E0` default + the HUD shader pass
   texture-stage state (D-HUD-8); the crosshair styles' count (`cross%02d.tga`).
 - **Crosshair sub-elements** — the target-tracking cursor
@@ -2100,9 +2124,11 @@ message rings, and it was renamed 2026-08-21.
   system ring at `+0x2808` in the right, each entry's colour at `+120`, with
   NO expiry gate — the oldest shown line is the top row and a short history
   leaves the TOP rows blank.
-- Two terms are provably zero and not carried: `fixedZ @0x24c18f4` (single
-  writer `Renderer_SetDisplayModeWithFallback @0x587622`, edi zeroed
-  `@0x58761a`) and the chat-box table's `dword_28E51FC`.
+- Two terms are zero in retail and not carried: `fixedZ @0x24c18f4`
+  (provably — single writer `Renderer_SetDisplayModeWithFallback @0x587622`,
+  edi zeroed `@0x58761a`) and the chat-box table's `dword_28E51FC`
+  (`chat_message`'s y1, written only by the `hud.def` parser `@0x5bb7a0`;
+  JO:CA ships no `hud.def`).
 - **Port** (2026-08-21): `hud_message_log.h` (layout policy +
   `message_log_row_source`, ctest `hud_message_log`) + `hud_frame_message_log.cpp`
   (`element_message_log`: the titled stdbox, 16 display slots per column, the
@@ -2121,7 +2147,15 @@ staged HUD modules; IDB saved):
 - **Renames** (anchored: bodies read): `sub_546680` →
   `Entity_GetMountSlotBoneIndex` (the attached child's gun-slot bone,
   cached +0x319), `sub_5BBE90` → `HUD_GetChatBoxCoord`, `dword_28E4DF8` →
-  `g_hudChatBoxCoords` (rows 1/2 HUDCHATTEXT, 3/4 HUDSYSTEXT).
+  `g_hudChatBoxCoords` (the `hud.def` `chat_message`/`sys_message` x1 y1 x2
+  y2 table — rows 1/2 chat, 3/4 system — written by the parser callback
+  `@0x5bb7a0`; the "HUDCHATTEXT/HUDSYSTEXT rows" gloss was the port's
+  stand-in).
+- **Comment corrected by the orchestrator** (the final review, 2026-08-21):
+  the entry comment on `HUD_DrawZoneStatusPanel @0x5a2480` read "y + 12 +
+  86*group" and "(x, y−4)" — both wrong: the markers sit at `g_hudZonePanelY
+  + 86·group` and only the status text is at `(x − 4, y + 12)` (`ebx = y +
+  0Ch` `@0x5a25b9..0x5a25bd`).
 - **Comments** (`[opennova 2026-08-21 …]` entry comments + `reimpl:` links):
   `Entity_BuildWeaponSlotList @0x434c60` (the list order + the digit rule),
   `Chat_AddMessageChannel1 @0x4985d0` (raw ring vs display buffer, the slot-1
