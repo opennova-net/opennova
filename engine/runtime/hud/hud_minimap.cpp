@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "hud/hud_math.h"
+#include "hud/hud_medic_cross.h"
 #include <io/bam.h>
 
 namespace opennova::hud {
@@ -961,6 +962,37 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			if (!project_view_point(view, input, marker.x, marker.y,
 					false, mx, my))
 				continue;
+			if (!special && marker.medic != 0) {
+				// A local-team medic draws the red-cross plate IN PLACE of its
+				// blip: the rect (px - 3.5, py - 3.5)..(px + 4.5, py + 4.5) in
+				// map pixels, through the shared white-field + two-red-bars
+				// primitive at the overlay pass's opaque alpha
+				// [orig: draw_entity_labels_and_markers @0x5a49e0 — the
+				//  AnimMap_IsSlotActive(playerClass, 8) test @0x5a4ab3, the
+				//  rect @0x5a4cd6..0x5a4d24 (flt_7C44B8 = 4.0, flt_7C691C = 4.5,
+				//  flt_7C3B94 = 0.5), HUD_DrawMedicCrossQuad @0x5a4d40, then
+				//  the blip skipped]. The quads join the overlay fills, clipped
+				//  by the same map stencil as every other map polygon.
+				const float x1 = mx - 3.5f, y1 = my - 3.5f;
+				const float x2 = mx + 4.5f, y2 = my + 4.5f;
+				for (const MedicCrossQuad &q :
+						medic_cross_quads(x1, y1, x2, y2, 0xFF)) {
+					clip_a_.resize(4);
+					clip_a_[0] = {q.x0, q.y0, 0.0f, 0.0f};
+					clip_a_[1] = {q.x1, q.y0, 0.0f, 0.0f};
+					clip_a_[2] = {q.x1, q.y1, 0.0f, 0.0f};
+					clip_a_[3] = {q.x0, q.y1, 0.0f, 0.0f};
+					if (view.rect_clip) {
+						clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
+								view.px_x2, view.px_y2);
+					} else {
+						clip_circle32(clip_a_, clip_b_, view.center_x,
+								view.center_y, view.disc_radius, view.disc_radius);
+					}
+					emit_fan(clip_a_, q.color, out.overlays);
+				}
+				continue;
+			}
 			if (special && (marker.icon == 253 || marker.icon == 254)) {
 				// Pulse markers: the MAIN ring sized by the slot height,
 				// colors pulsing toward white; ring colors submit OPAQUE
