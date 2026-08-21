@@ -1364,6 +1364,11 @@ target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(player_view_test PRIVATE cxx_std_17)
 add_test(NAME player_view COMMAND player_view_test)
 
+add_executable(vehicle_part_registers_test world/vehicle_part_registers_test.cpp)
+target_link_libraries(vehicle_part_registers_test PRIVATE opennova_runtime)
+target_include_directories(vehicle_part_registers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME vehicle_part_registers COMMAND vehicle_part_registers_test)
+
 add_executable(tp_camera_mount_test world/tp_camera_mount_test.cpp)
 target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)
 target_include_directories(tp_camera_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
