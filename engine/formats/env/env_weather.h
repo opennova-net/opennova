@@ -538,5 +538,42 @@ uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
 // NOT exact) [orig: PolyTrn_RenderTile @ 0x60df0d, combine pass 0x631].
 Rgb tile_overlay_tint_factor(const TerrainTint &tint);
 
+// ---------------------------------------------------------------------------
+// Terrain colour reciprocal (Env_TerrainColorRecip)
+// [orig: TimeOfDay_ParseProperty @ 0x57ca60..0x57cae3 — right after the
+//  terrain_rgb bytes are packed into Env_TerrainColorPacked @ 0x57ca71, each
+//  channel byte c becomes `c == 0 ? 0x80 : 0x7F80 / c` (signed idiv, i.e.
+//  truncating; @ 0x57ca6f..0x57cab2), each result is clamped `> 0xFF -> 0xFF`
+//  (@ 0x57cab2..0x57cad3), and the three are re-packed (r << 16 | g << 8 | b)
+//  into Env_TerrainColorRecip @ 0x26c67f8 (@ 0x57cad8..0x57cae3). The boot
+//  default, before any .env loads, is 0x808080 — the same immediate that seeds
+//  Env_CloudColorTarget and Env_LightningColor
+//  [orig: Environment_InitDefaults @ 0x57c050..0x57c065].]
+//
+// The recip's ONLY consumer is EffectWorld_TickInstancesAndLightScale
+// @ 0x5aa21d..0x5aa23f, which unpacks its bytes x 1/128 (flt_7C3DD4) into
+// the terrain light pass's per-channel factor flt_2732DA{C,8,4}
+// (renderer::terrain_per_channel_factor). It is NOT the EffectWorld ambient
+// scale: that triple (EffectWorld_AmbientScale{R,G,B} @ 0x840b24..0x840b2c)
+// is the fog/ambient modulator's packed colour x 1/64
+// [orig: EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaf1d..0x5aaf37, sole
+//  caller Environment_ApplyFogAndAmbient @ 0x57e464] — the env light-state
+// gain the presenter already feeds. The two triples multiply together only in
+// the terrain pass (Light_SetupTerrainProjectedPass @ 0x5aa9a3..0x5aa9f3).
+//
+// White terrain_rgb (255) divides to exactly 128 per channel = factor 1.0; a
+// darker authored terrain colour yields a LARGER recip (up to 255 = 1.99x),
+// the brightness compensation against the terrain tint.
+inline constexpr uint32_t kTerrainColorRecipDefaultPacked = 0x808080u;
+
+// One channel: 0 -> 0x80, else min(0x7F80 / c, 0xFF).
+int terrain_color_recip_byte(int channel_byte);
+
+// The packed global from the three parsed bytes.
+uint32_t terrain_color_recip_packed(int r_byte, int g_byte, int b_byte);
+
+// The parsed-Rgb (bytes/255 floats) path: packs back to bytes, then the above.
+uint32_t terrain_color_recip_from_rgb(const Rgb &terrain_rgb);
+
 
 } // namespace opennova::env

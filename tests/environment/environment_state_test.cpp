@@ -446,6 +446,23 @@ int main() {
 				"Weather's direct global write preserves the selected underwater pass fog");
 	}
 
+	// --- the terrain colour reciprocal the loaded config parses to ----------
+	// [orig: TimeOfDay_ParseProperty @ 0x57ca60..0x57cae3; the boot default
+	//  Environment_InitDefaults @ 0x57c065]
+	{
+		EnvironmentState env;
+		ok &= expect(env.terrain_color_recip_packed() == 0x808080u,
+				"no config serves the 0x808080 boot default");
+		opennova::env::Config cfg = make_config();
+		cfg.terrain_rgb = {1.0f, 1.0f, 1.0f};
+		env.set_config(&cfg, true);
+		ok &= expect(env.terrain_color_recip_packed() == 0x808080u,
+				"white terrain_rgb divides to the same 0x808080");
+		cfg.terrain_rgb = {200.0f / 255.0f, 128.0f / 255.0f, 0.0f};
+		ok &= expect(env.terrain_color_recip_packed() == 0xA3FF80u,
+				"200 -> 163, 128 -> 255 (clamp), 0 -> 0x80, packed r<<16|g<<8|b");
+	}
+
 	// --- the 62 Hz autonomous accumulator clamp ------------------------------
 	{
 		EnvironmentState env;

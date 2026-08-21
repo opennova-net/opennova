@@ -112,9 +112,18 @@
 //
 // Divergences tracked on D-RLIT-4: retail's setters write through stale
 // handles into reused slots; OpenNova's generation lease intentionally
-// rejects those writes. Retail derives the ambient scale from
-// Env_TerrainColorRecip bytes / 128 in the same tick (@ 0x5aa1f0) where our
-// presenter feeds the env light-state gain.
+// rejects those writes.
+//
+// The ambient scale the select multiplies (EffectWorld_AmbientScale{R,G,B}
+// @ 0x840b24..0x840b2c) is the fog/ambient modulator's packed colour x 1/64
+// [orig: EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaf1d..0x5aaf37, sole
+// caller Environment_ApplyFogAndAmbient @ 0x57e464] — the env light-state
+// gain the presenter feeds. The same per-frame tick that decays the pool
+// ALSO unpacks Env_TerrainColorRecip bytes x 1/128 into flt_2732DA{C,8,4}
+// (@ 0x5aa21d..0x5aa23f), but that triple is a SEPARATE factor consumed only
+// by the terrain projected pass (light_terrain_pass.h
+// terrain_per_channel_factor; env::terrain_color_recip_packed is the producer)
+// — an earlier note here had conflated the two.
 //
 // Reimpl shape: positions stay in mission space (the retail Y-negation is the
 // world->D3D fold the presenter replaces); the gen block is stored by value
@@ -128,6 +137,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+
+namespace opennova::renderer {
+struct TerrainLightPatchBounds;
+struct TerrainLightPassInputs;
+struct TerrainLightPatchRows;
+} // namespace opennova::renderer
 
 namespace renderer {
 
@@ -403,6 +418,21 @@ public:
 	// segment [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
 	size_t collect_corona_quads(const LightCoronaFrameInputs &inputs,
 			std::vector<LightCoronaQuad> &out) const;
+
+	// The terrain projected pass's per-patch collect + gate + constant build
+	// (light_terrain_pass.h carries the contract; defined in
+	// light_terrain_pass.cpp) [orig: render_terrain_sector_batch
+	// @0x6095f9..0x6098bc + Light_SetupTerrainProjectedPass @0x5aa830]. Per
+	// patch: the slot-order collect capped at SIXTEEN then nearest-first
+	// (collect_nearby_zones_by_aabb @0x5aa250 with the 16 cap @0x609658), the
+	// group gate with BOTH groups cleared (@0x60967c/@0x609685 — so every
+	// owned light fails), the alive + !terrain-disabled gate, and one row per
+	// survivor with NO four-light cap. Returns the total row count.
+	size_t collect_terrain_pass_rows(
+			const opennova::renderer::TerrainLightPatchBounds *patches,
+			size_t patch_count,
+			const opennova::renderer::TerrainLightPassInputs &inputs,
+			opennova::renderer::TerrainLightPatchRows *out) const;
 
 	LightSceneReport inspect() const;
 

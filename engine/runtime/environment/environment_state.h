@@ -296,6 +296,13 @@ public:
 	// dark). [orig: PolyTrn_SetTerrainTintColors @ 0x605e20;
 	//  PolyTrn_RenderTile @ 0x60df0d]
 	Rgb tile_overlay_tint() const;
+	// The packed Env_TerrainColorRecip the loaded terrain_rgb parses to (the
+	// 0x808080 boot default without a config) — the terrain light pass's
+	// per-channel factor source, bytes x 1/128 at the consumer.
+	// [orig: TimeOfDay_ParseProperty @ 0x57ca60..0x57cae3;
+	//  Environment_InitDefaults @ 0x57c065; EffectWorld_TickInstancesAndLightScale
+	//  @ 0x5aa21d..0x5aa23f]
+	uint32_t terrain_color_recip_packed() const;
 
 	// --- water / directions / phase ---------------------------------------
 

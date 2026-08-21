@@ -1658,6 +1658,30 @@ TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb) {
 	return terrain_tint_from_packed(packed);
 }
 
+int terrain_color_recip_byte(int channel_byte) {
+	// [orig: TimeOfDay_ParseProperty @ 0x57ca6f..0x57cab2 — `test; jz ->
+	//  0x80`, else `mov eax, 7F80h; cdq; idiv`; the clamp @ 0x57cab2..0x57cad3
+	//  compares signed `> 0xFF`]. A negative byte never reaches here (the
+	// parse yields 0..255), so the signed division is the plain quotient.
+	if (channel_byte == 0) {
+		return 0x80;
+	}
+	const int quotient = 0x7F80 / channel_byte;
+	return quotient > 0xFF ? 0xFF : quotient;
+}
+
+uint32_t terrain_color_recip_packed(int r_byte, int g_byte, int b_byte) {
+	// [orig: the re-pack @ 0x57cad8..0x57cae3 — ((r << 8) + g) << 8 + b].
+	return (static_cast<uint32_t>(terrain_color_recip_byte(r_byte)) << 16) |
+			(static_cast<uint32_t>(terrain_color_recip_byte(g_byte)) << 8) |
+			static_cast<uint32_t>(terrain_color_recip_byte(b_byte));
+}
+
+uint32_t terrain_color_recip_from_rgb(const Rgb &terrain_rgb) {
+	return terrain_color_recip_packed(rgb_byte(terrain_rgb.r),
+			rgb_byte(terrain_rgb.g), rgb_byte(terrain_rgb.b));
+}
+
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
 	// [orig: sample_terrain_colormap_tinted @ 0x606030] per channel
 	// min((texel * FULL) >> 7, 255); alpha passthrough.
