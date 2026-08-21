@@ -125,6 +125,21 @@ func _run() -> void:
 			return
 	var sim = world.get_sim()
 	await _wait_frames(90)
+	# The SP start-mission splash holds the world UN-TICKED until its dismissal
+	# edge (main_game.gd: `if _world_load.is_splash_active(): return` before the
+	# tick; retail has not returned from Game_StartMission @0x525d42 yet). A
+	# volley fired under the splash spawns rounds that never fly — zero stops,
+	# zero scars, and the splash layer owns the viewport (black captures). Enter
+	# gameplay through the production seam, then prove the world ticks.
+	game.dismiss_start_mission_splash()
+	await _wait_frames(30)
+	var tick_before := int(sim.get_round_debug().get("tick", 0))
+	await _wait_frames(10)
+	var tick_probe := int(sim.get_round_debug().get("tick", 0))
+	if tick_probe <= tick_before:
+		_fail("the world is not ticking (logic tick %d -> %d); the start-mission splash or a pause still holds it" % [tick_before, tick_probe])
+		return
+	print("PROBE world ticking: logic tick %d -> %d over 10 frames" % [tick_before, tick_probe])
 
 	var player: Vector3 = sim.get_local_player_position()
 	var eye := player + Vector3.UP * 1.6
@@ -158,6 +173,7 @@ func _run() -> void:
 
 	# Where the rounds stopped, from the sim's round debug trail.
 	var trail: Dictionary = sim.get_round_debug()
+	print("PROBE logic tick after the volley: %d" % int(trail.get("tick", 0)))
 	var by_kind := {}
 	var samples := []
 	for ev in trail.get("events", []):

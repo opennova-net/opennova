@@ -15,7 +15,9 @@
 // The drawer state is the per-strip material (shaders/scar_quad.gdshader):
 // unshaded, vertex colour modulate, clamp wrap, alpha test 128, blend mode 0.
 // The ONLY device fold is the view-space pull that replaces the D3D depth
-// bias (retail: Scar_DrawBatches @0x5ccd10, Scar_RenderAllCaches @0x5CDF70).
+// bias (retail: the scar batch drawer Terrain_RenderFoliageBatches @0x5ccd10 —
+// the IDB's kong misnomer, Scar_DrawBatches proposed — under
+// Scar_RenderAllCaches @0x5CDF70).
 
 #include <cstdint>
 
