@@ -1199,6 +1199,11 @@ target_link_libraries(impact_scar_test PRIVATE opennova_runtime)
 target_include_directories(impact_scar_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME impact_scar COMMAND impact_scar_test)
 
+add_executable(ground_conform_test world/ground_conform_test.cpp)
+target_link_libraries(ground_conform_test PRIVATE opennova_runtime)
+target_include_directories(ground_conform_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ground_conform COMMAND ground_conform_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
