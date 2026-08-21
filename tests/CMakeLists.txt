@@ -1184,6 +1184,11 @@ target_link_libraries(hud_vehicle_panel_test PRIVATE opennova_runtime)
 target_include_directories(hud_vehicle_panel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_vehicle_panel COMMAND hud_vehicle_panel_test)
 
+add_executable(hud_message_log_test hud/hud_message_log_test.cpp)
+target_link_libraries(hud_message_log_test PRIVATE opennova_runtime)
+target_include_directories(hud_message_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_message_log COMMAND hud_message_log_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
