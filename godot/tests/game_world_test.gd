@@ -1057,11 +1057,14 @@ func test_world_environment_owns_native_radiance_fog_and_post_processing() -> vo
 			"A procedural Sky must feed reflected radiance.")
 	assert_true(clear.environment.sky.sky_material is ProceduralSkyMaterial)
 	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_COLOR)
+	assert_almost_eq(clear.environment.ambient_light_energy, 2.0, 0.001)
+	assert_almost_eq(clear.environment.ambient_light_sky_contribution, 0.0, 0.001,
+			"Decoded ENV ambient, not procedural sky radiance, owns native fill.")
 	assert_eq(clear.environment.reflected_light_source, Environment.REFLECTION_SOURCE_SKY)
 	assert_eq(clear.environment.fog_mode, Environment.FOG_MODE_DEPTH)
 	assert_true(clear.environment.fog_enabled)
 	assert_eq(clear.environment.tonemap_mode, Environment.TONE_MAPPER_FILMIC)
-	assert_almost_eq(clear.environment.tonemap_exposure, 1.0, 0.001,
+	assert_almost_eq(clear.environment.tonemap_exposure, 1.25, 0.001,
 			"Exposure is fixed; the hard cut does not add auto-exposure semantics.")
 	assert_true(clear.environment.glow_enabled)
 	assert_true(clear.environment.ssao_enabled)

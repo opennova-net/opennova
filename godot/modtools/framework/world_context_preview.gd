@@ -80,11 +80,11 @@ func init_environment_preview() -> void:
 	radiance.sky_material = procedural
 	clear_environment.sky = radiance
 	clear_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	clear_environment.ambient_light_energy = 0.75
-	clear_environment.ambient_light_sky_contribution = 0.65
+	clear_environment.ambient_light_energy = 2.0
+	clear_environment.ambient_light_sky_contribution = 0.0
 	clear_environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	clear_environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	clear_environment.tonemap_exposure = 1.0
+	clear_environment.tonemap_exposure = 1.25
 	clear_environment.tonemap_white = 4.0
 	clear_environment.fog_enabled = true
 	clear_environment.fog_mode = Environment.FOG_MODE_DEPTH
