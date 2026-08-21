@@ -233,12 +233,24 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 			// world::minimap_blip_draw_policy). Absent entity -> the
 			// rotated fallback on the class table.
 			opennova::world::MinimapBlipDrawPolicy policy;
+			int32_t medic = 0;
 			if (world_) {
 				const opennova::world::Entity *entity = world_->registry.get(
 						opennova::world::EntityHandle{slot.handle});
 				if (entity != nullptr) {
 					policy = opennova::world::minimap_blip_draw_policy(
 							*entity, slot.param);
+					// v4: the map medic marker — a LOCAL-TEAM entity whose
+					// class carries the charattr Medic attribute; the other
+					// team's bit is forced off at the producer (retail:
+					// draw_entity_labels_and_markers @0x5a49e0 — the team
+					// gate @0x5a4ac6/@0x5a4acf, AnimMap_IsSlotActive(
+					// playerClass, 8) @0x5a4ab3; see docs/interface/hud-re.md).
+					medic = local_player != nullptr &&
+									entity->team == local_player->team &&
+									world_->class_has_attribute(entity->player_class,
+											opennova::world::World::kCharAttrMedic)
+							? 1 : 0;
 				} else {
 					policy.half_x_q16 = 0;
 					policy.half_y_q16 = 0;
@@ -251,6 +263,7 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 			dst[13] = policy.half_x_q16;
 			dst[14] = policy.half_y_q16;
 			dst[15] = policy.floor_px;
+			dst[16] = medic;
 		}
 	};
 	if (runtime_) {
@@ -285,6 +298,11 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 		dst[13] = policy.half_x_q16;
 		dst[14] = policy.half_y_q16;
 		dst[15] = policy.floor_px;
+		// The restored local row is a local-team player by definition; its
+		// medic bit is its own class attribute.
+		dst[16] = world_->class_has_attribute(local_player->player_class,
+						  opennova::world::World::kCharAttrMedic)
+				? 1 : 0;
 	}
 	minimap_snapshot_cache_ = out;
 	minimap_snapshot_revision_ = revision;

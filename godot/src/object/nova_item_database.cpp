@@ -152,6 +152,7 @@ ItemDatabase::Item ItemDatabase::item_from_entry(const ::DefItemDef &entry) {
 	Item item;
 	item.id = entry.id;
 	item.type = entry.type;
+	item.sid = String(entry.sid);
 	item.attrib = static_cast<uint32_t>(entry.attrib);
 	item.attrib2 = static_cast<uint32_t>(entry.attrib2);
 	item.display_name = String(entry.display_name);
@@ -682,6 +683,7 @@ Dictionary ItemDatabase::get_item(int id) const {
 	}
 	out["id"] = it->second.id;
 	out["type"] = it->second.type;
+	out["sid"] = it->second.sid;
 	out["display_name"] = it->second.display_name;
 	out["graphic"] = it->second.graphic;
 	out["anim_def"] = it->second.anim_def;

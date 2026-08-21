@@ -216,11 +216,12 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 
 	# {version, stride, count}, then one retained overlay row:
 	# {bank, handle, x, y, z, heading, icon, argb, flags, source,
-	#  remaining_ticks, entity_known, policy_flags, half_x, half_y, floor}.
+	#  remaining_ticks, entity_known, policy_flags, half_x, half_y, floor,
+	#  medic}.
 	var snapshot := PackedInt32Array([
-		3, 16, 1,
+		4, 17, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
-		1, 0, 0, 6,
+		1, 0, 0, 6, 0,
 	])
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
 	var stats: Dictionary = hud.get_draw_list_stats()
@@ -258,10 +259,27 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	# Unknown versions are rejected as a whole instead of partially walking a
 	# stale or shorter row layout. The waypoint tip and compass sprites remain.
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
-			PackedInt32Array([99, 16, 1]))
+			PackedInt32Array([99, 17, 1]))
 	stats = hud.get_draw_list_stats()
 	assert_eq(int(stats["map_sprites"]), 2,
 			"A malformed snapshot contributes no retained marker rows.")
+	await get_tree().process_frame
+
+	# v4's medic bit: a LOCAL-TEAM medic's marker is the red-cross plate IN
+	# PLACE of its blip — three overlay quads (six tris), no sprite
+	# [orig: draw_entity_labels_and_markers @0x5a49e0 — the cross
+	#  @0x5a4cd6..0x5a4d48 replacing the blip].
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			PackedInt32Array([
+				4, 17, 1,
+				0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
+				1, 0, 0, 6, 1,
+			]))
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["map_sprites"]), 2,
+			"A medic marker draws no blip sprite (waypoint tip + compass remain).")
+	assert_eq(int(stats["map_footprint_tris"]), 6,
+			"The medic marker is the three cross-plate quads as overlay tris.")
 	await get_tree().process_frame
 
 	# A footprint-class marker skips its icon quad and fills the static
@@ -275,9 +293,9 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	]))
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				3, 16, 1,
+				4, 17, 1,
 				0, 0x2042, 0, 0, 0, 0, 0, -6250336, 0, 0, 1984, 1,
-				2, 0, 0, 6,
+				2, 0, 0, 6, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_gt(int(stats["map_footprint_tris"]), 0,
@@ -289,7 +307,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	# The M-cycle pass owns a separate canvas sandwich and carries the same
 	# sampler contract as the corner spinmap.
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 3, false,
-			PackedInt32Array([3, 16, 0]))
+			PackedInt32Array([4, 17, 0]))
 	await get_tree().process_frame
 	stats = hud.get_draw_list_stats()
 	assert_true(bool(stats["big_map_visible"]),

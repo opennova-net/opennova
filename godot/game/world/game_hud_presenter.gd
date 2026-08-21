@@ -17,6 +17,9 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presenter.gd")
+const VehiclePanelPresenterScript := preload("res://game/world/vehicle_panel_presenter.gd")
+const MessageLogPresenterScript := preload("res://game/world/message_log_presenter.gd")
+const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
 var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)
@@ -28,6 +31,10 @@ const MAX_PENDING_HUD_MESSAGES := 40
 
 var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
+var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
+var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
+var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
+var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
 var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
 var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
@@ -156,6 +163,10 @@ func teardown() -> void:
 	_endround_banner = ""
 	_objectives_visible = false
 	_scoreboard.reset()
+	_vehicle_panel.reset()
+	_message_log.reset()
+	_lfp_panel.reset()
+	_hud_pos = null
 	_pending_hud_messages.clear()
 	Strings.register_table("mission", null)
 	_warned_no_player = false
@@ -223,6 +234,7 @@ func _ensure_game_hud() -> void:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
 	_game_hud.configure(hudpos, root)
+	_hud_pos = hudpos
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap
 	# texture; the native overlay copies only the portable routing scalars.
 	# The raw colormap remains the sharp base; depthspin supplies water only.
@@ -490,6 +502,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_game_hud.set_view_state(binoculars_view_active,
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)
+	_vehicle_panel.update(_game_hud, _hud_pos,
+			_world.get_item_db() if _world != null else null, sim, stance)
 	if waypoint != null:
 		_game_hud.set_waypoint(waypoint.text_name, waypoint.distance_m,
 				waypoint.mission_position, waypoint.altitude_wu)
@@ -512,6 +526,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
+	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
+			hud_keys_chorded, gameplay_input_active)
+	_lfp_panel.update(_game_hud, sim, _hud_ticks())
 	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()

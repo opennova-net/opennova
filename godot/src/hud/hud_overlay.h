@@ -103,6 +103,27 @@ public:
 	// precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, const Dictionary &p_strings,
 			Simulation *p_sim);
+	// The mounted-vehicle panel: the rider's VEHICLE_HUD block (HudPos::get_vehicle_hud),
+	// the rider's stance (the panel rides the stance icon's HUDSTANCE offset), and
+	// the Simulation the hull band + seat rows are pulled from natively
+	// (Simulation::fill_vehicle_panel). The block's `interface` silhouette is
+	// loaded per sid (the set_weapon reload idiom). Pass null when hiding.
+	void set_vehicle_panel(bool p_shown, const Dictionary &p_block, int p_stance,
+			Simulation *p_sim);
+	// One player-chat line for the CHAT ring (S2C 0x14 routed to the chat
+	// sink by Simulation::drain_chat_lines); the engine ring word-wraps it.
+	void push_chat_line(const String &p_text, int64_t p_argb);
+	// The Recent Messages (J) window: the OldMessages toggle and its stdbox
+	// title (gametext Overlays/STROVER43, resolved by the shell).
+	void set_message_log_shown(bool p_shown);
+	void set_message_log_title(const String &p_title);
+	// The AAS zone status panel: shown, the session game type (the conquest
+	// arm is unmodelled and draws nothing), the viewer's team, the HUD frame
+	// counter the blink masks, the two status strings the shell resolved
+	// ({under_attack, ready}), and the Simulation the zone rows are pulled
+	// from natively (Simulation::fill_lfp_zones). Pass null when hiding.
+	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
+			int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);
@@ -198,6 +219,11 @@ private:
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
+	// The HUDVEHSTANCEPOS anchor (the vehicle panel's base before the stance
+	// offset) and the sid whose silhouette currently occupies the
+	// kHudTexVehiclePanel slot (reloaded on change).
+	Vector2i veh_stance_pos_;
+	String vehicle_panel_sid_;
 	// Additive rows cannot share this item's blend mode: they render through a
 	// child RenderingServer canvas item carrying a BLEND_MODE_ADD material.
 	Ref<CanvasItemMaterial> additive_material_;

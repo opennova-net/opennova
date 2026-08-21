@@ -174,6 +174,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_hud_chline"), &HudPos::get_hud_chline);
 	ClassDB::bind_method(D_METHOD("get_stance_pos"), &HudPos::get_stance_pos);
 	ClassDB::bind_method(D_METHOD("get_veh_stance_pos"), &HudPos::get_veh_stance_pos);
+	ClassDB::bind_method(D_METHOD("get_lfp_flags"), &HudPos::get_lfp_flags);
 	ClassDB::bind_method(D_METHOD("get_stances"), &HudPos::get_stances);
 	ClassDB::bind_method(D_METHOD("get_static_frames"), &HudPos::get_static_frames);
 	ClassDB::bind_method(D_METHOD("get_vehicle_hud", "sid"), &HudPos::get_vehicle_hud);
@@ -350,6 +351,10 @@ Vector2i HudPos::get_stance_pos() const {
 
 Vector2i HudPos::get_veh_stance_pos() const {
 	return loaded_ ? pos2(file_.hud.veh_stance_pos) : Vector2i();
+}
+
+Vector2i HudPos::get_lfp_flags() const {
+	return loaded_ ? pos2(file_.hud.lfp_flags) : Vector2i();
 }
 
 Array HudPos::get_stances() const {
