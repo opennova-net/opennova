@@ -434,9 +434,10 @@ public:
 	void set_static_shadow_caster_enabled(bool p_enabled);
 	bool is_static_shadow_caster_enabled() const;
 	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
-	// drapes elongate 4x; vehicles may author an items.def `shadow` blob
-	// decal fallback (retail: itemdef type 3 / the +0xA0 decal, see
-	// docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
+	// casters are the depth-clip stage's steepened class (that stage owns the
+	// 4x, not the drape — render_slot_shadow.h); vehicles may author an
+	// items.def `shadow` blob decal fallback (retail: itemdef type 3 / the
+	// +0xA0 decal, see docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
 	// Capture-with link: this model renders into ANOTHER caster's slot

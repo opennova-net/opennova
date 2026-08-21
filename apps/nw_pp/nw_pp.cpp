@@ -593,10 +593,9 @@ void print_tag_18(const std::vector<uint8_t> &body) {
 	            clean ? "" : " DECODE INCOMPLETE");
 }
 
-// S2C 0x58 SESSION-STATUS (§5.48) — server/mission names + up-time + scoring rules.
-// S2C 0x56 END-OF-ROUND STAT BOARD (§5.61). Chunked, so a lone datagram is
-// usually a fragment; the envelope is what a capture can show without
-// reassembling across datagrams.
+// S2C 0x56 END-OF-ROUND STAT BOARD (§5.68). Pulled in 200-byte chunks over
+// C2S 0x2B, so a lone datagram is usually a fragment; the envelope is what a
+// capture can show without reassembling across datagrams.
 void print_tag_56(const std::vector<uint8_t> &body) {
 	EndRoundStatsChunk ch;
 	const bool clean = decode_end_round_stats_chunk(body.data(), body.size(), ch);
@@ -622,6 +621,7 @@ void print_tag_56(const std::vector<uint8_t> &body) {
 	}
 }
 
+// S2C 0x58 SESSION-STATUS (§5.48) — server/mission names + up-time + scoring rules.
 void print_tag_58(const std::vector<uint8_t> &body) {
 	SessionStatusBlock s;
 	const bool clean = decode_session_status(body.data(), body.size(), s);

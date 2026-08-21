@@ -315,7 +315,7 @@ sweep; blank = not yet characterized.
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | **entity removal (decoded + PORTED 2026-08-15, `decode_entity_remove`)** — body `[u16 handle]` (a short body reads 0); gated `!is_authority`; `0xFFFF` ignored, pool must be `< 5` and slot `< capacity`, then `Entity_Destroy @0x43e810` (KOTH/flag types first re-pick the waypoint when the removed base point was `g_currentWaypoint`) — a SINGLE-row destroy: attached children DETACH rather than being erased with the parent. Sender `Server_RemoveEntityAndNotify @0x50A270`: writes the handle, `send_mask 0x90` (alive + not-host), msgClass 1, then removes a PLAYER's placed devices (`Entity_RemovePlacedDevicesByOwner @0x546e00`, itself recursing here) and destroys the row; also reached from the per-owner same-type device cap `Server_EnforcePlacedDeviceCapByOwner @0x5119E0` (surplus → oldest armed, D-THROW-10), player disconnect/death sweeps, and pool-1 slot expiry `Entity_UpdatePool1Slot @0x4b8dd0` (§5.36) |
 | 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]`, gated `!is_authority`: handle gates (≠0xFFFF, pool<5, slot < that pool's capacity) → Health=0 @0x42ebd6, deathAnimStateId=killerSource @0x42ebdf, **deathCallback(entity, 4, 0)** @0x42ebf5 — for a destructible that cb IS the local husk/explosion chain (@0x440210); local-player leg = camera lerp + scope drop. Sender: `Entity_CheckAndProcessDeath @0x51b550` (msg 19, mask 0x90) for every non-player death. Ported: JoinerConnection surfaces it, `ClientReplicaPipeline::apply_entity_death` folds it, the sim runs `destruction_notify_item_damage(…, 4)` on the world twin (D-NET-208) (§5.35) |
-| 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast [u8 senderSlot][u8 channel][cstr formatted] → Chat_DispatchToChannel; the fan-out of C2S 0x0D. Field map §5.52 (decoded) |
+| 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast `[i8 channel][u8 senderSlot][cstr formatted]` → `Chat_DispatchToChannel(body[1], (char)body[0], &body[2])` — the order D-NET-215 settled 2026-08-20 (the dispatcher's FIRST parameter is the roster index it gates on, its SECOND the 0..0xE channel switch `@0x42B910`); the fan-out of C2S 0x0D. Field map §5.52 (decoded) |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
 | 0x18 | 0x433780 | `FullEntitySpawn` | reply to C2S 0x0F: destroy + FULL single-entity rebuild (itemDef/models/playerClass/minimap/anim registration). Absent from healthy sessions (self-heal, §5.46) — the early "does not fire" note meant nothing needed healing, not an inert path. Field map §5.46 (decoded) |
@@ -323,7 +323,7 @@ sweep; blank = not yet characterized.
 | 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock) |
 | 0x1B | 0x426080 | `_0x01B` | |
 | 0x1C | 0x4227F0 | `_0x01C` | empty stub |
-| 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2) |
+| 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2). The payload is the END-ROUND BOARD HEADER (`EndRoundScoreboard_SerializeHeader @0x505280`, sent per slot from `Server_ProcessRoundEnd @0x516839`; draw flag `@0x430ac1`, `g_netPlayerCount = 0` `@0x430ac6`), and on an MP peer the handler KICKS the stat-board pull by queueing C2S 0x2B `[u16 0]` `@0x430ad5..0x430b03` (§5.68) |
 | 0x1E | 0x426270 | `_0x01E` (`NetPacket_HandleGameEvent`) | 8-byte game event; does not unblock movement directly |
 | 0x1F | 0x427CB0 | `_0x01F` | |
 | 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; `[u16 start_idx][u16 count]` header + per-entity record per the §5.12 field map (u16 type_id; `type_id==0` ⇒ empty-slot sentinel, no body; else u8 flags + 3×i32 pos always, then u32 movementVal/BAM-heading (f&1; D-NET-59), u32 orient (f&2), u16 ammo (f&4), u16 netHandle ALWAYS, u8 team (f&8), u16 weaponType (f&0x10), u8 score (f&0x20)); allocates pool-3 entries |
@@ -375,7 +375,7 @@ sweep; blank = not yet characterized.
 | 0x52 | 0x428A80 | `_0x052` | |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
 | 0x54 | 0x429040 | `_0x054` | death/wounded minimap marker `[u16 entityHandle][u8 state]` — server emits from `GameEvent_PlayerDeath @0x516dd0` ×2, `GameEvent_RevivePlayer @0x517db4`, `Server_BroadcastMedicRequest @0x515390` (D-NET-108); handler body unwitnessed (§5.60) |
-| 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
+| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Decoded 2026-08-21 (`decode_end_round_stats_chunk` + `decode_end_round_stats`); the 0x2B request leg, the fold and stat.mnu are unported |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
 | 0x59 | 0x4228E0 | `_0x059` | deployed-item / weapon-overlay spawn (32 B): item ids + owner + slot + parent + 3×i32 pos + 3×u16 ang (§5.36) |
@@ -466,7 +466,7 @@ This is what a reimplemented server must **handle**.
 | 0x27 | 0x4FC980 | VEHICLE-DETACH request: [u16 handle] → Entity_DetachFromVehicle(entity, entity+364) |
 | 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
 | 0x29 | 0x514F10 | team/spawn ack `[u16 team_change_index]` (client 0x51-apply sends team+1 @0x431c99; also sent at deploy/team pick) → S2C 0x51 ONLY for a pending `g_team_change_entity_list @0xC947C8` entry via write_entity_packet @0x506bb0; a plain join-deploy 0x29 draws NO reply (§5.59, D-NET-148; the old "entity-packet request → always 0x51" reading was wrong) |
-| 0x2B | 0x514FE0 | |
+| 0x2B | 0x514FE0 | STAT-BOARD CHUNK REQUEST `[u16 offset]` (IDB name `NapiNPServerMsg_HandleReplayDataRequest` is a misnomer — it serves the end-of-round board): authority-only, replies to the REQUESTER alone (`send_mask 0x20`) with S2C 0x56 `[u16 streamLen][u16 offset][≤200 B]` cut from the server's board stream `stru_C947D8` by `NetPacket_WriteReplayStreamChunk @0x506F60` (also misnamed; the 200 clamp `@0x506fb9`, an out-of-range offset returns 0 bytes `@0x506fa0`). The stream is filled by `Server_BuildEndOfRoundScoreboard @0x508F30` from `Server_ProcessRoundEnd @0x5164f0` (the call `@0x516590`); no server path pushes 0x56 unrequested. §5.68 |
 | 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
 | 0x2D | 0x502430 | burst-member receiver |
 | 0x2E | 0x515390 | |
@@ -613,6 +613,7 @@ were found. Divergence IDs referenced here are defined in the §8 catalog.
 | 5.65 | S2C `0x30` / `0x31` — the anti-cheat challenge pair, and the client reply builders (2026-07-26) |
 | 5.66 | The multiplayer loadout SOURCE — the per-side/per-class profile page in `weapon.sav` (live retail↔retail capture, 2026-07-26) |
 | 5.67 | The same-weapon first-person viewmodel bleed — a RETAIL defect in the unguarded idle anim re-seed (live retail↔retail A/B, 2026-07-26) |
+| 5.68 | The end-of-round stat board — S2C 0x56 pulled in 200-byte chunks over C2S 0x2B (decoder slice, 2026-08-21) |
 
 ### 5.0 Session bring-up — single player is an in-process listen server
 
@@ -9270,6 +9271,82 @@ do not re-open them as suspects. (a) The C2S `0x06` `hit_part` word was shipped 
 where retail packs `(roster slot << 9) | (seq & 0x1FF)`; (b) off32 (`entity+0x160`, the ammo-def
 index) was shipped as 0 where retail sends the equipped weapon's index. Both are real divergences,
 both are fixed under D-WPN-8, and the symptom survived each.
+
+### 5.68 The end-of-round stat board — S2C 0x56 pulled in 200-byte chunks over C2S 0x2B (decoder slice, 2026-08-21)
+
+Everything the post-round `stat.mnu` table shows arrives in ONE message the
+catalog had filed as "touches `dword_24C1928` (write unconfirmed)". Witnessed in
+the kong IDB while reviewing the #533 decoder; the handler only READS that gate.
+
+**Round end on the server** `[orig: Server_ProcessRoundEnd @0x5164f0]`: awards
+the winning team's scoring `@0x516565`, builds the board into the server stream
+`stru_C947D8` `[orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]`,
+then per in-game slot sends S2C 0x61 `[u32 0]` `@0x516790` and the S2C 0x1D
+board HEADER `[orig: EndRoundScoreboard_SerializeHeader @0x505280 -> @0x516839]`,
+moves the slot to state 7 and the net player to game state 11, and latches
+`g_spawn_success_gate = 1` `@0x5168e4`. The board BODY is never pushed.
+
+**The pull loop.** The client requests a chunk with C2S 0x2B `[u16 offset]`;
+the server `[orig: NapiNPServerMsg 0x2B @0x514FE0 — IDB name
+`NapiNPServerMsg_HandleReplayDataRequest`, a misnomer]` is authority-gated,
+resolves the sender's player, cuts `[u16 streamLen][u16 offset][min(200,
+remaining) bytes]` from the stream `[orig: NetPacket_WriteReplayStreamChunk
+@0x506F60 — the 200 clamp @0x506fb9; offset < 0 or > length returns 0 bytes
+@0x506fa0]` and sends it as S2C 0x56 to the requester alone (`send_mask 0x20`)
+`@0x51505a`. The client handler `[orig: NapiNPClientMsg_0x056 @0x431D10]`,
+gated on `g_spawn_success_gate` `@0x431d33`, reads `totalSize` `@0x431d4d` and
+`chunkOffset` `@0x431d61` (a short datagram reads 0 for either), RESETS the
+reassembly stream `g_scoreReassemblyStream @0xA82324` when the offset is 0
+`@0x431d79`, seeks + writes the chunk at the offset `@0x431d8a/@0x431d96`, and
+tests `offset + len >= total` `@0x431d9f`. Incomplete: it queues C2S 0x2B
+`[u16 offset + len]` reliably `@0x431db3..0x431dc4` and returns. Complete: it
+parses the stream, sets `g_scoreboardDirty = 1` `@0x4321be` (the end-round
+screen polls it and opens `stat.mnu` 6000 ms later `[orig:
+UI_ProcessEndRoundScreenTransition @0x5B8600]`), and latches the
+save-scores flag `dword_A85B78` when `g_SaveScores` is set `@0x4321e2`.
+**The kick.** The FIRST request is sent by the S2C 0x1D board-HEADER handler
+`[orig: NapiNPClientMsg_0x01D @0x430840]`: after parsing the header it queues
+C2S 0x2B `[u16 0]` reliably, gated on `is_mp_session_peer` (a single-player
+listen host never pulls) `@0x430ad5..0x430b03`. So the full sequence on a
+retail server is 0x61 + 0x1D pushed at round end, then 0x2B{0} → 0x56{0..199}
+→ 0x2B{200} → 0x56{200..399} → … until `offset + len >= total`.
+
+**Payload grammar** (the reassembled stream; every read is bounds-checked and
+yields 0/empty past the end — retail TOLERATES truncation, leaving a partly
+zeroed board):
+
+| Field | Type | Notes |
+|---|---|---|
+| winner_team | i8 | stored to `g_endround_winner_team @0x24C1970` (the decompiler calls it gameType) `@0x431e28` |
+| team_score_0 / team_score_1 | i16 × 2 | `@0x431e41` / `@0x431e55` |
+| field_count | **i8** (`movsx` `@0x431e69`) | declared team columns; every loop it drives is a `> 0` test (`@0x431e75`, `@0x432091`, `@0x432174`), so a byte ≥ 0x80 declares NO fields |
+| team_fields[field_count] | {u8 field, u8 enabled} | `@0x431e8e` / `@0x431e9f` |
+| player_count | u8 (`movzx`) | `@0x431ec6` |
+| players[player_count] | see below | stride 57 dwords in `g_scorePlayerStats @0x24C1AD0` |
+| team_row_count | **i8** (`movsx` `@0x432159`) | trailing matrix rows; skipped when ≤ 0 `@0x432166` |
+| team_rows[team_row_count][field_count] | i16 | `@0x432195`, row stride 34 dwords at `dword_24CFB08` |
+
+Per player row: `[u8 slot][cstr name][cstr clan][cstr tag][u8 team][u8 side]`
+then seven i16 in WIRE order `kills, deaths, assists, score, captures, flags,
+special`, then `field_count` × i16 per-team scores. Each string is copied by a
+31-char loop into a 32-byte buffer `@0x431f0a/@0x431f4d/@0x431f8f` but the
+cursor advances past the FULL string (`strlen + 1`, clamped to the stream end)
+`@0x431f3d/@0x431f7f/@0x431fc1`. The storage shuffle is the screen's column
+order, not the wire's: score lands in slot 5 `@0x432049`, captures in slot 4
+`@0x43205f`. The display name is `sprintf("%s %s", clan, name)` when the clan
+is non-empty `@0x4320d7`, else the bare name `@0x4320e1..0x432100`, then
+stored through a 32-byte copy (31 chars) `[orig: Napi_CopyString @0x432110]`;
+the tag through an 8-byte one `@0x432120`.
+
+**Ported (2026-08-21, #533):** `decode_end_round_stats_chunk` (the envelope)
+and `decode_end_round_stats` (the reassembled board, WIRE-order stats, the
+signed counts) in `engine/net/npwire`, pinned by `nw_message_coverage_test`;
+`nw_pp` prints the envelope and a single-datagram board. One recorded
+divergence: the decoder follows the npwire protocol-cursor contract and
+REJECTS a short stream where retail zero-fills. **Not yet ported:** the C2S
+0x2B request leg (a consumer that decodes and never requests receives the
+first 200 bytes and nothing else), the fold into `ClientState`, and the
+`stat.mnu` screen.
 
 ## 6. Struct reference
 

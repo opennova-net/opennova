@@ -31,11 +31,11 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 	var env: MissionEnvironment = world.get_environment_node()
 	var weather: Weather = world.get_weather_node()
 	var water: Water = world.get_water_node()
-	var sky := world.get_node_or_null("SkyDome") as SkyDome
+	var sky: SkyDome = world.get_sky_dome_node()
 	var celestial: Celestial = world.get_celestial_node()
-	var dynamic_shadow := world.get_node_or_null("SunShadow") as SunShadow
+	var dynamic_shadow: SunShadow = world.get_sun_shadow_node()
 	var terrain: Terrain = world.get_terrain_node()
-	var clear := world.get_node_or_null("ClearColor") as WorldEnvironment
+	var clear: WorldEnvironment = world.get_clear_color_node()
 	_value = {
 		"schema": SCHEMA,
 		"frame": {

@@ -1656,8 +1656,10 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	return c.ok && (c.p == c.end);
 }
 
-// §5.61 S2C 0x56 envelope — [orig: NapiNPClientMsg_0x056 @0x431D10, the two
-// u16 reads @0x431D42 / @0x431D61]. The remainder of the datagram is the chunk.
+// §5.68 S2C 0x56 envelope — [orig: NapiNPClientMsg_0x056 @0x431D10, the two
+// u16 reads @0x431D4D / @0x431D61]. The remainder of the datagram is the chunk
+// (at most 200 bytes: the server cuts it with NetPacket_WriteReplayStreamChunk
+// @0x506F60 — `if (copyLen > 200) copyLen = 200` @0x506FB9).
 bool decode_end_round_stats_chunk(const uint8_t *body, size_t len,
                                   EndRoundStatsChunk &out) {
 	out = EndRoundStatsChunk{};
@@ -1669,7 +1671,7 @@ bool decode_end_round_stats_chunk(const uint8_t *body, size_t len,
 	return true;
 }
 
-// §5.61 the reassembled board — [orig: the parse from @0x431E0B].
+// §5.68 the reassembled board — [orig: the parse from @0x431E0B].
 bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out) {
 	out = EndRoundStats{};
 	Cursor c{data, data + len, true};
@@ -1679,10 +1681,13 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 
 	// The declared team columns. This count sizes each row's per-team array
 	// AND the trailing matrix, so a bad count corrupts everything after it.
-	const uint8_t field_count = c.u8();
+	// Retail reads it as a SIGNED byte (movsx @0x431E69) and every loop it
+	// drives is a `> 0` test [orig: @0x431E75 / @0x432091 / @0x432174], so a
+	// byte >= 0x80 declares NO fields rather than 128..255 of them.
+	const int field_count = static_cast<int8_t>(c.u8());
 	if (!c.ok) return false;
-	out.team_fields.reserve(field_count);
-	for (uint8_t i = 0; i < field_count; ++i) {
+	if (field_count > 0) out.team_fields.reserve(static_cast<size_t>(field_count));
+	for (int i = 0; i < field_count; ++i) {
 		const uint8_t f0 = c.u8();
 		const uint8_t f1 = c.u8();
 		if (!c.ok) return false;
@@ -1713,8 +1718,8 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 		r.captures = c.i16();
 		r.flags = c.i16();
 		r.special = c.i16();
-		r.per_team.reserve(field_count);
-		for (uint8_t f = 0; f < field_count; ++f) r.per_team.push_back(c.i16());
+		if (field_count > 0) r.per_team.reserve(static_cast<size_t>(field_count));
+		for (int f = 0; f < field_count; ++f) r.per_team.push_back(c.i16());
 		if (!c.ok) return false;
 		out.players.push_back(std::move(r));
 	}
@@ -1726,8 +1731,8 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 	if (!c.ok) return false;
 	for (int8_t rrow = 0; rrow < team_row_count; ++rrow) {
 		std::vector<int16_t> row;
-		row.reserve(field_count);
-		for (uint8_t f = 0; f < field_count; ++f) row.push_back(c.i16());
+		if (field_count > 0) row.reserve(static_cast<size_t>(field_count));
+		for (int f = 0; f < field_count; ++f) row.push_back(c.i16());
 		if (!c.ok) return false;
 		out.team_rows.push_back(std::move(row));
 	}

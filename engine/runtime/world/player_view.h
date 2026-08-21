@@ -269,7 +269,7 @@ inline constexpr int kShakeQuakeLevel = 32;
 inline constexpr int kShakeDecayPerTick = 2;
 inline constexpr int kShakeStoreMax = 255;
 // Sampling clamps to 64 even though the STORE cap is 255, so the arms above
-// buy DURATION past 64, never amplitude [orig: the > 64 test @0x438...].
+// buy DURATION past 64, never amplitude [orig: the > 64 test @0x43804b..0x438050].
 inline constexpr int kShakeSampleMax = 64;
 
 // The three one-pole IIR accumulators, in BAM32. They persist across ticks
@@ -304,8 +304,9 @@ inline void camera_shake_decay(CameraShakeState &st) {
 // The slices are arithmetic on int32 (sign-propagating), the filter is
 // s = (7*s + n) >> 3, and the delta is (clamped * s) >> 6 with the multiply
 // left to WRAP as retail's imul does.
-// [orig: the block @0x438213.. — roll (p << 1) >> 5, pitch (p << 17) >> 5,
-//  yaw (p << 9) >> 5]
+// [orig: the block @0x43803c..0x4380df — roll (2p) sar 5 @0x43806c, pitch
+//  (p << 17) sar 5 @0x43807c, yaw (p << 9) sar 5 @0x438093; the sar 3 filters
+//  @0x4380a1..0x4380a7; the imul / sar 6 applies @0x4380b0..0x4380d9]
 void camera_shake_sample(CameraShakeState &st, uint32_t weather_prng,
                          int32_t &d_yaw_bam, int32_t &d_pitch_bam,
                          int32_t &d_roll_bam);

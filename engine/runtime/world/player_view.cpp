@@ -351,10 +351,9 @@ void player_view_compose_camera(const PlayerViewState &v,
     for (int i = 0; i < 3; ++i) out.eye[i] = eye[i] - fwd[i] * kFpEyePullback;
 }
 
-
 // [orig: the mode-0 shake block inside Camera_ComputeThirdPersonView
-//  @0x437D10 — the counter gate, the > 64 clamp, the three IIR updates and
-//  the three >> 6 applications]
+//  @0x437D10, the block @0x43803c..0x4380df — the counter gate, the > 64
+//  clamp, the three IIR updates and the three >> 6 applications]
 void camera_shake_sample(CameraShakeState &st, uint32_t weather_prng,
                          int32_t &d_yaw_bam, int32_t &d_pitch_bam,
                          int32_t &d_roll_bam) {

@@ -40,7 +40,7 @@ int main() {
 		CHECK(near_f(high[1], -0.7f));
 	}
 
-	// --- registration LOD laws [orig: shadow_decal_alloc_slot @ 0x5d5690].
+	// --- registration LOD laws [orig: RenderSlot_AllocSlot @ 0x5d5690].
 	CHECK(slot_lod_for_radius(1.0f) == 6);    // 2*1+1=3 -> floor 6
 	CHECK(slot_lod_for_radius(4.0f) == 9);    // 2*4+1
 	CHECK(slot_lod_for_radius(50.0f) == 20);  // ceiling
@@ -60,7 +60,7 @@ int main() {
 	CHECK(near_f(silhouette_half_extent(1.0f), 1.25f));   // r*1.25
 	CHECK(near_f(silhouette_half_extent(8.0f), 8.75f));   // clamp r+0.75
 
-	// --- RT chain [orig: init_render_target_chain @ 0x5d5320].
+	// --- RT chain [orig: RenderSlot_InitTextureChain @ 0x5d5320].
 	CHECK(slot_texture_size(0, 2) == 512);
 	CHECK(slot_texture_size(1, 2) == 512);
 	CHECK(slot_texture_size(2, 2) == 256);
@@ -83,7 +83,7 @@ int main() {
 	CHECK(slot_refresh_due(5, 6, 3, true));    // dirty forces
 	CHECK(slot_refresh_due(3, 9000, 0, false));  // detail 4+: every frame
 
-	// --- drape fade / cull [orig: render_sector_model @ 0x5d5d30..0x5d5d53].
+	// --- drape fade / cull [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d30..0x5d5d53].
 	CHECK(near_f(drape_fade(10.0f), 0.0f));
 	CHECK(near_f(drape_fade(40.0f), 0.0f));
 	CHECK(near_f(drape_fade(60.0f), 0.5f));
@@ -182,7 +182,7 @@ int main() {
 		CHECK(near_f(at_start[0], 3.0f) && near_f(at_start[1], 4.0f));
 	}
 
-	// --- priority scoring [orig: terrain_sort_and_assign_render_slots
+	// --- priority scoring [orig: RenderSlot_SortAndAssign
 	// @ 0x5d6530].
 	{
 		SlotCandidateState near_front;
@@ -298,7 +298,7 @@ int main() {
 	}
 
 	// --- fixed-index records: a release never re-phases the slots behind
-	// it [orig: shadow_decal_alloc_slot @ 0x5d5690 — an entity's index is
+	// it [orig: RenderSlot_AllocSlot @ 0x5d5690 — an entity's index is
 	// its own for life]; the freed index is the next one claimed (the device
 	// fold render_slot_shadow.h describes — retail never releases).
 	{
@@ -339,7 +339,7 @@ int main() {
 		CHECK(plan.registered_count() == 5);
 	}
 
-	// --- registration cap [orig: shadow_decal_alloc_slot @ 0x5d56d6].
+	// --- registration cap [orig: RenderSlot_AllocSlot @ 0x5d56d6].
 	{
 		RenderSlotPlan plan;
 		for (uint64_t id = 1; id <= 256; ++id) {

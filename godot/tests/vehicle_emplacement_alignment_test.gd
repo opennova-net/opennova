@@ -430,10 +430,17 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			if carrier_node != null else Transform3D.IDENTITY)
 	assert_true(rt.get_sim().local_player_toggle_mount(),
 			"the local player mounts the real DBuggy controller")
+	# The drive rides the typed frame input: the session re-applies the
+	# frame's movement before every tick (ADR 0035), so a latch deposited
+	# on the sim is clobbered by the empty MissionFrameInput rt.tick() builds.
+	rt.play()
 	for _tick in range(124):
-		rt.get_sim().set_player_input(
-				true, false, true, false, false, false, false)
-		assert_true(rt.tick())
+		var input := MissionFrameInput.new()
+		input.delta_seconds = Simulation.tick_dt()
+		input.set_movement(true, false, true, false, false, false, false)
+		var outcome: MissionFrameOutcome = rt.advance_session_frame(input)
+		assert_true(outcome != null and outcome.did_tick(),
+				"each drive frame runs one logic tick")
 	var carrier_after := (
 			carrier_node.global_transform
 			if carrier_node != null else Transform3D.IDENTITY)

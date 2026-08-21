@@ -6,15 +6,15 @@
 // [orig: RenderSlot_Table @ 0x2be3d30] registered at entity init — persons
 // always, items via the attrib2 DynamicShadow bit, gated on the shadow-detail
 // option [orig: Entity_InitFromModel @ 0x40E1C8..0x40E1F7 ->
-// shadow_decal_alloc_slot @ 0x5d5690]. Each frame the slot pass
+// RenderSlot_AllocSlot @ 0x5d5690]. Each frame the slot pass
 // [orig: render_shadow_pass @ 0x5d7b70]:
 //   1. loads the sun into the slot default direction, clamps the vertical
 //      component to 0.25 and negates all three (light->surface form; a
 //      grazing sun never stretches a silhouette past 4x height);
 //   2. scores and sorts every slot by camera distance x view alignment,
 //      binds the best 24 to drape patches and the first 12 to silhouette
-//      render targets [orig: terrain_sort_and_assign_render_slots
-//      @ 0x5d6530; RT chain init_render_target_chain @ 0x5d5320];
+//      render targets [orig: RenderSlot_SortAndAssign
+//      @ 0x5d6530; RT chain RenderSlot_InitTextureChain @ 0x5d5320];
 //   3. per slot picks the dominant nearby point light (NTSC luminance over
 //      distance^2 attenuation; an interior-parented entity zeroes the win
 //      threshold) and marches the shadow anchor from the entity along the
@@ -28,8 +28,8 @@
 //      terrain with the per-channel ambient law and the 40..80 u distance
 //      fade — or, for a bound slot without a silhouette RT, the authored
 //      items.def `shadow` blob decal, heading-rotated
-//      [orig: RenderSlot_DrawAllDrapes @ 0x5d6e20 -> render_sector_model
-//      (drape) @ 0x5d5ca0 / render_minimap_tile_overlay (authored blob)
+//      [orig: RenderSlot_DrawAllDrapes @ 0x5d6e20 -> RenderSlot_DrawSilhouetteDrape
+//      (drape) @ 0x5d5ca0 / RenderSlot_DrawAuthoredBlobDecal (authored blob)
 //      @ 0x5d59d0].
 //
 // This unit carries every planning/selection/color law as a structural
@@ -63,7 +63,7 @@ std::array<float, 3> slot_projection_direction(
 
 // Slot LOD at registration: dynamic silhouette slots take
 // bound_radius(16.16) >> 15 + 1 = 2*radius + 1 world units, clamped [6, 20]
-// [orig: shadow_decal_alloc_slot @ 0x5d5773..0x5d578a].
+// [orig: RenderSlot_AllocSlot @ 0x5d5773..0x5d578a].
 int slot_lod_for_radius(float bound_radius_units);
 
 // Blob-only slots (shadow_type 0) take max(width, length) + 7 clamped
@@ -83,28 +83,13 @@ int grazing_slot_lod(int base_lod, float dir_y);
 // @ 0x5d783e..0x5d7871 — slot float24/float25].
 float silhouette_half_extent(float bound_radius_units);
 
-// Person-type entities (itemdef +0x5C == 3) do NOT stretch the drape. The
-// 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
-// direction, and that copy builds only the drape's SECOND texture matrix —
-// the depth-clip stage: "shadowztex" (shadow_system_init_resources
-// @ 0x5d62d2), a 32x4 white/black step addressed by depth along that
-// steepened direction, which clips the projected silhouette to the
-// half-space beyond the caster and, for a soldier, nearer its feet. The
-// silhouette projection itself uses the unscaled direction
-// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d7f..0x5d5de1 ->
-// build_shadow_cascade_uv_matrices @ 0x58cf10: lookat_dir1 (primary,
-// unscaled) vs lookat_dir2 (detail, y x4); re-witnessed 2026-08-21 — the
-// earlier "elongate 4x along the direction" reading drew every person
-// shadow four times its projected length]. The depth-clip stage is the
-// render-slot side's open residual (render-lighting-re.md).
-
 // ---------------------------------------------------------------------------
 // Render-target chain and refresh cadence (the retail texture budget)
 // ---------------------------------------------------------------------------
 
 // 12 silhouette RTs; base size 256 (512 at shadow detail >= 2, 1024 at
 // >= 4), halving after every second slot down to a 32 px floor
-// [orig: init_render_target_chain @ 0x5d5320].
+// [orig: RenderSlot_InitTextureChain @ 0x5d5320].
 inline constexpr int kSlotTextureCount = 12;
 int slot_texture_size(int texture_order, int shadow_detail);
 
@@ -135,7 +120,7 @@ bool local_first_person_drape_skipped(bool first_person, bool prone,
 
 // Distance fade of the drape: 0 inside 40 u, (d - 40) / 40 across
 // 40..80 u; at >= 80 u the drape is skipped entirely
-// [orig: render_sector_model @ 0x5d5d30..0x5d5d53 — 0x280000/0x500000
+// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d30..0x5d5d53 — 0x280000/0x500000
 // fixed thresholds, flt_7DC668 = 1/2621440]. The device drape shader takes
 // the pair as a uniform from these constants.
 inline constexpr float kDrapeFadeStartUnits = 40.0f;  // 0x280000
@@ -146,7 +131,7 @@ bool drape_culled(float camera_distance_units);
 // The sun-lit drape ambient: per channel
 //   ambient_c = 1 - (1 - fade) * sun_c*|dir_y| / (sun_c*|dir_y| + sky_c)
 // with sun = Env_LightBlock, sky = Env_SkyBlock (0..1 here; retail bytes)
-// [orig: render_sector_model @ 0x5d5f63..0x5d6008]. The shadow removes only
+// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5f63..0x5d6008]. The shadow removes only
 // the direct sun term scaled by the projection vertical — never the sky
 // ambient — which is why a retail noon shadow darkens far more than a
 // grazing-clamped dawn shadow.
@@ -164,7 +149,7 @@ std::array<float, 3> drape_shadow_term(const std::array<float, 3> &sun_rgb,
 // (c + lum) * 0.5 * -3 (lum = 0.3r + 0.6g + 0.1b) into PS c21..c23
 // [orig: RenderSlot_SetupNextLighting @ 0x5d73d3..0x5d740d], and the drape
 // scales the light color by -(c + lum) * (1 - fade)
-// [orig: render_sector_model @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0
+// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0
 // folded with the 0.5].
 std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb);
 std::array<float, 3> drape_attached_light_scale(
@@ -219,7 +204,7 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		int max_steps = 4096);
 
 // ---------------------------------------------------------------------------
-// Slot assignment [orig: terrain_sort_and_assign_render_slots @ 0x5d6530]
+// Slot assignment [orig: RenderSlot_SortAndAssign @ 0x5d6530]
 // ---------------------------------------------------------------------------
 
 inline constexpr int kSlotRecordCount = 256;   // [orig: @ 0x5d56d6]
@@ -230,6 +215,20 @@ inline constexpr int kSlotCaptureCount = 12;   // silhouette RT budget
 // separate DRAPE gate — drape_culled above.)
 inline constexpr float kSlotBindMaxDistance = 320.0f;
 
+// The is_person class (itemdef +0x5C == 3) does NOT stretch the drape. The
+// 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
+// direction, and that copy builds only the drape's SECOND texture matrix —
+// the depth-clip stage: "shadowztex" (shadow_system_init_resources
+// @ 0x5d62d2), a 32x4 white/black step addressed by depth along that
+// steepened direction, which clips the projected silhouette to the
+// half-space beyond the caster and, for a soldier, nearer its feet. The
+// silhouette projection itself uses the unscaled direction
+// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d7f..0x5d5de1 ->
+// build_shadow_cascade_uv_matrices @ 0x58cf10: lookat_dir1 (primary,
+// unscaled) vs lookat_dir2 (detail, y x4); re-witnessed 2026-08-21 — the
+// earlier "elongate 4x along the direction" reading drew every person
+// shadow four times its projected length]. The depth-clip stage is the
+// render-slot side's open residual (render-lighting-re.md).
 struct SlotCandidateState {
 	std::array<float, 2> pos2d{};  // world planar (x, z)
 	float bound_radius = 1.0f;     // world units
@@ -270,7 +269,7 @@ struct SlotAssignment {
 // [orig: @ 0x5d69c8..0x5d69d9].
 class RenderSlotPlan {
 public:
-	// Registration mirrors shadow_decal_alloc_slot: idempotent per id, fails
+	// Registration mirrors RenderSlot_AllocSlot: idempotent per id, fails
 	// past 256 records [orig: @ 0x5d5690].
 	bool register_entity(uint64_t id);
 	void release_entity(uint64_t id);
@@ -296,7 +295,7 @@ private:
 	};
 	// The fixed 256-record table: an entity keeps its index for its
 	// lifetime, so the refresh cadence keyed on it never re-phases when
-	// another record is released [orig: shadow_decal_alloc_slot @ 0x5d5690
+	// another record is released [orig: RenderSlot_AllocSlot @ 0x5d5690
 	// appends at RenderSlot_Count into RenderSlot_Table @ 0x2be3d30, and the
 	// count only resets at subsystem init @ 0x5d61cb — retail binds a slot
 	// per entity for the mission and never releases]. Device fold: a Godot

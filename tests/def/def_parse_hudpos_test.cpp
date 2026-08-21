@@ -333,7 +333,7 @@ int main(void) {
     /* StaticFrame is NOT a list in retail: the handler copies each dispatched
        line over the previous one, so the LAST authored line is the one that
        draws [orig: HUD_ParseHudposToken @0x59F370 - name copy @0x5a0a4e-
-       0x5a0a62, x @0x5a0a73, y @0x5a0a8a]. We keep every line so the writer
+       0x5a0a62, x @0x5a0a72, y @0x5a0a8a]. We keep every line so the writer
        round-trips, which makes "which one" a consumer policy -- pinned here so
        the parser side of that contract (all lines recorded, IN ORDER) cannot
        drift under hud_static_frame_index(). */

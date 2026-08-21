@@ -120,7 +120,7 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 		var terrain: Terrain = _world.get_terrain_node()
 		if terrain != null:
 			terrain.visible = not indoors
-		var sky: SkyDome = _world.get_node_or_null("SkyDome")
+		var sky: SkyDome = _world.get_sky_dome_node()
 		if sky != null:
 			sky.visible = not indoors
 		var celestial: Celestial = _world.get_celestial_node()
@@ -381,7 +381,7 @@ func _reset_blink_frame_gates() -> void:
 		var terrain: Terrain = _world.get_terrain_node()
 		if terrain != null:
 			terrain.visible = true
-		var sky: SkyDome = _world.get_node_or_null("SkyDome")
+		var sky: SkyDome = _world.get_sky_dome_node()
 		if sky != null:
 			sky.visible = true
 		var celestial: Celestial = _world.get_celestial_node()

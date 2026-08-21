@@ -89,7 +89,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::TEAM_ASSIGN,               "team-assign",             MsgCoverage::Decoded,     "decode_team_assign — [u16 handle][u8 team][u16 netId][u8 animSlot] (the identity pair, zeroed for non-players by the Flags & 0x100 gate @0x506b3d); NapiNPClientMsg_TeamAssign (0x50) @0x431910 latches byte_A85B48 for self, writes entity Team otherwise, and re-sends ONE C2S 0x2F with slot 195 raw"},
 		{'S', s2c::TEAM_CHANGE_CONFIRM,       "team-change-confirm",     MsgCoverage::PrinterOnly, "write_entity_packet @0x506BB0 for g_team_change_entity_list[idx] (@0x514F10, team-change only); client FIELD-PARSES + rebinds CharacterEntity @0x431BB0 — never sent on a plain join (D-NET-148, §5.59)"},
 		{'S', s2c::ZONE_TIMER_WINDOW,         "zone-timer-window",       MsgCoverage::Decoded,     "§5.49 decode_zone_timer_window (capture/takeover HUD)"},
-		{'S', s2c::END_ROUND_STATS,           "end-round-stats",         MsgCoverage::Decoded,     "§5.61 decode_end_round_stats_chunk + decode_end_round_stats (stat.mnu source)"},
+		{'S', s2c::END_ROUND_STATS,           "end-round-stats",         MsgCoverage::Decoded,     "§5.68 decode_end_round_stats_chunk + decode_end_round_stats (stat.mnu source; pulled 200 B at a time over C2S 0x2B)"},
 		{'S', s2c::RTT_ECHO,                  "rtt-echo",                MsgCoverage::Decoded,     "§5.34 decode_rtt_sample"},
 		{'S', s2c::SESSION_STATUS,            "session-status",          MsgCoverage::Decoded,     "§5.48 decode_session_status (server/mission names + score rules)"},
 		{'S', s2c::DEPLOYED_ITEM,             "deployed-item",           MsgCoverage::Decoded,     "§5.36 decode_deployed_item_spawn"},

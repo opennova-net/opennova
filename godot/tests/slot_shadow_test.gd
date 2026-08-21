@@ -138,6 +138,36 @@ func test_capture_with_child_rides_its_parent_slot_child_registered_first() -> v
 	_child_shares_parent_channel(false)
 
 
+func test_capture_with_child_refused_by_the_full_table_still_rides_its_parent() -> void:
+	# The fixed 256-record table refuses the 257th registration
+	# (RenderSlot_AllocSlot @0x5d5690), so a linked child past the cap has no
+	# assignment row of its own; the child walk follows the entity hierarchy,
+	# not the table, so it still captures into its parent's RT — and gives
+	# the channel back once the link drops, even while it stays row-less.
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var parent := _caster_at(5.0)
+	for i in range(255):
+		var _filler := _caster_at(6.0 + 0.5 * float(i))
+	var child := _caster_at(5.5)
+	child.set_slot_shadow_capture_with(parent)
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["registered"]), 256,
+			"the fixed table holds 256 records, so the linked child is refused")
+	var parent_mesh := parent.get_child(0) as VisualInstance3D
+	var child_mesh := child.get_child(0) as VisualInstance3D
+	var parent_bits: int = parent_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
+	assert_ne(parent_bits, 0, "the nearest caster captures")
+	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, parent_bits,
+			"a row-less linked child still renders into its parent's slot RT")
+	child.set_slot_shadow_capture_with(null)
+	shadow.advance_frame()
+	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, 0,
+			"dropping the link clears the inherited channel on the next plan")
+
+
 func test_local_player_first_person_drape_gates() -> void:
 	# Retail skips the local player's own drape in first person while
 	# prone-latched or below shadow detail 2

@@ -1888,18 +1888,31 @@ struct ChatBroadcast {
 };
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 
-// §5.61 S2C 0x56 — END-OF-ROUND STAT BOARD. Everything the post-round
-// stat.mnu screen shows arrives here, and it arrives CHUNKED: each datagram
-// is [u16 total_size][u16 chunk_offset][chunk], written into a reassembly
-// stream at its offset, and the board is complete once
+// §5.68 S2C 0x56 — END-OF-ROUND STAT BOARD. Everything the post-round
+// stat.mnu screen shows arrives here, and it arrives CHUNKED and PULLED: each
+// datagram is [u16 total_size][u16 chunk_offset][chunk], written into a
+// reassembly stream at its offset, and the board is complete once
 // chunk_offset + chunk_len >= total_size. A zero offset RESETS the stream, so
 // a re-sent board never merges with the previous one
-// [orig: NapiNPClientMsg_0x056 @0x431D10 — the envelope reads @0x431D42 /
-//  @0x431D61, the reset @0x431D80, the completion test @0x431D9B].
+// [orig: NapiNPClientMsg_0x056 @0x431D10 — the envelope reads @0x431D4D /
+//  @0x431D61, the reset @0x431D79, the completion test @0x431D9F]. The whole
+// handler is gated on the spawn-success gate [orig: @0x431D33].
 //
-// Reassembly deliberately stays with the CALLER: the stream is per-session
-// state with a lifetime the decoder does not own, and retail keeps it in one
-// global for the same reason.
+// The server never pushes a chunk: it cuts at most 200 bytes from its board
+// stream at a CLIENT-REQUESTED offset and replies to that client alone
+// [orig: NapiNPServerMsg 0x2B @0x514FE0 -> NetPacket_WriteReplayStreamChunk
+//  @0x506F60, the 200 clamp @0x506FB9; the stream is filled by
+//  Server_BuildEndOfRoundScoreboard @0x508F30 from Server_ProcessRoundEnd
+//  @0x5164F0, the call @0x516590]. While a chunk leaves the board
+// incomplete the client answers with C2S 0x2B [u16 chunk_offset + chunk_len]
+// [orig: @0x431DB3..0x431DC4],
+// and on completion raises g_scoreboardDirty, the stat.mnu trigger
+// [orig: @0x4321BE; polled by UI_ProcessEndRoundScreenTransition @0x5B8600].
+//
+// Reassembly AND the 0x2B request leg deliberately stay with the CALLER: the
+// stream is per-session state with a lifetime the decoder does not own, and
+// retail keeps it in one global for the same reason. A consumer that only
+// decodes and never sends 0x2B receives the first 200 bytes and nothing else.
 struct EndRoundStatsChunk {
 	uint16_t total_size = 0;   // bytes in the whole board
 	uint16_t chunk_offset = 0; // where this chunk lands; 0 also means "restart"
@@ -1934,7 +1947,10 @@ struct EndRoundPlayerRow {
 	// One score per declared team field, positional against `team_fields`.
 	std::vector<int16_t> per_team;
 	// The board draws "<clan> <name>" when a clan is present, else the bare
-	// name [orig: the sprintf @0x432119 vs the copy loop @0x43212F].
+	// name [orig: the sprintf @0x4320D7 vs the copy loop @0x4320E1..0x432100].
+	// Retail then STORES that join through a 32-byte copy (31 chars) and the
+	// tag through an 8-byte one [orig: Napi_CopyString @0x432110 / @0x432120]
+	// — the fold's truncation, which the decoder leaves to the fold.
 	std::string display_name() const {
 		return clan.empty() ? name : clan + " " + name;
 	}
@@ -1949,7 +1965,8 @@ struct EndRoundStats {
 	int16_t team_score_1 = 0;
 	// The declared team columns: one {field, enabled} pair each, and the count
 	// also sizes every row's per_team array and the trailing matrix's columns
-	// [orig: the pair loop @0x431E6E].
+	// [orig: the pair loop @0x431E6E]. The count byte is SIGNED like the
+	// team-row count (movsx @0x431E69): a byte >= 0x80 declares no fields.
 	std::vector<std::pair<uint8_t, uint8_t>> team_fields;
 	std::vector<EndRoundPlayerRow> players;
 	// Trailing per-team score matrix: team_rows x team_fields.size()
