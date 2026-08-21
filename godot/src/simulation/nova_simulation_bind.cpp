@@ -399,6 +399,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_debug"), &Simulation::get_throwable_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
+	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
+	                     &Simulation::get_scar_draw_list);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
 	                     &Simulation::debug_spawn_round);
 	ClassDB::bind_method(D_METHOD("debug_pick_entity", "from_godot", "dir_godot", "max_range_units"),

@@ -2290,6 +2290,9 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# (the typed seam; GameWorld's register_effect_anchor delegates to the
 	# same instance).
 	opts["effect_anchors"] = _item_fx
+	# The scar present pass reads the fog distance + the combined terrain light
+	# off the live environment node each present frame (world-wac-ai-re §24.9).
+	opts["environment_node"] = Callable(self, "get_environment_node")
 	# The dynamic light-pool routes (renderer/light_scene.h witness map): the
 	# MF_Light muzzle glow per presented fire, the death flash per husk death.
 	if _light_director != null:

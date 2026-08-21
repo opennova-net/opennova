@@ -2177,6 +2177,21 @@ public:
 	// the spawner's team pick @ 0x4ec79b; world-wac-ai-re §27].
 	Array get_throwable_visuals() const;
 
+	// The impact-scar draw list for ScarPresenter (nova_simulation_scars.cpp):
+	// World::scars compiled through renderer::compile_scar_draws with the shell's
+	// camera (Godot space), fog distance and the combined terrain light colour
+	// (Env_TerrainLightCombined — EnvFile.combine_terrain_light(sun, sky)).
+	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
+	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,
+	//   batch_owner/texture/section/flags(bit0 entity_local, bit1 building)/
+	//   first/count, batch_bms_id, batch_spawn_origin, strip_names,
+	//   slots_live, slots_culled, rings_leased }. Empty without a world.
+	Dictionary get_scar_draw_list(const Vector3 &p_camera_godot, float p_fog_distance,
+			const Color &p_terrain_light) const;
+	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
+	// the entity's blink-box quad (see nova_simulation_scars.cpp).
+	bool scar_owner_visible(uint16_t p_owner_packed) const;
+
 	// The round hit-detection reality for the F3 hitbox view:
 	// { entities: [ { entity_handle, pos, bound_radius, husk, has_faces,
 	//   face_total, tris (PackedVector3Array, triangle list, Godot world),

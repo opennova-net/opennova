@@ -36,6 +36,7 @@ const PRESENT_SLOTS := [
 	FrameStatsBoard.PRESENT_FIRE,
 	FrameStatsBoard.PRESENT_DESTRUCTION,
 	FrameStatsBoard.PRESENT_THROWABLE,
+	FrameStatsBoard.PRESENT_SCARS,
 ]
 const SHELL_LEG_SLOTS := [
 	FrameStatsBoard.FRAME_PLAYER_BEFORE,

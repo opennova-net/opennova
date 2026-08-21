@@ -43,6 +43,7 @@
 #include "particle/nova_effect_scene.h"
 #include "particle/nova_particle_compositor.h"
 #include "particle/nova_particle_renderer.h"
+#include "world/nova_scar_presenter.h"
 #include "object/nova_entity_index.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_model.h"
@@ -179,6 +180,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
+	GDREGISTER_CLASS(ScarPresenter);
 	GDREGISTER_CLASS(ResourceIndex);
 	GDREGISTER_CLASS(ReferenceIndex);
 	GDREGISTER_CLASS(ResourceRoot);
