@@ -19,7 +19,7 @@
 
 namespace opennova::world {
 
-struct World;
+class World; // the class-key must match world.h (MSVC mangles struct/class apart)
 
 // One entry of retail's 10-slot weapon/seat list [orig: Entity_BuildWeaponSlotList
 // @0x434c60]: `entity` is the vehicle for seat entries and the attached gun

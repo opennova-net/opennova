@@ -21,7 +21,7 @@
 
 namespace opennova::world {
 
-struct World;
+class World; // the class-key must match world.h (MSVC mangles struct/class apart)
 
 // The zone-timer entry as the panel reads it (the client runtime owns the
 // 13-DWORD image; engine/runtime/world stays net-agnostic, so the embedder
