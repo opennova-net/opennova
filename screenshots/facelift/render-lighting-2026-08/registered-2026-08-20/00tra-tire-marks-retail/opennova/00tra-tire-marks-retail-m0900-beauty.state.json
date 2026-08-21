@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 11223004.0,
+		"captured_at_ticks_usec": 11507521.0,
 		"height": 1200.0,
-		"id": "00tra-tire-marks-retail-m0900-beauty-11223004-f154",
+		"id": "00tra-tire-marks-retail-m0900-beauty-11507521-f154",
 		"label": "00tra-tire-marks-retail-m0900-beauty",
 		"mime": "image/png",
 		"png_path": "00tra-tire-marks-retail-m0900-beauty.png",
-		"png_sha256": "bbc0fe31eb71e41cd8041431d8d49f05299d33c9a4e23045d84a38da149115f1",
+		"png_sha256": "b654ea641441e637709e7ceaafaac4cab30619010ad2143ede0735fc92a5525b",
 		"process_frame": 154.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 583.0,
-			"light_state_generation": 234.0,
+			"generation": 590.0,
+			"light_state_generation": 241.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 256.0,
+			"physics": 261.0,
 			"process": 154.0,
-			"ticks_usec": 11223084.0
+			"ticks_usec": 11507595.0
 		},
 		"lights": {
 			"active": 8.0,
@@ -324,9 +324,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.913725554943085,
-							0.890196144580841,
-							0.86274516582489,
+							0.909803986549377,
+							0.886274576187134,
+							0.858823597431183,
 							1.0
 						],
 						"direction": [
@@ -349,9 +349,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.898039281368256,
-							0.874509871006012,
-							0.843137323856354,
+							0.90588241815567,
+							0.890196144580841,
+							0.858823597431183,
 							1.0
 						],
 						"direction": [
@@ -555,9 +555,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.913725554943085,
-						0.890196144580841,
-						0.86274516582489,
+						0.909803986549377,
+						0.886274576187134,
+						0.858823597431183,
 						1.0
 					],
 					"energy": 1.0,
@@ -601,9 +601,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.898039281368256,
-						0.874509871006012,
-						0.843137323856354,
+						0.90588241815567,
+						0.890196144580841,
+						0.858823597431183,
 						1.0
 					],
 					"energy": 1.0,
@@ -943,10 +943,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 1335.0,
+					"tick_us": 1092.0,
 					"voice_writes": 9.0
 				},
-				"audio_us": 1388.0,
+				"audio_us": 1139.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -998,11 +998,11 @@
 					],
 					"terrain_scene_counter": 150.0
 				},
-				"foliage_us": 733.0,
+				"foliage_us": 720.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 560.0,
+					"effects_us": 3.0,
+					"present_us": 508.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -1026,12 +1026,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 1939.0,
-					"tick_us": 2211.0,
+					"sim_us": 2036.0,
+					"tick_us": 2293.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 2501.0,
-				"tick_us": 14892.0
+				"runtime_us": 2547.0,
+				"tick_us": 14788.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1126,7 +1126,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1136,7 +1136,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1295,7 +1295,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 9063.0,
+				"cache_hits": 9080.0,
 				"cache_misses": 162.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1303,9 +1303,9 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 43133.0,
-				"frame_output_hash": 6075417156925865000.0,
-				"frame_output_pages": 5.0,
+				"frame_compose_us": 26532.0,
+				"frame_output_hash": -8250155942495487000.0,
+				"frame_output_pages": 3.0,
 				"frame_ready_hits": 54.0,
 				"frame_requests": 54.0,
 				"frame_selected_ready_pages": 54.0,
@@ -1313,7 +1313,7 @@
 				"frame_shadow_base_nonzero_alpha_bytes": 0.0,
 				"frame_shadow_rgb_changed_bytes": 0.0,
 				"frame_stale_hits": 0.0,
-				"frame_uploads": 5.0,
+				"frame_uploads": 3.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 54.0,
 				"resident_output_hash": 3402873422153697300.0,
@@ -1628,7 +1628,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "17960975eb370b66aa9c8a9921558e3f2460faaed6a9c8e0bfdd27ca3c340e02",
+		"source_state_sha256": "aa63dbb1cdab7ce14bf63aedc212b9380dceb65c11e854fe62e56c143ccd4683",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

@@ -400,17 +400,17 @@
         2000,
         1200
       ],
-      "gdextension_sha256": "b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce",
+      "gdextension_sha256": "129bb0cd93c082337206b6d57bcd3b5a1646dd64eb83ac6cc5eb81e739d578d5",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "0631dbf92e404dbad7f4222bb84c01b8e0f7a6510189337d5d5c79b0f1b164fd",
-      "sha256": "3bee62ca8165db59ef4509245bb753fe7434c29015f13557b0c3498b67850c73",
-      "source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
+      "manifest_sha256": "b481d879e1e6364672e30467ce5b77a22e40de353a904434c87e285474e4253c",
+      "sha256": "8ba81cb9fe01e71272dff6fc7f891ea0bbfd49c7e237b2358da274c0b374533a",
+      "source_commit": "e59dc041e78509abed3b4110db95b729a6312125",
       "source_name": "cp01-waterline-below-retail-m0930-beauty.png",
       "state_name": "cp01-waterline-below-retail-m0930-beauty.state.json",
-      "state_sha256": "420d772456d52b62e188f5101720df7366db4a39f06dd0744e17ea924de04d1c"
+      "state_sha256": "b85ee3dc8d00fac787a212eff8c4ce1e03f86f923d65f701932e06591c01f189"
     },
     "retail": {
-      "bundle_sha256": "7c8d65517bec493069b2beefc239c6e04decf3e9e97aed88c676cb2ffdebe2b8",
+      "bundle_sha256": "3d31b4a91b28cc4f2e7f1bc2712b18fa181b110bdd25978c6d751d80ff257f46",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
+      "opennova_source_commit": "e59dc041e78509abed3b4110db95b729a6312125",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -603,8 +603,8 @@
   "metrics": {
     "full_frame": {
       "channel_count": 6912000,
-      "max_channel_delta": 49,
-      "mean_abs_channel_delta": 8.953803,
+      "max_channel_delta": 47,
+      "mean_abs_channel_delta": 8.94804,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,13 +612,13 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 13.841502
+      "root_mean_square_channel_delta": 13.836615
     },
     "regions": [
       {
         "channel_count": 1663200,
         "max_channel_delta": 44,
-        "mean_abs_channel_delta": 7.786971,
+        "mean_abs_channel_delta": 7.784693,
         "name": "world_center",
         "pixel_count": 554400,
         "region": [
@@ -627,13 +627,13 @@
           1320,
           420
         ],
-        "root_mean_square_channel_delta": 12.168433,
+        "root_mean_square_channel_delta": 12.167655,
         "type": "roi"
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 49,
-        "mean_abs_channel_delta": 5.780953,
+        "max_channel_delta": 47,
+        "mean_abs_channel_delta": 5.756973,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 8.384286,
+        "root_mean_square_channel_delta": 8.350216,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "cp01-waterline-below-retail-absolute-diff.png",
-      "sha256": "cb094c68f545326dd3e49e11856ca3a861a7b3f53cac96e70590d22963e2a8c1"
+      "sha256": "aba96177dadab435e60dfdd1b114441bf6fb55d30d1425890a18069ced4220ee"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "cp01-waterline-below-retail-opennova-normalized.png",
-      "sha256": "5467d3d857b547068fe48dcd367bcbc857976593fa3569e8a66eea83d53247e5"
+      "sha256": "43f87311a25a7d9f6f2f76301dd45fb34fbf0acf40533a86be7d19c3bc044717"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "cp01-waterline-below-retail-overlay-50.png",
-      "sha256": "14dfae027b4f645b5ba5d8e0b40758f4ed5423e0942a917775d385e2ec763034"
+      "sha256": "4962ab49d2fe9f3a31736d4635bb37af0381102a5491a8285ca3eef562dc35df"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "cp01-waterline-below-retail-side-by-side.png",
-      "sha256": "78c6adb9712fa0a7e3b75d9ec770205d5c15cf0e776e2a50ae7b5401ac8b561a"
+      "sha256": "c58e9f4f2934327d12b484c0d65f383e6aeb59fa0fc2ec9add36d410066fe4a8"
     }
   },
   "presentations": {

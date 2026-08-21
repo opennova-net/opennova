@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 13457609.0,
+		"captured_at_ticks_usec": 13755836.0,
 		"height": 1200.0,
-		"id": "00tra-tire-marks-retail-m0900-lighting_only-13457609-f162",
+		"id": "00tra-tire-marks-retail-m0900-lighting_only-13755836-f162",
 		"label": "00tra-tire-marks-retail-m0900-lighting_only",
 		"mime": "image/png",
 		"png_path": "00tra-tire-marks-retail-m0900-lighting_only.png",
-		"png_sha256": "07e39e708ace7b5a5b2ffb7572432b05d18bfb6eb03dbce0d3559797db49dfbe",
+		"png_sha256": "d6a29879df8f989422de0619cda2e135125a82a587f83aef09e82b6166529cf9",
 		"process_frame": 162.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 583.0,
-			"light_state_generation": 234.0,
+			"generation": 590.0,
+			"light_state_generation": 241.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 287.0,
+			"physics": 293.0,
 			"process": 162.0,
-			"ticks_usec": 13457678.0
+			"ticks_usec": 13755912.0
 		},
 		"lights": {
 			"active": 8.0,
@@ -324,9 +324,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.921568691730499,
-							0.901960849761963,
-							0.878431439399719,
+							0.90588241815567,
+							0.882353007793427,
+							0.854902029037476,
 							1.0
 						],
 						"direction": [
@@ -349,7 +349,7 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.913725554943085,
+							0.909803986549377,
 							0.898039281368256,
 							0.866666734218597,
 							1.0
@@ -555,9 +555,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.921568691730499,
-						0.901960849761963,
-						0.878431439399719,
+						0.90588241815567,
+						0.882353007793427,
+						0.854902029037476,
 						1.0
 					],
 					"energy": 1.0,
@@ -601,7 +601,7 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.913725554943085,
+						0.909803986549377,
 						0.898039281368256,
 						0.866666734218597,
 						1.0
@@ -943,10 +943,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 1335.0,
+					"tick_us": 1092.0,
 					"voice_writes": 9.0
 				},
-				"audio_us": 1388.0,
+				"audio_us": 1139.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -998,11 +998,11 @@
 					],
 					"terrain_scene_counter": 152.0
 				},
-				"foliage_us": 554.0,
+				"foliage_us": 518.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 560.0,
+					"effects_us": 3.0,
+					"present_us": 508.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -1026,12 +1026,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 1939.0,
-					"tick_us": 2211.0,
+					"sim_us": 2036.0,
+					"tick_us": 2293.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 2501.0,
-				"tick_us": 14892.0
+				"runtime_us": 2547.0,
+				"tick_us": 14788.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1126,7 +1126,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1136,7 +1136,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1295,7 +1295,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 9171.0,
+				"cache_hits": 9188.0,
 				"cache_misses": 162.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1628,7 +1628,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "24b0cc639254a36ba41890a059e7acc3e0f50ec48595163947ba20c941c8bf33",
+		"source_state_sha256": "5d563acb2bb0d9f335df283b4eb4414c122138721c361c31ac18bbae7a953d85",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

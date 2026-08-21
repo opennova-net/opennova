@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 15683882.0,
+		"captured_at_ticks_usec": 15753852.0,
 		"height": 1200.0,
-		"id": "00tra-armory-lght-retail-m0900-directional_shadow_atlas-15683882-f164",
+		"id": "00tra-armory-lght-retail-m0900-directional_shadow_atlas-15753852-f164",
 		"label": "00tra-armory-lght-retail-m0900-directional_shadow_atlas",
 		"mime": "image/png",
 		"png_path": "00tra-armory-lght-retail-m0900-directional_shadow_atlas.png",
-		"png_sha256": "854fcf194e0e07cda51cac7dd3edf478bc7514e4f11953f766072268b0bcb0eb",
+		"png_sha256": "3793a7c17499783a052c7d372afd6706766c5e2b22cfdc0fe5e7d8930c8afae2",
 		"process_frame": 164.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 583.0,
-			"light_state_generation": 234.0,
+			"generation": 581.0,
+			"light_state_generation": 232.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 302.0,
+			"physics": 297.0,
 			"process": 164.0,
-			"ticks_usec": 15684019.0
+			"ticks_usec": 15753993.0
 		},
 		"lights": {
 			"active": 8.0,
@@ -324,9 +324,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.921568691730499,
-							0.898039281368256,
-							0.874509871006012,
+							0.913725554943085,
+							0.890196144580841,
+							0.866666734218597,
 							1.0
 						],
 						"direction": [
@@ -349,9 +349,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.90588241815567,
-							0.886274576187134,
-							0.854902029037476,
+							0.901960849761963,
+							0.878431439399719,
+							0.850980460643768,
 							1.0
 						],
 						"direction": [
@@ -555,9 +555,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.921568691730499,
-						0.898039281368256,
-						0.874509871006012,
+						0.913725554943085,
+						0.890196144580841,
+						0.866666734218597,
 						1.0
 					],
 					"energy": 1.0,
@@ -601,9 +601,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.90588241815567,
-						0.886274576187134,
-						0.854902029037476,
+						0.901960849761963,
+						0.878431439399719,
+						0.850980460643768,
 						1.0
 					],
 					"energy": 1.0,
@@ -943,10 +943,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 1870.0,
+					"tick_us": 2040.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 1918.0,
+				"audio_us": 2085.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -998,11 +998,11 @@
 					],
 					"terrain_scene_counter": 148.0
 				},
-				"foliage_us": 585.0,
+				"foliage_us": 582.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 3.0,
-					"present_us": 587.0,
+					"effects_us": 2.0,
+					"present_us": 474.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -1026,12 +1026,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2345.0,
-					"tick_us": 2696.0,
+					"sim_us": 2207.0,
+					"tick_us": 2473.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 2935.0,
-				"tick_us": 10025.0
+				"runtime_us": 2683.0,
+				"tick_us": 8890.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1126,7 +1126,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1136,7 +1136,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1295,7 +1295,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 8709.0,
+				"cache_hits": 8726.0,
 				"cache_misses": 113.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1628,7 +1628,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "c7174373cccaa6f65bcdb4acc8b4ba130ae8305ea5e1559b54ddaa3ed1e061ca",
+		"source_state_sha256": "4d29803bbbf45d203eb0479206624c595c38d8e6672898906af775ea83bd932d",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

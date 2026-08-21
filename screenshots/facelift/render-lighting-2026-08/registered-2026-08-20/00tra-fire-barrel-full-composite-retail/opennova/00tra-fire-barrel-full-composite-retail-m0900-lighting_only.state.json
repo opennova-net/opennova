@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 13937961.0,
+		"captured_at_ticks_usec": 13820452.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only-13937961-f163",
+		"id": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only-13820452-f167",
 		"label": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only.png",
-		"png_sha256": "54bc02adfddcdb3a6a5e2eb23f58bb23439c757cab72335b48123899e8b6a446",
-		"process_frame": 163.0,
+		"png_sha256": "7ca018c5ca5011602fba3413e60dd1aa254ce446aae12416da2d9317a49495c2",
+		"process_frame": 167.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -204,8 +204,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 584.0,
-			"light_state_generation": 235.0,
+			"generation": 585.0,
+			"light_state_generation": 236.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -309,8 +309,8 @@
 		},
 		"frame": {
 			"physics": 289.0,
-			"process": 163.0,
-			"ticks_usec": 13938094.0
+			"process": 167.0,
+			"ticks_usec": 13820577.0
 		},
 		"lights": {
 			"active": 8.0,
@@ -324,9 +324,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.90588241815567,
-							0.882353007793427,
-							0.854902029037476,
+							0.917647123336792,
+							0.894117712974548,
+							0.870588302612305,
 							1.0
 						],
 						"direction": [
@@ -399,9 +399,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							0.960784375667572,
-							0.960784375667572,
-							0.960784375667572,
+							0.647058844566345,
+							0.647058844566345,
+							0.647058844566345,
 							1.0
 						],
 						"direction": [
@@ -555,9 +555,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.90588241815567,
-						0.882353007793427,
-						0.854902029037476,
+						0.917647123336792,
+						0.894117712974548,
+						0.870588302612305,
 						1.0
 					],
 					"energy": 1.0,
@@ -693,9 +693,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.960784375667572,
-						0.960784375667572,
-						0.960784375667572,
+						0.647058844566345,
+						0.647058844566345,
+						0.647058844566345,
 						1.0
 					],
 					"energy": 1.0,
@@ -943,10 +943,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 2658.0,
+					"tick_us": 2476.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 2705.0,
+				"audio_us": 2541.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -969,7 +969,7 @@
 					"detail_vertices": 12852.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 153.0,
+					"frame_calls": 157.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -996,13 +996,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 153.0
+					"terrain_scene_counter": 157.0
 				},
-				"foliage_us": 358.0,
+				"foliage_us": 348.0,
 				"runtime": {
 					"did_tick": true,
 					"effects_us": 3.0,
-					"present_us": 578.0,
+					"present_us": 571.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -1026,12 +1026,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2190.0,
-					"tick_us": 2466.0,
+					"sim_us": 2212.0,
+					"tick_us": 2553.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 2771.0,
-				"tick_us": 13463.0
+				"runtime_us": 2786.0,
+				"tick_us": 14999.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1126,7 +1126,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1136,7 +1136,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1295,7 +1295,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 9118.0,
+				"cache_hits": 9217.0,
 				"cache_misses": 206.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1628,7 +1628,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "226d4241a0fe7821abd757df353bb1bf0495c8bf18fd87a48dd0b1b2aa44bf65",
+		"source_state_sha256": "61c44c53bab777bd5f84d3c35d133617764bdf87b254888ee3ce216ab12a4cdb",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

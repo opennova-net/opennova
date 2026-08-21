@@ -123,10 +123,10 @@ context frames are not substitutes for these fixtures.
 The current 2026-08-20 facelift publication contains
 [all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md),
 captured from frozen source
-`04ac107197c0d068c2fc071bf4e3fcc247c6a8ba`. Every row binds Godot executable
+`e59dc041e78509abed3b4110db95b729a6312125`. Every row binds Godot executable
 SHA-256 `1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7`
 and GDExtension SHA-256
-`b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce`.
+`129bb0cd93c082337206b6d57bcd3b5a1646dd64eb83ac6cc5eb81e739d578d5`.
 The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
@@ -154,9 +154,9 @@ re-shootable — its `camera_bms` values bind its own capture session's physics
 constraint table).
 
 Across the 18 current comparison-v6 manifests, full-frame MAE spans
-`8.953803`–`32.955741`, `world_center` MAE spans
-`5.388775`–`35.747731`, and `viewmodel_arms` MAE spans
-`5.780953`–`44.944125`. These are descriptive deltas, not parity thresholds.
+`8.948040`–`32.961275`, `world_center` MAE spans
+`5.394610`–`35.765520`, and `viewmodel_arms` MAE spans
+`5.756973`–`44.881361`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
 night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
 differences remain visible. CP04 is the clearest night-exposure outlier: an

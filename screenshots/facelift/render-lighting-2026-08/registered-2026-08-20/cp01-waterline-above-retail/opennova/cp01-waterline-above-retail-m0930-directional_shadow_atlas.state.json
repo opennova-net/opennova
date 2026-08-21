@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 16896086.0,
+		"captured_at_ticks_usec": 16700320.0,
 		"height": 1200.0,
-		"id": "cp01-waterline-above-retail-m0930-directional_shadow_atlas-16896086-f173",
+		"id": "cp01-waterline-above-retail-m0930-directional_shadow_atlas-16700320-f173",
 		"label": "cp01-waterline-above-retail-m0930-directional_shadow_atlas",
 		"mime": "image/png",
 		"png_path": "cp01-waterline-above-retail-m0930-directional_shadow_atlas.png",
-		"png_sha256": "11a0fa054fb272044c2f934ef7bb55aa6e4fdda72ff7060135a94aa489b0bb3a",
+		"png_sha256": "bdd069a485f9955c0fb980012334648c3b64e2f59fef09ddf53a0cba897ec613",
 		"process_frame": 173.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 250.0,
 			"fog_start": 62.5,
 			"fog_type": 3.0,
-			"generation": 567.0,
-			"light_state_generation": 273.0,
+			"generation": 561.0,
+			"light_state_generation": 267.0,
 			"loaded": true,
 			"mission_minute_of_day": 930.0,
 			"mission_time_fixed24": 260046848.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 367.0,
+			"physics": 360.0,
 			"process": 173.0,
-			"ticks_usec": 16896152.0
+			"ticks_usec": 16700378.0
 		},
 		"lights": {
 			"active": 1.0,
@@ -445,10 +445,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 141.0,
 					"physical_channels": 8.0,
-					"tick_us": 6606.0,
+					"tick_us": 6969.0,
 					"voice_writes": 16.0
 				},
-				"audio_us": 6647.0,
+				"audio_us": 7058.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -500,11 +500,11 @@
 					],
 					"terrain_scene_counter": 157.0
 				},
-				"foliage_us": 487.0,
+				"foliage_us": 485.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 4.0,
-					"present_us": 3038.0,
+					"effects_us": 2.0,
+					"present_us": 3304.0,
 					"sim": {
 						"ai_count": 126.0,
 						"listen_server": true,
@@ -528,12 +528,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 5418.0,
-					"tick_us": 5962.0,
-					"ticks": 3.0
+					"sim_us": 3453.0,
+					"tick_us": 3771.0,
+					"ticks": 2.0
 				},
-				"runtime_us": 8460.0,
-				"tick_us": 22831.0
+				"runtime_us": 6759.0,
+				"tick_us": 20691.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -628,7 +628,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -638,7 +638,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -797,7 +797,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 8244.0,
+				"cache_hits": 8252.0,
 				"cache_misses": 246.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1130,7 +1130,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "c6b0ac504acb07ad8caaa3b7b5231bf4d7dfc3ba73da17eec2fed7b6603507f1",
+		"source_state_sha256": "81142f6054b41b87a8c8707230c3d573d3cf94041fef88c88b1176caff3cde44",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

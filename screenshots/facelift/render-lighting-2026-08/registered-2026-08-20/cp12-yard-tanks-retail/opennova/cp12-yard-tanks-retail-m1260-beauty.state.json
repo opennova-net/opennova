@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 13947169.0,
+		"captured_at_ticks_usec": 13892304.0,
 		"height": 1200.0,
-		"id": "cp12-yard-tanks-retail-m1260-beauty-13947169-f161",
+		"id": "cp12-yard-tanks-retail-m1260-beauty-13892304-f161",
 		"label": "cp12-yard-tanks-retail-m1260-beauty",
 		"mime": "image/png",
 		"png_path": "cp12-yard-tanks-retail-m1260-beauty.png",
-		"png_sha256": "f79452eef1d07bca8a9346e0412a2f5e2f2559adb63f0c189881e8a2adfd3d07",
+		"png_sha256": "e9dcd07765dc21f54e5c6c1c0d06fe8d39c06250f9459e67c85c61e88392380c",
 		"process_frame": 161.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 600.0,
 			"fog_start": 300.0,
 			"fog_type": 2.0,
-			"generation": 606.0,
-			"light_state_generation": 288.0,
+			"generation": 612.0,
+			"light_state_generation": 294.0,
 			"loaded": true,
 			"mission_minute_of_day": 1260.0,
 			"mission_time_fixed24": 352321536.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 321.0,
+			"physics": 325.0,
 			"process": 161.0,
-			"ticks_usec": 13947238.0
+			"ticks_usec": 13892379.0
 		},
 		"lights": {
 			"active": 10.0,
@@ -1027,9 +1027,9 @@
 				"shadow_draw_calls": 508.0,
 				"shadow_objects": 508.0,
 				"shadow_primitives": 1059293.0,
-				"visible_draw_calls": 210.0,
-				"visible_objects": 218.0,
-				"visible_primitives": 477148.0
+				"visible_draw_calls": 209.0,
+				"visible_objects": 217.0,
+				"visible_primitives": 476906.0
 			},
 			"water_reflection": {
 				"available": true,
@@ -1085,10 +1085,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 191.0,
 					"physical_channels": 8.0,
-					"tick_us": 6180.0,
+					"tick_us": 4652.0,
 					"voice_writes": 12.0
 				},
-				"audio_us": 6236.0,
+				"audio_us": 4710.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -1140,11 +1140,11 @@
 					],
 					"terrain_scene_counter": 157.0
 				},
-				"foliage_us": 789.0,
+				"foliage_us": 582.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 3.0,
-					"present_us": 6460.0,
+					"effects_us": 2.0,
+					"present_us": 6035.0,
 					"sim": {
 						"ai_count": 234.0,
 						"listen_server": true,
@@ -1168,12 +1168,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 11818.0,
-					"tick_us": 12856.0,
+					"sim_us": 12015.0,
+					"tick_us": 12905.0,
 					"ticks": 3.0
 				},
-				"runtime_us": 18281.0,
-				"tick_us": 21289.0
+				"runtime_us": 18052.0,
+				"tick_us": 19410.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1268,7 +1268,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1278,7 +1278,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1437,7 +1437,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 6128.0,
+				"cache_hits": 6131.0,
 				"cache_misses": 197.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1445,9 +1445,9 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 10249.0,
-				"frame_output_hash": 6350550228208471000.0,
-				"frame_output_pages": 1.0,
+				"frame_compose_us": 20620.0,
+				"frame_output_hash": -5669367553152996400.0,
+				"frame_output_pages": 2.0,
 				"frame_ready_hits": 65.0,
 				"frame_requests": 65.0,
 				"frame_selected_ready_pages": 65.0,
@@ -1455,7 +1455,7 @@
 				"frame_shadow_base_nonzero_alpha_bytes": 0.0,
 				"frame_shadow_rgb_changed_bytes": 0.0,
 				"frame_stale_hits": 0.0,
-				"frame_uploads": 1.0,
+				"frame_uploads": 2.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 65.0,
 				"resident_output_hash": 1729842096687691500.0,
@@ -1754,7 +1754,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "93916f06b4ee875afc43122288944b09a728112fccd589ffa908d694f37e3ed6",
+		"source_state_sha256": "0b6bd54288a3d24011e689a3cfd36cd137fd72ee09ba23a2e90b792ccccd5e63",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

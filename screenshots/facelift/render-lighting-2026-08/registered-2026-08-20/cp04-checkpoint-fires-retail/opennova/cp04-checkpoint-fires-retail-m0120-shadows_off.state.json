@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 15313898.0,
+		"captured_at_ticks_usec": 14667749.0,
 		"height": 1200.0,
-		"id": "cp04-checkpoint-fires-retail-m0120-shadows_off-15313898-f156",
+		"id": "cp04-checkpoint-fires-retail-m0120-shadows_off-14667749-f156",
 		"label": "cp04-checkpoint-fires-retail-m0120-shadows_off",
 		"mime": "image/png",
 		"png_path": "cp04-checkpoint-fires-retail-m0120-shadows_off.png",
-		"png_sha256": "07a1713250f8e69416c87d68e3ffa950c0d13e6093795dea5d4c5d5f65eccb0f",
+		"png_sha256": "3c82cc70e8a9237edcdbee971cdc44793efd164ce4cc49151758d99cda328f92",
 		"process_frame": 156.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 300.0,
 			"fog_start": 150.0,
 			"fog_type": 2.0,
-			"generation": 566.0,
-			"light_state_generation": 288.0,
+			"generation": 544.0,
+			"light_state_generation": 266.0,
 			"loaded": true,
 			"mission_minute_of_day": 120.0,
 			"mission_time_fixed24": 33554432.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 340.0,
+			"physics": 315.0,
 			"process": 156.0,
-			"ticks_usec": 15314023.0
+			"ticks_usec": 14667867.0
 		},
 		"lights": {
 			"active": 22.0,
@@ -325,7 +325,7 @@
 						"atten2": 0.266666680574417,
 						"color": [
 							0.956862807273865,
-							0.81960791349411,
+							0.823529481887817,
 							0.619607865810394,
 							1.0
 						],
@@ -350,7 +350,7 @@
 						"atten2": 0.266666680574417,
 						"color": [
 							0.956862807273865,
-							0.81960791349411,
+							0.823529481887817,
 							0.619607865810394,
 							1.0
 						],
@@ -375,7 +375,7 @@
 						"atten2": 0.266666680574417,
 						"color": [
 							0.956862807273865,
-							0.81960791349411,
+							0.823529481887817,
 							0.619607865810394,
 							1.0
 						],
@@ -400,7 +400,7 @@
 						"atten2": 0.266666680574417,
 						"color": [
 							0.956862807273865,
-							0.81960791349411,
+							0.823529481887817,
 							0.619607865810394,
 							1.0
 						],
@@ -906,7 +906,7 @@
 					"class": "OmniLight3D",
 					"color": [
 						0.956862807273865,
-						0.81960791349411,
+						0.823529481887817,
 						0.619607865810394,
 						1.0
 					],
@@ -952,7 +952,7 @@
 					"class": "OmniLight3D",
 					"color": [
 						0.956862807273865,
-						0.81960791349411,
+						0.823529481887817,
 						0.619607865810394,
 						1.0
 					],
@@ -998,7 +998,7 @@
 					"class": "OmniLight3D",
 					"color": [
 						0.956862807273865,
-						0.81960791349411,
+						0.823529481887817,
 						0.619607865810394,
 						1.0
 					],
@@ -1044,7 +1044,7 @@
 					"class": "OmniLight3D",
 					"color": [
 						0.956862807273865,
-						0.81960791349411,
+						0.823529481887817,
 						0.619607865810394,
 						1.0
 					],
@@ -1937,10 +1937,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 246.0,
 					"physical_channels": 5.0,
-					"tick_us": 6449.0,
+					"tick_us": 2284.0,
 					"voice_writes": 7.0
 				},
-				"audio_us": 6490.0,
+				"audio_us": 2329.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -1992,11 +1992,11 @@
 					],
 					"terrain_scene_counter": 149.0
 				},
-				"foliage_us": 579.0,
+				"foliage_us": 539.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 3.0,
-					"present_us": 3122.0,
+					"effects_us": 5.0,
+					"present_us": 2830.0,
 					"sim": {
 						"ai_count": 149.0,
 						"listen_server": true,
@@ -2020,12 +2020,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 4066.0,
-					"tick_us": 4576.0,
+					"sim_us": 4136.0,
+					"tick_us": 4907.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 7191.0,
-				"tick_us": 34312.0
+				"runtime_us": 6971.0,
+				"tick_us": 25559.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -2120,7 +2120,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -2130,7 +2130,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -2289,7 +2289,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 7905.0,
+				"cache_hits": 7917.0,
 				"cache_misses": 215.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -2622,7 +2622,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "8ec7de4d88e96b54d6bcdfe01cedef2bc1eba0c13d082c3debe368fcf9259b10",
+		"source_state_sha256": "850cba52a24fcf423a61c7ccc8423b915c0fc57bba71f04347519e48a0641eef",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

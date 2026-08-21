@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "cp01-waterline-below-retail-m0930-beauty",
 			"png_path": "cp01-waterline-below-retail-m0930-beauty.png",
-			"png_sha256": "3bee62ca8165db59ef4509245bb753fe7434c29015f13557b0c3498b67850c73",
-			"source_state_sha256": "383a20c12eb6641de90e754e63c28d09290e2f37023cd16e7cafa7cf44057a71",
+			"png_sha256": "8ba81cb9fe01e71272dff6fc7f891ea0bbfd49c7e237b2358da274c0b374533a",
+			"source_state_sha256": "f2753b0a47b41df1616e57751830cd6a029a862b25cf01ec68d072f20b4fc317",
 			"state_path": "cp01-waterline-below-retail-m0930-beauty.state.json",
-			"state_sha256": "420d772456d52b62e188f5101720df7366db4a39f06dd0744e17ea924de04d1c",
+			"state_sha256": "b85ee3dc8d00fac787a212eff8c4ce1e03f86f923d65f701932e06591c01f189",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "cp01-waterline-below-retail-m0930-shadows_off",
 			"png_path": "cp01-waterline-below-retail-m0930-shadows_off.png",
-			"png_sha256": "2d74cf3b181839a8419cf99eb0e9d28c9d0336baf1d27f7eb655bffd472682e1",
-			"source_state_sha256": "c4b9640bb1c4a474079dfce16a51da04b1b2cf41ef31b0503321363fffdfe587",
+			"png_sha256": "6aeb1d1ea61089038845889164a7b4013590cc10d0c31b295599938ab15de6ae",
+			"source_state_sha256": "f5d27dafa55360e287ebf01ffe148fb8db849a45a6fe0098030df5dfb25f8af9",
 			"state_path": "cp01-waterline-below-retail-m0930-shadows_off.state.json",
-			"state_sha256": "49da22c2110b63f5bd096a4f5016e757ae1359d2da8c8ec5e45be96b4b9f4dcb",
+			"state_sha256": "24d1150afbdb225d004e3a0fc0801cf11ada715bd77cd8382fabc370a33ec733",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "cp01-waterline-below-retail-m0930-lighting_only",
 			"png_path": "cp01-waterline-below-retail-m0930-lighting_only.png",
-			"png_sha256": "e12d954c40b960a2c95da143cfbb185145e753ddc4e1fa4746d30697b4eaa68b",
-			"source_state_sha256": "cb936f41a9cdcc2bc9fc5ade37c92a7d26f5b611ab3884d49fa17e7bf6a97b6a",
+			"png_sha256": "0ebad4298ce65fab71054b7a7cd1b2dc30cdab39e32ee099b6c5229fa7368303",
+			"source_state_sha256": "d766d5d216132bf12c2516ba2f9e0f27c2fba9c75b505c4dd764fa594940dcba",
 			"state_path": "cp01-waterline-below-retail-m0930-lighting_only.state.json",
-			"state_sha256": "2ad4b1afebb8698d5e47f4203981a55ac00831cafbb0d06366e6ed0bf4bb980a",
+			"state_sha256": "df7d067c69764b8c52943ed9e720eb3446f29d35c8fd119ad61f7914cd66148e",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "cp01-waterline-below-retail-m0930-unshaded",
 			"png_path": "cp01-waterline-below-retail-m0930-unshaded.png",
-			"png_sha256": "39bfe9e9348e704a99b356ee295f89d2ebb10f290f31919e619304f3888ea7a6",
-			"source_state_sha256": "7be276980d0c61ae01210b490bb206f4dc26272d8ebc943d92a92bf1fdfd8c4e",
+			"png_sha256": "859cfc9eb9a82808852510f1f8ee1c06ad4df749d010ca90e47056c9bc7ad598",
+			"source_state_sha256": "b48dc6a24bba2a9416c8487bac65f601791bd546bff97302613dfaf95ba543bc",
 			"state_path": "cp01-waterline-below-retail-m0930-unshaded.state.json",
-			"state_sha256": "4b3075b5d2704751f52dabd1940eae099341c5ef3890c39005cf6535fb857a92",
+			"state_sha256": "8ef63a0c07534d19e9b9f0b8c7eb3ab0d8dff0de147850de50afd4d784c8be3a",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "cp01-waterline-below-retail-m0930-directional_shadow_atlas",
 			"png_path": "cp01-waterline-below-retail-m0930-directional_shadow_atlas.png",
-			"png_sha256": "8995d730725e150f480fed640f030896475f339938df22c6f2f89171a53495e0",
-			"source_state_sha256": "b3344556633c620140dae36462447e972fb9937e6e8d8b9c3ddf0322247b6077",
+			"png_sha256": "12226ff94f7da8f9e44905c502c0df6105bd1e4eb1b205b904440acff0d81c4b",
+			"source_state_sha256": "af6b25a73b5d3c993818eb4940987b907afa72cfd695a23155861c557d08f806",
 			"state_path": "cp01-waterline-below-retail-m0930-directional_shadow_atlas.state.json",
-			"state_sha256": "ca6d6a89161346bdb4ca688d3c2b4345a8b3e752334c875d26bca7fd0a7dd825",
+			"state_sha256": "cbe2b0a18ed5379ea7ce4ee52736dfee3a7ca9f86b2d562cdc7ad57375f2149a",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -223,10 +223,10 @@
 	},
 	"provenance": {
 		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
-		"gdextension_sha256": "b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce",
+		"gdextension_sha256": "129bb0cd93c082337206b6d57bcd3b5a1646dd64eb83ac6cc5eb81e739d578d5",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba"
+		"source_commit": "e59dc041e78509abed3b4110db95b729a6312125"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

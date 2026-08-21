@@ -1,12 +1,12 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 15273310.0,
+		"captured_at_ticks_usec": 14868096.0,
 		"height": 1200.0,
-		"id": "cp12-truck-material-retail-m1260-shadows_off-15273310-f160",
+		"id": "cp12-truck-material-retail-m1260-shadows_off-14868096-f160",
 		"label": "cp12-truck-material-retail-m1260-shadows_off",
 		"mime": "image/png",
 		"png_path": "cp12-truck-material-retail-m1260-shadows_off.png",
-		"png_sha256": "42e0ea0cd454d9eae9d28b29554639bc9af5d67c08f6898a8b4bbecf4baa1902",
+		"png_sha256": "55ee08a39fea28188300556cee06ebfba79fafeeccde0b20ff726a987047cc0e",
 		"process_frame": 160.0,
 		"width": 2000.0
 	},
@@ -204,8 +204,8 @@
 			"fog_end": 600.0,
 			"fog_start": 300.0,
 			"fog_type": 2.0,
-			"generation": 617.0,
-			"light_state_generation": 299.0,
+			"generation": 611.0,
+			"light_state_generation": 293.0,
 			"loaded": true,
 			"mission_minute_of_day": 1260.0,
 			"mission_time_fixed24": 352321536.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 343.0,
+			"physics": 335.0,
 			"process": 160.0,
-			"ticks_usec": 15273371.0
+			"ticks_usec": 14868246.0
 		},
 		"lights": {
 			"active": 10.0,
@@ -1085,10 +1085,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 191.0,
 					"physical_channels": 8.0,
-					"tick_us": 5639.0,
+					"tick_us": 4111.0,
 					"voice_writes": 12.0
 				},
-				"audio_us": 5712.0,
+				"audio_us": 4153.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -1140,11 +1140,11 @@
 					],
 					"terrain_scene_counter": 153.0
 				},
-				"foliage_us": 377.0,
+				"foliage_us": 325.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 5.0,
-					"present_us": 6295.0,
+					"effects_us": 6.0,
+					"present_us": 6327.0,
 					"sim": {
 						"ai_count": 234.0,
 						"listen_server": true,
@@ -1168,12 +1168,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 12013.0,
-					"tick_us": 13360.0,
+					"sim_us": 11564.0,
+					"tick_us": 12513.0,
 					"ticks": 3.0
 				},
-				"runtime_us": 18313.0,
-				"tick_us": 15331.0
+				"runtime_us": 17897.0,
+				"tick_us": 12907.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1268,7 +1268,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1278,7 +1278,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1437,7 +1437,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 5848.0,
+				"cache_hits": 5862.0,
 				"cache_misses": 172.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1754,7 +1754,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "b4f086cb4536bea6231be0652f9600558d2026b2d0e9726decbd26087c3feb4d",
+		"source_state_sha256": "45c77d10708fc289b69751e113886530792ffe7ee56d0bdbbee56b743cc8a1f9",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

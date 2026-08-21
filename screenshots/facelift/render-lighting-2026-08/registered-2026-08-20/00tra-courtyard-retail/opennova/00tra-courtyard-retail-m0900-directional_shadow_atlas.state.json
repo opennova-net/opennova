@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 20422671.0,
+		"captured_at_ticks_usec": 19184118.0,
 		"height": 1200.0,
-		"id": "00tra-courtyard-retail-m0900-directional_shadow_atlas-20422671-f177",
+		"id": "00tra-courtyard-retail-m0900-directional_shadow_atlas-19184118-f176",
 		"label": "00tra-courtyard-retail-m0900-directional_shadow_atlas",
 		"mime": "image/png",
 		"png_path": "00tra-courtyard-retail-m0900-directional_shadow_atlas.png",
-		"png_sha256": "e620dcc1b2f31a0ec2545457a298b69476a5b597ad21687c1cb4478d0470c8d1",
-		"process_frame": 177.0,
+		"png_sha256": "7b4db3439515f763f1d40b0c8f3164fb1685c7a0fe610339f6eb0df44545a9cf",
+		"process_frame": 176.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -204,8 +204,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 620.0,
-			"light_state_generation": 271.0,
+			"generation": 577.0,
+			"light_state_generation": 228.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 360.0,
-			"process": 177.0,
-			"ticks_usec": 20422837.0
+			"physics": 310.0,
+			"process": 176.0,
+			"ticks_usec": 19184246.0
 		},
 		"lights": {
 			"active": 8.0,
@@ -324,9 +324,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.890196144580841,
-							0.86274516582489,
-							0.835294187068939,
+							0.894117712974548,
+							0.870588302612305,
+							0.839215755462646,
 							1.0
 						],
 						"direction": [
@@ -399,9 +399,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							0.768627524375916,
-							0.768627524375916,
-							0.768627524375916,
+							0.901960849761963,
+							0.901960849761963,
+							0.901960849761963,
 							1.0
 						],
 						"direction": [
@@ -555,9 +555,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.890196144580841,
-						0.86274516582489,
-						0.835294187068939,
+						0.894117712974548,
+						0.870588302612305,
+						0.839215755462646,
 						1.0
 					],
 					"energy": 1.0,
@@ -693,9 +693,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.768627524375916,
-						0.768627524375916,
-						0.768627524375916,
+						0.901960849761963,
+						0.901960849761963,
+						0.901960849761963,
 						1.0
 					],
 					"energy": 1.0,
@@ -943,10 +943,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 1240.0,
+					"tick_us": 1264.0,
 					"voice_writes": 6.0
 				},
-				"audio_us": 1301.0,
+				"audio_us": 1300.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -969,7 +969,7 @@
 					"detail_vertices": 30132.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 161.0,
+					"frame_calls": 160.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -996,13 +996,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 161.0
+					"terrain_scene_counter": 160.0
 				},
-				"foliage_us": 584.0,
+				"foliage_us": 700.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 4.0,
-					"present_us": 617.0,
+					"effects_us": 2.0,
+					"present_us": 773.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -1026,12 +1026,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2489.0,
-					"tick_us": 2947.0,
+					"sim_us": 2077.0,
+					"tick_us": 2340.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 3110.0,
-				"tick_us": 5447.0
+				"runtime_us": 2852.0,
+				"tick_us": 4969.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1295,7 +1295,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 9781.0,
+				"cache_hits": 9732.0,
 				"cache_misses": 151.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1628,7 +1628,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "d99519b23ab12aeae2ce7ba92e69d674e6ac15c1f18c2db326beb43a4693a204",
+		"source_state_sha256": "37801bfe5cb2e3cb84a1d8cb767b3403c58498da0a1407d15ae1ba8096b3b428",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

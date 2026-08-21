@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 11677280.0,
+		"captured_at_ticks_usec": 11394131.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-east-retail-m0900-beauty-11677280-f158",
+		"id": "00tra-fire-barrel-east-retail-m0900-beauty-11394131-f159",
 		"label": "00tra-fire-barrel-east-retail-m0900-beauty",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-east-retail-m0900-beauty.png",
-		"png_sha256": "de8de90275ab8aed5b04fccc9538a1e8dca3bf8d1a6809318ca233cb1dd4610a",
-		"process_frame": 158.0,
+		"png_sha256": "33cfabb6edac5e768bf4b0fd1f3565b314898313731b7325583d016338b1adf2",
+		"process_frame": 159.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -204,8 +204,8 @@
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 597.0,
-			"light_state_generation": 248.0,
+			"generation": 575.0,
+			"light_state_generation": 226.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -308,9 +308,9 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 272.0,
-			"process": 158.0,
-			"ticks_usec": 11677426.0
+			"physics": 250.0,
+			"process": 159.0,
+			"ticks_usec": 11394319.0
 		},
 		"lights": {
 			"active": 8.0,
@@ -324,9 +324,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.909803986549377,
-							0.886274576187134,
-							0.858823597431183,
+							0.917647123336792,
+							0.894117712974548,
+							0.870588302612305,
 							1.0
 						],
 						"direction": [
@@ -349,9 +349,9 @@
 					{
 						"atten2": 0.600000023841858,
 						"color": [
-							0.898039281368256,
-							0.874509871006012,
-							0.843137323856354,
+							0.909803986549377,
+							0.890196144580841,
+							0.86274516582489,
 							1.0
 						],
 						"direction": [
@@ -399,9 +399,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							0.792156934738159,
-							0.792156934738159,
-							0.792156934738159,
+							0.694117665290833,
+							0.694117665290833,
+							0.694117665290833,
 							1.0
 						],
 						"direction": [
@@ -555,9 +555,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.909803986549377,
-						0.886274576187134,
-						0.858823597431183,
+						0.917647123336792,
+						0.894117712974548,
+						0.870588302612305,
 						1.0
 					],
 					"energy": 1.0,
@@ -601,9 +601,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.898039281368256,
-						0.874509871006012,
-						0.843137323856354,
+						0.909803986549377,
+						0.890196144580841,
+						0.86274516582489,
 						1.0
 					],
 					"energy": 1.0,
@@ -693,9 +693,9 @@
 					"caster_cull_mask": 4294967295.0,
 					"class": "OmniLight3D",
 					"color": [
-						0.792156934738159,
-						0.792156934738159,
-						0.792156934738159,
+						0.694117665290833,
+						0.694117665290833,
+						0.694117665290833,
 						1.0
 					],
 					"energy": 1.0,
@@ -943,10 +943,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 3970.0,
+					"tick_us": 2232.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 4035.0,
+				"audio_us": 2269.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -969,7 +969,7 @@
 					"detail_vertices": 12852.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 154.0,
+					"frame_calls": 155.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -996,13 +996,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 154.0
+					"terrain_scene_counter": 155.0
 				},
-				"foliage_us": 652.0,
+				"foliage_us": 560.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 4.0,
-					"present_us": 633.0,
+					"effects_us": 3.0,
+					"present_us": 634.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -1026,12 +1026,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 2488.0,
-					"tick_us": 2915.0,
+					"sim_us": 2024.0,
+					"tick_us": 2284.0,
 					"ticks": 2.0
 				},
-				"runtime_us": 3125.0,
-				"tick_us": 16762.0
+				"runtime_us": 2661.0,
+				"tick_us": 12790.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -1126,7 +1126,7 @@
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932685039600.0,
+					"instance_id": -9223371932768925700.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1136,7 +1136,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371932634708000.0,
+					"instance_id": -9223371932718594000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1295,7 +1295,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 9081.0,
+				"cache_hits": 9084.0,
 				"cache_misses": 206.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -1303,9 +1303,9 @@
 				"dimension": 256.0,
 				"frame_capacity_fallbacks": 0.0,
 				"frame_compose_jobs": 0.0,
-				"frame_compose_us": 28271.0,
-				"frame_output_hash": 1765552799422308900.0,
-				"frame_output_pages": 3.0,
+				"frame_compose_us": 39573.0,
+				"frame_output_hash": -5186002611379342300.0,
+				"frame_output_pages": 4.0,
 				"frame_ready_hits": 60.0,
 				"frame_requests": 60.0,
 				"frame_selected_ready_pages": 60.0,
@@ -1313,7 +1313,7 @@
 				"frame_shadow_base_nonzero_alpha_bytes": 0.0,
 				"frame_shadow_rgb_changed_bytes": 0.0,
 				"frame_stale_hits": 0.0,
-				"frame_uploads": 3.0,
+				"frame_uploads": 4.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 60.0,
 				"resident_output_hash": -4059628529002818000.0,
@@ -1628,7 +1628,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "c9942531538c10c7b0270db895546011fa2bf9b306f95f4d7a0cc5e06fee22c9",
+		"source_state_sha256": "f1956a0ca979fa43e394afb16e3f76cf7af5fbe3176b9ceb03499dba7c17f3b2",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

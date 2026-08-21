@@ -400,17 +400,17 @@
         2000,
         1200
       ],
-      "gdextension_sha256": "b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce",
+      "gdextension_sha256": "129bb0cd93c082337206b6d57bcd3b5a1646dd64eb83ac6cc5eb81e739d578d5",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "bf8303790516455e7e554f700f037795182e717a9cd5d782b0ddc262ca094647",
-      "sha256": "93ab70ed8dec906b8f5515448028d3613ed6a7c96b03c736594a5d0f2608d9cc",
-      "source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
+      "manifest_sha256": "6ee603a58a4e759faf58f0194ef45f508f266a7ee1503dd297ed0b358ea84f0c",
+      "sha256": "5a25ed24d713a9b915153d624aac51aea4d0cc208d4d10c1b6682df89765a7e8",
+      "source_commit": "e59dc041e78509abed3b4110db95b729a6312125",
       "source_name": "03tr-sun-sky-retail-m0390-beauty.png",
       "state_name": "03tr-sun-sky-retail-m0390-beauty.state.json",
-      "state_sha256": "5a3583b11ee4bac530203dfa8ad3ed788178fc3323d065547e96b54e5795de23"
+      "state_sha256": "8984a908ae24a4d5c33761685abb99f8c95c9fba140d5a9b4bfa5990c2a24313"
     },
     "retail": {
-      "bundle_sha256": "2046953720064d083117abb848f6628540c9f842864fc6aefb2b6ee7aad2d4c5",
+      "bundle_sha256": "d63d51d6db0dccf64b51764cca5462a242d7e4ea60d871ad5a0aa389eb1846c0",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
+      "opennova_source_commit": "e59dc041e78509abed3b4110db95b729a6312125",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -603,8 +603,8 @@
   "metrics": {
     "full_frame": {
       "channel_count": 6912000,
-      "max_channel_delta": 219,
-      "mean_abs_channel_delta": 23.25326,
+      "max_channel_delta": 220,
+      "mean_abs_channel_delta": 23.26779,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,13 +612,13 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 28.356819
+      "root_mean_square_channel_delta": 28.449465
     },
     "regions": [
       {
         "channel_count": 1663200,
-        "max_channel_delta": 214,
-        "mean_abs_channel_delta": 22.35076,
+        "max_channel_delta": 213,
+        "mean_abs_channel_delta": 22.378276,
         "name": "world_center",
         "pixel_count": 554400,
         "region": [
@@ -627,13 +627,13 @@
           1320,
           420
         ],
-        "root_mean_square_channel_delta": 28.837041,
+        "root_mean_square_channel_delta": 28.947949,
         "type": "roi"
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 122,
-        "mean_abs_channel_delta": 25.247999,
+        "max_channel_delta": 125,
+        "mean_abs_channel_delta": 25.238127,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 28.494326,
+        "root_mean_square_channel_delta": 28.543384,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "03tr-sun-sky-retail-absolute-diff.png",
-      "sha256": "afe306f1c4297ff81ca7734b8682e0c02c5cdba6ae9ac5dabbcd4655aa5c534d"
+      "sha256": "3d1755aabfb0f56b4a51fb560b6f1cb7dbd8069b04e343e381e9038692bc54cc"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "03tr-sun-sky-retail-opennova-normalized.png",
-      "sha256": "92374c50b8c554629aa7e3d5a8366afcbfeb29c0abca462360444efca3b58675"
+      "sha256": "c3b95ec85a499958ec1b5a49c487a7614ced10331e553b473fdbcd03aeae68ac"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "03tr-sun-sky-retail-overlay-50.png",
-      "sha256": "8c9698a904f14ccbb5288e053afd9bad5f6cf650e7e9c089d0a644f00bce9cfb"
+      "sha256": "b8650f35fd6937057aaeb91adaf9e7293c08bc5fef5552365ab9c9e634085b10"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "03tr-sun-sky-retail-side-by-side.png",
-      "sha256": "aebe925f66a00ab99f9d46d2b6f205971db7e047bb41135c3b0a89751fff2d2d"
+      "sha256": "fb442feb8077a4d2dcf8a731bfacaf4c1280ce405bec52c3280869df58c0f690"
     }
   },
   "presentations": {
