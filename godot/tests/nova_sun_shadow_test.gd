@@ -19,7 +19,7 @@ func _expected_emission(environment: MissionEnvironment) -> Vector3:
 	# [orig: Environment_GetLightDirectionFloat @ 0x57d870;
 	#  render_shadow_pass @ 0x5d7b70].
 	var g := environment.get_light_direction()
-	return -Vector3(g.z, maxf(g.y, 0.25), g.x).normalized()
+	return -Vector3(g.x, maxf(g.y, 0.25), g.z).normalized()
 
 
 func _assert_tracks_environment(
@@ -110,7 +110,7 @@ func test_low_sun_projection_clamps_the_vertical_component() -> void:
 	assert_lt(g.y, 0.25, "the sunrise fixture must sit under the clamp")
 	var emission := -light.global_basis.z.normalized()
 	assert_true(emission.is_equal_approx(
-			-Vector3(g.z, 0.25, g.x).normalized()),
+			-Vector3(g.x, 0.25, g.z).normalized()),
 			"a grazing sun projects at the clamped 0.25 vertical")
 
 
@@ -123,7 +123,7 @@ func test_high_sun_projection_uses_the_unclamped_tuple() -> void:
 	var g := environment.get_light_direction()
 	assert_gt(g.y, 0.25, "the noon fixture must sit above the clamp")
 	var emission := -light.global_basis.z.normalized()
-	assert_true(emission.is_equal_approx(-Vector3(g.z, g.y, g.x).normalized()),
+	assert_true(emission.is_equal_approx(-Vector3(g.x, g.y, g.z).normalized()),
 			"above the clamp the presentation reduction (g2,g1,g0) passes through")
 
 

@@ -108,9 +108,10 @@ void SunShadow::_update_direction() {
 		return;
 	}
 	set_visible(true);
-	// The environment serves the DIRECT retail getter tuple g = (-Y_bms,
-	// Z_bms, X_bms); presentation-world surface->light is the (g2, g1, g0)
-	// reduction (retail: Environment_GetLightDirectionFloat @0x57d870;
+	// get_light_direction serves the Godot-axes vector: the env_axes x/z
+	// swap of the raw getter tuple g = (-Y_bms, Z_bms, X_bms) IS the
+	// (g2, g1, g0) surface->light reduction, applied once at the getter
+	// (retail: Environment_GetLightDirectionFloat @0x57d870;
 	// Math_BuildFixedPointToFloatMatrix4x4 @0x612402..0x612457). Retail's
 	// entity shadow projection additionally clamps the vertical component to
 	// 0.25 before negating into the slot's light->surface direction, so a
@@ -122,8 +123,8 @@ void SunShadow::_update_direction() {
 	// along local -Z, so emission is that negated form. The SlotShadow
 	// capture pipeline owns the entity ground shadows; this light remains
 	// the direction-law reference and the static-terrain bake device.
-	const Vector3 surface_to_light(light_tuple.z,
-			std::max(light_tuple.y, real_t(0.25)), light_tuple.x);
+	const Vector3 surface_to_light(light_tuple.x,
+			std::max(light_tuple.y, real_t(0.25)), light_tuple.z);
 	const Vector3 emission = -surface_to_light.normalized();
 	if (emission.is_equal_approx(last_emission_direction_)) {
 		return;
