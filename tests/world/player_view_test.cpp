@@ -470,13 +470,20 @@ PlayerViewState mounted_state(float bound_radius, float carrier_z = 10.0f) {
     v.mount.carrier_yaw_bam = bam_heading_from_mission_yaw_deg(0.0); // mission yaw 0
     v.mount.bound_radius = bound_radius;
     v.mount.water_z = -1000.0f;
-    // The anchor as the tick would have settled it: carrier + lift.
+    v.mount.carrier_forward[0] = 0.0f; // mission yaw 0 = +Y
+    v.mount.carrier_forward[1] = 1.0f;
+    v.mount.carrier_forward[2] = 0.0f;
+    // The anchor and the look-ahead as the tick would have settled them:
+    // carrier + lift, and the carrier's forward x 6.
     v.tp_anchor_valid = true;
     v.tp_anchor[0] = 0.0f;
     v.tp_anchor[1] = 0.0f;
     v.tp_anchor[2] = carrier_z + mount_anchor_lift(bound_radius);
     for (int i = 0; i < 3; ++i)
         v.tp_anchor_q16[i] = static_cast<int32_t>(v.tp_anchor[i] * 65536.0f);
+    v.lookahead_q16[0] = 0;
+    v.lookahead_q16[1] = 6 * 0x10000;
+    v.lookahead_q16[2] = 0;
     return v;
 }
 
@@ -497,8 +504,9 @@ void test_compose_camera_mounted() {
     CHECK(near_eq(pose.eye[0], 0.0f, 0.001f));
     CHECK(near_eq(pose.eye[1], -7.0f * std::cos(p), 0.001f));
     CHECK(near_eq(pose.eye[2], 11.5f - 7.0f * std::sin(p), 0.001f));
-    // The final angles look at the point 6 u ahead of the carrier: the yaw
-    // stays on the carrier heading, the pitch looks DOWN at it.
+    // The final angles look at the anchor + the look-ahead (6 u along the
+    // carrier's forward): the yaw stays on the carrier heading, the pitch
+    // looks DOWN at it.
     CHECK(near_eq(pose.yaw_deg, 0.0f, 0.01f) || near_eq(pose.yaw_deg, 360.0f, 0.01f));
     CHECK(pose.pitch_deg < 0.0f);
 
@@ -509,14 +517,21 @@ void test_compose_camera_mounted() {
     CHECK(near_eq(pose.eye[1], -2.5f * std::cos(p), 0.001f));
     CHECK(near_eq(pose.eye[2], 11.0f - 2.5f * std::sin(p), 0.001f));
 
-    // The QUARTER look yaw: a 40-degree look offset swings the camera 10.
+    // The QUARTER look yaw: a 40-degree look offset orbits the EYE 10 degrees
+    // around the anchor (the eye sits 7 u back along the damped yaw); the
+    // final yaw is the look-at from there to the carrier-forward point, which
+    // lands between the carrier heading and the damped orbit.
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
             40.0f, 0.0f, 0, 0, 0, pose);
-    CHECK(near_eq(pose.yaw_deg, 10.0f, 0.05f));
+    const float ten = 10.0f * 3.14159265f / 180.0f;
+    CHECK(near_eq(pose.eye[0], -7.0f * std::sin(ten) * std::cos(p), 0.002f));
+    CHECK(near_eq(pose.eye[1], -7.0f * std::cos(ten) * std::cos(p), 0.002f));
+    CHECK(pose.yaw_deg > 0.5f && pose.yaw_deg < 10.0f);
     // ... and it is symmetric.
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
             -40.0f, 0.0f, 0, 0, 0, pose);
-    CHECK(near_eq(pose.yaw_deg, 350.0f, 0.05f));
+    CHECK(near_eq(pose.eye[0], 7.0f * std::sin(ten) * std::cos(p), 0.002f));
+    CHECK(pose.yaw_deg > 350.0f && pose.yaw_deg < 359.5f);
 
     // The WATERCRAFT drop: half the radius off the eye.
     PlayerViewState boat = mounted_state(4.0f);
@@ -565,9 +580,16 @@ void test_compose_camera_mounted_terrain() {
     PlayerCameraPose flat;
     player_view_compose_camera(v, position, no_anchor, false, &field, false,
             0.0f, 0.0f, 0, 0, 0, flat);
-    // Flat ground far below: neither floor moves the eye.
+    // Flat ground far below: the terrain floor does not move the eye, but the
+    // slope raise's 0.333-per-unit margin ALWAYS applies (the running max is
+    // seeded at 0.0, so a downhill run never lowers it): the eye is floored at
+    // anchor + 0.333 * the horizontal distance.
     const float p = -11.25f * 3.14159265f / 180.0f;
-    CHECK(near_eq(flat.eye[2], 11.5f - 7.0f * std::sin(p), 0.001f));
+    const float horizontal = 7.0f * std::cos(p);
+    const float raw_z = 11.5f - 7.0f * std::sin(p);
+    const float margin_floor = 11.5f + horizontal * 0.333f;
+    CHECK(margin_floor > raw_z);
+    CHECK(near_eq(flat.eye[2], margin_floor, 0.002f));
 
     // Ground just above the eye: the terrain floor (+0.25) and the slope
     // raise both apply and the eye ends above the ground.
@@ -577,15 +599,16 @@ void test_compose_camera_mounted_terrain() {
             0.0f, 0.0f, 0, 0, 0, raised);
     CHECK(raised.eye[2] >= 13.25f);
 
-    // A ramp rising BEHIND the carrier (the eye side, mission -y = atlas +z)
-    // raises the eye above the flat result.
+    // A ramp rising steeply BEHIND the carrier (the eye side, mission -y =
+    // atlas +z) raises the eye above the flat result.
     for (int z = 0; z < kDim; ++z)
         for (int x = 0; x < kDim; ++x)
-            heightmap[z * kDim + x] = static_cast<uint16_t>((8 * 256) + (z - 100) * 256 / 2);
+            heightmap[z * kDim + x] = static_cast<uint16_t>(
+                    (8 * 256) + (z > 100 ? (z - 100) * 512 : 0));
     PlayerCameraPose ramp;
     player_view_compose_camera(v, position, no_anchor, false, &field, false,
             0.0f, 0.0f, 0, 0, 0, ramp);
-    CHECK(ramp.eye[2] > flat.eye[2]);
+    CHECK(ramp.eye[2] > flat.eye[2] + 1.0f);
 }
 
 // The mounted anchor ease in 16.16: a sixteenth per tick on x/y and a
@@ -601,12 +624,19 @@ void test_tick_mounted_anchor_ease() {
     v.mount.carrier_pos_q16[1] = 0;
     v.mount.carrier_pos_q16[2] = 32 * 0x10000;
     v.mount.bound_radius = 4.0f; // lift 1.5 -> target z 33.5
+    v.mount.carrier_forward[0] = 0.0f;
+    v.mount.carrier_forward[1] = 1.0f;
+    v.mount.carrier_forward[2] = 0.0f;
     player_view_tick(v, eye);
     // x: a sixteenth of 16 = 1.0; z: a thirty-second of 33.5 = 1.046875.
     CHECK(v.tp_anchor_q16[0] == 0x10000);
     CHECK(near_eq(v.tp_anchor[0], 1.0f));
     CHECK(v.tp_anchor_q16[2] == (33 * 0x10000 + 0x8000 + 16) >> 5);
     CHECK(near_eq(v.tp_anchor[2], 1.046875f, 0.0001f));
+    // The look-ahead eases a thirty-second toward forward x 6 = (0, 6, 0).
+    CHECK(v.lookahead_q16[0] == 0);
+    CHECK(v.lookahead_q16[1] == (6 * 0x10000 + 16) >> 5);
+    CHECK(v.lookahead_q16[2] == 0);
     // Dismounting returns to the quarter-step float ease from where it was.
     v.mount.control_seat = false;
     player_view_tick(v, eye);

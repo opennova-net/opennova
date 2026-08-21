@@ -289,6 +289,12 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
              * [orig: atol -> cdq/sub/sar signed div 2 -> imul 0xB60B60 @0x40ad51] */
             current.kz_pieslice_bam = (parse_int_n(v, vl) / 2) * 11930464;
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "scar_type", 9)) {
+            /* The impact scar kind [orig: AmmoDef_ParseProperty @0x40aeea..0x40af11,
+             * atol -> word +0x76]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.scar_type = parse_int_n(v, vl);
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
             current.min_stable_velocity = parse_int_n(v, vl);

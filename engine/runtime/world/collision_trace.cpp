@@ -117,6 +117,18 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     return &scratch;
 }
 
+bool CollisionWorld::entity_section_matrix(const World &world, EntityHandle h, int section,
+                                           CollisionMatrix &out) const {
+    CollisionTargetView scratch;
+    std::vector<CollisionMatrix> matrices;
+    const CollisionTargetView *target = target_view(world, h, scratch, matrices);
+    if (target == nullptr || target->model == nullptr || target->matrices == nullptr ||
+        section < 0 || section >= static_cast<int>(target->model->sections.size()))
+        return false;
+    out = target->matrices[section];
+    return true;
+}
+
 std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
         const World &world, EntityHandle h, const Vec3 &blast_center) const {
     std::vector<SectionDebrisSample> out;

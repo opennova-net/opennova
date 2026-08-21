@@ -109,11 +109,15 @@ inline float watercraft_eye_drop(float carrier_radius) {
 	return carrier_radius * kWatercraftEyeDropScale;
 }
 
-// The mounted look-at point sits 6 units along the TRACKED ENTITY's yaw, on
-// the terrain + 1.0 or the entity's own z, whichever is higher
-// [orig: @0x438767..0x4387C9 — 6.0 * cos / sin from the BAM tables added to
-//  entity x/y, Terrain_SampleHeightBilinear + 0x10000 floored against
-//  entity z; a second 6.0 seeds the carrier-relative point @0x438835].
+// THE LOOK-AHEAD. Mounted (parent && slot 2/5) the look-at target is the
+// carrier's chassis matrix times (6.0, 0, 0) — rotation only, so it follows
+// the carrier's pitch and roll — eased into the camera's look-ahead offset a
+// thirty-second per axis (`g_camera_lookahead += (target - lookahead + 16)
+// >> 5`) and added onto the eye accumulators; the final yaw comes from the
+// look-at (fpatan) [orig: @0x438811..0x4388b5]. The tracked-entity (on-foot)
+// leg uses 6 units along the entity's own yaw floored at terrain + 1.0
+// instead [orig: @0x438767..0x4387C9 — Terrain_SampleHeightBilinear +
+// 0x10000 against entity z]; that leg rides the deferred orbit/tracked state.
 inline constexpr float kMountLookaheadDistance = 6.0f;
 inline constexpr float kMountLookaheadTerrainLift = 1.0f;
 

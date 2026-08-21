@@ -79,6 +79,7 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		e.light_impact_ticks = d.light_impact_ticks;
 		e.turnrate_maxpit = d.turnrate_maxpit;
 		e.turnrate_maxyaw = d.turnrate_maxyaw;
+		e.scar_type = d.scar_type;
 		table.entries.push_back(std::move(e));
 	}
 	return table;
