@@ -1399,7 +1399,7 @@ int MissionDocument::event_flag_mask() const {
 std::vector<MissionEnumEntry> MissionDocument::ai_attribute_flag_bits() const {
 	// Author-facing AI attribute flags (bmsi_attributes). Labels confirmed against the DFX2 object-properties
 	// dialog (Med_ObjectPropertiesDialog @0x4096d0; label table @0x5b1c84: BLIND / GUARDING / MULTIPLAYER /
-	// INDESTRUCTABLE / NAVIGATION_WAYPT / REFLECTIVE / ...). Attribute17 is accepted because it appears in
+	// INDESTRUCTABLE / NAVIGATION_WAYPT / REFLECTIVE / ...). EngineRunning is accepted because it appears in
 	// shipped missions, but its editor label is not pinned, so it is intentionally omitted from checkboxes.
 	return {
 			{static_cast<int>(bms::BmsiAttributeFlags::Blind), "Blind"},

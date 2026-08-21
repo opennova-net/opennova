@@ -28,7 +28,7 @@ constexpr uint32_t kKnownBmsiAttributeMask =
     static_cast<uint32_t>(BmsiAttributeFlags::Berserk) |
     static_cast<uint32_t>(BmsiAttributeFlags::FlyingOrganic) |
     static_cast<uint32_t>(BmsiAttributeFlags::Coward) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Attribute17) |
+    static_cast<uint32_t>(BmsiAttributeFlags::EngineRunning) |
     static_cast<uint32_t>(BmsiAttributeFlags::AdvancedAmmo) |
     static_cast<uint32_t>(BmsiAttributeFlags::Indestructible) |
     static_cast<uint32_t>(BmsiAttributeFlags::NavigationWaypoint) |

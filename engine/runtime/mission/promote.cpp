@@ -2,6 +2,7 @@
 #include "mission/promote.h"
 
 #include "world/ai.h"
+#include "world/vehicle_part_anim.h"
 #include "world/world.h"
 
 #include <algorithm>
@@ -134,6 +135,17 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= kEntityFlagIndestructible;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Reflective)) s.engine_flags |= kEntityFlagReflective;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NoShadow)) s.engine_flags |= kEntityFlagNoShadow;
+    // An "engine running" vehicle record spawns with its rotor at full speed,
+    // Flags 0x80 up and the ground speed register at 1.0 — a helicopter placed
+    // in flight has its rotor already turning [orig: Entity_SpawnFromBMSRecord
+    // @0x40ee70..0x40ee94 on attrib bit 0x20000: Flags |= 0x80, +0x468 =
+    // 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000].
+    if (kind == EntityKind::Item &&
+        (attrib & static_cast<uint32_t>(BmsiAttributeFlags::EngineRunning)) != 0) {
+        s.flags |= 0x80u;
+        rotor_spawn_full(s.veh.part_spin);
+        s.veh.speed = 0x10000;
+    }
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Guarding)) {
         s.engine_flags |= kEntityFlagMounted;
         s.flags |= kEntityFlagMounted;

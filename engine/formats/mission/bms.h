@@ -164,7 +164,8 @@ enum class BmsiAttributeFlags : uint32_t {
     Berserk = 1 << 11,
     FlyingOrganic = 1 << 14,
     Coward = 1 << 16,
-    Attribute17 = 1 << 17, // present in shipped missions; editor label bit map not yet pinned
+    EngineRunning = 1 << 17, // the vehicle spawns with its engine/rotor already running
+                             // [orig: Entity_SpawnFromBMSRecord @0x40ee70..0x40ee94]
     AdvancedAmmo = 1 << 18,
     Indestructible = 1 << 21,
     NavigationWaypoint = 1 << 22,

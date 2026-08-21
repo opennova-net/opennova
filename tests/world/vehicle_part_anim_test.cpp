@@ -281,6 +281,49 @@ void test_register_projection_through_the_mover() {
 			"three ticks of angle accumulation");
 }
 
+// THE TWO MACHINES: the profile type picks ground (2) or helo (1), nothing
+// else runs one; the helo twin's empty decay is 46603/tick against the ground
+// machine's 186413.
+void test_rotor_machines_by_profile_type() {
+	CHECK(rotor_machine_for_profile(2) == RotorMachine::Ground, "type 2 -> ground");
+	CHECK(rotor_machine_for_profile(1) == RotorMachine::Helo, "type 1 -> helo");
+	CHECK(rotor_machine_for_profile(3) == RotorMachine::None, "type 3 (organic) -> none");
+	CHECK(rotor_machine_for_profile(0) == RotorMachine::None, "unresolved -> none");
+	CHECK(rotor_decay_for(RotorMachine::Helo) == kRotorDecayHelo &&
+					rotor_decay_for(RotorMachine::Ground) == kRotorDecayGround,
+			"each machine's decay");
+	RotorState helo;
+	helo.speed = 100000;
+	rotor_tick(helo, false, kRotorDecayHelo);
+	CHECK(helo.speed == 100000 - kRotorDecayHelo && helo.angle == helo.speed,
+			"the helo twin decays 46603 and still adds the speed to the angle");
+	RotorState ground;
+	ground.speed = 100000;
+	rotor_tick(ground, false, kRotorDecayGround);
+	CHECK(ground.speed == 0, "the ground machine's 186413 stops it in one tick");
+}
+
+// Through the mover tail: a Helicopter-family row with no brain takes the helo
+// machine (its family stands in for the profile), so its rotor winds down at
+// 46603/tick after the dismount.
+void test_helo_family_decays_at_the_helo_rate() {
+	Rig r;
+	VehicleTraits t = buggy_traits(true);
+	t.family = VehicleFamily::Helicopter;
+	r.mount();
+	for (int i = 0; i < 3; ++i) vehicle_part_anim_tick(r.w, r.veh(), t);
+	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull,
+			"occupied: the full spin-up rate, both machines");
+	CHECK(entity_detach_from_vehicle(r.w, r.drv_h), "dismount");
+	vehicle_part_anim_tick(r.w, r.veh(), t);
+	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo,
+			"unoccupied: the helo decay");
+	VehicleTraits g = buggy_traits(true);
+	vehicle_part_anim_tick(r.w, r.veh(), g);
+	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo - kRotorDecayGround,
+			"a ground-family row decays at the ground rate");
+}
+
 } // namespace
 
 int main() {
@@ -293,6 +336,8 @@ int main() {
 	test_non_player_control_rolls_once_per_unoccupied_tick();
 	test_spin_caps_through_the_mover();
 	test_register_projection_through_the_mover();
+	test_rotor_machines_by_profile_type();
+	test_helo_family_decays_at_the_helo_rate();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

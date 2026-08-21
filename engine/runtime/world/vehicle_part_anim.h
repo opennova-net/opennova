@@ -20,6 +20,10 @@
 // PF_VEHICLE_STEERING / PF_VEHICLE_SPEED; this TU owns what those do not
 // carry: the rotor spin machine and the wheel phase, published through
 // PF_VEHICLE_ROTOR / PF_VEHICLE_TAIL_ROTOR / PF_VEHICLE_WHEELS.
+//
+// NAMED RESIDUAL (presentation, no D-row): the HELO machine's engine-start
+// sound and the rotor-downwash leg that follow its spin arithmetic inside
+// @0x48FA70 — device work for the shell's audio/particle presenters.
 
 #include <cstdint>
 
@@ -31,25 +35,47 @@ class World;
 struct VehicleTraits;
 
 // ---------------------------------------------------------------------------
-// ROTOR [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 — called from every
+// THE TWO ROTOR MACHINES, split by the AI PROFILE TYPE (.aip +16) read
+// through the brain the mover owns [orig: the class gate
+//  `brain+4 -> profile+16 == 2` @0x4928C9..0x4928D1 selects the GROUND
+//  machine Entity_UpdatePartSpinAccumulator @0x4928B0 — called from every
 //  vehicle mover (@0x46F99E, @0x4700F5, @0x4869EA, @0x4889F5, @0x48AE3D,
-//  @0x48D42B) and gated on the move-context class 2 @0x4928C9..0x4928D1].
+//  @0x48D42B) and decaying 186413/tick; the HELO twin @0x48FA70 gates
+//  `== 1`, decays 46603/tick and is called from the aircraft mover @0x4905A6].
 // ---------------------------------------------------------------------------
 
 using RotorState = Entity::VehicleMotorState::PartSpin;
+
+enum class RotorMachine : uint8_t { None, Ground, Helo };
 
 // The spin-up rates. A PLAYER-CONTROL item (ItemDef attrib 0x40) always seeds
 // the full rate; every other item seeds one of three by a PRNG roll
 // [orig: @0x4928E5..0x492935 — attrib & 0x40 with an occupant -> 186413
 //  @0x4928F3; no 0x40 -> PRNG_Next16() % 100: > 66 -> 139809, > 33 -> 163110,
-//  else 186413 @0x49290E..0x492935]. Spin-DOWN always uses the full rate
-// [orig: @0x49294F], so a player-control rotor takes as long to stop as to
-// start while a rolled one may stop faster than it started.
+//  else 186413 @0x49290E..0x492935]. Spin-DOWN always uses the machine's
+// decay [orig: ground @0x49294F = 186413; helo = 46603 inside @0x48FA70], so
+// a player-control ground rotor takes as long to stop as to start while a
+// rolled one may stop faster than it started, and a helicopter's rotor winds
+// down four times slower than it spun up.
 inline constexpr int32_t kRotorRateFull = 186413; // 0x2D82D
 inline constexpr int32_t kRotorRateMid = 163110;  // 0x27D26
 inline constexpr int32_t kRotorRateLow = 139809;  // 0x22221
 inline constexpr int32_t kRotorSpeedMax = 0x0CCCCCC0; // 214748352
+inline constexpr int32_t kRotorDecayGround = kRotorRateFull;
+inline constexpr int32_t kRotorDecayHelo = 46603; // 0xB60B
 inline constexpr int32_t kItemAttribPlayerControl = 0x40;
+
+// The profile type selects the machine: 2 (GROUND) / 1 (HELO); any other
+// type (3 organic, 0 unresolved) runs neither.
+inline RotorMachine rotor_machine_for_profile(int32_t profile_type) {
+	if (profile_type == 2) return RotorMachine::Ground;
+	if (profile_type == 1) return RotorMachine::Helo;
+	return RotorMachine::None;
+}
+
+inline int32_t rotor_decay_for(RotorMachine machine) {
+	return machine == RotorMachine::Helo ? kRotorDecayHelo : kRotorDecayGround;
+}
 
 // Whether THIS tick's seed needs a draw from the shared PRNG stream: only a
 // zero rate on a non-player-control item rolls [orig: the `!rate` gate
@@ -81,9 +107,9 @@ inline void rotor_seed_rate(RotorState &s, bool player_control, bool occupied,
 }
 
 // One tick [orig: occupied @0x492984..0x4929A7: speed += rate, cap, angle +=
-//  speed; unoccupied @0x492945..0x492972: speed -= 186413 floored at 0, angle
-//  += speed, rate = 0].
-inline void rotor_tick(RotorState &s, bool occupied) {
+//  speed; unoccupied @0x492945..0x492972: speed -= decay floored at 0, angle
+//  += speed, rate = 0]. `decay` is the machine's: 186413 ground, 46603 helo.
+inline void rotor_tick(RotorState &s, bool occupied, int32_t decay = kRotorDecayGround) {
 	if (occupied) {
 		s.speed += s.rate;
 		if (s.speed > kRotorSpeedMax) s.speed = kRotorSpeedMax;
@@ -91,7 +117,7 @@ inline void rotor_tick(RotorState &s, bool occupied) {
 		return;
 	}
 	if (s.speed != 0) {
-		s.speed -= kRotorRateFull;
+		s.speed -= decay;
 		if (s.speed < 0) s.speed = 0;
 	}
 	s.angle += s.speed;
@@ -100,10 +126,11 @@ inline void rotor_tick(RotorState &s, bool occupied) {
 
 // A spawn flag seeds the rotor at FULL speed rather than spinning it up
 // [orig: Entity_SpawnFromBMSRecord @0x40E9F0, @0x40EE70..0x40EE94 — record flag
-//  0x20000 sets entity Flags |= 0x80, rate = 0x2D82D, speed = 0x0CCCCCC0 and
-//  the ground speed register +0x29C = 0x10000] — a helicopter spawned in
-// flight has its rotor already turning. The +0x29C / Flags side effects
-// belong to the spawner, not this state.
+//  0x20000 (bms EngineRunning) sets entity Flags |= 0x80, rate = 0x2D82D,
+//  speed = 0x0CCCCCC0 and the ground speed register +0x29C = 0x10000] — a
+// helicopter spawned in flight has its rotor already turning. The +0x29C /
+// Flags side effects belong to the spawner (mission/promote.cpp), not this
+// state.
 inline constexpr int32_t kSpawnRotorFullBit = 0x20000;
 inline void rotor_spawn_full(RotorState &s) {
 	s.rate = kRotorRateFull;
@@ -112,24 +139,25 @@ inline void rotor_spawn_full(RotorState &s) {
 
 // The register the PANM feeder reads: the accumulator's HIGH WORD
 // [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the rotor angle's +0x466
-//  @0x492ACA..0x492ADE, the wheel phase's +0x2BA @0x4929B4; the same MOVZX
-//  idiom as the steer word @0x4929C0..0x4929D7].
+//  @0x492ACA..0x492ADE for BOTH ordinals 46 and 47 (the tail rotor reads the
+//  same accumulator @0x492AD7), the wheel phase's +0x2BA @0x4929B4; the same
+//  MOVZX idiom as the steer word @0x4929C0..0x4929D7].
 inline uint16_t part_register(int32_t accumulator) {
 	return static_cast<uint16_t>((static_cast<uint32_t>(accumulator) >> 16) &
 			0xFFFFu);
 }
 
 // ---------------------------------------------------------------------------
-// WHEEL PHASE (+0x2B8) [orig: Entity_UpdateVehiclePhysics @0x48C4C0..0x48C4D0
-//  (|slip| + (speed << 13)) and the +0x46C form @0x48C4D8..0x48C4F4; the
-//  watercraft mover adds its brain forward command instead,
-//  Entity_UpdateWatercraftPhysics @0x48E9F0..0x48E9F9 (`+0x220 << 13`)].
+// WHEEL PHASE (+0x2B8) [orig: Entity_UpdateVehiclePhysics — `+0x2B8 +=
+//  |+0x46C| + (+0x29C << 13)` @0x48C4C5..0x48C4D0 and the twin store
+//  @0x48C4E4..0x48C4F4; the watercraft mover adds its brain forward command
+//  instead, Entity_UpdateWatercraftPhysics @0x48E9F0..0x48E9F9 (`+0x220 << 13`)].
 // ---------------------------------------------------------------------------
 
-// Wheels advance by the speed scaled up, plus a slip kick on an active skid.
-// The slip term rides the terrain-contact skid vector, which no wire field
-// carries — a peer integrates with slip 0, and the wheelspin kick is a
-// RECORDED GAP rather than something approximated.
+// Wheels advance by the speed scaled up, plus the slip kick |+0x46C| on an
+// active skid. The slip register rides the terrain-contact skid vector the
+// D-NET-161 level-frame re-derive does not carry — a peer integrates with
+// slip 0; the wheelspin kick is that ledger row's, not something approximated.
 inline int32_t wheel_phase_step(int32_t phase, int32_t speed, int32_t slip_abs) {
 	return phase + slip_abs + (speed << 13);
 }
@@ -140,11 +168,14 @@ inline int32_t watercraft_wheel_phase_step(int32_t phase, int32_t forward) {
 }
 
 // ---------------------------------------------------------------------------
-// The per-tick entry every family mover calls at its tail. Runs the rotor
-// machine (seeding the rate from the shared PRNG when a non-player-control
-// item needs a roll — the seed path is the ONLY PRNG consumer here, and it
-// draws exactly once per unoccupied tick for such an item) and advances the
-// wheel phase from the motor's own speed register.
+// The per-tick entry every family mover calls at its tail. Picks the rotor
+// machine by the brain's profile type (a brainless row — a lib embedder's
+// loose vehicle, a unit rig — has no profile, and its family stands in: the
+// Helicopter/Plane movers are where retail calls the HELO twin from), runs it
+// (seeding the rate from the shared PRNG when a non-player-control item needs
+// a roll — the seed path is the ONLY PRNG consumer here, and it draws exactly
+// once per unoccupied tick for such an item) and advances the wheel phase
+// from the motor's own speed register.
 // `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
 // occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
 void vehicle_part_anim_tick(World &world, Entity &veh, const VehicleTraits &traits);
