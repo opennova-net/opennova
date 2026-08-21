@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "cp12-truck-material-retail-m1260-beauty",
 			"png_path": "cp12-truck-material-retail-m1260-beauty.png",
-			"png_sha256": "4c18013ab0879e78f2f291fad82cfa61c88e6868e070bd8f6f44b362a59bf7cd",
-			"source_state_sha256": "8ef62dbc61b8ae4aaad268326d4d6a786534b67ad5e5e688ad4f1f15b4a76606",
+			"png_sha256": "971d25ebb6a785f77d0e94d0770b8ee75c1444015313bc2a449ad08ab285cebd",
+			"source_state_sha256": "e7158d4acdf144776f7ab9cb64d8269522875070f4327a5c2aff40221644a748",
 			"state_path": "cp12-truck-material-retail-m1260-beauty.state.json",
-			"state_sha256": "c76814a8dab9b2f3613b017e1e4a72fad0d450f820041487d2f422802e636182",
+			"state_sha256": "b6b2aad55ad53f5c995e0b9ee6c03f5a0b5ab5ad7a61b3e0d07c419b39fcab53",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "cp12-truck-material-retail-m1260-shadows_off",
 			"png_path": "cp12-truck-material-retail-m1260-shadows_off.png",
-			"png_sha256": "adff71e89b5745a56f09342b1498d3135f211585204a8b25a17ed3c6b4343807",
-			"source_state_sha256": "1cf0df25abade7c730c14e6131e24663b5f01c6c7ea7227d3bbddff89890e2e7",
+			"png_sha256": "a08f0387d2f09a6de039c3dd4891ef9dfdd6a8d2cffdf1907ab01dc8dcdb7215",
+			"source_state_sha256": "4961954c9afa46de8b00f8b59d5e9bfb8b8ea5d7a9ca4f6fe7ec87c3335b7be2",
 			"state_path": "cp12-truck-material-retail-m1260-shadows_off.state.json",
-			"state_sha256": "0c5057930ae867c8063952a093fee2a950cd97080d23466754a96b68d6fa379d",
+			"state_sha256": "5e5a3c1909a8d12dcd9e77194c065b03b698754173b76aeb34888ef02157e805",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "cp12-truck-material-retail-m1260-lighting_only",
 			"png_path": "cp12-truck-material-retail-m1260-lighting_only.png",
-			"png_sha256": "6911489c1ec0aadafb6ca34adbba5142b1df02b6af0a1083c114ca99865c9ec2",
-			"source_state_sha256": "fadae59f5b12a7393b8cc26fa67b0d019d4a2c81ae85742cde4a528c0d56c70b",
+			"png_sha256": "2a32776e9ddf215e4b182fde4c8dbc9525d13d71ca4576f05a5c1e634dadd6db",
+			"source_state_sha256": "a2d0b6bd3955bdee9eebc8d7f6760752ecd747affe9e9a91345954548929e587",
 			"state_path": "cp12-truck-material-retail-m1260-lighting_only.state.json",
-			"state_sha256": "b4fe7c6492ba66b99dc8f3e33bc33492659f383462caab8e13b94ed7e19dc4cf",
+			"state_sha256": "f62a231bf7dedca54aa720550d2200992f7f2dc4382ac9fd74725b2eaa87f7bb",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "cp12-truck-material-retail-m1260-unshaded",
 			"png_path": "cp12-truck-material-retail-m1260-unshaded.png",
-			"png_sha256": "72e412f50340486ed342ccfb4a4730ca35bd5be1f6171ff2a73a2aed0e7de88c",
-			"source_state_sha256": "cd7b6d06e7a815a128181ec168dab418751d9526d890ad78ee2408c4e93ade89",
+			"png_sha256": "8d8d1777e3a4689094c92c1694bc31dab07907c1ef9246d22edf449fe2e2d4bc",
+			"source_state_sha256": "e0266dc9da661327189e8280a54a03c16a9858f2319e0667207a88b9f4767130",
 			"state_path": "cp12-truck-material-retail-m1260-unshaded.state.json",
-			"state_sha256": "2366f7875aca475a1a92b421f2b66a3b14d1edd8f480fb1383e2e045c281071e",
+			"state_sha256": "b8004027aea022c0801d302ffb7927ea22d00125bd3c1307f08f2824e82e555c",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "cp12-truck-material-retail-m1260-directional_shadow_atlas",
 			"png_path": "cp12-truck-material-retail-m1260-directional_shadow_atlas.png",
-			"png_sha256": "d4b709f35aa248d2c081e5afd172eed8da472535749512bf6c33102aee655e96",
-			"source_state_sha256": "ab0d67250f3a88839b5741ee1f9e0aaa5813411990e249a318114c8d7bf62b36",
+			"png_sha256": "474aab826e2b1d86dbb14aca8c16d042d18626d4e152071f71f7eace8c05005f",
+			"source_state_sha256": "9a8204f9d595290b7d03aa5f907d967e7327b13b167d76c7247eafdfeb5824e0",
 			"state_path": "cp12-truck-material-retail-m1260-directional_shadow_atlas.state.json",
-			"state_sha256": "3b56b120dc655e7078758171ed502708a750778a923a51b5af7b53abab667c54",
+			"state_sha256": "d29dcc23590eb85e64cc7473981724a039c393519b1ccebb51ed8671b6af11d8",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -223,10 +223,10 @@
 	},
 	"provenance": {
 		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
-		"gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
+		"gdextension_sha256": "f08d7e93a13671bd8b37eb522e123462f4cfd2c4e59fa1ebcd0110db83340b53",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "30f3e194b9f7aaea6053492f7797c9940f8039ed"
+		"source_commit": "58ea3e5ff61b9aef5841a8601b7d9b86817ebde1"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

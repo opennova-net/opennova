@@ -1,13 +1,13 @@
 {
 	"capture": {
-		"captured_at_ticks_usec": 14161721.0,
+		"captured_at_ticks_usec": 15717100.0,
 		"height": 1200.0,
-		"id": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow-14161721-f324",
+		"id": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow-15717100-f289",
 		"label": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow_atlas",
 		"mime": "image/png",
 		"png_path": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow_atlas.png",
-		"png_sha256": "7b042b67739f6569616aa8057ca12e701fe2ae561ee3a63afa3cd0a8da5ca747",
-		"process_frame": 324.0,
+		"png_sha256": "70dfa47dbe3fba38203269eebaaf67e368d80ba365ec4d8edc815896cb9f760e",
+		"process_frame": 289.0,
 		"width": 2000.0
 	},
 	"comparison_contract_witness": {
@@ -56,7 +56,7 @@
 		"camera": {
 			"aspect": 1.66666666666667,
 			"available": true,
-			"cull_mask": 1042431.0,
+			"cull_mask": 99329.0,
 			"current": true,
 			"far": 4000.0,
 			"fov_deg": 53.4468002319336,
@@ -150,30 +150,67 @@
 				1200.0
 			]
 		},
+		"celestial": {
+			"available": true,
+			"bodies": {
+				"glare": {
+					"opacity": 0.25,
+					"visible": true
+				},
+				"glint": {
+					"opacity": 0.0,
+					"visible": false
+				},
+				"moon": {
+					"opacity": 0.166656494140625,
+					"visible": true
+				},
+				"sun": {
+					"opacity": 1.0,
+					"visible": true
+				}
+			},
+			"built": true,
+			"glare_occlusion": {
+				"brightness": 128.0,
+				"ray_length": 1024.0,
+				"window": 255.0
+			},
+			"sun_veil": {
+				"alpha": 0.0,
+				"glare": 0.0,
+				"stopdown": 0.0
+			},
+			"visible": true,
+			"water_glint": {
+				"brightness": 0.0,
+				"window": 0.0
+			}
+		},
 		"environment": {
 			"active_light_direction": [
-				-0.342010498046875,
+				-0.664455473423004,
 				0.664455592632294,
-				-0.664455473423004
+				-0.342010498046875
 			],
 			"available": true,
 			"day_phase_blend": 1.0,
 			"fill_light": [
-				0.156862750649452,
-				0.164705887436867,
-				0.156862750649452
+				0.14509804546833,
+				0.152941182255745,
+				0.14509804546833
 			],
 			"fog_color": [
-				0.690196096897125,
-				0.705882370471954,
-				0.933333337306976
+				0.643137276172638,
+				0.658823549747467,
+				0.87058824300766
 			],
 			"fog_distance": 500.0,
 			"fog_end": 500.0,
 			"fog_start": 250.0,
 			"fog_type": 2.0,
-			"generation": 495.0,
-			"light_state_generation": 157.0,
+			"generation": 522.0,
+			"light_state_generation": 178.0,
 			"loaded": true,
 			"mission_minute_of_day": 900.0,
 			"mission_time_fixed24": 251658240.0,
@@ -183,74 +220,74 @@
 				0.0
 			],
 			"moon_direction": [
-				-0.5,
+				0.612363338470459,
 				-0.612363338470459,
-				0.612363338470459
+				-0.5
 			],
 			"night_phase": false,
 			"published_lighting": {
 				"available": true,
 				"ceiling": [
-					0.215686276555061,
-					0.215686276555061,
-					0.215686276555061
+					0.200000002980232,
+					0.200000002980232,
+					0.200000002980232
 				],
 				"direction": [
-					0.3420150578022,
+					0.664464294910431,
 					-0.66446441411972,
-					0.664464294910431
+					0.3420150578022
 				],
 				"directional_color": [
-					0.623529434204102,
 					0.584313750267029,
-					0.537254929542542
+					0.545098066329956,
+					0.501960813999176
 				],
 				"floor": [
-					0.0980392172932625,
-					0.0980392172932625,
-					0.0980392172932625
+					0.0901960805058479,
+					0.0901960805058479,
+					0.0901960805058479
 				],
 				"fog_color": [
-					0.690196096897125,
-					0.705882370471954,
-					0.933333337306976
+					0.643137276172638,
+					0.658823549747467,
+					0.87058824300766
 				],
 				"fog_enabled": true,
 				"fog_end": 500.0,
 				"fog_start": 250.0,
 				"fog_type": 2.0,
 				"gain": [
-					1.0,
-					1.0,
-					1.0
+					0.9375,
+					0.9375,
+					0.9375
 				],
 				"hemi_ground": [
-					0.156862750649452,
-					0.164705887436867,
-					0.156862750649452
+					0.14509804546833,
+					0.152941182255745,
+					0.14509804546833
 				],
 				"hemi_sky": [
-					0.384313732385635,
-					0.376470595598221,
-					0.372549027204514
+					0.356862753629684,
+					0.352941185235977,
+					0.34901961684227
 				]
 			},
 			"sky_ambient": [
-				0.384313732385635,
-				0.376470595598221,
-				0.372549027204514
+				0.356862753629684,
+				0.352941185235977,
+				0.34901961684227
 			],
 			"sky_height": 175.0,
 			"sky_speed": 15.0,
 			"skyfog_color": [
-				0.690196096897125,
-				0.705882370471954,
-				0.933333337306976
+				0.643137276172638,
+				0.658823549747467,
+				0.87058824300766
 			],
 			"source_gain": [
-				1.0,
-				1.0,
-				1.0
+				0.9375,
+				0.9375,
+				0.9375
 			],
 			"sun_color": [
 				0.623529434204102,
@@ -258,14 +295,14 @@
 				0.537254929542542
 			],
 			"sun_direction": [
-				-0.342010498046875,
+				-0.664455473423004,
 				0.664455592632294,
-				-0.664455473423004
+				-0.342010498046875
 			],
 			"sun_light": [
-				0.623529434204102,
 				0.584313750267029,
-				0.537254929542542
+				0.545098066329956,
+				0.501960813999176
 			],
 			"time_hhmm": 1500.0,
 			"water_color": [
@@ -276,25 +313,25 @@
 			"weather_driven": true
 		},
 		"frame": {
-			"physics": 302.0,
-			"process": 324.0,
-			"ticks_usec": 14161832.0
+			"physics": 325.0,
+			"process": 289.0,
+			"ticks_usec": 15717213.0
 		},
 		"lights": {
 			"active": 1.0,
 			"directional": 1.0,
 			"effectworld": {
 				"high_water": 7.0,
-				"last_query": 7.0,
+				"last_query": 1.0,
 				"live": 7.0,
 				"owner_isolation": "per_model",
 				"rows": [
 					{
 						"atten2": 0.150000005960464,
 						"color": [
-							1.32421886920929,
-							0.814453125,
-							0.50390625,
+							1.24145519733429,
+							0.7635498046875,
+							0.472412109375,
 							1.0
 						],
 						"handle": 950278.0,
@@ -309,9 +346,9 @@
 					{
 						"atten2": 14999998.0,
 						"color": [
-							1.025390625,
-							1.025390625,
-							1.025390625,
+							1.07666027545929,
+							1.07666027545929,
+							1.07666027545929,
 							1.0
 						],
 						"handle": 753667.0,
@@ -326,9 +363,9 @@
 					{
 						"atten2": 1.06666672229767,
 						"color": [
-							1.494140625,
-							1.494140625,
-							1.494140625,
+							1.4007568359375,
+							1.4007568359375,
+							1.4007568359375,
 							1.0
 						],
 						"handle": 884741.0,
@@ -343,9 +380,9 @@
 					{
 						"atten2": 1.06666672229767,
 						"color": [
-							1.494140625,
-							1.494140625,
-							1.494140625,
+							1.4007568359375,
+							1.4007568359375,
+							1.4007568359375,
 							1.0
 						],
 						"handle": 819204.0,
@@ -379,19 +416,19 @@
 					"global_transform": {
 						"basis": [
 							[
-								-0.889129638671875,
+								-0.45765545964241,
 								0.0,
-								0.45765545964241
+								0.889129638671875
 							],
 							[
-								0.304095774888992,
+								0.59079498052597,
 								0.747319996356964,
-								0.59079498052597
+								0.304095774888992
 							],
 							[
-								-0.3420150578022,
+								-0.664464294910431,
 								0.66446441411972,
-								-0.664464294910431
+								-0.3420150578022
 							]
 						],
 						"origin": [
@@ -421,21 +458,21 @@
 			"relation": "last_completed_draw",
 			"root": {
 				"available": true,
-				"shadow_draw_calls": 48.0,
-				"shadow_objects": 48.0,
-				"shadow_primitives": 38910.0,
-				"visible_draw_calls": 326.0,
-				"visible_objects": 335.0,
-				"visible_primitives": 886894.0
+				"shadow_draw_calls": 0.0,
+				"shadow_objects": 0.0,
+				"shadow_primitives": 0.0,
+				"visible_draw_calls": 334.0,
+				"visible_objects": 344.0,
+				"visible_primitives": 1120797.0
 			},
 			"water_reflection": {
 				"available": true,
 				"shadow_draw_calls": 0.0,
 				"shadow_objects": 0.0,
 				"shadow_primitives": 0.0,
-				"visible_draw_calls": 99.0,
-				"visible_objects": 108.0,
-				"visible_primitives": 225252.0
+				"visible_draw_calls": 203.0,
+				"visible_objects": 213.0,
+				"visible_primitives": 608495.0
 			}
 		},
 		"presentation": {
@@ -482,10 +519,10 @@
 					"ambient_decode_failures": 0.0,
 					"markers": 211.0,
 					"physical_channels": 8.0,
-					"tick_us": 2007.0,
+					"tick_us": 1934.0,
 					"voice_writes": 10.0
 				},
-				"audio_us": 2042.0,
+				"audio_us": 1977.0,
 				"fire": {
 					"effects": 0.0,
 					"fires": 0.0,
@@ -508,7 +545,7 @@
 					"detail_vertices": 12852.0,
 					"disabled_slots": 0.0,
 					"enabled_slots": 3.0,
-					"frame_calls": 308.0,
+					"frame_calls": 273.0,
 					"model_cache_evictions": 0.0,
 					"model_cache_hits": 0.0,
 					"model_cache_misses": 0.0,
@@ -535,13 +572,13 @@
 						1.0,
 						1.0
 					],
-					"terrain_scene_counter": 308.0
+					"terrain_scene_counter": 273.0
 				},
-				"foliage_us": 396.0,
+				"foliage_us": 354.0,
 				"runtime": {
 					"did_tick": true,
-					"effects_us": 2.0,
-					"present_us": 815.0,
+					"effects_us": 4.0,
+					"present_us": 882.0,
 					"sim": {
 						"ai_count": 16.0,
 						"listen_server": true,
@@ -565,12 +602,12 @@
 						"trace_static_us": 0.0,
 						"trace_terrain_us": 0.0
 					},
-					"sim_us": 851.0,
-					"tick_us": 1141.0,
+					"sim_us": 885.0,
+					"tick_us": 1216.0,
 					"ticks": 1.0
 				},
-				"runtime_us": 1668.0,
-				"tick_us": 11634.0
+				"runtime_us": 1771.0,
+				"tick_us": 11958.0
 			}
 		},
 		"schema": "OpenNovaRenderDiagnosticsV1",
@@ -580,28 +617,28 @@
 				"bias": 0.0199999995529652,
 				"caster_cull_mask": 16384.0,
 				"emission_direction": [
-					0.3420150578022,
+					0.664464294910431,
 					-0.66446441411972,
-					0.664464294910431
+					0.3420150578022
 				],
 				"energy": 1.0,
 				"fade_start": 0.949999988079071,
 				"global_transform": {
 					"basis": [
 						[
-							-0.889129638671875,
+							-0.45765545964241,
 							0.0,
-							0.45765545964241
+							0.889129638671875
 						],
 						[
-							0.304095774888992,
+							0.59079498052597,
 							0.747319996356964,
-							0.59079498052597
+							0.304095774888992
 						],
 						[
-							-0.3420150578022,
+							-0.664464294910431,
 							0.66446441411972,
-							-0.664464294910431
+							-0.3420150578022
 						]
 					],
 					"origin": [
@@ -623,7 +660,7 @@
 			},
 			"static_terrain": {
 				"active": true,
-				"alpha_changed_bytes": 575860.0,
+				"alpha_changed_bytes": 532656.0,
 				"available": true,
 				"enabled": true,
 				"frame_alpha_changed_bytes": 0.0,
@@ -649,24 +686,24 @@
 			"shader": {
 				"available": true,
 				"u_cloud_base": [
-					1.64705884456635,
-					1.64705884456635,
-					0.909803926944733
+					1.53725492954254,
+					1.53725492954254,
+					0.847058832645416
 				],
 				"u_cloud_edge": [
-					1.0823529958725,
-					1.0823529958725,
-					1.01960790157318
+					1.01176476478577,
+					1.01176476478577,
+					0.949019610881805
 				],
 				"u_cloud_highlight": [
-					0.18823529779911,
-					0.133333340287209,
-					0.0705882385373116
+					0.172549024224281,
+					0.117647059261799,
+					0.062745101749897
 				],
 				"u_cloud_tex1": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371934513756200.0,
+					"instance_id": -9223371932836034600.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -676,7 +713,7 @@
 				"u_cloud_tex2": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371934463424500.0,
+					"instance_id": -9223371932785702900.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -686,16 +723,16 @@
 				"u_flat_color": null,
 				"u_flat_pass": false,
 				"u_fog_color": [
-					0.690196096897125,
-					0.705882370471954,
-					0.933333337306976
+					0.643137276172638,
+					0.658823549747467,
+					0.87058824300766
 				],
 				"u_fog_end": 500.0,
 				"u_has_clouds": true,
 				"u_light_dir": [
-					-0.342010498046875,
+					-0.664455473423004,
 					0.664455592632294,
-					-0.664455473423004
+					-0.342010498046875
 				],
 				"u_scroll_offset1": [
 					0.0690985545516014,
@@ -706,25 +743,25 @@
 					0.0436457544565201
 				],
 				"u_sky_base": [
-					0.423529416322708,
-					0.580392181873322,
-					1.0274510383606
+					0.39215686917305,
+					0.541176497936249,
+					0.95686274766922
 				],
 				"u_sky_bright": [
-					0.243137255311012,
-					0.243137255311012,
-					0.407843142747879
+					0.227450981736183,
+					0.227450981736183,
+					0.376470595598221
 				],
 				"u_sky_height": 175.0,
 				"u_sky_highlight": [
-					1.12156867980957,
-					1.1372549533844,
-					1.04313731193542
+					1.05098044872284,
+					1.05882358551025,
+					0.972549021244049
 				],
 				"u_sun_dir": [
-					-0.342010498046875,
+					-0.664455473423004,
 					0.664455592632294,
-					-0.664455473423004
+					-0.342010498046875
 				]
 			},
 			"visible": true
@@ -835,7 +872,7 @@
 			"tile_cache": {
 				"active_jobs": 0.0,
 				"available": true,
-				"cache_hits": 12051.0,
+				"cache_hits": 11535.0,
 				"cache_misses": 353.0,
 				"capacity": 128.0,
 				"capture_diagnostics": true,
@@ -856,12 +893,12 @@
 				"frame_uploads": 0.0,
 				"pending_jobs": 0.0,
 				"ready_pages": 60.0,
-				"resident_output_hash": -5792644533906995200.0,
+				"resident_output_hash": -2264598286323500800.0,
 				"resident_output_pages": 60.0,
-				"shadow_alpha_changed_bytes": 575860.0,
-				"shadow_base_nonzero_alpha_bytes": 7707580.0,
-				"shadow_epoch_alpha_changed_bytes": 287930.0,
-				"shadow_epoch_base_nonzero_alpha_bytes": 3853790.0,
+				"shadow_alpha_changed_bytes": 532656.0,
+				"shadow_base_nonzero_alpha_bytes": 7671924.0,
+				"shadow_epoch_alpha_changed_bytes": 266328.0,
+				"shadow_epoch_base_nonzero_alpha_bytes": 3835962.0,
 				"shadow_epoch_pages_with_draws": 26.0,
 				"shadow_epoch_plan_failures": 0.0,
 				"shadow_epoch_projection_draws": 668.0,
@@ -872,25 +909,25 @@
 				"shadow_provider_admitted_count": 915.0,
 				"shadow_provider_candidate_count": 941.0,
 				"shadow_provider_enabled": true,
-				"shadow_provider_epoch_alpha_test_triangles": 173335.0,
+				"shadow_provider_epoch_alpha_test_triangles": 169074.0,
 				"shadow_provider_epoch_has_projected_bounds": true,
 				"shadow_provider_epoch_pages_with_draws": 26.0,
 				"shadow_provider_epoch_plan_compiles": 60.0,
 				"shadow_provider_epoch_plan_count": 60.0,
 				"shadow_provider_epoch_plan_failures": 0.0,
 				"shadow_provider_epoch_projected_uv_max": [
-					2.50023651123047,
-					2.28156089782715
+					2.26276636123657,
+					2.48209190368652
 				],
 				"shadow_provider_epoch_projected_uv_min": [
-					-1.40804326534271,
-					-0.91360878944397
+					-1.34175264835358,
+					-0.997008800506592
 				],
 				"shadow_provider_epoch_projection_draws": 668.0,
 				"shadow_provider_epoch_raster_count": 60.0,
 				"shadow_provider_epoch_receiver_cache_hits": 60.0,
 				"shadow_provider_epoch_receiver_cache_misses": 0.0,
-				"shadow_provider_epoch_triangles": 317880.0,
+				"shadow_provider_epoch_triangles": 313256.0,
 				"shadow_provider_epoch_unsupported_attribution": [],
 				"shadow_provider_epoch_unsupported_attribution_truncated": 0.0,
 				"shadow_provider_epoch_unsupported_draw_count": 0.0,
@@ -943,7 +980,7 @@
 				"camera": {
 					"aspect": 1.0,
 					"available": true,
-					"cull_mask": 951295.0,
+					"cull_mask": 32769.0,
 					"current": true,
 					"far": 4000.0,
 					"fov_deg": 79.9999618530273,
@@ -1046,15 +1083,15 @@
 			"shader": {
 				"available": true,
 				"u_fog_color": [
-					0.690196096897125,
-					0.705882370471954,
-					0.933333337306976
+					0.643137276172638,
+					0.658823549747467,
+					0.87058824300766
 				],
 				"u_has_reflection": true,
 				"u_noise_color": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371938825501700.0,
+					"instance_id": -9223371938657729500.0,
 					"path": "",
 					"size": [
 						128.0,
@@ -1064,7 +1101,7 @@
 				"u_noise_normal": {
 					"available": true,
 					"class": "ImageTexture",
-					"instance_id": -9223371938791946200.0,
+					"instance_id": -9223371938624174100.0,
 					"path": "",
 					"size": [
 						128.0,
@@ -1074,7 +1111,7 @@
 				"u_reflection": {
 					"available": true,
 					"class": "ViewportTexture",
-					"instance_id": -9223371938708060200.0,
+					"instance_id": -9223371938540288000.0,
 					"path": "",
 					"size": [
 						256.0,
@@ -1087,9 +1124,9 @@
 				],
 				"u_underwater_view": false,
 				"u_water_color": [
-					0.356862753629684,
-					0.360784322023392,
-					0.227450981736183
+					0.333333343267441,
+					0.337254911661148,
+					0.211764708161354
 				],
 				"u_water_murk": 0.949999988079071,
 				"u_water_uv": [
@@ -1112,46 +1149,51 @@
 				0.0436457544565201
 			],
 			"cloud_uv_rate_per_second": 0.0,
+			"iris_samples": [
+				5.0,
+				7.0,
+				8.0
+			],
 			"lightning_intensity": 0.0,
 			"smooth_ceiling": [
-				0.215686276555061,
-				0.215686276555061,
-				0.215686276555061
+				0.200000002980232,
+				0.200000002980232,
+				0.200000002980232
 			],
 			"smooth_cloud": [
-				0.501960813999176,
-				0.501960813999176,
-				0.501960813999176
+				0.470588237047195,
+				0.470588237047195,
+				0.470588237047195
 			],
 			"smooth_fill": [
-				0.156862750649452,
-				0.164705887436867,
-				0.156862750649452
+				0.14509804546833,
+				0.152941182255745,
+				0.14509804546833
 			],
 			"smooth_floor": [
-				0.0980392172932625,
-				0.0980392172932625,
-				0.0980392172932625
+				0.0901960805058479,
+				0.0901960805058479,
+				0.0901960805058479
 			],
 			"smooth_fog": [
-				0.690196096897125,
-				0.705882370471954,
-				0.933333337306976
+				0.643137276172638,
+				0.658823549747467,
+				0.87058824300766
 			],
 			"smooth_sky": [
-				0.384313732385635,
-				0.376470595598221,
-				0.372549027204514
+				0.356862753629684,
+				0.352941185235977,
+				0.34901961684227
 			],
 			"smooth_skyfog": [
-				0.690196096897125,
-				0.705882370471954,
-				0.933333337306976
+				0.643137276172638,
+				0.658823549747467,
+				0.87058824300766
 			],
 			"smooth_sun": [
-				0.623529434204102,
 				0.584313750267029,
-				0.537254929542542
+				0.545098066329956,
+				0.501960813999176
 			],
 			"sway_amount": -2.0,
 			"sway_phase": 0.0,
@@ -1160,9 +1202,9 @@
 		},
 		"world": {
 			"clear_color": [
-				0.690196096897125,
-				0.705882370471954,
-				0.933333337306976,
+				0.643137276172638,
+				0.658823549747467,
+				0.87058824300766,
 				1.0
 			],
 			"loaded": true,
@@ -1171,7 +1213,7 @@
 		}
 	},
 	"publication": {
-		"source_state_sha256": "56413137fd07ee8b6d0129926f0990c6d908da4e01b5802a27437c8cc0c7d6a1",
+		"source_state_sha256": "aa1f864e19f5be6fdee7258381233c57c94e483d4088eb1b738407d73cacad0b",
 		"transform": "rewrite_capture_label_and_png_path_to_publication_siblings"
 	},
 	"schema": "OpenNovaRenderCaptureV1"

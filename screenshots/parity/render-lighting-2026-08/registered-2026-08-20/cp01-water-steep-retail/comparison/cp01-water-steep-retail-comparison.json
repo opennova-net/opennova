@@ -400,17 +400,17 @@
         2000,
         1200
       ],
-      "gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
+      "gdextension_sha256": "f08d7e93a13671bd8b37eb522e123462f4cfd2c4e59fa1ebcd0110db83340b53",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "66416150fa2d59e384e209751ba95cadb28525ee189dd4cad005064058035491",
-      "sha256": "05dac2a4aa8941a8c170b74d4dd811fb52abf28e449b845a905680e2cb2830c7",
-      "source_commit": "30f3e194b9f7aaea6053492f7797c9940f8039ed",
+      "manifest_sha256": "9fb302cf0b0900d859e558bdae19d9ee72624c6fc5f445a96e467c628234d03d",
+      "sha256": "9be0f3d9dc8190cc2683c36bece18853b6863d76a6f18dec2f07478737e038f3",
+      "source_commit": "58ea3e5ff61b9aef5841a8601b7d9b86817ebde1",
       "source_name": "cp01-water-steep-retail-m0930-beauty.png",
       "state_name": "cp01-water-steep-retail-m0930-beauty.state.json",
-      "state_sha256": "c54432d643315bf276fa99e6dd1e90dcfa0152dc3909e26643c3daf4944f268a"
+      "state_sha256": "351452ec520b53f45f2aabfc56e5d2cc3cbd95c31b7bd75de01fec05e03bc5fc"
     },
     "retail": {
-      "bundle_sha256": "ee9aa4f5e5843847cffffa304ff1befef8a269366b0a136f58e16e42cc8b9163",
+      "bundle_sha256": "fab1a65d32afc05ceb3722e6889427df3bc8a0858c0e4f6e79b0474d3ba64cae",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "30f3e194b9f7aaea6053492f7797c9940f8039ed",
+      "opennova_source_commit": "58ea3e5ff61b9aef5841a8601b7d9b86817ebde1",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -604,7 +604,7 @@
     "full_frame": {
       "channel_count": 6912000,
       "max_channel_delta": 242,
-      "mean_abs_channel_delta": 14.281561,
+      "mean_abs_channel_delta": 12.662834,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,13 +612,13 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 26.13174
+      "root_mean_square_channel_delta": 22.695924
     },
     "regions": [
       {
         "channel_count": 1663200,
-        "max_channel_delta": 146,
-        "mean_abs_channel_delta": 9.272734,
+        "max_channel_delta": 131,
+        "mean_abs_channel_delta": 8.669101,
         "name": "world_center",
         "pixel_count": 554400,
         "region": [
@@ -627,13 +627,13 @@
           1320,
           420
         ],
-        "root_mean_square_channel_delta": 15.109348,
+        "root_mean_square_channel_delta": 14.094723,
         "type": "roi"
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 228,
-        "mean_abs_channel_delta": 29.857325,
+        "max_channel_delta": 223,
+        "mean_abs_channel_delta": 25.479596,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 45.546545,
+        "root_mean_square_channel_delta": 38.541585,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "cp01-water-steep-retail-absolute-diff.png",
-      "sha256": "d0f53680f10983dcb4ffa3525be1aad5c959a3bc5327fa2ddc784ff7b385cd48"
+      "sha256": "101104bbbb0531ff27fec951941e57d90cfa434dea2ce088cf89c20f39b71a87"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "cp01-water-steep-retail-opennova-normalized.png",
-      "sha256": "07097f63ecaf3bf9ed22f7bf2a706a53cbd319cea354767a6f8aa95666f5a877"
+      "sha256": "092144df9ad0241de090e3dfe7edea986b902564a4da4d4e823017defac7db89"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "cp01-water-steep-retail-overlay-50.png",
-      "sha256": "1eb61b9888f7b7e139a33589c5abba3c5bb2ccd1f7f069941c38c423c81d9b2e"
+      "sha256": "ef55b7623ac706ea5715556dff7193e27883f8257c23353bb2e156bfd49f2bd0"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "cp01-water-steep-retail-side-by-side.png",
-      "sha256": "7fcaad4c28eb7e3519c20511cad05957dd8aff03157961af4079be934f93d07e"
+      "sha256": "73449642ba4f4c301356c63eb6b7f490048976d5daa3f494eb72a63eebb25d74"
     }
   },
   "presentations": {
