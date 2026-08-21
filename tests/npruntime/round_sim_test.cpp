@@ -68,7 +68,7 @@ struct DeathAnimSource final : w::IRootMotionSource {
 		       (state_id >= w::anim_state::kDeathFire &&
 		        state_id <= w::anim_state::kDeathBulletBase + 59);
 	}
-	int32_t clip_length_ticks(int, int) const override { return -1; }
+	int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
 	bool advance(int, int state_id, int32_t &phase, w::RootMotionFrame &out) override {
 		if (!has_clip(0, state_id)) return false;
 		++phase;

@@ -59,7 +59,6 @@ public:
 	                     int target_state, int32_t &target_phase_ticks,
 	                     float target_weight,
 	                     opennova::world::RootMotionFrame &out) override;
-	int32_t clip_length_ticks(int adm_id, int state_id) const override;
 	// The served ring entry's own length — the promotion clock for ringed rows
 	// [orig: the ring rotate @0x40b740-0x40b749 re-inits the channel from the
 	// served entry; frame_count read @0x40b25d runs on that clip].
@@ -86,13 +85,13 @@ public:
 	// returns how many were written.
 	int scan_triggers(int adm_id, int state_id, int32_t from_phase,
 	                  int32_t to_phase, uint32_t *out, int max_out,
-	                  int variant = 0) const;
+	                  int variant) const;
 
 	// The frame's capsule bottom (out[3] = bottom * 65536) at one playhead
 	// position — the dip that puts a footstep at FOOT level rather than the
 	// body origin [orig: the AnimMap out[3] cell @0x4b77d3].
 	int32_t capsule_bottom_at(int adm_id, int state_id, int32_t phase_ticks,
-	                          int variant = 0) const;
+	                          int variant) const;
 
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }

@@ -45,6 +45,15 @@ struct SunVeil {
 SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
                           int sun_dim_fixed, int overcast_blend_fixed);
 
+// When water exists the frame's veil is the sky term plus the water-reflected
+// secondary term, summed per channel with both sums clamped 192
+// [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8f3..0x5ad916].
+SunVeil sun_veil_combine(const SunVeil &primary, const SunVeil &secondary);
+
+// The fullscreen white-quad draw gate: only a glare above 2 submits the quad
+// [orig: @ 0x5ad928; the quad color is (glare << 24) + 0xFFFFFF @ 0x5ad931].
+bool sun_veil_draws(int glare);
+
 // Occlusion hysteresis: target = 32 * visible_rays (0..8 rays), brightness
 // moves +-16 per frame toward it, clamped 0..255.
 int glare_brightness_step(int current, int target);
@@ -168,8 +177,8 @@ inline float glare_coarse_start_lift(uint32_t frame_index) {
 // ---------------------------------------------------------------------------
 // The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
 // main scene render from Terrain_RenderSceneWithReflection @ 0x5c96c0]: its
-// own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 8 =
-// visible) and +-16 brightness chase toward popcount * 64 (no dead-band, no
+// own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 3
+// (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no dead-band, no
 // fog scale — dword_27E2E28). The settled brightness draws the glare model
 // mirrored below the eye (camera + sun * 128 with the HEIGHT term negated)
 // and, right-shifted 2, feeds the sun veil's secondary term
@@ -203,8 +212,8 @@ int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
                             int sun_dim_fixed);
 
 struct GlareRayJitter {
-	float offset_eng_y = 0.0f; // engine Y axis (render/Godot -x)
-	float offset_eng_z = 0.0f; // engine Z (height, render/Godot +y)
+	float offset_eng_y = 0.0f; // mission Y (north; Godot -z)
+	float offset_eng_z = 0.0f; // mission Z (height; Godot +y)
 };
 
 // The jitter offsets for one sample index [orig: @ 0x5ace3b..0x5ace61].

@@ -105,8 +105,19 @@ int slot_texture_size(int texture_order, int shadow_detail);
 // local player's slot (or its parent vehicle's) skips only below detail 3
 // [orig: @ 0x5d7713..0x5d7734].
 uint32_t slot_refresh_mask(int shadow_detail);
+// The mask one slot refreshes on: the local player's slot (or its parent
+// vehicle's) refreshes every frame from detail 3 up
+// [orig: @ 0x5d7713..0x5d7734].
+uint32_t slot_refresh_mask_for(int shadow_detail,
+		bool is_local_player_or_parent);
 bool slot_refresh_due(int slot_index, uint32_t frame, uint32_t mask,
 		bool dirty);
+
+// The local player's first-person drape gate: its own drape is skipped while
+// prone-latched or below shadow detail 2
+// [orig: RenderSlot_DrawAllDrapes @ 0x5d6e70..0x5d6e90].
+bool local_first_person_drape_skipped(bool first_person, bool prone,
+		int shadow_detail);
 
 // ---------------------------------------------------------------------------
 // Drape color laws
@@ -115,7 +126,10 @@ bool slot_refresh_due(int slot_index, uint32_t frame, uint32_t mask,
 // Distance fade of the drape: 0 inside 40 u, (d - 40) / 40 across
 // 40..80 u; at >= 80 u the drape is skipped entirely
 // [orig: render_sector_model @ 0x5d5d30..0x5d5d53 — 0x280000/0x500000
-// fixed thresholds, flt_7DC668 = 1/2621440].
+// fixed thresholds, flt_7DC668 = 1/2621440]. The device drape shader takes
+// the pair as a uniform from these constants.
+inline constexpr float kDrapeFadeStartUnits = 40.0f;  // 0x280000
+inline constexpr float kDrapeFadeEndUnits = 80.0f;    // 0x500000
 float drape_fade(float camera_distance_units);
 bool drape_culled(float camera_distance_units);
 
@@ -250,7 +264,7 @@ public:
 	// past 256 records [orig: @ 0x5d5690].
 	bool register_entity(uint64_t id);
 	void release_entity(uint64_t id);
-	size_t registered_count() const { return records_.size(); }
+	size_t registered_count() const { return live_count_; }
 
 	// Scores, sorts, and (re)binds every registered record for this frame.
 	// view_dir2d is the planar camera forward (need not be normalized; a
@@ -265,11 +279,17 @@ public:
 private:
 	struct Record {
 		uint64_t id = 0;
+		bool live = false;
 		bool bound = false;
 		int patch_index = -1;
 		int capture_order = -1;
 	};
-	std::vector<Record> records_;
+	// The fixed 256-record table: an entity keeps its index for its
+	// lifetime, so the refresh cadence keyed on it never re-phases when
+	// another record is released [orig: shadow_decal_alloc_slot @ 0x5d5690
+	// claims the first free record of RenderSlot_Table @ 0x2be3d30].
+	std::array<Record, kSlotRecordCount> records_{};
+	size_t live_count_ = 0;
 	std::array<bool, kSlotPatchCount> patch_used_{};
 };
 

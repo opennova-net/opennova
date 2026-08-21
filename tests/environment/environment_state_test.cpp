@@ -306,6 +306,27 @@ int main() {
 		const opennova::env::SunVeil away = sun_veil_from_dot(-0x8000, 256, 0, 0);
 		ok &= expect(away.glare == 0 && away.stopdown == 0,
 				"looking away from the sun serves no veil");
+		// SunDim above 100% (author-reachable; the spring is kUnclamped)
+		// turns the fold scale negative (here -13000): both lanes are one
+		// signed /25600 that truncates toward zero like retail's idiv
+		// [orig: @ 0x5ad82c — the reciprocal multiply + UNSIGNED >>31 fixup].
+		const opennova::env::SunVeil over_dim =
+				sun_veil_from_dot(0x10000, 256, 0x640001 + 3328000, 0);
+		ok &= expect(over_dim.glare == -97 && over_dim.stopdown == -20,
+				"a negative SunDim scale truncates toward zero "
+				"(192 * -13000 / 25600 = -97, 40 * -13000 / 25600 = -20)");
+		// The water-reflected secondary term sums per channel under the 192
+		// clamps, and only a glare above 2 draws the quad
+		// [orig: Environment_ApplySunVeilAndExposureStopdown
+		//  @ 0x5ad8f3..0x5ad928].
+		const opennova::env::SunVeil combined =
+				opennova::env::sun_veil_combine(head_on, settled_fixture);
+		ok &= expect(combined.glare == 192 && combined.stopdown == 67,
+				"the veil sums clamp the glare at 192 and add the stop-downs "
+				"(40 + 27)");
+		ok &= expect(!opennova::env::sun_veil_draws(2) &&
+						opennova::env::sun_veil_draws(3),
+				"the fullscreen veil draws only above glare 2");
 
 		EnvironmentState env;
 		const opennova::env::Config cfg = make_config();
@@ -363,12 +384,13 @@ int main() {
 		ok &= expect(opennova::env::water_glint_point(cam, sun, 10.0f, 0.0f,
 							 point),
 				"an above-water camera serves the reflected point");
-		// clip = 2*10 - 30 = -10; ratio = 20 / (30 + 251.29 + 10);
-		// x = 0.9316*2048*ratio; z = -10 + 251.29*ratio (the witnessed
-		// structural form lands NEAR, not exactly on, the plane).
+		// clip = 2*10 - 30 = -10; denom = 30 + 251.29 + 10; ratio = 20 /
+		// denom; x = 0.9316*2048*ratio; z = clip + denom*ratio = the water
+		// height itself (the last fmulp multiplies ratio by the FULL delta
+		// [orig: sub_5AC040 @ 0x5ac0d0..0x5ac0e5]).
 		ok &= expect(near(point.x, 130.99f, 0.05f) &&
-						near(point.z, 7.26f, 0.05f),
-				"the interpolation matches the witnessed structural form");
+						near(point.z, 10.0f, 0.01f),
+				"the reflected point lands on the water plane");
 
 		ok &= expect(opennova::env::water_glint_alpha_fixed(0x10000, 256, 0) ==
 						9216,

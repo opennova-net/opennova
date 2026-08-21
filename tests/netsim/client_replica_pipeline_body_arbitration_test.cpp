@@ -78,7 +78,7 @@ struct BodySource final : public opennova::world::IRootMotionSource {
 		out.capsule_top = 2 << 16;
 		return true;
 	}
-	int32_t clip_length_ticks(int, int state) const override {
+	int32_t clip_length_ticks(int, int state, int /*variant*/) const override {
 		if (state == as::kRollLeft) return 4; // a short locked one-shot
 		if (state == as::kRun2Crouch || state == as::kRun2Prone) return 6;
 		return 62;

@@ -625,192 +625,20 @@ bool test_optional_00tra_fork_oracle() {
 			entry_781.tile_index == 42 && entry_781.flags == 0x06,
 			"00TRa entry 781 matches the witnessed tile/flags/placement")) return false;
 	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
+	// The RGB pins are the shipped rotate-then-flip composer's pages (the
+	// full-atlas bake agrees texel for texel): 0x05 -> T(x,z) = (z,x) hashes
+	// 5690c9449dabde0f and 0x06 -> (1-z,1-x) hashes a03140eb55c2e69d. The
+	// pre-fix flip-then-rotate order rendered 0x05 as (1-z,1-x) — it
+	// produces a03140eb55c2e69d for entry 761, which is how the two pins
+	// tell the orders apart. The constants this oracle first shipped with
+	// (9bd9ceb8ff8a85b1 / 7c7aa42a36f35e03) matched neither order on the
+	// retail atlas; re-witnessed 2026-08-21.
 	return til_entry_oracle(entry_761, tilestrip, 761, fork_key,
-			UINT64_C(0x9bd9ceb8ff8a85b1),
+			UINT64_C(0x5690c9449dabde0f),
 			UINT64_C(0xd88858b8092111d7)) &&
 			til_entry_oracle(entry_781, tilestrip, 781, fork_key,
-					UINT64_C(0x7c7aa42a36f35e03),
+					UINT64_C(0xa03140eb55c2e69d),
 					UINT64_C(0x7bc3040e0ef8c534));
-}
-
-// DIAGNOSTIC (D-TERRAIN-7 tire-marks investigation): compose the pages around
-// the 00tra-tire-marks-retail fixture pose at every lod and report how many
-// texels the .til overlays touched per page, dumping PPMs to .scratch. Gated
-// like the CP12 leg. Set OPENNOVA_TIL_PROBE_DIR to enable the dump.
-bool test_optional_00tra_tire_probe() {
-	const char *root = std::getenv("OPENNOVA_JO_DIR");
-	const char *probe_dir = std::getenv("OPENNOVA_TIL_PROBE_DIR");
-	if (root == nullptr || root[0] == '\0' || probe_dir == nullptr ||
-			probe_dir[0] == '\0') {
-		std::printf("SKIP: 00TRa tire probe (needs OPENNOVA_JO_DIR + "
-				"OPENNOVA_TIL_PROBE_DIR)\n");
-		return true;
-	}
-
-	opennova::Vfs vfs;
-	if (!expect(vfs.mount_game(root, "revx02", opennova::VfsMountMode::Packed),
-			"OPENNOVA_JO_DIR mounts for the 00TRa tire probe")) return false;
-	std::vector<uint8_t> til_bytes;
-	if (!vfs.read_file("00TRA.TIL", til_bytes)) {
-		std::printf("SKIP: mounted install lacks 00TRA.TIL\n");
-		return true;
-	}
-	opennova::TilFile tiles;
-	std::string error;
-	if (!expect(opennova::load_til(
-				til_bytes.data(), til_bytes.size(), tiles, error),
-			"00TRA.TIL parses")) return false;
-	std::printf("probe: 00TRA.TIL entries=%zu\n", tiles.entries.size());
-
-	// The tile-set name lives in the BMS header at +0x118
-	// [orig: Terrain_LoadEnvironmentConfig @ 0x610940, Bms_TileSetName].
-	Rgba8Image tilestrip;
-	std::vector<uint8_t> bms_bytes;
-	if (vfs.read_file("00TRA.BMS", bms_bytes) && bms_bytes.size() > 0x138) {
-		std::string tileset;
-		for (size_t i = 0x118; i < 0x138 && bms_bytes[i] != 0; ++i) {
-			tileset.push_back(static_cast<char>(
-					std::toupper(static_cast<unsigned char>(bms_bytes[i]))));
-		}
-		std::printf("probe: BMS tile set = '%s'\n", tileset.c_str());
-		std::vector<uint8_t> tga_bytes;
-		if (!tileset.empty() &&
-				vfs.read_file((tileset + ".TGA").c_str(), tga_bytes)) {
-			if (!decode_uncompressed_tga_rgba(tga_bytes, tilestrip)) {
-				tilestrip = Rgba8Image{};
-			}
-		}
-	}
-	const bool real_strip = tilestrip.is_valid();
-	if (!real_strip) {
-		// Coverage-only fallback: placement geometry is tilestrip-independent.
-		tilestrip = solid_image(1024, 1024, {255, 255, 255, 255});
-		std::printf("probe: using solid tilestrip (coverage only)\n");
-	} else {
-		std::printf("probe: real tilestrip %ux%u\n", tilestrip.width,
-				tilestrip.height);
-	}
-
-	// Real colormap when available (00TRa terrain dvxg6 -> polytrn_colormap
-	// dvxg6_c.tga in DVXG6.TRN) so the page BASE pass is diagnosable too;
-	// solid fallback keeps the overlay-coverage half meaningful without it.
-	Rgba8Image colormap;
-	{
-		std::vector<uint8_t> colormap_bytes;
-		if (!vfs.read_file("DVXG6_C.TGA", colormap_bytes) ||
-				!decode_uncompressed_tga_rgba(colormap_bytes, colormap)) {
-			colormap = Rgba8Image{};
-		}
-	}
-	const bool real_colormap = colormap.is_valid();
-	if (real_colormap) {
-		std::printf("probe: real colormap %ux%u\n", colormap.width,
-				colormap.height);
-	} else {
-		colormap = solid_image(2, 2, {96, 128, 64, 255});
-		std::printf("probe: using solid colormap (coverage only)\n");
-	}
-	const Rgba8Image normal = solid_image(2, 2, {128, 128, 128, 128});
-
-	// Fixture pose: player BMS (318.9, -375.7) => terrain world (318.9, 375.7).
-	// Probe the sector-0 rect around it at every page lod.
-	int rect_entries = 0;
-	for (const opennova::TilOverlayEntry &entry : tiles.entries) {
-		const float ex = opennova::til_world_x_from_fixed(entry.x_fixed);
-		const float ez = opennova::til_world_z_from_fixed(entry.z_fixed);
-		if (ex >= 224.0f && ex < 448.0f && ez >= 256.0f && ez < 480.0f) {
-			++rect_entries;
-		}
-	}
-	std::printf("probe: entries in rect x[224,448) z[256,480) = %d\n",
-			rect_entries);
-
-	for (uint8_t lod = 1; lod <= 4; ++lod) {
-		const int span =
-				opennova::TerrainTileCompositionCache::page_world_span(lod);
-		for (int page_z = 256; page_z < 448; page_z += span) {
-			for (int page_x = 256; page_x < 384; page_x += span) {
-				const int local_x = page_x - (page_x / 512) * 512;
-				const int local_z = page_z - (page_z / 512) * 512;
-				const opennova::TerrainTilePageKey key{
-						(page_x / 512) * 512, (page_z / 512) * 512,
-						local_x, local_z, lod};
-				// Runtime parity: the device forwards the CPT tile's absolute
-				// source coords as the source-atlas origin
-				// (terrain_frame source_page_x/z = tile.tile_x/tile_y).
-				// 00TRa (dvxg6) is a wrapped 8x8-sector world built from a
-				// 2x2-source atlas; world sectors (0..1, 0..1) route through
-				// the .trn sector grid (origin -4,-4) to sector ids
-				// [[4,2],[3,1]] -> atlas quadrants. Reproduce that routing so
-				// the base pass samples the quadrant the runtime samples.
-				static const int kQuadrantOx[2][2] = {{512, 0}, {512, 0}};
-				static const int kQuadrantOz[2][2] = {{512, 512}, {0, 0}};
-				const int world_sx = page_x / 512;
-				const int world_sz = page_z / 512;
-				const int source_origin_x =
-						kQuadrantOx[world_sz & 1][world_sx & 1] +
-						(page_x & 511);
-				const int source_origin_z =
-						kQuadrantOz[world_sz & 1][world_sx & 1] +
-						(page_z & 511);
-
-				opennova::terrain::TerrainTilePageSourceView with;
-				with.colormap = &colormap;
-				with.heightfield_normal = &normal;
-				with.tile_info = &tiles;
-				with.tilestrip = &tilestrip;
-				with.light_bytes = {128, 128, 128};
-				with.tile_overlay_tint = {254.0f / 255.0f, 254.0f / 255.0f,
-						254.0f / 255.0f};
-				const Rgba8Image page = opennova::terrain::
-						compose_terrain_tile_page(
-								cold_job(lod, key, source_origin_x,
-										source_origin_z), with);
-
-				opennova::terrain::TerrainTilePageSourceView without = with;
-				without.tile_info = nullptr;
-				const Rgba8Image bare = opennova::terrain::
-						compose_terrain_tile_page(
-								cold_job(lod, key, source_origin_x,
-										source_origin_z), without);
-
-				if (!expect(page.is_valid() && bare.is_valid(),
-						"00TRa probe pages compose")) {
-					return false;
-				}
-				int touched = 0;
-				for (size_t i = 0; i + 3 < page.pixels.size(); i += 4) {
-					if (page.pixels[i] != bare.pixels[i] ||
-							page.pixels[i + 1] != bare.pixels[i + 1] ||
-							page.pixels[i + 2] != bare.pixels[i + 2] ||
-							page.pixels[i + 3] != bare.pixels[i + 3]) {
-						++touched;
-					}
-				}
-				std::printf("probe: lod=%d page=(%d,%d) span=%d "
-						"overlay_texels=%d/%d\n",
-						lod, page_x, page_z, span, touched,
-						static_cast<int>(page.width * page.height));
-
-				char name[256];
-				std::snprintf(name, sizeof(name),
-						"%s/page-lod%d-x%04d-z%04d.ppm", probe_dir, lod,
-						page_x, page_z);
-				std::FILE *out = std::fopen(name, "wb");
-				if (out != nullptr) {
-					std::fprintf(out, "P6\n%u %u\n255\n", page.width,
-							page.height);
-					for (size_t i = 0; i + 3 < page.pixels.size(); i += 4) {
-						std::fputc(page.pixels[i], out);
-						std::fputc(page.pixels[i + 1], out);
-						std::fputc(page.pixels[i + 2], out);
-					}
-					std::fclose(out);
-				}
-			}
-		}
-	}
-	return true;
 }
 
 } // namespace
@@ -822,7 +650,6 @@ int main() {
 	if (!test_overlay_atlas_flags_tint_clipping_and_order()) return 1;
 	if (!test_optional_cp12_assets()) return 1;
 	if (!test_optional_00tra_fork_oracle()) return 1;
-	if (!test_optional_00tra_tire_probe()) return 1;
 	std::printf("OK: terrain tile page composition\n");
 	return 0;
 }

@@ -42,7 +42,38 @@ int32_t clamp_i32(int64_t value) {
 			std::numeric_limits<int32_t>::max()));
 }
 
+// The RgbGen multiply shared by the point-light select and the corona walk:
+// tick the FLICKER register from the wave ring, then scale by the gen's
+// color x intensity [orig: Light_GetPointLightParams @ 0x5a9211..0x5a9243;
+// the corona walk's copy @ 0x5ab149..0x5ab1b8].
+void apply_rgb_gen(const LightSpawnParams &params,
+		const LightFlickerInputs &flicker, std::array<float, 3> &rgb) {
+	if (!params.has_gen || params.gen.style == 0) {
+		return;
+	}
+	const int32_t ctrl = light_flicker_value(params.position_fixed, flicker);
+	const LightRuntime gen = eval_light_runtime(params.gen.style,
+			params.gen.phase, params.gen.rate, params.gen.color_start,
+			params.gen.color_end, flicker.time_ms, ctrl);
+	rgb[0] *= gen.r * gen.intensity;
+	rgb[1] *= gen.g * gen.intensity;
+	rgb[2] *= gen.b * gen.intensity;
+}
+
 } // namespace
+
+uint8_t corona_texture_byte(int x, int y) {
+	// [orig: Lighting_InitTextures @ 0x5a973a..0x5a97ff].
+	if (x <= 0 || x >= kCoronaTextureSize - 1 || y <= 0 ||
+			y >= kCoronaTextureSize - 1) {
+		return 0;
+	}
+	const double dx = static_cast<double>(std::abs(x - 64)) * (1.0 / 64.0);
+	const double dy = static_cast<double>(std::abs(y - 64)) * (1.0 / 64.0);
+	const double d = std::sqrt(dx * dx + dy * dy);
+	const int intensity = static_cast<int>((0.4 - d * 0.45) * 255.0);
+	return static_cast<uint8_t>(intensity < 0 ? 0 : intensity);
+}
 
 LightHandle LightScene::spawn(const LightSpawnParams &params) {
 	// First-free linear scan, then high-water growth, capacity 4096
@@ -333,19 +364,7 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 			static_cast<float>(params.rgb[1]) / 256.0f,
 			static_cast<float>(params.rgb[2]) / 256.0f,
 		};
-		if (params.has_gen && params.gen.style != 0) {
-			// [orig: Light_GetPointLightParams @ 0x5a9211..0x5a9243 —
-			// tick the FLICKER register from the wave ring, then the RGB-gen
-			// multiply].
-			const int32_t ctrl =
-					light_flicker_value(params.position_fixed, flicker);
-			const LightRuntime gen = eval_light_runtime(params.gen.style,
-					params.gen.phase, params.gen.rate, params.gen.color_start,
-					params.gen.color_end, flicker.time_ms, ctrl);
-			rgb[0] *= gen.r * gen.intensity;
-			rgb[1] *= gen.g * gen.intensity;
-			rgb[2] *= gen.b * gen.intensity;
-		}
+		apply_rgb_gen(params, flicker, rgb);
 		// The intensity term is the LIVE blend (record f14) — spawn seeds it
 		// and the fade tick / SetBlendAmount mutate it [orig: @ 0x5a9207].
 		light.color = point_light_color(rgb, slot->blend, ambient_scale,
@@ -569,17 +588,7 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 			static_cast<float>(slot.params.rgb[2]) / 256.0f *
 					slot.blend * inputs.ambient_scale[2] * kColorScale,
 		};
-		if (slot.params.has_gen && slot.params.gen.style != 0) {
-			const int32_t ctrl = light_flicker_value(
-					slot.params.position_fixed, inputs.flicker);
-			const LightRuntime gen = eval_light_runtime(slot.params.gen.style,
-					slot.params.gen.phase, slot.params.gen.rate,
-					slot.params.gen.color_start, slot.params.gen.color_end,
-					inputs.flicker.time_ms, ctrl);
-			rgb[0] *= gen.r * gen.intensity;
-			rgb[1] *= gen.g * gen.intensity;
-			rgb[2] *= gen.b * gen.intensity;
-		}
+		apply_rgb_gen(slot.params, inputs.flicker, rgb);
 		// The toward-camera march: step = 0.1 x radius along
 		// normalize(cam - light) [orig: @ 0x5ab28b..0x5ab2c4].
 		std::array<float, 3> to_camera = {

@@ -1307,21 +1307,41 @@ SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
 		}
 	}
 	// The SunDim fold [orig: @ 0x5ad822..0x5ad82c] — at SunDim 0 the scale is
-	// exactly 25600 and both folds are identity. 1374389535 = the compiler's
-	// /25600 reciprocal (x0.32 >> 13); the (x >> 31) add is its idiv
-	// round-toward-zero fixup.
+	// exactly 25600 and both folds are identity. Both lanes are one signed
+	// /25600: the glare lane compiles to the 1374389535 reciprocal multiply
+	// plus an UNSIGNED >>31 round-toward-zero fixup (the idiv idiom, not
+	// behavior), so a negative scale (SunDim above 100%) truncates toward
+	// zero in both.
 	const int view_dist_scale = (0x640000 - sun_dim_fixed + 1) >> 8;
-	const int fog_scaled = fog_value * view_dist_scale;
-	const int glare_scaled = static_cast<int>(
-			(static_cast<int64_t>(1374389535) * glare_value * view_dist_scale) >> 32) >> 13;
+	const int fog_scaled = fog_value * view_dist_scale / 25600;
+	const int glare_scaled = glare_value * view_dist_scale / 25600;
 	// The overcast folds [orig: @ 0x5ad893..0x5ad8a3].
 	veil.stopdown = static_cast<int>(
-			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
-							(fog_scaled / 25600) + 0x8000) >> 16);
+			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) * fog_scaled +
+					0x8000) >> 16);
 	veil.glare = static_cast<int>(
-			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
-							(glare_scaled + (glare_scaled >> 31)) + 0x8000) >> 16);
+			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) * glare_scaled +
+					0x8000) >> 16);
 	return veil;
+}
+
+SunVeil sun_veil_combine(const SunVeil &primary, const SunVeil &secondary) {
+	// [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8f3..0x5ad916].
+	SunVeil veil;
+	veil.glare = primary.glare + secondary.glare;
+	if (veil.glare > 192) {
+		veil.glare = 192;
+	}
+	veil.stopdown = primary.stopdown + secondary.stopdown;
+	if (veil.stopdown > 192) {
+		veil.stopdown = 192;
+	}
+	return veil;
+}
+
+bool sun_veil_draws(int glare) {
+	// [orig: @ 0x5ad928 — `if (sun_glare > 2)` submits the fullscreen quad].
+	return glare > 2;
 }
 
 int glare_brightness_step(int current, int target) {
@@ -1388,9 +1408,11 @@ bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
                        float water_height, float view_z_jitter,
                        Vec3 &out_mission) {
 	// [orig: sub_5AC040] — structural translation of the fixed/float mix:
-	// clip = 2*wh - cam_z - jitter; reject at clip >= wh; ratio =
-	// (wh - clip) / (cam_z + sun_z*2048 - clip); out = (cam_xy + sun_xy*2048
-	// * ratio, clip + sun_z*2048 * ratio).
+	// clip = 2*wh - cam_z - jitter; reject at clip >= wh; denom = cam_z +
+	// sun_z*2048 - clip; ratio = (wh - clip) / denom; out = (cam_xy +
+	// sun_xy*2048 * ratio, clip + denom * ratio) — the last fmulp
+	// @ 0x5ac0d0 multiplies ratio by the FULL delta, so the point lands on
+	// the water plane.
 	const float clip = 2.0f * water_height - cam_mission.z - view_z_jitter;
 	if (clip >= water_height) {
 		return false;
@@ -1402,7 +1424,7 @@ bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
 	const float ratio = (water_height - clip) / denom;
 	out_mission.x = cam_mission.x + sun_mission.x * 2048.0f * ratio;
 	out_mission.y = cam_mission.y + sun_mission.y * 2048.0f * ratio;
-	out_mission.z = clip + sun_mission.z * 2048.0f * ratio;
+	out_mission.z = clip + denom * ratio;
 	return true;
 }
 

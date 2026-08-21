@@ -129,26 +129,47 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 		// bytes, but an unbound slot is never read (0x16 rows for it drop)
 		// and a re-bind re-inits every field [orig: @0x4346c0], so the reset
 		// covers both witnessed states with one form.
+		// A live slot vanishing is presenter state like the rows (the board
+		// reads the LIVE slot's quality/binding), so it moves the revision —
+		// edge-triggered, like the entity-team write.
+		const bool was_bound = slot.bound;
 		slot = ClientRosterSlot{};
+		if (was_bound) ++state_.revision;
 		return;
 	}
+	bool changed = !slot.bound; // a (re)bind
 	if (!slot.bound) slot = ClientRosterSlot{}; // re-bind re-init [orig: @0x4346c0]
 	slot.bound = true;
 	// The entity binding is NOT bitmask-gated: every non-removal sync restamps
 	// it [orig: @0x431477/@0x431480; the no-entity -1 form @0x431489].
-	slot.entity_slot = sync.entity_slot_id == 0xFF
+	const int16_t entity_slot = sync.entity_slot_id == 0xFF
 			? int16_t{-1}
 			: static_cast<int16_t>(sync.entity_slot_id);
+	changed |= slot.entity_slot != entity_slot;
+	slot.entity_slot = entity_slot;
 	// Named fields land per-FIELD last-write-wins: a sync that omits a bit
 	// leaves that field alone rather than clearing it.
-	if ((sync.field_bitmask & kPlayerSyncHasName) != 0u) slot.name = sync.name;
-	if ((sync.field_bitmask & kPlayerSyncHasTeamString) != 0u) slot.clan = sync.clan;
+	if ((sync.field_bitmask & kPlayerSyncHasName) != 0u) {
+		changed |= slot.name != sync.name;
+		slot.name = sync.name;
+	}
+	if ((sync.field_bitmask & kPlayerSyncHasTeamString) != 0u) {
+		changed |= slot.clan != sync.clan;
+		slot.clan = sync.clan;
+	}
 	if ((sync.field_bitmask & kPlayerSyncHasTeamByte) != 0u) {
 		slot.team = sync.team;
-		apply_team_to_entity(state_, slot, sync.team); // [orig: @0x4315fc]
+		apply_team_to_entity(state_, slot, sync.team); // [orig: @0x4315fc] — its own edge bump
 	}
-	if ((sync.field_bitmask & kPlayerSyncHasQuality) != 0u)
-		slot.quality = sync.quality > 4u ? uint8_t{4} : sync.quality; // [orig: @0x43170d]
+	if ((sync.field_bitmask & kPlayerSyncHasQuality) != 0u) {
+		const uint8_t quality = sync.quality > 4u ? uint8_t{4} : sync.quality; // [orig: @0x43170d]
+		changed |= slot.quality != quality;
+		slot.quality = quality;
+	}
+	// The binding, name, clan and quality are what the board projects from
+	// the LIVE slot, so a change to any of them moves ClientState.revision
+	// like the entity rows do (edge-triggered; the team byte bumps above).
+	if (changed) ++state_.revision;
 }
 
 } // namespace opennova::netsim

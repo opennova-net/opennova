@@ -127,7 +127,7 @@ struct TestSource : IRootMotionSource {
     // One-shot length per state when set: the weapon channel's clip-end promotion
     // [orig: AnimMap_UpdateEntity @0x40b77b] is exercised through this.
     std::map<int, int32_t> lengths;
-    int32_t clip_length_ticks(int /*adm_id*/, int id) const override {
+    int32_t clip_length_ticks(int /*adm_id*/, int id, int /*variant*/) const override {
         auto it = lengths.find(id);
         return it == lengths.end() ? -1 : it->second;
     }
@@ -145,7 +145,7 @@ struct BlendProbeSource : IRootMotionSource {
     std::map<int, RootMotionFrame> frames;
 
     bool has_clip(int, int id) const override { return frames.count(id) != 0; }
-    int32_t clip_length_ticks(int, int) const override { return -1; }
+    int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         auto it = frames.find(id);
         if (it == frames.end()) return false;
@@ -393,7 +393,7 @@ CollisionModel ladder_slab_model(bool with_backing = true) {
 struct ClimbSource : IRootMotionSource {
     std::set<int> clips;
     bool has_clip(int, int id) const override { return clips.count(id) != 0; }
-    int32_t clip_length_ticks(int, int) const override { return -1; }
+    int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         if (clips.count(id) == 0) return false;
         ++phase;
@@ -2492,7 +2492,7 @@ void test_eye_offset_restamp() {
         int32_t bottom = 0;
         int32_t top = 0;
         bool has_clip(int, int) const override { return true; }
-        int32_t clip_length_ticks(int, int) const override { return -1; }
+        int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
         bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
             ++phase;
             out = RootMotionFrame{};
@@ -3454,7 +3454,7 @@ int main() {
         // integration. Real idle clips may author zero mean root velocity; the gate is data.
         struct SwaySource : IRootMotionSource {
             bool has_clip(int, int) const override { return true; }
-            int32_t clip_length_ticks(int, int) const override { return -1; }
+            int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
             bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
                 ++phase;
                 out = RootMotionFrame{};
@@ -3493,7 +3493,7 @@ int main() {
                 if (adm_id < 0 || adm_id >= static_cast<int>(clips.size())) return false;
                 return clips[static_cast<size_t>(adm_id)].count(id) != 0;
             }
-            int32_t clip_length_ticks(int, int) const override { return -1; }
+            int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
             bool advance(int adm_id, int id, int32_t &phase, RootMotionFrame &out) override {
                 if (!has_clip(adm_id, id)) return false;
                 ++phase;

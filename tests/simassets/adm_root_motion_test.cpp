@@ -56,13 +56,13 @@ int main() {
     // falls back to RESET's channel (the retail AnimMap registration rule).
     TEST_EXPECT(source.has_clip(0, opennova::world::anim_state::kReset));
     const int32_t reset_len =
-            source.clip_length_ticks(0, opennova::world::anim_state::kReset);
+            source.clip_length_ticks(0, opennova::world::anim_state::kReset, 0);
     std::printf("[adm] reset clip_length_ticks=%d\n", reset_len);
     TEST_EXPECT(reset_len > 0);
     // Fallback: a state id far past the authored table still resolves (RESET).
-    TEST_EXPECT(source.clip_length_ticks(0, 199) == reset_len);
+    TEST_EXPECT(source.clip_length_ticks(0, 199, 0) == reset_len);
     // An unregistered set has nothing.
-    TEST_EXPECT(source.clip_length_ticks(7, 0) == -1);
+    TEST_EXPECT(source.clip_length_ticks(7, 0, 0) == -1);
 
     // advance(): the playhead half-frame convention — phase increments by one
     // per call, frames carry capsule extents (top gets the +0x2000 bias).
@@ -173,18 +173,17 @@ int main() {
         // [orig: ring rotate @0x40b740-0x40b749; frame_count read @0x40b25d].
         const int32_t idle_len_v0 = rings.clip_length_ticks(rid, kIdle, 0);
         const int32_t idle_len_v1 = rings.clip_length_ticks(rid, kIdle, 1);
-        const int32_t walk_len = rings.clip_length_ticks(rid, kWalkForward);
+        const int32_t walk_len = rings.clip_length_ticks(rid, kWalkForward, 0);
         std::printf("[adm] ring length idle[0]=%d idle[1]=%d walk=%d\n",
                 idle_len_v0, idle_len_v1, walk_len);
-        TEST_EXPECT(idle_len_v0 == rings.clip_length_ticks(rid, kIdle));
         TEST_EXPECT(idle_len_v1 == walk_len); // variant 1 IS the walk clip
         TEST_EXPECT(rings.clip_length_ticks(rid, kIdle, 2) == idle_len_v0); // wrap
         TEST_EXPECT(rings.capsule_bottom_at(rid, kIdle, 4, 1) ==
-                    rings.capsule_bottom_at(rid, kWalkForward, 4));
+                    rings.capsule_bottom_at(rid, kWalkForward, 4, 0));
         uint32_t ring_words_v1[8] = {};
         uint32_t walk_words[8] = {};
         const int n_v1 = rings.scan_triggers(rid, kIdle, -1, 7, ring_words_v1, 8, 1);
-        const int n_walk = rings.scan_triggers(rid, kWalkForward, -1, 7, walk_words, 8);
+        const int n_walk = rings.scan_triggers(rid, kWalkForward, -1, 7, walk_words, 8, 0);
         TEST_EXPECT(n_v1 == n_walk);
         for (int i = 0; i < n_v1; ++i) TEST_EXPECT(ring_words_v1[i] == walk_words[i]);
     }
@@ -196,37 +195,37 @@ int main() {
         uint32_t words[8] = {0};
         // A fresh clip start (from_phase = -1) fires frame 0.
         const int first = source.scan_triggers(soldier, opennova::world::anim_state::kReset, -1, 0,
-                                               words, 8);
+                                               words, 8, 0);
         TEST_EXPECT(first == 1);
         // Re-scanning the SAME span from the same start does not double-fire
         // (the scan is a pure function of the span, so the caller advances
         // from_phase; this pins that a zero-width span yields nothing).
-        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 0, words, 8) == 0);
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 0, words, 8, 0) == 0);
         // Two half-frame ticks cross exactly one frame boundary.
-        const int one = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 2, words, 8);
+        const int one = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 2, words, 8, 0);
         TEST_EXPECT(one == 1);
         // A wide span reports every frame it crossed, bounded by max_out.
-        const int many = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, words, 8);
+        const int many = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, words, 8, 0);
         TEST_EXPECT(many > 1);
         TEST_EXPECT(many <= 8);
         uint32_t two_only[2] = {0};
-        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, two_only, 2) == 2);
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, two_only, 2, 0) == 2);
         // An unauthored state falls back to RESET's channel, the same
         // AnimMap registration rule the length/advance paths follow — so a
         // scan of state 9999 reports RESET's words, not nothing.
-        TEST_EXPECT(source.scan_triggers(soldier, 9999, -1, 8, words, 8) ==
+        TEST_EXPECT(source.scan_triggers(soldier, 9999, -1, 8, words, 8, 0) ==
                     source.scan_triggers(soldier, opennova::world::anim_state::kReset,
-                                         -1, 8, words, 8));
+                                         -1, 8, words, 8, 0));
         // An UNREGISTERED SET has no track at all.
-        TEST_EXPECT(source.scan_triggers(7, 0, -1, 8, words, 8) == 0);
+        TEST_EXPECT(source.scan_triggers(7, 0, -1, 8, words, 8, 0) == 0);
         // A null destination scans nothing rather than faulting.
         TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset,
-                                         -1, 8, nullptr, 8) == 0);
+                                         -1, 8, nullptr, 8, 0) == 0);
         // The capsule-bottom dip is readable at a position without advancing;
         // it matches what advance() reports for the same frame.
         TEST_EXPECT(source.capsule_bottom_at(
-                            soldier, opennova::world::anim_state::kReset, 0) == bottom0);
-        TEST_EXPECT(source.capsule_bottom_at(7, 0, 0) == 0);
+                            soldier, opennova::world::anim_state::kReset, 0, 0) == bottom0);
+        TEST_EXPECT(source.capsule_bottom_at(7, 0, 0, 0) == 0);
     }
 
     // clear() empties the registry.

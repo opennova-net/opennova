@@ -243,6 +243,15 @@ struct LightCoronaQuad {
 	std::array<float, 3> rgb{};
 };
 
+// The procedural corona texture "texlightcrn": 128x128 gray, intensity =
+// trunc(255 x (0.4 - 0.45 x d)) clamped >= 0 with d = sqrt((|x-64|/64)^2 +
+// (|y-64|/64)^2), the border row/column forced 0, alpha 255
+// [orig: Lighting_InitTextures @ 0x5a973a..0x5a97ff — abs32 per axis times
+// flt_7C3DCC = 1/64, dbl_7DA050 = 0.4, dbl_7DA058 = 0.45, dbl_7D9F98 = 255,
+// ftol truncation, the < 0 clamp @ 0x5a9793]. One texel's byte.
+inline constexpr int kCoronaTextureSize = 128;
+uint8_t corona_texture_byte(int x, int y);
+
 // One owner's live section-visibility mask for the corona walk: bit N set =
 // COBJ section N draws this frame (the OcclusionWorld::section_mask domain)
 // [orig: g_BuildingSectionVisMask @ 0x297f250, tested per owned corona via

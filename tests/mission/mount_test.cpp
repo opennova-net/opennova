@@ -95,7 +95,7 @@ struct ClipSource : IRootMotionSource {
         return state_id == available_state;
     }
 
-    int32_t clip_length_ticks(int /*adm_id*/, int /*state_id*/) const override { return -1; }
+    int32_t clip_length_ticks(int /*adm_id*/, int /*state_id*/, int /*variant*/) const override { return -1; }
 
     bool advance(int /*adm_id*/, int /*state_id*/, int32_t &/*phase_ticks*/,
                  RootMotionFrame &/*out*/) override {

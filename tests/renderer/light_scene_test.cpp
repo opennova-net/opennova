@@ -773,6 +773,19 @@ int main() {
                "a corona past the fog end fades fully out");
     }
 
+    // The procedural corona texture [orig: Lighting_InitTextures
+    // @ 0x5a973a..0x5a97ff — ftol TRUNCATION, the border forced 0].
+    {
+        expect(corona_texture_byte(64, 64) == 102,
+               "the corona center is trunc(255 * 0.4) = 102");
+        expect(corona_texture_byte(32, 64) == 44,
+               "half radius: trunc(255 * (0.4 - 0.225)) = 44, not rounded 45");
+        expect(corona_texture_byte(0, 64) == 0 && corona_texture_byte(64, 127) == 0,
+               "the border row/column is forced to 0");
+        expect(corona_texture_byte(1, 1) == 0,
+               "past the 0.4/0.45 radius the clamp holds 0");
+    }
+
     // The model-light owner attach: attach bone, blink box, or unowned
     // [orig: Entity_SpawnGlowEffects @ 0x56c7ec / @ 0x56c89f / @ 0x56c8bd].
     {
