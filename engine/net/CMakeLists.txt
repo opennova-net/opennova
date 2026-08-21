@@ -66,6 +66,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_guided.cpp  # the 0x44 guidance fold + client flight (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_feed.cpp  # the S2C 0x1E feed fold
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_scoreboard.cpp  # the 0x16/0x46 board lanes
+    ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_endround.cpp    # the chunked 0x56 stat board
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_scoreboard_view.cpp  # the draw-time board projection
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_world_materializer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/connection_fan.cpp
