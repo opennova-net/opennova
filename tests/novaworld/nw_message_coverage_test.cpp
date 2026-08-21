@@ -845,6 +845,84 @@ int check_S_18_full_entity_spawn() {
 
 // S2C 0x58 — session-status block (§5.48): names + 3 bytes + uptime + 39 stat
 // values + 2 kv pairs. [orig: SessionStatus_ParseFromBuffer @ 0x530ED0]
+// S2C 0x56 -- the chunked end-of-round stat board. Two decoders: the envelope
+// per datagram, and the reassembled payload. [orig: NapiNPClientMsg_0x056
+// @0x431D10]
+int check_S_56_end_round_stats() {
+	// (a) the envelope. A first chunk (offset 0) that does not reach total_size
+	//     is INCOMPLETE; the follow-up that reaches it completes the board.
+	{
+		LE e;
+		e.u16(10);            // total_size
+		e.u16(0);             // chunk_offset -- also the reset signal
+		for (int i = 0; i < 4; ++i) e.u8(uint8_t(i));
+		EndRoundStatsChunk ch;
+		EXPECT(decode_end_round_stats_chunk(e.b.data(), e.b.size(), ch));
+		EXPECT(ch.total_size == 10 && ch.chunk_offset == 0);
+		EXPECT(ch.chunk.size() == 4);
+		EXPECT(!ch.complete());   // 0 + 4 < 10
+		LE e2;
+		e2.u16(10);
+		e2.u16(4);
+		for (int i = 0; i < 6; ++i) e2.u8(uint8_t(0x40 + i));
+		EndRoundStatsChunk ch2;
+		EXPECT(decode_end_round_stats_chunk(e2.b.data(), e2.b.size(), ch2));
+		EXPECT(ch2.complete());   // 4 + 6 >= 10
+	}
+
+	// (b) the reassembled board: one team field, two players, one team row.
+	LE p;
+	p.u8(1);              // winner_team
+	p.u16(0x0064);        // team_score_0 = 100
+	p.u16(0x0032);        // team_score_1 = 50
+	p.u8(1);              // one declared team field...
+	p.u8(7); p.u8(1);     // ...{field 7, enabled}
+	p.u8(2);              // two players
+	// row 0: a clanned player -- display name joins clan and name
+	p.u8(3);                                   // slot
+	for (char ch : std::string("Ace")) p.u8(uint8_t(ch)); p.u8(0);   // name
+	for (char ch : std::string("=X=")) p.u8(uint8_t(ch)); p.u8(0);   // clan
+	for (char ch : std::string("sq1")) p.u8(uint8_t(ch)); p.u8(0);   // tag
+	p.u8(1); p.u8(2);                          // team, side
+	// DISTINCT stat values so a reordering of the seven cannot pass
+	p.u16(11); p.u16(12); p.u16(13); p.u16(14); p.u16(15); p.u16(16); p.u16(17);
+	p.u16(21);                                 // per_team[0]
+	// row 1: no clan -- display name is the bare name
+	p.u8(4);
+	for (char ch : std::string("Solo")) p.u8(uint8_t(ch)); p.u8(0);
+	p.u8(0);                                   // empty clan
+	p.u8(0);                                   // empty tag
+	p.u8(2); p.u8(1);
+	p.u16(1); p.u16(2); p.u16(3); p.u16(4); p.u16(5); p.u16(6); p.u16(7);
+	p.u16(22);
+	p.u8(1);                                   // one trailing team row...
+	p.u16(99);                                 // ...with one column (field_count)
+
+	EndRoundStats st;
+	EXPECT(decode_end_round_stats(p.b.data(), p.b.size(), st));
+	EXPECT(st.winner_team == 1);
+	EXPECT(st.team_score_0 == 100 && st.team_score_1 == 50);
+	EXPECT(st.team_fields.size() == 1);
+	EXPECT(st.team_fields[0].first == 7 && st.team_fields[0].second == 1);
+	EXPECT(st.players.size() == 2);
+	// The seven stats in WIRE order -- the assertion that catches a shuffle.
+	EXPECT(st.players[0].kills == 11 && st.players[0].deaths == 12);
+	EXPECT(st.players[0].assists == 13 && st.players[0].score == 14);
+	EXPECT(st.players[0].captures == 15 && st.players[0].flags == 16);
+	EXPECT(st.players[0].special == 17);
+	EXPECT(st.players[0].per_team.size() == 1 && st.players[0].per_team[0] == 21);
+	EXPECT(st.players[0].slot == 3 && st.players[0].team == 1 && st.players[0].side == 2);
+	// The clan join, and its absence.
+	EXPECT(st.players[0].display_name() == "=X= Ace");
+	EXPECT(st.players[1].display_name() == "Solo");
+	EXPECT(st.team_rows.size() == 1 && st.team_rows[0].size() == 1);
+	EXPECT(st.team_rows[0][0] == 99);
+	// A truncated board is REJECTED rather than half-decoded.
+	EXPECT(!decode_end_round_stats(p.b.data(), p.b.size() - 3, st));
+	cover('S', 0x56);
+	return 0;
+}
+
 int check_S_58_session_status() {
 	LE w;
 	auto str = [&](const char *s) { for (const char *p = s; *p; ++p) w.u8(uint8_t(*p)); w.u8(0); };
@@ -1209,6 +1287,7 @@ int main() {
 	if (check_S_59_deployed_item()) return 1;
 	if (check_S_45_terrain_load()) return 1;
 	if (check_S_18_full_entity_spawn()) return 1;
+	if (check_S_56_end_round_stats()) return 1;
 	if (check_S_58_session_status()) return 1;
 	if (check_S_6F_zone_timer_value()) return 1;
 	if (check_S_53_zone_timer_window()) return 1;
