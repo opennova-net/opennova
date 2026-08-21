@@ -272,6 +272,19 @@ int main() {
 							: "  (retail holds every player pending until a pick)";
 			std::printf("deploy-selectable spawn zones: %d%s\n", zones, note);
 		}
+		// Vehicle families present. A rotor test on a mission with no helicopter
+		// proves nothing, so make the population visible.
+		{
+			std::map<int, int> fam;
+			world.registry.for_each([&](const w::Entity &e) {
+				if (e.handle.pool() != 1) return;
+				const w::VehicleTraits *vt = world.vehicle_traits.get(e.item_id);
+				if (vt != nullptr) fam[static_cast<int>(vt->family)] += 1;
+			});
+			std::printf("vehicle families (0=ground 1=water 2=helo 3=plane 4=bike 5=tank):");
+			for (const auto &kv : fam) std::printf(" %d x%d", kv.first, kv.second);
+			std::printf("\n");
+		}
 		std::printf("scripted kills: %zu death(s) raised", death_tick.size());
 		if (!death_tick.empty())
 			std::printf(", ticks %d..%d (%.1f s..%.1f s)", death_tick.front(),

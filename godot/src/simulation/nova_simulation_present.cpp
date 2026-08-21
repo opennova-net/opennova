@@ -931,6 +931,17 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["wp_node"] = e->brain.f[AiBrain::kWpNode];
 	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
+	// Rotor spin, so a live round can show the blades actually turning rather
+	// than only the code that says they should.
+	if (const opennova::world::Entity *ve = world_->registry.get(e->handle)) {
+		out["rotor_speed"] = ve->veh.rotor_speed;
+		out["rotor_phase"] = ve->veh.rotor_phase;
+		// The mover family, so a rotor check can tell "no helicopter here" from
+		// "the helicopter's blades are not turning".
+		const opennova::world::VehicleTraits *vt =
+				world_->vehicle_traits.get(ve->item_id);
+		out["veh_family"] = vt != nullptr ? int(vt->family) : -1;
+	}
 	out["infantry"] = e->inf.active;
 	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
 	out["adm_name"] = e->inf.active

@@ -89,6 +89,10 @@ func tick(world: GameWorld, delta: float) -> void:
 			"air": bool(card.get("airborne", false)),
 			"alert": int(card.get("alert", -1)),
 			"tgt": bool(card.get("combat_target_valid", false)),
+				# rotor spin (helicopters): speed ramp + blade phase
+				"rs": int(card.get("rotor_speed", 0)),
+				"rp": int(card.get("rotor_phase", 0)),
+				"vf": int(card.get("veh_family", -1)),
 		})
 	if cards.is_empty():
 		return
