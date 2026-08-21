@@ -1215,6 +1215,16 @@ target_include_directories(lfp_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(lfp_feed_test PRIVATE cxx_std_17)
 add_test(NAME lfp_feed COMMAND lfp_feed_test)
 
+# charattr.def ATTRIBUTES -> World::class_attribute_flags -> the friendly-tag
+# medic plate: the whole per-class word, the first-missing-section stop, the
+# first-section-wins duplicate rule, the 16-slot wrap and the S2C 0x41 clear
+# [orig: CharAttr_LoadFromDef @0x412140; AnimMap_IsSlotActive @0x4125e0].
+add_executable(charattr_flags_test world/charattr_flags_test.cpp)
+target_link_libraries(charattr_flags_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(charattr_flags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(charattr_flags_test PRIVATE cxx_std_17)
+add_test(NAME charattr_flags COMMAND charattr_flags_test)
+
 # The player-chat lane (S2C 0x14) fold + the HUD channel table.
 add_executable(client_replica_chat_test netsim/client_replica_chat_test.cpp)
 target_link_libraries(client_replica_chat_test PRIVATE opennova_net opennova_runtime)

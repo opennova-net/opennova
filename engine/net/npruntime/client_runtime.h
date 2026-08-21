@@ -232,6 +232,11 @@ public:
 	void clear_charattr_challenge_table() {
 		if (joiner_) joiner_->clear_charattr_challenge_table();
 	}
+	// The joiner's live charattr table (null without a joiner: a HostClient
+	// reads its embedder's boot copy, which no 0x41 ever mutates).
+	const CharAttrChallengeTable *charattr_challenge_table() const {
+		return joiner_ ? &joiner_->charattr_challenge_table() : nullptr;
+	}
 	bool set_integrity_challenge_profile(std::string_view id) {
 		return joiner_ != nullptr &&
 		       joiner_->set_integrity_challenge_profile(id);

@@ -44,4 +44,16 @@ const CharAttrChallengeRow *find_charattr_challenge_row(
 void clear_charattr_challenge_property(
 		CharAttrChallengeTable &table, uint8_t property_id);
 
+// The sixteen per-class ATTRIBUTES words as the HUD reads them (index =
+// class - 1; AutoScope 1, SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl
+// 0x20): a row contributes its +40 dword only while its active dword (+0) is
+// set. [orig: AnimMap_IsSlotActive @0x4125e0 -- `dword_A79540[31 * ((class - 1)
+//  & 0xF)]` (active) && `mask & dword_A79568[31 * row]` (+0x28 ATTRIBUTES);
+//  the function's third gate, the property-0 disable latch dword_A79508[0],
+//  is raised by the same S2C 0x41 arm that zeroes this dword across every row
+//  (AnimMap_SetSlotDisabled @0x4125c0 called @0x42550d), so a zeroed word
+//  already carries it.] World::class_attribute_flags takes this array.
+std::array<uint32_t, kCharAttrChallengeRowCount> charattr_class_attribute_rows(
+		const CharAttrChallengeTable &table);
+
 } // namespace opennova::np

@@ -309,4 +309,16 @@ void clear_charattr_challenge_property(
 		write_u32(row, offset, 0);
 }
 
+// [orig: AnimMap_IsSlotActive @0x4125e0 -- the row's active dword at +0 gates
+//  the read of its ATTRIBUTES dword at +0x28 (= byte offset 40)]
+std::array<uint32_t, kCharAttrChallengeRowCount> charattr_class_attribute_rows(
+		const CharAttrChallengeTable &table) {
+	std::array<uint32_t, kCharAttrChallengeRowCount> out{};
+	for (std::size_t i = 0; i < kCharAttrChallengeRowCount; ++i) {
+		const CharAttrChallengeRow &row = table.rows[i];
+		out[i] = read_u32(row, 0) != 0 ? read_u32(row, 40) : 0u;
+	}
+	return out;
+}
+
 } // namespace opennova::np
