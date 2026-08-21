@@ -20,7 +20,7 @@ namespace {
 // OcclusionWorld::section_mask over the same COBJ-section domain and
 // Entity::blink_hits — the packed `((section & 0x1F) | (pool_index << 8)) << 12`
 // quads the collision pass stamps.
-bool scar_owner_visible(uint16_t p_owner_packed, void *p_user) {
+bool scar_owner_visible_cb(uint16_t p_owner_packed, void *p_user) {
 	const Simulation *sim = static_cast<const Simulation *>(p_user);
 	return sim->scar_owner_visible(p_owner_packed);
 }
@@ -92,7 +92,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.cam_y = -p_camera_godot.z;
 	ctx.fog_distance = p_fog_distance > 0.0f ? p_fog_distance : 0.0f;
 	ctx.terrain_light_argb = argb_from_color(p_terrain_light);
-	ctx.owner_visible = &scar_owner_visible;
+	ctx.owner_visible = &scar_owner_visible_cb;
 	ctx.user = const_cast<Simulation *>(this);
 	renderer::ScarDrawList list;
 	renderer::compile_scar_draws(world_->scars, ctx, list);
