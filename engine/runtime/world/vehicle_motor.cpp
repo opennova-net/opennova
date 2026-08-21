@@ -1976,7 +1976,14 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // [orig: Entity_UpdateAircraftPhysics @0x490310]
     const bool ai_drive = m.ai_drive;
     m.ai_drive = false;
-    if (!m.net_predicted && !ai_drive) return;
+    // Retail runs this mover for every aircraft row unconditionally - the class
+    // table dispatches it and the occupant-input block gates itself. Our
+    // net_predicted/ai_drive pair is a reimpl guard, so a PLAYER-piloted row has
+    // to be admitted explicitly or the pilot commands nothing.
+    // [orig: the class-table dispatch -> Entity_UpdateAircraftPhysics @0x490310]
+    const bool player_piloted =
+            resolve_local_vehicle_controller(world, veh, traits) != nullptr;
+    if (!m.net_predicted && !ai_drive && !player_piloted) return;
     if (!m.yaw_seeded) {
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;

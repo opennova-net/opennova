@@ -519,7 +519,20 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                                              actrl->health > 0;
                     const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
                                          actrl->player_class != 0;
-                    if (!aplayer) {
+                    if (aplayer) {
+                        // A PLAYER pilot still runs the shared mover: retail has
+                        // ONE aircraft function, and its occupant-input block
+                        // (our stage_air_vehicle_input) stages the same
+                        // fwd/lat/steer/altitude registers the AI leg fills.
+                        // Skipping the mover here left a player in the pilot
+                        // seat with no physics at all - the aircraft simply did
+                        // not respond.
+                        // [orig: Entity_UpdateAircraftPhysics @0x490310 — the
+                        //  input gate is `(occ->Flags & 0x100) && (occ ==
+                        //  g_local_player_entity || is_authority)`, not a
+                        //  separate mover]
+                        aircraft_client_tick(world, *veh, *traits);
+                    } else {
                         chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
                                       *traits);
                         aircraft_client_tick(world, *veh, *traits);
