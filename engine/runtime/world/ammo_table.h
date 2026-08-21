@@ -94,8 +94,14 @@ inline constexpr uint32_t kAmmoFlagClaymore = 0x20000u;
 inline constexpr uint32_t kAmmoFlagNoOItems = 0x80000u;
 inline constexpr uint32_t kAmmoFlagNoMItems = 0x100000u;
 inline constexpr uint32_t kAmmoFlagNoDItems = 0x200000u;
+// [orig: the flag OR-bit table @0x813500 — ClipWater @0x8135b0, ClipWaterFx @0x8135b8]
+inline constexpr uint32_t kAmmoFlagClipWater = 0x1000000u;
 inline constexpr uint32_t kAmmoFlagDesignateTarget = 0x2000000u;
 inline constexpr uint32_t kAmmoFlagIgnorFoilage = 0x4000000u; // sic — the witnessed token spelling
+// The in-flight `move` emitter is RELEASED (not re-posed) while the round sits
+// at or below the water plane [orig: the +0x114 & 0x20000000 test @0x4EA02B in
+// Projectile_UpdatePhysics; world/round_move_effect.h].
+inline constexpr uint32_t kAmmoFlagClipWaterFx = 0x20000000u;
 // (parity static_asserts against DEF_AMMO_FLAG_* live in npruntime/src/weapon_table_build.cpp)
 
 struct AmmoTableEntry {
