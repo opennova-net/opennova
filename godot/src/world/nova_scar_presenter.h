@@ -46,8 +46,9 @@ public:
 
 	// Upload one frame's draw list (the Dictionary Simulation::get_scar_draw_list
 	// returns). `p_owner_nodes` maps an entity-ring owner (the packed handle, int)
-	// to its live model node (ObjectModel preferred — its render-part nodes host
-	// the section-local meshes; any Node3D hosts them at its origin otherwise).
+	// to its live model node (ObjectModel preferred — its render-part nodes are
+	// the mounts for the section-local meshes; any Node3D mounts them at its
+	// origin otherwise).
 	// Entity batches whose owner is absent from the map draw nothing this frame.
 	void present(const Dictionary &p_draw_list, const Dictionary &p_owner_nodes);
 	// Drop every scar mesh (the Stop -> Play boundary, teardown).

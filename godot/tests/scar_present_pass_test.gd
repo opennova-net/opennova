@@ -3,7 +3,7 @@ extends GutTest
 # ScarPresentPass + ScarPresenter on the typed surfaces (ADR 0034): the draw
 # list is pure data through the public present_draw_list leg (production
 # present() pulls Simulation.get_scar_draw_list), the owner models are real
-# ObjectModels built from the armory fixture (their render-part nodes host the
+# ObjectModels built from the armory fixture (their render-part nodes mount the
 # entity-ring meshes), the wire resolver is a real WirePresentPass with injected
 # nodes, and the textures resolve through a real ResourceRoot over a temp dir.
 #

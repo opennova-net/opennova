@@ -267,15 +267,15 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 		if (owner == nullptr) {
 			continue;
 		}
-		// The struck section's render-part node hosts the section-local quads;
-		// a model without that part (or a plain Node3D owner) hosts them at its
-		// own origin.
-		Node3D *host = owner;
+		// The struck section's render-part node is the mount for the
+		// section-local quads; a model without that part (or a plain Node3D
+		// owner) mounts them at its own origin.
+		Node3D *mount = owner;
 		if (ObjectModel *model = Object::cast_to<ObjectModel>(owner)) {
 			const Dictionary parts = model->get_render_part_nodes();
 			const Variant part_v = parts.get(group.section, Variant());
 			if (Node3D *part = Object::cast_to<Node3D>(static_cast<Object *>(part_v))) {
-				host = part;
+				mount = part;
 			}
 		}
 		const uint32_t key = (static_cast<uint32_t>(group.owner & 0xFFFF) << 8) |
@@ -283,7 +283,7 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 		MeshInstance3D *instance = nullptr;
 		if (const ObjectID *existing_id = entity_meshes_.getptr(key)) {
 			instance = Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(*existing_id));
-			if (instance != nullptr && instance->get_parent() != host) {
+			if (instance != nullptr && instance->get_parent() != mount) {
 				instance->queue_free();
 				instance = nullptr;
 			}
@@ -292,7 +292,7 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 			instance = memnew(MeshInstance3D);
 			instance->set_name(String("Scars_") + String::num_int64(group.owner) +
 					"_s" + String::num_int64(group.section));
-			host->add_child(instance);
+			mount->add_child(instance);
 		}
 		instance->set_mesh(group.mesh);
 		kept[key] = instance->get_instance_id();
