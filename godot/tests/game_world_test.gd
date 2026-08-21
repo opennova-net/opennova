@@ -1054,9 +1054,9 @@ func test_world_environment_owns_native_radiance_fog_and_post_processing() -> vo
 	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
 			"The custom dome still owns the visible background while the Sky feeds radiance.")
 	assert_not_null(clear.environment.sky,
-			"A procedural Sky must feed ambient and reflected radiance.")
+			"A procedural Sky must feed reflected radiance.")
 	assert_true(clear.environment.sky.sky_material is ProceduralSkyMaterial)
-	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_SKY)
+	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_COLOR)
 	assert_eq(clear.environment.reflected_light_source, Environment.REFLECTION_SOURCE_SKY)
 	assert_eq(clear.environment.fog_mode, Environment.FOG_MODE_DEPTH)
 	assert_true(clear.environment.fog_enabled)

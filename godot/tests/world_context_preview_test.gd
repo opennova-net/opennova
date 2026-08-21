@@ -111,8 +111,8 @@ func test_preview_renders_runtime_frame_clear_color_below_the_dome_rim() -> void
 		return
 	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
 		"BG_COLOR renders the witnessed skyfog clear instead of the black null-sky fallback.")
-	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_SKY,
-			"Lit preview surfaces receive ENV-driven procedural-sky radiance.")
+	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_COLOR,
+			"Lit preview surfaces receive the decoded ENV sky-ambient color.")
 	assert_eq(clear.environment.tonemap_mode, Environment.TONE_MAPPER_FILMIC)
 	assert_eq(clear.environment.fog_mode, Environment.FOG_MODE_DEPTH)
 

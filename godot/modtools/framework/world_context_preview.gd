@@ -79,7 +79,7 @@ func init_environment_preview() -> void:
 	radiance.process_mode = Sky.PROCESS_MODE_REALTIME
 	radiance.sky_material = procedural
 	clear_environment.sky = radiance
-	clear_environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	clear_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	clear_environment.ambient_light_energy = 0.75
 	clear_environment.ambient_light_sky_contribution = 0.65
 	clear_environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
