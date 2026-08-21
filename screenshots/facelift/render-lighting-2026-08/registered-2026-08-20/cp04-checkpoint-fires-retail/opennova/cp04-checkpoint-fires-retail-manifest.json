@@ -1,0 +1,231 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "cp04-checkpoint-fires-retail-m0120-beauty",
+			"png_path": "cp04-checkpoint-fires-retail-m0120-beauty.png",
+			"png_sha256": "ef5c3ac7b1c64b8bb4562d479a101b43ae5b94d1b3c90f10b8de7a07fbc124d0",
+			"source_state_sha256": "3b681a91ee7359d212c9696f2a00171b6a5a7421a7c5e82b6a0202d05e789054",
+			"state_path": "cp04-checkpoint-fires-retail-m0120-beauty.state.json",
+			"state_sha256": "6efa8edea6b2eb4f7eb1fb45ce54e3391b08249bfd79d316ec46a0b6bbce2355",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp04-checkpoint-fires-retail-m0120-shadows_off",
+			"png_path": "cp04-checkpoint-fires-retail-m0120-shadows_off.png",
+			"png_sha256": "ec7f355bef5d5a63f1fee0bedf921acd9920ca50fe178461e172aee75859ab0f",
+			"source_state_sha256": "e965bbc04ec0261331ec633ec18097a3d76e72039ce39028dafa308d9e8c5c79",
+			"state_path": "cp04-checkpoint-fires-retail-m0120-shadows_off.state.json",
+			"state_sha256": "d31ebe1d09a294c12f48005ce3f4060c63bf237f6c93a643998cd88b24f1451c",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp04-checkpoint-fires-retail-m0120-lighting_only",
+			"png_path": "cp04-checkpoint-fires-retail-m0120-lighting_only.png",
+			"png_sha256": "5445c73358a755dec3f71b686d5bb69fe46d67e305343e12c1ef7a18d75bef4f",
+			"source_state_sha256": "e14c1f72c262184109ef6d624c3b8aaa3183c6acbc2072b9911277019159c115",
+			"state_path": "cp04-checkpoint-fires-retail-m0120-lighting_only.state.json",
+			"state_sha256": "a79e010330795bfaf1e5338497b4dfa044555891d9394224162a6dcbb233cc9a",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp04-checkpoint-fires-retail-m0120-unshaded",
+			"png_path": "cp04-checkpoint-fires-retail-m0120-unshaded.png",
+			"png_sha256": "951e95d6f4f222636d4ae0640a42e4925e3ee8be9e38c528160a02c8e7ff7624",
+			"source_state_sha256": "2480e5c7f117dfc7fd765067f37fbcb57126860a1406056ea62f99e5e4f14b73",
+			"state_path": "cp04-checkpoint-fires-retail-m0120-unshaded.state.json",
+			"state_sha256": "e41a79cd63dbf7c734b43177880dad537c0a774523367e597a6bcc2904edd17d",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp04-checkpoint-fires-retail-m0120-directional_shadow_atlas",
+			"png_path": "cp04-checkpoint-fires-retail-m0120-directional_shadow_atlas.png",
+			"png_sha256": "d4711c9e2d0118b07644820ca329cfed95c74f790e19fb959b670247604a897e",
+			"source_state_sha256": "00490caa6e9a842a55d022ccca67941a20d9814a86a12a0f13e91cc492532871",
+			"state_path": "cp04-checkpoint-fires-retail-m0120-directional_shadow_atlas.state.json",
+			"state_sha256": "ad7fa5709c8e918cdff1f4c808005122a5ac8e9115aba9406ed9a96897b7e5c9",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				0.642787635326386,
+				0.0,
+				0.766044437885284
+			],
+			[
+				0.0667651668190956,
+				0.99619472026825,
+				-0.0560226291418076
+			],
+			[
+				-0.763129413127899,
+				0.0871557369828224,
+				0.640341639518738
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": -5.0,
+			"position": [
+				515.856706953292,
+				-180.120050725277,
+				30.7163296274939
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 50.0
+		},
+		"camera_position_godot": [
+			515.856689453125,
+			30.716329574585,
+			180.120056152344
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				516.0,
+				-180.0,
+				30.0
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": -5.0,
+				"position": [
+					516.0,
+					-180.0,
+					30.0
+				],
+				"yaw_deg": 50.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": -5.0,
+			"position": [
+				515.856706953292,
+				-180.120050725277,
+				30.7163296274939
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 50.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"night_fire_light",
+			"effectworld_point_light"
+		],
+		"id": "cp04-checkpoint-fires-retail",
+		"minutes_of_day": [
+			120.0
+		],
+		"mission": "CP04.bms",
+		"retail_player_bms": {
+			"applied": [
+				516.0,
+				-180.0,
+				30.0
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "CP04.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "ade019ca4b3d8cd6851abeec6ca8ffa2357d2b9b83a2cd348eebf4a82f9e8346",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

@@ -34,4 +34,4 @@ fixtures/**/.gitignore text eol=lf filter= diff= merge=
 # conversion: the evidence records hash each other byte-exactly, and two
 # CRLF-written manifests must keep their bytes (-text, not eol=lf).
 screenshots/**/*.md -text filter= diff= merge=
-screenshots/**/*.json -text filter= diff= merge=
+screenshots/**/*.json -text filter= diff= merge= whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

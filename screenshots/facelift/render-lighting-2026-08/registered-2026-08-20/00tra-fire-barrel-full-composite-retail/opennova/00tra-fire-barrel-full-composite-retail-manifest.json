@@ -1,0 +1,232 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "00tra-fire-barrel-full-composite-retail-m0900-beauty",
+			"png_path": "00tra-fire-barrel-full-composite-retail-m0900-beauty.png",
+			"png_sha256": "0e1a21bcdde7a5338d95281c6f2ad2efd44a0ff625d5b13448f0f7f98152d4a6",
+			"source_state_sha256": "fdfd55a7c0cdd2d01b78905df3ee7e60b95be75fc053434b9a32458c3dab9940",
+			"state_path": "00tra-fire-barrel-full-composite-retail-m0900-beauty.state.json",
+			"state_sha256": "35adddc03a3938ab97fadc6532d58d5a752d349694ec7b75ac3a264b70c0a86f",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-fire-barrel-full-composite-retail-m0900-shadows_off",
+			"png_path": "00tra-fire-barrel-full-composite-retail-m0900-shadows_off.png",
+			"png_sha256": "7b42d720f3fa3f6ee70c390f1df7bb19435261ed7bacaed6bcb13546b58823a9",
+			"source_state_sha256": "f143706dae6113681c5f55a2204eda8ca381ee81149ad3bed4100a54851337f5",
+			"state_path": "00tra-fire-barrel-full-composite-retail-m0900-shadows_off.state.json",
+			"state_sha256": "a307e78715f62a44607a2814066e3fa096486b565eb32bbbaf1407eb26ca5334",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only",
+			"png_path": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only.png",
+			"png_sha256": "59bca343eabcea8bc96ff9b4b931b3e285fcacb06dd28272e78a441caa613126",
+			"source_state_sha256": "9fa4e0cd0f9693fc063038420736059157466ca4cd88a34b3ce2d4cc35f483b7",
+			"state_path": "00tra-fire-barrel-full-composite-retail-m0900-lighting_only.state.json",
+			"state_sha256": "8e0528aabd3a4c79a45ad9556668b8c3116701884ee8e2f2bcbea20a41c009f1",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-fire-barrel-full-composite-retail-m0900-unshaded",
+			"png_path": "00tra-fire-barrel-full-composite-retail-m0900-unshaded.png",
+			"png_sha256": "a4873ba5682059c8e73de3c5211e8f501f81a5156f9674d9580c3c919789ebe6",
+			"source_state_sha256": "a3a91d4086ee7fc1f87455f0cd5cbcbef3df2f09b9d1785c3a3504fae82c658e",
+			"state_path": "00tra-fire-barrel-full-composite-retail-m0900-unshaded.state.json",
+			"state_sha256": "ec3a5208d53ed3b9cda74364c06d518161f6759460045e65de7cb545e0d55a3a",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow_atlas",
+			"png_path": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow_atlas.png",
+			"png_sha256": "4bbeaacb25937c34ea957d8b483e946d9cdecea71fde68729693621f6c0e173b",
+			"source_state_sha256": "eea65005cf714b5fd9320636a3bb9b8de2002a346a18fdc710f2f7d4b2898632",
+			"state_path": "00tra-fire-barrel-full-composite-retail-m0900-directional_shadow_atlas.state.json",
+			"state_sha256": "74a62c7c832acbc3cd6ebf01b806bd0de83be3c94cc48819e0827e8501508c98",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				-0.0000000437113882867379,
+				0.0,
+				-1.0
+			],
+			[
+				-0.113203212618828,
+				0.993571877479553,
+				0.00000000494826979391405
+			],
+			[
+				0.993571877479553,
+				0.113203212618828,
+				-0.0000000434304077145953
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": -6.5,
+			"position": [
+				283.027679359777,
+				-357.546026565741,
+				28.7064882767706
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": -90.0
+		},
+		"camera_position_godot": [
+			283.027679443359,
+			28.7064876556396,
+			357.546020507813
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				283.129364013672,
+				-357.799468994141,
+				27.0
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": -6.5,
+				"position": [
+					283.129364013672,
+					-357.799468994141,
+					27.0
+				],
+				"yaw_deg": -90.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": -6.5,
+			"position": [
+				283.027679359777,
+				-357.546026565741,
+				28.7064882767706
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": -90.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"hud",
+			"viewmodel",
+			"caster_context"
+		],
+		"id": "00tra-fire-barrel-full-composite-retail",
+		"minutes_of_day": [
+			900.0
+		],
+		"mission": "00TRa.bms",
+		"retail_player_bms": {
+			"applied": [
+				283.129364,
+				-357.799469,
+				27.0
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "00TRa.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "64dd18b3122a6c4ee4e173cac1b9a12d19004c32572bd2f1ad113a475fe57407",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

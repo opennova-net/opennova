@@ -27,7 +27,7 @@ CAPTION_FONT_BOLD = (
     / "CourierPrime-Bold.ttf"
 )
 PUBLISHED_EVIDENCE_ROOT = (
-    ROOT / "screenshots" / "parity" / "render-lighting-2026-08"
+    ROOT / "screenshots" / "facelift" / "render-lighting-2026-08"
     / "registered-2026-08-20"
 )
 LEGACY_CATALOG_SHA256 = (
@@ -64,7 +64,7 @@ if _PROBE_PNG is not None and _lfs_pointer_stub(_PROBE_PNG):
         "--include=screenshots/**`)",
         allow_module_level=True,
     )
-CURRENT_SOURCE_COMMIT = "30f3e194b9f7aaea6053492f7797c9940f8039ed"
+CURRENT_SOURCE_COMMIT = "179e8715ec11dbae6cd75562f0a843f4c5c720f3"
 # The archived v1 catalog predates the tire-marks fixture; its id set is
 # pinned separately from the current publication's.
 LEGACY_FIXTURE_IDS = frozenset({

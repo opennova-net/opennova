@@ -15,7 +15,7 @@ pixel target.
 | [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0) |
 | [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 | [`render-occlusion-re.md`](render-occlusion-re.md) | **landed 2026-07-16** (outside the original three REN slices) | D-OCC | blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, the GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, and the sound-occlusion witness (which closed D-SND-7). Sound occlusion (2026-07-16, `CollisionWorld` + `engine/runtime/terrain_query`), the indoor frame gates (2026-07-16, `OcclusionFramePass`), and the section-mask/portal engine (init, mask build, traversal, occluder culling — 2026-07-17, `engine/runtime/world/src/occlusion.cpp`) are all ported; residuals ride the D-OCC rows |
-| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; max-quality publication refreshed 2026-08-20** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
+| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; facelift publication refreshed 2026-08-20** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
 sky/water shader gaps grow [env/env-tod-re.md](../env/env-tod-re.md) — in
@@ -117,12 +117,14 @@ matrix. It extends v3 with two snapshot-derived fixtures
 `cp12-yard-road-retail`, and `cp12-yard-tanks-retail`; rejected unregistered
 context frames are not substitutes for these fixtures.
 
-The current 2026-08-20 max-quality publication contains
-[all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
+The current 2026-08-20 facelift publication contains
+[all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md),
 captured from frozen source
-`30f3e194b9f7aaea6053492f7797c9940f8039ed` (the catalog-v4 growth commit;
-the prior frozen sources `3ada00e96…` and `3232a5c86…` were orphaned from
-master ancestry by a rebase merge, which is what prompted this re-take). The fixture index links every
+`179e8715ec11dbae6cd75562f0a843f4c5c720f3`. Every row binds Godot executable
+SHA-256 `1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7`
+and GDExtension SHA-256
+`7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e`.
+The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
 uses fixture catalog v4,
@@ -132,8 +134,11 @@ images come from the pre-HUD backbuffer snapshot; the ordinary retail HUD/FPS
 path remains active on screen. Validators reject every legacy schema rather
 than silently upgrading it.
 
-Two superseded sets are retained only in repository history and are not
-admissible parity evidence: the 2026-08-17 set (catalog v1, frozen source
+Three superseded sets are retained only in repository history and are not
+current facelift evidence: the pre-facelift catalog-v4 publication (frozen
+source `30f3e194b9f7aaea6053492f7797c9940f8039ed`; its prior frozen sources
+`3ada00e96…` and `3232a5c86…` were orphaned from master ancestry by a rebase
+merge), the 2026-08-17 set (catalog v1, frozen source
 `b476b1ef8acd65d18f7149f744e72d48f086e506`, `object_texdetail=1`,
 process-scoped HUD suppression) and the 2026-08-16/18 set (catalog v2, frozen
 source `2cde75ad029be14d1c6e0dd8b034efc5fef017b5` — a pre-squash PR SHA that is
@@ -146,26 +151,31 @@ re-shootable — its `camera_bms` values bind its own capture session's physics
 constraint table).
 
 Across the 18 current comparison-v6 manifests, full-frame MAE spans
-`5.071006`–`26.338288`, `world_center` MAE spans
-`2.493591`–`23.970676`, and `viewmodel_arms` MAE spans
-`6.103721`–`34.217820`. These are descriptive deltas, not parity thresholds.
+`7.873537`–`31.626552`, `world_center` MAE spans
+`7.671877`–`30.705093`, and `viewmodel_arms` MAE spans
+`4.679503`–`42.439465`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
 night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
-differences remain visible. The `00tra-tire-marks-retail` fixture (added
-2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
-tire-mark composition; the D-TIL-4 flip/rotate composition-order fix in this
-revision dropped its full-frame MAE `16.354421` → `12.135816`, and the
-remaining delta rides the open D-TERRAIN-7 tile-composition items. The
+differences remain visible. CP04 is the clearest night-exposure outlier: an
+8-pixel-stride full-frame Rec. 709 luma sample measures OpenNova mean `0.032`
+versus retail `0.123`, with `98.0%` of OpenNova samples below `0.10`; its
+`shadows_off` diagnostic stays dark, locating the residual in ambient/exposure
+rather than cast shadows. The `00tra-tire-marks-retail` fixture (added 2026-08-20
+from a debug snapshot) measures the ordered `.til` overlay tire-mark composition
+under the new relight; the remaining data/composition questions stay in
+D-TERRAIN-7. The
 `00tra-armory-lght-retail` fixture (added 2026-08-20 from a debug snapshot)
-measures model-authored `LGHT` lamp delivery inside the armory - the
-2026-08-20 slice landed vertex-rate point shading, static-source owner
-scope, and corona billboards, and refuted the Target/spot-cone premise
-(the spot spawner is caller-less dead code); interior groups, batch draw
-contexts, and the terrain/foliage legs ride the open D-RLIT-4 residual
-tail. The `03tr-sun-sky-retail` fixture (same session)
-measures low-sun sky-dome/sun/ambient response on the 03TR airfield; its
-deltas ride D-RLIT-2, D-RLIT-5, and the deferred env #16 first-pass TOD
-table.
+measures model-authored `LGHT` lamp delivery inside the armory. The portable
+pool retains decoded identity, transform, animated color, range, lifetime and
+participation flags; `EffectLightDirector` realizes each active row as a pooled
+Godot `OmniLight3D` or `SpotLight3D`, selected from the decoded target bit, and
+keeps the witnessed corona walk live. Illumination is now native clustered and
+spatial rather than retail's nearest-four per-draw delivery. Native-versus-retail
+attenuation, specular and shadow response still diverge, along with batched
+static subobject ownership and the remaining D-RLIT-4 delivery tail. The
+`03tr-sun-sky-retail` fixture (same session) measures the low-sun divergence in
+iris/ambient sampling (D-RLIT-2), sun-glint/reflection stand-ins (D-RLIT-5),
+and the deferred overcast/TOD first-pass table (env #16).
 
 ## Capture procedures
 

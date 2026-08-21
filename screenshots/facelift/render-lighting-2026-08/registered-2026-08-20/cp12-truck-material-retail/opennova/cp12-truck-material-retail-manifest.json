@@ -1,0 +1,232 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "cp12-truck-material-retail-m1260-beauty",
+			"png_path": "cp12-truck-material-retail-m1260-beauty.png",
+			"png_sha256": "1aaaedb455db397c131a2e9a33f787c14c5ada8df11e7f012af1106cbabdebfe",
+			"source_state_sha256": "37f1cd20e4e51e78b6821b595fcff7036d1d2048e78006c3a65297fb4ea63172",
+			"state_path": "cp12-truck-material-retail-m1260-beauty.state.json",
+			"state_sha256": "fb225b8542331b1341c77c382ce80a3913eed9e0a7bcb0106f113a45b9e389d7",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-truck-material-retail-m1260-shadows_off",
+			"png_path": "cp12-truck-material-retail-m1260-shadows_off.png",
+			"png_sha256": "aa080b1e14bc3b071b949bb35a3142d0c0a4eeffc069d1bf3e8da5af4ed431b6",
+			"source_state_sha256": "186fb9ff389290dd7936e0d2dbddc3b92ed0c57533e6ba225609b1d652b2c30e",
+			"state_path": "cp12-truck-material-retail-m1260-shadows_off.state.json",
+			"state_sha256": "1adce1413032aac8a07394957419183f6400835212cff14b09a3bc3519a1849c",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-truck-material-retail-m1260-lighting_only",
+			"png_path": "cp12-truck-material-retail-m1260-lighting_only.png",
+			"png_sha256": "9fd554380c4dcceb9caeedaa44ba32d633a6bb3479089dd0ff8af52b74d6809e",
+			"source_state_sha256": "74e99f3e7efa4877fe566a2035852250c166515eb95c134b6ee31bd692433f5e",
+			"state_path": "cp12-truck-material-retail-m1260-lighting_only.state.json",
+			"state_sha256": "b3c136a50f2048f7ea3e8536ecc1896a742db5742f6f8edfce5c6b6b53655af3",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-truck-material-retail-m1260-unshaded",
+			"png_path": "cp12-truck-material-retail-m1260-unshaded.png",
+			"png_sha256": "6932c90d90d54317ae95ceac65441263a7abecd1caefe4e81f6ce9fc5ce2a764",
+			"source_state_sha256": "7d7b1aaa1d967427fe23685702ae33ddca63748ca68a4b72f6c7d5bd10931660",
+			"state_path": "cp12-truck-material-retail-m1260-unshaded.state.json",
+			"state_sha256": "4a6375040a0cfcf930ee9fc089bdcb25e274890596c2808debad9a6760533ff0",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-truck-material-retail-m1260-directional_shadow_atlas",
+			"png_path": "cp12-truck-material-retail-m1260-directional_shadow_atlas.png",
+			"png_sha256": "661221e1b1c40a38b40ef61893dddf38ffabe134d01b8528bc9075ad12e6572e",
+			"source_state_sha256": "42d60e56ee6d44e5bc6aaa953a6bf50d037688b4f2156979abdf66ec22e7e3cc",
+			"state_path": "cp12-truck-material-retail-m1260-directional_shadow_atlas.state.json",
+			"state_sha256": "b23c06dad28f8641e578851e865b0566ac27aa7dd74907cb30098ddff81afc97",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				0.70710676908493,
+				0.0,
+				0.70710676908493
+			],
+			[
+				0.0690015256404877,
+				0.99522739648819,
+				-0.0690015256404877
+			],
+			[
+				-0.703732013702393,
+				0.0975828990340233,
+				0.703732013702393
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": -5.6,
+			"position": [
+				-429.98776281563,
+				1539.47444358454,
+				62.1082911638805
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 45.0
+		},
+		"camera_position_godot": [
+			-429.987762451172,
+			62.1082916259766,
+			-1539.47448730469
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				-429.856048583984,
+				1539.60729980469,
+				61.3899993896484
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": -5.6,
+				"position": [
+					-429.856048583984,
+					1539.60729980469,
+					61.3899993896484
+				],
+				"yaw_deg": 45.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": -5.6,
+			"position": [
+				-429.98776281563,
+				1539.47444358454,
+				62.1082911638805
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 45.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"vs_envphongt",
+			"glass",
+			"night_reflection"
+		],
+		"id": "cp12-truck-material-retail",
+		"minutes_of_day": [
+			1260.0
+		],
+		"mission": "CP12.bms",
+		"retail_player_bms": {
+			"applied": [
+				-429.856046,
+				1539.607326,
+				61.39
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "CP12.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "24d498c38f694bcddecfe71567f64a5c12d7164f3566554fc5cde66e42216459",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

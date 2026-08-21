@@ -47,7 +47,7 @@ except ImportError:  # invoked from scripts/render directly
 
 DEFAULT_CATALOG = "docs/render/render-fixtures-retail-v4.json"
 DEFAULT_PUBLISHED = (
-    "screenshots/parity/render-lighting-2026-08/registered-2026-08-20"
+    "screenshots/facelift/render-lighting-2026-08/registered-2026-08-20"
 )
 RETAIL_SIZE = (1920, 1200)
 

@@ -16,7 +16,7 @@ refactor, and the evidence plumbing used to compare them across three missions:
 - replacement of runtime-composed object shader source with typed pipeline
   descriptors and finite checked-in technique resources; and
 - frame-correlated diagnostics, capture bundles, exact post-spawn fixtures,
-  and the [current 15-pair max-quality registered review set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
+  and the [current 18-pair facelift registered review set](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md),
   refreshed 2026-08-20.
 
 It does **not** claim that glass/environment cubemaps, sky-dome rendering,
@@ -281,38 +281,46 @@ sole authored minute multiplied by 60 as seconds, and the catalog mission
 filename/SHA pair; sequential capture never treats a prior fixture's FOV or
 clock as evidence for the next one.
 
-### Current 2026-08-20 max-quality registered publication
+### Current 2026-08-20 facelift registered publication
 
 The current publication is indexed at
-[`screenshots/parity/render-lighting-2026-08/registered-2026-08-20/`](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md).
+[`screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/`](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md).
 It contains all 18 registered pairs, 18 overlays, 18 absolute-difference
 images, 18 normalized OpenNova images, and 90 raw OpenNova diagnostic images
 with portable evidence records. Three pairs are snapshot-derived growth:
 `00tra-tire-marks-retail` (2026-08-20, the crossing ground tire tracks,
 measuring the ordered `.til` overlay composition divergence D-TERRAIN-7),
 `00tra-armory-lght-retail` (2026-08-20, the lamp-lit armory interior wall,
-measuring the D-RLIT-4 model-`LGHT` delivery residuals: corona billboards,
-Target/spot cones, static-batch owner scope), and `03tr-sun-sky-retail`
+measuring native clustered model-`LGHT` delivery, the witnessed corona walk,
+and the remaining D-RLIT-4 static-subobject delivery tail), and `03tr-sun-sky-retail`
 (2026-08-20, the low-sun 03TR airfield vista, measuring sun/sky-dome/ambient
 response across D-RLIT-2, D-RLIT-5, and the deferred env #16 table). All rows
-bind frozen source `30f3e194b9f7aaea6053492f7797c9940f8039ed` (the catalog-v4
-growth commit; the earlier frozen sources `3ada00e96…` and `3232a5c86…` were
-orphaned from master ancestry by rebase merges of PR #520/#521 — the tag
-`render-evidence/2026-08-20` keeps `3232a5c86…` reachable — which is what
-prompted this full re-take), fixture catalog v4 at SHA-256
+bind frozen facelift source `179e8715ec11dbae6cd75562f0a843f4c5c720f3`,
+Godot executable SHA-256
+`1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7`,
+GDExtension SHA-256
+`7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e`,
+and fixture catalog v4 at SHA-256
 `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
 verbatim fresh-process captures, every applied pose kept exactly —
 stage/restore v3 (tool 3.0.0), raw capture bundle v4 from bridge 1.4/onHook 0.5.0,
 registered capture v5 (tool 4.0.0), and comparison v6 (tool 4.0.0).
 
+The superseded pre-facelift catalog-v4 publication bound source
+`30f3e194b9f7aaea6053492f7797c9940f8039ed` (the catalog-v4 growth commit).
+Its earlier frozen sources `3ada00e96…` and `3232a5c86…` were orphaned from
+master ancestry by rebase merges of PR #520/#521; the tag
+`render-evidence/2026-08-20` keeps `3232a5c86…` reachable. Those identities and
+pixels remain available through repository history.
+
 Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 18 comparison-v6
-manifests, full-frame MAE spans `5.071006`–`26.338288`, `world_center` MAE
-spans `2.493591`–`23.970676`, and `viewmodel_arms` MAE spans
-`6.103721`–`34.217820`. These are descriptive deltas rather than parity
+manifests, full-frame MAE spans `7.873537`–`31.626552`, `world_center` MAE
+spans `7.671877`–`30.705093`, and `viewmodel_arms` MAE spans
+`4.679503`–`42.439465`. These are descriptive deltas rather than parity
 thresholds; no metric from a superseded set is carried forward as if it
 described these images.
 
@@ -503,7 +511,8 @@ murk remain visibly non-identical. Surface-water reflection/noise differs by
 angle; the steep row's world region is relatively close while its foreground
 viewmodel region is not. Fire-barrel rows retain the largest deltas because
 particle phase, blur, and local-light spill are unsynchronized. CP04 retains
-fire, foliage, and live-actor differences. CP12 retains night exposure,
+pronounced night ambient/exposure underexposure plus fire, foliage, and
+live-actor differences. CP12 retains night exposure,
 vegetation/ground sampling, residual road-marking contrast, vehicle/material,
 and live NPC or flag-phase differences. The weapon and bare-arm silhouette now
 match closely, but placement, material response, lighting, and animation phase
@@ -522,8 +531,8 @@ lifecycle fix.
 | Static shadow filtering/submission | Compare static model eligibility and submission separately from dynamic actors. `[orig: Terrain_CollectAndRenderTileModels @ 0x60D421..0x60D463; Render_SubmitEntity @ 0x60D971]` |
 | Terrain-tile shadow invocation/composite | Treat the retail tile render and composite as the reference destination for static sun shadows; do not infer whole-scene receiver behavior from a Godot directional light. `[orig: PolyTrn_RenderTile @ 0x60DC83..0x60DC99; @ 0x60E0C6..0x60E19D]` |
 | Per-entity sun visibility | Separate entity illumination/visibility from cast-shadow admission when interpreting lighting-only and shadow-off variants. `[orig: Entity_ComputeSunVisibility @ 0x5C6800..0x5C68FF]` |
-| Point-light attenuation | The fire-barrel comparison is bounded by the retail EffectWorld attenuation path. OpenNova now evaluates that color/range/attenuation math and feeds object shaders through an explicitly approximate camera-global four-light selection; retail instead selects per draw context. `[orig: Light_GetPointLightParams @ 0x5A9180..0x5A927A; update_light_slots @ 0x5ABC50]` |
-| Authored model lights | Retail instantiates authored `LGHT` records into EffectWorld at mission start. OpenNova does the same for mission-start sources and late ObjectModel nodes; static batched-object destruction/husk rebinding and bone-follow remain residual. `[orig: parse_lights_chunk @ 0x5B47B0; Entity_SpawnGlowEffects @ 0x56C7C0]` |
+| Point-light attenuation | The fire-barrel comparison is bounded by the retail EffectWorld attenuation path and nearest-four per-draw delivery. The facelift retains decoded color/range/attenuation and evaluates every active row, then hands it to Godot's native clustered lighting; native-versus-retail attenuation, specular and shadow response are descriptive divergences rather than compatibility gates. `[orig: Light_GetPointLightParams @ 0x5A9180..0x5A927A; update_light_slots @ 0x5ABC50]` |
+| Authored model lights | Retail instantiates authored `LGHT` records into EffectWorld at mission start. OpenNova does the same for mission-start sources and late `ObjectModel` nodes; `EffectLightDirector` realizes the active rows as pooled `OmniLight3D`/`SpotLight3D` nodes while the witnessed corona walk remains live. Batched static subobject ownership and the remaining D-RLIT-4 delivery tail still diverge. `[orig: parse_lights_chunk @ 0x5B47B0; Entity_SpawnGlowEffects @ 0x56C7C0]` |
 | Sky | Compare the retail sky and its pass structure at the catalog poses/TODs; this session did not modify OpenNova sky behavior. `[orig: render_skybox @ 0x579080; passes @ 0x57988E / @ 0x579AC7]` |
 | Water reflection | Every reflected-world leg — the sector-building pass included — draws only the collection filtered by flag `0x400` above water; the flag's writers are the vehicle item type and the mission-authored BMS `Reflective` attribute. OpenNova mirrors that admission. `[orig: Water_ReflectionPrerender @ 0x5C2780..0x5C27CE; Water_RenderReflectedWorldScene @ 0x5C8510; Terrain_RenderSectorModels @ 0x5C5D30; calls @ 0x5C8576/0x5C857B/0x5C8590/0x5C8599; collector filter @ 0x5C6C32..0x5C6C39; writers @ 0x40E208..0x40E20A / @ 0x40ED1D..0x40ED2B]` |
 | Dynamic environment cube | Normal environment-reflection comparisons are bounded by retail's live environment-cube update path. `[orig: update_environment_cubemap @ 0x6106A0..0x6107C6]` |
@@ -537,12 +546,13 @@ witness set used for this comparison run.
 
 ## Evidence boundaries and limitations
 
-- **EffectWorld object lighting is only partially implemented.** The portable pool,
-  lifecycle, target-disable gates, safe handles, and transient routes are live.
-  The Godot renderer currently publishes one camera-global object-light set;
-  it has no per-draw owner/interior isolation, terrain projection, foliage
-  sampling, or corona pass. Registered retail telemetry and dedicated light
-  fixtures are still required before treating this as visual closure.
+- **EffectWorld records now drive native clustered lights.** The portable pool,
+  lifecycle, participation gates, safe handles, transient routes and witnessed
+  corona walk are live. `EffectLightDirector` synchronizes active rows into
+  pooled Godot `OmniLight3D`/`SpotLight3D` nodes instead of publishing the old
+  camera-global nearest-four shader set. Native-versus-retail attenuation,
+  specular and shadow response still diverge, along with batched static
+  subobject ownership and the remaining D-RLIT-4 delivery tail.
 - **Pixel gates remain within one OpenNova launch.** The fixture resets
   weather to the requested TOD, advances water once for the realized pose,
   then freezes presentation before its five variants. Weather is canonical,
@@ -574,12 +584,14 @@ witness set used for this comparison run.
   only with an exact same-instance application result plus observed pose and
   projection checks. TOD/weather, water state, active lights, material ledger,
   and shadow/pass telemetry remain unsupported and must not be inferred.
-- **No broad rendering closure is claimed.** This slice repairs directional
-  shadow orientation/admission and water reflected-world admission, replaces
-  the generated object-shader boundary without changing intended material
-  math, and adds observation/capture tooling. Glass/environment cubes, sky,
-animated effects, EffectWorld point lights, presentation blend space, and water
-  spatial batching remain governed by their divergence records.
+- **No broad rendering closure is claimed.** The 2026-08-15 slice repaired
+  directional-shadow orientation/admission and water reflected-world admission,
+  replaced the generated object-shader boundary without changing intended
+  material math, and added observation/capture tooling. ADR 0036 subsequently
+  hard-cut the presentation to native lit surfaces and native lights. Retail's
+  glass/environment cubes, sky, point-light equation, presentation blend space
+  and water spatial batching remain stable comparison context, not facelift
+  pixel targets.
 
 ## PR evidence contract
 
@@ -587,8 +599,8 @@ Unselected raw bundles, retail tool transcripts, and full baseline sets remain
 machine-local under `.scratch` according to the
 [asset-gated evidence policy](../asset-gated-tests.md); the selected published
 captures and derivatives do not. The current
-[2026-08-20 max-quality registered set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md)
-supplies the following catalog-v3/stage-v3/raw-v4/registered-v5/comparison-v6
+[2026-08-20 facelift registered set](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md)
+supplies the following catalog-v4/stage-v3/raw-v4/registered-v5/comparison-v6
 inventory:
 
 1. selected within-run OpenNova `subsystem-ab` sheets and heatmaps committed

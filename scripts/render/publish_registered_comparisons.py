@@ -61,7 +61,8 @@ RESIDUALS = """\
   shoreline shading still diverge. Waterline/glare ordering and underwater
   murk remain non-identical.
 - Fire rows retain unsynchronized flame/smoke phase, blur, warm spill, and
-  particle differences. CP04 also contains foliage and live-actor phase.
+  particle differences. CP04 also remains substantially underexposed in its
+  night ambient response and contains foliage and live-actor phase.
 - CP12 retains night exposure, residual road-marking contrast, vegetation and
   ground sampling, vehicle/material response, and live NPC or flag phase.
 - The M16 and bare-arm identity is matched, but viewmodel placement, lighting,
@@ -69,10 +70,16 @@ RESIDUALS = """\
 - Ground tire marks and other ordered .til overlay contributions diverge in
   placement and blend (the open D-TERRAIN-7 tile-composition producer gap,
   measured by the tire-marks fixture).
-- Model-authored `LGHT` lamp delivery diverges: corona billboards are not
-  drawn, Target/spot cones are dropped, and batched static buildings lose the
-  authored subobject owner scope (the open D-RLIT-4 residual tail, measured by
-  the armory-lght fixture).
+- Model-authored `LGHT` records and transient glows now drive pooled native
+  `OmniLight3D`/`SpotLight3D` nodes; corona billboards remain a separate port
+  of the witnessed three-segment EffectWorld walk. The facelift intentionally
+  does not reproduce retail's per-draw nearest-four owner/interior-group
+  selection: Godot admits all spatially overlapping live lights, uses native
+  attenuation/specular with light shadows disabled, and maps authored Target
+  records to spotlights even though JO's runtime spot delivery is dead.
+  Terrain/object participation is layer-coarse, while bone following and
+  batched-static owner/corona visibility remain incomplete (D-RLIT-4,
+  measured by the armory-lght fixture).
 - Sun, sky-dome, and ambient response diverge at low sun: iris/ambient
   sampling (D-RLIT-2), the sun-glint/reflection stand-ins (D-RLIT-5), and the
   deferred overcast/TOD first-pass table (env #16), measured by the 03TR
