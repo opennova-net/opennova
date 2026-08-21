@@ -31,7 +31,7 @@ scalar function in this record; the GUT env vectors
 | Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported; reimpl transfer wired) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the parent interior's daylight openness (model+536), NOT a dual-LOD fade. The reimpl now parses `items.def light_transfer` as a clamped percentage, carries it through `ItemDatabase`, and applies the normalized value to interior ROBJ sections and contained player/viewmodel lighting |
 | FF vertex lighting (ambient + dir + hemisphere delta lights, saturate, ×2) | MATCHING | `renderer::ff_vertex_light` + the checked-in technique implementation `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TSSColor MODULATE2X]`; D-RMAT-5 FIXED; T2 swatch: 116/120 cells moved, the 4 VS_TRACER (unlit, MODULATE 1×) cells byte-identical |
 | Per-entity sun visibility (effectScale source) | MATCHING (2026-08-18: the outdoor feed is live) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; `world::CollisionWorld::sun_visibility_blocked_rays` casts the witnessed one-segment/three-radius query against the drawn entity's OWN proximity-candidate slice (the `+0x1BC`/`+0x1C0` walk of `raycast_find_collision_entity @ 0x539a70` — only structures overlapping the entity's inflated bubble can shade it; an empty slice keeps quality 4, retail's `+0x1C0 == 0` skip), `Simulation::get_entity_sun_visibility_changes` diffs quality per bms_id for the shell, and the local player's quality reaches the presenter (third-person body dims; FP parts keep the witnessed effectScale=1 exemption) (D-RLIT-3) |
-| EffectWorld dynamic point lights (instance pool, spawn/query/select, color × modulator × RgbGen, {1,0,15/r²,1}, ≤4, owner/interior groups, fade/decay lifecycle, transient spawners, coronas) | **PARTIAL (2026-08-20 vertex-rate delivery + coronas ported, spot delivery witnessed DEAD; interior groups + terrain/foliage open)** | `renderer::LightScene` (engine/runtime/renderer/light_scene.h carries the witness map) hosts the 4096×176B pool, safe generation leases, the faithful group-gated selection API, target-disable filtering, and a separately named all-overlap camera query `[orig: Light_InstanceTable @ 0x2732e28; collect_nearby_zones_by_aabb @ 0x5aa250; update_light_slots @ 0x5abc50 — no xrefs; the live per-draw select+enable is `Light_SelectAndEnableForDraw @ 0x5ab9d0` (ex collect_visible_foliage_slots, renamed 2026-08-20), same gate semantics]`. `EffectLightDirector` routes mission-start/late-node model lights and four transient families into object shaders; per-draw owner isolation ported 2026-08-18 (`LightScene::select_for_draws`, per-instance light uniforms, camera-global query = report census only); batched static sources spawn with a synthetic owner so subobject-attached records obey the group gate instead of leaking as world lights (2026-08-20, `[orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity, bone) for every spawning entity kind]`). Point-light shading now runs at the VERTEX rate like the D3D pipeline the pool lights ride (`v_point_light_diffuse` in shared.gdshaderinc `[orig: Light_ApplyAsD3DLight @ 0x5abd50 — LightEnable on fixed-function VERTEX lights]`) — the per-pixel evaluation painted a circular pool retail never draws (the 00tra-armory-lght-retail fixture). Corona billboards ported IN FULL (`LightScene::collect_corona_quads` + `light_corona.gdshader` `[orig: EffectWorld_RenderLightCoronas @ 0x5aaf40; texture "texlightcrn" @ Lighting_InitTextures 0x5a94f0]`), including the owner visible-section gate (the occlusion verdict masks feed the collect `[orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960 over g_BuildingSectionVisMask @ 0x297f250 — the ported OcclusionWorld::section_mask domain]`), the flag-0x100 impact re-center (the flag's only witnessed reader — the corona drops radius/2 back onto the impact `[orig: @ 0x5ab037..0x5ab05c]`), and the fog-to-black fold (mode-2 fog forces FOGCOLOR black `[orig: CD3DDevice_SetFogAndBlendMode @ 0x677740 case 2]`). Spot/Target-cone runtime delivery is witnessed DEAD CODE in JO (`LightPool_SpawnSpotProjectorEffect @ 0x5a9fd0` is caller-less; model LGHT falloff/rotation/view_proj never reach the pool). Interior groups, terrain/foliage delivery, and static-destruction rebinding remain residuals on D-RLIT-4. |
+| EffectWorld dynamic point lights (instance pool, spawn/query/select, color × modulator × RgbGen, {1,0,15/r²,1}, ≤4, owner/interior groups, fade/decay lifecycle, transient spawners, coronas) | **PARTIAL (2026-08-21 blink-box owner attach + interior light groups ported; 2026-08-20 vertex-rate delivery + coronas, spot delivery witnessed DEAD; terrain/foliage open)** | `renderer::LightScene` (engine/runtime/renderer/light_scene.h carries the witness map) hosts the 4096×176B pool, safe generation leases, the faithful group-gated selection API, target-disable filtering, and a separately named all-overlap camera query `[orig: Light_InstanceTable @ 0x2732e28; collect_nearby_zones_by_aabb @ 0x5aa250; update_light_slots @ 0x5abc50 — no xrefs; the live per-draw select+enable is `Light_SelectAndEnableForDraw @ 0x5ab9d0` (ex collect_visible_foliage_slots, renamed 2026-08-20), same gate semantics]`. `EffectLightDirector` routes mission-start/late-node model lights and four transient families into object shaders; per-draw owner isolation ported 2026-08-18 (`LightScene::select_for_draws`, per-instance light uniforms, camera-global query = report census only); batched static sources spawn with a synthetic owner so subobject-attached records obey the group gate instead of leaking as world lights (2026-08-20, `[orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity, bone) for every spawning entity kind]`). Point-light shading now runs at the VERTEX rate like the D3D pipeline the pool lights ride (`v_point_light_diffuse` in shared.gdshaderinc `[orig: Light_ApplyAsD3DLight @ 0x5abd50 — LightEnable on fixed-function VERTEX lights]`) — the per-pixel evaluation painted a circular pool retail never draws (the 00tra-armory-lght-retail fixture). Corona billboards ported IN FULL (`LightScene::collect_corona_quads` + `light_corona.gdshader` `[orig: EffectWorld_RenderLightCoronas @ 0x5aaf40; texture "texlightcrn" @ Lighting_InitTextures 0x5a94f0]`), including the owner visible-section gate (the occlusion verdict masks feed the collect `[orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960 over g_BuildingSectionVisMask @ 0x297f250 — the ported OcclusionWorld::section_mask domain]`), the flag-0x100 impact re-center (the flag's only witnessed reader — the corona drops radius/2 back onto the impact `[orig: @ 0x5ab037..0x5ab05c]`), and the fog-to-black fold (mode-2 fog forces FOGCOLOR black `[orig: CD3DDevice_SetFogAndBlendMode @ 0x677740 case 2]`). Spot/Target-cone runtime delivery is witnessed DEAD CODE in JO (`LightPool_SpawnSpotProjectorEffect @ 0x5a9fd0` is caller-less; model LGHT falloff/rotation/view_proj never reach the pool). The owner attach is complete as of 2026-08-21: `renderer::resolve_model_light_owner` reproduces the spawner's branch order including the blink-box leg and the building-skips-the-query gate, and both witnessed groups now ride each draw context so interior room lights reach exactly the entities standing in their section (and the first-person parts through the local player's group) `[orig: Entity_SpawnGlowEffects @ 0x56c7ec/@ 0x56c8bd; Lighting_SetInteriorLightGroup @ 0x5a90e0 -> setup_terrain_effect_for_entity @ 0x5c74a0]`. Terrain/foliage delivery, static-destruction rebinding, the per-ROBJ owner section on a building's own draw `[orig: @ 0x5d8ff7]`, and batched containing buildings remain residuals on D-RLIT-4. |
 | Model-authored `LGHT` chunks | **RE-GRADED 2026-08-16**: consumed at spawn via the EffectWorld pool, never via per-material uniforms | The old “no post-load read” claim audited the wrong field: the +0xCC xref audit missed that `Entity_SpawnGlowEffects @ 0x56c7c0` walks the model's light array (count at model dword 49 = +0xC4, records at dword 50 = +0xC8, stride 120) at mission start and spawns one EffectWorld pool instance per record — white spawn color, radius = atten_end × 65536, the record's RGB-gen block attached, subobject/blink-box owner attach, and the three authored disable flags → render flags 512/1024/2048 `[orig: @ 0x56c836..0x56c92c]`. The per-material `u_local_light_*` path stays editor-preview-only (`u_local_light_count = 0` in gameplay — that half of the old row remains true); gameplay illumination flows through `renderer::LightScene` |
 | Terrain surface c0/c1 | MATCHING (ported) | c0 = SKY block, c1 = LIGHT block (both [0] ÷255): `renderer::terrain_surface_light`, `terrain_lighting.gdshaderinc` corrected from the gobj-era combined/fill guess `[orig: terrain_setup_lighting_and_shader @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 ← Render_TerrainScene @ 0x610c80]` |
 | Dynamic projected entity shadows | WITNESSED / reimpl-native approximation | Retail allocates the independent projected render-slot path for people (and the local player) or ItemDef `DynamicShadow`; attached third-person weapons join their entity, while the first-person viewmodel does not cast. ItemDef `NoShadow` does not gate this path. Mission placement carries that admission policy (the aspirational streamed-model resolver twin was deleted 2026-08-11 — unreferenced since birth) `[orig: Entity_InitFromModel @ 0x40E1BC..0x40E1F7; GUT: mission_object_placer_test, nova_object_model_runtime_gate_test]` |
@@ -275,18 +275,64 @@ reuse (intentional safety divergence). Four transient spawners are routed:
   round+0x1B4, spawned radius/2 up, per-tick follow at the raw round
   position (`@ 0x4eaa9f`), cleared in `Projectile_ReleaseEffects`.
 
-The owner-group write in the model-light spawner is conditional
-(`@ 0x56c8ae..0x56c8db`): a record with a nonzero attach bone is owned by
-its entity + section (cabin self-lights); a record inside a blink box is
-owned by the CONTAINING building + section (interior room lights); every
-other record — the fire barrels — spawns unowned and lights the world.
+**Owner groups and the blink-box attach (PORTED 2026-08-21).** The owner-group
+write in the model-light spawner is conditional and runs in a fixed branch
+order (`@ 0x56c89a..0x56c8db`): a record with a nonzero attach bone is owned by
+its entity + section (cabin self-lights); a record inside a blink box is owned
+by the CONTAINING building + section (interior room lights); every other
+record — the fire barrels — spawns unowned and lights the world. The blink
+query itself runs ONCE per spawning entity, before the record walk
+(`Entity_QueryBlinkBoxesAtPoint @ 0x4af350`, called `@ 0x56c7fc`), and only
+slot 0 of the packed quad is read: owner = `Pool_GetEntryUnchecked(2, hit >> 20)`
+`@ 0x56c8c9`, section = `(hit >> 12) & 0x1F` `@ 0x56c8db`. Retail **skips the
+query outright when the spawning entity's ItemDef type is Building**
+`@ 0x56c7ec` — the query has no self-exclusion, so without that gate a
+building's own unattached records would bind to itself; instead they stay world
+lights. The port is the pure `renderer::resolve_model_light_owner`
+(engine/runtime/renderer/light_scene.h), fed by the director's per-source
+facts.
+
 `Lighting_OwnerGroupEntity`/`InteriorGroup*` are per-DRAW-CONTEXT state, so
-owned lights illuminate only their own entity's draws. The portable
-`LightScene` preserves that gate. The current Godot adapter cannot provide a
-draw context because it publishes process-global shader parameters, so its
-explicit camera-global object fallback admits owned lights unscoped. Muzzle
-and cabin lights are therefore visible, but can bleed onto nearby objects;
-that is an approximation, not owner-group parity.
+owned lights illuminate only the draws that declare them. Both groups are now
+supplied per draw:
+
+- **Owner group** — `Lighting_SetOwnerLightGroup @ 0x5a9100` (pair
+  `@ 0x272ED7C/78`). The sector walk pushes the drawn entity `@ 0x5c7fb1`, and
+  inside the model the batch collector re-scopes it PER RENDER OBJECT as
+  `(0, robjIndex)` `@ 0x5d8ff7` — which is what section-matches a building's
+  own interior lights to the room being drawn.
+- **Interior group** — `Lighting_SetInteriorLightGroup @ 0x5a90e0` (pair
+  `@ 0x272ED84/80`). An entity draw pushes its containing building + blink
+  section, read straight off the entity's packed blink ref (entity+464, the
+  `blink_hits[0]` quad); retail additionally gates on the containing entry
+  carrying interior data (`pool_entry + 48`, the same field the iris march's
+  no-interior-data short-circuit reads), where the port's stand-in is simply
+  that the containing building resolves to a presented model
+  `[orig: setup_terrain_effect_for_entity @ 0x5c74a0]`. The same pair feeds the
+  render-slot dominant-light pick `[orig: RenderSlot_UpdateEntityLight
+  @ 0x5d6b66]`. A building draw pushes itself + section 0 `@ 0x5c5e07`. The
+  terrain batch clears BOTH pairs `@ 0x60967c/@ 0x609685`, so only unowned
+  lights reach terrain.
+
+The gate reading them is `Light_PassesActiveGroups @ 0x5a9120`: an unowned
+light always passes; an owned one passes when its owner is the interior group
+entity AND its section matches the interior section (falling back to the OWNER
+section when the interior section is 0 — the building-draw case), or when its
+owner is the owner-group entity outright. `LightScene::select` is that
+function; `LightDrawContext::groups` carries the pair per draw, filled from
+`Simulation::get_entity_interior_groups` / `local_player_interior_group` (the
+first-person parts inherit the local player's group, so a room's lights reach
+the arms and weapon).
+
+Three bounded approximations remain on D-RLIT-4. Our draw contexts are
+per-MODEL, not per-ROBJ, so a building's own draw admits all of its own owned
+lights at once instead of section-matching each render object. And a
+containing building that presents as a batched MultiMesh row has no per-model
+owner id to name, so a light inside it stays a world light. Separately, only
+entities that run the movement resolver (or the remote-peer refresh) stamp
+`blink_hits` today, so a placed prop that never moves takes no interior group
+and the room's lamp does not reach it — the same stamping residual
+D-COL-11/D-OCC-15 already track.
 
 Mission-start static model lights and late ObjectModel nodes are wired into the pool. Late
 nodes retire their handles on `tree_exiting`; mission reset synchronously

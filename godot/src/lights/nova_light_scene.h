@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -27,8 +28,12 @@ public:
 	// int64 leases: retail's slot word in bits 0..15, generation in bits 16..47.
 	// config keys: position (Vector3 Godot world), atten_end (float world
 	// units), color_start / color_end (Color), style / phase / rate (int),
-	// intensity (float), owner_entity / owner_section (int),
-	// disable_corona / disable_terrain / disable_objects (bool).
+	// intensity (float), disable_corona / disable_terrain / disable_objects
+	// (bool), plus the owner-attach facts renderer::resolve_model_light_owner
+	// decides from: attach_bone (int, the record's authored subobject),
+	// spawning_entity (int), spawner_is_building (bool), and
+	// blink_owner_entity / blink_section (int) for the blink box the spawning
+	// entity stands in.
 	int64_t spawn_model_light(const Dictionary &p_config);
 	// Transient glow spawn (muzzle / impact / death / round legs — the
 	// light_scene.h witness map). config keys: position (Vector3), radius
@@ -58,12 +63,17 @@ public:
 
 	// The per-draw gameplay pass (retail: update_light_slots @0x5abc50 per
 	// draw context, see docs/render/render-lighting-re.md): one draw context
-	// per visible ObjectModel, owner group = that model's entity id, then the
-	// selected <= 4 written as per-instance shader parameters on the model's
-	// surfaces. p_models and p_owner_entities are parallel arrays. Returns
-	// the number of models that received at least one light.
+	// per visible ObjectModel, owner group = that model's entity id, interior
+	// group = the building it currently stands inside + that blink volume's
+	// section, then the selected <= 4 written as per-instance shader
+	// parameters on the model's surfaces. p_models, p_owner_entities,
+	// p_interior_owners and p_interior_sections are parallel arrays (interior
+	// owner 0 = outdoors). Returns the number of models that received at
+	// least one light.
 	int render_model_frame(const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
+			const PackedInt64Array &p_interior_owners,
+			const PackedInt32Array &p_interior_sections,
 			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
 
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):

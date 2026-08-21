@@ -9,14 +9,18 @@ extends RefCounted
 ## [orig: Game_StartMission @ 0x525d19 -> sub_5227B0 ->
 ## Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
 ## group-passing four [orig: collect_nearby_zones_by_aabb @ 0x5aa250;
-## update_light_slots @ 0x5abc50]. The object pass now runs per rendered
-## model: one draw context per visible ObjectModel with its entity as the
-## owner group, so owned lights (muzzle glow, subobject records) light only
-## their owner exactly as retail's update_light_slots gates them. Corona
-## billboards draw per frame from the portable corona walk [orig:
-## EffectWorld_RenderLightCoronas @ 0x5aaf40]. Remaining D-RLIT-4 residuals:
-## interior groups, terrain projected-texture light, foliage sampling, and
-## subobject bone following.
+## update_light_slots @ 0x5abc50]. The object pass runs per rendered model:
+## one draw context per visible ObjectModel carrying BOTH witnessed groups —
+## its entity as the owner group, and the building it stands inside plus that
+## blink volume's section as the interior group — so owned lights (muzzle
+## glow, subobject records, interior room lights) light only what retail's
+## update_light_slots admits. Corona billboards draw per frame from the
+## portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
+## Remaining D-RLIT-4 residuals: the per-ROBJ owner section on a building's
+## OWN draw (retail re-scopes per render object [orig:
+## collect_render_objects_for_batch @ 0x5d8ff7]; our per-model draw admits all
+## of a building's own lights at once), terrain projected-texture light,
+## foliage sampling, and subobject bone following.
 
 ## Model gather half-extent around the camera. Light ranges are authored
 ## small (atten_end 8 on the fire barrels), so any model a pool light could
@@ -50,6 +54,9 @@ var _round_handles: Dictionary = {}
 # renderer::LightScene::collect_corona_quads].
 var _corona_instance: MultiMeshInstance3D
 var _corona_frame := 0
+# Containing-building bms_id -> owner id, rebuilt per spawn pass and per render
+# frame (nodes are recreated across reloads, so nothing survives a pass).
+var _blink_owner_cache: Dictionary = {}
 
 
 func setup(world: GameWorld, static_sources: Callable) -> void:
@@ -67,6 +74,7 @@ func reset() -> void:
 	_spawned_nodes.clear()
 	_muzzle_handles.clear()
 	_round_handles.clear()
+	_blink_owner_cache.clear()
 	_clear_coronas()
 
 
@@ -99,9 +107,12 @@ func reattach() -> void:
 		# lights. Batch draws do not take per-draw light selections yet, so
 		# these lights reach nothing until that leg lands (D-RLIT-4 residual);
 		# retail scopes them to exactly the owner's draws.
-		var handles := _spawn_model_lights(data,
-				source.get("world_transform", Transform3D.IDENTITY),
-				-(source_index + 1))
+		var xform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
+		# The batched sources are the placer's pool-1 item rows, so retail's
+		# ItemDef-type gate never suppresses their blink query [orig: the
+		# ItemType_Building gate @ 0x56c7ec].
+		var handles := _spawn_model_lights(data, xform, -(source_index + 1),
+				_blink_owner_at(xform.origin), false)
 		if not handles.is_empty():
 			_spawned_static[source_index] = handles
 
@@ -128,8 +139,17 @@ func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
 	var data: ObjectData = node.get_object_data()
 	if data == null:
 		return
+	# Retail runs the blink query once per spawning entity, and skips it
+	# outright for a BUILDING — a building's own unattached records stay world
+	# lights even though its blink volumes contain them (the query has no
+	# self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec].
+	var ref: Dictionary = node.get_meta("entity_ref", {})
+	var is_building := int(ref.get("kind", -1)) == MissionData.KIND_BUILDING
+	var blink_owner: Array = []
+	if not is_building:
+		blink_owner = _blink_owner_at(node.global_position)
 	var handles := _spawn_model_lights(data, node.global_transform,
-			owner_id_for_node(node))
+			owner_id_for_node(node), blink_owner, is_building)
 	if not handles.is_empty():
 		var on_exit := _on_wire_node_exiting.bind(node_id)
 		_spawned_nodes[node_id] = {
@@ -160,35 +180,40 @@ func _disconnect_wire_node_exit(record: Dictionary) -> void:
 
 
 func _spawn_model_lights(data: ObjectData, world_transform: Transform3D,
-		owner_id: int = 0) -> Array[int]:
+		owner_id: int = 0, blink_owner: Array = [],
+		spawner_is_building: bool = false) -> Array[int]:
 	var handles: Array[int] = []
 	if data == null:
 		return handles
 	for i in range(data.get_light_count()):
 		var handle := spawn_light_record(data.get_light_info(i), world_transform,
-				owner_id)
+				owner_id, blink_owner, spawner_is_building)
 		if handle != 0:
 			handles.append(handle)
 	return handles
 
 
 ## One authored light record (the get_light_info dictionary shape) becomes one
-## pool instance. Public: the GUT seam test feeds records directly. A record
-## attached to a subobject carries retail's owner metadata into the group gate
-## [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity, bone)
-## when the record's attach bone != 0; the blink-box interior leg is a tracked
-## residual]. Every caller supplies an owner id — live nodes their wire
-## handle/instance id, batched static sources a synthetic negative id — so a
-## subobject-attached light passes the per-draw select only for its owner's
-## draws (per_model_light_isolation_test pins both directions). A record with
-## subobject 0 spawns unowned: a mission-start world light.
+## pool instance. Public: the GUT seam test feeds records directly. The owner
+## attach is decided by the portable policy the config feeds
+## (renderer::resolve_model_light_owner): a record attached to a subobject is
+## owned by its own entity + that subobject (cabin self-lights), an unattached
+## record spawned INSIDE a blink box is owned by the containing building + that
+## volume's section (interior room lights), and everything else — the fire
+## barrels — spawns unowned and lights the world [orig: Entity_SpawnGlowEffects
+## @ 0x56c89f / @ 0x56c8bd]. Every caller supplies an owner id — live nodes
+## their wire handle/instance id, batched static sources a synthetic negative
+## id — so an owned light passes the per-draw select only for the draws retail
+## admits (per_model_light_isolation_test pins both directions). `blink_owner`
+## is the [owner id, section] pair _blink_owner_at resolved, empty outdoors.
 func spawn_light_record(info: Dictionary, world_transform: Transform3D,
-		owner_id: int = 0) -> int:
+		owner_id: int = 0, blink_owner: Array = [],
+		spawner_is_building: bool = false) -> int:
 	if info.is_empty():
 		return 0
 	var world_pos: Vector3 = world_transform * Vector3(
 			info.get("position", Vector3.ZERO))
-	var subobject := int(info.get("subobject", 0))
+	var has_blink := blink_owner.size() >= 2
 	return int(_scene.spawn_model_light({
 		"position": world_pos,
 		"atten_end": float(info.get("atten_end", 0.0)),
@@ -197,12 +222,61 @@ func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 		"rate": int(info.get("colorgen_rate", 0)),
 		"color_start": info.get("color_start", Color.WHITE),
 		"color_end": info.get("color_end", Color.WHITE),
-		"owner_entity": owner_id if subobject != 0 else 0,
-		"owner_section": subobject,
+		"attach_bone": int(info.get("subobject", 0)),
+		"spawning_entity": owner_id,
+		"spawner_is_building": spawner_is_building,
+		"blink_owner_entity": int(blink_owner[0]) if has_blink else 0,
+		"blink_section": int(blink_owner[1]) if has_blink else 0,
 		"disable_corona": bool(info.get("disable_corona", false)),
 		"disable_terrain": bool(info.get("disable_lightterrain", false)),
 		"disable_objects": bool(info.get("disable_lightobjects", false)),
 	}))
+
+
+## The blink-box owner at one world point: retail runs ONE query at the
+## spawning entity's position before walking its LGHT records, and slot 0's hit
+## names the containing building + section every unattached record binds to
+## [orig: Entity_SpawnGlowEffects @ 0x56c7fc -> Entity_QueryBlinkBoxesAtPoint
+## @ 0x4af350]. Returns [owner id, section], or an empty array outdoors — and
+## also when the containing building has no presentation node to name, since a
+## batched building cannot be addressed in the per-model owner id space
+## (tracked on D-RLIT-4).
+func _blink_owner_at(world_pos: Vector3) -> Array:
+	var sim: Simulation = _sim()
+	if sim == null:
+		return []
+	var hit: PackedInt64Array = sim.query_blink_owner_at(world_pos)
+	if hit.size() < 2:
+		return []
+	var owner := _owner_id_for_bms(int(hit[0]))
+	return [owner, int(hit[1])] if owner != 0 else []
+
+
+## The owner id a containing building's bms_id resolves to — the SAME id its
+## own draw context declares, or owner gating never matches.
+func _owner_id_for_bms(bms_id: int) -> int:
+	if bms_id == 0:
+		return 0
+	var cached: Variant = _blink_owner_cache.get(bms_id)
+	if cached != null:
+		return int(cached)
+	var owner := 0
+	var runtime: MissionPresentation = _world.get_runtime() if _world != null else null
+	if runtime != null:
+		var registry: EntityIndex = runtime.get_registry()
+		if registry != null:
+			var node: ObjectModel = registry.resolve_single(bms_id)
+			if node != null:
+				owner = owner_id_for_node(node)
+	_blink_owner_cache[bms_id] = owner
+	return owner
+
+
+func _sim() -> Simulation:
+	if _world == null:
+		return null
+	var runtime: MissionPresentation = _world.get_runtime()
+	return runtime.get_sim() if runtime != null else null
 
 
 ## The per-frame device leg (GameFramePipeline, after iris, before the
@@ -239,6 +313,14 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 	var cam_pos := camera.get_camera_transform().origin
 	var models: Array[Node3D] = []
 	var owners := PackedInt64Array()
+	# The second witnessed group: the building each draw currently stands
+	# inside, plus that blink volume's section [orig:
+	# setup_terrain_effect_for_entity @ 0x5c74a0 ->
+	# Lighting_SetInteriorLightGroup @ 0x5a90e0].
+	var interior_owners := PackedInt64Array()
+	var interior_sections := PackedInt32Array()
+	_blink_owner_cache.clear()
+	var groups := _entity_interior_groups()
 	var container: Node = _world.get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		for child in container.get_children():
@@ -249,20 +331,71 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 				continue
 			models.append(model)
 			owners.append(owner_id_for_node(model))
+			var group := _interior_group_for_node(model, groups)
+			interior_owners.append(int(group[0]))
+			interior_sections.append(int(group[1]))
+	# The first-person parts inherit the LOCAL PLAYER's interior group, so the
+	# room's lights reach the arms and weapon the same way they reach the
+	# third-person body standing there.
+	var viewmodel_interior := _local_player_interior_group()
 	for part in viewmodel_parts:
 		if part == null or not part.is_visible_in_tree():
 			continue
 		models.append(part)
 		owners.append(viewmodel_owner if viewmodel_owner != 0
 				else part.get_instance_id())
+		interior_owners.append(int(viewmodel_interior[0]))
+		interior_sections.append(int(viewmodel_interior[1]))
 	# Census select first (report rows for F3 and the seam tests), then the
 	# gameplay per-model pass — its mode/isolation stamp is what the report
 	# ends the frame with.
 	_scene.render_frame(cam_pos, QUERY_RADIUS, gain, Time.get_ticks_msec(),
 			weather)
-	_scene.render_model_frame(models, owners, gain, Time.get_ticks_msec(),
-			weather)
+	_scene.render_model_frame(models, owners, interior_owners,
+			interior_sections, gain, Time.get_ticks_msec(), weather)
 	_render_coronas(camera, gain, weather, models, owners, env)
+
+
+## bms_id -> [containing bms_id, section] for every entity currently standing
+## inside a blink volume. Entities outside every volume are absent (group 0).
+func _entity_interior_groups() -> Dictionary:
+	var out: Dictionary = {}
+	var sim: Simulation = _sim()
+	if sim == null:
+		return out
+	var rows: PackedInt64Array = sim.get_entity_interior_groups()
+	var i := 0
+	while i + 2 < rows.size():
+		out[int(rows[i])] = [int(rows[i + 1]), int(rows[i + 2])]
+		i += 3
+	return out
+
+
+## One drawn model's interior group as [owner id, section]; [0, 0] outdoors.
+func _interior_group_for_node(model: ObjectModel, groups: Dictionary) -> Array:
+	var ref: Dictionary = model.get_meta("entity_ref", {})
+	var bms_id := int(ref.get("bms_id", 0))
+	if bms_id == 0:
+		return [0, 0]
+	var row: Variant = groups.get(bms_id)
+	if row == null:
+		return [0, 0]
+	var owner := _owner_id_for_bms(int(row[0]))
+	return [owner, int(row[1])] if owner != 0 else [0, 0]
+
+
+## The local player's interior group as [owner id, section]; [0, 0] outdoors.
+## The player is a spawned entity with no bms_id, so it never appears in
+## _entity_interior_groups.
+func _local_player_interior_group() -> Array:
+	var sim: Simulation = _sim()
+	if sim == null:
+		return [0, 0]
+	var hit: PackedInt64Array = sim.local_player_interior_group()
+	if hit.size() < 2:
+		return [0, 0]
+	var owner := _owner_id_for_bms(int(hit[0]))
+	return [owner, int(hit[1])] if owner != 0 else [0, 0]
 
 
 ## The corona device leg: fetch this frame's additive quads from the portable
