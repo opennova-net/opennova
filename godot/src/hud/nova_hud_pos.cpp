@@ -374,12 +374,13 @@ Array HudPos::get_static_frames() const {
 	return out;
 }
 
-// One VEHICLE_HUD block by items.def sid, case-insensitively -- retail matches
-// the sid with _stricmp when it commits the block against the item table
-// (retail: HUD_ParseHudposToken @0x59F370, see docs/interface/hud-re.md).
+// One VEHICLE_HUD block by items.def sid, case-insensitively -- matching the
+// _stricmp the original commits the block with. The witness for the block and
+// its grammar lives with the parse, in engine/formats/def/def.h; this is only
+// the projection into a Dictionary.
+//
 // An unknown sid returns an EMPTY dictionary rather than a default-filled one:
-// a vehicle with no authored panel draws none, which is what retail does for
-// the one shipped sid whose panel art is missing.
+// a vehicle with no authored panel draws none.
 Dictionary HudPos::get_vehicle_hud(const String &p_sid) const {
 	Dictionary out;
 	if (!loaded_ || p_sid.is_empty()) return out;
