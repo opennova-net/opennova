@@ -4,6 +4,7 @@
 //  @0x43846E..0x438619]
 
 #include <world/tp_camera_mount.h>
+#include <world/player_view.h>
 
 #include <cmath>
 #include <cstdio>
@@ -81,14 +82,24 @@ void test_mount_pitch_is_downward() {
 	CHECK(near(kMountPitchDeg, -11.25f), "and is the witnessed -11.25 degrees");
 }
 
-void test_aircraft_eye_drop() {
-	CHECK(near(aircraft_eye_drop(4.0f), 2.0f), "half the carrier radius");
-	CHECK(near(aircraft_eye_drop(0.0f), 0.0f), "a zero radius drops nothing");
-	// The gate is the item def's class byte: 3 and 4 only.
-	CHECK(vehicle_class_byte_is_aircraft(3) && vehicle_class_byte_is_aircraft(4),
-			"classes 3 and 4 are aircraft");
-	CHECK(!vehicle_class_byte_is_aircraft(2) && !vehicle_class_byte_is_aircraft(5),
-			"2 and 5 are not — the test is a two-value window");
+// A WATERCRAFT drops the eye by half its radius; unit_type 3/4 are the boat
+// classes (Entity_ClassifyForMinimap @0x50FA70 — 5..8 are the helicopters).
+void test_watercraft_eye_drop() {
+	CHECK(near(watercraft_eye_drop(4.0f), 2.0f), "half the carrier radius");
+	CHECK(near(watercraft_eye_drop(0.0f), 0.0f), "a zero radius drops nothing");
+	// The gate is the item def's unit type: 3 and 4 only.
+	CHECK(vehicle_unit_type_is_watercraft(3) && vehicle_unit_type_is_watercraft(4),
+			"unit types 3 and 4 are watercraft");
+	CHECK(!vehicle_unit_type_is_watercraft(2) && !vehicle_unit_type_is_watercraft(5),
+			"2 and 5 (a helicopter) are not — the test is a two-value window");
+}
+
+// The Q16 anchor lift mirrors the float form: `(24576 * r + 0x8000) >> 16`
+// floored at 0x10000.
+void test_mount_lift_q16() {
+	CHECK(mount_anchor_lift_q16(8 * 0x10000) == 3 * 0x10000, "0.375 of 8.0 is 3.0");
+	CHECK(mount_anchor_lift_q16(0x10000) == 0x10000, "a small hull floors at 1.0");
+	CHECK(mount_anchor_lift_q16(0) == 0x10000, "a zero radius still lifts");
 }
 
 // The clearances raise the eye only when it is BELOW the surface — they are a
@@ -116,11 +127,11 @@ void test_clearances_are_a_floor() {
 	CHECK(near(raise_above_water(1.0f, 2.0f, 2.25f), 1.0f),
 			"exactly at water + clearance is NOT above it");
 
-	// The terrain floor is skipped for the 0x800000 flag: the floor is 0.
-	CHECK(near(raise_above_terrain(0.0f, 5.0f, 0u), 5.25f), "terrain + 0.25 normally");
-	CHECK(near(raise_above_terrain(-1.0f, 5.0f, kEntityFlagCameraSkipsTerrainFloor), 0.0f),
-			"with the flag the floor is the height-0 plane");
-	CHECK(near(raise_above_terrain(3.0f, 5.0f, kEntityFlagCameraSkipsTerrainFloor), 3.0f),
+	// The terrain floor is skipped INDOORS (Flags & 0x800000): the floor is 0.
+	CHECK(near(raise_above_terrain(0.0f, 5.0f, false), 5.25f), "terrain + 0.25 normally");
+	CHECK(near(raise_above_terrain(-1.0f, 5.0f, true), 0.0f),
+			"indoors the floor is the height-0 plane");
+	CHECK(near(raise_above_terrain(3.0f, 5.0f, true), 3.0f),
 			"and an eye above zero is left alone");
 }
 
@@ -146,9 +157,9 @@ void test_slope_raise_floor() {
 // following a tracked entity starts further back and pitched up, and a dead
 // target starts further back still.
 void test_seeds_differ() {
-	CHECK(kTpPlayDistance < kTpTrackedDistance,
+	CHECK(kTpDistance < kTpTrackedDistance,
 			"entering play starts closer than tracking");
-	CHECK(near(kTpPlayOrbitPitchDeg, 0.0f), "play zeroes the orbit");
+	CHECK(near(kTpOrbitPitchDeg, 0.0f), "play zeroes the orbit");
 	CHECK(kTpTrackedOrbitPitchDeg > 0.0f, "tracking starts pitched up");
 	CHECK(kTpDeadTargetDistance > kTpTrackedDistance,
 			"a dead target is framed from 10.0 before the reel-in");
@@ -158,10 +169,11 @@ void test_seeds_differ() {
 
 int main() {
 	test_mount_lift_floor();
+	test_mount_lift_q16();
 	test_mount_anchor_ease();
 	test_mount_look_yaw_damping();
 	test_mount_pitch_is_downward();
-	test_aircraft_eye_drop();
+	test_watercraft_eye_drop();
 	test_clearances_are_a_floor();
 	test_slope_raise_floor();
 	test_seeds_differ();

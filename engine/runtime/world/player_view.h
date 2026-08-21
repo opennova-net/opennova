@@ -111,6 +111,23 @@ inline bool player_view_narrow_aspect(int viewport_w, int viewport_h) {
     return 3 * viewport_w <= 4 * viewport_h;
 }
 
+// The MOUNTED camera's inputs, resolved by the hosting simulation from the
+// local player's carrier each tick: a control seat (mount state +0x168 == 2
+// or 5 — Entity::is_vehicle_control_seat()) with the carrier's position,
+// heading and bound radius, its watercraft class (itemDef+0x196 in {3,4}),
+// and the water plane the clearances read. `control_seat` false = on foot or
+// a passenger/gunner seat, which keeps the on-foot chase.
+// [orig: the +0x168/+0x16C reads in ThirdPersonCamera_Update @0x437B1F and
+//  Camera_ComputeThirdPersonView @0x438100/@0x43845A/@0x43861D]
+struct MountedCameraInput {
+    bool control_seat = false;
+    int32_t carrier_pos_q16[3] = {0, 0, 0}; // mission space, 16.16
+    int32_t carrier_yaw_bam = 0;            // BAM32 heading
+    float bound_radius = 0.0f;              // carrier +0, mission units
+    bool watercraft = false;                // unit_type 3/4 [orig: @0x43861D]
+    float water_z = 0.0f;                   // Env_WaterHeightFixed, units
+};
+
 struct PlayerViewState {
     bool scope_engaged = false;   // [orig: g_scopeEngaged @ 0x82CE94]
     int32_t scope_step = 0;       // 0 (hip) .. ease_steps (sighted), of the CURRENT ease
@@ -125,12 +142,21 @@ struct PlayerViewState {
     int32_t nvg_gain = kNvgGainMin;
     bool tp_anchor_valid = false;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space (Z-up)
+    // The mounted anchor's exact 16.16 carrier: the mounted ease integrates
+    // it (>> 4 on x/y, >> 5 on z, half-step rounded) and `tp_anchor` mirrors
+    // it; the on-foot float ease keeps it in step for a seamless mount.
+    int32_t tp_anchor_q16[3] = {0, 0, 0};
+    MountedCameraInput mount;
 };
 
 // One 62.5 Hz tick: step the scope ease toward the engaged target and chase
 // the third-person anchor toward `eye` (mission space). Entering third person
 // seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0 resets
-// the track on change]; leaving invalidates it.
+// the track on change]; leaving invalidates it. In a control seat the anchor
+// chases the carrier position lifted max(1.0, 0.375 r) instead, a sixteenth
+// per tick horizontally and a thirty-second vertically in 16.16
+// [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B, the ease
+//  @0x437C56..0x437C79].
 void player_view_tick(PlayerViewState &v, const float eye[3]);
 
 // Whether the scope-camera interp is mid-ease. Every scope toggle is REFUSED
@@ -335,6 +361,15 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 // the pivot nudge R*(nudge,nudge,nudge) backed off by the march-landed
 // distance along the orbit forward; roll 0. With no march collision ported,
 // emitting the seed angles equals the original's final look-at recompute.
+// Mounted (`v.mount.control_seat`) [orig: the mounted arm of mode 1 — yaw
+// @0x438138..0x43814A, pitch @0x438150, distance @0x438121..0x438136, the
+// clearances @0x438409..0x438456, the slope march @0x43846E..0x438619, the
+// watercraft drop @0x43861D..0x43864C, the look-ahead @0x438767..0x4387C9]:
+// the eye sits mount_distance(r) behind the eased mounted anchor along the
+// quarter-damped look yaw at the fixed downward pitch, is floored by the
+// water/terrain clearances and the slope raise, dropped r/2 on a watercraft,
+// and the final angles look at the point 6 u ahead of the carrier
+// (world/tp_camera_mount.h carries the constants).
 struct PlayerCameraPose {
     float eye[3] = {0.0f, 0.0f, 0.0f}; // mission units
     float yaw_deg = 0.0f;              // mission-euler view angles
