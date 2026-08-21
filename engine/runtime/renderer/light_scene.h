@@ -17,10 +17,15 @@
 // instances: overlap test + center-distance sort, at most 64 handles
 // [orig: collect_nearby_zones_by_aabb @ 0x5aa250 — distance metric
 // sum(((d*d + 0x8000) >> 16)) per axis, bubble sort, skip flag bit 2].
-// update_light_slots then group-gates the ordered list and enables the FIRST
-// FOUR passers as D3D lights [orig: update_light_slots @ 0x5abc50 — owner
-// entity at record dword 19, section at dword 20; an owned light passes only
-// for the active interior/owner group]. The per-light parameters are
+// The live per-draw select then enables the FIRST FOUR as D3D lights
+// [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 — the > 4 clamp @ 0x5abbeb;
+// update_light_slots @ 0x5abc50 is its xref-less twin], and the group gate
+// is Light_PassesActiveGroups @ 0x5a9120 [owner entity at record dword 19,
+// section at dword 20; an owned light passes only for the active
+// interior/owner group — called from collect_render_objects_for_batch
+// @ 0x5d91f8, collect_render_batches_for_entity @ 0x5d96b8,
+// render_terrain_sector_batch @ 0x60969f and RenderSlot_UpdateEntityLight
+// @ 0x5d6b89]. The per-light parameters are
 // [orig: Light_GetPointLightParams @ 0x5a9180]: color = record RGB (bytes
 // * 1/256 at spawn) x EffectWorld_AmbientScale x intensity, then the optional
 // RGB-gen multiply; attenuation {1, 0, 15/range^2, 1} with range =
@@ -150,7 +155,8 @@ struct LightSpawnParams {
 	int32_t fade_duration = -1;
 	bool has_gen = false;
 	LightGenBlock gen{};
-	// Group culling pair [orig: record dwords 19/20 @ 0x5abc90..0x5abd1d].
+	// Group culling pair [orig: record dwords 19/20, read by
+	// Light_PassesActiveGroups @ 0x5a9134 / @ 0x5a915c].
 	uint64_t owner_entity = 0;
 	int32_t owner_section = 0;
 	// The authored disable trio [orig: @ 0x56c8e7..0x56c91d -> render flags
@@ -295,8 +301,10 @@ struct LightCoronaFrameInputs {
 
 // One draw context for the per-draw selection pass: the draw's query AABB
 // (mission 16.16) plus its active owner/interior groups — the shape retail
-// hands update_light_slots per rendered entity [orig: update_light_slots
-// @ 0x5abc50 consumes the per-draw collect @ 0x5aa250].
+// hands the per-draw select per rendered entity [orig:
+// Light_SelectAndEnableForDraw @ 0x5ab9d0; the batch collectors consume
+// collect_nearby_zones_by_aabb @ 0x5aa250 and gate through
+// Light_PassesActiveGroups @ 0x5a9120].
 struct LightDrawContext {
 	std::array<int32_t, 3> aabb_min_fixed{};
 	std::array<int32_t, 3> aabb_max_fixed{};
@@ -312,7 +320,7 @@ class LightScene {
 public:
 	static constexpr size_t kCapacity = 4096;   // [orig: @ 0x5a8db1]
 	static constexpr size_t kQueryLimit = 64;   // [orig: @ 0x5aa384]
-	static constexpr size_t kSelectLimit = 4;   // [orig: @ 0x5abd28]
+	static constexpr size_t kSelectLimit = 4;   // [orig: the > 4 clamp @ 0x5abbeb]
 
 	LightHandle spawn(const LightSpawnParams &params);
 	void despawn(LightHandle handle);
@@ -352,8 +360,9 @@ public:
 			std::array<LightHandle, kQueryLimit> &out_handles) const;
 
 	// Group-gate the ordered handles and produce the first <= 4 passers'
-	// witnessed parameters [orig: update_light_slots @ 0x5abc50;
-	// Light_GetPointLightParams @ 0x5a9180]. d3d_light_path applies the
+	// witnessed parameters [orig: Light_PassesActiveGroups @ 0x5a9120; the
+	// 4-cap Light_SelectAndEnableForDraw @ 0x5abbeb; Light_GetPointLightParams
+	// @ 0x5a9180]. d3d_light_path applies the
 	// 1.5x diffuse boost [orig: Light_FillD3DPointLight @ 0x5aa450].
 	size_t select(const LightHandle *handles, size_t handle_count,
 			const LightActiveGroups &groups,

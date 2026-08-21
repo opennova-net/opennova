@@ -1,7 +1,8 @@
 // The EffectWorld dynamic light pool (D-RLIT-4 implementation): spawn/query/select
 // semantics pinned against the witnessed originals —
 // [orig: LightPool_SpawnGlowEffect @ 0x5a8d50;
-//  collect_nearby_zones_by_aabb @ 0x5aa250; update_light_slots @ 0x5abc50;
+//  collect_nearby_zones_by_aabb @ 0x5aa250; Light_PassesActiveGroups @ 0x5a9120;
+//  Light_SelectAndEnableForDraw @ 0x5ab9d0;
 //  Light_GetPointLightParams @ 0x5a9180; Light_TickGenBlock @ 0x5a8ae0].
 #include "renderer/light_scene.h"
 
@@ -244,7 +245,7 @@ int main() {
                "attenuation = {1, 0, 15/range^2, 1}");
     }
 
-    // Select cap: exactly four of six pass [orig: @ 0x5abd28].
+    // Select cap: exactly four of six pass [orig: the > 4 clamp @ 0x5abbeb].
     {
         LightScene scene;
         std::array<LightHandle, LightScene::kQueryLimit> handles{};
@@ -309,7 +310,7 @@ int main() {
                "terrain selection ignores disable_objects but honors disable_terrain");
     }
 
-    // Group gate [orig: update_light_slots @ 0x5abc90..0x5abd23]: unowned
+    // Group gate [orig: Light_PassesActiveGroups @ 0x5a9120..0x5a916e]: unowned
     // lights always pass; owned lights need the matching active group.
     {
         LightScene scene;
@@ -528,8 +529,8 @@ int main() {
     }
 
     // select_for_draws: per-draw owner isolation over one snapshot
-    // [orig: the per-draw collect @ 0x5aa250 feeding update_light_slots
-    // @ 0x5abc50 with that draw's owner/interior groups].
+    // [orig: the per-draw collect @ 0x5aa250 gated by Light_PassesActiveGroups
+    // @ 0x5a9120 with that draw's owner/interior groups].
     {
         LightScene scene;
         LightSpawnParams world_light = barrel_params(0, 0, 0);

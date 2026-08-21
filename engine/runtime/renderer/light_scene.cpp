@@ -335,7 +335,7 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 		if (disabled_for_target) {
 			continue;
 		}
-		// Group gate [orig: update_light_slots @ 0x5abc90..0x5abd23]: an
+		// Group gate [orig: Light_PassesActiveGroups @ 0x5a9120..0x5a916e]: an
 		// owned light passes only for the active interior group (section
 		// matched against the interior section, falling back to the owner
 		// section) or the active owner group.

@@ -843,11 +843,9 @@ int check_S_18_full_entity_spawn() {
 	return 0;
 }
 
-// S2C 0x58 — session-status block (§5.48): names + 3 bytes + uptime + 39 stat
-// values + 2 kv pairs. [orig: SessionStatus_ParseFromBuffer @ 0x530ED0]
-// S2C 0x56 -- the chunked end-of-round stat board. Two decoders: the envelope
-// per datagram, and the reassembled payload. [orig: NapiNPClientMsg_0x056
-// @0x431D10]
+// S2C 0x56 -- the end-of-round stat board, pulled in 200-byte chunks over C2S
+// 0x2B. Two decoders: the envelope per datagram, and the reassembled payload.
+// [orig: NapiNPClientMsg_0x056 @0x431D10]
 int check_S_56_end_round_stats() {
 	// (a) the envelope. A first chunk (offset 0) that does not reach total_size
 	//     is INCOMPLETE; the follow-up that reaches it completes the board.
@@ -919,10 +917,33 @@ int check_S_56_end_round_stats() {
 	EXPECT(st.team_rows[0][0] == 99);
 	// A truncated board is REJECTED rather than half-decoded.
 	EXPECT(!decode_end_round_stats(p.b.data(), p.b.size() - 3, st));
+
+	// (c) the team-field count is a SIGNED byte like the team-row count: 0xFF
+	//     reads as -1 and declares NO fields, so every row ends at `special`
+	//     and the trailing matrix has zero columns [orig: the movsx @0x431E69,
+	//     the `> 0` loop tests @0x431E75 / @0x432091 / @0x432174].
+	LE n;
+	n.u8(2); n.u16(7); n.u16(3);
+	n.u8(0xFF);                                // -1 declared team fields
+	n.u8(1);                                   // one player
+	n.u8(9);                                   // slot
+	for (char ch : std::string("Neg")) n.u8(uint8_t(ch)); n.u8(0);
+	n.u8(0); n.u8(0);                          // empty clan, empty tag
+	n.u8(1); n.u8(1);                          // team, side
+	n.u16(1); n.u16(2); n.u16(3); n.u16(4); n.u16(5); n.u16(6); n.u16(7);
+	n.u8(1);                                   // one trailing team row, no columns
+	EndRoundStats neg;
+	EXPECT(decode_end_round_stats(n.b.data(), n.b.size(), neg));
+	EXPECT(neg.team_fields.empty());
+	EXPECT(neg.players.size() == 1 && neg.players[0].per_team.empty());
+	EXPECT(neg.players[0].special == 7);
+	EXPECT(neg.team_rows.size() == 1 && neg.team_rows[0].empty());
 	cover('S', 0x56);
 	return 0;
 }
 
+// S2C 0x58 — session-status block (§5.48): names + 3 bytes + uptime + 39 stat
+// values + 2 kv pairs. [orig: SessionStatus_ParseFromBuffer @ 0x530ED0]
 int check_S_58_session_status() {
 	LE w;
 	auto str = [&](const char *s) { for (const char *p = s; *p; ++p) w.u8(uint8_t(*p)); w.u8(0); };

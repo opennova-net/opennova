@@ -15,7 +15,7 @@ std::array<float, 3> slot_projection_direction(
 
 int slot_lod_for_radius(float bound_radius_units) {
 	// (bound_radius_fixed >> 15) + 1 = 2 * radius + 1, clamped [6, 20]
-	// [orig: shadow_decal_alloc_slot @ 0x5d5773..0x5d578a].
+	// [orig: RenderSlot_AllocSlot @ 0x5d5773..0x5d578a].
 	const int lod = static_cast<int>(bound_radius_units * 2.0f) + 1;
 	return std::clamp(lod, 6, 20);
 }
@@ -47,7 +47,7 @@ float silhouette_half_extent(float bound_radius_units) {
 }
 
 int slot_texture_size(int texture_order, int shadow_detail) {
-	// [orig: init_render_target_chain @ 0x5d5320 — base 256/512/1024 by the
+	// [orig: RenderSlot_InitTextureChain @ 0x5d5320 — base 256/512/1024 by the
 	// shadow-detail option, halving after every second slot, 32 px floor].
 	int size = 256;
 	if (shadow_detail >= 2) {
@@ -106,7 +106,7 @@ bool slot_refresh_due(int slot_index, uint32_t frame, uint32_t mask,
 }
 
 float drape_fade(float camera_distance_units) {
-	// [orig: render_sector_model @ 0x5d5d30..0x5d5d53 — 0 below 40 u
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d30..0x5d5d53 — 0 below 40 u
 	// (0x280000), (d - 40) / 40 beyond (flt_7DC668 = 1/2621440)].
 	if (camera_distance_units < kDrapeFadeStartUnits) {
 		return 0.0f;
@@ -124,7 +124,7 @@ bool drape_culled(float camera_distance_units) {
 std::array<float, 3> drape_shadow_term(const std::array<float, 3> &sun_rgb,
 		const std::array<float, 3> &sky_rgb, float dir_y) {
 	// q_c = sun_c*|y| / (sun_c*|y| + sky_c)
-	// [orig: render_sector_model @ 0x5d5f63..0x5d6008 — fabs of the slot
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5f63..0x5d6008 — fabs of the slot
 	// direction vertical, Env_LightBlock / Env_SkyBlock bytes; the byte
 	// scale cancels in the ratio].
 	const float ay = std::fabs(dir_y);
@@ -167,7 +167,7 @@ std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb) {
 std::array<float, 3> drape_attached_light_scale(
 		const std::array<float, 3> &rgb, float fade) {
 	// (c + lum) * 0.5 * -2 * (1 - fade) = -(c + lum) * (1 - fade)
-	// [orig: render_sector_model @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0].
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0].
 	const float lum = ntsc_luminance(rgb);
 	std::array<float, 3> out{};
 	for (int c = 0; c < 3; ++c) {
@@ -243,7 +243,7 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 }
 
 static bool slot_excluded(const SlotCandidateState &state) {
-	// [orig: terrain_sort_and_assign_render_slots @ 0x5d6581..0x5d6627 —
+	// [orig: RenderSlot_SortAndAssign @ 0x5d6581..0x5d6627 —
 	// dead, seat-parented, or standing on a vehicle; the silhouette-render
 	// leg re-checks the same predicates @ 0x5d774e..0x5d77b3].
 	return state.dead || state.seat_parented || state.on_vehicle;
@@ -252,7 +252,7 @@ static bool slot_excluded(const SlotCandidateState &state) {
 int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
 		const std::array<float, 2> &view_dir2d,
 		const SlotCandidateState &state) {
-	// [orig: terrain_sort_and_assign_render_slots @ 0x5d6535..0x5d6871].
+	// [orig: RenderSlot_SortAndAssign @ 0x5d6535..0x5d6871].
 	if (slot_excluded(state)) {
 		return kSlotScoreExcluded;
 	}
@@ -286,7 +286,7 @@ int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
 }
 
 bool RenderSlotPlan::register_entity(uint64_t id) {
-	// [orig: shadow_decal_alloc_slot @ 0x5d5690 — a registered entity keeps
+	// [orig: RenderSlot_AllocSlot @ 0x5d5690 — a registered entity keeps
 	// its index for life; retail appends at the high-water count]. The
 	// lowest-free reuse is the device fold the header describes.
 	int free_index = -1;

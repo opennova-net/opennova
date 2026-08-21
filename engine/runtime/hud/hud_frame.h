@@ -81,7 +81,7 @@ inline constexpr float kBoxTitleTrim = 12.0f;
 // the position into two words, so every dispatched StaticFrame line OVERWRITES
 // the one before it and the LAST authored line is the one that draws
 // [orig: HUD_ParseHudposToken @0x59F370 — the name copy @0x5a0a4e-0x5a0a62,
-//  the x store @0x5a0a73, the y store @0x5a0a8a].
+//  the x store @0x5a0a72, the y store @0x5a0a8a].
 //
 // Our def parser keeps every line so the writer round-trips, which makes the
 // pick a policy the consumer has to apply: taking entry 0 draws a frame retail
