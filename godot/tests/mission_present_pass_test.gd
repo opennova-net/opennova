@@ -85,6 +85,12 @@ class Snapshot:
 					e.get("vehicle_steering", 0))
 			out[b + Simulation.PF_VEHICLE_SPEED] = float(
 					e.get("vehicle_speed", 0))
+			out[b + Simulation.PF_VEHICLE_ROTOR] = float(
+					e.get("vehicle_rotor", 0))
+			out[b + Simulation.PF_VEHICLE_TAIL_ROTOR] = float(
+					e.get("vehicle_tail_rotor", 0))
+			out[b + Simulation.PF_VEHICLE_WHEELS] = float(
+					e.get("vehicle_wheels", 0))
 			out[b + Simulation.PF_TEX_TEAM_VALID] = float(
 					e.get("tex_team_valid", 0))
 			out[b + Simulation.PF_TEX_TEAM] = float(
@@ -479,17 +485,34 @@ func test_vehicle_motion_controls_publish_and_release_as_one_owned_pair() -> voi
 		"vehicle_motion_valid": 1,
 		"vehicle_steering": 0xFEDC,
 		"vehicle_speed": 0x10000,
+		"vehicle_rotor": 0x1234,
+		"vehicle_tail_rotor": 0x1234,
+		"vehicle_wheels": 0xABCD,
 	}]
 	_present(p, snap)
 	assert_eq(model.get_ctrl_values(), {
 		"VEHICLE_STEERING": 0xFEDC,
 		"VEHICLE_SPEED": 0x10000,
-	}, "the cveh pair publishes by semantic retail name")
+		"HELO_ROTOR": 0x1234,
+		"HELO_TAILROTOR": 0x1234,
+		"VEHICLE_WHEELS": 0xABCD,
+	}, "the cveh callback's five words publish by semantic retail name")
+
+	# The part-animation words are owned at rest too: literal zero is a write,
+	# exactly like the steer/speed pair (Entity_CacheVehicleHUDStats stores all
+	# five before every model submission).
+	snap.entities[0]["vehicle_rotor"] = 0
+	snap.entities[0]["vehicle_tail_rotor"] = 0
+	snap.entities[0]["vehicle_wheels"] = 0
+	_present(p, snap)
+	assert_eq(_ctrl(model, "HELO_ROTOR"), 0,
+			"a resting rotor publishes literal zero rather than releasing")
+	assert_eq(_ctrl(model, "VEHICLE_WHEELS"), 0)
 
 	snap.entities[0]["vehicle_motion_valid"] = 0
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().is_empty(),
-			"an unavailable/non-authoritative row releases the cveh writer")
+			"an unavailable/non-authoritative row releases all five cveh writers")
 
 
 func test_sector_and_zone_controls_preserve_write_validity_and_scoped_release() -> void:

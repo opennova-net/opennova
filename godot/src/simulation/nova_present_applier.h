@@ -229,7 +229,7 @@ private:
 		// the first application, and a cold plan rebuild re-applies once by
 		// construction (rows rebuild with invalid caches). The field lists live
 		// beside the legs in nova_present_applier_wire.cpp.
-		static constexpr int kCtrlCacheCount = 18;
+		static constexpr int kCtrlCacheCount = 21;
 		static constexpr int kAimCacheCount = 30;
 		float ctrl_cache[kCtrlCacheCount];
 		float aim_cache[kAimCacheCount];

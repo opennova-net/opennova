@@ -744,6 +744,15 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, index,
 			Simulation.PF_VEHICLE_SPEED), 0)
+	# The part-animation words ride the same valid bit and rest at zero
+	# (Entity_CacheVehicleHUDStats publishes the rotor/wheel accumulators'
+	# high words; an unoccupied, unmoved vehicle has none).
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, index,
+			Simulation.PF_VEHICLE_ROTOR), 0)
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, index,
+			Simulation.PF_VEHICLE_WHEELS), 0)
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, index,
 			Simulation.PF_TEX_TEAM_VALID), 1,
@@ -772,6 +781,13 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 			"the snapshot carries the live currentSpeed magnitude")
 	assert_lte(speed, 0x10000,
 			"the retail speed publisher saturates at its fixed-point endpoint")
+	# Driving turns the wheels: the wheel phase integrates the speed word every
+	# tick [orig: the +0x2B8 accumulate @0x48c4c5..0x48c4d0], and the snapshot
+	# carries its high word for VEHICLE_WHEELS.
+	assert_ne(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, index,
+			Simulation.PF_VEHICLE_WHEELS), 0,
+			"the snapshot carries the live wheel-phase high word once driven")
 	sim.free()
 
 

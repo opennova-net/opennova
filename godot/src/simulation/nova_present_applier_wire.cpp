@@ -50,7 +50,7 @@ const String &infantry_key_cached(int state) {
 // churn (2026-08-04 joiner profile: ~21us/row over 876 mostly-static rows).
 // Mirrors of WireRow::kCtrlCacheCount / kAimCacheCount (the struct is class-
 // private); static_asserts in present_one_wire_row pin the mirror.
-constexpr int kCtrlLegFieldCount = 18;
+constexpr int kCtrlLegFieldCount = 21;
 constexpr int kAimLegFieldCount = 30;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
@@ -72,6 +72,11 @@ constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_PHASE1,
 	Simulation::PF_ACTIVE2,
 	Simulation::PF_PHASE2,
+	// The part-animation words the vehicle-motion leg now stores (appended so
+	// the cache layout of every earlier field is unchanged).
+	Simulation::PF_VEHICLE_ROTOR,
+	Simulation::PF_VEHICLE_TAIL_ROTOR,
+	Simulation::PF_VEHICLE_WHEELS,
 };
 
 // The aim-overlay leg's inputs: the body triple plus all nine overlay-class
