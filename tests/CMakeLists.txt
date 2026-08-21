@@ -817,6 +817,11 @@ target_link_libraries(hud_map_bracket_test PRIVATE opennova_runtime)
 target_include_directories(hud_map_bracket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_map_bracket COMMAND hud_map_bracket_test)
 
+add_executable(hud_lfp_panel_test hud/hud_lfp_panel_test.cpp)
+target_link_libraries(hud_lfp_panel_test PRIVATE opennova_runtime)
+target_include_directories(hud_lfp_panel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_lfp_panel COMMAND hud_lfp_panel_test)
+
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
