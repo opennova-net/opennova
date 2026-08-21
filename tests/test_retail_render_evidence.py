@@ -64,7 +64,7 @@ if _PROBE_PNG is not None and _lfs_pointer_stub(_PROBE_PNG):
         "--include=screenshots/**`)",
         allow_module_level=True,
     )
-CURRENT_SOURCE_COMMIT = "30f3e194b9f7aaea6053492f7797c9940f8039ed"
+CURRENT_SOURCE_COMMIT = "58ea3e5ff61b9aef5841a8601b7d9b86817ebde1"
 # The archived v1 catalog predates the tire-marks fixture; its id set is
 # pinned separately from the current publication's.
 LEGACY_FIXTURE_IDS = frozenset({

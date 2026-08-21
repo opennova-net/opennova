@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "00tra-courtyard-retail-m0900-beauty",
 			"png_path": "00tra-courtyard-retail-m0900-beauty.png",
-			"png_sha256": "3a5811907eabe1667020b13a2673ba30643b4383a2f95c0777a407efcaf190a3",
-			"source_state_sha256": "3a2eb6c8762aaf3e6e90a29468bb87e53b434157ac9dc13f99a7e433d15a6188",
+			"png_sha256": "20499867f377b50203ea92105d09951c9a09055e02a58a0fbdfd5082263eba76",
+			"source_state_sha256": "730229df9cb4a7b4a4e6e01bd3f4d2dd809842d60dbcf822ff63b4f3ed454f20",
 			"state_path": "00tra-courtyard-retail-m0900-beauty.state.json",
-			"state_sha256": "20bde8dd2bbfccf77bf23ebbe64eb76fdd010db47bf964972821a8954bd1f067",
+			"state_sha256": "aefbaa494b4e3c0dcdd9c87ce3e82c6eda4f2dcfdc2fb722c768023546b2ad68",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "00tra-courtyard-retail-m0900-shadows_off",
 			"png_path": "00tra-courtyard-retail-m0900-shadows_off.png",
-			"png_sha256": "db5a2d7bf3646c9544070ea17d5aded22a9785716af6a0047e3b0842f96f87fd",
-			"source_state_sha256": "0ddf5584b9f6b198c5c2544d30b994564e0ef5443f5b4eb5dae32bb975b6c36e",
+			"png_sha256": "760e26d88d7e2e72da3ee30a93411fe3bd4fc6a0220d76ba8fa926f18541a5b4",
+			"source_state_sha256": "f10653ea011ebc9895e4062b627a1a5d171b770e0ff1dc5de7e8626ea38e4eaf",
 			"state_path": "00tra-courtyard-retail-m0900-shadows_off.state.json",
-			"state_sha256": "0d10e5241674a00a13462e36b93f295806068f85f254c4369b8a04d0ce727e46",
+			"state_sha256": "64976ad2943f6b71d154997dd4bb9ed62ca3c087da8500f5506446f7e04636f1",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "00tra-courtyard-retail-m0900-lighting_only",
 			"png_path": "00tra-courtyard-retail-m0900-lighting_only.png",
-			"png_sha256": "3fbb00a9f520d3ca6da779905f316f58b6cab9f9d062fba866e6029928869a40",
-			"source_state_sha256": "675899c7718d236841afb8da49c95fd46300c8dddcdd4ad8d1b21d6632fb11a1",
+			"png_sha256": "7ce340f2ab80f0a506d017f2f52a7286a0f540b6e2f107a3c24bf0fbda9c5270",
+			"source_state_sha256": "e867344b281ec63b0d307936837313bc9bb0b4150e2fe428c0d0411ca6489c65",
 			"state_path": "00tra-courtyard-retail-m0900-lighting_only.state.json",
-			"state_sha256": "430488c438e5ea30ca8eb66548b32a26babadcb5dd284bd03b647db90bd83bba",
+			"state_sha256": "a96d517f64d2c106f8b2cf9d65590b198bfe88ee7b3dc23ca627234644783291",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "00tra-courtyard-retail-m0900-unshaded",
 			"png_path": "00tra-courtyard-retail-m0900-unshaded.png",
-			"png_sha256": "b2fc69bc9c6e60bcdce2dfc6fe5786b38dad7659f4a47382385f1fee00a09dfd",
-			"source_state_sha256": "2066e20c59585503df81d39d177aabe42d8d65d1f03cdf02294e0bfe354ae317",
+			"png_sha256": "a0f669cefd2323cf0f600f7cb3e627b787480009deb638b91d4d7cbcb2300b86",
+			"source_state_sha256": "3513d15e07e221725bc231d52161ea9046975a6adda8761330928ef4fe7d10ba",
 			"state_path": "00tra-courtyard-retail-m0900-unshaded.state.json",
-			"state_sha256": "d8fbbd5912dc25ea2dcce5331bcfafd1eaeba198b8273ad59d7460b1ea722f12",
+			"state_sha256": "a0d85a39a7d03601d5e1fe49109d310f5c25d338cd315ced8d46d02cf681ead5",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "00tra-courtyard-retail-m0900-directional_shadow_atlas",
 			"png_path": "00tra-courtyard-retail-m0900-directional_shadow_atlas.png",
-			"png_sha256": "874ef59f8dd2ad0fe15f9db556e794fb1a6f8612e36e3044e5be655fd82698f7",
-			"source_state_sha256": "6a7851fe33539f5d7f546a4af0ee7d7a5e7efc974bd7876528f6cb5de6e27d7c",
+			"png_sha256": "c112f8143394d4d2462ab99d382b34954918595c3d7c69f390f2de37a8f94459",
+			"source_state_sha256": "75d9aba916e1766d59f462d54ede58737b9443fb89eef0bd6206ca3f63d77821",
 			"state_path": "00tra-courtyard-retail-m0900-directional_shadow_atlas.state.json",
-			"state_sha256": "c5b4cdad3966bdf46b968fabb38e69f170ce404a6a9648f95da5d3fb92fe537b",
+			"state_sha256": "853b1b82b649a01850aee709e7b6cd765adef9bf79b5b42ee340ce7bb98838e1",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -222,10 +222,10 @@
 	},
 	"provenance": {
 		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
-		"gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
+		"gdextension_sha256": "f08d7e93a13671bd8b37eb522e123462f4cfd2c4e59fa1ebcd0110db83340b53",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "30f3e194b9f7aaea6053492f7797c9940f8039ed"
+		"source_commit": "58ea3e5ff61b9aef5841a8601b7d9b86817ebde1"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

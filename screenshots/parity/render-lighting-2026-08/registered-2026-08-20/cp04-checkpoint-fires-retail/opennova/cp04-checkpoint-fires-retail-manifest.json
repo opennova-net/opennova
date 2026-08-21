@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "cp04-checkpoint-fires-retail-m0120-beauty",
 			"png_path": "cp04-checkpoint-fires-retail-m0120-beauty.png",
-			"png_sha256": "5c1fd7e715259fd1e3c6b9fe288909254a43c6d0de838022fc2f2c296f9e6775",
-			"source_state_sha256": "ad8e8b023f6d7b587b9135b05591d2902e6c80d55f6970140d0fcb647b6be19a",
+			"png_sha256": "65b151e216a5c2e2f4ca057185dd42790b8a0f6a216ae7b2feee5edb3b808e4b",
+			"source_state_sha256": "5dce098d4dd16e175ac62759e66c7463ad4177f8a5aec3e6e39fe88dc3733b34",
 			"state_path": "cp04-checkpoint-fires-retail-m0120-beauty.state.json",
-			"state_sha256": "5660d88089bfce06afd44b9598fb997393425e61964234926a013747160107ea",
+			"state_sha256": "1a45622fea5be4234336f17704fc35752ba598a35b7aad38fcec49ad745dd7d3",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "cp04-checkpoint-fires-retail-m0120-shadows_off",
 			"png_path": "cp04-checkpoint-fires-retail-m0120-shadows_off.png",
-			"png_sha256": "7dae93f8d545394012790bc02133462fbf1c6bb0ed3569c7552d46925196caac",
-			"source_state_sha256": "bb52eaebed88b1368759cd09aa034d66bc15d91bcb6c1cf0b3f5fa46c6453fd0",
+			"png_sha256": "7faac9be37783ae1ef9915426d01374788168fe50369b9b242ceb2ab622ac631",
+			"source_state_sha256": "49eca1b13dd25b18982263241e3220d38b90f8befceb2a397e7b5b49a477f611",
 			"state_path": "cp04-checkpoint-fires-retail-m0120-shadows_off.state.json",
-			"state_sha256": "895633f450136f277ceab1e41461e53b666d06917edae404064b732f0db093a5",
+			"state_sha256": "850fcca6b2e1be01a69c5438409679e37fad29c090a9ea62df94e6ab569e678a",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "cp04-checkpoint-fires-retail-m0120-lighting_only",
 			"png_path": "cp04-checkpoint-fires-retail-m0120-lighting_only.png",
-			"png_sha256": "b258d68ad8a5e1da0e3bd131b3b78411640befcba63382e164b7ca98eeab02e2",
-			"source_state_sha256": "c0c74e6852314798500d09ed8897347889e84c8ddfc798e145959cfb32803662",
+			"png_sha256": "8f8865ee34960fd64b9e2e782731a903a2a24b7b09a1eab06ebb02664dca241a",
+			"source_state_sha256": "c82227ea1bfb230c705e394a8cb750d192c60c5d9f90e6f97315ee3321973a40",
 			"state_path": "cp04-checkpoint-fires-retail-m0120-lighting_only.state.json",
-			"state_sha256": "d54740ab52efa5f47f6bd933101d326e495b0778a099a16dd889e44429470ac3",
+			"state_sha256": "fd7ebac7cafca75f817c5d2a8e9fcecd6760103c972d3b70fc71013eecbda6f9",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "cp04-checkpoint-fires-retail-m0120-unshaded",
 			"png_path": "cp04-checkpoint-fires-retail-m0120-unshaded.png",
-			"png_sha256": "f7aad9f2e79b2d8b270eb6f5b8d6d406a47e3bf783243567fdf12fc5f07a0641",
-			"source_state_sha256": "acd85892d40a8cdf00c67d97091b675ad9c5e15acd962f4190a36927011b0617",
+			"png_sha256": "a099f2b20a7260028563021781fc535dd2f307a04c850c473e8f1aa71fd99e9a",
+			"source_state_sha256": "29dcad03f29577d9c6369ccaadab9c84aa160bdcb2686d5ec7c29d5cc30dc277",
 			"state_path": "cp04-checkpoint-fires-retail-m0120-unshaded.state.json",
-			"state_sha256": "07b9cd85476b28bf7d51b5bb97e70b3b238a578f8f26f42001948c829689d94e",
+			"state_sha256": "798b94f870b9e694b99dde0c92b640bb089bf3b5d058096f80b36e1d33546a03",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "cp04-checkpoint-fires-retail-m0120-directional_shadow_atlas",
 			"png_path": "cp04-checkpoint-fires-retail-m0120-directional_shadow_atlas.png",
-			"png_sha256": "8a5407b4cc6f255aa1aea910ab5eb328442d9e814aeac656dad24d983becd22a",
-			"source_state_sha256": "9c5868263a04eab8f010602e551db6ceb5d736f7c79703b2a6376aa989c6db2d",
+			"png_sha256": "d1f2e46c0b5c6b1d94746d70d876c7ff65616c8a060be291efe1ed4d711348f2",
+			"source_state_sha256": "d2c4ae9dd0e2fcf03b0082389a7dfa08a6f0c48b201523ccb4de19efa8870074",
 			"state_path": "cp04-checkpoint-fires-retail-m0120-directional_shadow_atlas.state.json",
-			"state_sha256": "70a27ba68085e84d45ca3af43f3e1282ae5dd769cf57086728c362de1535f5ea",
+			"state_sha256": "37213dddffc587a8a52a6c8fe735b7e68ea98a4d361cd4a4b9a71b370bf4c638",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -222,10 +222,10 @@
 	},
 	"provenance": {
 		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
-		"gdextension_sha256": "3a35e9065f23fa576e45e82819222d3b3d6b379c0e21d08454d2c75f4281af65",
+		"gdextension_sha256": "f08d7e93a13671bd8b37eb522e123462f4cfd2c4e59fa1ebcd0110db83340b53",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "30f3e194b9f7aaea6053492f7797c9940f8039ed"
+		"source_commit": "58ea3e5ff61b9aef5841a8601b7d9b86817ebde1"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

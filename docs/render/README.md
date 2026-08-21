@@ -114,9 +114,10 @@ context frames are not substitutes for these fixtures.
 The current 2026-08-20 max-quality publication contains
 [all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
 captured from frozen source
-`30f3e194b9f7aaea6053492f7797c9940f8039ed` (the catalog-v4 growth commit;
-the prior frozen sources `3ada00e96…` and `3232a5c86…` were orphaned from
-master ancestry by a rebase merge, which is what prompted this re-take). The fixture index links every
+`58ea3e5ff61b9aef5841a8601b7d9b86817ebde1` (master after the 2026-08-20
+render-fix trio: the render-slot entity ground shadows #523, vertex-rate
+model-LGHT lighting with coronas #524, and the sun veil/exposure/celestial
+axis-map fixes #525). The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
 uses fixture catalog v4,
@@ -140,16 +141,17 @@ re-shootable — its `camera_bms` values bind its own capture session's physics
 constraint table).
 
 Across the 18 current comparison-v6 manifests, full-frame MAE spans
-`5.071006`–`26.338288`, `world_center` MAE spans
-`2.493591`–`23.970676`, and `viewmodel_arms` MAE spans
-`6.103721`–`34.217820`. These are descriptive deltas, not parity thresholds.
+`5.564968`–`17.027909`, `world_center` MAE spans
+`2.866836`–`19.097433`, and `viewmodel_arms` MAE spans
+`5.694804`–`26.720878`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
 night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
 differences remain visible. The `00tra-tire-marks-retail` fixture (added
 2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
-tire-mark composition; the D-TIL-4 flip/rotate composition-order fix in this
-revision dropped its full-frame MAE `16.354421` → `12.135816`, and the
-remaining delta rides the open D-TERRAIN-7 tile-composition items. The
+tire-mark composition; the corrected celestial axis map (#525) now lays the static tree
+silhouettes through this camera's view, so its full-frame MAE (`17.027909`)
+measures the open D-TERRAIN-7 low-sun silhouette-density divergence together
+with the tile-composition items. The
 `00tra-armory-lght-retail` fixture (added 2026-08-20 from a debug snapshot)
 measures model-authored `LGHT` lamp delivery inside the armory - the
 2026-08-20 slice landed vertex-rate point shading, static-source owner

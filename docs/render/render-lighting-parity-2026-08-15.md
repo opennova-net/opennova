@@ -295,11 +295,12 @@ measuring the D-RLIT-4 model-`LGHT` delivery residuals: corona billboards,
 Target/spot cones, static-batch owner scope), and `03tr-sun-sky-retail`
 (2026-08-20, the low-sun 03TR airfield vista, measuring sun/sky-dome/ambient
 response across D-RLIT-2, D-RLIT-5, and the deferred env #16 table). All rows
-bind frozen source `30f3e194b9f7aaea6053492f7797c9940f8039ed` (the catalog-v4
-growth commit; the earlier frozen sources `3ada00e96…` and `3232a5c86…` were
-orphaned from master ancestry by rebase merges of PR #520/#521 — the tag
-`render-evidence/2026-08-20` keeps `3232a5c86…` reachable — which is what
-prompted this full re-take), fixture catalog v4 at SHA-256
+bind frozen source `58ea3e5ff61b9aef5841a8601b7d9b86817ebde1` (master after
+the 2026-08-20 render-fix trio #523/#524/#525: render-slot entity ground
+shadows, vertex-rate model-LGHT lighting with coronas, and the sun
+veil/exposure/celestial axis-map fixes; the prior frozen source
+`30f3e194b…` remains reachable via the merge-committed PR #522 and the tag
+`render-evidence/2026-08-20-v4`), fixture catalog v4 at SHA-256
 `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
 verbatim fresh-process captures, every applied pose kept exactly —
@@ -310,9 +311,9 @@ Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 18 comparison-v6
-manifests, full-frame MAE spans `5.071006`–`26.338288`, `world_center` MAE
-spans `2.493591`–`23.970676`, and `viewmodel_arms` MAE spans
-`6.103721`–`34.217820`. These are descriptive deltas rather than parity
+manifests, full-frame MAE spans `5.564968`–`17.027909`, `world_center` MAE
+spans `2.866836`–`19.097433`, and `viewmodel_arms` MAE spans
+`5.694804`–`26.720878`. These are descriptive deltas rather than parity
 thresholds; no metric from a superseded set is carried forward as if it
 described these images.
 
