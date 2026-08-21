@@ -368,9 +368,19 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		rec.anim_slot = e.anim_slot;
 		// Players: the per-team minimap/char-slot id picked at add (CI0/CI1 join vars) when present,
 		// else the D-NET-137 encoding shim (host's own player / var-less peers).
+		// Field 14 = entity+0x15C, the WIRE NetId — a PLAYER-only field, assigned at
+		// add [orig: Server_PlayerAdd @0x51cbc0 @0x51d0b1 / slot+440; D-NET-146]. AI
+		// organics never receive one, so retail serializes 0 for them; the 00TRg
+		// baseline shows exactly that — 56 organic records at net=0x0000 and only the
+		// two Player #1 (0x14b9) rows carrying values (0x0203 "JO", 0x0200
+		// "SPAGHETTI"). We used to send the AUTHORED SSN here, conflating entity+0x15C
+		// with entity+124 (the authored id the BMS triggers/actions reference
+		// [orig: Entity_SpawnFromBMSRecord @0x40e9f0 copies record dword @+8 to
+		// entity+124]). Two different fields; only the player one belongs on the wire.
+		// Safe for our own client, which keys rows by slot_id, never by this value.
 		rec.net_id = (e.item_id == kPlayerPersonTypeId)
 				? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
-				: e.net_id;
+				: 0;
 		rec.player_class = player_class_for_wire(e);
 		batch.records.push_back(std::move(rec));
 	});
@@ -433,9 +443,12 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// Same field sources as the 0x0C organic record: entity+0x374 raw + the per-team minimap id
 	// (see build_pool0_organic_batch; D-NET-146/137).
 	rec.anim_slot = e.anim_slot;
+	// entity+0x15C is player-only here too (see build_pool0_organic_batch). NOTE the
+	// evidence is weaker for 0x18 than for 0x0C: the retail baseline contains no 0x18
+	// at all, so this follows the SAME FIELD rather than a directly observed record.
 	rec.net_id = (e.item_id == kPlayerPersonTypeId)
 			? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
-			: e.net_id;
+			: 0;
 	rec.player_class = player_class_for_wire(e);
 	// The wire struct retains its early alert_level name, but the grilled source is refNum.
 	// entity+340 remains the sole unmodeled live-record byte and therefore stays zero.

@@ -102,7 +102,12 @@ bool run_pool0_organic() {
 	if (!expect(r.pos_x == w::to_fixed(10.0) && r.pos_z == w::to_fixed(1.5), "pos 16.16")) return false;
 	if (!expect(r.orientation == heading_bam(30), "orientation = engine heading BAM")) return false;
 	if (!expect(r.team == 2, "team carried")) return false;
-	if (!expect(r.net_id == 0x4242, "net_id carried")) return false;
+	// entity+0x15C is PLAYER-ONLY [orig: Server_PlayerAdd @0x51cbc0]: an AI organic
+	// serializes 0, never its authored SSN. Witnessed in the 00TRg retail baseline —
+	// 56 organic records at net=0x0000 and only the two Player #1 (0x14b9) rows
+	// carrying values. This test previously asserted the AI's 0x4242 came through,
+	// which pinned the field conflation rather than the retail behaviour.
+	if (!expect(r.net_id == 0, "AI organics serialize net_id 0")) return false;
 	if (!expect(r.anim_slot == 5, "anim slot carried")) return false;
 	std::printf("PASS pool0_organic\n");
 	return true;
@@ -417,7 +422,8 @@ bool run_full_entity_spawn_rich_fields() {
 	if (!expect(rec.heading_hi == want_heading && rec.pitch_hi == want_pitch,
 	            "yaw/pitch engine BAM high words")) return false;
 	if (!expect(rec.ai_state == 0x34, "ai_state low byte")) return false;
-	if (!expect(rec.anim_slot == 6 && rec.net_id == 0x4242 && rec.player_class == 7,
+	// net_id 0 for the same player-only reason as the 0x0C record above.
+	if (!expect(rec.anim_slot == 6 && rec.net_id == 0 && rec.player_class == 7,
 	            "anim/net/class raw fields")) return false;
 	if (!expect(rec.unused_byte == 0 && rec.alert_level == 0xAB && rec.sub_type == 0xCD,
 	            "tail leaves only entity+340 zero")) return false;
