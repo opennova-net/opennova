@@ -381,6 +381,52 @@ int main() {
 		expect(again12 == 0, "a drained removal is announced exactly once");
 	}
 
+	// --- 9. S2C 0x13 field 2 is the victim's DEATH ANIM STATE, not a killer
+	// [orig: BuildDeathNotifyPayload @0x5036E0 -> dest[1] = *(WORD *)(entity + 704);
+	// the client stores it as deathAnimStateId @0x42ebdf]. Sending the killer handle
+	// here made a corpse pick an anim indexed by whoever shot it.
+	{
+		w::World w5;
+		w5.registry.configure_pool(0, 16);
+		w::AiSystem ai5;
+		w5.ai = &ai5;
+		w::PlayerSpawn ps5;
+		ps5.position = {0.0f, 0.0f, 10.0f};
+		ps5.team = 1;
+		ps5.net_id = 0xFFC0;
+		const w::EntityHandle killer5 = w::spawn_player(w5, ps5);
+		w::Entity foe5;
+		foe5.team = 2;
+		foe5.alive = true;
+		foe5.net_id = 700;
+		foe5.death_anim_state = 174; // a real death clip id, distinct from any slot
+		const w::EntityHandle victim5 = w5.registry.spawn_from(0, 3, foe5);
+
+		ns::LoopbackChannel ch5;
+		np::NapiNPServerCtx c5;
+		c5.is_authority = 1;
+		c5.is_in_session = 1;
+		c5.world = &w5;
+		c5.np_protocol.connection_list.push_back(make_conn(
+				1, 1, &ch5, ns::TransportMode::Client, killer5, true));
+
+		push_death(w5, victim5, killer5);
+		np::Server_TickUpdate(c5);
+		ns::Datagram d5;
+		std::vector<uint8_t> b13;
+		while (ch5.client_recv(d5))
+			if (d5.tag == 0x13 && d5.body.size() == 4) b13 = d5.body;
+		expect(b13.size() == 4, "a 4-byte 0x13 reached the peer");
+		if (b13.size() == 4) {
+			expect(uint16_t(b13[0] | (b13[1] << 8)) == victim5.packed,
+			       "0x13 field 1 is the VICTIM handle");
+			expect(uint16_t(b13[2] | (b13[3] << 8)) == 174,
+			       "0x13 field 2 is the victim's death anim state, NOT the killer");
+			expect(uint16_t(b13[2] | (b13[3] << 8)) != killer5.packed,
+			       "field 2 is not the killer handle");
+		}
+	}
+
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;
 }

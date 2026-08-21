@@ -366,7 +366,21 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		if (ctx.is_in_session) {
 			std::vector<uint8_t> body13;
 			put_u16le(body13, d.victim_handle);
-			put_u16le(body13, d.killer_handle); // the killerSource stamp [orig: entity+704]
+			// Field 2 is the victim's DEATH ANIM STATE (entity+0x2C0), not a killer
+			// [orig: BuildDeathNotifyPayload @0x5036E0 writes dest[1] =
+			//  *(WORD *)(entity + 704)]. The client stores it straight into
+			// deathAnimStateId [orig: NapiNPClientMsg_0x013 @0x42EB50 @0x42ebdf], and
+			// 0 means "none", where the death edge falls back to 174 death_pungi.
+			// We were sending the KILLER'S HANDLE into an animation-state field, so a
+			// remote corpse selected an anim indexed by whoever shot it. Retail's
+			// baseline is 0 on all 44 deaths, which is what an org1 AI parks.
+			// (nw_pp prints this field as "killerSource" -- a decoder misnomer.)
+			{
+				const world::Entity *dead = world.registry.get(d.victim);
+				put_u16le(body13, dead != nullptr
+						? static_cast<uint16_t>(dead->death_anim_state)
+						: uint16_t(0));
+			}
 			std::vector<uint8_t> body1e;
 			if (victim_is_player) {
 				const world::Entity *victim = world.registry.get(d.victim);
