@@ -334,6 +334,72 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	sim.free()
 
 
+func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
+	# The rotor spin machine: a player-control item seeds its rate while the
+	# engine-running occupant latch holds, the speed ramps and the angle
+	# accumulates; the cveh callback publishes the angle's high word as
+	# HELO_ROTOR / HELO_TAILROTOR and the present applier stores it on the
+	# carrier model [orig: Entity_UpdatePartSpinAccumulator @0x4928B0;
+	#  Entity_CacheVehicleHUDStats @0x492ACA..0x492ADE].
+	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
+	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Blackhawk witness")
+		return
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	assert_eq(String(item_db.get_graphic(CARRIER_ITEM_ID)), CARRIER_GRAPHIC)
+
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var placed := mission.add_entity(
+			MissionData.KIND_ITEM, CARRIER_ITEM_ID,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(placed.is_empty())
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var placer := MissionObjectPlacer.create(root, item_db)
+	placer.place(mission, container)
+	var mission_objects := container.get_node_or_null("MissionObjects") as Node3D
+	assert_not_null(mission_objects)
+	if mission_objects == null:
+		return
+	var rt = preload("res://game/world/mission_presentation.gd").new()
+	add_child_autofree(rt)
+	assert_gt(int(rt.setup(mission, mission_objects, {
+		"resource_root": root,
+		"item_db": item_db,
+		"placer": placer,
+		"playable": true,
+	})), 0)
+	assert_true(rt.tick())
+	var carrier_model := rt.get_registry().resolve(
+			int(placed.get("bms_id", 0)),
+			MissionData.KIND_ITEM,
+			int(placed.get("index", 0))) as ObjectModel
+	assert_not_null(carrier_model, "the Blackhawk resolves through the placed registry")
+	if carrier_model == null:
+		return
+	assert_eq(int(carrier_model.get_ctrl_values().get("HELO_ROTOR", 0)), 0,
+			"an uncrewed Blackhawk's rotor rests at zero")
+
+	assert_true(rt.get_sim().local_player_toggle_mount(),
+			"the local player takes the Blackhawk's control seat")
+	rt.play()
+	for _tick in range(62):
+		var input := MissionFrameInput.new()
+		input.delta_seconds = Simulation.tick_dt()
+		assert_true(rt.advance_session_frame(input).did_tick())
+	var ctrls: Dictionary = carrier_model.get_ctrl_values()
+	assert_true(ctrls.has("HELO_ROTOR"),
+			"the crewed carrier owns the HELO_ROTOR register")
+	assert_gt(int(ctrls.get("HELO_ROTOR", 0)), 0,
+			"the rotor angle's high word advanced while crewed")
+	assert_eq(int(ctrls.get("HELO_TAILROTOR", -1)), int(ctrls.get("HELO_ROTOR", 0)),
+			"both rotor ordinals publish the one +0x464 accumulator word")
+
+
 func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
 	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
@@ -446,6 +512,42 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			if carrier_node != null else Transform3D.IDENTITY)
 	assert_gt(carrier_after.origin.distance_to(carrier_before.origin), 1.0,
 			"the real DBuggy model moved under player control")
+	# The wheel phase integrates the speed word every driven tick and the cveh
+	# callback publishes its high word as VEHICLE_WHEELS, which the present
+	# applier stores on the carrier model as an owned CTRL override
+	# [orig: the +0x2B8 accumulate @0x48c4c5..0x48c4d0; the +0x2BA read in
+	#  Entity_CacheVehicleHUDStats @0x4929B4].
+	var carrier_model := carrier_node as ObjectModel
+	assert_not_null(carrier_model, "the driven DBuggy presents as an ObjectModel")
+	if carrier_model != null:
+		var ctrls: Dictionary = carrier_model.get_ctrl_values()
+		assert_true(ctrls.has("VEHICLE_WHEELS"),
+				"the driven carrier owns the VEHICLE_WHEELS register")
+		assert_ne(int(ctrls.get("VEHICLE_WHEELS", 0)), 0,
+				"the wheel phase advanced under drive")
+	# The mounted third-person camera: in a control seat the chase anchor is
+	# the carrier lifted max(1, 0.375 r) and the eye backs off 1 + 1.5 r — a
+	# longer reach than the on-foot 1.0 u — with the fixed -11.25 deg pitch
+	# [orig: ThirdPersonCamera_Update @0x437B1F..0x437B4B; the mounted leg of
+	#  Camera_ComputeThirdPersonView @0x438121..0x438150].
+	rt.get_sim().set_local_player_camera_third_person(true)
+	for _tick in range(62):
+		var settle := MissionFrameInput.new()
+		settle.delta_seconds = Simulation.tick_dt()
+		assert_true(rt.advance_session_frame(settle).did_tick())
+	var view: Dictionary = rt.get_sim().get_local_player_view()
+	assert_true(bool(view.get("camera_mounted", false)),
+			"a control-seat rider engages the mounted camera leg")
+	assert_true(bool(view.get("camera_pose_valid", false)))
+	var eye: Vector3 = view.get("camera_eye", Vector3.ZERO)
+	var carrier_pos: Vector3 = carrier_node.global_position
+	var horizontal := Vector2(eye.x - carrier_pos.x, eye.z - carrier_pos.z).length()
+	assert_gt(horizontal, 1.5,
+			"the mounted eye backs off further than the on-foot 1.0 u chase")
+	assert_gt(eye.y, carrier_pos.y,
+			"the mounted eye sits above the lifted carrier anchor")
+	assert_almost_eq(float(view.get("camera_pitch_deg", 0.0)), -11.25, 0.01,
+			"a vehicle is looked down on at the fixed mounted pitch")
 	assert_gt(
 			(carrier_after.basis * Vector3.BACK).angle_to(
 					carrier_before.basis * Vector3.BACK),
