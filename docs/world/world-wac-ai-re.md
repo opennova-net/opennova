@@ -5371,7 +5371,9 @@ death entries and on attach, `renderer::compile_scar_draws`
 per-strip batches, the fog-box cull, the owner-visibility gate), and the
 device `ScarPresenter` + `scar_present_pass.gd` (entity-ring batches parented
 under the owner model's section node, shared-ring batches as a world mesh;
-unshaded vertex colour, alpha-scissor 0.5, clamp — landing in this PR).
+unshaded vertex colour, alpha-scissor 0.5, clamp — landed 2026-08-21, D-SCAR; the
+entity-ring batches are uploaded in the section-local frame the engine stores,
+the shared ring in world space).
 Pinned by ctest `impact_scar`, `projectile_combat`, `renderer_scar_draw_list`,
 `destruction`. **The one residual**: the GLASS userpoint leg — the 24-row
 table is not witnessed in full, so a userpoint match cannot be detected and
