@@ -808,9 +808,11 @@ func test_lfp_panel_device_seam() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",
 		"LFP_FLAGS 1020 , 27",
-	]), PackedStringArray(["JO_LFP.tga", "R_LFP.tga", "N_LFP.tga", "lfp_alf.tga"]),
+	]), PackedStringArray(["JO_LFP.tga", "R_LFP.tga", "N_LFP.tga", "lfp_alf.tga",
+			"lfp_dlf.tga"]),
 			{"JO_LFP.tga": Vector2i(64, 256), "R_LFP.tga": Vector2i(64, 256),
-			 "N_LFP.tga": Vector2i(64, 256), "lfp_alf.tga": Vector2i(36, 36)})
+			 "N_LFP.tga": Vector2i(64, 256), "lfp_alf.tga": Vector2i(36, 36),
+			 "lfp_dlf.tga": Vector2i(36, 36)})
 	_copy_font_into(fixture["dir"])
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture["dir"]), OK)
