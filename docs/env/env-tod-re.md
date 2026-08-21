@@ -584,7 +584,70 @@ a scope check (`sub_581F60`) quarters it. Ported: `env::GlareOcclusionState`/
 `glare_ray_jitter`/`glare_occlusion_tick`/`glare_glow_alpha_fixed` +
 `celestial_sun/moon_alpha_fixed` + `kCelestialBodyDistance` (ctest landmark-pinned;
 `glare_brightness_step` corrected to the witnessed dead-band form). The dot³² curve
-(`compute_sun_glare_and_fog_blend @ 0x5ad610`) stays live via `sub_5AD8B0`.
+(`compute_sun_glare_and_fog_blend @ 0x5ad610`) stays live via
+`Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0` (ex `sub_5AD8B0`) —
+witnessed in full 2026-08-20 (the 03tr-sun-sky fixture round):
+
+**The sun veil + exposure stop-down** (`@ 0x5ad8b0`, once per main scene frame
+from `Render_ProcessMainSceneFrame @ 0x5cac4b`, gated on `Celestial_SunModel`):
+`compute_sun_glare_and_fog_blend` runs for the primary view ray (occlusion
+brightness) and, when `Env_WaterHeightFixed`, a secondary water-reflected ray
+(`sub_5AC040` clipped point, its own brightness accumulator
+`dword_27E2E28 >> 2`), sums clamped 192. Each output already folds SunDim
+(`×(0x640000 − dim + 1) >> 8, /25600` — identity at dim 0) and overcast
+(`×(1 − blend)`) inside `@ 0x5ad610` (`@ 0x5ad822..0x5ad8a3`). Consumers:
+
+- `glare > 2` draws a FULLSCREEN WHITE quad with alpha = the glare byte
+  (`(glare << 24) + 0xFFFFFF`, mode 1 → `render_fullscreen_decal_quad
+  @ 0x5c6590`, an alpha-blended viewport quad) — the visible sun-glow veil,
+  far larger than the additive glare 3DI body. It draws after the damage/white
+  flash quads (`@ 0x5cabb0..0x5cac36`) and is skipped on the death screen.
+- The dot¹²⁸ output (previously summarized as "fog whitening") is really an
+  EXPOSURE STOP-DOWN: it writes the modulator-2 TARGET (`Env_Modulator2Target
+  @ 0x26c66a4` — its ONLY writer) to `0x10101 × (64 − (3·min(v,40)) >> 1)`
+  with 8-tick step deltas (`@ 0x5ad96a..0x5ad989`); at v ≤ 0 it releases to
+  `0x404040` over 124 ticks (`@ 0x5ad996..0x5ad9a7`). Staring into the sun
+  therefore stops the whole modulated frame down while the white veil blooms.
+
+Ported 2026-08-20: `env::sun_veil_from_dot` (exact integer chain incl. both
+folds), `ModulatorChain::set_sun_veil_stopdown` (modulator-2 had wrongly been
+pinned to a constant identity target), the `Celestial` per-frame veil leg
+(pushes the `opennova_sun_veil_alpha` shader global; the world's veil leg
+forwards the stop-down to `Weather`), and the `PlayerViewEffects` white veil
+rect. The same round witnessed and FIXED the AXIS divergence the fixture's
+"sun rises in the wrong place" half came from: the celestial tuples are
+RENDER-FLOAT (D3D world) axes — mission `(x,y,z)` -> render `(-y, z, x)`
+`[orig: Math_FixedPointToFloat3_YNegated @ 0x611210]` — while the reimpl's
+Godot world is mission `(x, z, -y)`; the Godot-facing seams had
+identity-mapped the tuple (bodies/glare/dome/object-directional/shadow 90
+deg off in yaw + mirrored). Fixed via the `godot/src/env/env_axes.h` x/z
+swap at every consumer seam (render-lighting-re.md carries the closed note
+and the per-seam list).
+
+**The water-reflected sun glint** (`update_sun_glare @ 0x5ad130`, once per
+main scene render from `Terrain_RenderSceneWithReflection @ 0x5c96c0`) —
+witnessed and ported the same round: its own 4-bit window
+(`dword_27E2E2C`, one sample per frame, bit 8 = visible) and ±16 chase
+toward `popcount × 64` (`dword_27E2E28` — no dead-band, no fog scale). The
+sample point is the reflected-sun position on the water plane
+(`sub_5AC040`: reflect the camera about the water height with a
+`0.25 × (frame & 3)` lift, interpolate along sun × 2048; then ±2 x/z point
+jitter), visible when the point sees both the sun (`point -> cam +
+sun × 2048`) and the camera over terrain plus the physics/player checks.
+The settled brightness submits the glare 3DI mirrored below the eye
+(camera + sun × 128, height negated) at alpha `(dot⁴ − 28672/65536) ×
+brightness >> 8 × SunDim fold >> 2` (no overcast fold), and `brightness >>
+2` feeds the sun veil's SECONDARY term (both veil sums clamp 192).
+Ported: `env::WaterGlintState`/`water_glint_tick`/`water_glint_point`/
+`water_glint_alpha_fixed` + the Celestial "glint" body leg and the veil
+secondary term. The glare gate ray's start-height lift
+(`+1.0 + 0.5 × (frame & 3)` `[orig: @ 0x5acde4]`, fine rays from the exact
+camera height) is ported as `glare_coarse_start_lift` with the witnessed
+coarse-gate-then-jittered-fine cadence; the fine rays' entity leg keeps the
+documented sun-occlusion statics posture (render-lighting-re.md
+D-RLIT-2/D-RLIT-3). The veil rect draws on the PlayerViewEffects
+behind-parent stack (murk -> veil -> NVG), the reimpl home for the retail
+post-scene overlay quads.
 
 ### Original notes (pre-2026-07-06, kept for provenance)
 
@@ -1018,7 +1081,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | Weather tick / smoothing / lightning | **matching for the ported scope**: the fixed 62 Hz clock drives the oscillator, both flash sequencers, rain fade, the two-stage iris modulator, all fourteen color blocks, the cloud-scroll tail, and #27's smoothed scalar springs in witnessed order. Fog/skyfog post-processing and every hosted sky/static current now reach their render consumers. Thunder (#15), quake/WAC wind-ring wiring (#18), and the rain/overcast consumers retained by #27 remain deferred. |
 | Sky dome render: scroll / VS constants / mesh / advanced_clouds=0 | **matching** (including the six-color `2/255` upload and vs.1.1 color-output saturation; verified against `Color_UnpackToFloat4 @ 0x578900`, `render_skybox @ 0x579080`, and `build_sky_dome_mesh @ 0x578db0`) |
 | Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) folded into one Godot pass; D3D forward clip depth is reconstructed for the proximity dp3 while raster position remains native Godot reverse-Z |
-| Celestial + glare | **matching for the ported scope (ENG-2 celestial leg; #33 star field closed at REN-6, 2026-07-06)**: body placement (camera + dir × 64) + witnessed alphas + the #14 occlusion window/hysteresis/glow chain live in `engine/formats/env` behind EnvFile statics + `GlareOcclusion`; the 256-star field generates + twinkles per the witnessed table (`StarField`); the former ENG-3 lo-res-DDA ray residual closed with #209 (2026-07-08) — the glare ray now marches the `engine/runtime/terrain_query` port via `TerrainData.raycast_terrain` |
+| Celestial + glare | **matching for the ported scope (ENG-2 celestial leg; #33 star field closed at REN-6, 2026-07-06; sun veil ported 2026-08-20)**: body placement (camera + dir × 64) + witnessed alphas + the #14 occlusion window/hysteresis/glow chain live in `engine/formats/env` behind EnvFile statics + `GlareOcclusion`; the 256-star field generates + twinkles per the witnessed table (`StarField`); the former ENG-3 lo-res-DDA ray residual closed with #209 (2026-07-08) — the glare ray now marches the `engine/runtime/terrain_query` port via `TerrainData.raycast_terrain`. 2026-08-20: the live `@ 0x5ad8b0` consumer witnessed + ported — the fullscreen white sun veil (alpha = dot³² glare byte) and the modulator-2 exposure stop-down (see the #14 closure). Frozen captures previously starved BOTH glare accumulators (occlusion window at one advance, modulator at its reset identity) — the capture refresh now settles them at the fixture pose through the witnessed per-tick math (`Celestial.settle_glare_occlusion`, `Weather.settle_exposure` — capture-seam only, live cadence unchanged). The 2026-08-20 round also witnessed + ported the celestial AXIS map (`env_axes.h` — the #14 closure carries the derivation), the water-reflected sun glint (`update_sun_glare @ 0x5ad130` — the "glint" body leg + the veil secondary term), and the glare gate ray's start-height lift/coarse-then-fine cadence |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
 | iris / terrain_rgb | iris **matching for the ported scope** after #17 and D-RLIT-2: the live modulator is fed by the marched three-point camera-ray average with per-sample indoor/outdoor classification and sun-occlusion rays; the smoothed ÷64 gain reaches shaders. D-RLIT-2 records the bounded entity/light-group geometry residuals. terrain_rgb **matching** after the 2026-07-13 correction to #19: tile overlay HALF×2X and the effects reciprocal are observable; the foliage FULL-tint sample is overwritten before emission, the bake is dead, and the terrain surface is faithfully untinted |
 | Load pipeline overcast precedence | **matching** after C6 correction (additive-after-success; reimpl two-table model documented, overcast blend at 0 pending weather work) |

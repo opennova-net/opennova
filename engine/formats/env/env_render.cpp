@@ -1276,6 +1276,54 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
 	return result;
 }
 
+SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
+                          int sun_dim_fixed, int overcast_blend_fixed) {
+	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610] — the exact 16.16
+	// chain: five squarings to dot^32, two more to dot^128, brightness >> 8,
+	// the x192 / x40 scales, then the SunDim (x(0x640000 - dim + 1)>>8,
+	// /25600) and overcast (x(1 - overcast)) folds on BOTH outputs.
+	SunVeil veil;
+	int glare_value = 0;
+	int fog_value = 0;
+	if (view_dot_fixed > 0) {
+		const auto sq = [](int32_t v) -> int32_t {
+			return static_cast<int32_t>(
+					(static_cast<int64_t>(v) * v + 0x8000) >> 16);
+		};
+		const int32_t dot2 = sq(view_dot_fixed);   // @ 0x5ad759
+		const int32_t dot4 = sq(dot2);             // @ 0x5ad771
+		const int32_t dot8 = sq(dot4);             // @ 0x5ad789
+		const int32_t dot16 = sq(dot8);            // @ 0x5ad7a1
+		const int32_t dot32 = sq(dot16);
+		glare_value = (192 * ((occlusion_brightness * dot32) >> 8)) >> 16; // @ 0x5ad7b1
+		if (glare_value > 255) {
+			glare_value = 255; // @ 0x5ad7ba
+		}
+		const int32_t dot64 = sq(dot32);  // @ 0x5ad7d5
+		const int32_t dot128 = sq(dot64);
+		fog_value = (40 * ((occlusion_brightness * dot128) >> 8)) >> 16; // @ 0x5ad7fc
+		if (fog_value > 40) {
+			fog_value = 40; // @ 0x5ad802
+		}
+	}
+	// The SunDim fold [orig: @ 0x5ad822..0x5ad82c] — at SunDim 0 the scale is
+	// exactly 25600 and both folds are identity. 1374389535 = the compiler's
+	// /25600 reciprocal (x0.32 >> 13); the (x >> 31) add is its idiv
+	// round-toward-zero fixup.
+	const int view_dist_scale = (0x640000 - sun_dim_fixed + 1) >> 8;
+	const int fog_scaled = fog_value * view_dist_scale;
+	const int glare_scaled = static_cast<int>(
+			(static_cast<int64_t>(1374389535) * glare_value * view_dist_scale) >> 32) >> 13;
+	// The overcast folds [orig: @ 0x5ad893..0x5ad8a3].
+	veil.stopdown = static_cast<int>(
+			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
+							(fog_scaled / 25600) + 0x8000) >> 16);
+	veil.glare = static_cast<int>(
+			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
+							(glare_scaled + (glare_scaled >> 31)) + 0x8000) >> 16);
+	return veil;
+}
+
 int glare_brightness_step(int current, int target) {
 	// [orig: render_skybox_sun_glow @ 0x5acf5d..0x5acf7f] — +-16 per frame
 	// with a +-16 DEAD-BAND HOLD (the original never snaps onto the target;
@@ -1314,6 +1362,66 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
 		return 0x10000;
 	}
 	return static_cast<int>(value * 65536.0);
+}
+
+void water_glint_tick(WaterGlintState &state, bool visible) {
+	// [orig: update_sun_glare @ 0x5ad1cd..0x5ad356] — one sample per frame
+	// into the 4-bit window (bit 8), then the plain +-16 step toward
+	// popcount * 64 (no dead-band, no fog scale — unlike the sky glow).
+	state.frame_index += 1;
+	state.window = static_cast<uint8_t>((state.window >> 1) |
+			(visible ? 0x8u : 0u));
+	int target = 0;
+	for (int bit = 0; bit < 4; ++bit) {
+		if (state.window & (1u << bit)) {
+			target += 64;
+		}
+	}
+	if (state.brightness < target) {
+		state.brightness += 16;
+	} else if (state.brightness > target) {
+		state.brightness -= 16;
+	}
+}
+
+bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
+                       float water_height, float view_z_jitter,
+                       Vec3 &out_mission) {
+	// [orig: sub_5AC040] — structural translation of the fixed/float mix:
+	// clip = 2*wh - cam_z - jitter; reject at clip >= wh; ratio =
+	// (wh - clip) / (cam_z + sun_z*2048 - clip); out = (cam_xy + sun_xy*2048
+	// * ratio, clip + sun_z*2048 * ratio).
+	const float clip = 2.0f * water_height - cam_mission.z - view_z_jitter;
+	if (clip >= water_height) {
+		return false;
+	}
+	const float denom = cam_mission.z + sun_mission.z * 2048.0f - clip;
+	if (denom == 0.0f) {
+		return false;
+	}
+	const float ratio = (water_height - clip) / denom;
+	out_mission.x = cam_mission.x + sun_mission.x * 2048.0f * ratio;
+	out_mission.y = cam_mission.y + sun_mission.y * 2048.0f * ratio;
+	out_mission.z = clip + sun_mission.z * 2048.0f * ratio;
+	return true;
+}
+
+int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
+                            int sun_dim_fixed) {
+	// [orig: update_sun_glare @ 0x5ad395..0x5ad41c] — (dot^4 - 28672/65536)
+	// x brightness >> 8, the SunDim fold (/25600), >> 2; the negative
+	// dot^4 region clamps to 0. No overcast fold.
+	int factor = 0;
+	if (view_dot_fixed > 0) {
+		const int squared = static_cast<int>(
+				(static_cast<int64_t>(view_dot_fixed) * view_dot_fixed + 0x8000) >> 16);
+		factor = static_cast<int>(
+				(static_cast<int64_t>(squared) * squared + 0x8000) >> 16) - 28672;
+	}
+	const int dim_scale = (0x640000 - sun_dim_fixed + 1) >> 8;
+	const int combined = dim_scale * ((brightness * factor) >> 8);
+	const int alpha = (combined / 25600) >> 2;
+	return clamp_int(alpha, 0, 0x10000);
 }
 
 GlareRayJitter glare_ray_jitter(uint32_t jitter_index) {

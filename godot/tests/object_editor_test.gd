@@ -638,7 +638,11 @@ func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void
 	var fog_raw: Vector3 = tod.get("fog", Vector3.ZERO)
 	var fog_doubled := EnvFile.double_saturate_color(Color(fog_raw.x, fog_raw.y, fog_raw.z))
 	_assert_vector3_close(material.get_shader_parameter("u_fog_color"), Vector3(fog_doubled.r, fog_doubled.g, fog_doubled.b), 0.01, "Preview should use the engine-doubled environment fog color.")
-	_assert_vector3_close(material.get_shader_parameter("u_dir_light_dir"), -env.compute_sun_direction(1200.0).normalized(), 0.01, "Preview should use environment sun direction.")
+	# compute_sun_direction serves the raw render-float tuple; the preview
+	# seam maps it into Godot world axes (the x/z swap, env_axes.h).
+	var sun_raw := env.compute_sun_direction(1200.0)
+	var sun_godot := Vector3(sun_raw.z, sun_raw.y, sun_raw.x)
+	_assert_vector3_close(material.get_shader_parameter("u_dir_light_dir"), -sun_godot.normalized(), 0.01, "Preview should use environment sun direction.")
 	assert_true(bool(material.get_shader_parameter("u_fog_enabled")), "Loaded environments should enable object fog uniforms.")
 	assert_eq(int(material.get_shader_parameter("u_fog_type")), env.get_fog_type())
 	assert_true(float(material.get_shader_parameter("u_fog_end")) > 0.0, "Object fog should carry a positive fog end distance.")

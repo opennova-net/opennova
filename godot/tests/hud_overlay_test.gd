@@ -662,14 +662,22 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
 			Rect2(0, 0, 1024, 768),
 			"Retail masks cover the viewport while inset art stays in design coordinates.")
-	assert_eq(effects.get_child_count(true), 2,
-			"The underwater murk and NVG post-processes are internal children.")
+	assert_eq(effects.get_child_count(true), 3,
+			"The underwater murk, sun veil, and NVG post-processes are internal children.")
 	var murk := effects.get_node("UnderwaterMurk") as ColorRect
+	var veil := effects.get_node("SunVeil") as ColorRect
 	var nvg := effects.get_node("NvgPost") as ColorRect
 	assert_not_null(murk)
+	assert_not_null(veil)
 	assert_not_null(nvg)
-	assert_lt(murk.get_index(true), nvg.get_index(true),
+	assert_lt(murk.get_index(true), veil.get_index(true),
+			"Retail composites underwater murk before the sun-glare veil "
+			+ "[orig: the veil draws in Render_ProcessMainSceneFrame @ 0x5cac4b, "
+			+ "after the scene composites].")
+	assert_lt(veil.get_index(true), nvg.get_index(true),
 			"Retail composites underwater murk before later first-person HUD effects.")
+	assert_not_null(veil.material as ShaderMaterial,
+			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
 	assert_true(nvg.visible,
 			"First-person-visible NVG enables the post-process.")
 	effects.update_info({"nvg_visible": false})

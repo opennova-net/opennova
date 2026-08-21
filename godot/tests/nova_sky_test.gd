@@ -32,9 +32,14 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	assert_eq(mat.get_shader_parameter("u_cloud_base"), ctx.env_node.get_cloud_base() * 2.0, "c24 cloudbase")
 	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), ctx.env_node.get_cloud_highlight() * 2.0, "c27 cloudhighlight")
 	assert_eq(mat.get_shader_parameter("u_cloud_edge"), ctx.env_node.get_cloud_edge() * 2.0, "c26 cloudedge")
-	assert_eq(mat.get_shader_parameter("u_sun_dir"), ctx.env_node.get_sun_direction(),
+	# The dome shader and the getters both serve GODOT-world vectors (the
+	# env_axes.h swap applies once at each device seam — 2026-08-20
+	# celestial-axis correction).
+	assert_eq(mat.get_shader_parameter("u_sun_dir"),
+		ctx.env_node.get_sun_direction(),
 		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
-	assert_eq(mat.get_shader_parameter("u_light_dir"), ctx.env_node.get_light_direction(),
+	assert_eq(mat.get_shader_parameter("u_light_dir"),
+		ctx.env_node.get_light_direction(),
 		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
 	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_skyfog_color(),
 		"the dome fogs with the dedicated skyfog block [orig: sky fog wrapper @ 0x579cb0]")

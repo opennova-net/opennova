@@ -135,7 +135,128 @@ func test_glare_keeps_occlusion_brightness_but_fades_from_each_pass_view() -> vo
 				assert_eq(material.get_shader_parameter("u_glare_view_fade"), true,
 						"the view-dependent dot^4 fold runs in each render pass")
 				assert_eq(material.get_shader_parameter("u_glare_direction"),
-						fixture.environment.get_sun_direction())
+						fixture.environment.get_sun_direction(),
+						"the glare direction and the getter both serve the "
+						+ "Godot-world vector (env_axes.h swap applied once)")
+
+
+func test_settle_glare_occlusion_reaches_the_dead_band_hold() -> void:
+	# The capture-refresh seam (the D-RLIT-2 fixture starvation): the glare
+	# brightness steps +-16 per frame toward popcount * 32 * fog/1000 with a
+	# +-16 dead-band hold [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f],
+	# so one zero-delta advance leaves a fresh accumulator dark. With no
+	# terrain loaded both jittered rays are clear every frame; the settle must
+	# fill the window (0xFF) and hold inside the dead-band around the
+	# fog-scaled target.
+	var fixture := _make_fixture()
+	var celestial: Celestial = fixture.celestial
+	var env: MissionEnvironment = fixture.environment
+	var before: Dictionary = celestial.get_diagnostics()
+	var glare_before: Dictionary = before.get("glare_occlusion", {})
+	assert_lte(int(glare_before.get("brightness", 0)), 16,
+			"a single advance cannot lift a fresh accumulator past one step")
+
+	var settled: int = celestial.settle_glare_occlusion()
+	# target = popcount(0xFF) * 32 * fog * 65536 * (1/65536000), ftol-truncated
+	# [orig: @ 0x5acf30..0x5acf58].
+	var target := int(256.0 * env.get_fog_level() * 65536.0 * 1.525878978725359e-08)
+	assert_gt(settled, target - 17,
+			"the settled brightness rises into the dead-band below the target")
+	assert_lte(settled, target + 16,
+			"the dead-band hold never overshoots past +16")
+
+	celestial.advance_frame(TICK)
+	var diag: Dictionary = celestial.get_diagnostics()
+	var glare: Dictionary = diag.get("glare_occlusion", {})
+	assert_eq(int(glare.get("window", 0)), 0xFF,
+			"clear rays fill the whole 8-sample window")
+	assert_eq(int(glare.get("brightness", -1)), settled,
+			"a settled accumulator HOLDS through the publishing frame")
+	var bodies: Dictionary = diag.get("bodies", {})
+	assert_true(bodies.has("glare"), "diagnostics list the glare body")
+	var glare_body: Dictionary = bodies.get("glare", {})
+	assert_gt(float(glare_body.get("opacity", 0.0)), 0.0,
+			"the settled brightness publishes a visible glare opacity")
+	assert_true(bool(glare_body.get("visible", false)),
+			"the glare model is shown once its opacity is non-zero")
+
+
+func test_sun_veil_publishes_the_dot32_alpha_global_when_facing_the_sun() -> void:
+	# The sun-glare screen veil [orig:
+	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0]: with the glare
+	# occlusion settled and the camera facing the sun, the dot^32 chain must
+	# publish a non-zero white-veil alpha through the opennova_sun_veil_alpha
+	# shader global and expose the modulator-2 stop-down for the world's veil
+	# leg. Facing away serves zero (the dot <= 0 gate).
+	var fixture := _make_fixture()
+	var celestial: Celestial = fixture.celestial
+	var camera: Camera3D = fixture.camera
+	var env: MissionEnvironment = fixture.environment
+	celestial.settle_glare_occlusion()
+
+	# The getter serves the GODOT-world sun (the env_axes.h swap applies at
+	# the MissionEnvironment boundary).
+	var sun_dir: Vector3 = env.get_sun_direction()
+	# A near-vertical sun is colinear with the default look_at up vector.
+	var up := Vector3.RIGHT if absf(sun_dir.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + sun_dir, up)
+	celestial.advance_frame(TICK)
+	var facing_alpha: float = celestial.get_sun_veil_alpha()
+	assert_gt(facing_alpha, 0.0,
+			"a settled accumulator and a sun-facing view raise the veil")
+	# (The opennova_sun_veil_alpha shader-global push cannot be read back
+	# under the headless dummy RenderingServer; the typed getter is the
+	# testable seam and the push shares its value.)
+	var diag: Dictionary = celestial.get_diagnostics()
+	var veil: Dictionary = diag.get("sun_veil", {})
+	assert_eq(float(veil.get("alpha", -1.0)), facing_alpha)
+	assert_gte(int(veil.get("stopdown", -1)), 0)
+
+	camera.look_at(camera.global_position - sun_dir, up)
+	celestial.advance_frame(TICK)
+	assert_eq(celestial.get_sun_veil_alpha(), 0.0,
+			"looking away from the sun clears the veil")
+
+
+func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
+	# The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130]: with
+	# a water height authored and no terrain (every visibility ray clear),
+	# the settle must chase the glint accumulator to the full 4 * 64 and
+	# place the glare 3DI mirrored BELOW the eye (camera + sun * 128 with the
+	# height term negated). Without water the glint body stays hidden.
+	var fixture := _make_fixture()
+	var celestial: Celestial = fixture.celestial
+	var camera: Camera3D = fixture.camera
+	var env: MissionEnvironment = fixture.environment
+	var glint := celestial.get_node_or_null("Celestial_glint") as Node3D
+	assert_not_null(glint, "the glint body loads beside the glare body")
+	if glint == null:
+		return
+	celestial.advance_frame(TICK)
+	assert_false(glint.visible, "no water height -> no glint")
+
+	# Author a water plane well below the camera and look along the sun so
+	# the mirrored view dot exceeds the witnessed dot^4 threshold.
+	fixture.environment.environment_data.set_water_height(-200.0)
+	var sun_dir: Vector3 = env.get_sun_direction()
+	var mirrored := Vector3(sun_dir.x, -sun_dir.y, sun_dir.z)
+	var up := Vector3.RIGHT if absf(mirrored.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + mirrored, up)
+	celestial.settle_glare_occlusion()
+	celestial.advance_frame(TICK)
+
+	var diag: Dictionary = celestial.get_diagnostics()
+	var glint_state: Dictionary = diag.get("water_glint", {})
+	assert_eq(int(glint_state.get("brightness", 0)), 256,
+			"clear rays settle the glint chase onto popcount * 64")
+	assert_eq(int(glint_state.get("window", 0)), 0xF)
+	assert_true(glint.visible,
+			"a settled glint with a facing view shows the mirrored body")
+	var expected := camera.global_position + mirrored * 128.0
+	assert_true(glint.global_position.is_equal_approx(expected),
+			"the glint places at camera + sun * 128 with the height negated")
+	var bodies: Dictionary = diag.get("bodies", {})
+	assert_gt(float((bodies.get("glint", {}) as Dictionary).get("opacity", 0.0)), 0.0)
 
 
 func test_celestial_shaders_anchor_and_billboard_from_the_active_pass() -> void:
