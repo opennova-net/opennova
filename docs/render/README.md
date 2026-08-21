@@ -1,9 +1,13 @@
-# docs/render/ — the REN track's RE-record home
+# docs/render/ — rendering records and evidence
 
-The render visual-parity track ([maturity-program.md](../maturity-program.md)
-REN; standing rules [ADR 0023](../adr/0023-render-visual-parity.md)). Records
-land here as the grill slices convert the three `UNAUDITED` render systems
-([divergence-ledger.md](../divergence-ledger.md) audit track):
+The historical render visual-parity track ([maturity-program.md](../maturity-program.md)
+REN; [ADR 0023](../adr/0023-render-visual-parity.md)) established the decoded
+material, texture, order and lighting records kept here.
+[ADR 0036](../adr/0036-hard-cut-rendering-facelift.md) now governs the shipping
+presentation: one hard-cut Godot-native relight, no render profiles or inferred
+PBR maps, and unchanged source assets and decoded semantics. The 18 registered
+fixtures remain descriptive retail comparisons rather than a fixed-function
+pixel target.
 
 | Record | Lands at | Catalog | Covers |
 |---|---|---|---|
@@ -17,10 +21,12 @@ Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
 sky/water shader gaps grow [env/env-tod-re.md](../env/env-tod-re.md) — in
 place, never forked.
 
-## The parity instrument (REN-1)
+## The retained rendering instrument
 
-Three tiers; tolerances never widen — a divergence triggers a re-grill
-(ADR 0023 §4).
+ADR 0023's semantic vectors and capture machinery remain in service. Under ADR
+0036, semantic-vector drift still requires explanation, while swatches and retail
+pixels describe or regress the current presentation rather than requiring the old
+fixed-function look.
 
 **T1 — render-state vectors (the CI gate).**
 `tests/renderer/state_vectors_test.cpp` (ctest `renderer_state_vectors`)
@@ -70,12 +76,12 @@ committed — [asset-gated-tests.md](../asset-gated-tests.md) policy). The
 pre-change baseline set is captured before the first REN behavior change and
 each slice's PR attests its A/B.
 
-**T3 — registered retail side-by-side (the headline gate, attested at
-REN-7).** Registration replaces REN-7's earlier unregistered captures with
-cryptographically bound evidence, but the instrument is unchanged: the by-eye
-retail pass over each sheet is the maintainer's attestation, recorded
-scene-by-scene in the slice PR. MAE/RMS numbers are descriptive
-measurements, never the gate.
+**T3 — registered retail side-by-side.** Registration replaces REN-7's earlier
+unregistered captures with cryptographically bound evidence. ADR 0036 retains all
+18 catalog-v4 scenes and recaptures the OpenNova leg after the hard cut. The
+scene-by-scene review checks preserved content semantics and a coherent restrained
+relight, not similarity to the fixed-function pixels. MAE/RMS numbers are
+descriptive measurements, never the gate.
 The named scene list is captured in retail JO and OpenNova from a catalog pose
 and authored start minute. Registration binds the exact retail process,
 frame-correlated state, packed mission, binaries, and frozen OpenNova source.

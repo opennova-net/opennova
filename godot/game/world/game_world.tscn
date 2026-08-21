@@ -1,16 +1,68 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://game/world/game_world.gd" id="1_world"]
 
-[sub_resource type="Environment" id="Environment_clear"]
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_world"]
+sky_top_color = Color(0.055, 0.09, 0.18, 1)
+sky_horizon_color = Color(0.28, 0.38, 0.55, 1)
+sky_curve = 0.12
+ground_bottom_color = Color(0.025, 0.03, 0.035, 1)
+ground_horizon_color = Color(0.22, 0.27, 0.32, 1)
+ground_curve = 0.05
+sun_angle_max = 12.0
+sun_curve = 0.08
+use_debanding = true
+
+[sub_resource type="Sky" id="Sky_world"]
+radiance_size = 3
+process_mode = 2
+sky_material = SubResource("ProceduralSkyMaterial_world")
+
+[sub_resource type="Environment" id="Environment_world"]
 background_mode = 1
-ambient_light_source = 1
+sky = SubResource("Sky_world")
+ambient_light_source = 3
+ambient_light_color = Color(0.08, 0.09, 0.11, 1)
+ambient_light_energy = 0.75
+ambient_light_sky_contribution = 0.65
+reflected_light_source = 2
+tonemap_mode = 2
+tonemap_exposure = 1.0
+tonemap_white = 4.0
+glow_enabled = true
+glow_normalized = true
+glow_intensity = 0.2
+glow_strength = 0.8
+glow_hdr_threshold = 1.2
+glow_hdr_scale = 1.0
+glow_bloom = 0.03
+ssao_enabled = true
+ssao_radius = 1.5
+ssao_intensity = 0.8
+ssao_power = 1.2
+ssao_detail = 0.35
+ssao_horizon = 0.08
+ssao_sharpness = 0.95
+fog_enabled = true
+fog_mode = 1
+fog_light_color = Color(0.5, 0.6, 0.8, 1)
+fog_light_energy = 1.0
+fog_density = 1.0
+fog_depth_begin = 500.0
+fog_depth_end = 1024.0
+fog_depth_curve = 1.0
+fog_sky_affect = 0.35
+sdfgi_enabled = false
+ssil_enabled = false
+ssr_enabled = false
+volumetric_fog_enabled = false
+adjustment_enabled = false
 
 [node name="GameWorld" type="Node3D"]
 script = ExtResource("1_world")
 
 [node name="ClearColor" type="WorldEnvironment" parent="."]
-environment = SubResource("Environment_clear")
+environment = SubResource("Environment_world")
 
 [node name="Terrain" type="Terrain" parent="."]
 environment_path = NodePath("../MissionEnvironment")
@@ -27,6 +79,7 @@ process_priority = -20
 [node name="SkyDome" type="SkyDome" parent="."]
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
+frame_clear_environment = SubResource("Environment_world")
 
 [node name="Weather" type="Weather" parent="."]
 process_priority = -10

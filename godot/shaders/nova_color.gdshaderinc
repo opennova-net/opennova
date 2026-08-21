@@ -11,14 +11,10 @@
 // the default gamma 1.0 [orig: GLib_SetGammaRamp @ 0x677be0 - ramp[i] =
 // (i/255)^gamma; default 1.0f @ 0x84f354].
 //
-// The host renders linear HDR with an sRGB-encoding blit, so the witnessed-FF
-// shaders sample textures RAW (no source_color hint), run the witnessed math
-// in gamma space, and write ALBEDO through this exact inverse of the blit's
-// transfer curve - the displayed byte then equals the computed gamma-space
-// byte (divergence D-RMAT-7, docs/render/render-material-re.md). Framebuffer
-// BLENDING still happens on the encoded values - that bounded residual is
-// D-RMAT-8. Object, terrain, foliage, sky, and water shaders include this
-// single checked-in implementation.
+// The facelift's ordinary surfaces now use source_color inputs and native
+// linear lighting. This helper remains for ordering-sensitive custom effects
+// whose authored color vectors or retained gamma-space combines must be
+// converted explicitly before writing the linear HDR buffer.
 vec3 nova_gamma_to_linear(vec3 gamma_rgb) {
 	vec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));
 	return mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),

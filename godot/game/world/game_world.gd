@@ -267,7 +267,6 @@ func _ready() -> void:
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as TerrainTileOverlay
 	_sun_shadow = SunShadow.new()
 	_sun_shadow.name = "SunShadow"
-	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child(_sun_shadow)
 	_sun_shadow.set_environment_node(_env)
 	# The retained water renderer starts dormant until a successful load chooses
@@ -590,7 +589,6 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 		_local_character_profile = {}
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
-	_placer.set_environment_state(_env.get_light_state())
 	var options := {}
 	# A wire-header join deliberately has no authored body records. The load stream
 	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
@@ -607,11 +605,6 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# inside Game_StartMission's model loops @ 0x524d9c/0x524e09, 0x524f32/0x524fe0].
 	options["progress"] = func() -> void: load_progress.emit(26)
 	_mission_stats = _placer.place(mission, self, options)
-	# Static tile shadows are composed from the placer's resolved ObjectData and
-	# exact entity transforms. Attach only after place() has finished building
-	# that immutable mission snapshot; Terrain invalidates any pre-placement
-	# cache pages when the producer becomes live.
-	_terrain.set_static_shadow_placer(_placer)
 	print_verbose("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),
@@ -688,10 +681,6 @@ func unload() -> void:
 	# whole-world reset or leak a prior mission's pool into the menu frame.
 	if _light_director != null:
 		_light_director.reset()
-	# Release Terrain's Ref before the MissionObjects nodes and owning placer.
-	# This also invalidates pages composed with the departing caster snapshot.
-	if _terrain != null:
-		_terrain.set_static_shadow_placer(null)
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()
@@ -1224,8 +1213,6 @@ func advance_weather_frame() -> void:
 		var weather := get_node_or_null("Weather") as Weather
 		if weather != null:
 			weather.advance_world_driven(_frame_delta, get_sim())
-	if _placer != null:
-		_placer.update_environment()
 	if _frame_timing:
 		var weather_us := Time.get_ticks_usec() - probe_phase_start
 		if _frame_probe_enabled:
@@ -2606,17 +2593,12 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# time-owning leg. Terrain publishes the detail-cell handoff consumed by
 	# foliage; occlusion then resolves the world visibility for this exact view.
 	apply_scene_environment_frame()
-	if _placer != null:
-		# Static MultiMesh batches are retained materials rather than ObjectModels;
-		# the frozen path omits Weather's normal relight tail, so restamp them now.
-		_placer.update_environment()
 	render_terrain_frame()
 	render_foliage_frame()
 	apply_occlusion_frame()
 	# A pass transition can precede the moved camera's visibility notification.
 	# Restamp only environment values after the exact-pose collector admits new
 	# models; do not advance PANM, material generators, animation, or clocks.
-	ObjectModel.refresh_awake_environment()
 
 	# These native devices normally self-refresh during a live frame. A fixture
 	# freezes their parent before moving the capture camera, so drive their

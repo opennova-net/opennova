@@ -30,6 +30,7 @@ void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
 	// Gamma-space modulate + encoded output (D-RMAT-7); the alpha-blend dst
 	// term stays linear-space (D-RMAT-8).
-	ALBEDO = nova_gamma_to_linear(tex.rgb * u_tint);
+	ALBEDO = vec3(0.0);
+	EMISSION = nova_gamma_to_linear(tex.rgb * u_tint);
 	ALPHA = tex.a * u_opacity;
 }

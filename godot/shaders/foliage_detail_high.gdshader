@@ -1,5 +1,6 @@
 shader_type spatial;
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_always;
+render_mode cull_disabled, blend_mix, depth_draw_always,
+	diffuse_burley, specular_schlick_ggx;
 
 // Near detail pass: alpha reference 180 with depth writes enabled, blended
 // SRCALPHA/INVSRCALPHA like every retail detail draw. Alpha-test survivors

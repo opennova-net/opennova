@@ -2109,12 +2109,10 @@ public:
 	// [n_added, ids..., n_removed, ids...] since the last call.
 	PackedInt32Array get_render_culled_changes();
 	// Per-entity sun-visibility factor feed (D-RLIT-3): pairs
-	// [bms_id, quality 1..4] whose quality changed since the last call. The
-	// shell maps quality through sun_visibility_factor into
-	// ObjectModel.set_entity_lighting_context. The local player's quality is
-	// computed but never emitted here — the presenter reads it via
-	// get_local_player_sun_quality() so the FP parts can keep their witnessed
-	// exemption while the third-person body dims.
+	// [bms_id, quality 1..4] whose quality changed since the last call. Retained
+	// as a portable simulation observable even though the native facelift does
+	// not apply per-object directional-light scaling. The local player's quality
+	// remains available separately through get_local_player_sun_quality().
 	PackedInt64Array get_entity_sun_visibility_changes(const Vector3 &p_light_dir);
 	int get_local_player_sun_quality() const { return local_sun_quality_; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —

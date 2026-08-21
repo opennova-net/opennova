@@ -1032,29 +1032,6 @@ func _environment_node() -> MissionEnvironment:
 	return null
 
 
-## Wire the placer to the editor environment's typed light channel: models
-## and static batches relight from the published values, and the channel's
-## changed signal drives the batch restamp on every TOD scrub. The previous
-## placer's restamp is disconnected first — a connected Callable keeps its
-## RefCounted target alive, and mission reloads replace the placer.
-var _placer_restamp := Callable()
-var _placer_restamp_state: EnvLightState = null
-
-
-func _wire_placer_environment() -> void:
-	if _placer == null:
-		return
-	var env := _environment_node()
-	if env == null:
-		return
-	if _placer_restamp_state != null and _placer_restamp.is_valid() 			and _placer_restamp_state.changed.is_connected(_placer_restamp):
-		_placer_restamp_state.changed.disconnect(_placer_restamp)
-	_placer.set_environment_state(env.get_light_state())
-	_placer_restamp = Callable(_placer, "update_environment")
-	_placer_restamp_state = env.get_light_state()
-	env.get_light_state().changed.connect(_placer_restamp)
-
-
 func _objects_container() -> Node3D:
 	if terrain_editor == null:
 		return null

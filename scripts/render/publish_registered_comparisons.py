@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-"""Assemble a registered render-parity publication and generate its index.
+"""Assemble a registered retail/OpenNova comparison and generate its index.
 
 The OpenNova probe, ``register_retail_capture.py`` and
 ``build_retail_side_by_side.py`` each leave their artifacts in a separate
 scratch tree. This tool copies the publishable subset into the tracked
-``screenshots/parity/`` layout, verifies every copied byte against the hash its
+``screenshots/facelift/`` layout, verifies every copied byte against the hash its
 own manifest declares, and writes the publication ``README.md`` -- the identity
 table, the inventory line, and the per-fixture descriptive metric table.
 
@@ -19,7 +19,7 @@ Usage::
       --opennova-root .scratch/golden/render/fixtures \
       --retail-root .scratch/retail/raw \
       --comparison-root .scratch/publication \
-      --output screenshots/parity/render-lighting-2026-08/registered-<date>
+      --output screenshots/facelift/render-lighting-2026-08/registered-<date>
 
 See docs/render/render-parity-runbook.md section 4.
 """

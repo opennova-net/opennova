@@ -1,12 +1,16 @@
 # ADR 0023 - Render visual parity (the REN track)
 
-Status: accepted (maintainer, 2026-07-05). Establishes the REN (render visual parity)
+Status: accepted historical (maintainer, 2026-07-05). Establishes the REN (render visual parity)
 track of the maturity program — grill and reimplement the original renderer's
 materials, batching/draw order, fixed-function shaders, and lighting so our output
 looks identical to retail. The program that schedules the slices is
 [docs/maturity-program.md](../maturity-program.md); the divergence dashboard is
 [docs/divergence-ledger.md](../divergence-ledger.md); the RE records land under
 `docs/render/`.
+
+Decision 1 governed the parity renderer through the final baseline at
+`b2ff3369f`. [ADR 0036](0036-hard-cut-rendering-facelift.md) supersedes that
+presentation target while retaining this ADR's semantic instruments.
 
 ## Context
 

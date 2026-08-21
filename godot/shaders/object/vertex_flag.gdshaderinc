@@ -11,8 +11,10 @@ void vertex() {
 	v_world_pos = (MODEL_MATRIX * vec4(local_pos, 1.0)).xyz;
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_geom_normal = v_world_normal;
-	v_world_tangent = normalize((MODEL_MATRIX * vec4(TANGENT, 0.0)).xyz);
-	v_world_binormal = normalize((MODEL_MATRIX * vec4(BINORMAL, 0.0)).xyz);
-	// Vertex-rate like retail's D3D vertex lights (shared.gdshaderinc note).
-	v_point_light_diffuse = obj_point_light_sum(v_world_pos, v_world_normal);
+	vec3 world_tangent = (MODEL_MATRIX * vec4(TANGENT, 0.0)).xyz;
+	vec3 world_binormal = (MODEL_MATRIX * vec4(BINORMAL, 0.0)).xyz;
+	v_world_tangent = dot(world_tangent, world_tangent) < 0.000001
+			? vec3(0.0) : normalize(world_tangent);
+	v_world_binormal = dot(world_binormal, world_binormal) < 0.000001
+			? vec3(0.0) : normalize(world_binormal);
 }

@@ -323,7 +323,6 @@ static func _shadow_state(shadow: SunShadow) -> Dictionary:
 		return {"available": false}
 	return {
 		"available": true,
-		"projection_mode": shadow.get_projection_mode(),
 		"visible": shadow.visible,
 		"visible_in_tree": shadow.is_visible_in_tree(),
 		"processing": shadow.is_processing(),
@@ -408,9 +407,8 @@ static func _lights_state(root: Node) -> Dictionary:
 			spot += 1
 		elif light is DirectionalLight3D:
 			directional += 1
-	# The EffectWorld point lights are shader-fed pool instances, not Light3D
-	# nodes — the omni node census above must stay 0 while this sibling block
-	# reports the hosted table (effect_light_director.gd).
+	# Keep the portable effect-light snapshot beside the native Omni/Spot node
+	# census so captures verify both source state and device realization.
 	var effectworld: Dictionary = {}
 	var world := root as GameWorld
 	if world != null:

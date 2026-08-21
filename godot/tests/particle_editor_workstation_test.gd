@@ -399,8 +399,10 @@ func test_additive_particle_shaders_do_not_double_apply_alpha() -> void:
 				"Additive color must not be attenuated by any alpha source.")
 	if bumpadd != null:
 		var bumpadd_code := String(bumpadd.code)
-		assert_true(bumpadd_code.contains("ALBEDO = vec3(dotv);"),
-				"Bumpadd should pass its DOT3 result straight to the additive blend state.")
+		assert_true(bumpadd_code.contains("ALBEDO = vec3(0.0);"),
+				"Bumpadd keeps the natively lit base channel black.")
+		assert_true(bumpadd_code.contains("EMISSION = vec3(dotv) * 1.25;"),
+				"Bumpadd presents its DOT3 result as restrained HDR emission.")
 		assert_false(bumpadd_code.contains("dotv * texel.a")
 				or bumpadd_code.contains("dotv * COLOR.a"),
 				"Bumpadd color must not be premultiplied a second time.")

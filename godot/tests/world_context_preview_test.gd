@@ -32,16 +32,19 @@ func _mounted_preview(calls: Dictionary, material: ShaderMaterial = null) -> Arr
 	return [world_root, preview]
 
 
-func test_init_creates_the_five_furniture_nodes_once_with_exact_names() -> void:
+func test_init_creates_the_native_preview_furniture_once_with_exact_names() -> void:
 	var pair := _mounted_preview({})
 	var world_root: Node3D = pair[0]
 	var preview = pair[1]
 
-	assert_eq(world_root.get_child_count(), 5, "clear + env + sky + weather + water land under the world root.")
+	assert_eq(world_root.get_child_count(), 6,
+			"clear + env + sun + sky + weather + water land under the world root.")
 	assert_not_null(world_root.get_node_or_null("EditorEnvironment"), "The environment node keeps its contract name.")
 	assert_not_null(world_root.get_node_or_null("EditorClearColor"), "The frame-clear node keeps its contract name.")
 	assert_not_null(world_root.get_node_or_null("EditorSky"), "The sky node keeps its contract name.")
 	assert_not_null(world_root.get_node_or_null("EditorWeather"), "The weather node keeps its contract name.")
+	assert_true(world_root.get_node_or_null("EditorSunShadow") is DirectionalLight3D,
+			"The preview ENV drives the same native directional-light type as runtime.")
 	assert_not_null(world_root.get_node_or_null("WaterPlane"), "The water node keeps its contract name.")
 	assert_eq(preview.get_environment_node(), world_root.get_node("EditorEnvironment"), "Getter hands out the created environment node.")
 	assert_true(preview.has_method("get_clear_color_node"), "The preview exposes its frame-clear node.")
@@ -61,7 +64,7 @@ func test_init_creates_the_five_furniture_nodes_once_with_exact_names() -> void:
 	# Re-init must not duplicate the furniture.
 	preview.init_environment_preview()
 	preview.init_water_plane()
-	assert_eq(world_root.get_child_count(), 5, "re-init keeps the same five nodes.")
+	assert_eq(world_root.get_child_count(), 6, "re-init keeps the same six nodes.")
 
 
 func test_preview_sky_tracks_active_camera_with_retail_half_height() -> void:
@@ -108,8 +111,10 @@ func test_preview_renders_runtime_frame_clear_color_below_the_dome_rim() -> void
 		return
 	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
 		"BG_COLOR renders the witnessed skyfog clear instead of the black null-sky fallback.")
-	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_DISABLED,
-		"The clear color must not inject Godot ambient into OpenNova's authored lighting.")
+	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_SKY,
+			"Lit preview surfaces receive ENV-driven procedural-sky radiance.")
+	assert_eq(clear.environment.tonemap_mode, Environment.TONE_MAPPER_FILMIC)
+	assert_eq(clear.environment.fog_mode, Environment.FOG_MODE_DEPTH)
 
 	var env_editor = add_child_autofree(EnvironmentEditorScript.new())
 	preview.bind_environment_editor(env_editor)
@@ -119,7 +124,7 @@ func test_preview_renders_runtime_frame_clear_color_below_the_dome_rim() -> void
 		"Below-rim ONED pixels use the same frame-clear color as runtime.")
 
 	env_node.set_smoothed_scalars(100.0, env_node.get_sky_height(), 0.0)
-	preview.get_sky_node().sync_frame_clear_color()
+	preview.apply_environment_to_preview()
 	rgb = env_node.get_frame_clear_color()
 	assert_eq(clear.environment.background_color, Color(rgb.x, rgb.y, rgb.z),
 		"The editor clear tracks weather-smoothed frame color every rendered sky frame.")
@@ -239,7 +244,7 @@ func test_release_frees_the_furniture_and_unbinds_the_document() -> void:
 	preview.bind_environment_editor(env_editor)
 
 	preview.release()
-	assert_eq(world_root.get_child_count(), 0, "release() frees the four furniture nodes.")
+	assert_eq(world_root.get_child_count(), 0, "release() frees all preview furniture nodes.")
 	assert_null(preview.get_environment_node(), "release() clears the environment node reference.")
 	assert_null(preview.get_sky_node(), "release() clears the sky node reference.")
 	assert_null(preview.get_weather_node(), "release() clears the weather node reference.")
@@ -254,4 +259,4 @@ func test_release_frees_the_furniture_and_unbinds_the_document() -> void:
 	# release-then-mount contract).
 	preview.init_environment_preview()
 	preview.init_water_plane()
-	assert_eq(world_root.get_child_count(), 5, "init after release rebuilds all five furniture nodes.")
+	assert_eq(world_root.get_child_count(), 6, "init after release rebuilds all six furniture nodes.")

@@ -57,46 +57,6 @@ const PUBLICATION_TRANSACTION_SCHEMA := \
 		"opennova.fixture-publication-transaction.v1"
 
 
-class StaticTerrainShadowWarmupSuspension:
-	extends RefCounted
-
-	var _terrain: Object = null
-	var _original_enabled := false
-	var _active := false
-
-
-	func begin(terrain: Object) -> Error:
-		if _active:
-			return ERR_ALREADY_IN_USE
-		if terrain == null or not is_instance_valid(terrain) \
-				or not terrain.has_method("is_static_terrain_shadow_enabled") \
-				or not terrain.has_method("set_static_terrain_shadow_enabled"):
-			return ERR_UNCONFIGURED
-		_terrain = terrain
-		_original_enabled = bool(terrain.call(
-				"is_static_terrain_shadow_enabled"))
-		_active = true
-		if _original_enabled:
-			terrain.call("set_static_terrain_shadow_enabled", false)
-		return OK
-
-
-	func finish() -> void:
-		if not _active:
-			return
-		var terrain := _terrain
-		var original_enabled := _original_enabled
-		_terrain = null
-		_original_enabled = false
-		_active = false
-		if terrain != null and is_instance_valid(terrain) \
-				and terrain.has_method("is_static_terrain_shadow_enabled") \
-				and terrain.has_method("set_static_terrain_shadow_enabled") \
-				and bool(terrain.call("is_static_terrain_shadow_enabled")) \
-				!= original_enabled:
-			terrain.call("set_static_terrain_shadow_enabled", original_enabled)
-
-
 var _game: Node
 var _world: GameWorld
 var _capture_size := DEFAULT_CAPTURE_SIZE
@@ -104,7 +64,6 @@ var _expected_mission_time_fixed24 := -1
 var _failed := false
 var _shutdown_started := false
 var _shadow_capture_session
-var _static_shadow_warmup_suspension: StaticTerrainShadowWarmupSuspension
 var _fixture_publication_staging_abs := ""
 
 
@@ -168,11 +127,11 @@ static func publication_child_path(output_abs: String, filename: String) -> Stri
 
 static func capture_variants() -> Array:
 	return [
-		CaptureVariant.new("beauty", 0, true, true),
+		CaptureVariant.new("beauty", 0, true, false),
 		CaptureVariant.new("shadows_off", 0, false, false),
-		CaptureVariant.new("lighting_only", 2, true, true),
-		CaptureVariant.new("unshaded", 1, true, true),
-		CaptureVariant.new("directional_shadow_atlas", 10, true, true),
+		CaptureVariant.new("lighting_only", 2, true, false),
+		CaptureVariant.new("unshaded", 1, true, false),
+		CaptureVariant.new("directional_shadow_atlas", 10, true, false),
 	]
 
 
@@ -180,20 +139,13 @@ static func capture_variant_tile_cache_is_realized(
 		variant, diagnostics: Dictionary) -> bool:
 	if variant == null or not (variant is CaptureVariant):
 		return false
-	var static_enabled := bool(variant.static_terrain_shadow_enabled)
 	if not diagnostics.has("available") \
 			or not bool(diagnostics.available) \
 			or not diagnostics.has("tile_overlay_required") \
 			or (bool(diagnostics.tile_overlay_required) \
 					and (not diagnostics.has("tile_overlay_available") \
 							or not bool(diagnostics.tile_overlay_available))) \
-			or not diagnostics.has("shadow_raster_available") \
-			or not bool(diagnostics.shadow_raster_available) \
-			or int(diagnostics.get("upload_failures", -1)) != 0 \
-			or int(diagnostics.get("shadow_raster_failures", -1)) != 0:
-		return false
-	if bool(diagnostics.get("shadow_provider_enabled", not static_enabled)) \
-			!= static_enabled:
+			or int(diagnostics.get("upload_failures", -1)) != 0:
 		return false
 	var frame_requests := int(diagnostics.get("frame_requests", 0))
 	var frame_compose_jobs := int(diagnostics.get("frame_compose_jobs", -1))
@@ -204,34 +156,12 @@ static func capture_variant_tile_cache_is_realized(
 			or frame_compose_jobs != 0 \
 			or frame_ready_hits != frame_requests \
 			or int(diagnostics.get("frame_selected_ready_pages", 0)) <= 0 \
-			or int(diagnostics.get("ready_pages", 0)) <= 0 \
-			or int(diagnostics.get(
-					"shadow_provider_frame_plan_failures", -1)) != 0 \
-			or int(diagnostics.get("frame_shadow_rgb_changed_bytes", -1)) != 0:
+			or int(diagnostics.get("ready_pages", 0)) <= 0:
 		return false
-	if static_enabled:
-		# Worker evidence is cumulative only for the current invalidation epoch.
-		# The final refresh above is an all-ready hit frame with no compiler work.
-		return bool(diagnostics.get("shadow_provider_snapshot_exact", false)) \
-				and int(diagnostics.get(
-						"shadow_provider_admitted_count", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_provider_resolved_casters", 0)) > 0 \
-				and int(diagnostics.get("shadow_epoch_raster_jobs", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_pages_with_draws", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_projection_draws", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_plan_failures", -1)) == 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_unsupported_draw_count", -1)) == 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_unsupported_attribution_truncated", -1)) == 0
-	# The disabled epoch must contain no static-raster publication.
-	return int(diagnostics.get("shadow_epoch_raster_jobs", -1)) == 0 \
-			and int(diagnostics.get(
-					"frame_shadow_alpha_changed_bytes", -1)) == 0
+	# Native directional shadows are realized by the viewport, not baked into
+	# tile-cache alpha. Cache readiness is therefore identical for beauty and
+	# shadows-off captures; variant diagnostics verify the native light state.
+	return true
 
 
 static func capture_variant_matches_diagnostics(
@@ -304,11 +234,11 @@ static func capture_variant_matches_diagnostics(
 			or not bool(dynamic.available) \
 			or not bool(dynamic.visible) \
 			or not bool(dynamic.visible_in_tree) \
-			or not bool(dynamic.processing) \
-			or not bool(static_terrain.available):
+			or not bool(dynamic.processing):
 		return false
 	return bool(dynamic.available) \
-			and bool(static_terrain.available) \
+			and (not bool(variant.static_terrain_shadow_enabled) \
+					or bool(static_terrain.available)) \
 			and int(renderer.debug_draw) == int(variant.debug_draw) \
 			and bool(dynamic.shadow_enabled) \
 					== bool(variant.dynamic_shadow_enabled) \
@@ -2018,14 +1948,6 @@ func _ready() -> void:
 		# Captures assert on the byte-level page hash/diff diagnostics that
 		# steady-state play leaves off.
 		probe_terrain.set_tile_cache_capture_diagnostics(true)
-	_static_shadow_warmup_suspension = \
-			StaticTerrainShadowWarmupSuspension.new()
-	var warmup_shadow_error: Error = \
-			_static_shadow_warmup_suspension.begin(probe_terrain)
-	if warmup_shadow_error != OK:
-		_fail("could not suspend static terrain shadow projection during live " \
-				+ "capture warmup: %s" % error_string(warmup_shadow_error))
-		return
 	var capture_settings: Dictionary = catalog.get("capture", {})
 	await _settle(int(capture_settings.get("load_settle_frames", 132)))
 	if Vector2i(viewport.get_visible_rect().size) != _capture_size:
@@ -2326,7 +2248,6 @@ func _prepare_pose(
 	camera.v_offset = 0.0
 	camera.global_transform = Transform3D(camera_basis(yaw_deg, pitch_deg), position)
 	camera.make_current()
-	_finish_static_shadow_warmup_suspension()
 	var refresh_error := _world.debug_refresh_render_pose(camera)
 	if refresh_error != OK:
 		_fail("could not refresh production state at the exact fixture pose: %s" \
@@ -2578,13 +2499,6 @@ func _realize_capture_variant_cache(variant, camera: Camera3D) -> Dictionary:
 			JSON.stringify(diagnostics)}
 
 
-func _finish_static_shadow_warmup_suspension() -> void:
-	if _static_shadow_warmup_suspension == null:
-		return
-	_static_shadow_warmup_suspension.finish()
-	_static_shadow_warmup_suspension = null
-
-
 func _fail(reason: String) -> void:
 	if _failed:
 		return
@@ -2601,7 +2515,6 @@ func _shutdown(exit_code: int) -> void:
 
 
 func _finish_shutdown(exit_code: int) -> void:
-	_finish_static_shadow_warmup_suspension()
 	if not _fixture_publication_staging_abs.is_empty():
 		var abort_error := abort_fixture_publication(
 				_fixture_publication_staging_abs)

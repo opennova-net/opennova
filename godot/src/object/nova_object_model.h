@@ -6,7 +6,7 @@
 // nova_object_scene_builder.gd, ported verbatim). One Node3D owns the
 // retained scene (Robj part nodes / Skeleton3D + Skin / materials), the
 // main-body skeletal channels, the PLAYPARTANIM part channels, the CTRL
-// register store, environment lighting application, and the event-driven
+// register store, and the event-driven
 // runtime frame. Presenters drive it through direct typed calls — there is
 // no script bridge, no virtual dispatch layer, and no capability probing.
 //
@@ -20,7 +20,6 @@
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
-#include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
@@ -138,20 +137,6 @@ class ObjectModel : public Node3D {
 	GDCLASS(ObjectModel, Node3D)
 
 public:
-	// The witnessed lighting uniform surface defaults — the RETAIL NOON
-	// register (shipped full_00.env tod 1200 bytes /255), so an un-enved
-	// preview lights like a JO noon world. Must stay equal to the checked-in
-	// shader defaults (res://shaders/object/shared.gdshaderinc).
-	static Vector3 default_hemi_sky_color() { return Vector3(84.0f / 255.0f, 88.0f / 255.0f, 89.0f / 255.0f); }
-	static Vector3 default_dir_light_dir() { return Vector3(-0.4082f, -0.8165f, -0.4082f); }
-	static Vector3 default_dir_light_color() { return Vector3(170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f); }
-	static Vector3 default_hemi_ground_color() { return Vector3(49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f); }
-
-	enum LightingContext {
-		LIGHTING_CONTEXT_ENTITY = 0,
-		LIGHTING_CONTEXT_INTERIOR_SECTION = 1,
-	};
-
 	// Visual-layer bits, mirrored from the authoritative GDScript table in
 	// adapter/environment/nova_water.gd (the water/mirror pass owns the layer
 	// scheme; keep the two in lockstep).
@@ -165,9 +150,6 @@ public:
 		LAYER_SHADOW_CASTER_MASK =
 				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
 	};
-
-	// This model's fixed slot spread for staggered environment restamps.
-	static constexpr int kEnvRestampSpreadFrames = 16;
 
 private:
 	struct PartAnimChannel {
@@ -183,17 +165,6 @@ private:
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
-	bool env_has_generation_ = false;
-	bool last_light_push_valid_ = false;
-	int last_light_count_ = 0;
-	Vector3 last_light_position_;
-	Color last_light_color_ = Color(1, 1, 1, 1);
-	float last_light_intensity_ = 0.0f;
-	// The last applied point-light selection (FNV over count + packed
-	// vectors); 0 = never applied.
-	uint64_t last_point_light_selection_hash_ = 0;
-	float last_light_atten_start_ = 0.0f;
-	float last_light_atten_end_ = 0.0f;
 	// Dense part-index -> Node3D array + the PANM revision this model last
 	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
 	// it directly).
@@ -202,7 +173,6 @@ private:
 	int64_t section_visibility_mask_ = -1;
 	PackedInt32Array surface_material_indices_;
 	Vector<Ref<ShaderMaterial>> surface_materials_;
-	PackedByteArray surface_lighting_contexts_;
 	HashMap<int64_t, Array> anim_frames_by_mat_;
 	// This retained model stores the latest CTRL snapshot applied to it
 	// (Dictionary: ObjectData's PANM/material evaluators consume it).
@@ -229,16 +199,8 @@ private:
 	int active_lod_ = 0;
 	bool is_playing_ = true;
 	AABB model_bounds_;
-	Ref<EnvLightState> env_state_;
-	float lighting_effect_scale_ = 1.0f;
-	bool interior_lerp_ = false;
-	float interior_daylight_ = 0.0f;
-	bool interior_section_lighting_ = false;
-	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
-	Ref<ShaderMaterial> shadow_receiver_material_;
 	bool mirror_reflected_ = false;
-	int env_stagger_slot_ = 0;
 	Dictionary submission_registry_;
 	bool submission_registry_bound_ = false;
 	bool on_screen_ = true;
@@ -312,19 +274,13 @@ private:
 	int wpn_prev_variant_ = 0;
 
 	// Per-frame work skips.
-	bool has_lights_ = false;
 	bool has_live_panm_ = false;
 	Vector<bool> material_needs_eval_;
 	PackedInt32Array dynamic_material_slots_;
-	int64_t last_env_gen_ = -1;
-	Ref<EnvLightValues> last_env_values_;
-	Ref<EnvLightValues> last_section_env_values_;
-	bool model_light_preview_enabled_ = false;
 
 	// --- core (nova_object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
 	void apply_shadow_casting_below(Node *p_root);
-	int lighting_context_for_robj(int p_robj_index) const;
 	static int64_t ctrl_dword(int64_t p_value);
 	void finish_ctrl_change(bool p_apply_now);
 	Node3D *get_or_create_robj_node(int p_robj_index);
@@ -332,8 +288,6 @@ private:
 	bool apply_robj_transforms();
 	int64_t last_object_update_mask() const;
 	void on_object_changed();
-	void on_env_generation_changed();
-	void on_env_pass_changed();
 	void wake_runtime_frame();
 	void sleep_runtime_frame_if_idle();
 	bool needs_runtime_frame_work() const;
@@ -370,22 +324,17 @@ private:
 	String resolve_anim_channel_owner(int p_slot) const;
 	bool advance_part_anims(double p_delta);
 
-	// --- materials/environment (nova_object_model_materials.cpp) ---
+	// --- materials (nova_object_model_materials.cpp) ---
 	void build_material_defs();
-	Ref<ShaderMaterial> material_for_index(int p_material_array_index,
-			int p_lighting_context);
+	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
 	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
-	Ref<ShaderMaterial> get_shadow_receiver_material();
 	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Color hash_color_for_index(int p_index);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
-	void apply_default_environment_to_material(const Ref<ShaderMaterial> &p_material);
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
-	void apply_environment_to_materials();
-	void apply_lights();
 
 	// --- retained-scene construction (nova_object_model_scene.cpp) ---
 	void rebuild_scene();
@@ -407,9 +356,6 @@ public:
 	// loop. Models self-park out of the set the first frame they hold no live
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
-	// Exact-pose capture tail: stamp current env values on awake visible models
-	// without advancing any clock-derived render state.
-	static void refresh_awake_environment();
 	static int64_t awake_model_count();
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
@@ -426,26 +372,13 @@ public:
 	bool get_mirror_reflected() const { return mirror_reflected_; }
 	void set_native_frame(bool p_native) { native_frame_ = p_native; }
 	bool get_native_frame() const { return native_frame_; }
-	void set_model_light_preview_enabled(bool p_enabled);
 	void set_shadow_caster_enabled(bool p_enabled);
 	bool is_shadow_caster_enabled() const;
 	void set_static_shadow_caster_enabled(bool p_enabled);
 	bool is_static_shadow_caster_enabled() const;
-	void set_environment_state(const Ref<EnvLightState> &p_state);
-	Ref<EnvLightState> get_environment_state() const { return env_state_; }
-	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
-			float p_interior_daylight);
-	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
-	// The model bounds in world space — the per-draw light query box
-	// (retail queries per draw context, see docs/render/render-lighting-re.md).
+	// The model bounds in world space.
 	AABB get_world_bounds() const;
-	// Write one frame's selected point lights (packed posr = xyz world +
-	// atten2, color = premultiplied rgb + range) as per-instance shader
-	// parameters on every surface instance. A selection hash gates redundant
-	// RenderingServer writes; count 0 clears.
-	void apply_point_light_selection(int p_count, const Vector4 *p_posr,
-			const Vector4 *p_color);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
 	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
@@ -535,17 +468,6 @@ public:
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).
 	bool is_body_pose_dirty() const { return body_pose_dirty_; }
 
-	// --- environment-value derivation (static; the placer's static batches
-	// consume the same values/skip logic as live models) ---
-	static Ref<EnvLightValues> entity_lighting_values(
-			const Ref<EnvLightValues> &p_world_values, float p_effect_scale,
-			bool p_interior_lerp, float p_interior_daylight);
-	static void apply_environment_values(const Ref<ShaderMaterial> &p_material,
-			const Ref<EnvLightValues> &p_values);
-	static bool material_supports_projected_shadow_receiver(int p_blend_mode,
-			int p_material_flags);
 };
 
 } // namespace godot
-
-VARIANT_ENUM_CAST(godot::ObjectModel::LightingContext);

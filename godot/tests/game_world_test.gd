@@ -1039,13 +1039,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	Strings.clear()
 
 
-func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
-	# _update_frame_clear_color() writes the witnessed frame clear into the
-	# ClearColor Environment's background_color every frame - but the scene
-	# resource decides whether that color ever renders. The Wave-1 scene shipped
-	# background_mode = 2 (BG_SKY) with no Sky resource, which renders BLACK and
-	# silently swallows the env-#21 clear consumer: a 1px black dome-rim seam in
-	# ground views, a black band in aerial views. Pin the mode so it can't drift.
+func test_world_environment_owns_native_radiance_fog_and_post_processing() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
@@ -1058,9 +1052,28 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 	if clear.environment == null:
 		return
 	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
-		"BG_COLOR renders background_color; BG_SKY with a null sky renders BLACK and silently swallows the witnessed frame clear [orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]")
-	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_DISABLED,
-		"Godot ambient must never inject into the witnessed lighting model - all OpenNova materials light themselves; AMBIENT_SOURCE_BG would derive ambient from the clear color")
+			"The custom dome still owns the visible background while the Sky feeds radiance.")
+	assert_not_null(clear.environment.sky,
+			"A procedural Sky must feed ambient and reflected radiance.")
+	assert_true(clear.environment.sky.sky_material is ProceduralSkyMaterial)
+	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_SKY)
+	assert_eq(clear.environment.reflected_light_source, Environment.REFLECTION_SOURCE_SKY)
+	assert_eq(clear.environment.fog_mode, Environment.FOG_MODE_DEPTH)
+	assert_true(clear.environment.fog_enabled)
+	assert_eq(clear.environment.tonemap_mode, Environment.TONE_MAPPER_FILMIC)
+	assert_almost_eq(clear.environment.tonemap_exposure, 1.0, 0.001,
+			"Exposure is fixed; the hard cut does not add auto-exposure semantics.")
+	assert_true(clear.environment.glow_enabled)
+	assert_true(clear.environment.ssao_enabled)
+	assert_false(clear.environment.sdfgi_enabled)
+	assert_false(clear.environment.ssil_enabled)
+	assert_false(clear.environment.ssr_enabled)
+	assert_false(clear.environment.volumetric_fog_enabled)
+	assert_false(clear.environment.adjustment_enabled)
+	assert_true(ProjectSettings.get_setting(
+			"rendering/anti_aliasing/quality/use_taa", false))
+	assert_true(ProjectSettings.get_setting(
+			"rendering/anti_aliasing/quality/use_debanding", false))
 
 
 func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear() -> void:

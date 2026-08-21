@@ -696,6 +696,74 @@ int main() {
                "coronas cull beyond 100 wu from the camera");
     }
 
+    // Facelift device snapshot: every visible live pool entry is evaluated
+    // once, without the retail nearest-four draw cap. It carries enough
+    // authored data for a native omni/spot adapter while keeping fade and
+    // generation leases in this portable module.
+    {
+        LightScene scene;
+        LightSpawnParams spot;
+        spot.position_fixed = {2 << 16, -3 << 16, 4 << 16};
+        spot.direction = {0.0f, 3.0f, 4.0f};
+        spot.target = true;
+        spot.spot_angle_degrees = 120.0f;
+        spot.attenuation_start = 2.0f;
+        spot.radius_fixed = 8 << 16;
+        spot.rgb = {255, 128, 0};
+        spot.intensity = 0.5f;
+        spot.disable_terrain = true;
+        spot.owner_entity = 77;
+        spot.owner_section = 3;
+        const LightHandle spot_handle = scene.spawn(spot);
+        for (int i = 0; i < 5; ++i) {
+            LightSpawnParams point;
+            point.position_fixed = {i << 16, 0, 0};
+            point.radius_fixed = 4 << 16;
+            scene.spawn(point);
+        }
+
+        std::vector<ActiveLight> active;
+        expect(scene.collect_active(LightFlickerInputs{}, active) == 6,
+               "native snapshot is not capped at four lights");
+        const ActiveLight &row = active[0];
+        expect(row.kind == ActiveLightKind::Spot &&
+                       row.handle == spot_handle,
+               "target records surface as stable spot-light rows");
+        expect(nearly_equal(row.position[0], 2.0f) &&
+                       nearly_equal(row.position[1], -3.0f) &&
+                       nearly_equal(row.position[2], 4.0f),
+               "native snapshot decodes mission-space position");
+        expect(nearly_equal(row.direction[0], 0.0f) &&
+                       nearly_equal(row.direction[1], 0.6f) &&
+                       nearly_equal(row.direction[2], 0.8f),
+               "spot direction is normalized once at the snapshot seam");
+        expect(nearly_equal(row.color[0], 1.0f) &&
+                       nearly_equal(row.color[1], 128.0f / 255.0f) &&
+                       nearly_equal(row.color[2], 0.0f) &&
+                       nearly_equal(row.energy, 0.5f),
+               "authored hue and live fade energy remain separate");
+        expect(nearly_equal(row.range, 8.0f) &&
+                       nearly_equal(row.attenuation_start, 2.0f) &&
+                       nearly_equal(row.spot_angle_degrees, 89.0f),
+               "range, attenuation start, and safe spot angle are surfaced");
+        expect(!row.lights_terrain && row.lights_objects &&
+                       row.owner_entity == 77 && row.owner_section == 3,
+               "participation and ownership metadata survive evaluation");
+
+        scene.set_blend(spot_handle, 0.0f);
+        expect(scene.collect_active(LightFlickerInputs{}, active) == 5,
+               "a hidden live lease releases its native light row");
+        scene.set_blend(spot_handle, 0.25f);
+        expect(scene.collect_active(LightFlickerInputs{}, active) == 6 &&
+                       nearly_equal(active[0].energy, 0.25f),
+               "re-showing a lease republishes its current fade energy");
+        scene.set_position(spot_handle, {9 << 16, 1 << 16, -2 << 16});
+        scene.collect_active(LightFlickerInputs{}, active);
+        expect(nearly_equal(active[0].position[0], 9.0f) &&
+                       nearly_equal(active[0].position[2], -2.0f),
+               "moving lights update the next native snapshot");
+    }
+
     // Corona owner visible-section gate [orig: the sectorFilter leg
     // @ 0x5ab027 -> Terrain_IsBuildingSectionBitSet @ 0x5c6960]: an owned
     // corona draws only when its owner's section bit is set; owners absent

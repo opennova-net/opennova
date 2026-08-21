@@ -1,7 +1,7 @@
-// Shared NovaLogic terrain lighting + fog math, included by both terrain.gdshader
+// Shared NovaLogic terrain sampling, included by both terrain.gdshader
 // (runtime, baked-CPT mesh) and terrain_editor.gdshader (editor live-sculpt
-// heightmap mesh). Both render the SAME surface; only their geometry source and
-// overlays differ, so the surface-shading and fog math live here once.
+// heightmap mesh). Both render the same authored surface; only their geometry
+// source and overlays differ.
 //
 // The surface chain is the witnessed TOP-TIER ps.1.4 splat shader
 // [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0, assembled by
@@ -19,11 +19,10 @@
 // ledger). Fog: [orig: Render_SetFogState @ 0x58a950 ->
 // CD3DDevice_SetFogParameters @ 0x677960]. Keep byte-for-byte authoritative.
 
-// --- Shared uniforms: terrain surface inputs + lighting + fog -----------------
-// Textures sample RAW (no source_color): retail never enables sRGB sampling -
-// texel bytes enter the ps.1.4 math as-is. The gamma-space convention
-// (D-RMAT-7) lives in nova_color.gdshaderinc; consumers encode the final
-// color once at their ALBEDO write.
+// --- Shared uniforms: authored terrain inputs ---------------------------------
+// RGB textures are color data and therefore use source_color in the new linear
+// HDR renderer. Blend/detail2/heightfield textures remain raw data. The asset
+// channels, UVs, tiling, and detail combination are otherwise unchanged.
 // The device-global texfilter mode applies to EVERY active stage
 // [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],
 // and the reference machine runs the anisotropic mode, so every mipped
@@ -31,10 +30,10 @@
 // surrogate for the per-LOD tile-cache RT (D-TERRAIN-7); the DBlendmap
 // quadrants are box-mipped in retail (created with flags 0x100001
 // [orig: PolyTrn_InitTextures @ 0x60b2c9]).
-uniform sampler2D u_colormap : filter_linear_mipmap_anisotropic, repeat_disable;
-uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_colormap : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D u_detail_c1 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_detail_c2 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_detail_c3 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_blendmap : filter_linear_mipmap_anisotropic, repeat_disable;
 // The ps.1.4 splat's stage-3 dp3 input: the authored SECOND detail pair at
 // its own density, dp3'd with the normalized blend — a blend-weighted
@@ -69,7 +68,7 @@ uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
 uniform bool u_has_heightfield_normal = false;
 // PolyTrn_RenderTile composes the mission .til base layer into the terrain
 // tile before the same ps.1.4 lighting chain used by runtime and ONED.
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
+uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
 // Declared for the ONED authored-slot binding only; the top-tier chain does
@@ -226,6 +225,37 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	vec3 lit = ambient * cm.rgb * 2.0;
 	lit *= normal_factor;
 	return lit * detail * 4.0;
+}
+
+// Facelift surface realization. The composed page's RGB remains the canonical
+// colormap/.til result, while its alpha is deliberately ignored: that channel
+// carried the retired fixed-function heightfield/static-shadow bake. Detail
+// textures and their authored modulation keep the same slots and UV semantics;
+// native Godot lights now supply illumination and shadowing.
+vec3 terrain_surface_albedo_from_colormap(vec4 cm, vec2 colormap_uv,
+		vec2 detail_uv, vec2 quadrant) {
+	vec2 blend_uv = clamp_retail_quadrant_uv(
+		colormap_uv, quadrant, textureSize(u_blendmap, 0));
+	vec3 blend = texture(u_blendmap, blend_uv).rgb;
+	vec3 c1 = sample_retail_detail_mips(u_detail_c1, detail_uv).rgb;
+	vec3 c2 = sample_retail_detail_mips(u_detail_c2, detail_uv).rgb;
+	vec3 c3 = sample_retail_detail_mips(u_detail_c3, detail_uv).rgb;
+	vec3 detail = c1 * blend.r + c2 * blend.g + c3 * blend.b;
+
+	float authored_modulation = 1.0;
+	if (u_has_detail2) {
+		vec3 modulator = u_below_water
+			? texture(u_water_noise,
+				retail_detail_uv_from_atlas(colormap_uv, 8.0)).rgb
+			: sample_retail_detail_mips(
+				u_detail2, retail_detail_uv_from_atlas(
+					colormap_uv, u_detail2_density)).rgb;
+		authored_modulation = dot(modulator, blend) * 2.0;
+	}
+
+	// The three detail textures use mid-gray as their neutral authored level.
+	return clamp(cm.rgb * detail * authored_modulation * 2.0,
+		vec3(0.0), vec3(1.0));
 }
 
 float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {

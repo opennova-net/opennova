@@ -18,6 +18,7 @@ void fragment() {
 		texel.a = clamp(1.0 - r, 0.0, 1.0);
 	}
 	float dotv = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
-	ALBEDO = vec3(dotv);
+	ALBEDO = vec3(0.0);
+	EMISSION = vec3(dotv) * 1.25;
 	ALPHA = texel.a * COLOR.a;
 }

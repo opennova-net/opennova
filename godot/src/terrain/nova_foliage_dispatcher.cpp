@@ -4,6 +4,7 @@
 #include "nova_terrain_data.h"
 #include "nova_terrain_tile_info.h"
 #include "nova_terrain_foliage_def.h"
+#include "env/nova_water.h"
 
 #include <terrain/foliage_detail_collector.h>
 
@@ -642,16 +643,10 @@ MeshInstance3D *FoliageDispatcher::_ensure_draw_node(
     add_child(instance);
     instance->set_as_top_level(true);
     instance->set_transform(Transform3D());
-    // Fresh audit: attrib shadow (0x02) is parsed but never read, and both
-    // foliage tiers are excluded from retail shadow-caster passes. They still
-    // receive static model projection through retail's composed tile cache.
+    // The command tier selects shadow participation below. Distant silhouette
+    // foliage remains a depth-only impostor and never casts.
     instance->set_cast_shadows_setting(
         GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-    // The generic attenuation catcher cannot reproduce foliage-card alpha,
-    // two-sided rasterization, and wind deformation without dark rectangles.
-    // Keep foliage on the ordinary world layer until the retail tile-cache
-    // compositor (which supplies the alpha-lighting term before this pass) is
-    // ported.
     instance->set_layer_mask(1u << 0);
     instance->set_extra_cull_margin(8.0f);
     instance->set_visible(false);
@@ -1150,6 +1145,14 @@ void FoliageDispatcher::_apply_draw_list(
                : _ensure_draw_node(model_draw_pool_, model_draw_index++,
                                    String("FoliageModelDraw"));
     draw->set_mesh(found->second.mesh);
+    // Only the near expanded tier participates in the native directional
+    // shadow pass. Local-light shadows remain disabled at the light pool.
+    draw->set_cast_shadows_setting(
+        detail ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
+               : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+    draw->set_layer_mask(
+        Water::VISUAL_LAYER_WORLD |
+        (detail ? Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER : 0));
     if (detail) {
       const bool high =
           command.pass == opennova::foliage::DetailPass::HighAlphaTest;

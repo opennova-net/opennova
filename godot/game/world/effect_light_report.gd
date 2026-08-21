@@ -10,9 +10,13 @@ extends RefCounted
 class Row:
 	extends RefCounted
 
+	var kind := "omni"
 	var position := Vector3.ZERO
+	var direction := Vector3(0.0, 0.0, -1.0)
 	var color := Color.WHITE
+	var energy := 1.0
 	var range := 0.0
+	var spot_angle_degrees := 45.0
 	var attenuation_quadratic := 0.0
 	var handle := 0
 	var retail_handle := 0
@@ -20,9 +24,13 @@ class Row:
 
 	static func from_ffi_dictionary(value: Dictionary) -> Row:
 		var row := Row.new()
+		row.kind = String(value.get("kind", "omni"))
 		row.position = value.get("position", Vector3.ZERO)
+		row.direction = value.get("direction", Vector3(0.0, 0.0, -1.0))
 		row.color = value.get("color", Color.WHITE)
+		row.energy = float(value.get("energy", 1.0))
 		row.range = float(value.get("range", 0.0))
+		row.spot_angle_degrees = float(value.get("spot_angle_degrees", 45.0))
 		row.attenuation_quadratic = float(value.get("atten2", 0.0))
 		row.handle = int(value.get("handle", 0))
 		row.retail_handle = int(value.get("retail_handle", 0))
@@ -31,9 +39,13 @@ class Row:
 
 	func to_json_value() -> Dictionary:
 		return {
+			"kind": kind,
 			"position": position,
+			"direction": direction,
 			"color": color,
+			"energy": energy,
 			"range": range,
+			"spot_angle_degrees": spot_angle_degrees,
 			"atten2": attenuation_quadratic,
 			"handle": handle,
 			"retail_handle": retail_handle,

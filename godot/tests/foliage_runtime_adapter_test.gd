@@ -135,10 +135,10 @@ func test_detail_preview_uses_foliage_map() -> void:
 			is_equal_approx(alpha_ref, 180.0 / 255.0) or is_equal_approx(alpha_ref, 8.0 / 255.0),
 			"Each resident cell draw carries its current pass alpha reference."
 		)
-		assert_eq(child.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
-			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
-		assert_eq(child.layers & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
-			"an alpha-blind catcher must not darken whole foliage cards")
+		assert_eq(child.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+			"Near detail cards cast alpha-aware native directional shadows.")
+		assert_ne(child.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+			"Near detail cards participate in the native sun caster population.")
 		var material := child.material_override as ShaderMaterial
 		assert_not_null(material)
 		if material != null:

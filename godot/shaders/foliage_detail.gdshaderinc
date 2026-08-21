@@ -1,19 +1,18 @@
-#include "res://shaders/nova_color.gdshaderinc"
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
 
 // Expanded detail foliage. Retail emits the source model once per accepted
 // candidate and bends every transformed vertex onto the terrain before this
 // shader runs [orig: generate_foliage_instances_0 @ 0x5ffdd0].
-uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_fd_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_fd_texture = false;
-uniform sampler2D u_colormap : filter_linear, repeat_disable;
+uniform sampler2D u_colormap : source_color, filter_linear, repeat_disable;
 uniform bool u_has_colormap = false;
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
 uniform bool u_has_heightfield_normal = false;
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
+uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0);
-uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
+uniform sampler2DArray u_tile_cache : source_color, filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 uniform vec3 u_emitter_color = vec3(0.5019608);
 instance uniform float u_wind_phase = 0.0;
@@ -31,36 +30,9 @@ instance uniform vec4 u_instance_tile_cache_origin_span = vec4(0.0);
 // CGfxDevice ZFUNC wrapper @ 0x67cac0..0x67caea]
 instance uniform float u_high_pass_cutoff = 0.0;
 
-global uniform vec3 opennova_sky_ambient;
-global uniform vec3 opennova_sun_light;
-global uniform vec3 opennova_sun_direction;
-global uniform vec3 opennova_fog_color;
-global uniform float opennova_fog_start;
-global uniform float opennova_fog_end;
-global uniform int opennova_fog_type;
-
 varying vec2 v_tile_uv;
 varying vec2 v_overlay_uv;
 varying vec2 v_tile_cache_uv;
-varying vec3 v_heightfield_normal;
-varying float v_fog_distance;
-
-float foliage_fog_factor(float fog_distance) {
-	if (opennova_fog_start == opennova_fog_end) {
-		return 1.0;
-	}
-	if (opennova_fog_end <= 0.0) {
-		return 1.0;
-	}
-	if (opennova_fog_type == 0) {
-		return clamp(exp(-max(fog_distance, 0.0) *
-			(4.1588830833596715 / opennova_fog_end)), 0.0, 1.0);
-	}
-
-	float start = opennova_fog_start;
-	return clamp((opennova_fog_end - fog_distance) /
-		(opennova_fog_end - start), 0.0, 1.0);
-}
 
 vec2 foliage_quadrant_clamped_uv(vec2 uv, ivec2 dimensions) {
 	vec2 quadrant = floor(clamp(uv * 2.0, vec2(0.0), vec2(1.999999)));
@@ -94,12 +66,10 @@ void vertex() {
 	v_tile_cache_uv =
 		(pre_wind_world_pos.xz - u_instance_tile_cache_origin_span.xy) *
 		u_instance_tile_cache_origin_span.z;
-	v_heightfield_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	float eye_depth = max(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z, 0.0);
-	v_fog_distance = opennova_fog_type == 0
-		? eye_depth
-		: length(world_pos - CAMERA_POSITION_WORLD);
-	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
+	// Draw meshes are world-space and their pooled nodes are top-level identity.
+	// Move VERTEX itself so native lighting and directional shadow passes see
+	// the same wind-deformed surface as the color pass.
+	VERTEX = world_pos;
 }
 
 void fragment() {
@@ -129,27 +99,6 @@ void fragment() {
 		vec2 colormap_uv = foliage_quadrant_clamped_uv(
 			v_tile_uv, textureSize(u_colormap, 0));
 		vec3 raw_colormap = texture(u_colormap, colormap_uv).rgb;
-		vec3 normal_byte;
-		if (u_has_heightfield_normal) {
-			vec2 normal_uv = foliage_quadrant_clamped_uv(
-				v_tile_uv, textureSize(u_heightfield_normal, 0));
-			normal_byte = texture(u_heightfield_normal, normal_uv).rgb;
-		} else {
-			vec3 texture_basis_normal = vec3(
-				v_heightfield_normal.x,
-				v_heightfield_normal.z,
-				v_heightfield_normal.y);
-			normal_byte = floor(clamp(
-				(normalize(texture_basis_normal) + 1.0) * 127.5,
-				vec3(0.0), vec3(255.0))) / 255.0;
-		}
-		vec3 texture_basis_light = vec3(
-			opennova_sun_direction.z,
-			opennova_sun_direction.x,
-			opennova_sun_direction.y);
-		vec3 light_byte = floor(clamp(
-			(texture_basis_light + 1.0) * 127.5,
-			vec3(0.0), vec3(255.0))) / 255.0;
 		vec3 composed_rgb =
 			clamp(raw_colormap * (256.0 / 255.0), vec3(0.0), vec3(1.0));
 		if (u_has_tile_overlay) {
@@ -157,22 +106,17 @@ void fragment() {
 			composed_rgb = mix(
 				composed_rgb, overlay.rgb * u_tile_overlay_tint, overlay.a);
 		}
-		tile = vec4(
-			composed_rgb,
-			clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0));
+		tile = vec4(composed_rgb, 1.0);
 	}
 
-	// Exact ps.1.4 combine: t0 * (t1 * (t1.a*c1 + c0)) * v0 * 8.
-	// The analytic bare-ground sample reproduces the byte-quantized heightfield
-	// DOT3 stored in composed tile alpha. The hosted .til overlay is composed
-	// into RGB before this lighting chain; ordered tile-model/depth-alpha
-	// contributions still require the terrain tile-composition cache.
-	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
-	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
-	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
-	color = mix(opennova_fog_color, color, foliage_fog_factor(v_fog_distance));
-	ALBEDO = nova_gamma_to_linear(color);
-	// D3D fog folds into the source color before blending, so the blended
-	// weight is exactly the retail SRCALPHA term.
+	// Preserve the :fd, terrain-color, emitter-color, and fade semantics while
+	// discarding the composed page's legacy lighting alpha. Native environment,
+	// sun, local lights, fog, and shadows now realize the final appearance.
+	vec3 color = clamp(fd.rgb * tile.rgb * u_emitter_color * 8.0,
+		vec3(0.0), vec3(1.0));
+	ALBEDO = color;
+	METALLIC = 0.0;
+	ROUGHNESS = 0.8;
+	SPECULAR = 0.2;
 	ALPHA = clamp(retail_alpha, 0.0, 1.0);
 }

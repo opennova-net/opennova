@@ -7,17 +7,11 @@ namespace godot {
 
 class MissionEnvironment;
 
-// Shadow-only device leg: a DirectionalLight3D that casts Godot shadow maps
-// without contributing color lighting (the fixed-function terrain/object
-// shaders own all color; the light is visible only to a black ATTENUATION
-// catcher pass). It models retail's two independent shadow projection lists
-// (docs/render/render-lighting-re.md: the static collector admits pool-2
-// unless NoShadow and pool-1 only with attrib2 StaticShadow; dynamic slots
-// ride entity init) via a projection_mode enum — PROJECTION_DYNAMIC
-// (pose-derived live entity silhouettes onto world models + the hidden FP
-// body) and PROJECTION_STATIC_TERRAIN (static silhouettes onto terrain only)
-// — pairing light_cull_mask (receivers) with shadow_caster_mask (casters)
-// over the Water visual-layer bits. Each frame it reads the environment's
+// Native directional-light device leg. It reads the active ENV sun/moon
+// direction and color, supplies direct lighting to the facelift materials,
+// and casts cascaded Godot shadow maps. The existing static and dynamic caster
+// layers both feed that one native sun; ordinary world and viewmodel layers
+// receive it. Each frame it reads the environment's
 // surface-to-light direction (the engine light chain already computes the
 // negated emission form: renderer::WorldLightingBlock.dir), orients via a
 // look-at basis with a degenerate-up fallback, and hides itself when the
@@ -27,13 +21,6 @@ class SunShadow : public DirectionalLight3D {
 	GDCLASS(SunShadow, DirectionalLight3D)
 
 public:
-	enum ProjectionMode {
-		PROJECTION_DYNAMIC = 0,
-		PROJECTION_STATIC_TERRAIN = 1,
-	};
-
-	void set_projection_mode(int p_mode);
-	int get_projection_mode() const { return projection_mode_; }
 	void set_environment_node(MissionEnvironment *p_environment);
 
 	// One render-frame advance (the _process body) — the externally-callable
@@ -47,10 +34,9 @@ protected:
 	static void _bind_methods();
 
 private:
-	void _apply_projection_masks();
+	void _apply_native_masks();
 	void _update_direction();
 
-	int projection_mode_ = PROJECTION_DYNAMIC;
 	ObjectID environment_node_id_;
 	Vector3 last_emission_direction_ = Vector3(INFINITY, INFINITY, INFINITY);
 };

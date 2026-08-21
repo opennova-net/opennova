@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, depth_prepass_alpha, depth_draw_opaque, cull_disabled;
+render_mode blend_mix, depth_prepass_alpha, depth_draw_opaque, cull_disabled;
 
 #include "res://shaders/object/shared.gdshaderinc"
 #include "res://shaders/object/sampling/detail.gdshaderinc"

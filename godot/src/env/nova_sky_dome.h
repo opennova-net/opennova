@@ -78,6 +78,7 @@ private:
 	ObjectID env_node_id_;
 	ObjectID weather_node_id_;
 	ObjectID cached_cam_id_;
+	int64_t world_environment_generation_ = -1;
 	// Standalone fallback (owners with no weather node): the engine-owned
 	// private scroll core + 62 Hz credit.
 	opennova::env::ScrollFallback fallback_scroll_;

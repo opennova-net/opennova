@@ -27,21 +27,15 @@ void ObjectModel::rebuild_scene() {
 	muzzle_bone_ = -1;
 	surface_material_indices_.clear();
 	surface_materials_.clear();
-	surface_lighting_contexts_.clear();
 	alpha_materials_.clear();
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
 	material_defs_.clear();
 	body_pose_dirty_ = true;
 	bounds_dirty_ = true;
-	has_lights_ = false;
 	has_live_panm_ = false;
 	material_needs_eval_.clear();
 	dynamic_material_slots_ = PackedInt32Array();
-	last_env_gen_ = -1;
-	last_env_values_.unref();
-	last_section_env_values_.unref();
-	last_light_push_valid_ = false;
 	robj_dense_ = Array();
 	panm_applied_revision_ = 0;
 	if (object_data_.is_null() || !object_data_->has_document()) {
@@ -79,7 +73,6 @@ void ObjectModel::rebuild_scene() {
 			robj_rest_transforms_[robj_index] =
 					Transform3D(Basis(), submesh.get("abs", Vector3()));
 		}
-		const int lighting_context = lighting_context_for_robj(robj_index);
 		MeshInstance3D *instance = memnew(MeshInstance3D);
 		instance->set_mesh(mesh);
 		instance->set_cast_shadows_setting(shadow_caster_layers_ != 0
@@ -91,8 +84,7 @@ void ObjectModel::rebuild_scene() {
 		instance->set_layer_mask(
 				(mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR) |
 				shadow_caster_layers_);
-		const Ref<ShaderMaterial> material =
-				material_for_index(material_index, lighting_context);
+		const Ref<ShaderMaterial> material = material_for_index(material_index);
 		instance->set_material_override(material);
 		// Skinned + rigid-fake-skinned submeshes bind to the shared
 		// Skeleton3D; everything else stays under its Robj part node so PANM
@@ -108,12 +100,10 @@ void ObjectModel::rebuild_scene() {
 		}
 		surface_material_indices_.append(material_index);
 		surface_materials_.push_back(material);
-		surface_lighting_contexts_.append(static_cast<uint8_t>(lighting_context));
 		collect_anim_frames(material_index);
 	}
 
 	classify_materials();
-	has_lights_ = object_data_->get_light_count() > 0;
 	apply_runtime_state(0.0);
 	refresh_render_order();
 }

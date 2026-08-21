@@ -1,12 +1,8 @@
-// ObjectModel: material factory + classification and environment-lighting
-// application. Ported verbatim from nova_object_materials.gd (2026-08-09
-// de-scripting); the environment pull became the typed EnvLightState
-// channel — the model never touches the environment object.
+// ObjectModel material factory, classification, and authored animation.
 
 #include "object/nova_object_model.h"
 
 #include <godot_cpp/classes/image.hpp>
-#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/core/math.hpp>
 
 #include "object/nova_object_shader_cache.h"
@@ -39,20 +35,8 @@ void ObjectModel::build_material_defs() {
 	}
 }
 
-bool ObjectModel::material_supports_projected_shadow_receiver(int p_blend_mode,
-		int p_material_flags) {
-	// The simple attenuation next-pass has no access to the source material's
-	// alpha coverage or two-sided raster state; keep the approximation on
-	// coverage-complete one-sided opaque surfaces only.
-	return p_blend_mode == static_cast<int32_t>(renderer::ObjectBlendMode::Opaque) &&
-			(p_material_flags & (THREEDI_MATERIAL_FLAG_ALPHA_TEST |
-										THREEDI_MATERIAL_FLAG_TWO_SIDED)) == 0;
-}
-
-Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index,
-		int p_lighting_context) {
-	const int64_t cache_key =
-			(int64_t(p_material_array_index) << 8) | int64_t(p_lighting_context);
+Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) {
+	const int64_t cache_key = p_material_array_index;
 	const Ref<ShaderMaterial> *cached = material_cache_.getptr(cache_key);
 	if (cached != nullptr) {
 		return *cached;
@@ -61,11 +45,6 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index,
 	const Ref<ShaderMaterial> material =
 			create_material(p_material_array_index, def != nullptr ? *def : Dictionary());
 	material_cache_[cache_key] = material;
-	// A newly created context-specific material still carries only the
-	// defaults; force the next environment push to stamp it.
-	last_env_gen_ = -1;
-	last_env_values_.unref();
-	last_section_env_values_.unref();
 	return material;
 }
 
@@ -169,27 +148,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
 	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
 	material->set_shader_parameter("u_alpha_mod", 1.0f);
-	material->set_shader_parameter("u_local_light_count", 0);
-	material->set_shader_parameter("u_local_light_position", Vector3());
-	material->set_shader_parameter("u_local_light_color", Vector3(1, 1, 1));
-	material->set_shader_parameter("u_local_light_intensity", 1.0f);
-	material->set_shader_parameter("u_local_light_atten_start", 0.0f);
-	material->set_shader_parameter("u_local_light_atten_end", 5.0f);
-	if (material_supports_projected_shadow_receiver(blend_mode, material_flags)) {
-		material->set_next_pass(get_shadow_receiver_material());
-	}
-	apply_default_environment_to_material(material);
 	return material;
-}
-
-Ref<ShaderMaterial> ObjectModel::get_shadow_receiver_material() {
-	if (shadow_receiver_material_.is_null()) {
-		shadow_receiver_material_.instantiate();
-		shadow_receiver_material_->set_shader(
-				ResourceLoader::get_singleton()->load(
-						"res://shaders/sun_shadow_catcher.gdshader", "Shader"));
-	}
-	return shadow_receiver_material_;
 }
 
 Ref<Texture2D> ObjectModel::load_texture_for_slot(const Dictionary &p_material_def,
@@ -252,11 +211,6 @@ Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {
 	return ImageTexture::create_from_image(image);
 }
 
-void ObjectModel::apply_default_environment_to_material(
-		const Ref<ShaderMaterial> &p_material) {
-	apply_environment_values(p_material, EnvLightValues::retail_noon_defaults());
-}
-
 // A surface material needs per-frame UV/RGB/alpha evaluation only if one of
 // its generators animates. Conservative: any non-zero generator style counts.
 bool ObjectModel::material_runtime_is_dynamic(int p_material_index) const {
@@ -295,184 +249,6 @@ void ObjectModel::classify_materials() {
 		}
 	}
 	dynamic_material_slots_ = dynamic_slots;
-}
-
-Ref<EnvLightValues> ObjectModel::entity_lighting_values(
-		const Ref<EnvLightValues> &p_world_values, float p_effect_scale,
-		bool p_interior_lerp, float p_interior_daylight) {
-	if (p_world_values.is_null()) {
-		return Ref<EnvLightValues>();
-	}
-	Ref<EnvLightValues> v;
-	v.instantiate();
-	const EnvLightValues &w = **p_world_values;
-	v->dir = w.dir;
-	v->dir_color = w.dir_color * CLAMP(p_effect_scale, 0.0f, 1.0f);
-	v->hemi_sky = w.hemi_sky;
-	v->hemi_ground = w.hemi_ground;
-	v->ceiling = w.ceiling;
-	v->floor_color = w.floor_color;
-	v->gain = w.gain;
-	v->fog_enabled = w.fog_enabled;
-	v->fog_color = w.fog_color;
-	v->fog_start = w.fog_start;
-	v->fog_end = w.fog_end;
-	v->fog_type = w.fog_type;
-	if (p_interior_lerp) {
-		// [orig: the containing building's light_transfer lerp —
-		//  setup_entity_lighting_and_shader_constants @0x5D98A0]
-		const float transfer = CLAMP(p_interior_daylight, 0.0f, 1.0f);
-		v->dir_color = v->dir_color * transfer;
-		v->hemi_ground = w.floor_color.lerp(w.hemi_ground, transfer);
-		v->hemi_sky = w.ceiling.lerp(w.hemi_sky, transfer);
-	}
-	return v;
-}
-
-void ObjectModel::apply_environment_values(const Ref<ShaderMaterial> &p_material,
-		const Ref<EnvLightValues> &p_values) {
-	if (p_material.is_null() || p_values.is_null()) {
-		return;
-	}
-	const EnvLightValues &v = **p_values;
-	p_material->set_shader_parameter("u_hemi_sky_color", v.hemi_sky);
-	p_material->set_shader_parameter("u_dir_light_dir", v.dir);
-	p_material->set_shader_parameter("u_dir_light_color", v.dir_color);
-	p_material->set_shader_parameter("u_hemi_ground_color", v.hemi_ground);
-	p_material->set_shader_parameter("u_color_src_global_gain", v.gain);
-	p_material->set_shader_parameter("u_fog_enabled", v.fog_enabled);
-	p_material->set_shader_parameter("u_fog_color", v.fog_color);
-	p_material->set_shader_parameter("u_fog_start", v.fog_start);
-	p_material->set_shader_parameter("u_fog_end", v.fog_end);
-	p_material->set_shader_parameter("u_fog_type", v.fog_type);
-}
-
-// Stamp the current environment values onto every surface material, skipping
-// entirely when the published generation and the derived values are unchanged
-// (retained mode — an identical re-push is invisible).
-void ObjectModel::apply_environment_to_materials() {
-	int64_t gen = -1;
-	Ref<EnvLightValues> world_values;
-	if (env_state_.is_valid()) {
-		gen = env_state_->get_generation();
-		const bool have_all_cached = last_env_values_.is_valid() &&
-				(!interior_section_lighting_ || last_section_env_values_.is_valid());
-		if (gen == last_env_gen_ && have_all_cached) {
-			return;
-		}
-		world_values = env_state_->get_values();
-	}
-	if (world_values.is_null()) {
-		world_values = EnvLightValues::retail_noon_defaults();
-	}
-	// A portal building is not an ordinary entity submission: its exterior
-	// shell always keeps effectScale 1, and only ROBJ 1+ takes its own
-	// ItemDef transfer.
-	const Ref<EnvLightValues> values = entity_lighting_values(world_values,
-			interior_section_lighting_ ? 1.0f : lighting_effect_scale_,
-			interior_section_lighting_ ? false : interior_lerp_,
-			interior_section_lighting_ ? 0.0f : interior_daylight_);
-	Ref<EnvLightValues> section_values;
-	if (interior_section_lighting_) {
-		section_values = entity_lighting_values(world_values, 1.0f, true,
-				interior_section_daylight_);
-	}
-	const bool entity_unchanged = values->equals(last_env_values_);
-	const bool section_unchanged = !interior_section_lighting_ ||
-			section_values->equals(last_section_env_values_);
-	if (entity_unchanged && section_unchanged) {
-		last_env_gen_ = gen;
-		return;
-	}
-	last_env_values_ = values;
-	last_section_env_values_ = section_values;
-	last_env_gen_ = gen;
-	for (int i = 0; i < surface_materials_.size(); ++i) {
-		const Ref<ShaderMaterial> material = surface_materials_[i];
-		if (material.is_null()) {
-			continue;
-		}
-		const int context = i < surface_lighting_contexts_.size()
-				? surface_lighting_contexts_[i]
-				: LIGHTING_CONTEXT_ENTITY;
-		apply_environment_values(material,
-				context == LIGHTING_CONTEXT_INTERIOR_SECTION ? section_values : values);
-	}
-}
-
-void ObjectModel::apply_lights() {
-	// This per-material local-light route is editor preview only. Gameplay
-	// evaluates authored LGHT into the shared EffectWorld light pool, whose
-	// selected lights arrive through the global object-shader uniforms; it must
-	// not also inject the same record through u_local_light_*.
-	if (!model_light_preview_enabled_ || !has_lights_) {
-		return;
-	}
-	if (object_data_.is_null()) {
-		return;
-	}
-	const Array lights = object_data_->evaluate_lights(anim_time_ms_, ctrl_values_);
-	Dictionary dominant;
-	float best_intensity = -1.0f;
-	for (int64_t i = 0; i < lights.size(); ++i) {
-		const Dictionary info = lights[i];
-		const float intensity = float(info.get("intensity", 1.0));
-		if (intensity > best_intensity) {
-			best_intensity = intensity;
-			dominant = info;
-		}
-	}
-	const int count = dominant.is_empty() ? 0 : 1;
-	const Vector3 model_position = dominant.get("position", Vector3());
-	Vector3 position = get_global_transform().xform(model_position);
-	const Color color = dominant.get("color", Color(1, 1, 1, 1));
-	const float atten_start = float(dominant.get("atten_start", 0.0));
-	const float atten_end = float(dominant.get("atten_end", 5.0));
-	const int subobject = int(dominant.get("subobject", -1));
-	if (skeleton_ != nullptr && subobject >= 0 &&
-			subobject < skeleton_->get_bone_count()) {
-		// LGHT positions are authored in model space; move through the same
-		// rest-to-live bone transform as user points.
-		position = (skeleton_->get_global_transform() *
-						   skeleton_->get_bone_global_pose(subobject) *
-						   skeleton_->get_bone_global_rest(subobject).affine_inverse())
-						   .xform(model_position);
-	} else if (subobject >= 0) {
-		Node3D *const *node = robj_nodes_.getptr(subobject);
-		const Transform3D *rest = robj_rest_transforms_.getptr(subobject);
-		if (node != nullptr && *node != nullptr && rest != nullptr) {
-			position = (*node)->get_global_transform().xform(
-					rest->affine_inverse().xform(model_position));
-		}
-	}
-	// Push only on change (retained mode — the skip is invisible).
-	const float intensity = best_intensity > 0.0f ? best_intensity : 1.0f;
-	if (last_light_push_valid_ && count == last_light_count_ &&
-			position == last_light_position_ && color == last_light_color_ &&
-			intensity == last_light_intensity_ &&
-			atten_start == last_light_atten_start_ &&
-			atten_end == last_light_atten_end_) {
-		return;
-	}
-	last_light_push_valid_ = true;
-	last_light_count_ = count;
-	last_light_position_ = position;
-	last_light_color_ = color;
-	last_light_intensity_ = intensity;
-	last_light_atten_start_ = atten_start;
-	last_light_atten_end_ = atten_end;
-	for (const Ref<ShaderMaterial> &material : surface_materials_) {
-		if (material.is_null()) {
-			continue;
-		}
-		material->set_shader_parameter("u_local_light_count", count);
-		material->set_shader_parameter("u_local_light_position", position);
-		material->set_shader_parameter("u_local_light_color",
-				Vector3(color.r, color.g, color.b));
-		material->set_shader_parameter("u_local_light_intensity", intensity);
-		material->set_shader_parameter("u_local_light_atten_start", atten_start);
-		material->set_shader_parameter("u_local_light_atten_end", atten_end);
-	}
 }
 
 } // namespace godot

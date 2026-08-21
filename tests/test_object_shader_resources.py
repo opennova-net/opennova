@@ -170,6 +170,80 @@ def test_every_wrapper_matches_manifest_topology() -> None:
                 assert f'/object/{expected_output}.gdshaderinc"' in source
 
 
+def test_facelift_uses_native_lit_surfaces_without_legacy_light_uniforms() -> None:
+    shared = normalized_source(SHADER_DIR / "shared.gdshaderinc")
+    for legacy_name in (
+        "u_hemi_",
+        "u_dir_light_",
+        "u_fog_",
+        "u_point_light_",
+        "u_local_light_",
+        "obj_ff_lighting",
+        "obj_apply_fog",
+    ):
+        assert legacy_name not in shared
+
+    outputs = normalized_source(SHADER_DIR / "output_opaque.gdshaderinc")
+    assert "ALBEDO = albedo" in outputs
+    assert "NORMAL = normalize" in outputs
+    assert "METALLIC = 0.0" in outputs
+    assert "ROUGHNESS = roughness" in outputs
+    assert "SPECULAR = specular" in outputs
+    assert "EMISSION = emission" in outputs
+    assert "nova_gamma_to_linear" not in outputs
+
+    single = normalized_source(SHADER_DIR / "sampling" / "single.gdshaderinc")
+    detail = normalized_source(SHADER_DIR / "sampling" / "detail.gdshaderinc")
+    assert "u_diffuse : source_color" in single
+    assert "u_diffuse : source_color" in detail
+    assert "u_detail : source_color" in detail
+    assert "source_color" not in normalized_source(
+        SHADER_DIR / "normal" / "tangent_uv1.gdshaderinc"
+    )
+
+    expected_roughness = {
+        "fixed.gdshaderinc": "0.8",
+        "flag.gdshaderinc": "0.8",
+        "phong_diffuse.gdshaderinc": "0.55",
+        "phong_specular.gdshaderinc": "0.55",
+        "dot3.gdshaderinc": "0.55",
+        "environment.gdshaderinc": "0.3",
+        "environment_specular.gdshaderinc": "0.3",
+        "glass.gdshaderinc": "0.1",
+    }
+    for filename, value in expected_roughness.items():
+        technique = normalized_source(SHADER_DIR / "technique" / filename)
+        assert f"output_roughness = {value};" in technique
+
+    lit_directories = {
+        "flag",
+        "phong_tangent_diffuse",
+        "phong_tangent_specular",
+        "phong_object_diffuse",
+        "phong_object_specular",
+        "dot3_tangent",
+        "dot3_tangent_detail",
+        "dot3_object",
+        "dot3_object_detail",
+        "environment_tangent",
+        "environment_tangent_specular",
+        "glass",
+    }
+    for directory in lit_directories:
+        for wrapper in (SHADER_DIR / directory).glob("*.gdshader"):
+            assert "render_mode unshaded" not in normalized_source(wrapper)
+
+    for directory in ("self_lit", "self_lit_detail", "tracer", "flag_self_lit"):
+        for wrapper in (SHADER_DIR / directory).glob("*.gdshader"):
+            assert "render_mode unshaded" in normalized_source(wrapper)
+
+    tangent_normal = normalized_source(
+        SHADER_DIR / "normal" / "tangent_uv1.gdshaderinc"
+    )
+    assert "dot(tangent, tangent) < 0.000001" in tangent_normal
+    assert "return geom_normal" in tangent_normal
+
+
 def test_transitive_shader_sources_match_golden() -> None:
     """Keep the old composed-source regression sensitivity after static splitting.
 

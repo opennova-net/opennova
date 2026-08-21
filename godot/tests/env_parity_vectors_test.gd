@@ -224,7 +224,9 @@ const EXPECTED_BYTES := {
 	"celestial/glare_occlusion": "0000 1805 300A 6014 901E C028",
 	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0000 0600 2500 5501 8B0B C028",
 	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
-	"sky/flat": "01 2D3C4B",
+	# Facelift device vector: the authored 2D3C4B cloud color is explicitly
+	# linearized before the custom dome writes the HDR buffer.
+	"sky/flat": "01 070C12",
 	"sky/mesh": "441 2400 0 22 21 0 1 22 1 23 22 1 2 23",
 	"smoother/clamped": "FE0000 FD0000 FC0000 FB0000",
 	"smoother/decay": "DF7038 C36231 AB562B 954B26 834221 72391D 643219 582C16",

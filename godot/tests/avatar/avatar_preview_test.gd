@@ -33,6 +33,18 @@ func _resolved_combo() -> Dictionary:
 	return {}
 
 
+func test_preview_has_native_studio_lighting() -> void:
+	var studio_world := _preview.find_child(
+			"AvatarPreviewStudioEnvironment", true, false) as WorldEnvironment
+	var studio_key := _preview.find_child(
+			"AvatarPreviewKeyLight", true, false) as DirectionalLight3D
+	assert_not_null(studio_world, "avatar preview supplies ambient native lighting")
+	assert_not_null(studio_key, "avatar preview supplies a deterministic native key light")
+	if studio_world != null:
+		assert_eq(studio_world.environment.ambient_light_source,
+				Environment.AMBIENT_SOURCE_COLOR)
+
+
 func test_load_combo_composes_parts_when_root_mounted() -> void:
 	var combo := _resolved_combo()
 	if combo.is_empty():

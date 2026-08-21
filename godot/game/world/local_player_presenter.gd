@@ -527,46 +527,9 @@ func _update_player_camera() -> void:
 					Vector3(0, 0, -1), deg_to_rad(_view.camera_roll_deg))
 	_update_scope_camera()
 	_update_avatar(pos)
-	_update_model_lighting_context()
 	_viewmodel_rig.update_viewmodel(_view,
 			_weapon_effects.weapon_view() if _weapon_effects != null else null,
 			_third_person, debug_force_viewmodel)
-
-
-func _update_model_lighting_context() -> void:
-	var sim = _sim()
-	var interior_item_id := \
-			int(sim.local_player_interior_item_id()) if sim != null else 0
-	var transfer := 0.0
-	var item_db = _world.get_item_db() if _world != null else null
-	if interior_item_id != 0 and item_db != null:
-		transfer = float(item_db.get_light_transfer(interior_item_id))
-	var interior := interior_item_id != 0
-
-	# The third-person body and its held gun take the entity's outdoor sun
-	# factor like any sector-drawn entity (D-RLIT-3; the sim computes the
-	# local quality each occlusion frame). The FP submit deliberately keeps
-	# effectScale=1 (retail computes then discards its outdoor sun sample)
-	# but still keys the interior group from blink_hits[0]. Updating on every
-	# presentation frame makes portal crossings live.
-	# [orig: Player_RenderFirstPersonViewModel @0x4DEEA4..0x4DEF52 — the
-	# setup_terrain_effect_for_entity return is dropped on the FP leg;
-	# Terrain_RenderSectorEntities stacks it for the world body @0x5c7bff]
-	var body_scale := 1.0
-	if sim != null:
-		# quality -> effectScale maps engine-side (one owner:
-		# renderer::sun_visibility_factor via sun_quality_factor).
-		body_scale = sim.sun_quality_factor(sim.get_local_player_sun_quality())
-	_set_model_lighting_context(_avatar, interior, transfer, body_scale)
-	_set_model_lighting_context(_held_weapon, interior, transfer, body_scale)
-	for part in vm_parts():
-		_set_model_lighting_context(part, interior, transfer)
-
-
-func _set_model_lighting_context(model: Node, interior: bool,
-		transfer: float, effect_scale := 1.0) -> void:
-	if model != null and is_instance_valid(model):
-		model.set_entity_lighting_context(effect_scale, interior, transfer)
 
 
 # The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted defs,

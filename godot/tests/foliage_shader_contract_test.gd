@@ -65,8 +65,8 @@ func test_fd_sampling_is_anisotropic_with_conservative_terminal_guard() -> void:
 			"The conservative shader guard must keep requests out of the synthetic terminal tail.")
 	assert_true(sampling.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
 		":fd sampling must stay implicit/anisotropic within the retail chain.")
-	assert_true(detail.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
-		"Expanded detail must sample :fd anisotropically like the reference device.")
+	assert_true(detail.contains("uniform sampler2D u_fd_texture : source_color, filter_linear_mipmap_anisotropic"),
+		"Expanded detail must decode :fd color into linear HDR and sample anisotropically.")
 	assert_true(silhouette.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
 		"MODEL foliage must sample :fd anisotropically like the reference device.")
 	assert_true(detail.contains("sample_retail_foliage_fd(u_fd_texture, UV)"),
@@ -104,57 +104,33 @@ func _flat_ground_light_alpha(retail_getter_direction: Vector3) -> float:
 	return _light_alpha(normal_byte, retail_getter_direction)
 
 
-func test_detail_light_packs_world_sun_in_heightfield_texture_basis() -> void:
+func test_detail_foliage_uses_native_lighting_without_tile_alpha() -> void:
 	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
-	assert_true(
-		detail.contains("vec3 texture_basis_light = vec3("),
-		"Detail must explicitly convert the retail getter tuple to GPU diffuse RGB."
-	)
-	assert_true(
-		detail.contains("opennova_sun_direction.z,\n\t\t\topennova_sun_direction.x,\n\t\t\topennova_sun_direction.y"),
-		"The GPU diffuse RGB order must be retail getter Z, X, Y."
-	)
-	assert_true(
-		detail.contains("(texture_basis_light + 1.0) * 127.5"),
-		"Retail byte packing must consume the converted GPU diffuse vector."
-	)
-	assert_false(
-		detail.contains("(opennova_sun_direction + 1.0) * 127.5"),
-		"The getter tuple must not be packed without the D3DCOLOR permutation."
-	)
-
-	var env := EnvFile.new()
-	var dawn := _flat_ground_light_alpha(env.compute_sun_direction(600.0))
-	var noon := _flat_ground_light_alpha(env.compute_sun_direction(1200.0))
-	var dusk := _flat_ground_light_alpha(env.compute_sun_direction(1800.0))
-	assert_lt(dawn, 0.01, "Flat ground must not receive overhead DOT3 light at dawn.")
-	assert_gt(noon, 0.9, "Flat ground must receive overhead DOT3 light at noon.")
-	assert_lt(dusk, 0.01, "Flat ground must not receive overhead DOT3 light at dusk.")
+	var high := _source("res://shaders/foliage_detail_high.gdshader")
+	var low := _source("res://shaders/foliage_detail_low.gdshader")
+	assert_false(high.contains("unshaded"))
+	assert_false(low.contains("unshaded"))
+	assert_false(detail.contains("opennova_sun_direction"),
+			"Native lights own the direct-light calculation.")
+	assert_false(detail.contains("tile.a"),
+			"The composed terrain page alpha must not act as baked foliage lighting.")
+	assert_true(detail.contains("ALBEDO = color;"))
+	assert_true(detail.contains("ROUGHNESS = 0.8;"))
 
 
-	var morning := env.compute_sun_direction(800.0)
-	assert_eq(_gpu_light_byte(morning), Vector3(231, 83, 187) / 255.0,
-		"08:00 D3DCOLOR diffuse RGB must be the witnessed getter permutation (z, x, y).")
-	assert_almost_eq(_light_alpha(Vector3(217, 127, 217) / 255.0, morning),
-		0.8987774, 0.000001, "08:00 X-ramp normal must receive the witnessed bright DOT3 response.")
-	assert_almost_eq(_light_alpha(Vector3(127, 217, 217) / 255.0, morning),
-		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
-
-func test_detail_fog_consumes_supplied_start_and_honors_disable() -> void:
+func test_detail_foliage_uses_native_depth_fog() -> void:
 	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
-	assert_true(
-		detail.contains("if (opennova_fog_start == opennova_fog_end)"),
-		"The device fog policy disables linear fog when start equals end."
-	)
-	assert_true(
-		detail.contains("float start = opennova_fog_start;"),
-		"The environment already supplies the authored per-type/per-overcast fog start."
-	)
-	assert_false(
-		detail.contains("start = safe_end * 0.5") or
-			detail.contains("start = safe_end * 0.25"),
-		"The foliage shader must not overwrite the supplied type 2/3 fog start."
-	)
+	assert_false(detail.contains("opennova_fog_"))
+	assert_false(detail.contains("apply_fog"))
+
+
+func test_only_near_detail_foliage_submits_to_the_directional_caster_layer() -> void:
+	var dispatcher := _source("res://src/terrain/nova_foliage_dispatcher.cpp")
+	assert_true(dispatcher.contains(
+			"detail ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON"))
+	assert_true(dispatcher.contains(
+			"detail ? Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER : 0"),
+			"Only the high-detail/near tier enters the sun's caster mask.")
 
 
 func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:

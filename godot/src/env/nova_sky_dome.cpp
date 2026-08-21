@@ -3,8 +3,10 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/procedural_sky_material.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/sky.hpp>
 
 #include "env/env_file.h"
 #include "env/env_render_camera.h"
@@ -15,12 +17,23 @@ namespace godot {
 
 namespace {
 
-Vector3 to_vector3(const opennova::env::Rgb &rgb) {
-	return Vector3(rgb.r, rgb.g, rgb.b);
+Vector3 to_linear_vector3(const opennova::env::Rgb &rgb) {
+	const Color linear = Color(MAX(rgb.r, 0.0f), MAX(rgb.g, 0.0f),
+			MAX(rgb.b, 0.0f), 1.0f).srgb_to_linear();
+	return Vector3(linear.r, linear.g, linear.b);
 }
 
 Vector3 to_vector3(const opennova::env::Vec3 &v) {
 	return Vector3(v.x, v.y, v.z);
+}
+
+// Native Environment and ProceduralSkyMaterial colors are authored/sRGB-facing;
+// Forward+ performs their linearization when building render data. Keep the
+// explicit conversion above only for vec3 values written by our custom sky
+// shader directly into the HDR buffer.
+Color authored_render_color(const Vector3 &value) {
+	return Color(MAX(value.x, 0.0f), MAX(value.y, 0.0f),
+			MAX(value.z, 0.0f), 1.0f);
 }
 
 } // namespace
@@ -71,6 +84,7 @@ void SkyDome::set_weather_path(const NodePath &p_path) {
 
 void SkyDome::set_frame_clear_environment(const Ref<Environment> &p_environment) {
 	frame_clear_environment_ = p_environment;
+	world_environment_generation_ = -1;
 }
 
 MissionEnvironment *SkyDome::_env_node() {
@@ -126,6 +140,7 @@ void SkyDome::build() {
 	built_ = false;
 	bound_cloud_tex1_.unref();
 	bound_cloud_tex2_.unref();
+	world_environment_generation_ = -1;
 
 	Ref<Shader> sky_shader =
 			ResourceLoader::get_singleton()->load("res://shaders/sky.gdshader");
@@ -192,28 +207,28 @@ void SkyDome::advance_frame(double p_delta) {
 		if (frame.flat_pass) {
 			sky_material_->set_shader_parameter("u_flat_pass", true);
 			sky_material_->set_shader_parameter("u_flat_color",
-					to_vector3(frame.flat_color));
+					to_linear_vector3(frame.flat_color));
 		} else {
 			sky_material_->set_shader_parameter("u_flat_pass", false);
 			sky_material_->set_shader_parameter("u_sky_base",
-					to_vector3(frame.sky_base));
+					to_linear_vector3(frame.sky_base));
 			sky_material_->set_shader_parameter("u_sky_bright",
-					to_vector3(frame.sky_bright));
+					to_linear_vector3(frame.sky_bright));
 			sky_material_->set_shader_parameter("u_sky_highlight",
-					to_vector3(frame.sky_highlight));
+					to_linear_vector3(frame.sky_highlight));
 			sky_material_->set_shader_parameter("u_cloud_base",
-					to_vector3(frame.cloud_base));
+					to_linear_vector3(frame.cloud_base));
 			sky_material_->set_shader_parameter("u_cloud_highlight",
-					to_vector3(frame.cloud_highlight));
+					to_linear_vector3(frame.cloud_highlight));
 			sky_material_->set_shader_parameter("u_cloud_edge",
-					to_vector3(frame.cloud_edge));
+					to_linear_vector3(frame.cloud_edge));
 		}
 		sky_material_->set_shader_parameter("u_sun_dir",
 				to_vector3(frame.sun_dir));
 		sky_material_->set_shader_parameter("u_light_dir",
 				to_vector3(frame.light_dir));
 		sky_material_->set_shader_parameter("u_fog_color",
-				to_vector3(frame.skyfog_color));
+				to_linear_vector3(frame.skyfog_color));
 		// The sky wrapper keeps its dedicated skyfog color on both sides of the
 		// water plane, but uses the active pass visibility distance.
 		sky_material_->set_shader_parameter("u_fog_end",
@@ -285,6 +300,46 @@ void SkyDome::sync_frame_clear_color() {
 	}
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
+		return;
+	}
+
+	// A configured procedural Sky marks the runtime facelift environment. The
+	// game world still owns its above-water/underwater/indoors clear selection;
+	// this applier updates only the native ambient/reflection/fog realization.
+	// Simple shells with no Sky resource retain the historical below-rim
+	// clear-color mirror below.
+	Ref<Sky> sky = frame_clear_environment_->get_sky();
+	ProceduralSkyMaterial *procedural = nullptr;
+	if (sky.is_valid() && sky->get_material().is_valid()) {
+		procedural = Object::cast_to<ProceduralSkyMaterial>(
+				sky->get_material().ptr());
+	}
+	if (procedural != nullptr) {
+		const int64_t generation = env->get_scene_generation();
+		if (generation == world_environment_generation_) {
+			return;
+		}
+		world_environment_generation_ = generation;
+
+		procedural->set_sky_top_color(
+				authored_render_color(env->get_sky_base()));
+		procedural->set_sky_horizon_color(
+				authored_render_color(env->get_sky_bright()));
+		procedural->set_ground_horizon_color(
+				authored_render_color(env->get_skyfog_color()));
+		procedural->set_ground_bottom_color(
+				authored_render_color(env->get_floor_color()));
+
+		frame_clear_environment_->set_ambient_light_color(
+				authored_render_color(env->get_sky_ambient()));
+		frame_clear_environment_->set_fog_light_color(
+				authored_render_color(env->get_scene_fog_color()));
+		const float fog_start = MAX(env->get_scene_fog_start(), 0.0f);
+		const float fog_end = MAX(env->get_scene_fog_end(), fog_start + 1.0f);
+		frame_clear_environment_->set_fog_depth_begin(fog_start);
+		frame_clear_environment_->set_fog_depth_end(fog_end);
+		frame_clear_environment_->set_fog_enabled(
+				env->get_scene_fog_end() > fog_start);
 		return;
 	}
 	const opennova::env::Rgb rgb = env->state().frame_clear_color();

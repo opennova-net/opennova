@@ -417,3 +417,20 @@ func test_water_material_has_no_far_discard_uniforms() -> void:
 			"u_fog_type retired: water fog rides the per-row spec-alpha factor")
 	assert_not_null(water.get_water_material().get_shader_parameter("u_underwater_view"),
 			"u_underwater_view must be fed by the strip rebuild")
+
+
+func test_water_keeps_reflection_ordering_but_outputs_coherent_linear_hdr() -> void:
+	var shader := load(WATER_SHADER) as Shader
+	assert_not_null(shader)
+	if shader == null:
+		return
+	var code := shader.code
+	assert_true(code.contains("blend_premul_alpha"),
+			"The witnessed reflection/composite ordering remains intact.")
+	assert_true(code.contains("float fresnel ="))
+	assert_true(code.contains("nova_gamma_to_linear(u_water_color)"))
+	assert_true(code.contains("nova_gamma_to_linear(v_specular)"))
+	assert_false(code.contains("mix(u_fog_color"),
+			"WorldEnvironment depth fog owns the final water fog pass.")
+	assert_false(code.contains("ALBEDO = nova_gamma_to_linear"),
+			"The HDR result must not be gamma-decoded a second time.")

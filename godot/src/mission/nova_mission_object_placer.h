@@ -88,10 +88,6 @@ public:
 	void set_avatar_db(const Ref<AvatarDatabase> &p_db);
 	Ref<AvatarDatabase> get_avatar_db();
 	void set_panm_clock(const Ref<PanmClock> &p_clock);
-	// The typed environment light channel (published by MissionEnvironment).
-	// Set once by the owner; every model built here holds the same record,
-	// and update_environment() restamps the harvested static-batch materials.
-	void set_environment_state(const Ref<EnvLightState> &p_state);
 	void set_edit_mode(bool p_edit_mode) { edit_mode_ = p_edit_mode; }
 	bool get_edit_mode() const { return edit_mode_; }
 
@@ -148,11 +144,6 @@ public:
 			const String &p_clip_key = String(),
 			const String &p_rig_graphic = String());
 
-	// Re-stamp every harvested static-batch material from the live
-	// environment — retail relights every entity from the current lighting
-	// block each frame (witness: placement_traits.h ledger);
-	// generation/value-equality gated like ObjectModel's stamp.
-	void update_environment();
 
 	// --- read-back seams --------------------------------------------------
 	Array get_placed_entity_records() const { return placed_entity_records_; }
@@ -256,7 +247,6 @@ private:
 	bool _placement_is_mirror_reflected(uint32_t p_entity_attrib,
 			int p_item_id) const;
 	void _configure_item_shadow(ObjectModel *p_model, int p_item_id);
-	void _configure_item_lighting(ObjectModel *p_model, int p_item_id);
 	Ref<SkeletalAnim> _skeletal_from_adm(const String &p_adm_name,
 			const PackedVector3Array &p_bone_origins,
 			const PackedInt32Array &p_bone_parents);
@@ -293,7 +283,6 @@ private:
 	Ref<ItemDatabase> item_db_;
 	Ref<AvatarDatabase> avatar_db_;
 	Ref<PanmClock> panm_clock_;
-	Ref<EnvLightState> env_state_;
 	bool edit_mode_ = false;
 
 	Array placed_entity_records_;
@@ -316,9 +305,6 @@ private:
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
-	Vector<Ref<Material>> batch_materials_;
-	int64_t last_batch_env_gen_ = -1;
-	Ref<EnvLightValues> last_batch_env_values_;
 	HashMap<String, Vector3> anchor_cache_;
 	HashMap<String, Array> collision_shapes_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;

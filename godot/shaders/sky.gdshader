@@ -14,9 +14,6 @@ render_mode unshaded, cull_front;
 // D3DRS_AMBIENT 0xFFFFFF [orig: render_skybox @ 0x579b42..0x579bb6].
 // Full spec: docs/env/env-tod-re.md "Sky dome".
 
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
-#include "res://shaders/nova_color.gdshaderinc"
-
 uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7); // c11 skybase
 uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9); // c11 + c12
 uniform vec3 u_sky_highlight = vec3(1.0, 0.95, 0.8); // c15
@@ -32,8 +29,8 @@ uniform vec3 u_flat_color = vec3(0.5, 0.5, 0.5); // cloud_rgb, flat path only
 
 // The reference device applies anisotropic minification to active texture
 // stages; this matters most at the dome's grazing-angle horizon.
-uniform sampler2D u_cloud_tex1 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_cloud_tex2 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_cloud_tex1 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_cloud_tex2 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_clouds = false;
 uniform vec2 u_scroll_offset1 = vec2(0.0);
 uniform vec2 u_scroll_offset2 = vec2(0.0);
@@ -42,7 +39,6 @@ uniform float u_sky_height = 175.0;
 varying vec3 v_pass1; // pass-1 oD0: gradient + sun-proximity highlight
 varying vec3 v_cloud_ramp; // pass-2 oD0
 varying vec3 v_sky_behind; // pass-2 oD1
-varying float v_fog; // oFog = 1 - dist/(0.9*fogEnd)
 varying vec2 v_uv1;
 varying vec2 v_uv2;
 
@@ -109,8 +105,6 @@ void vertex() {
 	// c9 upload @ 0x5792c2].
 	// (divisor floor keeps the varying defined when fog is off; the fragment
 	// guard never reads it in that case)
-	v_fog = 1.0 - distance(world_pos, eye) / max(0.9 * u_fog_end, 0.001);
-
 	v_uv1 = UV + u_scroll_offset1;
 	v_uv2 = UV2 + u_scroll_offset2;
 	POSITION = clip;
@@ -142,14 +136,7 @@ void fragment() {
 		}
 	}
 
-	// The sky wrapper temporarily selects the post-horizon-blend, doubled
-	// skyfog block, matching the clear below the open dome rim; world passes
-	// restore ordinary fog afterward [orig: sky fog wrapper @ 0x579cb0].
-	if (u_fog_end > 0.0) {
-		col = mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
-	}
-	// Gamma-space output (D-RMAT-7): the gradient/cloud/fog combine above ran
-	// on raw byte values (colors and cloud texels alike); encode once so the
-	// displayed dome bytes equal the computed ones.
-	ALBEDO = nova_gamma_to_linear(col);
+	// Inputs are linear; the WorldEnvironment supplies native depth fog and
+	// the Filmic output transform after this custom dome pass.
+	ALBEDO = col;
 }

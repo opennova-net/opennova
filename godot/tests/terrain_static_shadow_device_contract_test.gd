@@ -162,60 +162,41 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 		"The caster/light snapshot must be final before any page plan is requested.")
 
 
-func test_game_world_attaches_and_detaches_the_mission_shadow_source() -> void:
+func test_game_world_does_not_attach_the_legacy_page_shadow_source() -> void:
 	var source := _source("res://game/world/game_world.gd")
-	var placed := source.find("_mission_stats = _placer.place(mission, self, options)")
-	var attached := source.find("_terrain.set_static_shadow_placer(_placer)")
-	assert_gt(attached, placed,
-		"Only successfully placed ObjectData/transform sources may enter the page collector.")
-	var unload := source.find("func unload() -> void:")
-	var detached := source.find("_terrain.set_static_shadow_placer(null)", unload)
-	var release := source.find("_placer = null", unload)
-	assert_gt(detached, unload)
-	assert_gt(release, detached,
-		"Terrain must release its Ref before GameWorld drops the mission placer.")
+	assert_false(source.contains("_terrain.set_static_shadow_placer(_placer)"),
+			"Native directional shadow maps replace runtime tile-alpha silhouettes.")
+	assert_false(source.contains("_terrain.set_static_shadow_placer(null)"))
 
 
-func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> void:
+func test_runtime_terrain_ignores_page_shadow_alpha_and_uses_native_fog() -> void:
 	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
 	var runtime := _source("res://shaders/terrain.gdshader")
 	var device := _source("res://src/terrain/nova_terrain.cpp")
-	assert_true(shared.contains("cm.a * u_sun_light + u_sky_ambient"),
-		"A zeroed page light term must remove only direct sun while retaining sky ambient.")
-	var surface := runtime.find("terrain_surface_color_from_colormap(")
-	var fog := runtime.find("result = apply_terrain_fog(")
-	assert_gt(fog, surface,
-		"Fog must still composite after the shadowed terrain light result.")
+	var modern_begin := shared.find("vec3 terrain_surface_albedo_from_colormap")
+	var modern_end := shared.find("\n}\n", modern_begin)
+	var modern := shared.substr(modern_begin, modern_end - modern_begin)
+	assert_false(modern.contains("cm.a"),
+			"Tile-cache alpha is legacy bake data, not runtime lighting.")
+	assert_true(runtime.contains("terrain_surface_albedo_from_colormap("))
+	assert_false(runtime.contains("terrain_surface_color_from_colormap("))
+	assert_false(runtime.contains("apply_terrain_fog("),
+			"Native Environment depth fog follows native light evaluation.")
 	assert_false(device.contains("sun_shadow_catcher.gdshader"),
-		"The page-alpha result replaces the legacy final-RGB black shadow overlay.")
+			"Native shadows require no final-RGB black overlay.")
 
 
-func test_capture_variants_control_page_shadows_without_a_static_shadow_map() -> void:
-	var terrain_header := _source("res://src/terrain/nova_terrain.h")
-	var terrain_source := _source("res://src/terrain/nova_terrain.cpp")
-	var device_header := _source(
-		"res://src/terrain/nova_terrain_tile_cache_device.h")
+func test_capture_variants_control_the_native_directional_shadow_map() -> void:
 	var world := _source("res://game/world/game_world.gd")
 	var session := _source(
 		"res://tests/support/shadow_attribution_capture_session.gd")
-	assert_true(terrain_header.contains("set_static_terrain_shadow_enabled("))
-	assert_true(terrain_header.contains(
-			"set_suppressed_static_shadow_bms_ids("))
-	assert_true(device_header.contains("invalidate_static_shadow_pages()"),
-		"Provider control changes need an explicit ready-binding invalidation seam.")
-	assert_true(terrain_source.count(
-			"tile_cache_device.invalidate_static_shadow_pages();") >= 3,
-		"Attach, enable, and suppression changes must retire stale page bindings.")
 	assert_false(world.contains("NovaStaticSunShadow"),
-		"The page provider makes the old static DirectionalLight shadow map obsolete.")
+			"The runtime uses the single ENV/TOD SunShadow device.")
 	assert_true(session.contains(
-			"_terrain.set_static_terrain_shadow_enabled("),
-		"Canonical shadows_off must disable page-composed silhouettes too.")
-	assert_true(session.contains(
-			"_terrain.set_suppressed_static_shadow_bms_ids("),
-		"Attribution suppression must filter the provider's typed BMS sources.")
+			"_dynamic_shadow.shadow_enabled = variant.dynamic_shadow_enabled"),
+			"Canonical shadows_off must disable the native directional atlas.")
 	assert_false(session.contains('get_node_or_null(\n\t\t\t"NovaStaticSunShadow")'),
-		"Capture state must not depend on the retired static shadow-map node.")
+			"Capture state must not depend on the retired static shadow-map node.")
 
 
 func test_device_frame_diagnostics_are_bounded_and_capacity_is_explicit() -> void:

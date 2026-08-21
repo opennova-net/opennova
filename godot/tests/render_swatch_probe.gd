@@ -106,8 +106,18 @@ func _capture_mode(out_dir: String, prefix: String) -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.12, 0.12, 0.14)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.72, 0.76, 0.82)
+	env.ambient_light_energy = 0.75
 	world_env.environment = env
 	scene.add_child(world_env)
+
+	var key_light := DirectionalLight3D.new()
+	key_light.light_color = Color(1.0, 0.96, 0.88)
+	key_light.light_energy = 1.25
+	key_light.shadow_enabled = false
+	key_light.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
+	scene.add_child(key_light)
 
 	var diffuse := _make_diffuse_texture()
 	var detail := _make_detail_texture()
@@ -479,7 +489,6 @@ func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: 
 	material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
 	material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 	material.set_shader_parameter("u_alpha_mod", 1.0)
-	material.set_shader_parameter("u_local_light_count", 0)
 	# Pin the TIME-driven flag wind sway: A/B captures happen at arbitrary
 	# times, and a swaying vertex displacement is capture noise, not a
 	# material delta. The Flag family still renders (family lighting, key,

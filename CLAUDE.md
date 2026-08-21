@@ -117,7 +117,11 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   code in the same change — no deprecation shims, migration paths, or compat readers for
   files our tools write. Retail interop (wire/format parity) is the product, not
   back-compat, and is never relaxed.
-- Rendering targets the original fixed-function look, not PBR.
+- Rendering preserves source assets and the witnessed decoded
+  geometry/material/texture/order semantics, but uses the hard-cut Godot-native
+  facelift defined by ADR 0036. Do not add render profiles, asset PBR fields,
+  inferred material maps, or compatibility shader paths. Any future sidecar or
+  cache remains an optional presentation override, not an asset migration.
 - Networking is wire-compatible by design — the parity rule applied to the byte stream.
   We write code such that our clients can join original (retail) servers, our servers can
   serve original clients, and opennova↔opennova works the same way. Every encoder produces

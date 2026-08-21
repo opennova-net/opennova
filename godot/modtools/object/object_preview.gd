@@ -93,13 +93,31 @@ func _build_viewport() -> void:
 	_environment.name = "ObjectPreviewEnvironment"
 	_root.add_child(_environment)
 
+	var studio_world := WorldEnvironment.new()
+	studio_world.name = "ObjectPreviewStudioEnvironment"
+	var studio_environment := Environment.new()
+	studio_environment.background_mode = Environment.BG_COLOR
+	studio_environment.background_color = Color(0.08, 0.09, 0.11)
+	studio_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	studio_environment.ambient_light_color = Color(0.72, 0.76, 0.82)
+	studio_environment.ambient_light_energy = 0.75
+	studio_world.environment = studio_environment
+	_root.add_child(studio_world)
+
+	var studio_key := DirectionalLight3D.new()
+	studio_key.name = "ObjectPreviewKeyLight"
+	studio_key.light_color = Color(1.0, 0.96, 0.88)
+	studio_key.light_energy = 1.25
+	studio_key.shadow_enabled = false
+	studio_key.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
+	_root.add_child(studio_key)
+
 	_guide_root = Node3D.new()
 	_guide_root.name = "ObjectPreviewGuides"
 	_root.add_child(_guide_root)
 
 	_model = ObjectModel.new()
 	_model.name = "ObjectModel"
-	_model.set_model_light_preview_enabled(true)
 	_root.add_child(_model)
 	_model.bounds_changed.connect(_on_model_bounds_changed)
 	_model.set_object_data(object_data)
@@ -276,9 +294,7 @@ func load_arms(arms_name: String, resource_root) -> bool:
 	if _arms_model == null:
 		_arms_model = ObjectModel.new()
 		_arms_model.name = "NovaArmsModel"
-		_arms_model.set_model_light_preview_enabled(true)
 		_root.add_child(_arms_model)
-		_arms_model.set_environment_state(_environment.get_light_state())
 	_arms_model.set_object_data(data)
 	_arms_model.set_skeletal_anim(_skeletal)  # share the main model's .adm skeleton (may be null)
 	_arms_model.set_playing(_model.is_playing() if _model != null else true)
@@ -475,8 +491,6 @@ func _apply_environment_to_model() -> void:
 	if _environment != null:
 		_environment.environment_data = _environment_file
 		_environment.time_of_day = _environment_time
-	if _model != null:
-		_model.set_environment_state(_environment.get_light_state())
 
 
 func _on_model_bounds_changed(bounds: AABB) -> void:

@@ -279,33 +279,6 @@ func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 			"night objects must not stay pinned to the solar highlight vector")
 
 
-func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -> void:
-	var env_node := MissionEnvironment.new()
-	add_child_autofree(env_node)
-	env_node.environment_data = _load_full_00()
-	env_node.time_of_day = 1500.0
-	var world_values: EnvLightValues = env_node.get_light_state().get_values()
-
-	assert_true(world_values.floor_color.is_equal_approx(env_node.get_floor_color()))
-	assert_true(world_values.ceiling.is_equal_approx(env_node.get_ceiling_color()))
-
-	var covered = ObjectModel.entity_lighting_values(
-			world_values, 0.25, false, 0.0)
-	assert_true(covered.dir_color.is_equal_approx(world_values.dir_color * 0.25),
-			"three blocked retail rays leave one quarter directional light")
-	assert_true(covered.hemi_ground.is_equal_approx(world_values.hemi_ground),
-			"sun visibility does not dim the outdoor hemisphere")
-	assert_true(covered.hemi_sky.is_equal_approx(world_values.hemi_sky))
-
-	var interior = ObjectModel.entity_lighting_values(
-			world_values, 1.0, true, 0.2)
-	assert_true(interior.dir_color.is_equal_approx(world_values.dir_color * 0.2),
-			"Ihq01 light_transfer 20 leaves twenty percent directional light")
-	assert_true(interior.hemi_ground.is_equal_approx(
-			world_values.floor_color.lerp(world_values.hemi_ground, 0.2)))
-	assert_true(interior.hemi_sky.is_equal_approx(
-			world_values.ceiling.lerp(world_values.hemi_sky, 0.2)))
-
 
 func test_weather_publishes_the_active_moon_direction_at_night() -> void:
 	var env_node := MissionEnvironment.new()

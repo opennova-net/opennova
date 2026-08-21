@@ -9,6 +9,15 @@ const SKY_SHADER := "res://shaders/sky.gdshader"
 const TICK := 1.0 / 62.0
 
 
+func _linear_vec(value: Vector3) -> Vector3:
+	var linear := Color(value.x, value.y, value.z, 1.0).srgb_to_linear()
+	return Vector3(linear.r, linear.g, linear.b)
+
+
+func _authored_color(value: Vector3) -> Color:
+	return Color(value.x, value.y, value.z, 1.0)
+
+
 func _make() -> Dictionary:
 	var env_node: Node = MissionEnvironment.new()
 	env_node.name = "SkyTestEnv"
@@ -28,41 +37,41 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	ctx.sky.advance_frame(0.016)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), false, "advanced clouds take the keyframed path")
-	assert_eq(mat.get_shader_parameter("u_sky_base"), ctx.env_node.get_sky_base() * 2.0, "c11 skybase")
-	assert_eq(mat.get_shader_parameter("u_cloud_base"), ctx.env_node.get_cloud_base() * 2.0, "c24 cloudbase")
-	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), ctx.env_node.get_cloud_highlight() * 2.0, "c27 cloudhighlight")
-	assert_eq(mat.get_shader_parameter("u_cloud_edge"), ctx.env_node.get_cloud_edge() * 2.0, "c26 cloudedge")
+	assert_eq(mat.get_shader_parameter("u_sky_base"),
+			_linear_vec(ctx.env_node.get_sky_base() * 2.0), "c11 skybase in linear HDR")
+	assert_eq(mat.get_shader_parameter("u_cloud_base"),
+			_linear_vec(ctx.env_node.get_cloud_base() * 2.0), "c24 cloudbase in linear HDR")
+	assert_eq(mat.get_shader_parameter("u_cloud_highlight"),
+			_linear_vec(ctx.env_node.get_cloud_highlight() * 2.0), "c27 cloudhighlight in linear HDR")
+	assert_eq(mat.get_shader_parameter("u_cloud_edge"),
+			_linear_vec(ctx.env_node.get_cloud_edge() * 2.0), "c26 cloudedge in linear HDR")
 	assert_eq(mat.get_shader_parameter("u_sun_dir"), ctx.env_node.get_sun_direction(),
 		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
 	assert_eq(mat.get_shader_parameter("u_light_dir"), ctx.env_node.get_light_direction(),
 		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
-	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_skyfog_color(),
+	assert_eq(mat.get_shader_parameter("u_fog_color"),
+			_linear_vec(ctx.env_node.get_skyfog_color()),
 		"the dome fogs with the dedicated skyfog block [orig: sky fog wrapper @ 0x579cb0]")
 	assert_eq(float(mat.get_shader_parameter("u_fog_end")), ctx.env_node.get_fog_level(), "dome fog end distance")
 
 
-func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> void:
+func test_keyframed_colors_are_explicitly_linear_for_the_hdr_sky_shader() -> void:
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
-	var actual := [
-		_shader_color_units(mat, "u_sky_base"),
-		_shader_color_units(mat, "u_sky_bright"),
-		_shader_color_units(mat, "u_sky_highlight"),
-		_shader_color_units(mat, "u_cloud_base"),
-		_shader_color_units(mat, "u_cloud_highlight"),
-		_shader_color_units(mat, "u_cloud_edge"),
-		_shader_color_units(mat, "u_fog_color"),
-	]
-	assert_eq(actual, [
-		[114, 154, 276],
-		[38, 38, 62],
-		[292, 324, 294],
-		[274, 274, 274],
-		[38, 46, 18],
-		[308, 316, 330],
-		[154, 182, 255],
-	], "six sky/cloud constants use retail 2/255; active packed skyfog stays byte/255")
+	var expected := {
+		"u_sky_base": _linear_vec(ctx.env_node.get_sky_base() * 2.0),
+		"u_sky_bright": _linear_vec(ctx.env_node.get_sky_bright() * 2.0),
+		"u_sky_highlight": _linear_vec(ctx.env_node.get_sky_highlight() * 2.0),
+		"u_cloud_base": _linear_vec(ctx.env_node.get_cloud_base() * 2.0),
+		"u_cloud_highlight": _linear_vec(ctx.env_node.get_cloud_highlight() * 2.0),
+		"u_cloud_edge": _linear_vec(ctx.env_node.get_cloud_edge() * 2.0),
+		"u_fog_color": _linear_vec(ctx.env_node.get_skyfog_color()),
+	}
+	for parameter in expected:
+		assert_true(Vector3(mat.get_shader_parameter(parameter)).is_equal_approx(
+				Vector3(expected[parameter])),
+				"%s is linearized exactly once" % parameter)
 
 
 func test_weather_core_ticks_every_world_driven_sky_block_and_doubles_fog_afterward() -> void:
@@ -126,8 +135,8 @@ func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
 	ctx.sky.advance_frame(TICK)
 
 	var dome_fog: Vector3 = ctx.sky.get_sky_material().get_shader_parameter("u_fog_color")
-	assert_eq(dome_fog, ctx.env_node.get_skyfog_color())
-	assert_ne(dome_fog, ctx.env_node.get_fog_color(),
+	assert_eq(dome_fog, _linear_vec(ctx.env_node.get_skyfog_color()))
+	assert_ne(dome_fog, _linear_vec(ctx.env_node.get_fog_color()),
 		"the sky wrapper swaps to skyfog while the world keeps ordinary fog")
 
 
@@ -140,18 +149,13 @@ func test_underwater_dome_uses_pass_distance_without_rewriting_sky_wrapper() -> 
 	ctx.sky.advance_frame(TICK)
 
 	assert_eq(Vector3(mat.get_shader_parameter("u_fog_color")),
-			ctx.env_node.get_skyfog_color(),
+			_linear_vec(ctx.env_node.get_skyfog_color()),
 			"the dome keeps the witnessed skyfog wrapper underwater")
 	assert_almost_eq(float(mat.get_shader_parameter("u_fog_end")),
 			ctx.env_node.get_scene_fog_end(), 0.001,
 			"the dome's upper half uses the same murk visibility as the world")
 	assert_eq(Vector3(mat.get_shader_parameter("u_sky_base")), dry_sky_base,
 			"pass fog selection does not rewrite authored sky/TOD colors")
-
-
-func _shader_color_units(material: ShaderMaterial, parameter: StringName) -> Array[int]:
-	var value: Vector3 = material.get_shader_parameter(parameter)
-	return [roundi(value.x * 255.0), roundi(value.y * 255.0), roundi(value.z * 255.0)]
 
 
 func _color_units(value: Color) -> Array[int]:
@@ -166,7 +170,8 @@ func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 	ctx.sky.advance_frame(0.016)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), true, "advanced_clouds 0 takes the flat pass")
-	assert_eq(mat.get_shader_parameter("u_flat_color"), ctx.env_node.get_cloud_tint(),
+	assert_eq(mat.get_shader_parameter("u_flat_color"),
+			_linear_vec(ctx.env_node.get_cloud_tint()),
 		"the flat dome color is cloud_rgb [orig: render_skybox @ 0x579b42]")
 	assert_eq(mat.get_shader_parameter("u_sky_base"), keyframed_base,
 		"the flat pass no longer overwrites the keyframed uniforms")
@@ -231,6 +236,39 @@ func test_cloud_layers_keep_the_recovered_anisotropic_stage_filter() -> void:
 	var shader := load(SKY_SHADER) as Shader
 	assert_eq(shader.code.count("filter_linear_mipmap_anisotropic"), 2,
 		"both active cloud stages use the reference device's anisotropic minification")
+	assert_eq(shader.code.count("source_color"), 2,
+			"Cloud RGB textures decode into the linear HDR sky pass.")
+
+
+func test_custom_dome_defers_distance_fog_to_the_native_environment() -> void:
+	var shader := load(SKY_SHADER) as Shader
+	assert_false(shader.code.contains("apply_terrain_fog"))
+	assert_false(shader.code.contains("mix(u_fog_color"))
+
+
+func test_dome_syncs_authored_env_colors_into_native_environment_properties() -> void:
+	var ctx := _make()
+	var render_environment := Environment.new()
+	var procedural := ProceduralSkyMaterial.new()
+	var radiance := Sky.new()
+	radiance.sky_material = procedural
+	render_environment.sky = radiance
+	ctx.sky.frame_clear_environment = render_environment
+	ctx.sky.advance_frame(TICK)
+
+	assert_eq(procedural.sky_top_color,
+			_authored_color(ctx.env_node.get_sky_base()))
+	assert_eq(procedural.sky_horizon_color,
+			_authored_color(ctx.env_node.get_sky_bright()))
+	assert_eq(render_environment.ambient_light_color,
+			_authored_color(ctx.env_node.get_sky_ambient()),
+			"Native color properties remain sRGB-facing; Forward+ linearizes them.")
+	assert_eq(render_environment.fog_light_color,
+			_authored_color(ctx.env_node.get_scene_fog_color()))
+	assert_almost_eq(render_environment.fog_depth_begin,
+			ctx.env_node.get_scene_fog_start(), 0.001)
+	assert_almost_eq(render_environment.fog_depth_end,
+			ctx.env_node.get_scene_fog_end(), 0.001)
 
 
 func test_dome_rides_at_half_camera_height() -> void:

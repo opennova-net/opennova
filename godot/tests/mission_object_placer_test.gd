@@ -191,12 +191,6 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
-	var env_state := EnvLightState.new()
-	var dry_values := EnvLightValues.retail_noon_defaults()
-	var dry_fog := Vector3(0.71, 0.18, 0.33)
-	dry_values.fog_color = dry_fog
-	env_state.publish(dry_values)
-	placer.set_environment_state(env_state)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 	placer.place(mission, parent)
@@ -251,27 +245,8 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# record rather than the MultiMesh. Render fidelity is validated against real assets
 	# out-of-band; here the placed entity's position is already pinned by the controller tests.
 	assert_eq(rec["offset"], offset, "the record carries the batch offset the drag path rewrites through")
-	placer.update_environment()
-	var batch_fog: Variant = batch_material.get_shader_parameter("u_fog_color")
-	assert_not_null(batch_fog,
-			"registered production-equivalent batches retain their material for relighting")
-	if batch_fog == null:
-		return
-	assert_true(Vector3(batch_fog)
-			.is_equal_approx(dry_fog),
-			"the retained static-batch material consumes the shared environment")
-	var underwater_values := EnvLightValues.retail_noon_defaults()
-	var underwater_fog := Vector3(0.03, 0.14, 0.08)
-	underwater_values.fog_color = underwater_fog
-	underwater_values.fog_end = 24.0
-	underwater_values.fog_type = 1
-	env_state.publish(underwater_values)
-	placer.update_environment()
-	assert_true(Vector3(batch_material.get_shader_parameter("u_fog_color"))
-			.is_equal_approx(underwater_fog),
-			"pose refresh can restamp a static batch to the selected underwater payload")
-	assert_almost_eq(float(batch_material.get_shader_parameter("u_fog_end")), 24.0, 0.001)
-	assert_eq(int(batch_material.get_shader_parameter("u_fog_type")), 1)
+	assert_null(batch_material.get_shader_parameter("u_fog_color"),
+			"static object batches use the shared native WorldEnvironment")
 
 	# The batch has no per-entity Node3D, but mission-start item effects still
 	# receive one immutable value descriptor for the successfully rendered entity.

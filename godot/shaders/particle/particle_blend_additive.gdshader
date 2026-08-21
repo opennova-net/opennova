@@ -23,6 +23,7 @@ void fragment() {
 		// The diagnostic disc rides RGB; additive alpha is witnessed-dead.
 		rgb *= mask;
 	}
-	ALBEDO = rgb;
+	ALBEDO = vec3(0.0);
+	EMISSION = rgb * 1.5;
 	ALPHA = 0.0;
 }

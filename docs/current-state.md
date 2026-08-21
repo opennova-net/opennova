@@ -17,6 +17,14 @@ structural (move code, draw boundaries, add gates) and had a schedule. The
 current phase is behavioral (make it act like retail) and is driven by the
 ledger's open rows rather than by a wave calendar.
 
+Rendering is the deliberate exception after its parity baseline: ADR 0036 keeps
+source assets and the verified decoded material/texture/order contract, while
+replacing only the Godot presentation with one hard-cut native relight. It has no
+render profiles or inferred PBR maps, targets 2560x1440 at 60 fps on a high-end
+desktop, and retains the existing 18-fixture suite as descriptive reference
+evidence. It does not relax retail fidelity for simulation, formats, networking
+or the remaining ledger domains.
+
 THE structural program is the **rearchitecture**
 ([ADR 0033](adr/0033-engine-owned-loops-device-shells.md), approved
 2026-08-09, replacing the ADR 0031/0032 adapter-seam regime in full): the

@@ -1,34 +1,15 @@
 #include "env/nova_sun_shadow.h"
 
-#include <godot_cpp/classes/rendering_server.hpp>
-
 #include "env/nova_mission_environment.h"
 #include "env/nova_water.h"
 
 namespace godot {
 
 void SunShadow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_projection_mode", "mode"),
-			&SunShadow::set_projection_mode);
-	ClassDB::bind_method(D_METHOD("get_projection_mode"),
-			&SunShadow::get_projection_mode);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "projection_mode",
-						 PROPERTY_HINT_ENUM, "Dynamic,Static Terrain"),
-			"set_projection_mode", "get_projection_mode");
 	ClassDB::bind_method(D_METHOD("set_environment_node", "environment"),
 			&SunShadow::set_environment_node);
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&SunShadow::advance_frame);
-
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PROJECTION_DYNAMIC", PROJECTION_DYNAMIC);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PROJECTION_STATIC_TERRAIN", PROJECTION_STATIC_TERRAIN);
-}
-
-void SunShadow::set_projection_mode(int p_mode) {
-	projection_mode_ = p_mode;
-	_apply_projection_masks();
 }
 
 void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
@@ -51,31 +32,20 @@ void SunShadow::_ready() {
 	set_param(Light3D::PARAM_SHADOW_NORMAL_BIAS, 0.2f);
 	set_param(Light3D::PARAM_SIZE, 0.0f);
 	set_param(Light3D::PARAM_ENERGY, 1.0f);
-	set_param(Light3D::PARAM_SPECULAR, 0.0f);
+	set_param(Light3D::PARAM_SPECULAR, 1.0f);
 	set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
-	_apply_projection_masks();
+	_apply_native_masks();
 	set_process(true);
 	_update_direction();
 }
 
-// The retail two-list split as Godot mask pairs: receivers via
-// light_cull_mask, casters via shadow_caster_mask, both over the Water
-// visual-layer allocation. The mask VALUES are device plumbing; the pairing
-// policy they encode is the witnessed list taxonomy
-// (docs/render/render-lighting-re.md).
-void SunShadow::_apply_projection_masks() {
-	if (projection_mode_ == PROJECTION_STATIC_TERRAIN) {
-		set_cull_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
-		set_shadow_caster_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
-	} else {
-		// Receivers: both world-entity layers plus the hidden FP body (its
-		// silhouette must land on the world the player sees).
-		set_cull_mask(Water::VISUAL_LAYER_WORLD |
-				Water::VISUAL_LAYER_WORLD_NO_MIRROR |
-				Water::VISUAL_LAYER_FP_BODY_SHADOW_ONLY);
-		set_shadow_caster_mask(Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
-	}
+void SunShadow::_apply_native_masks() {
+	set_cull_mask(Water::VISUAL_LAYER_WORLD |
+			Water::VISUAL_LAYER_WORLD_NO_MIRROR |
+			Water::VISUAL_LAYER_VIEWMODEL);
+	set_shadow_caster_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER |
+			Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
 }
 
 void SunShadow::_process(double p_delta) {
@@ -94,6 +64,13 @@ void SunShadow::_update_direction() {
 		set_visible(false);
 		return;
 	}
+	// MissionEnvironment publishes the final active sun-or-moon color after
+	// TOD interpolation and weather smoothing. Godot's Light3D color property
+	// stores non-linear sRGB and performs its own HDR conversion.
+	const Vector3 published = env->get_sun_light();
+	const Color authored(MAX(published.x, 0.0f), MAX(published.y, 0.0f),
+			MAX(published.z, 0.0f));
+	set_color(authored);
 	const Vector3 light_direction = env->get_light_direction();
 	if (light_direction.length_squared() <= 1.0e-6) {
 		set_visible(false);

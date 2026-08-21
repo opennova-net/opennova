@@ -40,7 +40,7 @@ func _barrel_light_info() -> Dictionary:
 	}
 
 
-func test_spawn_select_and_global_push_round_trip() -> void:
+func test_spawn_and_active_snapshot_round_trip() -> void:
 	var scene := LightScene.new()
 	var handle := scene.spawn_model_light({
 		"position": Vector3(4.0, 1.0, -2.0),
@@ -48,9 +48,8 @@ func test_spawn_select_and_global_push_round_trip() -> void:
 	})
 	assert_gt(handle, 0, "a spawned light returns an opaque positive lease")
 	assert_true(scene.is_alive(handle))
-	var selected := scene.render_frame(Vector3(4.0, 1.0, -6.0), 512.0,
-			Vector3.ONE, 0, null)
-	assert_eq(selected, 1, "the light selects for a nearby camera")
+	var active: Array = scene.collect_active_rows(0, null)
+	assert_eq(active.size(), 1, "a live light reaches the native snapshot")
 	var report := scene.get_report()
 	assert_eq(int(report.get("live", 0)), 1)
 	assert_eq(int(report.get("selected", 0)), 1)
@@ -61,8 +60,8 @@ func test_spawn_select_and_global_push_round_trip() -> void:
 			"diagnostics retain the opaque lease returned to gameplay")
 	assert_eq(int(row.get("retail_handle", 0)), handle & 0xffff,
 			"diagnostics expose the retail slot word separately for provenance")
-	assert_almost_eq(float(row.get("range", 0.0)), 10.0, 0.001,
-			"range = atten_end * 1.25 [orig: Light_GetPointLightParams]")
+	assert_almost_eq(float(row.get("range", 0.0)), 8.0, 0.001,
+			"native range preserves the authored attenuation end")
 	assert_almost_eq(float(row.get("atten2", 0.0)), 0.15, 0.001,
 			"atten2 = 15 / range^2")
 	var world_pos: Vector3 = row.get("position", Vector3.ZERO)
@@ -70,12 +69,12 @@ func test_spawn_select_and_global_push_round_trip() -> void:
 			"the mission<->godot conversion round-trips")
 	scene.despawn(handle)
 	assert_false(scene.is_alive(handle))
-	scene.render_frame(Vector3(4.0, 1.0, -6.0), 512.0, Vector3.ONE, 0, null)
+	scene.collect_active_rows(0, null)
 	assert_eq(int(scene.get_report().get("selected", -1)), 0,
 			"despawn clears the selection on the next frame")
 
 
-func test_camera_global_object_select_admits_an_owned_muzzle_light() -> void:
+func test_native_snapshot_admits_an_owned_muzzle_light() -> void:
 	var scene := LightScene.new()
 	var handle := scene.spawn_glow({
 		"position": Vector3(4.0, 1.0, -2.0),
@@ -84,15 +83,14 @@ func test_camera_global_object_select_admits_an_owned_muzzle_light() -> void:
 		"owner_entity": 77,
 	})
 	assert_gt(handle, 0)
-	assert_eq(scene.render_frame(Vector3(4.0, 1.0, -6.0), 512.0,
-			Vector3.ONE, 0, null), 1,
-			"the camera-global fallback keeps an owned MF_Light visible")
+	assert_eq(scene.collect_active_rows(0, null).size(), 1,
+			"native lights do not require a per-draw owner gate")
 	var report := scene.get_report()
-	assert_eq(report.get("selection_mode", ""), "camera_global_objects")
-	assert_eq(report.get("owner_isolation", ""), "unavailable")
+	assert_eq(report.get("selection_mode", ""), "native_lights")
+	assert_eq(report.get("owner_isolation", ""), "native_cull_mask")
 
 
-func test_camera_global_object_select_filters_disabled_lights_before_the_cap() -> void:
+func test_native_snapshot_surfaces_all_participation_flags_without_a_cap() -> void:
 	var scene := LightScene.new()
 	for i in range(4):
 		scene.spawn_glow({
@@ -107,34 +105,36 @@ func test_camera_global_object_select_filters_disabled_lights_before_the_cap() -
 			"radius": 8.0,
 			"color": Color.WHITE,
 		})
-	assert_eq(scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null), 4,
-			"four nearer object-disabled lights cannot starve eligible lights")
+	var rows: Array = scene.collect_active_rows(0, null)
+	assert_eq(rows.size(), 8, "native clustered lighting receives every live row")
+	assert_false(bool((rows[0] as Dictionary).get("lights_objects", true)),
+			"the authored object participation flag survives the snapshot")
 
 
-func test_camera_query_bounds_saturate_at_the_mission_fixed_limit() -> void:
+func test_native_snapshot_handles_the_mission_fixed_limit() -> void:
 	var scene := LightScene.new()
 	scene.spawn_glow({
 		"position": Vector3(32767.0, 0.0, 0.0),
 		"radius": 8.0,
 		"color": Color.WHITE,
 	})
-	assert_eq(scene.render_frame(Vector3(32767.0, 0.0, 0.0), 512.0,
-			Vector3.ONE, 0, null), 1,
-			"center plus half-extent saturates instead of wrapping the AABB")
+	var rows: Array = scene.collect_active_rows(0, null)
+	assert_eq(rows.size(), 1)
+	assert_almost_eq(((rows[0] as Dictionary).get("position") as Vector3).x,
+			32767.0, 0.01, "the fixed-point edge survives native marshalling")
 
 
-func test_select_caps_at_the_witnessed_four() -> void:
+func test_native_snapshot_is_not_capped_at_four() -> void:
 	var scene := LightScene.new()
 	for i in range(6):
 		scene.spawn_model_light({
 			"position": Vector3(float(i), 0.0, 0.0),
 			"atten_end": 8.0,
 		})
-	var selected := scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null)
-	assert_eq(selected, 4,
-			"at most four lights select [orig: update_light_slots @ 0x5abc50]")
+	var active: Array = scene.collect_active_rows(0, null)
+	assert_eq(active.size(), 6, "all live lights reach Godot's clustered renderer")
 	scene.clear()
-	scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null)
+	assert_eq(scene.collect_active_rows(0, null).size(), 0)
 
 
 func test_clear_render_output_preserves_the_live_pool() -> void:
@@ -144,7 +144,7 @@ func test_clear_render_output_preserves_the_live_pool() -> void:
 		"radius": 8.0,
 		"color": Color.WHITE,
 	})
-	assert_eq(scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null), 1)
+	assert_eq(scene.collect_active_rows(0, null).size(), 1)
 	scene.clear_render_output()
 	var report := scene.get_report()
 	assert_eq(int(report.get("live", -1)), 1,

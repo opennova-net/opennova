@@ -93,17 +93,15 @@
 // [orig: @ 0x5ab037..0x5ab05c]. All three legs are ported in
 // collect_corona_quads.
 //
-// SPOT/TARGET DELIVERY IS DEAD CODE IN JO (witnessed 2026-08-20): the only
-// spawner that marks an instance as a spot projector (flag 0x10000, the
-// projection matrix at bytes 88..152, direction floats 38..40, near/far
-// 41/42) is caller-less [orig: LightPool_SpawnSpotProjectorEffect
-// @ 0x5a9fd0 — zero xrefs and zero data refs in Jointops.exe].
-// Entity_SpawnGlowEffects passes only position + radius, so a model LGHT
-// record's falloff byte, rotation, and view_proj never reach the runtime —
-// every model light renders as an omni point light, and the spotlight
-// projected-texture legs in CRenderBatchQueue_FlushBatches
-// (Light_IsSpotlight @ 0x5a9040 -> get_light_projection_info @ 0x5aa5c0)
-// are unreachable. LightSpawnParams therefore carries no spot fields.
+// HISTORICAL RETAIL NOTE (witnessed 2026-08-20): JO's only spawner that marks
+// a runtime instance as a spot projector is caller-less, so the retail model
+// LGHT path realizes every light as an omni point light [orig:
+// LightPool_SpawnSpotProjectorEffect @ 0x5a9fd0 — zero xrefs and zero data
+// refs in Jointops.exe]. The facelift deliberately does not preserve that
+// dead delivery seam: LightSpawnParams carries the already-decoded LGHT
+// target, direction, falloff, and attenuation-start fields so a modern device
+// adapter can present authored target lights as native spotlights. The legacy
+// query/select API below remains available as the retail semantic oracle.
 //
 // Divergences tracked on D-RLIT-4: retail's setters write through stale
 // handles into reused slots; OpenNova's generation lease intentionally
@@ -137,6 +135,15 @@ struct LightGenBlock {
 struct LightSpawnParams {
 	// Mission-space 16.16 world position.
 	std::array<int32_t, 3> position_fixed{};
+	// Mission-space emission direction for authored target lights. Point
+	// lights ignore it. The Godot adapter supplies the placed, normalized
+	// direction so the portable pool remains renderer-neutral.
+	std::array<float, 3> direction{0.0f, 0.0f, -1.0f};
+	// The decoded LGHT target bit and half-cone angle. Transient gameplay
+	// glows leave these at their point-light defaults.
+	bool target = false;
+	float spot_angle_degrees = 45.0f;
+	float attenuation_start = 0.0f;
 	// atten_end * 65536 [orig: Entity_SpawnGlowEffects @ 0x56c876].
 	int32_t radius_fixed = 0;
 	// packedColor bytes / 256 at spawn [orig: @ 0x5a8e51]; -1 spawns white.
@@ -232,6 +239,31 @@ struct LightSceneReport {
 	size_t last_selected = 0;
 };
 
+enum class ActiveLightKind {
+	Point,
+	Spot,
+};
+
+// The complete evaluated light-pool output consumed by a modern renderer.
+// This is intentionally not the retail nearest-four draw selection: every
+// visible live slot is surfaced once, after animation/flicker/fade, and the
+// device adapter decides how to realize it.
+struct ActiveLight {
+	ActiveLightKind kind = ActiveLightKind::Point;
+	std::array<float, 3> position{}; // mission-space world units
+	std::array<float, 3> direction{0.0f, 0.0f, -1.0f};
+	std::array<float, 3> color{1.0f, 1.0f, 1.0f};
+	float energy = 1.0f;
+	float range = 0.0f;
+	float attenuation_start = 0.0f;
+	float spot_angle_degrees = 45.0f;
+	bool lights_terrain = true;
+	bool lights_objects = true;
+	uint64_t owner_entity = 0;
+	int32_t owner_section = 0;
+	LightHandle handle{};
+};
+
 // One additive corona billboard quad, camera-facing at `center` with
 // `half_size` world-unit extents along the camera right/up axes and the
 // premultiplied additive color (segment fade folded in)
@@ -324,6 +356,12 @@ public:
 	// @ 0x5aa170]: run once per 62 Hz tick. Expired mode-5 slots hide, other
 	// expired slots die; modes 2/5 blend down linearly while counting.
 	void tick();
+
+	// Evaluate every visible live light once for a native clustered-light
+	// renderer. Slot order is stable and handles retain their generation lease.
+	// Hidden mode-5 slots are omitted until set_blend makes them visible again.
+	size_t collect_active(const LightFlickerInputs &flicker,
+			std::vector<ActiveLight> &out) const;
 
 	// AABB overlap + nearest-first handle list (the witnessed per-draw
 	// collection) [orig: collect_nearby_zones_by_aabb @ 0x5aa250].

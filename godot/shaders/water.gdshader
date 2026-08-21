@@ -55,7 +55,8 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 //   only on reflection-less owners). FF fallback: s0 MOD2X(reflection,
 //   diffuse), s1 MOD2X(noise, current), alpha MOD(noise.a, diffuse.a).
 
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+// Authored water/tint colors are sRGB-era values. Convert those inputs once;
+// reflection samples stay in the viewport's linear HDR convention.
 #include "res://shaders/nova_color.gdshaderinc"
 
 // Env_WaterColorLit — since env #30 this is only the reflection-LESS
@@ -64,9 +65,8 @@ uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 // The reflection RTT (env #30): Water's mirror-camera SubViewport
 // texture, the chain's t2 [orig: texm3x2pad/texm3x2tex t2 —
 // Water_InitSurfaceShaders @ 0x5c19b0; the mirror scene RTT
-// render_main_scene @ 0x5c1240]. Sampled WITHOUT source_color on purpose:
-// under the gamma-space convention (D-RMAT-7) the RTT's stored bytes are
-// the display-encoded scene, consumed raw exactly like retail's t2 texels.
+// render_main_scene @ 0x5c1240]. Sampled WITHOUT source_color because the
+// native reflection viewport is already a linear HDR render target.
 uniform sampler2D u_reflection : filter_linear;
 uniform bool u_has_reflection = false;
 // The witnessed texm3x2 rows are normalized against the MAIN viewport, while
@@ -108,19 +108,15 @@ varying vec3 v_specular;
 // V-flip rides the rows themselves [orig: @ 0x5c306f..0x5c3085].
 varying vec3 v_refl_row_u;
 varying vec3 v_refl_row_v;
-varying float v_fog;
 
 void vertex() {
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_specular = CUSTOM1.rgb;
 	v_refl_row_u = vec3(CUSTOM2.xy, CUSTOM0.z);
 	v_refl_row_v = vec3(CUSTOM2.zw, CUSTOM0.w);
-	// The witnessed water fog factor: D3D8 fogs pre-transformed (XYZRHW) verts by
-	// the SPECULAR ALPHA, which the rows fill with dist_alpha (255 near -> 0 far)
-	// [orig: RS28 on via pass bit 0x20000 @ 0x68324f; spec.a = dist_alpha
-	// @ 0x5c2eb5..0x5c2ef4]. NOT the terrain fog table — the old
-	// jointops_fog_factor curve here was a reimpl invention.
-	v_fog = CUSTOM1.a;
+	// Retail used SPECULAR alpha as a per-row fog factor for its pre-transformed
+	// strip. The facelift keeps the row alpha for water coverage below while
+	// WorldEnvironment depth fog owns scene integration.
 	// The witnessed depth model: retail computes the strip depth as an arithmetic
 	// replica of the scene projection ((t*uvScale - uvBias)*rhw = viewportMaxZ *
 	// zproj(near 0.2, far = fog-int) [orig: depth chain @ 0x5c2c0c..0x5c2c4a; scale
@@ -189,9 +185,24 @@ void fragment() {
 	//   add r0.rgb, r0, v1    ; + specular
 	// staged below with per-write saturation like ps.1.1 register writes
 	// (every input here is [0,1], so each write clamps at 1).
-	vec3 color = clamp(t2_sample * COLOR.rgb * 2.0, 0.0, 1.0);
-	color = clamp(color * noise.rgb * 4.0, 0.0, 1.0);
-	color = clamp(color + v_specular, 0.0, 1.0);
+	// Keep the authored strip brightness, noise ridge, DuDv perturbation, and
+	// mirror lookup, but realize them in linear HDR. Existing assets do not
+	// encode roughness, so water uses one restrained dielectric Fresnel curve.
+	vec3 dudv = texture(u_noise_normal, uv).rgb * 2.0 - 1.0;
+	vec3 surface_normal = normalize(vec3(dudv.x * 0.18, 1.0,
+		dudv.y * 0.18));
+	vec3 view_direction = normalize(CAMERA_POSITION_WORLD - v_world_pos);
+	float ndotv = clamp(dot(surface_normal, view_direction), 0.0, 1.0);
+	float fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 5.0);
+	vec3 water_tint = nova_gamma_to_linear(u_water_color);
+	vec3 reflection_color = u_has_reflection ? t2_sample : water_tint;
+	float strip_brightness = clamp(max(COLOR.r,
+		max(COLOR.g, COLOR.b)) * 1.35, 0.2, 1.0);
+	float ridge = mix(0.82, 1.18, noise.r);
+	vec3 color = mix(water_tint, reflection_color,
+		clamp(0.28 + fresnel * 0.68, 0.0, 1.0));
+	color *= ridge * strip_brightness;
+	color += nova_gamma_to_linear(v_specular) * (0.35 + fresnel * 1.15);
 
 	// alpha = t3.a x v0.a x2, saturated [orig: +mul_x2 r0.a, t3.a, v0.a —
 	// Water_InitSurfaceShaders @ 0x5c19b0 ps.1.1]. COLOR.a carries the
@@ -211,16 +222,12 @@ void fragment() {
 	// the far water renders to the full march extent, converging to the fog color.
 	float alpha = alpha_dist;
 
-	// Scene fog toward u_fog_color by the witnessed per-row factor (see v_fog).
-	color = mix(u_fog_color, color, v_fog);
-
 	// The witnessed blend is out = src + dst * a (ONE + dst*SRCALPHA): under
 	// Godot's premul pass (out = src.rgb + dst * (1 - ALPHA)) that is
 	// src.rgb = color * 1 with ALPHA = 1 - a. The source term itself is NOT
 	// multiplied by a — retail's SrcBlend is ONE.
-	// Gamma-space output (D-RMAT-7): the src term encodes so the surface-
-	// dominant (near) result displays the computed bytes; the dst*a term still
-	// blends in the linear buffer — that residual is D-RMAT-8.
-	ALBEDO = nova_gamma_to_linear(color);
+	// The source term is linear HDR; WorldEnvironment handles fog and the output
+	// transform after this ordering-sensitive custom blend.
+	ALBEDO = color;
 	ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
 }

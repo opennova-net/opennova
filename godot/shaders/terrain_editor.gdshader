@@ -1,11 +1,9 @@
 shader_type spatial;
 render_mode unshaded, cull_disabled;
 
-// Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
-// u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
+// Shared terrain texture semantics. The editor shows the same facelift albedo
+// that runtime submits to native lighting, with its authoring overlays on top.
 #include "res://shaders/terrain_lighting.gdshaderinc"
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
-#include "res://shaders/nova_color.gdshaderinc"
 
 // Editor-only extras: a live heightmap (the editor sculpts geometry the runtime
 // bakes into CPT), a surface/sector inspection overlay, and the paint brush ring.
@@ -38,7 +36,6 @@ varying vec2 v_sector_uv;
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;
 varying float v_sector_id;
-varying float v_eye_depth;
 
 
 vec2 sector_offset(float sector_id) {
@@ -87,7 +84,6 @@ void vertex() {
 	v_detail_uv = retail_detail_uv_from_atlas(source_uv, u_detail_density);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);
 }
 
 
@@ -119,9 +115,8 @@ void fragment() {
 			texture(u_colormap, sampled_colormap_uv).rgb, v_world_normal,
 			v_colormap_uv, quadrant);
 		colormap = compose_retail_tile_overlay(colormap, v_world_pos);
-		result = terrain_surface_color_from_colormap(
+		result = terrain_surface_albedo_from_colormap(
 			colormap, v_colormap_uv, v_detail_uv, quadrant);
-		result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
 		if (u_show_surface_overlay) {
 			vec3 surface_rgb = texture(u_charmap, v_colormap_uv).rgb;
 			result = mix(result * 0.25, surface_rgb, 0.75);
@@ -163,7 +158,5 @@ void fragment() {
 		}
 	}
 
-	// Gamma-space output (D-RMAT-7): the surface math above ran on raw bytes;
-	// encode once. Editor overlays/brush tints ride the same transform.
-	ALBEDO = nova_gamma_to_linear(result);
+	ALBEDO = result;
 }

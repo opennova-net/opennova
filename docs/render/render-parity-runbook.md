@@ -1,9 +1,9 @@
-# Registered render-parity runbook
+# Registered render-comparison runbook
 
-Use this runbook to refresh the T3 headline evidence for
-[ADR 0023](../adr/0023-render-visual-parity.md): the registered retail/OpenNova
-side-by-sides published under
-`screenshots/parity/render-lighting-2026-08/registered-<date>/`. It is the
+Use this runbook to refresh the registered retail/OpenNova reference suite for
+[ADR 0036](../adr/0036-hard-cut-rendering-facelift.md). The current
+side-by-sides are published under
+`screenshots/facelift/render-lighting-2026-08/registered-<date>/`. It is the
 operator procedure behind the contract described in
 [README.md](README.md); that page stays the record index and states what the
 evidence must prove, this page states how to produce it.
@@ -32,6 +32,7 @@ tracked files. The values below are the authoritative capture machine's.
 | Catalog SHA-256 | `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` |
 | Fixtures | 18 (`00TRa` x7, `CP01` x6, `CP04` x1, `CP12` x3, `03TR` x1) |
 | OpenNova capture size | 2000x1200, vertical FOV 53.4468 |
+| Facelift performance target | 2560x1440 at 60 fps on a high-end desktop; measured separately from this fixed-size comparison capture |
 | Retail backbuffer | 1920x1200 (one horizontal bicubic squeeze at comparison time) |
 | Loose mission root | `NOVA_MISSION_RESOURCE_DIR`, the loose `.bms` corpus |
 | Packed runtime root | `NOVA_RUNTIME_RESOURCE_DIR`, **the same install retail captures from** |
@@ -298,8 +299,10 @@ prevent. Run the full refresh (sections 2-5); the retail leg stays cheap
 
 Retail must not be running. `stage_retail_presentation.py` refuses otherwise.
 
-Copy the retained bundles into this worktree's own `.scratch` before touching
-them — never write into another worktree.
+Re-register retained bundles in their original durable evidence root. The raw
+capture record binds the absolute image/state paths, so copying a bundle into a
+worktree makes it unregistrable. Back up each existing `registered.json` beside
+the bundle before replacing it; never write into another worktree.
 
 ```powershell
 uv run python scripts/render/stage_retail_presentation.py stage `
@@ -322,21 +325,21 @@ per-fixture `retail-stage.json`:
 uv run python scripts/render/register_retail_capture.py `
   --catalog docs/render/render-fixtures-retail-v4.json `
   --fixture-id <fixture-id> `
-  --raw-state       .scratch\retail\raw\<fixture-id>\retail.state.json `
-  --raw-image       .scratch\retail\raw\<fixture-id>\retail.png `
-  --instance-status .scratch\retail\raw\<fixture-id>\instance-status.json `
-  --fixture-result  .scratch\retail\raw\<fixture-id>\fixture-result.json `
-  --capture-result  .scratch\retail\raw\<fixture-id>\capture-result.json `
-  --onhook-log      .scratch\retail\raw\<fixture-id>\onhook.log `
+  --raw-state       <durable-root>\<fixture-id>\retail.state.json `
+  --raw-image       <durable-root>\<fixture-id>\retail.png `
+  --instance-status <durable-root>\<fixture-id>\instance-status.json `
+  --fixture-result  <durable-root>\<fixture-id>\fixture-result.json `
+  --capture-result  <durable-root>\<fixture-id>\capture-result.json `
+  --onhook-log      <durable-root>\<fixture-id>\onhook.log `
   --game-dir "<game dir>" --expansion revx02 `
   --retail-executable "<game dir>\Jointops.exe" `
   --onhook-mcp <path to the onhook-mcp.exe that produced the bundle> `
   --onhook-proxy "<game dir>\binkw32.dll" `
   --onhook-forwarder "<game dir>\binkw32_.dll" `
   --opennova-source-commit $sourceCommit `
-  --retail-stage-manifest .scratch\retail\raw\<fixture-id>\retail-stage.json `
+  --retail-stage-manifest <durable-root>\<fixture-id>\retail-stage.json `
   --confirm-retail-presentation-contract `
-  --output .scratch\retail\raw\<fixture-id>\registered.json
+  --output <durable-root>\<fixture-id>\registered.json
 ```
 
 Write `registered.json` **into the bundle directory**. Its
@@ -444,10 +447,10 @@ uv run python scripts/render/build_retail_side_by_side.py `
   --catalog docs/render/render-fixtures-retail-v4.json `
   --fixture-id <fixture-id> `
   --opennova-manifest .scratch\golden\render\fixtures\<fixture-id>\<fixture-id>-manifest.json `
-  --retail-bundle .scratch\retail\raw\<fixture-id>\registered.json `
+  --retail-bundle <durable-root>\<fixture-id>\registered.json `
   --output-dir .scratch\publication\<fixture-id> `
-  --opennova-caption "HUD hidden - bare arms - M16 Burst 30/270 - terrain" `
-  --retail-caption "Pre-HUD snapshot - bare arms - M16 Burst - terrain - frame-correlated" `
+  --opennova-caption "OpenNova facelift - HUD hidden - bare arms - M16 Burst 30/270 - terrain" `
+  --retail-caption "Retail reference - pre-HUD snapshot - bare arms - M16 Burst - terrain" `
   --roi world_center=240,180,1320,420 `
   --roi viewmodel_arms=850,700,900,500
 ```
@@ -463,9 +466,9 @@ Then assemble the publication and generate its index:
 uv run python scripts/render/publish_registered_comparisons.py `
   --catalog docs/render/render-fixtures-retail-v4.json `
   --opennova-root .scratch\golden\render\fixtures `
-  --retail-root .scratch\retail\raw `
+  --retail-root <durable-root> `
   --comparison-root .scratch\publication `
-  --output screenshots\parity\render-lighting-2026-08\registered-<date>
+  --output screenshots\facelift\render-lighting-2026-08\registered-<date>
 ```
 
 It copies only the publishable subset, verifies every copied byte against the
@@ -510,16 +513,17 @@ replaced.
 uv run --frozen pytest tests/test_retail_render_evidence.py -v
 uv run --frozen pytest tests/test_retail_capture_registration.py tests/test_render_comparison_tool.py
 ctest --test-dir build -C Release -R "renderer|render"
-git check-attr filter -- screenshots/parity/render-lighting-2026-08/registered-<date>/*/retail/retail.png
+git check-attr filter -- screenshots/facelift/render-lighting-2026-08/registered-<date>/*/retail/retail.png
 ```
 
 `test_retail_render_evidence.py` skips as pass when the checkout holds LFS
 pointer stubs, so confirm the run actually exercised the publication-pinned
 tests rather than skipping the whole module.
 
-The gate itself is the by-eye retail pass over every sheet,
-recorded scene by scene in the slice PR (ADR 0023 section 4). MAE and RMS are
-descriptive measurements and never a threshold.
+The gate is a scene-by-scene review for preserved content semantics and a
+coherent restrained relight, recorded in the slice PR under ADR 0036. Retail is
+a stable reference rather than a pixel target; MAE and RMS are descriptive and
+never a threshold.
 
 ## 7. Growing the set: a fixture from a debug snapshot
 

@@ -68,26 +68,25 @@ func test_game_world_composes_only_the_live_shadow_map_during_ready() -> void:
 
 
 
-func test_dynamic_projection_separates_live_casters_from_world_receivers() -> void:
-	var light: SunShadow = SunShadow.new()
-	light.projection_mode = SunShadow.PROJECTION_DYNAMIC
+func test_native_sun_lights_world_and_uses_both_caster_populations() -> void:
+	var environment := _environment_at(1200, "NativeSunEnvironment")
+	var light := SunShadow.new()
+	light.set_environment_node(environment)
 	add_child_autofree(light)
 
 	assert_eq(light.light_cull_mask,
 			Water.VISUAL_LAYER_WORLD
 			| Water.VISUAL_LAYER_WORLD_NO_MIRROR
-			| Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
-			"live shadows reach both world-entity layers and the hidden FP body")
+			| Water.VISUAL_LAYER_VIEWMODEL,
+			"terrain, world objects, reflections, and the viewmodel receive the sun")
 	assert_eq(light.shadow_caster_mask,
-			Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
-
-
-func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
-	var light: SunShadow = SunShadow.new()
-	light.projection_mode = SunShadow.PROJECTION_STATIC_TERRAIN
-	add_child_autofree(light)
-
-	assert_eq(light.light_cull_mask,
-			Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER)
-	assert_eq(light.shadow_caster_mask,
-			Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+			Water.VISUAL_LAYER_STATIC_SHADOW_CASTER
+			| Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
+			"one cascaded sun consumes both existing caster populations")
+	assert_true(light.shadow_enabled)
+	assert_almost_eq(light.light_energy, 1.0, 0.001)
+	assert_almost_eq(light.light_specular, 1.0, 0.001)
+	var published := environment.get_sun_light()
+	assert_true(light.light_color.is_equal_approx(Color(
+			published.x, published.y, published.z)),
+			"Light3D receives the final active sun-or-moon sRGB color")

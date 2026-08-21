@@ -374,7 +374,6 @@ func _place_objects(mission: MissionData, resource_root: ResourceRoot, timeline:
 		return
 	_c._placer = MissionObjectPlacer.create(resource_root, null)
 	_c._placer.edit_mode = true
-	_c._wire_placer_environment()
 	_c._stats = _c._placer.place(mission, world_root)
 	# The native placer times its own stages; fold them into the load timeline.
 	if timeline != null:

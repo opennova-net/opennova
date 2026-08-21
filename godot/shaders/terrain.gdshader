@@ -1,11 +1,10 @@
 shader_type spatial;
-render_mode unshaded;
+render_mode diffuse_burley, specular_schlick_ggx;
 
-// Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
-// u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
+// Shared terrain texture semantics. The source RGB/detail/blend/.til inputs are
+// unchanged; only the legacy baked-light-alpha and manual fog realization are
+// retired in favor of Godot's native lights, shadows, and depth fog.
 #include "res://shaders/terrain_lighting.gdshaderinc"
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
-#include "res://shaders/nova_color.gdshaderinc"
 
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
@@ -14,7 +13,7 @@ uniform int u_debug_mode = 0;
 // Page identity/LRU/pixels come from engine/runtime/terrain; this shader only
 // selects the layer bound to the current terrain instance. The analytic path
 // below remains the fail-closed editor/cold-cache fallback.
-uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
+uniform sampler2DArray u_tile_cache : source_color, filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 
 // Per-instance debug data (set via instance_geometry_set_shader_parameter)
@@ -31,14 +30,12 @@ varying vec2 v_colormap_uv;
 varying vec2 v_detail_uv;
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;
-varying float v_eye_depth;
 
 void vertex() {
 	v_colormap_uv = UV;
 	v_detail_uv = retail_detail_uv_from_atlas(UV, u_detail_density);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);
 }
 
 // LOD level to color — 8 distinct colors from green (high detail) to red (low)
@@ -92,10 +89,8 @@ void fragment() {
 			v_colormap_uv, u_instance_source_quadrant);
 		colormap = compose_retail_tile_overlay(colormap, v_world_pos);
 	}
-	vec3 result = terrain_surface_color_from_colormap(
+	vec3 result = terrain_surface_albedo_from_colormap(
 		colormap, v_colormap_uv, v_detail_uv, u_instance_source_quadrant);
-
-	result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
 
 	// Debug overlays — replace output with diagnostic color
 	if (u_debug_mode == 1) {
@@ -115,8 +110,8 @@ void fragment() {
 		result = vec3(h);
 	}
 
-	// The witnessed math above ran in gamma space; encode once so the display
-	// shows exactly those bytes (D-RMAT-7). Debug overlays ride the same
-	// transform (diagnostic-only).
-	ALBEDO = nova_gamma_to_linear(result);
+	ALBEDO = result;
+	METALLIC = 0.0;
+	ROUGHNESS = 0.8;
+	SPECULAR = 0.3;
 }

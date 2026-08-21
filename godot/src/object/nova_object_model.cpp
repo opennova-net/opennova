@@ -60,12 +60,12 @@ bool EnvLightValues::equals(const Ref<EnvLightValues> &p_other) const {
 Ref<EnvLightValues> EnvLightValues::retail_noon_defaults() {
 	Ref<EnvLightValues> v;
 	v.instantiate();
-	v->hemi_sky = ObjectModel::default_hemi_sky_color();
-	v->dir = ObjectModel::default_dir_light_dir();
-	v->dir_color = ObjectModel::default_dir_light_color();
-	v->hemi_ground = ObjectModel::default_hemi_ground_color();
-	v->ceiling = ObjectModel::default_hemi_sky_color();
-	v->floor_color = ObjectModel::default_hemi_ground_color();
+	v->hemi_sky = Vector3(84.0f / 255.0f, 88.0f / 255.0f, 89.0f / 255.0f);
+	v->dir = Vector3(-0.4082f, -0.8165f, -0.4082f);
+	v->dir_color = Vector3(170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f);
+	v->hemi_ground = Vector3(49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f);
+	v->ceiling = v->hemi_sky;
+	v->floor_color = v->hemi_ground;
 	v->gain = Vector3(1, 1, 1);
 	v->fog_enabled = false;
 	v->fog_color = Vector3(0.5f, 0.6f, 0.8f);
@@ -124,10 +124,7 @@ void PanmClock::set_time_ms_for_test(int64_t p_value_ms) {
 	sampled_frame_ = -1;
 }
 
-ObjectModel::ObjectModel() {
-	env_stagger_slot_ = static_cast<int>(
-			(static_cast<uint64_t>(get_instance_id()) >> 3) % kEnvRestampSpreadFrames);
-}
+ObjectModel::ObjectModel() = default;
 
 ObjectModel::~ObjectModel() {
 	// A model can be freed without a PREDELETE notification in some teardown
@@ -209,24 +206,6 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 }
 
 
-void ObjectModel::set_model_light_preview_enabled(bool p_enabled) {
-	if (model_light_preview_enabled_ == p_enabled) {
-		return;
-	}
-	model_light_preview_enabled_ = p_enabled;
-	last_light_push_valid_ = false;
-	wake_runtime_frame();
-	if (p_enabled) {
-		apply_lights();
-		return;
-	}
-	for (const Ref<ShaderMaterial> &material : surface_materials_) {
-		if (material.is_valid()) {
-			material->set_shader_parameter("u_local_light_count", 0);
-		}
-	}
-}
-
 void ObjectModel::set_shadow_caster_enabled(bool p_enabled) {
 	set_shadow_caster_layer_enabled(LAYER_DYNAMIC_SHADOW_CASTER, p_enabled);
 }
@@ -268,77 +247,6 @@ void ObjectModel::apply_shadow_casting_below(Node *p_root) {
 		}
 		apply_shadow_casting_below(child);
 	}
-}
-
-void ObjectModel::set_environment_state(const Ref<EnvLightState> &p_state) {
-	// The typed env channel: the environment PUBLISHES into this shared state
-	// (values + generation + a changed signal); the model never holds the
-	// environment object itself.
-	const Callable changed = callable_mp(this, &ObjectModel::on_env_generation_changed);
-	const Callable pass_changed = callable_mp(this, &ObjectModel::on_env_pass_changed);
-	if (env_state_.is_valid() && env_state_->is_connected("changed", changed)) {
-		env_state_->disconnect("changed", changed);
-	}
-	if (env_state_.is_valid() &&
-			env_state_->is_connected("pass_changed", pass_changed)) {
-		env_state_->disconnect("pass_changed", pass_changed);
-	}
-	env_state_ = p_state;
-	last_env_gen_ = -1;
-	last_env_values_.unref();
-	last_section_env_values_.unref();
-	if (env_state_.is_valid()) {
-		env_state_->connect("changed", changed);
-		env_state_->connect("pass_changed", pass_changed);
-	}
-	wake_runtime_frame();
-	apply_environment_to_materials();
-}
-
-void ObjectModel::set_entity_lighting_context(float p_effect_scale,
-		bool p_interior_lerp, float p_interior_daylight) {
-	const float next_effect = CLAMP(p_effect_scale, 0.0f, 1.0f);
-	const float next_daylight = CLAMP(p_interior_daylight, 0.0f, 1.0f);
-	if (Math::is_equal_approx(lighting_effect_scale_, next_effect) &&
-			interior_lerp_ == p_interior_lerp &&
-			Math::is_equal_approx(interior_daylight_, next_daylight)) {
-		return;
-	}
-	lighting_effect_scale_ = next_effect;
-	interior_lerp_ = p_interior_lerp;
-	interior_daylight_ = next_daylight;
-	last_env_gen_ = -1;
-	last_env_values_.unref();
-	last_section_env_values_.unref();
-	apply_environment_to_materials();
-}
-
-void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
-	const float next_daylight = CLAMP(p_daylight, 0.0f, 1.0f);
-	if (interior_section_lighting_ &&
-			Math::is_equal_approx(interior_section_daylight_, next_daylight)) {
-		return;
-	}
-	interior_section_lighting_ = true;
-	interior_section_daylight_ = next_daylight;
-	last_env_gen_ = -1;
-	last_env_values_.unref();
-	last_section_env_values_.unref();
-	// The exterior/interior split is part of the material-cache key. Owners
-	// normally configure it before set_object_data(), but preserve correctness
-	// for a live reconfiguration too.
-	if (object_data_.is_valid() && object_data_->has_document()) {
-		rebuild();
-	} else {
-		apply_environment_to_materials();
-	}
-}
-
-int ObjectModel::lighting_context_for_robj(int p_robj_index) const {
-	if (interior_section_lighting_ && p_robj_index != 0) {
-		return LIGHTING_CONTEXT_INTERIOR_SECTION;
-	}
-	return LIGHTING_CONTEXT_ENTITY;
 }
 
 Dictionary ObjectModel::get_render_part_nodes() const {
@@ -629,23 +537,6 @@ void ObjectModel::advance_awake_frame(double p_delta) {
 	}
 }
 
-void ObjectModel::refresh_awake_environment() {
-	if (awake_models_.is_empty()) {
-		return;
-	}
-	LocalVector<ObjectModel *> batch;
-	batch.reserve(awake_models_.size());
-	for (ObjectModel *model : awake_models_) {
-		batch.push_back(model);
-	}
-	for (ObjectModel *model : batch) {
-		if (awake_models_.has(model) && model->is_visible_in_tree()) {
-			model->apply_environment_to_materials();
-			model->sleep_runtime_frame_if_idle();
-		}
-	}
-}
-
 int64_t ObjectModel::awake_model_count() {
 	return static_cast<int64_t>(awake_models_.size());
 }
@@ -675,31 +566,6 @@ void ObjectModel::sleep_runtime_frame_if_idle() {
 	if (awake_) {
 		awake_ = false;
 		awake_models_.erase(this);
-	}
-}
-
-void ObjectModel::on_env_generation_changed() {
-	// One restamp per stagger window per parked model; global lighting moves
-	// well under 1/255 per frame at mission TOD rates, so the stagger is
-	// invisible (see the GDScript origin's derivation).
-	if ((Engine::get_singleton()->get_process_frames() + env_stagger_slot_) %
-					kEnvRestampSpreadFrames !=
-			0) {
-		return;
-	}
-	wake_runtime_frame();
-}
-
-void ObjectModel::on_env_pass_changed() {
-	// Crossing the water plane changes fog by a large amount in one render
-	// pass. Unlike slow TOD/weather drift, it cannot ride the 16-frame stagger:
-	// the visible world and first-person weapon must share the new pass before
-	// the imminent draw (and before a frozen exact-pose capture).
-	if (is_visible_in_tree() && on_screen_) {
-		apply_environment_to_materials();
-	} else {
-		// Hidden/off-screen models catch up through the ordinary visibility gate.
-		wake_runtime_frame();
 	}
 }
 
@@ -744,9 +610,6 @@ void ObjectModel::advance_runtime_frame(double p_delta) {
 			anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(p_delta * 1000.0)) &
 					0xffffffff;
 		}
-		if (renderable) {
-			apply_environment_to_materials();
-		}
 		sleep_runtime_frame_if_idle();
 		return;
 	}
@@ -756,7 +619,7 @@ void ObjectModel::advance_runtime_frame(double p_delta) {
 
 bool ObjectModel::needs_runtime_frame_work() const {
 	if (bounds_dirty_ || has_live_panm_ || !dynamic_material_slots_.is_empty() ||
-			(model_light_preview_enabled_ && has_lights_) || !part_anims_.is_empty()) {
+			!part_anims_.is_empty()) {
 		return true;
 	}
 	if (skeleton_ == nullptr || skeletal_.is_null() || anim_key_.is_empty()) {
@@ -867,8 +730,6 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable) {
 			}
 		}
 	}
-	apply_lights();
-	apply_environment_to_materials();
 	if (bounds_dirty_ || part_changed || robj_changed) {
 		set_model_bounds(compute_transformed_mesh_bounds());
 		bounds_dirty_ = false;
@@ -951,75 +812,10 @@ AABB ObjectModel::get_world_bounds() const {
 	return get_global_transform().xform(model_bounds_);
 }
 
-void ObjectModel::apply_point_light_selection(int p_count,
-		const Vector4 *p_posr, const Vector4 *p_color) {
-	const int count = CLAMP(p_count, 0, 4);
-	uint64_t hash = 0xcbf29ce484222325ull;
-	const auto mix = [&hash](const void *data, size_t size) {
-		const uint8_t *bytes = static_cast<const uint8_t *>(data);
-		for (size_t i = 0; i < size; ++i) {
-			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
-		}
-	};
-	mix(&count, sizeof(count));
-	for (int i = 0; i < count; ++i) {
-		mix(&p_posr[i], sizeof(Vector4));
-		mix(&p_color[i], sizeof(Vector4));
-	}
-	if (hash == last_point_light_selection_hash_) {
-		return;
-	}
-	last_point_light_selection_hash_ = hash;
-	// Applies are hash-gated and infrequent; per-call StringName construction
-	// avoids a DLL-teardown-ordered static against Godot's name table.
-	const StringName count_name("u_point_light_count");
-	const StringName posr_names[4] = {
-		StringName("u_point_light_posr_0"), StringName("u_point_light_posr_1"),
-		StringName("u_point_light_posr_2"), StringName("u_point_light_posr_3")
-	};
-	const StringName color_names[4] = {
-		StringName("u_point_light_color_0"),
-		StringName("u_point_light_color_1"),
-		StringName("u_point_light_color_2"),
-		StringName("u_point_light_color_3")
-	};
-	const auto apply_to = [&](Node *p_parent) {
-		if (p_parent == nullptr) {
-			return;
-		}
-		const int children = p_parent->get_child_count();
-		for (int child = 0; child < children; ++child) {
-			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
-					p_parent->get_child(child));
-			if (instance == nullptr) {
-				continue;
-			}
-			instance->set_instance_shader_parameter(count_name,
-					static_cast<float>(count));
-			for (int i = 0; i < 4; ++i) {
-				const Vector4 posr = i < count ? p_posr[i] : Vector4();
-				const Vector4 color = i < count ? p_color[i] : Vector4();
-				instance->set_instance_shader_parameter(posr_names[i], posr);
-				instance->set_instance_shader_parameter(color_names[i], color);
-			}
-		}
-	};
-	// Surface instances are direct children of their Robj part node or the
-	// shared skeleton (nova_object_model_scene.cpp attach split).
-	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
-		apply_to(Object::cast_to<Node>(
-				static_cast<Object *>(robj_dense_[entry])));
-	}
-	apply_to(skeleton_);
-}
-
 void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("advance_awake_frame", "delta"),
 			&ObjectModel::advance_awake_frame);
-	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("refresh_awake_environment"),
-			&ObjectModel::refresh_awake_environment);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("awake_model_count"), &ObjectModel::awake_model_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
@@ -1046,8 +842,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_native_frame);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "native_frame"),
 			"set_native_frame", "get_native_frame");
-	ClassDB::bind_method(D_METHOD("set_model_light_preview_enabled", "enabled"),
-			&ObjectModel::set_model_light_preview_enabled);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
@@ -1056,16 +850,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_static_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_static_shadow_caster_enabled"),
 			&ObjectModel::is_static_shadow_caster_enabled);
-	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
-			&ObjectModel::set_environment_state);
-	ClassDB::bind_method(D_METHOD("get_environment_state"),
-			&ObjectModel::get_environment_state);
-	ClassDB::bind_method(
-			D_METHOD("set_entity_lighting_context", "effect_scale", "interior_lerp",
-					"interior_daylight"),
-			&ObjectModel::set_entity_lighting_context);
-	ClassDB::bind_method(D_METHOD("set_interior_section_light_transfer", "daylight"),
-			&ObjectModel::set_interior_section_light_transfer);
 	ClassDB::bind_method(D_METHOD("get_model_bounds"), &ObjectModel::get_model_bounds);
 	ClassDB::bind_method(D_METHOD("get_render_part_nodes"),
 			&ObjectModel::get_render_part_nodes);
@@ -1186,22 +970,7 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),
 			&ObjectModel::is_body_pose_dirty);
 
-	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("entity_lighting_values", "world_values", "effect_scale",
-					"interior_lerp", "interior_daylight"),
-			&ObjectModel::entity_lighting_values);
-	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("apply_environment_values", "material", "values"),
-			&ObjectModel::apply_environment_values);
-	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("material_supports_projected_shadow_receiver", "blend_mode",
-					"material_flags"),
-			&ObjectModel::material_supports_projected_shadow_receiver);
-
 	ADD_SIGNAL(MethodInfo("bounds_changed", PropertyInfo(Variant::AABB, "bounds")));
-
-	BIND_ENUM_CONSTANT(LIGHTING_CONTEXT_ENTITY);
-	BIND_ENUM_CONSTANT(LIGHTING_CONTEXT_INTERIOR_SECTION);
 }
 
 } // namespace godot

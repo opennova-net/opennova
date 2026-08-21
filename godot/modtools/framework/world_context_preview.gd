@@ -31,6 +31,7 @@ var environment_editor: EnvironmentEditor
 var _world_root: Node3D
 var _environment_node: MissionEnvironment
 var _clear_color_node: WorldEnvironment
+var _sun_shadow_node: SunShadow
 var _sky_node: SkyDome
 var _weather_node: Weather
 var _water_node: Node3D
@@ -73,10 +74,28 @@ func init_environment_preview() -> void:
 	_clear_color_node.name = "EditorClearColor"
 	var clear_environment := Environment.new()
 	clear_environment.background_mode = Environment.BG_COLOR
-	clear_environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	var procedural := ProceduralSkyMaterial.new()
+	var radiance := Sky.new()
+	radiance.process_mode = Sky.PROCESS_MODE_REALTIME
+	radiance.sky_material = procedural
+	clear_environment.sky = radiance
+	clear_environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	clear_environment.ambient_light_energy = 0.75
+	clear_environment.ambient_light_sky_contribution = 0.65
+	clear_environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	clear_environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	clear_environment.tonemap_exposure = 1.0
+	clear_environment.tonemap_white = 4.0
+	clear_environment.fog_enabled = true
+	clear_environment.fog_mode = Environment.FOG_MODE_DEPTH
+	clear_environment.fog_sky_affect = 0.35
 	_clear_color_node.environment = clear_environment
 	_world_root.add_child(_clear_color_node)
 
+	_sun_shadow_node = SunShadow.new()
+	_sun_shadow_node.name = "EditorSunShadow"
+	_world_root.add_child(_sun_shadow_node)
+	_sun_shadow_node.set_environment_node(_environment_node)
 
 	_sky_node = SkyDome.new()
 	_sky_node.name = "EditorSky"
@@ -171,6 +190,11 @@ func _apply_time_of_day_override() -> void:
 
 func apply_environment_to_preview() -> void:
 	sync_environment_to_preview(true)
+	if _clear_color_node != null and _clear_color_node.environment != null \
+			and _environment_node != null and _environment_node.is_loaded():
+		var rgb := _environment_node.get_frame_clear_color()
+		_clear_color_node.environment.background_color = Color(
+				rgb.x, rgb.y, rgb.z, 1.0)
 	if _sky_node != null:
 		_sky_node.sync_frame_clear_color()
 	# Water color/height/murk now come from the Water node (env-driven),
@@ -248,11 +272,13 @@ func release() -> void:
 	_time_of_day_override = 0.0
 	_terrain_material_instance_id = 0
 	_terrain_env_generation = -1
-	for node in [_water_node, _weather_node, _sky_node, _clear_color_node, _environment_node]:
+	for node in [_water_node, _weather_node, _sky_node, _sun_shadow_node,
+			_clear_color_node, _environment_node]:
 		if is_instance_valid(node):
 			node.free()
 	_water_node = null
 	_weather_node = null
 	_sky_node = null
+	_sun_shadow_node = null
 	_environment_node = null
 	_clear_color_node = null

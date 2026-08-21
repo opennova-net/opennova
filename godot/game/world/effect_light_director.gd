@@ -1,19 +1,18 @@
 class_name EffectLightDirector
 extends RefCounted
 
-## The EffectWorld dynamic point-light director: spawns one pool light per
-## authored model light record for every placed entity, and drives the
-## per-frame select that feeds the technique shaders' global parameters.
+## The EffectWorld dynamic-light director: spawns one pool light per authored
+## model light record for every placed entity, evaluates that portable pool,
+## and presents every live entry as a pooled Godot OmniLight3D/SpotLight3D.
 ## The witness map lives on engine/runtime/renderer/light_scene.h — mission
 ## start walks the placed pools spawning per-record instances
 ## [orig: Game_StartMission @ 0x525d19 -> sub_5227B0 ->
 ## Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
 ## group-passing four [orig: collect_nearby_zones_by_aabb @ 0x5aa250;
 ## update_light_slots @ 0x5abc50]. The object pass now runs per rendered
-## model: one draw context per visible ObjectModel with its entity as the
-## owner group, so owned lights (muzzle glow, subobject records) light only
-## their owner exactly as retail's update_light_slots gates them. Corona
-## billboards draw per frame from the portable corona walk [orig:
+## model. Native clustered lighting replaces the fixed-function nearest-four
+## delivery; authored ownership remains diagnostic metadata. Corona billboards
+## draw per frame from the portable corona walk [orig:
 ## EffectWorld_RenderLightCoronas @ 0x5aaf40]. Remaining D-RLIT-4 residuals:
 ## interior groups, terrain projected-texture light, foliage sampling, and
 ## subobject bone following.
@@ -44,6 +43,12 @@ var _spawned_nodes: Dictionary = {}
 var _muzzle_handles: Dictionary = {}
 # round presentation id -> pool light handle (the light_move follow).
 var _round_handles: Dictionary = {}
+# Opaque pool handle -> active native node. Retired nodes stay hidden in their
+# kind-specific free list and are reused by later transient lights.
+var _native_nodes: Dictionary = {}
+var _free_omni: Array[OmniLight3D] = []
+var _free_spot: Array[SpotLight3D] = []
+var _native_node_serial := 0
 # The corona billboard presenter: one MultiMesh of additive camera-facing
 # quads rebuilt per frame from the portable corona walk
 # [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 — the witness map lives on
@@ -58,11 +63,12 @@ func setup(world: GameWorld, static_sources: Callable) -> void:
 
 
 ## Mission teardown: disconnect live node retirement hooks, retire every pool
-## lease, and synchronously clear the shader-global output.
+## lease, and synchronously retire the active native-light nodes.
 func reset() -> void:
 	for node_id_v in _spawned_nodes.keys():
 		_disconnect_wire_node_exit(_spawned_nodes[node_id_v])
 	_scene.clear()
+	_clear_native_lights()
 	_spawned_static.clear()
 	_spawned_nodes.clear()
 	_muzzle_handles.clear()
@@ -93,12 +99,8 @@ func reattach() -> void:
 		# the record's attach bone != 0, for every spawning entity kind
 		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity,
 		# bone)]. There is no node to borrow an id from, so each static source
-		# owns a synthetic negative id (never issued by owner_id_for_node,
-		# never declared by a draw context) — its subobject-attached lights
-		# stay scoped to their building instead of leaking as unscoped world
-		# lights. Batch draws do not take per-draw light selections yet, so
-		# these lights reach nothing until that leg lands (D-RLIT-4 residual);
-		# retail scopes them to exactly the owner's draws.
+		# owns a synthetic negative id. The facelift keeps that provenance for
+		# diagnostics/coronas while native illumination remains spatial.
 		var handles := _spawn_model_lights(data,
 				source.get("world_transform", Transform3D.IDENTITY),
 				-(source_index + 1))
@@ -110,9 +112,8 @@ func reattach() -> void:
 ## the item-effect director).
 ## The one owner id space: a model's sim wire handle when the present pass
 ## stamped one (live entities — the same domain fire events report shooters
-## in), else the node instance id (placer statics, preview scenes). Light
-## spawns and per-draw contexts must agree on this or owner gating never
-## matches.
+## in), else the node instance id (placer statics, preview scenes). The same
+## id is retained on pool snapshots for diagnostics and corona visibility.
 static func owner_id_for_node(node: ObjectModel) -> int:
 	var ref: Dictionary = node.get_meta("entity_ref", {})
 	var wire := int(ref.get("wire_handle", 0))
@@ -174,23 +175,25 @@ func _spawn_model_lights(data: ObjectData, world_transform: Transform3D,
 
 ## One authored light record (the get_light_info dictionary shape) becomes one
 ## pool instance. Public: the GUT seam test feeds records directly. A record
-## attached to a subobject carries retail's owner metadata into the group gate
-## [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity, bone)
-## when the record's attach bone != 0; the blink-box interior leg is a tracked
-## residual]. Every caller supplies an owner id — live nodes their wire
-## handle/instance id, batched static sources a synthetic negative id — so a
-## subobject-attached light passes the per-draw select only for its owner's
-## draws (per_model_light_isolation_test pins both directions). A record with
-## subobject 0 spawns unowned: a mission-start world light.
+## attached to a subobject keeps its authored owner/section metadata for
+## diagnostics and the corona visibility gate. Native clustered illumination
+## is intentionally spatial rather than reconstructed per-draw group state.
+## A record with subobject 0 remains an unowned mission-start world light.
 func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 		owner_id: int = 0) -> int:
 	if info.is_empty():
 		return 0
 	var world_pos: Vector3 = world_transform * Vector3(
 			info.get("position", Vector3.ZERO))
+	var local_direction: Vector3 = info.get("direction", Vector3(0.0, 0.0, -1.0))
+	var world_direction := (world_transform.basis * local_direction).normalized()
 	var subobject := int(info.get("subobject", 0))
 	return int(_scene.spawn_model_light({
 		"position": world_pos,
+		"direction": world_direction,
+		"target": int(info.get("light_type", 0)) != 0,
+		"spot_angle_degrees": float(info.get("falloff_deg", 45.0)),
+		"atten_start": float(info.get("atten_start", 0.0)),
 		"atten_end": float(info.get("atten_end", 0.0)),
 		"style": int(info.get("colorgen_style", 0)),
 		"phase": int(info.get("colorgen_phase", 0)),
@@ -206,15 +209,14 @@ func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 
 
 ## The per-frame device leg (GameFramePipeline, after iris, before the
-## material frame): one draw context per visible ObjectModel near the camera
-## (owner group = that model's entity id) plus the first-person viewmodel
-## parts (owner = the local player, so its own muzzle glow reaches the arms).
-## The FLICKER phase reads the live weather wave ring; the ambient scale is
-## the env light-state gain (the ported EffectWorld_AmbientScale channel).
+## material frame): evaluate the portable pool once and synchronize native
+## clustered lights. The nearby-model walk remains only for owned-corona
+## visibility; native lights no longer write per-model shader uniforms.
 func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		viewmodel_owner: int = 0) -> void:
-	if camera == null:
+	if camera == null or _world == null:
 		_scene.clear_render_output()
+		_clear_native_lights()
 		_clear_coronas()
 		return
 	var gain := Vector3.ONE
@@ -243,14 +245,116 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		models.append(part)
 		owners.append(viewmodel_owner if viewmodel_owner != 0
 				else part.get_instance_id())
-	# Census select first (report rows for F3 and the seam tests), then the
-	# gameplay per-model pass — its mode/isolation stamp is what the report
-	# ends the frame with.
-	_scene.render_frame(cam_pos, QUERY_RADIUS, gain, Time.get_ticks_msec(),
-			weather)
-	_scene.render_model_frame(models, owners, gain, Time.get_ticks_msec(),
-			weather)
+	var light_rows: Array = _scene.collect_active_rows(
+			Time.get_ticks_msec(), weather)
+	_sync_native_lights(light_rows)
 	_render_coronas(camera, gain, weather, models, owners, env)
+
+
+func _sync_native_lights(rows: Array) -> void:
+	var seen: Dictionary = {}
+	for value in rows:
+		var row: Dictionary = value
+		var handle := int(row.get("handle", 0))
+		if handle == 0:
+			continue
+		seen[handle] = true
+		var wants_spot := String(row.get("kind", "omni")) == "spot"
+		var light := _native_nodes.get(handle) as Light3D
+		if light != null and (light is SpotLight3D) != wants_spot:
+			_release_native_light(handle)
+			light = null
+		if light == null:
+			light = _acquire_native_light(wants_spot)
+			if light == null:
+				continue
+			_native_nodes[handle] = light
+		_configure_native_light(light, row)
+	for handle_value in _native_nodes.keys():
+		var handle := int(handle_value)
+		if not seen.has(handle):
+			_release_native_light(handle)
+
+
+func _acquire_native_light(wants_spot: bool) -> Light3D:
+	var light: Light3D
+	if wants_spot:
+		if not _free_spot.is_empty():
+			light = _free_spot.pop_back()
+		else:
+			light = SpotLight3D.new()
+	else:
+		if not _free_omni.is_empty():
+			light = _free_omni.pop_back()
+		else:
+			light = OmniLight3D.new()
+	if light.get_parent() == null:
+		_native_node_serial += 1
+		light.name = "EffectLight%04d" % _native_node_serial
+		_world.add_child(light)
+		light.set_as_top_level(true)
+	light.shadow_enabled = false
+	return light
+
+
+func _configure_native_light(light: Light3D, row: Dictionary) -> void:
+	var source_color: Color = row.get("color", Color.WHITE)
+	light.light_color = source_color
+	light.light_energy = maxf(float(row.get("energy", 0.0)), 0.0)
+	light.light_cull_mask = _native_light_cull_mask(row)
+	light.shadow_enabled = false
+	light.global_position = row.get("position", Vector3.ZERO)
+	var light_range := maxf(float(row.get("range", 0.0)), 0.05)
+	if light is SpotLight3D:
+		var spot := light as SpotLight3D
+		spot.spot_range = light_range
+		spot.spot_angle = clampf(
+				float(row.get("spot_angle_degrees", 45.0)), 1.0, 89.0)
+		spot.spot_attenuation = 1.0
+		var direction: Vector3 = row.get("direction", Vector3(0.0, 0.0, -1.0))
+		if direction.length_squared() > 0.000001:
+			direction = direction.normalized()
+			var up := Vector3.FORWARD if absf(direction.dot(Vector3.UP)) > 0.99 \
+					else Vector3.UP
+			spot.look_at(spot.global_position + direction, up)
+	else:
+		var omni := light as OmniLight3D
+		omni.omni_range = light_range
+		omni.omni_attenuation = 1.0
+	light.set_meta("effect_light_handle", int(row.get("handle", 0)))
+	light.set_meta("attenuation_start", float(row.get("atten_start", 0.0)))
+	light.visible = light.light_energy > 0.001 and light.light_cull_mask != 0
+
+
+func _native_light_cull_mask(row: Dictionary) -> int:
+	var mask := 0
+	# Terrain and ordinary world objects currently share the world layer. The
+	# authored participation flags still suppress a light completely and keep
+	# the viewmodel leg object-only without growing another layer taxonomy.
+	if bool(row.get("lights_terrain", true)) \
+			or bool(row.get("lights_objects", true)):
+		mask |= Water.VISUAL_LAYER_WORLD | Water.VISUAL_LAYER_WORLD_NO_MIRROR
+	if bool(row.get("lights_objects", true)):
+		mask |= Water.VISUAL_LAYER_VIEWMODEL
+	return mask
+
+
+func _release_native_light(handle: int) -> void:
+	var light := _native_nodes.get(handle) as Light3D
+	_native_nodes.erase(handle)
+	if light == null or not is_instance_valid(light):
+		return
+	light.visible = false
+	light.set_meta("effect_light_handle", 0)
+	if light is SpotLight3D:
+		_free_spot.append(light as SpotLight3D)
+	else:
+		_free_omni.append(light as OmniLight3D)
+
+
+func _clear_native_lights() -> void:
+	for handle_value in _native_nodes.keys():
+		_release_native_light(int(handle_value))
 
 
 ## The corona device leg: fetch this frame's additive quads from the portable
@@ -363,9 +467,8 @@ func advance_fixed_tick() -> void:
 
 ## One weapon fire with the ammo MF_Light flag [orig: Entity_UpdateMuzzleGlow-
 ## Effect @ 0x56c960, called per shot from both fire arms]. Owner = the
-## shooter. The metadata is preserved, but the current camera-global object
-## pass admits it unscoped: the flash is visible and may light nearby objects
-## until per-draw grouping closes the tracked D-RLIT-4 residual.
+## shooter. The metadata is preserved for diagnostics/coronas; the native
+## light spatially illuminates nearby receivers, including the viewmodel.
 func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 	var handle := int(_muzzle_handles.get(shooter_handle, 0))
 	if handle == 0:

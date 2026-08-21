@@ -500,15 +500,13 @@ func test_nova_object_model_builds_runtime_scene_without_editor_viewport() -> vo
 	assert_gt(model.get_surface_material_indices().size(), 0, "Object model should expose material lookup indices.")
 
 
-func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
+func test_object_preview_uses_internal_viewport_with_object_model() -> void:
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
 	await get_tree().process_frame
 
-	assert_null(_find_node_by_type(preview, "DirectionalLight3D"), "Object preview should not use Godot directional lights.")
-	assert_null(_find_node_by_type(preview, "OmniLight3D"), "Object preview should not use Godot omni lights.")
 	assert_true(_find_node_by_type(preview, "MeshInstance3D") != null, "Object preview should build visible mesh instances.")
 	assert_not_null(preview.get_object_model(), "Object preview should delegate object rendering to ObjectModel.")
 	assert_not_null(_find_node_by_name(preview, "ObjectGrid"), "Object preview should include an authoring grid.")
@@ -608,40 +606,38 @@ func test_object_preview_applies_diffuse_material_textures() -> void:
 		assert_string_contains(shader_code, "cull_back", "One-sided preview materials should keep backface culling.")
 
 
-func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void:
+
+func test_object_preview_uses_native_lit_surface_outputs() -> void:
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var env := EnvFile.new()
-	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV))
-	env.load()
-	assert_true(env.is_loaded(), "Environment fixture should load from the fixtures dir.")
-	if env == null:
-		return
 	var preview = add_child_autofree(ObjectPreviewScript.new())
-	preview.set_environment(env, 1200.0)
 	preview.set_object_data(data)
 	await get_tree().process_frame
+	var studio_world := preview.find_child(
+			"ObjectPreviewStudioEnvironment", true, false) as WorldEnvironment
+	var studio_key := preview.find_child(
+			"ObjectPreviewKeyLight", true, false) as DirectionalLight3D
+	assert_not_null(studio_world, "preview supplies ambient native lighting without an ENV")
+	assert_not_null(studio_key, "preview supplies a deterministic native key light")
+	if studio_world != null:
+		assert_eq(studio_world.environment.ambient_light_source,
+				Environment.AMBIENT_SOURCE_COLOR)
 
 	var material := _find_textured_shader_material(preview.get_object_model())
-	assert_not_null(material, "Environment uniforms should be written to object shader materials.")
+	assert_not_null(material)
 	if material == null:
 		return
-	var tod := env.interpolate_time_of_day(1200.0)
-	_assert_vector3_close(material.get_shader_parameter("u_dir_light_color"), tod.get("sun", Vector3.ZERO), 0.01, "Preview should use environment sun lighting.")
-	# The witnessed hemisphere pair: ground -> HemiGroundColor, sky ->
-	# HemiSkyColor (docs/render/render-lighting-re.md, REN-5).
-	_assert_vector3_close(material.get_shader_parameter("u_hemi_ground_color"), tod.get("ground", Vector3.ZERO), 0.01, "Preview should use environment ground lighting.")
-	_assert_vector3_close(material.get_shader_parameter("u_hemi_sky_color"), tod.get("sky", Vector3.ZERO), 0.01, "Preview should use environment sky lighting.")
-	# Fog render color is the keyframe color doubled-and-saturated, matching the
-	# engine [orig: Environment_UpdateWeatherTick @ 0x57f17c] — .env fog is
-	# authored at half intensity. See docs/env/env-tod-re.md.
-	var fog_raw: Vector3 = tod.get("fog", Vector3.ZERO)
-	var fog_doubled := EnvFile.double_saturate_color(Color(fog_raw.x, fog_raw.y, fog_raw.z))
-	_assert_vector3_close(material.get_shader_parameter("u_fog_color"), Vector3(fog_doubled.r, fog_doubled.g, fog_doubled.b), 0.01, "Preview should use the engine-doubled environment fog color.")
-	_assert_vector3_close(material.get_shader_parameter("u_dir_light_dir"), -env.compute_sun_direction(1200.0).normalized(), 0.01, "Preview should use environment sun direction.")
-	assert_true(bool(material.get_shader_parameter("u_fog_enabled")), "Loaded environments should enable object fog uniforms.")
-	assert_eq(int(material.get_shader_parameter("u_fog_type")), env.get_fog_type())
-	assert_true(float(material.get_shader_parameter("u_fog_end")) > 0.0, "Object fog should carry a positive fog end distance.")
+	assert_false(material.shader.code.contains("unshaded"),
+			"ordinary object surfaces participate in native Godot lighting")
+	assert_null(material.get_shader_parameter("u_dir_light_color"),
+			"environment lighting is no longer copied onto each object material")
+	assert_null(material.get_shader_parameter("u_fog_color"),
+			"fog is owned by WorldEnvironment rather than object shaders")
+	var output_source := FileAccess.get_file_as_string(
+			"res://shaders/object/output_opaque.gdshaderinc")
+	assert_string_contains(output_source, "METALLIC = 0.0")
+	assert_string_contains(output_source, "ROUGHNESS = roughness")
+	assert_string_contains(output_source, "EMISSION = emission")
 
 
 func test_object_workspace_viewport_uses_global_environment_button_only() -> void:

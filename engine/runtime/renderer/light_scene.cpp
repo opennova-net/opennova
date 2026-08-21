@@ -151,6 +151,71 @@ void LightScene::tick() {
 	}
 }
 
+size_t LightScene::collect_active(const LightFlickerInputs &flicker,
+		std::vector<ActiveLight> &out) const {
+	out.clear();
+	out.reserve(slots_.size());
+	for (size_t i = 0; i < slots_.size(); ++i) {
+		const Slot &slot = slots_[i];
+		if (!slot.live || slot.hidden || slot.blend <= 0.001f) {
+			continue;
+		}
+		const LightSpawnParams &params = slot.params;
+		ActiveLight light;
+		light.kind = params.target ? ActiveLightKind::Spot
+										 : ActiveLightKind::Point;
+		for (int axis = 0; axis < 3; ++axis) {
+			light.position[axis] =
+					static_cast<float>(params.position_fixed[axis]) / 65536.0f;
+		}
+		const float direction_len_sq =
+				params.direction[0] * params.direction[0] +
+				params.direction[1] * params.direction[1] +
+				params.direction[2] * params.direction[2];
+		if (direction_len_sq > 1.0e-8f) {
+			const float inv_len = 1.0f / std::sqrt(direction_len_sq);
+			for (int axis = 0; axis < 3; ++axis) {
+				light.direction[axis] = params.direction[axis] * inv_len;
+			}
+		}
+
+		// Native lights consume canonical 0..255 colors. Fade remains a
+		// separate energy channel so converting the hue to linear color space in
+		// a device adapter does not apply an sRGB curve to the fade itself.
+		light.color = {
+			static_cast<float>(params.rgb[0]) / 255.0f,
+			static_cast<float>(params.rgb[1]) / 255.0f,
+			static_cast<float>(params.rgb[2]) / 255.0f,
+		};
+		if (params.has_gen && params.gen.style != 0) {
+			const int32_t ctrl =
+					light_flicker_value(params.position_fixed, flicker);
+			const LightRuntime gen = eval_light_runtime(params.gen.style,
+					params.gen.phase, params.gen.rate, params.gen.color_start,
+					params.gen.color_end, flicker.time_ms, ctrl);
+			light.color[0] *= gen.r * gen.intensity;
+			light.color[1] *= gen.g * gen.intensity;
+			light.color[2] *= gen.b * gen.intensity;
+		}
+		light.energy = std::max(slot.blend, 0.0f);
+		light.range = std::max(
+				static_cast<float>(params.radius_fixed) / 65536.0f, 0.0f);
+		light.attenuation_start = std::clamp(
+				params.attenuation_start, 0.0f, light.range);
+		light.spot_angle_degrees = std::clamp(
+				params.spot_angle_degrees, 1.0f, 89.0f);
+		light.lights_terrain = !params.disable_terrain;
+		light.lights_objects = !params.disable_objects;
+		light.owner_entity = params.owner_entity;
+		light.owner_section = params.owner_section;
+		light.handle = LightHandle{
+				static_cast<uint16_t>(i | kHandleFlag), slot.generation};
+		out.push_back(light);
+	}
+	report_.last_selected = out.size();
+	return out.size();
+}
+
 void LightScene::despawn(LightHandle handle) {
 	Slot *slot = slot_for(handle);
 	if (slot != nullptr) {

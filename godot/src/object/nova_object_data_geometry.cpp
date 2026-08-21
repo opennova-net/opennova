@@ -153,6 +153,7 @@ Array ObjectData::get_lights() const {
 		item["index"] = static_cast<int64_t>(i);
 		item["part_index"] = static_cast<int>(light.subobj_index);
 		item["offset"] = godot_vec3(light.offset);
+		item["direction"] = godot_vec3(light.rotation);
 		item["attenuation_start"] = light.atten_start;
 		item["attenuation_end"] = light.atten_end;
 		// Authored bytes are packed B,G,R.
@@ -177,6 +178,7 @@ Dictionary ObjectData::get_light_info(int p_index) const {
 	const ThreediLight &light = source_model.lights[p_index];
 	info["name"] = vformat("Light %d", p_index);
 	info["position"] = godot_vec3(light.offset);
+	info["direction"] = godot_vec3(light.rotation);
 	info["atten_start"] = light.atten_start;
 	info["atten_end"] = light.atten_end;
 	info["color_start"] = Color(light.color_start[2] / 255.0f, light.color_start[1] / 255.0f, light.color_start[0] / 255.0f, 1.0f);

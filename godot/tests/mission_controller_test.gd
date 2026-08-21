@@ -60,7 +60,7 @@ class StubTerrainEditor:
 	func get_resource_root() -> ResourceRoot:
 		return resource_root
 
-	# No live environment in the headless fixture: null skips _wire_placer_environment.
+	# No live environment is needed by this terrain-focused headless fixture.
 	func get_environment_node() -> MissionEnvironment:
 		return null
 

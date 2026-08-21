@@ -26,15 +26,6 @@ func _model() -> ObjectModel:
 	return model
 
 
-func _part_materials(part: Node3D) -> Array:
-	var out: Array = []
-	for i in range(part.get_child_count()):
-		var instance := part.get_child(i) as MeshInstance3D
-		if instance != null and instance.material_override != null:
-			out.append(instance.material_override)
-	return out
-
-
 func test_mask_bits_toggle_part_nodes() -> void:
 	var m := _model()
 	var parts: Dictionary = m.get_render_part_nodes()
@@ -75,50 +66,19 @@ func test_same_mask_reapply_is_a_no_op() -> void:
 	assert_true(part.visible, "re-applying the same mask changes nothing")
 
 
-func test_interior_parts_duplicate_shared_material_and_apply_light_transfer() -> void:
-	# Retail's batch-entry bit leaves ROBJ 0 outdoors and applies the
-	# ItemDef+0x218 daylight fraction to non-zero ROBJ parts. A material index
-	# shared across that boundary must split into per-context instances —
-	# otherwise one stamp would overwrite the other — while parts on the same
-	# side keep sharing.
-	var m := ObjectModel.new()
-	add_child_autofree(m)
-	m.set_process(false)
-	m.set_interior_section_light_transfer(0.2)
-	m.set_object_data(_object_data())
-
-	var state := EnvLightState.new()
-	var values := EnvLightValues.retail_noon_defaults()
-	values.dir_color = Vector3(1.0, 0.5, 0.25)
-	state.publish(values)
-	m.set_environment_state(state)
-	m.advance_runtime_frame(0.016)
-
-	var parts: Dictionary = m.get_render_part_nodes()
-	var exterior_ids := {}
-	for material in _part_materials(parts[0] as Node3D):
-		exterior_ids[(material as ShaderMaterial).get_instance_id()] = true
-		assert_eq((material as ShaderMaterial).get_shader_parameter("u_dir_light_color"),
-				values.dir_color, "ROBJ 0 materials receive the full outdoor daylight")
-	assert_gt(exterior_ids.size(), 0, "the exterior part draws at least one surface")
-
-	var interior_count := 0
-	for key in parts.keys():
-		if int(key) == 0:
-			continue
-		for material in _part_materials(parts[key] as Node3D):
-			interior_count += 1
-			assert_false(exterior_ids.has((material as ShaderMaterial).get_instance_id()),
-					"a shared material index splits at the lighting-context boundary")
-			var indoor: Vector3 = (material as ShaderMaterial).get_shader_parameter(
-					"u_dir_light_color")
-			assert_true(indoor.is_equal_approx(values.dir_color * 0.2),
-					"non-zero ROBJ parts receive the authored interior daylight fraction")
-	assert_gt(interior_count, 0, "the fixture draws interior surfaces")
-
-	var distinct := {}
-	for material in m.get_surface_materials():
-		if material != null:
-			distinct[(material as ShaderMaterial).get_instance_id()] = true
-	assert_lt(distinct.size(), m.get_surface_materials().size(),
-			"parts with the same context still share one material")
+func test_shared_material_indices_reuse_one_native_lit_material() -> void:
+	var m := _model()
+	var indices: PackedInt32Array = m.get_surface_material_indices()
+	var materials: Array = m.get_surface_materials()
+	assert_eq(materials.size(), indices.size())
+	var material_ids := {}
+	for i in range(indices.size()):
+		var material := materials[i] as ShaderMaterial
+		assert_not_null(material)
+		if material_ids.has(indices[i]):
+			assert_eq(material.get_instance_id(), material_ids[indices[i]],
+					"one decoded material index reuses one native surface material")
+		else:
+			material_ids[indices[i]] = material.get_instance_id()
+		assert_null(material.get_shader_parameter("u_dir_light_color"),
+				"object materials no longer carry copied environment lighting")

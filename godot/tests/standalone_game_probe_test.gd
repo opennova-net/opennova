@@ -20,7 +20,6 @@ const PROBE_PATHS: Array[String] = [
 # lighter contract below pins readable + compiles + no dead PIE API.
 const SELF_CONTAINED_PROBES: Array[String] = [
 	"res://tests/effects_visual_probe.gd",
-	"res://tests/sun_shadow_catcher_probe.gd",
 ]
 
 const REMOVED_PIE_PROBES: Array[String] = [

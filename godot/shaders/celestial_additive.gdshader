@@ -58,6 +58,8 @@ void fragment() {
 	// happens in the linear buffer — the bounded residual is D-RMAT-8.
 	// COLOR = per-instance brightness for the star field's twinkle (env #33;
 	// plain meshes default to white).
-	ALBEDO = nova_gamma_to_linear(tex.rgb * u_tint * COLOR.rgb * tex.a * opacity);
+	ALBEDO = vec3(0.0);
+	EMISSION = nova_gamma_to_linear(
+		tex.rgb * u_tint * COLOR.rgb * tex.a * opacity) * 1.5;
 	ALPHA = 1.0;
 }

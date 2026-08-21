@@ -84,13 +84,13 @@ func test_detail_mips_sample_anisotropically_with_conservative_terminal_guard() 
 	# [orig: per-stage filter select @ 0x67e38a..0x67e45b]
 	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
 	assert_true(
-		terrain.contains("u_detail_c1 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_detail_c2 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_detail_c3 : filter_linear_mipmap_anisotropic") and
+		terrain.contains("u_detail_c1 : source_color, filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail_c2 : source_color, filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail_c3 : source_color, filter_linear_mipmap_anisotropic") and
 			terrain.contains("u_detail2 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_colormap : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_colormap : source_color, filter_linear_mipmap_anisotropic") and
 			terrain.contains("u_blendmap : filter_linear_mipmap_anisotropic"),
-		"Every mipped terrain input must sample anisotropically like the retail reference.")
+		"Color inputs must decode into linear HDR while every mipped terrain input remains anisotropic.")
 	assert_true(terrain.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
 			"The conservative shader guard must keep requests out of the synthetic terminal tail.")
 	assert_true(terrain.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
@@ -190,3 +190,24 @@ func test_runtime_and_oned_share_tile_overlay_composition() -> void:
 	assert_eq(material.get_shader_parameter("u_tile_overlay_tint"),
 		environment.get_tile_overlay_tint(),
 		"The shared environment binding must apply the retail tile tint in runtime and ONED.")
+
+
+func test_runtime_terrain_uses_native_lighting_and_ignores_legacy_light_alpha() -> void:
+	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
+	var runtime := _source("res://shaders/terrain.gdshader")
+	var helper_begin := shared.find("vec3 terrain_surface_albedo_from_colormap")
+	var helper_end := shared.find("\n}\n", helper_begin)
+	var helper := shared.substr(helper_begin, helper_end - helper_begin)
+
+	assert_true(runtime.contains("diffuse_burley, specular_schlick_ggx"))
+	assert_false(runtime.contains("unshaded"))
+	assert_true(runtime.contains("terrain_surface_albedo_from_colormap("))
+	assert_false(runtime.contains("terrain_surface_color_from_colormap("),
+			"Runtime terrain must no longer consume the tile-cache alpha light bake.")
+	assert_false(helper.contains("cm.a"),
+			"The modern surface helper preserves colormap RGB but ignores legacy baked lighting alpha.")
+	assert_false(runtime.contains("apply_terrain_fog("),
+			"WorldEnvironment depth fog owns the runtime terrain fog pass.")
+	assert_true(runtime.contains("ROUGHNESS = 0.8;"))
+	assert_true(runtime.contains("u_tile_cache : source_color"),
+			"Composed tile-cache RGB is color data in the linear renderer.")

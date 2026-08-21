@@ -49,6 +49,8 @@ textures/vram_compression/import_etc2_astc=true
 ; (MINFILTER=ANISOTROPIC + MAXANISOTROPY @ 0x67e38a..0x67e45b). The capture
 ; machine reports a 16x device maximum, which Godot selects with enum 4.
 textures/default_filters/anisotropic_filtering_level=4
+anti_aliasing/quality/use_taa=true
+anti_aliasing/quality/use_debanding=true
 environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
 [shader_globals]
