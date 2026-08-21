@@ -263,6 +263,36 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 	}
 }
 
+// Announce rows the sim destroyed this tick
+// [orig: Server_RemoveEntityAndNotify @0x50A270 — writes the handle, send_mask 0x90
+//  (alive + not-host), msgClass 1, then destroys the row]. The destroy already
+// happened sim-side (the corpse despawn in infantry.cpp); this is the notify half,
+// which our client already decodes [orig: NapiNPClientMsg_0x012 @0x425EE0, ported as
+// decode_entity_remove]. Body is the packed handle, [u16].
+//
+// DIVERGENCE (placement only): retail sends from inside the remove function itself,
+// at the moment of destruction. The world layer holds no connection list, so it
+// records the handle and the tick drains it here — same bytes, at most one tick later.
+// The `send_mask 0x90` recipient filter (alive + not-host) is modelled by the
+// is_in_match + loopback-exclusion the fan already applies to every S2C.
+void emit_entity_removals(NapiNPServerCtx &ctx, world::World &world) {
+	if (world.entity_removals.empty()) return;
+	if (ctx.is_in_session) {
+		for (const uint16_t handle : world.entity_removals) {
+			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+				// not-host: the host's own loopback already destroyed the row in-sim.
+				if (conn.link.mode == netsim::TransportMode::Loopback) continue;
+				std::vector<uint8_t> body;
+				put_u16le(body, handle);
+				conn.link.transport->host_send(s2c::ENTITY_REMOVE, std::move(body),
+				                               /*reliable=*/true);
+			}
+		}
+	}
+	world.entity_removals.clear();
+}
+
 // The kill-event scoring award [orig: GameEvent_ProcessScoring @ 0x52F550, case 3].
 // Retail's branch order inside the kill case, which this reproduces:
 //   1. self-kill (`entity == victimEntity`)                 -> SUICIDE  (slot 4, [78])
@@ -967,6 +997,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Server_ProcessRoundEnd during that same pass, so it lands ahead of this
 	// frame's death routing and 0x0A fan; keep it here for the same ordering.
 	emit_round_end_wire(ctx, world);
+	// Announce corpse/row destructions raised by the tick above, ahead of the 0x0A
+	// fan so a client never sees a frame referencing a row we just destroyed.
+	emit_entity_removals(ctx, world);
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A

@@ -1111,10 +1111,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 if (watched) {
                     ent->corpse_timer = 62; // seen -> retry in 1 s [orig: @0x4b9f83]
                 } else {
-                    // Despawn [orig: Entity_Destroy @0x4b9f93 frees the slot; our
-                    // registry keeps the slot — hidden ends presentation and the
-                    // health<=0 store already gates every consumer].
+                    // Despawn. Retail FREES the slot here and announces the removal
+                    // to every client [orig: Entity_Destroy @0x4b9f93; the notify is
+                    // Server_RemoveEntityAndNotify @0x50A270, body [u16 handle]].
+                    // We used to only set `hidden`, which ends our own presentation
+                    // but leaves the row in the registry AND in the replication fan —
+                    // so a corpse was streamed forever and the client never destroyed
+                    // it (S2C 0x12 absent, ledger D3). Record the handle for the net
+                    // layer to announce, then actually destroy the row so it stops
+                    // being replicated; announcing WITHOUT destroying would be worse
+                    // than either, since the client would drop a row we keep sending.
                     ent->hidden = true;
+                    world.entity_removals.push_back(e.handle.packed);
+                    world.registry.despawn(e.handle);
                 }
             }
         }

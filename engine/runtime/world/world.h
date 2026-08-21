@@ -425,6 +425,13 @@ public:
     // a no-op rather than a guess.
     ScoreRules score_rules;
 
+    // Rows the sim destroyed this tick that the net layer must announce with
+    // S2C 0x12 [orig: Server_RemoveEntityAndNotify @0x50A270 writes the handle,
+    // send_mask 0x90 (alive + not-host), msgClass 1, then destroys the row]. The
+    // world cannot send, so it records the packed handle here and the server tick
+    // drains it. Cleared by the drain; a client-side World never fills it.
+    std::vector<uint16_t> entity_removals;
+
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)

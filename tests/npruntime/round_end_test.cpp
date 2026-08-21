@@ -325,6 +325,62 @@ int main() {
 		       "a kill with no owning connection scores nobody");
 	}
 
+	// --- 8. Corpse removal announced as S2C 0x12
+	// [orig: Server_RemoveEntityAndNotify @0x50A270 — body [u16 handle], send_mask
+	// 0x90 = alive + NOT-HOST]. The sim destroys the row (infantry.cpp corpse
+	// despawn, retail Entity_Destroy @0x4b9f93) and records the handle; the tick
+	// announces it to remote peers only — the host's own loopback client shares the
+	// sim that already destroyed it.
+	{
+		w::World w4;
+		w4.registry.configure_pool(0, 16);
+		w::AiSystem ai4;
+		w4.ai = &ai4;
+		w::PlayerSpawn ps4;
+		ps4.position = {0.0f, 0.0f, 10.0f};
+		ps4.team = 1;
+		ps4.net_id = 0xFFD0;
+		const w::EntityHandle p4 = w::spawn_player(w4, ps4);
+
+		ns::LoopbackChannel remote, host_loop;
+		np::NapiNPServerCtx c4;
+		c4.is_authority = 1;
+		c4.is_in_session = 1;
+		c4.world = &w4;
+		c4.np_protocol.connection_list.push_back(make_conn(
+				1, 1, &remote, ns::TransportMode::Client, p4, true));
+		c4.np_protocol.connection_list.push_back(make_conn(
+				2, 1, &host_loop, ns::TransportMode::Loopback, p4, true));
+
+		const uint16_t corpse = 0x0026; // a pool-0 organic handle, as retail's are
+		w4.entity_removals.push_back(corpse);
+		np::Server_TickUpdate(c4);
+		expect(w4.entity_removals.empty(), "the drain clears the queue");
+
+		ns::Datagram d4;
+		int saw12 = 0;
+		std::vector<uint8_t> body12;
+		while (remote.client_recv(d4))
+			if (d4.tag == 0x12) { ++saw12; body12 = d4.body; }
+		expect(saw12 == 1, "one S2C 0x12 to the remote peer");
+		expect(body12.size() == 2, "0x12 body is [u16 handle]");
+		if (body12.size() == 2)
+			expect(uint16_t(body12[0] | (body12[1] << 8)) == corpse,
+			       "0x12 carries the packed handle, little-endian");
+
+		int host12 = 0;
+		while (host_loop.client_recv(d4))
+			if (d4.tag == 0x12) ++host12;
+		expect(host12 == 0,
+		       "the host loopback is NOT told [orig: send_mask 0x90 excludes the host]");
+
+		np::Server_TickUpdate(c4);
+		int again12 = 0;
+		while (remote.client_recv(d4))
+			if (d4.tag == 0x12) ++again12;
+		expect(again12 == 0, "a drained removal is announced exactly once");
+	}
+
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;
 }
