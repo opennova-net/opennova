@@ -94,3 +94,20 @@ func test_not_loaded_is_safe() -> void:
 			"An unloaded layout has no authored declutter row.")
 	assert_eq(hud.get_stances().size(), 0, "Unloaded stances empty.")
 	assert_eq(hud.to_dictionary().size(), 0, "Unloaded to_dictionary empty.")
+	assert_eq(hud.get_veh_stance_pos(), Vector2i(), "Unloaded HUDVEHSTANCEPOS empty.")
+	assert_eq(hud.get_lfp_flags(), Vector2i(), "Unloaded LFP_FLAGS empty.")
+
+
+# The two panel anchors the wire-up lanes consume: HUDVEHSTANCEPOS (the
+# vehicle panel's base before the stance offset) and LFP_FLAGS (the AAS zone
+# panel's right edge + row base; retail g_hudZonePanelX/Y written by the hudpos
+# parse @0x5a0563/@0x5a057b).
+func test_panel_anchors() -> void:
+	var hud := _load()
+	assert_eq(hud.get_veh_stance_pos(), Vector2i(0, 272),
+			"HUDVEHSTANCEPOS 0 272 from the fixture.")
+	assert_eq(hud.get_lfp_flags(), Vector2i(1020, 27),
+			"LFP_FLAGS 1020 , 27 from the fixture.")
+	var block: Dictionary = hud.get_vehicle_hud("dbuggy1")
+	assert_eq(String(block.get("interface", "")), "h_buggya.tga",
+			"The buggy's VEHICLE_HUD block resolves by sid.")
