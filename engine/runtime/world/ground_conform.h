@@ -14,11 +14,13 @@ namespace opennova::world {
 //  Entity_ProcessLightVehiclePhysics @0x479600 and
 //  Entity_ProcessAircraftContactPhysics @0x47EF10].
 //
-// STAGED, NOT WIRED: the live contact solves (world/vehicle_contact_solve.cpp
-// — tracked §7, wheeled §8, bike §9 of vehicle-client-movers-re.md) hold the
-// per-wheel sink state at zero by declared deferral; this header is the spring
-// machinery they will consume. The probe radii those solves derive
-// (`r = beam >> 2`, the spine floor 0x2000 @0x47C9E8) live THERE, not here.
+// This header is the oscillator KERNEL; world/vehicle_suspension.cpp is the
+// leg that calls it from the tracked (§7) and light (§9) contact solves of
+// vehicle-client-movers-re.md over each tick's pad depths, owning the parked
+// latch and the per-wheel state on Entity::VehicleMotorState (wired
+// 2026-08-21; the wheeled §8 family's linear/slow pair is still pending its
+// witness). The probe radii those solves derive (`r = beam >> 2`, the spine
+// floor 0x2000 @0x47C9E8) live THERE, not here.
 //
 // OWNERSHIP, witnessed at both conform exits: Pitch and Roll are written
 // UNCONDITIONALLY; Yaw only when the parked latch (+0x2EC) is set

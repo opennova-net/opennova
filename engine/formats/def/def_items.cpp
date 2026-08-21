@@ -354,6 +354,25 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
             current.flip = parse_int_n(v, vl);
             parsed = 1;
+        /* The suspension spring block — raw atol [orig: spring_comp @0x49dbd4,
+           spring @0x49db5c, shock @0x49dc10, top_heavy @0x49db98]. spring_comp
+           must match before its prefix `spring`. */
+        } else if (lower_match_key(lower, ll, "spring_comp", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.spring_comp = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "spring", 6)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            current.spring = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "shock", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.shock = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "top_heavy", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.top_heavy = parse_int_n(v, vl);
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "max_slope", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */

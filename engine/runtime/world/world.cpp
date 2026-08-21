@@ -1375,6 +1375,7 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
     ctx.pre_mission = pre_mission;
+    vehicle_authority = is_authority;
     // The pending fire-sound countdown, before this tick's spawns: retail
     // drains after the client network frame (whose receive seeds our embedder
     // also applies pre-tick) and before the server/entity updates that seed

@@ -15,6 +15,7 @@
 #include "vehicle_motor_detail.h"
 
 #include "world/angle.h"
+#include "world/vehicle_suspension.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -261,13 +262,13 @@ void aircraft_contact_solve(World &world, Entity &veh,
 // clearance) instead of clamping the origin onto the terrain.
 // Cited deferrals (same seams as the air solve §6): every authority Health
 // write (object-impact damage @0x47CD00..0x47CDFB, crush @0x47D96B..0x47DA2B,
-// inverted-crush @0x47DBFF..0x47DC50, burn drain @0x47DDF4), the
-// spring/oscillator machinery (the +0x2C4 sinks, free-fall +187/tick
-// @0x47DB59..0x47DBE4, the spring-energy resolution loop @0x47E960..0x47EC1F —
-// its state is identically zero here, so the corner lifts consume the raw d_i
-// exactly like the zero-state original; the +0x2D4 brake-dive probe offsets are
-// written only by the wheeled-solve brake machinery @0x45CEB0/@0x4790C7 and
-// stay zero for tracked rows), entity-entity collision + momentum exchange
+// inverted-crush @0x47DBFF..0x47DC50, burn drain @0x47DDF4), the remaining
+// spring/oscillator machinery (the +0x2C4 sinks and their free-fall growth
+// +187/tick @0x47DB59..0x47DBE4, and the corner-lift feedback of the stepped
+// compression in the spring-energy loop @0x47E960..0x47EC1F — the per-wheel
+// compress/oscillate step itself and the +0x2D4 pad offsets are LIVE through
+// vehicle_suspension.cpp since 2026-08-21; the corner lifts still consume the
+// raw d_i pending that feedback witness), entity-entity collision + momentum exchange
 // (@0x47CE7C../@0x47D097../@0x47D336..; plat_terrain_probe carries the terrain
 // leg only), the crash/park/wreck latch machine (+0x2EC/+0x2ED/+0x2EE/+0x2EF/
 // +0x2F0/+0x2FC bytes, the flip threshold @0x47D727, the client landing-grace
@@ -329,12 +330,16 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     const int32_t ymid =
             traits.box_y_lo + ((traits.box_y_hi - traits.box_y_lo) >> 1);
     const int32_t spine_z = traits.box_z_hi - rs;
+    // Each pad rides its wheel's spring compression (+0x2D4 + 4k, the
+    // vehicle_suspension.cpp leg) on top of the wheel-height Z
+    // [orig: the per-pad `box_z_lo + r + comp[k]` stores @0x47F514/@0x47F56A/
+    //  @0x47F5E3/@0x47F63F-pattern in this solve's probe build].
     const int32_t pad_z = traits.box_z_lo + r;
     const int32_t probes_model[7][3] = {
-        {traits.foot_x_hi - r, traits.foot_y_hi - r, pad_z}, // pad0 (+fwd,+side)
-        {traits.foot_x_hi - r, traits.foot_y_lo + r, pad_z}, // pad1 (+fwd,-side)
-        {traits.foot_x_lo + r, traits.foot_y_lo + r, pad_z}, // pad2 (-fwd,-side)
-        {traits.foot_x_lo + r, traits.foot_y_hi - r, pad_z}, // pad3 (-fwd,+side)
+        {traits.foot_x_hi - r, traits.foot_y_hi - r, pad_z + m.wheel_comp[0]}, // pad0 (+fwd,+side)
+        {traits.foot_x_hi - r, traits.foot_y_lo + r, pad_z + m.wheel_comp[1]}, // pad1 (+fwd,-side)
+        {traits.foot_x_lo + r, traits.foot_y_lo + r, pad_z + m.wheel_comp[2]}, // pad2 (-fwd,-side)
+        {traits.foot_x_lo + r, traits.foot_y_hi - r, pad_z + m.wheel_comp[3]}, // pad3 (-fwd,+side)
         {traits.box_x_lo + ((3 * L) >> 2), ymid, spine_z},   // pt4
         {traits.box_x_lo + (L >> 1), ymid, spine_z},         // pt5
         {traits.box_x_lo + (L >> 2), ymid, spine_z},         // pt6
@@ -496,13 +501,20 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     }
     // ---- pad contact: airborne clears unconditionally [orig: @0x47E8EE].
     veh.flags &= ~kEntityFlagInAir;
+    // The spring leg over this tick's pad depths: the parked latch edge and
+    // the per-wheel compress/oscillate step (vehicle_suspension.cpp) — the
+    // compressions feed NEXT tick's pad points above [orig: the latch
+    //  @0x46B1A6..0x46B213 inside the wheel-solver call @0x47EC4D; the spring
+    //  loop @0x47E960..0x47EC1F with its compress/oscillate arms].
+    vehicle_suspension_latch(world, veh);
+    vehicle_suspension_step(world, veh, traits, d);
     // The pad-rectangle bounding quad, in the witnessed winding — corner k
     // sits over pad k, so the identity d_k lift pairing is geometric here
     // [orig: Entity_ComputeBoundingQuad @0x45B6E0 non-square arm, called
     // @0x47DAE2/@0x47DB54: c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s);
-    // corner_z[k] += d_k in the spring loop's zero-state arm @0x47EC05].
-    // (The spring resolution is deferred, so d_k lifts raw — the air-port
-    // contract §6.16.)
+    // corner_z[k] += d_k in the spring loop's arm @0x47EC05].
+    // WITNESS PENDING: the corner-lift feedback of the STEPPED compression
+    // (the spring loop's non-zero-state arm) — d_k lifts raw until witnessed.
     int32_t c[4][3];
     {
         const int32_t hw2 = half_w >> 1, hh2 = half_h >> 1;
@@ -562,13 +574,12 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 // instead of the tracked +0x2000 rise clamp.
 // Cited deferrals (the same seams as the tracked solve §7): every authority
 // Health write (park-move damage @0x477157.., spine-impact @0x47733f..,
-// underside-crush @0x477e6a-region, burn drain/emitters), the live per-wheel
-// spring machinery (sink growth +250/tick on airborne wheels, the
+// underside-crush @0x477e6a-region, burn drain/emitters), the wheeled
+// family's own spring pair (sink growth +250/tick on airborne wheels, the
 // Suspension_CompressWheelLinear @0x45CEB0 step, Suspension_OscillateWheel
-// @0x45D240 — state identically zero here, so pads probe at box_z_lo + r and
-// the corner lifts consume raw d_k exactly like the zero-state original; the
-// quadratic/fast pair the tracked and light solves call is the staged
-// world/ground_conform.h leg, unwired until the sinks land),
+// @0x45D240 — WITNESS PENDING for the linear/slow pair's wiring; the pads
+// ride +0x2D4 and the latch edge runs through vehicle_suspension.cpp, the
+// quadratic/fast pair the tracked and light solves call is live there),
 // entity-entity collision + momentum exchange (mass-gated transfer at the
 // sev-3 leg and the entity-mass delta scaling — plat_terrain_probe carries
 // the terrain leg only), the crash/flip/park/wreck latch machine (the
@@ -628,11 +639,13 @@ void wheeled_contact_solve(World &world, Entity &veh,
     const int32_t bx = traits.foot_x_lo + r; // belly-station base X
     const int32_t ys = traits.foot_y_hi - r; // starboard rail (+side)
     const int32_t yp = traits.foot_y_lo + r; // port rail (-side)
+    // The four wheel pads ride their spring compression (+0x2D4 + 4k, the
+    // vehicle_suspension.cpp leg); the belly/spine stations do not.
     const int32_t probes_model[13][3] = {
-        {traits.foot_x_hi - r, ys, pad_z},              // pad0 (+fwd,+side)
-        {traits.foot_x_hi - r, yp, pad_z},              // pad1 (+fwd,-side)
-        {traits.foot_x_lo + r, yp, pad_z},              // pad2 (-fwd,-side)
-        {traits.foot_x_lo + r, ys, pad_z},              // pad3 (-fwd,+side)
+        {traits.foot_x_hi - r, ys, pad_z + m.wheel_comp[0]}, // pad0 (+fwd,+side)
+        {traits.foot_x_hi - r, yp, pad_z + m.wheel_comp[1]}, // pad1 (+fwd,-side)
+        {traits.foot_x_lo + r, yp, pad_z + m.wheel_comp[2]}, // pad2 (-fwd,-side)
+        {traits.foot_x_lo + r, ys, pad_z + m.wheel_comp[3]}, // pad3 (-fwd,+side)
         {bx + 3 * q, ys, pad_z},                        // belly4 (fwd,+side)
         {bx + 3 * q, yp, pad_z},                        // belly5 (fwd,-side)
         {bx + q, yp, pad_z},                            // belly6 (rear,-side)
@@ -847,10 +860,13 @@ void wheeled_contact_solve(World &world, Entity &veh,
     // ---- wheel/belly contact: airborne clears unconditionally
     // [orig: @0x478604 in the latch fall-through]. The corner quad lifts by
     // the four WHEEL d's only (belly/spine d's feed severity and the Z maxes)
-    // in the zero-state spring loop [orig: `dest[corner].z += d_k`
-    // @0x478A16/@0x478A72-region; Suspension_CompressWheelLinear @0x45CEB0
-    // and the oscillator transfer are the deferred spring machinery].
+    // in the spring loop [orig: `dest[corner].z += d_k`
+    // @0x478A16/@0x478A72-region]. The wheeled family's spring pair is the
+    // LINEAR compress (Suspension_CompressWheelLinear @0x45CEB0) with the SLOW
+    // oscillator (Suspension_OscillateWheel @0x45D240) — WITNESS PENDING for
+    // that pair's wiring; the latch edge runs here as in the tracked solve.
     veh.flags &= ~kEntityFlagInAir;
+    vehicle_suspension_latch(world, veh);
     int32_t c[4][3];
     {
         const int32_t hw2 = half_w >> 1, hh2 = half_h >> 1;
@@ -916,10 +932,10 @@ void wheeled_contact_solve(World &world, Entity &veh,
 // flt_7C3B94 @0x468D34-region].
 // Cited deferrals (same seams as §7/§8): authority impact/eject legs (the
 // head-on rider ejection ladder @0x47A343.., the belly-strike eject, the
-// underside crush), the wheelie/spring machinery (sinks grow +100/tick, the
-// Suspension_CompressWheelQuadratic @0x45CFB0 step and
-// Suspension_OscillateWheelFast @0x45D110 — zero state here; the pair is
-// ported as the staged world/ground_conform.h leg),
+// underside crush), the wheelie machinery and the +100/tick sink growth
+// (the Suspension_CompressWheelQuadratic @0x45CFB0 /
+// Suspension_OscillateWheelFast @0x45D110 step itself is LIVE through
+// vehicle_suspension.cpp over the two wheel depths),
 // the tip-over/crash tumble (the parked bike's 298261 BAM/tick fall-over,
 // Entity_QueueSuspensionForce legs, the flip byte at the 0..100 def clamp),
 // the grounded heading/lean smoother (Entity_SmoothHeadingToTarget
@@ -966,10 +982,12 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     const int32_t foot_ymid = (traits.foot_y_lo + traits.foot_y_hi) >> 1;
     const int32_t box_ymid =
             traits.box_y_lo + ((traits.box_y_hi - traits.box_y_lo) >> 1);
+    // The two wheels ride their spring compression (+0x2D4 / +0x2D8, the
+    // vehicle_suspension.cpp leg — the bike uses the quadratic/fast pair).
     const int32_t wheel_z = traits.box_z_lo + r;
     const int32_t probes_model[6][3] = {
-        {traits.foot_x_hi - r, foot_ymid, wheel_z},            // front wheel
-        {traits.foot_x_lo + r, foot_ymid, wheel_z},            // rear wheel
+        {traits.foot_x_hi - r, foot_ymid, wheel_z + m.wheel_comp[0]}, // front wheel
+        {traits.foot_x_lo + r, foot_ymid, wheel_z + m.wheel_comp[1]}, // rear wheel
         {traits.box_x_lo + (Lbox >> 2), box_ymid, traits.box_z_lo + 2 * r},
         {traits.box_x_lo + ((3 * Lbox) >> 2), box_ymid, traits.box_z_lo + 2 * r},
         {traits.box_x_lo + (Lbox >> 1), box_ymid, traits.box_z_lo + 2 * r},
@@ -1101,8 +1119,16 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // from the isSquare quad — ±half the inset foot length along the basis
     // forward row [orig: Entity_ComputeBoundingQuad @0x45B6E0 isSquare arm:
     // c0 = pos + 0.5*len*fwd, c1 = pos - 0.5*len*fwd] — lifted by the wheel
-    // d's in the zero-state spring loop [orig: dest[2] += d0 / dest[5] += d1].
+    // d's in the spring loop [orig: dest[2] += d0 / dest[5] += d1].
     veh.flags &= ~kEntityFlagInAir;
+    // The bike's spring leg over its two wheel depths (the quadratic/fast
+    // pair, the same calls as the tracked solve) [orig: the light solve's
+    //  Suspension_CompressWheelQuadratic / OscillateWheelFast calls].
+    {
+        const int32_t wheel_depths[4] = {d[0], d[1], 0, 0};
+        vehicle_suspension_latch(world, veh);
+        vehicle_suspension_step(world, veh, traits, wheel_depths);
+    }
     const int32_t half_len =
             ((traits.foot_x_hi - r) - (traits.foot_x_lo + r)) >> 1;
     int32_t cf[3], cr[3];

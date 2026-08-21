@@ -235,6 +235,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.pitch_lift_vel = def->pitch_velocity;
                 vt.bob = def->bob;
                 vt.flip = def->flip;
+                vt.spring = def->spring;
+                vt.spring_comp = def->spring_comp;
+                vt.shock = def->shock;
+                vt.top_heavy = def->top_heavy;
                 vt.player_control =
                         (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
                 // The per-frame physics mover is selected exclusively by the
