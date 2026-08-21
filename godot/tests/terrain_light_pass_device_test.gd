@@ -139,25 +139,13 @@ func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> vo
 	assert_not_null(material.get_shader_parameter("u_terrain_light_disc"))
 	assert_not_null(material.get_shader_parameter("u_terrain_light_strip"))
 
-	# The pixel end of the leg: the ground under the camera renders brighter
-	# with the pool than without it (the additive two-stage term).
-	camera.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
-	await get_tree().process_frame
-	await get_tree().process_frame
-	var lit_image: Image = viewport.get_texture().get_image()
-	var lit := lit_image.get_pixel(160, 90)
-
-	# No pool: the leg retires and the gate closes.
+	# No pool: the leg retires and the gate closes. (The pixel end of the leg
+	# cannot be pinned here — the headless GUT runner rasterizes nothing, so a
+	# SubViewport texture has no image; the capture probe's frames carry it.)
 	terrain.set_light_context(null, 0)
 	terrain.render_frame()
 	assert_eq(terrain.get_light_rows_total(), 0)
 	assert_false(bool(material.get_shader_parameter("u_terrain_light_enabled")))
-	await get_tree().process_frame
-	await get_tree().process_frame
-	var dark_image: Image = viewport.get_texture().get_image()
-	var dark := dark_image.get_pixel(160, 90)
-	assert_gt(lit.get_luminance(), dark.get_luminance() + 0.02,
-			"the pool brightens the ground under the light (lit %s vs dark %s)" % [lit, dark])
 
 
 func test_the_two_procedural_textures_have_the_witnessed_shape() -> void:
