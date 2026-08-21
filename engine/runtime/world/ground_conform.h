@@ -4,15 +4,21 @@
 
 namespace opennova::world {
 
-// THE GROUND-VEHICLE TERRAIN CONFORM — the client-side solve retail runs for
-// every items.def physics-1 vehicle, every tick, remote or local
+// THE GROUND-VEHICLE SUSPENSION SPRING LEG — the per-wheel compression step
+// and free-decay oscillator the client-side conform runs for every items.def
+// physics-1 vehicle, every tick, remote or local
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00 -> (unconditional @0x48D0B1)
-//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0].
+//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0, whose spring calls are
+//  Suspension_CompressWheelQuadratic @0x47E2C1/@0x47EB68/@0x47EB7C and
+//  Suspension_OscillateWheelFast @0x47E2D3/@0x47EBBB; the same pair serves
+//  Entity_ProcessLightVehiclePhysics @0x479600 and
+//  Entity_ProcessAircraftContactPhysics @0x47EF10].
 //
-// This is what keeps a jeep's wheels on the ground instead of the hull sliding
-// through a hillside at a fixed attitude. It runs on EVERY machine for EVERY
-// such vehicle, which is why a client that skips it looks wrong even when the
-// wire data is perfect.
+// STAGED, NOT WIRED: the live contact solves (world/vehicle_contact_solve.cpp
+// — tracked §7, wheeled §8, bike §9 of vehicle-client-movers-re.md) hold the
+// per-wheel sink state at zero by declared deferral; this header is the spring
+// machinery they will consume. The probe radii those solves derive
+// (`r = beam >> 2`, the spine floor 0x2000 @0x47C9E8) live THERE, not here.
 //
 // OWNERSHIP, witnessed at both conform exits: Pitch and Roll are written
 // UNCONDITIONALLY; Yaw only when the parked latch (+0x2EC) is set
@@ -23,31 +29,54 @@ namespace opennova::world {
 // Fixed point throughout, as retail: positions and heights 16.16, slope
 // thresholds Q22, suspension travel 16.16 with full extension 0xFFFF.
 
-// Suspension extension range [orig: dword_815180 — a .data constant with no
-// writer in the image] and the per-step delta it is divided into
-// [orig: >> 4 @0x47CBE5].
+// Suspension extension range [orig: dword_815180 = 0xFFFF — a .data constant
+// with no writer in the image] and the per-step delta it is divided into
+// [orig: >> 4 @0x47CBE5; the oscillator re-derives it as
+//  dword_815180 >> 4 @0x45D203..0x45D20B].
 inline constexpr int32_t kSuspFull = 0xFFFF;
 inline constexpr int32_t kSuspStep = 0xFFF;
 
-// The NON-AUTHORITY spring scale [orig: flt_7C6F14 @0x46B1C5..0x46B1DB]. A
-// client runs its springs 1.75x the authority's; this is a witnessed
-// difference between the two roles, not a tuning value to normalise away.
-inline constexpr float kClientSpringScale = 1.75f;
-// The unparked time scale [orig: flt_7C3DC8 @0x47C222].
-inline constexpr float kTimeScaleUnparked = 0.75f;
+// The wheel-solver DISABLE-rate multiplier, picked by role ONCE when the
+// parked latch +0x2EC goes 0 -> 1 (the mover's disable request +0x2ED with
+// the latch still clear) and consumed by the per-wheel contact loop
+// [orig: Entity_ProcessWheeledVehicleSuspension — gate @0x46B1B9, the pick
+//  @0x46B1C5..0x46B1DB (flt_7C6F14 = 1.75 off the authority, flt_7C6F18 =
+//  1.25 on it), the latch set @0x46B1F9, the use @0x46B22E;
+//  vehicle-client-movers-re.md §8/§9]. A witnessed role difference, not a
+// tuning value to normalise away — and NOT an every-tick spring scale.
+inline constexpr float kSuspensionDisableRateNonAuthority = 1.75f;
+inline constexpr float kSuspensionDisableRateAuthority = 1.25f;
 
-// The wheel oscillator's constants [orig: sub_45D110 — note Hex-Rays names it
-// Entity_ApplyDamageOscillationFast, which is wrong; it is the suspension
-// oscillator].
+// The spring step's dt, by the parked latch: 0.75 while +0x2EC is clear,
+// 3.0 once parked [orig: Entity_ProcessTrackedVehiclePhysics @0x47C218..0x47C22B
+//  — flt_7C3DC8 @0x47C222 / flt_7C6F80 @0x47C21A into the local consumed by
+//  the spring calls @0x47DBC3 / @0x47E2ED / @0x47E9C2]. A parked vehicle
+// settles its springs four times faster than a moving one.
+inline constexpr float kSuspensionDtUnparked = 0.75f;
+inline constexpr float kSuspensionDtParked = 3.0f;
+
+// The wheel oscillator's constants [orig: Suspension_OscillateWheelFast
+//  @0x45D110 (ex `Entity_ApplyDamageOscillationFast` — no health is touched;
+//  the slow twin Suspension_OscillateWheel @0x45D240 steps 0.0872 rad/tick)
+//  and its compressing-tick sibling Suspension_CompressWheelQuadratic
+//  @0x45CFB0 (ex `sub_45CFB0`; the linear form is
+//  Suspension_CompressWheelLinear @0x45CEB0). flt_7C6A10 @0x45D11F,
+//  flt_7C6A04 @0x45D1C2, flt_7C6A00 @0x45D1CA, flt_7C69FC @0x45CFC8].
 inline constexpr float kOscPhaseStep = 0.2616667f; // flt_7C6A10
 inline constexpr float kOscDecayA = 0.09090909f;   // flt_7C6A04, = 1/11
 inline constexpr float kOscDecayB = 0.99f;         // flt_7C6A00
-// The phase preset a compressing wheel is forced to [orig: @0x45CFC8].
+// The phase preset a compressing wheel is forced to [orig: flt_7C69FC = 1.57
+// stored @0x45CFC8..0x45CFD4].
 inline constexpr float kOscPhasePreset = 1.57f;
 
+// The entity+0xA0 threshold below which a landing is damped four times harder
+// [orig: `cmp [esi+0A0h], -2000; jge skip; sar [edi], 2` @0x45D21F..0x45D22D].
+inline constexpr int32_t kOscHardLandingBelow = -2000;
+
 // Suspension travel from the def's spring_comp PERCENTAGE
-// [orig: the dword_815184 derivation @0x47C51F..0x47C544 —
-//  travel = 0xFFFF - 0xFFFF * (100 - spring_comp) * 0.01].
+// [orig: dword_815184 = ftol((100 - spring_comp) * 0xFFFF * flt_7C56A8 (0.01))
+//  @0x47C51F..0x47C544; the bound the compress step tests is
+//  dword_815180 - dword_815184 @0x45CFC2..0x45CFCE].
 // A spring_comp of 100 gives full travel; 0 gives none.
 inline int32_t conform_travel_from_def(int spring_comp) {
 	if (spring_comp < 0) spring_comp = 0;
@@ -58,46 +87,28 @@ inline int32_t conform_travel_from_def(int spring_comp) {
 }
 
 // A slope threshold from a def BAM field, as Q22
-// [orig: @0x47C54C..0x47C587 — cos(field * 2pi / 2^32) * 2^22; the slip
-//  threshold comes from slip_slope (+0x8F8) and the max from max_slope
-//  (+0x8F4)]. Implemented in the caller's math so the cos is shared; this
-// header states the scaling the result must carry.
+// [orig: @0x47C54C..0x47C587 — cos(field * dbl_7C3608 (2pi / 2^32)) *
+//  dbl_7C3600 (2^22); the slip threshold comes from slip_slope (+0x8F8) and
+//  the max from max_slope (+0x8F4)]. Implemented in the caller's math so the
+// cos is shared; this header states the scaling the result must carry.
 inline constexpr float kConformThresholdScale = 4194304.0f; // 2^22
 
-// The wheel radius the contact points use: a quarter of the bounds band's
-// width [orig: w4 = (B15 - B14) >> 2 @0x47C804].
-inline int32_t conform_wheel_radius(int32_t b14, int32_t b15) {
-	return (b15 - b14) >> 2;
-}
-
-// The SPINE points' radius, which is clamped rather than derived outright
-// [orig: v42 = clamp(min(((B11-B10)>>1) - 0x4000, ((B15-B14)>>1) - 0x1000),
-//  >= 0x2000) @0x47C998..0x47C9EA]. The floor is what stops a low or narrow
-// hull from collapsing its spine probes to nothing.
-inline constexpr int32_t kConformSpineRadiusFloor = 0x2000;
-inline int32_t conform_spine_radius(int32_t b10, int32_t b11, int32_t b14,
-		int32_t b15) {
-	const int32_t a = ((b11 - b10) >> 1) - 0x4000;
-	const int32_t b = ((b15 - b14) >> 1) - 0x1000;
-	int32_t r = a < b ? a : b;
-	if (r < kConformSpineRadiusFloor) r = kConformSpineRadiusFloor;
-	return r;
-}
-
-// One wheel's oscillator state.
+// One wheel's oscillator state — the 4-dword block Suspension_CompressWheelQuadratic and the
+// oscillator share: +0 amplitude, +4 extension, +8 energy, +0x14 phase.
 struct ConformOscillator {
 	int32_t amplitude = 0; // o[0]
 	int32_t extension = 0; // o[1]
 	int32_t energy = 0;    // o[2]
-	float phase = 0.0f;    // o[3]
+	float phase = 0.0f;    // o[5]
 };
 
-// COMPRESSION step. Returns the step actually applied — zero once the wheel is
-// already past its travel limit, which is how a bottomed suspension stops
-// absorbing [orig: the > travel early-out @0x45CFE8 returning 0 @0x45D0A5].
+// COMPRESSION step [orig: Suspension_CompressWheelQuadratic @0x45CFB0]. Returns the step actually
+// applied — zero once the wheel is already past its travel limit, which is how
+// a bottomed suspension stops absorbing [orig: the > travel early-out @0x45CFE8
+// returning 0 @0x45D0A0..0x45D0A5].
 //
-// `impact` is decremented alongside, but only while POSITIVE: the energy sink
-// is one-directional [orig: the > 0 gate @0x45D03A].
+// `impact` (entity+0x300) is decremented alongside, but only while POSITIVE:
+// the energy sink is one-directional [orig: the > 0 gate @0x45D03A..0x45D042].
 int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 		int32_t &impact, int32_t step, int32_t travel, int32_t spring);
 
@@ -105,11 +116,14 @@ int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 // compression, which the caller consumes [orig: the subtraction @0x47EBC3].
 //
 // TWO DECAYS, and conflating them is the easy mistake: the amplitude decays by
-// 0.99 EVERY tick [orig: @0x45D1D5], but the (11 - shock)/11 damping applies
-// ONLY on the tick the wheel lands at zero compression
-// [orig: the comp == 0 arm @0x45D1E5..]. Applying the damp every tick kills
-// the bounce far too quickly.
+// 0.99 EVERY tick [orig: @0x45D1C8..0x45D1D5], but the (11 - shock)/11 damping
+// applies ONLY on the tick the wheel lands at zero compression
+// [orig: the compression == 0 arm @0x45D1D7..0x45D1EE, multiplying the
+//  ALREADY-decayed amplitude]. Applying the damp every tick kills the bounce
+// far too quickly. `entity_a0` is the entity+0xA0 field the hard-landing test
+// reads; retail also clamps the def's shock (+0x904) to [0, 10] IN PLACE
+// @0x45D18F..0x45D1A2 — the caller owns that write-back.
 int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression,
-		int32_t &impact, int32_t shock, int32_t spring, bool a0_negative);
+		int32_t &impact, int32_t shock, int32_t spring, int32_t entity_a0);
 
 } // namespace opennova::world

@@ -1,7 +1,9 @@
 // The terrain leg of the dynamic light pool: the 0.66 factor, the 0.5 that
-// exists because of MODULATE2X, and the per-channel factor's default.
-// [orig: render_foliage_instance @0x5AA830 (a misnomer — the arg is a
-//  Light_InstanceTable slot @0x5AA844); the literals @0x7D3E68 / @0x7C3B94]
+// exists because of the stage-0 doubling, the per-channel factor's default and
+// the two projected-texture scales.
+// [orig: Light_SetupTerrainProjectedPass @0x5AA830 (ex render_foliage_instance
+//  — the arg is a Light_InstanceTable slot @0x5AA857); the literals @0x7D3E68 /
+//  @0x7C3618; the scale @0x5AA864..0x5AA873]
 
 #include <renderer/light_terrain_pass.h>
 
@@ -58,7 +60,8 @@ void test_per_channel_factor_default_is_unity() {
 	CHECK(bright[0] > 1.0f, "a white terrain colour exceeds unity");
 	CHECK(near(bright[0], 255.0f / 128.0f), "and is not clamped to 1");
 
-	// Channels are independent and in RGB order.
+	// Channels are independent and in RGB order: byte 2 red, byte 1 green,
+	// byte 0 blue — the order the per-tick unpack writes flt_2732DAC/DA8/DA4.
 	const auto tinted = terrain_per_channel_factor(0x804000u);
 	CHECK(near(tinted[0], 1.0f), "red channel from the high byte");
 	CHECK(near(tinted[1], 0.5f), "green from the middle");
@@ -77,15 +80,21 @@ void test_ambient_composition() {
 }
 
 // The projected texture scales INVERSELY with radius: a bigger light projects
-// a wider, not a brighter, pool.
+// a wider, not a brighter, pool. The normal pass spans one diameter (0.5/r);
+// the bit-0x100 pass is the wider 0.4/r.
 void test_projection_scale() {
-	CHECK(near(terrain_project_scale(1.0f), kTerrainProjectScale),
-			"unit radius gives the bare scale");
-	CHECK(near(terrain_project_scale(2.0f), kTerrainProjectScale / 2.0f),
+	CHECK(near(terrain_project_scale(1.0f), 0.5f),
+			"unit radius gives 0.5 — one diameter across the texture");
+	CHECK(near(terrain_project_scale(2.0f), 0.25f),
 			"a bigger light projects a wider pool");
 	CHECK(terrain_project_scale(4.0f) < terrain_project_scale(2.0f),
 			"the scale falls as radius grows");
 	CHECK(terrain_project_scale(0.0f) == 0.0f, "a zero radius is inert");
+	CHECK(near(terrain_project_scale(1.0f, true), 0.4f),
+			"the alternate pass is the 0.4 / r form");
+	CHECK(terrain_project_scale(1.0f, true) < terrain_project_scale(1.0f),
+			"the two passes are NOT one scale");
+	CHECK(kLightFlagNoTerrain == 0x400u, "flag 1024 keeps a light off the terrain");
 }
 
 } // namespace

@@ -559,6 +559,10 @@ void process_destructible_death(World &world, Entity &target) {
         const std::vector<SectionDebrisSample> samples =
                 world.collision->sample_section_debris(
                         world, target.handle, target.death_blast_center);
+        // Material 17 (foliage) spawns with the ENTITY as the emitter owner
+        // (descriptor +12); wood spawns unowned [orig: the two
+        // submit_effect_descriptor calls @0x43f825..0x43f84d]. The event
+        // carries no owner tag yet — world-wac-ai-re.md §24.3 follow-up.
         for (const SectionDebrisSample &sample : samples) {
             ev.effects.push_back(DestructionEffectEvent{
                     sample.material == 17 ? kSectionDebrisFoliageEffect
@@ -567,8 +571,9 @@ void process_destructible_death(World &world, Entity &target) {
         }
         ev.debris_triangles += static_cast<int32_t>(samples.size());
     }
-    // Scar/decal clear (Scar_ClearEntriesByEntity @ 0x5ccec0) — no decal
-    // system yet; tracked §24.
+    // Scar clear (Scar_ClearEntriesByEntity @ 0x5ccec0) — the scar ring
+    // policy is staged in world/impact_scar.h (D-ITEM-6); the per-entity
+    // cache, its clear and the ring renderer are unported; tracked §24.
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk); // [orig: Flags |= 6 @ 0x43fbf6]
     target.alive = false;
     target.health = 0;

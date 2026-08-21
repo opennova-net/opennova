@@ -73,14 +73,17 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 				true);
 	}
 
-	// 3. The empty seats' select labels, centred in the box.
+	// 3. The empty seats' select labels, centred in the box. Retail draws
+	// the digit white through the half-bright text path, which lands grey
+	// [orig: HUD_DrawTextCentered_HalfBright(&g_hudLabelFontBold, x, y, buf,
+	//  0xFFFFFFFF) @0x5a5322 -- white x half-bright = 0x7F7F7F].
 	if (font_.font() != nullptr) {
 		for (const HudVehicleSeat &seat : vp.seats) {
 			if (seat.occupied || seat.label.empty()) continue;
 			emit_text(seat.label.c_str(),
 					static_cast<float>(seat_label_x(base_x, seat.x)),
 					static_cast<float>(seat_label_y(base_y, seat.y)), w, h,
-					layout_.hud_text, kFontAlignCenter);
+					0xFF7F7F7Fu, kFontAlignCenter);
 		}
 
 		// 4. The local player's own seat, marked LAST so nothing draws over it.

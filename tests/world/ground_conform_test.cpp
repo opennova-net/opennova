@@ -1,7 +1,8 @@
-// The ground-vehicle terrain conform: suspension travel, slope thresholds and
-// the two-decay wheel oscillator.
-// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0; the oscillator
-//  sub_45D110; the travel derivation @0x47C51F..0x47C544]
+// The ground-vehicle suspension spring leg: travel, the compress step and the
+// two-decay wheel oscillator.
+// [orig: Suspension_CompressWheelQuadratic @0x45CFB0; Suspension_OscillateWheelFast @0x45D110
+//  (the oscillator, despite the name); the travel derivation
+//  @0x47C51F..0x47C544]
 
 #include <world/ground_conform.h>
 
@@ -17,7 +18,7 @@ int failures = 0;
 		if (!(c)) { std::fprintf(stderr, "FAIL: %s\n", m); ++failures; }       \
 	} while (0)
 
-// travel = 0xFFFF - 0xFFFF * (100 - spring_comp) * 0.01
+// travel = 0xFFFF - ftol(0xFFFF * (100 - spring_comp) * 0.01)
 void test_travel_from_def() {
 	CHECK(conform_travel_from_def(100) == kSuspFull,
 			"spring_comp 100 gives full travel");
@@ -29,22 +30,6 @@ void test_travel_from_def() {
 	// Out-of-range percentages clamp rather than producing nonsense travel.
 	CHECK(conform_travel_from_def(150) == kSuspFull, "over 100 clamps");
 	CHECK(conform_travel_from_def(-20) == 0, "under 0 clamps");
-}
-
-// Radii come from the bounds band, and the spine has a FLOOR so a low or
-// narrow hull cannot collapse its probes to nothing.
-void test_radii() {
-	CHECK(conform_wheel_radius(0, 0x10000) == 0x4000,
-			"the wheel radius is a quarter of the band");
-
-	// A roomy hull takes the derived value.
-	const int32_t roomy = conform_spine_radius(0, 0x20000, 0, 0x20000);
-	CHECK(roomy > kConformSpineRadiusFloor, "a roomy hull derives its radius");
-
-	// A tight hull would derive something below the floor and is clamped up.
-	const int32_t tight = conform_spine_radius(0, 0x1000, 0, 0x1000);
-	CHECK(tight == kConformSpineRadiusFloor, "a tight hull clamps to the floor");
-	CHECK(tight > 0, "and never reaches zero");
 }
 
 // A wheel already past its travel limit ABSORBS NOTHING — that is what a
@@ -76,10 +61,25 @@ void test_compress_normal() {
 	// The phase is FORCED, not advanced, so a wheel re-entering oscillation
 	// always restarts from the same point on the curve.
 	CHECK(osc.phase == kOscPhasePreset, "the phase is preset, not advanced");
-	CHECK(impact < 100000, "the impact sink drains while positive");
+	// The sink drains by exactly half the doubled product: 2*3*100*100 / 2.
+	CHECK(impact == 100000 - 30000, "the impact sink drains spring * step^2");
 	// Energy floors at -1 rather than 0.
 	CHECK(osc.energy < 0, "energy goes negative under load");
 	CHECK(osc.energy == -1, "and floors at -1, not 0");
+}
+
+// The doubled product is computed ONCE and wraps as int32 before either half
+// is taken — past the wrap the two halves divide the WRAPPED double, which is
+// not the same as negating an unwrapped spring * step^2.
+void test_spring_term_wraps_as_the_doubled_product() {
+	ConformOscillator osc;
+	osc.energy = 0x7FFFFFFF; // far from the floor so the value survives
+	int32_t compression = 0;
+	int32_t impact = 0x7FFFFFFF;
+	// 2 * 0x10000 * 0x1000 * 0x1000 = 2^45 -> wraps to 0 as int32.
+	conform_spring_compress(osc, compression, impact, 0x1000, 0x7FFFFFFF, 0x10000);
+	CHECK(osc.energy == 0x7FFFFFFF, "a wrapped-to-zero product drains nothing");
+	CHECK(impact == 0x7FFFFFFF, "from either sink");
 }
 
 // The impact sink is ONE-DIRECTIONAL: it drains while positive and is left
@@ -94,8 +94,9 @@ void test_impact_sink_is_one_directional() {
 }
 
 // THE TWO DECAYS. Amplitude decays 0.99 every tick; the (11-shock)/11 damp
-// applies ONLY on the tick the wheel lands at zero compression. Conflating
-// them kills the bounce far too fast.
+// applies ONLY on the tick the wheel lands at zero compression, and then it
+// multiplies the amplitude that was just decayed. Conflating them kills the
+// bounce far too fast.
 void test_oscillator_two_decays() {
 	// Mid-bounce (compression will not land at 0): only the 0.99 applies.
 	{
@@ -104,67 +105,88 @@ void test_oscillator_two_decays() {
 		osc.phase = 0.0f; // sin(0.2616) > 0, so env > 0.5 -> compression > 0
 		int32_t compression = 0;
 		int32_t impact = 0;
-		conform_spring_oscillate(osc, compression, impact, 10, 3, false);
+		conform_spring_oscillate(osc, compression, impact, 10, 3, 0);
 		CHECK(compression > 0, "mid-bounce leaves the wheel compressed");
 		// 10000 * 0.99 = 9900, with no shock damp.
 		CHECK(osc.amplitude == 9900, "only the 0.99 decay applies mid-bounce");
 	}
 
-	// A landing (env resolves to 0 compression) also applies the shock damp.
+	// A landing (env resolves to 0 compression) also applies the shock damp,
+	// on top of the 0.99 — the order is decay first, then (11 - shock)/11.
 	{
 		ConformOscillator osc;
-		osc.amplitude = 0; // env * 0 == 0 -> lands
-		osc.phase = 0.0f;
+		osc.amplitude = 10000;
+		osc.phase = 4.4509f; // + 0.2617 = 3pi/2 -> sin = -1 -> env = 0
 		int32_t compression = 500;
 		int32_t impact = 0;
-		conform_spring_oscillate(osc, compression, impact, 10, 3, false);
+		conform_spring_oscillate(osc, compression, impact, 0, 3, 0);
 		CHECK(compression == 0, "the wheel lands");
+		// shock 0: (11 - 0) * (1/11) * 9900 = 9900 (the damp is unity).
+		CHECK(osc.amplitude == 9900 || osc.amplitude == 9899,
+				"a landing with shock 0 keeps the decayed amplitude");
 	}
-
-	// Shock strength changes the landing damp: 0 damps least, 10 most.
+	{
+		ConformOscillator osc;
+		osc.amplitude = 10000;
+		osc.phase = 4.4509f;
+		int32_t compression = 500;
+		int32_t impact = 0;
+		conform_spring_oscillate(osc, compression, impact, 10, 3, 0);
+		CHECK(compression == 0, "the wheel lands");
+		// shock 10: (11 - 10) * (1/11) * 9900 = 900 — the damp multiplies the
+		// DECAYED amplitude, not the original 10000 (which would give 909).
+		CHECK(osc.amplitude == 900 || osc.amplitude == 899,
+				"the landing damp multiplies the already-decayed amplitude");
+	}
+	// Shock out of range clamps into [0, 10] before the damp.
 	{
 		ConformOscillator a, b;
 		a.amplitude = b.amplitude = 10000;
-		a.phase = b.phase = 3.14159f; // sin ~ 0 -> env ~ 0.5
-		int32_t ca = 0, cb = 0, ia = 0, ib = 0;
-		// Force the landing arm by driving amplitude to 0 after the envelope.
-		a.amplitude = 0; b.amplitude = 0;
-		conform_spring_oscillate(a, ca, ia, 0, 3, false);
-		conform_spring_oscillate(b, cb, ib, 10, 3, false);
-		CHECK(ca == 0 && cb == 0, "both land");
+		a.phase = b.phase = 4.4509f;
+		int32_t ca = 500, cb = 500, ia = 0, ib = 0;
+		conform_spring_oscillate(a, ca, ia, 25, 3, 0);
+		conform_spring_oscillate(b, cb, ib, 10, 3, 0);
+		CHECK(a.amplitude == b.amplitude, "shock above 10 clamps to 10");
 	}
 
-	// The a0_negative flag damps a landing four times harder again.
+	// The entity+0xA0 threshold damps a landing four times harder; -2000
+	// itself does NOT (the test is strictly below).
 	{
-		ConformOscillator plain, damped;
-		plain.amplitude = damped.amplitude = 10000;
-		plain.phase = damped.phase = 4.712f; // sin ~ -1 -> env ~ 0 -> lands
-		int32_t cp = 0, cd = 0, ip = 0, id = 0;
-		conform_spring_oscillate(plain, cp, ip, 0, 3, false);
-		conform_spring_oscillate(damped, cd, id, 0, 3, true);
-		CHECK(damped.amplitude <= plain.amplitude,
-				"the a0 flag damps a landing at least as hard");
+		ConformOscillator plain, edge, damped;
+		plain.amplitude = edge.amplitude = damped.amplitude = 10000;
+		plain.phase = edge.phase = damped.phase = 4.4509f;
+		int32_t cp = 500, ce = 500, cd = 500, ip = 0, ie = 0, id = 0;
+		conform_spring_oscillate(plain, cp, ip, 0, 3, 0);
+		conform_spring_oscillate(edge, ce, ie, 0, 3, -2000);
+		conform_spring_oscillate(damped, cd, id, 0, 3, -2001);
+		CHECK(edge.amplitude == plain.amplitude, "-2000 exactly is not below");
+		CHECK(damped.amplitude == (plain.amplitude >> 2),
+				"below -2000 the landing is damped four times harder");
 	}
 }
 
-// The client runs a DIFFERENT spring scale from the authority. That is
-// witnessed, not a tuning knob to normalise away.
-void test_client_scale_is_distinct() {
-	CHECK(kClientSpringScale > 1.0f,
-			"the non-authority spring scale is not unity");
-	CHECK(kTimeScaleUnparked < 1.0f, "the unparked time scale slows the solve");
+// The disable-rate multiplier is a role difference, not a spring scale: the
+// two roles get different values, neither is unity. The spring dt is the
+// parked latch's: a parked vehicle settles four times faster.
+void test_disable_rate_is_a_role_difference() {
+	CHECK(kSuspensionDisableRateNonAuthority == 1.75f, "1.75 off the authority");
+	CHECK(kSuspensionDisableRateAuthority == 1.25f, "1.25 on it");
+	CHECK(kSuspensionDisableRateNonAuthority != kSuspensionDisableRateAuthority,
+			"the two roles settle at different rates");
+	CHECK(kSuspensionDtParked == 4.0f * kSuspensionDtUnparked,
+			"parked springs step 3.0 against 0.75 unparked");
 }
 
 } // namespace
 
 int main() {
 	test_travel_from_def();
-	test_radii();
 	test_compress_bottomed_absorbs_nothing();
 	test_compress_normal();
+	test_spring_term_wraps_as_the_doubled_product();
 	test_impact_sink_is_one_directional();
 	test_oscillator_two_decays();
-	test_client_scale_is_distinct();
+	test_disable_rate_is_a_role_difference();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;
