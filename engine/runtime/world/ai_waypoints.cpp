@@ -564,13 +564,31 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // to vehicle brains (stage-1 parse landed; patrol_altitude authored ~40u).
     constexpr int32_t kPatrolAglStandIn = 40 << 16;
 
-    if (b.f[AiBrain::kWpType] == 0) {
-        // No route: hover at patrol height. [orig: the no-target leg holds
-        // heading sweeps + def altitude; the sweep cadence is a follow-up]
+    // NO ROUTE -> the aircraft does not fly. Retail reads its waypoint target
+    // and then THROWS IT AWAY unless the brain carries a channel or a node, so
+    // the whole flight computation below - including the altitude command - is
+    // skipped. The altitude target therefore keeps whatever the parked leg last
+    // wrote (ground - 0x4000, collective off), which is why a crewed helicopter
+    // with no orders sits on its skids with the engine running and the blades
+    // turning instead of lifting off.
+    //
+    // This is 05TRcoop's whole co-op choreography: its WAC watches what the
+    // player is riding (`if area(24) and eq(v2,1) and not meride(423) then
+    // set(v2,2)`) and the BMS misvar triggers hand the group its route, so the
+    // helicopters wait on the ground until the script sends them.
+    //
+    // We previously gated on kWpType and, worse, commanded a 40 u AGL patrol
+    // hover here - so every routeless helicopter climbed and hovered the moment
+    // anyone sat in it.
+    // [orig: Entity_UpdateAircraftPhysics @0x490310, kong 120676 —
+    //  `v91 = brain[16]; if (!brain[15] && !brain[14]) v91 = nullptr;` and the
+    //  flight block's `if (v91 && brain[4] == 7)` guard; the altitude store
+    //  brain[131] lives INSIDE that guard @ kong 120816]
+    if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) {
         m.cmd_speed = 0;
         m.cmd_lateral_speed = 0;
         m.steer_target_bam = m.yaw_bam;
-        m.net_alt_target = ground + kPatrolAglStandIn;
+        // net_alt_target deliberately untouched — retail does not write it here.
         return;
     }
 

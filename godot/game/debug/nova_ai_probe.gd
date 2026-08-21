@@ -128,8 +128,20 @@ func tick(world: GameWorld, delta: float) -> void:
 		humans = int(outcome["humans"])
 	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards,
 			"ev": {"n": nfired, "of": fired.size(), "idx": fired_idx},
-			"humans": humans}))
+			"humans": humans,
+			# Mission variables v1..v8. 05TRcoop's WAC drives its whole co-op
+			# vehicle choreography through these (`if area(24) and eq(v2,1) and not
+			# meride(423) then set(v2,2)`), and the BMS misvar triggers turn them
+			# into the group orders. If they never move, no vehicle is ever ordered.
+			"mv": _mission_vars(sim)}))
 	f.close()
+
+
+func _mission_vars(sim: Simulation) -> Array:
+	var out: Array = []
+	for i in range(1, 9):
+		out.append(int(sim.get_mission_variable(i)))
+	return out
 
 
 func _shot_tick(world: GameWorld) -> void:
