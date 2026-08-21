@@ -34,6 +34,34 @@ enum class SeatHealthBand { Good, Middle, Bad };
 // change that edge, so the port keeps the asymmetry.
 SeatHealthBand seat_health_band(int32_t health, int32_t max_health);
 
+// The EMPLACEMENT occupant's band takes the other road: the ratio is clamped
+// to 1.0 and classified through the shared HUD_ClassifyHealthBand (signed
+// > 0xC000 Good, > 0x6FFF Middle) rather than the inline unsigned/signed pair
+// above [orig: the emplacement arm @0x5a54d3..0x5a54e3 — min(ratio, 0x10000)
+//  then HUD_ClassifyHealthBand @0x59c1f0, result 2 Good / 1 Middle / else Bad].
+// Behaviourally equal on every non-negative ratio; a negative ratio reads BAD
+// here where the rider arm reads Good — the asymmetry retail carries.
+SeatHealthBand emplacement_health_band(int32_t health, int32_t max_health);
+
+// THE SEAT-SELECT DIGIT. Every empty marker prints ONE digit through "%1d"
+// [orig: off_7D8E64 = "%1d"], and the number is the seat's 1-based position
+// in Entity_BuildWeaponSlotList's order with 10 folded to 0 — the key the
+// seat1..seat10 binding rows select with
+// [orig: passenger k -> (listPos + 1) % 10 @0x5a5283; the emplacement arm
+//  prints i + 2 @0x5a5602 (= its list position 1 + i, plus one); the driver
+//  arm prints 1 @0x5a57ee — its list position is always 0].
+// The list order itself [orig: Entity_BuildWeaponSlotList @0x434c60]: slot 0
+// the vehicle's control seat (type 8), then every attached gun child in the
+// def's gun-slot order (type 9), then the present passenger seats 0..7 by
+// seat index, capped at 10 entries.
+inline int seat_label_digit(int list_pos) {
+	return (list_pos + 1) % 10;
+}
+inline int emplace_label_digit(int gun_slot_index) {
+	return gun_slot_index + 2; // at most 4 gun slots, so never folds
+}
+inline constexpr int kDriverLabelDigit = 1;
+
 // The seat label's anchor: the marker box's CENTRE, floor-divided
 // [orig: baseX + w/2 + slotX, baseY + slotY + h/2 -- note the x form adds the
 //  half-extent before the slot offset and the y form after, which lands the

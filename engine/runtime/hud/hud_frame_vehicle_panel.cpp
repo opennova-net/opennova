@@ -66,8 +66,13 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 		if (!seat.occupied) continue;
 		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		seat_marker_rect(base_x, base_y, seat.x, seat.y, x0, y0, x1, y1);
-		const uint32_t fill =
-				band_color(layout_, seat_health_band(seat.health, seat.max_health));
+		// Riders and the driver band through the inline unsigned/signed pair;
+		// an emplacement occupant through the clamped shared classifier
+		// [orig: @0x5a507f/@0x5a508a vs @0x5a54d3..0x5a54e3].
+		const SeatHealthBand band = seat.is_emplacement
+				? emplacement_health_band(seat.health, seat.max_health)
+				: seat_health_band(seat.health, seat.max_health);
+		const uint32_t fill = band_color(layout_, band);
 		emit_rect(sx(static_cast<float>(x0), w), sy(static_cast<float>(y0), h),
 				sx(static_cast<float>(x1), w), sy(static_cast<float>(y1), h), fill,
 				true);
