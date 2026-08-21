@@ -1581,6 +1581,7 @@ void World::restore(const Snapshot &s) {
     throwables.reset();
     death_pieces.reset();
     destruction_rng.reset();
+    scars.reset();
     destruction = DestructionEvents{};
     // Round outcome + kill stats reset with the mission [orig: Game_StartMission —
     // gate clear @0x524a1f + the scoreboard-block memset @0x5249df; the stat buckets
