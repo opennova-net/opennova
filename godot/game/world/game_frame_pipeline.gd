@@ -51,6 +51,9 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 		_world.apply_blink_frame()
 	_world.apply_occlusion_frame()
 	_world.sample_iris_frame()
+	# The sun-veil stop-down feed for the weather ticks banked above (the
+	# veil alpha itself rides the Celestial shader-global push).
+	_world.render_sun_veil_frame()
 	# The EffectWorld point-light select for this camera (after iris publishes
 	# the frame's ambient scale, before the lit material draws consume the
 	# pushed globals).

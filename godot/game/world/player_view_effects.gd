@@ -10,6 +10,7 @@ extends Control
 # engine's HudPos constants/statics — the witnesses live at the engine home,
 # engine/runtime/hud hud/view_effects.h.
 const NVG_SHADER := preload("res://shaders/nvg_view.gdshader")
+const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
 
 var _root: ResourceRoot
 var _binocular_mask: Texture2D
@@ -18,6 +19,7 @@ var _binocular_numbers: Texture2D
 var _nvg_mask: Texture2D
 var _nvg_scale: Texture2D
 var _underwater_murk: ColorRect
+var _sun_veil: ColorRect
 var _nvg_post: ColorRect
 var _environment: MissionEnvironment
 var _environment_light_state: EnvLightState
@@ -38,6 +40,22 @@ func _ready() -> void:
 	add_child(_underwater_murk, false, Node.INTERNAL_MODE_BACK)
 	_underwater_murk.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_underwater_murk.visible = false
+	# The sun-glare screen veil: a fullscreen white quad whose alpha is the
+	# dot^32 glare byte, drawn over the complete scene [orig:
+	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 from
+	# Render_ProcessMainSceneFrame @ 0x5cac4b]. Celestial pushes the
+	# opennova_sun_veil_alpha shader global every advanced frame, so the rect
+	# needs no per-frame script drive and stays correct in frozen captures.
+	_sun_veil = ColorRect.new()
+	_sun_veil.name = "SunVeil"
+	_sun_veil.color = Color.WHITE
+	_sun_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sun_veil.show_behind_parent = true
+	var veil_material := ShaderMaterial.new()
+	veil_material.shader = SUN_VEIL_SHADER
+	_sun_veil.material = veil_material
+	add_child(_sun_veil, false, Node.INTERNAL_MODE_BACK)
+	_sun_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_nvg_post = ColorRect.new()
 	_nvg_post.name = "NvgPost"
 	_nvg_post.color = Color.WHITE

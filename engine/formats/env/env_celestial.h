@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "env/env.h" // Vec3
+
 // Celestial-side render state math: sun glare, the celestial body alphas,
 // the star field, glare occlusion, and the sky-dome constants + mesh
 // builder. Split from the retired env_render.h umbrella (W3-7).
@@ -22,6 +24,26 @@ struct GlareResult {
 // view_dot_sun is the cosine between the view direction and the sun; values
 // below 0 yield no glare. occlusion_brightness is the hysteresis state 0..255.
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness);
+
+// The sun-glare screen veil + exposure stop-down pair — the exact integer
+// chain of [orig: compute_sun_glare_and_fog_blend @ 0x5ad610], consumed once
+// per main scene frame by [orig: Environment_ApplySunVeilAndExposureStopdown
+// @ 0x5ad8b0 (ex sub_5AD8B0)]: `glare` (dot^32 x 192 x brightness/256, SunDim
+// and overcast folds) is the ALPHA byte of a fullscreen WHITE quad drawn over
+// the scene when > 2 ((glare << 24) + 0xFFFFFF -> render_fullscreen_decal_quad
+// @ 0x5ad94f), and `stopdown` (dot^128 x 40 x brightness/256, same folds) is
+// the modulator-2 exposure stop-down input (ModulatorChain::
+// set_sun_veil_stopdown). compute_sun_glare above is the earlier float
+// summary of the same curve, kept for the EnvFile tooling static.
+struct SunVeil {
+	int glare = 0;    // 0..255 fullscreen white veil alpha byte (draw gate > 2)
+	int stopdown = 0; // 0..40 modulator-2 exposure stop-down input
+};
+
+// view_dot_fixed is dot(view_forward, sun_direction) in 16.16;
+// occlusion_brightness the hysteresis state 0..256; sun_dim/overcast in 16.16.
+SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
+                          int sun_dim_fixed, int overcast_blend_fixed);
 
 // Occlusion hysteresis: target = 32 * visible_rays (0..8 rays), brightness
 // moves +-16 per frame toward it, clamped 0..255.
@@ -134,6 +156,51 @@ struct GlareOcclusionState {
 	int brightness = 0;        // Glare_OcclusionBrightness @ 0x27E2E30
 	uint32_t jitter_index = 0; // Glare_JitterFrameIndex @ 0x27E5690
 };
+
+// The coarse (unjittered) glare gate ray's start-height lift
+// [orig: render_skybox_sun_glow @ 0x5acde4 — start.z = camera_z + 1.0 +
+// 0.5 * (Glare_JitterFrameIndex & 3) world units; the two jittered fine rays
+// start at the exact camera height (@ 0x5ace37)].
+inline float glare_coarse_start_lift(uint32_t frame_index) {
+	return 1.0f + 0.5f * static_cast<float>(frame_index & 3u);
+}
+
+// ---------------------------------------------------------------------------
+// The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
+// main scene render from Terrain_RenderSceneWithReflection @ 0x5c96c0]: its
+// own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 8 =
+// visible) and +-16 brightness chase toward popcount * 64 (no dead-band, no
+// fog scale — dword_27E2E28). The settled brightness draws the glare model
+// mirrored below the eye (camera + sun * 128 with the HEIGHT term negated)
+// and, right-shifted 2, feeds the sun veil's secondary term
+// [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8dc..0x5ad916 —
+// both veil sums clamp 192].
+struct WaterGlintState {
+	uint8_t window = 0;        // dword_27E2E2C
+	int brightness = 0;        // dword_27E2E28
+	uint32_t frame_index = 0;  // dword_27E5694
+};
+
+// One frame: advance the frame index, shift the window, mark visibility,
+// step the brightness [orig: @ 0x5ad1cd..0x5ad356].
+void water_glint_tick(WaterGlintState &state, bool visible);
+
+// The reflected-sun point on the water plane [orig: sub_5AC040 — reflect the
+// camera about the water height (view_z_jitter = 0.25 * (frame & 3), the
+// caller's per-frame lift), then interpolate along sun * 2048 to the
+// surface]. Mission axes (x, y ground plane, z = height), world units.
+// Returns false when the geometry rejects (clip >= water height — no glint).
+// The caller then jitters the point x/z by +-2 from the frame index bits
+// [orig: @ 0x5ad26a..0x5ad27e] before the visibility rays.
+bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
+                       float water_height, float view_z_jitter,
+                       Vec3 &out_mission);
+
+// The glint submit alpha, 16.16 [orig: @ 0x5ad395..0x5ad41c]: (dot^4 -
+// 28672/65536) x brightness >> 8, the SunDim fold, >> 2; clamped [0, 1].
+// No overcast fold (unlike the sky glow).
+int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
+                            int sun_dim_fixed);
 
 struct GlareRayJitter {
 	float offset_eng_y = 0.0f; // engine Y axis (render/Godot -x)

@@ -1,5 +1,7 @@
 #include "env/nova_sky_dome.h"
 
+#include "env/env_axes.h"
+
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -208,10 +210,15 @@ void SkyDome::advance_frame(double p_delta) {
 			sky_material_->set_shader_parameter("u_cloud_edge",
 					to_vector3(frame.cloud_edge));
 		}
+		// The dome mesh is the engine layout drawn identity into the Godot
+		// world, so its shader dots GODOT-world sun/light vectors: route the
+		// render-float tuples through the env_axes.h swap (2026-08-20 — the
+		// identity mapping put the sun-proximity highlight 90 degrees off in
+		// yaw, the 03tr-sun-sky dome half).
 		sky_material_->set_shader_parameter("u_sun_dir",
-				to_vector3(frame.sun_dir));
+				render_float_to_godot(frame.sun_dir));
 		sky_material_->set_shader_parameter("u_light_dir",
-				to_vector3(frame.light_dir));
+				render_float_to_godot(frame.light_dir));
 		sky_material_->set_shader_parameter("u_fog_color",
 				to_vector3(frame.skyfog_color));
 		// The sky wrapper keeps its dedicated skyfog color on both sides of the

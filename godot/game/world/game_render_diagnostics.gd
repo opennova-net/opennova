@@ -32,6 +32,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 	var weather: Weather = world.get_weather_node()
 	var water: Water = world.get_water_node()
 	var sky := world.get_node_or_null("SkyDome") as SkyDome
+	var celestial := world.get_node_or_null("Celestial") as Celestial
 	var dynamic_shadow := world.get_node_or_null("SunShadow") as SunShadow
 	var terrain: Terrain = world.get_terrain_node()
 	var clear := world.get_node_or_null("ClearColor") as WorldEnvironment
@@ -55,6 +56,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 		"environment": _environment_state(env),
 		"weather": _weather_state(weather, camera),
 		"sky": _sky_state(sky),
+		"celestial": _celestial_state(celestial),
 		"water": _water_state(water, camera),
 		"terrain": _terrain_state(world),
 		"shadows": {
@@ -230,7 +232,24 @@ static func _weather_state(weather: Weather, camera: Camera3D) -> Dictionary:
 		"smooth_ceiling": weather.get_smooth_ceiling(),
 		"smooth_cloud": weather.get_smooth_cloud(),
 		"smooth_floor": weather.get_smooth_floor(),
+		# The marched iris-exposure feed (D-RLIT-2): the stamped per-sample
+		# classification codes distinguish a starved capture (empty) from a
+		# settled one.
+		"iris_samples": Array(weather.get_iris_samples()),
 	}
+
+
+# Celestial bodies + the glare occlusion accumulator (docs/env/env-tod-re.md
+# "Celestial bodies"): per-body opacity/visibility and the glare
+# brightness/window make "occluded", "starved", and "model absent"
+# distinguishable in a captured fixture state.
+static func _celestial_state(celestial: Celestial) -> Dictionary:
+	if celestial == null:
+		return {"available": false}
+	var state: Dictionary = celestial.get_diagnostics()
+	state["available"] = true
+	state["visible"] = celestial.is_visible_in_tree()
+	return state
 
 
 static func _sky_state(sky: SkyDome) -> Dictionary:

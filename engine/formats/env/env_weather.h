@@ -350,6 +350,31 @@ struct ModulatorChain {
 		modulator2.snap(kModulatorIdentityPacked);
 	}
 
+	// The sun-veil exposure stop-down — modulator-2's ONLY witnessed target
+	// writer [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0
+	// (ex sub_5AD8B0), per main scene frame]: a positive stop-down (the
+	// dot^128 sun-veil output, clamped 40) dims modulator-2 toward
+	// 64 - (3 * stopdown) >> 1 chased over 8 ticks (@ 0x5ad96a..0x5ad989);
+	// zero releases it back to identity over 124 ticks (@ 0x5ad996..0x5ad9a7).
+	// Every color block then modulates through modulator-2 via the modulator,
+	// so staring into the sun stops the whole frame down while the white veil
+	// blooms.
+	void set_sun_veil_stopdown(int stopdown) {
+		if (stopdown > 0) {
+			if (stopdown > 40) {
+				stopdown = 40;
+			}
+			modulator2.target = 0x10101u *
+					static_cast<uint32_t>(64 - ((3 * stopdown) >> 1));
+			modulator2.set_step_deltas(8);
+		} else {
+			// The witnessed release writes the raw 0x404040 (like the
+			// modulator's own 0x10101 * gain targets, the alpha byte is 0).
+			modulator2.target = 0x404040u;
+			modulator2.set_step_deltas(124);
+		}
+	}
+
 	// Set the exposure target from an iris gain (0..255, 64 = identity):
 	// target = 0x10101 * gain, chased over 62 ticks
 	// [orig: @ 0x57e512..0x57e538].

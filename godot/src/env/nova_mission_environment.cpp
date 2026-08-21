@@ -1,5 +1,7 @@
 #include "env/nova_mission_environment.h"
 
+#include "env/env_axes.h"
+
 #include <environment/water_frame.h>
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -432,17 +434,20 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 	Ref<EnvLightValues> defaults = EnvLightValues::retail_noon_defaults();
 	opennova::env::WorldLightValues out;
-	const opennova::env::Vec3 default_dir{
-		static_cast<float>(defaults->dir.x),
-		static_cast<float>(defaults->dir.y),
-		static_cast<float>(defaults->dir.z)};
+	// The engine computes in the render-float axes; the published defaults
+	// are a Godot-world vector, so they cross the env_axes.h swap on the way
+	// in, and the built direction crosses back on the way out (the
+	// 2026-08-20 celestial-axis correction: the identity mapping lit every
+	// object from a direction 90 degrees off in yaw and mirrored — the
+	// 03tr-sun-sky "front-lit where retail backlights" half).
+	const opennova::env::Vec3 default_dir = godot_to_render_float(defaults->dir);
 	if (!state_.build_light_values(default_dir, out, underwater_view_)) {
 		return defaults;
 	}
 	Ref<EnvLightValues> v;
 	v.instantiate();
 	v->hemi_sky = to_vector3(out.hemi_sky);
-	v->dir = to_vector3(out.dir);
+	v->dir = render_float_to_godot(out.dir);
 	v->dir_color = to_vector3(out.dir_color);
 	v->hemi_ground = to_vector3(out.hemi_ground);
 	v->ceiling = to_vector3(out.ceiling);
@@ -849,16 +854,21 @@ float MissionEnvironment::get_water_height() const {
 	return state_.water_height();
 }
 
+// The engine state serves the render-float tuple; these Godot-facing getters
+// serve the GODOT-world direction through the env_axes.h swap (2026-08-20).
+// Raw-tuple consumers (the opennova_sun_direction global and the terrain
+// u_sun_direction uniform, whose shaders re-swizzle into the engine texture
+// basis; the star-field cull) read state_ directly and never route here.
 Vector3 MissionEnvironment::get_sun_direction() const {
-	return to_vector3(state_.sun_direction());
+	return render_float_to_godot(state_.sun_direction());
 }
 
 Vector3 MissionEnvironment::get_moon_direction() const {
-	return to_vector3(state_.moon_direction());
+	return render_float_to_godot(state_.moon_direction());
 }
 
 Vector3 MissionEnvironment::get_light_direction() const {
-	return to_vector3(state_.light_direction());
+	return render_float_to_godot(state_.light_direction());
 }
 
 bool MissionEnvironment::is_night_phase() const {
