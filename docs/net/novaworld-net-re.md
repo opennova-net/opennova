@@ -6519,7 +6519,11 @@ sink/colour table (`hud::chat_channel_sink/color` — no local-team term; 0 and
 ≥ 15 → the SYSTEM ring, 8 → the message queue, 14 → the never-drawn third ring,
 13 → colour [0] + the unported `HUD_SetTrackedEntityTarget` leg); the HUDCHATTEXT
 feed loop and the J-key Recent Messages window draw it (hud-re.md §The message
-feeds / §The Recent Messages window; D-HUD-6 narrowed).
+feeds / §The Recent Messages window; D-HUD-6 narrowed). **Named residual** (the
+final review, 2026-08-21): the dispatcher's SENDER gate — `slot+0x4A & 2` (muted)
+and `slot+0x46 && !g_spawn_success_gate` (a spectator while the round runs) each
+drop the line — is applied NOWHERE in the port; `ClientRosterSlot` carries
+neither slot byte. No D-row.
 **§5.52a** C2S 0x0A SPAWN-MENU REQUEST (len 0) `[orig: NapiNPServerMsg_HandlePlayerSpawnRequest
 @ 0x513260]`: game state → 9 (spawning), session+32 = 4, replies **S2C 0x19** = `[u32 timestamp]`
 (NetPacket_WriteTimestampB) to the requester only → client stores it in `dword_A82360` (read by the
