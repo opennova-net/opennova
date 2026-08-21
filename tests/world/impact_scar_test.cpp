@@ -6,6 +6,9 @@
 
 #include <cstdio>
 
+#include <world/collision.h>
+#include <world/world.h>
+
 using namespace opennova::world;
 
 namespace {
@@ -143,6 +146,161 @@ void test_tangent_ladder() {
 	CHECK(perpendicular(-0x10000, 0, 0, t), "-X face");
 }
 
+// The basis: unit tangent/bitangent, perpendicular to the normal and to each
+// other, right-handed about the normal, spun by the word.
+void test_basis() {
+	const int32_t n[3] = {0, 0, 0x10000}; // +Z face
+	int32_t a[3], b[3];
+	scar_basis(n, 0, a, b);
+	const auto len2 = [](const int32_t v[3]) {
+		return (int64_t(v[0]) * v[0] + int64_t(v[1]) * v[1] + int64_t(v[2]) * v[2]) >> 16;
+	};
+	CHECK(len2(a) > 0xFF00 && len2(a) < 0x10100, "the tangent is unit length");
+	CHECK(len2(b) > 0xFF00 && len2(b) < 0x10100, "the bitangent is unit length");
+	CHECK(int64_t(n[0]) * a[0] + int64_t(n[1]) * a[1] + int64_t(n[2]) * a[2] == 0,
+			"the tangent lies in the face plane");
+	CHECK(int64_t(a[0]) * b[0] + int64_t(a[1]) * b[1] + int64_t(a[2]) * b[2] == 0,
+			"the pair is perpendicular");
+	// A quarter-turn word (16384) swaps the pair.
+	int32_t a2[3], b2[3];
+	scar_basis(n, 16384, a2, b2);
+	const auto close = [](int32_t x, int32_t y) { return x - y < 64 && y - x < 64; };
+	CHECK(close(a2[0], b[0]) && close(a2[1], b[1]) && close(a2[2], b[2]),
+			"a quarter turn rotates the tangent onto the bitangent");
+	CHECK(close(b2[0], -a[0]) && close(b2[1], -a[1]) && close(b2[2], -a[2]),
+			"and the bitangent onto the negated tangent");
+}
+
+// THE CACHE: rings lease per owner, wrap at 256, never evict, and clear on
+// death; the terrain ring is always there.
+void test_cache() {
+	ScarCache cache;
+	CHECK(cache.leased_count() == 0, "empty at start");
+	const EntityHandle h = EntityHandle::make(1, 5);
+	ScarRing *ring = cache.ring_for(h, 100);
+	CHECK(ring != nullptr && ring->owner == h, "a ring leases to the owner");
+	CHECK(cache.ring_for(h, 100) == ring, "the same owner finds its ring");
+	CHECK(cache.leased_count() == 1, "one lease");
+	// 257 writes wrap the cursor onto slot 0.
+	for (int i = 0; i < 257; ++i) {
+		ring->slots[ring->cursor].live = true;
+		ring->slots[ring->cursor].texture = static_cast<uint8_t>(i % 4);
+		ring->advance_cursor();
+	}
+	CHECK(ring->cursor == 1, "257 writes leave the cursor at 1");
+	CHECK(ring->slots[0].texture == 0 && ring->slots[0].live,
+			"the 257th impact overwrote slot 0 (texture 256 % 4 == 0)");
+	// A reused handle with a new spawn id gets a FRESH ring, not the stale one.
+	ScarRing *reused = cache.ring_for(h, 101);
+	CHECK(reused == ring, "the same cache entry is re-leased");
+	CHECK(reused->cursor == 0 && !reused->slots[0].live, "and it starts empty");
+	CHECK(reused->lease == 101, "under the new lease");
+	// Fill the cache: the 129th distinct owner gets nothing.
+	for (int i = 0; i < kScarCacheEntities - 1; ++i)
+		CHECK(cache.ring_for(EntityHandle::make(2, i), 1) != nullptr, "rings lease until full");
+	CHECK(cache.leased_count() == kScarCacheEntities, "all 128 leased");
+	CHECK(cache.ring_for(EntityHandle::make(3, 1), 1) == nullptr,
+			"a miss with no free ring leaves no scar");
+	CHECK(cache.ring_for(EntityHandle::make(2, 3), 1) != nullptr,
+			"an existing owner still finds its ring when full");
+	// The death clear releases the ring.
+	cache.clear_entity(EntityHandle::make(2, 3));
+	CHECK(cache.find(EntityHandle::make(2, 3)) == nullptr, "cleared owner has no ring");
+	CHECK(cache.leased_count() == kScarCacheEntities - 1, "the ring is free again");
+	CHECK(cache.ring_for(EntityHandle::make(3, 1), 1) != nullptr, "and a new owner can take it");
+	// The terrain ring is the invalid-handle owner.
+	CHECK(cache.ring_for(EntityHandle{}, 0) == &cache.terrain_ring(), "alloc 0 = terrain");
+	cache.reset();
+	CHECK(cache.leased_count() == 0, "reset releases everything");
+}
+
+// THE SLOT WRITER through a World: the gates, the PRNG discipline on the
+// SHARED stream (two draws for the scorch, one for the fallback), and the
+// slot contents.
+void test_add_entry() {
+	World world;
+	world.registry.configure_pool(1, 4);
+	Entity e;
+	e.kind = EntityKind::Item;
+	e.position = {0.0f, 0.0f, 0.0f};
+	const EntityHandle h = world.registry.spawn(1, e);
+	const Entity *target = world.registry.get(h);
+	CHECK(target != nullptr, "the target spawned");
+	world.env.water_z = 0x10000; // water at 1.0
+
+	ProjectileHit hit;
+	hit.hit_class = ProjectileHitClass::DynamicEntity;
+	hit.geometry_entity = h;
+	hit.position_q16 = FixedVec3{3 * 0x10000, 4 * 0x10000, 5 * 0x10000};
+	hit.normal_q16 = FixedVec3{0, 0, 0x10000};
+	hit.surface_type = 3;
+	hit.bone_index = 2;
+
+	// A scorch: two draws (texture, then spin).
+	const uint32_t before = world.prng16_state;
+	CHECK(scar_add_entry(world, hit, target), "an ordinary face takes a scar");
+	uint32_t expect = before;
+	{
+		World probe;
+		probe.prng16_state = before;
+		probe.next_prng16();
+		probe.next_prng16();
+		expect = probe.prng16_state;
+	}
+	CHECK(world.prng16_state == expect, "the scorch draws exactly two words");
+	const ScarRing *ring = world.scars.find(h);
+	CHECK(ring != nullptr && ring->cursor == 1, "one slot written");
+	if (ring != nullptr) {
+		const ScarSlot &s = ring->slots[0];
+		CHECK(s.live, "the slot is live");
+		CHECK(s.pos[0] == 3 * 0x10000 && s.pos[2] == 5 * 0x10000, "the hit point");
+		CHECK(s.radius_q16 == kScarRadiusNormalQ16, "the scorch radius");
+		CHECK(s.texture <= 3, "one of the four scorch strips");
+		CHECK(s.bone == 2, "the bone index");
+		CHECK(!s.building, "an item is not a building");
+	}
+
+	// The fallback (surface 15): ONE draw, the single bhole strip, half radius.
+	hit.surface_type = 15;
+	const uint32_t before2 = world.prng16_state;
+	CHECK(scar_add_entry(world, hit, target), "surface 15 takes the fallback");
+	{
+		World probe;
+		probe.prng16_state = before2;
+		probe.next_prng16();
+		CHECK(world.prng16_state == probe.prng16_state,
+				"the fallback draws exactly one word (the spin)");
+	}
+	if (ring != nullptr) {
+		CHECK(ring->slots[1].texture == kScarGlassFallbackTextureStrip, "bhole1");
+		CHECK(ring->slots[1].radius_q16 == kScarRadiusGlassFallbackQ16, "half radius");
+	}
+
+	// The gates draw NOTHING.
+	const uint32_t before3 = world.prng16_state;
+	hit.surface_type = 3;
+	hit.material_flags = 0x400u;
+	CHECK(!scar_add_entry(world, hit, target), "face flag 0x400 takes no scar");
+	hit.material_flags = 0;
+	hit.position_q16.z = 0x8000; // below the water plane
+	CHECK(!scar_add_entry(world, hit, target), "below water takes no scar");
+	hit.position_q16.z = 5 * 0x10000;
+	CHECK(world.prng16_state == before3, "a gated impact advances no stream word");
+	// A husk takes none either.
+	Entity *mut = world.registry.get(h);
+	mut->engine_flags |= kEntityFlagHusk;
+	CHECK(!scar_add_entry(world, hit, mut), "a husk takes no scar");
+	mut->engine_flags &= ~kEntityFlagHusk;
+
+	// The terrain ring takes a null target.
+	CHECK(scar_add_entry(world, hit, nullptr), "a terrain hit writes the terrain ring");
+	CHECK(world.scars.terrain_ring().cursor == 1, "in the terrain ring");
+
+	// Death clears the entity's ring.
+	world.scars.clear_entity(h);
+	CHECK(world.scars.find(h) == nullptr, "the ring is gone after the clear");
+}
+
 } // namespace
 
 int main() {
@@ -152,6 +310,9 @@ int main() {
 	test_gates();
 	test_spin();
 	test_tangent_ladder();
+	test_basis();
+	test_cache();
+	test_add_entry();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

@@ -571,9 +571,10 @@ void process_destructible_death(World &world, Entity &target) {
         }
         ev.debris_triangles += static_cast<int32_t>(samples.size());
     }
-    // Scar clear (Scar_ClearEntriesByEntity @ 0x5ccec0) — the scar ring
-    // policy is staged in world/impact_scar.h (D-ITEM-6); the per-entity
-    // cache, its clear and the ring renderer are unported; tracked §24.
+    // The dying entity's scar ring is cleared before the husk flag lands
+    // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 (thunk @0x43a950), called
+    //  from the death chain ahead of Flags |= 6 @ 0x43fbf6].
+    world.scars.clear_entity(target.handle);
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk); // [orig: Flags |= 6 @ 0x43fbf6]
     target.alive = false;
     target.health = 0;
@@ -793,6 +794,9 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         break;
     }
     if (!matched_row) target.engine_flags &= ~kEntityFlagBuilding;
+    // The second death entry clears the scar ring the same way
+    // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 ahead of the Flags |= 6].
+    if (!was_husked) world.scars.clear_entity(target.handle);
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;

@@ -1,8 +1,15 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <vector>
+
+#include "world/entity.h"
 
 namespace opennova::world {
+
+class World;
+struct ProjectileHit;
 
 // IMPACT SCARS — the marks ordinary ammo leaves on what it hits.
 //
@@ -157,5 +164,100 @@ inline void scar_tangent(int32_t nx, int32_t ny, int32_t nz, int32_t out[3]) {
 	if (ax > az) { out[0] = -ny; out[1] = nx; out[2] = 0; }          // @0x5CCA19
 	else { out[0] = 0; out[1] = nz; out[2] = -ny; }                  // @0x5CCA2E
 }
+
+// THE SCAR TEXTURE STRIP: 32-byte names at @0x8413A8, indexed by the slot's
+// texture byte. Ordinary fire reaches strips 0..3 (scorch1..4) and 27 (bhole1);
+// the other strips belong to scar ids no bullet selects and are not named here.
+inline constexpr int kScarTextureStripCount = 32;
+inline const char *scar_texture_strip_name(int strip) {
+	switch (strip) {
+	case 0: return "scorch1.tga";
+	case 1: return "scorch2.tga";
+	case 2: return "scorch3.tga";
+	case 3: return "scorch4.tga";
+	case 27: return "bhole1.tga";
+	default: return "";
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE RING CACHE — the slot layout Scar_AddEntry @0x5CC830 writes and
+// Scar_RenderCache @0x5CD830 reads. Relative to the slot's owner dword
+// (`cache + 60 + 64*i`): owner ptr +0 (nonzero = live), texture index -4,
+// radius Q16 -8, position Q16[3] -20, axis A Q16[3] -44, axis B Q16[3] -32,
+// the is-building byte +4 and the bone index byte +5 (bone matrix =
+// `bones + bone << 6` at render time).
+// ---------------------------------------------------------------------------
+struct ScarSlot {
+	int32_t pos[3] = {0, 0, 0};    // Q16 [orig: slot-20]
+	int32_t axis_a[3] = {0, 0, 0}; // Q16 unit tangent [orig: slot-44]
+	int32_t axis_b[3] = {0, 0, 0}; // Q16 unit bitangent [orig: slot-32]
+	int32_t radius_q16 = 0;        // [orig: slot-8]
+	uint8_t texture = 0;           // strip index [orig: slot-4]
+	uint8_t bone = 0;              // [orig: slot+5]
+	bool building = false;         // [orig: slot+4]
+	bool live = false;             // [orig: slot+0 owner nonzero]
+};
+
+// One entity's ring: 256 slots behind an owner and a cursor
+// [orig: the 16392-byte cache entry; the cursor dword at +0x4004].
+struct ScarRing {
+	EntityHandle owner;   // invalid = the terrain ring (alloc 0)
+	uint64_t lease = 0;   // the owner's registry spawn id at allocation
+	bool in_use = false;
+	uint32_t cursor = 0;  // [orig: Scar_AdvanceRingCursor @0x5CC1D0]
+	std::array<ScarSlot, kScarsPerEntity> slots;
+
+	void clear();
+	// The witnessed advance: `++cursor; if (cursor >= 256) cursor = 0`.
+	void advance_cursor();
+};
+
+// The 128-ring entity cache plus the terrain ring. Rings are keyed by the
+// owner's handle AND its registry spawn id (retail keys by entity pointer
+// with no eviction; a reused slot therefore inherited a dead owner's ring —
+// the generation lease is the same fold LightScene applies: a handle reused
+// by a new spawn gets a fresh ring, never the stale one).
+class ScarCache {
+public:
+	ScarCache();
+
+	// Find the owner's ring, leasing a free one on a miss. Null when every
+	// ring is leased to another live owner — the impact then leaves NO scar
+	// [orig: Scar_GetEntityCache @0x5CC4C0, the miss @0x5CC979..0x5CC983].
+	ScarRing *ring_for(EntityHandle owner, uint64_t lease);
+	const ScarRing *find(EntityHandle owner) const;
+	ScarRing &terrain_ring() { return terrain_; }
+	const ScarRing &terrain_ring() const { return terrain_; }
+	const std::vector<ScarRing> &entity_rings() const { return rings_; }
+
+	// The death clear [orig: Scar_ClearEntriesByEntity @0x5ccec0]: every slot
+	// of the owner's ring is dropped and the ring is released.
+	// WITNESS PENDING: whether retail releases the ring (owner dword zeroed)
+	// or only its entries — ported as a release so dead owners do not starve
+	// the 128-ring cache for the rest of the mission.
+	void clear_entity(EntityHandle owner);
+	void reset();
+	int leased_count() const;
+
+private:
+	std::vector<ScarRing> rings_; // kScarCacheEntities
+	ScarRing terrain_;
+};
+
+// Build the quad basis for a Q16 unit normal: the witnessed tangent ladder,
+// normalised, crossed for the bitangent, handedness-fixed, then spun about the
+// normal by the PRNG word [orig: Scar_AddEntry @0x5CC9DA..0x5CCB7B].
+void scar_basis(const int32_t normal_q16[3], uint16_t spin_word,
+		int32_t out_a[3], int32_t out_b[3]);
+
+// Write one scar for a round stop. `target` is the struck item/building (its
+// ring), or null for the terrain ring. Applies the gates in order (water
+// plane, husk, face flag 0x400), picks the scar id from the hit's surface
+// byte, draws the texture word (normal scar only) and the spin word from the
+// SHARED mission stream, and appends at the ring cursor. Returns true when a
+// slot was written. [orig: Impact_SpawnGlassEffectsOrScar @0x5CF1B0 ->
+// Scar_AddEntry @0x5CC830]
+bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity *target);
 
 } // namespace opennova::world

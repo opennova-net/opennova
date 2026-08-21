@@ -28,6 +28,7 @@
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
 #include "world/ammo_table.h"
+#include "world/impact_scar.h"
 #include "world/round_sim.h"
 #include "world/throwables.h"
 #include "world/vehicle_motor.h"
@@ -401,6 +402,11 @@ public:
     DestructionRng destruction_rng;
     ItemDeathTraitsTable item_death_traits;
     DestructionEvents destruction;
+    // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
+    // terrain ring, written by the round stop and cleared on death. Presentation
+    // state — the shell compiles it into quads each frame; it is NOT part of the
+    // snapshot (retail's caches live beside the renderer, not the entity pools).
+    ScarCache scars;
 
     // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
     RoundEndState round_end;

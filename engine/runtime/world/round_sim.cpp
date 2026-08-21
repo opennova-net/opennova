@@ -15,6 +15,7 @@
 #include "world/ammo_table.h"
 #include "world/angle.h"
 #include "world/collision.h"
+#include "world/impact_scar.h"
 #include "world/infantry.h"
 #include "world/round_move_effect.h"
 #include "world/throwables.h"
@@ -805,6 +806,18 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
                     impacts.push_back(imp);
+                    // The knife leaf runs the same impact-effect processor,
+                    // so a stab into an item/building/terrain leaves the
+                    // same scar. WITNESS PENDING: Weapon_RaycastAndSpawnImpact
+                    // @0x4e8460's processor call reaching the scar fall-through.
+                    if (hit.hit_class == ProjectileHitClass::StaticEntity ||
+                        hit.hit_class == ProjectileHitClass::DynamicEntity) {
+                        if (const Entity *struck =
+                                world.registry.get(hit.geometry_entity))
+                            scar_add_entry(world, hit, struck);
+                    } else if (hit.hit_class == ProjectileHitClass::Terrain) {
+                        scar_add_entry(world, hit, nullptr);
+                    }
                 }
             }
         } else if (impacts.size() < kMaxPendingImpacts) {
@@ -1520,6 +1533,21 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         imp.tick = world.logic_tick;
         imp.source_order = next_impact_order++;
         if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+
+        // The impact scar: an ordinary round stop on an item, a building or
+        // the terrain writes one ring slot (water and persons never do;
+        // the glass-group userpoint leg stays separate) [orig: the impact
+        // effect processor AmmoDef_ProcessImpactEffect @0x40a264 ->
+        // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830].
+        // WITNESS PENDING: the bullet-path GLASS1..4 userpoint leg
+        // @0x5cf217..0x5cf289 that runs before the scar fall-through.
+        if (collision.hit_class == ProjectileHitClass::StaticEntity ||
+            collision.hit_class == ProjectileHitClass::DynamicEntity) {
+            if (impact_target != nullptr)
+                scar_add_entry(world, collision, impact_target);
+        } else if (collision.hit_class == ProjectileHitClass::Terrain) {
+            scar_add_entry(world, collision, nullptr);
+        }
 
         // Every explosive round stop queues its authored kill zone. The queue
         // drains after the round simulation, preserving direct-hit-before-AoE
