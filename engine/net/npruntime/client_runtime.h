@@ -377,6 +377,13 @@ public:
 			int32_t value_limit = 0;         // DWORD 10
 			int32_t value_rate = 0;          // DWORD 11
 			bool value_active = false;       // DWORD 12
+			// The two in-radius contest counts the 0x6F value carries, stored
+			// on the zone ENTITY by the retail handler (+0x220 the owning
+			// side's, +0x221 the other side's) and read by the AAS status
+			// panel's marker [orig: NapiNPClientMsg_ZoneTimerValue stores
+			//  @0x428e79/@0x428e7f; HUD_DrawZoneMarker reads @0x598866/@0x599009].
+			uint8_t contest_owner = 0;
+			uint8_t contest_other = 0;
 		} entry;
 	};
 	const std::unordered_map<uint16_t, ZoneState> &zone_states() const {

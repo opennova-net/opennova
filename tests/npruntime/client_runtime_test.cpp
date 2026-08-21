@@ -2465,6 +2465,12 @@ bool run_host_zone_timer_value_matches_retail_entry() {
 	if (!expect(host_view.lfp_cam_percent(kZone, percent) && percent == 32715,
 	            "zone value: later 0x6F re-targets without replacing current"))
 		return false;
+	// The two contest bytes ride the same message onto the live entry — the AAS
+	// status panel's in-radius counts [orig: @0x428e79/@0x428e7f].
+	if (!expect(host_view.zone_states().at(kZone).entry.contest_owner == 0xCC &&
+	                    host_view.zone_states().at(kZone).entry.contest_other == 0xDD,
+	            "zone value: the 0x6F contest bytes are retained on the entry"))
+		return false;
 
 	// Two messages in one receive pump apply in FIFO order, then the list advances
 	// exactly once with the final message's rate: 619 - 9 = 610.
