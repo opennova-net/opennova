@@ -54,6 +54,11 @@ func test_admission_caps_follow_the_retail_patch_and_capture_budgets() -> void:
 	var shadow := SlotShadow.new()
 	add_child_autofree(shadow)
 	shadow.set_environment_node(environment)
+	# The caster group is scene-tree wide: guard the absolute counts below
+	# against a caster another test left enabled.
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["registered"]), 0,
+			"no caster from another test is still in the slot group")
 	for i in range(30):
 		var _model := _caster_at(4.0 + 2.0 * float(i))
 	shadow.advance_frame()
@@ -88,6 +93,47 @@ func test_admitted_casters_carry_exactly_one_capture_channel() -> void:
 	shadow.advance_frame()
 	assert_eq(mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, 0,
 			"a released caster loses its capture channel")
+
+
+func _child_shares_parent_channel(parent_first: bool) -> void:
+	# The retail child walk renders a capture-with child (held weapon, mounted
+	# child) into its PARENT's slot RT (RenderSlot_RenderEntityAndChildren
+	# @0x5d78ef..0x5d79d6); the child's own slot is excluded. Registration
+	# order must not matter: the child's own (excluded) row once cleared the
+	# bit the parent's row had just stamped.
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := SlotShadow.new()
+	add_child_autofree(shadow)
+	shadow.set_environment_node(environment)
+	var parent: ObjectModel
+	var child: ObjectModel
+	if parent_first:
+		parent = _caster_at(5.0)
+		child = _caster_at(5.5)
+	else:
+		child = _caster_at(5.5)
+		parent = _caster_at(5.0)
+	child.set_slot_shadow_capture_with(parent)
+	shadow.advance_frame()
+	var parent_mesh := parent.get_child(0) as VisualInstance3D
+	var child_mesh := child.get_child(0) as VisualInstance3D
+	var parent_bits: int = parent_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
+	var order := "parent first" if parent_first else "child first"
+	assert_ne(parent_bits, 0, "the parent captures (%s)" % order)
+	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, parent_bits,
+			"the linked child renders into its parent's slot RT (%s)" % order)
+	assert_eq(int(shadow.get_report()["captures"]), 1,
+			"the child's own slot is excluded (%s)" % order)
+
+
+func test_capture_with_child_rides_its_parent_slot_parent_registered_first() -> void:
+	_child_shares_parent_channel(true)
+
+
+func test_capture_with_child_rides_its_parent_slot_child_registered_first() -> void:
+	_child_shares_parent_channel(false)
 
 
 func test_local_player_first_person_drape_gates() -> void:

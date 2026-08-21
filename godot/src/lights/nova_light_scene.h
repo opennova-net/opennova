@@ -8,8 +8,12 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+
+#include <vector>
 
 #include <renderer/light_scene.h>
+#include <renderer/render_slot_shadow.h>
 
 namespace godot {
 
@@ -76,14 +80,20 @@ public:
 			const PackedInt32Array &p_interior_sections,
 			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather);
 
+	// The procedural corona texture "texlightcrn" as RGB8 bytes,
+	// corona_texture_size() square — renderer::corona_texture_byte carries
+	// the law; this only lays the gray bytes out for Image::create_from_data.
+	static int corona_texture_size();
+	static PackedByteArray corona_texture_rgb8();
+
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):
 	// entity-centered collect + group-gated params, no D3D-fill boost
 	// (retail: RenderSlot_UpdateEntityLight @0x5d6a30, see
-	// docs/render/render-lighting-re.md). Entries: position (Godot world),
-	// color (Vector3), attenuation (Vector4 D3D form), handle (int64).
-	TypedArray<Dictionary> slot_shadow_lights(const Vector3 &p_world_pos,
-			float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
-			Object *p_weather);
+	// docs/render/render-lighting-re.md). A C++ seam: fills the planner's
+	// typed inputs (positions in Godot world) and returns the count.
+	size_t slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
+			const Vector3 &p_ambient_scale, int p_time_ms, Object *p_weather,
+			std::vector<renderer::SlotPointLight> &r_out);
 
 	// The corona billboard rows for this frame (retail:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on

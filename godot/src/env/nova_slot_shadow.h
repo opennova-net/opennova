@@ -10,6 +10,8 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/projection.hpp>
 
+#include <vector>
+
 #include <renderer/render_slot_shadow.h>
 
 namespace godot {
@@ -36,6 +38,10 @@ class ResourceRoot;
 // mounted/standing children capture through their own slots rather than the
 // parent's RT walk; the attached-light drape darkening folds the light's
 // attenuation at the entity into the per-slot term.
+//
+// Driven once per display frame by GameFramePipeline through
+// GameWorld.render_slot_shadow_frame(), after the light select has pushed
+// this frame's LightScene and context into it — never self-clocked.
 class SlotShadow : public Node3D {
 	GDCLASS(SlotShadow, Node3D)
 
@@ -70,15 +76,14 @@ public:
 	void set_local_player_first_person(bool p_first_person);
 	void set_local_player_prone(bool p_prone);
 
+	// One display frame: plan, stamp the capture channels, steer the capture
+	// cameras, publish the drape terms.
 	void advance_frame();
 	Dictionary get_report() const;
 
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
-
-public:
-	void _process(double p_delta) override;
 
 private:
 	struct CasterInfo {
@@ -99,6 +104,8 @@ private:
 	// instance id -> applied capture bit (for removal on churn).
 	HashMap<uint64_t, uint32_t> applied_bits_;
 	HashMap<String, Ref<Texture2D>> blob_textures_;
+	// The per-slot dominant-light query buffer (reused across frames).
+	std::vector<renderer::SlotPointLight> slot_lights_;
 	ObjectID environment_node_id_;
 	Ref<LightScene> light_scene_;
 	Vector3 light_gain_ = Vector3(1, 1, 1);

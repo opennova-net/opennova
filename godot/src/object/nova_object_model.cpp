@@ -4,6 +4,8 @@
 
 #include "object/nova_object_model.h"
 
+#include "env/nova_slot_shadow.h"
+
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -239,7 +241,7 @@ void ObjectModel::update_slot_shadow_group() {
 	if (!is_inside_tree()) {
 		return;
 	}
-	const StringName group("nova_slot_shadow_casters");
+	const StringName &group = SlotShadow::caster_group();
 	if (is_shadow_caster_enabled()) {
 		if (!is_in_group(group)) {
 			add_to_group(group);

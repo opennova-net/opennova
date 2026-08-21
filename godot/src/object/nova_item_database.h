@@ -284,7 +284,10 @@ public:
 	// The authored items.def `shadow` blob decal as {texture: String,
 	// width/length/offset_x/offset_y: float}; empty Dictionary when the item
 	// authors none. Consumed by the placer's slot-shadow profile.
-	Dictionary get_shadow_decal(int id) const;
+	// The authored items.def `shadow` blob decal (C++ seam for the placer):
+	// false when the item authors none; dims = (width, length, offset_x,
+	// offset_y) in the decal's own units.
+	bool get_shadow_decal(int id, String &r_texture, Vector4 &r_dims) const;
 	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
 	// deceleration, turn_rate, turn_rate2, unit_type]; empty for unknown ids. Feeds the sim's
 	// world::VehicleTraits table (resolve_item_traits). [orig: ItemDef_ParsePhysicsProperty

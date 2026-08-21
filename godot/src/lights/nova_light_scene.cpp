@@ -245,9 +245,30 @@ int LightScene::render_frame(const Vector3 &p_camera_world,
 	return static_cast<int>(selected_count_);
 }
 
-TypedArray<Dictionary> LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
+int LightScene::corona_texture_size() {
+	return renderer::kCoronaTextureSize;
+}
+
+PackedByteArray LightScene::corona_texture_rgb8() {
+	PackedByteArray bytes;
+	const int size = renderer::kCoronaTextureSize;
+	bytes.resize(static_cast<int64_t>(size) * size * 3);
+	uint8_t *out = bytes.ptrw();
+	for (int y = 0; y < size; ++y) {
+		for (int x = 0; x < size; ++x) {
+			const uint8_t value = renderer::corona_texture_byte(x, y);
+			uint8_t *texel = out + (static_cast<size_t>(y) * size + x) * 3;
+			texel[0] = value;
+			texel[1] = value;
+			texel[2] = value;
+		}
+	}
+	return bytes;
+}
+
+size_t LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 		float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
-		Object *p_weather) {
+		Object *p_weather, std::vector<renderer::SlotPointLight> &r_out) {
 	// The render-slot dominant-light query: the witnessed per-entity collect
 	// over entity position +- bound radius, group-gated params, no D3D-fill
 	// boost (retail: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
@@ -255,7 +276,7 @@ TypedArray<Dictionary> LightScene::slot_shadow_lights(const Vector3 &p_world_pos
 	// Light_GetPointLightParams @0x5a9180 directly — the pick itself lives
 	// portable in renderer::pick_dominant_light, see
 	// docs/render/render-lighting-re.md).
-	TypedArray<Dictionary> out;
+	r_out.clear();
 	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
 	const int64_t half =
 			static_cast<int64_t>(clamp_fixed(MAX(p_radius, 0.0f) * 65536.0));
@@ -292,20 +313,21 @@ TypedArray<Dictionary> LightScene::slot_shadow_lights(const Vector3 &p_world_pos
 	const size_t count = scene_.select(handles.data(), found,
 			renderer::LightActiveGroups{}, options, ambient, flicker,
 			/*d3d_light_path=*/false, selected);
+	r_out.reserve(count);
 	for (size_t i = 0; i < count; ++i) {
 		const renderer::SelectedLight &light = selected[i];
-		Dictionary entry;
-		entry["position"] = godot_from_mission_float(light.position);
-		entry["color"] =
-				Vector3(light.color[0], light.color[1], light.color[2]);
-		entry["attenuation"] = Vector4(light.attenuation[0],
-				light.attenuation[1], light.attenuation[2],
-				light.attenuation[3]);
-		entry["handle"] = static_cast<int64_t>(light.handle.retail_value) |
-				(static_cast<int64_t>(light.handle.generation) << 16);
-		out.push_back(entry);
+		renderer::SlotPointLight point;
+		const Vector3 position = godot_from_mission_float(light.position);
+		point.position = { float(position.x), float(position.y),
+			float(position.z) };
+		point.color = { light.color[0], light.color[1], light.color[2] };
+		point.attenuation = { light.attenuation[0], light.attenuation[1],
+			light.attenuation[2], light.attenuation[3] };
+		point.handle = static_cast<uint32_t>(light.handle.retail_value) |
+				(static_cast<uint32_t>(light.handle.generation) << 16);
+		r_out.push_back(point);
 	}
-	return out;
+	return count;
 }
 
 int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
@@ -548,13 +570,14 @@ void LightScene::_bind_methods() {
 			"owner_entities", "interior_owners", "interior_sections",
 			"ambient_scale", "time_ms", "weather"),
 			&LightScene::render_model_frame);
-	ClassDB::bind_method(D_METHOD("slot_shadow_lights", "world_pos", "radius",
-			"ambient_scale", "time_ms", "weather"),
-			&LightScene::slot_shadow_lights);
 	ClassDB::bind_method(D_METHOD("collect_corona_rows", "camera_pos",
 			"camera_forward", "ambient_scale", "time_ms", "frame_index",
 			"weather", "models", "owner_entities", "fog"),
 			&LightScene::collect_corona_rows);
+	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_size"),
+			&LightScene::corona_texture_size);
+	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_rgb8"),
+			&LightScene::corona_texture_rgb8);
 	ClassDB::bind_method(D_METHOD("live_count"), &LightScene::live_count);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 }

@@ -703,7 +703,7 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
-		const Dictionary &p_strings, Object *p_sim) {
+		const Dictionary &p_strings, Simulation *p_sim) {
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb.shown = p_shown;
 	sb.game_type = static_cast<uint32_t>(p_game_type);
@@ -716,9 +716,8 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 	sb.footer = String(p_strings.get("footer", "")).utf8().get_data();
 	// Rows come straight from the netsim projection — no script-side
 	// Dictionary round-trip to drop fields or lose the score sign.
-	Simulation *sim = Object::cast_to<Simulation>(p_sim);
-	if (p_shown && sim != nullptr) {
-		sim->fill_scoreboard_rows(sb.rows);
+	if (p_shown && p_sim != nullptr) {
+		p_sim->fill_scoreboard_rows(sb.rows);
 	} else {
 		sb.rows.clear();
 	}

@@ -25,10 +25,15 @@ const SELF_CONTAINED_PROBES: Array[String] = [
 const REMOVED_PIE_PROBES: Array[String] = [
 	"res://tests/destruction_probe.gd",
 	"res://tests/destruction_probe.tscn",
-	"res://tests/sun_shadow_catcher_probe.gd",
-	"res://tests/sun_shadow_catcher_probe.tscn",
 	"res://tests/perf_fire_probe.gd",
 	"res://tests/perf_fire_probe.tscn",
+]
+
+# Self-contained probes retired with the device they exercised: the projected
+# sun-shadow catcher went with the SlotShadow capture pipeline (2026-08-20).
+const RETIRED_PROBES: Array[String] = [
+	"res://tests/sun_shadow_catcher_probe.gd",
+	"res://tests/sun_shadow_catcher_probe.tscn",
 ]
 const SCREENSHOT_CAPTURE_PATH := "res://modtools/tools/screenshot_capture.gd"
 
@@ -84,6 +89,12 @@ func test_shared_probe_can_parse_an_exact_saved_bms_against_a_packed_runtime_roo
 func test_obsolete_pie_only_probes_are_removed() -> void:
 	for path in REMOVED_PIE_PROBES:
 		assert_false(ResourceLoader.exists(path), "%s should be removed." % path)
+
+
+func test_retired_probes_are_removed() -> void:
+	for path in RETIRED_PROBES:
+		assert_false(ResourceLoader.exists(path),
+			"%s was retired with its device and should stay removed." % path)
 
 
 func test_editor_screenshot_driver_has_no_runtime_capture_leg() -> void:

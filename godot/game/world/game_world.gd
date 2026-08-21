@@ -81,6 +81,7 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _terrain: Terrain = $Terrain
 @onready var _env: MissionEnvironment = get_node_or_null("MissionEnvironment")
 @onready var _water: Water = get_node_or_null("Water")
+@onready var _celestial: Celestial = get_node_or_null("Celestial")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: FoliageDispatcher
@@ -770,9 +771,8 @@ func _load_environment(env_path: String) -> bool:
 	var weather: Weather = get_node_or_null("Weather")
 	if weather != null:
 		weather.resync_colors()
-	var celestial: Celestial = get_node_or_null("Celestial")
-	if celestial != null:
-		celestial.set_resource_root(_resource_root)
+	if _celestial != null:
+		_celestial.set_resource_root(_resource_root)
 	return true
 
 
@@ -1016,10 +1016,9 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.build()
 	if _water != null:
 		_water.set("terrain_data", data)
-	var celestial_node := get_node_or_null("Celestial")
-	if celestial_node != null:
+	if _celestial != null:
 		# The glare occlusion rays march this terrain (env #14).
-		celestial_node.set("terrain_data", data)
+		_celestial.terrain_data = data
 	_configure_foliage()
 	return true
 
@@ -1346,10 +1345,19 @@ func render_sun_veil_frame() -> void:
 	if not _world_ready:
 		return
 	var veil_weather := get_weather_node()
-	var veil_celestial := get_node_or_null("Celestial") as Celestial
-	if veil_weather == null or veil_celestial == null:
+	if veil_weather == null or _celestial == null:
 		return
-	veil_weather.set_sun_veil_stopdown(veil_celestial.get_sun_veil_stopdown())
+	veil_weather.set_sun_veil_stopdown(_celestial.get_sun_veil_stopdown())
+
+
+## The render-slot ground-shadow plan for this camera (GameFramePipeline,
+## right after the light select: render_light_frame pushes this frame's
+## LightScene and light context into the device, and slot priority plus the
+## capture poses are camera-relative) [orig: render_shadow_pass @ 0x5d7b70
+## once per main scene frame].
+func render_slot_shadow_frame() -> void:
+	if _slot_shadow != null:
+		_slot_shadow.advance_frame()
 
 
 func mix_audio_frame(ticks_run: int) -> void:
@@ -2661,15 +2669,14 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# it first at the frozen pose so the settled glare brightness, the veil
 	# alpha global, and this frame's stop-down all exist before the exposure
 	# settle chases them.
-	var celestial := get_node_or_null("Celestial") as Celestial
-	if celestial != null:
+	if _celestial != null:
 		# The glare occlusion brightness accumulates over ~a dozen live
 		# frames; a frozen fixture gets exactly one zero-delta advance, which
 		# left the sun glow invisible at any pose (the D-RLIT-2 fixture
 		# starvation's other half). Settle the witnessed ray/window/step leg
 		# at this pose first, then publish it through the normal frame.
-		celestial.settle_glare_occlusion()
-		celestial.advance_frame(0.0)
+		_celestial.settle_glare_occlusion()
+		_celestial.advance_frame(0.0)
 	render_sun_veil_frame()
 	_stamp_iris_samples(_frame_camera_xform)
 	var settle_weather := get_weather_node()
@@ -2715,8 +2722,7 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	render_light_frame()
 	# Re-plan the render-slot ground shadows for the moved capture camera
 	# (slot priority and the capture poses are camera-relative).
-	if _slot_shadow != null:
-		_slot_shadow.advance_frame()
+	render_slot_shadow_frame()
 	update_clear_frame()
 	return OK
 

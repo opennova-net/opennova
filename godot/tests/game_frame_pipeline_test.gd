@@ -55,6 +55,7 @@ class FakeWorld:
 	func sample_iris_frame() -> void: trace.append("iris")
 	func render_sun_veil_frame() -> void: trace.append("sun_veil")
 	func render_light_frame() -> void: trace.append("lights")
+	func render_slot_shadow_frame() -> void: trace.append("slot_shadows")
 	func render_material_frame() -> void: trace.append("materials")
 	func render_particle_frame() -> void: trace.append("particles")
 	func mix_audio_frame(ticks_run: int) -> void:
@@ -80,8 +81,8 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
 		"begin", "session", "local_view", "scene_environment", "terrain", "foliage", "network",
-		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "particles",
-		"audio:0", "clear", "finish",
+		"weather", "occlusion", "iris", "sun_veil", "lights", "slot_shadows", "materials",
+		"particles", "audio:0", "clear", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,
 			"terrain samples the post-present camera generation")

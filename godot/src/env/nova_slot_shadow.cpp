@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "env/nova_mission_environment.h"
@@ -56,10 +57,27 @@ uint32_t SlotShadow::capture_layer_mask() {
 	return mask;
 }
 
+// The per-slot uniform names, built once: the device names up to two per
+// admitted slot every frame.
+struct SlotUniformNames {
+	StringName mat[renderer::kSlotCaptureCount];
+	StringName tex[renderer::kSlotCaptureCount];
+	SlotUniformNames() {
+		for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+			mat[i] = StringName(vformat("u_slot_mat_%d", i));
+			tex[i] = StringName(vformat("u_slot_tex_%d", i));
+		}
+	}
+};
+
+static const SlotUniformNames &slot_uniforms() {
+	static const SlotUniformNames names;
+	return names;
+}
+
 static void reset_material_slots(const Ref<ShaderMaterial> &p_material) {
 	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
-		p_material->set_shader_parameter(
-				vformat("u_slot_mat_%d", i), Projection());
+		p_material->set_shader_parameter(slot_uniforms().mat[i], Projection());
 	}
 	PackedVector4Array terms;
 	terms.resize(renderer::kSlotCaptureCount);
@@ -83,6 +101,11 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	// (retail: RenderSlot_DrawAllDrapes @0x5d6e54..0x5d6ec4, see
 	// docs/render/render-lighting-re.md).
 	drape_material_->set_next_pass(blob_material_);
+	// The drape distance fade thresholds — renderer::drape_fade owns them.
+	const Vector2 fade_range(renderer::kDrapeFadeStartUnits,
+			renderer::kDrapeFadeEndUnits - renderer::kDrapeFadeStartUnits);
+	drape_material_->set_shader_parameter("u_drape_fade_range", fade_range);
+	blob_material_->set_shader_parameter("u_drape_fade_range", fade_range);
 	return drape_material_;
 }
 
@@ -116,8 +139,6 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_local_player_prone);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &SlotShadow::advance_frame);
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
-	ClassDB::bind_static_method("SlotShadow",
-			D_METHOD("get_capture_layer_mask"), &SlotShadow::capture_layer_mask);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_drape_material"),
 			&SlotShadow::get_drape_material);
 }
@@ -168,13 +189,7 @@ void SlotShadow::set_local_player_prone(bool p_prone) {
 void SlotShadow::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
 		_ensure_captures();
-		set_process(true);
 	}
-}
-
-void SlotShadow::_process(double p_delta) {
-	(void)p_delta;
-	advance_frame();
 }
 
 void SlotShadow::_ensure_captures() {
@@ -205,7 +220,7 @@ void SlotShadow::_ensure_captures() {
 	// Bind the capture textures to the drape pass once.
 	const Ref<ShaderMaterial> drape = get_drape_material();
 	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
-		drape->set_shader_parameter(vformat("u_slot_tex_%d", i),
+		drape->set_shader_parameter(slot_uniforms().tex[i],
 				viewports_[i]->get_texture());
 	}
 }
@@ -269,8 +284,8 @@ Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 	const Transform3D view = p_pose.affine_inverse();
 	const float inv_u = 1.0f / (2.0f * MAX(p_half_u, 0.001f));
 	const float inv_v = 1.0f / (2.0f * MAX(p_half_v, 0.001f));
-	// Rows: u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down),
-	// depth01 = -z / far.
+	// Columns (godot-cpp Projection(x, y, z, w) takes column vectors):
+	// u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down), depth01 = -z / far.
 	const Projection to_uv(
 			Vector4(inv_u, 0, 0, 0),
 			Vector4(0, -inv_v, 0, 0),
@@ -355,7 +370,9 @@ void SlotShadow::advance_frame() {
 	const Vector3 sun_rgb = env->get_sun_light();
 	const Vector3 sky_rgb = env->get_sky_ambient();
 
-	// Build per-caster planner state.
+	// Build per-caster planner state. capture_links collects (child, parent)
+	// for models linked capture-with another caster.
+	std::vector<std::pair<uint64_t, uint64_t>> capture_links;
 	for (CasterInfo &info : casters) {
 		ObjectModel *model = info.model;
 		const uint64_t id = uint64_t(model->get_instance_id());
@@ -373,7 +390,12 @@ void SlotShadow::advance_frame() {
 		// A caster parented under another caster renders with its parent in
 		// retail (the seat/standing child walk of the parent's slot RT);
 		// its own slot is excluded.
-		state.seat_parented = model->get_slot_shadow_capture_with() != nullptr;
+		ObjectModel *capture_with = model->get_slot_shadow_capture_with();
+		state.seat_parented = capture_with != nullptr;
+		if (capture_with != nullptr) {
+			capture_links.push_back(
+					{ id, uint64_t(capture_with->get_instance_id()) });
+		}
 		for (Node *ancestor = model->get_parent();
 				!state.seat_parented && ancestor != nullptr;
 				ancestor = ancestor->get_parent()) {
@@ -411,13 +433,31 @@ void SlotShadow::advance_frame() {
 	const std::vector<renderer::SlotAssignment> assignments =
 			plan_.assign(cam2d, view2d, state_for);
 
-	const uint32_t mask = renderer::slot_refresh_mask(shadow_detail_);
 	PackedVector4Array silhouette_terms;
 	silhouette_terms.resize(renderer::kSlotCaptureCount);
 	PackedVector4Array blob_terms;
 	blob_terms.resize(renderer::kSlotCaptureCount);
 	int blob_cursor = 0;
 	report_bound_ = report_captures_ = report_blobs_ = 0;
+
+	// The retail child walk: models linked capture-with an admitted caster
+	// (held weapons, mounted children) render into the parent's slot RT
+	// (retail: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6). A
+	// linked child is excluded from its own slot and its own row lands
+	// before or after the parent's in registration order, so resolve every
+	// claim first: child id -> the parent's capture bit this frame.
+	HashMap<uint64_t, uint32_t> claimed;
+	for (const renderer::SlotAssignment &assignment : assignments) {
+		if (!assignment.draws_silhouette || assignment.excluded) {
+			continue;
+		}
+		const uint32_t bit = capture_layer_bit(assignment.capture_order);
+		for (const std::pair<uint64_t, uint64_t> &link : capture_links) {
+			if (link.second == assignment.id) {
+				claimed[link.first] = bit;
+			}
+		}
+	}
 
 	for (const renderer::SlotAssignment &assignment : assignments) {
 		const size_t *index = caster_index.getptr(assignment.id);
@@ -429,23 +469,15 @@ void SlotShadow::advance_frame() {
 		const bool captures =
 				assignment.draws_silhouette && !assignment.excluded;
 		// Capture-layer churn: re-stamp admitted models every frame
-		// (rebuild() resets children), clear once on the way out.
-		const uint32_t want_bit =
-				captures ? capture_layer_bit(assignment.capture_order) : 0;
+		// (rebuild() resets children), clear once on the way out. A claimed
+		// child carries its parent's bit, never its own excluded row's zero.
+		const uint32_t *claim = claimed.getptr(assignment.id);
+		const uint32_t want_bit = captures
+				? capture_layer_bit(assignment.capture_order)
+				: (claim != nullptr ? *claim : 0u);
 		uint32_t &applied = applied_bits_[assignment.id];
 		if (want_bit != 0 || applied != 0) {
 			_apply_capture_layers(model, want_bit);
-			// The retail child walk: models linked capture-with this caster
-			// (held weapons, mounted children) render into the same slot RT
-			// (retail: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6).
-			for (const CasterInfo &linked : casters) {
-				if (linked.model != model &&
-						linked.model->get_slot_shadow_capture_with() == model) {
-					_apply_capture_layers(linked.model, want_bit);
-					applied_bits_[uint64_t(
-							linked.model->get_instance_id())] = want_bit;
-				}
-			}
 			applied = want_bit;
 		}
 		if (assignment.bound && !assignment.excluded) {
@@ -478,9 +510,9 @@ void SlotShadow::advance_frame() {
 							Vector3(0.0f, 100.0f, 0.0f);
 					const int slot = blob_cursor++;
 					blob_material_->set_shader_parameter(
-							vformat("u_slot_tex_%d", slot), texture);
+							slot_uniforms().tex[slot], texture);
 					blob_material_->set_shader_parameter(
-							vformat("u_slot_mat_%d", slot),
+							slot_uniforms().mat[slot],
 							_drape_projection(projector, w * 0.5f, l * 0.5f,
 									200.0f));
 					blob_terms[slot] = Vector4(0, 0, 0, 2.0f);
@@ -500,32 +532,15 @@ void SlotShadow::advance_frame() {
 		float attached_atten = 0.0f;
 		if (light_scene_.is_valid()) {
 			Object *weather = ObjectDB::get_instance(weather_id_);
-			const TypedArray<Dictionary> lights =
-					light_scene_->slot_shadow_lights(center,
-							info.state.bound_radius, light_gain_,
-							light_time_ms_, weather);
-			std::vector<renderer::SlotPointLight> points;
-			points.reserve(static_cast<size_t>(lights.size()));
-			for (int64_t li = 0; li < lights.size(); ++li) {
-				const Dictionary light = lights[li];
-				renderer::SlotPointLight point;
-				const Vector3 lp = light.get("position", Vector3());
-				const Vector3 lc = light.get("color", Vector3());
-				const Vector4 la =
-						light.get("attenuation", Vector4(1, 0, 0, 0));
-				point.position = {float(lp.x), float(lp.y), float(lp.z)};
-				point.color = {float(lc.x), float(lc.y), float(lc.z)};
-				point.attenuation = {float(la.x), float(la.y), float(la.z),
-						float(la.w)};
-				point.handle = uint32_t(int64_t(light.get("handle", 0)));
-				points.push_back(point);
-			}
+			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
+					light_gain_, light_time_ms_, weather, slot_lights_);
 			pick = renderer::pick_dominant_light(
 					{float(center.x), float(center.y), float(center.z)},
 					{default_dir.x, default_dir.y, default_dir.z},
-					points.data(), points.size(), info.state.interior);
+					slot_lights_.data(), slot_lights_.size(),
+					info.state.interior);
 			if (pick.attached_handle != 0) {
-				for (const renderer::SlotPointLight &point : points) {
+				for (const renderer::SlotPointLight &point : slot_lights_) {
 					if (point.handle == pick.attached_handle) {
 						attached_color = Vector3(point.color[0],
 								point.color[1], point.color[2]);
@@ -564,11 +579,10 @@ void SlotShadow::advance_frame() {
 		slot_camera->set_near(0.05f);
 		slot_camera->set_far(cam_dist * 2.0f + radius);
 
-		// The refresh cadence (the local player refreshes every frame from
-		// detail 3 up — the retail pool-0/local exception).
-		const bool local_exception =
-				assignment.id == local_id && shadow_detail_ >= 3;
-		const uint32_t effective_mask = local_exception ? 0 : mask;
+		// The refresh cadence (renderer::slot_refresh_mask_for carries the
+		// local-player exception).
+		const uint32_t effective_mask = renderer::slot_refresh_mask_for(
+				shadow_detail_, assignment.id == local_id);
 		SubViewport *slot_viewport = viewports_[order];
 		const int want_size =
 				renderer::slot_texture_size(order, shadow_detail_);
@@ -580,11 +594,11 @@ void SlotShadow::advance_frame() {
 			slot_viewport->set_update_mode(SubViewport::UPDATE_ONCE);
 		}
 
-		// The local player's first-person drape gates (retail:
-		// RenderSlot_DrawAllDrapes @0x5d6e70..0x5d6e90 — skipped while
-		// prone-latched or below shadow detail 2).
-		if (assignment.id == local_id && local_first_person_ &&
-				(local_prone_ || shadow_detail_ < 2)) {
+		// The local player's first-person drape gate
+		// (renderer::local_first_person_drape_skipped carries the law).
+		if (assignment.id == local_id &&
+				renderer::local_first_person_drape_skipped(local_first_person_,
+						local_prone_, shadow_detail_)) {
 			silhouette_terms[order] = Vector4();
 			continue;
 		}
@@ -614,7 +628,7 @@ void SlotShadow::advance_frame() {
 		const float along_scale = info.state.is_person
 				? renderer::kPersonDrapeElongation
 				: 1.0f;
-		drape->set_shader_parameter(vformat("u_slot_mat_%d", order),
+		drape->set_shader_parameter(slot_uniforms().mat[order],
 				_drape_projection(pose, half_extent,
 						half_extent * along_scale, slot_camera->get_far()));
 		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);

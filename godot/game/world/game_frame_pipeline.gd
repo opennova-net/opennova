@@ -58,6 +58,9 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	# the frame's ambient scale, before the lit material draws consume the
 	# pushed globals).
 	_world.render_light_frame()
+	# The render-slot ground shadows plan against the light select just
+	# published (the device reads this frame's LightScene and context).
+	_world.render_slot_shadow_frame()
 	# Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	# occlusion resolves visibility, before the particle composite over it.
 	_world.render_material_frame()

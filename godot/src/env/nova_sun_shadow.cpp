@@ -2,7 +2,9 @@
 
 #include <godot_cpp/classes/rendering_server.hpp>
 
-#include <algorithm>
+#include <array>
+
+#include <renderer/render_slot_shadow.h>
 
 #include "env/nova_mission_environment.h"
 #include "env/nova_water.h"
@@ -118,14 +120,15 @@ void SunShadow::_update_direction() {
 	// grazing sun never stretches an entity silhouette past 4x height
 	// (retail: render_shadow_pass @0x5d7b70 — GetLightDirectionFloat into
 	// RenderSlot_DefaultLightDir*, `if (y < 0.25) y = 0.25`, then negate all
-	// three; the law lives portable in renderer::slot_projection_direction —
-	// see docs/render/render-lighting-re.md). A DirectionalLight3D emits
-	// along local -Z, so emission is that negated form. The SlotShadow
+	// three; renderer::slot_projection_direction is the one owner of that
+	// law — see docs/render/render-lighting-re.md). A DirectionalLight3D
+	// emits along local -Z, so emission is that negated form. The SlotShadow
 	// capture pipeline owns the entity ground shadows; this light remains
 	// the direction-law reference and the static-terrain bake device.
-	const Vector3 surface_to_light(light_tuple.x,
-			std::max(light_tuple.y, real_t(0.25)), light_tuple.z);
-	const Vector3 emission = -surface_to_light.normalized();
+	const std::array<float, 3> slot_dir = renderer::slot_projection_direction(
+			{ float(light_tuple.x), float(light_tuple.y), float(light_tuple.z) });
+	const Vector3 emission =
+			Vector3(slot_dir[0], slot_dir[1], slot_dir[2]).normalized();
 	if (emission.is_equal_approx(last_emission_direction_)) {
 		return;
 	}

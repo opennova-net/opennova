@@ -23,6 +23,8 @@
 
 namespace godot {
 
+class Simulation;
+
 class HudPos;
 class ResourceRoot;
 class TerrainData;
@@ -100,7 +102,7 @@ public:
 	// Typed cross-class args on the bound API follow the set_minimap_terrain
 	// precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, const Dictionary &p_strings,
-			Object *p_sim);
+			Simulation *p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);

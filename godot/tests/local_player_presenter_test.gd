@@ -619,7 +619,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	presenter.set_debug_body_in_first_person(true)
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
-		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+		assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
 				Water.VISUAL_LAYER_WORLD,
 				"the debug first-person body uses the visible world layer")
 		if vi is GeometryInstance3D:

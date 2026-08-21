@@ -22,6 +22,9 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 // multiply blend of (silhouette + ambient-law material) over the patch.
 
 const int MAX_SLOTS = 12;
+// The drape distance fade (start, range) in world units; SlotShadow pushes
+// the pair from renderer::kDrapeFadeStartUnits/kDrapeFadeEndUnits.
+uniform vec2 u_drape_fade_range = vec2(40.0, 40.0);
 uniform vec4 u_slot_term[12];
 uniform sampler2D u_slot_tex_0 : source_color, filter_linear, repeat_disable;
 uniform sampler2D u_slot_tex_1 : source_color, filter_linear, repeat_disable;
@@ -89,9 +92,10 @@ mat4 slot_matrix(int i) {
 }
 
 void fragment() {
-	// The drape distance fade: 0 inside 40 u, ramping out by 80 u
-	// (retail: render_sector_model @0x5d5d30..0x5d5d53).
-	float fade = clamp((length(VERTEX) - 40.0) / 40.0, 0.0, 1.0);
+	// The drape distance fade (renderer::drape_fade: 0 inside the start
+	// distance, ramping to 1 over the range).
+	float fade = clamp((length(VERTEX) - u_drape_fade_range.x) /
+			u_drape_fade_range.y, 0.0, 1.0);
 	vec3 factor = vec3(1.0);
 	for (int i = 0; i < MAX_SLOTS; i++) {
 		float mode = u_slot_term[i].a;
