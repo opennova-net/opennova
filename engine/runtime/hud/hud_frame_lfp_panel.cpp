@@ -35,16 +35,21 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	for (const HudLfpZone &z : lp.zones) {
 		if (z.team != 0 && z.team < kLfpTeamMax) ++per_team[static_cast<size_t>(z.team)];
 	}
-	// A zone draws a marker only with a timer entry AND the transient slot's
-	// 0xC0 flags [orig: @0x5a2689 / @0x5a26ef]; the first such zone seeds the
-	// walk, and without one the panel draws nothing at all [orig: the seed
-	// search @0x5a2501..0x5a2575 returns when none qualifies].
-	const auto contested = [](const HudLfpZone &z) {
-		return z.team != 0 && z.timer_present && (z.capture_flags & 0xC0u) != 0;
+	// The seed and the walk test the team byte and the transient slot's 0xC0
+	// flags; the timer entry gates only the marker itself, never the seed
+	// [orig: the seed search @0x5a2501..0x5a2575 reads the team and the slot
+	//  flags only; in the walk CProximityList_FindEntryById @0x5a2689 skips
+	//  past the marker and the flags test @0x5a26ef follows it]. Without a
+	// seed the panel draws nothing at all.
+	const auto flagged = [](const HudLfpZone &z) {
+		return z.team != 0 && (z.capture_flags & 0xC0u) != 0;
+	};
+	const auto contested = [&](const HudLfpZone &z) {
+		return flagged(z) && z.timer_present;
 	};
 	size_t start = lp.zones.size();
 	for (size_t i = 0; i < lp.zones.size(); ++i) {
-		if (contested(lp.zones[i])) {
+		if (flagged(lp.zones[i])) {
 			start = i;
 			break;
 		}
@@ -67,7 +72,8 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	const uint32_t opposing_color = lfp_opposing_team_color(lp.local_team);
 
 	// The group cursor [orig: x = g_hudZonePanelX - 98 * count[team]
-	// @0x5a2589..0x5a259d; y = g_hudZonePanelY + 12 @0x5a25bd].
+	// @0x5a2589..0x5a259d; the markers' y = g_hudZonePanelY + 86 * group
+	// (@0x5a249d, @0x5a2667), the status text's y = that + 12 (@0x5a25bd)].
 	int current_team = lp.zones[start].team;
 	int group = 0;
 	int index_in_group = 0;
@@ -117,8 +123,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		const bool contested_counts = z.count_owner != z.count_other;
 		const uint32_t point = lfp_point_color(lfp_team_color(z.team),
 				z.in_cylinder, contested_counts, attacked, ready, phase_a);
-		const LfpFrame frame = lfp_frame(z.team, lp.local_team, z.control, z.rate,
-				z.in_cylinder, phase_a);
+		const LfpFrame frame = lfp_frame(attacked, ready, z.in_cylinder, phase_a);
 
 		// 1. The icon: one 102x102 frame of the team's vertical atlas at the
 		// flat half-bright modulate [orig: @0x59886f..0x59898b].

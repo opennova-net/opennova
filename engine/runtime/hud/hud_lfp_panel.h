@@ -83,7 +83,7 @@ inline constexpr int kLfpBarY2 = 0x52;
 // x first.)
 inline constexpr int kLfpStepX = 0x62; // 98, marker pitch across a group
 inline constexpr int kLfpStepY = 0x56; // 86, group pitch down
-inline constexpr int kLfpRowDy = 12;   // the row cursor's +12 over the anchor
+inline constexpr int kLfpRowDy = 12;   // the STATUS TEXT's +12 over its group's Y
 
 // The group's status text ("!Under Attack!!" / "!Ready for Takeover!") sits
 // 4 px left of the group's first marker, on the group's row cursor
@@ -161,11 +161,15 @@ inline bool lfp_in_cylinder(int32_t dist2d_q16, int32_t dz_q16, uint16_t radius)
 	return adz <= r_q16 / 2;
 }
 
-// Which frame a marker draws, given its state.
-inline LfpFrame lfp_frame(int zone_team, int viewer_team, int control, int rate,
-		bool in_cylinder, bool phase_a) {
-	const bool ready = lfp_zone_ready(zone_team, viewer_team, control);
-	const bool attacked = lfp_zone_under_attack(zone_team, viewer_team, rate);
+// Which frame a marker draws, given its state. `attacked` and `ready` are the
+// CALLER'S two tests — the same pair the point colour ladder reads, computed
+// once per marker: the attacked test carries the timer entry's team term
+// (DWORD 1 == the zone's team byte) alongside the rate sign, so a frame and a
+// colour never disagree about one zone [orig: HUD_DrawZoneMarker @0x5986f0 —
+//  both tests are evaluated ahead of the colour ladder and the frame select
+//  reads the same two locals].
+inline LfpFrame lfp_frame(bool attacked, bool ready, bool in_cylinder,
+		bool phase_a) {
 	// The two blinking states alternate on the pulse; when neither applies the
 	// in-cylinder frame wins over the default [orig: @0x598915..0x598934].
 	if (attacked && phase_a) return LfpFrame::UnderAttack;
@@ -229,11 +233,17 @@ inline int lfp_format_distance(char *buf, size_t len, int metres) {
 
 // A marker's origin: the group is right-anchored to the panel X and steps
 // across by kLfpStepX per marker; each group steps down by kLfpStepY from the
-// row cursor (panel Y + 12).
+// PANEL Y. The marker takes the group's Y accumulator itself, NOT the status
+// text's row: the drawer seeds the stack slot from g_hudZonePanelY, adds 86
+// per group and pushes that slot as the marker's y, while the +12 lives in a
+// separate register that only the status-text call reads
+// [orig: seed @0x5a249d; `add [esp+y], 56h` @0x5a2667 vs `add ebx, 56h`
+//  @0x5a2676; `mov ebx, [esp+y]; add ebx, 0Ch` @0x5a25b9..0x5a25bd; the
+//  marker pushes [esp+y] @0x5a2799, the text call @0x5a2652 takes ebx].
 inline void lfp_marker_origin(int panel_x, int panel_y, int zones_in_group,
 		int index_in_group, int group_index, int &out_x, int &out_y) {
 	out_x = panel_x - zones_in_group * kLfpStepX + index_in_group * kLfpStepX;
-	out_y = panel_y + kLfpRowDy + group_index * kLfpStepY;
+	out_y = panel_y + group_index * kLfpStepY;
 }
 
 // Where a group's status text is drawn (right-aligned at this point): the

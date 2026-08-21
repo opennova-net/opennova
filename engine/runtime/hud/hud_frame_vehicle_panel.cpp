@@ -78,25 +78,45 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 				true);
 	}
 
-	// 3. The empty seats' select labels, centred in the box. Retail draws
-	// the digit white through the half-bright text path, which lands grey
-	// [orig: HUD_DrawTextCentered_HalfBright(&g_hudLabelFontBold, x, y, buf,
-	//  0xFFFFFFFF) @0x5a5322 -- white x half-bright = 0x7F7F7F].
-	if (font_.font() != nullptr) {
+	// 3. The empty seats' select labels, in the BOLD label font at its slot
+	// scale, centred ON the box: x at the box centre, the text's TOP at
+	// centre + 1 - h/2 of the measured label (CGameFont_DrawText takes y as
+	// the top; the half-bright wrapper passes x/y straight through @0x580680).
+	// Retail draws the digit white through that half-bright path, which lands
+	// grey [orig: HUD_MeasureTextWH(&g_hudLabelFontBold, buf, &w, &h), then
+	//  HUD_DrawTextCentered_HalfBright(&g_hudLabelFontBold, cx, cy + 1 - h/2,
+	//  buf, 0xFFFFFFFF) @0x5a52f0..0x5a5322; the driver digit @0x5a57ee.. and
+	//  the "X" @0x5a586b.. take the same road; white x half-bright = 0x7F7F7F].
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bf = have_bold ? label_font_bold_ : font_;
+	const float bscale = have_bold ? label_scale_ : 1.0f;
+	if (bf.font() != nullptr) {
+		const auto centred_label = [&](const char *t, int cx, int cy) {
+			int tw = 0;
+			int th = 0;
+			bf.measure(t, bscale, bscale, &tw, &th);
+			// The +1 is design units (scaled with the anchor); the half height
+			// is the measured surface-px height, floor-halved like retail's
+			// integer h/2.
+			const float top = sy(static_cast<float>(cy + 1), h) -
+					static_cast<float>(th / 2);
+			const GameFontRun run = bf.layout(t, sx(static_cast<float>(cx), w),
+					top, bscale, bscale, kFontAlignCenter, 0xFF7F7F7Fu);
+			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+					run.quads.end());
+		};
 		for (const HudVehicleSeat &seat : vp.seats) {
 			if (seat.occupied || seat.label.empty()) continue;
-			emit_text(seat.label.c_str(),
-					static_cast<float>(seat_label_x(base_x, seat.x)),
-					static_cast<float>(seat_label_y(base_y, seat.y)), w, h,
-					0xFF7F7F7Fu, kFontAlignCenter);
+			centred_label(seat.label.c_str(), seat_label_x(base_x, seat.x),
+					seat_label_y(base_y, seat.y));
 		}
 
-		// 4. The local player's own seat, marked LAST so nothing draws over it.
+		// 4. The local player's own seat, marked LAST so nothing draws over it
+		// [orig: the "X" arm @0x5a586b runs after every seat arm].
 		for (const HudVehicleSeat &seat : vp.seats) {
 			if (!seat.own_seat) continue;
-			emit_text("X", static_cast<float>(seat_label_x(base_x, seat.x)),
-					static_cast<float>(seat_label_y(base_y, seat.y)), w, h,
-					0xFF7F7F7Fu, kFontAlignCenter);
+			centred_label("X", seat_label_x(base_x, seat.x),
+					seat_label_y(base_y, seat.y));
 			break;
 		}
 	}
