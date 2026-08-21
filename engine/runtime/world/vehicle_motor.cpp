@@ -2427,6 +2427,24 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     veh.position.z = static_cast<float>(from_fixed(pz));
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    // ...and the attitude with it. In the original these ARE the entity's own
+    // Pitch/Roll -- the integration above writes entity+0x14/+0x18 directly, so
+    // there is no separate motor copy to publish. Our split kept
+    // air_pitch_bam/air_roll_bam private and only ever mirrored them from the
+    // GROUND conform, which left the whole aerodynamic bank computed and then
+    // discarded on the host: a helicopter turned and slid sideways with the
+    // hull dead level, and the mounted camera (which reads entity roll) stayed
+    // level with it.
+    //
+    // Republishing the value the contact solve wrote is harmless on the ground
+    // and matches retail, whose common tail integrates unconditionally too with
+    // the next tick's conform overwriting.
+    // [orig: Entity_UpdateAircraftPhysics common tail @0x49237E --
+    //  `entity+20 += entity+168; entity+24 += entity+172`]
+    veh.pitch = static_cast<int16_t>(std::lround(
+            static_cast<double>(m.air_pitch_bam) * kDegreesPerBam));
+    veh.roll = static_cast<int16_t>(std::lround(
+            static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
     // The part-animation accumulators — the air mover's tail call [orig:
     // Entity_UpdatePartSpinAccumulator @0x4928B0 from the CHel/cpln callback].
     vehicle_part_anim_tick(world, veh, traits);

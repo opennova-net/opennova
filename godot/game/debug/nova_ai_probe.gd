@@ -145,6 +145,9 @@ func tick(world: GameWorld, delta: float) -> void:
 	f.close()
 
 
+var _veh_dbg: Array = []
+
+
 func _camera_probe(sim: Simulation) -> Dictionary:
 	var v: Dictionary = sim.get_local_player_view()
 	var eye: Vector3 = v.get("camera_eye", Vector3.ZERO)
@@ -160,6 +163,7 @@ func _camera_probe(sim: Simulation) -> Dictionary:
 		"cp": snappedf(float(v.get("camera_pitch_deg", 0.0)), 0.1),
 		"cr": snappedf(float(v.get("camera_roll_deg", 0.0)), 0.1),
 		"vy": snappedf(_piloted_vehicle_yaw(sim), 0.1),
+		"veh": _veh_dbg,
 	}
 
 
@@ -171,6 +175,8 @@ func _piloted_vehicle_yaw(sim: Simulation) -> float:
 	var d: Dictionary = sim.get_world_entity_debug(ssn)
 	if d.is_empty():
 		return NAN
+	_veh_dbg = [int(d.get("pitch", 0)), int(d.get("roll", 0)),
+			int(d.get("health", 0)), bool(d.get("alive", false))]
 	return float(int(d.get("yaw", 0)))
 
 
