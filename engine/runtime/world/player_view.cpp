@@ -33,14 +33,12 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
             for (int i = 0; i < 3; ++i) v.tp_anchor_q16[i] = to_fixed(eye[i]);
             v.tp_anchor_valid = true;
         } else if (v.mount.control_seat) {
-            // MOUNTED: the anchor chases the carrier position lifted
-            // max(1.0, 0.375 r), a sixteenth per tick on x/y and a
-            // thirty-second on z, in 16.16 with the half-step rounding
-            // [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B,
-            //  `(target - anchor + 8) >> 4` @0x437C56/@0x437C6A and
-            //  `(+ 16) >> 5` @0x437C79]. WITNESS PENDING: the ease target
-            // (ported as carrier position + lift; the seat/CameraOffset
-            // alternative is the open item).
+            // MOUNTED: the anchor chases the CARRIER position lifted
+            // max(1.0, 0.375 r) — not Position + CameraOffset — a sixteenth
+            // per tick on x/y and a thirty-second on z, in 16.16 with the
+            // half-step rounding [orig: ThirdPersonCamera_Update — the
+            // parentSlot 2/5 target @0x437B1F..0x437B4B, `(target - anchor +
+            // 8) >> 4` @0x437C56/@0x437C6A and `(+ 16) >> 5` @0x437C79].
             const int32_t target[3] = {
                 v.mount.carrier_pos_q16[0],
                 v.mount.carrier_pos_q16[1],
@@ -52,6 +50,16 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
                         v.tp_anchor_q16[i], target[i],
                         i == 2 ? kMountAnchorEaseShiftZ : kMountAnchorEaseShiftXY);
                 v.tp_anchor[i] = static_cast<float>(from_fixed(v.tp_anchor_q16[i]));
+            }
+            // The look-ahead offset eases a thirty-second per axis toward the
+            // carrier's forward x 6.0 [orig: `g_camera_lookahead += (target -
+            // lookahead + 16) >> 5` @0x438811..0x4388b5, target = parentMatrix
+            // x (6, 0, 0), rotation only].
+            for (int i = 0; i < 3; ++i) {
+                const int32_t ahead = to_fixed(
+                        static_cast<double>(v.mount.carrier_forward[i]) *
+                        kMountLookaheadDistance);
+                v.lookahead_q16[i] += (ahead - v.lookahead_q16[i] + 16) >> 5;
             }
         } else {
             // Quarter-step ease per 62 Hz tick. [orig: @ 0x437c8d]
@@ -283,8 +291,9 @@ void compose_mounted_camera(const PlayerViewState &v, const float position[3],
             m.carrier_yaw_bam,
             m.carrier_yaw_bam + io::bam_sub(aim_bam, m.carrier_yaw_bam));
     const double yaw_deg = mission_yaw_deg_from_bam_heading(yaw_bam);
-    // Pitch: the fixed downward -11.25 [orig: mov esi, 0F8000000h @0x438150].
-    // WITNESS PENDING: assigned (ported) rather than added to the aim pitch.
+    // Pitch: the fixed downward -11.25, ASSIGNED — the on-foot arm adds the
+    // orbit pitch to the entity's, the mounted arm replaces it
+    // [orig: mov esi, 0F8000000h @0x438150 vs the on-foot sum].
     const double pitch_deg = kMountPitchDeg;
 
     // The anchor: the eased mounted anchor (carrier + lift), or the carrier
@@ -320,9 +329,12 @@ void compose_mounted_camera(const PlayerViewState &v, const float position[3],
         eye[2] = raise_above_terrain(eye[2], 0.0f, true);
     }
 
-    // The slope raise [orig: @0x43846E..0x438619]: march from the anchor
-    // toward the eye in half-unit steps, keep the steepest rise-over-run, and
-    // floor the eye at anchor + slope * distance + 0.333 * distance.
+    // The slope raise [orig: @0x43846E..0x438619]: the xy unit from the
+    // anchor toward the eye (zero when degenerate), a march of half-unit
+    // steps up to the distance keeping the steepest rise-over-run with the
+    // running max SEEDED AT 0.0 (@0x438599 — a downhill run never lowers the
+    // floor), then `eye.z = max(eye.z, anchor.z + maxSlope * dist + 0.333 *
+    // dist)` @0x4385f8..0x438619.
     if (have_terrain) {
         const float dx = eye[0] - anchor[0];
         const float dy = eye[1] - anchor[1];
@@ -330,45 +342,34 @@ void compose_mounted_camera(const PlayerViewState &v, const float position[3],
         if (horizontal > 0.0f) {
             const float ux = dx / horizontal;
             const float uy = dy / horizontal;
-            float max_slope = -1.0e30f;
+            float max_slope = 0.0f;
             for (float run = kSlopeStep; run <= horizontal; run += kSlopeStep) {
                 const float h = terrain_height_at(terrain, anchor[0] + ux * run,
                                                   anchor[1] + uy * run);
                 const float slope = (h - anchor[2]) / run;
                 if (slope > max_slope) max_slope = slope;
             }
-            if (max_slope > -1.0e30f) {
-                const float floor_z = slope_raise_floor(anchor[2], horizontal, max_slope);
-                if (eye[2] < floor_z) eye[2] = floor_z;
-            }
+            const float floor_z = slope_raise_floor(anchor[2], horizontal, max_slope);
+            if (eye[2] < floor_z) eye[2] = floor_z;
         }
     }
 
     // The watercraft drop: half the carrier radius off the eye AND the
-    // look-at [orig: @0x43861D..0x43864C, itemDef+0x196 in {3,4}].
+    // look-at [orig: @0x43861D..0x43864C, itemDef+0x196 in {3,4} — the eye z
+    // and var_AC (the look-at z) both lose boundRadius >> 1].
     const float drop = m.watercraft ? watercraft_eye_drop(r) : 0.0f;
     eye[2] -= drop;
 
-    // The look-ahead point: 6 u along the yaw from the carrier, on the
-    // terrain + 1.0 or the carrier's own z, whichever is higher
-    // [orig: @0x438767..0x4387C9]; the final angles are the look-at from the
-    // eye to it. WITNESS PENDING: the yaw source (ported as the damped camera
-    // yaw) and the drop's application to the look-at (ported as applied).
-    const double sy = std::sin(yaw_deg * kRadPerDeg);
-    const double cy = std::cos(yaw_deg * kRadPerDeg);
-    const float carrier_x = static_cast<float>(from_fixed(m.carrier_pos_q16[0]));
-    const float carrier_y = static_cast<float>(from_fixed(m.carrier_pos_q16[1]));
-    const float carrier_z = static_cast<float>(from_fixed(m.carrier_pos_q16[2]));
+    // The look-at point: the anchor plus the eased look-ahead offset (the
+    // carrier's forward x 6.0, integrated by the tick), with the drop applied;
+    // the final angles are the look-at from the eye to it via atan
+    // [orig: @0x438811..0x4388b5 — the eased g_camera_lookahead added to the
+    //  eye accumulators, yaw via fpatan].
     float target[3] = {
-        carrier_x + static_cast<float>(sy) * kMountLookaheadDistance,
-        carrier_y + static_cast<float>(cy) * kMountLookaheadDistance,
-        carrier_z,
+        anchor[0] + static_cast<float>(from_fixed(v.lookahead_q16[0])),
+        anchor[1] + static_cast<float>(from_fixed(v.lookahead_q16[1])),
+        anchor[2] + static_cast<float>(from_fixed(v.lookahead_q16[2])),
     };
-    if (have_terrain) {
-        const float lifted =
-                terrain_height_at(terrain, target[0], target[1]) + kMountLookaheadTerrainLift;
-        if (lifted > target[2]) target[2] = lifted;
-    }
     target[2] -= drop;
 
     const double tx = static_cast<double>(target[0] - eye[0]);

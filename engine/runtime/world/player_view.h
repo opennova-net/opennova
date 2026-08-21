@@ -123,6 +123,10 @@ struct MountedCameraInput {
     bool control_seat = false;
     int32_t carrier_pos_q16[3] = {0, 0, 0}; // mission space, 16.16
     int32_t carrier_yaw_bam = 0;            // BAM32 heading
+    // The carrier's unit forward in mission space (its chassis matrix's first
+    // column — the look-ahead point is that matrix times (6, 0, 0), rotation
+    // only) [orig: parentMatrix(+0xB4) x (6.0, 0, 0) @0x438811..0x4388b5].
+    float carrier_forward[3] = {0.0f, 1.0f, 0.0f};
     float bound_radius = 0.0f;              // carrier +0, mission units
     bool watercraft = false;                // unit_type 3/4 [orig: @0x43861D]
     float water_z = 0.0f;                   // Env_WaterHeightFixed, units
@@ -146,6 +150,11 @@ struct PlayerViewState {
     // it (>> 4 on x/y, >> 5 on z, half-step rounded) and `tp_anchor` mirrors
     // it; the on-foot float ease keeps it in step for a seamless mount.
     int32_t tp_anchor_q16[3] = {0, 0, 0};
+    // The mounted look-ahead offset (16.16), eased a thirty-second per tick
+    // toward the carrier's forward x 6.0; the look-at point is the anchor plus
+    // this [orig: g_camera_lookahead += (target - lookahead + 16) >> 5 per axis
+    // @0x438811..0x4388b5].
+    int32_t lookahead_q16[3] = {0, 0, 0};
     MountedCameraInput mount;
 };
 

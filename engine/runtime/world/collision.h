@@ -744,6 +744,13 @@ public:
                                          std::vector<CollisionMatrix> matrices);
     void clear_entity_section_matrices(EntityHandle h);
     bool has_instance(const World &world, EntityHandle h) const;
+    // The entity's current world-space section matrix (the same slot array the
+    // traces consume: published pose, else the host callback, else the placement
+    // matrix). False when the entity has no collision instance or the section
+    // is out of range. The scar writer transposes it to store a bone-local slot
+    // [orig: Scar_AddEntry @0x5ccc99..0x5ccca5].
+    bool entity_section_matrix(const World &world, EntityHandle h, int section,
+                               CollisionMatrix &out) const;
     bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 

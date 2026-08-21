@@ -151,6 +151,12 @@ typedef struct DefAmmoDef {
     int light_impact_radius_fp16; /* +132 */
     int light_impact_color;       /* +128: packed 0xRRGGBB */
     int light_impact_ticks;       /* +136: authored seconds * 62; 0 -> 10 */
+    /* The impact scar kind, 'scar_type <n>' (appended; FFI mirror stability):
+     * 0 = no mark, 1 = the ordinary ring scar, 2 = glass-only (the projected
+     * glass decal leg without the ring fallback). [orig: AmmoDef_ParseProperty
+     * @0x40aeea..0x40af11 atol -> word +0x76; consumer AmmoDef_ProcessImpactEffect
+     * @0x40a24e..0x40a264 -> Impact_SpawnGlassEffectsOrScar @0x5cf1b0] */
+    int scar_type;                /* word +0x76 */
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {

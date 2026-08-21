@@ -170,6 +170,10 @@ struct AmmoTableEntry {
     // 0 = the integrator default).
     int32_t turnrate_maxpit = 0;      // +80
     int32_t turnrate_maxyaw = 0;      // +84
+    // The impact scar kind (`scar_type`): 0 = no mark, 1 = the ring scar,
+    // 2 = glass-only [orig: word +0x76 -> Impact_SpawnGlassEffectsOrScar
+    // @0x5cf1b0's kind argument; world/impact_scar.h].
+    int32_t scar_type = 0;            // word +0x76
     bool valid = false;
 };
 

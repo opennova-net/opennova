@@ -806,18 +806,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
                     impacts.push_back(imp);
-                    // The knife leaf runs the same impact-effect processor,
-                    // so a stab into an item/building/terrain leaves the
-                    // same scar. WITNESS PENDING: Weapon_RaycastAndSpawnImpact
-                    // @0x4e8460's processor call reaching the scar fall-through.
-                    if (hit.hit_class == ProjectileHitClass::StaticEntity ||
-                        hit.hit_class == ProjectileHitClass::DynamicEntity) {
-                        if (const Entity *struck =
-                                world.registry.get(hit.geometry_entity))
-                            scar_add_entry(world, hit, struck);
-                    } else if (hit.hit_class == ProjectileHitClass::Terrain) {
-                        scar_add_entry(world, hit, nullptr);
-                    }
+                    // The knife leaf feeds the same impact-effect processor,
+                    // so a stab into an entity leaves the same scar by the
+                    // ammo's `scar_type` [orig: Weapon_RaycastAndSpawnImpact
+                    // @0x4e8460 -> AmmoDef_ProcessImpactEffect @0x40a170 ->
+                    // Impact_SpawnGlassEffectsOrScar @0x5cf1b0].
+                    if (const Entity *struck = world.registry.get(hit.geometry_entity))
+                        scar_add_entry(world, hit, *struck, ammo->scar_type);
                 }
             }
         } else if (impacts.size() < kMaxPendingImpacts) {
@@ -1207,14 +1202,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // `ignore` rounds only age.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
 
-        // The `move`-row emitter's LAZY spawn, tested after the aging decrement
-        // and before the move: an authored effect, no live handle, life still
-        // left, and not sitting at/below the water plane under ClipWaterFx.
-        // The shell spawns the emitter when this flips true. [orig: the guided
-        // leg @0x4E9F58..0x4E9F94 / the ballistic leg @0x4EA8AE; the z test
-        // reads the PRE-move position. WITNESS PENDING: whether the custom
-        // motor (+452) leg reaches a spawn site — ported as spawning so thrown
-        // rounds keep their authored plume]
+        // The `move`-row emitter's lifecycle, tested after the aging decrement
+        // and BEFORE the move — both tests read the pre-move position, since
+        // the function's only Position.Z store sits after them [orig:
+        // Projectile_UpdatePhysics @0x4E9D70 — the decrement @0x4e9f41, the
+        // spawn test @0x4e9f58..0x4e9f8e (an authored effect, no live handle,
+        // life left, not at/below the water plane under ClipWaterFx), the
+        // handle branch @0x4ea019..0x4ea03e (`z > water` re-poses, else
+        // ClipWaterFx releases the emitter, unlatched, so it may respawn once
+        // above water), the z store @0x4eaa45]. The shell spawns/retires the
+        // emitter as this flag flips. The custom-motor (+452) leg @0x4e9f06
+        // precedes the decrement in the same pass, so thrown rounds take the
+        // same tests.
         {
             const bool has_move_effect =
                 ammo != nullptr && !ammo->impact_effects[1].effect.empty();
@@ -1223,9 +1222,12 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                                              : r.max_age_ticks - r.age_ticks;
             const bool clipped = round_effect_should_release_for_water(
                 ammo_flags, to_fixed(r.pos.z), world.env.water_z);
-            if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
-                                          life_ticks, clipped))
+            if (clipped) {
+                r.move_effect_live = false;
+            } else if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
+                                                 life_ticks, clipped)) {
                 r.move_effect_live = true;
+            }
         }
         // `useownmove` rounds run ONLY their class motor — no stock ray,
         // gravity, or drag [orig: the +452 motor leg of Projectile_UpdatePhysics
@@ -1299,15 +1301,6 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
             r.pos = vec_from_fixed(end_q16);
-            // The water RELEASE, on the POST-move z: a ClipWaterFx round at or
-            // below the plane drops its emitter (the shell detaches it); it is
-            // not latched — surfacing re-arms the spawn above. [orig:
-            // @0x4EA01D..0x4EA036 — `z > Env_WaterHeightFixed` re-poses, else
-            // flags & 0x20000000 -> Entity_ReleaseEffectEmitter @0x4EA031]
-            if (r.move_effect_live &&
-                round_effect_should_release_for_water(ammo_flags, end_q16.z,
-                                                      world.env.water_z))
-                r.move_effect_live = false;
             if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr)
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z);
@@ -1534,19 +1527,17 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         imp.source_order = next_impact_order++;
         if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
 
-        // The impact scar: an ordinary round stop on an item, a building or
-        // the terrain writes one ring slot (water and persons never do;
-        // the glass-group userpoint leg stays separate) [orig: the impact
-        // effect processor AmmoDef_ProcessImpactEffect @0x40a264 ->
-        // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830].
-        // WITNESS PENDING: the bullet-path GLASS1..4 userpoint leg
-        // @0x5cf217..0x5cf289 that runs before the scar fall-through.
-        if (collision.hit_class == ProjectileHitClass::StaticEntity ||
-            collision.hit_class == ProjectileHitClass::DynamicEntity) {
-            if (impact_target != nullptr)
-                scar_add_entry(world, collision, impact_target);
-        } else if (collision.hit_class == ProjectileHitClass::Terrain) {
-            scar_add_entry(world, collision, nullptr);
+        // The impact scar: a round stop on an ENTITY (item, vehicle, building
+        // or person — terrain and water never scar) writes one ring slot per
+        // the ammo's `scar_type` [orig: the impact-effect processor
+        // AmmoDef_ProcessImpactEffect @0x40a24e..0x40a264 passes the entity,
+        // the hit record and the kind (ammo word +0x76) to
+        // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830;
+        // the GLASS userpoint leg's residual is recorded in world/impact_scar.h].
+        if (impact_target != nullptr) {
+            const AmmoTableEntry *scar_ammo = world.ammo.by_index(impact_ammo_index);
+            scar_add_entry(world, collision, *impact_target,
+                           scar_ammo != nullptr ? scar_ammo->scar_type : 0);
         }
 
         // Every explosive round stop queues its authored kill zone. The queue

@@ -1,6 +1,6 @@
 // The impact-scar draw list: the witnessed six-vertex quad order and UVs, the
-// per-texture batching, the fog-box and owner-visibility culls, and the
-// terrain-first ring order.
+// per-texture batching, the shared-ring-first order, the entity rings'
+// section-local batches, and the fog-box / owner-visibility culls.
 // [orig: Scar_RenderCache @0x5CD830; Scar_RenderAllCaches @0x5CDF70]
 
 #include <renderer/scar_draw_list.h>
@@ -22,25 +22,28 @@ int failures = 0;
 
 bool near(float a, float b) { return std::fabs(a - b) < 0.0005f; }
 
-// A slot centred at (10, 20, 3) with axis A = +X, axis B = +Y and a 0.5 u
-// radius.
-ScarSlot make_slot(int32_t cx, int32_t cy, int32_t cz, uint8_t texture) {
+// A slot centred at (cx, cy, cz) with axis A = +X, axis B = +Y and a 0.5 u
+// radius, owned by `owner`.
+ScarSlot make_slot(int32_t cx, int32_t cy, int32_t cz, uint8_t texture,
+		EntityHandle owner = EntityHandle{}, uint8_t section = 0) {
 	ScarSlot s;
 	s.pos[0] = cx * 0x10000;
 	s.pos[1] = cy * 0x10000;
 	s.pos[2] = cz * 0x10000;
 	s.axis_a[0] = 0x10000;
 	s.axis_b[1] = 0x10000;
+	s.normal[2] = 0x10000;
 	s.radius_q16 = 0x8000;
 	s.texture = texture;
+	s.owner = owner;
+	s.bone = section;
 	s.live = true;
 	return s;
 }
 
 void test_quad_order_and_uvs() {
 	ScarCache cache;
-	cache.terrain_ring().slots[0] = make_slot(10, 20, 3, 2);
-	cache.terrain_ring().in_use = true;
+	cache.world_ring().slots[0] = make_slot(10, 20, 3, 2);
 	ScarViewContext ctx;
 	ctx.terrain_light_argb = 0x00808080u;
 	ScarDrawList out;
@@ -68,58 +71,73 @@ void test_quad_order_and_uvs() {
 		CHECK(v[i].argb == 0xFF808080u, "the terrain light colour with alpha forced opaque");
 	}
 	CHECK(out.batches[0].texture == 2, "the batch carries the strip index");
-	CHECK(out.batches[0].owner_packed == 0xFFFF, "the terrain ring is the world owner");
+	CHECK(out.batches[0].owner_packed == 0xFFFF, "the shared ring is the world owner");
+	CHECK(!out.batches[0].entity_local, "shared-ring batches are world space");
 	CHECK(out.batches[0].first_vertex == 0 && out.batches[0].vertex_count == 6, "batch span");
 }
 
 void test_batches_per_texture_and_ring_order() {
 	ScarCache cache;
-	// Terrain: two slots on strip 0 and one on strip 27.
-	ScarRing &terrain = cache.terrain_ring();
-	terrain.slots[0] = make_slot(0, 0, 0, 0);
-	terrain.slots[1] = make_slot(1, 0, 0, 27);
-	terrain.slots[2] = make_slot(2, 0, 0, 0);
-	// An entity ring with one strip-3 slot.
-	ScarRing *ring = cache.ring_for(EntityHandle::make(1, 7), 42);
+	// The shared ring: two slots on strip 0 and one on strip 27.
+	ScarRing &shared = cache.world_ring();
+	shared.slots[0] = make_slot(0, 0, 0, 0);
+	shared.slots[1] = make_slot(1, 0, 0, 27);
+	shared.slots[2] = make_slot(2, 0, 0, 0);
+	// An entity ring with strip-3 slots on sections 1 and 4.
+	const EntityHandle owner = EntityHandle::make(1, 7);
+	ScarRing *ring = cache.ring_for(owner, 42);
 	CHECK(ring != nullptr, "an entity ring leases");
-	ring->slots[0] = make_slot(5, 5, 0, 3);
+	ring->slots[0] = make_slot(5, 5, 0, 3, owner, 4);
+	ring->slots[1] = make_slot(6, 5, 0, 3, owner, 1);
+	ring->slots[2] = make_slot(7, 5, 0, 3, owner, 4);
 	ScarViewContext ctx;
 	ScarDrawList out;
 	renderer::compile_scar_draws(cache, ctx, out);
-	CHECK(out.batches.size() == 3, "strip 0 + strip 27 for the terrain, strip 3 for the entity");
-	if (out.batches.size() != 3) return;
+	CHECK(out.batches.size() == 4,
+			"strip 0 + strip 27 for the shared ring, then section 1 and section 4 for the entity");
+	if (out.batches.size() != 4) return;
 	CHECK(out.batches[0].texture == 0 && out.batches[0].vertex_count == 12,
-			"the terrain's strip-0 batch holds both quads");
+			"the shared ring's strip-0 batch holds both quads");
 	CHECK(out.batches[1].texture == 27 && out.batches[1].vertex_count == 6,
-			"then the terrain's strip-27 batch");
-	CHECK(out.batches[2].owner_packed == EntityHandle::make(1, 7).packed &&
-					out.batches[2].texture == 3,
-			"the entity ring follows the terrain ring");
-	CHECK(out.vertices.size() == 24, "four quads in total");
+			"then the shared ring's strip-27 batch");
+	CHECK(out.batches[2].owner_packed == owner.packed && out.batches[2].entity_local &&
+					out.batches[2].section == 1 && out.batches[2].vertex_count == 6,
+			"the entity ring follows, per section: section 1 first");
+	CHECK(out.batches[3].section == 4 && out.batches[3].vertex_count == 12 &&
+					out.batches[3].texture == 3,
+			"section 4 holds its two quads");
+	CHECK(out.vertices.size() == 36, "six quads in total");
 }
 
-void test_fog_box_cull() {
+void test_fog_box_cull_is_world_only() {
 	ScarCache cache;
-	cache.terrain_ring().slots[0] = make_slot(0, 0, 0, 0);    // near
-	cache.terrain_ring().slots[1] = make_slot(100, 0, 0, 0);  // beyond the fog on x
-	cache.terrain_ring().slots[2] = make_slot(0, -100, 0, 0); // beyond the fog on y
+	cache.world_ring().slots[0] = make_slot(0, 0, 0, 0);    // near
+	cache.world_ring().slots[1] = make_slot(100, 0, 0, 0);  // beyond the fog on x
+	cache.world_ring().slots[2] = make_slot(0, -100, 0, 0); // beyond the fog on y
 	ScarViewContext ctx;
 	ctx.cam_x = 0.0f;
 	ctx.cam_y = 0.0f;
 	ctx.fog_distance = 50.0f;
 	ScarDrawList out;
 	renderer::compile_scar_draws(cache, ctx, out);
-	CHECK(out.slots_live == 1 && out.slots_culled == 2, "the two far slots are culled");
+	CHECK(out.slots_live == 1 && out.slots_culled == 2, "the two far shared slots are culled");
 	CHECK(out.vertices.size() == 6, "only the near quad is emitted");
 	// The margin is fog + radius: a slot at fog + 0.4 with a 0.5 radius stays.
-	cache.terrain_ring().slots[1] = make_slot(0, 0, 0, 0);
-	cache.terrain_ring().slots[1].pos[0] = static_cast<int32_t>(50.4f * 65536.0f);
-	cache.terrain_ring().slots[2].live = false;
+	cache.world_ring().slots[1] = make_slot(0, 0, 0, 0);
+	cache.world_ring().slots[1].pos[0] = static_cast<int32_t>(50.4f * 65536.0f);
+	cache.world_ring().slots[2].live = false;
 	renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_live == 2, "|dx| <= fog + r keeps the slot");
+	// Entity-local slots are never box-culled here (their frame is the
+	// owner's section; the presenter culls them with the node).
+	const EntityHandle owner = EntityHandle::make(1, 2);
+	ScarRing *ring = cache.ring_for(owner, 1);
+	ring->slots[0] = make_slot(500, 500, 0, 0, owner, 0);
+	renderer::compile_scar_draws(cache, ctx, out);
+	CHECK(out.slots_live == 3, "an entity-local slot far from the camera still emits");
 	// No fog distance means no cull.
 	ctx.fog_distance = 0.0f;
-	cache.terrain_ring().slots[2] = make_slot(0, -100, 0, 0);
+	cache.world_ring().slots[2] = make_slot(0, -100, 0, 0);
 	renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_culled == 0, "a zero fog distance disables the box cull");
 }
@@ -131,21 +149,28 @@ bool show_owner_7(std::uint16_t owner, void *) {
 
 void test_owner_visibility() {
 	ScarCache cache;
-	ScarRing *a = cache.ring_for(EntityHandle::make(1, 7), 1);
-	ScarRing *b = cache.ring_for(EntityHandle::make(2, 9), 2);
-	a->slots[0] = make_slot(0, 0, 0, 0);
-	b->slots[0] = make_slot(1, 1, 1, 0);
-	cache.terrain_ring().slots[0] = make_slot(3, 3, 3, 0);
+	const EntityHandle a_owner = EntityHandle::make(1, 7);
+	const EntityHandle b_owner = EntityHandle::make(1, 9);
+	ScarRing *a = cache.ring_for(a_owner, 1);
+	ScarRing *b = cache.ring_for(b_owner, 2);
+	a->slots[0] = make_slot(0, 0, 0, 0, a_owner);
+	b->slots[0] = make_slot(1, 1, 1, 0, b_owner);
+	// Shared-ring slots are gated on their OWN owner; an ownerless slot is
+	// never gated.
+	cache.world_ring().slots[0] = make_slot(3, 3, 3, 0, EntityHandle::make(2, 1));
+	cache.world_ring().slots[1] = make_slot(4, 4, 4, 0, a_owner);
+	cache.world_ring().slots[2] = make_slot(5, 5, 5, 0);
 	ScarViewContext ctx;
 	ScarDrawList out;
 	ctx.owner_visible = hide_everything;
 	renderer::compile_scar_draws(cache, ctx, out);
-	CHECK(out.slots_live == 1, "the terrain ring never takes the owner gate");
-	CHECK(out.slots_culled == 2, "both entity rings were gated off");
+	CHECK(out.slots_live == 1, "only the ownerless shared slot survives a hide-all gate");
+	CHECK(out.slots_culled == 4, "both entity rings and the two owned shared slots were gated off");
 	ctx.owner_visible = show_owner_7;
 	renderer::compile_scar_draws(cache, ctx, out);
-	CHECK(out.slots_live == 2 && out.slots_culled == 1, "only the visible owner draws");
-	CHECK(out.batches.size() == 2, "terrain + the visible entity");
+	CHECK(out.slots_live == 3 && out.slots_culled == 2,
+			"the visible owner's shared slot and ring draw, the others do not");
+	CHECK(out.batches.size() == 2, "one shared batch + the visible entity ring's batch");
 }
 
 } // namespace
@@ -153,7 +178,7 @@ void test_owner_visibility() {
 int main() {
 	test_quad_order_and_uvs();
 	test_batches_per_texture_and_ring_order();
-	test_fog_box_cull();
+	test_fog_box_cull_is_world_only();
 	test_owner_visibility();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
