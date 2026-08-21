@@ -3280,7 +3280,19 @@ push, the in-water flag with the r/2 hysteresis, corner-quad conform, and the
     the origin at `ground − box_z_lo` (the wheel clearance). Crashed or
     inverted: `Position.Z += maxGroundHeight` (the max-penetration scan
     @ 0x47E09F..0x47E107) [orig: 0x47ECE2]; wreck-rest upright: the solved Z.
-11. **Tail** [orig: 0x47EE50..0x47EEF5]: spring-energy release, the airborne
+11. **Post-contact sink reset** [orig: 0x47ECE9..0x47ED60] (walked
+    2026-08-21): every pad WITH contact zeroes its OWN sink [orig:
+    0x47ECED..0x47ED17]; then a DIAGONAL pair `((d0 && d3) || (d1 && d2)) &&
+    up.z > 0 && !crashed(+0x2EC)` → `+0x2EE = 0`, all four sinks = 0,
+    `+0x2EF = 0`. The `up.z` term is `ebp = var_288` — the same up.z the
+    pre-skip gate reads, NOT a penetration depth; the `+0x2EC = 0` store
+    @ 0x47ED60 is redundant under the gate's own `!crashed` term.
+12. **Crash recovery** [orig: 0x47ED67..0x47EE49; the client twin
+    @ 0x47EEA0] (walked 2026-08-21): `!(Flags & 0x10) && up.z < 0` →
+    `Entity_RebuildOrientationMatrixFromAxes` + `Entity_ComputeBoundingQuad`,
+    then `+0x2EC = +0x2EF = +0x2F0 = 0` (crashed, the 2EF byte and the settle
+    latch all clear). The righting itself is the named residual of §7.3.
+13. **Tail** [orig: 0x47EE50..0x47EEF5]: spring-energy release, the airborne
     tick counter (entity[1] bookkeeping @ 0x47EEC7), the non-authority
     inverted flip-restore [orig: 0x47EEAC..0x47EEB7], wreck-rest slideDecay
     halving, `+0x2ED = 0` — all deferred except nothing our subset consumes.
@@ -3343,12 +3355,18 @@ wire-up round's witness pass corrected two readings of the tidy:
   memset only), raised by the family physics during the tick and cleared
   UNCONDITIONALLY at every tick tail (tank `@0x4795da`, bike `@0x47c0b6`,
   tracked `@0x47eeee`) — so a fresh row can never latch. The 17 producers (all
-  require `+0x2EC == 0`): tank `@0x477776` (upside-down beyond `def->flip`
-  `&& Flags & 0x2000` airborne), `@0x4777bf` (authority `|velocity.z| >
-  0x7000`, client `airborne && Flags & 0x10`), `@0x478bc0` (CLIENT-ONLY, the
-  10-tick airborne window over `+0x2F1/+0x2F0/+0x2F8`); tracked `@0x47d763`
-  (`(upside-down || Flags & 0x10) && airborne`), `@0x47d7a8` (the same
-  authority/client split), `@0x47e7d8` (the client window twin); bike
+  require `+0x2EC == 0`): tank `@0x477776` (crash test (a): `|up.z| <
+  flip · flt_7C56A8 (0.01) · flt_7C32BC (65536.0, NOT 65535.0)` — the
+  `cdq; xor; sub` ABSOLUTE value `@0x477748..0x477776`, so an inverted hull
+  tip-tests too — `&& Flags & 0x2000` airborne), `@0x4777bf` (authority
+  `|velocity.z| > 0x7000`, client `airborne && Flags & 0x10`), `@0x478bc0`
+  (CLIENT-ONLY, the 10-tick airborne window over `+0x2F1/+0x2F0/+0x2F8`, with
+  a `+0x2F0 == 0` settle term `@0x478b8a` that is TANK-ONLY); tracked
+  `@0x47d763` (the same `|up.z|` test `@0x47d722..0x47d763` `|| Flags &
+  0x10` — the `|| bit` alternative is TRACKED-ONLY, absent from the tank
+  twin — `&& airborne`), `@0x47d7a8` (the same authority/client split),
+  `@0x47e7d8` (the client window twin `@0x47e793..0x47e7a8`, WITHOUT the
+  settle term); bike
   `@0x47b14c` (authority, driven `var_29C > 0x6702`, upside-down `up·z <
   −0.87`, then `front || rear` contact), `@0x47b375` (both wheels off `&&
   +0x3DE && an extra probe hit`), `@0x47b6a7` / `@0x47b6d1` / `@0x47b6fb`
@@ -3376,7 +3394,8 @@ wire-up round's witness pass corrected two readings of the tidy:
   `@0x47db70..0x47dbd1` the same gate, `+= ftol(dt × 250.0)` = 187
   (pre-skipped when `+0x2F2 == 0 && all sinks == 0 && var_288 < 0`); bike
   `@0x47ab36..0x47abdc` with NO latch terms — front/rear `+= 100` whenever
-  that wheel has no contact.
+  that wheel has no contact. The tracked RESET (contact → own sink = 0, the
+  diagonal-pair clear of `+0x2EE`/sinks/`+0x2EF`) is §7 step 11.
 - **`Entity_ClearSuspensionState @0x4592B0`** is routine, not a latch effect:
   identity into the chassis matrix `+0x4F4`, the interp quaternion
   `+0x534..+0x540 = 0`, `+0x4EC/+0x4F0 = 0`, `+0x4E8 = 0`, `+0x3DC = 0` if
@@ -3409,7 +3428,9 @@ taken once per latch; the Flags-0x10 client path; the clear), and the
 reading of the gate had parked every vehicle at spawn). **Named residuals**
 (no D-row): the crash-request producers whose inputs are unported — the
 bike's `+0x3DE` has-been-driven byte and the client 10-tick airborne window
-(`+0x2F1/+0x2F0/+0x2F8`) — and the contact-direction slope feed (D-NET-161).
+(`+0x2F1/+0x2F0/+0x2F8`) — the contact-direction slope feed (D-NET-161), and
+the crash-recovery righting (§7 step 12: the inverted-hull rebuild and its
+three-byte clear, walked 2026-08-21, unported).
 
 ### 7.4 The part-animation registers — rotors and the wheel phase (witnessed + ported 2026-08-21)
 
@@ -3427,7 +3448,11 @@ accumulator, no separate tail-rotor state.
   (ex `Entity_UpdateGravityAccumulator`; the gate `@0x4928c9`), called
   unconditionally at the tail of all six movers after the splash sound
   (`@0x46f99e` inf, `@0x4700f5` air, `@0x4869ea` light, `@0x4889f5` mounted,
-  `@0x48ae3d` tank, `@0x48d42b` vehicle); HELO (1) =
+  `@0x48ae3d` tank, `@0x48d42b` ground vehicle = `Entity_UpdateVehiclePhysics
+  @0x48AF00`). The watercraft mover `Entity_UpdateWatercraftPhysics @0x48D480`
+  calls NEITHER rotor machine — its only part register is the wheel phase
+  `+0x2B8 += cmd << 13` `@0x48E9F0`, so a boat never draws the rotor PRNG
+  word. HELO (1) =
   `entity_update_damage_accumulator_and_shadow @0x48FA70` (a misnomer;
   proposed `Entity_UpdateHeloRotorSpin`), called from `Entity_UpdateAircraftPhysics
   @0x4905a6`. Rate seeding (both): `attrib & 0x40` (PlayerControl) with an

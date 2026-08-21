@@ -4726,8 +4726,11 @@ vehicle-client-movers-re.md §7.4; the vehicle-pass facts:
   profile+16`): GROUND profiles (type 2) run `Entity_UpdatePartSpinAccumulator
   @0x4928b0` (decay 186413/tick), called unconditionally at the tail of all
   six movers (`@0x46f99e` infantry, `@0x4700f5` air, `@0x4869ea` light,
-  `@0x4889f5` mounted infantry, `@0x48ae3d` tank, `@0x48d42b` vehicle);
-  helicopters (type 1) run the twin `@0x48fa70` from `Entity_UpdateAircraftPhysics
+  `@0x4889f5` mounted infantry, `@0x48ae3d` tank, `@0x48d42b` ground vehicle =
+  `Entity_UpdateVehiclePhysics @0x48af00`); the watercraft mover
+  `Entity_UpdateWatercraftPhysics @0x48d480` calls NEITHER machine — its only
+  part register is the wheel phase `@0x48e9f0`, so a boat never draws the
+  rotor PRNG word; helicopters (type 1) run the twin `@0x48fa70` from `Entity_UpdateAircraftPhysics
   @0x4905a6` (decay 46603/tick, plus the engine-start sound and the downwash
   overlay — presentation residuals). Both seed the rate the same way: a
   PlayerControl item (attrib 0x40) with an occupant → 186413; any other item →
@@ -5300,16 +5303,20 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   `(entity, hitRec, arg2, hitPos, hitZ, scarId, spinFlag)`): gates `scarId
   != 0`, a model, `hitZ > Env_WaterHeightFixed` `@0x5cc865`, entity flag 4
   clear `@0x5cc894`, section/face indices in range, a face without flag
-  `0x400` `@0x5cc92b`. **Ring selection is BY POOL** `@0x5cc873..0x5cc88c`:
-  `isEntityLocal = Pool_GetIndexFromPtr(1, entity) >= 0 || (def+84 byte0 &
-  0x80)` — a pool-1 item/vehicle owns a per-entity ring (`Scar_GetEntityCache
-  (entity, 1)`) whose slot keeps the normal model-local and the position
-  transformed INTO section-local space through the transposed section matrix
+  `0x400` `@0x5cc92b`. **Ring selection is BY POOL** (`isEntityLocal`
+  computed `@0x5cc873..0x5cc88c` = `Pool_GetIndexFromPtr(1, entity) >= 0 ||
+  (def+84 byte0 & 0x80)`), but the ring is LEASED only AFTER the face gate
+  (`@0x5cc96f..0x5cc983`) — a rejected hit never takes a ring. The face
+  normal ×4 → Q16 `@0x5cc938..0x5cc960` is stored RAW (untransformed) for a
+  pool-1 item/vehicle's per-entity ring (`Scar_GetEntityCache(entity, 1)`),
+  whose slot keeps that model-local normal and the position transformed INTO
+  section-local space through the transposed section matrix
   `@0x5ccc99..0x5ccca5` (bone byte = the section index, hitRecord+0x7C), so
   the scars follow a moving carrier; buildings (pool 2) and persons (pool 0)
   write the shared world ring `dword_2BDB7C0` (alloc 0) with the normal
-  rotated by the live section matrix `@0x5cc96f` and the position in world
-  space. Face normal ×4 → Q16 `@0x5cc938..0x5cc960`; the tangent is a
+  rotated by the live section matrix (the `@0x5cc96f` branch — the ONLY
+  normal rotation in the function) and the position in world space. The
+  tangent is a
   seven-case magnitude ladder `@0x5cc9da..0x5cca71` (b<a&&a>c&&b>c →
   (ny,−nx,0); b<a&&a>c&&b<=c → (nz,0,−nx); b<a&&a<=c → (−nz,0,nx); b==a →
   (0,−nz,ny); b>a&&b<=c → (0,−nz,ny); b>a&&b>c&&a>c → (−ny,nx,0);
@@ -5317,7 +5324,9 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   `B = N × T` with T flipped when `N·(B × T) < 0` `@0x5ccada..0x5ccb37`;
   `spinFlag` draws `PRNG_Next16 << 16` as BAM32 `@0x5ccb50` FIRST (the texture
   word is drawn at the slot write) and rotates `T' = (T·c − B·s) >> 22`,
-  `B' = (T·s + B·c) >> 22` `@0x5ccb54..0x5ccc65`; the slot is
+  `B' = (T·s + B·c) >> 22` `@0x5ccb54..0x5ccc65` — retail shifts EACH product
+  `>> 22` separately before the add/sub, where the port sums the products and
+  shifts once (a ±1 LSB difference, recorded, not fixed); the slot is
   `Scar_AdvanceRingCursor @0x5cc1d0` (compare-and-wrap at 256, ex
   `CTerrainRenderer_AdvanceFrameIndex`); the 64-byte entry = N@0, T@12, B@24,
   position@36, radius@48 (`Scar_RadiusForId`), texture index@52 (`(name −
@@ -5590,26 +5599,35 @@ The ammo's effects-table tag 1 ("move") emitter the round carries at
 was missing was WHEN it spawns and when the water plane releases it
 `[orig: Projectile_UpdatePhysics @0x4e9d70]`:
 
-- The life decrement (`+0x2AC`, only while > 0) `@0x4e9f41` PRECEDES the
-  spawn test; spawn iff `ammo+0x70` authored `@0x4e9f58` `&& +0x1CC == 0`
-  `@0x4e9f63` `&& life != 0` `@0x4e9f70` `&& !(z <= Env_WaterHeightFixed &&
-  ammoFlags & 0x20000000)` `@0x4e9f7d..0x4e9f8e` → `CEffectWorld_SpawnEmitterAtPosition`
-  → `+0x1CC` `@0x4ea011`. With a handle `@0x4ea019..0x4ea03e`: `z > water` →
-  `CEffect_UpdateEmitterTransform` (re-pose); else `ClipWaterFx` →
-  `Entity_ReleaseEffectEmitter @0x5f75d0` (UNLATCHED — `+0x1CC = 0`, so a
-  round that surfaces again spawns a fresh emitter); else re-pose. Both tests
-  read the PRE-move position: the only `Position.Z` store in the function is
-  `@0x4eaa45`, after them. The ammo flag table `@0x813500`: `ClipWaterFx =
-  0x20000000` `@0x8135b8` (`ClipWater = 0x1000000` `@0x8135b0`, `noage =
-  0x4000`). The custom-motor (thrown) leg runs the same tests after its motor
-  call `@0x4e9f06` precedes the decrement — an address-order reading.
+- **The `useownmove` (0x2000) leg ONLY** `@0x4e9f50..0x4ea06a` carries the
+  water gate and the release (its custom-motor call `@0x4e9f06` precedes the
+  decrement): the life decrement (`+0x2AC`, only while > 0) `@0x4e9f41`
+  PRECEDES the spawn test; spawn iff `ammo+0x70` authored `@0x4e9f58` `&&
+  +0x1CC == 0` `@0x4e9f63` `&& life != 0` `@0x4e9f70` `&& !(z <=
+  Env_WaterHeightFixed && ammoFlags & 0x20000000)` `@0x4e9f7d..0x4e9f8e` →
+  `CEffectWorld_SpawnEmitterAtPosition` → `+0x1CC` `@0x4ea011`. With a handle
+  `@0x4ea019..0x4ea03e`: `z > water` → `CEffect_UpdateEmitterTransform`
+  (re-pose); else `ClipWaterFx` → `Entity_ReleaseEffectEmitter @0x5f75d0`
+  (UNLATCHED — `+0x1CC = 0`, so a round that surfaces again spawns a fresh
+  emitter); else re-pose. Both tests read the PRE-move position: the only
+  `Position.Z` store in the function is `@0x4eaa45`, after them. The ammo
+  flag table `@0x813500`: `ClipWaterFx = 0x20000000` `@0x8135b8` (`ClipWater
+  = 0x1000000` `@0x8135b0`, `noage = 0x4000`).
+- **The ballistic leg has NO water term**: its spawn test `@0x4ea8ae..
+  0x4ea8d3` is `ammo+0x70 authored && +0x1CC == 0 && life != 0` with the
+  life read BEFORE that leg's own decrement `@0x4eaa7f` (the opposite order
+  from the `useownmove` leg), and its handle branch `@0x4ea963` only
+  re-poses — a ballistic round under the water plane keeps its emitter until
+  `Projectile_ReleaseEffects` lets it go. (The tidy's "the thrown leg runs the
+  same tests" was the mislabeled `useownmove` block itself.)
 - Death detaches rather than destroys `[orig: Projectile_ReleaseEffects
   @0x4e8280 -> Entity_ReleaseEffectEmitter @0x4e82b1..0x4e82bf]` — stop
   emission and let the live particles drain (the live
   `throwable_present_pass.gd` leg). "A zero max_age never times out" was
   REFUTED in the tidy: the head `@0x4e9da7..0x4e9dae` retires `+0x2AC <= 0` on
   the first tick; "never times out" is the `noage` flag.
-- **Port**: `round_sim.cpp` evaluates the predicates each flight tick into
+- **Port**: `round_sim.cpp` evaluates each leg's own predicates each flight
+  tick (the water term on the `useownmove` leg only) into
   `LiveRound::move_effect_live` (`round_move_effect.h` keeps the consumed
   predicates; `ammo_table.h` names `kAmmoFlagClipWater/ClipWaterFx`); the rows
   carry the bool and `throwable_present_pass.gd` spawns only when live with
@@ -6000,7 +6018,9 @@ The parser stages canonical tag 1 at `0xA2E974` (effect handle
 Both projectile tick paths load +0x70, lazily spawn one group into the round's
 +0x1CC slot, and update that same group from the current round transform
 `[orig: @ 0x4e9f58..0x4ea041 / @ 0x4ea8ae..0x4ea970;
-CEffect_UpdateEmitterTransform @ 0x5f7410]`. `Projectile_ReleaseEffects
+CEffect_UpdateEmitterTransform @ 0x5f7410]` — but the `ClipWaterFx`
+water-plane release is the `useownmove` leg's alone; the ballistic leg's
+handle branch `@ 0x4ea963` only re-poses (the `move` emitter record above). `Projectile_ReleaseEffects
 @ 0x4e8280` releases +0x1CC when the round dies. The port mirrors this through
 `get_throwable_visuals().move_effect` and an owner-bound group in
 `throwable_present_pass.gd`: one spawn, full-transform follow, then immediate
