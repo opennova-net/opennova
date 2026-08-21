@@ -43,6 +43,25 @@ inline int seat_label_y(int base_y, int slot_y) {
 	return base_y + slot_y + kSeatMarkerH / 2;
 }
 
+// THE PANEL'S BASE CORNER. Every seat offset in the VEHICLE_HUD block is
+// relative to this, and it is NOT a fixed screen position: it is the authored
+// HUDVEHSTANCEPOS anchor plus the offset for the rider's CURRENT STANCE
+// [orig: baseX = dword_2723AF4 + dword_2723B24[byte_27235C0],
+//        baseY = dword_2723AF8 + dword_2723B44[byte_27235C0]].
+//
+// Both halves already exist on our side and are simply joined here: the
+// anchor is hudpos's HUDVEHSTANCEPOS pair (def.h `veh_stance_pos`) and the
+// per-stance offsets are the same HUDSTANCE tables the stance icon uses
+// (hud_frame.h `stance_offset_x`/`stance_offset_y`). Sharing them is the
+// witnessed behaviour, not a convenience -- the panel MOVES WITH the stance
+// icon, so a reimplementation that pinned the panel to a fixed corner would
+// drift apart from it the moment the rider changed stance.
+inline void vehicle_panel_base(int anchor_x, int anchor_y, int stance_offset_x,
+		int stance_offset_y, int &out_x, int &out_y) {
+	out_x = anchor_x + stance_offset_x;
+	out_y = anchor_y + stance_offset_y;
+}
+
 // The marker's filled rect, as corners.
 inline void seat_marker_rect(int base_x, int base_y, int slot_x, int slot_y,
 		int &x0, int &y0, int &x1, int &y1) {
