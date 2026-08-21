@@ -4,10 +4,10 @@
 			"height": 1200,
 			"label": "00tra-fire-barrel-close-retail-m0900-beauty",
 			"png_path": "00tra-fire-barrel-close-retail-m0900-beauty.png",
-			"png_sha256": "645f3b9baec38f811dee03c3707b46e495fa1bbd2b473a7a38b12c9f4cbb8acb",
-			"source_state_sha256": "b8f2add58e354f0a3860e76811abdf134c486d75887b8186c3516a517e076c09",
+			"png_sha256": "188faa89ee92a757d9b5389728bf3300c59dd5f161e269dff69db62b4407c24d",
+			"source_state_sha256": "ada8f7b1b0452069b443eec58bff5ce0858cc174313c94e33bb42db9de2302b3",
 			"state_path": "00tra-fire-barrel-close-retail-m0900-beauty.state.json",
-			"state_sha256": "fb52149a5950380e2198ef411bf2d3c68b8dfb99c0288cc6bd6d1cb35e34306a",
+			"state_sha256": "8d0b4646894a90b16afbf13d3aeab2eb0c2eb23917b410ae746ea7dff1b6a905",
 			"variant": "beauty",
 			"width": 2000
 		},
@@ -15,10 +15,10 @@
 			"height": 1200,
 			"label": "00tra-fire-barrel-close-retail-m0900-shadows_off",
 			"png_path": "00tra-fire-barrel-close-retail-m0900-shadows_off.png",
-			"png_sha256": "914504a9745f49c29a7413ded59b45962827d83d693db3595c5e3f7dc29e580f",
-			"source_state_sha256": "bc84411fa1be00c1ec19480eb8a0d8d81df6592f59bb1e9f42abb232fe6d6944",
+			"png_sha256": "a3dc846aa93ebb44a36abf26ef733399f5259a4db71291e7943a277504cf6dff",
+			"source_state_sha256": "60b788f1e0af73cb83dd2d8ca9d7f8f6d8f0459ba635aa1cd86cd022fc937dbf",
 			"state_path": "00tra-fire-barrel-close-retail-m0900-shadows_off.state.json",
-			"state_sha256": "3ee9417fcc9c30316bfb29fbef26f1b122c0ecf47f0f8d39c4f4e96f7fd83770",
+			"state_sha256": "6b77e0798182a43b80691acabf09efde9711f4a244425a3e3d315b66f02fbe3d",
 			"variant": "shadows_off",
 			"width": 2000
 		},
@@ -26,10 +26,10 @@
 			"height": 1200,
 			"label": "00tra-fire-barrel-close-retail-m0900-lighting_only",
 			"png_path": "00tra-fire-barrel-close-retail-m0900-lighting_only.png",
-			"png_sha256": "cdbe353e8b3439808c3b2160a79f0b0432258d31a14acd8f6b070120f8624716",
-			"source_state_sha256": "9eccc27cb9c7b0c69e0cb53ec041e3a4ab49097e61c3a30f04ee284fb5725ac9",
+			"png_sha256": "75bacff6577f7fe28de15b7a70ae4006cc99d613571c705192154b32b3b342b7",
+			"source_state_sha256": "1cd2cf8c1b12225fe2efe552e6606883fa96cb2d4a6d45ca89274ea7a71e5a82",
 			"state_path": "00tra-fire-barrel-close-retail-m0900-lighting_only.state.json",
-			"state_sha256": "dca9de84148a61aeb51a796b009fe175d1ff7d822983cd89ed84b0474c3b2256",
+			"state_sha256": "827559ead1aa6dea53b8b022ea1364c6f20d536fe62a7fc06fdd2b8122803fb9",
 			"variant": "lighting_only",
 			"width": 2000
 		},
@@ -37,10 +37,10 @@
 			"height": 1200,
 			"label": "00tra-fire-barrel-close-retail-m0900-unshaded",
 			"png_path": "00tra-fire-barrel-close-retail-m0900-unshaded.png",
-			"png_sha256": "fc7eca09cc6b1c141c5ebcea8d30f22feb4644fe39c3175378fd55b6f95da79b",
-			"source_state_sha256": "bfd129e72594f9d6a72ac2177991ceca523b469aa5157635e63adb00114b889e",
+			"png_sha256": "a42d252f5710da57608a36947d55164125c298aeb11b35bddb6ad69ff8128a7a",
+			"source_state_sha256": "6dcb932711634e923129e01ced4854e11b02d09ac15023038dc9187515e2c6f1",
 			"state_path": "00tra-fire-barrel-close-retail-m0900-unshaded.state.json",
-			"state_sha256": "2136915dbad21b88e02e42f3ba758d1a07d31d9185772e593f6f263330d0e1a8",
+			"state_sha256": "ba7ec74bbea721765d762605c60291e5e782ce75da9591e8f3b7d1aa830f690d",
 			"variant": "unshaded",
 			"width": 2000
 		},
@@ -48,10 +48,10 @@
 			"height": 1200,
 			"label": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas",
 			"png_path": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas.png",
-			"png_sha256": "78a969eb1c9b365511b895cf623a413138a6647d0f14c0b425ffd587d81299cb",
-			"source_state_sha256": "aaa55595c8b2d807de25b18f187be72d7671d5f7ba82f136650fb9a07483ed55",
+			"png_sha256": "8e7e8df059ee37afc2554695a9a573dc6c30a4b64853d566277a1932c4a9dc7b",
+			"source_state_sha256": "e802c4b8310a06fe313ba0730e44c7a8578021c4658d9e931008f77ba712e21b",
 			"state_path": "00tra-fire-barrel-close-retail-m0900-directional_shadow_atlas.state.json",
-			"state_sha256": "caefeaef4ac5153ef6beffb532be6223740078555591e841b818e6d2d9a60a5b",
+			"state_sha256": "0883abf1955bc47994a34c257a74c987fd7dc18da41151b5a12bd1a6d260c181",
 			"variant": "directional_shadow_atlas",
 			"width": 2000
 		}
@@ -222,10 +222,10 @@
 	},
 	"provenance": {
 		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
-		"gdextension_sha256": "7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e",
+		"gdextension_sha256": "b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce",
 		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
 		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-		"source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3"
+		"source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba"
 	},
 	"schema": "opennova.render-fixture-captures.v1"
 }

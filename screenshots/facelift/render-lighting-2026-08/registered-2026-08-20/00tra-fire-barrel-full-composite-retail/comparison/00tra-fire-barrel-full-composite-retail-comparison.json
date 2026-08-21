@@ -400,17 +400,17 @@
         2000,
         1200
       ],
-      "gdextension_sha256": "7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e",
+      "gdextension_sha256": "b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce",
       "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
-      "manifest_sha256": "fe0dde298fe1be9b57fe2a2928270be32ed98fc8c4bcee10b397765400990647",
-      "sha256": "0e1a21bcdde7a5338d95281c6f2ad2efd44a0ff625d5b13448f0f7f98152d4a6",
-      "source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3",
+      "manifest_sha256": "c3827886d35956eca7b1bb25fd608e73f456b91333a1968df4568bd1fa0c32e2",
+      "sha256": "fa072e259ed4d8533202068270ce6d2d01f877e66a28343883ff7eebc8fc6d2c",
+      "source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
       "source_name": "00tra-fire-barrel-full-composite-retail-m0900-beauty.png",
       "state_name": "00tra-fire-barrel-full-composite-retail-m0900-beauty.state.json",
-      "state_sha256": "35adddc03a3938ab97fadc6532d58d5a752d349694ec7b75ac3a264b70c0a86f"
+      "state_sha256": "1a9fbf57774dcf931659c11a3ca93966eaeace2943f85d21a3135417ee145dde"
     },
     "retail": {
-      "bundle_sha256": "3506f191160806f9f1fcfdc2e94ba0b9ad39009eccda2a6b3137e30c7331b641",
+      "bundle_sha256": "9ee1ee62c0152edfdb6bdba1b89a6c7118c39b9fbbf1639a04f801d4c745b896",
       "dimensions": [
         1920,
         1200
@@ -449,7 +449,7 @@
       "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
       "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
       "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-      "opennova_source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3",
+      "opennova_source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
       "presentation_stage": {
         "game_config": {
           "changed_keys": [
@@ -603,8 +603,8 @@
   "metrics": {
     "full_frame": {
       "channel_count": 6912000,
-      "max_channel_delta": 242,
-      "mean_abs_channel_delta": 27.007621,
+      "max_channel_delta": 246,
+      "mean_abs_channel_delta": 30.929611,
       "pixel_count": 2304000,
       "region": [
         0,
@@ -612,13 +612,13 @@
         1920,
         1200
       ],
-      "root_mean_square_channel_delta": 36.71602
+      "root_mean_square_channel_delta": 39.63691
     },
     "regions": [
       {
         "channel_count": 1663200,
-        "max_channel_delta": 227,
-        "mean_abs_channel_delta": 30.705093,
+        "max_channel_delta": 232,
+        "mean_abs_channel_delta": 35.747731,
         "name": "world_center",
         "pixel_count": 554400,
         "region": [
@@ -627,13 +627,13 @@
           1320,
           420
         ],
-        "root_mean_square_channel_delta": 38.50655,
+        "root_mean_square_channel_delta": 42.513227,
         "type": "roi"
       },
       {
         "channel_count": 1350000,
-        "max_channel_delta": 242,
-        "mean_abs_channel_delta": 28.078824,
+        "max_channel_delta": 246,
+        "mean_abs_channel_delta": 29.921205,
         "name": "viewmodel_arms",
         "pixel_count": 450000,
         "region": [
@@ -642,7 +642,7 @@
           900,
           500
         ],
-        "root_mean_square_channel_delta": 40.708832,
+        "root_mean_square_channel_delta": 42.573368,
         "type": "roi"
       }
     ]
@@ -662,7 +662,7 @@
         1200
       ],
       "path": "00tra-fire-barrel-full-composite-retail-absolute-diff.png",
-      "sha256": "4dd0de604cfa7760ecc3da06c511191e906cba9f23c7705e5f238297dc69c872"
+      "sha256": "be541286f1168e9eaa2fee868c282cc616e3f4ab10bc612476d8a45faf0efeb8"
     },
     "opennova_normalized": {
       "dimensions": [
@@ -670,7 +670,7 @@
         1200
       ],
       "path": "00tra-fire-barrel-full-composite-retail-opennova-normalized.png",
-      "sha256": "f9a3772cd54da7954562f8e871e0f1d4b575c8f51237b8a337cb361b29040cff"
+      "sha256": "6a69e12b890b967ba02fe258cba0e07615c435cf90a7dd65de088f1293a9e1f8"
     },
     "overlay_50": {
       "dimensions": [
@@ -678,7 +678,7 @@
         1200
       ],
       "path": "00tra-fire-barrel-full-composite-retail-overlay-50.png",
-      "sha256": "530f4c8597790def19d2429c8b5a1f3c70dcb01ddaa4f3f0338fdf782f8f538f"
+      "sha256": "001c568d8241c43d70227c5684a46cb5a69888b7485bf0f9a507c7a0d70f9df1"
     },
     "side_by_side": {
       "dimensions": [
@@ -686,7 +686,7 @@
         1272
       ],
       "path": "00tra-fire-barrel-full-composite-retail-side-by-side.png",
-      "sha256": "0ae0538dbe4023b59468232870c3998da179bad90f6f3af975930dc2efc86909"
+      "sha256": "e87f8cc7c85bab7033378e72e017eb94c529f80e634e6025c24e4bde56fc77f7"
     }
   },
   "presentations": {

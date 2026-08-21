@@ -295,11 +295,11 @@ measuring native clustered model-`LGHT` delivery, the witnessed corona walk,
 and the remaining D-RLIT-4 static-subobject delivery tail), and `03tr-sun-sky-retail`
 (2026-08-20, the low-sun 03TR airfield vista, measuring sun/sky-dome/ambient
 response across D-RLIT-2, D-RLIT-5, and the deferred env #16 table). All rows
-bind frozen facelift source `179e8715ec11dbae6cd75562f0a843f4c5c720f3`,
+bind frozen facelift source `04ac107197c0d068c2fc071bf4e3fcc247c6a8ba`,
 Godot executable SHA-256
 `1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7`,
 GDExtension SHA-256
-`7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e`,
+`b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce`,
 and fixture catalog v4 at SHA-256
 `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
@@ -318,9 +318,9 @@ Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 18 comparison-v6
-manifests, full-frame MAE spans `7.873537`–`31.626552`, `world_center` MAE
-spans `7.671877`–`30.705093`, and `viewmodel_arms` MAE spans
-`4.679503`–`42.439465`. These are descriptive deltas rather than parity
+manifests, full-frame MAE spans `8.953803`–`32.955741`, `world_center` MAE
+spans `5.388775`–`35.747731`, and `viewmodel_arms` MAE spans
+`5.780953`–`44.944125`. These are descriptive deltas rather than parity
 thresholds; no metric from a superseded set is carried forward as if it
 described these images.
 

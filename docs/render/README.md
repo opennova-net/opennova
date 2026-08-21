@@ -123,10 +123,10 @@ context frames are not substitutes for these fixtures.
 The current 2026-08-20 facelift publication contains
 [all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/facelift/render-lighting-2026-08/registered-2026-08-20/README.md),
 captured from frozen source
-`179e8715ec11dbae6cd75562f0a843f4c5c720f3`. Every row binds Godot executable
+`04ac107197c0d068c2fc071bf4e3fcc247c6a8ba`. Every row binds Godot executable
 SHA-256 `1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7`
 and GDExtension SHA-256
-`7c05b12c7b15a7a5cb2267d6aad1da518377bb13db6afffef69a7e515da78b8e`.
+`b8590ed91f7c1b30e362e971f6341f1d20d153f079291d85671bdbf37d5276ce`.
 The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
@@ -154,14 +154,14 @@ re-shootable — its `camera_bms` values bind its own capture session's physics
 constraint table).
 
 Across the 18 current comparison-v6 manifests, full-frame MAE spans
-`7.873537`–`31.626552`, `world_center` MAE spans
-`7.671877`–`30.705093`, and `viewmodel_arms` MAE spans
-`4.679503`–`42.439465`. These are descriptive deltas, not parity thresholds.
+`8.953803`–`32.955741`, `world_center` MAE spans
+`5.388775`–`35.747731`, and `viewmodel_arms` MAE spans
+`5.780953`–`44.944125`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
 night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
 differences remain visible. CP04 is the clearest night-exposure outlier: an
-8-pixel-stride full-frame Rec. 709 luma sample measures OpenNova mean `0.032`
-versus retail `0.123`, with `98.0%` of OpenNova samples below `0.10`; its
+8-pixel-stride full-frame Rec. 709 luma sample measures OpenNova mean `0.036`
+versus retail `0.123`, with `97.3%` of OpenNova samples below `0.10`; its
 `shadows_off` diagnostic stays dark, locating the residual in ambient/exposure
 rather than cast shadows. The `00tra-tire-marks-retail` fixture (added 2026-08-20
 from a debug snapshot) measures the ordered `.til` overlay tire-mark composition

@@ -3,7 +3,7 @@
     "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
     "onhook_mcp_sha256": "746e2a1ba05c165ba87ab1e501f900c8476133461853b44568318ecec14ace25",
     "onhook_proxy_sha256": "c89de4dc1b42a4fe5a89ada78fad5c698f520ea00f73aae362d22f920b73fee0",
-    "opennova_source_commit": "179e8715ec11dbae6cd75562f0a843f4c5c720f3",
+    "opennova_source_commit": "04ac107197c0d068c2fc071bf4e3fcc247c6a8ba",
     "retail_executable_sha256": "b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac"
   },
   "camera_bms": {
