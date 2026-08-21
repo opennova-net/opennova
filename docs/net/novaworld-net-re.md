@@ -315,7 +315,7 @@ sweep; blank = not yet characterized.
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | **entity removal (decoded + PORTED 2026-08-15, `decode_entity_remove`)** — body `[u16 handle]` (a short body reads 0); gated `!is_authority`; `0xFFFF` ignored, pool must be `< 5` and slot `< capacity`, then `Entity_Destroy @0x43e810` (KOTH/flag types first re-pick the waypoint when the removed base point was `g_currentWaypoint`) — a SINGLE-row destroy: attached children DETACH rather than being erased with the parent. Sender `Server_RemoveEntityAndNotify @0x50A270`: writes the handle, `send_mask 0x90` (alive + not-host), msgClass 1, then removes a PLAYER's placed devices (`Entity_RemovePlacedDevicesByOwner @0x546e00`, itself recursing here) and destroys the row; also reached from the per-owner same-type device cap `Server_EnforcePlacedDeviceCapByOwner @0x5119E0` (surplus → oldest armed, D-THROW-10), player disconnect/death sweeps, and pool-1 slot expiry `Entity_UpdatePool1Slot @0x4b8dd0` (§5.36) |
 | 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]`, gated `!is_authority`: handle gates (≠0xFFFF, pool<5, slot < that pool's capacity) → Health=0 @0x42ebd6, deathAnimStateId=killerSource @0x42ebdf, **deathCallback(entity, 4, 0)** @0x42ebf5 — for a destructible that cb IS the local husk/explosion chain (@0x440210); local-player leg = camera lerp + scope drop. Sender: `Entity_CheckAndProcessDeath @0x51b550` (msg 19, mask 0x90) for every non-player death. Ported: JoinerConnection surfaces it, `ClientReplicaPipeline::apply_entity_death` folds it, the sim runs `destruction_notify_item_damage(…, 4)` on the world twin (D-NET-208) (§5.35) |
-| 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast `[i8 channel][u8 senderSlot][cstr formatted]` → `Chat_DispatchToChannel(body[1], (char)body[0], &body[2])` — the order D-NET-215 settled 2026-08-20 (the dispatcher's FIRST parameter is the roster index it gates on, its SECOND the 0..0xE channel switch `@0x42B910`); the fan-out of C2S 0x0D. Field map §5.52 (decoded) |
+| 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast `[i8 channel][u8 senderSlot][cstr formatted]` → `Chat_DispatchToChannel(body[1], (char)body[0], &body[2])` — the order D-NET-215 settled 2026-08-20 (the dispatcher's FIRST parameter is the roster index it gates on, its SECOND the 0..0xE channel switch `@0x42B910`); the fan-out of C2S 0x0D. Field map §5.52 (decoded; consumed 2026-08-21 — the chat ring, `client_replica_feed.cpp` → `push_chat_line`) |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
 | 0x18 | 0x433780 | `FullEntitySpawn` | reply to C2S 0x0F: destroy + FULL single-entity rebuild (itemDef/models/playerClass/minimap/anim registration). Absent from healthy sessions (self-heal, §5.46) — the early "does not fire" note meant nothing needed healing, not an inert path. Field map §5.46 (decoded) |
@@ -4875,12 +4875,29 @@ timings, and replay/spectate source injection.
 The moving player's view, witnessed for a faithful first-person camera (the §5.38 player). All
 anchored (decompiled this session); read-only, no IDB writes.
 
-**2026-08-21:** the mounted legs' constants (anchor lift, 1/16·1/32 ease,
-`1 + 1.5r` distance, quarter look-yaw, `−0x8000000` pitch, water/terrain
-`+0x4000` floors, the 0.333 slope margin, the aircraft `r >> 1` drop, the 6.0
-look-ahead) are staged in `engine/runtime/world/tp_camera_mount.h`
-(world-wac-ai-re.md §14.6); the wiring into `player_view_compose_camera`
-follows.
+**2026-08-21 — the mounted legs PORTED** (world-wac-ai-re.md §14.6 carries
+the witness; `engine/runtime/world/tp_camera_mount.h` the constants,
+`player_view.cpp` the consumer): `ThirdPersonCamera_Update @0x437af0`'s
+mounted target (parentSlot `+0x168` ∈ {2, 5}) is the CARRIER position +
+`(0, 0, max(1.0, (24576·boundRadius + 0x8000) >> 16))` — NOT + CameraOffset —
+eased `(d+8)>>4` xy / `(d+16)>>5` z `@0x437c56..0x437c79`; the eye
+(`Camera_ComputeThirdPersonView @0x437d10`, the mounted fork `@0x4380ed`):
+distance `1.0 + 1.5·r` `@0x43811b..0x438136`, yaw = parentYaw + ((entityYaw −
+parentYaw) >> 2) `@0x438138..0x43814a`, pitch ASSIGNED `0xF8000000` `@0x438150`;
+the water floor `water + 0x4000` only while the entity is above it and the eye
+below `@0x438409..0x43841e`, the terrain floor `terrain + 0x4000` skipped under
+Flags `0x800000` `@0x438422..0x438456`; the mounted slope march `@0x43845a..
+0x438619` (0x8000 steps along the eye−anchor xy unit, `maxSlope` seeded 0.0
+`@0x438599`, `eye.z = max(eye.z, anchor.z + ftol(maxSlope·dist + 0.333·dist))`);
+the WATERCRAFT drop `boundRadius >> 1` on the eye AND the anchor when the
+parent def's `unitType (+0x196) ∈ {3, 4}` `@0x43861d..0x43864c` — watercraft,
+not aircraft (`Entity_ClassifyForMinimap @0x50fa70`; the staged header's
+"aircraft drop" was a misnomer); the look-ahead `@0x438811..0x4388b5`: target =
+parentMatrix(+0xB4) × (6.0, 0, 0), `g_camera_lookahead += (target − lookahead
++ 16) >> 5` per axis, yaw/pitch through fpatan. The device fills
+`PlayerViewState::mount` per tick (`carrier_forward` in the yaw-only form — a
+stated fold: the seam reads the fixed heading, not the full chassis matrix).
+`Camera_SetTrackedEntity`'s orbit/tracked seeds stay the tracked deferral.
 
 **Mode flag `dword_A890C8`** (set by `[orig: Camera_SetTrackedEntity @ 0x4391d0]`; tracked entity =
 `dword_A890CC`): **0 = first-person on-foot** (primary), 1 = vehicle/mounted (3P), 3 = spectator,
@@ -6494,7 +6511,15 @@ via CLinkedList_FindByTag), and fans the formatted line out as **S2C 0x14** `[u8
 2 = team (+354 match; also appends the nearest pool-3 type-2044 marker name as a `:[<location>]` tag),
 4/5 = side 2/1, 11/12 = squad/commander, 13 = proximity ≤ 0x640000 (100.0 world units) per axis,
 default = all. Client receive: `[orig: NapiNPClientMsg_ChatMessage @ 0x42F240]` →
-`Chat_DispatchToChannel @ 0x42B910`.
+`Chat_DispatchToChannel @ 0x42B910`. **Consumer PORTED 2026-08-21:** the decoded
+0x14 folds to a typed `ClientChatLine{channel, sender_slot, text}` in
+`ClientState` (`engine/net/netsim/client_replica_feed.cpp`), drained by the
+shell into `HudFrameCompiler::push_chat_line` with the dispatcher's channel →
+sink/colour table (`hud::chat_channel_sink/color` — no local-team term; 0 and
+≥ 15 → the SYSTEM ring, 8 → the message queue, 14 → the never-drawn third ring,
+13 → colour [0] + the unported `HUD_SetTrackedEntityTarget` leg); the HUDCHATTEXT
+feed loop and the J-key Recent Messages window draw it (hud-re.md §The message
+feeds / §The Recent Messages window; D-HUD-6 narrowed).
 **§5.52a** C2S 0x0A SPAWN-MENU REQUEST (len 0) `[orig: NapiNPServerMsg_HandlePlayerSpawnRequest
 @ 0x513260]`: game state → 9 (spawning), session+32 = 4, replies **S2C 0x19** = `[u32 timestamp]`
 (NetPacket_WriteTimestampB) to the requester only → client stores it in `dword_A82360` (read by the
