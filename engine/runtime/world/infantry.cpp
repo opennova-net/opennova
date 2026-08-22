@@ -452,9 +452,25 @@ static void commit_body_state(InfantryState &inf, int resolved,
 
 void AiSystem::infantry_select(AiEntity &e) {
     InfantryState &inf = e.inf;
-    // [orig: alerted = entity[190] || slot byte +136 || combat-reaction byte +875]
-    const bool alerted =
-        inf.alert_timer != 0 || e.slot.bytes()[AiSlot::kAlertByte] != 0 || inf.combat_reaction;
+    // The WALK-vs-RUN gate, ported 1:1 from the move-state selection:
+    //
+    //     v99 = entity->damageTimer == 0;
+    //     v327 = 1; targetAnimState = 1;                                  // WALK
+    //     if ( !v99 || *((_BYTE *)playerSlotPtr + 136) || entity->wasHit )
+    //         { v327 = 149; targetAnimState = 149; }                      // RUN
+    //
+    // [orig: Entity_UpdateInfantryAI @0x4b9910, the targetAnimState 1/149 block.]
+    //
+    // RETRACTS the previous reading ("entity[190] || slot+136 || combat-reaction
+    // byte +875"). Two of those three terms were wrong, and the first was inert:
+    // `alert_timer` (entity[190]) is READ HERE AND WRITTEN NOWHERE in the whole
+    // engine, so the term was always false. Retail's first term is damageTimer,
+    // which IS live on both legs that raise it -- damage (+10, capped 25) and
+    // SIGHT (+12, capped 15) -- so a soldier who merely sees an enemy runs. Ours
+    // kept walking, which is why route followers covered a fraction of their
+    // channel: node 7 of 30 in 430 s against retail finishing it.
+    const bool alerted = inf.damage_timer != 0 ||
+                         e.slot.bytes()[AiSlot::kAlertByte] != 0 || inf.was_hit;
 
     int target = anim_state::kIdle; // [orig: targetAnimState seeds 43]
     const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
