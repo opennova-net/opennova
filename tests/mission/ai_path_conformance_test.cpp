@@ -231,18 +231,44 @@ int main() {
 	// capture baseline is 430 s, so comparing counts against it needs
 	// OPENNOVA_AI_PATH_TICKS=27000 -- a 40 s run scoring fewer movers than a
 	// 430 s capture is a BUDGET difference, not a defect.
+	// PATH LENGTH, accumulated per tick -- NOT net displacement. The capture side
+	// sums per-sample deltas, so a start->end measure is not comparable to it: a
+	// patrolling AI that loops back has a huge path and a tiny net displacement.
+	// (This bit three times before it was fixed; see 7.4b.)
+	std::vector<double> ai_path(size_t(ai.count()), 0.0);
+	std::vector<int32_t> prev(size_t(ai.count()) * 2, 0);
+	for (int i = 0; i < ai.count(); ++i) {
+		if (const w::AiEntity *e = ai.at(i)) {
+			prev[size_t(i) * 2] = e->pos[0];
+			prev[size_t(i) * 2 + 1] = e->pos[1];
+		}
+	}
+
 	int ticks = 2500;
 	if (const char *tv = std::getenv("OPENNOVA_AI_PATH_TICKS")) {
 		const int parsed = std::atoi(tv);
 		if (parsed > 0) ticks = parsed;
 	}
-	for (int t = 0; t < ticks; ++t) world.run_logic_tick(/*is_authority=*/true);
+	for (int t = 0; t < ticks; ++t) {
+		world.run_logic_tick(/*is_authority=*/true);
+		const int live = ai.count();
+		if (int(ai_path.size()) < live) { ai_path.resize(size_t(live), 0.0); prev.resize(size_t(live) * 2, 0); }
+		for (int i = 0; i < live; ++i) {
+			const w::AiEntity *e = ai.at(i);
+			if (e == nullptr) continue;
+			const double dx = (double(e->pos[0]) - prev[size_t(i) * 2]) / 65536.0;
+			const double dy = (double(e->pos[1]) - prev[size_t(i) * 2 + 1]) / 65536.0;
+			ai_path[size_t(i)] += std::sqrt(dx * dx + dy * dy);
+			prev[size_t(i) * 2] = e->pos[0];
+			prev[size_t(i) * 2 + 1] = e->pos[1];
+		}
+	}
 
 	const bool report = std::getenv("OPENNOVA_AI_PATH_REPORT") != nullptr;
 	if (report) {
 		std::printf("%-5s %-6s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %-6s %-7s %-4s %10s\n", "ai#",
 				"handle", "has", "cmd", "tgtSSN", "wpType", "wpChan", "wpNode",
-				"moveMd", "cmd37", "carr36", "mnt", "travel_u");
+				"moveMd", "cmd37", "carr36", "mnt", "path_u");
 		std::printf("--------------------------------------------------------------------\n");
 	}
 
@@ -250,7 +276,8 @@ int main() {
 	for (int i = 0; i < n; ++i) {
 		const w::AiEntity *e = ai.at(i);
 		if (e == nullptr) continue;
-		const double travel = dist2d_units(e->pos, &start[size_t(i) * 3]);
+		const double travel = (i < int(ai_path.size())) ? ai_path[size_t(i)]
+				: dist2d_units(e->pos, &start[size_t(i) * 3]);
 		if (travel > kMovedUnits) ++moved; else ++still;
 		if (report) {
 			// The AUTHORED routing inputs, straight off the BMS organic record,
@@ -290,6 +317,20 @@ int main() {
 		std::vector<uint16_t> seen;
 		// The nav ENTRY payloads for one carrier channel. f[0] is what the advance
 		// gate compares the remaining distance against (kWpNodeVal / "animTime").
+		for (int ch = 1; ch <= 20; ++ch) {
+			const w::NavChannel *nc = ai.nav.channel(ch);
+			if (nc == nullptr || nc->count == 0) continue;
+			std::printf("   NAVCH %d count=%d loopflag=%d\n", ch, nc->count, nc->loopflag);
+			int waitsum = 0, waitmax = 0;
+			for (int k = 0; k < nc->count && k < 32; ++k) {
+				const w::NavEntry *ne = ai.nav.entry(nc->entries[k]);
+				if (ne == nullptr) continue;
+				waitsum += ne->wait_ticks;
+				if (ne->wait_ticks > waitmax) waitmax = ne->wait_ticks;
+			}
+			std::printf("        waits: sum=%d max=%d  (cooldown ticks sum=%d)\n",
+					waitsum, waitmax, (waitsum + 8 * nc->count) >> 4);
+		}
 		if (const w::NavChannel *nc13 = ai.nav.channel(13)) {
 			std::printf("nav channel 13: count=%d loopflag=%d\n", nc13->count, nc13->loopflag);
 			for (int k = 0; k < nc13->count && k < 6; ++k) {
