@@ -209,8 +209,9 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 // player victims — the S2C 0x1E kill-feed event (§5.26 8-B body; standard-kill
 // event_type 4: the original picks rand(0-2)+4 @0x517237, a presentation-only variant;
 // zone-flag types (headshot 32 / vehicle 10 / knife 13) wait on the bone-hit port).
-// Deferred (§5.60): 0x52 kill stats, 0x54 death/wounded markers, 0x32 name broadcast,
-// scoring. A dead HOST player (the loopback's own entity) is queued for the respawn
+// Deferred (§5.60): 0x52 kill-detail stats, 0x54 death/wounded markers, and
+// 0x32 name broadcast. Core player/team scoring is consumed here by world::Match.
+// A dead HOST player (the loopback's own entity) is queued for the respawn
 // release; a joiner's respawn rides its own deploy request instead.
 // Route placed-device lifetimes created or retired by this authoritative tick.
 // Retail's filtered send excludes the host itself (mask 0x90): the listen
@@ -451,8 +452,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 // SP carries exactly ONE auto condition: the local player is DEAD and the mission
 // does not allow SP-respawn (attrib 0x40) -> Server_ProcessRoundEnd(2) — every other
 // SP outcome comes from the WAC win/lose handlers or the BMS Blue/Red/GreenWin
-// actions [orig: @0x51ad6f]. Multiplayer delegates the witnessed uniform-zone,
-// TDM, and A&S/CAC score/time decisions to world::Match.
+// actions [orig: @0x51ad6f]. Multiplayer delegates the witnessed uniform-zone
+// check and the complete game-type switch to world::Match.
 void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	(void)ctx;
 	if (world.match.outcome().ended) return;
@@ -915,7 +916,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	release_due_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,
-	// so those script-driven outcomes consume this tick; TDM/A&S outcomes found
+	// so those script-driven outcomes consume this tick; automatic MP outcomes found
 	// by the check below do not. Keep the phase fact even though our countdown
 	// mutation is grouped at the tail of this function.
 	// [orig: Server_TickUpdate @0x51D7E0: linger drain @0x51DA04 precedes
@@ -1156,7 +1157,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Retail holds the multiplayer post-round state for 2790 server ticks. Its
 	// drain precedes automatic win checks, so only an outcome already present at
 	// that phase (including a WAC/BMS result from this tick) consumes the first
-	// count; automatic TDM/A&S announcements start draining next tick. At expiry,
+	// count; automatic multiplayer announcements start draining next tick. At expiry,
 	// the session replication gate closes while the frozen result stays readable.
 	// [orig: store @0x5166C4; phase/drain @0x51DA04; exit reason 3 @0x51DA91]
 	if ((round_was_announced || round_ended_at_retail_linger_phase) &&

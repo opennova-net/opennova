@@ -404,12 +404,14 @@ int32_t Match::score_value(size_t status_index) const {
 }
 
 void Match::add_event(MatchPlayer &player, size_t counter, int32_t points) {
+    if (!gt::has_score_table(rules_.game_type))
+        return;
     ++player.stats[counter];
     player.stats[MatchStats::kPoints] += points;
 }
 
 void Match::add_team_event(uint8_t team, size_t counter, int32_t points) {
-    if (team >= teams_.size())
+    if (!gt::has_score_table(rules_.game_type) || team >= teams_.size())
         return;
     ++teams_[team][counter];
     teams_[team][MatchStats::kPoints] += points;
@@ -754,9 +756,10 @@ void Match::update_hill_presence(const World &world) {
 }
 
 void Match::update_flag_objectives(World &world, bool advance_return_timers) {
-    if (rules_.game_type != gt::kCaptureTheFlag &&
-        rules_.game_type != gt::kFlagBall && rules_.game_type != gt::kFlagMe)
-        return;
+    // The retail collision dispatcher keys only on the objective item ID. It
+    // has no game-type gate, which is observable in C&C's combined flag/zone
+    // score schema. [orig: Entity_ProcessWaypointInteraction @0x4AD820;
+    // GameType_CreateDefaultSettings @0x52DD00]
     ensure_objective_census(world);
 
     // Dropped flags count down to their authored home. A carried flag keeps
@@ -784,7 +787,15 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
 
     std::vector<EntityHandle> objectives;
     world.registry.for_each([&](const Entity &entity) {
-        if (is_flag(entity.item_id) || is_flag_bay(entity.item_id))
+        // The movement resolver dispatches this callback only for a live
+        // ItemDef carrying MoveCB and not Powerup. Preserve that target gate
+        // here for both locally simulated and authority-snapped remote players.
+        // [orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FD0]
+        const bool move_callback = entity.has_item_def &&
+            (entity.item_attrib & kItemAttribMoveCallback) != 0 &&
+            (entity.item_attrib & kItemAttribPowerup) == 0;
+        if (move_callback &&
+            (is_flag(entity.item_id) || is_flag_bay(entity.item_id)))
             objectives.push_back(entity.handle);
     });
     std::sort(objectives.begin(), objectives.end(),

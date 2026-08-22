@@ -189,8 +189,10 @@ deaths, teamkills, suicides, and zone captures mutate the witnessed signed stat
 indices. One shared retail-default table feeds both gameplay and S2C 0x58 when
 `score.ini` is absent; a VERSION 40 file overlays that table and may
 intentionally materialize an all-zero row. At the 1 Hz authority pass Match
-evaluates the universal all-zones-owned rule, TDM score/time limits, and
-Advance and Secure zone counts. WAC/BMS co-op win/lose actions enter the same
+services hill occupancy and dropped-flag returns. Per tick it services flag
+contacts; its winner check implements the universal all-zones-owned rule and
+every retail competitive branch: DM/TDM, KOTH/TKOTH, S&D/A&D, CTF, FlagBall,
+Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same
 `World::process_round_end` transaction. `[orig: GameEvent_ProcessScoring
 @0x52F550; GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
 @0x52D8A0; Server_CheckWinConditions @0x51AD40]`
@@ -201,7 +203,7 @@ accessor, omits columns that are zero for every player, serializes the remaining
 field pairs in configuration order, announces once, and drains the retail
 2790-tick multiplayer linger. Script-driven co-op outcomes consume their
 originating tick because retail's linger drain precedes the automatic
-win-condition pass; TDM/A&S outcomes begin draining on the following tick. It
+win-condition pass; automatic multiplayer outcomes begin draining on the following tick. It
 never recomputes the winner. `[orig: Server_TickUpdate @0x51D7E0;
 CPlayerStats_GetFieldByIndex @0x52D630; Server_BuildEndOfRoundScoreboard
 @0x508F30; Server_ProcessRoundEnd @0x5164F0]`
@@ -214,7 +216,8 @@ Focused local coverage pins:
   catch-up cancellation, reset, and idempotent close in
   `tests/frame/inmatch_session_test.cpp`;
 - the same session interface in `apps/nw_server`;
-- TDM, A&S, co-op, scoring, clocks, frozen results, and end-round wire flow in
+- every retail game type, co-op, scoring, objectives, clocks, frozen results,
+  and end-round wire flow in
   `tests/world/match_test.cpp`, `tests/npruntime/round_end_test.cpp`, and
   `tests/npruntime/client_runtime_test.cpp`;
 - typed Godot session/presentation behavior in

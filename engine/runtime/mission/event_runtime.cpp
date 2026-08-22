@@ -265,8 +265,9 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 }
                 case bms::GroupTriggerType::GroupHoldingGroup:
                     // Any pool-0 member of group p1 carrying an object of
-                    // group p2 via the mounted_child link; the link's
-                    // producers ride the carry/CTF system port (§3b item 4).
+                    // group p2 via the mounted_child link. Match owns the
+                    // live flag writers; generic carryables retain their
+                    // vehicle-attachment owner (§3b item 4).
                     // [orig: @0x453778 -> TriggerGroup_AnyMemberHoldingItemGroup]
                     return cmds.group_holding_group(t.param1, t.param2);
                 default:

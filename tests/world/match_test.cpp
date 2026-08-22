@@ -53,10 +53,13 @@ EntityHandle player(World &world, uint8_t slot, uint8_t team, const char *name) 
     Entity entity;
     entity.kind = EntityKind::Organic;
     entity.item_id = 5305;
+    entity.has_item_def = true;
     entity.player_class = 8;
     entity.team = team;
     entity.health = 100;
     entity.alive = true;
+    entity.flags = kEntityFlagPlayer;
+    entity.engine_flags = kEntityFlagPlayer;
     const EntityHandle handle = world.registry.spawn(0, entity);
     MatchPlayerIdentity identity;
     identity.entity = handle;
@@ -79,10 +82,13 @@ EntityHandle zone(World &world, uint8_t number, uint8_t team) {
     return handle;
 }
 
-EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 position = {}) {
+EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 position = {},
+                       uint32_t item_attrib = kItemAttribMoveCallback) {
     Entity entity;
     entity.kind = EntityKind::Item;
     entity.item_id = item_id;
+    entity.has_item_def = true;
+    entity.item_attrib = item_attrib;
     entity.team = team;
     entity.position = position;
     entity.spawn_position = position;
@@ -159,6 +165,8 @@ void test_every_retail_default_score_row() {
                    {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}});
     expect_fields(gt::kCoop,
                   {{19, 1}, {3, 1}, {4, 1}, {30, 1}, {10, 1}, {11, 1}, {21, 1}});
+    expect_fields(gt::kObjectiveCoop,
+                  {{19, 1}, {3, 1}, {4, 1}, {30, 1}, {10, 1}, {11, 1}, {21, 1}});
     CHECK(default_match_score_fields(gt::kFlagMe).empty());
 
     const auto dm = default_match_score_values(gt::kDeathmatch);
@@ -175,6 +183,13 @@ void test_every_retail_default_score_row() {
     CHECK(fb[10] == 40 && fb[11] == 2 && fb[20] == 5);
     const std::array<int32_t, 39> zero_values{};
     CHECK(default_match_score_values(gt::kFlagMe) == zero_values);
+
+    CHECK(gt::score_table_index(gt::kDeathmatch) == 11);
+    CHECK(gt::score_table_index(gt::kObjectiveCoop) == 2);
+    CHECK(gt::score_table_index(gt::kCoop) == 0);
+    CHECK(gt::score_table_index(gt::kFlagMe) == 12);
+    CHECK(gt::has_score_table(gt::kCoop));
+    CHECK(!gt::has_score_table(gt::kFlagMe));
 }
 
 void test_retail_default_score_values() {
@@ -490,26 +505,16 @@ void test_demolition_flag_and_flagball_gameplay() {
     CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
     world->registry.despawn(timed_flag);
 
-    for (const uint32_t game_type : {gt::kFlagBall, gt::kFlagMe}) {
-        MatchRules flag_mode;
-        flag_mode.game_type = game_type;
-        flag_mode.game_time_minutes = 1;
-        flag_mode.max_score = 2;
-        world->match.configure(flag_mode);
-        world->match.upsert_player({blue, 0, "Blue"});
-        world->match.record_flag_capture(*world, blue, EntityHandle{});
-        world->match.record_flag_capture(*world, blue, EntityHandle{});
-        const auto winner = world->match.winner_if_finished(*world);
-        CHECK(winner.has_value());
-        CHECK(*winner == (game_type == gt::kFlagBall ? 1 : 0));
-    }
-
-    MatchRules zero_flag_me;
-    zero_flag_me.game_type = gt::kFlagMe;
-    zero_flag_me.max_score = 0;
-    world->match.configure(zero_flag_me);
+    MatchRules flag_ball;
+    flag_ball.game_type = gt::kFlagBall;
+    flag_ball.game_time_minutes = 1;
+    flag_ball.max_score = 2;
+    world->match.configure(flag_ball);
     world->match.upsert_player({blue, 0, "Blue"});
-    CHECK(!world->match.winner_if_finished(*world).has_value());
+    world->match.record_flag_capture(*world, blue, EntityHandle{});
+    world->match.record_flag_capture(*world, blue, EntityHandle{});
+    const auto flag_ball_winner = world->match.winner_if_finished(*world);
+    CHECK(flag_ball_winner.has_value() && *flag_ball_winner == 1);
 
     MatchRules zero_flag_ball;
     zero_flag_ball.game_type = gt::kFlagBall;
@@ -518,6 +523,85 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->match.upsert_player({blue, 0, "Blue"});
     const auto zero_winner = world->match.winner_if_finished(*world);
     CHECK(zero_winner.has_value() && *zero_winner == 1);
+}
+
+void test_flag_me_keeps_retails_unreachable_score_arm() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+
+    MatchRules rules;
+    rules.game_type = gt::kFlagMe;
+    rules.max_score = 1;
+    rules.score_values.emplace();
+    (*rules.score_values)[3] = 99;
+    (*rules.score_values)[5] = -7;
+    (*rules.score_values)[10] = 40;
+    (*rules.score_values)[11] = 2;
+    world->match.configure(rules);
+
+    const EntityHandle carrier = player(*world, 0, 1, "Carrier");
+    const EntityHandle victim = player(*world, 1, 1, "Victim");
+    Entity *carrier_entity = world->registry.get(carrier);
+    carrier_entity->position = {0.0f, 0.0f, 0.0f};
+    carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle flag = objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+    objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+
+    world->match.advance_tick(*world);
+    CHECK(carrier_entity->mounted_child == flag);
+    carrier_entity->position = {20.0f, 0.0f, 0.0f};
+    world->match.advance_tick(*world);
+    CHECK(carrier_entity->mounted_child == EntityHandle{});
+    CHECK(world->registry.get(flag) != nullptr);
+    CHECK(world->registry.get(flag)->position.x == 0.0f);
+
+    world->match.record_death(*world, victim, carrier);
+    CHECK(world->match.player(carrier)->stats[MatchStats::kFlagPickups] == 0);
+    CHECK(world->match.player(carrier)->stats[MatchStats::kFlagCaptures] == 0);
+    CHECK(world->match.player(carrier)->stats[MatchStats::kEnemyKills] == 0);
+    CHECK(world->match.player(carrier)->stats[MatchStats::kPoints] == 0);
+    CHECK(world->match.player(victim)->stats[MatchStats::kDeaths] == 0);
+    CHECK(!world->match.winner_if_finished(*world).has_value());
+
+    const std::vector<MatchGameplayEvent> events =
+        world->match.drain_gameplay_events();
+    CHECK(events.size() == 2);
+    CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+    CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+    CHECK(!events[1].remove_objective);
+
+    // The retail win check still reads raw capture field 12; the ordinary
+    // scorer simply has no valid row capable of incrementing it.
+    world->match.player(carrier)->stats[MatchStats::kFlagCaptures] = 1;
+    const auto injected_winner = world->match.winner_if_finished(*world);
+    CHECK(injected_winner.has_value() && *injected_winner == 0);
+}
+
+void test_flag_contact_requires_the_retail_move_callback_gate() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+
+    MatchRules rules;
+    rules.game_type = gt::kFlagBall;
+    world->match.configure(rules);
+    const EntityHandle carrier = player(*world, 0, 1, "Carrier");
+    Entity *carrier_entity = world->registry.get(carrier);
+    carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+
+    const EntityHandle inert = objective(*world, 4095, 0, {}, 0);
+    world->match.advance_tick(*world);
+    CHECK(carrier_entity->mounted_child == EntityHandle{});
+
+    world->registry.get(inert)->item_attrib =
+        kItemAttribMoveCallback | kItemAttribPowerup;
+    world->match.advance_tick(*world);
+    CHECK(carrier_entity->mounted_child == EntityHandle{});
+
+    world->registry.get(inert)->item_attrib = kItemAttribMoveCallback;
+    world->match.advance_tick(*world);
+    CHECK(carrier_entity->mounted_child == inert);
 }
 
 void test_aas_capture_scoring_and_outcomes() {
@@ -552,6 +636,50 @@ void test_aas_capture_scoring_and_outcomes() {
     world->registry.get(z1)->team = 2;
     const auto red_all_owned = world->match.winner_if_finished(*world);
     CHECK(red_all_owned.has_value() && *red_all_owned == 2);
+}
+
+void test_cac_combines_flag_and_zone_objectives() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+
+    MatchRules cac;
+    cac.game_type = gt::kConquerAndControl;
+    cac.game_time_minutes = 1;
+    world->match.configure(cac);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    Entity *blue_entity = world->registry.get(blue);
+    blue_entity->position = {0.0f, 0.0f, 0.0f};
+    blue_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle flag =
+        objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+    objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+
+    world->match.advance_tick(*world);
+    CHECK(blue_entity->mounted_child == flag);
+    blue_entity->position = {20.0f, 0.0f, 0.0f};
+    world->match.advance_tick(*world);
+    CHECK(blue_entity->mounted_child == EntityHandle{});
+    CHECK(world->registry.get(flag) != nullptr);
+    CHECK(world->registry.get(flag)->position.x == 0.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagCaptures] == 1);
+    CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 0);
+
+    // C&C's primary score and win arm remain the zone counter even though its
+    // retail FIELD row also exposes flag stats. [orig: sub_52C850 @0x52C850;
+    // GameType_CreateDefaultSettings @0x52DD00]
+    world->match.record_numbered_zone_capture(*world, {blue});
+    CHECK(world->match.player(blue)->stats[MatchStats::kZoneTakeovers] == 1);
+    CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 15);
+    CHECK(world->match.primary_score(*world->match.player(blue)) == 1);
+
+    const std::vector<MatchGameplayEvent> events =
+        world->match.drain_gameplay_events();
+    CHECK(events.size() == 2);
+    if (events.size() >= 2) {
+        CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+    }
 }
 
 void test_end_result_is_frozen_in_retail_board_order() {
@@ -634,7 +762,10 @@ int main() {
     test_tdm_limit_and_clock_decisions();
     test_deathmatch_and_hill_outcomes();
     test_demolition_flag_and_flagball_gameplay();
+    test_flag_me_keeps_retails_unreachable_score_arm();
+    test_flag_contact_requires_the_retail_move_callback_gate();
     test_aas_capture_scoring_and_outcomes();
+    test_cac_combines_flag_and_zone_objectives();
     test_end_result_is_frozen_in_retail_board_order();
     test_coop_remains_script_owned();
     if (failures != 0) {

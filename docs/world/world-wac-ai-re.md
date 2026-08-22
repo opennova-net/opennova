@@ -3902,7 +3902,7 @@ tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
 `!world.mp_session` because our SP-as-listen-server always runs
 `ctx.is_in_session = 1`. Independently, the same death enters `world::Match`'s
 42-field player/team records with the signed `score.ini` event values used by
-TDM, A&S, co-op, and the end-round board. The SP epilog's difficulty-scaled
+every competitive game type, co-op, and the end-round board. The SP epilog's difficulty-scaled
 score sums remain unmodeled. `[orig: GameEvent_ProcessScoring @0x52F550;
 CPlayerStats_RecordEvent @0x52C8E0]`
 
@@ -4019,6 +4019,25 @@ target scoring, live 0x16 team projection, and authored objective census.
 Therefore residual (b) no longer applies to these retail game-mode producers.
 The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
 ordinary combat event producer not enumerated here.
+
+Flag Me retains one retail defect rather than silently becoming a private
+OpenNova ruleset. Its selector is 12, but the FIELD loader, event scorer, and
+session-status value copy each accept only rows `<=11`; captures still run the
+ordinary event/reset transaction, while no player/team stat changes and the
+MaxScore winner arm is consequently unreachable through ordinary play. The
+shared `game_type::score_table_index` pins that fact for all three consumers.
+`[orig: load_scoring_table_for_game_type @0x52D300;
+GameEvent_ProcessScoring @0x52F550; Server_BuildStatusReport @0x530A60;
+Server_CheckWinConditions @0x51AD40]`
+
+C&C keeps both halves of its retail objective vocabulary. Flag and bay contact
+is item-ID driven, not game-type gated, so C&C can carry/capture/reset authored
+flags while numbered-zone takeovers remain its primary score and win metric.
+The authority contact projection also preserves the resolver's ItemDef gate:
+`MoveCB` must be set and `Powerup` clear before a flag or bay can interact.
+`[orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FD0;
+Entity_ProcessWaypointInteraction @0x4AD820;
+GameType_CreateDefaultSettings @0x52DD00]`
 
 `D-AI-6` update (2026-07-20): the aim-error global `@ 0xC6EAE8` is the WAC
 named variable **accuracyspread** — its config source is mission scripts (the

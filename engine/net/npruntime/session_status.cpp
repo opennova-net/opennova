@@ -69,30 +69,12 @@ const char *score_game_type_name(uint32_t game_type) {
 	case gtype::kAttackDefend: return "AD";
 	case gtype::kCaptureTheFlag: return "CTF";
 	case gtype::kFlagBall: return "FB";
+	case gtype::kFlagMe: return nullptr;
 	case gtype::kAdvanceAndSecure: return "AAS";
 	case gtype::kConquerAndControl: return "CAC";
 	default:
 		// Retail normalizes its unknown/nonzero row 0 to the Co-op score row.
 		return "COOP";
-	}
-}
-
-uint8_t session_status_game_type_index(uint32_t game_type) {
-	if (game_type == gtype::kDeathmatch) return 11;
-	if (game_type == gtype::kTeamDeathmatch) return 1;
-	if (gtype::is_waypoint_family(game_type) && gtype::is_objective(game_type))
-		return 2;
-	switch (game_type) {
-	case 0x10001u: return 3;
-	case 0x00001u: return 4;
-	case 0x90002u: return 5;
-	case 0x10002u: return 6;
-	case 0x10004u: return 7;
-	case 0x10008u: return 8;
-	case 0x00008u: return 12;
-	case 0x10010u: return 9;
-	case 0x50010u: return 10;
-	default: return 0;
 	}
 }
 
@@ -112,10 +94,14 @@ void append_u32(std::vector<uint8_t> &out, uint32_t value) {
 } // namespace
 
 bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
+	const char *target_name = score_game_type_name(config.game_type);
+	// Flag Me's selector is the intentionally invalid row 12. Retail loads no
+	// FIELD/VAR row for it; in particular it never falls through to Co-op.
+	if (target_name == nullptr) return false;
 	std::array<int32_t, 39> parsed =
 			world::default_match_score_values(config.game_type);
 	std::vector<std::pair<uint8_t, uint8_t>> parsed_fields;
-	const std::string target = score_game_type_name(config.game_type);
+	const std::string target = target_name;
 	bool selected = false;
 	bool found_target = false;
 	bool selected_section_has_fields = false;
@@ -197,7 +183,7 @@ std::vector<uint8_t> serialize_session_status(
 	append_cstr_limited(out, config.server_name, 31);
 	append_cstr_limited(out, config.mission_name, 63);
 	out.push_back(static_cast<uint8_t>(config.game_type));
-	out.push_back(session_status_game_type_index(config.game_type));
+	out.push_back(gtype::score_table_index(config.game_type));
 	out.push_back(static_cast<uint8_t>(config.max_players));
 	append_u32(out, uptime_ms);
 	const std::array<int32_t, 39> default_values =

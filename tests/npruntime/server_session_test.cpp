@@ -2694,11 +2694,19 @@ bool check_score_ini_drives_session_status_values() {
 		return false;
 	const auto before = config.session_status_stat_values;
 	const auto fields_before = config.scoreboard_fields;
-	return expect(!opennova::np::load_session_score_config(
+	if (!expect(!opennova::np::load_session_score_config(
 	                      config, "VERSION 39\nGAMETYPE \"COOP\"\nVAR \"FIRE\" 99\n") &&
 	                      config.session_status_stat_values == before &&
 	                      config.scoreboard_fields == fields_before,
-	              "wrong score.ini version fails closed without mutating live rules");
+	              "wrong score.ini version fails closed without mutating live rules"))
+		return false;
+
+	opennova::np::GameConfig flag_me;
+	flag_me.game_type = opennova::game_type::kFlagMe;
+	return expect(!opennova::np::load_session_score_config(flag_me, score_ini) &&
+	                      !flag_me.session_status_stat_values.has_value() &&
+	                      flag_me.scoreboard_fields.empty(),
+	              "Flag Me's out-of-range retail score row cannot inherit COOP score.ini");
 }
 
 // Retail's S2C 0x40 producer is the general minimap-overlay stream, not an AS

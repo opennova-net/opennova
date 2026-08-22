@@ -161,6 +161,8 @@ enum class DeathMotionMode : uint8_t {
 // ai.h's def_attrib profile mirror). engine/runtime/world stays def-parser-free; parity
 // static_asserts against def.h live in npruntime/src/weapon_table_build.cpp.
 // [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155]
+inline constexpr uint32_t kItemAttribMoveCallback = 0x1u;
+inline constexpr uint32_t kItemAttribPowerup = 0x2u;
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
 inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;

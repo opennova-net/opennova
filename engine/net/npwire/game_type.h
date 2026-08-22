@@ -25,16 +25,6 @@ namespace opennova::game_type {
 // Code words and structural predicates live in world/game_type.h so runtime
 // gameplay and this mission/wire adapter consume one vocabulary.
 
-// The two witnessed bits.
-
-// Objective/waypoint Co-op — the shipped stock-mission gametype.
-
-// The waypoint gametype family: stock Co-op 0x10020 AND objective Co-op
-// 0x30020 (the objective bit is the one the mask forgives).
-// Retail's literal two-part stock-Co-op test (deliberately narrower than the
-// 0x7B selector — D-NET-205).
-
-
 // Retail's mission-attrib -> g_GameType selection: the single-select game-mode
 // bit from the mission header (bms::AttribFlags) picks the session code word.
 // An ATTRIB_COOP mission derives the OBJECTIVE Co-op word 0x30020 (0x10010
