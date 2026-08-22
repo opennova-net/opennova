@@ -36,6 +36,7 @@
 #include <simassets/seat_spec_extract.h>
 #include <threedi/threedi_3di3.h>
 #include <simassets/adm_root_motion.h>
+#include <simassets/item_traits.h>
 
 #include <algorithm>
 #include <cmath>
@@ -183,6 +184,20 @@ int main() {
 	ai.root_motion = &root_motion;
 	for (int i = 0; i < ai.count(); ++i) {
 		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	}
+
+	// VEHICLE TRAITS, or the whole motor pass is skipped. AiSystem's pool-1
+	// motor loop is gated on `!world.vehicle_traits.empty()`
+	// (ai_system.cpp:468), and the table is filled from the items.def rows
+	// [orig: Entity_InitFromItemDef @0x49e550; ItemDef_ParsePhysicsProperty
+	// @0x49d870]. Without it a carrier is never driven, its motor never mirrors
+	// the hull transform back into the brain, and the brain's own locomotion
+	// walks its internal pos along the route while the hull stays parked --
+	// which reads exactly like a pathing defect. coop_convoy_test hand-sets a
+	// traits row for the same reason.
+	if (items.count > 0) {
+		simassets::resolve_item_traits(world, items,
+				[](int32_t) -> uint8_t { return 0; });
 	}
 
 	world.add_system(&events);
