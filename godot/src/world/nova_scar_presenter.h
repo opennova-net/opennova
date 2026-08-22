@@ -12,12 +12,17 @@
 // slots through `bones + bone << 6` at draw time; the shared ring draws its
 // positions as-is — see docs/world/world-wac-ai-re.md §24.9).
 //
-// The drawer state is the per-strip material (shaders/scar_quad.gdshader):
-// unshaded, vertex colour modulate, clamp wrap, alpha test 128, blend mode 0.
-// The ONLY device fold is the view-space pull that replaces the D3D depth
-// bias (retail: the scar batch drawer Terrain_RenderFoliageBatches @0x5ccd10 —
-// the IDB's kong misnomer, Scar_DrawBatches proposed — under
-// Scar_RenderAllCaches @0x5CDF70).
+// The drawer state is per strip: the GfxShader mode word the loader built the
+// strip's effect from (the draw list's `strip_mode_words`, decoded through
+// renderer::decode_scar_strip_mode) selects the material — the scorch state
+// (shaders/scar_quad.gdshader: SRCALPHA/INVSRCALPHA blend, MODULATE2X colour,
+// fog, no z-write, CCW cull, NO alpha test) or the bullet-hole state
+// (shaders/scar_quad_hole.gdshader: the same plus the GREATER/128 alpha test,
+// z-write, cull none). The ONLY device folds are the view-space pull that
+// replaces the D3D depth bias and the winding the sim packer applies with the
+// coordinate fold (retail: the scar batch drawer Terrain_RenderFoliageBatches
+// @0x5ccd10 — the IDB's kong misnomer, Scar_DrawBatches proposed — under
+// Scar_RenderAllCaches @0x5CDF70; the strip table Scar_LoadTextures @0x5CC2E0).
 
 #include <cstdint>
 
@@ -56,7 +61,10 @@ public:
 	// Drop every scar mesh (the Stop -> Play boundary, teardown).
 	void clear();
 	// Typed counters: world_surfaces, entity_meshes, batches, vertices,
-	// textures_missing (strips whose TGA did not resolve this present).
+	// textures_missing (strips drawn this present whose TGA has not resolved —
+	// re-tried every present), strips_unsupported (strips drawn this present
+	// whose mode word decodes to neither shipped drawer state; they draw in
+	// the scorch state).
 	Dictionary get_stats() const;
 
 protected:
@@ -64,14 +72,24 @@ protected:
 	void _notification(int p_what);
 
 private:
-	Ref<ShaderMaterial> material_for_strip_(int p_strip, const String &p_texture_name);
+	// One strip's material: the shader its mode word selects, the TGA bound
+	// once it resolves.
+	struct StripMaterial {
+		Ref<ShaderMaterial> material;
+		bool texture_bound = false;
+		bool unsupported = false;
+	};
+	StripMaterial &material_for_strip_(int p_strip, const String &p_texture_name,
+			uint32_t p_mode_word);
+	Ref<Shader> shader_for_mode_(uint32_t p_mode_word, bool &r_unsupported);
 	Ref<Texture2D> texture_(const String &p_name);
 	MeshInstance3D *ensure_world_mesh_();
 	void free_entity_meshes_();
 
 	Ref<ResourceRoot> resource_root_;
-	Ref<Shader> shader_;
-	HashMap<int, Ref<ShaderMaterial>> materials_;
+	Ref<Shader> shader_scorch_;
+	Ref<Shader> shader_hole_;
+	HashMap<int, StripMaterial> materials_;
 	HashMap<String, Ref<Texture2D>> textures_;
 	ObjectID world_mesh_id_;
 	// (owner << 8 | section) -> the entity-ring mesh instance under the owner's
@@ -82,6 +100,7 @@ private:
 	int stat_batches_ = 0;
 	int stat_vertices_ = 0;
 	int stat_textures_missing_ = 0;
+	int stat_strips_unsupported_ = 0;
 };
 
 } // namespace godot

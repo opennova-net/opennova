@@ -123,8 +123,35 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 			entity_local_vertex[k] = true;
 		}
 	}
+	// The winding fold that rides the coordinate folds. The witnessed quad
+	// order's coordinate cross product points AGAINST the struck face's normal
+	// in the engine's frame: the slot writer's handedness fix makes the
+	// (tangent, bitangent, normal) triple LEFT-handed (retail: Scar_AddEntry
+	// @0x5CCAE6..0x5CCB37 — the tangent flips while n . (b x t) < 0, see
+	// docs/world/world-wac-ai-re.md §24.9; pinned by ctest impact_scar).
+	// Retail uploads through a REFLECTION
+	// (Math_FixedPointToFloat3_YNegated @0x611210, y -> -y) into D3D's
+	// left-handed, clockwise-front frame, which makes the quad a front face on
+	// the normal side under the drawer's CCW cull — the mark shows on the face
+	// you shot and not through the wall behind it. Godot's front face is
+	// clockwise too, but its frame is right-handed: a triangle is front-facing
+	// when its coordinate cross product points AWAY from the viewer. The world
+	// fold below, (x, y, z) -> (x, z, -y), is a ROTATION that preserves the
+	// engine-frame relation, so the witnessed order is already front on the
+	// struck side and the shared ring keeps it; the entity-local fold
+	// (-x, y, z) is a reflection that flips it, so those triangles are re-wound
+	// (vertices 1 and 2 swapped). The scorch shader's cull_back then culls
+	// exactly what retail's CCW cull culls (proved in-game by
+	// godot/tests/scar_wall_probe.gd's front/behind captures).
+	const auto source_index = [&](size_t i) -> size_t {
+		if (!entity_local_vertex[i]) {
+			return i;
+		}
+		const size_t k = i % 3;
+		return k == 0 ? i : i - k + (3 - k);
+	};
 	for (size_t i = 0; i < list.vertices.size(); ++i) {
-		const renderer::ScarVertex &v = list.vertices[i];
+		const renderer::ScarVertex &v = list.vertices[source_index(i)];
 		vertices[static_cast<int64_t>(i)] = entity_local_vertex[i]
 				? Vector3(-v.x, v.y, v.z)
 				: Vector3(v.x, v.z, -v.y);
@@ -172,10 +199,19 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		batch_bms_id[i] = bms_id;
 		batch_spawn_origin[i] = spawn_origin;
 	}
+	// The strip table: the TGA name and the GfxShader mode word the loader
+	// builds each strip's effect from (retail: Scar_LoadTextures @0x5CC2E0 —
+	// modeId 0 -> 0x120651, 1 -> 0x460651, see docs/world/world-wac-ai-re.md
+	// §24.9); the presenter decodes the word into the drawer state
+	// (renderer::decode_scar_strip_mode).
 	PackedStringArray strip_names;
+	PackedInt32Array strip_mode_words;
 	strip_names.resize(opennova::world::kScarTextureStripCount);
+	strip_mode_words.resize(opennova::world::kScarTextureStripCount);
 	for (int strip = 0; strip < opennova::world::kScarTextureStripCount; ++strip) {
 		strip_names[strip] = String(opennova::world::scar_texture_strip_name(strip));
+		strip_mode_words[strip] =
+				static_cast<int32_t>(opennova::world::scar_texture_strip_mode_word(strip));
 	}
 	out["vertices"] = vertices;
 	out["uvs"] = uvs;
@@ -189,6 +225,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	out["batch_bms_id"] = batch_bms_id;
 	out["batch_spawn_origin"] = batch_spawn_origin;
 	out["strip_names"] = strip_names;
+	out["strip_mode_words"] = strip_mode_words;
 	out["slots_live"] = static_cast<int>(list.slots_live);
 	out["slots_culled"] = static_cast<int>(list.slots_culled);
 	out["rings_leased"] = world_->scars.leased_count();

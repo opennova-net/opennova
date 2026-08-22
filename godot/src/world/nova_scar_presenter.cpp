@@ -12,6 +12,9 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <renderer/scar_draw_list.h>
+#include <world/impact_scar.h>
+
 #include <vector>
 
 #include "object/nova_object_model.h"
@@ -20,7 +23,9 @@ namespace godot {
 
 namespace {
 
-constexpr const char *kScarShaderPath = "res://shaders/scar_quad.gdshader";
+// The two shipped drawer states (world::kScarModeWordScorch / ...Hole).
+constexpr const char *kScarShaderScorchPath = "res://shaders/scar_quad.gdshader";
+constexpr const char *kScarShaderHolePath = "res://shaders/scar_quad_hole.gdshader";
 constexpr const char *kWorldMeshName = "ScarWorld";
 
 // One batch row of the draw-list dictionary (Simulation::get_scar_draw_list).
@@ -107,32 +112,57 @@ Ref<Texture2D> ScarPresenter::texture_(const String &p_name) {
 	if (resource_root_.is_valid()) {
 		texture = resource_root_->load_texture(p_name);
 	}
-	textures_[p_name] = texture;
+	// Only a resolved texture is remembered: a strip whose TGA is not there
+	// yet (no root, a root set later) is re-tried on the next present.
+	if (texture.is_valid()) {
+		textures_[p_name] = texture;
+	}
 	return texture;
 }
 
-Ref<ShaderMaterial> ScarPresenter::material_for_strip_(int p_strip,
-		const String &p_texture_name) {
-	const Ref<ShaderMaterial> *cached = materials_.getptr(p_strip);
-	if (cached != nullptr) {
-		return *cached;
+Ref<Shader> ScarPresenter::shader_for_mode_(uint32_t p_mode_word, bool &r_unsupported) {
+	// The mode word -> the drawer state -> the shader that carries it. The two
+	// shipped words are matched on their FULL decoded state, so a word that
+	// decodes to anything else is reported rather than silently approximated.
+	const renderer::ScarStripState s = renderer::decode_scar_strip_mode(p_mode_word);
+	const bool shared = s.src_alpha_blend && s.alpha_modulate_texture_diffuse &&
+			s.color_modulate2x_texture_diffuse && s.fog;
+	const bool scorch = shared && !s.alpha_test && !s.depth_write && !s.cull_none;
+	const bool hole = shared && s.alpha_test && s.depth_write && s.cull_none;
+	r_unsupported = !scorch && !hole;
+	if (hole) {
+		if (shader_hole_.is_null()) {
+			shader_hole_ = ResourceLoader::get_singleton()->load(kScarShaderHolePath, "Shader");
+		}
+		return shader_hole_;
 	}
-	if (shader_.is_null()) {
-		shader_ = ResourceLoader::get_singleton()->load(kScarShaderPath, "Shader");
+	if (shader_scorch_.is_null()) {
+		shader_scorch_ = ResourceLoader::get_singleton()->load(kScarShaderScorchPath, "Shader");
 	}
-	Ref<ShaderMaterial> material;
-	material.instantiate();
-	if (shader_.is_valid()) {
-		material->set_shader(shader_);
+	return shader_scorch_;
+}
+
+ScarPresenter::StripMaterial &ScarPresenter::material_for_strip_(int p_strip,
+		const String &p_texture_name, uint32_t p_mode_word) {
+	StripMaterial *cached = materials_.getptr(p_strip);
+	if (cached == nullptr) {
+		StripMaterial entry;
+		entry.material.instantiate();
+		const Ref<Shader> shader = shader_for_mode_(p_mode_word, entry.unsupported);
+		if (shader.is_valid()) {
+			entry.material->set_shader(shader);
+		}
+		materials_[p_strip] = entry;
+		cached = materials_.getptr(p_strip);
 	}
-	const Ref<Texture2D> texture = texture_(p_texture_name);
-	if (texture.is_valid()) {
-		material->set_shader_parameter("albedo_tex", texture);
-	} else {
-		++stat_textures_missing_;
+	if (!cached->texture_bound) {
+		const Ref<Texture2D> texture = texture_(p_texture_name);
+		if (texture.is_valid()) {
+			cached->material->set_shader_parameter("albedo_tex", texture);
+			cached->texture_bound = true;
+		}
 	}
-	materials_[p_strip] = material;
-	return material;
+	return *cached;
 }
 
 MeshInstance3D *ScarPresenter::ensure_world_mesh_() {
@@ -180,6 +210,7 @@ void ScarPresenter::clear() {
 
 void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_owner_nodes) {
 	stat_textures_missing_ = 0;
+	stat_strips_unsupported_ = 0;
 	const PackedVector3Array vertices = p_draw_list.get("vertices", PackedVector3Array());
 	const PackedVector2Array uvs = p_draw_list.get("uvs", PackedVector2Array());
 	const PackedColorArray colors = p_draw_list.get("colors", PackedColorArray());
@@ -191,6 +222,8 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 	const PackedInt32Array counts = p_draw_list.get("batch_count", PackedInt32Array());
 	const PackedStringArray strip_names =
 			p_draw_list.get("strip_names", PackedStringArray());
+	const PackedInt32Array strip_mode_words =
+			p_draw_list.get("strip_mode_words", PackedInt32Array());
 	const int64_t batch_count = owners.size();
 	if (batch_count == 0 || textures.size() != batch_count ||
 			sections.size() != batch_count || flags.size() != batch_count ||
@@ -225,7 +258,18 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 		const String texture_name = row.texture >= 0 && row.texture < strip_names.size()
 				? strip_names[row.texture]
 				: String();
-		const Ref<ShaderMaterial> material = material_for_strip_(row.texture, texture_name);
+		// A strip the list does not describe draws in the scorch state.
+		const uint32_t mode_word = row.texture >= 0 && row.texture < strip_mode_words.size()
+				? static_cast<uint32_t>(strip_mode_words[row.texture])
+				: opennova::world::kScarModeWordScorch;
+		const StripMaterial &strip = material_for_strip_(row.texture, texture_name, mode_word);
+		const Ref<ShaderMaterial> material = strip.material;
+		if (!strip.texture_bound) {
+			++stat_textures_missing_;
+		}
+		if (strip.unsupported) {
+			++stat_strips_unsupported_;
+		}
 		if (!row.entity_local) {
 			append_surface(world_mesh, vertices, uvs, colors, row, material);
 			continue;
@@ -317,6 +361,7 @@ Dictionary ScarPresenter::get_stats() const {
 	out["batches"] = stat_batches_;
 	out["vertices"] = stat_vertices_;
 	out["textures_missing"] = stat_textures_missing_;
+	out["strips_unsupported"] = stat_strips_unsupported_;
 	return out;
 }
 

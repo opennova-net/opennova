@@ -5346,13 +5346,36 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   appended per texture via `Terrain_ParseSectorTypeCallback @0x5cf390`. The
   drawer `Terrain_RenderFoliageBatches @0x5ccd10` (a misnomer; proposed
   `Scar_DrawBatches`; caller `Terrain_RenderSceneWithReflection @0x5c9658`
-  after the lit sector entities): `CD3DDevice_SetFogAndBlendMode(dev, 0)`,
+  after the lit sector entities): `CD3DDevice_SetFogAndBlendMode(dev, 0)` (the
+  fog COLOUR select — scene fog colour; it never touches a blend state),
   identity world, vertex shader 0, FVF 0x142, the 1000-vertex dynamic VB
-  `dword_2BDF9C8` (stride 24, `Scar_InitDynamicBuffers @0x5cc3f0`), alpha-test
-  ref 128, per texture `GfxShader_ApplyPassChecked(strip[k].effect,
-  0x10000000)` then D3DPT_TRIANGLELIST; the strip `Scar_LoadTextures @0x5cc2e0`
-  (32-byte entries `@0x8413a8` {name[16], tex, effect, modeId, loadFlags}:
-  scorch1..4 mode 0, bhole1 (idx 27) mode 1, clamp wrap).
+  `dword_2BDF9C8` (stride 24, `Scar_InitDynamicBuffers @0x5cc3f0`),
+  `CGfxDevice_SetAlphaTestRef(128) @0x5ccdae` (ALPHAFUNC GREATER + ALPHAREF
+  only — a latch), per texture `GfxShader_ApplyPassChecked(strip[k].effect,
+  0x10000000)` (LIGHTING off) then D3DPT_TRIANGLELIST. **The drawer state
+  lives in the strip's effect** (re-grilled 2026-08-21): `Scar_LoadTextures
+  @0x5cc2e0` walks the 32-byte entries `@0x8413a8` {name[16], tex@16,
+  effect@20, modeId@24, loadFlags@28} and `modeId` is a SELECTOR, not a state
+  word — `0 -> 0x120651` `@0x5cc315`, `1 -> 0x460651` `@0x5cc321` (the
+  decompiler shows the latter as a bogus `offset loc_46064F+2`), else 0 — fed
+  to `GfxShader_Create1TexModeId(tex, modeWord) @0x679030`, then clamp wrap
+  (`sub_680720(effect, 1, 0, 0, 0)`). Every strip but bhole1 (idx 27) carries
+  modeId 0. Decoded through the mode-word layout
+  ([render-material-re.md](../render/render-material-re.md) "The mode word"):
+  **scorch 0x120651** = SRCALPHA/INVSRCALPHA blend, stage 0
+  `MODULATE2X(TEXTURE, DIFFUSE)` colour / `MODULATE(TEXTURE, DIFFUSE)` alpha,
+  FOGENABLE, z-write OFF, CULLMODE CCW, and **no ALPHATESTENABLE** — the 128
+  latch is inert there; **bhole1 0x460651** = the same plus ALPHATESTENABLE
+  (GREATER 128 live), z-write ON, CULLMODE NONE. The scorch TGAs are black RGB
+  under an alpha falloff (peak ~0.75), so the mark IS the alpha blend over
+  the lit wall; alpha-testing them paints an opaque black blob. With
+  `Env_TerrainLightCombined` as DIFFUSE and the unconditional
+  `GfxDevice_Modulate2XEnabled` (`CGfxDevice_CreateDevice @0x67eb5f`), the
+  colour is `saturate(2 · tex · light)`. Winding: the slot writer's basis is
+  LEFT-handed (`n . (t x b) < 0` — the bitangent is crossed before the
+  tangent-only flip, `@0x5ccada`/`@0x5ccae6..0x5ccb37`) and the upload is the
+  Y-negated reflection (`Math_FixedPointToFloat3_YNegated @0x611210`), which
+  together put the quad's front on the struck face's side under the CCW cull.
 - **The GLASS userpoint leg** `Terrain_SpawnSurfaceEffectsAtUserPoints
   @0x5cea90`: the 24-row surface-material table `@0x841980` ({surface[16]
   GLASS1..3, userpoint[16], model[16], fx[4][32] = Effect_BldGlassExp /
@@ -5379,10 +5402,25 @@ death entries and on attach, `renderer::compile_scar_draws`
 (`engine/runtime/renderer/scar_draw_list.*` — the witnessed vertex order/UVs,
 per-strip batches, the fog-box cull, the owner-visibility gate), and the
 device `ScarPresenter` + `scar_present_pass.gd` (entity-ring batches parented
-under the owner model's section node, shared-ring batches as a world mesh;
-unshaded vertex colour, alpha-scissor 0.5, clamp — landed 2026-08-21, D-SCAR; the
+under the owner model's section node, shared-ring batches as a world mesh; the
 entity-ring batches are uploaded in the section-local frame the engine stores,
-the shared ring in world space).
+the shared ring in world space). The device state is per strip from the
+witnessed mode words (`world::scar_texture_strip_mode_word`,
+`renderer::decode_scar_strip_mode`, the draw list's `strip_mode_words`):
+`scar_quad.gdshader` carries the scorch state (blend_mix, unshaded, fog,
+depth_draw_never, cull_back, no alpha test, `saturate(2 · tex · COLOR)` in
+gamma space) and `scar_quad_hole.gdshader` the bhole state (plus the
+GREATER/128 discard, depth_draw_always, cull_disabled); Godot's front face is
+clockwise like D3D's but in a right-handed frame, so the witnessed order is
+already front on the struck side under the packer's world ROTATION fold and
+the shared ring keeps it, while the entity-local REFLECTION fold flips it and
+those triangles are re-wound — the scorch `cull_back` then culls what retail's
+CCW cull culls (the probe's front/behind captures prove it). **Fixed
+2026-08-21**: the first cut
+drew both strips through one alpha-scissor-0.5 material, which in Godot means the
+opaque pass with no blend — every scorch drew as an opaque black blob
+(the "pitch black, no texture" report); the scissor was a misread of the
+inert 128 latch.
 Pinned by ctest `impact_scar`, `projectile_combat`, `renderer_scar_draw_list`,
 `destruction`. **The one residual**: the GLASS userpoint leg — the 24-row
 table is not witnessed in full, so a userpoint match cannot be detected and

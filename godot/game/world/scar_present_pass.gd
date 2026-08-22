@@ -41,6 +41,7 @@ class Stats:
 	var world_surfaces := 0
 	var entity_meshes := 0
 	var textures_missing := 0
+	var strips_unsupported := 0   # strips whose mode word is neither shipped drawer state
 	var owners_unresolved := 0
 
 
@@ -140,6 +141,7 @@ func present_draw_list(draw: Dictionary) -> void:
 	_stats.world_surfaces = int(device.get("world_surfaces", 0))
 	_stats.entity_meshes = int(device.get("entity_meshes", 0))
 	_stats.textures_missing = int(device.get("textures_missing", 0))
+	_stats.strips_unsupported = int(device.get("strips_unsupported", 0))
 
 
 # Every entity-ring owner in the list -> its live node (packed handle -> Node3D).

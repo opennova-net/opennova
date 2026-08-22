@@ -134,6 +134,27 @@ void emit_entity_ring(const ScarRing &ring, const ScarViewContext &ctx, ScarDraw
 
 } // namespace
 
+ScarStripState decode_scar_strip_mode(std::uint32_t mode_word) {
+	ScarStripState s;
+	// Bits 0-3: the framebuffer blend [orig: decode_blend_mode_to_d3d_states
+	// @0x680F00 — case 1 writes SRCBLEND 5, DESTBLEND 6, ALPHABLENDENABLE 1].
+	s.src_alpha_blend = (mode_word & 0xFu) == 1u;
+	// Bits 4-7: the stage-0 alpha op [orig: decode_mode_alpha_stage @0x680B00
+	// — nibble 0x50 substate 0: ALPHAOP 4 (MODULATE), ARG1 TEXTURE, ARG2
+	// DIFFUSE].
+	s.alpha_modulate_texture_diffuse = ((mode_word >> 4) & 0xFu) == 5u;
+	// Bits 8-13: the stage-0 colour op [orig: decode_mode_color_stage @0x681080
+	// — family 0x600 sub-pass 0: COLOROP 4 + GfxDevice_Modulate2XEnabled,
+	// ARG1 TEXTURE, ARG2 DIFFUSE].
+	s.color_modulate2x_texture_diffuse = (mode_word & 0x3F00u) == 0x600u;
+	// Bits 16+: the pass flags [orig: CGfxShader_ApplyPass @0x683232..0x6832BE].
+	s.alpha_test = (mode_word & 0x40000u) != 0u;
+	s.fog = (mode_word & 0x20000u) != 0u;
+	s.depth_write = (mode_word & 0x100000u) == 0u;
+	s.cull_none = (mode_word & 0x400000u) != 0u;
+	return s;
+}
+
 void compile_scar_draws(const opennova::world::ScarCache &cache,
 		const ScarViewContext &ctx, ScarDrawList &out) {
 	out.vertices.clear();

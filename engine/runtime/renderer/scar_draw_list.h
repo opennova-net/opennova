@@ -83,4 +83,30 @@ struct ScarViewContext {
 void compile_scar_draws(const opennova::world::ScarCache &cache,
 		const ScarViewContext &ctx, ScarDrawList &out);
 
+// The device state a strip's GfxShader mode word selects
+// (world::scar_texture_strip_mode_word), decoded from the witnessed layout
+// [orig: CGfxShader_ApplyPass @0x683190 — `combined = modeWord | passFlags`,
+//  the drawer passes 0x10000000 (LIGHTING off @ sub_6808A0): bit 0x40000 ->
+//  ALPHATESTENABLE, 0x20000 -> FOGENABLE, 0x100000 -> z-write OFF, 0x400000 ->
+//  CULLMODE NONE (else CCW); decode_blend_mode_to_d3d_states @0x680F00 —
+//  bits 0-3, nibble 1 = SRCALPHA/INVSRCALPHA; decode_mode_alpha_stage
+//  @0x680B00 — bits 4-7, nibble 5 = MODULATE(TEXTURE, DIFFUSE);
+//  decode_mode_color_stage @0x681080 — bits 8-13, family 0x600 =
+//  MODULATE2X(TEXTURE, DIFFUSE) under GfxDevice_Modulate2XEnabled, which
+//  CGfxDevice_CreateDevice @0x67EB5F sets to 1 unconditionally]. The alpha
+// test compares GREATER against the drawer's latched ref
+// [orig: CGfxDevice_SetAlphaTestRef(128) @0x5CCDAE — ALPHAFUNC + ALPHAREF
+//  only; without the 0x40000 bit the latch is inert].
+struct ScarStripState {
+	bool src_alpha_blend = false;            // SRCBLEND SRCALPHA / DESTBLEND INVSRCALPHA
+	bool alpha_modulate_texture_diffuse = false; // ALPHAOP MODULATE(TEXTURE, DIFFUSE)
+	bool color_modulate2x_texture_diffuse = false; // COLOROP MODULATE2X(TEXTURE, DIFFUSE)
+	bool alpha_test = false;                 // ALPHATESTENABLE (GREATER kScarAlphaTestRef)
+	bool fog = false;                        // FOGENABLE
+	bool depth_write = false;                // ZWRITEENABLE
+	bool cull_none = false;                  // CULLMODE NONE; else the CCW back-face cull
+};
+inline constexpr int kScarAlphaTestRef = 128;
+ScarStripState decode_scar_strip_mode(std::uint32_t mode_word);
+
 } // namespace renderer

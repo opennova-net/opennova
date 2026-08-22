@@ -219,6 +219,30 @@ inline const char *scar_texture_strip_name(int strip) {
 	}
 }
 
+// THE STRIP'S DRAWER STATE. The table's modeId@24 is a SELECTOR, not a state
+// word: the loader maps 0 -> the GfxShader mode word 0x120651 and 1 ->
+// 0x460651 (anything else -> 0) and builds the strip's effect from that word
+// [orig: Scar_LoadTextures @0x5CC30C..0x5CC328 — `GfxShader_Create1TexModeId
+//  (tex, modeWord)` @0x679030 -> CGfxShader_SetRenderStateByModeId @0x6835C0
+//  -> the permutation cache; the 0x460651 immediate @0x5CC321 decompiles as a
+//  bogus code offset]. Every strip but bhole1 (index 27, modeId 1) carries
+// modeId 0 in the 32-byte table @0x8413A8. The words decode through the
+// material record's mode-word layout (renderer::decode_scar_strip_mode):
+//   0x120651 scorch: SRCALPHA/INVSRCALPHA blend, MODULATE2X(TEXTURE, DIFFUSE)
+//            colour, MODULATE(TEXTURE, DIFFUSE) alpha, fog ON, z-write OFF,
+//            NO alpha test, CCW back-face cull;
+//   0x460651 bhole:  the same plus ALPHATESTENABLE (the drawer's GREATER/128
+//            latch is live only here), z-write ON, CULL NONE.
+// The scorch TGAs are black RGB under an alpha falloff (max ~0.75), so the
+// mark IS the alpha blend: a drawer that alpha-tests them instead paints an
+// opaque black blob.
+inline constexpr uint32_t kScarModeWordScorch = 0x120651u;
+inline constexpr uint32_t kScarModeWordHole = 0x460651u;
+inline constexpr int kScarStripHole = 27;
+inline uint32_t scar_texture_strip_mode_word(int strip) {
+	return strip == kScarStripHole ? kScarModeWordHole : kScarModeWordScorch;
+}
+
 // ---------------------------------------------------------------------------
 // THE RING CACHE — the 64-byte slot Scar_AddEntry @0x5CC830 writes and
 // Scar_RenderCache @0x5CD830 reads: normal @0, tangent @12, bitangent @24,

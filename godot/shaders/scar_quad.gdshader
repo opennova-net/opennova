@@ -1,14 +1,32 @@
 shader_type spatial;
-// The impact-scar quad: the one-texture mode the retail drawer applies per
-// texture strip — unshaded, the vertex colour (Env_TerrainLightCombined) as the
-// modulate, the strip's own TGA with clamp wrap, alpha-tested at ref 128, fog
-// on, blend mode 0 (retail: the scar batch drawer Terrain_RenderFoliageBatches
-// @0x5ccd10 — a kong misnomer, IDB rename to Scar_DrawBatches proposed — under
-// Scar_RenderAllCaches @0x5CDF70, see docs/world/world-wac-ai-re.md §24.9).
-// Both faces draw: retail submits the six vertices without a cull change.
-render_mode unshaded, cull_disabled, depth_draw_never;
+// The impact-scar quad in the SCORCH drawer state — GfxShader mode word
+// 0x120651, the state every strip but bhole1 selects [orig: Scar_LoadTextures
+// @0x5CC315 -> GfxShader_Create1TexModeId @0x679030; the drawer
+// Terrain_RenderFoliageBatches @0x5CCD10 (the IDB's kong misnomer,
+// Scar_DrawBatches proposed) under Scar_RenderAllCaches @0x5CDF70; the decode
+// renderer::decode_scar_strip_mode, docs/world/world-wac-ai-re.md §24.9]:
+//   SRCALPHA / INVSRCALPHA framebuffer blend      -> blend_mix
+//   LIGHTING off (pass flag 0x10000000)            -> unshaded
+//   FOGENABLE (0x20000)                            -> Godot fog left on
+//   z-write OFF (0x100000), z-test on              -> depth_draw_never
+//   CULLMODE CCW (no 0x400000): back faces culled  -> cull_back (the packer
+//       winds every quad so its front is the struck face's normal side,
+//       nova_simulation_scars.cpp)
+//   NO ALPHATESTENABLE (no 0x40000): the drawer's SetAlphaTestRef(128)
+//       @0x5CCDAE latches ALPHAFUNC/ALPHAREF only, so it is INERT here
+//   stage 0: COLOROP MODULATE2X(TEXTURE, DIFFUSE), ALPHAOP MODULATE(TEXTURE,
+//       DIFFUSE); DIFFUSE = Env_TerrainLightCombined | FF000000 on every
+//       vertex; the strip's TGA with clamp wrap.
+// The scorch TGAs are black RGB under an alpha falloff (max ~0.75): the mark
+// IS the blend. An alpha scissor here (the 2026-08-21 first cut) dropped the
+// blend and painted an opaque black blob.
+render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 
-uniform sampler2D albedo_tex : source_color, repeat_disable, filter_linear_mipmap;
+// Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
+// the exact inverse of the blit's transfer curve on the way out.
+#include "res://shaders/nova_color.gdshaderinc"
+
+uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
 
 // The presenter's ONE device fold: retail writes no depth bias — the scar quad
 // is coplanar with the struck face and the D3D rasteriser's own bias keeps it
@@ -25,8 +43,10 @@ void vertex() {
 
 void fragment() {
 	vec4 tex = texture(albedo_tex, UV);
-	ALBEDO = tex.rgb * COLOR.rgb;
-	ALPHA = tex.a;
-	// Alpha test ref 128 (D3DRS_ALPHAREF) -> the scissor threshold.
-	ALPHA_SCISSOR_THRESHOLD = 0.5;
+	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: decode_mode_color_stage
+	// @0x681080 family 0x600 under GfxDevice_Modulate2XEnabled].
+	ALBEDO = nova_gamma_to_linear(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
+	// MODULATE(TEXTURE, DIFFUSE) alpha [orig: decode_mode_alpha_stage @0x680B00
+	// nibble 0x50]; DIFFUSE alpha is the vertex's FF.
+	ALPHA = tex.a * COLOR.a;
 }
