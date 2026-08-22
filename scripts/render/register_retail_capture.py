@@ -26,7 +26,7 @@ output bundle; its local restore token is never accepted or published.
 CLI (all paths are explicit; no installed-tool fallback is used):
 
 uv run python scripts/render/register_retail_capture.py \
-  --catalog docs/render/render-fixtures-retail-v4.json \
+  --catalog docs/render/render-fixtures-retail-v5.json \
   --fixture-id FIXTURE --raw-state FRAME.state.json --raw-image FRAME.png \
   --instance-status INSTANCES.json --fixture-result FIXTURE-RESULT.json \
   --capture-result CAPTURE-RESULT.json \

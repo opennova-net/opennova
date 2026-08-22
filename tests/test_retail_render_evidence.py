@@ -34,11 +34,11 @@ LEGACY_CATALOG_SHA256 = (
     "6948682efc5e58d0ea887728e1318dd3c618b286a322b1bce430e9fbfff6ebf2"
 )
 CURRENT_CATALOG_PATH = (
-    ROOT / "docs" / "render" / "render-fixtures-retail-v4.json"
+    ROOT / "docs" / "render" / "render-fixtures-retail-v5.json"
 )
 CURRENT_EVIDENCE_ROOT = PUBLISHED_EVIDENCE_ROOT
 CURRENT_CATALOG_SHA256 = (
-    "e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1"
+    "d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e"
 )
 
 
@@ -269,7 +269,7 @@ def _inputs(
 
     retail_bundle = {
         "schema": "opennova.registered-retail-capture.v5",
-        "tool": {"name": "register_retail_capture", "version": "4.0.0"},
+        "tool": {"name": "register_retail_capture", "version": "4.1.0"},
         "catalog_sha256": catalog["catalog_sha256"],
         "fixture_id": fixture["id"],
         "mission": {
@@ -462,8 +462,8 @@ def _inputs(
             "source_pid": 1234,
             "source_instance_id": "1234-ABC",
             "bridge_version_major": 1,
-            "bridge_version_minor": 4,
-            "hook_version": "0.5.0",
+            "bridge_version_minor": 5,
+            "hook_version": "0.6.0",
             "capture_bundle_supported": True,
         },
     }
@@ -798,7 +798,9 @@ def test_comparison_rejects_a_legacy_registered_capture_contract(
     [
         ("bridge_version_major", 0),
         ("bridge_version_minor", 3),
+        ("bridge_version_minor", 4),
         ("hook_version", "0.4.0"),
+        ("hook_version", "0.5.0"),
         ("capture_bundle_supported", False),
     ],
 )

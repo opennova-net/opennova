@@ -3,7 +3,7 @@
 Example:
 
 uv run python scripts/render/build_retail_side_by_side.py \
-  --catalog docs/render/render-fixtures-retail-v4.json \
+  --catalog docs/render/render-fixtures-retail-v5.json \
   --fixture-id FIXTURE --opennova-manifest OPENNOVA-MANIFEST.json \
   --retail-bundle REGISTERED.json --output-dir OUTPUT \
   --opennova-caption "HUD hidden, bare arms, M16 Burst, frozen" \
@@ -51,7 +51,9 @@ except ModuleNotFoundError:  # Direct ``python scripts/render/...`` execution.
 
 TOOL_NAME = "build_retail_side_by_side"
 TOOL_VERSION = "4.0.0"
-REGISTRAR_VERSIONS = ("4.0.0", "4.1.0")
+# register_retail_capture versions this builder accepts. 4.1.0 is the settled
+# capture-frame-witness registrar; the transient 4.0.0 publication is retired.
+REGISTRAR_VERSIONS = ("4.1.0",)
 OPENNOVA_SIZE = (2000, 1200)
 RETAIL_SIZE = (1920, 1200)
 HEADER_HEIGHT = 72
@@ -589,9 +591,9 @@ def _validate_raw_evidence(retail: dict[str, Any]) -> dict[str, Any]:
     if source_pid <= 0 or not isinstance(instance_id, str) \
             or not instance_id.startswith(f"{source_pid}-"):
         raise EvidenceError("retail raw evidence source identity is mismatched")
-    # (1, 4, "0.5.0") produced the 2026-08-20 transient-sampled publication;
     # (1, 5, "0.6.0") produces settled captures carrying the fixture-binding
-    # witness. The older pair leaves this set when that publication is re-shot.
+    # witness; the transient 2026-08-20 producer pair (1, 4, "0.5.0") is
+    # retired with its publication.
     producer = (
         raw.get("bridge_version_major"),
         raw.get("bridge_version_minor"),
@@ -600,11 +602,11 @@ def _validate_raw_evidence(retail: dict[str, Any]) -> dict[str, Any]:
     if not any(
         type(producer[0]) is int and type(producer[1]) is int
         and type(producer[2]) is str and producer == known
-        for known in ((1, 4, "0.5.0"), (1, 5, "0.6.0"))
+        for known in ((1, 5, "0.6.0"),)
     ) or raw.get("capture_bundle_supported") is not True:
         raise EvidenceError(
-            "retail raw evidence producer version must be bridge 1.4 + hook "
-            "0.5.0 or bridge 1.5 + hook 0.6.0, with capture-bundle support"
+            "retail raw evidence producer version must be bridge 1.5 and "
+            "hook 0.6.0, with capture-bundle support"
         )
     return raw
 
@@ -728,10 +730,8 @@ def validate_registered_inputs(
         )
 
     retail = _load_json(retail_bundle_path, "registered retail bundle")
-    # 4.0.0 registered the 2026-08-20 publication under the apply-to-capture
-    # frame-gap rule (a transient-sampled viewmodel, runbook section 8); 4.1.0
-    # registers settled captures proven by the hook's capture-frame witness.
-    # The older value leaves this set when that publication is re-shot.
+    # 4.1.0 registers settled captures proven by the hook's capture-frame
+    # witness; the 2026-08-20 frame-gap publication (4.0.0) is retired.
     if retail.get("schema") != "opennova.registered-retail-capture.v5" \
             or not any(
                 retail_contract._same_typed_value(

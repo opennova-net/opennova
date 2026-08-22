@@ -15,7 +15,7 @@ version, because a publication that mixes provenance is not evidence.
 Usage::
 
     uv run python scripts/render/publish_registered_comparisons.py \
-      --catalog docs/render/render-fixtures-retail-v4.json \
+      --catalog docs/render/render-fixtures-retail-v5.json \
       --opennova-root .scratch/golden/render/fixtures \
       --retail-root .scratch/retail/raw \
       --comparison-root .scratch/publication \
@@ -64,8 +64,15 @@ RESIDUALS = """\
   particle differences. CP04 also contains foliage and live-actor phase.
 - CP12 retains night exposure, residual road-marking contrast, vegetation and
   ground sampling, vehicle/material response, and live NPC or flag phase.
-- The M16 and bare-arm identity is matched, but viewmodel placement, lighting,
-  material response, and animation phase remain different.
+- Retail frames are SETTLED captures: >= 4 s after the fixture apply with the
+  clock pinned by the hook's capture-frame fixture-binding witness, so the
+  teleport transient the 2026-08-20 publication sampled is gone and the
+  cameras are the ground-snapped settled poses (net-re section 5.40 ninth
+  pass; runbook section 8). Deep-water rows keep the fast capture (float
+  physics pins the pose; D-INF-3).
+- The M16 and bare-arm identity and PLACEMENT are matched (bone-exact and
+  counter-gated, D-INF-14 FIXED), but viewmodel lighting, material response,
+  and animated phase remain different.
 - Ground tire marks and other ordered .til overlay contributions diverge in
   placement and blend (the open D-TERRAIN-7 tile-composition producer gap,
   measured by the tire-marks fixture).
