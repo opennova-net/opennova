@@ -259,6 +259,19 @@ bool ObjectModel::is_slot_shadow_person() const {
 	return slot_shadow_person_;
 }
 
+void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bound) {
+	model_sphere_radius_ = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
+	entity_bound_radius_ = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
+}
+
+float ObjectModel::get_model_sphere_radius() const {
+	return model_sphere_radius_;
+}
+
+float ObjectModel::get_entity_bound_radius() const {
+	return entity_bound_radius_;
+}
+
 void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
 	slot_shadow_capture_with_ = p_owner != nullptr
 			? ObjectID(p_owner->get_instance_id())
@@ -1114,6 +1127,12 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_slot_shadow_person);
 	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
 			&ObjectModel::is_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
+			&ObjectModel::set_shadow_bound_radii);
+	ClassDB::bind_method(D_METHOD("get_model_sphere_radius"),
+			&ObjectModel::get_model_sphere_radius);
+	ClassDB::bind_method(D_METHOD("get_entity_bound_radius"),
+			&ObjectModel::get_entity_bound_radius);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_decal", "texture", "dims"),
 			&ObjectModel::set_slot_shadow_decal);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),

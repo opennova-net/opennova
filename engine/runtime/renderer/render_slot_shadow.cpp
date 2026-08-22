@@ -218,8 +218,12 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::function<float(float, float)> &terrain_height,
 		int max_steps) {
 	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6c86..0x5d6d67 — planar step
-	// normalized to unit length (flt_7C32BC = 65536 fold), vertical step
-	// clamped to <= -0.5 u (-32768 fixed @ 0x5d6cdd)].
+	// normalized to unit length (flt_7C32BC = 65536 fold); the vertical step
+	// keeps its true rate and is SUBSTITUTED by -0.5 u only when it does not
+	// descend (`test eax, eax; jl` @ 0x5d6cd7..0x5d6cdd, the -32768 store
+	// @ 0x5d6cdf is reached for a non-negative step only — re-witnessed
+	// 2026-08-22; the earlier "clamped to at least 0.5 u of drop" reading
+	// steepened every shallow sun)].
 	float x = start[0];
 	float z = start[2];
 	float y = start[1];
@@ -231,7 +235,7 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 	const float step_x = direction[0] / planar_len;
 	const float step_z = direction[2] / planar_len;
 	float step_y = direction[1] / planar_len;
-	if (step_y > -0.5f) {
+	if (step_y >= 0.0f) {
 		step_y = -0.5f;
 	}
 	for (int i = 0; i < max_steps && terrain_height(x, z) < y; ++i) {
@@ -240,6 +244,90 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		y += step_y;
 	}
 	return {x, z};
+}
+
+SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod) {
+	// The patch origin is the anchor backed off half a lod west and pushed
+	// half a lod north, rounded to the lod band's grid; the (lod + 1)^2 grid
+	// then runs east and south at 1 u, so the patch is the lod x lod square
+	// [origin_x, origin_x + lod] x [origin_north - lod, origin_north]
+	// [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130 — raw origin
+	//  `slot[15] - lod << 15`, `slot[16] + lod << 15` @ 0x5d5142/@ 0x5d5149;
+	//  `(v + 0x8000) & 0xFFFF0000` below lod 10 @ 0x5d515e, `(v + 0x10000) &
+	//  0xFFFE0000` for 10..15 @ 0x5d517d, `(v + 0x20000) & 0xFFFC0000` from 16
+	//  @ 0x5d5197; rows `x += 0x10000` @ 0x5d52f7, columns `north - col <<
+	//  16` @ 0x5d527a, `resolution = lod + 1` vertices each way].
+	const float grid = lod >= 16 ? 4.0f : (lod >= 10 ? 2.0f : 1.0f);
+	const float half = static_cast<float>(lod) * 0.5f;
+	const float origin_x =
+			std::floor((anchor_x - half) / grid + 0.5f) * grid;
+	const float origin_north =
+			std::floor((anchor_north + half) / grid + 0.5f) * grid;
+	SlotPatch patch;
+	patch.min_x = origin_x;
+	patch.max_x = origin_x + static_cast<float>(lod);
+	patch.max_north = origin_north;
+	patch.min_north = origin_north - static_cast<float>(lod);
+	return patch;
+}
+
+std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {
+	// [orig: shadow_system_init_resources @ 0x5d6260..0x5d62a7 — 4 rows of
+	//  32 ARGB texels: row 3 white, rows 0..2 white below column 16, the one
+	//  gray texel at column 16 (0xFF808080), black beyond].
+	std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> px{};
+	for (int row = 0; row < kShadowZTexHeight; ++row) {
+		for (int col = 0; col < kShadowZTexWidth; ++col) {
+			uint32_t argb = 0xFF000000u;
+			if (row == kShadowZTexHeight - 1 || col < 16) {
+				argb = 0xFFFFFFFFu;
+			} else if (col == 16) {
+				argb = 0xFF808080u;
+			}
+			px[static_cast<size_t>(row * kShadowZTexWidth + col)] = argb;
+		}
+	}
+	return px;
+}
+
+SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
+		float half_size, bool person, const std::array<float, 3> &entity_pos) {
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d66..0x5d5de1 — two copies
+	//  of the slot direction; the second's VERTICAL x 4.0 (flt_7C44B8) for
+	//  itemdef type 3 @ 0x5d5d7e..0x5d5d91; light_pos = slot pos - dir1
+	//  @ 0x5d5d95..0x5d5dd4; build_shadow_cascade_uv_matrices @ 0x58cf10 —
+	//  k = 0.5 / half_size @ 0x58cf2f, the look-ats normalize their direction
+	//  (build_direction_look_at_matrix @ 0x612c90), the detail u row is the
+	//  dir2 look-at's forward column scaled k with + 0.5 @ 0x58d1cc..0x58d204,
+	//  the detail v row is the primary's ALREADY k-scaled depth column times
+	//  0.333 k with + 0.5 @ 0x58d222..0x58d249].
+	SlotDepthClip clip;
+	const float k = half_size > 1.0e-6f ? 0.5f / half_size : 0.0f;
+	std::array<float, 3> lp = {entity_pos[0] - slot_direction[0],
+			entity_pos[1] - slot_direction[1], entity_pos[2] - slot_direction[2]};
+	auto normalized = [](std::array<float, 3> v) {
+		const float len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+		if (len > 1.0e-6f) {
+			v[0] /= len;
+			v[1] /= len;
+			v[2] /= len;
+		}
+		return v;
+	};
+	const std::array<float, 3> f1 = normalized(slot_direction);
+	const std::array<float, 3> f2 = normalized({slot_direction[0],
+			slot_direction[1] * (person ? kPersonClipSteepening : 1.0f),
+			slot_direction[2]});
+	const float v_scale = 0.333f * k * k;
+	clip.u_offset = 0.5f;
+	clip.v_offset = 0.5f;
+	for (int i = 0; i < 3; ++i) {
+		clip.u_axis[i] = k * f2[i];
+		clip.v_axis[i] = v_scale * f1[i];
+		clip.u_offset -= clip.u_axis[i] * lp[i];
+		clip.v_offset -= clip.v_axis[i] * lp[i];
+	}
+	return clip;
 }
 
 static bool slot_excluded(const SlotCandidateState &state) {

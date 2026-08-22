@@ -518,16 +518,56 @@ code** in retail JO.
 **The render-slot (entity ground shadow) side** — witnessed end to end and
 PORTED (2026-08-20; the earlier ADR-0023-era "Shadow_/Scar_ family
 exclusion" is superseded for the RenderSlot_* half — the Scar_ decal family
-alone remains out of REN scope) except the drape's depth-clip texture stage
-(`shadowztex`, the *Drape* paragraph below — re-witnessed 2026-08-21 while
-correcting the person-4× misread): the device draws the projected
-silhouette over the whole capture frustum where retail clips it by depth
-along the (person-steepened) clip direction, so low-sun shadows still run
-longer than retail's until that stage is ported. Porting it needs the
-stage-1 combine of the drape pass (`sub_679630(28, 29, ..., 0x1520000)`,
-sampler slots 12/12 and 12/13), the runtime-built flip matrix
-`flt_27219C0`, and `build_direction_look_at_matrix @ 0x612c90`'s frame
-(right = normalize(dir.z, 0, −dir.x), up = fwd × right).
+alone remains out of REN scope). **2026-08-22 — the two extent bounds
+ported** (the "objects cast too-tall shadows" report): the device had drawn
+the projected silhouette over the whole capture frustum, sized from the
+model's render-bounds diagonal. Retail bounds every drape twice. (1) The
+PATCH: the drape is drawn only over the lod × lod terrain-following square
+`RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130` builds around the marched
+anchor — origin `anchor − lod/2` east / `+ lod/2` north, rounded to the lod
+band's grid (`(v + 0x8000) & 0xFFFF0000` below lod 10 `@ 0x5d515e`,
+2 u for 10..15 `@ 0x5d517d`, 4 u from 16 `@ 0x5d5197`), `(lod + 1)²`
+vertices stepping east (`@ 0x5d52f7`) and south (`@ 0x5d527a`) at 1 u, so
+no entity's shadow ever covers more than 20 u; lod = the grazing-rescaled
+`clamp(2r + 1, 6, 20)` with r = entity+0 boundRadius — the .3di origin
+sphere `Entity_InitFromModel @ 0x40dc30` stamps (`gpm[5]` × scale, husk
+max, + 0x1000), NOT `Entity_ComputeBoundingSphere`'s collision-AABB sphere
+(that is entity+0x208). (2) The DEPTH CLIP: the drape pass is a
+fixed-function two-stage desc (`dword_2BE3A50`, written `@ 0x5d6318..
+0x5d635e`): blend `SRC = DESTCOLOR, DST = ZERO`; stage 0 `COLOROP ADD
+(TEXTURE = the silhouette RT, DIFFUSE = the ambient-law material)`; stage 1
+`COLOROP ADD (TEXTURE = shadowztex, CURRENT)`; both stages texgen
+`D3DTSS_TCI_CAMERASPACEPOSITION + COUNT2` through texture matrices 12/13
+(`0x3266B88`/`0x3266BC8`); samplers from global slots 28/29
+(`sub_679630(28, 29, ..., 0x1520000)` — slot indices, the word's low 16
+bits zero, the upper bits pass flags). Because the stage ADDs and
+saturates, shadowztex's WHITE suppresses the shadow and its BLACK keeps it:
+`u2 = 0.5 + k·f2·(p − lp)` with `k = 0.5/half_size`, `lp = entity pos −
+dir1`, `f2` = the slot direction with its vertical × 4 for a person then
+normalized; `v2 = 0.5 + 0.333·k²·f1·(p − lp)` (the detail v row is the
+primary's ALREADY k-scaled depth column × 0.333 k, `@ 0x58d222..0x58d249`);
+ground beyond the caster plane (u2 > 0.5, away from the light) draws, ground
+toward the light is suppressed, and the far row (v2 ≥ 0.75) fades to white.
+Port: `renderer::slot_patch_bounds`, `slot_depth_clip`, `shadowztex_pixels`
+(ctest `renderer_render_slot_shadow`), the device publishes the patch and the
+clip rows per slot and samples the generated 32×4 texture in
+`slot_shadow_drape.gdshader` (`min(1, (1 − (1−f)·q·mask) + ztex)`), the
+anchor march probes `TerrainData` (ground-standing casters exit at step 0),
+and the placer stamps both radii on every model it builds — items and the
+avatar body/head parts alike — as `ObjectModel.set_shadow_bound_radii(model
+sphere, entity bound)`: the MODEL SPHERE (gpm[5], the header's origin sphere)
+sizes the capture extent and the depth clip (`RenderSlot_RenderEntityAndChildren
+@ 0x5d7835` reads the model's +0x14, never entity+0), the ENTITY BOUND is that
+sphere raised to the first husk stage's and padded + 0x1000 only when the
+graphic carries a collision block (`Entity_InitFromModel @ 0x40dc30`'s
+gpm[44] gate `@ 0x40de8f`; a collision-less model keeps entity+0 = 0, so its
+slot takes the lod floor 6) and sizes the lod/patch and the light query. The
+blob leg places its patch with the slot's stored direction too (the
+dominant-light pick runs for every bound slot, as
+`RenderSlot_UpdateEntityLight` does from the entity update). Residuals: the
+def scale fold of entity+0 (D-COL-3, as in the engine's own entity law), and a
+model the placer did not build (no stamp) falls back to half its
+render-bounds diagonal for both radii.
 
 *Registration* — `Entity_InitFromModel @ 0x40E1C8..0x40E1F7`: persons
 always, items via the `DynamicShadow` attrib2 bit, gated on the
@@ -577,10 +617,12 @@ position ± boundRadius) wins when NTSC luminance 0.3R + 0.6G + 0.1B over
 entity); the winning direction is `normalize(entity − light)`. The shadow
 anchor then marches from the entity (or its rotated bbox-center anchor
 when the entity flag word is zero) along the light direction in unit-planar
-steps down to `Terrain_GetHeightAtPosition @ 0x606720`, the vertical step
-clamped to ≥ 0.5 u of drop (fixed −32768) per iteration — for suns below
-~30° the march descends steeper than the true projection, so the anchor
-only PLACES the drape patch; the projected UV matrices land the silhouette.
+steps down to `Terrain_GetHeightAtPosition @ 0x606720`; the vertical step
+keeps the direction's own rate and is SUBSTITUTED by 0.5 u of drop (fixed
+−32768) only when it would not descend (`test eax, eax; jl` `@ 0x5d6cd7..
+0x5d6cdd` — corrected 2026-08-22; the earlier "clamped to ≥ 0.5 u" reading
+steepened every shallow sun). The anchor PLACES the drape patch; the
+projected UV matrices land the silhouette.
 The slot LOD refreshes grazing-scaled: `(0.5 + |0.5/dirY|)·baseLod`
 clamped [6, 20] (`@ 0x5d6d5c..0x5d6dac`).
 
@@ -607,8 +649,10 @@ stage that clips the projection by depth — `shadowztex`
 (`shadow_system_init_resources @ 0x5d62d2`: a 32×4 white/black step, one
 gray texel at the boundary, row 3 all white) addressed by
 `build_shadow_cascade_uv_matrices @ 0x58cf10`'s detail matrix (u = depth
-along the clip direction × 0.5/half_size + 0.5, v = 0.333 × depth along the
-light direction + 0.5) — where person-type entities (itemdef +0x5C == 3)
+along the clip direction × 0.5/half_size + 0.5, v = 0.333 × (0.5/half_size)²
+× depth along the light direction + 0.5 — the v row multiplies the already
+k-scaled primary depth column by 0.333 k, `@ 0x58d222..0x58d249`; corrected
+2026-08-22) — where person-type entities (itemdef +0x5C == 3)
 steepen the CLIP direction's vertical component 4× (`flt_7C44B8`
 @ 0x5d5d85: the copy at slot+108 feeding lookat_dir2 only; the silhouette
 projection keeps the unscaled lookat_dir1 — re-witnessed 2026-08-21, the
@@ -638,9 +682,11 @@ GUT `slot_shadow_test`) realizes the capture as 12 per-slot SubViewports
 at the witnessed chain sizes culling per-slot capture layers, and the
 drape as a per-pixel projection over the terrain surface. Device folds,
 each serving the same observable: the terrain surface stands in for the
-21×21 patch mesh and the projection is evaluated per pixel, so the anchor
-march (retail's patch-PLACEMENT approximation of that projection) needs no
-separate device leg; held weapons ride their owner's slot via the
+21×21 patch mesh and the projection is evaluated per pixel, bounded (since
+2026-08-22) by the lod × lod patch the anchor march places
+(`renderer::slot_patch_bounds` over `TerrainData`'s height query) and clipped
+by the shadowztex stage (`renderer::slot_depth_clip`), both published per
+slot to the shader; held weapons ride their owner's slot via the
 capture-with link (`ObjectModel.set_slot_shadow_capture_with` — the
 `RenderSlot_RenderEntityAndChildren` child walk) while tree-parented
 riders fold into the ancestor exclusion; the attached-light drape folds
