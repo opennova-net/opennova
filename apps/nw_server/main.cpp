@@ -29,6 +29,7 @@
 #include <world/world.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -36,6 +37,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -52,6 +54,22 @@ uint16_t env_port(const char *name, uint16_t fallback) {
 		if (p > 0 && p < 65536) return static_cast<uint16_t>(p);
 	}
 	return fallback;
+}
+
+bool apply_env_u32(const char *name, uint32_t &value) {
+	const char *text = std::getenv(name);
+	if (text == nullptr || *text == '\0') return true;
+	char *end = nullptr;
+	errno = 0;
+	const unsigned long parsed = std::strtoul(text, &end, 0);
+	if (*text == '-' || errno == ERANGE || end == text || *end != '\0' ||
+			parsed > std::numeric_limits<uint32_t>::max()) {
+		std::fprintf(stderr,
+				"nw-server: %s must be a uint32 (decimal or 0x hex)\n", name);
+		return false;
+	}
+	value = static_cast<uint32_t>(parsed);
+	return true;
 }
 
 // The dedicated host's one adapter to inmatch::Session. The portable session
@@ -209,10 +227,27 @@ int main() {
 	host_cfg.config.max_score = game_rules::kDefaultMaxScore;
 	host_cfg.config.koth_delta = game_rules::kDefaultKothDelta;
 	host_cfg.config.flag_return_ticks = game_rules::kDefaultFlagReturnTicks;
+	host_cfg.config.num_teams = static_cast<uint8_t>(game_rules::kDefaultNumTeams);
 	host_cfg.config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
 	host_cfg.config.start_delay = game_rules::kDefaultStartDelay;
 	host_cfg.config.destroy_buildings = game_rules::kDefaultDestroyBuildings;
 	host_cfg.config.death_messages = game_rules::kDefaultDeathMessages;
+	// The BMS task vocabulary has no authored Flag Me bit even though retail's
+	// Game_StartMission retains its type-12 -> g_GameType 8 branch. The harness
+	// therefore accepts an explicit numeric code so every witnessed wire mode
+	// remains capturable; ordinary hosts continue to derive the mission type.
+	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0;
+	// Game_StartMission @0x524360]
+	if (!apply_env_u32("NW_GAME_TYPE", host_cfg.config.game_type))
+		return 2;
+	uint32_t configured_teams = host_cfg.config.num_teams;
+	if (!apply_env_u32("NW_NUM_TEAMS", configured_teams))
+		return 2;
+	if (configured_teams > 0xFFu) {
+		std::fprintf(stderr, "nw-server: NW_NUM_TEAMS must fit a uint8\n");
+		return 2;
+	}
+	host_cfg.config.num_teams = static_cast<uint8_t>(configured_teams);
 	// Retail starts from GameType_CreateDefaultSettings and overlays a loose
 	// VERSION 40 score.ini when present. An absent file intentionally leaves the
 	// optional row unset so Match and S2C 0x58 select that same default table.

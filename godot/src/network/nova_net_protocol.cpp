@@ -15,6 +15,8 @@ static_assert(NetProtocol::GAME_TYPE_DEATHMATCH == opennova::game_type::kDeathma
 		"GAME_TYPE_DEATHMATCH drifted from npwire game_type.h");
 static_assert(NetProtocol::GAME_TYPE_KING_OF_THE_HILL == opennova::game_type::kKingOfTheHill,
 		"GAME_TYPE_KING_OF_THE_HILL drifted from npwire game_type.h");
+static_assert(NetProtocol::GAME_TYPE_FLAG_ME == opennova::game_type::kFlagMe,
+		"GAME_TYPE_FLAG_ME drifted from npwire game_type.h");
 static_assert(NetProtocol::GAME_TYPE_TEAM_DEATHMATCH == opennova::game_type::kTeamDeathmatch,
 		"GAME_TYPE_TEAM_DEATHMATCH drifted from npwire game_type.h");
 static_assert(NetProtocol::GAME_TYPE_TEAM_KING_OF_THE_HILL == opennova::game_type::kTeamKingOfTheHill,
@@ -62,6 +64,14 @@ static_assert(NetProtocol::DEFAULT_MAX_TEAM_LIVES == opennova::game_rules::kDefa
 		"DEFAULT_MAX_TEAM_LIVES drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_SCORE_LIMIT == opennova::game_rules::kDefaultScoreLimit,
 		"DEFAULT_SCORE_LIMIT drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_MAX_SCORE == opennova::game_rules::kDefaultMaxScore,
+		"DEFAULT_MAX_SCORE drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_KOTH_DELTA == opennova::game_rules::kDefaultKothDelta,
+		"DEFAULT_KOTH_DELTA drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_FLAG_RETURN_TICKS == opennova::game_rules::kDefaultFlagReturnTicks,
+		"DEFAULT_FLAG_RETURN_TICKS drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_NUM_TEAMS == opennova::game_rules::kDefaultNumTeams,
+		"DEFAULT_NUM_TEAMS drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_RESPAWN_TIMEOUT == opennova::game_rules::kDefaultRespawnTimeout,
 		"DEFAULT_RESPAWN_TIMEOUT drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_START_DELAY == opennova::game_rules::kDefaultStartDelay,
@@ -127,6 +137,7 @@ void NetProtocol::_bind_methods() {
 
 	BIND_CONSTANT(GAME_TYPE_DEATHMATCH);
 	BIND_CONSTANT(GAME_TYPE_KING_OF_THE_HILL);
+	BIND_CONSTANT(GAME_TYPE_FLAG_ME);
 	BIND_CONSTANT(GAME_TYPE_TEAM_DEATHMATCH);
 	BIND_CONSTANT(GAME_TYPE_TEAM_KING_OF_THE_HILL);
 	BIND_CONSTANT(GAME_TYPE_ATTACK_AND_DEFEND);
@@ -149,6 +160,10 @@ void NetProtocol::_bind_methods() {
 	BIND_CONSTANT(DEFAULT_REPLAY_ENABLED);
 	BIND_CONSTANT(DEFAULT_MAX_TEAM_LIVES);
 	BIND_CONSTANT(DEFAULT_SCORE_LIMIT);
+	BIND_CONSTANT(DEFAULT_MAX_SCORE);
+	BIND_CONSTANT(DEFAULT_KOTH_DELTA);
+	BIND_CONSTANT(DEFAULT_FLAG_RETURN_TICKS);
+	BIND_CONSTANT(DEFAULT_NUM_TEAMS);
 	BIND_CONSTANT(DEFAULT_RESPAWN_TIMEOUT);
 	BIND_CONSTANT(DEFAULT_START_DELAY);
 	BIND_CONSTANT(DEFAULT_DESTROY_BUILDINGS);

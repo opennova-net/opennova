@@ -96,7 +96,7 @@ constexpr int host_filter_category(uint32_t g) {
 	case kAttackDefend: return 6;
 	case kCaptureTheFlag: return 7;
 	case kFlagBall: return 8;
-	case 8: return 12;
+	case kFlagMe: return 12;
 	case kAdvanceAndSecure: return 9;
 	case kConquerAndControl: return 10;
 	default: return 0;
@@ -117,7 +117,7 @@ constexpr const char *host_abbreviation_key(uint32_t g) {
 	case kSearchAndDestroy: return "SD";
 	case kAttackDefend: return "AD";
 	case kFlagBall: return "FB";
-	case 8: return "FM";
+	case kFlagMe: return "FM";
 	case kAdvanceAndSecure: return "AAS";
 	case kConquerAndControl: return "CAC";
 	default: return "";
@@ -140,7 +140,7 @@ constexpr const char *overlay_label_key(uint32_t g) {
 	case kSearchAndDestroy: return "STROVER56";
 	case kAttackDefend: return "STROVER57";
 	case kFlagBall: return "STROVER58";
-	case 8: return "STROVER29";
+	case kFlagMe: return "STROVER29";
 	case kAdvanceAndSecure: return "STROVER92";
 	case kConquerAndControl: return "STROVER93";
 	default: return "";
@@ -183,6 +183,8 @@ inline constexpr uint32_t kDefaultScoreLimit = 50;
 inline constexpr uint32_t kDefaultMaxScore = 5;
 inline constexpr uint32_t kDefaultKothDelta = 5;
 inline constexpr uint32_t kDefaultFlagReturnTicks = 210;
+// [orig: Config_SetDefaults @0x54D030 writes g_MpNumTeams = 2]
+inline constexpr uint32_t kDefaultNumTeams = 2;
 inline constexpr uint32_t kDefaultRespawnTimeout = 5;
 inline constexpr uint32_t kDefaultStartDelay = 0;
 inline constexpr uint32_t kDefaultDestroyBuildings = 0;

@@ -6647,6 +6647,17 @@ OpenNova shares one `game_type::score_table_index` across those consumers.
 `[orig: load_scoring_table_for_game_type @0x52D300;
 GameEvent_ProcessScoring @0x52F550; Server_BuildStatusReport @0x530A60]`
 
+Flag Me is a real launch code but not an authored BMS mode: the BMS flag
+mapper has eleven outcomes and never returns task 12, while the following
+mission-start switch still maps task 12 to `g_GameType = 8`. OpenNova therefore
+keeps authored mode derivation as the ordinary route and exposes type 8 as an
+explicit host/harness selection. Both host adapters also install the complete
+fresh-host gameplay defaults before entering the shared `GameConfig`, including
+MaxScore 5 and two teams; otherwise a default-zero FlagBall host takes retail's
+team-1 `score >= MaxScore` win arm immediately. `[orig:
+AI_GetTaskTypeFromFlags @0x40DAE0; Game_StartMission @0x524360;
+Config_SetDefaults @0x54D030; Server_CheckWinConditions @0x51AD40]`
+
 **§5.49 S2C 0x6F / 0x53 ZONE TIMERS** — NOT cinematic-camera messages (that §4 label and the kong
 "CTerrainRenderer color ramp / CColorGradient" names were wrong; renamed `ZoneTimerList_*` in the IDB).
 Both program per-zone-entity timer entries in `g_zone_timer_list @ 0x24E41B0` (13-dword entries keyed by

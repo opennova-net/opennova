@@ -197,6 +197,16 @@ Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same
 @0x52F550; GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
 @0x52D8A0; Server_CheckWinConditions @0x51AD40]`
 
+The one typed host request carries the gameplay inputs needed by those
+branches: game type, kill/flag/hill limits, KOTH delta, dropped-flag return
+time, and two/four-side selection. Godot and the headless server install one
+shared retail-default set before the request crosses into `GameConfig`; there
+is no per-mode adapter or fallback rule layer. Authored BMS modes normally
+select the game type. Flag Me is explicitly selectable because retail keeps
+the task-12-to-type-8 launch case even though its BMS flag mapper cannot
+produce task 12. `[orig: Config_SetDefaults @0x54D030;
+AI_GetTaskTypeFromFlags @0x40DAE0; Game_StartMission @0x524360]`
+
 The first finish freezes a `MatchResult`; later scoring and finish attempts are
 inert. The network side resolves the frozen stats through retail's field-ID
 accessor, omits columns that are zero for every player, serializes the remaining

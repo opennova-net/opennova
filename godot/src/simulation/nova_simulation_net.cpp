@@ -866,6 +866,12 @@ void Simulation::configure_host_session(Dictionary p_options) {
 	config.max_team_lives = dictionary_u32(
 			p_options, "max_team_lives", config.max_team_lives);
 	config.score_limit = dictionary_u32(p_options, "score_limit", config.score_limit);
+	config.max_score = dictionary_u32(p_options, "max_score", config.max_score);
+	config.koth_delta = dictionary_u32(p_options, "koth_delta", config.koth_delta);
+	config.flag_return_ticks = dictionary_u32(
+			p_options, "flag_return_ticks", config.flag_return_ticks);
+	config.num_teams = static_cast<uint8_t>(dictionary_u32(
+			p_options, "num_teams", config.num_teams) & 0xFFu);
 	config.respawn_timeout = dictionary_u32(
 			p_options, "respawn_timeout", config.respawn_timeout);
 	config.start_delay = dictionary_u32(p_options, "start_delay", config.start_delay);
@@ -958,6 +964,10 @@ Dictionary Simulation::get_host_session_config() const {
 	out["replay_enabled"] = static_cast<int64_t>(session.replay_enabled);
 	out["max_team_lives"] = static_cast<int64_t>(session.max_team_lives);
 	out["score_limit"] = static_cast<int64_t>(session.score_limit);
+	out["max_score"] = static_cast<int64_t>(session.max_score);
+	out["koth_delta"] = static_cast<int64_t>(session.koth_delta);
+	out["flag_return_ticks"] = static_cast<int64_t>(session.flag_return_ticks);
+	out["num_teams"] = static_cast<int64_t>(session.num_teams);
 	out["respawn_timeout"] = static_cast<int64_t>(session.respawn_timeout);
 	out["start_delay"] = static_cast<int64_t>(session.start_delay);
 	out["destroy_buildings"] = static_cast<int64_t>(session.destroy_buildings);

@@ -374,6 +374,11 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_eq(int(options.get("replay_enabled", -1)), 1)
 	assert_eq(int(options.get("max_team_lives", -1)), 100)
 	assert_eq(int(options.get("score_limit", -1)), 50)
+	assert_eq(int(options.get("max_score", -1)), 5,
+			"FlagBall never boots into retail's immediate team-1 zero-limit outcome")
+	assert_eq(int(options.get("koth_delta", -1)), 5)
+	assert_eq(int(options.get("flag_return_ticks", -1)), 210)
+	assert_eq(int(options.get("num_teams", -1)), 2)
 	assert_eq(int(options.get("respawn_timeout", -1)), 5)
 	assert_eq(int(options.get("start_delay", -1)), 0)
 	assert_eq(int(options.get("destroy_buildings", -1)), 0)
