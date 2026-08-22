@@ -160,6 +160,19 @@ int main() {
 		opts.item_seat_specs = extraction.specs;
 		std::printf("seat specs extracted: %zu (from %zu seed ids)\n",
 				extraction.specs.size(), seeds.size());
+		for (const mission::ItemSeatSpec &sp : opts.item_seat_specs) {
+			int g = 0, pa = 0, ct = 0, dr = 0;
+			for (const world::Seat &st : sp.seats) {
+				if (st.type == world::SeatType::Gunner) ++g;
+				else if (st.type == world::SeatType::Passenger) ++pa;
+				else if (st.type == world::SeatType::Controller) ++ct;
+				else if (st.type == world::SeatType::Driver) ++dr;
+			}
+			if (g > 0 || sp.seats.size() > 1)
+				std::printf("   SPEC type=%-7d seats=%-3zu [pass %d ctrl %d GUN %d drv %d] attach=%zu\n",
+						sp.type_id, sp.seats.size(), pa, ct, g, dr,
+						sp.emplacement_attachments.size());
+		}
 	}
 	const mission::PromoteResult promo = mission::promote_mission(m, world, ai, opts);
 	expect(promo.nav_channels > 0, "nav channels promoted");
@@ -401,10 +414,17 @@ int main() {
 					aiy = vb->pos[1] / 65536.0;
 				}
 			}
-			std::printf("   carrier handle=%-6u item_id=%-6d seats=%-3zu net_id=%-5d "
+			int nseat[6] = {0,0,0,0,0,0};
+			if (veh != nullptr)
+				for (const w::Seat &st : veh->seats) {
+					const int ti = int(st.type);
+					if (ti >= 0 && ti < 6) ++nseat[ti];
+				}
+			std::printf("   carrier handle=%-6u item_id=%-6d seats=%-3zu [pass %d ctrl %d GUN %d drv %d] net_id=%-5d "
 					"pos=(%.1f,%.1f) aipos=(%.1f,%.1f) wpType=%-3d wpChan=%-3d wpNode=%-3d/%-3d mm=%-3d moved=%.2f\n",
 					unsigned(ch.packed), veh ? veh->item_id : -1,
-					veh ? veh->seats.size() : size_t(0), veh ? veh->net_id : -1,
+					veh ? veh->seats.size() : size_t(0),
+					nseat[1], nseat[2], nseat[3], nseat[5], veh ? veh->net_id : -1,
 					veh ? veh->position.x : 0.0f, veh ? veh->position.y : 0.0f,
 					aix, aiy,
 					vt, vc, vn,
