@@ -6638,6 +6638,15 @@ there are **zero differing bytes** and both hash to
 inside the long mixed capture. Uptime uses live host-session elapsed milliseconds, not the server tick
 epoch; `score.ini` resolves loose-first so the copied retail tree supplies the same eight nonzero values.
 
+**Flag Me row-12 exception (2026-08-22).** The status report advertises game
+type index 12 but copies the 39 score values only when the selected row is
+`<=11`; the score FIELD loader and gameplay scorer repeat the same bound.
+Therefore Flag Me sends zero score values and cannot inherit COOP's
+`score.ini` section, even though unknown row 0 does normalize to COOP row 2.
+OpenNova shares one `game_type::score_table_index` across those consumers.
+`[orig: load_scoring_table_for_game_type @0x52D300;
+GameEvent_ProcessScoring @0x52F550; Server_BuildStatusReport @0x530A60]`
+
 **§5.49 S2C 0x6F / 0x53 ZONE TIMERS** — NOT cinematic-camera messages (that §4 label and the kong
 "CTerrainRenderer color ramp / CColorGradient" names were wrong; renamed `ZoneTimerList_*` in the IDB).
 Both program per-zone-entity timer entries in `g_zone_timer_list @ 0x24E41B0` (13-dword entries keyed by
@@ -8022,9 +8031,9 @@ The first `World::process_round_end` freezes the result, after which score and
 finish events are inert. `[orig: GameEvent_PlayerDeath scorer call @0x516F06;
 GameEvent_ProcessScoring @0x52FB80/@0x52FBC7/@0x52FC99/@0x52FD75;
 CaptureZone_CheckProximityScoring call @0x500D84; scorer case 24 @0x5307C2;
-Server_ProcessRoundEnd @0x5164F0]` TDM, A&S, and WAC/BMS co-op all use this
-same outcome path; `match_test` and `npruntime_round_end_test` pin the three
-families independently.
+Server_ProcessRoundEnd @0x5164F0]` Every competitive game type and WAC/BMS
+co-op use this same outcome path; `match_test` and
+`npruntime_round_end_test` pin the branches and shared transaction.
 
 **v31 LIVE (2026-07-03, 2 retail clients): the deploy screen still did NOT appear — and
 the wire shows ZERO C2S 0x0E all session, so the slice-1 pick handler went unexercised;
@@ -9599,7 +9608,7 @@ live. The authority freezes one `world::MatchResult`, pushes reliable S2C 0x61
 `[u32 0]` then the recipient-specific 7-byte S2C 0x1D header, enters game state
 11, and retains the board throughout the 2790-tick linger. The tick phase is
 also exact: an already-ended WAC/BMS co-op round consumes its announcement
-tick, while a TDM/A&S result discovered by the later automatic check starts
+tick, while an automatic multiplayer result discovered by the later check starts
 draining next tick. `[orig: Server_TickUpdate @0x51D7E0 — linger drain
 @0x51DA04 before Server_CheckWinConditions @0x51DF5A]` `JoinerConnection`
 receives 0x1D and immediately queues reliable C2S 0x2B `[u16 0]`; each
@@ -9667,6 +9676,13 @@ GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile @0x52D8A0;
 CPlayerStats_GetFieldByIndex @0x52D630; Server_BuildEndOfRoundScoreboard
 @0x508F30; CPairList_ShellSortByValue @0x526CF0]`
 
+Flag Me is the intentional exception: its selector is row 12 while these
+tables stop at row 11, so it has no configured FIELD columns and ordinary
+capture/kill events do not mutate its stat block. Its capture event and flag
+reset wire transaction still occur. `[orig: load_scoring_table_for_game_type
+@0x52D300; GameEvent_ProcessScoring @0x52F550;
+Server_ProcessScoringAndBroadcast @0x5169C0]`
+
 **Ported (completed 2026-08-22):** `engine/net/npwire` owns strict codecs for
 the 0x1D header, 0x2B request, 0x56 envelope, and reassembled board;
 `npruntime/end_round_protocol` translates only the immutable semantic result
@@ -9675,7 +9691,8 @@ default VAR score values, active-column filtering, field accessor, raw-point
 player ordering, fixed source-string caps, authority announcement,
 requester-only 200-byte service (including silence for an offset past the
 board), automatic client pull, offset fold, game-state transition, and exact
-linger phase are live and covered end-to-end for TDM, A&S, and co-op. `nw_pp` prints the
+linger phase are live and covered end-to-end for every competitive mode and
+co-op. `nw_pp` prints the
 envelope and a single-datagram board. One recorded divergence remains: the decoder
 follows the npwire protocol-cursor contract and REJECTS a short stream where
 retail zero-fills. The unported residue is presentation only: `stat.mnu`.

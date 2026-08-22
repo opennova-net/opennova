@@ -68,7 +68,9 @@ the code harder to change without helping a retail peer.
   selector, automatic win arm, clock/draw rule, flag transition, and immutable
   result. These branches follow `Server_CheckWinConditions @0x51AD40`,
   `GameEvent_ProcessScoring @0x52F550`, and
-  `GameType_CreateDefaultSettings @0x52DD00`.
+  `GameType_CreateDefaultSettings @0x52DD00`. It also preserves Flag Me's
+  retail row-12 defect: objective wire transitions remain live, but the
+  12-row scorer/status table rejects its score row.
 - `tests/npruntime/round_end_test.cpp` pins multiplayer and co-op through the
   shared live transition, exact objective-state/event routing, `0x61`/`0x1D`
   delivery, requester-only `0x2B`/`0x56` board pulls, and the 2790-tick linger
