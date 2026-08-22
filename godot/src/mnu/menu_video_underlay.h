@@ -1,13 +1,17 @@
 #pragma once
 
+#include <bink/bink.h>
+
 #include <godot_cpp/classes/control.hpp>
-#include <godot_cpp/classes/video_stream_player.hpp>
+#include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <menu/menu_video.h>
 
 #include <array>
+#include <memory>
 
 namespace godot {
 
@@ -19,12 +23,10 @@ namespace godot {
 // the MenuFrame surface, so the movies show through the regions the authored
 // custom appearances leave unpainted.
 //
-// The witnessed selection picks the .bik; playback uses that movie's
-// converted `.ogv` sibling (produced by `onimport menu-movies` — Godot has
-// no Bink decoder). A selected movie without a converted sibling stays
-// empty, exactly like retail's silent missing-file skip, and is counted for
-// diagnostics. Hidden slots keep playing (decode continues; only the draw is
-// gated), and loop by rewinding on finish.
+// The witnessed selection picks and plays the .bik directly through the
+// engine's portable BIKi decoder. A selected movie that cannot be opened or
+// decoded stays empty and is counted for diagnostics. Hidden slots keep
+// decoding (only the draw is gated), and loop by rewinding on finish.
 class MenuVideoUnderlay : public Control {
 	GDCLASS(MenuVideoUnderlay, Control)
 
@@ -40,10 +42,10 @@ public:
 	void stop();
 
 	int get_active_slot_count() const;
-	int get_unconverted_count() const;
+	int get_failed_count() const;
 	bool is_startup_layout() const;
-	// The converted source an active slot plays (root-relative), "" when the
-	// slot is empty — the witnessed expansion-first pick, observable.
+	// The native .bik source an active slot plays (root-relative), "" when
+	// the slot is empty — the expansion-first pick, observable.
 	String get_slot_source(int p_slot) const;
 
 protected:
@@ -52,15 +54,20 @@ protected:
 
 private:
 	struct Slot {
-		VideoStreamPlayer *player = nullptr;
+		Ref<FileAccess> file;
+		std::unique_ptr<opennova::bink::BinkMovie> movie;
+		Ref<ImageTexture> texture;
 		String source;
+		double elapsed_seconds = 0.0;
 	};
 
 	void draw_slots_();
-	void on_slot_finished_(int p_index);
+	bool upload_frame_(Slot &p_slot);
+	bool advance_slot_(Slot &p_slot, double p_delta);
+	void fail_slot_(Slot &p_slot);
 
 	std::array<Slot, opennova::menu::kMenuVideoSlotCount> slots_{};
-	int unconverted_ = 0;
+	int failed_ = 0;
 	bool startup_ = true;
 };
 
