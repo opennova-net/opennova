@@ -72,7 +72,12 @@ func _ready() -> void:
 		return
 
 	# On-foot third person is the debug override (no gameplay key resolves it).
-	presenter.set_debug_third_person(true)
+	var tp_presenter := _find_player_presenter(get_tree().root)
+	if tp_presenter == null:
+		push_error("[bend] no player presenter")
+		get_tree().quit(1)
+		return
+	tp_presenter.set_debug_third_person(true)
 	await _settle(20)
 	await _capture("02_tp_level.png")
 	# Fast 180 flick: the aim swings instantly, the body chases (~5.8 deg/tick) and the
