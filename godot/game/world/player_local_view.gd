@@ -11,6 +11,14 @@ extends RefCounted
 
 var scope_engaged := false
 var mounted := false
+# The RESOLVED camera mode, the chase preference behind it, and whether the
+# mounted camera leg is engaged (a control seat in third person). The sim's
+# arbiter resolves the mode every tick from the preference and the seat
+# [orig: g_camera_mode @0xA890C8; g_camera_third_person_selected @0xA860DF;
+#  Render_ProcessMainSceneFrame @0x5ca1d2].
+var third_person := false
+var third_person_selected := true
+var camera_mounted := false
 var vehicle_attack_context := false
 var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, over the toggle's ease steps
 # The NoCardSwitch reload rule: true while the slot is mid-RELOAD on a weapon
@@ -67,6 +75,9 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	var out := PlayerLocalView.new()
 	out.scope_engaged = bool(d.get("scope_engaged", false))
 	out.mounted = bool(d.get("mounted", false))
+	out.third_person = bool(d.get("third_person", false))
+	out.third_person_selected = bool(d.get("third_person_selected", true))
+	out.camera_mounted = bool(d.get("camera_mounted", false))
 	out.vehicle_attack_context = bool(d.get("vehicle_attack_context", false))
 	out.scope_fraction = float(d.get("scope_fraction", 0.0))
 	out.suppress_view_bias = bool(d.get("suppress_view_bias", false))

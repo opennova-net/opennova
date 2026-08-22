@@ -86,13 +86,9 @@ func _ready() -> void:
 	var ray_points := _capture_fp_ray_points([10.0, 50.0, 1000.0])
 	_project_points("C fp", ray_points)
 	await _capture("C_fp_aim.png")
-	# A synthesized keypress can be swallowed by editor focus — press until the
-	# presenter's mode actually flips.
-	for _attempt in 5:
-		_press(KEY_F4)
-		await _settle(10)
-		if _presenter.is_third_person():
-			break
+	# On-foot third person is the debug override (no gameplay key resolves it).
+	_presenter.set_debug_third_person(true)
+	await _settle(10)
 	await _settle(50)
 	_dump("C tp settled")
 	_project_points("C tp", ray_points)
@@ -100,11 +96,8 @@ func _ready() -> void:
 	var vp_size: Vector2 = _cam.get_viewport().get_visible_rect().size
 	print("[leantp] C tp aim_screen_point=%s viewport=%s center=%s" % [str(aim), str(vp_size), str(vp_size * 0.5)])
 	await _capture("C_tp_aim.png")
-	for _attempt in 5:
-		_press(KEY_F4)
-		await _settle(10)
-		if not _presenter.is_third_person():
-			break
+	_presenter.set_debug_third_person(false)
+	await _settle(10)
 
 	print("[leantp] done -> ", _out_abs)
 	get_tree().quit()

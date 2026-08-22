@@ -125,9 +125,8 @@ func _ready() -> void:
 	# screen center (D-HUD-10) — pitch down a touch so the offset is visible.
 	_look(Vector2(0, 140))
 	await _settle(12)
-	_hold(KEY_F4, true)
-	await _settle(2)
-	_hold(KEY_F4, false)
+	# On-foot third person is the debug override (no gameplay key resolves it).
+	_presenter.set_debug_third_person(true)
 	await _settle(40)
 	_log_view("third person")
 	await _capture("07_3p_projected_aim.png")

@@ -567,13 +567,17 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	# the 6 u look-ahead point looks DOWN on the vehicle from its -11.25 deg
 	# seed [orig: ThirdPersonCamera_Update @0x437B1F..0x437B4B; the mounted leg
 	#  of Camera_ComputeThirdPersonView @0x438121..0x438150, the look-ahead
-	#  @0x438811..0x4388b5].
-	rt.get_sim().set_local_player_camera_third_person(true)
+	#  @0x438811..0x4388b5]. Nothing selects the mode here: boarding a control
+	# seat with the default chase preference resolves third person by itself
+	# [orig: the arbiter Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2 over
+	#  g_camera_third_person_selected @0xA860DF, 1 from the session reset].
 	for _tick in range(62):
 		var settle := MissionFrameInput.new()
 		settle.delta_seconds = Simulation.tick_dt()
 		assert_true(rt.advance_session_frame(settle).did_tick())
 	var view: Dictionary = rt.get_sim().get_local_player_view()
+	assert_true(bool(view.get("third_person", false)),
+			"a control seat resolves the chase camera without any camera write")
 	assert_true(bool(view.get("camera_mounted", false)),
 			"a control-seat rider engages the mounted camera leg")
 	assert_true(bool(view.get("camera_pose_valid", false)))

@@ -189,8 +189,16 @@ int Simulation::request_local_player_nvg_gain(int p_delta) {
 	return opennova::world::player_view_adjust_nvg_gain(player_view_, p_delta);
 }
 
-void Simulation::set_local_player_camera_third_person(bool p_third_person) {
-	player_view_.third_person = p_third_person; // [orig: g_camera_mode @ 0xA890C8]
+void Simulation::set_local_player_third_person_selected(bool p_selected) {
+	// The preference re-resolves the mode at once (retail: the next frame's
+	// arbiter; see world/player_view.h).
+	opennova::world::player_view_set_third_person_selected(player_view_, p_selected);
+	refresh_local_player_view_effects();
+}
+
+void Simulation::set_local_player_debug_third_person(bool p_enabled) {
+	player_view_.debug_third_person_on_foot = p_enabled;
+	opennova::world::player_view_resolve_mode(player_view_);
 	refresh_local_player_view_effects();
 }
 
@@ -202,6 +210,10 @@ void Simulation::set_local_player_camera_third_person(bool p_third_person) {
 // [orig: call sites @ 0x42c18e / @ 0x526786; promoter @ 0x4de4f7].
 void Simulation::tick_local_player_view() {
 	if (!world_ || !world_->cached.local_player.valid()) {
+		// No seat without a player: the arbiter resolves to first person (or
+		// the debug override) before the effective modes read the mode.
+		player_view_.mount = opennova::world::MountedCameraInput();
+		opennova::world::player_view_resolve_mode(player_view_);
 		opennova::world::player_view_update_effective_modes(
 				player_view_, false, world_ != nullptr && world_->round_end.ended);
 		player_view_.tp_anchor_valid = false;
@@ -209,42 +221,15 @@ void Simulation::tick_local_player_view() {
 	}
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (!e) return;
-	refresh_local_player_view_effects();
-	// The per-tick movement delta the FP motion lead samples per render frame
-	// (retail: the (position - entity+0x80 prev-position) << 8 samples
-	// @ 0x437bb2/0x437b92/0x437ba2 — world/player_view.h carries the witness).
-	if (local_tick_prev_valid_) {
-		local_tick_delta_[0] = e->position.x - local_tick_prev_pos_[0];
-		local_tick_delta_[1] = e->position.y - local_tick_prev_pos_[1];
-		local_tick_delta_[2] = e->position.z - local_tick_prev_pos_[2];
-	}
-	local_tick_prev_pos_[0] = e->position.x;
-	local_tick_prev_pos_[1] = e->position.y;
-	local_tick_prev_pos_[2] = e->position.z;
-	local_tick_prev_valid_ = true;
-	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
-	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
-	// skeleton sample (see local_weapon_.eye_mission). Without a sample: Position + 1.0,
-	// the witnessed NON-person bump [orig: @ 0x437e8f].
-	float eye[3] = {
-		local_weapon_.eye_valid ? local_weapon_.eye_mission[0] : e->position.x,
-		local_weapon_.eye_valid ? local_weapon_.eye_mission[1] : e->position.y,
-		local_weapon_.eye_valid ? local_weapon_.eye_mission[2] : e->position.z + 1.0f,
-	};
-	// The chase target inherits the CameraOffset terrain floor: retail's
-	// producer floors the head-bone eye before the store the chase reads
-	// (D-INF-18; the witnessed walk lives in world::player_view_floor_eye_to_terrain).
-	if (local_weapon_.eye_valid) {
-		opennova::world::player_view_floor_eye_to_terrain(
-				world_->ai != nullptr ? world_->ai->terrain : nullptr,
-				(e->flags & opennova::world::kEntityFlagIndoors) != 0, eye);
-	}
 	// The mounted camera's carrier read, refreshed every tick: only a CONTROL
 	// seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
 	// carrier's pose/radius/class feed the chase target, the back-off and the
 	// watercraft eye drop (retail: Camera_ComputeThirdPersonView @0x437D10 —
 	// the +0x168 seat test, parentEntity +0x16C, boundRadius +0, the unitType
-	// +0x196 in {3,4} test @0x43861D..0x43864C; see world/player_view.h).
+	// +0x196 in {3,4} test @0x43861D..0x43864C; see world/player_view.h). The
+	// same seat test is the arbiter's (retail: Render_ProcessMainSceneFrame
+	// @0x5ca1e2..0x5ca1f2), so the read precedes the mode resolve and the
+	// effective-mode refresh below.
 	opennova::world::MountedCameraInput mount;
 	const opennova::world::Entity *carrier = e->mounted
 			? world_->registry.get(e->mount_target)
@@ -275,6 +260,37 @@ void Simulation::tick_local_player_view() {
 		mount.water_z = static_cast<float>(world_->env.water_z) / 65536.0f;
 	}
 	player_view_.mount = mount;
+	opennova::world::player_view_resolve_mode(player_view_);
+	refresh_local_player_view_effects();
+	// The per-tick movement delta the FP motion lead samples per render frame
+	// (retail: the (position - entity+0x80 prev-position) << 8 samples
+	// @ 0x437bb2/0x437b92/0x437ba2 — world/player_view.h carries the witness).
+	if (local_tick_prev_valid_) {
+		local_tick_delta_[0] = e->position.x - local_tick_prev_pos_[0];
+		local_tick_delta_[1] = e->position.y - local_tick_prev_pos_[1];
+		local_tick_delta_[2] = e->position.z - local_tick_prev_pos_[2];
+	}
+	local_tick_prev_pos_[0] = e->position.x;
+	local_tick_prev_pos_[1] = e->position.y;
+	local_tick_prev_pos_[2] = e->position.z;
+	local_tick_prev_valid_ = true;
+	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
+	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
+	// skeleton sample (see local_weapon_.eye_mission). Without a sample: Position + 1.0,
+	// the witnessed NON-person bump [orig: @ 0x437e8f].
+	float eye[3] = {
+		local_weapon_.eye_valid ? local_weapon_.eye_mission[0] : e->position.x,
+		local_weapon_.eye_valid ? local_weapon_.eye_mission[1] : e->position.y,
+		local_weapon_.eye_valid ? local_weapon_.eye_mission[2] : e->position.z + 1.0f,
+	};
+	// The chase target inherits the CameraOffset terrain floor: retail's
+	// producer floors the head-bone eye before the store the chase reads
+	// (D-INF-18; the witnessed walk lives in world::player_view_floor_eye_to_terrain).
+	if (local_weapon_.eye_valid) {
+		opennova::world::player_view_floor_eye_to_terrain(
+				world_->ai != nullptr ? world_->ai->terrain : nullptr,
+				(e->flags & opennova::world::kEntityFlagIndoors) != 0, eye);
+	}
 	opennova::world::player_view_tick(player_view_, eye);
 }
 
@@ -312,9 +328,14 @@ Dictionary Simulation::get_local_player_view() const {
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
 	out["mounted"] = local != nullptr && local->mounted;
-	// The camera's mounted leg is engaged (a control seat with a live carrier —
-	// the per-tick carrier read in tick_local_player_view).
-	out["camera_mounted"] = player_view_.mount.control_seat;
+	// The RESOLVED camera mode and the chase preference behind it
+	// [orig: g_camera_mode @ 0xA890C8; g_camera_third_person_selected @ 0xA860DF].
+	out["third_person"] = player_view_.third_person;
+	out["third_person_selected"] = player_view_.third_person_selected;
+	// The camera's mounted leg is engaged: a control seat with a live carrier
+	// (the per-tick carrier read in tick_local_player_view) AND the resolved
+	// third person — the compose fork's own gate.
+	out["camera_mounted"] = player_view_.mount.control_seat && player_view_.third_person;
 	// Structural proxy for Player_IsVehicleHasAttackCapability until mounted
 	// weapon inventory is modeled: these seat classes replace the on-foot
 	// upper-body weapon channel; passenger seats do not.

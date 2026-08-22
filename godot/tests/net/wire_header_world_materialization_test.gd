@@ -719,11 +719,11 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the mounted joiner suppresses the gun's duplicate world model")
-	joiner.set_local_player_camera_third_person(true)
+	joiner.set_local_player_debug_third_person(true)
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"third person restores the world gun")
-	joiner.set_local_player_camera_third_person(false)
+	joiner.set_local_player_debug_third_person(false)
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
 

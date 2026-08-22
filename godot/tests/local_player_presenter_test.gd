@@ -482,18 +482,25 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 	assert_almost_eq(rad_to_deg(asin(fp_forward.y)), view.camera_pitch_deg, 0.01,
 			"the camera pitches to the composed pitch exactly")
 
-	# F4 flips the mode INTO the sim [orig: g_camera_mode @0xA890C8]: the
-	# third-person composition pulls the eye away from the player.
+	# No gameplay key moves the camera on foot: F4 is retail's `viewchase` row,
+	# a PREFERENCE the sim's arbiter resolves to third person only in a control
+	# seat [orig: Input_HandleActionBinding case 402 @0x49c0f6; the arbiter
+	# Render_ProcessMainSceneFrame @0x5ca1d2]. The on-foot chase is the debug
+	# menu's override; its third-person composition pulls the eye away from
+	# the player.
 	var player_pos: Vector3 = sim.get_local_player_position()
 	var fp_distance := (camera.global_position - player_pos).length()
-	assert_true(presenter.handle_key_input(_key(KEY_F4), true))
-	assert_true(presenter.is_third_person(), "F4 enters third person")
+	assert_false(presenter.handle_key_input(_key(KEY_F4), true),
+			"F4 is not a shell camera key")
+	assert_false(presenter.is_third_person(), "on foot the chase preference stays first person")
+	presenter.set_debug_third_person(true)
+	assert_true(presenter.is_third_person(), "the debug override resolves third person on foot")
 	_frame(world, presenter, camera, 20)
 	var tp_distance := (camera.global_position - sim.get_local_player_position()).length()
 	assert_gt(tp_distance, fp_distance + 0.1,
 			"the sim's third-person composition chases the eye back from the player")
-	assert_true(presenter.handle_key_input(_key(KEY_F4), true))
-	assert_false(presenter.is_third_person(), "F4 toggles back")
+	presenter.set_debug_third_person(false)
+	assert_false(presenter.is_third_person(), "clearing the override returns to first person")
 
 	presenter.teardown()
 	assert_almost_eq(camera.fov, saved_fov, 0.001,
@@ -588,7 +595,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 					"the dedicated viewmodel pass never casts into the world")
 
-	presenter.set_third_person(true)
+	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
 		assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
@@ -615,7 +622,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 					"the hidden viewmodel remains non-casting")
 
-	presenter.set_third_person(false)
+	presenter.set_debug_third_person(false)
 	presenter.set_debug_body_in_first_person(true)
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
@@ -783,13 +790,13 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 	assert_false(gun_part.get_ctrl_values().has("TEX_CAMO1"),
 			"the arms camo never lands on the gun part")
 
-	presenter.set_third_person(true)
+	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 1)
 	for part_v in presenter.vm_parts():
 		assert_true((part_v as ObjectModel).get_ctrl_values().is_empty(),
 				"a third-person frame does not execute any FP CTRL writer")
 
-	presenter.set_third_person(false)
+	presenter.set_debug_third_person(false)
 	_frame(world, presenter, camera, 1)
 	var part0 := presenter.vm_parts()[0] as ObjectModel
 	assert_eq(int(part0.get_ctrl_values().get("TEX_TEAM", -999)),

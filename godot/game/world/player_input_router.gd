@@ -4,11 +4,12 @@ const LocalPlayerPresenter := preload("res://game/world/local_player_presenter.g
 
 # The local player's input sampling/routing, split out of LocalPlayerPresenter
 # (W4-4): the movement-state sampling into the sim, the weapon trigger/switch
-# edge latches, the gameplay keys (F4/B/N/NVG/stance), mouse look, and mouse
-# capture/release. The presenter keeps the camera cluster, the avatar/viewmodel
-# presentation, and the third-person FLAG (camera state) — F4 flips it through
-# presenter.set_third_person(). The presenter's before_world_tick / handle_key_input /
-# handle_input stay the externally pinned names and delegate here.
+# edge latches, the gameplay keys (B/N/NVG/stance), mouse look, and mouse
+# capture/release. The presenter keeps the camera cluster and the
+# avatar/viewmodel presentation; the camera MODE is the sim's resolved word
+# (the arbiter over the chase preference and the seat), mirrored by the
+# presenter — no key here flips it. The presenter's before_world_tick /
+# handle_key_input / handle_input stay the externally pinned names and delegate here.
 
 # The world serves the sim; the presenter serves the presentation surfaces this
 # router drives around the sample (fly-camera lock, model lifetime, the
@@ -161,10 +162,12 @@ func _send_weapon_switch_input(captured: bool) -> void:
 # The retail radar-zoom bindings are ordinary configurable key rows applying
 # one multiplicative step on the down edge: radarout GROWS the world-extent
 # value (x1.15 toward 0x100000) and radarin shrinks it (x0.85 toward 4096).
-# huddetail (dispatch code 19) is a retail dispatcher no-op and gets no
-# sampler. [orig: Input_HandleActionBinding @0x49AD40 — radarout row 48 =
-#  case 361 @0x49beaf, radarin row 49 = case 360 @0x49bcb0; code 19 -> the
-#  default arm @0x49c27d]
+# huddetail (dispatch code 19) is a live arm of the IN-GAME dispatcher, the
+# declutter cycle, and GameHudPresenter samples it beside the other HUD rows
+# (hud-re.md D-CTRL-4). [orig: Input_HandleActionBinding @0x49AD40 — radarout
+#  row 48 = case 361 @0x49beaf, radarin row 49 = case 360 @0x49bcb0; code 19 ->
+#  Input_HandleActionBinding_0 @0x4e060b..0x4e0624 -> CRenderState_SetLayerVisibility
+#  @0x59B0F0]
 func _sample_hud_input(active: bool) -> void:
 	# The down-edge latches ride the RAW key state — retail's key scan
 	# latches the device state and the context only gates which dispatcher
@@ -191,15 +194,18 @@ func _sample_hud_input(active: bool) -> void:
 	_map_toggle_was_down = map_down
 
 
-# Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
-# @ 0xA890C8; view actions 400/402/412 @ 0x49C073; ThirdPersonCamera_Update @0x437af0
-# — full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14 (D-INF-11),
-# net-re §5.39 2026-07-08 addendum]. The third-person flag is CAMERA state and stays
-# on the presenter — F4 flips it through presenter.set_third_person(). Stance is the witnessed
-# 3-key SELECT — Z prone, X crouch, C stand (catalog ids 9/10/11, defaults Z/X/C) —
-# each key REQUESTS its stance from the sim, which applies the mutual exclusion and
-# the ForceCrouch refusal (the C2S 0x1D semantics). [orig: input cases 170/169/172
-# @0x4e0df3/@0x4e0d77/@0x4e0e3e -> NapiNPServerMsg_HandleStanceChange @0x501c60]
+# Edge-triggered gameplay keys. No key here moves the camera: the view rows
+# (view1st F2 / viewwithgun F3 / viewchase F4) only write the chase PREFERENCE
+# and the FP-gun bit, and the sim's arbiter resolves the mode from the
+# preference and the seat — GameHudPresenter polls those rows beside its other
+# HUD rows [orig: Input_HandleActionBinding cases 400/401/402 @0x49c073..
+# 0x49c107; the arbiter Render_ProcessMainSceneFrame @0x5ca1d2; full 3P camera
+# + torso-bend witness: docs/world/world-wac-ai-re.md §14 (D-INF-11), net-re
+# §5.39]. Stance is the witnessed 3-key SELECT — Z prone, X crouch, C stand
+# (catalog ids 9/10/11, defaults Z/X/C) — each key REQUESTS its stance from the
+# sim, which applies the mutual exclusion and the ForceCrouch refusal (the C2S
+# 0x1D semantics). [orig: input cases 170/169/172 @0x4e0df3/@0x4e0d77/@0x4e0e3e
+# -> NapiNPServerMsg_HandleStanceChange @0x501c60]
 func handle_key_input(event: InputEvent, active: bool) -> bool:
 	if not active or _presenter == null or not _presenter.has_player() \
 			or not (event is InputEventKey):
@@ -207,9 +213,6 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 	var key := event as InputEventKey
 	if not key.pressed or key.echo:
 		return false
-	if key.keycode == KEY_F4:
-		_presenter.set_third_person(not _presenter.is_third_person())
-		return true
 	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
 	var sim = _sim()
 	if physical == KEY_B:

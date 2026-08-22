@@ -138,7 +138,21 @@ struct PlayerViewState {
     int32_t ease_steps = kScopeEaseSteps; // latched per toggle [orig: the Setup steps arg]
     bool scope_hipfire = true;    // [orig: g_scopeHipfire @ 0x82CE98, init/reset 1]
     bool move_held = false;       // [orig: the movement-held latch g_movementKeyHeld @ 0xB7653B]
-    bool third_person = false;    // [orig: g_camera_mode @ 0xA890C8]
+    // THE CAMERA MODE, two words. `third_person_selected` is the user's
+    // preference — the chase byte the view actions write, 1 from the session
+    // reset on [orig: g_camera_third_person_selected @ 0xA860DF — set to 1 by
+    // Client_ResetGameSessionState @ 0x42ca3c; written by
+    // Input_HandleActionBinding cases 400 @ 0x49c084 (0), 401 @ 0x49c0ea (0),
+    // 402 @ 0x49c100 (1), 412 @ 0x49c0ad/@ 0x49c0c8 (the cycle)].
+    // `third_person` is the RESOLVED mode the per-frame arbiter derives from
+    // that preference and the seat — player_view_resolve_mode
+    // [orig: g_camera_mode @ 0xA890C8].
+    bool third_person_selected = true;
+    bool third_person = false;
+    // The on-foot third person retail never resolves (stock 1.7.5.7 has no
+    // on-foot chase, net-re §5.39): the debug affordance the onhook camera
+    // patch provides, exposed on the debug menu and never on a gameplay key.
+    bool debug_third_person_on_foot = false;
     bool binoculars_requested = false;   // [orig: raw toggle g_binocularsToggle @ 0xB76539]
     bool binoculars_raised = false;      // [orig: body-pose g_binocularsRaised @ 0xB7653A]
     bool binoculars_view_active = false; // [orig: first-person view g_binocularsViewActive @ 0xB76538]
@@ -158,14 +172,37 @@ struct PlayerViewState {
     MountedCameraInput mount;
 };
 
-// One 62.5 Hz tick: step the scope ease toward the engaged target and chase
-// the third-person anchor toward `eye` (mission space). Entering third person
-// seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0 resets
-// the track on change]; leaving invalidates it. In a control seat the anchor
-// chases the carrier position lifted max(1.0, 0.375 r) instead, a sixteenth
-// per tick horizontally and a thirty-second vertically in 16.16
-// [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B, the ease
-//  @0x437C56..0x437C79].
+// THE MODE ARBITER, run every tick ahead of the anchor chase (retail: every
+// rendered frame): desired = 0; the chase preference AND a control seat
+// (parentSlot 2 or 5 — `mount.control_seat`) -> 1; the mode is then applied
+// only when it changed, so the orbit/distance state carries across the flip
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca1f4 -> the changed
+//  test @ 0x5ca258 -> Camera_SetTrackedEntity @ 0x5ca262]. Boarding and
+// dismounting never touch the camera — Entity_ProcessVehicleAttach @ 0x435aa0
+// only moves the seat plus the stance latches and the look yaw, and
+// Entity_DetachFromVehicle @ 0x4355f0 zeroes parentSlot @ 0x435921 — the next
+// frame's arbiter does the rest: a driver arrives in the chase, a gunner or
+// passenger stays first person, a dismount returns to first person. The debug
+// on-foot override ORs in. RESIDUAL: the death/spectator modes 3/4 and the
+// in-session server force-first-person rule (`g_rules_flags @ 0x24D1E34 &
+// 0x40` @ 0x5ca235 — no direct writer witnessed) are not modelled.
+void player_view_resolve_mode(PlayerViewState &v);
+
+// The view actions' preference writes: `view1st` (400) and `viewwithgun` (401)
+// select first person, `viewchase` (402) the chase; the mode re-resolves at
+// once. The FP-gun bit 400/401 also write (g_FpWeaponViewFlags bit 0) belongs
+// to the HUD flag owner. [orig: Input_HandleActionBinding @ 0x49c084 /
+//  @ 0x49c0ea / @ 0x49c100]
+void player_view_set_third_person_selected(PlayerViewState &v, bool selected);
+
+// One 62.5 Hz tick: resolve the camera mode, step the scope ease toward the
+// engaged target and chase the third-person anchor toward `eye` (mission
+// space). Entering third person seeds the anchor at the eye [orig:
+// Camera_SetTrackedEntity @ 0x4391d0 resets the track on change]; leaving
+// invalidates it. In a control seat the anchor chases the carrier position
+// lifted max(1.0, 0.375 r) instead, a sixteenth per tick horizontally and a
+// thirty-second vertically in 16.16 [orig: ThirdPersonCamera_Update — the
+// lift @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79].
 void player_view_tick(PlayerViewState &v, const float eye[3]);
 
 // Whether the scope-camera interp is mid-ease. Every scope toggle is REFUSED

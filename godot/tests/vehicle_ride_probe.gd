@@ -60,6 +60,42 @@ func _fail(msg: String) -> void:
 	quit(1)
 
 
+# The camera mode the sim RESOLVED for the current seat: the chase in a control
+# seat (type 2/5) with the default chase preference, first person otherwise;
+# no key and no board/dismount path writes it [orig: the arbiter
+# Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2 over
+# g_camera_third_person_selected @0xA860DF, 1 from the session reset @0x42ca3c].
+# With NW_PROBE_SHOTS set on a WINDOWED run the root viewport — the real game
+# camera — is saved per check.
+func _camera_check(sim, label: String, expect_third_person: bool) -> bool:
+	var view: Dictionary = sim.get_local_player_view()
+	var tp := bool(view.get("third_person", false))
+	print("PROBE camera %s: third_person=%s camera_mounted=%s selected=%s eye=%s" % [
+			label, str(tp), str(view.get("camera_mounted", false)),
+			str(view.get("third_person_selected", true)),
+			str(view.get("camera_eye", Vector3.ZERO))])
+	await _shot(label)
+	if tp != expect_third_person:
+		_fail("camera %s: expected third_person=%s, resolved %s" % [
+				label, str(expect_third_person), str(tp)])
+		return false
+	return true
+
+
+func _shot(label: String) -> void:
+	var dir := OS.get_environment("NW_PROBE_SHOTS")
+	if dir.is_empty() or DisplayServer.get_name() == "headless":
+		return
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var img := root.get_texture().get_image()
+	if img == null:
+		return
+	var path := dir.path_join("ride_%s.png" % label)
+	img.save_png(path)
+	print("PROBE shot saved: %s" % path)
+
+
 func _run() -> void:
 	if OS.get_environment("NW_SP_MISSION").is_empty():
 		push_error("vehicle_ride_probe: set NW_SP_MISSION=00TRa.bms")
@@ -95,6 +131,13 @@ func _run() -> void:
 		return
 	presenter.set_input_source(func() -> Dictionary: return {"forward": _forward})
 	await _mission_wait(1.0)
+	# A windowed run sits under the SP start-mission splash (black captures,
+	# see scar_wall_probe.gd); enter gameplay through the production seam.
+	if DisplayServer.get_name() != "headless":
+		game.dismiss_start_mission_splash()
+		await _mission_wait(0.5)
+	if not await _camera_check(sim, "on_foot", false):
+		return
 
 	# --- Locate the truck + the player's AI row.
 	var truck: Dictionary = sim.get_world_entity_debug(TRUCK_SSN)
@@ -129,6 +172,9 @@ func _run() -> void:
 		return
 	print("PROBE MOUNTED: seat=%d type=%d (1 sitex/2 ctrl/3 gun/5 drvr)" %
 			[int(pd.get("mount_seat", -1)), int(pd.get("mount_type", 0))])
+	var truck_type := int(pd.get("mount_type", 0))
+	if not await _camera_check(sim, "truck_seat", truck_type == 2 or truck_type == 5):
+		return
 
 	# --- Event 2 (PLYRATTACHED 11 -> the ride kickoff) fires within a few event quanta.
 	var fired := false
@@ -190,6 +236,8 @@ func _run() -> void:
 		quit(0)
 		return
 	print("PROBE dismounted (scan-dry toggle)")
+	if not await _camera_check(sim, "dismounted", false):
+		return
 	pd = sim.get_entity_debug(player_idx)
 	here = pd.get("position", Vector3.ZERO)
 	sim.debug_set_world_entity_position(ATV_SSN, Vector3(here.x + 1.5, -here.z, here.y))
@@ -205,6 +253,8 @@ func _run() -> void:
 		return
 	var seat_type := int(pd.get("mount_type", 0))
 	print("PROBE ATV mounted: type=%d" % seat_type)
+	if not await _camera_check(sim, "atv_seat", seat_type == 2 or seat_type == 5):
+		return
 	if seat_type == 2 or seat_type == 5:
 		var a0: Vector3 = sim.get_world_entity_debug(ATV_SSN).get("position", Vector3.ZERO)
 		_forward = true
@@ -221,6 +271,8 @@ func _run() -> void:
 			_fail("driver fell off the ATV (gap %.1fu)" % gap)
 			return
 		print("PROBE DRIVE OK (player-driven)")
+		if not await _camera_check(sim, "atv_driving", true):
+			return
 		print("PROBE PASS: mount + event 2 + AI ride + carry + player drive")
 	else:
 		print("PROBE PASS: mount + event 2 + AI ride + carry (ATV seat was type %d)" % seat_type)

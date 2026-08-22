@@ -1467,9 +1467,14 @@ public:
 	// Retail actions 56/57 (default +/-), available even while NVG is off.
 	// Returns the clamped gain in [0,4].
 	int request_local_player_nvg_gain(int p_delta);
-	// The shell's camera mode, driving the fov suppression + anchor chase
-	// [orig: g_camera_mode @ 0xA890C8].
-	void set_local_player_camera_third_person(bool p_third_person);
+	// The view actions' chase preference (view1st/viewwithgun -> false,
+	// viewchase -> true) [orig: g_camera_third_person_selected @ 0xA860DF]; the
+	// camera mode itself is RESOLVED per tick by the arbiter from the
+	// preference and the seat (world/player_view.h player_view_resolve_mode).
+	void set_local_player_third_person_selected(bool p_selected);
+	// The debug menu's on-foot third person — stock JO never resolves it
+	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
+	void set_local_player_debug_third_person(bool p_enabled);
 	// The shell-sampled head-bone eye (Godot space) for the 3P anchor chase; pass
 	// valid=false when no skeleton sample exists (falls back to Position + 1.0).
 	void set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid);

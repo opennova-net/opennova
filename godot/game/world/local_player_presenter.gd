@@ -68,6 +68,11 @@ var _camera_saved_fov := -1.0
 # section-hide like the original's bone zeroing @0x4b1f2a is ported).
 var debug_force_viewmodel := false
 var debug_body_in_first_person := false
+# The debug menu's on-foot third person: stock JO never resolves the chase
+# outside a control seat (net-re §5.39 — the per-frame arbiter), so this is
+# the onhook debug patch's affordance, pushed into the sim's arbiter as its
+# one override. Never a gameplay key.
+var debug_third_person := false
 var _camera_saved_cull_mask := -1
 
 
@@ -185,21 +190,47 @@ func set_input_source(source: Callable) -> void:
 	_input_router.set_input_source(source)
 
 
-func set_third_person(enabled: bool) -> void:
-	_third_person = enabled
-	_sync_camera_mode()
-
-
-# The sim owns the camera-mode-dependent view state (fov suppression + the 3P
-# anchor chase) [orig: g_camera_mode @0xA890C8]; tell it whenever the mode flips.
-func _sync_camera_mode() -> void:
+## The view actions' chase preference — view1st/viewwithgun (F2/F3) select
+## first person, viewchase (F4) the chase — effective only in a control seat:
+## the sim's arbiter resolves the camera mode every tick from the preference
+## and the seat, so on foot the preference changes nothing visible
+## [orig: g_camera_third_person_selected @0xA860DF; the arbiter
+##  Render_ProcessMainSceneFrame @0x5ca1d2]. GameHudPresenter polls the rows
+## (it owns the FP-gun bit two of them also write) and calls this.
+func set_third_person_selected(selected: bool) -> void:
 	var sim = _sim()
 	if sim != null:
-		sim.set_local_player_camera_third_person(_third_person)
+		sim.set_local_player_third_person_selected(selected)
+	_refresh_camera_mode()
 
 
+## The debug menu's on-foot third person (the F3 Player page).
+func set_debug_third_person(enabled: bool) -> void:
+	debug_third_person = enabled
+	var sim = _sim()
+	if sim != null:
+		sim.set_local_player_debug_third_person(enabled)
+	_refresh_camera_mode()
+
+
+func is_debug_third_person() -> bool:
+	return debug_third_person
+
+
+## The RESOLVED camera mode, mirrored from the sim's view snapshot every tick
+## [orig: g_camera_mode @0xA890C8]. Nothing on the shell writes it directly.
 func is_third_person() -> bool:
 	return _third_person
+
+
+# Re-read the resolved mode right after a preference/override write so the
+# same frame's layer decisions see it (the tick refresh keeps it current).
+func _refresh_camera_mode() -> void:
+	if _world == null or _sim() == null:
+		_third_person = debug_third_person
+		return
+	var view: PlayerLocalView = _world.local_player_view()
+	_third_person = view != null and view.third_person
 
 
 # W4-2-style justified accessors: PlayerWeaponEffects resolves action userpoints
@@ -257,6 +288,8 @@ func after_world_tick() -> void:
 		_view = null
 		return
 	_view = _world.local_player_view()
+	# The camera mode is the sim's resolved word (the arbiter ran this tick).
+	_third_person = _view != null and _view.third_person
 	_set_world_nvg_view(_view != null and _view.nvg_visible,
 			_view.nvg_gain if _view != null else 0)
 	# Place the camera/viewmodel root for THIS tick before consuming one-shot
@@ -284,6 +317,7 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 		_weapon_effects.consume(weapon_view, events, true)
 		return
 	_view = _world.local_player_view()
+	_third_person = _view != null and _view.third_person
 	_weapon_effects.set_weapon_view(weapon_view)
 	_update_player_camera()
 	_weapon_effects.consume(weapon_view, events, true)
@@ -303,12 +337,17 @@ func handle_input(event: InputEvent, active: bool) -> bool:
 
 func _reset_state() -> void:
 	_third_person = false
+	# The debug override is mission-run state like the mode itself: a fresh
+	# sim starts with it off, and the debug check reads this getter live.
+	debug_third_person = false
 	if _weapon_effects != null:
 		_weapon_effects.reset()
 	_input_router.reset()
 	_view = null
 	_set_world_nvg_view(false, 0)
-	_sync_camera_mode()
+	var sim = _sim()
+	if sim != null:
+		sim.set_local_player_debug_third_person(false)
 
 
 func _set_world_nvg_view(active: bool, gain: int) -> void:

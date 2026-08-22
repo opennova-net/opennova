@@ -510,12 +510,12 @@ func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 	assert_false(bool(view.get("binoculars_raised", true)))
 	assert_false(bool(view.get("binoculars_view_active", true)))
 	sim.set_player_input(false, false, false, false, false, false, false)
-	sim.set_local_player_camera_third_person(true)
+	sim.set_local_player_debug_third_person(true)
 	view = sim.get_local_player_view()
 	assert_true(bool(view.get("binoculars_raised", false)),
 			"third person retains the remote-visible body pose")
 	assert_false(bool(view.get("binoculars_view_active", true)))
-	sim.set_local_player_camera_third_person(false)
+	sim.set_local_player_debug_third_person(false)
 	sim.request_local_player_binoculars_toggle()
 	assert_false(bool(sim.get_local_player_view().get("binoculars_requested", true)))
 
@@ -524,7 +524,7 @@ func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 			"gain is adjustable while NVG is inactive")
 	assert_true(sim.request_local_player_nvg_toggle())
 	assert_true(bool(sim.get_local_player_view().get("nvg_visible", false)))
-	sim.set_local_player_camera_third_person(true)
+	sim.set_local_player_debug_third_person(true)
 	view = sim.get_local_player_view()
 	assert_true(bool(view.get("nvg_active", false)))
 	assert_false(bool(view.get("nvg_visible", true)),
@@ -978,7 +978,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	assert_true(aimed_row_seen,
 			"settled first-person aim adds the second-triplet offset")
 
-	sim.set_local_player_camera_third_person(true)
+	sim.set_local_player_debug_third_person(true)
 	sim.step()
 	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
 			"third person clears aimed-shot availability without changing stance")
@@ -2594,10 +2594,10 @@ end
 	assert_eq(sim.get_attach_labels().size(), 1,
 			"settled first-person aim restricts labels to the nearest candidate")
 
-	sim.set_local_player_camera_third_person(true)
+	sim.set_local_player_debug_third_person(true)
 	assert_eq(sim.get_attach_labels().size(), 2,
 			"the live camera gate applies before another simulation tick")
-	sim.set_local_player_camera_third_person(false)
+	sim.set_local_player_debug_third_person(false)
 	sim.set_water_z(1.0)
 	sim.step()
 	assert_false(_aimed_shot_available(sim))
@@ -2837,11 +2837,11 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the live parent slot with a resolved FP model suppresses the duplicate world gun")
 
-	sim.set_local_player_camera_third_person(true)
+	sim.set_local_player_debug_third_person(true)
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"third person restores the parent model")
-	sim.set_local_player_camera_third_person(false)
+	sim.set_local_player_debug_third_person(false)
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
 	for _tick in range(120):

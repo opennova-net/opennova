@@ -52,12 +52,12 @@ void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
 
     PlayerViewState per_frame;       // "60 fps": one tick per render frame
     per_frame.scope_engaged = true;
-    per_frame.third_person = true;
+    per_frame.debug_third_person_on_foot = true;  // on-foot 3P = the debug override
     for (int i = 0; i < 24; ++i) player_view_tick(per_frame, eye);
 
     PlayerViewState bursty;          // "uneven fps": frames of 4/0/3/0/1... ticks
     bursty.scope_engaged = true;
-    bursty.third_person = true;
+    bursty.debug_third_person_on_foot = true;
     const int frames[] = {4, 0, 3, 0, 1, 7, 0, 0, 2, 5, 0, 2};
     int total = 0;
     for (int n : frames) {
@@ -73,8 +73,11 @@ void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
 void test_anchor_chase_quarter_step_and_seeding() {
     PlayerViewState v;
     float eye[3] = {8.0f, 0.0f, 4.0f};
-    v.third_person = true;
+    // On foot, third person is only ever the debug override (the arbiter
+    // resolves the chase preference to first person outside a control seat).
+    v.debug_third_person_on_foot = true;
     player_view_tick(v, eye); // first 3P tick seeds AT the eye
+    CHECK(v.third_person);
     CHECK(v.tp_anchor_valid);
     CHECK(v.tp_anchor[0] == 8.0f && v.tp_anchor[2] == 4.0f);
 
@@ -86,12 +89,52 @@ void test_anchor_chase_quarter_step_and_seeding() {
     CHECK(v.tp_anchor[0] == 11.5f);
 
     // Leaving third person invalidates; re-entering re-seeds at the current eye.
-    v.third_person = false;
+    v.debug_third_person_on_foot = false;
     player_view_tick(v, eye);
-    CHECK(!v.tp_anchor_valid);
-    v.third_person = true;
+    CHECK(!v.third_person && !v.tp_anchor_valid);
+    v.debug_third_person_on_foot = true;
     player_view_tick(v, eye);
     CHECK(v.tp_anchor_valid && v.tp_anchor[0] == 16.0f);
+}
+
+// THE MODE ARBITER [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca1f4]:
+// the chase preference defaults to selected [orig: Client_ResetGameSessionState
+// @ 0x42ca3c], resolves to third person only in a control seat, and falls back
+// to first person the tick the seat goes (dismount, or a gunner/passenger seat
+// — the board and detach paths themselves never touch the camera
+// [orig: Entity_ProcessVehicleAttach @ 0x435aa0; Entity_DetachFromVehicle
+//  parentSlot = 0 @ 0x435921]). The view actions flip the preference and
+// re-resolve at once; the debug override is the only on-foot third person.
+void test_mode_arbiter() {
+    PlayerViewState v;
+    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    CHECK(v.third_person_selected);
+    player_view_tick(v, eye);
+    CHECK(!v.third_person);          // on foot: first person despite the preference
+    CHECK(!v.tp_anchor_valid);
+    v.mount.control_seat = true;     // boarded a driver/control seat
+    player_view_tick(v, eye);
+    CHECK(v.third_person);           // the chase, without any camera write on board
+    CHECK(v.tp_anchor_valid);
+    v.mount.control_seat = false;    // dismounted (or a gunner/passenger seat)
+    player_view_tick(v, eye);
+    CHECK(!v.third_person && !v.tp_anchor_valid);
+    // view1st / viewwithgun: first person selected keeps a driver in first person.
+    player_view_set_third_person_selected(v, false);
+    v.mount.control_seat = true;
+    player_view_tick(v, eye);
+    CHECK(!v.third_person);
+    // viewchase: the preference resolves immediately in the seat.
+    player_view_set_third_person_selected(v, true);
+    CHECK(v.third_person);
+    // The debug override: third person on foot, the one non-stock mode.
+    v.mount.control_seat = false;
+    v.debug_third_person_on_foot = true;
+    player_view_tick(v, eye);
+    CHECK(v.third_person);
+    v.debug_third_person_on_foot = false;
+    player_view_tick(v, eye);
+    CHECK(!v.third_person);
 }
 
 void test_fov_policy() {
@@ -615,7 +658,10 @@ void test_compose_camera_mounted_terrain() {
 // thirty-second on z toward carrier + lift, mirrored into the float anchor.
 void test_tick_mounted_anchor_ease() {
     PlayerViewState v;
-    v.third_person = true;
+    // The ease math under a mode that stays third person across the seat
+    // change (the debug override); the arbiter's own transitions are
+    // test_mode_arbiter's.
+    v.debug_third_person_on_foot = true;
     const float eye[3] = {0.0f, 0.0f, 0.0f};
     player_view_tick(v, eye); // seeds the anchor at the eye
     CHECK(v.tp_anchor_valid);
@@ -812,6 +858,7 @@ int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
     test_anchor_chase_quarter_step_and_seeding();
+    test_mode_arbiter();
     test_fov_policy();
     test_binoculars_effective_state_and_fov();
     test_nvg_toggle_gain_and_first_person_visibility();

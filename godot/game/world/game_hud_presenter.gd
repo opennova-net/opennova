@@ -91,6 +91,10 @@ var _hud_hidden_saved_detail_level := 0
 # writes @0x5521CB/@0x5521D7]
 var _showhud_flags := 3
 var _showhud_was_down := false
+# The view-action rows' down latches (view1st / viewwithgun / viewchase).
+var _view1st_was_down := false
+var _viewwithgun_was_down := false
+var _viewchase_was_down := false
 # Whether the map grid origin (the type-2043 marker) has been resolved onto
 # the HUD. A joiner's origin entity decodes from the world stream AFTER the
 # HUD builds, so tick() keeps querying until it appears.
@@ -476,6 +480,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 			ControlsBindings.pressed("hudcolor"), hud_keys_chorded,
 			gameplay_input_active)
 	poll_showhud_edge(ControlsBindings.pressed("showhud"), hud_keys_chorded,
+			gameplay_input_active)
+	poll_view_action_edges(ControlsBindings.pressed("view1st"),
+			ControlsBindings.pressed("viewwithgun"),
+			ControlsBindings.pressed("viewchase"), hud_keys_chorded,
 			gameplay_input_active)
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
@@ -1003,6 +1011,47 @@ func cycle_showhud() -> void:
 
 func showhud_flags() -> int:
 	return _showhud_flags
+
+
+## The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
+## viewchase F4): first person clears the FP-gun bit, gun view sets it, and
+## both select first person; chase selects the chase preference. None of them
+## moves the camera by itself — the sim's arbiter resolves the mode from the
+## preference and the seat, so on foot they only touch the gun bit and the
+## preference (stock JO has no on-foot third person). The 412 cycle and the
+## 405-410 orbit actions have no catalog row and are unreachable from a key.
+## [orig: Input_HandleActionBinding cases 400 @0x49c073, 401 @0x49c0d9,
+##  402 @0x49c0f6; the records @0x8186CC / @0x818738 / @0x8187A4 (keys F2/F3/F4)
+##  — their row flag gates (0x1 / 0x40 / 0x400 / 0x8000000) ride the unported
+##  binding layer, D-CTRL-3]
+func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
+		viewchase_down: bool, chorded: bool, active: bool) -> void:
+	var gate := active and not chorded
+	if view1st_down and not _view1st_was_down and gate:
+		_set_showhud_gun_bit(false)
+		_select_third_person(false)
+	_view1st_was_down = view1st_down
+	if viewwithgun_down and not _viewwithgun_was_down and gate:
+		_set_showhud_gun_bit(true)
+		_select_third_person(false)
+	_viewwithgun_was_down = viewwithgun_down
+	if viewchase_down and not _viewchase_was_down and gate:
+		_select_third_person(true)
+	_viewchase_was_down = viewchase_down
+
+
+# g_FpWeaponViewFlags bit 0, the view actions' write [orig: @0x49c073 clears,
+# @0x49c0d9 sets].
+func _set_showhud_gun_bit(gun_visible: bool) -> void:
+	_showhud_flags = (_showhud_flags | 1) if gun_visible else (_showhud_flags & ~1)
+	if _game_hud != null:
+		_game_hud.set_showhud_flags(_showhud_flags)
+	_apply_fp_gun_visible()
+
+
+func _select_third_person(selected: bool) -> void:
+	if _player_presenter != null:
+		_player_presenter.set_third_person_selected(selected)
 
 
 func _apply_fp_gun_visible() -> void:

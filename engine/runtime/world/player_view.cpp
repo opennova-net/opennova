@@ -15,7 +15,22 @@
 
 namespace opennova::world {
 
+void player_view_resolve_mode(PlayerViewState &v) {
+    // [orig: @ 0x5ca1d8 desired = 0; @ 0x5ca1da the preference byte gate;
+    //  @ 0x5ca1e2..0x5ca1f2 parentSlot == 2 || parentSlot == 5 -> desired = 1]
+    const bool desired = v.third_person_selected && v.mount.control_seat;
+    v.third_person = desired || v.debug_third_person_on_foot;
+}
+
+void player_view_set_third_person_selected(PlayerViewState &v, bool selected) {
+    v.third_person_selected = selected;
+    player_view_resolve_mode(v);
+}
+
 void player_view_tick(PlayerViewState &v, const float eye[3]) {
+    // The mode first: the arbiter precedes the camera work every frame
+    // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2, ahead of the view build].
+    player_view_resolve_mode(v);
     // The scope-camera ease, one step per tick toward the engaged target within
     // the ease length this toggle latched. [orig: CNetPlayerInterp steps —
     // 15 @ 0x4df36e / 7 Inset @ 0x4df355 / 1 hipfire-return @ 0x4df1c3]

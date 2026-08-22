@@ -71,7 +71,8 @@ func _ready() -> void:
 		get_tree().quit()
 		return
 
-	_press_key(KEY_F4)
+	# On-foot third person is the debug override (no gameplay key resolves it).
+	presenter.set_debug_third_person(true)
 	await _settle(20)
 	await _capture("02_tp_level.png")
 	# Fast 180 flick: the aim swings instantly, the body chases (~5.8 deg/tick) and the
@@ -103,7 +104,7 @@ func _ready() -> void:
 	# body forced onto the world layer — look down and find our own feet.
 	var presenter := _find_player_presenter(get_tree().root)
 	if presenter != null:
-		_press_key(KEY_F4)            # back to first person
+		presenter.set_debug_third_person(false)  # back to first person
 		presenter.set_debug_body_in_first_person(true)
 		presenter.set_debug_force_viewmodel(true)
 		_look(Vector2(0, 380))        # level-ish again

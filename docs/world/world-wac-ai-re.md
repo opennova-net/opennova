@@ -1403,7 +1403,11 @@ parses do disagree, and only the former may be used for a runtime ADM index.
 **2026-08-21 — the mounted camera legs, PORTED.** The chase camera's
 vehicle branch (parentSlot `+0x168` ∈ {2, 5} — our `SeatType`
 Controller/Driver, `Entity::is_vehicle_control_seat()`) is wired into
-`player_view.cpp` from the constants in `engine/runtime/world/tp_camera_mount.h`:
+`player_view.cpp` from the constants in `engine/runtime/world/tp_camera_mount.h`
+(2026-08-22: and REACHED in play — the mode arbiter `player_view_resolve_mode`
+now resolves third person from the chase preference and that same seat test
+every tick, so a driver arrives in this leg without any camera key; net-re
+§5.39's 2026-08-22 addendum carries the witness):
 
 - **Anchor** `[orig: ThirdPersonCamera_Update @0x437af0]`: the mounted target
   is the CARRIER position + `(0, 0, max(1.0, (24576·boundRadius + 0x8000)

@@ -34,12 +34,20 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 
-	# F4: first person -> third person on the shared presenter.
-	var tp_before := bool(presenter.get("_third_person"))
+	# F4 is retail's viewchase PREFERENCE row: on foot it never moves the camera
+	# (the sim's arbiter resolves the chase only in a control seat); the debug
+	# override is the one on-foot third person.
+	var tp_before := bool(presenter.is_third_person())
 	_tap(KEY_F4)
 	await _settle(4)
-	var tp_after := bool(presenter.get("_third_person"))
-	_check(tp_after != tp_before, "F4 flips the camera mode (%s -> %s)" % [tp_before, tp_after])
+	var tp_after_key := bool(presenter.is_third_person())
+	_check(tp_after_key == tp_before, "F4 does not flip the camera mode on foot (%s -> %s)" % [tp_before, tp_after_key])
+	presenter.set_debug_third_person(true)
+	await _settle(4)
+	var tp_after := bool(presenter.is_third_person())
+	_check(tp_after and not tp_before, "the debug override enters third person on foot")
+	presenter.set_debug_third_person(false)
+	await _settle(4)
 
 	# F3: the game debug overlay opens.
 	var overlay_before: bool = game.is_debug_overlay_open()
