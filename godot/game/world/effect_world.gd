@@ -112,7 +112,22 @@ func set_water_height(value: float) -> void:
 	_water_height = value
 
 
-## Loads every mounted .ptl in VFS order, then opens the catalog once.
+## Loads every mounted .ptl AND the active gore set in VFS order, then opens the
+## catalog once. The gore set is a second extension carrying the same grammar —
+## `.ptu` (US) or `.ptg` (German) — and the impact-effect definitions that ride
+## only there: Effect_AmHitBody / Effect_SGvBody (the blood puffs) and the
+## Effect_FX50Cal* impact family. Skipping it does not fail loudly: an unknown
+## effect name interns as an invisible `stockeffect` clone (D-PTL-8), so every
+## flesh hit silently renders nothing.
+## [orig: CEffectSystem_Init @ 0x5f6070 scans loose `ptl\*.ptl` @0x5f6228 then
+##  `ptl\*<ext>` @0x5f6356, and matches each archive entry against ".ptl" OR the
+##  selected extension @0x5f64f3 — both legs parse through
+##  CEffectWorld_ParseSectionCallback @ 0x5ecb40.]
+## Order: the catalog registers EVERY particledef across ALL documents before it
+## resolves ANY effectdef, so cross-file pdefs resolve regardless of file order;
+## order only picks which duplicate id wins (first registration). `.ptl` before
+## the gore set reproduces retail's outcome on the shipped data, where the
+## joAmmoHit.ptl copies of AmHitBody_Mist4G/BloodAltG sort ahead of US_BLOOD.PTU.
 func load_from_resource_root(root: ResourceRoot) -> int:
 	clear_world()
 	if root == null:
@@ -121,7 +136,9 @@ func load_from_resource_root(root: ResourceRoot) -> int:
 	_texture_provider = Callable(root, "load_texture")
 	_ensure_renderer()
 	_renderer.set_texture_provider(_texture_provider)
-	for entry_v in root.list_file_entries(".ptl"):
+	var entries := root.list_file_entries(".ptl")
+	entries.append_array(root.list_file_entries(root.particle_extension()))
+	for entry_v in entries:
 		var entry := entry_v as Dictionary
 		var logical_name := String(entry.get("logical_name", ""))
 		if logical_name.is_empty():

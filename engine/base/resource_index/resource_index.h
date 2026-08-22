@@ -60,6 +60,12 @@ public:
 	void set_scr_policy(int scr_policy);
 
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;
+	// The gore-set extension the effect catalog loads ALONGSIDE every `.ptl`: ".ptg"
+	// when this mount carries `fgn2.bin` (the German content marker), else ".ptu".
+	// The `particle` kind indexes all three extensions; this is the runtime SELECTION
+	// [orig: Game_LoadConfig @ 0x5514e8..0x5514fa -> byte_24D4DF9, read by
+	// CEffectSystem_Init @ 0x5f608b..0x5f6095]. Empty mount answers the ".ptu" default.
+	std::string particle_extension() const;
 	// Default overloads use the session policy selected by scan(); policy overloads
 	// let retail consumers force one lookup without mutating that session default.
 	bool has_file(const std::string &name) const;

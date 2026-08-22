@@ -841,6 +841,23 @@ Notable outliers:
 - `stock.ptl` declares 7 effects over only 2 particledefs and contains the empty-texture
   graphic decl (`graphic1 = , blend;` line 163).
 - Trailing-NUL files (§1.1): `30MM.ptl`, `airexp.ptl`, `ambfx.ptl`, `df_exp.ptl`.
+- **The gore set** (§8, D-PTL-24): 4 plaintext `.ptu` in `localres.pff` — `US_BLOOD.PTU`
+  (`Effect_AmHitBody`, `Effect_SGvBody`), `Blood.ptu` (`Effect_GatorBlood`,
+  `Effect_MeleeBlood`, `effect_bullvfleshhp`), `FX50CAL.PTU` (12 `Effect_FX50Cal*`),
+  `PistolFX.ptu` — plus SCR-wrapped `.ptg` counterparts (`blood.ptg`, `Euro_Blood.ptg`,
+  `FX50Cal.ptg`, `PistolFX.ptg`). The German variants suffix their pdefs `G` and swap the
+  red `color1..4 = 139,0,0` for the `AMBIENTCOLOR` flag. 16 effectdefs in the plaintext
+  `.ptu` alone are defined **nowhere** in the `.ptl` set; 11 of those are named by `ammo.def`.
+- **`Effect_SGvBody` is broken in retail's own data** — the shotgun body hit renders
+  nothing, in retail and in OpenNova alike. `SHOTGNFX.PTL` declares `Effect_SGvbody` with
+  `pdefs =GvBody_Drops, SGvBody_Mist, SGvBody_splat, SGvStone_puf, SGhit_Cloth` — a dropped
+  leading `S`; the particledef is `SGvBody_Drops`, in that same file. `US_BLOOD.PTU` ships a
+  correct `Effect_SGvBody`, but never wins: effect names key case-insensitively so the two
+  collide, archive entries walk in uppercased-name order (`SHOTGNFX.PTL` < `US_BLOOD.PTU`),
+  and first registration wins — then one unresolved member clears the effect whole. Pinned by
+  `godot/tests/gore_set_catalog_probe.gd` so a future load-order change cannot silently turn
+  this into a divergence. `[orig: PFF_Open @ 0x7682e0 sorts by uppercased name;
+  CEffectBank_ResolveAllEntries @ 0x5e4920 — miss break @0x5e495d, ClearAll @0x5e49be]`
 
 The full per-file catalog (sections + first ids per file) is a mechanical section-count scan
 over the retail `.ptl` set and can be regenerated from retail data on demand; it is not
@@ -869,9 +886,23 @@ carried here.
   `{x,z,up}` basis once to Godot `{x,y,z}`. Invalid/empty terrain retains canonical up.
   `[orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0; Terrain_GenerateNormalMap @0x603210;
   height scale @0x7C6950]` (D-PTL-7).
-- **`.ptu`/`.ptg` alternate set**: `CEffectSystem_Init @ 0x5f6070` loads `*.ptu` — or `*.ptg`
-  when `byte_24D4DF9` is set — alongside `*.ptl`; the selector byte's meaning (gore toggle?)
-  is unwitnessed, and the runtime port loads only `.ptl`.
+- **`.ptu`/`.ptg` alternate set — RESOLVED 2026-08-22**: the selector is the **regional gore
+  set**, and it is presence-driven, not a user option. `Game_LoadConfig @ 0x551480` sets
+  `byte_24D4DF9 = FileSystem_FileExists("fgn2.bin") != 0` `[orig: @0x5514e8..0x5514fa]` — the
+  German content marker; retail never reads the file's contents, only asks whether the mount
+  stack carries it. `CEffectSystem_Init @ 0x5f6070` then picks `particleExtension = ".ptu"`
+  (US), or `".ptg"` when that byte is set `[orig: @0x5f608b..0x5f6095]`, and loads it
+  **alongside** every `.ptl`: loose `ptl\*.ptl` `@0x5f6228`, then loose `ptl\*<ext>`
+  `@0x5f6356` through `CEffectWorld_LoadDefinitionFile @0x5ecf70` (a thin wrapper on the same
+  `File_ParseASCIIFile` + `CEffectWorld_ParseSectionCallback @ 0x5ecb40`), then every archive
+  entry whose extension `stricmp`s `.ptl` **or** the selected extension `@0x5f64f3`, parsed by
+  that same callback `@0x5f6545`. One grammar, three extensions — the `.ptu`/`.ptg` files use
+  the identical `[effectdef]`/`[particledef]`/`[tabledef]`/`[tabledef_edithandles]` sections.
+  Retail JO ships the set in `localres.pff`, with the German variants distinguished by a `G`
+  pdef suffix and the `AMBIENTCOLOR` flag in place of the red `color1..4 = 139,0,0`.
+  **Ported 2026-08-22** (D-PTL-24): `ResourceIndex` classifies all three extensions as the
+  `particle` kind and `ResourceIndex::particle_extension()` owns the `fgn2.bin` selection;
+  `EffectWorld.load_from_resource_root` loads `.ptl` plus the active set.
 - **The flip-frame NAME registrar — RESOLVED 2026-07-14**: N=1 preserves the authored
   literal. N>1 lowercases, truncates at the first `.tga`, and appends `_01.tga` through
   `_09.tga`, then `_10.tga`+; identity is case-insensitive `(name,type)` and there is no
@@ -1015,6 +1046,8 @@ witnessed behavior gap stay in §8.
 | D-PTL-21 | Cross-emitter sorting: retail recursively partitions non-overlapping emitter AABBs, then globally particle-sorts each overlapping leaf; the reimpl globally particle-sorts the whole selected domain | **OPEN (exact algorithmic parity)** — overlapping emitter particles now interleave correctly and spatially disjoint differences are normally invisible, but exact retail leaf/tie order is not claimed. [orig: CParticleManager_RecursiveSortAndRender @ 0x5ec980; CParticleManager_RenderBatch @ 0x5e9890] |
 | D-PTL-22 | Section tags and known property keys were compared case-sensitively by the port even though the retail parser family uses `_stricmp` throughout | **FIXED 2026-07-16** — all four tags and effect/particle/graphic/table/edit-handle keys fold ASCII case; unknown keys retain authored spelling. Mixed-case regression in `particle_lenient_lines`; no shipped corpus trigger. |
 | D-PTL-23 | Duplicate table resolution treated TableDef+0x248 as an owner and always chose the first name match. Retail uses +0x248 as the inverse/reverse transform mask: unmodified refs choose the first base; modified refs reuse a cached transform or clone/transform the last base | **FIXED 2026-07-16** — native and legacy Godot lookup reproduce first-unmodified/last-modified selection; duplicate-selection ctest pins it. The 7 differing duplicate-name sets have no modified shipped reference. [orig: CParticleManager_FindTableDefByName @ 0x5e9540; transform @ 0x5e2700] |
+
+| D-PTL-24 | The effect catalog loaded only `.ptl`, dropping the regional gore set. `ResourceIndex` classified `.ptu`/`.ptg` as no kind at all, so they never entered the index, and `EffectWorld` asked only for `.ptl`. Retail loads `.ptl` **plus** `.ptu` (US) or `.ptg` (German) through the same parse callback. Every effect defined only in that set fell to the invisible `stockeffect` clone (D-PTL-8) with no error: `Effect_AmHitBody`/`Effect_SGvBody` (the blood puffs, `US_BLOOD.PTU`) and the whole `Effect_FX50Cal*` impact family (`FX50CAL.PTU`) — 16 effectdefs in the plaintext `.ptu` files alone, 11 of them referenced by `ammo.def`. Symptom: no blood on any flesh hit, and no .50cal impact anywhere | **FIXED 2026-08-22** — all three extensions classify as the `particle` kind; `ResourceIndex::particle_extension()` reproduces the presence-of-`fgn2.bin` selection and `EffectWorld.load_from_resource_root` loads `.ptl` plus the active set. Catalog `open()` registers every particledef across all documents before resolving any effectdef, so cross-file pdef references resolve regardless of load order; order only picks the first-registered duplicate id, and `.ptl`-before-gore-set matches retail on shipped data. [orig: CEffectSystem_Init @ 0x5f6070 — extension select @0x5f608b..0x5f6095, loose legs @0x5f6228/@0x5f6356, archive match @0x5f64f3, shared callback CEffectWorld_ParseSectionCallback @ 0x5ecb40; selector Game_LoadConfig @ 0x5514e8..0x5514fa] |
 
 WANDER/BUBBLE (engine-vestigial, zero xrefs), persistent emitter-AABB lifecycle, the full ORBIT
 orientation-matrix/age-chain port, exact recursive sort partition (D-PTL-21), collision sounds,

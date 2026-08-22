@@ -47,6 +47,7 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_file", "name"), &ResourceRoot::resolve_file);
 	ClassDB::bind_method(D_METHOD("list_files", "suffix"), &ResourceRoot::list_files, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_file_entries", "suffix"), &ResourceRoot::list_file_entries, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("particle_extension"), &ResourceRoot::particle_extension);
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "policy"), &ResourceRoot::load_texture, DEFVAL(LOOKUP_SESSION_DEFAULT));
@@ -375,6 +376,10 @@ Array ResourceRoot::list_file_entries(const String &suffix) const {
 		out.push_back(file_entry_to_dictionary(entry));
 	}
 	return out;
+}
+
+String ResourceRoot::particle_extension() const {
+	return String(index_.particle_extension().c_str());
 }
 
 bool ResourceRoot::has_file(const String &name, LookupPolicy policy) const {
