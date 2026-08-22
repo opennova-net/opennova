@@ -1034,6 +1034,40 @@ bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t targ
     return mount(occupant_ssn, target_ssn, mode);
 }
 
+// WAC `ssnrelease` -- the RELEASE half of the AI boarding order, and the reason a
+// transported squad ever gets out again. [orig: sub_4F7420 @0x4f7420]
+//
+//   if ( !v3 || !v3->ItemTypeIndex || !v3->parentEntity ) return 0;
+//   Entity_DetachFromVehicleIfServer(v3);
+//   if ( v3->aiRuntime ) { aiRuntime[37] = 0; aiRuntime[35] = 0; }
+//
+// It is the exact twin of the `ssn2ssn` setter (sub_4F7330 @0x4f7330, which arms
+// aiRuntime[37]=125 + [38]=target + [36]=carrier and zeroes thinkCooldown). Retail
+// has NO arrival-driven unload anywhere -- all 20 Entity_DetachFromVehicleIfServer
+// call sites are death/damage, a waypoint redirect, destroy, or spawn reset -- so
+// THIS script command is how a mission disembarks a transported AI. Without it the
+// occupant rides to the destination and then sits at command 125 forever, which is
+// exactly what our 00TRg probe showed: 12 permanently-mounted AI, every one at
+// wp=125, seven of them having driven ~700 u and then stopped dead.
+//
+// Clearing [35] (the has-route flag) as well as [37] is witnessed and load-bearing:
+// leaving the route flag set would keep the stale board route live after the detach.
+bool EntityCommands::release_boarding_command(uint16_t occupant_ssn) {
+    const EntityHandle oh = resolve_ssn(occupant_ssn);
+    Entity *occ = world_.registry.get(oh);
+    // [orig: the !ItemTypeIndex and !parentEntity rejects] -- a release only applies
+    // to a real item entity that is actually riding something.
+    if (!occ || occ->item_type == 0 || !occ->mounted) return false;
+    dismount(occupant_ssn); // [orig: Entity_DetachFromVehicleIfServer]
+    if (world_.ai) {
+        if (AiEntity *ae = world_.ai->for_handle(oh)) {
+            ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
+            ae->slot.f[35] = 0; // [orig: aiRuntime[35] = 0 — clear the has-route flag]
+        }
+    }
+    return true;
+}
+
 bool EntityCommands::mount_best(uint16_t occupant_ssn) {
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0 -> the vehicle is occupant-model+144.]
     // Proximity proxy: the nearest entity offering a free seat within kMountRadius.

@@ -363,6 +363,16 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 0;
     }
 
+    // ssnrelease(ssn) -- detach a transported AI and CLEAR its boarding order.
+    // [orig: sub_4F7420 @0x4f7420, the WAC command table's 0x4f7420 row]
+    // Previously fell through to the default effect push, i.e. the mission script
+    // said "everybody out" and nothing happened: the occupant stayed mounted at
+    // command 125 for the rest of the mission.
+    if (ieq(n, "ssnrelease")) {
+        w.commands.release_boarding_command(static_cast<uint16_t>(A(0)));
+        return 0;
+    }
+
     // ---- default: record the command as an observable effect ----
     w.effects.push({def.name, A(0), A(1), A(2), A(3), S(0)});
     return 0;

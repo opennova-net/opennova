@@ -144,6 +144,10 @@ public:
     // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
     bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
 
+    // WAC `ssnrelease` -- the release half of the AI boarding order.
+    // [orig: sub_4F7420 @0x4f7420]
+    bool release_boarding_command(uint16_t occupant_ssn);
+
     // BMS action 27 (PARTICLE_EFFECT): spawn the authored marker emitters whose
     // wp_number matches `wp_number`. Returns how many fired.
     // [orig: EventAction_Dispatch case 0x1B @0x4542e0 -> sub_4540E0]
