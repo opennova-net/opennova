@@ -1039,7 +1039,7 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		"underlay": {
 			"active_slots": _underlay.get_active_slot_count() if _underlay != null else 0,
 			"startup_layout": _underlay.is_startup_layout() if _underlay != null else false,
-			"unconverted": _underlay.get_unconverted_count() if _underlay != null else 0,
+			"failed": _underlay.get_failed_count() if _underlay != null else 0,
 		},
 	}
 	if include_widgets:

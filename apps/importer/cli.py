@@ -185,12 +185,6 @@ def cmd_export_all(args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
-def cmd_menu_movies(args: argparse.Namespace) -> int:
-    from apps.importer.menu_movies import convert_menu_movies
-
-    return convert_menu_movies(args.dir, force=args.force)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="onimport")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -223,14 +217,6 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Filter by type")
     _add_import_options(p_all)
     p_all.set_defaults(func=cmd_export_all)
-
-    p_movies = sub.add_parser(
-        "menu-movies",
-        help="Convert the menu backdrop movies (.bik) to playable .ogv siblings")
-    p_movies.add_argument("--dir", required=True, help="Game install directory")
-    p_movies.add_argument("--force", action="store_true",
-                          help="Re-convert movies whose .ogv sibling exists")
-    p_movies.set_defaults(func=cmd_menu_movies)
 
     return parser
 
