@@ -175,6 +175,48 @@ Scene projection depth range: `Render_SetProjectionDepthRange @ 0x58abe0`
 `[orig: Game_StartMission @ 0x524721]`), viewport-depth slot 0.99996948 =
 1 − 2⁻¹⁵ (`@ 0x58ac32`).
 
+**The mode word (anchored at the 2026-08-21 impact-scar grill).** The
+`GfxShader_Create1TexModeId(tex, modeWord) @ 0x679030` family builds its
+0xF4 state block from ONE word (`CGfxShader_SetRenderStateByModeId @ 0x6835c0`
+→ `RenderState_CacheFindOrAddByModeId @ 0x6832f0` →
+`find_or_create_render_state_permutation(word & 0x3FFF | 0x80000) @ 0x681d00`,
+the first `ValidateDevice`-passing substate wins). The word's upper bits ARE
+the pass-flag word above (the shader stores the whole word at +60, so
+`combined = word | passFlags`); the low 14 bits are three fields:
+- bits 0-3, the framebuffer blend (`decode_blend_mode_to_d3d_states
+  @ 0x680f00`): 0 = blend OFF (ONE/ZERO); 1 = SRCALPHA/INVSRCALPHA;
+  2 = ONE/ONE (later variants SRCALPHA/ONE, SRCALPHA/INVSRCALPHA);
+  3 = ZERO/INVSRCALPHA; 4 = DESTCOLOR/ONE; 5 = SRCALPHA/ZERO;
+  6 = ZERO/SRCCOLOR; 7 = ZERO/ONE; 8 = DESTCOLOR/SRCCOLOR; 9 = SRCCOLOR/ZERO;
+  10 = SRCCOLOR/ONE; 11 = ONE/SRCALPHA; 12 = ONE/INVSRCALPHA;
+  13 = SRCALPHA/SRCCOLOR.
+- bits 4-7, the stage-0 alpha op, first substate (`decode_mode_alpha_stage
+  @ 0x680b00`): 0x00/0x10 = SELECTARG2(TFACTOR); 0x20 = SELECTARG2(DIFFUSE);
+  0x30 = SELECTARG1(TEXTURE); 0x40 = MODULATE(TEXTURE, TFACTOR);
+  0x50 = MODULATE(TEXTURE, DIFFUSE); 0x60 = SELECTARG1(TEXTURE) with the
+  CURRENT/stage-1 variants behind it; 0xD0 = ADD; 0xE0 = SUBTRACT;
+  0xF0 = MODULATE(CURRENT, TEXTURE).
+- bits 8-13, the stage-0 colour op (`decode_mode_color_stage @ 0x681080`;
+  "MOD(2X)" = MODULATE2X because `GfxDevice_Modulate2XEnabled` (ex
+  `dword_32656AC`, renamed 2026-08-21) is set to 1 unconditionally by
+  `CGfxDevice_CreateDevice @ 0x67eb5f` — `CGfxTextOverlay_Draw @ 0x67715d`
+  halves clear colours only when it is 0): 0x100 = SELECTARG1(TFACTOR);
+  0x200 = SELECTARG2(DIFFUSE); 0x300 = MOD(2X)(DIFFUSE, TFACTOR);
+  0x400 = SELECTARG1(TEXTURE); 0x500 = MOD(2X)(TEXTURE, TFACTOR);
+  0x600 = MOD(2X)(TEXTURE, DIFFUSE); 0x700 = MODULATE(TEXTURE|ALPHAREPLICATE,
+  DIFFUSE); 0x800 = DOT3(TEXTURE, TFACTOR); 0x900 = DOT3(TEXTURE, DIFFUSE);
+  0xA00 = ADD; 0xD00 = ADD(DIFFUSE, TEXTURE); 0xE00 = SUBTRACT(CURRENT,
+  TEXTURE); 0xF00 = MOD(2X)(CURRENT, TEXTURE); 0x1000 = MODULATE(CURRENT,
+  CURRENT); 0x2000 = MOD(2X)(TEXTURE, TEXTURE|ALPHAREPLICATE); 0x80000001 =
+  MODULATE(TEXTURE, TEXTURE|ALPHAREPLICATE); family 0 writes nothing.
+Worked words: the impact-scar strips' `0x120651` (scorch: blend 1, alpha
+0x50, colour 0x600, FOGENABLE, z-write off — no alpha test, CCW cull) and
+`0x460651` (bhole1: plus ALPHATESTENABLE and CULLMODE NONE, z-write on)
+([world-wac-ai-re.md §24.9](../world/world-wac-ai-re.md)); the terrain's
+`0x20200` (blend off, TFACTOR alpha, flat DIFFUSE colour, fog). The port's
+decoder is `renderer::decode_scar_strip_mode`
+(`engine/runtime/renderer/scar_draw_list.h`).
+
 **Ground truth corpus.** The shipped shader set: 44 `.fx` in JO:CA
 `localres.pff` (SCR\x01-wrapped, key 0xA55B1EED), 20 `_`-prefixed includes +
 24 effect files → 19 tags (+3 `EffectAlt_UV` twins: VS_DOT3DIFF, VS_PHONGT,

@@ -171,6 +171,31 @@ void test_basis() {
 			"a quarter turn rotates the tangent onto the negated bitangent");
 	CHECK(close(b2[0], a[0]) && close(b2[1], a[1]) && close(b2[2], a[2]),
 			"and the bitangent onto the tangent");
+	// THE HANDEDNESS the fix leaves: the bitangent is `n x t` taken BEFORE the
+	// flip and is not recomputed, so the pair with the normal is LEFT-handed —
+	// n . (a x b) < 0 — for every face and every spin [orig: @0x5CCADA the
+	// cross, @0x5CCAE6..0x5CCB37 the tangent-only flip]. This is what makes the
+	// quad's coordinate winding face the struck side once retail's Y-negated
+	// upload (a reflection into D3D's left-handed frame) is applied, and what
+	// the Godot packer's winding fold relies on (nova_simulation_scars.cpp —
+	// the rotation fold keeps the order, the entity-local reflection re-winds).
+	const auto triple = [](const int32_t n_[3], const int32_t a_[3], const int32_t b_[3]) {
+		const int64_t cx = (int64_t(a_[1]) * b_[2] - int64_t(a_[2]) * b_[1]) >> 16;
+		const int64_t cy = (int64_t(a_[2]) * b_[0] - int64_t(a_[0]) * b_[2]) >> 16;
+		const int64_t cz = (int64_t(a_[0]) * b_[1] - int64_t(a_[1]) * b_[0]) >> 16;
+		return (int64_t(n_[0]) * cx + int64_t(n_[1]) * cy + int64_t(n_[2]) * cz) >> 16;
+	};
+	const int32_t faces[5][3] = {
+		{0, 0, 0x10000}, {0x10000, 0, 0}, {0, -0x10000, 0},
+		{0x9000, 0x7000, 0xA000}, {-0x3000, 0xE000, -0x5000},
+	};
+	for (const auto &f : faces) {
+		int32_t fa[3], fb[3];
+		scar_basis(f, 0, fa, fb);
+		CHECK(triple(f, fa, fb) < 0, "the (tangent, bitangent, normal) triple is left-handed");
+		scar_basis(f, 40000, fa, fb);
+		CHECK(triple(f, fa, fb) < 0, "...and stays left-handed under the spin");
+	}
 }
 
 // THE CACHE: rings lease per owner, wrap at 256, never evict, and clear on

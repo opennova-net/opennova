@@ -175,11 +175,47 @@ void test_owner_visibility() {
 
 } // namespace
 
+// The strip table's drawer state: the two mode words the loader builds from
+// the modeId selector and their decode [orig: Scar_LoadTextures @0x5CC315 /
+// @0x5CC321; CGfxShader_ApplyPass @0x683190; decode_blend_mode_to_d3d_states
+// @0x680F00; decode_mode_alpha_stage @0x680B00; decode_mode_color_stage
+// @0x681080].
+void test_strip_mode_words() {
+	for (int strip = 0; strip < kScarTextureStripCount; ++strip) {
+		const uint32_t expected = strip == 27 ? 0x460651u : 0x120651u;
+		CHECK(scar_texture_strip_mode_word(strip) == expected,
+				"every strip but bhole1 selects the scorch word");
+	}
+	const renderer::ScarStripState scorch =
+			renderer::decode_scar_strip_mode(kScarModeWordScorch);
+	CHECK(scorch.src_alpha_blend, "scorch: SRCALPHA/INVSRCALPHA");
+	CHECK(scorch.alpha_modulate_texture_diffuse, "scorch: MODULATE(TEXTURE, DIFFUSE) alpha");
+	CHECK(scorch.color_modulate2x_texture_diffuse, "scorch: MODULATE2X(TEXTURE, DIFFUSE)");
+	CHECK(!scorch.alpha_test, "scorch: NO alpha test — the 128 latch is inert");
+	CHECK(scorch.fog, "scorch: fog on");
+	CHECK(!scorch.depth_write, "scorch: z-write off");
+	CHECK(!scorch.cull_none, "scorch: the CCW back-face cull");
+	const renderer::ScarStripState hole = renderer::decode_scar_strip_mode(kScarModeWordHole);
+	CHECK(hole.src_alpha_blend && hole.alpha_modulate_texture_diffuse &&
+					hole.color_modulate2x_texture_diffuse && hole.fog,
+			"bhole: the shared blend / stage / fog state");
+	CHECK(hole.alpha_test, "bhole: ALPHATESTENABLE — GREATER 128");
+	CHECK(hole.depth_write, "bhole: z-write on");
+	CHECK(hole.cull_none, "bhole: cull none");
+	CHECK(renderer::kScarAlphaTestRef == 128, "the drawer's latched ref");
+	// A blend-off word (the terrain's 0x20200 family) decodes to no blend.
+	const renderer::ScarStripState flat = renderer::decode_scar_strip_mode(0x20200u);
+	CHECK(!flat.src_alpha_blend && !flat.alpha_modulate_texture_diffuse &&
+					!flat.color_modulate2x_texture_diffuse && flat.fog && flat.depth_write,
+			"a foreign word decodes field by field");
+}
+
 int main() {
 	test_quad_order_and_uvs();
 	test_batches_per_texture_and_ring_order();
 	test_fog_box_cull_is_world_only();
 	test_owner_visibility();
+	test_strip_mode_words();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

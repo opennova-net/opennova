@@ -19,6 +19,12 @@ const MODEL_GRAPHIC := "Armry01"
 const MODEL_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
 const STRIP_NAMES := ["scorch1.tga", "scorch2.tga", "scorch3.tga", "scorch4.tga"]
 const BHOLE_STRIP := 27
+# The loader's two GfxShader mode words [orig: Scar_LoadTextures @0x5CC315 /
+# @0x5CC321]: every strip but bhole1 draws in the scorch state.
+const MODE_WORD_SCORCH := 0x120651
+const MODE_WORD_HOLE := 0x460651
+const SHADER_SCORCH := "res://shaders/scar_quad.gdshader"
+const SHADER_HOLE := "res://shaders/scar_quad_hole.gdshader"
 const OWNER_A := 0x1004  # pool 1, slot 4
 const OWNER_B := 0x1005
 
@@ -79,6 +85,14 @@ func _strip_names() -> PackedStringArray:
 	return names
 
 
+func _strip_mode_words() -> PackedInt32Array:
+	var words := PackedInt32Array()
+	words.resize(32)
+	words.fill(MODE_WORD_SCORCH)
+	words[BHOLE_STRIP] = MODE_WORD_HOLE
+	return words
+
+
 # One quad = six vertices in the witnessed order around `centre` (half-size 0.25).
 func _quad(draw: Dictionary, centre: Vector3) -> void:
 	var corners := [
@@ -106,6 +120,7 @@ func _draw_list() -> Dictionary:
 		"batch_bms_id": PackedInt32Array(),
 		"batch_spawn_origin": PackedInt64Array(),
 		"strip_names": _strip_names(),
+		"strip_mode_words": _strip_mode_words(),
 		"slots_live": 0,
 		"slots_culled": 0,
 		"rings_leased": 0,
@@ -185,13 +200,76 @@ func test_shared_ring_batches_become_one_world_mesh_with_a_surface_per_batch() -
 	if material != null:
 		assert_not_null(material.get_shader_parameter("albedo_tex"),
 				"scorch1.tga resolved through the resource root")
+		assert_eq(material.shader.resource_path, SHADER_SCORCH,
+				"the scorch word (0x120651) selects the scorch drawer state")
+	var hole_material := world.mesh.surface_get_material(1) as ShaderMaterial
+	assert_not_null(hole_material)
+	if hole_material != null:
+		assert_eq(hole_material.shader.resource_path, SHADER_HOLE,
+				"the bhole word (0x460651) selects the alpha-tested drawer state")
 	var stats := scar_pass.get_stats()
 	assert_eq(stats.world_surfaces, 2)
 	assert_eq(stats.entity_meshes, 0)
 	assert_eq(stats.batches, 2)
 	assert_eq(stats.textures_missing, 0)
 	assert_eq(stats.slots_live, 4)
+	assert_eq(int(presenter.get_stats().get("strips_unsupported", -1)), 0,
+			"both shipped words decode to a carried drawer state")
 	assert_eq(_entity_meshes(self).size(), 0)
+	scar_pass.teardown()
+
+
+func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
+	# The scorch TGAs are black RGB under an alpha falloff: the mark IS the
+	# SRCALPHA/INVSRCALPHA blend [orig: mode word 0x120651 — blend nibble 1,
+	# no ALPHATESTENABLE bit; the drawer's SetAlphaTestRef(128) @0x5CCDAE is an
+	# inert latch there]. Godot's ALPHA_SCISSOR_THRESHOLD moves a material to the
+	# opaque pass and drops the blend — the regression that painted every scar
+	# as an opaque black blob — so neither drawer state may use it.
+	var scorch := load(SHADER_SCORCH) as Shader
+	var hole := load(SHADER_HOLE) as Shader
+	assert_not_null(scorch)
+	assert_not_null(hole)
+	if scorch == null or hole == null:
+		return
+	for shader in [scorch, hole]:
+		var code: String = shader.code
+		assert_false(code.contains("ALPHA_SCISSOR_THRESHOLD"),
+				"%s: no alpha scissor (it would drop the blend)" % shader.resource_path)
+		assert_true(code.contains("blend_mix"), "%s: the SRCALPHA/INVSRCALPHA blend" % shader.resource_path)
+		assert_true(code.contains("unshaded"), "%s: LIGHTING off" % shader.resource_path)
+		assert_false(code.contains("fog_disabled"), "%s: FOGENABLE" % shader.resource_path)
+		assert_false(code.contains("source_color"),
+				"%s: raw texel sampling (D-RMAT-7)" % shader.resource_path)
+	assert_true(scorch.code.contains("depth_draw_never"), "scorch: z-write off (0x100000)")
+	assert_true(scorch.code.contains("cull_back"), "scorch: the CCW back-face cull")
+	assert_false(scorch.code.contains("discard"), "scorch: no alpha test")
+	assert_true(hole.code.contains("depth_draw_always"), "bhole: z-write on")
+	assert_true(hole.code.contains("cull_disabled"), "bhole: cull none (0x400000)")
+	assert_true(hole.code.contains("discard"), "bhole: the GREATER/128 alpha test")
+	assert_true(hole.code.contains("128.0"), "bhole: ref 128")
+
+
+func test_a_strip_whose_tga_arrives_later_binds_it_on_the_next_present() -> void:
+	# The material is created on the first present even when the TGA is not
+	# resolvable yet (no root); the texture must not stay missing forever once
+	# a root is set.
+	var presenter := _presenter()
+	var scar_pass := ScarPresentPass.new()
+	scar_pass.setup(null, null, null, null, null, Callable(), Callable(), presenter)
+	var draw := _draw_list()
+	_batch(draw, 0xFFFF, 0, 0, false, 1)
+	scar_pass.present_draw_list(draw)
+	assert_eq(scar_pass.get_stats().textures_missing, 1, "no root: the strip reports its missing TGA")
+	var root := _texture_root(["scorch1.tga"])
+	presenter.set_resource_root(root)
+	scar_pass.present_draw_list(draw)
+	assert_eq(scar_pass.get_stats().textures_missing, 0, "the TGA binds once a root resolves it")
+	var world := _world_mesh(presenter)
+	if world != null and world.mesh != null:
+		var material := world.mesh.surface_get_material(0) as ShaderMaterial
+		if material != null:
+			assert_not_null(material.get_shader_parameter("albedo_tex"))
 	scar_pass.teardown()
 
 
@@ -338,6 +416,11 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	assert_eq(names[0], "scorch1.tga")
 	assert_eq(names[3], "scorch4.tga")
 	assert_eq(names[BHOLE_STRIP], "bhole1.tga")
+	var words: PackedInt32Array = draw["strip_mode_words"]
+	assert_eq(words.size(), 32)
+	assert_eq(words[0], MODE_WORD_SCORCH, "scorch1 draws in the scorch state")
+	assert_eq(words[3], MODE_WORD_SCORCH)
+	assert_eq(words[BHOLE_STRIP], MODE_WORD_HOLE, "bhole1 draws in the alpha-tested state")
 	assert_eq(int(draw["rings_leased"]), 0)
 	var stats := rt.get_scar_present_stats()
 	assert_not_null(stats, "the runtime owns the scar presentation pass")

@@ -70,10 +70,10 @@ func _shot(name: String, from: Vector3, at: Vector3) -> void:
 # 24 yaws at three pitches. The picker reports the entity origin + bound
 # radius, not the struck point: the volley flies along the pick ray, which by
 # construction crosses one of that entity's faces.
-func _find_target(sim, eye: Vector3) -> Dictionary:
+func _find_target(sim, eye: Vector3, pitches: Array) -> Dictionary:
 	var best := {}
 	var best_dist := INF
-	for pitch_deg in [0.0, -10.0, 10.0]:
+	for pitch_deg in pitches:
 		for i in range(24):
 			var yaw := TAU * float(i) / 24.0
 			var dir := Vector3(cos(yaw), 0.0, sin(yaw)).rotated(
@@ -143,7 +143,11 @@ func _run() -> void:
 
 	var player: Vector3 = sim.get_local_player_position()
 	var eye := player + Vector3.UP * 1.6
-	var target := _find_target(sim, eye)
+	# A level pick first (a wall face, not a lintel underside), then the
+	# pitched sweeps.
+	var target := _find_target(sim, eye, [0.0])
+	if target.is_empty():
+		target = _find_target(sim, eye, [-10.0, 10.0])
 	if target.is_empty():
 		_fail("no pickable entity face within %.0f u of the spawn" % PICK_RANGE)
 		return
@@ -164,8 +168,8 @@ func _run() -> void:
 		for _k in range(ROUNDS_PER_FRAME):
 			if spawned >= ROUNDS:
 				break
-			var jitter := Vector3(rng.randf_range(-0.03, 0.03),
-					rng.randf_range(-0.03, 0.03), rng.randf_range(-0.03, 0.03))
+			var jitter := Vector3(rng.randf_range(-0.08, 0.08),
+					rng.randf_range(-0.08, 0.08), rng.randf_range(-0.08, 0.08))
 			if sim.debug_spawn_round(eye, (dir + jitter).normalized(), AMMO) >= 0:
 				spawned += 1
 		await process_frame
@@ -176,14 +180,26 @@ func _run() -> void:
 	print("PROBE logic tick after the volley: %d" % int(trail.get("tick", 0)))
 	var by_kind := {}
 	var samples := []
+	var stop_sum := Vector3.ZERO
+	var stop_count := 0
 	for ev in trail.get("events", []):
 		var kind := String(ev.get("kind_name", "?"))
 		by_kind[kind] = int(by_kind.get(kind, 0)) + 1
-		if kind == "item face" and samples.size() < 3:
-			samples.append("%s s%s f%s m%s @%s" % [str(ev.get("entity_name", "")),
-					str(ev.get("section", -1)), str(ev.get("face", -1)),
-					str(ev.get("material", -1)), str(ev.get("hit", Vector3()))])
+		if kind == "item face":
+			var hit_v: Variant = ev.get("hit", null)
+			if hit_v is Vector3:
+				stop_sum += hit_v
+				stop_count += 1
+			if samples.size() < 3:
+				samples.append("%s s%s f%s m%s @%s" % [str(ev.get("entity_name", "")),
+						str(ev.get("section", -1)), str(ev.get("face", -1)),
+						str(ev.get("material", -1)), str(ev.get("hit", Vector3()))])
 	print("PROBE round stops: %s samples=%s" % [str(by_kind), str(samples)])
+	# The captures aim at where the rounds actually stopped (the struck face may
+	# not be the picker's face): the volley's stop centroid.
+	if stop_count > 0:
+		hit = stop_sum / float(stop_count)
+		print("PROBE stop centroid (Godot): %s (%.2f u from the eye)" % [str(hit), eye.distance_to(hit)])
 	var stats = world.get_scar_present_stats()
 	if stats == null:
 		_fail("the runtime owns no scar presentation pass")
@@ -193,11 +209,46 @@ func _run() -> void:
 			stats.batches, stats.world_surfaces, stats.entity_meshes,
 			stats.textures_missing, stats.owners_unresolved])
 	var draw: Dictionary = sim.get_scar_draw_list(eye, 0.0, Color.WHITE)
+	var verts: PackedVector3Array = draw.get("vertices", PackedVector3Array())
+	var batch_flags: PackedInt32Array = draw.get("batch_flags", PackedInt32Array())
+	var batch_first: PackedInt32Array = draw.get("batch_first", PackedInt32Array())
+	var batch_count: PackedInt32Array = draw.get("batch_count", PackedInt32Array())
 	print("PROBE draw list: vertices=%d batches=%d" % [
-			(draw.get("vertices", PackedVector3Array()) as PackedVector3Array).size(),
-			(draw.get("batch_owner", PackedInt32Array()) as PackedInt32Array).size()])
-	await _shot("overview", eye, hit)
+			verts.size(), (draw.get("batch_owner", PackedInt32Array()) as PackedInt32Array).size()])
+	# The winding fold: Godot's front face is CLOCKWISE in a right-handed frame,
+	# i.e. a triangle whose coordinate cross product points AWAY from the viewer
+	# is front-facing. A shared-ring quad must front-face the shooter (the
+	# struck face's side) so the scorch shader's cull_back culls the back
+	# exactly as retail's CCW cull does [orig: Scar_RenderCache @0x5CD830 under
+	# Math_FixedPointToFloat3_YNegated; the drawer's mode word 0x120651].
+	# Entity-ring batches are section-local and skipped here.
+	var facing := 0
+	var away := 0
+	var front_sum := Vector3.ZERO
+	for b in range(batch_first.size()):
+		if (batch_flags[b] & 1) != 0:
+			continue
+		var t := batch_first[b]
+		while t + 2 < batch_first[b] + batch_count[b]:
+			var n := (verts[t + 1] - verts[t]).cross(verts[t + 2] - verts[t])
+			var centroid := (verts[t] + verts[t + 1] + verts[t + 2]) / 3.0
+			if n.dot(eye - centroid) < 0.0:
+				facing += 1
+			else:
+				away += 1
+			if n.length() > 0.0:
+				front_sum -= n.normalized()
+			t += 3
+	print("PROBE winding (shared ring, Godot space, clockwise front): %d triangles front-face the firing eye, %d face away" % [facing, away])
+	# The captures look straight along the struck face's normal (the quads'
+	# front), from 1 u off the face; the behind shot from 1 u inside it.
 	var back := (eye - hit).normalized()
-	await _shot("close", hit + back * 1.6 + Vector3.UP * 0.3, hit)
+	var face_n := front_sum.normalized() if front_sum.length() > 0.0 else back
+	print("PROBE struck face front (Godot): %s" % str(face_n))
+	await _shot("overview", eye, hit)
+	await _shot("close", hit + face_n * 1.0, hit)
+	# From BEHIND the struck face: retail's scorch state culls the back (CCW),
+	# so nothing of the volley may show through the wall here.
+	await _shot("behind", hit - face_n * 1.0, hit)
 	print("PROBE done")
 	quit(0)
