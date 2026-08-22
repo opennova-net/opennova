@@ -435,8 +435,8 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	out["anim_variant"] = w.anim_variant;
 	// The FP clip channel position: gated per-tick advances since the play, not
 	// wall-clock age — the presenter poses the parts at advance * tick_dt and
-	// nothing free-runs the playhead [orig: the counter-gated
-	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40].
+	// nothing free-runs the playhead (retail: the counter-gated
+	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40).
 	out["anim_advance_ticks"] = static_cast<int64_t>(
 			w.anim_key.empty() ? 0u : w.anim_advance_ticks);
 	out["play_serial"] = static_cast<int64_t>(w.play_serial);
