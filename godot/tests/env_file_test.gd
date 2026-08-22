@@ -279,6 +279,24 @@ func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 			"night objects must not stay pinned to the solar highlight vector")
 
 
+func test_light_direction_render_tuple_is_the_raw_getter_and_the_godot_vector_its_swap() -> void:
+	# At 15:00 Environment_ComputeSunDirection gives the fixed tuple
+	# (0.9397 sin 225, 0.342, -0.9397 cos 225) and Environment_GetLightDirectionFloat
+	# serves (-f1, f2, f0) = (-0.342, +0.6645, -0.6645); the Godot-axes vector is
+	# that tuple's x/z swap. The terrain page path must see the RAW tuple.
+	var env_node := MissionEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	env_node.time_of_day = 1500.0
+	var raw := env_node.get_light_direction_render_tuple()
+	assert_almost_eq(raw.x, -0.342, 0.002, "raw tuple x is the fixed 22414 tilt, negated")
+	assert_almost_eq(raw.y, 0.6645, 0.002, "raw tuple y is the up component at 15:00")
+	assert_almost_eq(raw.z, -0.6645, 0.002, "raw tuple z is the east component at 15:00")
+	var godot_axes := env_node.get_light_direction()
+	assert_true(godot_axes.is_equal_approx(Vector3(raw.z, raw.y, raw.x)),
+			"the Godot-axes light is the raw tuple's x/z swap (env_axes.h), nothing else")
+
+
 func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -> void:
 	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)

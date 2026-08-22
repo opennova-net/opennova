@@ -211,6 +211,8 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_moon_direction);
 	ClassDB::bind_method(D_METHOD("get_light_direction"),
 			&MissionEnvironment::get_light_direction);
+	ClassDB::bind_method(D_METHOD("get_light_direction_render_tuple"),
+			&MissionEnvironment::get_light_direction_render_tuple);
 	ClassDB::bind_method(D_METHOD("is_night_phase"),
 			&MissionEnvironment::is_night_phase);
 	ClassDB::bind_method(D_METHOD("get_day_phase_blend"),
@@ -869,6 +871,10 @@ Vector3 MissionEnvironment::get_moon_direction() const {
 
 Vector3 MissionEnvironment::get_light_direction() const {
 	return render_float_to_godot(state_.light_direction());
+}
+
+Vector3 MissionEnvironment::get_light_direction_render_tuple() const {
+	return to_vector3(state_.light_direction());
 }
 
 bool MissionEnvironment::is_night_phase() const {

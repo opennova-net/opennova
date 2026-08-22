@@ -127,6 +127,65 @@ bool test_depth_and_winding_admission() {
 			"clockwise fragments at the receiver depth are admitted");
 }
 
+bool test_near_plane_clip() {
+	// Geometry below the caster's ground plane (depth < 0: h < 0.1 u) is cut
+	// by the D3D near plane before rasterization, so a fully buried rectangle
+	// leaves the page untouched.
+	TerrainStaticShadowRasterInput input;
+	TerrainStaticShadowAlphaPage result = alpha_page(4, 4,
+			std::vector<uint8_t>(16, 200));
+	const auto buried = rectangle(0.0f, 0.0f, 1.0f, 1.0f, -0.1f);
+	input.triangles.assign(buried.begin(), buried.end());
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"a buried projection is still a valid raster job")) return false;
+	if (!expect(std::all_of(result.alpha.begin(), result.alpha.end(),
+			[](uint8_t value) { return value == 200; }),
+			"fragments below the near plane never shadow")) return false;
+
+	// A rectangle whose top edge sits at depth -0.25 and bottom edge at +0.25
+	// crosses the plane at v = 0.5: the upper two rows stay untouched, the
+	// lower two are fully covered, and the cut edge lands exactly on the
+	// destination row boundary.
+	input.triangles.clear();
+	const auto tl = vertex(0.0f, 0.0f, -0.25f);
+	const auto tr = vertex(1.0f, 0.0f, -0.25f);
+	const auto bl = vertex(0.0f, 1.0f, 0.25f);
+	const auto br = vertex(1.0f, 1.0f, 0.25f);
+	input.triangles.push_back(triangle(tl, tr, br));
+	input.triangles.push_back(triangle(tl, br, bl));
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"a straddling projection rasterizes")) return false;
+	for (std::size_t index = 0; index < 8; ++index) {
+		if (!expect(result.alpha[index] == 200,
+				"rows above the near-plane cut keep the composed alpha")) return false;
+	}
+	for (std::size_t index = 8; index < 16; ++index) {
+		if (!expect(result.alpha[index] == 0,
+				"rows below the near-plane cut are fully covered")) return false;
+	}
+
+	// The cut interpolates the alpha-test texture coordinate too: a clipped
+	// triangle keeps sampling its material where the surviving part lies.
+	std::vector<uint8_t> storage;
+	std::vector<TerrainStaticShadowAlphaMipView> mips;
+	input.alpha_textures.push_back(constant_alpha_texture(255, storage, mips));
+	input.triangles.clear();
+	input.triangles.push_back(triangle(
+			vertex(0.0f, 0.0f, -0.25f, 0.0f, 0.0f),
+			vertex(1.0f, 0.0f, -0.25f, 1.0f, 0.0f),
+			vertex(1.0f, 1.0f, 0.25f, 1.0f, 1.0f), 0, 64));
+	input.triangles.push_back(triangle(
+			vertex(0.0f, 0.0f, -0.25f, 0.0f, 0.0f),
+			vertex(1.0f, 1.0f, 0.25f, 1.0f, 1.0f),
+			vertex(0.0f, 1.0f, 0.25f, 0.0f, 1.0f), 0, 64));
+	result = alpha_page(4, 4, std::vector<uint8_t>(16, 200));
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"a straddling alpha-tested projection rasterizes")) return false;
+	return expect(result.alpha[4] == 200 && result.alpha[8] == 0 &&
+			result.alpha[15] == 0,
+			"alpha-tested fragments survive only below the cut");
+}
+
 bool test_material_alpha_ref_64() {
 	std::vector<uint8_t> rejected_storage;
 	std::vector<uint8_t> admitted_storage;
@@ -267,6 +326,7 @@ bool test_retail_world_to_page_projection() {
 int main() {
 	if (!test_opaque_projection_preserves_outside_and_resolves_edges()) return 1;
 	if (!test_depth_and_winding_admission()) return 1;
+	if (!test_near_plane_clip()) return 1;
 	if (!test_material_alpha_ref_64()) return 1;
 	if (!test_shared_diagonal_uses_single_fragment_ownership()) return 1;
 	if (!test_inverted_material_alpha_ref()) return 1;
