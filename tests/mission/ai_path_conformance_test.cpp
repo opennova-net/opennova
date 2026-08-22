@@ -355,7 +355,7 @@ int main() {
 				// AUTHORED destination coordinates for the convoy channels: 3 is the
 				// trigger path (event 11 fires on group 3 reaching node 20) and 11/12
 				// are where that event sends the riders.
-				if (ch == 3 || ch == 11 || ch == 12)
+				if (ch == 3 || ch == 11 || ch == 12 || ch == 13 || ch == 14)
 					std::printf("       NODE ch=%d k=%d radius=%d pos=%d,%d,%d wait=%d\n",
 							ch, k, ne->f[0], ne->f[1], ne->f[2], ne->f[3], ne->wait_ticks);
 				waitsum += ne->wait_ticks;
@@ -420,8 +420,8 @@ int main() {
 		// starts penetrating and the resolver shoves it forever (6.4n).
 		world.registry.for_each([&](const w::Entity &e) {
 			if (e.item_id != 1293 && e.item_id != 1294) return;
-			std::printf("   HULL item=%d handle=%u bound_radius=%.2f seats=%zu\n",
-					e.item_id, unsigned(e.handle.packed), double(e.bound_radius), e.seats.size());
+			std::printf("   HULL item=%d handle=%u net_id=%u bms_id=%d seats=%zu\n",
+					e.item_id, unsigned(e.handle.packed), unsigned(e.net_id), int(e.bms_id), e.seats.size());
 			for (size_t si = 0; si < e.seats.size(); ++si) {
 				const w::Seat &s = e.seats[si];
 				std::printf("       SEAT %zu type=%d local=%.2f,%.2f,%.2f\n",
@@ -432,7 +432,7 @@ int main() {
 		std::printf("authored items: %zu\n", m.items.size());
 		for (size_t ii = 0; ii < m.items.size(); ++ii) {
 			const bms::Entity &b = m.items[ii];
-			if (b.id != 64 && b.id != 65 && b.id != 68 && b.id != 60 && b.type_id != 1902) continue;
+			if (b.type_id != 1293 && b.type_id != 1294 && b.id != 64 && b.id != 65 && b.id != 68 && b.id != 60 && b.type_id != 1902) continue;
 			std::printf("   BMSITEM %zu id=%d type=%d pos=(%.1f,%.1f)\n",
 					ii, b.id, b.type_id, b.x / 65536.0, b.y / 65536.0);
 		}
