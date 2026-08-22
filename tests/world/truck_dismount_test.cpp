@@ -157,7 +157,9 @@ int main() {
 	// The authored destination lies FORWARD of the truck. The live case is
 	// 28-31 u ahead (ch 11 node 0 at (381.2, 406.2) from a dismount at
 	// (377, 375)); 31 u forward reproduces it without the mission loaded.
-	const double tx = 0.0, ty = 31.0;
+	const char *tyv = std::getenv("NW_TARGET_Y");
+	const double tx = 0.0;
+	const double ty = (tyv != nullptr && tyv[0] != 0) ? std::atof(tyv) : 31.0;
 
 	// SIX bodies, one per rear passenger seat -- the live failure is a PILE-UP,
 	// not a single body against a hull. The user session shows all six dismounted
