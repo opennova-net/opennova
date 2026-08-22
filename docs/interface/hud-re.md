@@ -2053,11 +2053,35 @@ banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
   0x2A5A8EAD)` `@0x5be210..0x5be228`, callback `@0x5bb7a0`, the `chat_message
   x1 y1 x2 y2` / `sys_message x1 y1 x2 y2` stores `@0x5bb7d1/@0x5bb7ed/
   @0x5bb825/@0x5bb841` (`dword_28E51FC` is `chat_message`'s y1 — the earlier
-  "no writer in the image" / "never authored" readings were wrong). JO:CA
-  ships no `hud.def`, so the table stays zero and retail never wraps a chat
-  line; the port feeds the authored hudpos `HUDCHATTEXT`/`HUDSYSTEXT` rows
-  (`HudLayout::chat_box_x1/x2`) as its stand-in, so a long line wraps where
-  retail's does not — a named residual, no D-row.
+  "no writer in the image" / "never authored" readings were wrong). No shipped
+  title carries a `hud.def` (JO:CA's resource/localres/language pffs, the JOX
+  expansion assets and the JOTAC root were all checked), so the table stays
+  zero and retail never wraps a chat line; the port leaves
+  `HudLayout::chat_box_*` unset and does not wrap either (the review removed an
+  earlier hudpos-`HUDCHATTEXT` stand-in that wrapped where retail does not). A
+  `hud.def`-equipped mod would need a `formats/def` reader — the named residual
+  (no D-row); the path is fully witnessed for it: `File_ParseASCIIFile
+  @0x53d810` reads the whole file and decrypts in place ONLY when the caller's
+  key is nonzero AND the first four bytes are `'S','C','R',0x01` (`@0x53d899`;
+  `Scr_DecryptBuffer @0x53d090` = our `scr_decrypt`; any other leading bytes
+  parse as plain text), splits on CR LF only (`@0x53d8de`), tokenizes each line
+  with `Terrain_TokenizeConfigLine @0x53cb60` (space/comma/tab separators
+  outside `"`, `//` or `;` ends the line, max 30 tokens, 1000-char clamp) and
+  delivers non-empty lines whose first token does not start with `/`; the
+  callback `@0x5bb7a0` matches `token[1]` case-insensitively and `atol`s the
+  values into two parallel dword tables (X `@0x28E4DF8+4·row`, Y
+  `@0x28E51F8+4·row`): `chat_message` → rows 1/2, `sys_message` → rows 3/4,
+  plus two-value rows `lower_plate 0x1C, gun_icon 0x1D, waypoint_elevation 0x1A,
+  waypoint_range 0x1B, weapon_name 0x1F, weapon_clips 0x20, weapon_rounds 0x21,
+  position_icon 0x22, position 0x23, waypoint_name 0x24, extra1..4 0x25..0x28,
+  map_center 0x29, map_radius 0x2A, cargo_icon 0x2B, cargo 0x2C` and four-value
+  `health_bar 0x2D/0x2E`, `mana_bar 0x2F/0x30`. Only the X table's rows 1..4 are
+  ever read (`HUD_GetChatBoxCoord @0x5bbe90` from the two message sinks, channel
+  3 and the display rebuild) and only Y[1] (`dword_28E51FC`), which
+  `HUD_DrawMessageLog` adds in screen px to the Recent Messages BOX top/bottom
+  (`@0x5b9df2/@0x5b9e1f`, not to the text rows) and `HUD_DrawClassRosterOverlay
+  @0x5b9f8e` reads; every other `hud.def` key is parsed and never consumed by
+  the JO HUD.
 - **Crosshair color config** — `dword_25510E0` default + the HUD shader pass
   texture-stage state (D-HUD-8); the crosshair styles' count (`cross%02d.tga`).
 - **Crosshair sub-elements** — the target-tracking cursor
