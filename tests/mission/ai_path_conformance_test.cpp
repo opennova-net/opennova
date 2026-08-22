@@ -410,6 +410,24 @@ int main() {
 			std::printf("GUNSEAT CENSUS: %d owners, %d gunner seats, %d filled\n",
 					owners, gun_total, gun_filled);
 		}
+		{
+			// PRECONDITION for the combat-approach arm: an AI holding a target that
+			// is OUTSIDE its attack range (slot[15]).
+			int with_t = 0, out_of_range = 0, in_range = 0;
+			for (int k = 0; k < n; ++k) {
+				const w::AiEntity *e = ai.at(k);
+				if (e == nullptr || !e->inf.combat_target.valid()) continue;
+				++with_t;
+				const w::Entity *tg = world.registry.get(e->inf.combat_target);
+				if (tg == nullptr) continue;
+				const double dx = double(int32_t(tg->position.x * 65536.0f)) - e->pos[0];
+				const double dy = double(int32_t(tg->position.y * 65536.0f)) - e->pos[1];
+				const double d = std::sqrt(dx * dx + dy * dy);
+				if (d >= double(e->slot.f[15])) ++out_of_range; else ++in_range;
+			}
+			std::printf("COMBAT PRECOND: %d AI hold a target; %d OUT of attack range, %d in\n",
+					with_t, out_of_range, in_range);
+		}
 		std::printf("board carriers:\n");
 		for (int j = 0; j < n; ++j) {
 			const w::AiEntity *e = ai.at(j);
