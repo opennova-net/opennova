@@ -102,6 +102,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::WEAPON_RESTRICTIONS,       "weapon-restrictions",     MsgCoverage::PrinterOnly, "count + (slot,restriction) pairs @0x42D4C0"},
 		{'S', s2c::LOADED_MODEL_PAGE_REQUEST, "loaded-model-page-request", MsgCoverage::Decoded,   "§5.34 decode_u32_scalar (cursor pages frozen loaded-model rows -> C2S 0x3D)"},
 		{'S', s2c::MINIMAP_OVERLAY,           "minimap-overlay",         MsgCoverage::Decoded,     "§5.35 decode_minimap_overlay_batch"},
+		{'S', s2c::ZONE_PRESENCE_COUNT,       "zone-presence-count",     MsgCoverage::Decoded,     "§5.61 decode_zone_presence_count; active timed-capture rate @0x428FC0"},
 		{'S', s2c::SPAWN_WAVE_STATUS,         "spawn-wave-status",       MsgCoverage::Decoded,     "§5.31 decode_spawn_wave_status"},
 		{'S', s2c::ZONE_TIMER_VALUE,          "zone-timer-value",        MsgCoverage::Decoded,     "§5.49 decode_zone_timer_value (NOT cinematic camera)"},
 		{'S', s2c::SPECTATOR_FLAGS,           "player-slot-state",       MsgCoverage::PrinterOnly, "[spectator bit, team] → g_death_screen_active/byte_A85B48 @0x4259E0"},

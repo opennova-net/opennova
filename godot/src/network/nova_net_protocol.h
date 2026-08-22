@@ -74,6 +74,8 @@ public:
 		DEFAULT_MAX_SCORE = opennova::game_rules::kDefaultMaxScore,
 		DEFAULT_KOTH_DELTA = opennova::game_rules::kDefaultKothDelta,
 		DEFAULT_FLAG_RETURN_TICKS = opennova::game_rules::kDefaultFlagReturnTicks,
+		DEFAULT_CAPTURE_DURATION_SECONDS = opennova::game_rules::kDefaultCaptureDurationSeconds,
+		DEFAULT_CAPTURE_SPEED_SETTING = opennova::game_rules::kDefaultCaptureSpeedSetting,
 		DEFAULT_NUM_TEAMS = opennova::game_rules::kDefaultNumTeams,
 		DEFAULT_RESPAWN_TIMEOUT = opennova::game_rules::kDefaultRespawnTimeout,
 		DEFAULT_START_DELAY = opennova::game_rules::kDefaultStartDelay,

@@ -313,6 +313,8 @@ func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 		"max_score": 9,
 		"koth_delta": 7,
 		"flag_return_ticks": 333,
+		"capture_duration_seconds": 27,
+		"capture_speed_setting": 2,
 		"num_teams": 4,
 	})
 	var options: Dictionary = sim.get_host_session_config()
@@ -320,6 +322,8 @@ func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 	assert_eq(int(options.get("max_score", -1)), 9)
 	assert_eq(int(options.get("koth_delta", -1)), 7)
 	assert_eq(int(options.get("flag_return_ticks", -1)), 333)
+	assert_eq(int(options.get("capture_duration_seconds", -1)), 27)
+	assert_eq(int(options.get("capture_speed_setting", -1)), 2)
 	assert_eq(int(options.get("num_teams", -1)), 4)
 	sim.free()
 

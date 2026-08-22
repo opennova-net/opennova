@@ -870,6 +870,10 @@ void Simulation::configure_host_session(Dictionary p_options) {
 	config.koth_delta = dictionary_u32(p_options, "koth_delta", config.koth_delta);
 	config.flag_return_ticks = dictionary_u32(
 			p_options, "flag_return_ticks", config.flag_return_ticks);
+	config.capture_duration_seconds = dictionary_i32(
+			p_options, "capture_duration_seconds", config.capture_duration_seconds);
+	config.capture_speed_setting = dictionary_i32(
+			p_options, "capture_speed_setting", config.capture_speed_setting);
 	config.num_teams = static_cast<uint8_t>(dictionary_u32(
 			p_options, "num_teams", config.num_teams) & 0xFFu);
 	config.respawn_timeout = dictionary_u32(
@@ -967,6 +971,10 @@ Dictionary Simulation::get_host_session_config() const {
 	out["max_score"] = static_cast<int64_t>(session.max_score);
 	out["koth_delta"] = static_cast<int64_t>(session.koth_delta);
 	out["flag_return_ticks"] = static_cast<int64_t>(session.flag_return_ticks);
+	out["capture_duration_seconds"] =
+			static_cast<int64_t>(session.capture_duration_seconds);
+	out["capture_speed_setting"] =
+			static_cast<int64_t>(session.capture_speed_setting);
 	out["num_teams"] = static_cast<int64_t>(session.num_teams);
 	out["respawn_timeout"] = static_cast<int64_t>(session.respawn_timeout);
 	out["start_delay"] = static_cast<int64_t>(session.start_delay);

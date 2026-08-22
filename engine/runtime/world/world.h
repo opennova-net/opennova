@@ -37,6 +37,7 @@
 #include "world/vehicle_motor.h"
 #include "world/waypoint_track.h"
 #include "world/weapon_table.h"
+#include "world/zone_capture.h"
 #include "world/zone_chain.h"
 
 namespace opennova::terrain {
@@ -442,6 +443,10 @@ public:
     // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
     // from Game_StartMission; net-re §5.61]
     ZoneChain zone_chain;
+    // The capture request/active transaction is mission state, not host-wire
+    // scratch. Keeping it beside the chain prevents a second lifecycle or a
+    // static server singleton. [orig: CaptureCtx_Reset @0x53BD00]
+    ZoneCaptureState zone_capture_state;
 
     // The player waypoint track (built by mission promotion from the blue-route
     // nav channel; empty when the mission authors none). Advanced per logic tick

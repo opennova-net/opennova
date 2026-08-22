@@ -70,6 +70,12 @@ static_assert(NetProtocol::DEFAULT_KOTH_DELTA == opennova::game_rules::kDefaultK
 		"DEFAULT_KOTH_DELTA drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_FLAG_RETURN_TICKS == opennova::game_rules::kDefaultFlagReturnTicks,
 		"DEFAULT_FLAG_RETURN_TICKS drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_CAPTURE_DURATION_SECONDS ==
+		opennova::game_rules::kDefaultCaptureDurationSeconds,
+		"DEFAULT_CAPTURE_DURATION_SECONDS drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_CAPTURE_SPEED_SETTING ==
+		opennova::game_rules::kDefaultCaptureSpeedSetting,
+		"DEFAULT_CAPTURE_SPEED_SETTING drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_NUM_TEAMS == opennova::game_rules::kDefaultNumTeams,
 		"DEFAULT_NUM_TEAMS drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_RESPAWN_TIMEOUT == opennova::game_rules::kDefaultRespawnTimeout,
@@ -163,6 +169,8 @@ void NetProtocol::_bind_methods() {
 	BIND_CONSTANT(DEFAULT_MAX_SCORE);
 	BIND_CONSTANT(DEFAULT_KOTH_DELTA);
 	BIND_CONSTANT(DEFAULT_FLAG_RETURN_TICKS);
+	BIND_CONSTANT(DEFAULT_CAPTURE_DURATION_SECONDS);
+	BIND_CONSTANT(DEFAULT_CAPTURE_SPEED_SETTING);
 	BIND_CONSTANT(DEFAULT_NUM_TEAMS);
 	BIND_CONSTANT(DEFAULT_RESPAWN_TIMEOUT);
 	BIND_CONSTANT(DEFAULT_START_DELAY);

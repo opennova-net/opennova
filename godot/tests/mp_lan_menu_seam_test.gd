@@ -378,6 +378,8 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 			"FlagBall never boots into retail's immediate team-1 zero-limit outcome")
 	assert_eq(int(options.get("koth_delta", -1)), 5)
 	assert_eq(int(options.get("flag_return_ticks", -1)), 210)
+	assert_eq(int(options.get("capture_duration_seconds", -1)), 15)
+	assert_eq(int(options.get("capture_speed_setting", -1)), 1)
 	assert_eq(int(options.get("num_teams", -1)), 2)
 	assert_eq(int(options.get("respawn_timeout", -1)), 5)
 	assert_eq(int(options.get("start_delay", -1)), 0)

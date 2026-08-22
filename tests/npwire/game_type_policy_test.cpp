@@ -71,6 +71,10 @@ int main() {
 	CHECK(game_rules::kDefaultMaxScore == 5, "flag-score default");
 	CHECK(game_rules::kDefaultKothDelta == 5, "KOTH decay default");
 	CHECK(game_rules::kDefaultFlagReturnTicks == 210, "flag-return default");
+	CHECK(game_rules::kDefaultCaptureDurationSeconds == 15,
+			"capture-duration default");
+	CHECK(game_rules::kDefaultCaptureSpeedSetting == 1,
+			"capture-speed default");
 	CHECK(game_rules::kDefaultNumTeams == 2, "team-count default");
 	CHECK(game_rules::kMaxCallsignLength == 15, "callsign cap = Name[16]");
 	CHECK(np::kMaxPlayersCap == 65, "player cap [orig: the 1..65 clamp]");

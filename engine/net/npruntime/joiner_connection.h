@@ -87,10 +87,12 @@ public:
 		uint16_t net_id = 0;                      // packed character/minimap id (entity+0x15C)
 	};
 
-	// S2C 0x53 and 0x6F mutate one shared retail timer-list entry. Keeping them in
+	// S2C 0x53 and 0x6F mutate one shared retail timer-list entry; 0x6C updates
+	// the selected active-window presence byte. Keeping them in
 	// one typed FIFO preserves message order when both tags share a protocol packet;
 	// separate per-tag vectors would necessarily reorder that packet at the runtime fold.
-	using ZoneTimerUpdate = std::variant<ZoneTimerValue, ZoneTimerWindow>;
+	using ZoneTimerUpdate =
+			std::variant<ZoneTimerValue, ZoneTimerWindow, ZonePresenceCount>;
 
 	struct PollResult {
 		std::vector<std::vector<uint8_t>> outbound;   // datagrams to send back to the host

@@ -365,6 +365,8 @@ public:
 		ZoneTimerValue value;
 		bool has_window = false;
 		ZoneTimerWindow window;
+		bool has_presence = false;
+		uint8_t presence_count = 0;
 
 		// Exact semantic image of the retail 13-DWORD shared timer-list entry
 		// (the map key supplies DWORD 0). The raw latest records above remain for
@@ -428,6 +430,7 @@ private:
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
 	void apply_zone_timer_value(const ZoneTimerValue &value);
 	void apply_zone_timer_window(const ZoneTimerWindow &window);
+	void apply_zone_presence_count(const ZonePresenceCount &presence);
 	void advance_zone_timers();
 
 	Role role_;

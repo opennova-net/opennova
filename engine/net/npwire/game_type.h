@@ -183,6 +183,13 @@ inline constexpr uint32_t kDefaultScoreLimit = 50;
 inline constexpr uint32_t kDefaultMaxScore = 5;
 inline constexpr uint32_t kDefaultKothDelta = 5;
 inline constexpr uint32_t kDefaultFlagReturnTicks = 210;
+// Unnumbered ChangeTeam triggers capture over this many 1 Hz passes; setting
+// zero or negative selects the retail instant branch. TakeoverSpeed 1 selects
+// the control-delta base 24. [orig: Config_SetDefaults @0x54D030 writes
+// dword_2550B78=15 / dword_2550B84=1; applied to g_capture_duration and
+// g_capture_speed_setting @0x551D3E..0x551D55]
+inline constexpr int32_t kDefaultCaptureDurationSeconds = 15;
+inline constexpr int32_t kDefaultCaptureSpeedSetting = 1;
 // [orig: Config_SetDefaults @0x54D030 writes g_MpNumTeams = 2]
 inline constexpr uint32_t kDefaultNumTeams = 2;
 inline constexpr uint32_t kDefaultRespawnTimeout = 5;

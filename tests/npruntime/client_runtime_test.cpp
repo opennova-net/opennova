@@ -218,6 +218,14 @@ std::vector<uint8_t> zone_timer_window_body(
 	};
 }
 
+std::vector<uint8_t> zone_presence_body(uint16_t handle, uint8_t count) {
+	return {
+			static_cast<uint8_t>(handle),
+			static_cast<uint8_t>(handle >> 8),
+			count,
+	};
+}
+
 bool matches_client_header(const ProtocolPacketHeader &header,
 		uint32_t session_id, uint32_t sequence, uint32_t ack) {
 	return header.session_id == session_id &&
@@ -2676,6 +2684,35 @@ bool run_zone_timer_channels_share_one_retail_entry() {
 	              "zone channels: exact window completion condition deactivates DWORD 7");
 }
 
+bool run_zone_presence_updates_only_a_tracked_window() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	constexpr uint16_t kZone = 0x1003;
+
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW,
+			zone_timer_window_body(kZone, 0, 1, 0, 15, 1));
+	host_view.Client_ProcessNetworkFrame();
+	host_loop.host_send(
+			s2c::ZONE_PRESENCE_COUNT, zone_presence_body(kZone, 3));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.zone_states().at(kZone).has_presence &&
+	                    host_view.zone_states().at(kZone).presence_count == 3,
+	            "zone presence: 0x6C replaces the tracked active-window count"))
+		return false;
+
+	// The retail handler only changes dword_A85BA0 when the handle resolves to
+	// its currently tracked timed-capture entity. Unknown and malformed rows do
+	// not create timer entries. [orig: NapiNPClientMsg_0x06C @0x428FC0]
+	host_loop.host_send(
+			s2c::ZONE_PRESENCE_COUNT, zone_presence_body(0x1004, 9));
+	host_loop.host_send(s2c::ZONE_PRESENCE_COUNT, {0x03, 0x10});
+	host_view.Client_ProcessNetworkFrame();
+	return expect(host_view.zone_states().size() == 1 &&
+	                      host_view.zone_states().at(kZone).presence_count == 3,
+	              "zone presence: untracked/short 0x6C rows fail closed");
+}
+
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
 	ns::LoopbackChannel host_loop;
 	np::ClientRuntime host_view(host_loop);
@@ -4871,6 +4908,7 @@ int main() {
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
+	                run_zone_presence_updates_only_a_tracked_window() &&
 	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
 	                run_joiner_zone_timer_preserves_mixed_wire_order() &&
 	                run_host_as_client() &&

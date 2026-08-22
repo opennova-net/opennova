@@ -83,6 +83,7 @@ inline constexpr uint8_t MISSION_DATA_CHUNK = 0x64;         // §5.28 chunked tr
 inline constexpr uint8_t WEAPON_RESTRICTIONS = 0x66;        // count + (slot,restriction) pairs
 inline constexpr uint8_t LOADED_MODEL_PAGE_REQUEST = 0x68;  // §5.34 cursor -> c2s::LOADED_MODEL_PAGE_REPLY
 inline constexpr uint8_t MINIMAP_OVERLAY = 0x6B;            // §5.35 minimap overlay batch
+inline constexpr uint8_t ZONE_PRESENCE_COUNT = 0x6C;        // §5.61 [u16 active-zone handle][u8 unique presence]
 inline constexpr uint8_t SPAWN_WAVE_STATUS = 0x6E;          // §5.31 deploy-screen wave groups
 inline constexpr uint8_t ZONE_TIMER_VALUE = 0x6F;           // §5.49 zone timer value (NOT cinematic camera)
 inline constexpr uint8_t SPECTATOR_FLAGS = 0x75;            // 2 B [death-screen/spectator bit, player team]

@@ -574,6 +574,10 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		match_rules.hill_delta = owner.ctx.config.koth_delta;
 		match_rules.max_score = owner.ctx.config.max_score;
 		match_rules.flag_return_ticks = owner.ctx.config.flag_return_ticks;
+		match_rules.capture_duration_seconds =
+				owner.ctx.config.capture_duration_seconds;
+		match_rules.capture_speed_setting =
+				owner.ctx.config.capture_speed_setting;
 		match_rules.team_count = owner.ctx.config.num_teams;
 		match_rules.score_values = owner.ctx.config.session_status_stat_values;
 		match_rules.score_fields.reserve(owner.ctx.config.scoreboard_fields.size());

@@ -29,5 +29,9 @@ four-side TDM, team KOTH, or FlagBall form. This override is also how the
 harness reaches Flag Me (`0x8`): retail retains a type-12 load branch but its
 BMS task-bit mapper has no path that returns 12
 [`AI_GetTaskTypeFromFlags @0x40DAE0`; `Game_StartMission @0x524360`]. An
+A&S/C&C capture probe can override the retail takeover defaults (15 seconds,
+speed setting 1) with signed `NW_CAPTURE_DURATION_SECONDS` and
+`NW_CAPTURE_SPEED_SETTING`; duration ≤0 selects retail's instant path
+[`Config_SetDefaults @0x54D030`; `Server_UpdateCaptureZones @0x53B8F0`]. An
 optional loose `score.ini` in the resource root overlays the retail default
 score table and is rejected if malformed.

@@ -1848,6 +1848,17 @@ struct ZoneTimerWindow {
 bool decode_zone_timer_window(const uint8_t *body, size_t len,
                               ZoneTimerWindow &out, size_t &consumed);
 
+// §5.61 S2C 0x6C — the unique contact count for the currently active timed
+// capture. Fixed 3 B: [u16 zone handle][u8 count]. The producer clamps the
+// advertised byte to 1..32. [orig: NapiNPClientMsg_0x06C @0x428FC0;
+// NetPacket_WriteZonePresenceCount @0x506DE0]
+struct ZonePresenceCount {
+	uint16_t zone_handle = 0;
+	uint8_t count = 0;
+};
+bool decode_zone_presence_count(const uint8_t *body, size_t len,
+                                ZonePresenceCount &out, size_t &consumed);
+
 // §5.50 S2C 0x34 — PLAY-SOUND by sound-profile name. flag 0 → flat/ambient
 // play; flag 1 → positioned 3D one-shot at full volume (the 3 i16 coords are
 // shifted << 16 into 16.16 world space). No position block on the wire when

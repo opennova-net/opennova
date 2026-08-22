@@ -906,6 +906,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
 	world.run_logic_tick(/*is_authority=*/true);
 	world.match.advance_tick(world);
+	// Retail produces capture requests from movement collisions throughout the
+	// logic tick, then drains them in the periodic block below. Remote authority
+	// players are snapshot-driven here, so the world-owned contact pass consumes
+	// their same MoveOrder bit and final host pose. [orig: collision callsite
+	// @0x4B2F90..0x4B2FD0; Server_OnPlayerTouchCaptureZone @0x500BA0]
+	if (ctx.is_in_session && !world.match.outcome().ended)
+		world::zone_capture_contact_tick(world);
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
@@ -937,11 +944,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		emit_minimap_overlay_state(ctx, world);
 	}
 
-	// (2d) The AS capture loop at 1 Hz — slice 2 of the §5.61 witness [orig: the
+	// (2d) The capture transaction at 1 Hz [orig: the
 	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->
 	// Server_UpdateCaptureZoneEntities (0x6F + 0x1E 0x3B/0x3C) -> Server_EnforceZoneEntityTeams
-	// -> Server_UpdateCaptureZones (instant numbered flips + 0x53 + GameEvent_FlagCapture)].
-	// The world side runs in zone_capture_tick; this block encodes its events:
+	// -> Server_UpdateCaptureZones (instant numbered flips + timed active entries)].
+	// The world side runs in zone_capture_second_tick; this block encodes its events:
 	//   0x6F 15 B [u16 handle][u8 team][i32 control][i32 0x10000][i16 delta][u8 f][u8 e]
 	//     [orig: NetPacket_WriteZoneTimerValue @0x506E70] — CHANGE-GATED to all in-match
 	//     conns + the full set at 1 Hz to deploy-pending/dead ones (the golden carries
@@ -951,17 +958,23 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     50/51 (frontier held) or 52/53 (victim =
 	//     the recipient side's NEW frontier), team-filtered; then the 56/57 banner to all
 	//     [orig: GameEvent_FlagCapture @0x50F6F0];
-	//   0x53 9 B on flips [u16 handle][u8 curTeam][u8 capTeam][u16 progress=0][u16 limit=0]
-	//     [u8 rate=0] [orig: NetPacket_WriteZoneTimerWindow @0x506D00, the drain legs
-	//     @0x53BA36/0x53BA68];
+	//   0x53 9 B for ACTIVE unnumbered captures [u16 handle][u8 curTeam][u8 capTeam]
+	//     [u16 progress][u16 limit][u8 rate], and 0x6C [u16 handle][u8 presence]
+	//     when the unique contact rate changes [orig: NetPacket_WriteZoneTimerWindow
+	//     @0x506D00; CaptureCtx_UpdateActiveCaptureRate @0x53B600]. Numbered instant
+	//     flips do not emit 0x53 in Server_UpdateCaptureZones @0x53B8F0.
 	// The independent general 0x40 minimap-overlay producer runs above at its
 	// retail 14-tick cadence. It is intentionally not gated on this AS chain.
 	if (ctx.is_in_session && !world.match.outcome().ended &&
-			world.logic_tick % 62u == 0 && !world.zone_chain.empty()) {
-		static world::ZoneCaptureEvents ev; // scratch (single-threaded host tick)
-		world::zone_capture_tick(world, world.zone_chain, ev);
+			world.logic_tick % 62u == 0 &&
+			(world.match.rules().game_type & 0x30000u) != 0) {
+		world::ZoneCaptureEvents ev;
+		world::zone_capture_second_tick(world, ev);
 		for (const world::ZoneCaptureEvents::Flip &flip : ev.flips)
-			world.match.record_numbered_zone_capture(world, flip.scorers);
+			world.match.record_zone_capture(world, flip.scorers);
+		for (const auto &completion : ev.timed_completions)
+			world.match.record_zone_capture(
+					world, {completion.capturer});
 
 		// 0x6F bodies + the change gate.
 		std::vector<std::pair<uint16_t, std::vector<uint8_t>>> zone_6f; // (handle, body)
@@ -1002,17 +1015,23 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			return std::vector<uint8_t>{ev_type, attacker, victim, 0xFF, 0, 0, 0, 0};
 		};
 
-		// 0x53 flip windows.
-		std::vector<std::vector<uint8_t>> flip_53;
-		for (const auto &f : ev.flips) {
+		std::vector<std::vector<uint8_t>> timer_53;
+		for (const auto &window : ev.timer_windows) {
 			std::vector<uint8_t> b;
-			put_u16le(b, f.zone.packed);
-			b.push_back(f.new_team);
-			b.push_back(f.capturer_team);
-			put_u16le(b, 0); // progress [orig: the drain restart writes 0]
-			put_u16le(b, 0); // limit
-			b.push_back(0);  // rate
-			flip_53.push_back(std::move(b));
+			put_u16le(b, window.zone.packed);
+			b.push_back(window.current_team);
+			b.push_back(window.capturing_team);
+			put_u16le(b, window.progress);
+			put_u16le(b, window.limit);
+			b.push_back(window.rate);
+			timer_53.push_back(std::move(b));
+		}
+		std::vector<std::vector<uint8_t>> presence_6c;
+		for (const auto &presence : ev.presence) {
+			std::vector<uint8_t> b;
+			put_u16le(b, presence.zone.packed);
+			b.push_back(presence.count);
+			presence_6c.push_back(std::move(b));
 		}
 
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -1045,10 +1064,33 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 						                         zone_index_of(se.zone), se.zone_team));
 			}
 
-			// Flip events + 0x53 windows.
-			for (size_t fi = 0; fi < ev.flips.size(); ++fi) {
-				const auto &f = ev.flips[fi];
-				conn.link.transport->host_send(s2c::ZONE_TIMER_WINDOW, flip_53[fi]);
+			for (const auto &body : timer_53)
+				conn.link.transport->host_send(s2c::ZONE_TIMER_WINDOW, body);
+			for (const auto &body : presence_6c)
+				conn.link.transport->host_send(s2c::ZONE_PRESENCE_COUNT, body);
+			for (const auto &start : ev.timed_starts) {
+				const uint8_t actor = start.capturer.pool() == 0 &&
+						start.capturer.slot() <= 0xFE
+						? static_cast<uint8_t>(start.capturer.slot())
+						: uint8_t{0xFF};
+				conn.link.transport->host_send(
+						0x1E, event_body(start.team == 1 ? 41 : 42,
+						                 actor, 0xFF));
+			}
+			for (const auto &completion : ev.timed_completions) {
+				if (!completion.announce) continue;
+				const uint8_t actor = completion.capturer.pool() == 0 &&
+						completion.capturer.slot() <= 0xFE
+						? static_cast<uint8_t>(completion.capturer.slot())
+						: uint8_t{0xFF};
+				conn.link.transport->host_send(
+						0x1E, event_body(completion.new_team == 1 ? 43 : 44,
+						                 actor, 0xFF));
+			}
+
+			// Numbered instant-flip events.
+			for (const auto &f : ev.flips) {
+				if (!f.announce) continue;
 				if (f.suppressed) continue; // match decided [orig: @0x4A2920 gate]
 				const uint8_t zone_idx = zone_index_of(f.zone);
 				if (conn_team == f.capturer_team) {

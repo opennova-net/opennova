@@ -209,7 +209,7 @@ void test_retail_default_score_values() {
     aas_rules.game_type = kAas;
     world->match.configure(aas_rules);
     const EntityHandle aas_blue = player(*world, 0, 1, "AasBlue");
-    world->match.record_numbered_zone_capture(*world, {aas_blue});
+    world->match.record_zone_capture(*world, {aas_blue});
     CHECK(world->match.player(aas_blue)->stats[MatchStats::kPoints] == 15);
 
     MatchRules coop_rules;
@@ -615,7 +615,7 @@ void test_aas_capture_scoring_and_outcomes() {
 
     // CaptureZone_CheckProximityScoring awards event 24 to every living teammate
     // inside a numbered zone, so the team row advances once per scorer.
-    world->match.record_numbered_zone_capture(*world, {blue, blue2});
+    world->match.record_zone_capture(*world, {blue, blue2});
     CHECK(world->match.player(blue)->stats[MatchStats::kZoneTakeovers] == 1);
     CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 25);
     CHECK(world->match.player(blue2)->stats[MatchStats::kZoneTakeovers] == 1);
@@ -668,7 +668,7 @@ void test_cac_combines_flag_and_zone_objectives() {
     // C&C's primary score and win arm remain the zone counter even though its
     // retail FIELD row also exposes flag stats. [orig: sub_52C850 @0x52C850;
     // GameType_CreateDefaultSettings @0x52DD00]
-    world->match.record_numbered_zone_capture(*world, {blue});
+    world->match.record_zone_capture(*world, {blue});
     CHECK(world->match.player(blue)->stats[MatchStats::kZoneTakeovers] == 1);
     CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 15);
     CHECK(world->match.primary_score(*world->match.player(blue)) == 1);
