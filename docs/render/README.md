@@ -11,7 +11,7 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 | [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0) |
 | [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 | [`render-occlusion-re.md`](render-occlusion-re.md) | **landed 2026-07-16** (outside the original three REN slices) | D-OCC | blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, the GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, and the sound-occlusion witness (which closed D-SND-7). Sound occlusion (2026-07-16, `CollisionWorld` + `engine/runtime/terrain_query`), the indoor frame gates (2026-07-16, `OcclusionFramePass`), and the section-mask/portal engine (init, mask build, traversal, occluder culling — 2026-07-17, `engine/runtime/world/src/occlusion.cpp`) are all ported; residuals ride the D-OCC rows |
-| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; max-quality publication refreshed 2026-08-20** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
+| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; settled max-quality publication refreshed 2026-08-22** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
 sky/water shader gaps grow [env/env-tod-re.md](../env/env-tod-re.md) — in
@@ -102,56 +102,70 @@ The review remains scene-by-scene:
 6. First-person viewmodel over the world (draw-order: viewmodel pass).
 
 The current publication catalog is
-[`render-fixtures-retail-v4.json`](render-fixtures-retail-v4.json), SHA-256
-`e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` — minted by
+[`render-fixtures-retail-v5.json`](render-fixtures-retail-v5.json), SHA-256
+`d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e` — minted by
 [`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
-the 2026-08-20 verbatim retail sessions: every applied pose kept exactly, each
-fixture's `camera_bms` recalibrated from its own registered inverse view
-matrix. It extends v3 with two snapshot-derived fixtures
-(`00tra-armory-lght-retail`, `03tr-sun-sky-retail`) and adds `03TR.bms`
-(authored start minute 390) to the mission set. The final CP01/CP12 anchors are `cp01-water-oblique-retail`,
+the 2026-08-22 SETTLED retail sessions: every fixture re-applied and left to
+settle before capture, so motion-lead saturation and the deterministic ground
+snap finish first, then each `camera_bms` recalibrated from its own registered
+inverse view matrix. The id set, missions, minutes, FOV, and comparison
+contracts are v4's unchanged; only the poses moved (courtyard 19.4 cm in z and
+10.8 cm in x, fire-barrel-close 0.99 m — the teleport transient every v4 land
+camera sampled; net-re section 5.40 ninth pass). Deep-water CP01 rows keep the
+fast capture because float physics pins the pose (D-INF-3). The final
+CP01/CP12 anchors are `cp01-water-oblique-retail`,
 `cp12-yard-road-retail`, and `cp12-yard-tanks-retail`; rejected unregistered
 context frames are not substitutes for these fixtures.
 
-The current 2026-08-20 max-quality publication contains
-[all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-20/README.md),
+The current 2026-08-22 settled max-quality publication contains
+[all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md),
 captured from frozen source
-`58ea3e5ff61b9aef5841a8601b7d9b86817ebde1` (master after the 2026-08-20
-render-fix trio: the render-slot entity ground shadows #523, vertex-rate
-model-LGHT lighting with coronas #524, and the sun veil/exposure/celestial
-axis-map fixes #525). The fixture index links every
+`269c1c8e727a16074f13e7b2dfdc4ba9ff3af42c` (the viewmodel-alignment PR #562
+branch commit — the counter-gated first-person clip advance and the bone-exact
+one-rig viewmodel placement, D-INF-14 — kept an ancestor of master by that
+PR's merge commit). The fixture index links every
 side-by-side, overlay, difference image, comparison manifest, and OpenNova
 variant manifest, retail registration, and sanitized staging record. Every row
-uses fixture catalog v4,
-stage/restore v3 (tool 3.0.0), a raw capture bundle v4 from bridge 1.4/onHook 0.5.0,
-registered capture v5 (tool 4.0.0), and comparison v6 (tool 4.0.0). Retail
+uses fixture catalog v5,
+stage/restore v3 (tool 3.0.0), a raw capture bundle v4 from bridge 1.5/onHook
+0.6.0 — whose capture-frame fixture-binding witness proves the capture frame
+against the fixture apply (serial, pinned clock, held lease) —
+registered capture v5 (tool 4.1.0, settle floor 1.0 s with the documented
+deep-water exception), and comparison v6 (tool 4.0.0). Retail
 images come from the pre-HUD backbuffer snapshot; the ordinary retail HUD/FPS
 path remains active on screen. Validators reject every legacy schema rather
 than silently upgrading it.
 
-Two superseded sets are retained only in repository history and are not
+Three superseded sets are retained only in repository history and are not
 admissible parity evidence: the 2026-08-17 set (catalog v1, frozen source
 `b476b1ef8acd65d18f7149f744e72d48f086e506`, `object_texdetail=1`,
-process-scoped HUD suppression) and the 2026-08-16/18 set (catalog v2, frozen
-source `2cde75ad029be14d1c6e0dd8b034efc5fef017b5` — a pre-squash PR SHA that is
-not an ancestor of master, which is what prompted this refresh). Catalogs v2 and v3
+process-scoped HUD suppression), the 2026-08-16/18 set (catalog v2, frozen
+source `2cde75ad029be14d1c6e0dd8b034efc5fef017b5` — a pre-squash PR SHA that
+is not an ancestor of master), and the 2026-08-20 set (catalog v4, frozen
+source `58ea3e5ff61b9aef5841a8601b7d9b86817ebde1` — every land capture was
+taken the same frame as its fixture apply, so the cameras sample the teleport
+transient the settled 2026-08-22 refresh removed). Catalogs v2, v3, and v4
 ([`render-fixtures-retail-v2.json`](render-fixtures-retail-v2.json),
-[`render-fixtures-retail-v3.json`](render-fixtures-retail-v3.json)) are
+[`render-fixtures-retail-v3.json`](render-fixtures-retail-v3.json),
+[`render-fixtures-retail-v4.json`](render-fixtures-retail-v4.json)) are
 kept, like v1, as the record of the poses this revision inherits; they are not
-re-shootable — its `camera_bms` values bind its own capture session's physics
-(the [runbook](render-parity-runbook.md) section 3b carries the full
+re-shootable — a catalog's `camera_bms` values bind its own capture session's
+physics (the [runbook](render-parity-runbook.md) section 3b carries the full
 constraint table).
 
 Across the 18 current comparison-v6 manifests, full-frame MAE spans
-`5.564968`–`17.027909`, `world_center` MAE spans
-`2.866836`–`19.097433`, and `viewmodel_arms` MAE spans
-`5.694804`–`26.720878`. These are descriptive deltas, not parity thresholds.
+`5.165582`–`25.923306`, `world_center` MAE spans
+`2.439046`–`15.728697`, and `viewmodel_arms` MAE spans
+`5.036941`–`32.155453`. These are descriptive deltas, not parity thresholds.
 Water reflection/noise, fire particles and spill, vegetation and live actors,
-night exposure, residual CP12 tile-marking contrast, and viewmodel pose/light
-differences remain visible. The `00tra-tire-marks-retail` fixture (added
+night exposure, and residual CP12 tile-marking contrast remain visible, as do
+viewmodel lighting, material response, and animation-phase differences — the
+viewmodel identity and placement themselves are matched (D-INF-14 FIXED; the
+deep-water CP01 rows still show retail's D-INF-3 raised swimming hold, so
+they are not placement evidence). The `00tra-tire-marks-retail` fixture (added
 2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
 tire-mark composition; the corrected celestial axis map (#525) now lays the static tree
-silhouettes through this camera's view, so its full-frame MAE (`17.027909`)
+silhouettes through this camera's view, so its full-frame MAE (`10.191796`)
 measures the open D-TERRAIN-7 low-sun silhouette-density divergence together
 with the tile-composition items. The
 `00tra-armory-lght-retail` fixture (added 2026-08-20 from a debug snapshot)

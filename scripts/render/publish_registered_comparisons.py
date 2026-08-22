@@ -72,7 +72,10 @@ RESIDUALS = """\
   physics pins the pose; D-INF-3).
 - The M16 and bare-arm identity and PLACEMENT are matched (bone-exact and
   counter-gated, D-INF-14 FIXED), but viewmodel lighting, material response,
-  and animated phase remain different.
+  and animated phase remain different. The deep-water CP01 rows additionally
+  show retail's swimming raised-rifle hold (Flags 0x8000) against our hip
+  hold (D-INF-3's first-person consequence), so those pairs are not
+  viewmodel-placement evidence.
 - Ground tire marks and other ordered .til overlay contributions diverge in
   placement and blend (the open D-TERRAIN-7 tile-composition producer gap,
   measured by the tire-marks fixture).
