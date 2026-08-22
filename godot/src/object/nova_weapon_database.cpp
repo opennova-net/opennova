@@ -265,7 +265,7 @@ Dictionary WeaponDatabase::weapon_dict(int index) const {
 		tpos.push_back(w.tpos[k]);
 	}
 	d["pos"] = pos;   // xyz raw file units (/256 = world), then yaw/pitch/roll degrees
-	d["tpos"] = tpos; // the ADS variant [orig: WeaponDef.AltCamOffset @ 0x10C]
+	d["tpos"] = tpos; // the ADS variant (retail: WeaponDef.CamOffsetTpos @ 0x124)
 	d["renderfov"] = w.renderfov;
 	d["flags"] = w.flags;
 	d["flags2"] = w.flags2;

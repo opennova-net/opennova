@@ -284,10 +284,13 @@ float player_view_fov_h_deg(const PlayerViewState &v, int32_t def_flags, float s
 float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 
 // The eased first-person view bias in RAW weapon.def units: `pos` (hip) blended
-// toward `tpos` (sighted) by the scope fraction. The original's camera swaps
-// pos -> tpos instantly once sighted (entity Flags & 2 -> WeaponDef.AltCamOffset
-// @ +0x10C) with the visible ease carried by the interp [orig:
-// Player_UpdateFirstPersonCamera @ 0x4dd380; the interp @ 0x4df36e].
+// toward `tpos` (sighted) by the scope fraction. The original's camera adds the
+// def `pos` (+0xF4) plus the scope interp's bias, which the stepper publishes as
+// interp_current - the hip copy at +0x10C while the interp eases from that copy
+// to the tpos at +0x124 -- zero at hip, tpos - pos at full ADS [orig:
+// Player_UpdateFirstPersonCamera @ 0x4dd380; Player_StepFpViewBiasInterp
+// @ 0x4ddf53..0x4ddfc3; the interp setup @ 0x4df36e]. (The camera's
+// `Flags & 2` leg is the dead/round-end camera, not ADS; unported.)
 void player_view_bias_units(const PlayerViewState &v, const float pos[3],
                             const float tpos[3], float out[3]);
 

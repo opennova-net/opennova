@@ -5420,6 +5420,148 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    the narrow-aspect drop *(landed — the seventh pass)*; D-INF-13 (bodies onto the world
    table @ 0x40c770); D-INF-15.
 
+**§5.40, ninth pass (2026-08-22 — the settled-capture protocol; the residual refuted).** Four
+movements:
+
+1. **A settled retail frame is registrable now.** onhook (opennova-int PR #23, bridge
+   protocol 1.5) samples a fixture-binding witness ON the capture frame — the last exact
+   apply's frame serial/QPC, whether the (now 7200-frame) TOD advance lease was still held,
+   and the live clock against the requested fixed24 — and `register_retail_capture.py`
+   (4.1.0) replaces the `<= 120 frames` gap rule with that witness plus a
+   `--min-settle-seconds` floor (default 1.0 s); `retail_capture_driver.py` waits
+   `--settle-seconds` (default 4.0 s) between apply and capture on one connection.
+   Witnessed live under the staged cfg (the retained bundles): courtyard +360 frames /
+   4.040 s after the apply, fire-barrel-east +237 frames / 4.083 s — lease held, raw
+   0x0F000000, advance 0 on both capture frames — and the settle is DETERMINISTIC: two
+   independent retail processes solve the same settled camera to 4 decimals (courtyard
+   (297.9945, −409.0106, 28.8471), fire-barrel-east (282.9586, −357.6148, 28.8298)). The
+   registrar pins the recovered camera to the catalog, so settled bundles pair with a
+   settled-camera mint — proven end to end by the runbook §3b smoke (mint → register,
+   both bundles accepted). The settle exposes the teleport's full ground snap: courtyard
+   player z 27.810 → 28.004 (+19.4 cm, with +10.8 cm x), fire-barrel z 27 → 27.994.
+2. **The eighth pass's "≈ 2–3 cm settled residual" is refuted — a measurement artifact.**
+   That number was fit against `capture_bundle` settle-run frames (live cfg) whose camera
+   sat 19 cm above the fixture and whose world never registered (identity NCC ≈ 0.02),
+   with a landmark fit on dark masks. Remeasured with registrable frames: our normalized
+   frame's FULL-GUN ROI registers at identity against the PUBLISHED catalog frames
+   (courtyard s=0.999 t=(+0.5,+0.5) px; fire-barrel-east s=1.000 t=(+0.5,+0.5), receiver
+   s=1.001 t=(0,+0.5) — half-res+full-res scale/shift NCC), and retail's OWN
+   settled-vs-transient courtyard pair isolates the whole transient: the gun +8 px lower
+   at s=1.003 (viewmodel-masked, same renderer, NCC 0.965). Cross-engine NCC on the gun
+   INTERIOR is not decisive below ~10 px — the engines' shading response differs and the
+   fire-barrel flame flicker floods the mask — so placement rests on the bone-level oracle
+   (≤ 0.6 mm) plus the full-ROI identity; no witnessed placement term remains. The
+   apples-to-apples settled comparison arrives with the catalog reshoot (settled retail →
+   mint the next revision with the settled cameras → recapture ours against it).
+3. **The aspect mode's cfg source, closed.** game.cfg `display_16x9` IS the
+   `Render_SetAspectRatioMode` index (0=4:3, 1=16:10, 2=16:9, 3=5:4, else native — the key
+   name is a misnomer for value 1): `Config_ParseSettingsLine @ 0x54fd4b` →
+   `g_cfg_display_16x9 @ 0x25507E4` → the 0x34-byte video-settings block copy in
+   `apply_session_settings_to_globals @ 0x551574` → `g_session_aspect_mode @ 0x24D2060`
+   (static −1 = native until a session applies) → `Game_StartMission @ 0x524732`. The
+   capture cfg's `display_16x9 1` therefore selects 16:10 → scaleY 0.96 at 1920×1200 →
+   the catalog's 53.4468°, witnessed end to end (`PlayerInfo_InitPreviewModel @ 0x5600d9`
+   and the Dbuggy viewer `@ 0x5529e5` pass the cfg global directly).
+4. **The counter-gated channel advance, ported (motion timing, not the rest pose).** The
+   FP clip now advances only on the ticks retail's shim advances it:
+   `WeaponFsmEvents::advance_anim` fires from the begin-active shim's else leg when the
+   post-decrement `MountSlot+0` counter is non-zero, the action resolves a clip, and the
+   owner is local `[orig: ActionSlot_ExecuteActionTick @ 0x541a70 →
+   ActionSlot_ExecuteActionNoEffect @ 0x541a4d..0x541a59; the with-effect / begin variants
+   @ 0x5419b8 / @ 0x53f8d2]`; the sim's `anim_advance_ticks` (a gated count, reset by a
+   play) replaces the wall-clock age, and the presenter PINS the parts at
+   `advance × tick_dt` — nothing free-runs the playhead, matching
+   `AnimChannel_AdvancePlayback @ 0x40b140` stepping one 62 Hz tick of clip time per
+   dispatch (ctest `weapon_fsm`: every tick of an idle reseed cycle steps except the one
+   that drains the window, none for non-local owners or clipless actions). Both engines still park
+   non-looping idles on the last key, so the catalog hold pose is unchanged.
+5. **The reload/left-hand tail, closed by the full-clip bone sweep.** `vm_bone_probe.gd` now
+   poses EVERY frame of every `anim_wpn_idle`/`anim_wpn_reload` variant on BOTH viewmodel
+   parts (synchronously, so the presenter's per-tick pin never interleaves) and
+   `fp_bone_oracle.py --sweep-log` diffs each frame against the retail builders: the M16 rig
+   agrees to **0.0000 u on every bone of every frame** — 16-frame idles ×2 and the 99-frame
+   reload ×3 variants, gun and arms — so the reload direction and the finger/left-hand pose
+   are confirmed at the bone level with no motion-footage dependency. En route, the FP
+   matrix-source law was witnessed: retail builds ONE bone array per FP frame from the
+   equipped WEAPON's `fpModel` table + `field_174` channel and submits the gun AND the arms
+   model with the same array `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60 — the
+   build @ 0x4def59 → Entity_BuildBoneWorldMatrices @ 0x4df028, the arms submit reusing
+   bone_matrices @ 0x4df088; skipped under WeaponDef.Flags & 0x80]`. An arms model's own
+   bone table is never a matrix source — IndoArms carries 40 rows whose meshless helper
+   rows (BN38–BN40, 0 skinned vertices) sit up to 1.7 u from the live rig, a harmless
+   export leftover retail also ignores; the port's shared `.bad`-derived part skeletons
+   realize the same one-rig law (both parts pose identically). Whether every OTHER weapon's
+   `gfx1` table agrees with its `.adm` bind the way the M16's does is the standing
+   D-INF-13 equivalence question. D-INF-14 is closed FIXED with the settled catalog
+   reshoot remaining as runbook §8 evidence hygiene.
+
+**§5.40, eighth pass (2026-08-22 — the viewmodel alignment grill).** The question was why
+the registered 2026-08-20 pairs show the M16 viewmodel at fixture-dependent offsets from
+retail (up to ~110 px). Five findings, in the order they were settled:
+
+1. **The def field map, corrected.** The `pos` handler writes `Bone @ +0xF4` AND copies the
+   24-byte `{pos, rot}` to `+0x10C` `[orig: @ 0x5446db..0x544717]`; the `tpos` handler writes
+   `+0x124` `[orig: @ 0x54471f, edi = weapon+0x124 @ 0x544765]`. The scope-camera interp eases
+   between `+0x10C` (the hip copy) and `+0x124` (tpos) `[orig: Player_UpdatePerFrame
+   @ 0x4de480/@ 0x4de4b2; Player_PackInputStateToEntity @ 0x4df567/@ 0x4df5d1/@ 0x4df636]`,
+   and the stepper publishes `g_view_pos_bias/g_view_rot_bias = interp_current −
+   [+0x10C..+0x120]` `[orig: Player_StepFpViewBiasInterp @ 0x4ddf53..0x4ddfc3]` — zero at hip,
+   `tpos − pos` at full ADS — which `Player_UpdateFirstPersonCamera` adds to `Bone(+0xF4)`.
+   So the fifth-pass reading "`tpos` → `AltCamOffset @ 0x10C`" was wrong: `+0x10C` is the
+   `pos` copy. IDB: the `WeaponDef` members are now `CamOffsetHipCopy @ +0x10C`,
+   `CamOffsetTpos @ +0x124`, `renderfov @ +0x148` (typed), comments at the two handlers. The
+   port's `pos + (tpos − pos) · scope_fraction` (`world::player_view_bias_units`) pairs the
+   right fields. The "Path B" gate `Flags & 2 ‖ g_endround_winner_team` `[orig: @ 0x4dd58f]`
+   is the DEAD / round-end camera leg — entity `+0x24` bit 1 is the dead bit
+   `Player_RenderViewModelIfAlive @ 0x4e0145` skips on — and it reads the raw hip copy with no
+   bias, lead or drop; it is not an ADS switch and is unported (alive-only scope).
+2. **The rotation bias is composed, not angle-added.** `Math_BuildFixedPointRotationMatrixYXZ`
+   multiplies the `(bias + Bone.rot)` matrix INTO the already-built view matrix
+   `[orig: @ 0x4dd469 → Matrix_Multiply3x4_FixedPoint @ 0x615805]`, so
+   `offset' = R_view · R_bias · offset` — the rig's `camera × Transform3D(bias)` is the same
+   composition. Pitch sign: positive = nose up, and a `(0, 0, −z)` offset gains `+z·sin θ`
+   forward `[orig: the pitch block @ 0x6154b3..0x615615 through the point transform
+   @ 0x615853]`; Godot's `Basis.from_euler` +X rotation does the same, so the revx02 M16's
+   `0.4°` pitch bias lands identically (5.6 mm forward).
+3. **The FP projection IS the world frustum.** `Player_RenderViewModelIfAlive @ 0x4e0154`
+   pushes `flt_8409E8` as the pass's `viewportScaleY`; the pass calls
+   `Render_SetViewAndProjectionMatrices(viewMatrix, renderfov, 1.0, scaleY)`
+   `[orig: @ 0x4dee5a..0x4dee7f]`, and `Render_SetViewProjectionWithDefaults @ 0x58f6b0` feeds
+   the world pass the same `flt_8409E8`, which `Render_SetAspectRatioMode @ 0x58d870` sets to
+   `target_ratio / (h/w)` (mode 1 = 16:10 → 0.6/0.625 = 0.96 on 1920×1200; modes 0/2/3 =
+   0.75/0.5625/0.625; default 1.0). `vfov = 2·atan(tan(h/2) · H·sY/W)`, `aspect = W/(H·sY)`,
+   so `proj[0][0] = cot(40°)` in both passes and the registered `proj[1][1] = 1.98626` is
+   53.4468°. The rig's pass camera (same viewport, same vfov, KEEP_HEIGHT, pass camera ==
+   gameplay camera — verified live at 2000×1200) is exact.
+4. **The bone builders, transliterated and verified to 0.6 mm.**
+   `scripts/render/fp_bone_oracle.py` is the retail chain: `Math_QuaternionToMatrix3x3
+   @ 0x615a70` (channels are `x,y,z,w` — the reset clip reproduces every bind 3×3 exactly) →
+   `AnimChannel_ComputeBoneMatrices @ 0x410da0` (`A = (bindᵀ · ch)ᵀ`, bind = the `.adm` slot-0
+   `.bad`) → the copy loop `W = S·Aᵀ·S`, `T = S·t` `[orig: @ 0x40c4d1..0x40c582]` → the FK over
+   the model table with ABSOLUTE pivots (row `+36` is the file's `abs` vec3, file `+24` →
+   memory `+36`; `T(−pivot)·W` then `pivot·W_parent + t_parent + T`) `[orig: @ 0x40c5ef..
+   0x40c721]`, padding rows = bone 0 `[orig: @ 0x40c5a1]`. Against a live dump of the runtime
+   rig (`godot/tests/game/vm_bone_probe.gd`; M16 `gfx1` with the revx02 `M4_1ST` clip set) every
+   pivot agrees to ≤ 0.6 mm at the idle hold under the model→render x-flip. The
+   `anim_wpn_idle` clips `m4_1i` / `m4_1i2` are non-looping 16-frame holds (flags 0x0 / 0x2):
+   both engines park on the last frame; mid-clip frames differ by up to 1.2 cm of gun travel,
+   so the capture probe now waits for the hold before freezing.
+5. **What the registered pairs actually show.** A settle experiment against retail (onhook:
+   apply the catalog pose, capture at +0/1/3/6/10 s) proves the published retail frames are
+   transients — captures ≥ 1 s after the apply are pixel-identical to each other, while the
+   gap-2/3 frames differ (courtyard: 7–16 px vertically; fire-barrel: gap 2 precedes the
+   0.87 m ground pop that gap 3 shows). The registrar's 3-frame window samples the teleport's
+   motion-lead / ground-snap transient (the seventh-pass dynamics: one saturated tick, a sign
+   flip, ~50 saturated ticks, ~200 to decay), so the fixture-to-fixture spread is that
+   transient, not placement. A residual against SETTLED retail
+   (≈ 2–3 cm toward the camera, from a depth-aware landmark fit) was reported here from
+   those settle-run frames; the NINTH pass refutes it as a measurement artifact of the
+   unregistrable frames — placement stands verified with no witnessed term remaining. The CP01 water
+   fixtures are not placement evidence: retail's swimming state (`Flags 0x8000`, entered in
+   `Entity_UpdateInfantryPlayerBody @ 0x4b8130..0x4b8261`) raises the rifle above the
+   waterline; the port has no swim state (D-INF-3). Procedure notes live in
+   `docs/render/render-parity-runbook.md` §8.
+
 **§5.40, seventh pass (2026-08-19 — the viewmodel-parity slice).** Three movements:
 
 1. **Velocity lead ported.** The FP motion lead is a per-render-frame damped tracker of the
@@ -5486,8 +5628,9 @@ gun+arms are rendered with that same transform.
 **The two weapon.def fields** (`WeaponDef`, size 296):
 - **`pos`** → `WeaponDef.Bone` (`BoneTransform` @0xF4 = `{float pos[3]; int rot[3]}`) — the **hip**
   first-person offset.
-- **`tpos`** → `WeaponDef.AltCamOffset` (@0x10C) — the **ADS / sighted** offset (the alternate camera
-  position used when aiming down sights). Corroborated by the values: `tpos` pulls the weapon toward
+- **`tpos`** → `WeaponDef.CamOffsetTpos` (@0x124 — the eighth pass corrected the earlier
+  @0x10C reading: @0x10C is the `pos` COPY the scope interp starts from) — the **ADS / sighted**
+  offset (the alternate camera position used when aiming down sights). Corroborated by the values: `tpos` pulls the weapon toward
   the centreline and up vs `pos` (MP5SD `pos 9.07 20.74 -183` vs `tpos -44.98 44.05 -162`).
 
 **Units / scale** [orig: weapon.def `tpos` handler @ 0x54471f; `pos` mirror just above]:
@@ -5504,9 +5647,10 @@ gun+arms are rendered with that same transform.
    `Bone.rot` is added to the look angles (Z·X·Y order, 10.22 fixed `@0x615400`).
 3. Add a **clamped velocity lead** (`g_view_velocity >> 7`, ±1024 xy / ±4096 z) and a **prone Z-drop**
    (`−0x500` when `3·dword_A78394 ≤ 4·dword_A78398`).
-4. **ADS switch**: if `entity Flags & 2` ‖ `dword_24C1970`, *overwrite* `cam_offset` with
-   `AltCamOffset` (the `tpos`) — an **instant** swap in this function (any ADS-in easing is the
-   separate scopeup/scopedown weapon state, see [[project_fp_weapon_fsm]]).
+4. **Dead / round-end leg** (corrected in the eighth pass — this is NOT the ADS switch): if
+   `entity Flags & 2` (the dead bit) ‖ `dword_24C1970` (round-end winner), *overwrite*
+   `cam_offset` with the raw hip copy at +0x10C — no bias, lead or drop. The live ADS rides the
+   interp's `g_view_pos_bias`/`g_view_rot_bias` (the scopeup/scopedown weapon states, §5.62).
 5. Rotate the offset by the view matrix (`Math_FixedPointTransformPoint22` @0x615810, 10.22) and add
    `g_view_pos`; emit `g_view_euler_translation_out`.
 
@@ -8055,7 +8199,7 @@ clipsize && reserve>0. ADS = case 6 (current ∉ {4,7}) → `Player_ToggleWeapon
 @ 0x4df0c0`: gates def Flags&3 + `g_fpCameraInterp.activeFlag`; engage sets
 `g_scopeEngaged @ 0x82CE94` (the §5.41 `g_weaponScopeActive` mirror settles later),
 seat-flag C2S 0x1D/169, camera interp (15 steps; 7 for `Field0C & 0x200`) toward
-`AltCamOffset` (the §5.40 tpos), `WeaponSlot_TryQueueScopeUp @ 0x53f050` (ex
+`CamOffsetTpos` (+0x124, the §5.40 tpos), `WeaponSlot_TryQueueScopeUp @ 0x53f050` (ex
 "TryQueueReload" — queues 9, phase-gated {0,4}); disengage mirrors down
 (`..ScopeDown @ 0x53f080`, ex "TryQueueUnload" — queues 10), FOV back to 80.0; the
 zoom FOV (Flags&2): `g_cameraFovDeg @ 0x26C6848 = 80.0 / Player_GetClampedWeaponElevation`
@@ -8359,7 +8503,7 @@ aliased onto Underwater's 0x4 — replaced with the full two-dword table
   (entity Flags 0xA000), on mounts with parentSlot 2/5, un-scoping a ForceScoped
   weapon (`0x20000000 && g_weaponScopeActive @ 0x4df12d`), or NVG-blocked Inset
   weapons (flags2 0x200 + `g_NVGActive`).
-- The ease is `CNetPlayerInterp_Setup` between the def POS (`AltCamOffset` + 0x10C)
+- The ease is `CNetPlayerInterp_Setup` between the def POS copy (`CamOffsetHipCopy` +0x10C)
   and TPOS (+0x124): **15 steps, or 7 for Inset weapons** (`Def->Field0C & 0x200`
   `@ 0x4df1d2/@ 0x4df33f`), and **1 step on the hipfire-return leg**
   (`g_scopeHipfire @ 0x82CE98`, set 1 on disengage `@ 0x4df212`, 0 on engage

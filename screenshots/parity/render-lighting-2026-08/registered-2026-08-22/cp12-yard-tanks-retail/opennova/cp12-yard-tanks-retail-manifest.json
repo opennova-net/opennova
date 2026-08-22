@@ -1,0 +1,232 @@
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "cp12-yard-tanks-retail-m1260-beauty",
+			"png_path": "cp12-yard-tanks-retail-m1260-beauty.png",
+			"png_sha256": "a816150b2a61bb1147a8bb68113d13b6beea8fb070acf42e49907e2a9f312630",
+			"source_state_sha256": "af671ce6f97d898e6a6bff77efb858bf24c30ade03b902a317054eaa7a29c52f",
+			"state_path": "cp12-yard-tanks-retail-m1260-beauty.state.json",
+			"state_sha256": "9a6fb2514273f474afaf4d63db2a502a32c083c6b2e516b6284ac7cf850509eb",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-yard-tanks-retail-m1260-shadows_off",
+			"png_path": "cp12-yard-tanks-retail-m1260-shadows_off.png",
+			"png_sha256": "da6f8f84b4db12dd971a01ce5e5ab7789d2bd50b253fc9f78cb2a5091354251c",
+			"source_state_sha256": "f2cbd88468f08b57ba651bc39d8eafe23836473783ec9b27e548e2c8fa35c19d",
+			"state_path": "cp12-yard-tanks-retail-m1260-shadows_off.state.json",
+			"state_sha256": "b61cbfa9158f894aba55b096f32a80edc5f7453a7cf92a434e43bda479d5d42f",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-yard-tanks-retail-m1260-lighting_only",
+			"png_path": "cp12-yard-tanks-retail-m1260-lighting_only.png",
+			"png_sha256": "e0e3168587e6521f4ab0af43d5cb6f5caefafb3019f53d09342edbcacaf9c671",
+			"source_state_sha256": "8d1ec496acaf6f212bb9062423c4fe4ea50caa70248d76b16e934da57d8d3fab",
+			"state_path": "cp12-yard-tanks-retail-m1260-lighting_only.state.json",
+			"state_sha256": "32c72d2a33ff46a506049f8947acc9251d6d885db337d38e80d81cccfb64476b",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-yard-tanks-retail-m1260-unshaded",
+			"png_path": "cp12-yard-tanks-retail-m1260-unshaded.png",
+			"png_sha256": "12d8ff8f85082195aa0ccaf77299607cee6b5cb37ed2bc3334ae6b133db2f127",
+			"source_state_sha256": "dd584ec9bf3bb4104ce1f4381ec88e41545dbbcc9cf073fc072f93257d3b2fb7",
+			"state_path": "cp12-yard-tanks-retail-m1260-unshaded.state.json",
+			"state_sha256": "93a35f59cd68177eb5dcd3f9c23007e6e34abb3e3a6c0e381228eb3dd5634da6",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "cp12-yard-tanks-retail-m1260-directional_shadow_atlas",
+			"png_path": "cp12-yard-tanks-retail-m1260-directional_shadow_atlas.png",
+			"png_sha256": "df72648a940407ac031640febcd5a5db161411c83ce579c145d9372dd00d47bb",
+			"source_state_sha256": "90dbd6e35daf0b808464e71a98054d664bfbd4ba479c58d3fce4ba0efa708d2e",
+			"state_path": "cp12-yard-tanks-retail-m1260-directional_shadow_atlas.state.json",
+			"state_sha256": "ee2366fd5ec20ee77b2a6fc46dd69fa065a74fce6640ef04d5332f1e0cae57d7",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				-0.0000000437113882867379,
+				0.0,
+				1.0
+			],
+			[
+				0.0871557369828224,
+				0.99619472026825,
+				0.00000000380969833457812
+			],
+			[
+				-0.99619472026825,
+				0.0871557369828224,
+				-0.0000000435450537850102
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": -5.0,
+			"position": [
+				-430.042712547074,
+				1539.60729980469,
+				62.1063239544474
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 90.0
+		},
+		"camera_position_godot": [
+			-430.042724609375,
+			62.1063232421875,
+			-1539.60729980469
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				-429.856048583984,
+				1539.60729980469,
+				61.3899993896484
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": -5.0,
+				"position": [
+					-429.856048583984,
+					1539.60729980469,
+					61.3899993896484
+				],
+				"yaw_deg": 90.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": -5.0,
+			"position": [
+				-430.042712547074,
+				1539.60729980469,
+				62.1063239544474
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 90.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"tank_materials",
+			"night_sky",
+			"directional_shadow_context"
+		],
+		"id": "cp12-yard-tanks-retail",
+		"minutes_of_day": [
+			1260.0
+		],
+		"mission": "CP12.bms",
+		"retail_player_bms": {
+			"applied": [
+				-429.856046,
+				1539.607326,
+				61.39
+			],
+			"derivation": "APPLY_POSE request kept verbatim from the previous revision; camera_bms recalibrated from this revision's registered inverse view matrix",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "CP12.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "24d498c38f694bcddecfe71567f64a5c12d7164f3566554fc5cde66e42216459",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "8009f4fff847bc0092d4404fafd321fb7dedd777ceaa6eb55a4ddfd159e0e577",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "269c1c8e727a16074f13e7b2dfdc4ba9ff3af42c"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}

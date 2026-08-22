@@ -6,6 +6,9 @@ extends RefCounted
 ## decodes them immediately so owners consume a typed contract (ADR 0017). Within a
 ## record the observable order is clip start, ACTION begin leg, ACTION end leg. The
 ## production-tick position keeps delayed 3D audio spatially faithful during catch-up.
+## Ticks since the production tick — the catch-up pre-age for the sound/effect
+## legs (a delayed particle resumes at its source age). The FP CLIP is not posed
+## from this: the sim's anim_advance_ticks carries the gated channel position.
 var age_ticks := 0
 var world_position := Vector3.ZERO
 var anim_key := ""

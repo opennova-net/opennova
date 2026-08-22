@@ -1672,14 +1672,14 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var host_weapon_before: Dictionary = host.get_local_player_weapon_state()
 	var host_fired_before := int(host_weapon_before.get("fired_serial", 0))
 	# The viewmodel clip channel is SEPARATE from the fire channel: the first-person
-	# parts are re-posed every tick from (anim_key, anim_variant, anim_age_ticks) and
+	# parts are re-posed every tick from (anim_key, anim_variant, anim_advance_ticks) and
 	# a play event bumps play_serial without necessarily bumping fired_serial
 	# [play write site: Simulation weapon_fsm_tick play_anim leg]. A remote shot
 	# that perturbs any of these makes the host's own gun re-scrub its clip.
 	var host_play_before := int(host_weapon_before.get("play_serial", 0))
 	var host_anim_key_before := String(host_weapon_before.get("anim_key", ""))
 	var host_anim_variant_before := int(host_weapon_before.get("anim_variant", 0))
-	var host_anim_age_before := int(host_weapon_before.get("anim_age_ticks", 0))
+	var host_anim_advance_before := int(host_weapon_before.get("anim_advance_ticks", 0))
 	var joiner_play_before := int(
 			joiner.get_local_player_weapon_state().get("play_serial", 0))
 	var joiner_wire_handle := joiner.get_joiner_self_handle()
@@ -1724,14 +1724,15 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 			"the joiner's shot does not re-key the host's viewmodel clip")
 	assert_eq(int(host_weapon_after.get("anim_variant", 0)), host_anim_variant_before,
 			"the joiner's shot does not consume a variant from the host's clip ring")
-	# anim_age_ticks is the playhead the first-person parts are posed at every tick.
-	# It must keep advancing monotonically with the host's own clock; a remote shot
-	# that re-stamps weapon_anim_tick_ drops it back toward zero (re-scrubbing the
-	# clip), and an unsigned wrap sends it huge (clamping a one-shot to its tail).
-	var host_anim_age_after := int(host_weapon_after.get("anim_age_ticks", 0))
-	assert_gte(host_anim_age_after, host_anim_age_before,
+	# anim_advance_ticks is the playhead the first-person parts are posed at every
+	# tick (the counter-gated channel position). It must keep advancing with the
+	# host's own pump; a remote shot that resets the advance count drops it back
+	# toward zero (re-scrubbing the clip), and an unsigned wrap sends it huge
+	# (clamping a one-shot to its tail).
+	var host_anim_advance_after := int(host_weapon_after.get("anim_advance_ticks", 0))
+	assert_gte(host_anim_advance_after, host_anim_advance_before,
 			"the host's viewmodel playhead never rewinds when a remote player fires")
-	assert_lt(host_anim_age_after - host_anim_age_before, 1000,
+	assert_lt(host_anim_advance_after - host_anim_advance_before, 1000,
 			"the host's viewmodel playhead advances by its own elapsed ticks, not a wrap")
 	assert_gt(int(joiner.get_local_player_weapon_state().get(
 			"play_serial", 0)), joiner_play_before,

@@ -28,8 +28,8 @@ tracked files. The values below are the authoritative capture machine's.
 
 | Parameter | Value |
 |---|---|
-| Publication catalog | `docs/render/render-fixtures-retail-v4.json` |
-| Catalog SHA-256 | `e230836ea42fe563e24d16eec3a0d95137bb3c7138c711a9e04b8cc4a30fd1b1` |
+| Publication catalog | `docs/render/render-fixtures-retail-v5.json` |
+| Catalog SHA-256 | `d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e` |
 | Fixtures | 18 (`00TRa` x7, `CP01` x6, `CP04` x1, `CP12` x3, `03TR` x1) |
 | OpenNova capture size | 2000x1200, vertical FOV 53.4468 |
 | Retail backbuffer | 1920x1200 (one horizontal bicubic squeeze at comparison time) |
@@ -157,7 +157,7 @@ if (git status --porcelain) { throw "capture worktree is not source-frozen" }
 
 $env:NOVA_EVIDENCE_SOURCE_COMMIT = $sourceCommit
 $env:NOVA_GDEXTENSION_BINARY     = (Resolve-Path "godot\bin\libopennova.windows.template_debug.x86_64.dll").Path
-$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v4.json"
+$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../docs/render/render-fixtures-retail-v5.json"
 $env:NOVA_RENDER_CAPTURE_MODE    = "hud_hidden"
 $env:NOVA_MISSION_RESOURCE_DIR   = "<loose .bms corpus>"
 $env:NOVA_RUNTIME_RESOURCE_DIR   = "<retail install>"
@@ -320,7 +320,7 @@ per-fixture `retail-stage.json`:
 
 ```powershell
 uv run python scripts/render/register_retail_capture.py `
-  --catalog docs/render/render-fixtures-retail-v4.json `
+  --catalog docs/render/render-fixtures-retail-v5.json `
   --fixture-id <fixture-id> `
   --raw-state       .scratch\retail\raw\<fixture-id>\retail.state.json `
   --raw-image       .scratch\retail\raw\<fixture-id>\retail.png `
@@ -344,7 +344,10 @@ Write `registered.json` **into the bundle directory**. Its
 relative to the record's own directory, so a registration parked elsewhere
 cannot find its own frame.
 
-Pass the same `onhook-mcp.exe` that produced the bundle. Its hash is recorded as
+`--min-settle-seconds` (default 1.0) is the settle floor the bundle's
+`fixture_binding` witness must clear; pass 0 explicitly only for bundles that
+must capture inside the transient (deep-water rows) and say so in the session
+record. Pass the same `onhook-mcp.exe` that produced the bundle. Its hash is recorded as
 build provenance; substituting a different build silently relabels the evidence.
 
 Restore immediately after the last registration, and verify the original hash:
@@ -367,7 +370,8 @@ simultaneously satisfiable by the session that minted them:
 
 | Check | Where | Tolerance |
 |---|---|---|
-| capture frame follows fixture application | `register_retail_capture.py` | <= 120 frames |
+| capture frame witnesses the exact apply, clock pinned | `register_retail_capture.py` | hook fixture_binding witness |
+| retail settled after the apply | `register_retail_capture.py` | >= 1.0 s (`--min-settle-seconds`) |
 | applied player position == `retail_player_bms.applied` | `register_retail_capture.py` | 1e-5 |
 | registered camera == `camera_bms` | `build_retail_side_by_side.py` | 0.05 per axis |
 
@@ -390,10 +394,13 @@ above); a stale build may simply not expose `onhook_capture_retail_reference`
 stage command) before any capture.
 
 **Capture.** `scripts/render/retail_capture_driver.py` does the whole retail
-leg: it issues the fixture apply and the reference capture back-to-back on one
-MCP connection (3-5 frames apart, against the registrar's 120-frame limit),
-solves the camera from each frame's own view matrix, and writes the six bundle
-sidecars. Run it once per mission, with `--fresh-process` so every fixture gets
+leg: it issues the fixture apply and the reference capture on one MCP
+connection with a `--settle-seconds` wait between them (default 4.0 s -- the
+teleport's motion lead decays over ~200 ticks and the ground snap needs the
+physics to land; the hook's 7200-frame TOD lease keeps the applied clock
+pinned meanwhile, and the capture carries the hook's `fixture_binding`
+witness the registrar requires), solves the camera from each frame's own view
+matrix, and writes the six bundle sidecars. Run it once per mission, with `--fresh-process` so every fixture gets
 its own retail process -- a player already in water is pinned by float/settle
 physics and only the first teleport of a process lands verbatim, and even land
 fixtures drift in an aged process (measured 0.11-0.99 vs 0.003-0.13 fresh).
@@ -405,7 +412,7 @@ ever be re-registered from (section 0). The `--run-root` must be new per sweep
 ```powershell
 uv run python scripts/render/retail_capture_driver.py --no-correct `
   --fresh-process CP01.bms `
-  --catalog docs/render/render-fixtures-retail-v4.json `
+  --catalog docs/render/render-fixtures-retail-v5.json `
   --output C:\evidence\retail-<date> `
   --run-root C:\evidence\retail-<date>\_runs `
   --onhook-mcp <opennova-int>\onhook\onhook-mcp.exe `
@@ -441,7 +448,7 @@ catalog and the new bundles.
 
 ```powershell
 uv run python scripts/render/build_retail_side_by_side.py `
-  --catalog docs/render/render-fixtures-retail-v4.json `
+  --catalog docs/render/render-fixtures-retail-v5.json `
   --fixture-id <fixture-id> `
   --opennova-manifest .scratch\golden\render\fixtures\<fixture-id>\<fixture-id>-manifest.json `
   --retail-bundle .scratch\retail\raw\<fixture-id>\registered.json `
@@ -461,7 +468,7 @@ Then assemble the publication and generate its index:
 
 ```powershell
 uv run python scripts/render/publish_registered_comparisons.py `
-  --catalog docs/render/render-fixtures-retail-v4.json `
+  --catalog docs/render/render-fixtures-retail-v5.json `
   --opennova-root .scratch\golden\render\fixtures `
   --retail-root .scratch\retail\raw `
   --comparison-root .scratch\publication `
@@ -563,6 +570,58 @@ registered fixture. This is how `00tra-tire-marks-retail` (the D-TERRAIN-7
    JSON = 9 x N); the runbook's pinned table (fixture count, catalog sha);
    `docs/render/README.md` and the session record (counts, sha, MAE spans).
 
+## 8. First-person viewmodel evidence: what the pairs can and cannot show
+
+Measured 2026-08-22 (net-re §5.40 eighth and ninth passes); read this before
+judging the gun/arms region of any registered pair.
+
+- **The current publication is SETTLED.** Every land fixture was captured
+  ~4 s after `onhook_apply_render_fixture` with the hook's capture-frame
+  fixture witness proving the applied clock stayed pinned (each
+  `registered.json` records `capture.settle`); fire-barrel-close settles
+  1.2 s (the fire kills a longer stand) and the deep-water CP01 rows keep the
+  fast capture (float physics pins the pose; D-INF-3). The v5 catalog cameras
+  are the deterministic ground-snapped settled poses (courtyard +19.4 cm z
+  with +10.8 cm x over the applied position, fire-barrel +0.99 m z). The
+  RETIRED 2026-08-20 publication was captured 2-3 frames after the apply,
+  inside the teleport transient: retail's own settled-vs-transient courtyard
+  pair isolates what that did to the gun — +8 px lower at s = 1.003
+  (viewmodel-masked, same renderer, NCC 0.965); its fixture-to-fixture gun
+  spread was that transient, not placement.
+- **Our gun registers at identity against the retired 2026-08-20 frames.** Half-res +
+  full-res scale/shift NCC of our normalized frame's full-gun ROI against the
+  published retail frames lands at s = 0.999-1.000, t within 0.5 px
+  (courtyard, fire-barrel-east). Cross-engine NCC on the gun INTERIOR cannot
+  resolve below ~10 px — the engines' shading response differs (the
+  qualitative-metrics stance) and animated light like the fire barrel floods a
+  viewmodel mask — so sub-10-px placement claims must come from the bone-level
+  oracle, never a pixel fit. The earlier "~2-3 cm toward the camera against
+  settled retail" is REFUTED (ninth pass): it was fit against unregistrable
+  settle-run frames whose camera sat 19 cm above the fixture.
+- **The OpenNova leg freezes the viewmodel at its idle hold.** The probe waits
+  for every viewmodel part's active clip to reach its end before the pose
+  freeze (`_settle_viewmodel_hold`, reading the body-clip playhead); the
+  revx02 M16 uses the `M4_1ST` clip set whose idles are non-looping 16-frame
+  holds, and mid-clip frames differ by up to 1.2 cm of gun travel. The FP clip
+  advance is counter-gated exactly as retail's pump (ninth pass) — the hold
+  pose is unchanged.
+- **What is verified exact.** Root offset (`pos`/`tpos`, the 0.4 deg pitch
+  bias), the pass projection (the FP pass shares the world's `flt_8409E8`
+  Y-scale, so both frusta are 80 x 53.4468 deg; the cfg chain is game.cfg
+  `display_16x9` -> `g_session_aspect_mode @0x24D2060` -> mode 1 = 16:10 ->
+  scaleY 0.96 at 1920x1200), the full-clip bone sweep (every frame of every
+  idle/reload variant on BOTH parts at 0.0000 u -- reload direction and the
+  left hand confirmed, `fp_bone_oracle.py --sweep-log`; the arms are drawn
+  with the WEAPON rig's matrices, never their own table), and the bone FK to
+  <= 0.6 mm:
+  `scripts/render/fp_bone_oracle.py` (the retail builders) against the live rig
+  dump from `godot/tests/game/vm_bone_probe.gd` (run with `NOVA_RESOURCE_DIR`,
+  `NOVA_MISSION_BMS`, `NOVA_MISSION_PATH` = the loose JOX `.bms`,
+  `NOVA_EXPANSION=revx02`; pull the `.3di`/`.bad` inputs from the mount with
+  `pyopennova.vfs_ffi`).
+- **CP01 water fixtures are not placement evidence**: retail's swim state
+  raises the rifle above the waterline, the port has no swim state (D-INF-3).
+
 ## Failure triage
 
 | Symptom | Cause and fix |
@@ -578,13 +637,17 @@ registered fixture. This is how `00tra-tire-marks-retail` (the D-TERRAIN-7
 | `claude mcp list` says Connected but tools fetch failed | The server is up but its tool list was rejected; the capture tools are unavailable. Fix the server, do not proceed. |
 | `onhook_capture_retail_reference` missing from the tool list | The deployed onHook predates the frame-correlated capture tooling. `onhook_capture_bundle` is not a substitute -- registration needs the v4 presentation proof. Rebuild. |
 | `fixture application position does not match catalog` | The applied pose was corrected to chase the camera. Registration pins it at 1e-5; recapture with `--no-correct` and mint a catalog revision. |
-| `retail capture is more than 120 frames after fixture application` | Apply and capture were issued separately. Use `retail_capture_driver.py`, which pairs them on one connection. |
+| `retail sidecar has no capture-frame fixture witness` | The deployed onHook predates bridge protocol 1.5. Rebuild and redeploy the proxy/MCP pair. |
+| `retail capture settled ... under the ... registration floor` | The capture was taken back-to-back with the apply (or `--settle-seconds` too small). Recapture with the driver's settle wait, or lower `--min-settle-seconds` deliberately (deep-water rows, which must capture within ~50 ms). |
+| `retail time of day was not pinned on the capture frame` | The TOD lease expired or was cancelled before the capture (a >50 s wait, or a second apply raced it). Recapture; the apply and capture must share one driver run. |
 | `onhook_host_lan` times out with an empty log | The run's `output_dir` was reused. The hook log is create-new; give every run its own directory. |
 | Water frames come out submerged | The player is pinned in a swim state. Capture that fixture in a dedicated process (`--fresh-process`). |
 | Sheets pair but content differs structurally | Check `mission.expansion` in the OpenNova manifest against retail's `/exp`. A `jox01` OpenNova frame against a `revx02` retail frame is not a comparison. |
 | Registration rejects the mission | The loose `.bms` under `NOVA_MISSION_RESOURCE_DIR` does not hash to the catalog value. Repoint at the correct corpus. |
 | Every command in the shell is refused | The persistent shell was `cd`-ed into the shared checkout. Re-enter the current worktree to unwedge it. |
-| Deep-water pose drifts before capture | The player sinks then buoys. Re-apply the pose and capture within about 50 ms. |
+| Deep-water pose drifts before capture | The player sinks then buoys. Re-apply the pose and capture within about 50 ms (`--settle-seconds 0`, register with `--min-settle-seconds 0`). |
+| Solved camera lands at the mission spawn or hundreds of units away after a settle | The player DIED during the settle (hazard fixtures: fire-barrel-close kills in ~2 s of standing in the fire) or a fresh process's AAS deploy displaced them once. Shorten `--settle-seconds` (1.2 s still clears the registrar floor) or retry; a surviving settle is deterministic. |
+| The live game window shows the spawn/deploy menu during captures | Expected on AAS missions: the reference snapshot is taken at the pre-HUD boundary, before retail draws that UI, so the evidence PNG is the clean world view. Judge frames by the solved camera, never by the monitor. |
 | AAS mission sits on a control-point overlay | Focus the window owned by the exact PID and press SPACE once before posing. `00TRa` (training) has no overlay. |
 
 ## Never

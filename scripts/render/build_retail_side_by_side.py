@@ -3,7 +3,7 @@
 Example:
 
 uv run python scripts/render/build_retail_side_by_side.py \
-  --catalog docs/render/render-fixtures-retail-v4.json \
+  --catalog docs/render/render-fixtures-retail-v5.json \
   --fixture-id FIXTURE --opennova-manifest OPENNOVA-MANIFEST.json \
   --retail-bundle REGISTERED.json --output-dir OUTPUT \
   --opennova-caption "HUD hidden, bare arms, M16 Burst, frozen" \
@@ -51,6 +51,9 @@ except ModuleNotFoundError:  # Direct ``python scripts/render/...`` execution.
 
 TOOL_NAME = "build_retail_side_by_side"
 TOOL_VERSION = "4.0.0"
+# register_retail_capture versions this builder accepts. 4.1.0 is the settled
+# capture-frame-witness registrar; the transient 4.0.0 publication is retired.
+REGISTRAR_VERSIONS = ("4.1.0",)
 OPENNOVA_SIZE = (2000, 1200)
 RETAIL_SIZE = (1920, 1200)
 HEADER_HEIGHT = 72
@@ -588,16 +591,22 @@ def _validate_raw_evidence(retail: dict[str, Any]) -> dict[str, Any]:
     if source_pid <= 0 or not isinstance(instance_id, str) \
             or not instance_id.startswith(f"{source_pid}-"):
         raise EvidenceError("retail raw evidence source identity is mismatched")
-    if type(raw.get("bridge_version_major")) is not int \
-            or raw["bridge_version_major"] != 1 \
-            or type(raw.get("bridge_version_minor")) is not int \
-            or raw["bridge_version_minor"] != 4 \
-            or type(raw.get("hook_version")) is not str \
-            or raw["hook_version"] != "0.5.0" \
-            or raw.get("capture_bundle_supported") is not True:
+    # (1, 5, "0.6.0") produces settled captures carrying the fixture-binding
+    # witness; the transient 2026-08-20 producer pair (1, 4, "0.5.0") is
+    # retired with its publication.
+    producer = (
+        raw.get("bridge_version_major"),
+        raw.get("bridge_version_minor"),
+        raw.get("hook_version"),
+    )
+    if not any(
+        type(producer[0]) is int and type(producer[1]) is int
+        and type(producer[2]) is str and producer == known
+        for known in ((1, 5, "0.6.0"),)
+    ) or raw.get("capture_bundle_supported") is not True:
         raise EvidenceError(
-            "retail raw evidence producer version must be bridge 1.4 and "
-            "hook 0.5.0 with capture-bundle support"
+            "retail raw evidence producer version must be bridge 1.5 and "
+            "hook 0.6.0, with capture-bundle support"
         )
     return raw
 
@@ -721,10 +730,15 @@ def validate_registered_inputs(
         )
 
     retail = _load_json(retail_bundle_path, "registered retail bundle")
+    # 4.1.0 registers settled captures proven by the hook's capture-frame
+    # witness; the 2026-08-20 frame-gap publication (4.0.0) is retired.
     if retail.get("schema") != "opennova.registered-retail-capture.v5" \
-            or not retail_contract._same_typed_value(
-                retail.get("tool"),
-                {"name": "register_retail_capture", "version": "4.0.0"},
+            or not any(
+                retail_contract._same_typed_value(
+                    retail.get("tool"),
+                    {"name": "register_retail_capture", "version": version},
+                )
+                for version in REGISTRAR_VERSIONS
             ):
         raise EvidenceError("retail input is not a registered capture bundle")
     if retail.get("catalog_sha256") != catalog_sha:

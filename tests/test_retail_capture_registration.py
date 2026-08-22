@@ -294,9 +294,9 @@ def _inputs(tmp_path: Path) -> dict[str, Path | str]:
             "pid": 1234,
             "process_start_time": str(int("ABC", 16)),
             "executable": "Jointops.exe",
-            "hook_version": "0.5.0",
+            "hook_version": "0.6.0",
             "bridge_version_major": 1,
-            "bridge_version_minor": 4,
+            "bridge_version_minor": 5,
             "pre_overlay": True,
             "frame_correlated": True,
         },
@@ -411,6 +411,31 @@ def _inputs(tmp_path: Path) -> dict[str, Path | str]:
                 "executed_unmodified": True,
             },
         },
+        # The hook's capture-frame witness (bridge protocol 1.5): the apply
+        # at frame 40 / qpc 8990, the clock pinned at 15:00 (54000 s ->
+        # 15 << 24), and a 10 Hz QPC so the 11-tick gap is a 1.1 s settle.
+        "fixture_binding": {
+            "source": "capture_frame_fixture_witness.v1",
+            "applied": True,
+            "qpc_frequency": "10",
+            "apply_frame_serial": "40",
+            "apply_frame_qpc": "8990",
+            "frames_after_apply": 2,
+            "seconds_after_apply": 1.1,
+            "lease": {
+                "started": True,
+                "deadline_frame_serial": "7240",
+                "held_on_capture_frame": True,
+            },
+            "time_of_day": {
+                "requested": True,
+                "requested_fixed24": 251658240,
+                "witnessed": True,
+                "current_fixed24": 251658240,
+                "advance_fixed24": 0,
+                "pinned": True,
+            },
+        },
     }
     state_path = tmp_path / "retail.state.json"
     state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -489,6 +514,7 @@ def _inputs(tmp_path: Path) -> dict[str, Path | str]:
 def _run(
     inputs: dict[str, Path | str],
     confirm_presentation: bool = True,
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     game_dir = Path(inputs["game_dir"])
     retail_executable = Path(
@@ -523,6 +549,7 @@ def _run(
             "--opennova-source-commit", str(inputs["source_commit"]),
             "--output", str(inputs["output"]),
             *confirmation,
+            *extra_args,
         ],
         cwd=ROOT,
         capture_output=True,
@@ -550,7 +577,18 @@ def test_preflight_registers_only_vfs_and_frame_correlated_evidence(
     assert result.returncode == 0, result.stdout + result.stderr
     registration = json.loads(Path(inputs["output"]).read_text(encoding="utf-8"))
     assert registration["schema"] == "opennova.registered-retail-capture.v5"
-    assert registration["tool"]["version"] == "4.0.0"
+    assert registration["tool"]["version"] == "4.1.0"
+    settle = registration["capture"]["settle"]
+    assert settle["witness"] == "capture_frame_fixture_witness.v1"
+    assert settle["apply_frame_serial"] == "40"
+    assert settle["frames_after_apply"] == 2
+    assert abs(settle["seconds_after_apply"] - 1.1) < 1e-9
+    assert settle["min_settle_seconds"] == 1.0
+    assert settle["time_of_day_fixed24"] == 251658240
+    assert settle["time_of_day_pinned"] is True
+    assert settle["advance_lease"] == {
+        "started": True, "held_on_capture_frame": True,
+    }
     assert registration["fixture_id"] == "fixture-retail"
     assert registration["mission"]["verified"] is True
     assert registration["mission"]["verification"] == [
@@ -664,8 +702,8 @@ def test_preflight_registers_only_vfs_and_frame_correlated_evidence(
     assert registration["raw_evidence"]["capture_result_sha256"] \
         == _sha256(Path(inputs["capture_result"]))
     assert registration["raw_evidence"]["bridge_version_major"] == 1
-    assert registration["raw_evidence"]["bridge_version_minor"] == 4
-    assert registration["raw_evidence"]["hook_version"] == "0.5.0"
+    assert registration["raw_evidence"]["bridge_version_minor"] == 5
+    assert registration["raw_evidence"]["hook_version"] == "0.6.0"
 
 
 def test_preflight_rejects_v3_capture_result_schema(tmp_path: Path) -> None:
@@ -688,12 +726,12 @@ def test_preflight_rejects_v3_capture_result_schema(tmp_path: Path) -> None:
         ("bridge_version_major", 0),
         ("bridge_version_major", 2),
         ("bridge_version_major", "1"),
-        ("bridge_version_minor", 3),
-        ("bridge_version_minor", 5),
-        ("bridge_version_minor", "4"),
-        ("hook_version", "0.4.0"),
-        ("hook_version", "0.5.1"),
-        ("hook_version", ["0.5.0"]),
+        ("bridge_version_minor", 4),
+        ("bridge_version_minor", 6),
+        ("bridge_version_minor", "5"),
+        ("hook_version", "0.5.0"),
+        ("hook_version", "0.6.1"),
+        ("hook_version", ["0.6.0"]),
     ],
 )
 def test_preflight_requires_the_v4_capture_producer_version(
@@ -1258,30 +1296,132 @@ def test_preflight_rejects_capture_on_the_fixture_application_frame(
     assert not Path(inputs["output"]).exists()
 
 
-def test_preflight_rejects_capture_too_many_frames_after_application(
-    tmp_path: Path,
+def _rewrite_state(
+    inputs: dict[str, Path | str], mutate
 ) -> None:
-    inputs = _inputs(tmp_path)
     state_path = Path(inputs["state"])
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["frame_serial"] = "200"
-    state["frame_qpc"] = "9999"
-    state["d3d_device"]["frame_serial"] = "200"
-    state["d3d_device"]["frame_qpc"] = "9999"
-    state["presentation"]["armed_frame_serial"] = "199"
-    state["presentation"]["armed_frame_qpc"] = "9990"
-    state["presentation"]["target_frame_serial"] = "200"
-    state["presentation"]["target_frame_qpc"] = "10005"
+    mutate(state)
     state_path.write_text(json.dumps(state), encoding="utf-8")
     capture_path = Path(inputs["capture_result"])
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
-    capture["frame_serial"] = "200"
-    capture["frame_qpc"] = "9999"
+    capture["frame_serial"] = state["frame_serial"]
+    capture["frame_qpc"] = state["frame_qpc"]
     capture["state_bytes"] = state_path.stat().st_size
     capture_path.write_text(json.dumps(capture), encoding="utf-8")
+
+
+def test_preflight_accepts_a_long_settled_capture_with_a_pinned_clock(
+    tmp_path: Path,
+) -> None:
+    # 2000 frames and 50 s after the apply is fine when the witness proves
+    # the clock never moved; the old <= 120 frame correlation window is gone.
+    inputs = _inputs(tmp_path)
+
+    def mutate(state: dict) -> None:
+        state["frame_serial"] = "2040"
+        state["frame_qpc"] = "9490"
+        state["d3d_device"]["frame_serial"] = "2040"
+        state["d3d_device"]["frame_qpc"] = "9490"
+        state["presentation"]["armed_frame_serial"] = "2039"
+        state["presentation"]["armed_frame_qpc"] = "9480"
+        state["presentation"]["target_frame_serial"] = "2040"
+        state["presentation"]["target_frame_qpc"] = "9495"
+        state["fixture_binding"]["frames_after_apply"] = 2000
+        state["fixture_binding"]["seconds_after_apply"] = 50.0
+
+    _rewrite_state(inputs, mutate)
+    result = _run(inputs)
+    assert result.returncode == 0, result.stderr
+    registration = json.loads(
+        Path(inputs["output"]).read_text(encoding="utf-8")
+    )
+    assert registration["capture"]["settle"]["frames_after_apply"] == 2000
+    assert registration["capture"]["settle"]["seconds_after_apply"] == 50.0
+
+
+def test_preflight_rejects_capture_under_the_settle_floor(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path)
+
+    def mutate(state: dict) -> None:
+        # 5 QPC ticks at 10 Hz: a 0.5 s settle, the old back-to-back capture.
+        state["frame_qpc"] = "8995"
+        state["d3d_device"]["frame_qpc"] = "8995"
+        state["presentation"]["armed_frame_qpc"] = "8992"
+        state["presentation"]["target_frame_qpc"] = "8999"
+        state["fixture_binding"]["seconds_after_apply"] = 0.5
+
+    _rewrite_state(inputs, mutate)
     result = _run(inputs)
     assert result.returncode != 0
-    assert "more than 120 frames" in result.stderr
+    assert "settled 0.500 s" in result.stderr
+    assert "1.000 s registration floor" in result.stderr
+    assert not Path(inputs["output"]).exists()
+    # The floor is a declared policy: lowering it registers the same capture
+    # and records the floor it was registered under.
+    result = _run(inputs, extra_args=("--min-settle-seconds", "0.25"))
+    assert result.returncode == 0, result.stderr
+    registration = json.loads(
+        Path(inputs["output"]).read_text(encoding="utf-8")
+    )
+    assert registration["capture"]["settle"]["min_settle_seconds"] == 0.25
+    assert registration["capture"]["settle"]["seconds_after_apply"] == 0.5
+
+
+def test_preflight_rejects_sidecar_without_the_capture_frame_witness(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path)
+    _rewrite_state(inputs, lambda state: state.pop("fixture_binding"))
+    result = _run(inputs)
+    assert result.returncode != 0
+    assert "predates bridge protocol 1.5" in result.stderr
+
+
+def test_preflight_rejects_witness_of_a_different_fixture_application(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path)
+
+    def mutate(state: dict) -> None:
+        state["fixture_binding"]["apply_frame_serial"] = "39"
+
+    _rewrite_state(inputs, mutate)
+    result = _run(inputs)
+    assert result.returncode != 0
+    assert "different fixture application" in result.stderr
+
+
+def test_preflight_rejects_a_clock_that_was_not_pinned_on_the_capture_frame(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path)
+
+    def advanced(state: dict) -> None:
+        # The lease expired before the capture: the live advance resumed.
+        state["fixture_binding"]["lease"]["held_on_capture_frame"] = False
+        state["fixture_binding"]["time_of_day"]["advance_fixed24"] = 75
+        state["fixture_binding"]["time_of_day"]["pinned"] = False
+
+    _rewrite_state(inputs, advanced)
+    result = _run(inputs)
+    assert result.returncode != 0
+    assert "time of day was not pinned" in result.stderr
+
+    (tmp_path / "moved").mkdir()
+    inputs = _inputs(tmp_path / "moved")
+
+    def moved(state: dict) -> None:
+        # A pinned flag cannot outrank the raw clock: the registrar derives
+        # the expected fixed24 from the catalog minute itself.
+        state["fixture_binding"]["time_of_day"]["current_fixed24"] = 251658241
+
+    _rewrite_state(inputs, moved)
+    result = _run(inputs)
+    assert result.returncode != 0
+    assert "time of day was not pinned" in result.stderr
 
 
 def test_preflight_rejects_process_start_that_disagrees_with_instance_token(

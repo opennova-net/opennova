@@ -18,8 +18,10 @@ extends RefCounted
 # as degrees -> 32-bit BAM (`* 0x0B60B60` = 2^32/360) [orig: weapon.def 'tpos' handler @0x54471f].
 # The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
 # offset is simply `file_value / 256` — see _viewmodel_offset for the axis map and derivation.
-# The Sighted/ADS path swaps `pos` -> `tpos` (WeaponDef.AltCamOffset @0x10C, read when entity
-# Flags & 2), eased by the sim's scope fraction. The view fields flow from the mounted root's weapon.def
+# The Sighted/ADS path eases `pos` -> `tpos` (the scope interp runs from the hip copy at
+# WeaponDef+0x10C to the tpos at +0x124 and publishes the difference as the view bias
+# [orig: Player_StepFpViewBiasInterp @0x4ddf53..0x4ddfc3]), carried here by the sim's scope
+# fraction. (The `Flags & 2` leg of the camera is the DEAD/round-end camera, not ADS.) The view fields flow from the mounted root's weapon.def
 # (_apply_viewmodel_def <- GameWorld.local_player_viewmodel_def, the fixed default weapon until
 # equipped-weapon resolution lands); the values below are the witnessed JOX WPN_AK47AUTO line,
 # kept as the no-def fallback. (The pre-def constant (10, 0, -201) turned out to be the
@@ -29,7 +31,7 @@ extends RefCounted
 # Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
 # the witnessed WPN_AK47AUTO def line + the current best facing.
 var PLAYER_VIEWMODEL_POS_UNITS := Simulation.viewmodel_fallback_pos_units()
-# The ADS/sighted view offset (weapon.def `tpos` -> WeaponDef.AltCamOffset @0x10C), blended
+# The ADS/sighted view offset (weapon.def `tpos` -> WeaponDef.CamOffsetTpos @0x124), blended
 # in by the sim's scope fraction; JOX AK47AUTO = (-62.33, 29.19, -152.56).
 var PLAYER_VIEWMODEL_TPOS_UNITS := Simulation.viewmodel_fallback_tpos_units()
 # The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is a
@@ -246,8 +248,8 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# S8) — one blended VIEW-FRAME offset per frame; _viewmodel_view_offset maps
 	# the view axes onto Godot camera axes. Harness sim doubles implement the
 	# same seam.
-	# [orig: Player_UpdateFirstPersonCamera @0x4dd380, entity Flags & 2 ->
-	#  AltCamOffset; the interp CNetPlayerInterp_Setup @0x4df36e]
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the interp
+	#  bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C -> +0x124]
 	var sim = _world.get_sim() if _world != null else null
 	var view_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)
 	if sim != null:

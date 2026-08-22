@@ -93,7 +93,7 @@ void Simulation::reset_world() {
 	joiner_bridge_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	local_weapon_.events.clear();
-	local_weapon_.anim_tick = 0;
+	local_weapon_.anim_advance_ticks = 0;
 	local_weapon_.round_sequence = 0;
 	local_weapon_.active = false;
 	local_weapon_.fire_held = false;
@@ -888,7 +888,8 @@ void Simulation::restore_world_baseline() {
 	}
 	if (collision_item_db_.is_valid())
 		resolve_collision_instances(collision_item_db_);
-	local_weapon_.anim_tick = world_->logic_tick;
+	// The FP channel position is a gated advance count, not a clock delta, so a
+	// restored world keeps the held clip pose with no epoch re-stamp.
 	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.

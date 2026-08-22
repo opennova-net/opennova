@@ -433,9 +433,12 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	out["pending_combo"] = local_inventory_.pending_combo;
 	out["anim_key"] = String::utf8(w.anim_key.c_str());
 	out["anim_variant"] = w.anim_variant;
-	const uint32_t anim_age_ticks = world_ && !w.anim_key.empty()
-			? world_->logic_tick - w.anim_tick : 0;
-	out["anim_age_ticks"] = static_cast<int64_t>(anim_age_ticks);
+	// The FP clip channel position: gated per-tick advances since the play, not
+	// wall-clock age — the presenter poses the parts at advance * tick_dt and
+	// nothing free-runs the playhead (retail: the counter-gated
+	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40).
+	out["anim_advance_ticks"] = static_cast<int64_t>(
+			w.anim_key.empty() ? 0u : w.anim_advance_ticks);
 	out["play_serial"] = static_cast<int64_t>(w.play_serial);
 	// The last-started action's audio/effect legs remain useful snapshot diagnostics;
 	// ordered delivery uses drain_local_player_weapon_events().
@@ -661,6 +664,8 @@ Array Simulation::drain_local_player_weapon_events() {
 			local_weapon_.events) {
 		Dictionary row;
 		// Unsigned subtraction intentionally preserves age across logic-tick wrap.
+		// The age pre-ages delayed sound/effect legs only; the FP clip is posed
+		// from the gated anim_advance_ticks, never from this.
 		row["age_ticks"] = static_cast<int64_t>(now - event.tick);
 		// mission (x,y,z) -> Godot (x, z, -y) — the shooter position the
 		// world-side record carries in mission space.
