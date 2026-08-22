@@ -11,6 +11,10 @@
 
 namespace opennova::world {
 
+// Pool-3 marker def type the BMS PARTICLE_EFFECT action (27) selects.
+// [orig: sub_4540E0 @0x4540e0 -- `result[20] == 6088`]
+inline constexpr int32_t kParticleEffectMarkerTypeId = 6088;
+
 class World;
 
 // ----------------------------------------------------------------------------
@@ -136,6 +140,11 @@ public:
     // @0x4351f0 -> Entity_RequestVehicleAttach @0x4364a0. FindBestSeatSlot applies the rules:
     // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
     bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
+
+    // BMS action 27 (PARTICLE_EFFECT): spawn the authored marker emitters whose
+    // wp_number matches `wp_number`. Returns how many fired.
+    // [orig: EventAction_Dispatch case 0x1B @0x4542e0 -> sub_4540E0]
+    int spawn_marker_particle_effects(int32_t wp_number);
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
     // carries ONLY the occupant SSN; the original finds the vehicle via the occupant model's +144
     // hierarchy link. We don't model that link, so the target is the nearest emplacement with a free

@@ -385,6 +385,11 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::ChangeSingleAI:
             cmds.apply_ai_command(static_cast<uint16_t>(a.param1), a.action_sub_type, a.param2, a.param3, a.param4);
             break;
+        case bms::ActionType::ParticleEffectAction:
+            // [orig: case 0x1B @0x4542e0 -> sub_4540E0] param1 selects the authored
+            // 6088 markers by WP_NUMBER (not team -- see the command's comment).
+            cmds.spawn_marker_particle_effects(a.param1);
+            break;
         case bms::ActionType::ChangeGroupAI:
             cmds.apply_group_ai_command(a.param1, a.action_sub_type, a.param2, a.param3, a.param4);
             break;

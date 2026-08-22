@@ -1482,5 +1482,33 @@ int main() {
     test_dangling_zone_ref_neuters_trigger();
     test_bluewin_ends_round();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);
+    // --- BMS action 27, PARTICLE_EFFECT [orig: EventAction_Dispatch case 0x1B
+    // @0x4542e0 -> sub_4540E0]. Selects pool-3 def-type-6088 markers by WP_NUMBER.
+    // The kong banner calls entity[167] a "team", but 00TRg's four 6088 markers carry
+    // no team byte at all while their wp_numbers are 1/2/3/4 -- matching on team would
+    // fire nothing, so this pins the wp_number match specifically.
+    {
+        World pw;
+        pw.registry.configure_pool(3, 8);
+        auto put_marker = [&](int slot, int32_t type_id, int32_t wpn) {
+            world::Entity m;
+            m.item_id = type_id;
+            m.wp_number = wpn;
+            m.alive = true;
+            m.position = {static_cast<float>(10 * slot), 20.0f, 30.0f};
+            pw.registry.spawn_from(3, slot, m);
+        };
+        put_marker(0, 6088, 1);
+        put_marker(1, 6088, 2);
+        put_marker(2, 6088, 2);   // two markers share wp_number 2
+        put_marker(3, 6087, 2);   // right wp_number, WRONG def type
+        put_marker(4, 6088, 0);   // no wp_number
+
+        CHECK(pw.commands.spawn_marker_particle_effects(1) == 1);
+        CHECK(pw.commands.spawn_marker_particle_effects(2) == 2);
+        CHECK(pw.commands.spawn_marker_particle_effects(3) == 0);
+        CHECK(pw.effects.count("particle_effect") == 3);
+    }
+
     return failures ? 1 : 0;
 }

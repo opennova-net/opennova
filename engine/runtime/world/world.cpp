@@ -1168,6 +1168,37 @@ bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, in
     return true;
 }
 
+// BMS action 27, PARTICLE_EFFECT [orig: EventAction_Dispatch case 0x1B @0x4542e0 ->
+// sub_4540E0 @0x4540e0]. Retail walks POOL 3, matches `def type == 6088` and
+// `entity[167] == param1`, and spawns one emitter per match at the entity's position,
+// caching the handle at entity[115].
+//
+// entity[167] is the WP_NUMBER, not a team: the kong banner guesses "team", but
+// 00TRg's four 6088 markers all have NO team byte (0) while their wp_numbers are
+// 1/2/3/4 -- exactly the four params its events 12-15 pass. Matching on team would
+// fire nothing.
+//
+// UNPORTED, declared: the emitter descriptor itself (effect_desc[0..13], the rope-trail
+// style, the Entity_ClearOwnerSessionIfMatches owner callback) and the entity[115]
+// handle cache. We raise one shell effect per match carrying the marker's position and
+// leave the emitter style to the presenter; nothing here invents a particle type.
+int EntityCommands::spawn_marker_particle_effects(int32_t wp_number) {
+    int fired = 0;
+    const size_t capacity = world_.registry.pool_capacity(3);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const Entity *e = world_.registry.get(EntityHandle::make(3, static_cast<int>(slot)));
+        if (e == nullptr) continue;
+        if (e->item_id != kParticleEffectMarkerTypeId) continue; // def type 6088
+        if (e->wp_number != wp_number) continue;
+        world_.effects.push({"particle_effect", static_cast<int32_t>(to_fixed(e->position.x)),
+                             static_cast<int32_t>(to_fixed(e->position.y)),
+                             static_cast<int32_t>(to_fixed(e->position.z)), wp_number,
+                             std::string()});
+        ++fired;
+    }
+    return fired;
+}
+
 int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     // The alert-change subs also stamp the per-group alert record the cat-1
     // triggers read, independent of any AI brains [orig: Entity_HandleAlertCommand
