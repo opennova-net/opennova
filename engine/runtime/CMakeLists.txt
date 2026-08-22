@@ -37,6 +37,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_sort.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/stat_row_format.cpp
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp

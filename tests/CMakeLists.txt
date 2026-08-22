@@ -942,6 +942,16 @@ target_link_libraries(menu_table_sort_test PRIVATE opennova_runtime)
 target_include_directories(menu_table_sort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_table_sort COMMAND menu_table_sort_test)
 
+add_executable(stat_row_format_test hud/stat_row_format_test.cpp)
+target_link_libraries(stat_row_format_test PRIVATE opennova_runtime)
+target_include_directories(stat_row_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME stat_row_format COMMAND stat_row_format_test)
+
+add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
+target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
+target_include_directories(group_render_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME group_render_gate COMMAND group_render_gate_test)
+
 # The menu backdrop movie policy (engine/runtime/menu/menu_video): the
 # witnessed three-slot table, the STARTUP/strips draw gate, and the
 # expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
