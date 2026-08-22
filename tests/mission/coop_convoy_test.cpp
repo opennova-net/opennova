@@ -203,6 +203,13 @@ int main() {
 			pilot_seed.position = hv->position;
 			world.registry.spawn(0, pilot_seed);
 			expect(world.commands.mount(61001, 420), "AI pilot mounts the helo");
+			// The AI PROFILE TYPE, absent for the same reason the traits row is:
+			// a bare engine world loads no .aip, and mission promotion is what
+			// fills it in the live game (mission/promote.cpp). The rotor machine
+			// is selected by it — type 1 picks the HELO twin, and an unresolved
+			// 0 runs NEITHER machine [orig: the class gate `brain+4 ->
+			//  profile+16 == 2` @0x4928C9..0x4928D1 / the `== 1` twin @0x48FA70].
+			if (w::AiEntity *hb = ai.for_handle(helo)) hb->profile.type = 1;
 			// The mission's authored helo route order.
 			expect(world.commands.set_ssn_waypoint(420, 6, 0),
 			       "route 6 lands on the helo");
