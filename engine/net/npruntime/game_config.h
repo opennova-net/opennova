@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <npwire/protocol_message.h>
@@ -119,7 +120,14 @@ struct GameConfig {
 	// may seed the structural values directly. [orig: GameType_CreateDefaultSettings
 	// @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport
 	// @0x530A60 copies row+300..+452]
-	std::array<int32_t, 39> session_status_stat_values{};
+	// Absent selects GameType_CreateDefaultSettings for game_type. A parsed or
+	// explicitly supplied row is present even when every value is zero.
+	std::optional<std::array<int32_t, 39>> session_status_stat_values;
+	// score.ini FIELD rows for the selected game type, in file order. Empty
+	// means the match should use GameType_CreateDefaultSettings' retail schema.
+	// The second byte is preserved rather than normalized because it is emitted
+	// verbatim in the S2C 0x56 end-round board.
+	std::vector<std::pair<uint8_t, uint8_t>> scoreboard_fields;
 
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
 	// sources): the trailing flags dword of the 0x08 block. (`MaxScore`->`g_kill_limit @0x24D2138`

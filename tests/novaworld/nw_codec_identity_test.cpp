@@ -434,8 +434,11 @@ std::vector<Case> build_corpus() {
 		add("player_sync_removal", encode_player_sync_removal(7, true));
 	}
 	{
-		std::vector<PlayerListEntry> players = {{0, 1}, {1, 2}, {2, 2}};
-		add("player_list", encode_player_list(players));
+		PlayerListFrame frame;
+		frame.players = {{0, 1}, {1, 2}, {2, 2}};
+		frame.teams.resize(size_t(frame.team_count) + 1);
+		frame.in_game_count = static_cast<uint8_t>(frame.players.size());
+		add("player_list", encode_player_list(frame));
 	}
 
 	return corpus;

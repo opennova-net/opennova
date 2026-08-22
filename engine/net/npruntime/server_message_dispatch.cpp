@@ -2,6 +2,7 @@
 
 
 #include "npruntime/integrity_challenge_profile.h"
+#include "npruntime/end_round_protocol.h"
 #include <npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
 #include "npruntime/server_spawn.h" // Server_ReservePlayerTeam (0x04/spawn identity)
 #include "npruntime/server_tick.h" // Server_StageHostDisconnect
@@ -364,7 +365,7 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &roster,
                                         const PlayerReplicationState &fallback,
                                         const world::World *world) {
-	std::vector<PlayerListEntry> players;
+	PlayerListFrame frame;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
 		// Rows carry only IN-GAME players — a still-loading joiner (mid world-stream) is
@@ -376,12 +377,42 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 		uint8_t team = 1;
 		if (world != nullptr)
 			if (const world::Entity *e = world->registry.get(c.link.owned_entity)) team = e->team;
-		players.push_back({c.reply.player_slot, team});
+		PlayerListEntry row;
+		row.slot = c.reply.player_slot;
+		row.team = team;
+		if (world != nullptr) {
+			if (const world::MatchPlayer *player =
+					world->match.player(c.link.owned_entity)) {
+				row.score1 = static_cast<uint16_t>(
+						world->match.primary_score(player->stats));
+				row.score2 = static_cast<uint16_t>(
+						player->stats[world::MatchStats::kPoints]);
+			}
+		}
+		frame.players.push_back(row);
 	}
-	std::sort(players.begin(), players.end(),
+	std::sort(frame.players.begin(), frame.players.end(),
 	          [](const PlayerListEntry &a, const PlayerListEntry &b) { return a.slot < b.slot; });
-	if (players.empty()) players.push_back({fallback.player_slot, fallback.team});
-	return encode_player_list(players);
+	if (frame.players.empty()) {
+		PlayerListEntry row;
+		row.slot = fallback.player_slot;
+		row.team = fallback.team;
+		frame.players.push_back(row);
+	}
+	frame.teams.resize(size_t(frame.team_count) + 1);
+	if (world != nullptr) {
+		for (size_t team = 0; team < frame.teams.size(); ++team) {
+			const world::MatchStats &stats =
+					world->match.team_stats(static_cast<uint8_t>(team));
+			frame.teams[team].score1 = static_cast<uint16_t>(
+					world->match.primary_score(stats));
+			frame.teams[team].score2 = static_cast<uint16_t>(
+					stats[world::MatchStats::kPoints]);
+		}
+	}
+	frame.in_game_count = static_cast<uint8_t>(
+			std::min<size_t>(frame.players.size(), 0xFFu));
+	return encode_player_list(frame);
 }
 
 // tag=0x5A WEAPON-LOADOUT-SYNC, built from the joiner's own C2S 0x2F loadout submit.
@@ -1441,6 +1472,27 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				world::entity_detach_from_vehicle(*world, conn.link.owned_entity);
 				break;
 			}
+			case c2s::END_ROUND_STATS_REQUEST: {
+				// Retail serves the already-frozen board to this requester only. The
+				// request is exactly one u16 offset and every response carries at most
+				// 200 stream bytes. [orig: NapiNPServerMsg_0x02B @0x514FE0 ->
+				// NetPacket_WriteReplayStreamChunk @0x506F60]
+				if (world == nullptr || !world->match.result().ready) break;
+				EndRoundStatsRequest request;
+				if (!decode_end_round_stats_request(
+						msg.payload.data(), msg.payload.size(), request)) break;
+				const std::vector<uint8_t> board = encode_end_round_stats(
+						build_end_round_stats(world->match.result()));
+				std::vector<uint8_t> chunk =
+						encode_end_round_stats_chunk(board, request.offset);
+				// NetPacket_WriteReplayStreamChunk returns zero for an offset
+				// beyond the stream and its caller sends only for len > 0.
+				// [orig: NapiNPServerMsg_0x02B @0x514FE0]
+				if (!chunk.empty())
+					replies.push_back(make_protocol_message(
+							s2c::END_ROUND_STATS, std::move(chunk)));
+				break;
+			}
 			case c2s::RTT_CONSUMED: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
 				// [u32 timestamp][u8 echo_flag]. echo_flag != 0 -> bounce S2C 0x57 [u32 ts][u8 0]; the
 				// echo_flag == 0 return leg is server-internal RTT stat + min/max-ping kick (no reply).
@@ -1768,7 +1820,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// @0x429730). The handler reads NO fields from the request, is
 				// authority-gated, and is SKIPPED while g_net_spawn_suspended or
 				// g_spawn_success_gate (round over) is set — our reachable analog of the
-				// latter is world->round_end.ended.
+				// latter is world->match.outcome().ended.
 				// DIVERGENCE (D-NET-176): retail walks the pool's fixed entry count. Our
 				// pool-0 capacity is an OpenNova sizing choice (1024 by default), so the
 				// walk stops at the highest OCCUPIED slot: a slot above that high-water
@@ -1779,7 +1831,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
 						msg.payload.data(), msg.payload.size(), consumed) ||
-				    world->round_end.ended) {
+				    world->match.outcome().ended) {
 					break;
 				}
 				const std::size_t capacity = world->registry.pool_capacity(0);

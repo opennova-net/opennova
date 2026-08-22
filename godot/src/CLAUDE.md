@@ -4,7 +4,7 @@ The Godot layer's native half (ADR 0016/0028/0034 d6): C++ only — the
 GDExtension classes binding `engine/` to Godot. Register new classes in
 `register_types.cpp`. ADR 0035 supersedes ADR 0033's callback-bus design: a
 line here earns its place only as a device leg (marshalling, nodes, servers,
-input, audio, draw-list appliers), the typed bridge from `MissionSession` to
+input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
 Godot's `GameFramePipeline`, a Resource-shaped ONED document surface, or a
 documented seam bridge — format/runtime logic and every witnessed behavior
 belong in `engine/`. Nova formats never touch Godot's resource system

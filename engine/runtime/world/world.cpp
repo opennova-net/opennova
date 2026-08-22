@@ -1482,23 +1482,23 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     sound_emitters.prune(logic_tick);
 }
 
-// Structural translation of Server_ProcessRoundEnd @0x5164f0 at SP altitude.
+// Shared semantic half of Server_ProcessRoundEnd @0x5164f0. The authority
+// transport emits the per-recipient wire transaction from this frozen result.
 void World::process_round_end(int32_t winning_team) {
-    if (round_end.ended) return;          // the double-run guard [orig: @0x516502]
-    round_end.winner_team = winning_team; // [orig: g_round_winning_team @0x516528]
-    // Unmodeled MP score surfaces, in original order: the winner-team scoring pass
-    // (GameEvent_ProcessScoring @0x52f550 per winning-team member @0x516530), the
-    // end-of-round scoreboard block build (Server_BuildEndOfRoundScoreboard @0x508f30
-    // — round_end.winner_team stands for its winner dword @0x24c1970), and the
-    // top-scorer bonus on non-team draws. Net-track wire legs, per active slot in
-    // state 6: S2C 0x61 round-end marker (4 zero bytes) @0x516790, S2C 0x1D
+    if (!match.finish(winning_team, *this)) return; // double-run guard + frozen board [orig: @0x516502/@0x516528]
+    // Match::finish applies the winner marker and builds the immutable board in
+    // the original pre-send order [orig: GameEvent_ProcessScoring @0x52f550;
+    // Server_BuildEndOfRoundScoreboard @0x508f30]. The authority net tail sends,
+    // per active slot in state 6: S2C 0x61 round-end marker (4 zero bytes)
+    // @0x516790, S2C 0x1D
     // scoreboard header [u8 winner][s16 score0][s16 score1][u8 draw][s8 myEntryIndex]
     // (EndRoundScoreboard_SerializeHeader @0x505280) @0x516839, CNetPlayer_SetGameState(11)
     // @0x516846, slot state 6->7 @0x51685e; then the per-team round-win counters for
     // game types 0x10000/65537/65540 @0x5168a0 and the MP-only 2790-tick linger
     // @0x5166c4 (drained by Server_TickUpdate -> exit reason 3 / the client frame ->
     // reason 4; SP never drains it — the epilog owns the SP exit).
-    round_end.ended = true; // [orig: g_spawn_success_gate latch @0x5168e4]
+    // Match::finish sets the sole outcome latch before the network/presentation
+    // tails, matching retail's double-run guard without copying its global.
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
     // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390:
@@ -1552,6 +1552,7 @@ World::Snapshot World::snapshot() const {
     s.wac_values = wac_values;
     s.env = env;
     s.network_env = network_env;
+    s.match = match;
     s.logic_tick = logic_tick;
     s.prng16_state = prng16_state;
     s.local_player = cached.local_player;
@@ -1564,6 +1565,7 @@ void World::restore(const Snapshot &s) {
     wac_values = s.wac_values;
     env = s.env;
     network_env = s.network_env;
+    match = s.match;
     logic_tick = s.logic_tick;
     prng16_state = s.prng16_state;
     // Reset per-tick health/proximity counters, then restore only the stable
@@ -1584,10 +1586,10 @@ void World::restore(const Snapshot &s) {
     destruction_rng.reset();
     scars.reset();
     destruction = DestructionEvents{};
-    // Round outcome + kill stats reset with the mission [orig: Game_StartMission —
-    // gate clear @0x524a1f + the scoreboard-block memset @0x5249df; the stat buckets
-    // clear in the round-start state init].
-    round_end = RoundEndState{};
+    // The baseline copy above restores the configured rules, roster, clock,
+    // stats, and outcome together. This matters for SP-as-listen-server: its
+    // host player and game type already exist when the play-start snapshot is
+    // sealed, and reset must not reconstruct them through another seam.
     kill_stats = MissionKillStats{};
     load_systems(); // systems re-init their per-mission state
     if (collision != nullptr) collision->refresh_after_registry_change(*this);

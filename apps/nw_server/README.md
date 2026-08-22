@@ -22,4 +22,6 @@ the default resource root for its `.env` and the retail WAC layers
 environment file, or `NW_RESOURCE_ROOT` when the shared WAC layers were exported
 to a different directory. A present WAC layer that cannot be read or compiled
 aborts before the UDP socket opens; having no WAC layers is a valid BMS-only
-mission.
+mission. The mission's authored mode selects the live game type (including TDM,
+Advance and Secure, and co-op); an optional loose `score.ini` in the resource
+root overlays the retail default score table and is rejected if malformed.

@@ -18,7 +18,8 @@ easier to relay than to rediscover.
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, simassets),
-  `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
+  `net/` (novacrypto, napi, npwire, novaworld, inmatch, plus the internal
+  netsim/npruntime implementation directories). Consumed via the
   flat C ABI by Python and the Blender addon, by direct static link everywhere else.
   See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
@@ -102,10 +103,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   primitives (strcpy/sprintf, D3D, file I/O) — use standard or platform equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
-- The mission session owns lifecycle, role policy, fixed-tick banking, and input
-  consumption in portable C++ (`engine/net/npruntime/mission_session.*`; ADR 0035,
-  superseding ADR 0033's callback-bus design). A `MissionTickTarget` supplies the
-  concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
+- The in-match session owns lifecycle, role policy, fixed-tick banking, and
+  input consumption in portable C++ (`engine/net/inmatch/session.*`; ADR 0036,
+  superseding ADR 0035's old name/location). An `inmatch::TickTarget` supplies
+  the concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame. A `godot/` line earns its place only as that device
   work (node writes, GPU dispatch, input sampling, audio players), a thin typed seam,

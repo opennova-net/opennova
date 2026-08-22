@@ -625,7 +625,7 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 
 
 func test_tick_gates_the_runtime_on_its_transport() -> void:
-	# The game shell's tick must respect MissionSession state - the debug
+	# The game shell's tick must respect inmatch::Session state - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
 	# (before it, play()/pause() were inert in the game).
 	var world := _make_world()

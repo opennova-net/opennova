@@ -849,26 +849,108 @@ int test_player_sync_roundtrip() {
 }
 
 int test_player_list_roundtrip() {
-	std::vector<PlayerListEntry> players = {{0, 1}, {1, 2}, {2, 2}};
-	const std::vector<uint8_t> wire = encode_player_list(players);
+	PlayerListFrame frame;
+	frame.flags = 0x01;
+	frame.players = {
+			{0, 1, 0x0401, 12, 900, false},
+			{1, 2, 0x0002, 7, 450, false},
+			{2, 2, 0x0004, 3, 100, true},
+	};
+	frame.team_count = 2;
+	frame.teams = {{0, 0, 0, 0}, {12, 900, 0, 0}, {10, 550, 0, 0}};
+	frame.in_game_count = 2;
+	frame.spectator_count = 1;
+	const std::vector<uint8_t> wire = encode_player_list(frame);
 	PlayerList out;
 	EXPECT(decode_player_list(wire.data(), wire.size(), out));
-	EXPECT(out.player_count == players.size());
-	EXPECT(out.players.size() == players.size());
-	for (size_t i = 0; i < players.size(); ++i) {
-		EXPECT(out.players[i].slot_id == players[i].slot);
-		EXPECT(static_cast<uint8_t>(out.players[i].flags >> 1) == players[i].team); // team = flags >> 1
-	}
-	EXPECT(out.team_count == 2);
+	EXPECT(out.flags == 0x01 && out.player_count == 3);
+	EXPECT(out.players.size() == 3);
+	EXPECT(out.players[0].slot_id == 0 && out.players[0].flags == 2);
+	EXPECT(out.players[0].status_flags == 0x0401);
+	EXPECT(out.players[0].score1 == 12 && out.players[0].score2 == 900);
+	EXPECT(out.players[1].slot_id == 1 && out.players[1].flags == 4);
+	EXPECT(out.players[2].slot_id == 2 && out.players[2].flags == 5);
+	EXPECT(out.team_count == 2 && out.teams.size() == 3);
+	EXPECT(out.teams[1].score1 == 12 && out.teams[2].score2 == 550);
 	// Live trailer counts (D-NET-158): inGame = row count, spectators unmodeled 0 — the HUD
 	// player count is acceptedRows − spectatorCount, so a hardcoded trailer pinned it at 2.
-	EXPECT(out.in_game_count == players.size());
-	EXPECT(out.spectator_count == 0);
+	EXPECT(out.in_game_count == 2);
+	EXPECT(out.spectator_count == 1);
 	std::printf("PASS player_list_roundtrip\n");
 	return 0;
 }
 
 // §5.37 S2C 0x45 terrain-tile (.til) load — encode/decode byte-identical round-trip.
+int test_end_round_wire_roundtrip() {
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.team_score_0 = -3;
+	header.team_score_1 = 17;
+	header.draw = 1;
+	header.player_index = -1;
+	const std::vector<uint8_t> header_wire = encode_end_round_header(header);
+	EXPECT(header_wire == std::vector<uint8_t>({
+			0x02, 0xFD, 0xFF, 0x11, 0x00, 0x01, 0xFF}));
+	EndRoundHeader decoded_header;
+	EXPECT(decode_end_round_header(
+			header_wire.data(), header_wire.size(), decoded_header));
+	EXPECT(decoded_header.winner_team == 2 && decoded_header.team_score_0 == -3);
+	EXPECT(decoded_header.team_score_1 == 17 && decoded_header.draw == 1);
+	EXPECT(decoded_header.player_index == -1);
+
+	EndRoundStats board;
+	board.winner_team = 2;
+	board.team_score_0 = 9;
+	board.team_score_1 = 11;
+	board.team_fields = {{5, 1}};
+	EndRoundPlayerRow row;
+	row.slot = 4;
+	row.name = "RetailPeer";
+	row.tag = "TAG";
+	row.team = 2;
+	row.player_class = 8;
+	row.kills = 7;
+	row.deaths = -25;
+	row.assists = 3;
+	row.score = 6;
+	row.captures = 4;
+	row.flags = 2;
+	row.special = -1;
+	row.per_team = {13};
+	board.players.push_back(row);
+	board.team_rows = {{0}, {5}, {8}};
+	const std::vector<uint8_t> board_wire = encode_end_round_stats(board);
+	EndRoundStats decoded_board;
+	EXPECT(decode_end_round_stats(
+			board_wire.data(), board_wire.size(), decoded_board));
+	EXPECT(decoded_board.players.size() == 1);
+	EXPECT(decoded_board.players[0].name == "RetailPeer");
+	EXPECT(decoded_board.players[0].deaths == -25);
+	EXPECT(decoded_board.players[0].per_team == std::vector<int16_t>({13}));
+	EXPECT(decoded_board.team_rows.size() == 3);
+
+	const std::vector<uint8_t> chunk =
+			encode_end_round_stats_chunk(board_wire, 3);
+	EndRoundStatsChunk decoded_chunk;
+	EXPECT(decode_end_round_stats_chunk(
+			chunk.data(), chunk.size(), decoded_chunk));
+	EXPECT(decoded_chunk.total_size == board_wire.size());
+	EXPECT(decoded_chunk.chunk_offset == 3);
+	EXPECT(decoded_chunk.chunk.size() ==
+			std::min<std::size_t>(200, board_wire.size() - 3));
+	EXPECT(encode_end_round_stats_chunk(
+			board_wire, static_cast<uint16_t>(board_wire.size() + 1)).empty());
+
+	const std::vector<uint8_t> request_wire =
+			encode_end_round_stats_request(0x1234);
+	EndRoundStatsRequest request;
+	EXPECT(decode_end_round_stats_request(
+			request_wire.data(), request_wire.size(), request));
+	EXPECT(request.offset == 0x1234);
+	std::printf("PASS end_round_wire_roundtrip\n");
+	return 0;
+}
+
 static int test_terrain_load_header_chunk_roundtrip() {
 	TerrainLoadBatch in{};
 	in.has_header = true;
@@ -1116,6 +1198,7 @@ int main() {
 	rc |= test_loadout_submit_roundtrip();
 	rc |= test_player_sync_roundtrip();
 	rc |= test_player_list_roundtrip();
+	rc |= test_end_round_wire_roundtrip();
 	rc |= test_terrain_load_header_chunk_roundtrip();
 	rc |= test_terrain_load_continuation_chunk_roundtrip();
 	rc |= test_full_entity_spawn_player_layout();

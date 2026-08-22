@@ -46,6 +46,8 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	// [orig: Game_StartMission @0x526108 -> Nbstat_StartupInit @0x4FDE30;
 	// timer store @0x4FDE41]
 	ctx.scoreboard_broadcast_timer = 0;
+	ctx.round_end_announced = false;
+	ctx.round_end_linger_ticks = 0;
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.

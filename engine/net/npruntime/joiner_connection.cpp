@@ -996,6 +996,33 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					enter_initial_sync_tail();
 				}
 			}
+		} else if (m.tag == s2c::END_ROUND_HEADER) {
+			EndRoundHeader header;
+			if (decode_end_round_header(
+					m.payload.data(), m.payload.size(), header)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+				// A valid 0x1D immediately starts the requester-driven board stream
+				// at zero. [orig: NapiNPClientMsg_0x01D @0x430840 queues
+				// reliable C2S 0x2B {0}]
+				periodic_replies.push_back(make_protocol_message(
+						c2s::END_ROUND_STATS_REQUEST,
+						encode_end_round_stats_request(0)));
+			}
+		} else if (m.tag == s2c::END_ROUND_STATS) {
+			EndRoundStatsChunk chunk;
+			if (decode_end_round_stats_chunk(
+					m.payload.data(), m.payload.size(), chunk)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+				if (!chunk.complete()) {
+					const uint16_t next = static_cast<uint16_t>(
+							chunk.chunk_offset + chunk.chunk.size());
+					periodic_replies.push_back(make_protocol_message(
+							c2s::END_ROUND_STATS_REQUEST,
+							encode_end_round_stats_request(next)));
+				}
+			}
 		} else if (m.tag == s2c::BMS_HEADER) {
 			// Retail memcpy's the received 0x268-byte block verbatim. Retain the
 			// exact body rather than parsing/re-encoding it: ignored/padding bytes

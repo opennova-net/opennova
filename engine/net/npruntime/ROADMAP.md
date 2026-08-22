@@ -13,6 +13,12 @@ golden pcaps. **Server-first.**
 > [`docs/divergence-ledger.md`](../../../docs/divergence-ledger.md) (the `PAR-NET` slice) and witnessed
 > in [`docs/net/novaworld-net-re.md`](../../../docs/net/novaworld-net-re.md) §8. Start there for what
 > is open today.
+>
+> **Architecture amendment (2026-08-22):** ADR 0036 supersedes locked decision
+> 1 as a current topology mandate. `npruntime` and `netsim` remain internal
+> implementation directories; `engine/net/inmatch/session.*` is the sole public
+> lifecycle/cadence owner and `npwire` is the retail compatibility boundary.
+> This document retains the original phase names only as a build record.
 
 The witness record is `docs/net/novaworld-net-re.md`; governing decisions are ADRs 0009–0013 and
 0019. The original approved design lived in a session plan that was never tracked in this repo;

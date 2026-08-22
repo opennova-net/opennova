@@ -1,6 +1,8 @@
 # ADR 0035: MissionSession with a first-class Godot frame pipeline
 
-- **Status**: accepted (2026-08-10; maintainer-approved cutover)
+- **Status**: superseded in part by ADR 0036 (2026-08-22). Decisions 2-6
+  remain; decision 1's name, namespace, and location are replaced by the
+  full-cutover `opennova::inmatch::Session`.
 - **Amended**: PR #468 (2026-08-11) moved local-player camera/viewmodel
   placement into the pipeline as `present_local_view_frame`; decision 2's
   "MainGame retains the explicit local-player and HUD shell/UI tail" now

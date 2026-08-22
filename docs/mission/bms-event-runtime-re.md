@@ -170,7 +170,7 @@ gameplay speed to the render frame rate (the shared per-tick infantry motor, `ti
 integrates a fixed displacement per tick, so locomotion/animation ran fast at high FPS and slow
 at low FPS).
 
-`MissionSession.advance(FrameInput)` now owns the original's accumulator: it banks `delta`,
+`inmatch::Session::advance(FrameInput)` now owns the original's accumulator: it banks `delta`,
 runs `floor(accum / (1/62.5))` single ticks (clamped to 31, the 500 ms cap), and
 the Godot presentation owner presents **once** after the batch — sim at a
 constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick

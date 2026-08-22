@@ -1,6 +1,8 @@
 # ADR 0009 — In-match networking enters the world tick through one seam
 
-Status: accepted (design only; no implementation in this ADR)
+Status: superseded in part by ADR 0036 (2026-08-22). The witnessed
+net-before-logic frame order and wire-evidence requirements remain; decisions
+1-2 no longer mandate `NetSystem`/`INetCommandSink` as public module seams.
 
 ## Context
 

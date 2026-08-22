@@ -18,7 +18,7 @@ behavior is summarized and cited.
 |---|---|
 | [`current-state.md`](current-state.md) | Where the project is and where the next step is written down: the phase (maturity program closed, retail-fidelity slices current), the standing slice loop, which record names each domain's next step, and the research queue |
 | [`engine-primer.md`](engine-primer.md) | Start here for engine work: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
-| [`runtime-architecture.md`](runtime-architecture.md) | How a mission runs: how a mission runs under ADR 0035: the portable `MissionSession` tick and the `GameFramePipeline` device-leg order, mapped onto the original main loop |
+| [`runtime-architecture.md`](runtime-architecture.md) | How a match runs under ADR 0036: the portable `inmatch::Session` tick and the `GameFramePipeline` device-leg order, mapped onto the original main loop |
 | [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
 | [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
@@ -46,7 +46,7 @@ behavior is summarized and cited.
 | [0006](adr/0006-unified-mission-runtime-present-pass.md) | Unified mission present pass and entity index; its former embedded editor preview is superseded by ADR 0025 |
 | [0007](adr/0007-skeletal-runtime-and-entity-visual.md) | Skeletal `.bad`/`.adm` runtime and the `NovaEntityVisual` contract; the `NovaEntityVisual` duck-typed dispatch is superseded by ADR 0033's R2 draw-list cutover (the skeletal-runtime decisions stand) |
 | [0008](adr/0008-pff-writer-policy.md) | PFF writer: zero timestamp/checksum for new entries, verbatim for retained |
-| [0009](adr/0009-in-match-net-seam.md) | In-match networking enters the world tick through one seam (NetSystem + INetCommandSink) |
+| [0009](adr/0009-in-match-net-seam.md) | Historical in-match `NetSystem`/`INetCommandSink` seam; public-topology decisions superseded by ADR 0036 |
 | [0010](adr/0010-novaworld-client-completion.md) | NovaWorld client completion: gate → hello → auth → verify → join, then the JointOperations proto-switch |
 | [0011](adr/0011-single-player-in-process-listen-server.md) | Single-player is the in-process listen server (network-shaped); supersedes ADR 0009's "SP pays nothing" |
 | [0012](adr/0012-player-is-host-side-server-entity.md) | The player is a host-side server entity driven by a wire-shaped (C2S 0x0C) intent |
@@ -72,7 +72,8 @@ behavior is summarized and cited.
 | [0032](adr/0032-direct-document-io.md) | Direct document I/O — godot/ adds nothing but Godot: Nova formats never integrate with Godot's resource system (the ResourceFormat fleet is deleted); documents read/write themselves via load_from_path/save_to_path; adapter code exists only where a Godot type, API, or lifecycle demands it *(replaced by ADR 0033, which restates the operative rules)* |
 | [0033](adr/0033-engine-owned-loops-device-shells.md) | THE standing architecture contract, replacing ADRs 0031/0032 in full: the engine owns the main/tick/render loops; shells are devices (RenderBackend/InputSource/AudioSink); the R1-R4 ladder (frame port, draw-list presentation, spike-gated render frame, optional second backend); absorbs direct document I/O; supersedes 0028's runtime-GDScript rule at R1. The R3 spike (2026-08-10) closed that rung NOT TAKEN, so 0023's queue non-port stands; R1's `FrameDriver` is superseded by ADR 0035 |
 | [0034](adr/0034-first-class-godot.md) | Godot is the first-class shell: the adapter framing and shell-neutral pretense retire (game + ONED are the two front-ends inside the ONE Godot project); the engine stays portable C++ for its real non-Godot consumers; frame worlds/shells register themselves instead of Callable bundles; `godot/adapter/` becomes `godot/src/` |
-| [0035](adr/0035-mission-session-game-frame-pipeline.md) | MissionSession with a first-class Godot frame pipeline: portable `opennova::np::MissionSession` owns mission lifecycle, role policy, fixed cadence, and typed tick/frame results; Godot's `GameFramePipeline` owns world-device ordering directly (accepted 2026-08-10; amends ADR 0033 decisions 1-2 and ADR 0034 decision 3) |
+| [0035](adr/0035-mission-session-game-frame-pipeline.md) | Historical MissionSession cutover with the first-class Godot frame pipeline; lifecycle name/location superseded by ADR 0036, device-order decisions remain |
+| [0036](adr/0036-one-inmatch-session-wire-first.md) | One `opennova::inmatch::Session`, `world::Match` owns gameplay, and `npwire` is the retail compatibility boundary; full cutover with no legacy API (accepted 2026-08-22) |
 
 ## RE records by domain
 

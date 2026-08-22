@@ -1302,12 +1302,12 @@ static void test_zone_refs_resolve_by_id() {
     w.load_systems();
 
     tick_n(w, kCycle);
-    CHECK(!w.round_end.ended); // inside zone-id 6 -> the negated trigger is false
+    CHECK(!w.match.outcome().ended); // inside zone-id 6 -> the negated trigger is false
 
     w.registry.get(player)->position = {500.0f, 500.0f, 0.0f}; // leave the zone
     tick_n(w, kCycle);
-    CHECK(w.round_end.ended); // out of bounds -> RedWin
-    CHECK(w.round_end.winner_team == 2);
+    CHECK(w.match.outcome().ended); // out of bounds -> RedWin
+    CHECK(w.match.outcome().winner_team == 2);
 }
 
 // A dangling zone id NEUTERS the trigger (main/sub zeroed, flags kept): the
@@ -1351,8 +1351,8 @@ static void test_bluewin_ends_round() {
     w.load_systems();
 
     tick_n(w, kPass);
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 1);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 1);
     CHECK(w.effects.count("win") == 1);
     CHECK(w.effects.count("round_end") == 1);
 }

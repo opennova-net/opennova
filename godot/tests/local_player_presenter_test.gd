@@ -212,7 +212,7 @@ func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresent
 
 
 # One shell frame, in main_game's order: input sample -> world tick (the engine
-# MissionSession batch + the fixed-tick weapon consumer) -> presentation.
+# inmatch::Session batch + the fixed-tick weapon consumer) -> presentation.
 func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		ticks: int = 1, gameplay_active: bool = true) -> void:
 	for i in ticks:

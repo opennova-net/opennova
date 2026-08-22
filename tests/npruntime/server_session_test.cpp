@@ -2415,12 +2415,6 @@ bool check_session_status_reply_matches_retail_writer() {
 	config.game_type = 0x10020u;
 	config.max_players = 4;
 	config.respawn_time = 30;
-	config.session_status_stat_values = {
-		0, 0, 0, 5, 0, 0, 1, 2, 0, 0,
-		0, 0, 0, 0, 0, 12, 10, 5, 1, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 5, 0,
-	};
 
 	std::vector<opennova::np::NapiNPConnection> roster(2);
 	roster[0].type = 2;
@@ -2484,22 +2478,38 @@ bool check_score_ini_drives_session_status_values() {
 	const std::string score_ini =
 			"VERSION 40\n"
 			"GAMETYPE \"COOP\"\n"
+			"FIELD \"NUMENEMYKILLS\" 1\n"
+			"FIELD \"NUMFRIENDLYKILLS\" 0\n"
+			"FIELD \"NUMLFPTAKEOVERS\" 1\n"
 			"VAR \"FIRE\" 7\n"
 			"VAR \"ENEMYKILL\" 5\n"
 			"VAR \"VATTACHKILL\" -3\n";
 	if (!expect(opennova::np::load_session_score_config(config, score_ini),
 	            "score.ini VERSION 40 loads for the current game type"))
 		return false;
-	if (!expect(config.session_status_stat_values[0] == 7 &&
-	                    config.session_status_stat_values[3] == 5 &&
-	                    config.session_status_stat_values[37] == -3 &&
-	                    config.session_status_stat_values[38] == 0,
-	            "score.ini VAR names land in the witnessed 39-value table"))
+	if (!expect(config.session_status_stat_values.has_value() &&
+	                    (*config.session_status_stat_values)[0] == 7 &&
+	                    (*config.session_status_stat_values)[3] == 5 &&
+	                    (*config.session_status_stat_values)[6] == 1 &&
+	                    (*config.session_status_stat_values)[37] == -3 &&
+	                    (*config.session_status_stat_values)[38] == 0,
+	            "score.ini overlays the witnessed mode-default 39-value table"))
+		return false;
+	if (!expect(config.scoreboard_fields.size() == 3 &&
+	                    config.scoreboard_fields[0].first == 3 &&
+	                    config.scoreboard_fields[0].second == 1 &&
+	                    config.scoreboard_fields[1].first == 2 &&
+	                    config.scoreboard_fields[1].second == 0 &&
+	                    config.scoreboard_fields[2].first == 32 &&
+	                    config.scoreboard_fields[2].second == 1,
+	            "score.ini FIELD rows replace the default board schema in file order"))
 		return false;
 	const auto before = config.session_status_stat_values;
+	const auto fields_before = config.scoreboard_fields;
 	return expect(!opennova::np::load_session_score_config(
 	                      config, "VERSION 39\nGAMETYPE \"COOP\"\nVAR \"FIRE\" 99\n") &&
-	                      config.session_status_stat_values == before,
+	                      config.session_status_stat_values == before &&
+	                      config.scoreboard_fields == fields_before,
 	              "wrong score.ini version fails closed without mutating live rules");
 }
 

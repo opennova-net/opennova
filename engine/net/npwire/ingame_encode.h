@@ -284,6 +284,22 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = tr
 struct PlayerListEntry {
 	uint8_t slot = 0;
 	uint8_t team = 0;
+	uint16_t status_flags = 0;
+	uint16_t score1 = 0;
+	uint16_t score2 = 0;
+	bool spectator = false;
+};
+
+// Complete 0x16 snapshot. Keeping the team rows and trailer in the same value
+// prevents the authoritative score from being lost between the match model and
+// the serializer.
+struct PlayerListFrame {
+	uint8_t flags = 0x01;
+	std::vector<PlayerListEntry> players;
+	uint8_t team_count = 2;
+	std::vector<PlayerListTeamRow> teams;
+	uint8_t in_game_count = 0;
+	uint8_t spectator_count = 0;
 };
 
 // tag=0x16 PLAYER-LIST/SCOREBOARD — the inverse of decode_player_list. [orig:
@@ -294,7 +310,17 @@ struct PlayerListEntry {
 // [u8 (team<<1)|spectator], then [u8 team_count=2] + (team_count+1) × {u16 score1, u16 score2,
 // u8 kothHold, u8 ctfFlag}, then [u8 inGameCount][u8 spectatorCount] — the HUD player count is
 // acceptedRows − spectatorCount (D-NET-158).
-std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players);
+std::vector<uint8_t> encode_player_list(const PlayerListFrame &frame);
+
+// End-of-round wire transaction. Retail first sends the fixed seven-byte 0x1D
+// header, then serves the frozen board through C2S 0x2B / S2C 0x56 chunks of at
+// most 200 bytes. [orig: EndRoundScoreboard_SerializeHeader @0x505280;
+// NapiNPServerMsg_0x02B @0x514FE0; NetPacket_WriteReplayStreamChunk @0x506F60]
+std::vector<uint8_t> encode_end_round_header(const EndRoundHeader &header);
+std::vector<uint8_t> encode_end_round_stats(const EndRoundStats &stats);
+std::vector<uint8_t> encode_end_round_stats_chunk(
+		const std::vector<uint8_t> &board, uint16_t offset);
+std::vector<uint8_t> encode_end_round_stats_request(uint16_t offset);
 
 // tag=0x5A WEAPON-LOADOUT — the inverse of decode_weapon_loadout:
 // `[u8 avatarClass]` then per slot `[u8 typeId][u8 ammoPrimary][u8 ammoSecondary][u8 ammoAlt]`,

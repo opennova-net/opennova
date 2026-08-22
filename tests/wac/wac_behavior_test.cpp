@@ -278,13 +278,13 @@ static void test_lose_ends_round_with_banner_key() {
     w.load_systems();
 
     run(w, sys, 1);
-    CHECK(!w.round_end.ended); // no green kills yet
+    CHECK(!w.match.outcome().ended); // no green kills yet
     CHECK(w.effects.count("lose") == 0);
 
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 2);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 2);
     CHECK(w.effects.count("lose") == 1);
     CHECK(w.effects.count("round_end") == 1);
     for (const Effect &e : w.effects.entries()) {
@@ -306,7 +306,7 @@ static void test_lose_other_team_noop() {
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 3);
-    CHECK(!w.round_end.ended);
+    CHECK(!w.match.outcome().ended);
     CHECK(w.effects.count("lose") == 0);
     CHECK(w.effects.count("round_end") == 0);
 }
@@ -332,13 +332,13 @@ static void test_win_and_outcome_builtins() {
     w.cached.humans = 1;
 
     run(w, sys, 1);
-    CHECK(!w.round_end.ended);
+    CHECK(!w.match.outcome().ended);
     CHECK(w.vars.get_mission(1) == 0); // GameOver stays 0 pre-round-end
     CHECK(w.vars.get_mission(4) == 1); // humans visible from the first execution
 
     run(w, sys, 3); // past(2) fires -> win(1); the builtins read it the same pass
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 1);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 1);
     CHECK(w.vars.get_mission(1) == 1); // GameOver
     CHECK(w.vars.get_mission(2) == 1); // WinVar
     CHECK(w.vars.get_mission(3) == 0); // LoseVar stays 0 on a win
@@ -362,8 +362,8 @@ static void test_04tr_outcome_block_greenkills() {
     w.load_systems();
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 2);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 2);
     bool green_banner = false;
     for (const Effect &e : w.effects.entries())
         green_banner |= e.kind == "lose" && e.a == 0 && e.str == "STRMISC_KILLEDGREEN";
@@ -387,7 +387,7 @@ static void test_04tr_outcome_block_blue_priority() {
     w.kill_stats.bluekills_by_player = 1;
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
-    CHECK(w.round_end.ended);
+    CHECK(w.match.outcome().ended);
     bool blue_banner = false;
     for (const Effect &e : w.effects.entries())
         blue_banner |= e.kind == "lose" && e.a == 1 && e.str == "STRMISC_KILLEDBLUE";

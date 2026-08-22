@@ -1,4 +1,4 @@
-#include <npruntime/mission_session.h>
+#include <inmatch/session.h>
 
 #include <cstdio>
 #include <string>
@@ -6,7 +6,7 @@
 
 namespace {
 
-using namespace opennova::np;
+using namespace opennova::inmatch;
 
 bool expect(bool condition, const char *message) {
 	if (condition) return true;
@@ -14,7 +14,7 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-struct TickProbe final : MissionTickTarget {
+struct TickProbe final : TickTarget {
 	std::vector<TickInput> inputs;
 	int32_t logic_tick = 100;
 	int reset_calls = 0;
@@ -41,7 +41,7 @@ struct TickProbe final : MissionTickTarget {
 	void close_mission() override { ++close_calls; }
 };
 
-bool load(MissionSession &session) {
+bool load(Session &session) {
 	return session.begin_load().applied() && session.complete_load().applied();
 }
 
@@ -53,20 +53,20 @@ int main() {
 	// Lifecycle transitions are explicit and invalid transitions are inert.
 	{
 		TickProbe target;
-		MissionSession session(target);
-		if (!expect(session.state() == MissionSessionState::Unloaded,
+		Session session(target);
+		if (!expect(session.state() == State::Unloaded,
 				"new session is unloaded")) return 1;
 		if (!expect(session.complete_load().code == TransitionCode::InvalidState,
 				"load cannot complete before it begins")) return 1;
 		if (!expect(load(session), "load reaches running")) return 1;
 		if (!expect(session.pause().applied() &&
-				session.state() == MissionSessionState::Paused,
+				session.state() == State::Paused,
 				"single-player pauses")) return 1;
 		if (!expect(session.resume().applied() &&
-				session.state() == MissionSessionState::Running,
+				session.state() == State::Running,
 				"paused session resumes")) return 1;
 		if (!expect(session.close().applied() && target.close_calls == 1 &&
-				session.state() == MissionSessionState::Unloaded,
+				session.state() == State::Unloaded,
 				"close releases once and unloads")) return 1;
 		if (!expect(session.close().code == TransitionCode::NoOp &&
 				target.close_calls == 1,
@@ -76,7 +76,7 @@ int main() {
 	// One frame sample feeds every catch-up tick, with edges consumed once.
 	{
 		TickProbe target;
-		MissionSession session(target);
+		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput in;
 		in.delta_seconds = TickAccumulator::kTickDt * 3.0;
@@ -105,7 +105,7 @@ int main() {
 	// A zero-tick frame retains edge input until a tick actually runs.
 	{
 		TickProbe target;
-		MissionSession session(target);
+		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput first;
 		first.delta_seconds = TickAccumulator::kTickDt / 2.0;
@@ -124,7 +124,7 @@ int main() {
 	// The retail hitch clamp is owned here and drops the clamped backlog.
 	{
 		TickProbe target;
-		MissionSession session(target);
+		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput hitch;
 		hitch.delta_seconds = 1.0;
@@ -141,7 +141,7 @@ int main() {
 	// Pause clears banked time; manual step and reset stay local-only.
 	{
 		TickProbe target;
-		MissionSession session(target);
+		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput half;
 		half.delta_seconds = TickAccumulator::kTickDt / 2.0;
@@ -150,7 +150,7 @@ int main() {
 		if (!expect(session.step_once().ticks_run() == 1,
 				"paused local session can step once")) return 1;
 		if (!expect(session.reset_to_baseline().applied() && target.reset_calls == 1 &&
-				session.state() == MissionSessionState::Paused,
+				session.state() == State::Paused,
 				"reset restores baseline and remains paused")) return 1;
 		if (!expect(session.resume().applied(), "resume after reset")) return 1;
 		if (!expect(session.advance(half).ticks_run() == 0,
@@ -160,28 +160,28 @@ int main() {
 	// Network roles cannot pause, step, or reset.
 	{
 		TickProbe target;
-		MissionSession session(target, MissionSessionRole::ListenHost);
+		Session session(target, Role::ListenHost);
 		if (!load(session)) return 1;
 		if (!expect(session.pause().code == TransitionCode::RejectedForNetworkRole,
-        "network role rejects pause")) return 1;
+				"network role rejects pause")) return 1;
 		if (!expect(session.drive_one().ticks_run() == 1 &&
 				session.last_perf().ticks == 1,
 				"external network drive records one tick")) return 1;
 		if (!expect(session.step_once().status == FrameStatus::NotRunning,
-        "network role rejects manual step")) return 1;
+				"network role rejects manual step")) return 1;
 		if (!expect(session.last_perf().ticks == 0,
 				"rejected manual step clears stale frame perf")) return 1;
 		if (!expect(session.reset_to_baseline().code ==
 					TransitionCode::RejectedForNetworkRole,
-        "network role rejects reset")) return 1;
+				"network role rejects reset")) return 1;
 	}
 
 	// Joiners expose their pre-load connection state.
 	{
 		TickProbe target;
-		MissionSession session(target, MissionSessionRole::Joiner);
+		Session session(target, Role::Joiner);
 		if (!expect(session.begin_connect().applied() &&
-				session.state() == MissionSessionState::Connecting,
+				session.state() == State::Connecting,
 				"joiner enters Connecting")) return 1;
 		if (!expect(session.begin_load().applied() && session.complete_load().applied(),
 				"connected joiner loads into Running")) return 1;
@@ -190,7 +190,7 @@ int main() {
 	// A terminal tick cancels the rest of the batch and fails the session.
 	{
 		TickProbe target;
-		MissionSession session(target);
+		Session session(target);
 		if (!load(session)) return 1;
 		target.next_status = TickStatus::SessionLost;
 		FrameInput in;
@@ -198,10 +198,10 @@ int main() {
 		const FrameOutcome out = session.advance(in);
 		if (!expect(out.terminal() && out.status == FrameStatus::SessionLost &&
 				target.inputs.size() == 1 &&
-				session.state() == MissionSessionState::Failed,
+				session.state() == State::Failed,
 				"terminal tick aborts the batch and fails the session")) return 1;
 	}
 
-	std::printf("OK: mission session lifecycle/cadence/input/failure\n");
+	std::printf("OK: in-match session lifecycle/cadence/input/failure\n");
 	return 0;
 }

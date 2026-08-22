@@ -197,9 +197,9 @@ add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
 
-add_executable(mission_session_test frame/mission_session_test.cpp)
-target_link_libraries(mission_session_test PRIVATE opennova_net)
-add_test(NAME mission_session COMMAND mission_session_test)
+add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
+target_link_libraries(inmatch_session_test PRIVATE opennova_net)
+add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
 # loose .wav members (drives MNU hover/click via MnuMenu).
@@ -1504,6 +1504,15 @@ target_link_libraries(zone_chain_test PRIVATE opennova_runtime)
 target_include_directories(zone_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zone_chain_test PRIVATE cxx_std_17)
 add_test(NAME zone_chain COMMAND zone_chain_test)
+
+# The authoritative multiplayer rules/stats domain shared by TDM and A&S, with
+# Co-op pinned to the existing WAC/BMS outcome path. [orig:
+# GameEvent_ProcessScoring @0x52F550; Server_CheckWinConditions @0x51AD40]
+add_executable(match_test world/match_test.cpp)
+target_link_libraries(match_test PRIVATE opennova_runtime)
+target_include_directories(match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(match_test PRIVATE cxx_std_17)
+add_test(NAME match COMMAND match_test)
 
 # Host-authoritative ground-vehicle motor (net-re §5.13 drive-authority witness): the
 # items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive

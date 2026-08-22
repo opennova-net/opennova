@@ -1029,10 +1029,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
 	// Validate the lifecycle transition before opening a socket. Re-dialing a
 	// live mission is rejected without partially replacing its transport.
-	const opennova::np::TransitionResult role = mission_session_.configure_role(
-			opennova::np::MissionSessionRole::Joiner);
-	if (role.code != opennova::np::TransitionCode::Applied &&
-			role.code != opennova::np::TransitionCode::NoOp) {
+	const opennova::inmatch::TransitionResult role = session_.configure_role(
+			opennova::inmatch::Role::Joiner);
+	if (role.code != opennova::inmatch::TransitionCode::Applied &&
+			role.code != opennova::inmatch::TransitionCode::NoOp) {
 		return false;
 	}
 	if (pump_.is_null()) pump_.instantiate();
@@ -1057,7 +1057,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	joiner_bridge_.reset_for_join();
 	joiner_environment_revision_seen_ = 0;
 	joiner_applied_loadout_revision_ = 0;
-	if (!mission_session_.begin_connect().applied()) {
+	if (!session_.begin_connect().applied()) {
 		joiner_ = false;
 		return false;
 	}

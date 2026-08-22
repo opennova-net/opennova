@@ -42,7 +42,7 @@
 #include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
-#include <npruntime/mission_session.h>
+#include <inmatch/session.h>
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
 #include <world/collision.h>
@@ -75,7 +75,7 @@
 #include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
 #include <npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
-#include "simulation/nova_mission_session_values.h"
+#include "simulation/nova_inmatch_session_values.h"
 
 namespace opennova::hud {
 struct ScoreboardEntry; // hud/hud_scoreboard.h — the Tab-board drawer row
@@ -90,8 +90,8 @@ class ItemDatabase;
 class AvatarDatabase;
 class ResourceRoot;
 
-// The Godot adapter for one portable MissionSession tick target. It owns the
-// World and logic systems (WAC VM, BMS evaluator, AI); MissionSession owns
+// The Godot adapter for one portable in-match tick target. It owns the World
+// and logic systems (WAC VM, BMS evaluator, AI); inmatch::Session owns
 // lifecycle, input retention, fixed cadence, and terminal outcomes. One target
 // advance is the original's 62 Hz engine tick (current_tick in
 // Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of
@@ -108,7 +108,7 @@ class ResourceRoot;
 // EffectLog each tick. Runtime transport and fixture teardown use the same
 // play/pause/step/restart surface.
 class Simulation : public Node3D,
-                       private opennova::np::MissionTickTarget,
+                       private opennova::inmatch::TickTarget,
                        private opennova::world::ICollisionSectionMatrixProvider,
                        private opennova::world::IMountedPoseProvider {
 	GDCLASS(Simulation, Node3D)
@@ -393,20 +393,20 @@ private:
 	// Portable mission lifecycle and cadence. During one advance call the Godot
 	// adapter holds a single typed tick sink so presentation consumes every
 	// catch-up tick before the next simulation tick.
-	opennova::np::MissionSession mission_session_;
+	opennova::inmatch::Session session_;
 	Callable session_tick_sink_;
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
-	opennova::np::MissionSessionRole configured_session_role() const;
+	opennova::inmatch::Role configured_session_role() const;
 	bool begin_session_load();
 	void complete_session_load();
 	void fail_session_load(const char *p_message);
 	bool advance_world_tick();
 	void restore_world_baseline();
-	opennova::np::TickOutcome advance_mission_tick(
-			const opennova::np::TickInput &p_input) override;
-	bool reset_mission_to_baseline(opennova::np::SessionError &r_error) override;
+	opennova::inmatch::TickOutcome advance_mission_tick(
+			const opennova::inmatch::TickInput &p_input) override;
+	bool reset_mission_to_baseline(opennova::inmatch::SessionError &r_error) override;
 	void close_mission() override;
 	// The mission-lifetime collision graphic caches + the negative demand
 	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
@@ -501,7 +501,7 @@ private:
 	};
 	MissionBootDebug boot_debug_;
 	// Resource-install invariant only. Public lifecycle is
-	// mission_session_.state(); this prevents partially constructed worlds from
+	// session_.state(); this prevents partially constructed worlds from
 	// serving data while Loading/Failed transitions are in flight.
 	bool world_installed_ = false;
 	bool defer_session_load_completion_ = false;
@@ -1080,22 +1080,21 @@ public:
 	void build_demo_mission();
 	bool is_loaded() const;
 	int get_session_state() const {
-		return static_cast<int>(mission_session_.state());
+		return static_cast<int>(session_.state());
 	}
 	String get_session_error() const {
-		return String::utf8(mission_session_.last_error().message.c_str());
+		return String::utf8(session_.last_error().message.c_str());
 	}
 
 	// Transport.
 	bool is_playing() const {
-		return mission_session_.state() ==
-				opennova::np::MissionSessionState::Running;
+		return session_.state() == opennova::inmatch::State::Running;
 	}
 	// Advance exactly ONE 62 Hz logic tick — the original's engine tick. The per-system
 	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
 	// evaluator quarter-passes every 16th), exactly where the original keeps them. Returns
 	// false when the session cannot take a direct local/test tick. Banking wall
-	// clock and dispatching 0..N ticks per render frame belongs to MissionSession
+	// clock and dispatching 0..N ticks per render frame belongs to inmatch::Session
 	// (the Game_MainLoop @0x52b630 accumulator) — a render frame is NOT one tick.
 	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
 	bool step();

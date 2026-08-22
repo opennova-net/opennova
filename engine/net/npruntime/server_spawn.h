@@ -58,7 +58,7 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 
 // §5.2a step 2 — [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]. Gated
-// is_authority && !spawn_success_gate. Walks connection_list; for each accepted-but-unspawned node
+// is_authority && !world.match.outcome().ended. Walks connection_list; for each accepted-but-unspawned node
 // (self_id_seen && phase < PlayerAdded) builds + registers its pool-0 player entity in `world`. The
 // host's own type-2 loopback is just another entry in this list. Returns the number spawned this pass.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world);

@@ -1913,6 +1913,26 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 // stream is per-session state with a lifetime the decoder does not own, and
 // retail keeps it in one global for the same reason. A consumer that only
 // decodes and never sends 0x2B receives the first 200 bytes and nothing else.
+// S2C 0x1D, exactly seven bytes. The final signed byte is this recipient's row
+// in the frozen board (-1 when absent). [orig: EndRoundScoreboard_SerializeHeader
+// @0x505280; NapiNPClientMsg_0x01D @0x430840]
+struct EndRoundHeader {
+	int8_t winner_team = 0;
+	int16_t team_score_0 = 0;
+	int16_t team_score_1 = 0;
+	uint8_t draw = 0;
+	int8_t player_index = -1;
+};
+bool decode_end_round_header(const uint8_t *body, size_t len,
+		EndRoundHeader &out);
+
+// C2S 0x2B, the next byte offset requested by the client.
+struct EndRoundStatsRequest {
+	uint16_t offset = 0;
+};
+bool decode_end_round_stats_request(const uint8_t *body, size_t len,
+		EndRoundStatsRequest &out);
+
 struct EndRoundStatsChunk {
 	uint16_t total_size = 0;   // bytes in the whole board
 	uint16_t chunk_offset = 0; // where this chunk lands; 0 also means "restart"
@@ -1936,7 +1956,7 @@ struct EndRoundPlayerRow {
 	std::string clan;
 	std::string tag;    // the squad tag
 	uint8_t team = 0;
-	uint8_t side = 0;
+	uint8_t player_class = 0; // entity+660, the selected soldier type
 	int16_t kills = 0;
 	int16_t deaths = 0;
 	int16_t assists = 0;

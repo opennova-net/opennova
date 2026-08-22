@@ -1,4 +1,4 @@
-#include "simulation/nova_mission_session_values.h"
+#include "simulation/nova_inmatch_session_values.h"
 
 #include <algorithm>
 
@@ -106,11 +106,11 @@ void MissionTickOutcome::_bind_methods() {
 }
 
 bool MissionTickOutcome::is_terminal() const {
-	return status_ == static_cast<int32_t>(opennova::np::TickStatus::SessionLost) ||
-			status_ == static_cast<int32_t>(opennova::np::TickStatus::Fatal);
+	return status_ == static_cast<int32_t>(opennova::inmatch::TickStatus::SessionLost) ||
+			status_ == static_cast<int32_t>(opennova::inmatch::TickStatus::Fatal);
 }
 
-void MissionTickOutcome::assign(const opennova::np::TickOutcome &p_value) {
+void MissionTickOutcome::assign(const opennova::inmatch::TickOutcome &p_value) {
 	logic_tick_ = p_value.logic_tick;
 	status_ = static_cast<int32_t>(p_value.status);
 	error_ = String::utf8(p_value.error.message.c_str());
@@ -150,11 +150,11 @@ bool MissionFrameOutcome::is_terminal() const {
 	return status_ == STATUS_SESSION_LOST || status_ == STATUS_FATAL;
 }
 
-void MissionFrameOutcome::assign(const opennova::np::FrameOutcome &p_value) {
+void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value) {
 	status_ = static_cast<int32_t>(p_value.status);
 	state_ = static_cast<int32_t>(p_value.state);
 	ticks_.clear();
-	for (const opennova::np::TickOutcome &tick : p_value.ticks) {
+	for (const opennova::inmatch::TickOutcome &tick : p_value.ticks) {
 		Ref<MissionTickOutcome> value;
 		value.instantiate();
 		value->assign(tick);

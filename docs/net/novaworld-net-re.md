@@ -375,7 +375,7 @@ sweep; blank = not yet characterized.
 | 0x52 | 0x428A80 | `_0x052` | |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
 | 0x54 | 0x429040 | `_0x054` | death/wounded minimap marker `[u16 entityHandle][u8 state]` — server emits from `GameEvent_PlayerDeath @0x516dd0` ×2, `GameEvent_RevivePlayer @0x517db4`, `Server_BroadcastMedicRequest @0x515390` (D-NET-108); handler body unwitnessed (§5.60) |
-| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Decoded 2026-08-21 (`decode_end_round_stats_chunk` + `decode_end_round_stats`); the 0x2B request leg, the fold and stat.mnu are unported |
+| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; stat.mnu remains presentation residue |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
 | 0x59 | 0x4228E0 | `_0x059` | deployed-item / weapon-overlay spawn (32 B): item ids + owner + slot + parent + 3×i32 pos + 3×u16 ang (§5.36) |
@@ -7883,12 +7883,16 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
    `+544/+545`); zero presence ⇒ no change. Else `teamSize` = capturing side's player count
    `+ (6 − total)/2` when fewer than 6 in-session (small-server boost), soft-capped
    `x → cap + (x − cap)/2` at 20/40/60; `speed = teamSize × base` where base =
-   `g_capture_speed_setting @ 0x24D2254`: 1 → 24, 2 → 48, else 12; when the capturing side
-   owns fewer zones AND the round clock is inside the last `30 × g_respawn_time` seconds,
-   an underdog catch-up subtracts up to half: `speed −= min(imbalance × boost, 1) × speed/2`
-   with `imbalance = |zones₁ − zones₂| / totalZones`, `boost = 1 − 2·roundRemaining/(3720 ×
-   g_respawn_time)` (3720 ticks = 60 s) `[orig: @ 0x5013AB..0x501439]`; a zone number shared
-   by N entities divides speed by N. `delta = 65536 × presence / speed` (ftol; minimum
+   `g_capture_speed_setting @ 0x24D2254`: 1 → 24, 2 → 48, else 12. The sorted spawn-zone
+   registry supplies both ownership counts and the shared-zone divisor. When the capturing
+   side already owns MORE numbered spawn entries, the last half of a configured round
+   accelerates that leader by reducing `speed` up to half:
+   `speed −= imbalance × boost × speed/2`, where `imbalance = |zones₁ − zones₂| /
+   numberedSpawnEntries` and `boost = clamp(1 − 2·roundRemaining/(3720 ×
+   g_respawn_time), 0, 1)` (3720 ticks = 60 s). With no configured GameTime the clock
+   factor remains 1. `[orig: calculate_capture_zone_control_delta @0x501120]` A zone
+   number shared by N registry entries then divides speed by N. `delta = 65536 × presence /
+   speed` (ftol; minimum
    magnitude 1, sign = presence), accumulated into `+540` with clamp [0, 0x10000]. At the
    observed default (`g_capture_speed_setting = −1` ⇒ base 12): one attacker on an empty
    3-player-team server secures ~0x10000/1820 ≈ 36 s.
@@ -7948,8 +7952,21 @@ zone-chain-exempt sibling — KOTH family suspected); the exact session-settings
 behind the `0x2550B7x` mirror block; `CaptureCtx_MarkPresenceSlot @ 0x53B5C0` internals
 (presence-slot indexing); the 0x1E event-string table rows for 50-60 in
 `game_event_strcnd_key` should be cross-checked against these producer semantics at HUD
-time. Win conditions (`Server_CheckWinConditions @ 0x51AD40` reads the chain masks
-`@ 0x51AD87/0x51B4A2`) are roadmap item 4, unwitnessed here.
+time.
+
+**Win conditions (grilled 2026-08-22).** The 1 Hz check first returns after the
+round-end latch, handles the SP dead/no-respawn case, and then runs the uniform
+all-zones-owned test before its game-type switch. TDM (`0x10000`) returns
+immediately when `g_score_limit == 0`; otherwise the first team row 0..4 whose
+raw field 5 reaches the limit wins. At clock zero, teams 1..4 are compared and
+only a STRICT unique maximum wins; every tie ends with team 0. A&S (`0x10010`)
+and its `0x50010` sibling count zone ownership for teams 1 and 2 at clock zero,
+again returning team 0 on equality. The clock starts at -1, is seeded to
+`3720 * GameTime` only for a nonzero configured time outside the co-op waypoint
+family, and decrements once per authoritative frame. `[orig:
+Server_CheckWinConditions @0x51AD40; uniform-zone arm @0x51AD8A; TDM zero-limit
+return @0x51AE47; A&S clock tail @0x51B35B; Game_StartMission clock seed
+@0x524A89/@0x524F66; Game_ProcessMainFrame decrement @0x5266D6]`
 
 **Reimpl (slice 1 — spawn selection, same session).** Ported: `world::ZoneChain` +
 `zone_chain_*` (`engine/runtime/world/zone_chain.{h,cpp}` — build/masks/ranks, the frontier rule, the
@@ -7972,14 +7989,33 @@ reproduced). Slice-1 deferrals (all §5.61-cited in code): the spawn-wave system
 retail defaults), vehicle-seat deploys (seat model unported), deploy-time 0x61/0x1D
 re-sends, and the 6007 in-zone scatter + userpoint offset.
 
-**Reimpl (slice 2 — the capture loop, 2026-07-04, D-NET-162).** Ported:
+**Reimpl (slice 2 — the capture loop, completed 2026-08-22, D-NET-162).** Ported:
 `world::zone_capture_tick` (engine/runtime/world/zone_capture.{h,cpp} — the 1 Hz secure/control
-pass with the enemy-frontier latch, the control-delta formula verbatim, secure edges,
+pass with the enemy-frontier latch, the complete control-delta formula including its
+spawn-registry ownership/clock term, secure edges,
 instant numbered flips via neutral, mask rebuilds, non-trigger zone-object team
 enforcement) + the npruntime 1 Hz wire block (0x6F change-gated + deploy-screen refresh,
 the 0x1E zone-event family 0x3B/0x3C/50-53/56/57 team-filtered, 0x53 on flips, and the
-0x40 zone + vehicle-blip overlay feed). `zone_chain_test` pins the delta formula and the
-full flip→secure→contest→neutralize→retake cycle. Deferrals in the D-NET-162 row.
+0x40 zone + vehicle-blip overlay feed). The 0x1E actor uses retail's sorted
+`SpawnZoneList_IndexOf` space, not the internal zone-chain index. `zone_chain_test` pins
+the delta formula and the full flip→secure→contest→neutralize→retake cycle; the registry
+index divergence is pinned by `npruntime_round_end_test`. Deferrals remain in the
+D-NET-162 row. `[orig: calculate_capture_zone_control_delta @0x501120;
+SpawnZoneList_IndexOf @0x43B990]`
+
+**Reimpl (slice 3 — match rules and round transaction, 2026-08-22).**
+`world::Match` now owns the exact 42-word player/team stat records, clock, and
+the winner logic above. Death scoring records victim raw[7] + score-table
+status 5, enemy kill raw[5] + status 3, teamkill raw[4] + status 2, and
+suicide raw[6] + status 4. A numbered capture awards event 24 to every living
+same-team player in radius: raw[39] + status 34. All deltas remain signed.
+The first `World::process_round_end` freezes the result, after which score and
+finish events are inert. `[orig: GameEvent_PlayerDeath scorer call @0x516F06;
+GameEvent_ProcessScoring @0x52FB80/@0x52FBC7/@0x52FC99/@0x52FD75;
+CaptureZone_CheckProximityScoring call @0x500D84; scorer case 24 @0x5307C2;
+Server_ProcessRoundEnd @0x5164F0]` TDM, A&S, and WAC/BMS co-op all use this
+same outcome path; `match_test` and `npruntime_round_end_test` pin the three
+families independently.
 
 **v31 LIVE (2026-07-03, 2 retail clients): the deploy screen still did NOT appear — and
 the wire shows ZERO C2S 0x0E all session, so the slice-1 pick handler went unexercised;
@@ -9503,7 +9539,7 @@ where retail packs `(roster slot << 9) | (seq & 0x1FF)`; (b) off32 (`entity+0x16
 index) was shipped as 0 where retail sends the equipped weapon's index. Both are real divergences,
 both are fixed under D-WPN-8, and the symptom survived each.
 
-### 5.68 The end-of-round stat board — S2C 0x56 pulled in 200-byte chunks over C2S 0x2B (decoder slice, 2026-08-21)
+### 5.68 The end-of-round stat board — S2C 0x56 pulled in 200-byte chunks over C2S 0x2B (full transaction, 2026-08-22)
 
 Everything the post-round `stat.mnu` table shows arrives in ONE message the
 catalog had filed as "touches `dword_24C1928` (write unconfirmed)". Witnessed in
@@ -9522,9 +9558,11 @@ the server `[orig: NapiNPServerMsg 0x2B @0x514FE0 — IDB name
 `NapiNPServerMsg_HandleReplayDataRequest`, a misnomer]` is authority-gated,
 resolves the sender's player, cuts `[u16 streamLen][u16 offset][min(200,
 remaining) bytes]` from the stream `[orig: NetPacket_WriteReplayStreamChunk
-@0x506F60 — the 200 clamp @0x506fb9; offset < 0 or > length returns 0 bytes
-@0x506fa0]` and sends it as S2C 0x56 to the requester alone (`send_mask 0x20`)
-`@0x51505a`. The client handler `[orig: NapiNPClientMsg_0x056 @0x431D10]`,
+@0x506F60 — the 200 clamp @0x506fb9; offset < 0 or > length fails
+@0x506fa0]`; the handler sends S2C 0x56 to the requester alone (`send_mask
+0x20`) only when that writer succeeds `@0x51505a`. A request past the frozen
+board therefore receives no packet. The client handler `[orig:
+NapiNPClientMsg_0x056 @0x431D10]`,
 gated on `g_spawn_success_gate` `@0x431d33`, reads `totalSize` `@0x431d4d` and
 `chunkOffset` `@0x431d61` (a short datagram reads 0 for either), RESETS the
 reassembly stream `g_scoreReassemblyStream @0xA82324` when the offset is 0
@@ -9542,15 +9580,30 @@ listen host never pulls) `@0x430ad5..0x430b03`. So the full sequence on a
 retail server is 0x61 + 0x1D pushed at round end, then 0x2B{0} → 0x56{0..199}
 → 0x2B{200} → 0x56{200..399} → … until `offset + len >= total`.
 
-**Port status (2026-08-21).** The chunk fold is ported into `ClientState`
-(`netsim::client_replica_endround.cpp`): a chunk at offset 0 resets the
-retained stream (`CDataStream_SetMaxFrame(0)` `@0x431d79`, gated `test edi,edi`
-`@0x431d6d`), each chunk is written AT its offset `@0x431d8a/@0x431d96` and
-tested against its OWN `totalSize` (`add @0x431d9b`, `cmp @0x431d9d`, `jge
-@0x431d9f`); retail never resets the stream after the decode `@0x431e0b` —
-only the next offset-0 chunk does — so the fold retains it too. Unported: the
-C2S 0x2B pull `@0x431db3..0x431dc4`, the `g_spawn_success_gate` `@0x431d33`,
-and the `stat.mnu` surface.
+The S2C 0x1D body is exactly seven bytes:
+`[u8 winner][s16 teamScore0][s16 teamScore1][u8 draw][s8 myEntryIndex]`.
+The last byte is the recipient's index in the already-frozen sorted player
+array, or -1. `[orig: EndRoundScoreboard_SerializeHeader @0x505280]`
+
+**Port status (2026-08-22).** The complete transaction and producer schema are
+live. The authority freezes one `world::MatchResult`, pushes reliable S2C 0x61
+`[u32 0]` then the recipient-specific 7-byte S2C 0x1D header, enters game state
+11, and retains the board throughout the 2790-tick linger. The tick phase is
+also exact: an already-ended WAC/BMS co-op round consumes its announcement
+tick, while a TDM/A&S result discovered by the later automatic check starts
+draining next tick. `[orig: Server_TickUpdate @0x51D7E0 — linger drain
+@0x51DA04 before Server_CheckWinConditions @0x51DF5A]` `JoinerConnection`
+receives 0x1D and immediately queues reliable C2S 0x2B `[u16 0]`; each
+incomplete 0x56 queues the next offset, and `ClientState` folds the result. A
+chunk at offset 0 resets
+the retained stream (`CDataStream_SetMaxFrame(0)` `@0x431d79`, gated `test
+edi,edi` `@0x431d6d`), each chunk is written AT its offset
+`@0x431d8a/@0x431d96` and tested against its OWN `totalSize` (`add @0x431d9b`,
+`cmp @0x431d9d`, `jge @0x431d9f`); retail never resets the stream after the
+decode `@0x431e0b` — only the next offset-0 chunk does — so the fold retains it
+too. The native connection/header transaction is the reimpl gate; it does not
+copy retail's unrelated global variable. Remaining presentation work is the
+`stat.mnu` surface.
 
 **Payload grammar** (the reassembled stream; every read is bounds-checked and
 yields 0/empty past the end — retail TOLERATES truncation, leaving a partly
@@ -9567,7 +9620,7 @@ zeroed board):
 | team_row_count | **i8** (`movsx` `@0x432159`) | trailing matrix rows; skipped when ≤ 0 `@0x432166` |
 | team_rows[team_row_count][field_count] | i16 | `@0x432195`, row stride 34 dwords at `dword_24CFB08` |
 
-Per player row: `[u8 slot][cstr name][cstr clan][cstr tag][u8 team][u8 side]`
+Per player row: `[u8 slot][cstr name][cstr clan][cstr tag][u8 team][u8 playerClass]`
 then seven i16 in WIRE order `kills, deaths, assists, score, captures, flags,
 special`, then `field_count` × i16 per-team scores. Each string is copied by a
 31-char loop into a 32-byte buffer `@0x431f0a/@0x431f4d/@0x431f8f` but the
@@ -9577,18 +9630,46 @@ order, not the wire's: score lands in slot 5 `@0x432049`, captures in slot 4
 `@0x43205f`. The display name is `sprintf("%s %s", clan, name)` when the clan
 is non-empty `@0x4320d7`, else the bare name `@0x4320e1..0x432100`, then
 stored through a 32-byte copy (31 chars) `[orig: Napi_CopyString @0x432110]`;
-the tag through an 8-byte one `@0x432120`.
+the tag through an 8-byte one `@0x432120`. The server's source buffers are
+32/16/16 bytes, so its emitted name/clan/tag maxima are 31/15/15 characters;
+`playerClass` comes from the player entity at `+660`. `[orig:
+Server_BuildEndOfRoundScoreboard @0x508F30]`
 
-**Ported (2026-08-21, #533):** `decode_end_round_stats_chunk` (the envelope)
-and `decode_end_round_stats` (the reassembled board, WIRE-order stats, the
-signed counts) in `engine/net/npwire`, pinned by `nw_message_coverage_test`;
-`nw_pp` prints the envelope and a single-datagram board. One recorded
-divergence: the decoder follows the npwire protocol-cursor contract and
-REJECTS a short stream where retail zero-fills. **Fold ported 2026-08-21**
-(the retained `ClientState` stream, see Port status above). **Not yet
-ported:** the C2S 0x2B request leg (a consumer that decodes and never requests
-receives the first 200 bytes and nothing else), the `g_spawn_success_gate`, and
-the `stat.mnu` screen.
+Those seven names describe the decoder/display record; the server producer's
+actual value sequence is `primaryScore, raw[29], raw[30], raw[5], raw[7],
+raw[11], (raw[2] << 16) / raw[5]` (the final value is -1 when raw[5] is zero).
+The reimpl preserves that apparently odd mapping rather than inventing a
+cleaner scoreboard schema. `[orig: Server_BuildEndOfRoundScoreboard
+@0x508F30 — writes entry dwords 16..22]`
+
+**Configured columns and ordering.** `GameType_CreateDefaultSettings` installs
+the ordered `{fieldId, enabled}` rows for each mode, then a VERSION 40
+`score.ini` can replace the selected mode's row with its `FIELD` directives in
+file order. TDM defaults to 14 configured fields, A&S to 16, and the waypoint
+co-op family to 7. Every ID is resolved by the exact
+`CPlayerStats_GetFieldByIndex` switch. The producer computes all configured
+values but emits a column only when at least one player value is nonzero;
+disabled fields take part in that activity test and retain their raw enabled
+byte when emitted. Team games append three matrix rows, or five for the
+witnessed four-team TDM/TKOTH/FlagBall family. Players are first collected in
+slot order and then sorted descending by raw points with retail's Knuth-gap
+shell sort; the recipient index in 0x1D addresses that frozen order. `[orig:
+GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile @0x52D8A0;
+CPlayerStats_GetFieldByIndex @0x52D630; Server_BuildEndOfRoundScoreboard
+@0x508F30; CPairList_ShellSortByValue @0x526CF0]`
+
+**Ported (completed 2026-08-22):** `engine/net/npwire` owns strict codecs for
+the 0x1D header, 0x2B request, 0x56 envelope, and reassembled board;
+`npruntime/end_round_protocol` translates only the immutable semantic result
+into the witnessed producer order. The default/`score.ini` field schema,
+default VAR score values, active-column filtering, field accessor, raw-point
+player ordering, fixed source-string caps, authority announcement,
+requester-only 200-byte service (including silence for an offset past the
+board), automatic client pull, offset fold, game-state transition, and exact
+linger phase are live and covered end-to-end for TDM, A&S, and co-op. `nw_pp` prints the
+envelope and a single-datagram board. One recorded divergence remains: the decoder
+follows the npwire protocol-cursor contract and REJECTS a short stream where
+retail zero-fills. The unported residue is presentation only: `stat.mnu`.
 
 ## 6. Struct reference
 
@@ -11492,12 +11573,13 @@ on every join (§5.33) and both replies are ported, so either going missing is a
 allowlists, so losing any of them is now a hard test failure. The lone allowed spurious `0x18` remains
 the separately tracked D-NET-133 repair-path residual.
 
-**D-NET-162** [reimpl gap, PORTED 2026-07-04; 00TRg overlay cadence validated 2026-08-02] **The AS capture loop
+**D-NET-162** [reimpl gap, PORTED 2026-07-04; formula, scoring, and registry-index parity completed 2026-08-22; 00TRg overlay cadence validated 2026-08-02] **The AS capture loop
 now runs on our host** — the §5.61 1 Hz block was witnessed round 13 but unported (v33: no
 map colors, no LFP capture). Ported: `world::zone_capture_tick`
 (engine/runtime/world/zone_capture.{h,cpp}) — the per-second secure/control pass (the enemy-frontier
 latch + `calculate_capture_zone_control_delta @ 0x501120` verbatim incl. the small-server
-boost, the 20/40/60 soft caps, the 12/24/48 base table, the shared-zone-number divide, and
+boost, the 20/40/60 soft caps, the 12/24/48 base table, the sorted spawn-registry owner
+census, the late-round ownership-leader acceleration, the shared-zone-number divide, and
 the ±1 minimum), secure edges, the instant numbered-zone flips (owned → neutral → capturer,
 control zeroed — the Advance-and-Secure beat), mask rebuilds, and non-trigger zone-object
 team enforcement `[orig: Server_UpdateCaptureZoneEntities @ 0x519690;
@@ -11505,24 +11587,24 @@ Server_UpdateCaptureZones @ 0x53B8F0 drain; GameEvent_FlagCapture @ 0x50F6F0;
 Server_EnforceZoneEntityTeams @ 0x519600]` — plus the npruntime 1 Hz wire block
 (server_tick.cpp): 0x6F (15 B, change-gated to all + the full set to deploy-pending/dead
 recipients), the 0x1E zone events (0x3B/0x3C edges; flips 50/51/52/53 team-filtered + the
-56/57 banner), and 0x53 on flips. The 0x40 producer runs on its own witnessed 14-tick
+56/57 banner) with the actor byte in sorted `SpawnZoneList_IndexOf @0x43B990` space, and
+0x53 on flips. Numbered flips award scorer event 24 to every living same-team player in
+radius (`raw[39]` plus score-table status 34). The 0x40 producer runs on its own witnessed 14-tick
 cadence (this section's earlier "1 Hz-coupled" prose was stale against the
 shipped code) per §5.19 (`Server_BuildOverlayStateForPlayer @0x517FC0` →
 `Entity_ClassifyForMinimap @0x50FA70` → staging flush `@0x50FE20`); 2026-08-13
 adds HostClient loopback delivery and moves the classifier into the portable
 `world/minimap_overlay.*`. Pinned by `zone_chain_test`
-(control-delta formula pins; the full flip→secure→contest→neutralize→retake cycle).
+(control-delta formula pins; the full flip→secure→contest→neutralize→retake cycle) and
+`npruntime_round_end_test` (spawn-registry index distinct from chain index).
 Tracked divergences: our flip-request source is the same 1 Hz proximity sample the drain
-consumes (retail queues per-touch through the physics pass); the 0x1E attacker byte uses
-the chain-vector index (retail: `SpawnZoneList_IndexOf @ 0x43B990` over the client-sorted
-registry); 0x6F is change-gated (the golden's 268 non-periodic emits refute a steady
+consumes (retail queues per-touch through the physics pass); 0x6F is change-gated (the golden's 268 non-periodic emits refute a steady
 per-second stream; the exact retail emit filter is unwitnessed); 0x40 classifier
 residuals are now limited to the vehicle-bay group, supply-crate, medic-revivable,
 and exact pool-0 producer tails (ordinary active-player refresh separately rides 0x6B — the joiner fold applies via the reducer stream; the HOST-side 0x6B producer is NEEDS-RE, its retail server emitter unwitnessed);
-the timed-capture engine's ACTIVE entries + 0x6C presence
-counts (un-numbered flag zones — none authored on ASH_I5A), spawn-wave resets, the
-underdog catch-up term (needs the round clock), proximity scoring/0x81, and the
-`def+88 & 2` in-radius team conversion are all deferred.
+the timed-capture engine's ACTIVE entries + 0x6C presence counts (un-numbered flag zones —
+none authored on ASH_I5A), spawn-wave resets, the 0x81 proximity-score refresh packet, and
+the `def+88 & 2` in-radius team conversion are all deferred.
 
 **D-NET-161** [reimpl gap, PORTED 2026-07-04 (ground-family core; verify v35)] **The host
 never simulated vehicles** — the whole v33 "second model + can't drive" defect (see the

@@ -15,10 +15,9 @@
 // (un-numbered flag zones — ASH_I5A authors numbered bunkers only; 0x6C presence
 // counts ride those entries), the spawn-wave reset on flip, per-touch capture
 // requests through the physics pass (our request source is the same 1 Hz proximity
-// sample the drain consumes), the underdog catch-up term (needs the round clock —
-// unplumbed), the def+88&2 in-radius team conversion (attrib2 untracked on entities),
-// proximity scoring / 0x81 render-state sync, and the win-condition suppression's
-// round-end handoff (we only suppress events once one team owns every zone).
+// sample the drain consumes), the def+88&2 in-radius team conversion (attrib2
+// untracked on entities), and the 0x81 render-state sync beyond the authoritative
+// match scoring performed from each attributed flip.
 #ifndef OPENNOVA_WORLD_ZONE_CAPTURE_H
 #define OPENNOVA_WORLD_ZONE_CAPTURE_H
 
@@ -60,8 +59,17 @@ struct ZoneCaptureEvents {
     // banner keyed on the new owning team follows either way [orig: @0x50F6F0].
     struct Flip {
         EntityHandle zone;
+        // Exact Player whose eligible touch queued the capture. Stable pool
+        // order breaks ties between Players on the same uncontested team.
+        // [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 passes the Player to
+        // Server_UpdateCaptureZones @0x53B8F0 / GameEvent_FlagCapture @0x50F6F0]
+        EntityHandle capturer;
+        // Every living teammate in the numbered zone when it flips receives
+        // scorer event 24; this can include more Players than `capturer`.
+        // [orig: CaptureZone_CheckProximityScoring @0x500C50, call @0x53BC94]
+        std::vector<EntityHandle> scorers;
         uint8_t old_team = 0;
-        uint8_t new_team = 0;       // 0 = neutralized (was enemy-owned)
+        uint8_t new_team = 0;
         uint8_t capturer_team = 0;  // the team whose presence drove the flip
         bool frontier_changed = false;
         uint8_t capturer_frontier = 0; // FindFrontierZone AFTER the flip
@@ -79,15 +87,24 @@ struct ZoneCaptureEvents {
     }
 };
 
-// The control-delta formula [orig: calculate_capture_zone_control_delta @0x501120]:
-// presence = friendlies - frontier-eligible enemies (in radius); teamSize = the
-// capturing side's playing count + (6 - total)/2 when total < 6, soft-capped
-// x -> cap + (x - cap)/2 at 20/40/60; speed = teamSize * base (capture-speed setting
-// 1 -> 24, 2 -> 48, else 12), divided by the zone-number share count; delta =
-// 65536 * presence / speed, minimum magnitude 1. The underdog catch-up term is
-// deferred (needs the round clock; D-NET-162). Exposed for the test pins.
-int32_t zone_capture_control_delta(int presence, int capturing_side_players,
-                                   int total_players, int speed_setting, int shared_n);
+struct ZoneCaptureDeltaInput {
+    int presence = 0;
+    int capturing_side_players = 0;
+    int total_players = 0;
+    int speed_setting = -1;
+    int shared_zone_entities = 1;
+    int capturing_side_zones = 0;
+    int opposing_side_zones = 0;
+    int numbered_spawn_zones = 0;
+    int32_t remaining_ticks = -1;
+    uint32_t game_time_minutes = 0;
+};
+
+// The complete control-delta formula [orig:
+// calculate_capture_zone_control_delta @0x501120]: presence, player-count
+// shaping, the late-round ownership-leader acceleration, shared-zone division,
+// and minimum signed delta. Exposed as one input value for exact formula pins.
+int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input);
 
 // One 1 Hz capture pass over the chain. Reads/writes Entity::zone_control and zone
 // teams, rebuilds the chain masks on flips, enforces zone-numbered entity teams, and

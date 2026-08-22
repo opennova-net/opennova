@@ -1656,6 +1656,26 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	return c.ok && (c.p == c.end);
 }
 
+bool decode_end_round_header(const uint8_t *body, size_t len,
+		EndRoundHeader &out) {
+	out = EndRoundHeader{};
+	Cursor c{body, body + len, true};
+	out.winner_team = static_cast<int8_t>(c.u8());
+	out.team_score_0 = c.i16();
+	out.team_score_1 = c.i16();
+	out.draw = c.u8();
+	out.player_index = static_cast<int8_t>(c.u8());
+	return c.ok && c.p == c.end;
+}
+
+bool decode_end_round_stats_request(const uint8_t *body, size_t len,
+		EndRoundStatsRequest &out) {
+	out = EndRoundStatsRequest{};
+	Cursor c{body, body + len, true};
+	out.offset = c.u16();
+	return c.ok && c.p == c.end;
+}
+
 // §5.68 S2C 0x56 envelope — [orig: NapiNPClientMsg_0x056 @0x431D10, the two
 // u16 reads @0x431D4D / @0x431D61]. The remainder of the datagram is the chunk
 // (at most 200 bytes: the server cuts it with NetPacket_WriteReplayStreamChunk
@@ -1709,7 +1729,7 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 		if (r.clan.size() > 31) r.clan.resize(31);
 		if (r.tag.size() > 31) r.tag.resize(31);
 		r.team = c.u8();
-		r.side = c.u8();
+		r.player_class = c.u8();
 		// WIRE order; retail's slot shuffle is the column layout, not this.
 		r.kills = c.i16();
 		r.deaths = c.i16();
