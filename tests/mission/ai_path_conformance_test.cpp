@@ -307,15 +307,18 @@ int main() {
 				if (en.bms_id != 58 && en.bms_id != 63) return;
 				const w::AiEntity *ae = ai.for_handle(en.handle);
 				std::printf("  TRK t=%6d (%5.1fs) bms=%d pos=(%7.1f,%7.1f) wp=%d "
-				            "brain[type=%d ch=%d node=%d spd=%d] slot[35=%d 37=%d 38=%d]\n",
+				            "brain[type=%d ch=%d node=%d spd=%d spdA=%d spdB=%d st=%d dist=%d nv=%d]\n",
 						t, t / 62.5, en.bms_id, en.position.x, en.position.y,
 						int(en.waypoint_id),
 						ae ? ae->brain.f[w::AiBrain::kWpType] : -1,
 						ae ? ae->brain.f[w::AiBrain::kWpChannel] : -1,
 						ae ? ae->brain.f[w::AiBrain::kWpNode] : -1,
 						ae ? ae->brain.f[w::AiBrain::kOutSpeed] : -1,
-						ae ? ae->slot.f[35] : -1, ae ? ae->slot.f[37] : -1,
-						ae ? ae->slot.f[38] : -1);
+						ae ? ae->brain.f[w::AiBrain::kSpeedA] : -1,
+						ae ? ae->brain.f[w::AiBrain::kSpeedB] : -1,
+						ae ? ae->brain.f[w::AiBrain::kCurState] : -1,
+						ae ? ae->brain.f[w::AiBrain::kWpDistance] : -1,
+						ae ? ae->brain.f[w::AiBrain::kWpNodeVal] : -1);
 			});
 		}
 		{
@@ -431,8 +434,8 @@ int main() {
 				if (idx >= m.actions.size()) continue;
 				const bms::Action &ac = m.actions[idx];
 				const int t = int(ac.action_type);
-				if (t != 1 && t != 19) continue;   // RedirectGroupTo / RedirectSingleTo
-				std::printf("   REDIR ev=%zu type=%d sub=%d p1=%d p2=%d p3=%d p4=%d\n",
+				if (t != 1 && t != 19 && t != 3 && t != 21) continue; // redirects + AI-change
+				std::printf("   ACTION ev=%zu type=%d sub=%d p1=%d p2=%d p3=%d p4=%d\n",
 						ei, t, ac.action_sub_type, ac.param1, ac.param2, ac.param3, ac.param4);
 			}
 		}
