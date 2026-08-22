@@ -414,6 +414,21 @@ int main() {
 		}
 		// AUTHORED organic spawns straight off the BMS, the arbiter for any
 		// placement claim: whichever capture matches these is the correct one.
+		// HULL vs SEATS for the transport trucks. A dismounting body is left at its
+		// seat bone (EntityCommands::dismount does not reposition, and neither does
+		// retail @0x4355f0), so if a seat sits INSIDE the collision hull the body
+		// starts penetrating and the resolver shoves it forever (6.4n).
+		world.registry.for_each([&](const w::Entity &e) {
+			if (e.item_id != 1293 && e.item_id != 1294) return;
+			std::printf("   HULL item=%d handle=%u bound_radius=%.2f seats=%zu\n",
+					e.item_id, unsigned(e.handle.packed), double(e.bound_radius), e.seats.size());
+			for (size_t si = 0; si < e.seats.size(); ++si) {
+				const w::Seat &s = e.seats[si];
+				std::printf("       SEAT %zu type=%d local=%.2f,%.2f,%.2f\n",
+						si, int(s.type), double(s.seat_local.x), double(s.seat_local.y),
+						double(s.seat_local.z));
+			}
+		});
 		std::printf("authored items: %zu\n", m.items.size());
 		for (size_t ii = 0; ii < m.items.size(); ++ii) {
 			const bms::Entity &b = m.items[ii];
