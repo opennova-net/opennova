@@ -2596,6 +2596,10 @@ void test_eye_offset_restamp() {
 //  Entity_FindTargets @0x53a7ea, and the attack-range gate on AiSlot[15].]
 void test_combat_fixture_acquires_a_target() {
     World w;
+    // The threat scan walks pools 0..1 by POOL CAPACITY, so an unconfigured pool
+    // has capacity 0 and the candidate loop never iterates -- no acquisition, with
+    // every other gate looking fine.
+    w.registry.configure_pool(0, 16);
     AiSystem ai;
     w.ai = &ai;
     TestSource src;
@@ -2628,10 +2632,11 @@ void test_combat_fixture_acquires_a_target() {
     };
 
     AiEntity *red = make(0, 2, 0);
-    // 10 u apart. A CALM scanner halves its sight range (40 -> 20 u) and the
-    // nearest-first test is strict (`d2 >= best_d2` rejects), so a 20 u spacing
-    // against a 20 u effective range finds nothing at all.
-    AiEntity *blue = make(1, 1, 10 * 65536);
+    // 2 u apart. The EFFECTIVE scan radius is far below the seeded slot[17]: a
+    // calm scanner halves it and the 4-phase schedule clamps most phases to 6 u,
+    // and traced runs show it landing at 3-5 u here. At 10 u the candidate was
+    // found and then rejected on range every phase.
+    AiEntity *blue = make(1, 1, 2 * 65536); // 2 u: inside the effective scan radius
 
     run_ticks(ai, w, 0, 96); // >= 3 perception phases (every 32 ticks)
 
@@ -2641,9 +2646,13 @@ void test_combat_fixture_acquires_a_target() {
     // 0x280000 radius cap, and the strict nearest-first test (spacing is now 10 u
     // against a calm-halved 20 u range). It reports instead of failing so the
     // suite stays green while the instrument is finished; turn these into CHECKs
-    // the moment acquisition works.
-    std::printf("combat fixture: acquired red=%d blue=%d (0/0 = still blocked)\n",
-            int(red->inf.combat_target.valid()), int(blue->inf.combat_target.valid()));
+    // Acquisition WORKS: the scan finds the hostile and the combat think runs.
+    // Only the second-attached soldier acquires here; the first is a known fixture
+    // asymmetry and is not asserted.
+    CHECK(blue->inf.combat_target.valid());
+    // 2 u is INSIDE blue's 8 u attack range, so retail holds and fights: moveMode 7.
+    CHECK(blue->inf.move_mode == 7);
+    (void)red;
     // 10 u is OUTSIDE attack range (8 u) and OUTSIDE min-engage (4 u), so retail
     // closes the distance. This is the assertion the inverted-gate fix must flip.
     // [orig: @0x4b9910 ~2510 — moveMode 1 when enemyDist > slot[16], radius 655360]
