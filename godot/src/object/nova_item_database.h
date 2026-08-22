@@ -200,6 +200,8 @@ private:
 	// Items in a stable display order (by display name, then id), since the backing
 	// store is unordered. Shared by get_item_ids() / get_items().
 	std::vector<const Item *> sorted_items() const;
+	// The one per-item dictionary shape get_item() and get_items() both publish.
+	Dictionary item_dictionary(const Item &item) const;
 
 protected:
 	static void _bind_methods();
