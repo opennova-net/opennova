@@ -30,6 +30,9 @@ const PLAYER_POSE_TOLERANCE := 1.0e-3
 const COMPARISON_PRIMARY_CLIPS := 9
 const COMPARISON_WEAPON_CLIP := 30
 const COMPARISON_WEAPON_RESERVE := 270
+# Upper bound on the frames spent waiting for the first-person weapon's idle
+# clip to reach its hold before the pose is frozen (see _settle_viewmodel_hold).
+const VIEWMODEL_HOLD_MAX_FRAMES := 240
 const COMPARISON_WEAPON_NAME := "WPN_M16BURST"
 const COMPARISON_PLAYER_CLASS := 9
 const COMPARISON_CHARACTER_ID := 0x0402
@@ -2073,6 +2076,13 @@ func _ready() -> void:
 				_fail("fixture %s: Armory fallback did not converge: %s" % [
 						fixture_id, String(spawn_witness.error)])
 				return
+		# The Armory re-mount restarts the first-person weapon's idle clip. Retail
+		# holds a non-looping idle's LAST frame once it has played out (the FP
+		# channel plays the clip once and parks; the hip pose the registered retail
+		# frames settle into is that hold), so capturing mid-clip bakes a random
+		# phase -- up to ~1 cm of gun travel on the M4 clip set -- into the
+		# evidence. Let the hold establish before the pose is frozen.
+		await _settle_viewmodel_hold(VIEWMODEL_HOLD_MAX_FRAMES)
 
 	# ViewmodelPass is a sibling of MainGame under the gameplay viewport, not a
 	# descendant of MainGame. Query the same ownership seam used by
@@ -2548,6 +2558,38 @@ static func _write_bytes(path: String, bytes: PackedByteArray) -> Error:
 	var error := file.get_error()
 	file.close()
 	return error
+
+
+## Wait until every first-person viewmodel part's active body clip has played
+## to its end (a non-looping clip then holds its last frame, the state retail's
+## settled hip idle shows), bounded by max_frames. Looping clips have no hold
+## and are left alone: their phase is inherently unpinned on both engines.
+func _settle_viewmodel_hold(max_frames: int) -> void:
+	var presenter: Node = _game.get_node_or_null("LocalPlayerPresenter")
+	if presenter == null or not presenter.has_method("vm_parts"):
+		return
+	for _i in max_frames:
+		var held := true
+		for part in presenter.call("vm_parts"):
+			if not is_instance_valid(part):
+				continue
+			var model := part as ObjectModel
+			if model == null:
+				continue
+			var skeletal: SkeletalAnim = model.get_skeletal_anim()
+			var key: String = model.get_active_body_clip()
+			if skeletal == null or key.is_empty() or skeletal.is_clip_looping(key):
+				continue
+			var frames := skeletal.get_clip_frame_count(key)
+			var fps := skeletal.get_clip_fps(key)
+			if frames <= 0 or fps <= 0.0:
+				continue
+			var duration_ms := int(ceil(1000.0 * float(frames) / fps))
+			if model.get_animation_time_ms() < duration_ms:
+				held = false
+		if held:
+			return
+		await get_tree().process_frame
 
 
 func _settle(frames: int) -> void:

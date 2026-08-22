@@ -88,7 +88,9 @@ boundary. It restores the D3D scene and lets retail execute its ordinary UI
 call unmodified, so HUD/FPS remain visible to the player. OpenNova suppresses
 HUD/FPS only for its capture frame.
 Cross-engine metrics remain qualitative because the engines do not render
-identical viewmodel lighting/placement, post-processing, or animated phases.
+identical viewmodel lighting, post-processing, or animated phases, and the
+registered retail frames hold the viewmodel inside a teleport transient
+(runbook section 8).
 The explicit `world_center` and `viewmodel_arms` ROIs are descriptive only.
 The review remains scene-by-scene:
 

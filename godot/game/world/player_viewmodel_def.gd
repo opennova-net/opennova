@@ -23,7 +23,7 @@ var gfx3 := ""       # the THIRD-person world gun, drawn in the soldier's hands
 var animadm := ""    # the shared animation set (.adm basename)
 var pos_units := Vector3.ZERO       # hip view bias, raw def units
 var rot_bias_deg := Vector3.ZERO    # def rot columns: yaw/pitch/roll degrees
-var tpos_units := Vector3.ZERO      # ADS view bias [orig: WeaponDef.AltCamOffset @0x10C]
+var tpos_units := Vector3.ZERO      # ADS view bias [orig: WeaponDef.CamOffsetTpos @0x124]
 # Record default = the engine base camera fov (world/player_view.h
 # kPlayerCameraFovHDeg, Simulation.DEFAULT_PLAYER_FOV_H_DEG)
 # [orig: renderfov default flt_7D1898 @0x53ff31].

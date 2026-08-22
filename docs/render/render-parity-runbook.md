@@ -563,6 +563,43 @@ registered fixture. This is how `00tra-tire-marks-retail` (the D-TERRAIN-7
    JSON = 9 x N); the runbook's pinned table (fixture count, catalog sha);
    `docs/render/README.md` and the session record (counts, sha, MAE spans).
 
+## 8. First-person viewmodel evidence: what the pairs can and cannot show
+
+Measured 2026-08-22 (net-re §5.40 eighth pass); read this before judging the
+gun/arms region of any registered pair.
+
+- **The published retail frames sit inside a teleport transient.** The
+  registrar's `<= 120 frames` rule and the hook's 120-frame TOD lease force the
+  capture 2-3 frames after `onhook_apply_render_fixture`, and the fixture apply
+  is a teleport: retail's first-person motion lead saturates on the position
+  jump (one tick negative, then ~50 ticks positive, ~200 to decay) and a ground
+  snap adds a vertical pop (fire-barrel: gap 2 precedes the 0.87 m pop that gap
+  3 shows). Captures >= 1 s after the apply are pixel-identical to each other
+  and differ from the gap-3 frame by 7-16 px vertically (courtyard). The
+  fixture-to-fixture spread of the gun (up to ~110 px) is this transient, not
+  placement. A settled retail frame is not registrable today: extending the
+  hook's TOD lease and replacing the frame-gap rule with a settled-state
+  witness is the opennova-int follow-up.
+- **The OpenNova leg freezes the viewmodel at its idle hold.** The probe waits
+  for every viewmodel part's active clip to play out before the pose freeze
+  (`_settle_viewmodel_hold`); the revx02 M16 uses the `M4_1ST` clip set whose
+  idles are non-looping 16-frame holds, and mid-clip frames differ by up to
+  1.2 cm of gun travel.
+- **What is verified exact.** Root offset (`pos`/`tpos`, the 0.4 deg pitch
+  bias), the pass projection (the FP pass shares the world's `flt_8409E8`
+  Y-scale, so both frusta are 80 x 53.4468 deg), and the bone FK to <= 0.6 mm:
+  `scripts/render/fp_bone_oracle.py` (the retail builders) against the live rig
+  dump from `godot/tests/game/vm_bone_probe.gd` (run with `NOVA_RESOURCE_DIR`,
+  `NOVA_MISSION_BMS`, `NOVA_MISSION_PATH` = the loose JOX `.bms`,
+  `NOVA_EXPANSION=revx02`; pull the `.3di`/`.bad` inputs from the mount with
+  `pyopennova.vfs_ffi`).
+- **What remains.** Against a SETTLED retail frame the gun still sits about
+  11-35 px right and 0-30 px lower at 1920 px, depth-dependent (a camera-space
+  translation of ~2-3 cm toward the camera fits; a scale does not). Cause
+  unwitnessed; D-INF-14 carries it.
+- **CP01 water fixtures are not placement evidence**: retail's swim state
+  raises the rifle above the waterline, the port has no swim state (D-INF-3).
+
 ## Failure triage
 
 | Symptom | Cause and fix |

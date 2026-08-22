@@ -26,7 +26,7 @@ pass-class functions in this record.
 | Batch queue machinery (17-DWORD entries, CDynList68, per-frame quicksort) | witnessed / not a port target | ADR 0023: device-era artifact; the reimpl renderer owns its queues — semantics captured in the rows above |
 | Opaque state-sort (coarse depth slabs → effect index → fine depth, alpha-tested last) | witnessed / reimpl-internal equivalent | `[orig: RenderBatch_QuickSort @ 0x5d8b40]` unsigned-ascending + key layout below; Godot's opaque pass sorts front-to-back with its own state batching — same intent, D-RORD-2 permanent candidate |
 | Frame pass sequence (shadow slots → viewmodel → sky → world → overlays → bloom) | witnessed (confirm-only) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; Terrain_RenderSceneWithReflection @ 0x5c93a0]`; correspondence row |
-| Viewmodel pass (near-Z 0.05 + viewport depth [0, 0.1], drawn FIRST, own flush) | witnessed / reimpl visible equivalent ported | dedicated shared-world SubViewport at weapon `renderfov`, composited after the finished world so it occludes later global particles like retail's compressed depth band; `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60; Render_SwapProjectionNearZ @ 0x58a8f0; Render_SetViewportDepth01 @ 0x58a7b0]`; D-RORD-4 |
+| Viewmodel pass (near-Z 0.05 + viewport depth [0, 0.1], drawn FIRST, own flush) | witnessed / reimpl visible equivalent ported | dedicated shared-world SubViewport at weapon `renderfov`, composited after the finished world so it occludes later global particles like retail's compressed depth band; `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60; Render_SwapProjectionNearZ @ 0x58a8f0; Render_SetViewportDepth01 @ 0x58a7b0]`; the pass's `viewportScaleY` is `flt_8409E8` — the same `Render_SetAspectRatioMode @ 0x58d870` scale the world pass gets through `Render_SetViewProjectionWithDefaults @ 0x58f6b0` — so the FP frustum equals the world frustum (`[orig: Player_RenderViewModelIfAlive @ 0x4e0154 pushes it; @ 0x4dee5a..0x4dee7f]`, net-re §5.40 eighth pass); D-RORD-4 |
 | EffectWorld particle ordering | BOUNDED deterministic port | `ParticleFrameCompiler` orders emitter AABB centers back-to-front with source-index ties, then particles within each emitter by depth/source index, before adjacent state runs. `ParticleCompositorEffect` draws every command sequentially with depth test/no write, so reimpl surface/material sorting cannot reorder packet commands; exact equivalence to retail's recursive alternating-axis/depth-bin order remains open `[orig: CParticleManager_RecursiveSortAndRender @0x5ec980; CParticleManager_RenderBatch @0x5e9890]` |
 | EffectWorld pass placement around water | bounded reimpl mapping | retail invokes particle pass A before water and pass B after camera-side transparents; the reimpl currently issues one main-camera POST_TRANSPARENT compositor pass after the world transparents (D-RORD-7) |
 | Glow/envmap duplicate queue (Q3) + bloom flush | witnessed / deferred | `[orig: @ 0x5d93b5..0x5d9447; FrameFX_RenderBloomPass @ 0x582940]`; D-RORD-5 |
@@ -176,10 +176,18 @@ driver; camera above water shown — the sides mirror when underwater):
    `D3DXMatrixPerspectiveFovLH @ 0x58d9cc`) and the viewport depth range
    clamped to `[0, 0.1]` (`Render_SetViewportDepth01 @ 0x58a7b0`, renamed
    from `Scar_SubmitDecalToRenderObject` — it builds a D3D viewport
-   `{x,y,w,h,MinZ 0, MaxZ 0.1}`), per-weapon FOV, a state-stack push carrying
-   the character's effect scale, submits with flags 0x80 when armed, pops,
-   and flushes mode 0 — the compressed depth band keeps the world from ever
-   overlapping the gun. `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]`
+   `{x,y,w,h,MinZ 0, MaxZ 0.1}`), per-weapon FOV (`renderfov` @ `Def+0x148`,
+   horizontal; the vertical is derived through the SAME `flt_8409E8` viewport
+   Y-scale the world pass uses — `Player_RenderViewModelIfAlive @ 0x4e0154`
+   pushes it as the pass argument, `Render_SetAspectRatioMode @ 0x58d870` sets
+   it to `target_ratio / (h/w)`, 0.96 in 16:10 mode on 1920×1200 — so the FP
+   and world frusta are identical, `proj[0][0] = cot(40°)` in both), a
+   state-stack push carrying the equipped weapon item's `light_transfer`
+   (`ItemDef+0x218`, entry dword 1 — a lighting term; the effect-scale dword 0
+   keeps 1.0, the sun factor is discarded), submits with flags 0x80 when armed,
+   pops, and flushes mode 0 — the compressed depth band keeps the world from
+   ever overlapping the gun. `[orig: Player_RenderFirstPersonViewModel
+   @ 0x4ded60; @ 0x4dee5a..0x4dee7f; @ 0x4def3c]`
 4. Sky pass (`Terrain_RenderSkyboxPass @ 0x610ac0`): dome → celestial bodies
    → terrain surface, per the env record's witnessed order (env-tod-re.md
    §Sky dome); the celestial submits write the 16.16 alpha global
