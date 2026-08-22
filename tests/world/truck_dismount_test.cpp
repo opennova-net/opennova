@@ -104,6 +104,24 @@ int main() {
 		            p3[0], p3[1], p3[2]);
 	}
 
+	// A SOLDIER's real bound radius, against the 0x10000 (1.0 u) that D-COL-3
+	// hardcodes into the peer-repulsion threshold. Eindo11 is the 00TRg
+	// passenger model (item 102086, graphic Eindo11).
+	if (const Threedi3di3 *sm = cache.model_for("Eindo11")) {
+		if (sm->collision != nullptr) {
+			w::CollisionModel smodel;
+			if (simassets::collision_model_from_3di(sm->collision, smodel,
+			        simassets::model_has_collision(*sm))) {
+				std::printf("  Eindo11 fallback_bound_radius = %.3f u  (hardcoded 1.000)\n",
+				            double(smodel.fallback_bound_radius_q16) / 65536.0);
+			}
+		} else {
+			std::printf("  Eindo11 has NO collision block\n");
+		}
+	} else {
+		std::printf("  Eindo11 model not found\n");
+	}
+
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
