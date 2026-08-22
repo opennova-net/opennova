@@ -4979,8 +4979,9 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   ±0x800000 (actions 407/408). Seats 2/5: yaw = vehYaw + (lookYaw−vehYaw)/4, pitch fixed −0x8000000
   (11.25° down), **dist = 1.0 + 1.5·boundRadius**; plus ground-slope follow (max ground slope
   toward the anchor × 0.333 raises the eye), a smoothed (1/32) look-ahead point 6.0u along the
-  vehicle's `orientationMatrix(+0xb4)`, and model types 3/4 (helo/plane byte @ model+406) drop the
-  eye by boundRadius/2. Final rotation = atan2 look-at from eye to anchor(+R·(0.125,0.125,0.125)),
+  vehicle's `orientationMatrix(+0xb4)`, and unitType 3/4 (the itemDef `+0x196` WATERCRAFT
+  classes — `Entity_ClassifyForMinimap @ 0x50fa70`; the earlier "helo/plane" reading of this
+  byte was a misnomer, see §5.39's mounted-leg entries) drop the eye by boundRadius/2. Final rotation = atan2 look-at from eye to anchor(+R·(0.125,0.125,0.125)),
   roll 0 (+ explosion-shake sway from `dword_B764B0` filtered `Env_WeatherPrng` noise).
 - **Collision** `[orig: Camera_RaycastCollisionOffset @ 0x4378b0]` + inline in the view fn
   `@ 0x438213..0x43832e`: 0.25u-step march along the offset ray (skipped when dist ≥ 8.0),
@@ -5009,6 +5010,39 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   (its `PATTERN_CAMERA_DEFAULT_MODE` bytes are the `@ 0x5ca1d2` sequence) plus the mode-1 HUD
   mount gate to force on-foot 3P; the on-foot chase math itself is fully present (above).
   Our F4 toggle is that same debug affordance, not stock behavior.
+- **2026-08-22 addendum — the preference, its default, the rows, and the port.**
+  `g_camera_third_person_selected @ 0xA860DF` has six writers and one reader: the session
+  reset sets it to **1** (`[orig: Client_ResetGameSessionState @ 0x42c9f0, the write
+  @ 0x42ca3c]` — the DEFAULT is chase-selected), the view actions write it (400 `@ 0x49c084`
+  and 401 `@ 0x49c0ea` → 0, 402 `@ 0x49c100` → 1, the 412 cycle `@ 0x49c0ad`/`@ 0x49c0c8`),
+  and the arbiter reads it `@ 0x5ca1da`. `g_camera_mode @ 0xA890C8` has three writers only
+  (`Camera_SetTrackedEntity @ 0x439267`/`@ 0x4392c3`, `Camera_ClearViewState @ 0x437894`) and
+  `Camera_SetTrackedEntity` two callers (`Camera_ResetToLocalPlayer @ 0x4a3d42`, the arbiter
+  `@ 0x5ca262` — only when the mode CHANGED `@ 0x5ca258`, so the orbit/distance state carries
+  across a flip). The board and dismount paths are CAMERA-FREE: `Entity_ProcessVehicleAttach
+  @ 0x435aa0` only clears the MoveOrder stance bits `@ 0x435c42`, the stance latches
+  `@ 0x435c54`/`@ 0x435c59`, copies the look yaw `@ 0x435c61` and fires the tip;
+  `Entity_DetachFromVehicle @ 0x4355f0` clears flag 0x40, the parent and the bone and zeroes
+  parentSlot `@ 0x435921`. The mode is therefore EMERGENT: a driver/control seat (parentSlot
+  2/5) arrives in the chase on the next frame, a gunner (3) or passenger (1) stays first
+  person, a dismount returns to first person, and the surviving preference restores the chase
+  on re-boarding. The three view rows are the only bindable camera controls (CONTROLS
+  records, 0x6C stride from `0x8159a8`): 400 `view1st` `@ 0x8186CC` (flags 0x0C000801,
+  default F2), 401 `viewwithgun` `@ 0x818738` (0x0C000801, F3), 402 `viewchase` `@ 0x8187A4`
+  (0x04000800, F4); 412 and 405–410 have NO record. 400/401 differ only in
+  `g_FpWeaponViewFlags @ 0x24D20C0` bit 0 (`and …, ~1 @ 0x49c073` / `or …, 1 @ 0x49c0d9`).
+  The profile's +0x5CC setting writes only `g_cfg_default_camera_mode`, consumed at round
+  start by `Camera_ResetToLocalPlayer` and overwritten by the very next frame's arbiter —
+  vestigial; `mp_3rdperson_driver` (`dword_2550CA0`, default 1 `@ 0x54d35e`) has no gameplay
+  reader. Unwitnessed: the writer of `g_rules_flags @ 0x24D1E34` bit 0x40 (no direct one;
+  presumably a wire copy of the session attribute word). **PORTED 2026-08-22**:
+  `world::PlayerViewState` carries both words (`third_person_selected`, default true;
+  `third_person` RESOLVED by `player_view_resolve_mode` every tick ahead of the anchor chase
+  — `(selected && control_seat) || debug override`), the shell's hard-coded on-foot F4 toggle
+  is gone, the three rows ride `ControlsBindings` through
+  `GameHudPresenter.poll_view_action_edges` (which also owns the bit-0 write), and the
+  on-foot chase is the debug menu's "Third person on foot" check — the onhook affordance,
+  non-stock by design. Residuals: the death/spectator modes 3/4 and the 0x40 force-FP rule.
 - **FP mounted refinements** (mode 0): seat-bone eye (`Entity_GetBoneWorldPosition @ 0x545e60`)
   when the parent def sets +84 bit 0x20 (and not 0x40); a per-model camera callback (vtable +372)
   for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with

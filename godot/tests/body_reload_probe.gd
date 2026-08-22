@@ -41,8 +41,9 @@ func _ready() -> void:
 	if world == null or presenter == null:
 		push_error("[body] no weapon world/presenter"); get_tree().quit(1); return
 
-	# Third person (F4 through the real key path), clear the spawn tents.
-	_hold(KEY_F4, true); await _settle(2); _hold(KEY_F4, false)
+	# Third person on foot (the debug override; no gameplay key resolves it),
+	# clear the spawn tents.
+	presenter.set_debug_third_person(true); await _settle(2)
 	_hold(KEY_W, true)
 	await _settle(240)
 	_hold(KEY_W, false)

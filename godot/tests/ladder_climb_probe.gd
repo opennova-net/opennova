@@ -416,7 +416,7 @@ func _run() -> void:
 		return
 	var shot1_z := hold_z
 	if not _shots_dir.is_empty():
-		presenter.set_third_person(true)
+		presenter.set_debug_third_person(true)
 		await _mission_wait(0.4)
 		# The from-above latch lands one rung under the top — climb DOWN to
 		# mid-ladder for the latch beat so the body hangs clear on the rungs

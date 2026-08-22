@@ -363,7 +363,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_use_latched = true
 			get_viewport().set_input_as_handled()
 		return
-	# The gameplay keys (F4 first/third person, C/Z stance) live on LocalPlayerPresenter.
+	# Gameplay keys (B/N/NVG, Z/X/C stance) live on LocalPlayerPresenter; view rows on GameHudPresenter.
 	if _player_presenter != null and _player_presenter.handle_key_input(
 			event, is_gameplay_input_active()):
 		get_viewport().set_input_as_handled()

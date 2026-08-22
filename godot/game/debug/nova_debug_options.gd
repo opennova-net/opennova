@@ -141,6 +141,17 @@ const OPTIONS: Array[Dictionary] = [
 		"setter": &"set_debug_body_in_first_person",
 		"tooltip": "Draw your own body in first person — look down to see your legs and feet (debug experiment; expect the head/shoulders to clip the camera).",
 	},
+	{
+		"id": &"third_person_on_foot",
+		"label": "Third person on foot",
+		"kind": KIND_CHECK,
+		"default": false,
+		"target": TARGET_PLAYER,
+		"page": &"Player",
+		"getter": &"is_debug_third_person",
+		"setter": &"set_debug_third_person",
+		"tooltip": "Force the chase camera while on foot. Stock JO only resolves third person in a vehicle control seat with Chase View (F4) selected — the per-frame arbiter, net-re §5.39 — so this is the onhook debug patch's affordance, not a gameplay key.",
+	},
 ]
 
 

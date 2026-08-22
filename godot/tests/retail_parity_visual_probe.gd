@@ -157,7 +157,7 @@ end
 	for _tick in range(16):
 		sim.step()
 	var aimed: Array = sim.get_attach_labels()
-	sim.set_local_player_camera_third_person(true)
+	sim.set_local_player_debug_third_person(true)
 	var third_person: Array = sim.get_attach_labels()
 	sim.free()
 	if blocked.size() != 2 or aimed.size() != 1 or third_person.size() != 2:
