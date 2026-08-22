@@ -1,9 +1,9 @@
 extends GutTest
 
 ## The menu backdrop device leg (MenuVideoUnderlay): the witnessed
-## expansion-first source pick, the converted-sibling requirement, and the
-## STARTUP/strips draw gate (policy pinned engine-side by the menu_video
-## ctest; witness: docs/mnu/menu-re.md "The menu backdrop (Bink underlay)").
+## expansion-first source pick, direct BIKi decode, and the STARTUP/strips
+## draw gate (policy pinned engine-side by the menu_video ctest; witness:
+## docs/mnu/menu-re.md "The menu backdrop (Bink underlay)").
 
 var _root_dir := ""
 
@@ -37,41 +37,104 @@ func _touch(rel: String) -> void:
 	f.close()
 
 
+class BitWriter:
+	var bytes := PackedByteArray()
+	var bit_count := 0
+
+	func write(value: int, count: int) -> void:
+		for bit in count:
+			if (bit_count & 7) == 0:
+				bytes.append(0)
+			bytes[bytes.size() - 1] |= ((value >> bit) & 1) << (bit_count & 7)
+			bit_count += 1
+
+	func align_32() -> void:
+		while (bit_count & 31) != 0:
+			write(0, 1)
+
+
+func _write_fill_plane(writer: BitWriter, color: int) -> void:
+	writer.write(0, 4) # block types
+	writer.write(0, 4) # scaled sub-types
+	for _tree in 16:
+		writer.write(0, 4) # color high-nibble contexts
+	writer.write(0, 4) # color low nibble
+	writer.write(0, 4) # patterns
+	writer.write(0, 4) # X motion
+	writer.write(0, 4) # Y motion
+	writer.write(0, 4) # runs
+	writer.write(1, 10) # one block type
+	writer.write(1, 1) # repeat encoding
+	writer.write(6, 4) # fill block
+	writer.write(0, 9) # no scaled sub-types
+	writer.write(1, 10) # one color
+	writer.write(1, 1) # repeat encoding
+	writer.write(color >> 4, 4)
+	writer.write(color & 0xf, 4)
+	for _empty_bundle in 6:
+		writer.write(0, 10)
+	writer.align_32()
+
+
+func _write_white_biki(rel: String) -> void:
+	var packet := BitWriter.new()
+	packet.write(0, 32)
+	_write_fill_plane(packet, 235) # Y
+	_write_fill_plane(packet, 128) # V
+	_write_fill_plane(packet, 128) # U
+	var absolute := ProjectSettings.globalize_path(_root_dir.path_join(rel))
+	DirAccess.make_dir_recursive_absolute(absolute.get_base_dir())
+	var file := FileAccess.open(absolute, FileAccess.WRITE)
+	var first_frame_offset := 48
+	var file_size := first_frame_offset + packet.bytes.size()
+	file.store_32(0x694b4942) # BIKi
+	file.store_32(file_size - 8)
+	file.store_32(1) # frames
+	file.store_32(packet.bytes.size())
+	file.store_32(0) # reserved
+	file.store_32(8)
+	file.store_32(8)
+	file.store_32(30)
+	file.store_32(1)
+	file.store_32(0) # flags
+	file.store_32(0) # audio tracks
+	file.store_32(first_frame_offset | 1)
+	file.store_buffer(packet.bytes)
+	file.close()
+
+
 func _make_underlay() -> MenuVideoUnderlay:
 	var underlay: MenuVideoUnderlay = add_child_autofree(MenuVideoUnderlay.new())
 	return underlay
 
 
-func test_expansion_movie_wins_and_needs_its_own_sibling() -> void:
-	_touch("main.bik")
-	_touch("main.ogv")
-	_touch("expansion/revx02/main.bik")
-	_touch("expansion/revx02/main.ogv")
+func test_expansion_movie_wins_and_decodes_directly() -> void:
+	_write_white_biki("main.bik")
+	_write_white_biki("expansion/revx02/main.bik")
 	var underlay := _make_underlay()
 	underlay.set_source(ProjectSettings.globalize_path(_root_dir), "revx02")
-	assert_eq(underlay.get_slot_source(0), "expansion/revx02/main.ogv",
+	assert_eq(underlay.get_slot_source(0), "expansion/revx02/main.bik",
 			"the expansion's movie is the witnessed pick")
 	assert_eq(underlay.get_active_slot_count(), 1)
-	assert_eq(underlay.get_unconverted_count(), 0)
+	assert_eq(underlay.get_failed_count(), 0)
 
 
-func test_selected_movie_without_sibling_counts_unconverted() -> void:
-	# The expansion bik is the witnessed pick; playing the root's converted
-	# copy would show the WRONG movie, so the slot stays empty instead.
-	_touch("main.bik")
-	_touch("main.ogv")
+func test_invalid_selected_movie_counts_failed() -> void:
+	# The invalid expansion BIK is the witnessed pick; falling back to the
+	# root BIK after that choice would show the wrong movie.
+	_write_white_biki("main.bik")
 	_touch("expansion/revx02/main.bik")
 	var underlay := _make_underlay()
 	underlay.set_source(ProjectSettings.globalize_path(_root_dir), "revx02")
 	assert_eq(underlay.get_active_slot_count(), 0)
-	assert_eq(underlay.get_unconverted_count(), 1)
+	assert_eq(underlay.get_failed_count(), 1)
 
 
 func test_missing_movies_skip_silently() -> void:
 	var underlay := _make_underlay()
 	underlay.set_source(ProjectSettings.globalize_path(_root_dir), "")
 	assert_eq(underlay.get_active_slot_count(), 0)
-	assert_eq(underlay.get_unconverted_count(), 0)
+	assert_eq(underlay.get_failed_count(), 0)
 
 
 func test_screen_gate_follows_the_startup_rule() -> void:
@@ -83,8 +146,7 @@ func test_screen_gate_follows_the_startup_rule() -> void:
 
 
 func test_stop_clears_slots() -> void:
-	_touch("header.bik")
-	_touch("header.ogv")
+	_write_white_biki("header.bik")
 	var underlay := _make_underlay()
 	underlay.set_source(ProjectSettings.globalize_path(_root_dir), "")
 	assert_eq(underlay.get_active_slot_count(), 1)

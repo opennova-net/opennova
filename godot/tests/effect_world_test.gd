@@ -26,7 +26,7 @@ func before_each() -> void:
 	# rejected by ResourceRoot.is_valid_root (mirrors the other fixture roots).
 	_root_dir = OS.get_cache_dir().path_join("opennova_effect_world_test").path_join("root_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(_root_dir)
-	for fixture in ["buildup.ptl", "stock.ptl", "troytabl.ptl"]:
+	for fixture in ["buildup.ptl", "stock.ptl", "troytabl.ptl", "gorehit.ptu"]:
 		var src := ProjectSettings.globalize_path("res://../fixtures/particle/%s" % fixture)
 		var bytes := FileAccess.get_file_as_bytes(src)
 		assert_gt(bytes.size(), 0, "fixture readable: %s" % fixture)
@@ -119,11 +119,46 @@ func _warm_helper_count(world: EffectWorld) -> int:
 func test_load_from_resource_root_scans_every_ptl() -> void:
 	var world := _make_world()
 	var count := world.load_from_resource_root(_make_root())
-	assert_eq(world.file_count(), 3, "every mounted .ptl parses (buildup + stock + troytabl)")
-	# buildup declares 1 effect, stock declares 7; troytabl is table-only.
-	assert_eq(count, 8, "all effects across the mounts register")
+	assert_eq(world.file_count(), 4,
+			"every mounted .ptl parses (buildup + stock + troytabl) plus the .ptu gore set")
+	# buildup declares 1 effect, stock declares 7, gorehit.ptu declares 1;
+	# troytabl is table-only.
+	assert_eq(count, 9, "all effects across the mounts register")
 	assert_gt(world.effect_count(), 0)
 	assert_true(world.get_texture_provider().is_valid(), "textures route through the mounted root")
+
+
+# Retail's catalog spans `.ptl` PLUS one gore set — `.ptu` (US) or `.ptg` (German),
+# selected by the presence of `fgn2.bin`. Loading only `.ptl` silently loses every
+# effect defined there: retail's blood puffs (Effect_AmHitBody / Effect_SGvBody, in
+# US_BLOOD.PTU) and the whole Effect_FX50Cal* impact family. The loss is SILENT —
+# an unknown name interns as an invisible `stockeffect` clone (D-PTL-8), so the
+# only observable symptom is that flesh hits render nothing (D-PTL-24).
+# [orig: CEffectSystem_Init @ 0x5f6070 — extension select @0x5f608b..0x5f6095,
+#  archive match @0x5f64f3, shared callback CEffectWorld_ParseSectionCallback
+#  @ 0x5ecb40; selector Game_LoadConfig @ 0x5514e8..0x5514fa]
+func test_gore_set_effects_load_and_resolve_across_extensions() -> void:
+	var root := _make_root()
+	assert_eq(root.particle_extension(), ".ptu",
+			"no fgn2.bin in the fixture mount selects the US gore set")
+	var world := _make_world()
+	world.load_from_resource_root(root)
+
+	# The .ptu effectdef must be a REAL registration, not the stockeffect clone an
+	# unknown name would hand back. A clone carries no definitions and cannot spawn.
+	var handle := world.intern_effect("Effect_GoreHit")
+	assert_gt(handle, 0, "the .ptu effectdef interns")
+	assert_eq(world.effect_name_for_handle(handle), "Effect_GoreHit")
+
+	# Effect_GoreHit's pdefs list mixes its own particledef with `Buildup dots` from
+	# buildup.ptl. The catalog registers every particledef across ALL documents before
+	# resolving ANY effectdef, so the reference resolves across extensions. An effect
+	# with any unresolved pdef is cleared WHOLE (D-PTL-8 all-or-nothing) and spawns
+	# nothing, so a successful spawn is the proof that both halves resolved.
+	assert_true(world.spawn_effect_by_handle(handle, Vector3.ZERO, Vector3.FORWARD),
+			"the gore-set effect spawns; an unresolved or cloned one would not")
+	assert_gt(world.live_group_count(), 0,
+			"the cross-extension pdef reference resolved into a live group")
 
 
 func test_intern_is_case_insensitive_and_stable() -> void:
@@ -483,11 +518,12 @@ func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
 	# emitters live, and the sim-restart reset clears the warm spawns.
 	var world := _make_world()
 	var count := world.load_from_resource_root(_make_root())
-	assert_eq(count, 8, "fixture catalog registers 8 effects")
+	# 8 from the .ptl set + Effect_GoreHit from the .ptu gore set.
+	assert_eq(count, 9, "fixture catalog registers 9 effects")
 	var spawned := world.warm_all_effects(Vector3(1, 2, 3))
-	assert_eq(spawned, 8, "the warm pass spawns each cataloged effect once")
+	assert_eq(spawned, 9, "the warm pass spawns each cataloged effect once")
 	var warm_groups := world.get_debug_group_report()
-	assert_eq(warm_groups.size(), 8,
+	assert_eq(warm_groups.size(), 9,
 			"catalog warming must not duplicate every effect into FirstPerson")
 	for group_v in warm_groups:
 		var group := group_v as Dictionary
@@ -498,7 +534,7 @@ func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
 	world.advance_fixed_tick(0.016)
 	world.reset_runtime_state()
 	assert_eq(world.active_entry_count(), 0, "the reset clears every warm spawn")
-	assert_eq(world.warm_all_effects(Vector3.ZERO), 8,
+	assert_eq(world.warm_all_effects(Vector3.ZERO), 9,
 			"a later warm (reload) spawns the catalog again")
 
 

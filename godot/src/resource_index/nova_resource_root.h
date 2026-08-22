@@ -132,6 +132,10 @@ public:
 	String resolve_file(const String &name);
 	PackedStringArray list_files(const String &suffix = String()) const;
 	Array list_file_entries(const String &suffix = String()) const;
+	// The gore-set extension the effect catalog loads alongside every `.ptl` on this
+	// mount — ".ptg" when `fgn2.bin` is present, else ".ptu" (engine/base
+	// ResourceIndex::particle_extension owns the witness).
+	String particle_extension() const;
 	// Runtime roots honor the retail per-call source policy. Editor roots deliberately
 	// retain their legacy loose-only flat lookup for every policy value.
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;

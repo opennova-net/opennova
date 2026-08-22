@@ -92,7 +92,16 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (extension == ".fnt") {
 		return "font";
 	}
-	if (extension == ".ptl") {
+	// The effect catalog is one grammar across three extensions. `.ptl` is the base
+	// set; `.ptu` and `.ptg` are the US and German gore sets, parsed by the SAME
+	// section callback and differing only in which one the runtime selects
+	// [orig: CEffectSystem_Init @ 0x5f6070 matches an archive entry against ".ptl"
+	// OR the selected extension @0x5f64f3 and parses both through
+	// CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose `.ptu` leg's
+	// CEffectWorld_LoadDefinitionFile @ 0x5ecf70 is a thin wrapper on the same
+	// File_ParseASCIIFile + callback]. The index carries all three so the browser
+	// and the loader can both see them; particle_extension() owns the SELECTION.
+	if (extension == ".ptl" || extension == ".ptu" || extension == ".ptg") {
 		return "particle";
 	}
 	if (extension == ".mnu") {
@@ -155,7 +164,7 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "fnt" || key == "fonts") {
 		return "font";
 	}
-	if (key == "ptl" || key == "particles") {
+	if (key == "ptl" || key == "ptu" || key == "ptg" || key == "particles") {
 		return "particle";
 	}
 	if (key == "mnu" || key == "menus") {
@@ -298,6 +307,16 @@ std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &
 		}
 	}
 	return out;
+}
+
+std::string ResourceIndex::particle_extension() const {
+	// The gore set the effect catalog loads alongside every `.ptl`. Retail picks it
+	// once at config time from the mere PRESENCE of `fgn2.bin` in the mount stack —
+	// the German content marker — and never re-reads it
+	// [orig: Game_LoadConfig @ 0x551480 sets byte_24D4DF9 = FileSystem_FileExists(
+	// "fgn2.bin") != 0 @0x5514e8..0x5514fa; CEffectSystem_Init @ 0x5f6070 reads it to
+	// pick ".ptg" over the ".ptu" default @0x5f608b..0x5f6095].
+	return impl_->vfs.has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
 }
 
 void ResourceIndex::set_scr_policy(int scr_policy) {
