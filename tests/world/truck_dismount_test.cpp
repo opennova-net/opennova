@@ -21,9 +21,11 @@
 // infantry tick does. Diagnostic/report-only while the divergence is open, in
 // the bunker_walkin_test tradition: it prints whether the capsule escapes.
 // Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 #include "resource_index/resource_index.h"
@@ -72,6 +74,35 @@ int main() {
 	            model.min[0] / 65536.0, model.max[0] / 65536.0,
 	            model.min[1] / 65536.0, model.max[1] / 65536.0,
 	            model.min[2] / 65536.0, model.max[2] / 65536.0);
+
+	// The authored seat USER POINTS straight off the model -- the source our
+	// extraction reads. Tests whether the z=2.54 our seat table reports is the
+	// model's own or something we introduce.
+	// Volume TYPES: our ground probe accepts terrain or a type-1 CB solid as
+	// standing support, so whether the bed is type 1 decides if a dismounted
+	// body stands on the truck or falls through to terrain.
+	{
+		int t1 = 0, other = 0;
+		for (size_t vi = 0; vi < model.volumes.size(); ++vi) {
+			const int vt = int(model.volumes[vi].type);
+			std::printf("    VOL %zu type=%d\n", vi, vt);
+			if (vt == 1) ++t1; else ++other;
+		}
+		std::printf("    -> type1=%d other=%d\n", t1, other);
+	}
+	std::printf("  DTruck1 user points: %zu\n", m3->user_point_count);
+	for (size_t ui = 0; ui < m3->user_point_count; ++ui) {
+		const ThreediUserPoint &up = m3->user_points[ui];
+		std::string low(up.name);
+		for (char &c : low) c = char(::tolower((unsigned char)c));
+		if (low.rfind("sitex",0) != 0 && low.rfind("ctrlx",0) != 0 &&
+		    low.rfind("drvrx",0) != 0 && low.rfind("usegun",0) != 0)
+			continue;
+		float p3[3];
+		threedi_user_point_position(&up, p3);
+		std::printf("    USRP %-10s model=(%.3f, %.3f, %.3f)\n", up.name,
+		            p3[0], p3[1], p3[2]);
+	}
 
 	w::World world;
 	world.registry.configure_pool(0, 8);
