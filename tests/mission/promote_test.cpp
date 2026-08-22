@@ -28,8 +28,11 @@ static bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team, uint8_
     e.team = team;
     e.waypoint_id = wp_id;
     e.wp_number = wp_num;
-    e.min_engagement_distance = 50 << 16;
-    e.max_engagement_distance = 500 << 16;
+    // PLAIN WORLD UNITS, not 16.16 -- shipped missions author small integers here
+    // (00TRg's soldiers carry 10..500). The slot seed shifts these UP to 16.16
+    // [orig: slot+60/+64 engagement (<<16)], and the AI profile takes them unscaled.
+    e.min_engagement_distance = 50;
+    e.max_engagement_distance = 500;
     return e;
 }
 
@@ -456,6 +459,15 @@ int main() {
 
     // organic 0 is in GROUND_FOLLOWWP with its route + spawn transform.
     AiEntity *e0 = ai.at(0);
+    // Engage-range UNITS, both conventions pinned together so they cannot drift apart
+    // again: the AI PROFILE takes the BMS value unscaled (world units, i16), while the
+    // SLOT copy is the same value shifted to 16.16. A previous uncited `>> 16` on the
+    // profile side zeroed both ranges for every shipped mission, and ai_score_target
+    // rejects every candidate when the range is 0.
+    CHECK(e0->profile.range_primary == 500);
+    CHECK(e0->profile.range_secondary == 50);
+    CHECK(e0->slot.f[15] == (500 << 16));
+    CHECK(e0->slot.f[16] == (50 << 16));
     CHECK(e0 != nullptr);
     CHECK(e0->brain.f[AiBrain::kCurState] == 16); // GROUND_FOLLOWWP (patrol_on_spawn)
     CHECK(e0->brain.f[AiBrain::kWpType] == 1);

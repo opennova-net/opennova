@@ -162,8 +162,29 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // Profile (movement-relevant subset) from the mission AI fields.
     ae.profile.flags96 = 0;   // not combat-capable / can-fire here (the weapon phase sets these)
     ae.profile.flags100 = 0;  // no use-fallback / ignore-stealth
-    ae.profile.range_primary = static_cast<int16_t>(e.max_engagement_distance >> 16);
-    ae.profile.range_secondary = static_cast<int16_t>(e.min_engagement_distance >> 16);
+    // Engage ranges are WORLD UNITS on both sides of the compare, so the BMS value
+    // goes in UNSCALED. The BMS fields are plain units, not 16.16 -- the SLOT seeds
+    // further down shift the SAME two fields UP to 16.16
+    // [orig: slot+60 max / +64 min engagement (<<16); see s.f[15]/s.f[16] below], and
+    // AiProfile::range_primary/secondary are documented "+78/+70 max engage range
+    // (world units, signed i16)". The consumer agrees: ai_score_target gates
+    // `distance > range` against dist3d_units, which is the 16.16 distance shifted
+    // DOWN to units [orig: AI_FindBestTargetB @0x4671e8].
+    //
+    // This previously shifted DOWN (>> 16), uncited. Every 00TRg soldier authors
+    // 10..500 here, so it produced 0 for all of them -- and a 0 range makes
+    // ai_score_target reject EVERY candidate at any nonzero distance (0 is not
+    // "unlimited"), so those AI could never acquire a target, never alert, and never
+    // leave their idle pose.
+    //
+    // UNWITNESSED, declared: whether the BMS record is the right SOURCE for these two
+    // profile slots at all. +78/+70 live in the AI PROFILE struct, whose retail source
+    // is the .aip / item def rather than the mission record; seeding them from the BMS
+    // entity is a pre-existing adaptation kept as-is, with only the SCALE corrected.
+    ae.profile.range_primary =
+            static_cast<int16_t>(std::clamp<int32_t>(e.max_engagement_distance, -32768, 32767));
+    ae.profile.range_secondary =
+            static_cast<int16_t>(std::clamp<int32_t>(e.min_engagement_distance, -32768, 32767));
 
     // Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
     // The .aip profile seeds them when the embedder supplied the entity's profile
