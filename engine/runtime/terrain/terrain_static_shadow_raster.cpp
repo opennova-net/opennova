@@ -205,6 +205,46 @@ bool validate(const TerrainStaticShadowRasterInput &input,
 	return true;
 }
 
+// A triangle clipped against one plane has at most four corners.
+constexpr std::size_t kClippedPolygonMax = 4;
+
+TerrainStaticShadowRasterVertex lerp_vertex(
+		const TerrainStaticShadowRasterVertex &a,
+		const TerrainStaticShadowRasterVertex &b, float t) noexcept {
+	TerrainStaticShadowRasterVertex out;
+	out.page_u = a.page_u + (b.page_u - a.page_u) * t;
+	out.page_v = a.page_v + (b.page_v - a.page_v) * t;
+	out.depth = a.depth + (b.depth - a.depth) * t;
+	out.texture_u = a.texture_u + (b.texture_u - a.texture_u) * t;
+	out.texture_v = a.texture_v + (b.texture_v - a.texture_v) * t;
+	return out;
+}
+
+// Sutherland-Hodgman against the near plane depth >= 0 (the D3D clip volume's
+// z >= 0 face, w = 1 under the ortho). Keeps the input winding. Returns the
+// corner count: 0 when the whole triangle lies below the plane.
+std::size_t clip_near_plane(
+		const std::array<TerrainStaticShadowRasterVertex, 3> &in,
+		std::array<TerrainStaticShadowRasterVertex, kClippedPolygonMax> &out)
+		noexcept {
+	std::size_t count = 0;
+	for (std::size_t index = 0; index < in.size(); ++index) {
+		const TerrainStaticShadowRasterVertex &current = in[index];
+		const TerrainStaticShadowRasterVertex &next =
+				in[(index + 1) % in.size()];
+		const bool current_inside = current.depth >= 0.0f;
+		const bool next_inside = next.depth >= 0.0f;
+		if (current_inside) {
+			out[count++] = current;
+		}
+		if (current_inside != next_inside) {
+			const float t = current.depth / (current.depth - next.depth);
+			out[count++] = lerp_vertex(current, next, t);
+		}
+	}
+	return count;
+}
+
 } // namespace
 
 TerrainStaticShadowLightDirection
@@ -287,14 +327,30 @@ bool rasterize_terrain_static_shadow_alpha(
 	}
 
 	for (const TerrainStaticShadowRasterTriangle &triangle : input.triangles) {
+		// The D3D clip volume cuts the projected triangle at the near plane
+		// before rasterization: with w = 1 under the witnessed ortho, depth
+		// `h*0.0005 - 0.00005` is negative for every vertex lower than 0.1 u
+		// above the caster's ground plane, so buried foundations and skirts
+		// never cast; a straddling triangle keeps only its part above the
+		// plane, with every attribute interpolated linearly along the cut
+		// edges (Sutherland-Hodgman, exactly the clipper's arithmetic).
+		// [orig: setup_shadow_cascade_matrices_0 @0x58D5F8 (P[10] = 0.0005),
+		// @0x58D602 (P[14] = -0.00005), @0x58D60C (P[15] = 1); the temp RT
+		// clear depth 0.99995 @0x60D5BF places the far side likewise]
+		std::array<TerrainStaticShadowRasterVertex, kClippedPolygonMax> clipped;
+		const std::size_t clipped_count = clip_near_plane(
+				triangle.vertices, clipped);
+		for (std::size_t fan = 2; fan < clipped_count; ++fan) {
+		const std::array<const TerrainStaticShadowRasterVertex *, 3> corner = {
+				&clipped[0], &clipped[fan - 1], &clipped[fan]};
 		std::array<ScreenVertex, 3> vertices;
 		for (std::size_t index = 0; index < vertices.size(); ++index) {
 			vertices[index] = {
-					triangle.vertices[index].page_u * high_width,
-					triangle.vertices[index].page_v * high_height,
-					triangle.vertices[index].depth,
-					triangle.vertices[index].texture_u,
-					triangle.vertices[index].texture_v};
+					corner[index]->page_u * high_width,
+					corner[index]->page_v * high_height,
+					corner[index]->depth,
+					corner[index]->texture_u,
+					corner[index]->texture_v};
 		}
 		const float area = edge(vertices[0], vertices[1],
 				vertices[2].x, vertices[2].y);
@@ -374,6 +430,7 @@ bool rasterize_terrain_static_shadow_alpha(
 				destination = blend_fragment(
 						destination, triangle.blend, source_alpha);
 			}
+		}
 		}
 	}
 

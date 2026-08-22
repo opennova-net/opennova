@@ -153,9 +153,14 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 	assert_true(source.contains(
 			"p_placer.is_valid() ? &static_shadow_rasterizer : nullptr"),
 		"The device must expose the producer only while a mission source is attached.")
-	var light_sample := source.find("page_light_direction = cached_env_node->get_light_direction()")
+	var light_sample := source.find("cached_env_node->get_light_direction_render_tuple()")
 	var frame_raster := source.find("static_shadow_rasterizer.begin_frame(page_light_direction)")
 	var frame_cache := source.find("tile_cache_device.begin_frame(draw_list.frame_id)")
+	assert_gt(light_sample, 0,
+		"The page path must read the RAW getter tuple: its projector and DOT3 packs "
+		+ "reduce (g2,g1,g0)/(g2,g0,g1) themselves, so the Godot-axes vector would swap twice.")
+	assert_eq(source.find("page_light_direction = cached_env_node->get_light_direction()"), -1,
+		"The Godot-axes light vector must never feed the page path.")
 	assert_gt(frame_raster, light_sample,
 		"The producer must consume the same direct environment tuple as the page composer.")
 	assert_gt(frame_cache, frame_raster,

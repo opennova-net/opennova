@@ -471,8 +471,18 @@ The reimpl now follows that receiver domain directly for its supported subset.
 A typed static-source snapshot follows destruction/husk/editor transforms;
 the page provider selects the retail LOD/ROBJ population, resolves supported
 opaque/alpha-tested materials (including discrete `TEX_TEAM` frames), and
-rasterizes only page A. Terrain and detail foliage then sample the same current-
-frame cache binding, while sector-model floors remain outside the receiver.
+rasterizes only page A — since 2026-08-22 clipping each projected triangle at
+the ortho's near plane first (`setup_shadow_cascade_matrices_0 @ 0x58D5F8..
+0x58D60C`: depth `h·0.0005 − 0.00005`, so geometry lower than 0.1 u above the
+caster's ground plane never casts; `renderer`-side port in
+`engine/runtime/terrain/terrain_static_shadow_raster.cpp`), and fed the RAW
+`Environment_GetLightDirectionFloat` tuple — the projector's (g2,g1,g0) and
+the DOT3 (g2,g0,g1) reductions are retail's own packings of that tuple, so the
+page path must never receive the Godot-axes vector the celestial getters serve
+(the 2026-08-20 getter change had swapped it twice, rotating every static
+shadow's azimuth 35.6° at 15:00). Terrain and detail foliage then sample the
+same current-frame cache binding, while sector-model floors remain outside
+the receiver.
 The former terrain-only directional static-shadow light and black next-pass
 catcher are retired. Exact general c7/c8 projection, unsupported animated or
 skinned materials, one-sided/non-opaque overlap behavior, remaining ordered

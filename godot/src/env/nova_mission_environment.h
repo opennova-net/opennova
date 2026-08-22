@@ -151,6 +151,12 @@ public:
 	Vector3 get_sun_direction() const;
 	Vector3 get_moon_direction() const;
 	Vector3 get_light_direction() const;
+	// The active light as the engine serves it — the render-float tuple of
+	// Environment_GetLightDirectionFloat, no axis map. For consumers that
+	// port a retail packing of that tuple (the terrain page projector and
+	// the tile-cache DOT3 bytes), which must never receive the Godot-axes
+	// vector above: their own (g2,g1,g0) reduction would then swap twice.
+	Vector3 get_light_direction_render_tuple() const;
 	bool is_night_phase() const;
 	float get_day_phase_blend() const;
 	Vector3 get_sun_color() const;
