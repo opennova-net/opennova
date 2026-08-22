@@ -144,6 +144,18 @@ int main() {
 			                static_cast<float>(pos[1] / 65536.0),
 			                static_cast<float>(pos[2] / 65536.0)};
 		}
+		// Variant: the carrier DRIVES ON after the drop (NW_TRUCK_LEAVES=<tick>).
+		// The user reports retail's trucks continue past the drop point; if the
+		// hull vacating is what frees the body, this run clears and the stationary
+		// one does not.
+		static const char *leave_at = std::getenv("NW_TRUCK_LEAVES");
+		if (leave_at != nullptr && leave_at[0] != 0 && t == std::atoi(leave_at)) {
+			if (w::Entity *tv = world.registry.get(th)) {
+				tv->position.y += 400.0f;
+				std::printf("  t=%d TRUCK DRIVES ON (carrier moved away)\n", t);
+			}
+			for (int k = 0; k < 17; ++k) cw.build_tick_tables(world);
+		}
 		if ((t % 16) == 0) cw.build_tick_tables(world);
 		if ((t % 100) == 0)
 			std::printf("  t=%4d pos=(%6.2f, %6.2f, %5.2f) dist=%6.2f contactItem=%d\n",
