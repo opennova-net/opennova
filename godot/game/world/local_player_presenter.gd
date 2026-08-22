@@ -314,13 +314,13 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 	if events.is_empty():
 		# Keep the active clip at this tick's exact pose, but defer the expensive
 		# camera/avatar/viewmodel-root presentation to after the catch-up batch.
-		_weapon_effects.consume(weapon_view, events, true)
+		_weapon_effects.consume(weapon_view, events)
 		return
 	_view = _world.local_player_view()
 	_third_person = _view != null and _view.third_person
 	_weapon_effects.set_weapon_view(weapon_view)
 	_update_player_camera()
-	_weapon_effects.consume(weapon_view, events, true)
+	_weapon_effects.consume(weapon_view, events)
 
 
 # The gameplay keys (F4/B/N/NVG gain/stance) live in the input router; this

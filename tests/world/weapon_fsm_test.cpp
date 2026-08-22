@@ -511,6 +511,61 @@ void test_idle_plays_once_per_entry() {
     CHECK(idle_plays == 1);
 }
 
+void test_channel_advance_is_counter_gated() {
+    // The FP channel steps once per tick only while the slot counter is non-zero
+    // AFTER the pump's decrement: the tick that drains a window does not step,
+    // the entry tick plays instead of stepping, and a non-local owner never
+    // steps. [orig: ActionSlot_ExecuteActionNoEffect @ 0x541a4d..0x541a59]
+    WeaponFsmDef def = make_ak_def();
+    def.auto_fire = false;
+    WeaponSlotState s = make_ak_slot();
+    WeaponFsmInputs in;
+    WeaponFsmEvents ev;
+    // One semi shot, then walk to the settled idle (kDone, played).
+    in.fire_pressed = true;
+    weapon_fsm_tick(def, s, in, ev);
+    in.fire_pressed = false;
+    for (int t = 0; t < 40 && !(s.current == wa::kIdle && s.phase == weapon_phase::kDone);
+         ++t)
+        weapon_fsm_tick(def, s, in, ev);
+    CHECK(s.current == wa::kIdle);
+    // Align to a drained tick (post-tick counter == 0; that tick never steps).
+    int guard = 0;
+    while (s.counter != 0 && ++guard < 200) weapon_fsm_tick(def, s, in, ev);
+    CHECK(s.counter == 0);
+    CHECK(!ev.advance_anim);
+    // One full idle reseed cycle (ds + de ticks, baked from the clip): every
+    // tick steps the channel except the one that drains the window back to 0.
+    const int32_t cycle = def.actions[wa::kIdle].delay_start +
+                          def.actions[wa::kIdle].delay_end;
+    CHECK(cycle > 2);
+    int advances = 0;
+    for (int t = 0; t < cycle; ++t) {
+        weapon_fsm_tick(def, s, in, ev);
+        if (ev.advance_anim) ++advances;
+        if (s.counter == 0) CHECK(!ev.advance_anim); // the drained tick never steps
+    }
+    CHECK(s.counter == 0);          // exactly one cycle per reseed
+    CHECK(advances == cycle - 1);
+    // A non-local owner's channel is never advanced by this slot.
+    in.is_local = false;
+    advances = 0;
+    for (int t = 0; t < cycle; ++t) {
+        weapon_fsm_tick(def, s, in, ev);
+        if (ev.advance_anim) ++advances;
+    }
+    CHECK(advances == 0);
+    in.is_local = true;
+    // An action whose row resolves no clip never steps the channel.
+    def.actions[wa::kIdle].has_anim = false;
+    advances = 0;
+    for (int t = 0; t < cycle; ++t) {
+        weapon_fsm_tick(def, s, in, ev);
+        if (ev.advance_anim) ++advances;
+    }
+    CHECK(advances == 0);
+}
+
 void test_action_sound_legs() {
     // The corpus split: fire rows carry the gunshot in soundsetEND (118/130 REVX,
     // 83/89 JOX), reload rows in soundset (start). The shot tick begins AND finishes
@@ -1066,6 +1121,7 @@ int main() {
     test_reload_request_gate();
     test_scope_queue();
     test_idle_plays_once_per_entry();
+    test_channel_advance_is_counter_gated();
     test_action_sound_legs();
     test_held_replay_skips_the_begin_sound_leg();
     test_fire_abort_finishes_silently();

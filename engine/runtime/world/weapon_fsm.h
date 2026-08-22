@@ -286,6 +286,16 @@ struct WeaponFsmInputs {
 // viewmodel parts (arms + gun share the animadm channel).
 struct WeaponFsmEvents {
     bool play_anim = false;
+    // One gated step of FP channel time this tick. Retail advances the viewmodel's
+    // animadm channel ONLY from the handlers' tick shim, and only while the slot
+    // counter is non-zero AFTER the pump's decrement and the current action resolves
+    // a clip; the channel never free-runs. One step is one 62 Hz tick of clip time.
+    // [orig: ActionSlot_ExecuteActionNoEffect @ 0x541a4d..0x541a59 /
+    //  ..WithEffect @ 0x5419b8..0x5419c4 / ActionSlot_BeginActivePhase
+    //  @ 0x53f8d2..0x53f8de -> AnimChannel_AdvanceDispatch @ 0x40b960 ->
+    //  AnimChannel_AdvancePlayback @ 0x40b140 t += rate, rate = fps/62/frames
+    //  from AnimChannel_InitFromData @ 0x410560]
+    bool advance_anim = false;
     char anim_key[64] = {};
     int32_t action_started = -1;   // slot id whose ACTIVE phase began this tick — the
                                    // host's sound/muzzle seam (def.actions[id] carries

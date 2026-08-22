@@ -118,7 +118,8 @@ func _unregister_effect_anchors() -> void:
 # Drain any ordered presentation events left for owners that do not install the
 # fixed-tick callback. In the game, _present_fixed_weapon_tick consumes
 # each 62.5 Hz batch before that tick's particle update. Every clip/begin/end
-# payload survives either route; pre-aged fallback clips resume at their source age.
+# payload survives either route; clips are POSED at the sim's gated channel
+# position (anim_advance_ticks) — nothing free-runs the FP playhead.
 # Clip starts land on BOTH viewmodel parts. Scope side effects
 # (forced unscope, rescope-after-reload) flip the SIM's own engaged bit — they
 # arrive here already folded into the view snapshot.
@@ -132,8 +133,7 @@ func consume_pending(view: PlayerWeaponView) -> void:
 
 
 func consume(view: PlayerWeaponView,
-		events: Array[PlayerWeaponEvent],
-		authoritative_phase: bool = false) -> void:
+		events: Array[PlayerWeaponEvent]) -> void:
 	_weapon_view = view
 	if view == null:
 		# Slot selection is control state, not viewmodel presentation. In
@@ -151,15 +151,19 @@ func consume(view: PlayerWeaponView,
 		if not event.anim_key.is_empty():
 			batch_started_clip = true
 			break
-	if authoritative_phase and not batch_started_clip:
-		# Advance the already-playing clip before same-tick direct effects sample
-		# an action user point. A clip event below replaces this pose first.
+	if not batch_started_clip:
+		# Pose the already-playing clip at the sim's channel position before
+		# same-tick direct effects sample an action user point. A clip event
+		# below replaces this pose first.
 		_play_viewmodel_clip(view.anim_key, view.anim_variant,
-				view.anim_age_ticks, true)
+				view.anim_advance_ticks)
 	for event in events:
 		if not event.anim_key.is_empty():
+			# A batch's clip events are superseded by later ones; the surviving
+			# clip's position is the snapshot's channel position (0 on the
+			# production tick itself).
 			_play_viewmodel_clip(event.anim_key, event.anim_variant,
-					event.age_ticks, authoritative_phase)
+					view.anim_advance_ticks)
 		if event.action_started >= 0:
 			_fire_action_effects(event)
 		if event.action_effect >= 0:
@@ -178,9 +182,8 @@ func consume(view: PlayerWeaponView,
 	# but never replay the snapshot's historical sound/effect payloads.
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
-		if not authoritative_phase:
-			_play_viewmodel_clip(view.anim_key, view.anim_variant,
-					view.anim_age_ticks, false)
+		_play_viewmodel_clip(view.anim_key, view.anim_variant,
+				view.anim_advance_ticks)
 
 
 # The FIRE action kind — the only local action-begin that takes the with-effect
@@ -459,21 +462,21 @@ func _play_switch_deny_sound() -> void:
 		audio.ui_soundset(SWITCH_DENY_SOUNDSET)
 
 
-# Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
-# of the active key restarts it (fire/recoil re-triggers), unlike play_body_clip's
-# same-key resume. `variant` is the sim ring's latched serve for multi-clip .adm
-# rows — both parts follow the ONE latch, so arms and gun never split variants
-# [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served entry at animState+68].
-func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0,
-		authoritative_phase: bool = false) -> void:
+# Pose an FSM clip on every viewmodel part (arms + gun share the animadm) at the
+# sim's gated channel position — a replay resets the position to 0 through the
+# sim (fire/recoil re-triggers). `variant` is the sim ring's latched serve for
+# multi-clip .adm rows — both parts follow the ONE latch, so arms and gun never
+# split variants [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served
+# entry at animState+68]. The playhead is PINNED (external phase): retail's
+# channel moves only in the weapon pump's gated tick shim, never per render
+# frame [orig: AnimChannel_AdvancePlayback @ 0x40b140 rate = one 62 Hz tick of
+# clip time; the gate ActionSlot_ExecuteActionNoEffect @ 0x541a4d].
+func _play_viewmodel_clip(key: String, variant: int = 0,
+		advance_ticks: int = 0) -> void:
 	if key.is_empty():
 		return
-	var seconds := float(maxi(age_ticks, 0)) * Simulation.tick_dt()
+	var seconds := float(maxi(advance_ticks, 0)) * Simulation.tick_dt()
 	for visual in _presenter.vm_parts():
 		if not is_instance_valid(visual):
 			continue
-		if authoritative_phase:
-			visual.play_body_clip_variant_at_time(key, variant, seconds)
-			continue
-		visual.play_body_clip_variant(key, variant)
-		visual.set_animation_time(seconds)
+		visual.play_body_clip_variant_at_time(key, variant, seconds)

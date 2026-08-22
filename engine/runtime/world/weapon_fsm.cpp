@@ -124,7 +124,16 @@ void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
             copy_key(out.anim_key, desc.anim_key);
         }
     }
-    // else: the anim channel keeps advancing on its own (the embedder owns clip playback).
+    else if (slot.counter != 0 && desc.has_anim && in.is_local) {
+        // The tick shim's channel step: one tick of clip time while the window is
+        // open. The pump already decremented, so the tick that drains the counter
+        // to 0 does not step, and an action whose row resolves no clip never steps
+        // the channel at all. [orig: ActionSlot_ExecuteActionNoEffect @ 0x541a4d
+        // (counter != 0 && ActionDef+24 != -1 && owner == local) ->
+        // AnimChannel_AdvanceDispatch @ 0x541a59; the same gate @ 0x5419b8 /
+        // @ 0x53f8d2]
+        out.advance_anim = true;
+    }
 }
 
 // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 (desc, slot, entity, nextAction)]:

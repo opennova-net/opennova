@@ -11,7 +11,7 @@ func test_weapon_view_decodes_state_dict() -> void:
 		"current": 3,
 		"anim_key": "anim_wpn_fire",
 		"anim_variant": 2,
-		"anim_age_ticks": 4,
+		"anim_advance_ticks": 4,
 		"play_serial": 7,
 		"fired_serial": 5,
 		"dry_serial": 1,
@@ -38,7 +38,7 @@ func test_weapon_view_decodes_state_dict() -> void:
 	assert_eq(view.current_action, 3)
 	assert_eq(view.anim_key, "anim_wpn_fire")
 	assert_eq(view.anim_variant, 2)
-	assert_eq(view.anim_age_ticks, 4)
+	assert_eq(view.anim_advance_ticks, 4)
 	assert_eq(view.play_serial, 7)
 	assert_eq(view.fired_serial, 5)
 	assert_eq(view.dry_serial, 1)

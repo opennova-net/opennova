@@ -104,7 +104,11 @@ struct LocalPlayerWeapon {
 
     uint32_t play_serial = 0;
     std::string anim_key;
-    uint32_t anim_tick = 0;
+    // The FP animadm channel position in 62 Hz ticks: the count of gated
+    // advances since the play (WeaponFsmEvents::advance_anim), NOT the play's
+    // wall-clock age — ticks outside the counter window do not move the clip.
+    // [orig: the channel t maintained by AnimChannel_AdvancePlayback @ 0x40b140]
+    uint32_t anim_advance_ticks = 0;
     int32_t anim_variant = 0;
     uint32_t fired_serial = 0;
     uint16_t round_sequence = 0;
