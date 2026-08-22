@@ -894,26 +894,65 @@ bool EntityCommands::group_dead(int group) const {
 // --- mount / emplacement (AttachToEmplaced) ---
 
 int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant,
-                                   SeatSelectionMode mode) const {
-    // [orig: Entity_FindBestSeatSlot @0x4351f0] lowest weight wins; skip None/taken seats.
+                                   SeatSelectionMode mode,
+                                   EntityHandle *out_owner) const {
+    // [orig: Entity_FindBestSeatSlot @0x4351f0] lowest weight wins; skip None/taken
+    // seats. The original walks the vehicle AND ITS CHILDREN ("Searches through bone
+    // slots of a vehicle entity and its children"): childCount/childArray come off the
+    // carrier, index -1 is the carrier itself and 0..n-1 are its children, and two
+    // rules apply only to children — `ctrlx`/`drvrx` are SKIPPED on a child
+    // (`if (entityPtr != vehicleEntity) goto ...`), and a child `sitex` is weighted
+    // 0x2000000 instead of 0x200000, i.e. worst of all.
+    //
+    // This retires the "child-entity traversal is deferred" residual. It is the
+    // PRECONDITION for the emplaced body state: 00TRg's vehicles carry NO Gunner seat
+    // of their own (1302/1303/1305 are [pass N, ctrl 1, GUN 0] with attach 1/3/1) —
+    // every gun position is an addeweap CHILD (1892/1902/1988/1991/1993, GUN 1 each).
+    // Scanning only the parent could never reach one, so anim 67 kEmplaced sat at 0.0%
+    // against retail's 21.3%. With children in scope the Gunner weight (0x20000) beats
+    // the parent's passenger seats (0x200000) 16:1, which is how retail fills its guns.
     int best = -1;
     int32_t best_weight = 65536000; // [orig: bestWeight init sentinel]
-    for (int i = 0; i < static_cast<int>(target.seats.size()); ++i) {
-        const Seat &s = target.seats[i];
-        if (s.type == SeatType::None) continue;           // [orig: boneIdx != 0]
-        if (!seat_allowed_for_mode(s.type, mode)) continue;
-        if (s.occupant.valid() && s.occupant != occupant) // [orig: owner==0xFFFF || owner==self]
-            continue;
-        int32_t w;
-        switch (s.type) {
-            case SeatType::Controller:
-            case SeatType::Driver:    w = 0x2000;   break; // [orig: case 2/5]
-            case SeatType::Passenger: w = 0x200000; break; // [orig: case 1, on-vehicle]
-            case SeatType::Gunner:
-            default:                  w = 0x20000;  break; // [orig: default (UseGun)]
+    if (out_owner != nullptr) *out_owner = target.handle;
+
+    auto scan = [&](const Entity &owner, bool is_child) {
+        for (int i = 0; i < static_cast<int>(owner.seats.size()); ++i) {
+            const Seat &s = owner.seats[i];
+            if (s.type == SeatType::None) continue;           // [orig: boneIdx != 0]
+            // A child's control/driver bones are not seats of this vehicle.
+            // [orig: the `entityPtr != vehicleEntity` skips on ctrlx and drvrx]
+            if (is_child && (s.type == SeatType::Controller || s.type == SeatType::Driver))
+                continue;
+            if (!seat_allowed_for_mode(s.type, mode)) continue;
+            if (s.occupant.valid() && s.occupant != occupant) // [orig: owner==0xFFFF || owner==self]
+                continue;
+            int32_t w;
+            switch (s.type) {
+                case SeatType::Controller:
+                case SeatType::Driver:    w = 0x2000;   break; // [orig: case 2/5]
+                case SeatType::Passenger:
+                    w = is_child ? 0x2000000 : 0x200000;       // [orig: case 1 + the child bump]
+                    break;
+                case SeatType::Gunner:
+                default:                  w = 0x20000;  break; // [orig: default (UseGun)]
+            }
+            if (w < best_weight) {
+                best = i;
+                best_weight = w;
+                if (out_owner != nullptr) *out_owner = owner.handle;
+            }
         }
-        if (w < best_weight) { best = i; best_weight = w; }
-    }
+    };
+
+    scan(target, /*is_child=*/false);
+    // The children. Retail keeps an explicit child array on the carrier; our link is
+    // the child's own emplacement_parent stamped at promote, so the walk is a registry
+    // scan rather than an array index. Declared divergence: same set, different
+    // traversal. [orig: childArray = carrier->pad_1ba[2], childCount = pad_1ba[6]]
+    world_.registry.for_each([&](const Entity &e) {
+        if (e.emplacement_parent != target.handle) return;
+        scan(e, /*is_child=*/true);
+    });
     return best;
 }
 
@@ -927,8 +966,19 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     if (!occ || !tgt) return false;
     if (occ->mounted) return false;       // [orig: entity->pad8[8] set -> return 0]
     if (tgt->seats.empty()) return false; // [orig: no model+144 vehicle / no seats]
-    const int seat_idx = find_best_seat(*tgt, oh, mode);
+    // The winning seat may live on a CHILD emplacement, not on the addressed vehicle
+    // [orig: Entity_FindBestSeatSlot @0x4351f0 writes *outEntity]. Re-point the mount
+    // at whoever owns it, or the index would address the wrong entity's seat vector.
+    EntityHandle seat_owner = th;
+    const int seat_idx = find_best_seat(*tgt, oh, mode, &seat_owner);
     if (seat_idx < 0) return false;
+    if (seat_owner != th) {
+        Entity *child = world_.registry.get(seat_owner);
+        if (child == nullptr) return false;
+        th = seat_owner;
+        tgt = child;
+    }
+    if (seat_idx >= static_cast<int>(tgt->seats.size())) return false;
     Seat &s = tgt->seats[seat_idx];
     presnap_vehicle_attach_heading(world_, *occ, *tgt, s);
     s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]

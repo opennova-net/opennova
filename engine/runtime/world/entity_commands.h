@@ -127,9 +127,12 @@ public:
     // --- mount / emplacement (AttachToEmplaced) ---
     // [orig: Entity_FindBestSeatSlot @0x4351f0] Pick the best free seat on `target` for `occupant`:
     // skip None/taken seats, weight by type (driver/ctrl 0x2000 < gunner 0x20000 < passenger
-    // 0x200000; lower wins), return its index or -1. Child-entity traversal is deferred — tracked.
+    // 0x200000; lower wins), return its index or -1. The scan covers `target` AND ITS
+    // CHILD EMPLACEMENTS, as the original does; `out_owner` (when given) receives the
+    // entity that owns the winning seat, which is the child when a child wins.
     int find_best_seat(const Entity &target, EntityHandle occupant,
-                       SeatSelectionMode mode = SeatSelectionMode::Any) const;
+                       SeatSelectionMode mode = SeatSelectionMode::Any,
+                       EntityHandle *out_owner = nullptr) const;
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best
     // free seat: reject if the occupant is already mounted or the target has no free seat; write both
     // sides + pose immediately. Returns false on any reject.
