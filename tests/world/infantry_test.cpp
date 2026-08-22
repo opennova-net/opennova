@@ -2661,6 +2661,55 @@ void test_combat_fixture_acquires_a_target() {
             int(blue->inf.combat_target.valid()), blue->inf.move_mode);
 }
 
+// THE INVERTED APPROACH GATE. With the enemy OUTSIDE attack range, retail closes
+// the distance; ours did nothing, because the approach arm was nested inside the
+// IN-attack-range branch with no else.
+// [orig: Entity_UpdateInfantryAI @0x4b9910 ~2496-2530 --
+//    v7 = enemyDist < slot[15];
+//    if (!v7 || entity->moveTimer) {
+//        if (slot[16] < slot[17]) {
+//            if (enemyDist > slot[16]) { moveMode = 1; arrivalRadius = 655360; }
+//            else if (animMap[49]) { targetAnimState = 49; moveMode = 7; } } } ]
+void test_out_of_range_enemy_is_approached() {
+    World w;
+    w.registry.configure_pool(0, 16);
+    AiSystem ai;
+    w.ai = &ai;
+    TestSource src;
+    src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
+                 anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
+    ai.root_motion = &src;
+
+    auto make = [&](int idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(200 + idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(0, body);
+        AiEntity *e = ai.at(ai.attach(h));
+        e->inf.active = true;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
+        e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
+        e->slot.f[17] = 40 * 65536; // sight
+        return e;
+    };
+    make(0, 2, 0);
+    AiEntity *blue = make(1, 1, 2 * 65536);
+
+    run_ticks(ai, w, 0, 96);
+
+    CHECK(blue->inf.combat_target.valid());
+    // Retail closes: moveMode 1 with the witnessed 655360 arrival radius.
+    CHECK(blue->inf.move_mode == 1);
+    CHECK(blue->inf.arrival_radius == 655360);
+}
+
 int main() {
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();
@@ -3708,6 +3757,7 @@ int main() {
     test_remote_body_state_queue_gate();
 
     test_combat_fixture_acquires_a_target();
+    test_out_of_range_enemy_is_approached();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

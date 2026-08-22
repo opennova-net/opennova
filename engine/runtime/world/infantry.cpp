@@ -2164,7 +2164,51 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     const int32_t dist16 = static_cast<int32_t>(
         std::min(std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz), 2147418112.0));
 
-    if (dist16 < slot.f[15] && inf.combat_move_timer <= 0) { // inside attack range
+    // THE APPROACH / HOLD ARM. Retail runs this when the enemy is NOT inside
+    // attack range, or while the move timer is still up:
+    //
+    //     v7 = enemyDist < slot[15];
+    //     if ( !v7 || entity->moveTimer ) {
+    //         if ( slot[16] < slot[17] && cmd != 126 ) {
+    //             if ( enemyDist > slot[16] && Entity_CheckGroundHeightAtPosition(...) )
+    //                  { moveMode = 1; targetDist = enemyDist; arrivalRadius = 655360; }
+    //             else if ( animMap[49] != *animMap )
+    //                  { targetAnimState = 49; moveMode = 7; targetDist = 0; } } }
+    //
+    // [orig: Entity_UpdateInfantryAI @0x4b9910 ~2496-2530, which sits BEFORE the
+    //  reaction block at ~2530 so the reactions override the anim last.]
+    //
+    // This arm was previously nested INSIDE the in-attack-range branch as a
+    // fallback for "no reaction clip available", which inverted its meaning: an AI
+    // whose enemy was out of attack range did nothing at all, so our infantry never
+    // closed the distance and stood where they spawned. The two blocks are mutually
+    // exclusive by construction -- this one needs (!in_range || timer > 0), the
+    // reaction block needs (in_range && timer <= 0) -- so exactly one runs per think
+    // and neither can overwrite the other's committed body state.
+    //
+    // NOT YET PORTED, tracked: the `cmd != 126` exclusion and the
+    // Entity_CheckGroundHeightAtPosition guard on the target position.
+    const bool in_attack_range = dist16 < slot.f[15];
+    if (!in_attack_range || inf.combat_move_timer > 0) {
+        if (slot.f[16] < slot.f[17]) {
+            if (dist16 > slot.f[16]) {
+                inf.move_mode = 1;
+                inf.target_dist = dist16;
+                inf.arrival_radius = 655360;
+                inf.move_target[0] = tpos[0];
+                inf.move_target[1] = tpos[1];
+                inf.move_target[2] = tpos[2];
+                inf.target_heading =
+                        bearing_to(tpos[0] - e.pos[0], tpos[1] - e.pos[1]);
+            } else if (avail(anim_state::kIdle3)) {
+                inf.move_mode = 7;
+                inf.target_dist = 0;
+                commit_body_state(inf, anim_state::kIdle3, root_motion);
+            }
+        }
+    }
+
+    if (in_attack_range && inf.combat_move_timer <= 0) { // inside attack range
         // The combat reactions ARE the attack anims, availability-gated in the witnessed
         // order (each later hit overrides). The reaction flag re-derives only when this
         // region runs [orig: hasCombatReaction is the region's per-tick local -> +875].
@@ -2186,21 +2230,9 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             inf.move_mode = 7;                       // hold + fight
             inf.target_dist = 0;
             commit_body_state(inf, infantry_resolve_state(inf.adm_id, reaction), root_motion);
-        } else if (slot.f[16] < slot.f[17] && dist16 > slot.f[16]) {
-            // Approach the target. [orig: moveMode 1, arrive 10 u]
-            inf.move_mode = 1;
-            inf.target_dist = dist16;
-            inf.arrival_radius = 655360;
-            inf.move_target[0] = tpos[0];
-            inf.move_target[1] = tpos[1];
-            inf.move_target[2] = tpos[2];
-            inf.target_heading = bearing_to(tpos[0] - e.pos[0], tpos[1] - e.pos[1]);
-        } else if (avail(anim_state::kIdle3)) {
-            // Hold in the combat pose. [orig: anim 49 + moveMode 7]
-            inf.move_mode = 7;
-            inf.target_dist = 0;
-            commit_body_state(inf, anim_state::kIdle3, root_motion);
         }
+        // (the approach / idle3 fallbacks used to live here; they are the arm
+        //  hoisted above, where the original runs them)
         inf.was_hit = false; // [orig: LABEL_721 wasHit = 0 once the response is chosen]
     }
 
