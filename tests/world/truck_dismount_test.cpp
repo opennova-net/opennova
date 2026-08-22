@@ -78,6 +78,17 @@ int main() {
 	// The authored seat USER POINTS straight off the model -- the source our
 	// extraction reads. Tests whether the z=2.54 our seat table reports is the
 	// model's own or something we introduce.
+	// SECTION BOUNDS: where the hull sits relative to the model ORIGIN. If the
+	// height range runs ~0..+3 the origin is the vehicle BASE; if it straddles
+	// zero it is the CENTRE. That decides whether the live truck at z=13.06
+	// against ground 15.0 is sunk or normal.
+	for (size_t si = 0; si < model.sections.size(); ++si) {
+		const w::CollisionSection &sc = model.sections[si];
+		std::printf("    SEC %zu x=[%.2f..%.2f] y=[%.2f..%.2f] z=[%.2f..%.2f] off=(%.2f,%.2f,%.2f)\n",
+		            si, sc.min_x/65536.0, sc.max_x/65536.0, sc.min_y/65536.0,
+		            sc.max_y/65536.0, sc.min_z/65536.0, sc.max_z/65536.0,
+		            sc.offset[0]/65536.0, sc.offset[1]/65536.0, sc.offset[2]/65536.0);
+	}
 	// Volume TYPES: our ground probe accepts terrain or a type-1 CB solid as
 	// standing support, so whether the bed is type 1 decides if a dismounted
 	// body stands on the truck or falls through to terrain.
