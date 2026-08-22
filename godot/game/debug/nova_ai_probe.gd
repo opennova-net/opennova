@@ -41,6 +41,7 @@ func tick(world: GameWorld, delta: float) -> void:
 	_tp_tick(world)
 	_crew_tick(world)
 	_tp_player_tick(world)
+	_kill_group_tick(world)
 	_shot_tick(world)
 	if _path.is_empty():
 		return
@@ -314,6 +315,35 @@ func _tp_tick(world: GameWorld) -> void:
 # unattended round never produces contact; dropping the firing client into the
 # enemy base is how the combat path gets exercised without a human.
 var _tpp_hop := 0
+
+# One-shot scripted KILL of a BMS command group (NW_KILL_GROUP at NW_KILL_AT s),
+# HOST side only. 00TRg's win is event 31 = GroupDestroyed(16) AND misvar5==1; an
+# autofiring bot cannot reliably clear six specific AI (dropped on them it dies at
+# once, stood off it never engages), so this drives the precondition and lets the
+# scripted chain evaluate on its own. It fakes no event and sets no misvar.
+var _kg_done := false
+
+func _kill_group_tick(world: GameWorld) -> void:
+	if _kg_done:
+		return
+	var gs := OS.get_environment("NW_KILL_GROUP")
+	if gs.is_empty():
+		_kg_done = true
+		return
+	var at := OS.get_environment("NW_KILL_AT")
+	if _tp_elapsed < (at.to_float() if not at.is_empty() else 30.0):
+		return
+	var sim: Simulation = world.get_sim()
+	if sim == null:
+		return
+	var n := int(sim.debug_kill_group(gs.to_int()))
+	_kg_done = true
+	if not _path.is_empty():
+		var f := FileAccess.open(_path, FileAccess.READ_WRITE)
+		if f != null:
+			f.seek_end()
+			f.store_line(JSON.stringify({"kill_group": {"group": gs.to_int(), "killed": n}}))
+			f.close()
 
 func _tp_player_tick(world: GameWorld) -> void:
 	# Up to two hops (NW_TP_PLAYER_X/Y/Z at NW_TP_AT, then NW_TP_PLAYER_X2/Y2/Z2

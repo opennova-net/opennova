@@ -1968,6 +1968,12 @@ public:
 	                                         int p_reserve);
 	// Land the local player at an exact F3-dumped pose (probe seam). Returns
 	// ERR_UNAVAILABLE until the complete local-player subject exists.
+	// TEST SCAFFOLDING (host authority): kill a BMS command group outright so an
+	// unattended round can reach a scripted win an autofiring bot cannot. Drives the
+	// same EntityCommands::kill_group the BMS KILL_GROUP action uses; returns members
+	// affected, or -1 with no world.
+	int debug_kill_group(int p_group);
+
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
 	// The D-AI-6 muzzle seam: per-frame posed bullet fire-origin userpoint push from the

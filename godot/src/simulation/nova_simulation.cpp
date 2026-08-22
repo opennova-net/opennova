@@ -1231,6 +1231,18 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 // as the F3 Player-tab dump records them) — entity + AI-motor stores written
 // together so the next motor tick continues from the pose instead of
 // snapping back.
+// TEST SCAFFOLDING, host-authority only. Kills every member of a BMS command group
+// outright so an unattended round can reach a scripted win condition that an
+// autofiring bot cannot reliably produce (00TRg's event 31 needs GroupDestroyed(16),
+// i.e. six specific AI dead). It drives the SAME EntityCommands::kill_group the BMS
+// KILL_GROUP action uses [orig: EventAction_Dispatch case 2 @0x4542e0]; it invents no
+// state and fakes no event -- the win chain still has to evaluate on its own.
+// Sibling of debug_teleport_local_player, which exists for the same reason.
+int Simulation::debug_kill_group(int p_group) {
+	if (!world_) return -1;
+	return world_->commands.kill_group(p_group);
+}
+
 Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
                                                   float p_yaw_deg, float p_pitch_deg) {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) {
