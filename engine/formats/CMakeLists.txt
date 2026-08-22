@@ -22,6 +22,8 @@ add_library(opennova_formats STATIC
     # bad — skeletal animation
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad_write.cpp
+    # bink — native BIKi menu-video decode
+    ${CMAKE_CURRENT_SOURCE_DIR}/bink/bink.cpp
     # bfc1 — compressed container (vendored miniz stays in-tree here)
     ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/bfc1.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/miniz.c
