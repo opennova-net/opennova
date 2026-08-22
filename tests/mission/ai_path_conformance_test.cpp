@@ -380,6 +380,32 @@ int main() {
 						ei, t, ac.action_sub_type, ac.param1, ac.param2, ac.param3, ac.param4);
 			}
 		}
+		// TRIGGER dump for the events that re-task mounted riders. The detach
+		// path is apply_waypoint_order, so the CONDITION of a redirect event is
+		// what decides whether a rider leaves its carrier.
+		for (size_t ei = 0; ei < m.events.size(); ++ei) {
+			const bms::Event &ev = m.events[ei];
+			bool has_redirect = false;
+			for (int a2 = 0; a2 < ev.action_count; ++a2) {
+				const size_t idx = size_t(ev.action_index) + size_t(a2);
+				if (idx < m.actions.size()) {
+					const int t = int(m.actions[idx].action_type);
+					if (t == 1 || t == 19) has_redirect = true;
+				}
+			}
+			if (!has_redirect) continue;
+			std::printf("   EVCOND ev=%zu flags=%d delay=%d reset=%d triggers=%d\n",
+					ei, int(ev.flags), ev.delay, ev.reset_after, int(ev.trigger_count));
+			for (int t2 = 0; t2 < ev.trigger_count; ++t2) {
+				const size_t ti = size_t(ev.trigger_index) + size_t(t2);
+				if (ti >= m.triggers.size()) continue;
+				const bms::Trigger &tr = m.triggers[ti];
+				std::printf("       TRIG main=%d sub=%d p1=%d p2=%d p3=%d p4=%d neg=%d or=%d xor=%d\n",
+						int(tr.main_type), tr.sub_type, tr.param1, tr.param2,
+						tr.param3, tr.param4, int(tr.is_negated()),
+						int(tr.is_or()), int(tr.is_xor()));
+			}
+		}
 		// AUTHORED organic spawns straight off the BMS, the arbiter for any
 		// placement claim: whichever capture matches these is the correct one.
 		std::printf("authored items: %zu\n", m.items.size());
