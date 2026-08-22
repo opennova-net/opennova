@@ -29,9 +29,20 @@ the clip's channel count take bone 0's composed matrix (the padding loop
 identity: positions are in the model/render frame, root at the origin.
 
 Checked 2026-08-22 against the live OpenNova rig (godot/tests/game/vm_bone_probe.gd
-dump): every pivot of the M16/M4 FP rig agrees to <= 0.6 mm at the idle hold
-under the model->render x-flip (ADR 0007 convention 1: bones engine-native, the
-mesh carries the flip).
+dump): every pivot of the M16/M4 FP rig agrees to <= 0.6 mm at the idle hold,
+and the full-clip sweep (--sweep-log: every frame of anim_wpn_idle and
+anim_wpn_reload, all variants, BOTH viewmodel parts) agrees to 0.0000 u, under
+the model->render x-flip (ADR 0007 convention 1: bones engine-native, the mesh
+carries the flip).
+
+THE MATRIX SOURCE IS ALWAYS THE WEAPON'S MODEL: retail builds ONE bone array
+per FP frame from the equipped weapon's ``fpModel`` table + its ``field_174``
+channel and submits the gun AND the arms model with it
+[orig: Player_RenderFirstPersonViewModel @0x4ded60 - the build @0x4def59 ->
+@0x4df028, the arms submit reusing bone_matrices @0x4df088]. An arms model's
+own bone table (IndoArms: 40 rows with stale meshless helper rows BN38..BN40)
+is never read for matrices, so sweep an ARMS part against the WEAPON's .3di,
+not the arms .3di.
 
 Pull the inputs from a retail mount with pyopennova::
 
@@ -43,6 +54,9 @@ Usage::
 
     uv run python scripts/render/fp_bone_oracle.py m16_1st.3di m4_RST.bad m4_1i.bad --frame 15
     uv run python scripts/render/fp_bone_oracle.py ... --probe-log vm_bone_probe.log
+    uv run python scripts/render/fp_bone_oracle.py m16_1st.3di m4_RST.bad m4_1r.bad \\
+        --sweep-log vmsweep.log --sweep-part Viewmodel_m16_1st \\
+        --sweep-key anim_wpn_reload --sweep-variant 0
 """
 from __future__ import annotations
 
@@ -144,6 +158,51 @@ def pivot_world(world, lod, i):
     return [sum(piv[k] * w[k][c] for k in range(3)) + t[c] for c in range(3)]
 
 
+def read_sweep_log(path: Path, part: str, key: str, variant: int,
+                   ) -> dict[int, dict[int, tuple[float, float, float]]]:
+    """frame -> bone index -> global origin, from a vm_bone_probe.gd sweep dump
+    (the [vmsweep] lines) filtered to one part/key/variant."""
+    out: dict[int, dict[int, tuple[float, float, float]]] = {}
+    pat = re.compile(
+        r"\[vmsweep\] part=(\S+) key=(\S+) variant=(\d+) frame=(\d+) "
+        r"bone=(\d+) name=.*? origin=\(([^)]*)\)")
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = pat.match(line)
+        if not m or m.group(1) != part or m.group(2) != key \
+                or int(m.group(3)) != variant:
+            continue
+        frame = out.setdefault(int(m.group(4)), {})
+        frame[int(m.group(5))] = tuple(float(v) for v in m.group(6).split(","))
+    return out
+
+
+def sweep_compare(lod, bind_bf, clip_bf, dumped) -> float:
+    """Per-frame worst |pivot diff| (x-flip map) of the retail FK against the
+    probe's swept global origins; returns the overall worst."""
+    worst = 0.0
+    worst_at = ("-", -1)
+    for frame in sorted(dumped):
+        world = retail_pose(lod, bind_bf, clip_bf, frame)
+        frame_worst = 0.0
+        frame_bone = "-"
+        for i, o in sorted(dumped[frame].items()):
+            if i >= lod.render_object_count:
+                continue
+            pv = pivot_world(world, lod, i)
+            d = max(abs(-pv[0] - o[0]), abs(pv[1] - o[1]), abs(pv[2] - o[2]))
+            if d > frame_worst:
+                frame_worst = d
+                frame_bone = (bind_bf.bones[i].name.decode("latin-1")
+                              if i < bind_bf.num_bones else f"MDL{i}")
+        print(f"frame {frame:3d}: worst |diff| = {frame_worst:.4f} u ({frame_bone})")
+        if frame_worst > worst:
+            worst = frame_worst
+            worst_at = (frame_bone, frame)
+    print(f"# sweep worst |diff| vs probe (x-flip map): {worst:.4f} u "
+          f"at frame {worst_at[1]} ({worst_at[0]}) over {len(dumped)} frames")
+    return worst
+
+
 def read_probe_log(path: Path) -> dict[int, tuple[str, tuple[float, float, float]]]:
     """Bone index -> (name, live origin) from a vm_bone_probe.gd dump."""
     out = {}
@@ -163,12 +222,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frame", type=int, default=0)
     parser.add_argument("--probe-log", type=Path,
                         help="vm_bone_probe.gd output to compare against (x-flip map)")
+    parser.add_argument("--sweep-log", type=Path,
+                        help="vm_bone_probe.gd output with [vmsweep] lines: compare "
+                             "EVERY dumped frame of one part/key/variant against the "
+                             "retail FK of the given clip .bad")
+    parser.add_argument("--sweep-part", help="part node name in the sweep dump")
+    parser.add_argument("--sweep-key", default="anim_wpn_reload")
+    parser.add_argument("--sweep-variant", type=int, default=0)
     args = parser.parse_args(argv)
 
     model = threedi_ffi.read_model_3di3(str(args.model))
     lod = model.lods[0]
     bind_bf = bad_ffi.parse_bad(str(args.bind))
     clip_bf = bad_ffi.parse_bad(str(args.clip))
+    if args.sweep_log:
+        if not args.sweep_part:
+            parser.error("--sweep-log requires --sweep-part")
+        dumped = read_sweep_log(args.sweep_log, args.sweep_part,
+                                args.sweep_key, args.sweep_variant)
+        if not dumped:
+            print(f"# no [vmsweep] rows for part={args.sweep_part} "
+                  f"key={args.sweep_key} variant={args.sweep_variant}")
+            return 1
+        print(f"# sweep {args.model.name} bind={args.bind.name} clip={args.clip.name} "
+              f"part={args.sweep_part} key={args.sweep_key} variant={args.sweep_variant}")
+        sweep_compare(lod, bind_bf, clip_bf, dumped)
+        bad_ffi.free_bad(bind_bf)
+        bad_ffi.free_bad(clip_bf)
+        threedi_ffi.free_model_3di3(model)
+        return 0
     world = retail_pose(lod, bind_bf, clip_bf, args.frame)
     ours = read_probe_log(args.probe_log) if args.probe_log else {}
     worst = 0.0

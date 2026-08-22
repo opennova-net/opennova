@@ -5475,6 +5475,25 @@ movements:
    dispatch (ctest `weapon_fsm`: every tick of an idle reseed cycle steps except the one
    that drains the window, none for non-local owners or clipless actions). Both engines still park
    non-looping idles on the last key, so the catalog hold pose is unchanged.
+5. **The reload/left-hand tail, closed by the full-clip bone sweep.** `vm_bone_probe.gd` now
+   poses EVERY frame of every `anim_wpn_idle`/`anim_wpn_reload` variant on BOTH viewmodel
+   parts (synchronously, so the presenter's per-tick pin never interleaves) and
+   `fp_bone_oracle.py --sweep-log` diffs each frame against the retail builders: the M16 rig
+   agrees to **0.0000 u on every bone of every frame** — 16-frame idles ×2 and the 99-frame
+   reload ×3 variants, gun and arms — so the reload direction and the finger/left-hand pose
+   are confirmed at the bone level with no motion-footage dependency. En route, the FP
+   matrix-source law was witnessed: retail builds ONE bone array per FP frame from the
+   equipped WEAPON's `fpModel` table + `field_174` channel and submits the gun AND the arms
+   model with the same array `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60 — the
+   build @ 0x4def59 → Entity_BuildBoneWorldMatrices @ 0x4df028, the arms submit reusing
+   bone_matrices @ 0x4df088; skipped under WeaponDef.Flags & 0x80]`. An arms model's own
+   bone table is never a matrix source — IndoArms carries 40 rows whose meshless helper
+   rows (BN38–BN40, 0 skinned vertices) sit up to 1.7 u from the live rig, a harmless
+   export leftover retail also ignores; the port's shared `.bad`-derived part skeletons
+   realize the same one-rig law (both parts pose identically). Whether every OTHER weapon's
+   `gfx1` table agrees with its `.adm` bind the way the M16's does is the standing
+   D-INF-13 equivalence question. D-INF-14 is closed FIXED with the settled catalog
+   reshoot remaining as runbook §8 evidence hygiene.
 
 **§5.40, eighth pass (2026-08-22 — the viewmodel alignment grill).** The question was why
 the registered 2026-08-20 pairs show the M16 viewmodel at fixture-dependent offsets from

@@ -51,6 +51,7 @@ func _ready() -> void:
 			break
 	await _settle(90)
 	_dump(presenter)
+	_sweep_dump(presenter)
 	await _settle(2)
 	get_tree().quit()
 
@@ -126,6 +127,46 @@ func _dump(presenter: Node) -> void:
 		var aabb: AABB = part.get_aabb() if part.has_method("get_aabb") else AABB()
 		print("[vmbone]   aabb(rel part)=", aabb)
 		break  # the gun part carries the shared rig; the arms repeat it
+
+
+# Clip sweep: pose every frame of every variant of these keys on BOTH parts
+# (the gun carries the receiver bones, the arms carry the left hand/fingers)
+# and dump each bone's global origin, for fp_bone_oracle.py --sweep-log. The
+# whole sweep is synchronous (play_body_clip_variant_at_time writes the
+# Skeleton3D in the same call), so the presenter's per-tick playhead pin never
+# runs between a pose and its dump.
+const SWEEP_KEYS: Array[String] = ["anim_wpn_idle", "anim_wpn_reload"]
+
+
+func _sweep_dump(presenter: Node) -> void:
+	var rig = presenter.viewmodel_rig()
+	for part in rig.vm_parts():
+		if not is_instance_valid(part):
+			continue
+		var skel: Skeleton3D = part.get_skeleton()
+		var sa: SkeletalAnim = part.get_skeletal_anim()
+		if skel == null or sa == null:
+			print("[vmsweep] part=", part.name, " no skeleton/skeletal")
+			continue
+		for key in SWEEP_KEYS:
+			if not sa.has_clip(key):
+				print("[vmsweep] part=", part.name, " key=", key, " MISSING")
+				continue
+			for variant in sa.get_clip_variant_count(key):
+				var frames: int = sa.get_clip_frame_count(key, variant)
+				var fps: float = sa.get_clip_fps(key, variant)
+				if frames <= 0 or fps <= 0.0:
+					continue
+				print("[vmsweep] part=%s key=%s variant=%d frames=%d fps=%.3f loops=%s bones=%d" % [
+						part.name, key, variant, frames, fps,
+						sa.is_clip_looping(key, variant), skel.get_bone_count()])
+				for f in frames:
+					part.play_body_clip_variant_at_time(key, variant, float(f) / fps)
+					for i in skel.get_bone_count():
+						var g := skel.get_bone_global_pose(i)
+						print("[vmsweep] part=%s key=%s variant=%d frame=%d bone=%d name=%s origin=(%.5f, %.5f, %.5f)" % [
+								part.name, key, variant, f, i, skel.get_bone_name(i),
+								g.origin.x, g.origin.y, g.origin.z])
 
 
 func _find_by_method(node: Node, method: String) -> Node:

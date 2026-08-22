@@ -610,7 +610,11 @@ judging the gun/arms region of any registered pair.
   bias), the pass projection (the FP pass shares the world's `flt_8409E8`
   Y-scale, so both frusta are 80 x 53.4468 deg; the cfg chain is game.cfg
   `display_16x9` -> `g_session_aspect_mode @0x24D2060` -> mode 1 = 16:10 ->
-  scaleY 0.96 at 1920x1200), and the bone FK to <= 0.6 mm:
+  scaleY 0.96 at 1920x1200), the full-clip bone sweep (every frame of every
+  idle/reload variant on BOTH parts at 0.0000 u -- reload direction and the
+  left hand confirmed, `fp_bone_oracle.py --sweep-log`; the arms are drawn
+  with the WEAPON rig's matrices, never their own table), and the bone FK to
+  <= 0.6 mm:
   `scripts/render/fp_bone_oracle.py` (the retail builders) against the live rig
   dump from `godot/tests/game/vm_bone_probe.gd` (run with `NOVA_RESOURCE_DIR`,
   `NOVA_MISSION_BMS`, `NOVA_MISSION_PATH` = the loose JOX `.bms`,
