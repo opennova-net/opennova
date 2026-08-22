@@ -675,27 +675,31 @@ Dictionary ItemDatabase::get_particle_effects(int id) const {
 	return out;
 }
 
-Dictionary ItemDatabase::get_item(int id) const {
+Dictionary ItemDatabase::item_dictionary(const Item &item) const {
 	Dictionary out;
+	out["id"] = item.id;
+	out["type"] = item.type;
+	out["sid"] = item.sid;
+	out["display_name"] = item.display_name;
+	out["graphic"] = item.graphic;
+	out["anim_def"] = item.anim_def;
+	out["light_transfer"] = item.light_transfer;
+	out["sound_profile"] = item.sound_profile;
+	out["soundloops"] = get_sound_loops(item.id);
+	out["mount_config_valid"] = item.mount_config_valid;
+	out["mount_config"] = item.mount_config_valid ? item.mount_config : 0;
+	out["emplacement_attachments"] = get_emplacement_attachments(item.id);
+	out["emplacement_attachment_markers"] =
+			get_emplacement_attachment_markers(item.id);
+	return out;
+}
+
+Dictionary ItemDatabase::get_item(int id) const {
 	const auto it = items.find(id);
 	if (it == items.end()) {
-		return out;
+		return Dictionary();
 	}
-	out["id"] = it->second.id;
-	out["type"] = it->second.type;
-	out["sid"] = it->second.sid;
-	out["display_name"] = it->second.display_name;
-	out["graphic"] = it->second.graphic;
-	out["anim_def"] = it->second.anim_def;
-	out["light_transfer"] = it->second.light_transfer;
-	out["sound_profile"] = it->second.sound_profile;
-	out["soundloops"] = get_sound_loops(id);
-	out["mount_config_valid"] = it->second.mount_config_valid;
-	out["mount_config"] = it->second.mount_config_valid ? it->second.mount_config : 0;
-	out["emplacement_attachments"] = get_emplacement_attachments(id);
-	out["emplacement_attachment_markers"] =
-			get_emplacement_attachment_markers(id);
-	return out;
+	return item_dictionary(it->second);
 }
 
 // The backing store is an unordered_map, so callers that enumerate get a stable
@@ -730,21 +734,7 @@ PackedInt32Array ItemDatabase::get_item_ids() const {
 Array ItemDatabase::get_items() const {
 	Array out;
 	for (const Item *item : sorted_items()) {
-		Dictionary entry;
-		entry["id"] = item->id;
-		entry["type"] = item->type;
-		entry["display_name"] = item->display_name;
-		entry["graphic"] = item->graphic;
-		entry["anim_def"] = item->anim_def;
-		entry["light_transfer"] = item->light_transfer;
-		entry["sound_profile"] = item->sound_profile;
-		entry["soundloops"] = get_sound_loops(item->id);
-		entry["mount_config_valid"] = item->mount_config_valid;
-		entry["mount_config"] = item->mount_config_valid ? item->mount_config : 0;
-		entry["emplacement_attachments"] = get_emplacement_attachments(item->id);
-		entry["emplacement_attachment_markers"] =
-				get_emplacement_attachment_markers(item->id);
-		out.push_back(entry);
+		out.push_back(item_dictionary(*item));
 	}
 	return out;
 }
