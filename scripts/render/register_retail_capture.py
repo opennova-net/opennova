@@ -70,7 +70,13 @@ from PySide6.QtGui import QImage
 from pyopennova.vfs_ffi import Vfs
 
 
-TOOL_VERSION = "4.0.0"
+TOOL_VERSION = "4.1.0"
+# The registration floor for how long retail settled after the fixture apply
+# (a teleport) before the reference frame was taken. Retail's first-person
+# motion lead and ground snap take seconds to decay; the hook's capture-frame
+# witness (bridge protocol 1.5) proves the applied clock was still pinned when
+# the pixels were taken, so this is a settle rule, not a correlation window.
+DEFAULT_MIN_SETTLE_SECONDS = 1.0
 RETAIL_SIZE = (1920, 1200)
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 GUID_HEX_PATTERN = re.compile(r"^[0-9a-fA-F]{32}$")
@@ -609,6 +615,112 @@ def _positive_decimal_string(value: object, label: str) -> int:
     return parsed
 
 
+def _nonnegative_integer(value: object, label: str) -> int:
+    if type(value) is not int or value < 0:
+        raise RegistrationError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _time_of_day_fixed24(seconds: int) -> int:
+    # Environment_SetCurrentTime takes unsigned 8.24 hours; the hook converts
+    # the wire seconds with the engine's truncating integer semantics.
+    return (seconds << 24) // 3600
+
+
+def _validate_fixture_witness(
+    state: dict[str, Any],
+    fixture_result: dict[str, Any],
+    capture_frame: tuple[int, int],
+    fixture_frame: tuple[int, int],
+    min_settle_seconds: float,
+) -> dict[str, Any]:
+    """Prove the capture frame still held the applied fixture, then the settle.
+
+    The hook samples this witness on the capture frame itself (bridge protocol
+    1.5): which exact apply it follows, whether the time-advance lease was still
+    held, and the live clock against the requested fixed24. A capture taken
+    seconds after the apply registers only when the clock never moved.
+    """
+    witness = state.get("fixture_binding")
+    if not isinstance(witness, dict) \
+            or witness.get("source") != "capture_frame_fixture_witness.v1":
+        raise RegistrationError(
+            "retail sidecar has no capture-frame fixture witness; the onHook "
+            "build predates bridge protocol 1.5"
+        )
+    if witness.get("applied") is not True:
+        raise RegistrationError(
+            "retail capture frame witnessed no exact fixture application"
+        )
+    apply_frame = (
+        _positive_decimal_string(
+            witness.get("apply_frame_serial"), "fixture witness apply frame serial"
+        ),
+        _positive_decimal_string(
+            witness.get("apply_frame_qpc"), "fixture witness apply frame qpc"
+        ),
+    )
+    if apply_frame != fixture_frame:
+        raise RegistrationError(
+            "retail capture frame witnessed a different fixture application"
+        )
+    frequency = _positive_decimal_string(
+        witness.get("qpc_frequency"), "fixture witness qpc frequency"
+    )
+    time_of_day = witness.get("time_of_day")
+    if not isinstance(time_of_day, dict) \
+            or time_of_day.get("requested") is not True \
+            or time_of_day.get("witnessed") is not True:
+        raise RegistrationError(
+            "retail capture frame did not witness the applied time of day"
+        )
+    expected_fixed24 = _time_of_day_fixed24(
+        int(fixture_result["fixture"]["time_of_day_seconds"])
+    )
+    requested_fixed24 = _nonnegative_integer(
+        time_of_day.get("requested_fixed24"), "fixture witness requested clock"
+    )
+    current_fixed24 = _nonnegative_integer(
+        time_of_day.get("current_fixed24"), "fixture witness live clock"
+    )
+    advance_fixed24 = _nonnegative_integer(
+        time_of_day.get("advance_fixed24"), "fixture witness live clock advance"
+    )
+    if requested_fixed24 != expected_fixed24 \
+            or current_fixed24 != expected_fixed24 \
+            or advance_fixed24 != 0 \
+            or time_of_day.get("pinned") is not True:
+        raise RegistrationError(
+            "retail time of day was not pinned on the capture frame"
+        )
+    frames_after_apply = capture_frame[0] - fixture_frame[0]
+    seconds_after_apply = (capture_frame[1] - fixture_frame[1]) / frequency
+    if seconds_after_apply < min_settle_seconds:
+        raise RegistrationError(
+            f"retail capture settled {seconds_after_apply:.3f} s after the "
+            f"fixture application, under the {min_settle_seconds:.3f} s "
+            "registration floor (--min-settle-seconds)"
+        )
+    lease = witness.get("lease", {})
+    if not isinstance(lease, dict):
+        raise RegistrationError("fixture witness lease block is malformed")
+    return {
+        "witness": "capture_frame_fixture_witness.v1",
+        "apply_frame_serial": str(apply_frame[0]),
+        "apply_frame_qpc": str(apply_frame[1]),
+        "frames_after_apply": frames_after_apply,
+        "seconds_after_apply": seconds_after_apply,
+        "min_settle_seconds": min_settle_seconds,
+        "qpc_frequency": str(frequency),
+        "time_of_day_fixed24": expected_fixed24,
+        "time_of_day_pinned": True,
+        "advance_lease": {
+            "started": lease.get("started") is True,
+            "held_on_capture_frame": lease.get("held_on_capture_frame") is True,
+        },
+    }
+
+
 def _validate_capture_result(
     document: dict[str, Any],
     instance_id: str,
@@ -617,6 +729,7 @@ def _validate_capture_result(
     state_path: Path,
     state: dict[str, Any],
     fixture_result: dict[str, Any],
+    min_settle_seconds: float,
 ) -> dict[str, Any]:
     result = _structured(document)
     if result.get("schema") != "opennova.render_capture_bundle.v4" \
@@ -665,11 +778,9 @@ def _validate_capture_result(
         raise RegistrationError(
             "retail capture must follow the exact fixture application"
         )
-    if capture_frame[0] - fixture_frame[0] > 120:
-        raise RegistrationError(
-            "retail capture is more than 120 frames after fixture application"
-        )
-    return result
+    return _validate_fixture_witness(
+        state, fixture_result, capture_frame, fixture_frame, min_settle_seconds
+    )
 
 
 def _finite_matrix(value: object) -> bool:
@@ -1172,11 +1283,11 @@ def _validate_raw_state(
             or type(source.get("bridge_version_major")) is not int \
             or source["bridge_version_major"] != 1 \
             or type(source.get("bridge_version_minor")) is not int \
-            or source["bridge_version_minor"] != 4 \
+            or source["bridge_version_minor"] != 5 \
             or type(source.get("hook_version")) is not str \
-            or source["hook_version"] != "0.5.0":
+            or source["hook_version"] != "0.6.0":
         raise RegistrationError(
-            "retail capture producer version must be bridge 1.4 and hook 0.5.0"
+            "retail capture producer version must be bridge 1.5 and hook 0.6.0"
         )
     if source.get("pre_overlay") is not True \
             or source.get("frame_correlated") is not True:
@@ -1342,7 +1453,7 @@ def register_retail_reference(args: argparse.Namespace) -> None:
     source_identity = state.get("source", {})
     if not isinstance(source_identity, dict):
         raise RegistrationError(
-            "retail capture producer version must be bridge 1.4 and hook 0.5.0"
+            "retail capture producer version must be bridge 1.5 and hook 0.6.0"
         )
     try:
         source_pid = int(source_identity.get("pid"))
@@ -1368,7 +1479,7 @@ def register_retail_reference(args: argparse.Namespace) -> None:
     capture_result_document = _load_json(
         capture_result_path, "capture bundle result"
     )
-    _validate_capture_result(
+    settle = _validate_capture_result(
         capture_result_document,
         instance_id,
         fixture["id"],
@@ -1376,6 +1487,7 @@ def register_retail_reference(args: argparse.Namespace) -> None:
         state_path,
         state,
         fixture_result,
+        float(args.min_settle_seconds),
     )
     realized_camera, render_state = _validate_render_state(
         state, fixture, catalog
@@ -1454,6 +1566,7 @@ def register_retail_reference(args: argparse.Namespace) -> None:
             "frame_correlated": True,
             "frame_serial": str(state["frame_serial"]),
             "frame_qpc": str(state["frame_qpc"]),
+            "settle": settle,
         },
         "comparison_presentation": {
             "contract": dict(COMPARISON_CONTRACT),
@@ -1556,6 +1669,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--opennova-source-commit", required=True)
+    parser.add_argument(
+        "--min-settle-seconds",
+        type=float,
+        default=DEFAULT_MIN_SETTLE_SECONDS,
+        help=(
+            "registration floor for the seconds retail settled between the "
+            "fixture apply and the capture frame, proven by the hook's "
+            f"capture-frame witness (default {DEFAULT_MIN_SETTLE_SECONDS})"
+        ),
+    )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
 

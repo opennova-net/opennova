@@ -2580,12 +2580,13 @@ func _settle_viewmodel_hold(max_frames: int) -> void:
 			var key: String = model.get_active_body_clip()
 			if skeletal == null or key.is_empty() or skeletal.is_clip_looping(key):
 				continue
-			var frames := skeletal.get_clip_frame_count(key)
-			var fps := skeletal.get_clip_fps(key)
-			if frames <= 0 or fps <= 0.0:
+			var length := skeletal.get_clip_length(key)
+			if length <= 0.0:
 				continue
-			var duration_ms := int(ceil(1000.0 * float(frames) / fps))
-			if model.get_animation_time_ms() < duration_ms:
+			# get_animation_time() is the body-clip playhead (with the gated FP
+			# channel it is the pinned advance position); get_animation_time_ms
+			# is the PANM material clock and never measures the clip.
+			if model.get_animation_time() < length:
 				held = false
 		if held:
 			return

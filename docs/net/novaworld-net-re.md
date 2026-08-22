@@ -5420,6 +5420,62 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    the narrow-aspect drop *(landed — the seventh pass)*; D-INF-13 (bodies onto the world
    table @ 0x40c770); D-INF-15.
 
+**§5.40, ninth pass (2026-08-22 — the settled-capture protocol; the residual refuted).** Four
+movements:
+
+1. **A settled retail frame is registrable now.** onhook (opennova-int PR #23, bridge
+   protocol 1.5) samples a fixture-binding witness ON the capture frame — the last exact
+   apply's frame serial/QPC, whether the (now 7200-frame) TOD advance lease was still held,
+   and the live clock against the requested fixed24 — and `register_retail_capture.py`
+   (4.1.0) replaces the `<= 120 frames` gap rule with that witness plus a
+   `--min-settle-seconds` floor (default 1.0 s); `retail_capture_driver.py` waits
+   `--settle-seconds` (default 4.0 s) between apply and capture on one connection.
+   Witnessed live under the staged cfg (the retained bundles): courtyard +360 frames /
+   4.040 s after the apply, fire-barrel-east +237 frames / 4.083 s — lease held, raw
+   0x0F000000, advance 0 on both capture frames — and the settle is DETERMINISTIC: two
+   independent retail processes solve the same settled camera to 4 decimals (courtyard
+   (297.9945, −409.0106, 28.8471), fire-barrel-east (282.9586, −357.6148, 28.8298)). The
+   registrar pins the recovered camera to the catalog, so settled bundles pair with a
+   settled-camera mint — proven end to end by the runbook §3b smoke (mint → register,
+   both bundles accepted). The settle exposes the teleport's full ground snap: courtyard
+   player z 27.810 → 28.004 (+19.4 cm, with +10.8 cm x), fire-barrel z 27 → 27.994.
+2. **The eighth pass's "≈ 2–3 cm settled residual" is refuted — a measurement artifact.**
+   That number was fit against `capture_bundle` settle-run frames (live cfg) whose camera
+   sat 19 cm above the fixture and whose world never registered (identity NCC ≈ 0.02),
+   with a landmark fit on dark masks. Remeasured with registrable frames: our normalized
+   frame's FULL-GUN ROI registers at identity against the PUBLISHED catalog frames
+   (courtyard s=0.999 t=(+0.5,+0.5) px; fire-barrel-east s=1.000 t=(+0.5,+0.5), receiver
+   s=1.001 t=(0,+0.5) — half-res+full-res scale/shift NCC), and retail's OWN
+   settled-vs-transient courtyard pair isolates the whole transient: the gun +8 px lower
+   at s=1.003 (viewmodel-masked, same renderer, NCC 0.965). Cross-engine NCC on the gun
+   INTERIOR is not decisive below ~10 px — the engines' shading response differs and the
+   fire-barrel flame flicker floods the mask — so placement rests on the bone-level oracle
+   (≤ 0.6 mm) plus the full-ROI identity; no witnessed placement term remains. The
+   apples-to-apples settled comparison arrives with the catalog reshoot (settled retail →
+   mint the next revision with the settled cameras → recapture ours against it).
+3. **The aspect mode's cfg source, closed.** game.cfg `display_16x9` IS the
+   `Render_SetAspectRatioMode` index (0=4:3, 1=16:10, 2=16:9, 3=5:4, else native — the key
+   name is a misnomer for value 1): `Config_ParseSettingsLine @ 0x54fd4b` →
+   `g_cfg_display_16x9 @ 0x25507E4` → the 0x34-byte video-settings block copy in
+   `apply_session_settings_to_globals @ 0x551574` → `g_session_aspect_mode @ 0x24D2060`
+   (static −1 = native until a session applies) → `Game_StartMission @ 0x524732`. The
+   capture cfg's `display_16x9 1` therefore selects 16:10 → scaleY 0.96 at 1920×1200 →
+   the catalog's 53.4468°, witnessed end to end (`PlayerInfo_InitPreviewModel @ 0x5600d9`
+   and the Dbuggy viewer `@ 0x5529e5` pass the cfg global directly).
+4. **The counter-gated channel advance, ported (motion timing, not the rest pose).** The
+   FP clip now advances only on the ticks retail's shim advances it:
+   `WeaponFsmEvents::advance_anim` fires from the begin-active shim's else leg when the
+   post-decrement `MountSlot+0` counter is non-zero, the action resolves a clip, and the
+   owner is local `[orig: ActionSlot_ExecuteActionTick @ 0x541a70 →
+   ActionSlot_ExecuteActionNoEffect @ 0x541a4d..0x541a59; the with-effect / begin variants
+   @ 0x5419b8 / @ 0x53f8d2]`; the sim's `anim_advance_ticks` (a gated count, reset by a
+   play) replaces the wall-clock age, and the presenter PINS the parts at
+   `advance × tick_dt` — nothing free-runs the playhead, matching
+   `AnimChannel_AdvancePlayback @ 0x40b140` stepping one 62 Hz tick of clip time per
+   dispatch (ctest `weapon_fsm`: every tick of an idle reseed cycle steps except the one
+   that drains the window, none for non-local owners or clipless actions). Both engines still park
+   non-looping idles on the last key, so the catalog hold pose is unchanged.
+
 **§5.40, eighth pass (2026-08-22 — the viewmodel alignment grill).** The question was why
 the registered 2026-08-20 pairs show the M16 viewmodel at fixture-dependent offsets from
 retail (up to ~110 px). Five findings, in the order they were settled:
@@ -5478,12 +5534,10 @@ retail (up to ~110 px). Five findings, in the order they were settled:
    0.87 m ground pop that gap 3 shows). The registrar's 3-frame window samples the teleport's
    motion-lead / ground-snap transient (the seventh-pass dynamics: one saturated tick, a sign
    flip, ~50 saturated ticks, ~200 to decay), so the fixture-to-fixture spread is that
-   transient, not placement. Against a SETTLED retail frame one constant residual remains:
-   retail's gun sits ≈ 11–35 px right / 0–30 px lower at 1920 px, depth-dependent — a
-   camera-space translation of roughly 2–3 cm toward the camera and ~0.5 cm up fits a
-   depth-aware landmark fit best (a pass scale does not) — with the root, the projection and
-   the bone FK all verified exact. Its cause is unwitnessed; the next step is a vertex-level
-   oracle (the mesh skin bind) or retail bone matrices read through onhook. The CP01 water
+   transient, not placement. A residual against SETTLED retail
+   (≈ 2–3 cm toward the camera, from a depth-aware landmark fit) was reported here from
+   those settle-run frames; the NINTH pass refutes it as a measurement artifact of the
+   unregistrable frames — placement stands verified with no witnessed term remaining. The CP01 water
    fixtures are not placement evidence: retail's swimming state (`Flags 0x8000`, entered in
    `Entity_UpdateInfantryPlayerBody @ 0x4b8130..0x4b8261`) raises the rifle above the
    waterline; the port has no swim state (D-INF-3). Procedure notes live in
