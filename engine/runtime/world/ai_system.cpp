@@ -483,29 +483,9 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
-            if (vehicle_family_uses_direct_air_mover(traits->family)) {
-                // The helo mover itself is the unported residual; retail runs
-                // the part-animation accumulator from EVERY mover's tail, the
-                // helo mover included, so a host-crewed helicopter's rotor
-                // turns here at the point that tail would run
-                // [orig: the HELO twin @0x48FA70 called from the aircraft
-                //  mover's tail @0x4905A6].
-                vehicle_part_anim_tick(world, *veh, *traits);
-                continue;
-            }
             // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
             // stamps every mover carries; rider deltas read (current - saved)].
             stamp_saved_live_pose(*veh);
-            // Rotor spin. Retail drives this from the entity update, so it runs
-            // on BOTH the authority and the joiner path (the twin below) and
-            // ahead of every mover bail: a parked helicopter still has to spin
-            // DOWN, and an unboarded one has to sit still.
-            // [orig: RotorSpin_Update @0x4928B0]
-            if (traits->family == VehicleFamily::Helicopter) {
-                rotor_spin_tick(veh->veh,
-                                resolve_vehicle_controller(world, *veh) != nullptr,
-                                /*is_vehicle=*/true, rotor_rng_);
-            }
             // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
             // class table routes them to the shared aircraft mover, whose AI
             // brain leg and physics live in one function. A live PLAYER pilot
@@ -537,6 +517,18 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                                       *traits);
                         aircraft_client_tick(world, *veh, *traits);
                     }
+                }
+                else {
+                    // A predicted row skips the mover, so the mover's tail call
+                    // never runs for it. Retail's client has no such skip — it
+                    // runs the aircraft function (and therefore the tail) for
+                    // every vehicle it is not driving, seeding the drive
+                    // command from the wire — so advancing the accumulator here
+                    // restores that, it does not add a new one.
+                    // [orig: the HELO twin @0x48FA70 called from the aircraft
+                    //  mover's tail @0x4905A6; the not-driven client leg is
+                    //  @0x48B7F0]
+                    vehicle_part_anim_tick(world, *veh, *traits);
                 }
                 if (AiEntity *ve = for_handle(h)) {
                     ve->pos[0] = to_fixed(veh->position.x);
