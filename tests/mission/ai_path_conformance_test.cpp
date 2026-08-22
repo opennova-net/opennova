@@ -31,14 +31,19 @@
 #include "world/ai.h"
 #include "world/world.h"
 
+#include <def/def.h>
 #include <resource_index/resource_index.h>
+#include <simassets/seat_spec_extract.h>
+#include <threedi/threedi_3di3.h>
 #include <simassets/adm_root_motion.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -106,7 +111,56 @@ int main() {
 	// for the harness to measure its own omission (7.4c).
 	mission::BmsEventSystem events;
 	events.load(m.events, m.triggers, m.actions);
-	const mission::PromoteResult promo = mission::promote_mission(m, world, ai);
+
+	// SEATS COME FROM THE MODEL, NOT items.def. promote grants a vehicle its
+	// seats only from PromoteOptions::item_seat_specs, and the live game builds
+	// that table by walking each model's seat userpoints (sitex/ctrlx/drvrx/
+	// UseGun bones) -- items.def carries no seat rows at all
+	// [orig: seat typing Entity_GetBoneSlotType @0x434ed0]. A harness that skips
+	// this gives every carrier seats=0, so the board think's find_best_seat
+	// returns -1, the arrival ring widens, and the soldiers 'arrive' beside a
+	// seatless hull and never attach -- measuring the harness, not the engine.
+	mission::PromoteOptions opts;
+	// The mounted archives: the seat extraction and the root-motion clips both
+	// read through this one index.
+	ResourceIndex index;
+	const bool indexed = index.scan(std::string(dir));
+
+	DefItemsFile items{};
+	std::vector<uint8_t> items_bytes;
+	// value.second = 'resolved'; a failed parse caches a negative so each
+	// graphic is attempted once.
+	std::map<std::string, std::pair<Threedi3di3, bool>> model_cache;
+	if (index.read_file("items.def", items_bytes) &&
+			def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0) {
+		std::vector<int> seeds;
+		seeds.reserve(m.items.size() + m.organics.size());
+		for (const bms::Entity &b : m.items) seeds.push_back(100000 + b.type_id);
+		for (const bms::Entity &b : m.organics) seeds.push_back(100000 + b.type_id);
+		simassets::ModelLookupFn model_for =
+				[&](const std::string &key) -> const Threedi3di3 * {
+			auto it = model_cache.find(key);
+			if (it != model_cache.end())
+				return it->second.second ? &it->second.first : nullptr;
+			std::vector<uint8_t> raw;
+			Threedi3di3 parsed{};
+			if (index.read_file(key + ".3di", raw) &&
+					threedi_3di3_read_memory(raw.data(), raw.size(), &parsed) == 0) {
+				auto &slot = model_cache[key];
+				slot.first = parsed;
+				slot.second = true;
+				return &slot.first;
+			}
+			model_cache[key] = {Threedi3di3{}, false};
+			return nullptr;
+		};
+		simassets::SeatSpecExtraction extraction;
+		simassets::extract_item_seat_specs(items, model_for, seeds, extraction);
+		opts.item_seat_specs = extraction.specs;
+		std::printf("seat specs extracted: %zu (from %zu seed ids)\n",
+				extraction.specs.size(), seeds.size());
+	}
+	const mission::PromoteResult promo = mission::promote_mission(m, world, ai, opts);
 	expect(promo.nav_channels > 0, "nav channels promoted");
 
 	// INFANTRY DO NOT MOVE WITHOUT ROOT MOTION. Locomotion comes from the anim
@@ -119,9 +173,7 @@ int main() {
 	// which is what every entity grounds off until its own model's .adm is
 	// resolved [orig: AnimMap_RegisterEntity @0x40bb60; the same default the
 	// game shell installs in Simulation::set_infantry_anim_map].
-	ResourceIndex index;
 	simassets::AdmRootMotion root_motion;
-	const bool indexed = index.scan(std::string(dir));
 	const int default_adm = indexed ? root_motion.register_adm(&index, "E_STAND.adm") : -1;
 	if (default_adm != 0) {
 		std::printf("ai path conformance: SKIP (E_STAND.adm not resolvable under "
@@ -136,6 +188,18 @@ int main() {
 	world.add_system(&events);
 	world.add_system(&ai);
 	world.load_systems();
+
+	// Carrier START positions: a mounted passenger only travels if its VEHICLE
+	// drives. Retail's boarded soldiers cover hundreds of thousands of wire units
+	// because the hull carries them, so 'mounted but stationary' is a distinct
+	// defect from 'never boarded'.
+	std::map<uint16_t, std::pair<int32_t, int32_t>> carrier_start;
+	for (int j = 0; j < world.registry.pool_capacity(1); ++j) {
+		const w::EntityHandle h = w::EntityHandle::make(1, j);
+		if (const w::Entity *v = world.registry.get(h))
+			carrier_start[h.packed] = {int32_t(v->position.x * 65536.0f),
+					int32_t(v->position.y * 65536.0f)};
+	}
 
 	// Snapshot every AI's start position, keyed by its AI index.
 	const int n = ai.count();
@@ -197,6 +261,35 @@ int main() {
 		}
 	}
 	std::printf("ai path: %d AI, %d moved, %d still after %d ticks\n", n, moved, still, ticks);
+
+	// The BOARD CARRIERS: which entities the command-125 soldiers resolved, and
+	// whether those entities actually own seats. promote grants seats ONLY from
+	// PromoteOptions::item_seat_specs, so a seatless carrier here means the harness
+	// never described the vehicle -- not that the vehicle is broken.
+	if (report) {
+		std::vector<uint16_t> seen;
+		std::printf("board carriers:\n");
+		for (int j = 0; j < n; ++j) {
+			const w::AiEntity *e = ai.at(j);
+			if (e == nullptr || e->slot.f[37] < 123 || e->slot.f[37] > 125) continue;
+			const int32_t cached = e->slot.f[36];
+			if (cached == 0) continue;
+			const w::EntityHandle ch{static_cast<uint16_t>(cached - 1)};
+			if (std::find(seen.begin(), seen.end(), ch.packed) != seen.end()) continue;
+			seen.push_back(ch.packed);
+			const w::Entity *veh = world.registry.get(ch);
+			double vtravel = 0.0;
+			auto cs = carrier_start.find(ch.packed);
+			if (cs != carrier_start.end() && veh != nullptr) {
+				const double vdx = double(int32_t(veh->position.x * 65536.0f)) - cs->second.first;
+				const double vdy = double(int32_t(veh->position.y * 65536.0f)) - cs->second.second;
+				vtravel = std::sqrt(vdx * vdx + vdy * vdy) / 65536.0;
+			}
+			std::printf("   carrier handle=%-6u item_id=%-6d seats=%-3zu net_id=%-5d moved=%.2f\n",
+					unsigned(ch.packed), veh ? veh->item_id : -1,
+					veh ? veh->seats.size() : size_t(0), veh ? veh->net_id : -1, vtravel);
+		}
+	}
 
 	// --- the regression pins --------------------------------------------------
 	// Retail leaves exactly THREE AI stationary on this mission (s8/s15/s16, the
