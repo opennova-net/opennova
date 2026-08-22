@@ -141,58 +141,68 @@ int main() {
 	// (377, 375)); 31 u forward reproduces it without the mission loaded.
 	const double tx = 0.0, ty = 31.0;
 
-	w::Entity s{};
-	s.kind = w::EntityKind::Organic;
-	s.net_id = 70002;
-	s.alive = true;
-	s.position = {static_cast<float>(sx), static_cast<float>(sy),
-	              static_cast<float>(sz)};
-	const w::EntityHandle soldier = world.registry.spawn(0, s);
+	// SIX bodies, one per rear passenger seat -- the live failure is a PILE-UP,
+	// not a single body against a hull. The user session shows all six dismounted
+	// passengers collapsing onto ONE identical coordinate (371.41, -342.30) and
+	// locking, while the one AI that dismounted 8 u clear of the pile walked away.
+	// A single-capsule harness cannot show that. NW_BODIES overrides the count.
+	const char *nb = std::getenv("NW_BODIES");
+	const int body_count = (nb != nullptr && nb[0] != 0) ? std::atoi(nb) : 6;
+	struct Body { w::EntityHandle h; int32_t pos[3]; int32_t vel[3]; bool done; };
+	std::vector<Body> bodies;
+	const double seat_x[6] = {-1.068, 1.054, -1.068, 1.054, -1.068, 1.054};
+	const double seat_y[6] = {-2.039, -5.124, -3.569, -3.595, -5.138, -2.026};
+	for (int bi = 0; bi < body_count && bi < 6; ++bi) {
+		w::Entity s{};
+		s.kind = w::EntityKind::Organic;
+		s.net_id = uint16_t(70002 + bi);
+		s.alive = true;
+		s.position = {static_cast<float>(seat_x[bi]),
+		              static_cast<float>(seat_y[bi]), static_cast<float>(sz)};
+		Body b{};
+		b.h = world.registry.spawn(0, s);
+		b.pos[0] = fx(seat_x[bi]); b.pos[1] = fx(seat_y[bi]); b.pos[2] = fx(sz);
+		b.done = false;
+		bodies.push_back(b);
+	}
 	for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
-	int32_t pos[3] = {fx(sx), fx(sy), fx(sz)};
-	int32_t vel[3] = {0, 0, 0};
 	int16_t health = 100;
 	w::CollisionWorld::ResolveState state;
 	double closest = 1e9;
 	int pushed_ticks = 0;
 	for (int t = 0; t < 1200; ++t) {
-		const double px = pos[0] / 65536.0, py = pos[1] / 65536.0;
-		const double dx = tx - px, dy = ty - py;
-		const double d = std::sqrt(dx * dx + dy * dy);
-		closest = std::min(closest, d);
-		if (d < 0.5) break;
-		// The live root step measured on the pinned AI.
-		pos[0] += fx(0.09 * dx / d);
-		pos[1] += fx(0.09 * dy / d);
-		const int32_t before_x = pos[0], before_y = pos[1];
-		cw.resolve_entity(world, soldier, state, pos, vel, vel[2], 0, fx(1.8), 0,
-		                  0, /*is_player=*/false, /*is_authority=*/true, t,
-		                  /*anim=*/149, 0u, health);
-		if (before_x != pos[0] || before_y != pos[1]) ++pushed_ticks;
-		if (w::Entity *se = world.registry.get(soldier)) {
-			se->position = {static_cast<float>(pos[0] / 65536.0),
-			                static_cast<float>(pos[1] / 65536.0),
-			                static_cast<float>(pos[2] / 65536.0)};
-		}
-		// Variant: the carrier DRIVES ON after the drop (NW_TRUCK_LEAVES=<tick>).
-		// The user reports retail's trucks continue past the drop point; if the
-		// hull vacating is what frees the body, this run clears and the stationary
-		// one does not.
-		static const char *leave_at = std::getenv("NW_TRUCK_LEAVES");
-		if (leave_at != nullptr && leave_at[0] != 0 && t == std::atoi(leave_at)) {
-			if (w::Entity *tv = world.registry.get(th)) {
-				tv->position.y += 400.0f;
-				std::printf("  t=%d TRUCK DRIVES ON (carrier moved away)\n", t);
-			}
-			for (int k = 0; k < 17; ++k) cw.build_tick_tables(world);
+		for (Body &b : bodies) {
+			if (b.done) continue;
+			const double px = b.pos[0] / 65536.0, py = b.pos[1] / 65536.0;
+			const double dx = tx - px, dy = ty - py;
+			const double d = std::sqrt(dx * dx + dy * dy);
+			closest = std::min(closest, d);
+			if (d < 0.5) { b.done = true; continue; }
+			b.pos[0] += fx(0.09 * dx / d);
+			b.pos[1] += fx(0.09 * dy / d);
+			const int32_t bx = b.pos[0], by = b.pos[1];
+			cw.resolve_entity(world, b.h, state, b.pos, b.vel, b.vel[2], 0, fx(1.8),
+			                  0, 0, /*is_player=*/false, /*is_authority=*/true, t,
+			                  /*anim=*/149, 0u, health);
+			if (bx != b.pos[0] || by != b.pos[1]) ++pushed_ticks;
+			if (w::Entity *se = world.registry.get(b.h))
+				se->position = {static_cast<float>(b.pos[0] / 65536.0),
+				                static_cast<float>(b.pos[1] / 65536.0),
+				                static_cast<float>(b.pos[2] / 65536.0)};
 		}
 		if ((t % 16) == 0) cw.build_tick_tables(world);
-		if ((t % 100) == 0)
-			std::printf("  t=%4d pos=(%6.2f, %6.2f, %5.2f) dist=%6.2f contactItem=%d\n",
-			            t, pos[0] / 65536.0, pos[1] / 65536.0, pos[2] / 65536.0, d,
-			            cw.dbg_last_contact_item);
+		if ((t % 300) == 0) {
+			std::printf("  t=%4d", t);
+			for (const Body &b : bodies)
+				std::printf("  (%6.2f,%6.2f)", b.pos[0] / 65536.0, b.pos[1] / 65536.0);
+			std::printf("  contactItem=%d\n", cw.dbg_last_contact_item);
+		}
 	}
+	int escaped = 0;
+	for (const Body &b : bodies) if (b.done) ++escaped;
+	std::printf("bodies=%d escaped=%d  (resolver pushed on %d body-ticks)\n",
+	            int(bodies.size()), escaped, pushed_ticks);
 	std::printf("closest approach to the forward node: %.2f u  (resolver pushed on "
 	            "%d ticks)\n", closest, pushed_ticks);
 	if (closest < 1.0)
