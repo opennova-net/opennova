@@ -30,6 +30,7 @@
 #include "host_test_setup.h"
 
 #include <netsim/connection.h>
+#include <netsim/client_replica_pipeline.h>
 #include <netsim/idatagram_socket.h>
 #include <netsim/loopback_channel.h>
 #include <netsim/session_transport.h>
@@ -78,6 +79,15 @@ bool expect(bool cond, const char *msg) {
 	if (cond) return true;
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
+}
+
+std::vector<uint8_t> encode_test_player_list(
+		std::initializer_list<PlayerListEntry> players) {
+	PlayerListFrame frame;
+	frame.players.assign(players.begin(), players.end());
+	frame.teams.resize(size_t(frame.team_count) + 1);
+	frame.in_game_count = static_cast<uint8_t>(frame.players.size());
+	return encode_player_list(frame);
 }
 
 std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
@@ -384,6 +394,100 @@ bool run_tick_seed_anchors_the_client_clock() {
 			joiner.handle_datagram(disarm_dg.data(), disarm_dg.size());
 	return expect(disarm.tick_seed_set && disarm.tick_seed == 0u,
 			"the round-end disarm form is a witnessed seed of zero");
+}
+
+bool run_end_round_header_pulls_complete_board() {
+	const std::string client_scrk = "CLIENT-END-ROUND-SCRK";
+	const std::string server_scrk = "SERVER-END-ROUND-SCRK";
+	np::JoinerConnection joiner("RoundPull");
+	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	auto replica_owned = std::make_unique<ns::ClientReplicaPipeline>();
+	ns::ClientReplicaPipeline &replica = *replica_owned;
+
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.team_score_0 = 3;
+	header.team_score_1 = 8;
+	header.player_index = 4;
+	const std::vector<uint8_t> header_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header))});
+	const np::JoinerConnection::PollResult header_result =
+			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
+	if (!expect(header_result.queued_send_messages.size() == 1 &&
+			header_result.queued_send_messages[0].tag ==
+					c2s::END_ROUND_STATS_REQUEST &&
+			header_result.queued_send_messages[0].payload ==
+					std::vector<uint8_t>({0, 0}),
+			"S2C 0x1D immediately queues reliable C2S 0x2B offset zero")) {
+		return false;
+	}
+	for (const auto &message : header_result.inbound_reducer)
+		replica.apply(message.first, message.second);
+	if (!expect(replica.state().end_round.header_known &&
+			replica.state().end_round.header.player_index == 4,
+			"the canonical client reducer retains the recipient 0x1D header")) {
+		return false;
+	}
+
+	EndRoundStats board;
+	board.winner_team = 2;
+	board.team_score_0 = 3;
+	board.team_score_1 = 8;
+	for (uint8_t slot = 0; slot < 12; ++slot) {
+		EndRoundPlayerRow row;
+		row.slot = slot;
+		row.name = "RetailPeer" + std::to_string(slot);
+		row.team = static_cast<uint8_t>((slot & 1u) + 1u);
+		row.kills = slot;
+		board.players.push_back(std::move(row));
+	}
+	board.team_rows.resize(3);
+	const std::vector<uint8_t> board_wire = encode_end_round_stats(board);
+	if (!expect(board_wire.size() > 200 && board_wire.size() < 400,
+			"end-round pull fixture crosses exactly one 200-byte boundary")) {
+		return false;
+	}
+	const std::vector<uint8_t> first_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_STATS,
+					encode_end_round_stats_chunk(board_wire, 0))});
+	const np::JoinerConnection::PollResult first =
+			joiner.handle_datagram(first_datagram.data(), first_datagram.size());
+	if (!expect(first.queued_send_messages.size() == 1 &&
+			first.queued_send_messages[0].tag ==
+					c2s::END_ROUND_STATS_REQUEST &&
+			first.queued_send_messages[0].payload ==
+					std::vector<uint8_t>({200, 0}),
+			"incomplete S2C 0x56 requests the next running offset")) {
+		return false;
+	}
+	for (const auto &message : first.inbound_reducer)
+		replica.apply(message.first, message.second);
+	if (!expect(!replica.state().end_round.known,
+			"the first 200-byte chunk does not publish a partial board")) {
+		return false;
+	}
+
+	const std::vector<uint8_t> final_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_STATS,
+					encode_end_round_stats_chunk(board_wire, 200))});
+	const np::JoinerConnection::PollResult final =
+			joiner.handle_datagram(final_datagram.data(), final_datagram.size());
+	if (!expect(final.queued_send_messages.empty(),
+			"the completing S2C 0x56 queues no further pull")) {
+		return false;
+	}
+	for (const auto &message : final.inbound_reducer)
+		replica.apply(message.first, message.second);
+	return expect(replica.state().end_round.known &&
+			replica.state().end_round.board.players.size() == 12 &&
+			replica.state().end_round.board.players[11].name == "RetailPeer11",
+			"the requested chunks publish the complete retail board");
 }
 
 // Retail S2C 0x76 replaces the client-global class availability word. It is
@@ -769,7 +873,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(
-					0x16, encode_player_list({{0, 1}, {1, 2}}))});
+					0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
 	const np::JoinerConnection::PollResult player_list_result =
 			joiner.handle_datagram(
 					player_list_datagram.data(), player_list_datagram.size());
@@ -1185,7 +1289,7 @@ bool run_early_sync_tail_latch() {
 	}
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(0x16, encode_player_list({{0, 1}, {1, 2}}))});
+			{make_protocol_message(0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
 	const np::JoinerConnection::PollResult player_list_result = joiner.handle_datagram(
 			player_list_datagram.data(), player_list_datagram.size());
 	if (!expect(player_list_result.outbound.size() == 1 &&
@@ -1324,7 +1428,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			server_tx, server_scrk, 1u, {
 					make_protocol_message(0x49, encode_weapon_reload(reload)),
 					make_protocol_message(0x0A, encode_frame_update(frame)),
-					make_protocol_message(0x16, encode_player_list({{3, 1}})),
+					make_protocol_message(0x16, encode_test_player_list({{3, 1}})),
 					make_protocol_message(
 							0x46, encode_player_sync(sync_rep, kPlayerSyncHasName)),
 					make_protocol_message(0x1E, game_event),
@@ -4790,6 +4894,7 @@ int main() {
 	                run_start_resets_reusable_runtime_state() &&
 	                run_joiner_correlates_handshake_echoes() &&
 	                run_tick_seed_anchors_the_client_clock() &&
+	                run_end_round_header_pulls_complete_board() &&
 	                run_class_allow_mask_follows_retail_host() &&
 	                run_team_latch_is_falsifiable() &&
 	                run_player_sync_ack_walks_inclusive_roster_capacity() &&

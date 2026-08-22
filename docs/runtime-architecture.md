@@ -1,4 +1,4 @@
-# Runtime architecture — mission session and Godot frame pipeline
+# Runtime architecture — in-match session and Godot frame pipeline
 
 This is the current map of one OpenNova mission. It complements `GOALS.md`
 and the decisions under `docs/adr/`; unlike the historical ADRs, this file
@@ -23,7 +23,7 @@ own systems.
 
 ## Live OpenNova path
 
-[ADR 0035](adr/0035-mission-session-game-frame-pipeline.md) splits the frame
+[ADR 0036](adr/0036-one-inmatch-session-wire-first.md) splits the frame
 between one portable session module and one first-class Godot pipeline:
 
 ```text
@@ -34,7 +34,7 @@ MainGame._process
       begin device frame
       MissionPresentation.advance_session_frame
         Simulation.advance_session_frame
-          MissionSession.advance            state + bank + input retention
+          inmatch::Session.advance           state + bank + input retention
             0..N Simulation mission ticks   net pump + World.run_logic_tick
             typed TickOutcome values
           per-tick Godot presentation sink  effects + fixed-tick listeners
@@ -64,16 +64,16 @@ session. There is no callback lattice and no second legacy frame sequence.
 
 ### Portable session
 
-`engine/net/npruntime/mission_session.*` owns:
+`engine/net/inmatch/session.*` owns:
 
-- `MissionSessionState` and the allowed transitions;
+- `inmatch::State` and the allowed transitions;
 - role policy for single player, listen host, joiner, and dedicated host;
 - fixed-step banking and the catch-up cap;
 - held versus one-shot input retention across zero-tick and catch-up frames;
 - reset, close, terminal error propagation, and frame timing;
 - typed `FrameInput`, `TickInput`, `TickOutcome`, and `FrameOutcome` values.
 
-Its one internal seam is `MissionTickTarget`. The Godot `Simulation` adapter
+Its one internal seam is `inmatch::TickTarget`. The Godot `Simulation` adapter
 and `apps/nw_server` each provide a target, which proves the session interface
 does not depend on Godot. The target owns the concrete mission kernel it knows
 how to construct. In the game that remains `Simulation`: one `World`, WAC,
@@ -90,7 +90,7 @@ presentation synchronous without installing persistent string-named hooks.
 `MissionPresentation` owns the placed and wire present passes, entity index,
 effect drains, and fixed-tick presentation signals. It owns no cadence or
 playing flag. Its deterministic `tick()` test/debug entry still goes through
-`MissionSession.step_once`; it is not a second loop.
+`inmatch::Session::step_once`; it is not a second loop.
 
 `GameFramePipeline` owns the concrete Godot device order. It deliberately names
 the renderer, audio, particle, environment, and presentation operations we
@@ -98,7 +98,7 @@ ship. We do not add a generic renderer interface for a hypothetical backend.
 
 ### Lifecycle
 
-`MissionSessionState` is authoritative for mission play:
+`inmatch::State` is authoritative for mission play:
 
 - `Unloaded -> Connecting -> Loading -> Running` for joiners;
 - `Unloaded -> Loading -> Running` for other roles;
@@ -115,7 +115,7 @@ loops, and duck-typed legacy tick path are gone.
 ### Input
 
 `PlayerInputRouter` samples movement, look, fire, and reload once per outer
-frame into `MissionFrameInput`. MissionSession replaces held state with the
+frame into `MissionFrameInput`. `inmatch::Session` replaces held state with the
 newest sample, accumulates look/pressed edges across zero-tick frames, consumes
 those edges on the first successful tick, and reuses held state for every
 catch-up tick. Camera/listener state travels in the same typed frame value.
@@ -173,14 +173,50 @@ inside the session target tick. Decoded entities use the one
 `ClientReplicaPipeline` path and `WirePresentPass`; authored host/SP nodes
 use the placed present pass.
 
+`npwire` is the retail compatibility boundary. `npruntime` and `netsim` are
+implementation directories used inside the concrete tick targets, not
+additional public lifecycle layers. The exact end-round exchange pushes
+`0x61` then recipient-specific `0x1D`, followed by requester-only
+`0x2B`/`0x56` pulls in at most 200-byte chunks. The client connection owns the
+pull loop and folds the immutable board into client state.
+
+## Match gameplay
+
+`world::Match` is the authoritative gameplay owner shared by every session
+role. It holds the configured game type, clock, 42-field retail player stats,
+team rows, roster, and the ordered `score.ini` `FIELD` schema. Enemy kills,
+deaths, teamkills, suicides, and zone captures mutate the witnessed signed stat
+indices. One shared retail-default table feeds both gameplay and S2C 0x58 when
+`score.ini` is absent; a VERSION 40 file overlays that table and may
+intentionally materialize an all-zero row. At the 1 Hz authority pass Match
+evaluates the universal all-zones-owned rule, TDM score/time limits, and
+Advance and Secure zone counts. WAC/BMS co-op win/lose actions enter the same
+`World::process_round_end` transaction. `[orig: GameEvent_ProcessScoring
+@0x52F550; GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
+@0x52D8A0; Server_CheckWinConditions @0x51AD40]`
+
+The first finish freezes a `MatchResult`; later scoring and finish attempts are
+inert. The network side resolves the frozen stats through retail's field-ID
+accessor, omits columns that are zero for every player, serializes the remaining
+field pairs in configuration order, announces once, and drains the retail
+2790-tick multiplayer linger. Script-driven co-op outcomes consume their
+originating tick because retail's linger drain precedes the automatic
+win-condition pass; TDM/A&S outcomes begin draining on the following tick. It
+never recomputes the winner. `[orig: Server_TickUpdate @0x51D7E0;
+CPlayerStats_GetFieldByIndex @0x52D630; Server_BuildEndOfRoundScoreboard
+@0x508F30; Server_ProcessRoundEnd @0x5164F0]`
+
 ## Verification
 
 Focused local coverage pins:
 
 - lifecycle transitions, role restrictions, cadence, one-shot input retention,
   catch-up cancellation, reset, and idempotent close in
-  `tests/frame/mission_session_test.cpp`;
+  `tests/frame/inmatch_session_test.cpp`;
 - the same session interface in `apps/nw_server`;
+- TDM, A&S, co-op, scoring, clocks, frozen results, and end-round wire flow in
+  `tests/world/match_test.cpp`, `tests/npruntime/round_end_test.cpp`, and
+  `tests/npruntime/client_runtime_test.cpp`;
 - typed Godot session/presentation behavior in
   `godot/tests/mission_presentation_test.gd`;
 - concrete device ordering and cancellation in

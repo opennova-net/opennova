@@ -147,13 +147,18 @@ gets players INTO a match: gate, browser, accounts, NAT rendezvous — the NovaW
 service's domain. Code and libs are named by their domain, never bare "net".
 _Avoid_: unqualified "net code", lobby (for either)
 
-**Wire codec / Net runtime / Net seam**:
-The three in-match layers: the **wire codec** (`engine/net/npwire`, ADR 0019) encodes/decodes the
-byte stream (the message catalog is its single source of truth, ADR 0013); the **net
-runtime** (`engine/net/npruntime`)
-runs the 62 Hz host/client session over it; the **net seam** (`engine/net/netsim`) is where the
-world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
-_Avoid_: "the netcode" (say which layer)
+**Wire codec / In-match session / Match**:
+The two stable in-match boundaries and the gameplay model (ADR 0036). The **wire
+codec** (`engine/net/npwire`, ADR 0019) is the retail compatibility contract and
+encodes/decodes the byte stream; its message catalog is the single source of
+truth (ADR 0013). The **in-match session**
+(`opennova::inmatch::Session`, `engine/net/inmatch`) owns lifecycle, role,
+fixed cadence, retained input, and tick outcomes. The authoritative **Match**
+(`world::Match`) owns rules, player/team statistics, clock, winner evaluation,
+and the frozen end-round result. `npruntime` and `netsim` are implementation
+directories beneath those boundaries, not peer layers or extension seams.
+_Avoid_: "the netcode" (name the wire transaction, session behavior, or match rule);
+"net seam" / "net runtime layer" as public architecture
 
 **Packet / Draw list**:
 A **packet** is wire data — bytes on the network, and nothing else. What a frame

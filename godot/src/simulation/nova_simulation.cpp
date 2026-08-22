@@ -76,13 +76,13 @@ opennova::bms::File make_demo_mission() {
 
 } // namespace
 
-Simulation::Simulation() : mission_session_(*this) {
+Simulation::Simulation() : session_(*this) {
 	reset_world();
 	set_process(false);
 }
 
 Simulation::~Simulation() {
-	(void)mission_session_.close();
+	(void)session_.close();
 	if (weapon_defs_loaded_) {
 		def_free_weapons(&weapon_defs_);
 		weapon_defs_loaded_ = false;
@@ -746,7 +746,7 @@ bool Simulation::advance_world_tick() {
 	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates to every
 	// 62nd tick and the BMS evaluator quarter-passes every 16th, inside their systems —
 	// exactly where the original keeps those dividers. A render frame runs 0..N of these;
-	// the accumulator that decides N lives in MissionSession
+	// the accumulator that decides N lives in inmatch::Session
 	// [orig: Game_MainLoop @ 0x52b630].
 	//
 	// Listen-server frame order [orig: Game_ProcessMainFrame @ 0x5263f0]:
@@ -1258,8 +1258,8 @@ int Simulation::get_mission_variable(int index) const {
 Dictionary Simulation::get_round_outcome_debug() const {
 	Dictionary out;
 	if (!world_) return out;
-	out["ended"] = world_->round_end.ended;
-	out["winner_team"] = world_->round_end.winner_team;
+	out["ended"] = world_->match.outcome().ended;
+	out["winner_team"] = world_->match.outcome().winner_team;
 	out["bluekills"] = world_->kill_stats.bluekills_by_player;
 	out["greenkills"] = world_->kill_stats.greenkills_by_player;
 	out["enemy_kills"] = world_->kill_stats.enemy_kills_by_player;

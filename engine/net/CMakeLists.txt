@@ -77,6 +77,7 @@ add_library(opennova_net STATIC
     # netsim::ISessionTransport.
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/napi_np_protocol.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/npruntime/end_round_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_message_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/charattr_challenge.cpp
@@ -94,7 +95,9 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/lan_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/weapon_table_build.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/ammo_table_build.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/mission_session.cpp
+	# inmatch — the one public mission lifecycle/cadence surface. The np and
+	# netsim directories beneath it are wire/runtime implementation modules.
+	${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
 )
 
 target_include_directories(opennova_net

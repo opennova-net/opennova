@@ -843,6 +843,33 @@ int check_S_18_full_entity_spawn() {
 	return 0;
 }
 
+// S2C 0x1D + C2S 0x2B -- the fixed header and requester offset that start the
+// end-round board pull. [orig: NapiNPClientMsg_0x01D @0x430840;
+// NapiNPServerMsg_0x02B @0x514FE0]
+int check_end_round_control_pair() {
+	const std::vector<uint8_t> header_body = {
+			2, 0x34, 0x12, 0xFE, 0xFF, 1, 0xFF};
+	EndRoundHeader header;
+	EXPECT(decode_end_round_header(
+			header_body.data(), header_body.size(), header));
+	EXPECT(header.winner_team == 2 && header.team_score_0 == 0x1234);
+	EXPECT(header.team_score_1 == -2 && header.draw == 1 &&
+			header.player_index == -1);
+	EXPECT(!decode_end_round_header(
+			header_body.data(), header_body.size() - 1, header));
+	cover('S', 0x1D);
+
+	const std::vector<uint8_t> request_body = {0x34, 0x12};
+	EndRoundStatsRequest request;
+	EXPECT(decode_end_round_stats_request(
+			request_body.data(), request_body.size(), request));
+	EXPECT(request.offset == 0x1234);
+	EXPECT(!decode_end_round_stats_request(
+			request_body.data(), request_body.size() - 1, request));
+	cover('C', 0x2B);
+	return 0;
+}
+
 // S2C 0x56 -- the end-of-round stat board, pulled in 200-byte chunks over C2S
 // 0x2B. Two decoders: the envelope per datagram, and the reassembled payload.
 // [orig: NapiNPClientMsg_0x056 @0x431D10]
@@ -909,7 +936,8 @@ int check_S_56_end_round_stats() {
 	EXPECT(st.players[0].captures == 15 && st.players[0].flags == 16);
 	EXPECT(st.players[0].special == 17);
 	EXPECT(st.players[0].per_team.size() == 1 && st.players[0].per_team[0] == 21);
-	EXPECT(st.players[0].slot == 3 && st.players[0].team == 1 && st.players[0].side == 2);
+	EXPECT(st.players[0].slot == 3 && st.players[0].team == 1 &&
+			st.players[0].player_class == 2);
 	// The clan join, and its absence.
 	EXPECT(st.players[0].display_name() == "=X= Ace");
 	EXPECT(st.players[1].display_name() == "Solo");
@@ -929,7 +957,7 @@ int check_S_56_end_round_stats() {
 	n.u8(9);                                   // slot
 	for (char ch : std::string("Neg")) n.u8(uint8_t(ch)); n.u8(0);
 	n.u8(0); n.u8(0);                          // empty clan, empty tag
-	n.u8(1); n.u8(1);                          // team, side
+	n.u8(1); n.u8(1);                          // team, player class
 	n.u16(1); n.u16(2); n.u16(3); n.u16(4); n.u16(5); n.u16(6); n.u16(7);
 	n.u8(1);                                   // one trailing team row, no columns
 	EndRoundStats neg;
@@ -1334,6 +1362,7 @@ int main() {
 	if (check_S_59_deployed_item()) return 1;
 	if (check_S_45_terrain_load()) return 1;
 	if (check_S_18_full_entity_spawn()) return 1;
+	if (check_end_round_control_pair()) return 1;
 	if (check_S_56_end_round_stats()) return 1;
 	if (check_S_58_session_status()) return 1;
 	if (check_S_6F_zone_timer_value()) return 1;

@@ -606,6 +606,8 @@ struct ClientMinimapState {
 // @0xA82324, reset only by an offset-0 chunk @0x431D79 and otherwise kept
 // across completed decodes].
 struct ClientEndRoundStats {
+	bool header_known = false;
+	EndRoundHeader header;
 	// True once a complete board has been decoded at least once. A later
 	// partial chunk does not clear it, so the screen keeps showing the last
 	// complete board while the next one streams in.

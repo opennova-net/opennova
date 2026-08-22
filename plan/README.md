@@ -8,7 +8,7 @@
 > [Track A (server + engine)](track-a-server-engine.md),
 > [Track B (infra + deploy)](track-b-infra.md),
 > [Track C (launcher + website)](track-c-launcher-web.md). A later completed
-> effort also archived here: [mission-session-rearchitecture.md](mission-session-rearchitecture.md)
+> effort also archived here: [inmatch-session-rearchitecture.md](inmatch-session-rearchitecture.md)
 > (ADR 0035, PR #465).
 
 ## Goal

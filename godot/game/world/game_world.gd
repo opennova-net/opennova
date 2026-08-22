@@ -1163,7 +1163,7 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 # --- Godot frame device legs (ADR 0035) --------------------------------------
 # GameFramePipeline invokes these concrete renderer/audio/environment operations in
-# one visible order around MissionSession.advance().
+# one visible order around inmatch::Session::advance().
 
 var _frame_camera_pos := Vector3()
 # Untyped on purpose: a Transform3D-typed member on this class crashes the

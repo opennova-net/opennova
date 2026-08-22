@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
-namespace opennova::np {
+namespace opennova::inmatch {
 
-enum class MissionSessionState : uint8_t {
+enum class State : uint8_t {
 	Unloaded = 0,
 	Connecting,
 	Loading,
@@ -19,7 +19,7 @@ enum class MissionSessionState : uint8_t {
 	Failed,
 };
 
-enum class MissionSessionRole : uint8_t {
+enum class Role : uint8_t {
 	SinglePlayer = 0,
 	ListenHost,
 	Joiner,
@@ -52,8 +52,8 @@ enum class TransitionCode : uint8_t {
 
 struct TransitionResult {
 	TransitionCode code = TransitionCode::NoOp;
-	MissionSessionState from = MissionSessionState::Unloaded;
-	MissionSessionState to = MissionSessionState::Unloaded;
+	State from = State::Unloaded;
+	State to = State::Unloaded;
 	SessionError error;
 
 	bool applied() const { return code == TransitionCode::Applied; }
@@ -125,7 +125,7 @@ struct FramePerf {
 
 struct FrameOutcome {
 	FrameStatus status = FrameStatus::NotRunning;
-	MissionSessionState state = MissionSessionState::Unloaded;
+	State state = State::Unloaded;
 	std::vector<TickOutcome> ticks;
 	FramePerf perf;
 	SessionError error;
@@ -138,25 +138,25 @@ struct FrameOutcome {
 
 // The session's one real internal seam. Godot and the headless host both
 // provide an adapter; callers never see the former semantic callback lattice.
-class MissionTickTarget {
+class TickTarget {
 public:
-	virtual ~MissionTickTarget() = default;
+	virtual ~TickTarget() = default;
 	virtual TickOutcome advance_mission_tick(const TickInput &input) = 0;
 	virtual bool reset_mission_to_baseline(SessionError &error) = 0;
 	virtual void close_mission() = 0;
 };
 
-class MissionSession {
+class Session {
 public:
-	explicit MissionSession(MissionTickTarget &target,
-			MissionSessionRole role = MissionSessionRole::SinglePlayer);
+	explicit Session(TickTarget &target,
+			Role role = Role::SinglePlayer);
 
-	MissionSessionState state() const { return state_; }
-	MissionSessionRole role() const { return role_; }
+	State state() const { return state_; }
+	Role role() const { return role_; }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 
-	TransitionResult configure_role(MissionSessionRole role);
+	TransitionResult configure_role(Role role);
 	TransitionResult begin_connect();
 	TransitionResult begin_load();
 	TransitionResult complete_load();
@@ -177,7 +177,7 @@ public:
 	void reset_bank();
 
 private:
-	TransitionResult transition(MissionSessionState to);
+	TransitionResult transition(State to);
 	TransitionResult rejected(TransitionCode code, SessionError error = {}) const;
 	TickInput merged_tick_input(const FrameInput &input, bool consume_one_shots);
 	void latch_input(const FrameInput &input);
@@ -185,9 +185,9 @@ private:
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	static int64_t now_us();
 
-	MissionTickTarget &target_;
-	MissionSessionRole role_;
-	MissionSessionState state_ = MissionSessionState::Unloaded;
+	TickTarget &target_;
+	Role role_;
+	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
 	InputPacket pending_input_;
 	CameraSample latest_camera_;
@@ -195,4 +195,4 @@ private:
 	FramePerf last_perf_;
 };
 
-} // namespace opennova::np
+} // namespace opennova::inmatch

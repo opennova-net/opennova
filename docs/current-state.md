@@ -26,11 +26,13 @@ boundary. As of 2026-08-10 (trunk PR #460): R1 (the frame port) and R2
 deleted the MnuMenu Control tree for the compiled MenuFrame + MenuDriver
 path) LANDED — and R1 was then superseded by
 [ADR 0035](adr/0035-mission-session-game-frame-pipeline.md) (ADR 0033's
-ladder state records it): PR #465 rearchitected the mission-session
-lifecycle as the portable `opennova::np::MissionSession` in
-`engine/net/npruntime` with `godot/game/world/game_frame_pipeline.gd` as
-the device-order owner, superseding ADR 0033's R1 frame port and
-callback-bus design, and PR #468 moved local-player camera placement plus
+ladder state records it): PR #465 first rearchitected the lifecycle and
+frame pipeline. [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) then
+completed the no-compat cutover to portable `opennova::inmatch::Session` in
+`engine/net/inmatch`, made `world::Match` the shared TDM/A&S/co-op gameplay
+owner, and demoted `npruntime`/`netsim` from public layers to implementation
+directories. `godot/game/world/game_frame_pipeline.gd` remains the
+device-order owner, superseding ADR 0033's R1 callback-bus design; PR #468 moved local-player camera placement plus
 the ObjectModel material loop onto pipeline legs. The P1 rewrite queue that
 followed (env/weather, placer,
 present facades, composition, avatar, menus), the task-12

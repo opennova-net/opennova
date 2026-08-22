@@ -2,6 +2,9 @@
 #include "npwire/wire_handle.h"
 #include <io/le.h>
 
+#include <algorithm>
+#include <limits>
+
 // Encoders for the in-match S2C replication tags — the symmetric partners to
 // ingame_decode.cpp. Faithful structural ports of the original server-side
 // serializers. Verified inverse pair:
@@ -753,31 +756,115 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 // spectatorCount (g_scoreboard_row_count − g_scoreboard_spectator_count) — a hardcoded trailer pinned
 // every client's count at 2 (the v31 HUD-count defect, D-NET-158). Rows are accepted only for
 // 0x46-known slots; spectators are unmodeled (0).
-std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players) {
+std::vector<uint8_t> encode_player_list(const PlayerListFrame &frame) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	w.u8(0x01);                                  // flags: bit0 team-mode [orig: -> g_scoreboard_flags]
-	w.u8(static_cast<uint8_t>(players.size()));  // row count
-	for (const PlayerListEntry &e : players) {
+	const size_t player_count = std::min<size_t>(frame.players.size(), 0xFFu);
+	w.u8(frame.flags);
+	w.u8(static_cast<uint8_t>(player_count));
+	for (size_t i = 0; i < player_count; ++i) {
+		const PlayerListEntry &e = frame.players[i];
 		w.u8(e.slot);
-		// The status/score fields read the CPlayerStats record system the
-		// port does not carry yet — a recorded D-HUD-24 residual, not a
-		// stub: an opennova-hosted board draws zero scores until that system
-		// lands [orig: the serializer fills @0x504c2e..0x504d20 from
-		// CRenderState_GetFieldByIndex @0x52d7d6 / Player_ComputeScore
-		// @0x500A80].
-		w.u16(0); // statusFlags (the glyph bitfield)
-		w.u16(0); // score1 (the mode stat)
-		w.u16(0); // score2 (accumulated points)
-		w.u8(static_cast<uint8_t>(e.team << 1)); // bits1+ team, bit0 SPECTATOR (unmodeled 0)
+		w.u16(e.status_flags);
+		w.u16(e.score1);
+		w.u16(e.score2);
+		w.u8(static_cast<uint8_t>((e.team << 1) | (e.spectator ? 1u : 0u)));
 	}
-	w.u8(0x02); // team_count = 2 (matches retail)
-	for (int i = 0; i < 3; ++i) { // (team_count + 1) blocks {score1, score2, kothHold, ctfFlag}
-		w.u16(0); w.u16(0);
-		w.u8(0); w.u8(0);
+	w.u8(frame.team_count);
+	for (size_t i = 0; i < size_t(frame.team_count) + 1; ++i) {
+		const PlayerListTeamRow row =
+				i < frame.teams.size() ? frame.teams[i] : PlayerListTeamRow{};
+		w.u16(row.score1);
+		w.u16(row.score2);
+		w.u8(row.koth_hold);
+		w.u8(row.ctf_flag);
 	}
-	w.u8(static_cast<uint8_t>(players.size())); // inGameCount  [orig: -> g_scoreboard_ingame_count]
-	w.u8(0x00);                                 // spectatorCount [orig: -> g_scoreboard_spectator_count]
+	w.u8(frame.in_game_count);
+	w.u8(frame.spectator_count);
+	return out;
+}
+
+std::vector<uint8_t> encode_end_round_header(const EndRoundHeader &header) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	// Exact retail order and widths. [orig: EndRoundScoreboard_SerializeHeader
+	// @0x505280; client NapiNPClientMsg_0x01D @0x430840]
+	w.u8(static_cast<uint8_t>(header.winner_team));
+	w.u16(static_cast<uint16_t>(header.team_score_0));
+	w.u16(static_cast<uint16_t>(header.team_score_1));
+	w.u8(header.draw);
+	w.u8(static_cast<uint8_t>(header.player_index));
+	return out;
+}
+
+std::vector<uint8_t> encode_end_round_stats(const EndRoundStats &stats) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	const size_t field_count = std::min<size_t>(stats.team_fields.size(), 0x7Fu);
+	const size_t player_count = std::min<size_t>(stats.players.size(), 0xFFu);
+	const size_t team_row_count = std::min<size_t>(stats.team_rows.size(), 0x7Fu);
+
+	w.u8(static_cast<uint8_t>(stats.winner_team));
+	w.u16(static_cast<uint16_t>(stats.team_score_0));
+	w.u16(static_cast<uint16_t>(stats.team_score_1));
+	w.u8(static_cast<uint8_t>(field_count));
+	for (size_t i = 0; i < field_count; ++i) {
+		w.u8(stats.team_fields[i].first);
+		w.u8(stats.team_fields[i].second);
+	}
+
+	w.u8(static_cast<uint8_t>(player_count));
+	for (size_t i = 0; i < player_count; ++i) {
+		const EndRoundPlayerRow &row = stats.players[i];
+		w.u8(row.slot);
+		w.cstr(row.name);
+		w.cstr(row.clan);
+		w.cstr(row.tag);
+		w.u8(row.team);
+		w.u8(row.player_class);
+		w.u16(static_cast<uint16_t>(row.kills));
+		w.u16(static_cast<uint16_t>(row.deaths));
+		w.u16(static_cast<uint16_t>(row.assists));
+		w.u16(static_cast<uint16_t>(row.score));
+		w.u16(static_cast<uint16_t>(row.captures));
+		w.u16(static_cast<uint16_t>(row.flags));
+		w.u16(static_cast<uint16_t>(row.special));
+		for (size_t f = 0; f < field_count; ++f)
+			w.u16(static_cast<uint16_t>(
+					f < row.per_team.size() ? row.per_team[f] : 0));
+	}
+
+	w.u8(static_cast<uint8_t>(team_row_count));
+	for (size_t i = 0; i < team_row_count; ++i) {
+		for (size_t f = 0; f < field_count; ++f)
+			w.u16(static_cast<uint16_t>(
+					f < stats.team_rows[i].size() ? stats.team_rows[i][f] : 0));
+	}
+	return out;
+}
+
+std::vector<uint8_t> encode_end_round_stats_chunk(
+		const std::vector<uint8_t> &board, uint16_t offset) {
+	const size_t total = std::min<size_t>(
+			board.size(), std::numeric_limits<uint16_t>::max());
+	// Retail's writer returns zero and the server emits no 0x56 when the
+	// requested offset is past the frozen stream. Offset == size is valid and
+	// returns the four-byte terminal envelope.
+	// [orig: NetPacket_WriteReplayStreamChunk @0x506F60]
+	if (size_t(offset) > total) return {};
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(static_cast<uint16_t>(total));
+	w.u16(offset);
+	const size_t count = std::min<size_t>(200, total - size_t(offset));
+	out.insert(out.end(), board.begin() + offset, board.begin() + offset + count);
+	return out;
+}
+
+std::vector<uint8_t> encode_end_round_stats_request(uint16_t offset) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(offset);
 	return out;
 }
 

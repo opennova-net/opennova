@@ -10,6 +10,7 @@
 
 #include <io/le.h>
 #include <npwire/game_type.h>
+#include <world/match.h>
 
 namespace opennova::np {
 namespace gtype = opennova::game_type;
@@ -28,6 +29,22 @@ constexpr std::array<const char *, 38> kScoreVarNames = {
 	"ENEMYSNIPERKILL", "SNIPERSKILLKILLDISTANCEMIN",
 	"SNIPERSKILLKILLDISTANCEMAX", "INAZONE", "INDZONE", "INZONE",
 	"LFPTAKEOVER", "ALIVE", "ALIVEQUANTUM", "VATTACHKILL",
+};
+
+// IDs are one-based and positional in retail's lookup table.
+// [orig: ScoreConfig_LoadFile @0x52D8A0]
+constexpr std::array<const char *, 32> kScoreFieldNames = {
+	"NUMSUICIDES", "NUMFRIENDLYKILLS", "NUMENEMYKILLS", "NUMDEATHS",
+	"NUMSECONDSINZONE", "NUMFLAGSCAPTURED", "NUMFLAGSSAVED",
+	"NUMTARGETSDESTROYED", "NUMSHOTSFIRED", "NUMMEDICSAVES",
+	"NUMREVIVES", "NUMPSPATTEMPTS", "NUMPSPTAKEOVERS",
+	"NUMFLAGCARRIERKILLS", "NUMMULTIPLEKILLS", "NUMHEADSHOTKILLS",
+	"NUMKNIFEKILLS", "NUMTHEMINZONEKILLS", "EXPERIENCEPOINTS",
+	"ITEMPOINTS", "NUMSHOTSPERKILL", "NUMMEINZONEKILLS",
+	"NUMTHEMINMYZONEKILLS", "NUMMEINMYZONEKILLS",
+	"NUMTHEMINTHEIRZONEKILLS", "NUMMEINTHEIRZONEKILLS",
+	"NUMSKILLKILL", "NUMTHEMINFLAGZONEKILLS", "NUMMEINFLAGZONEKILLS",
+	"NUMASSISTS", "NUMENEMYSNIPERKILLS", "NUMLFPTAKEOVERS",
 };
 
 bool ascii_iequals(std::string_view a, std::string_view b) {
@@ -94,10 +111,14 @@ void append_u32(std::vector<uint8_t> &out, uint32_t value) {
 } // namespace
 
 bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
-	std::array<int32_t, 39> parsed{};
+	std::array<int32_t, 39> parsed =
+			world::default_match_score_values(config.game_type);
+	std::vector<std::pair<uint8_t, uint8_t>> parsed_fields;
 	const std::string target = score_game_type_name(config.game_type);
 	bool selected = false;
 	bool found_target = false;
+	bool selected_section_has_fields = false;
+	bool saw_score_fields = false;
 	bool saw_version = false;
 	int version = 0;
 
@@ -121,13 +142,35 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 			} else {
 				selected = false;
 			}
+			selected_section_has_fields = false;
 			continue;
 		}
-		if (!selected || !ascii_iequals(directive, "VAR")) continue;
+		if (!selected) continue;
 
 		std::string name;
 		int64_t value = 0;
 		if (!(row >> std::quoted(name) >> value)) continue;
+		if (ascii_iequals(directive, "FIELD")) {
+			for (std::size_t i = 0; i < kScoreFieldNames.size(); ++i) {
+				if (!ascii_iequals(name, kScoreFieldNames[i])) continue;
+				// The first recognized FIELD after every matching GAMETYPE
+				// replaces the prior/default schema; duplicate matching sections
+				// therefore follow the same reset-and-replace behavior as retail.
+				if (!selected_section_has_fields) {
+					parsed_fields.clear();
+					selected_section_has_fields = true;
+					saw_score_fields = true;
+				}
+				if (parsed_fields.size() < 34) {
+					parsed_fields.emplace_back(
+							static_cast<uint8_t>(i + 1),
+							static_cast<uint8_t>(value));
+				}
+				break;
+			}
+			continue;
+		}
+		if (!ascii_iequals(directive, "VAR")) continue;
 		for (std::size_t i = 0; i < kScoreVarNames.size(); ++i) {
 			if (!ascii_iequals(name, kScoreVarNames[i])) continue;
 			parsed[i] = static_cast<int32_t>(static_cast<uint32_t>(value));
@@ -137,6 +180,10 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 
 	if (!saw_version || version != 40 || !found_target) return false;
 	config.session_status_stat_values = parsed;
+	if (saw_score_fields)
+		config.scoreboard_fields = std::move(parsed_fields);
+	else
+		config.scoreboard_fields.clear();
 	return true;
 }
 
@@ -152,7 +199,13 @@ std::vector<uint8_t> serialize_session_status(
 	out.push_back(session_status_game_type_index(config.game_type));
 	out.push_back(static_cast<uint8_t>(config.max_players));
 	append_u32(out, uptime_ms);
-	for (int32_t value : config.session_status_stat_values)
+	const std::array<int32_t, 39> default_values =
+			world::default_match_score_values(config.game_type);
+	const std::array<int32_t, 39> &score_values =
+			config.session_status_stat_values.has_value()
+			? *config.session_status_stat_values
+			: default_values;
+	for (int32_t value : score_values)
 		append_u32(out, static_cast<uint32_t>(value));
 
 	std::vector<std::pair<uint8_t, uint32_t>> options;

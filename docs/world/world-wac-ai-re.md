@@ -3864,7 +3864,8 @@ Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 0xC6EAE8`, `bluekills → 0xC6EAF8`, `GameOver → 0xC6EAD8`, ...) was wrong; the
 resolver decompile pins the true anchors (name @ +0, type @ +0x10, value @ +0x14).
 Port: `Builtin` ids 8-13 in `engine/runtime/wac` (`bluekills/greenkills/humans/GameOver/
-WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` / `round_end`.
+WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` /
+`World::match.outcome()`.
 The writable `accuracyspread` row is also ported: case-insensitive compilation
 resolves it as a named engine-value lvalue, VM reads/writes
 `World::wac_values.accuracy_spread`, and the infantry aim pass consumes that same
@@ -3892,10 +3893,14 @@ misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
 
 Team space matches the round-end codes: 0 = green, 1 = blue, 2+ = enemy. The
 epilog count lines sum the pairs (TEAMUNITS = `0xC846F0 + 0xC846C0`, etc.).
-Port: `MissionKillStats` counts only (points/difficulty unmodeled — D-AI-10),
+Port: `MissionKillStats` intentionally remains the count-only WAC/epilog view,
 tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
 `!world.mp_session` because our SP-as-listen-server always runs
-`ctx.is_in_session = 1`.
+`ctx.is_in_session = 1`. Independently, the same death enters `world::Match`'s
+42-field player/team records with the signed `score.ini` event values used by
+TDM, A&S, co-op, and the end-round board. The SP epilog's difficulty-scaled
+score sums remain unmodeled. `[orig: GameEvent_ProcessScoring @0x52F550;
+CPlayerStats_RecordEvent @0x52C8E0]`
 
 ### 20.5 The outcome state + the client commit (S2C 0x1D)
 
@@ -3918,6 +3923,13 @@ authority [orig: @ 0x51d9cc] → mission metrics + `g_mission_exit_reason = 3`
 (4 when replay-chaining); `Client_ProcessNetworkFrame` drains the peer copy
 [orig: @ 0x42c3d1] → `reason = 4` → the "Game Loop" scene. SP never drains it —
 the epilog owns the SP exit (§20.6).
+
+Port (completed 2026-08-22): `World::process_round_end` latches one immutable
+`MatchResult`; the authority pushes 0x61 + the exact recipient-specific 0x1D,
+serves the board through requester-only 200-byte 0x56 chunks, and drains the
+2790-tick MP linger. The joiner starts and continues the 0x2B pull loop
+automatically. The full producer schema and its remaining presentation-only
+residue are tracked in net-re §5.68.
 
 ### 20.6 The SP end presentation
 
@@ -3991,7 +4003,7 @@ Two load/response-time resolutions the probe forced out:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-10 | Round-outcome stand-ins: (a) kill tallies are COUNTS only (no def+404 points, no difficulty scaling, no per-type enemy split, no human-player bucket); (b) the SP end presentation is a shell overlay — no flyaway cine / `.cne` playback, no score count-up lines, no saved-game list, no end-music track switch, a 3 s fade lead-in stands in for the cine fades, ESC/300 s stand in for the key/18600-tick exits; (c) the MP legs are cited stubs (0x61/0x1D wire, slot 6→7, `SetGameState(11)`, the 2790 linger, the round-win counters, the scoreboard block, `Server_CheckWinConditions` MP conditions); (d) `sub_5280B0` music-park and the `@ 0x3245B08` end-track selector are noted, unported; (e) the SP-gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @ 0x5164f0 flow + the §20.6 cines | SP outcome loop works end-to-end (probe PASS); the omissions are presentation/MP depth, each cited inline for the follow-up slices | 
+| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, saved-game list, or end-music switch; (d) `sub_5280B0` music-park and the `@0x3245B08` end-track selector remain unported; (e) the SP gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
 
 `D-AI-6` update (2026-07-20): the aim-error global `@ 0xC6EAE8` is the WAC
 named variable **accuracyspread** — its config source is mission scripts (the

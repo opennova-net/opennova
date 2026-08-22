@@ -268,6 +268,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		conn.reply.player_name = resolved_name;
 		if (world::Entity *e = world.registry.get(h)) e->name = resolved_name;
 	}
+	world::MatchPlayerIdentity match_player;
+	match_player.entity = h;
+	match_player.slot = *player_slot;
+	match_player.name = resolved_name;
+	world.match.upsert_player(match_player);
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -282,13 +287,14 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
 // !g_spawn_success_gate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
-// pool-3 start markers are promoted. [D-NET-116] The reimpl maps g_spawn_success_gate -> spawn_success_gate
-// but has no dword_24D1DE0 equivalent — acceptable today because the only callers (tests + the future
-// host driver) wire ctx.world AFTER the world is loaded with its markers. A production driver that wires
+// pool-3 start markers are promoted. [D-NET-116] The reimpl maps the retail
+// round-over gate to world::Match's sole outcome latch but has no dword_24D1DE0
+// equivalent — acceptable today because callers wire ctx.world AFTER the world
+// is loaded with its markers. A production driver that wires
 // ctx.world DURING load must add a load-complete gate here, else select_player_spawn finds no marker and
 // the idempotent origin fallback below latches the player at (0,0,0) permanently.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
-	if (!ctx.is_authority || ctx.spawn_success_gate != 0) return 0;
+	if (!ctx.is_authority || world.match.outcome().ended) return 0;
 	int spawned = 0;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		// Spawn an accepted-but-unspawned player: the host loopback (self_id_seen latched at
@@ -339,6 +345,13 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 		ctx.np_protocol.connection_list.push_back(c);
 		conn = &ctx.np_protocol.connection_list.back();
 	}
+	const std::optional<uint8_t> player_slot = Server_ReservePlayerSlot(
+			ctx.np_protocol.connection_list, *conn,
+			std::min<uint32_t>(ctx.config.max_players, 251u));
+	if (!player_slot.has_value()) {
+		world.registry.despawn(h);
+		return {};
+	}
 	conn->assigned_team = spawn.team;
 	conn->assigned_team_valid = true;
 	conn->link.owned_entity = h;
@@ -348,6 +361,13 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->link.mode = netsim::TransportMode::Client;
 	conn->phase = ConnectionPhase::PlayerAdded;
 	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
+	conn->reply.player_slot = *player_slot;
+	conn->reply.player_slot_reserved = false;
+	world::MatchPlayerIdentity match_player;
+	match_player.entity = h;
+	match_player.slot = *player_slot;
+	match_player.name = conn->player_name;
+	world.match.upsert_player(match_player);
 	return h;
 }
 

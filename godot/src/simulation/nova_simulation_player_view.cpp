@@ -30,7 +30,7 @@ void Simulation::refresh_local_player_view_effects() {
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
 	const bool alive = local != nullptr && local->alive && local->health > 0;
-	const bool round_ended = world_ != nullptr && world_->round_end.ended;
+	const bool round_ended = world_ != nullptr && world_->match.outcome().ended;
 	opennova::world::player_view_update_effective_modes(
 			player_view_, alive, round_ended);
 }
@@ -215,7 +215,7 @@ void Simulation::tick_local_player_view() {
 		player_view_.mount = opennova::world::MountedCameraInput();
 		opennova::world::player_view_resolve_mode(player_view_);
 		opennova::world::player_view_update_effective_modes(
-				player_view_, false, world_ != nullptr && world_->round_end.ended);
+				player_view_, false, world_ != nullptr && world_->match.outcome().ended);
 		player_view_.tp_anchor_valid = false;
 		return;
 	}

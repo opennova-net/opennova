@@ -1,9 +1,9 @@
-#include "npruntime/mission_session.h"
+#include "inmatch/session.h"
 
 #include <chrono>
 #include <utility>
 
-namespace opennova::np {
+namespace opennova::inmatch {
 
 // The session banks real time and dispatches one target call per 16 ms quantum,
 // matching the original outer/logic-loop split [orig: Game_MainLoop @ 0x52b630
@@ -17,16 +17,16 @@ SessionError invalid_transition(const char *message) {
 
 } // namespace
 
-MissionSession::MissionSession(MissionTickTarget &target, MissionSessionRole role)
+Session::Session(TickTarget &target, Role role)
 		: target_(target), role_(role) {}
 
-int64_t MissionSession::now_us() {
+int64_t Session::now_us() {
 	using Clock = std::chrono::steady_clock;
 	return std::chrono::duration_cast<std::chrono::microseconds>(
 			Clock::now().time_since_epoch()).count();
 }
 
-TransitionResult MissionSession::transition(MissionSessionState to) {
+TransitionResult Session::transition(State to) {
 	TransitionResult out;
 	out.from = state_;
 	out.to = to;
@@ -39,7 +39,7 @@ TransitionResult MissionSession::transition(MissionSessionState to) {
 	return out;
 }
 
-TransitionResult MissionSession::rejected(
+TransitionResult Session::rejected(
 		TransitionCode code, SessionError error) const {
 	TransitionResult out;
 	out.code = code;
@@ -49,9 +49,9 @@ TransitionResult MissionSession::rejected(
 	return out;
 }
 
-TransitionResult MissionSession::configure_role(MissionSessionRole role) {
-	if (state_ != MissionSessionState::Unloaded &&
-			state_ != MissionSessionState::Failed) {
+TransitionResult Session::configure_role(Role role) {
+	if (state_ != State::Unloaded &&
+			state_ != State::Failed) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("role can change only while unloaded or failed"));
 	}
@@ -60,53 +60,53 @@ TransitionResult MissionSession::configure_role(MissionSessionRole role) {
 	return {TransitionCode::Applied, state_, state_, {}};
 }
 
-TransitionResult MissionSession::begin_connect() {
-	if (role_ != MissionSessionRole::Joiner) {
+TransitionResult Session::begin_connect() {
+	if (role_ != Role::Joiner) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("only a joiner can enter Connecting"));
 	}
-	if (state_ != MissionSessionState::Unloaded &&
-			state_ != MissionSessionState::Failed) {
+	if (state_ != State::Unloaded &&
+			state_ != State::Failed) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("connect requires Unloaded or Failed"));
 	}
 	last_error_ = {};
 	reset_bank();
-	return transition(MissionSessionState::Connecting);
+	return transition(State::Connecting);
 }
 
-TransitionResult MissionSession::begin_load() {
-	if (state_ != MissionSessionState::Unloaded &&
-			state_ != MissionSessionState::Connecting &&
-			state_ != MissionSessionState::Failed) {
+TransitionResult Session::begin_load() {
+	if (state_ != State::Unloaded &&
+			state_ != State::Connecting &&
+			state_ != State::Failed) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("load requires Unloaded, Connecting, or Failed"));
 	}
 	last_error_ = {};
 	reset_bank();
-	return transition(MissionSessionState::Loading);
+	return transition(State::Loading);
 }
 
-TransitionResult MissionSession::complete_load() {
-	if (state_ != MissionSessionState::Loading) {
+TransitionResult Session::complete_load() {
+	if (state_ != State::Loading) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("load completion requires Loading"));
 	}
 	last_error_ = {};
 	reset_bank();
-	return transition(MissionSessionState::Running);
+	return transition(State::Running);
 }
 
-TransitionResult MissionSession::fail(SessionError error) {
+TransitionResult Session::fail(SessionError error) {
 	if (!error) error = {SessionErrorCode::TickFailed, "session failed"};
 	last_error_ = error;
 	reset_bank();
-	TransitionResult out = transition(MissionSessionState::Failed);
+	TransitionResult out = transition(State::Failed);
 	out.error = std::move(error);
 	return out;
 }
 
-void MissionSession::latch_input(const FrameInput &input) {
+void Session::latch_input(const FrameInput &input) {
 	pending_input_.movement = input.player.movement;
 	pending_input_.look_delta_x += input.player.look_delta_x;
 	pending_input_.look_delta_y += input.player.look_delta_y;
@@ -116,7 +116,7 @@ void MissionSession::latch_input(const FrameInput &input) {
 	latest_camera_ = input.camera;
 }
 
-TickInput MissionSession::merged_tick_input(
+TickInput Session::merged_tick_input(
 		const FrameInput &, bool consume_one_shots) {
 	TickInput out;
 	out.camera = latest_camera_;
@@ -130,13 +130,13 @@ TickInput MissionSession::merged_tick_input(
 	return out;
 }
 
-void MissionSession::consume_pending_one_shots() {
+void Session::consume_pending_one_shots() {
 	pending_input_.look_delta_x = 0.0f;
 	pending_input_.look_delta_y = 0.0f;
 	pending_input_.pressed_action_bits = 0;
 }
 
-FrameOutcome MissionSession::run_ticks(int32_t due, const FrameInput &input) {
+FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 	FrameOutcome out;
 	out.status = FrameStatus::Ok;
 	out.state = state_;
@@ -166,11 +166,11 @@ FrameOutcome MissionSession::run_ticks(int32_t due, const FrameInput &input) {
 	return out;
 }
 
-FrameOutcome MissionSession::advance(const FrameInput &input) {
+FrameOutcome Session::advance(const FrameInput &input) {
 	const int64_t frame_start = now_us();
 	FrameOutcome out;
 	out.state = state_;
-	if (state_ != MissionSessionState::Running) {
+	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
 		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
@@ -183,12 +183,12 @@ FrameOutcome MissionSession::advance(const FrameInput &input) {
 	return out;
 }
 
-FrameOutcome MissionSession::step_once(const FrameInput &input) {
+FrameOutcome Session::step_once(const FrameInput &input) {
 	const int64_t frame_start = now_us();
 	FrameOutcome out;
 	out.state = state_;
-	if (state_ != MissionSessionState::Paused ||
-			role_ != MissionSessionRole::SinglePlayer) {
+	if (state_ != State::Paused ||
+			role_ != Role::SinglePlayer) {
 		out.status = FrameStatus::NotRunning;
 		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
@@ -201,13 +201,13 @@ FrameOutcome MissionSession::step_once(const FrameInput &input) {
 	return out;
 }
 
-FrameOutcome MissionSession::drive_one(const FrameInput &input) {
+FrameOutcome Session::drive_one(const FrameInput &input) {
 	const int64_t frame_start = now_us();
 	FrameOutcome out;
 	out.state = state_;
-	const bool local_paused = state_ == MissionSessionState::Paused &&
-			role_ == MissionSessionRole::SinglePlayer;
-	if (state_ != MissionSessionState::Running && !local_paused) {
+	const bool local_paused = state_ == State::Paused &&
+			role_ == Role::SinglePlayer;
+	if (state_ != State::Running && !local_paused) {
 		out.status = FrameStatus::NotRunning;
 		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
@@ -220,45 +220,45 @@ FrameOutcome MissionSession::drive_one(const FrameInput &input) {
 	return out;
 }
 
-TransitionResult MissionSession::pause() {
-	if (role_ != MissionSessionRole::SinglePlayer) {
+TransitionResult Session::pause() {
+	if (role_ != Role::SinglePlayer) {
 		return rejected(TransitionCode::RejectedForNetworkRole,
 				{SessionErrorCode::NetworkRoleLocked,
 						"network sessions cannot pause"});
 	}
-	if (state_ == MissionSessionState::Paused)
+	if (state_ == State::Paused)
 		return rejected(TransitionCode::NoOp);
-	if (state_ != MissionSessionState::Running) {
+	if (state_ != State::Running) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("pause requires Running"));
 	}
 	reset_bank();
-	return transition(MissionSessionState::Paused);
+	return transition(State::Paused);
 }
 
-TransitionResult MissionSession::resume() {
-	if (state_ == MissionSessionState::Running)
+TransitionResult Session::resume() {
+	if (state_ == State::Running)
 		return rejected(TransitionCode::NoOp);
-	if (state_ != MissionSessionState::Paused) {
+	if (state_ != State::Paused) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("resume requires Paused"));
 	}
 	reset_bank();
-	return transition(MissionSessionState::Running);
+	return transition(State::Running);
 }
 
-TransitionResult MissionSession::reset_to_baseline() {
-	if (role_ != MissionSessionRole::SinglePlayer) {
+TransitionResult Session::reset_to_baseline() {
+	if (role_ != Role::SinglePlayer) {
 		return rejected(TransitionCode::RejectedForNetworkRole,
 				{SessionErrorCode::NetworkRoleLocked,
 						"network sessions cannot reset"});
 	}
-	if (state_ != MissionSessionState::Running &&
-			state_ != MissionSessionState::Paused) {
+	if (state_ != State::Running &&
+			state_ != State::Paused) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("reset requires Running or Paused"));
 	}
-	const MissionSessionState from = state_;
+	const State from = state_;
 	SessionError error;
 	if (!target_.reset_mission_to_baseline(error)) {
 		if (!error) error = {SessionErrorCode::TickFailed,
@@ -266,28 +266,28 @@ TransitionResult MissionSession::reset_to_baseline() {
 		return fail(error);
 	}
 	reset_bank();
-	state_ = MissionSessionState::Paused;
+	state_ = State::Paused;
 	return {TransitionCode::Applied, from,
-			MissionSessionState::Paused, {}};
+			State::Paused, {}};
 }
 
-TransitionResult MissionSession::close() {
-	if (state_ == MissionSessionState::Unloaded)
+TransitionResult Session::close() {
+	if (state_ == State::Unloaded)
 		return rejected(TransitionCode::NoOp);
-	const MissionSessionState from = state_;
-	state_ = MissionSessionState::Stopping;
+	const State from = state_;
+	state_ = State::Stopping;
 	target_.close_mission();
 	reset_bank();
 	last_error_ = {};
-	state_ = MissionSessionState::Unloaded;
+	state_ = State::Unloaded;
 	return {TransitionCode::Applied, from, state_, {}};
 }
 
-void MissionSession::reset_bank() {
+void Session::reset_bank() {
 	accumulator_.reset();
 	pending_input_ = {};
 	latest_camera_ = {};
 	last_perf_ = {};
 }
 
-} // namespace opennova::np
+} // namespace opennova::inmatch

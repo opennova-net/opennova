@@ -1,4 +1,5 @@
 #include "npruntime/server_tick.h"
+#include "npruntime/end_round_protocol.h"
 #include "npruntime/server_message_dispatch.h" // build_player_list_message
 
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <world/geom.h>                // to_fixed
 #include <world/infantry.h>            // infantry_respawn_snap (the motor half of a respawn)
 #include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
+#include <world/spawn_select.h>         // sorted SpawnZoneList index for capture events
 #include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
 #include <world/world.h>               // World::run_logic_tick
 #include <world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
@@ -266,6 +268,9 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		// The authoritative score ledger consumes the same death transaction as
+		// the kill-feed; non-roster actors are ignored by Match.
+		world.match.record_death(world, d.victim, d.killer);
 		// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
 		// victim's OWN client learns of its death from its record byte13 bit 0x02
 		// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death
@@ -385,19 +390,50 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 // SP carries exactly ONE auto condition: the local player is DEAD and the mission
 // does not allow SP-respawn (attrib 0x40) -> Server_ProcessRoundEnd(2) — every other
 // SP outcome comes from the WAC win/lose handlers or the BMS Blue/Red/GreenWin
-// actions [orig: @0x51ad6f]. The MP legs (zone-ownership sweep, per-game-type
-// score/time/kill limits over the team stat blocks) are unported — net track.
+// actions [orig: @0x51ad6f]. Multiplayer delegates the witnessed uniform-zone,
+// TDM, and A&S/CAC score/time decisions to world::Match.
 void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	(void)ctx;
-	if (world.round_end.ended) return;
-	// MP legs unported; mp_session (not ctx.is_in_session — always 1 on our
-	// listen server) is the retail SP discriminator.
-	if (world.mp_session) return;
+	if (world.match.outcome().ended) return;
+	if (world.mp_session) {
+		if (const std::optional<int32_t> winner =
+					world.match.winner_if_finished(world);
+				winner.has_value())
+			world.process_round_end(*winner);
+		return;
+	}
+	// mp_session (not ctx.is_in_session — always 1 on our listen server) is the
+	// retail SP discriminator.
 	const world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
 	const bool dead = !local->alive || (local->flags & 2u) != 0;
 	if (dead && (world.mission_attrib_flags & world::World::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
+}
+
+bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
+	if (!world.mp_session || ctx.round_end_announced ||
+			!world.match.result().ready)
+		return false;
+	const world::MatchResult &result = world.match.result();
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+		// The zero 0x61 precedes each recipient-specific 0x1D header, then the
+		// player enters game-state 11. Match's sole outcome gate supplies the
+		// original slot-state-7 replication stop without duplicating lifecycle
+		// state. The client pulls 0x56 independently, so no board chunk is pushed.
+		// [orig: Server_ProcessRoundEnd @0x516790..0x51685E]
+		conn.link.transport->host_send(
+				s2c::TICK_SEED, std::vector<uint8_t>(4, 0));
+		conn.link.transport->host_send(
+				s2c::END_ROUND_HEADER,
+				encode_end_round_header(build_end_round_header(
+						result, conn.reply.player_slot)));
+		conn.burst.game_state = 11;
+	}
+	ctx.round_end_announced = true;
+	ctx.round_end_linger_ticks = 2790;
+	return true;
 }
 
 // Release due respawns: back to the spawn point at full health [orig:
@@ -407,7 +443,7 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 	// Respawns are gate-blocked once the round has ended — the queue simply holds
 	// [orig: the respawn request path checks g_spawn_success_gate,
 	// Server_ProcessClientRequestRespawn @0x519af6].
-	if (world.round_end.ended) return;
+	if (world.match.outcome().ended) return;
 	for (auto it = ctx.respawn_queue.begin(); it != ctx.respawn_queue.end();) {
 		if (world.logic_tick < it->due_tick) {
 			++it;
@@ -754,6 +790,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// C2S drain + sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
 	world::World &world = *ctx.world;
+	const bool round_was_announced = ctx.round_end_announced;
 
 	// (1) net-before-logic: drain each in-match connection's queued C2S 0x0C and read-apply (SNAP).
 	// burst.spawned marks an in-match connection — a mid-burst peer is still receiving its §5.2a
@@ -806,6 +843,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
 	world.run_logic_tick(/*is_authority=*/true);
+	world.match.advance_tick();
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
@@ -813,16 +851,28 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
 	release_due_respawns(ctx, world);
+	// Retail drains an already-ended round here, before its periodic automatic
+	// win-condition pass. WAC/BMS can end the round during the world tick above,
+	// so those script-driven outcomes consume this tick; TDM/A&S outcomes found
+	// by the check below do not. Keep the phase fact even though our countdown
+	// mutation is grouped at the tail of this function.
+	// [orig: Server_TickUpdate @0x51D7E0: linger drain @0x51DA04 precedes
+	// Server_CheckWinConditions @0x51DF5A]
+	const bool round_ended_at_retail_linger_phase =
+			world.match.outcome().ended;
 
 	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in
 	// Server_TickUpdate — reload 62 @0x51db93 — calls Server_CheckWinConditions
 	// @0x51df5a once per second].
 	if (world.logic_tick % 62u == 0) check_win_conditions(ctx, world);
+	announce_round_end(ctx, world);
 
 	// Queue per-peer retail maintenance before the ordinary 0x0A fan so the
 	// requests share HostSession's next open S2C boundary.
-	emit_periodic_session_maintenance(ctx, world);
-	emit_minimap_overlay_state(ctx, world);
+	if (!world.match.outcome().ended) {
+		emit_periodic_session_maintenance(ctx, world);
+		emit_minimap_overlay_state(ctx, world);
+	}
 
 	// (2d) The AS capture loop at 1 Hz — slice 2 of the §5.61 witness [orig: the
 	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->
@@ -834,8 +884,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     conns + the full set at 1 Hz to deploy-pending/dead ones (the golden carries
 	//     0x6F in deploy-window bursts, not a steady per-second stream; D-NET-162);
 	//   0x1E 8 B zone events [orig: GameEvent_BuildPayload @0x5054E0]: 0x3B/0x3C secure
-	//     edges (attacker = zone-list index — ours is the chain index, a tracked
-	//     divergence; victim = zone team); flips 50/51 (frontier held) or 52/53 (victim =
+	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); flips
+	//     50/51 (frontier held) or 52/53 (victim =
 	//     the recipient side's NEW frontier), team-filtered; then the 56/57 banner to all
 	//     [orig: GameEvent_FlagCapture @0x50F6F0];
 	//   0x53 9 B on flips [u16 handle][u8 curTeam][u8 capTeam][u16 progress=0][u16 limit=0]
@@ -843,9 +893,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     @0x53BA36/0x53BA68];
 	// The independent general 0x40 minimap-overlay producer runs above at its
 	// retail 14-tick cadence. It is intentionally not gated on this AS chain.
-	if (ctx.is_in_session && world.logic_tick % 62u == 0 && !world.zone_chain.empty()) {
+	if (ctx.is_in_session && !world.match.outcome().ended &&
+			world.logic_tick % 62u == 0 && !world.zone_chain.empty()) {
 		static world::ZoneCaptureEvents ev; // scratch (single-threaded host tick)
 		world::zone_capture_tick(world, world.zone_chain, ev);
+		for (const world::ZoneCaptureEvents::Flip &flip : ev.flips)
+			world.match.record_numbered_zone_capture(world, flip.scorers);
 
 		// 0x6F bodies + the change gate.
 		std::vector<std::pair<uint16_t, std::vector<uint8_t>>> zone_6f; // (handle, body)
@@ -874,13 +927,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			zone_6f.emplace_back(c.zone.packed, std::move(b));
 		}
 
-		// Zone-list index approximation for the 0x1E attacker byte: the chain vector index
-		// (retail uses SpawnZoneList_IndexOf @0x43B990 over the client-sorted registry —
-		// tracked divergence, D-NET-162).
-		auto chain_index_of = [&](world::EntityHandle h) -> uint8_t {
-			for (size_t i = 0; i < world.zone_chain.zones.size(); ++i)
-				if (world.zone_chain.zones[i] == h) return static_cast<uint8_t>(i);
-			return 0xFF;
+		const world::SpawnZoneRegistry spawn_zones =
+				world::build_spawn_zone_list(world);
+		auto zone_index_of = [&](world::EntityHandle h) -> uint8_t {
+			const int index = world::spawn_zone_index_of(spawn_zones, h);
+			return index >= 0 && index <= 0xFE
+					? static_cast<uint8_t>(index)
+					: uint8_t{0xFF};
 		};
 		auto event_body = [](uint8_t ev_type, uint8_t attacker, uint8_t victim) {
 			return std::vector<uint8_t>{ev_type, attacker, victim, 0xFF, 0, 0, 0, 0};
@@ -926,7 +979,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			for (const auto &se : ev.secure_edges) {
 				conn.link.transport->host_send(
 						0x1E, event_body(se.secured ? 0x3B : 0x3C,
-				                         chain_index_of(se.zone), se.zone_team));
+						                         zone_index_of(se.zone), se.zone_team));
 			}
 
 			// Flip events + 0x53 windows.
@@ -934,7 +987,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				const auto &f = ev.flips[fi];
 				conn.link.transport->host_send(s2c::ZONE_TIMER_WINDOW, flip_53[fi]);
 				if (f.suppressed) continue; // match decided [orig: @0x4A2920 gate]
-				const uint8_t zone_idx = chain_index_of(f.zone);
+				const uint8_t zone_idx = zone_index_of(f.zone);
 				if (conn_team == f.capturer_team) {
 					conn.link.transport->host_send(
 							0x1E, f.frontier_changed
@@ -962,7 +1015,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// @0x51e089 emits NetPacket_WriteSpawnWaveStatus @0x507490 at 1 Hz; the recipient mask
 	// includes the respawn-pending bit4 (slot+89912 & 0x10 @0x5074c2) and dead players;
 	// golden ASH_I5A deploy window carries 0x6E ×11 at ~1 Hz]
-	if (ctx.is_in_session && world.logic_tick % 62u == 0) {
+	if (ctx.is_in_session && !world.match.outcome().ended &&
+			world.logic_tick % 62u == 0) {
 		static const std::vector<uint8_t> kEmptyWaveStatus{0x00};
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
@@ -1020,7 +1074,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// emits nothing and cannot advance per-recipient frame state.
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
-	if (ctx.is_in_session) {
+	if (ctx.is_in_session && !world.match.outcome().ended) {
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
@@ -1035,6 +1089,18 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 						? kMaxFrameUpdateBodyBytes
 						: 0);
 		}
+	}
+
+	// Retail holds the multiplayer post-round state for 2790 server ticks. Its
+	// drain precedes automatic win checks, so only an outcome already present at
+	// that phase (including a WAC/BMS result from this tick) consumes the first
+	// count; automatic TDM/A&S announcements start draining next tick. At expiry,
+	// the session replication gate closes while the frozen result stays readable.
+	// [orig: store @0x5166C4; phase/drain @0x51DA04; exit reason 3 @0x51DA91]
+	if ((round_was_announced || round_ended_at_retail_linger_phase) &&
+			ctx.round_end_linger_ticks > 0) {
+		--ctx.round_end_linger_ticks;
+		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
 	}
 
 	// (4) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client

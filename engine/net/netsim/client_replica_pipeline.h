@@ -287,6 +287,7 @@ private:
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
 	// ClientState::end_round and decodes when the board completes.
+	void apply_end_round_header(const std::vector<uint8_t> &body);
 	void apply_end_round_stats_chunk(const std::vector<uint8_t> &body);
 	void apply_frame_update(const std::vector<uint8_t> &body);
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries

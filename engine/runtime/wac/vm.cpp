@@ -93,9 +93,9 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 // round ends, like the scoreboard winner dword the original derives
                 // them from each pre-tick cache pass — a green/0 outcome never raises
                 // GameOver). [orig: WacScript_CacheLocalPlayerState @0x4f57bb/c9/cf]
-                case Builtin::GameOver: return w.round_end.winner_team != 0 ? 1 : 0;
-                case Builtin::WinVar: return w.round_end.winner_team == 1 ? 1 : 0;
-                case Builtin::LoseVar: return w.round_end.winner_team == 2 ? 1 : 0;
+                case Builtin::GameOver: return w.match.outcome().winner_team != 0 ? 1 : 0;
+                case Builtin::WinVar: return w.match.outcome().winner_team == 1 ? 1 : 0;
+                case Builtin::LoseVar: return w.match.outcome().winner_team == 2 ? 1 : 0;
                 case Builtin::AccuracySpread: return w.wac_values.accuracy_spread;
             }
             return 0;

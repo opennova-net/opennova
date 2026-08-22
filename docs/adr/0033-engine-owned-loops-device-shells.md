@@ -1,8 +1,9 @@
 # ADR 0033: the engine owns the loops; shells are devices
 
 - **Status**: accepted (2026-08-09; the rearchitecture plan, maintainer-approved)
-- **Amended**: ADR 0035 (2026-08-10) replaces the R1 callback-driven
-  `FrameDriver` with `MissionSession` plus the first-class `GameFramePipeline`.
+- **Amended**: ADR 0035 (2026-08-10) replaced the R1 callback-driven
+  `FrameDriver`; ADR 0036 (2026-08-22) cuts its lifecycle owner over to
+  `inmatch::Session` plus the first-class `GameFramePipeline`.
   The R2 draw-list and R3/R4 dispositions below remain in force.
 - **Owners**: runtime architecture
 - **Supersedes/updates**: **replaces ADR 0031 and ADR 0032 in full as the

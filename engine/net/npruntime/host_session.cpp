@@ -563,6 +563,20 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		}
 	}
 	if (owner.ctx.world != nullptr) {
+		world::MatchRules match_rules;
+		match_rules.game_type = owner.ctx.config.game_type;
+		// SET GameTime feeds g_respawn_time in retail. The existing host model
+		// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
+		// [orig: Game_StartMission seed @0x524F66]
+		match_rules.game_time_minutes = owner.ctx.config.respawn_time;
+		match_rules.score_limit = owner.ctx.config.score_limit;
+		match_rules.score_values = owner.ctx.config.session_status_stat_values;
+		match_rules.score_fields.reserve(owner.ctx.config.scoreboard_fields.size());
+		for (const auto &[field, enabled] : owner.ctx.config.scoreboard_fields)
+			match_rules.score_fields.push_back({field, enabled});
+		owner.ctx.world->match.configure(match_rules);
+		owner.ctx.world->mp_session =
+				cfg.socket_mode != SocketMode::Socketless;
 		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
 		owner.ctx.world->throwables.team_trigger_claymore =
 				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;

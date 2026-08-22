@@ -220,18 +220,50 @@ EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
 
 // The control-delta formula pins [orig: calculate_capture_zone_control_delta @0x501120].
 void test_control_delta_formula() {
+    auto delta = [](int presence, int side_players, int total_players, int speed_setting,
+                    int shared_n) {
+        ZoneCaptureDeltaInput input;
+        input.presence = presence;
+        input.capturing_side_players = side_players;
+        input.total_players = total_players;
+        input.speed_setting = speed_setting;
+        input.shared_zone_entities = shared_n;
+        return zone_capture_control_delta(input);
+    };
     // 1 attacker, 3-per-team server (6 total, no small-server boost), default base 12:
     // speed = 3*12 = 36 -> delta = 65536/36 = 1820 (secure in ~36 s at 1 Hz).
-    CHECK(zone_capture_control_delta(1, 3, 6, -1, 1) == 65536 / 36);
+    CHECK(delta(1, 3, 6, -1, 1) == 65536 / 36);
     // Small-server boost: 1v1 (2 total) -> teamSize = 1 + (6-2)/2 = 3 -> speed 36.
-    CHECK(zone_capture_control_delta(1, 1, 2, -1, 1) == 65536 / 36);
+    CHECK(delta(1, 1, 2, -1, 1) == 65536 / 36);
     // Speed setting 1 doubles the base (24); negative presence mirrors the sign.
-    CHECK(zone_capture_control_delta(-2, 3, 6, 1, 1) == -(2 * 65536) / (3 * 24));
+    CHECK(delta(-2, 3, 6, 1, 1) == -(2 * 65536) / (3 * 24));
     // A zone number shared by 2 entities halves the speed (doubles the rate).
-    CHECK(zone_capture_control_delta(1, 3, 6, -1, 2) == 65536 / 18);
+    CHECK(delta(1, 3, 6, -1, 2) == 65536 / 18);
     // Minimum magnitude 1.
-    CHECK(zone_capture_control_delta(1, 200, 200, 2, 1) >= 1);
-    CHECK(zone_capture_control_delta(0, 3, 6, -1, 1) == 0);
+    CHECK(delta(1, 200, 200, 2, 1) >= 1);
+    CHECK(delta(0, 3, 6, -1, 1) == 0);
+
+    ZoneCaptureDeltaInput endgame;
+    endgame.presence = 1;
+    endgame.capturing_side_players = 10;
+    endgame.total_players = 20;
+    endgame.capturing_side_zones = 3;
+    endgame.opposing_side_zones = 1;
+    endgame.numbered_spawn_zones = 4;
+    endgame.game_time_minutes = 10;
+    endgame.remaining_ticks = 0;
+    // In the last half of a timed round, the side already holding more numbered
+    // spawn zones gets up to a 50% speed-denominator reduction. Here
+    // 120 - (120 * 2/4 * 1/2) = 90.
+    // [orig: calculate_capture_zone_control_delta @0x501120]
+    CHECK(zone_capture_control_delta(endgame) == 65536 / 90);
+    endgame.capturing_side_zones = 1;
+    endgame.opposing_side_zones = 3;
+    CHECK(zone_capture_control_delta(endgame) == 65536 / 120);
+    endgame.capturing_side_zones = 3;
+    endgame.opposing_side_zones = 1;
+    endgame.remaining_ticks = 5 * 60 * 62; // halfway: the late-round factor is zero
+    CHECK(zone_capture_control_delta(endgame) == 65536 / 120);
 }
 
 // An attacker on an unsecured frontier zone: instant flip to NEUTRAL (owned zones pass
@@ -255,6 +287,8 @@ void test_capture_loop_flip_and_secure() {
         CHECK(ev.flips[0].old_team == 0);
         CHECK(ev.flips[0].new_team == 1);     // neutral -> capturer directly
         CHECK(ev.flips[0].capturer_team == 1);
+        CHECK(ev.flips[0].capturer == s1);    // scoring follows the actual touching Player
+        CHECK(ev.flips[0].scorers.size() == 1 && ev.flips[0].scorers[0] == s1);
         CHECK(!ev.flips[0].suppressed);
     }
     CHECK(z2a->team == 1);
@@ -278,7 +312,8 @@ void test_capture_loop_flip_and_secure() {
 
     // An ENEMY (team 2) walks in while it is secured: control must FALL first (the
     // touch gate rejects a flip at control > 0), then the zero edge (0x3C) fires,
-    // then the flip neutralizes the OWNED zone (via neutral).
+    // then the numbered-zone transaction changes through neutral and to team 2
+    // in one drain.
     Entity *s1e = f.w.registry.get(s1);
     s1e->position = {0.0f, 0.0f, 0.0f}; // the defender leaves
     const EntityHandle s2 = spawn_soldier(f.w, 2, z2a->position);
@@ -296,11 +331,42 @@ void test_capture_loop_flip_and_secure() {
     }
     CHECK(zero_edge);
     CHECK(flip_pass >= 0);
-    CHECK(z2a->team == 0);                    // owned zone neutralizes first
-    // The same enemy takes the now-neutral zone on the next pass.
-    zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
-    CHECK(!ev.flips.empty());
     CHECK(z2a->team == 2);
+}
+
+// A neutral frontier is not implicitly a team-1 objective. Either team can take it,
+// but simultaneous eligible Players contest it and must not pick a winner from pool
+// iteration order. The queued capture keeps the exact touching Player for the later
+// scoring/event pass. [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 ->
+// Server_UpdateCaptureZones @0x53B8F0 -> GameEvent_FlagCapture @0x50F6F0]
+void test_neutral_capture_is_symmetric_and_actor_attributed() {
+    {
+        AshFixture f;
+        Entity *zone = f.w.registry.get(f.z2a);
+        zone->zone_radius = 70;
+        const EntityHandle red = spawn_soldier(f.w, 2, zone->position);
+        ZoneCaptureEvents ev;
+        zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+        CHECK(ev.flips.size() == 1);
+        CHECK(zone->team == 2);
+        if (!ev.flips.empty()) {
+            CHECK(ev.flips[0].capturer_team == 2);
+            CHECK(ev.flips[0].capturer == red);
+            CHECK(ev.flips[0].scorers.size() == 1 && ev.flips[0].scorers[0] == red);
+        }
+    }
+    {
+        AshFixture f;
+        Entity *zone = f.w.registry.get(f.z2a);
+        zone->zone_radius = 70;
+        spawn_soldier(f.w, 1, zone->position);
+        spawn_soldier(f.w, 2, zone->position);
+        ZoneCaptureEvents ev;
+        zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+        CHECK(ev.flips.empty());
+        CHECK(zone->team == 0);
+        CHECK(zone->zone_control == 0);
+    }
 }
 
 // The deploy/spawn-zone registry: collect pools 2 then 1, sort by the composite
@@ -357,6 +423,7 @@ int main() {
     test_spawn_zone_presence_and_zone_info();
     test_control_delta_formula();
     test_capture_loop_flip_and_secure();
+    test_neutral_capture_is_symmetric_and_actor_attributed();
     test_spawn_zone_registry();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

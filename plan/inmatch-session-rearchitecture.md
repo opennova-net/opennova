@@ -1,9 +1,14 @@
-# MissionSession and Godot Frame Pipeline master plan
+# In-match Session and Godot Frame Pipeline master plan
 
 > **Status:** COMPLETE
 >
 > **Delivery:** one coordinated cutover PR; no compatibility period and no
 > second production frame path.
+>
+> **2026-08-22 amendment:** ADR 0036 deepened and renamed the portable owner
+> to `opennova::inmatch::Session`, removed the old API outright, and placed
+> gameplay rules/results in `world::Match`. The text below names the final
+> architecture rather than preserving obsolete API spelling.
 
 ## Goal
 
@@ -15,30 +20,30 @@ MainGame._process
   -> GameFramePipeline                     Godot device ordering
        -> stamp camera onto sampled input
        -> terrain + foliage
-       -> MissionSession.advance()     portable lifecycle, cadence, sim, net
+       -> inmatch::Session.advance()   portable lifecycle, cadence, sim, net
        -> typed tick/frame outcomes
        -> presentation, particles, environment, audio
   -> local-player post-present + HUD        shell/UI ordering
 ```
 
-`MissionSession` owns one mission's lifecycle, network-role policy, fixed
+`inmatch::Session` owns one match's lifecycle, network-role policy, fixed
 cadence, input deposit, reset, and teardown. Its one internal
-`MissionTickTarget` seam owns the concrete mission kernel. `GameFramePipeline` is the
+`inmatch::TickTarget` seam owns the concrete mission kernel. `GameFramePipeline` is the
 first-class Godot owner of rendering and the other device phases. The proven
 draw-list compilers remain. ADR 0033's R3 render-command stream remains closed
 NOT TAKEN.
 
 ## Target interface
 
-The portable module lives in `engine/net/npruntime/mission_session.*`, the
+The portable module lives in `engine/net/inmatch/session.*`, the
 lowest existing layer that may depend on both the runtime world and the
 network runtime without reversing the engine link graph.
 
 It exposes typed values for:
 
-- `SessionState`: `Unloaded`, `Connecting`, `Loading`, `Running`, `Paused`,
+- `inmatch::State`: `Unloaded`, `Connecting`, `Loading`, `Running`, `Paused`,
   `Stopping`, `Failed`;
-- `SessionRole`: single-player, listen host, joiner, dedicated host;
+- `inmatch::Role`: single-player, listen host, joiner, dedicated host;
 - one sampled `InputPacket` and `FrameInput` per outer frame;
 - immutable `TickOutcome`, `FrameOutcome`, `SessionError`, and
   `TransitionResult` values.
@@ -53,18 +58,18 @@ is direct-C++ only and adds no flat-C export.
 ### 1. Deep portable session
 
 - Move lifecycle, role policy, cadence, input retention, terminal errors, and
-  teardown orchestration into `MissionSession`.
-- Keep mission-kernel construction behind the single `MissionTickTarget` seam;
+  teardown orchestration into `inmatch::Session`.
+- Keep mission-kernel construction behind the single `inmatch::TickTarget` seam;
   retain the existing portable `runtime_boot` module rather than leaking
   Godot resource resolution into the session state machine.
-- Make `apps/nw_server` use `MissionSession` in dedicated-host mode, proving
+- Make `apps/nw_server` use `inmatch::Session` in dedicated-host mode, proving
   that the interface is portable and not a Godot-shaped extraction.
 
 ### 2. Typed frame values
 
 - Delete `FrameHooks`, `FrameDriver`, Callable registration, and frame
   Dictionaries.
-- Make `MissionSession.advance(FrameInput)` bank wall clock, run zero to 31
+- Make `inmatch::Session::advance(FrameInput)` bank wall clock, run zero to 31
   fixed ticks, and return one `FrameOutcome` with immutable per-tick packets.
 - Replace `_frame_aborted` with a terminal outcome.
 - Sample input/camera once. Order terrain, foliage, session advance, per-tick
@@ -74,7 +79,7 @@ is direct-C++ only and adds no flat-C export.
 
 ### 3. One lifecycle owner
 
-- Make `SessionState` authoritative; remove the loaded/playing flags in
+- Make `inmatch::State` authoritative; remove the loaded/playing flags in
   `Simulation` and `MissionRuntime`. Keep only GameWorld's render-resource
   installation invariant, renamed `_world_ready`.
 - Keep MainGame's state only as a shell-mode enum for menus and overlays.

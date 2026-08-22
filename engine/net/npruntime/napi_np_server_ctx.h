@@ -149,6 +149,12 @@ struct NapiNPServerCtx {
 	// intentionally makes the next server boundary due immediately.
 	uint32_t network_quality_broadcast_countdown = 0;
 
+	// The authoritative end-round transaction. The domain Match freezes the
+	// result; these are only the once-only wire announcement and retail MP linger
+	// clock. [orig: Server_ProcessRoundEnd @0x5164F0; 2790 store @0x5166C4]
+	bool round_end_announced = false;
+	uint32_t round_end_linger_ticks = 0;
+
 	// Non-dedicated S2C 0x68 wraps its 50-row cursor against the live renderer
 	// viewport height. Zero means no renderer seam was installed and suppresses
 	// that request instead of fabricating a screen size. Simulation refreshes
@@ -207,12 +213,10 @@ struct NapiNPServerCtx {
 	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
 	std::array<uint8_t, 180> mission_metadata_blob{};
 
-	// Spawn gate (§5.2). spawn_success_gate <- dword_24C1928 (drop the loading screen; cleared later by
-	// the per-frame 0x0A flags1 & 0x01, §5.2a step 4). The load-progress counter dword_A82370
-	// (g_loading_progress, walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land) is CLIENT state, not host
-	// bookkeeping — the host's spawn/load clock is the per-connection InitialStateBurst cursor
-	// (conn.burst). It was write-only here and is removed (D-NET-132).
-	uint32_t spawn_success_gate = 0;
+	// Retail's overloaded g_spawn_success_gate is deliberately not copied into
+	// this host context. Per-connection InitialStateBurst owns load progress;
+	// world::Match owns the round-over latch. The client retains the 0x1D header
+	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
 	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /

@@ -8,11 +8,11 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <npruntime/mission_session.h>
+#include <inmatch/session.h>
 
 namespace godot {
 
-// The typed Godot adapter values for the portable MissionSession. They carry
+// Typed Godot values for the portable in-match Session. They carry
 // data only: GameFramePipeline owns Godot device ordering and Simulation owns the
 // conversion to/from the native session records.
 class MissionFrameInput : public RefCounted {
@@ -28,7 +28,7 @@ public:
 	};
 
 private:
-	opennova::np::FrameInput value_;
+	opennova::inmatch::FrameInput value_;
 
 protected:
 	static void _bind_methods();
@@ -47,14 +47,14 @@ public:
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
 
-	const opennova::np::FrameInput &native_value() const { return value_; }
+	const opennova::inmatch::FrameInput &native_value() const { return value_; }
 };
 
 class MissionTickOutcome : public RefCounted {
 	GDCLASS(MissionTickOutcome, RefCounted)
 
 	int32_t logic_tick_ = 0;
-	int32_t status_ = static_cast<int32_t>(opennova::np::TickStatus::Declined);
+	int32_t status_ = static_cast<int32_t>(opennova::inmatch::TickStatus::Declined);
 	String error_;
 
 protected:
@@ -66,7 +66,7 @@ public:
 	String get_error() const { return error_; }
 	bool is_terminal() const;
 
-	void assign(const opennova::np::TickOutcome &p_value);
+	void assign(const opennova::inmatch::TickOutcome &p_value);
 };
 
 class MissionFrameOutcome : public RefCounted {
@@ -74,19 +74,19 @@ class MissionFrameOutcome : public RefCounted {
 
 public:
 	enum Status {
-		STATUS_OK = static_cast<int>(opennova::np::FrameStatus::Ok),
-		STATUS_NOT_RUNNING = static_cast<int>(opennova::np::FrameStatus::NotRunning),
-		STATUS_SESSION_LOST = static_cast<int>(opennova::np::FrameStatus::SessionLost),
-		STATUS_FATAL = static_cast<int>(opennova::np::FrameStatus::Fatal),
+		STATUS_OK = static_cast<int>(opennova::inmatch::FrameStatus::Ok),
+		STATUS_NOT_RUNNING = static_cast<int>(opennova::inmatch::FrameStatus::NotRunning),
+		STATUS_SESSION_LOST = static_cast<int>(opennova::inmatch::FrameStatus::SessionLost),
+		STATUS_FATAL = static_cast<int>(opennova::inmatch::FrameStatus::Fatal),
 	};
 	enum State {
-		STATE_UNLOADED = static_cast<int>(opennova::np::MissionSessionState::Unloaded),
-		STATE_CONNECTING = static_cast<int>(opennova::np::MissionSessionState::Connecting),
-		STATE_LOADING = static_cast<int>(opennova::np::MissionSessionState::Loading),
-		STATE_RUNNING = static_cast<int>(opennova::np::MissionSessionState::Running),
-		STATE_PAUSED = static_cast<int>(opennova::np::MissionSessionState::Paused),
-		STATE_STOPPING = static_cast<int>(opennova::np::MissionSessionState::Stopping),
-		STATE_FAILED = static_cast<int>(opennova::np::MissionSessionState::Failed),
+		STATE_UNLOADED = static_cast<int>(opennova::inmatch::State::Unloaded),
+		STATE_CONNECTING = static_cast<int>(opennova::inmatch::State::Connecting),
+		STATE_LOADING = static_cast<int>(opennova::inmatch::State::Loading),
+		STATE_RUNNING = static_cast<int>(opennova::inmatch::State::Running),
+		STATE_PAUSED = static_cast<int>(opennova::inmatch::State::Paused),
+		STATE_STOPPING = static_cast<int>(opennova::inmatch::State::Stopping),
+		STATE_FAILED = static_cast<int>(opennova::inmatch::State::Failed),
 	};
 
 private:
@@ -111,7 +111,7 @@ public:
 	bool is_terminal() const;
 	bool did_tick() const { return !ticks_.is_empty(); }
 
-	void assign(const opennova::np::FrameOutcome &p_value);
+	void assign(const opennova::inmatch::FrameOutcome &p_value);
 };
 
 } // namespace godot

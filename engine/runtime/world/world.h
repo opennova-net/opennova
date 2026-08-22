@@ -18,6 +18,7 @@
 #include "terrain_query/surface_type_map.h"
 #include "world/destruction.h"
 #include "world/entity.h"
+#include "world/match.h"
 #include "world/entity_commands.h"
 #include "world/entity_registry.h"
 #include "world/net_command_sink.h"
@@ -244,19 +245,6 @@ struct WacNamedValues {
     int32_t accuracy_spread = kDefaultAccuracySpread;
 };
 
-// End-of-round outcome state. `ended` is the double-run latch every round-end
-// consumer keys on; `winner_team` is the winning-team value the WAC outcome
-// builtins and the presentation layer derive from (0 = none/green, 1 = blue,
-// 2 = red, 3/4 = the extra MP teams). It stays 0 until the round ends, exactly
-// like the original's scoreboard winner dword (memset 0 at mission start).
-// [orig: g_spawn_success_gate @0x24c1928 (latched by Server_ProcessRoundEnd
-// @0x5168e4, cleared by Game_StartMission @0x524a1f), g_round_winning_team
-// @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D payload byte 0).]
-struct RoundEndState {
-    bool ended = false;
-    int32_t winner_team = 0;
-};
-
 // The epilog/debrief exit timeout: both end screens (WIN score epilog and the
 // LOSE debrief) force g_mission_exit_reason = 1 after 18600 ticks (~297.6 s at
 // the 62.5 Hz tick) when the player never presses ESC.
@@ -420,8 +408,9 @@ public:
     // snapshot (retail's caches live beside the renderer, not the entity pools).
     ScarCache scars;
 
-    // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
-    RoundEndState round_end;
+    // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
+    // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.
+    Match match;
     MissionKillStats kill_stats;
 
     // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
@@ -564,15 +553,16 @@ public:
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the
-    // registry + vars + named WAC values + env + clock + stable local-player
-    // ownership; per-tick health/proximity/human-count caches reset and systems
-    // re-init on restore.
+    // registry + vars + named WAC values + env + clock + match + stable
+    // local-player ownership; per-tick health/proximity/human-count caches reset
+    // and systems re-init on restore.
     struct Snapshot {
         EntityRegistry registry;
         ScriptVarStore vars;
         WacNamedValues wac_values;
         EnvState env;
         EnvNetworkState network_env;
+        Match match;
         uint32_t logic_tick = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
         EntityHandle local_player;

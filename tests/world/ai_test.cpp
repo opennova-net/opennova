@@ -2287,7 +2287,7 @@ int main() {
             AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
-            w.round_end.ended = true;
+            w.process_round_end(0);
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == false);
         }
