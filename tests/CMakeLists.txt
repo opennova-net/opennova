@@ -952,6 +952,11 @@ target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
 target_include_directories(group_render_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME group_render_gate COMMAND group_render_gate_test)
 
+add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
+target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)
+target_include_directories(vehicle_collision_damage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME vehicle_collision_damage COMMAND vehicle_collision_damage_test)
+
 # The menu backdrop movie policy (engine/runtime/menu/menu_video): the
 # witnessed three-slot table, the STARTUP/strips draw gate, and the
 # expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
