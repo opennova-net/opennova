@@ -65,6 +65,16 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
+# Native BIKi menu-video decoder: a deterministic generated bitstream plus an
+# OPENNOVA_JO_DIR-gated retail smoke test.
+add_executable(bink_test bink/bink_test.cpp)
+target_link_libraries(bink_test PRIVATE opennova_formats)
+add_test(NAME bink COMMAND bink_test)
+
+add_executable(bink_retail_test bink/bink_retail_test.cpp)
+target_link_libraries(bink_retail_test PRIVATE opennova_formats)
+add_test(NAME bink_retail COMMAND bink_retail_test)
+
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
 # world<->local self-consistency on the real BINOC.bad fixture.
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
