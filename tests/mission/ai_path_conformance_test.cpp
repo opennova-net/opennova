@@ -241,7 +241,7 @@ int main() {
 	const bool report = std::getenv("OPENNOVA_AI_PATH_REPORT") != nullptr;
 	if (report) {
 		std::printf("%-5s %-6s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %-6s %-7s %-4s %10s\n", "ai#",
-				"handle", "grp", "wpId", "wpNum", "wpType", "wpChan", "wpNode",
+				"handle", "has", "cmd", "tgtSSN", "wpType", "wpChan", "wpNode",
 				"moveMd", "cmd37", "carr36", "mnt", "travel_u");
 		std::printf("--------------------------------------------------------------------\n");
 	}
@@ -256,12 +256,17 @@ int main() {
 			// The AUTHORED routing inputs, straight off the BMS organic record,
 			// so a still AI is classified as "the mission gave it no route" vs
 			// "we failed to apply the route it was given".
-			int grp = -1, wpid = -1, wpnum = -1;
-			if (i < int(m.organics.size())) {
-				grp = m.organics[size_t(i)].group_id;
-				wpid = m.organics[size_t(i)].waypoint_id;
-				wpnum = m.organics[size_t(i)].wp_number;
-			}
+			// The RUNTIME routing registers, not m.organics[i]. Indexing the BMS
+			// organics by AI INDEX is wrong: the AI list is not the organics list
+			// (seat-spec extraction adds emplacement children, so 60 AI vs 52
+			// organics) and every authored column silently shifts. Read what the
+			// think actually uses: slot[35] has-route, slot[37] channel-or-command,
+			// slot[38] node-or-target-SSN [orig: Entity_SetWaypointByTeam @0x43cdb4
+			// writes aiComp+140/+148/+152; infantry.cpp:268 and
+			// infantry_board.cpp:139 read them].
+			const int grp = e->slot.f[35];
+			const int wpid = e->slot.f[37];
+			const int wpnum = e->slot.f[38];
 			std::printf("%-5d %-6u %-4d %-4d %-6d %-8d %-6d %-6d %-6d %-6d %-7d %-4d %10.2f\n", i,
 					unsigned(e->handle.packed), grp, wpid, wpnum,
 					e->brain.f[w::AiBrain::kWpType],
@@ -292,6 +297,15 @@ int main() {
 				if (ne) std::printf("   node %d: f0=%-12d x=%-12d y=%-12d z=%-12d f4=%d\n",
 						k, ne->f[0], ne->f[1], ne->f[2], ne->f[3], ne->f[4]);
 			}
+		}
+		// AUTHORED organic spawns straight off the BMS, the arbiter for any
+		// placement claim: whichever capture matches these is the correct one.
+		std::printf("authored organics: %zu\n", m.organics.size());
+		for (size_t oi = 0; oi < m.organics.size(); ++oi) {
+			const bms::Entity &b = m.organics[oi];
+			std::printf("   BMSORG %zu type=%d pos=(%.1f,%.1f) wp=%d wpnum=%d\n",
+					oi, b.type_id, b.x / 65536.0, b.y / 65536.0,
+					int(b.waypoint_id), int(b.wp_number));
 		}
 		std::printf("board carriers:\n");
 		for (int j = 0; j < n; ++j) {
