@@ -262,8 +262,22 @@ int main() {
 		const int parsed = std::atoi(tv);
 		if (parsed > 0) ticks = parsed;
 	}
+	// EVER-acquired census: the end-of-run snapshot cannot distinguish "never
+	// acquired a target" from "released it before the end".
+	std::vector<uint8_t> ever_target(size_t(ai.count()) + 64, 0);
+	int peak_targets = 0;
 	for (int t = 0; t < ticks; ++t) {
 		world.run_logic_tick(/*is_authority=*/true);
+		{
+			int now = 0;
+			for (int k = 0; k < ai.count(); ++k) {
+				const w::AiEntity *e = ai.at(k);
+				if (e == nullptr || !e->inf.combat_target.valid()) continue;
+				++now;
+				if (size_t(k) < ever_target.size()) ever_target[size_t(k)] = 1;
+			}
+			if (now > peak_targets) peak_targets = now;
+		}
 		const int live = ai.count();
 		if (int(ai_path.size()) < live) { ai_path.resize(size_t(live), 0.0); prev.resize(size_t(live) * 2, 0); }
 		for (int i = 0; i < live; ++i) {
@@ -425,6 +439,28 @@ int main() {
 				const double d = std::sqrt(dx * dx + dy * dy);
 				if (d >= double(e->slot.f[15])) ++out_of_range; else ++in_range;
 			}
+			{
+				int zero17 = 0, nonzero17 = 0; long long sum17 = 0;
+				for (int k = 0; k < n; ++k) {
+					const w::AiEntity *e = ai.at(k);
+					if (e == nullptr) continue;
+					if (e->slot.f[17] == 0) ++zero17; else { ++nonzero17; sum17 += e->slot.f[17]; }
+				}
+				int t0=0,t1=0,t2=0,tx=0;
+				for (int k = 0; k < n; ++k) {
+					const w::AiEntity *e = ai.at(k);
+					if (e == nullptr) continue;
+					switch (int(e->team)) { case 0: ++t0; break; case 1: ++t1; break;
+						case 2: ++t2; break; default: ++tx; }
+				}
+				std::printf("AI TEAM: team0=%d team1=%d team2=%d other=%d\n", t0,t1,t2,tx);
+				std::printf("SIGHT RANGE slot[17]: %d zero, %d non-zero (mean %.0f u)\n",
+						zero17, nonzero17, nonzero17 ? double(sum17)/nonzero17/65536.0 : 0.0);
+			}
+			int ever = 0;
+			for (size_t q = 0; q < ever_target.size(); ++q) ever += ever_target[q];
+			std::printf("COMBAT EVER: %d AI acquired a target at some point; peak %d concurrent\n",
+					ever, peak_targets);
 			std::printf("COMBAT PRECOND: %d AI hold a target; %d OUT of attack range, %d in\n",
 					with_t, out_of_range, in_range);
 		}

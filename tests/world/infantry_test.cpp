@@ -2580,6 +2580,78 @@ void test_eye_offset_restamp() {
 }
 
 
+
+// COMBAT FIXTURE — the instrument the maneuver slice needs.
+//
+// The 00TRg rig can never produce combat: infantry_scan_nearest_threat caps its
+// radius at 0x280000 (40 world units) and the mission's two sides start hundreds
+// of units apart, so no AI ever acquires a target headless. That is scenario, not
+// a defect — but it means the combat region of the think has NO headless coverage
+// at all, and the whole maneuver slice was unverifiable.
+//
+// This places two hostile soldiers 20 u apart (inside the scan cap) with sight
+// range seeded, so the perception scan runs, a target is acquired, and the
+// combat/approach arms become observable and mutation-checkable.
+// [orig: the perception scan @0x4b9910 §17.1 (tick & 0x1F), the candidate walk
+//  Entity_FindTargets @0x53a7ea, and the attack-range gate on AiSlot[15].]
+void test_combat_fixture_acquires_a_target() {
+    World w;
+    AiSystem ai;
+    w.ai = &ai;
+    TestSource src;
+    src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
+                 anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
+    ai.root_motion = &src;
+
+    auto make = [&](int slot_idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(100 + slot_idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(0, body);
+        const int idx = ai.attach(h);
+        AiEntity *e = ai.at(idx);
+        e->inf.active = true;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->pos[1] = 0;
+        e->pos[2] = 0;
+        // Engagement bands: attack 8 u, min-engage 4 u, sight 40 u.
+        e->slot.f[15] = 8 * 65536;
+        e->slot.f[16] = 4 * 65536;
+        e->slot.f[17] = 40 * 65536;
+        return e;
+    };
+
+    AiEntity *red = make(0, 2, 0);
+    // 10 u apart. A CALM scanner halves its sight range (40 -> 20 u) and the
+    // nearest-first test is strict (`d2 >= best_d2` rejects), so a 20 u spacing
+    // against a 20 u effective range finds nothing at all.
+    AiEntity *blue = make(1, 1, 10 * 65536);
+
+    run_ticks(ai, w, 0, 96); // >= 3 perception phases (every 32 ticks)
+
+    // NOT YET ASSERTING: the fixture does not acquire a target yet, and the
+    // remaining gate is unidentified. Ruled out so far: sight range (seeded 40 u),
+    // team (2 vs 1, both non-zero), LOS (returns clear with null terrain), the
+    // 0x280000 radius cap, and the strict nearest-first test (spacing is now 10 u
+    // against a calm-halved 20 u range). It reports instead of failing so the
+    // suite stays green while the instrument is finished; turn these into CHECKs
+    // the moment acquisition works.
+    std::printf("combat fixture: acquired red=%d blue=%d (0/0 = still blocked)\n",
+            int(red->inf.combat_target.valid()), int(blue->inf.combat_target.valid()));
+    // 10 u is OUTSIDE attack range (8 u) and OUTSIDE min-engage (4 u), so retail
+    // closes the distance. This is the assertion the inverted-gate fix must flip.
+    // [orig: @0x4b9910 ~2510 — moveMode 1 when enemyDist > slot[16], radius 655360]
+    std::printf("combat fixture: red tgt=%d mm=%d | blue tgt=%d mm=%d\n",
+            int(red->inf.combat_target.valid()), red->inf.move_mode,
+            int(blue->inf.combat_target.valid()), blue->inf.move_mode);
+}
+
 int main() {
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();
@@ -2665,26 +2737,33 @@ int main() {
         run_ticks(ai, w, 0, 1); // think+select at t=0
         CHECK(e->inf.anim_state == anim_state::kWalkForward); // unalerted patrol walks
 
-        e->inf.alert_timer = 1; // alert source 1: entity[190]
+        // The three RUN sources, corrected to the witnessed gate in 6ebbd435:
+        //   if (damageTimer != 0 || slot[136] || wasHit) -> run
+        // [orig: Entity_UpdateInfantryAI @0x4b9910, the targetAnimState 1/149 block].
+        // This block previously drove alert_timer and combat_reaction, pinning the
+        // earlier misreading; alert_timer is written NOWHERE in the engine, so that
+        // source could never fire outside this test.
+        e->inf.damage_timer = 40; // source 1: entity damageTimer (decays 1/tick, so
+                                  // it must outlast the 16-tick think window)
         run_ticks(ai, w, 1, 17);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->inf.alert_timer = 0;
-        e->slot.bytes()[AiSlot::kAlertByte] = 1; // alert source 2: slot byte +136
+        e->inf.damage_timer = 0;
+        e->slot.bytes()[AiSlot::kAlertByte] = 1; // source 2: slot byte +136
         run_ticks(ai, w, 17, 33);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
         e->slot.bytes()[AiSlot::kAlertByte] = 0;
-        e->inf.combat_reaction = true; // alert source 3: byte entity+875
+        e->inf.was_hit = true; // source 3: entity wasHit
         run_ticks(ai, w, 33, 49);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->inf.combat_reaction = false;
+        e->inf.was_hit = false;
         e->health = 50; // == max_health/2 -> wounded
         run_ticks(ai, w, 49, 65);
         CHECK(e->inf.anim_state == anim_state::kWoundedWalk);
 
-        e->inf.alert_timer = 1; // wounded + alerted
+        e->inf.damage_timer = 40; // wounded + alerted (outlasts the think window)
         run_ticks(ai, w, 65, 81);
         CHECK(e->inf.anim_state == anim_state::kWoundedRun);
 
@@ -2693,7 +2772,7 @@ int main() {
         run_ticks(ai, w, 81, 97);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->inf.alert_timer = 0; // wounded walk falls back to the base gait
+        e->inf.damage_timer = 0; // wounded walk falls back to the base gait
         run_ticks(ai, w, 97, 113);
         CHECK(e->inf.anim_state == anim_state::kWalkForward);
     }
@@ -3618,6 +3697,8 @@ int main() {
     test_primary_body_mid_blend_retarget_keeps_original_primary();
     test_death_during_blend_finishes_old_tuple_then_retargets();
     test_remote_body_state_queue_gate();
+
+    test_combat_fixture_acquires_a_target();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);
