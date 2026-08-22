@@ -380,6 +380,39 @@ int main() {
 	// cleared the 50-unit threshold yet. It pins the DEFECT, not the scenario.
 	expect(moved > 0, "at least one AI walks its authored route");
 
+	// THE PLAYERCONTROL ADMIT GATE, pinned against the real mission. 00TRg orders
+	// three soldiers (BMSORG 42/43/51, group 16, wp=125) onto 1902 "50cal on 180
+	// tripod" emplacements — attrib EWeap 0x20, NO PlayerControl 0x40 — standing at
+	// their own spawns. Retail never boards them [orig: Entity_UpdateInfantryAI
+	// @0x4b9910 — the `(itemDef->attrib & 0x40) != 0` test guarding the
+	// Entity_CanEnterVehicle @0x435480 consult]. The same run must still board the
+	// real carriers (trucks/SUVs/boats all carry PlayerControl): a gate that
+	// unmounts EVERYONE is a regression, not a fix.
+	{
+		int cmd125 = 0, mounted_on_eweap = 0, mounted_total = 0;
+		for (int i = 0; i < n; ++i) {
+			const w::AiEntity *e = ai.at(i);
+			if (e == nullptr || e->slot.f[37] < 123 || e->slot.f[37] > 125) continue;
+			++cmd125;
+			const w::Entity *self = world.registry.get(e->handle);
+			if (self == nullptr || !self->mounted) continue;
+			++mounted_total;
+			const int32_t cached = e->slot.f[36];
+			if (cached == 0) continue;
+			const w::Entity *carrier =
+					world.registry.get(w::EntityHandle{static_cast<uint16_t>(cached - 1)});
+			if (carrier != nullptr &&
+					(carrier->item_attrib & w::kItemAttribPlayerControl) == 0)
+				++mounted_on_eweap;
+		}
+		std::printf("board gate: %d command AI, %d mounted, %d on non-PlayerControl\n",
+				cmd125, mounted_total, mounted_on_eweap);
+		expect(mounted_on_eweap == 0,
+				"no AI boards a target lacking PlayerControl [orig: @0x4b9910 attrib&0x40]");
+		expect(mounted_total > 0,
+				"the PlayerControl carriers are still boarded (the gate is not a blanket reject)");
+	}
+
 	if (failures == 0) std::printf("ai path conformance tests passed\n");
 	return failures ? 1 : 0;
 }

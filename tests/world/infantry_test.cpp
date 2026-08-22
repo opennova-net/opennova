@@ -2579,6 +2579,7 @@ void test_eye_offset_restamp() {
     CHECK(std::abs(reg->eye_offset_y) <= 2);
 }
 
+
 int main() {
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();

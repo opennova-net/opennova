@@ -13,8 +13,12 @@
 // D-INF-2: the E1..E8 entry-point claim/stagger (boneWalkSlot), the 64-tick
 // mounted seat re-upgrade, the 11000/12000/12001 scripted escort offsets, the
 // can't-enter fallbacks (incl. the far-from-spawn self-kill @0x4b9910), and
-// Entity_CanEnterVehicle's exact gates (@0x435480) — the modeled equivalents are
-// cited inline where each stands in.
+// Entity_CanEnterVehicle's INTERNAL gates (@0x435480 — the Flags&2/itemDef/model
+// preamble, the groundEntity path, Entity_IsBoneInProximity, and the Flags&0x2000
+// + 16-unit savedLivePose arm) — the modeled equivalents are cited inline where
+// each stands in. NO LONGER A RESIDUAL: the itemDef attrib 0x40 (PlayerControl)
+// gate that guards the Entity_CanEnterVehicle consult is ported at the ARRIVED
+// branch below.
 
 #include "world/ai.h"
 #include "world/entity.h"
@@ -227,7 +231,39 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     //  radius < 0x640000 && itemDef attrib & 0x60 ->
     //  Entity_FindBestSeatSlot @0x4351f0 -> Entity_RequestVehicleAttach
     //  @0x4364a0]
-    if (seat_idx >= 0 && !target->seats.empty())
+    // THE PLAYERCONTROL ADMIT GATE. Retail only reaches its board/attach path
+    // when the TARGET's itemDef carries attrib bit 0x40 (items.def PlayerControl):
+    //
+    //     type = v158->itemDef->type;
+    //     if (type != ItemType_Vehicle && type != ItemType_Powerup) goto LABEL_308;
+    //     if ((v158->itemDef->attrib & 0x40) != 0) {
+    //         CanEnterVehicle = Entity_CanEnterVehicle(entity, v158);
+    //         ...
+    //     }
+    //     LABEL_308: walk toward the target (moveMode 3)
+    //
+    // so a target WITHOUT the bit is still walked to and simply never boarded.
+    // [orig: Entity_UpdateInfantryAI @0x4b9910 — the attrib test guarding the
+    //  Entity_CanEnterVehicle @0x435480 consult, and the LABEL_308 fall-through.]
+    //
+    // The type test is NOT reproduced because it cannot discriminate here: the
+    // engine stores powerup and object as the SAME value 6
+    // [orig: ItemDef_ParseProperty @0x49eb00, mirrored in def.h DefItemType], so
+    // every object-type target passes it. The attrib bit is the operative gate.
+    //
+    // This replaces the previous stand-in admit gate ("the target owns seats"),
+    // which boarded anything with a seat. 00TRg orders three soldiers onto 1902
+    // "50cal on 180 tripod" emplacements (attrib EWeap 0x20, no PlayerControl)
+    // standing at their own spawns; without this gate they mount an emplacement
+    // retail never lets them mount, and are pinned there for the whole mission.
+    //
+    // STILL A RESIDUAL: Entity_CanEnterVehicle's own internal gates (the Flags&2 /
+    // itemDef / model preamble, the groundEntity path, Entity_IsBoneInProximity,
+    // and the Flags&0x2000 + 16-unit savedLivePose arm) remain unported — only
+    // the attrib gate that guards the CALL is ported here.
+    const bool target_admits_occupants =
+            (target->item_attrib & kItemAttribPlayerControl) != 0;
+    if (target_admits_occupants && seat_idx >= 0 && !target->seats.empty())
         world.commands.mount_boarding_command(self->net_id, target_ssn,
                                               static_cast<uint8_t>(command));
 }
