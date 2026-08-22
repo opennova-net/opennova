@@ -150,4 +150,41 @@ void ClientReplicaPipeline::apply_entity_remove(
 	}
 }
 
+// S2C 0x2F: retail accepts this state writer only for the three flag item ids,
+// replaces the entity's low flags byte and position, then applies the two
+// relationships as occupantEntity and groundEntity. Attachment itself is
+// projected by the native materializer; the canonical replica keeps the raw
+// packed handles so render-only embedders see the same state.
+// [orig: NapiNPClientMsg_0x02F @0x430E10]
+void ClientReplicaPipeline::apply_objective_entity_state(
+		const std::vector<uint8_t> &body) {
+	ObjectiveEntityState state;
+	size_t consumed = 0;
+	if (!decode_objective_entity_state(
+			body.data(), body.size(), state, consumed) ||
+			consumed != body.size()) {
+		++malformed_bodies_;
+		return;
+	}
+	ClientEntityState *row = state_.find(state.entity_handle);
+	if (row == nullptr || (row->type_id != 4091 && row->type_id != 4093 &&
+			row->type_id != 4095))
+		return;
+
+	row->x = state.pos_x;
+	row->y = state.pos_y;
+	row->z = state.pos_z;
+	row->state_flags = state.flags_byte;
+	row->state_flags_known = true;
+	row->spawn_entity_flags =
+			(row->spawn_entity_flags & 0xFFFFFF00u) | state.flags_byte;
+	row->rm_entity_flags =
+			(row->rm_entity_flags & 0xFFFFFF00u) | state.flags_byte;
+	row->parent_handle = state.attach_handle;
+	row->target_handle = state.ground_handle;
+	row->parent_pose_valid = false;
+	++state_.world_stream_revision;
+	state_.mark_topology_changed();
+}
+
 } // namespace opennova::netsim

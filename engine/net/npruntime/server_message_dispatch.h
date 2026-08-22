@@ -83,7 +83,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 // client NapiNPClientMsg_PlayerList @0x42FAE0]
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          const world::World *world);
+                                          world::World *world);
 
 // Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
 // connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16

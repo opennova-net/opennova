@@ -25,6 +25,7 @@
 #include <npwire/session_keys.h>
 
 #include <world/ai.h>
+#include <world/game_type.h>
 #include <world/player_spawn.h>
 #include <world/world.h>
 
@@ -49,6 +50,126 @@ bool check_scoreboard_message_is_transient() {
 			opennova::np::build_player_list_message(config, {}, nullptr);
 	return expect(message.tag == opennova::s2c::PLAYER_LIST && !message.reliable,
 	              "scoreboard 0x16 uses retail's one-send transient delivery");
+}
+
+bool check_scoreboard_projects_every_retail_mode_shape() {
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 16);
+
+	auto spawn_player = [&](uint8_t team, bool alive) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = alive;
+		if (!alive) entity.flags |= opennova::world::kEntityFlagDead;
+		return world.registry.spawn(0, entity);
+	};
+	const opennova::world::EntityHandle blue = spawn_player(1, true);
+	const opennova::world::EntityHandle red = spawn_player(2, false);
+
+	std::vector<opennova::np::NapiNPConnection> roster(2);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].burst.spawned = true;
+		roster[slot].link.owned_entity = slot == 0 ? blue : red;
+		roster[slot].reply.player_slot = slot;
+	}
+
+	auto objective = [&](int32_t item_id, uint8_t team, uint32_t attrib = 0) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Item;
+		entity.item_id = item_id;
+		entity.team = team;
+		entity.item_attrib = attrib;
+		entity.alive = true;
+		return world.registry.spawn(1, entity);
+	};
+	objective(4091, 1); // one authored blue flag
+	objective(4093, 2);
+	objective(4093, 2); // two authored red flags
+	objective(7001, 1, opennova::world::kItemAttribObjectiveTarget);
+	objective(7002, 1, opennova::world::kItemAttribObjectiveTarget);
+	objective(7003, 2, opennova::world::kItemAttribObjectiveTarget);
+
+	opennova::np::GameConfig config;
+	config.num_teams = 4;
+	auto board = [&](uint32_t game_type) {
+		config.game_type = game_type;
+		opennova::world::MatchRules rules;
+		rules.game_type = game_type;
+		rules.team_count = config.num_teams;
+		world.match.configure(rules);
+		world.match.upsert_player({blue, 0, "Blue", {}, {}});
+		world.match.upsert_player({red, 1, "Red", {}, {}});
+		const opennova::ProtocolMessage message =
+				opennova::np::build_player_list_message(config, roster, &world);
+		opennova::PlayerList decoded;
+		if (!opennova::decode_player_list(
+					message.payload.data(), message.payload.size(), decoded))
+			decoded = {};
+		return decoded;
+	};
+
+	for (const uint32_t solo : {
+			opennova::game_type::kDeathmatch,
+			opennova::game_type::kFlagMe}) {
+		const opennova::PlayerList decoded = board(solo);
+		if (!expect(decoded.flags == 0 && decoded.team_count == 0 &&
+		                    decoded.teams.size() == 1,
+		            "DM/Flag Me scoreboard has the one neutral row and no team bit"))
+			return false;
+	}
+	{
+		const opennova::PlayerList decoded =
+				board(opennova::game_type::kKingOfTheHill);
+		if (!expect(decoded.flags == 2 && decoded.team_count == 0 &&
+		                    decoded.teams.size() == 1,
+		            "solo KOTH alone sets the timed-score bit"))
+			return false;
+	}
+	for (const uint32_t four_team : {
+			opennova::game_type::kTeamDeathmatch,
+			opennova::game_type::kFlagBall}) {
+		const opennova::PlayerList decoded = board(four_team);
+		if (!expect(decoded.flags == 1 && decoded.team_count == 4 &&
+		                    decoded.teams.size() == 5,
+		            "TDM/FlagBall honor the configured four-team scoreboard"))
+			return false;
+	}
+	{
+		const opennova::PlayerList decoded =
+				board(opennova::game_type::kAdvanceAndSecure);
+		if (!expect(decoded.flags == 1 && decoded.team_count == 2 &&
+		                    decoded.teams.size() == 3,
+		            "A&S remains two-team even when mp_numteams is four"))
+			return false;
+	}
+	{
+		const opennova::PlayerList decoded =
+				board(opennova::game_type::kTeamKingOfTheHill);
+		if (!expect(decoded.team_count == 4 && decoded.teams[1].koth_hold == 1 &&
+		                    decoded.teams[2].koth_hold == 0,
+		            "team KOTH rows carry each team's live-player count"))
+			return false;
+	}
+	{
+		const opennova::PlayerList decoded =
+				board(opennova::game_type::kCaptureTheFlag);
+		if (!expect(decoded.team_count == 2 && decoded.teams[1].ctf_flag == 1 &&
+		                    decoded.teams[2].ctf_flag == 2,
+		            "CTF rows carry each side's authored own-flag count"))
+			return false;
+	}
+	for (const uint32_t demolition : {
+			opennova::game_type::kSearchAndDestroy,
+			opennova::game_type::kAttackDefend}) {
+		const opennova::PlayerList decoded = board(demolition);
+		if (!expect(decoded.team_count == 2 && decoded.teams[1].ctf_flag == 2 &&
+		                    decoded.teams[2].ctf_flag == 1,
+		            "S&D/A&D rows carry each defending side's authored target count"))
+			return false;
+	}
+	return true;
 }
 
 void add_retail_game_environment(opennova::ClientAuth &auth) {
@@ -2472,6 +2593,73 @@ bool check_session_status_reply_matches_retail_writer() {
 	              "retail writer's extra zero key/value sentinel is preserved");
 }
 
+bool check_objective_mode_session_status_options() {
+	opennova::world::World world;
+	world.registry.configure_pool(1, 16);
+	auto objective = [&](int item_id, uint8_t team, uint32_t attrib = 0) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Item;
+		entity.item_id = item_id;
+		entity.team = team;
+		entity.item_attrib = attrib;
+		return world.registry.spawn(1, entity);
+	};
+	objective(4093, 2);
+	objective(4093, 2);
+	objective(4091, 1);
+
+	opennova::np::GameConfig config;
+	config.game_type = opennova::game_type::kCaptureTheFlag;
+	opennova::world::MatchRules rules;
+	rules.game_type = config.game_type;
+	world.match.configure(rules);
+	opennova::SessionStatusBlock decoded;
+	std::vector<uint8_t> body = opennova::np::serialize_session_status(
+			config, 0, 0, &world);
+	if (!expect(opennova::decode_session_status(
+				body.data(), body.size(), decoded) && decoded.kv.size() == 2 &&
+				decoded.kv[0].key == 7 && decoded.kv[0].value == 2 &&
+				decoded.kv[1].key == 6 && decoded.kv[1].value == 1,
+			"CTF status publishes red/blue authored flag targets as keys 7/6"))
+		return false;
+
+	objective(7001, 1, opennova::world::kItemAttribObjectiveTarget);
+	objective(7002, 1, opennova::world::kItemAttribObjectiveTarget);
+	objective(7003, 2, opennova::world::kItemAttribObjectiveTarget);
+	for (const uint32_t game_type : {
+			opennova::game_type::kSearchAndDestroy,
+			opennova::game_type::kAttackDefend}) {
+		config.game_type = game_type;
+		rules.game_type = game_type;
+		world.match.configure(rules);
+		body = opennova::np::serialize_session_status(config, 0, 0, &world);
+		decoded = {};
+		if (!expect(opennova::decode_session_status(
+					body.data(), body.size(), decoded) && decoded.kv.size() == 2 &&
+					decoded.kv[0].key == 3 && decoded.kv[0].value == 2 &&
+					decoded.kv[1].key == 4 && decoded.kv[1].value == 1,
+				"S&D/A&D status publishes the defending-side target census as keys 3/4"))
+			return false;
+	}
+
+	for (const uint32_t game_type : {
+			opennova::game_type::kFlagBall,
+			opennova::game_type::kFlagMe}) {
+		config.game_type = game_type;
+		config.max_score = 0;
+		rules.game_type = game_type;
+		world.match.configure(rules);
+		body = opennova::np::serialize_session_status(config, 0, 0, &world);
+		decoded = {};
+		if (!expect(opennova::decode_session_status(
+					body.data(), body.size(), decoded) && decoded.kv.size() == 1 &&
+					decoded.kv[0].key == 5 && decoded.kv[0].value == 0,
+				"FlagBall/Flag Me status always publishes MaxScore as key 5"))
+			return false;
+	}
+	return true;
+}
+
 bool check_score_ini_drives_session_status_values() {
 	opennova::np::GameConfig config;
 	config.game_type = 0x10020u;
@@ -2669,6 +2857,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 int main() {
 	bool ok = true;
 	ok = check_scoreboard_message_is_transient() && ok;
+	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
 	ok = check_retail_rate_defaults() && ok;
@@ -2695,6 +2884,7 @@ int main() {
 	ok = check_listen_host_receives_targeted_maintenance() && ok;
 	ok = check_spawned_peer_gets_periodic_retail_maintenance() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;
+	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

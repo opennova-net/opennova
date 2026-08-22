@@ -364,6 +364,11 @@ std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 std::vector<uint8_t> encode_deployed_item_spawn(const DeployedItemSpawn &spawn);
 std::vector<uint8_t> encode_entity_remove(const EntityRemove &removal);
 
+// S2C 0x2F — exact 19-byte objective/carryable state record.
+// [orig: serialize_entity_with_parent_and_target @0x505810]
+std::vector<uint8_t> encode_objective_entity_state(
+		const ObjectiveEntityState &state);
+
 // S2C 0x5D EMPTY-SLOT SWEEP — the inverse of decode_destroy_entity_list: a bare
 // `[u16 pool0Index] × N` run with no count word. Retail's builder walks pool 0
 // and appends the index of every entry whose occupancy dword is zero, then the

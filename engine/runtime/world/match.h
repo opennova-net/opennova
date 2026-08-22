@@ -33,6 +33,10 @@ struct MatchRules {
     uint32_t game_time_minutes =
         0;                    // SET GameTime / g_respawn_time, despite the old host-field name
     uint32_t score_limit = 0; // SET KillLimit / g_score_limit
+    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_time_limit_minutes
+    uint32_t hill_delta = 5;         // cfg koth_delta / dword_24D2148
+    uint32_t max_score = 0;          // SET MaxScore / g_kill_limit
+    uint32_t flag_return_ticks = 210;
     // Absent means the exact GameType_CreateDefaultSettings row. Present is a
     // fully materialized score.ini overlay and may intentionally contain zero
     // in every slot; absence is therefore not encoded as a magic all-zero row.
@@ -41,6 +45,24 @@ struct MatchRules {
     // replaces them in file order.
     std::vector<MatchScoreField> score_fields;
     uint8_t team_count = 2;
+};
+
+struct MatchLiveTeamScore {
+    int32_t primary_score = 0;
+    int32_t points = 0;
+    uint8_t alive_players = 0;
+    uint8_t authored_objectives = 0;
+};
+
+// One authoritative projection for S2C 0x16. The match owns every mode
+// decision; the network adapter only narrows these values to their wire words.
+// Row zero is the retail neutral row and remains zero-filled.
+// [orig: Server_BuildAndBroadcastScoreboard @0x50D960]
+struct MatchLiveScoreboard {
+    bool team_mode = false;
+    bool timed_score_mode = false;
+    uint8_t team_count = 0;
+    std::array<MatchLiveTeamScore, 5> teams{};
 };
 
 // The shared retail defaults consumed by Match and the S2C 0x58 session
@@ -63,6 +85,10 @@ struct MatchStats {
     static constexpr size_t kSuicides = 6;
     static constexpr size_t kDeaths = 7;
     static constexpr size_t kAssists = 11;
+    static constexpr size_t kFlagSaves = 11;
+    static constexpr size_t kFlagCaptures = 12;
+    static constexpr size_t kFlagPickups = 13;
+    static constexpr size_t kTargetsDestroyed = 14;
     static constexpr size_t kPoints = 29;
     static constexpr size_t kRoundMarker = 35;
     static constexpr size_t kZoneTakeovers = 39;
@@ -89,6 +115,9 @@ struct MatchPlayerIdentity {
 struct MatchPlayer {
     MatchPlayerIdentity identity;
     MatchStats stats;
+    // Player-slot +23595, maintained by the retail capture-proximity pass and
+    // supplied as sub_52C850's external score for KOTH/TKOTH.
+    int32_t objective_ticks = 0;
 };
 
 // One outcome latch for every producer: automatic multiplayer rules and the
@@ -110,6 +139,7 @@ struct MatchResultPlayer {
     uint8_t team = 0;
     uint8_t player_class = 0;
     MatchStats stats;
+    int32_t objective_ticks = 0;
     int32_t primary_score = 0;
 };
 
@@ -123,6 +153,29 @@ struct MatchResult {
     std::vector<MatchResultPlayer> players;
     std::array<MatchStats, 5> team_stats{};
     uint8_t team_row_count = 0;
+};
+
+enum class MatchGameplayEventKind : uint8_t {
+    FlagPickup,
+    FlagDrop,
+    FlagSave,
+    FlagCapture,
+    FlagReturn,
+};
+
+// A semantic objective transition plus the exact entity-state snapshot the
+// network adapter needs after the transition. Captured CTF flags can be gone
+// from the registry by the time the adapter drains this record.
+struct MatchGameplayEvent {
+    MatchGameplayEventKind kind = MatchGameplayEventKind::FlagPickup;
+    EntityHandle actor;
+    EntityHandle objective;
+    Vec3 position;           // event/feed position before capture/reset
+    Vec3 objective_position; // post-transition S2C 0x2F position
+    uint8_t objective_flags = 0;
+    EntityHandle parent;
+    EntityHandle ground;
+    bool remove_objective = false;
 };
 
 // Resolve one retail scoreboard FIELD ID against the direct CPlayerStats
@@ -149,31 +202,67 @@ class Match {
     const std::vector<MatchPlayer> &players() const { return players_; }
     const MatchStats &team_stats(uint8_t team) const;
 
+    // Authored objective totals used both by win evaluation and the pre-match
+    // status report. The first read freezes the round census, as retail's
+    // reset_round_counters does before play.
+    int32_t flag_capture_target(const World &world, uint8_t scoring_team);
+    int32_t demolition_target(const World &world, uint8_t scoring_team);
+
     // Retail runs the victim death scorer first, then the killer-victim scorer.
     // An invalid killer records only the victim leg.
-    void record_death(const World &world, EntityHandle victim,
+    void record_death(World &world, EntityHandle victim,
                       EntityHandle killer = EntityHandle{});
+
+    // Objective scorer cases 9 and 11. The ordinary runtime paths call these
+    // from carry contact and death routing; they remain public for script/WAC
+    // producers that author the same retail events.
+    void record_flag_capture(World &world, EntityHandle player,
+                             EntityHandle flag = EntityHandle{});
+    void record_target_destroyed(const World &world, EntityHandle target,
+                                 EntityHandle attacker);
 
     // Event 24 for a numbered objective is awarded to every living same-team
     // Player inside the zone, supplied by the capture census in stable slot order.
     void record_numbered_zone_capture(const World &world, const std::vector<EntityHandle> &scorers);
 
     // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
-    void advance_tick();
+    void advance_tick(World &world);
+
+    std::vector<MatchGameplayEvent> drain_gameplay_events();
 
     // Returns no value while play continues; value 0 is an actual draw decision.
     // The all-zones-owned check precedes the game-type switch exactly as retail.
-    std::optional<int32_t> winner_if_finished(const World &world) const;
+    std::optional<int32_t> winner_if_finished(const World &world);
 
     // Shared double-run latch used by World::process_round_end.
     bool finish(int32_t winner_team, const World &world);
 
-    int32_t primary_score(const MatchStats &stats) const;
+    int32_t primary_score(const MatchStats &stats, int32_t objective_ticks = 0) const;
+    int32_t primary_score(const MatchPlayer &player) const;
+    int32_t team_primary_score(const World &world, uint8_t team) const;
+    MatchLiveScoreboard live_scoreboard(World &world);
 
   private:
+    struct CarryObjectiveState {
+        EntityHandle objective;
+        uint64_t spawn_id = 0;
+        Vec3 home;
+        int32_t return_ticks = 0;
+    };
+
     int32_t score_value(size_t status_index) const;
     void add_event(MatchPlayer &player, size_t counter, int32_t points);
     void add_team_event(uint8_t team, size_t counter, int32_t points);
+    void ensure_objective_census(const World &world);
+    CarryObjectiveState *carry_state(World &world, EntityHandle objective);
+    void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
+    void record_flag_save(World &world, EntityHandle player, EntityHandle flag);
+    void drop_carried_object(World &world, EntityHandle player);
+    void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
+                          EntityHandle actor = EntityHandle{});
+    void update_hill_presence(const World &world);
+    void update_flag_objectives(World &world, bool advance_return_timers);
+    int32_t team_objective_ticks(const World &world, uint8_t team) const;
 
     MatchRules rules_;
     int32_t remaining_ticks_ = -1;
@@ -181,6 +270,13 @@ class Match {
     MatchResult result_;
     std::vector<MatchPlayer> players_;
     std::array<MatchStats, 5> teams_{};
+    std::array<int32_t, 5> team_hold_ticks_{};
+    int32_t periodic_second_timer_ = 0;
+    bool objective_census_ready_ = false;
+    std::array<int32_t, 5> flag_capture_targets_{};
+    std::array<int32_t, 5> demolition_targets_{};
+    std::vector<CarryObjectiveState> carry_objectives_;
+    std::vector<MatchGameplayEvent> gameplay_events_;
 };
 
 } // namespace opennova::world

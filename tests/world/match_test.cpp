@@ -1,12 +1,16 @@
-// Authoritative multiplayer match rules: retail score-event accounting, TDM/A&S
-// win decisions, the GameTime clock, and Co-op's script-owned outcome path.
+// Authoritative multiplayer match rules for every retail game type: score-event
+// accounting, objective interaction, win decisions, the GameTime clock, and
+// Co-op's script-owned outcome path.
 // [orig: CPlayerStats_RecordEvent @0x52C8E0; GameEvent_ProcessScoring @0x52F550;
 // Server_CheckWinConditions @0x51AD40; Server_ProcessRoundEnd @0x5164F0]
 #include "world/match.h"
+#include "world/game_type.h"
 #include "world/world.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
@@ -23,9 +27,11 @@ static int failures = 0;
 
 namespace {
 
-constexpr uint32_t kTdm = 0x10000u;
-constexpr uint32_t kAas = 0x10010u;
-constexpr uint32_t kCoop = 0x10020u;
+namespace gt = opennova::game_type;
+
+constexpr uint32_t kTdm = gt::kTeamDeathmatch;
+constexpr uint32_t kAas = gt::kAdvanceAndSecure;
+constexpr uint32_t kCoop = gt::kCoop;
 
 MatchRules rules(uint32_t game_type, uint32_t game_time_minutes, uint32_t score_limit) {
     MatchRules out;
@@ -71,6 +77,104 @@ EntityHandle zone(World &world, uint8_t number, uint8_t team) {
     const EntityHandle handle = world.registry.spawn(1, entity);
     world.zone_chain.zones.push_back(handle);
     return handle;
+}
+
+EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 position = {}) {
+    Entity entity;
+    entity.kind = EntityKind::Item;
+    entity.item_id = item_id;
+    entity.team = team;
+    entity.position = position;
+    entity.spawn_position = position;
+    entity.bound_radius = 2.0f;
+    entity.alive = true;
+    return world.registry.spawn(1, entity);
+}
+
+EntityHandle demolition_target(World &world, uint8_t team) {
+    Entity entity;
+    entity.kind = EntityKind::Item;
+    entity.item_id = 9000 + team;
+    entity.team = team;
+    entity.item_attrib = 0x8000u;
+    entity.alive = true;
+    return world.registry.spawn(1, entity);
+}
+
+void tick_to_zero(World &world) {
+    for (int i = 0; i < 60 * 62; ++i)
+        world.match.advance_tick(world);
+}
+
+void expect_fields(uint32_t game_type,
+                   std::initializer_list<std::pair<uint8_t, uint8_t>> expected) {
+    const std::vector<MatchScoreField> actual = default_match_score_fields(game_type);
+    CHECK(actual.size() == expected.size());
+    size_t i = 0;
+    for (const auto &[field, enabled] : expected) {
+        if (i >= actual.size())
+            break;
+        CHECK(actual[i].field == field);
+        CHECK(actual[i].enabled == enabled);
+        ++i;
+    }
+}
+
+void test_every_retail_default_score_row() {
+    // These are the complete FIELD rows installed before score.ini overlays.
+    // [orig: GameType_CreateDefaultSettings @0x52DD00]
+    expect_fields(gt::kDeathmatch,
+                  {{19, 1}, {3, 1}, {4, 1}, {1, 0}, {15, 0}, {16, 0}, {17, 0},
+                   {27, 0}, {21, 1}});
+    expect_fields(gt::kTeamDeathmatch,
+                  {{19, 1}, {3, 1}, {2, 0}, {4, 1}, {1, 0}, {30, 1}, {10, 1},
+                   {11, 0}, {12, 0}, {13, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}});
+    expect_fields(gt::kKingOfTheHill,
+                  {{19, 1}, {5, 1}, {22, 1}, {18, 1}, {3, 1}, {4, 1}, {1, 0},
+                   {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}});
+    expect_fields(gt::kTeamKingOfTheHill,
+                  {{19, 1}, {5, 1}, {22, 1}, {18, 1}, {3, 1}, {2, 0}, {4, 1},
+                   {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0}, {13, 1}, {15, 0},
+                   {16, 0}, {17, 0}, {27, 0}, {21, 1}});
+    const auto demolition = std::initializer_list<std::pair<uint8_t, uint8_t>>{
+        {19, 1}, {8, 1}, {3, 1}, {2, 0}, {4, 1}, {1, 0}, {30, 1}, {10, 1},
+        {11, 0}, {12, 0}, {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
+    expect_fields(gt::kSearchAndDestroy, demolition);
+    expect_fields(gt::kAttackDefend, demolition);
+    expect_fields(gt::kCaptureTheFlag,
+                  {{19, 1}, {6, 1}, {7, 1}, {14, 1}, {3, 1}, {2, 0}, {4, 1},
+                   {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0}, {13, 0}, {15, 0},
+                   {16, 0}, {17, 0}, {27, 0}, {21, 1}});
+    expect_fields(gt::kFlagBall,
+                  {{19, 1}, {6, 1}, {14, 1}, {29, 1}, {28, 1}, {3, 1}, {2, 0},
+                   {4, 1}, {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0}, {13, 0},
+                   {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}});
+    expect_fields(gt::kAdvanceAndSecure,
+                  {{19, 1}, {3, 1}, {2, 0}, {4, 1}, {1, 0}, {30, 1}, {10, 1},
+                   {11, 0}, {32, 1}, {12, 0}, {13, 1}, {15, 0}, {16, 0}, {17, 0},
+                   {27, 0}, {21, 1}});
+    expect_fields(gt::kConquerAndControl,
+                  {{19, 1}, {6, 1}, {14, 1}, {29, 1}, {28, 1}, {3, 1}, {2, 0},
+                   {4, 1}, {1, 0}, {30, 1}, {10, 1}, {11, 0}, {32, 1}, {12, 0},
+                   {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}});
+    expect_fields(gt::kCoop,
+                  {{19, 1}, {3, 1}, {4, 1}, {30, 1}, {10, 1}, {11, 1}, {21, 1}});
+    CHECK(default_match_score_fields(gt::kFlagMe).empty());
+
+    const auto dm = default_match_score_values(gt::kDeathmatch);
+    CHECK(dm[3] == 5 && dm[16] == 10 && dm[37] == 5);
+    const auto tkoth = default_match_score_values(gt::kTeamKingOfTheHill);
+    CHECK(tkoth[3] == 2 && tkoth[12] == 10 && tkoth[21] == 5 && tkoth[33] == 1);
+    const auto sd = default_match_score_values(gt::kSearchAndDestroy);
+    CHECK(sd[13] == 50 && sd[24] == 2 && sd[26] == 2);
+    const auto ad = default_match_score_values(gt::kAttackDefend);
+    CHECK(ad[13] == 50 && ad[23] == 1 && ad[24] == 2 && ad[26] == 0);
+    const auto ctf = default_match_score_values(gt::kCaptureTheFlag);
+    CHECK(ctf[9] == 10 && ctf[10] == 20 && ctf[11] == 2 && ctf[20] == 5);
+    const auto fb = default_match_score_values(gt::kFlagBall);
+    CHECK(fb[10] == 40 && fb[11] == 2 && fb[20] == 5);
+    const std::array<int32_t, 39> zero_values{};
+    CHECK(default_match_score_values(gt::kFlagMe) == zero_values);
 }
 
 void test_retail_default_score_values() {
@@ -184,7 +288,7 @@ void test_tdm_limit_and_clock_decisions() {
     world->match.upsert_player({red, 1, "Red"});
     world->match.record_death(*world, red, blue);
     for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick();
+        world->match.advance_tick(*world);
     const auto clock_winner = world->match.winner_if_finished(*world);
     CHECK(clock_winner.has_value() && *clock_winner == 1);
 
@@ -194,7 +298,7 @@ void test_tdm_limit_and_clock_decisions() {
     world->match.record_death(*world, red, blue);
     world->match.record_death(*world, blue, red);
     for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick();
+        world->match.advance_tick(*world);
     const auto draw = world->match.winner_if_finished(*world);
     CHECK(draw.has_value() && *draw == 0);
 
@@ -202,8 +306,218 @@ void test_tdm_limit_and_clock_decisions() {
     // [orig: Server_CheckWinConditions @0x51AE47]
     world->match.configure(rules(kTdm, 1, 0));
     for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick();
+        world->match.advance_tick(*world);
     CHECK(!world->match.winner_if_finished(*world).has_value());
+}
+
+void test_deathmatch_and_hill_outcomes() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(3, 4);
+
+    MatchRules dm;
+    dm.game_type = gt::kDeathmatch;
+    dm.game_time_minutes = 1;
+    dm.score_limit = 2;
+    world->match.configure(dm);
+    const EntityHandle solo = player(*world, 0, 1, "Solo");
+    world->match.player(solo)->stats[MatchStats::kEnemyKills] = 2;
+    const auto dm_limit = world->match.winner_if_finished(*world);
+    CHECK(dm_limit.has_value() && *dm_limit == 0);
+
+    world->match.configure(dm);
+    world->match.upsert_player({solo, 0, "Solo"});
+    tick_to_zero(*world);
+    const auto dm_clock = world->match.winner_if_finished(*world);
+    CHECK(dm_clock.has_value() && *dm_clock == 0);
+
+    MatchRules koth;
+    koth.game_type = gt::kKingOfTheHill;
+    koth.game_time_minutes = 1;
+    koth.hill_limit_minutes = 2;
+    world->match.configure(koth);
+    world->match.upsert_player({solo, 0, "Solo"});
+    world->match.player(solo)->objective_ticks = 120;
+    const auto koth_limit = world->match.winner_if_finished(*world);
+    CHECK(koth_limit.has_value() && *koth_limit == 0);
+
+    // The retail one-second service increments the persistent hill counter
+    // while inside a type-6006 hill and decays it one service step outside.
+    // Its timer starts at zero, so the first match tick runs immediately and
+    // subsequent runs are exactly 62 ticks apart.
+    // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
+    // Server_UpdateCaptureZoneProximity @0x5086A0]
+    world->match.configure(koth);
+    world->match.upsert_player({solo, 0, "Solo"});
+    world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
+    Entity hill;
+    hill.kind = EntityKind::Item;
+    hill.item_id = 6006;
+    hill.position = {0.0f, 0.0f, 0.0f};
+    hill.bound_radius = 10.0f;
+    hill.alive = true;
+    world->registry.spawn(3, hill);
+    world->match.advance_tick(*world);
+    CHECK(world->match.player(solo)->objective_ticks == 1);
+    for (int i = 0; i < 61; ++i)
+        world->match.advance_tick(*world);
+    CHECK(world->match.player(solo)->objective_ticks == 1);
+    world->match.advance_tick(*world);
+    CHECK(world->match.player(solo)->objective_ticks == 2);
+    world->registry.get(solo)->position = {100.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 61; ++i)
+        world->match.advance_tick(*world);
+    CHECK(world->match.player(solo)->objective_ticks == 2);
+    world->match.advance_tick(*world);
+    CHECK(world->match.player(solo)->objective_ticks == 1);
+
+    MatchRules tkoth = koth;
+    tkoth.game_type = gt::kTeamKingOfTheHill;
+    tkoth.hill_limit_minutes = 1;
+    world->match.configure(tkoth);
+    const EntityHandle red = player(*world, 1, 2, "Red");
+    world->match.upsert_player({solo, 0, "Solo"});
+    world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
+    world->registry.get(red)->position = {100.0f, 0.0f, 0.0f};
+    // One minute is 60 service steps, not 60 simulation ticks.
+    for (int i = 0; i <= 59 * 62; ++i)
+        world->match.advance_tick(*world);
+    const auto tkoth_limit = world->match.winner_if_finished(*world);
+    CHECK(tkoth_limit.has_value() && *tkoth_limit == 1);
+    CHECK(world->match.primary_score(*world->match.player(solo)) == 60);
+    CHECK(world->match.team_primary_score(*world, 1) == 60);
+}
+
+void test_demolition_flag_and_flagball_gameplay() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(1, 16);
+
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    const EntityHandle red = player(*world, 1, 2, "Red");
+
+    for (const uint32_t game_type : {gt::kSearchAndDestroy, gt::kAttackDefend}) {
+        MatchRules demolition;
+        demolition.game_type = game_type;
+        demolition.game_time_minutes = 1;
+        world->match.configure(demolition);
+        world->match.upsert_player({blue, 0, "Blue"});
+        world->match.upsert_player({red, 1, "Red"});
+        const EntityHandle blue_target = demolition_target(*world, 1);
+        const EntityHandle red_target = demolition_target(*world, 2);
+        world->match.advance_tick(*world); // freezes the authored target census
+        world->match.record_target_destroyed(*world, red_target, blue);
+        CHECK(world->match.player(blue)->stats[MatchStats::kTargetsDestroyed] == 1);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 50);
+        const auto winner = world->match.winner_if_finished(*world);
+        CHECK(winner.has_value() && *winner == 1);
+        world->registry.despawn(blue_target);
+        if (world->registry.get(red_target) != nullptr)
+            world->registry.despawn(red_target);
+    }
+
+    MatchRules ctf;
+    ctf.game_type = gt::kCaptureTheFlag;
+    ctf.game_time_minutes = 1;
+    ctf.flag_return_ticks = 210;
+    world->match.configure(ctf);
+    world->match.upsert_player({blue, 0, "Blue"});
+    world->match.upsert_player({red, 1, "Red"});
+    world->registry.get(blue)->position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle blue_flag = objective(*world, 4091, 1, {80.0f, 0.0f, 0.0f});
+    const EntityHandle red_flag = objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
+    const EntityHandle blue_bay = objective(*world, 4098, 1, {50.0f, 0.0f, 0.0f});
+    world->match.advance_tick(*world);
+    CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
+
+    // Retail reaches waypoint interaction through the movement collision
+    // resolver and also requires MoveOrder bit 3. A stationary overlap cannot
+    // pick up or capture a flag. [orig: Entity_ProcessWaypointInteraction
+    // @0x4AD820, caller in Entity_MovementCollisionResolver]
+    world->registry.get(blue)->net_move_input |= Entity::kMoveOrderMoving;
+    world->match.advance_tick(*world);
+    CHECK(world->registry.get(blue)->mounted_child == red_flag);
+    CHECK(world->registry.get(red_flag)->primary_occupant == blue);
+    CHECK((world->registry.get(red_flag)->flags & kEntityFlagCarried) != 0);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 1);
+
+    world->registry.get(blue)->position = {50.0f, 0.0f, 0.0f};
+    world->match.advance_tick(*world);
+    CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
+    CHECK(world->registry.get(red_flag) == nullptr); // CTF consumes captured flags
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagCaptures] == 1);
+    CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 22);
+    CHECK(world->match.team_stats(1)[MatchStats::kFlagCaptures] == 1);
+    const auto ctf_winner = world->match.winner_if_finished(*world);
+    CHECK(ctf_winner.has_value() && *ctf_winner == 1);
+    const std::vector<MatchGameplayEvent> flag_events = world->match.drain_gameplay_events();
+    CHECK(flag_events.size() == 2);
+    CHECK(flag_events[0].kind == MatchGameplayEventKind::FlagPickup);
+    CHECK(flag_events[1].kind == MatchGameplayEventKind::FlagCapture);
+    CHECK(flag_events[1].objective == red_flag);
+    CHECK(flag_events[1].remove_objective);
+    world->registry.despawn(blue_flag);
+    world->registry.despawn(blue_bay);
+
+    // FlagReturnTime is counted by the same one-second entity service (the
+    // flag callback rearms itself at spawnPhase 62), not once per sim tick.
+    // [orig: flag update callback @0x408430; g_FlagReturnTime_2 @0x24D2174]
+    MatchRules timed_return;
+    timed_return.game_type = gt::kFlagBall;
+    timed_return.flag_return_ticks = 5;
+    world->match.configure(timed_return);
+    world->match.upsert_player({blue, 0, "Blue"});
+    Entity *blue_entity = world->registry.get(blue);
+    blue_entity->alive = true;
+    blue_entity->flags &= ~kEntityFlagDead;
+    blue_entity->net_move_input |= Entity::kMoveOrderMoving;
+    blue_entity->position = {10.0f, 0.0f, 0.0f};
+    const EntityHandle timed_flag =
+        objective(*world, 4095, 0, {10.0f, 0.0f, 0.0f});
+    world->match.advance_tick(*world); // immediate service + per-tick pickup
+    CHECK(blue_entity->mounted_child == timed_flag);
+    blue_entity->position = {0.0f, 0.0f, 0.0f};
+    world->match.record_death(*world, blue);
+    blue_entity->alive = false;
+    blue_entity->flags |= kEntityFlagDead;
+    CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
+    for (int i = 0; i < 4 * 62; ++i)
+        world->match.advance_tick(*world);
+    CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
+    for (int i = 0; i < 62; ++i)
+        world->match.advance_tick(*world);
+    CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
+    world->registry.despawn(timed_flag);
+
+    for (const uint32_t game_type : {gt::kFlagBall, gt::kFlagMe}) {
+        MatchRules flag_mode;
+        flag_mode.game_type = game_type;
+        flag_mode.game_time_minutes = 1;
+        flag_mode.max_score = 2;
+        world->match.configure(flag_mode);
+        world->match.upsert_player({blue, 0, "Blue"});
+        world->match.record_flag_capture(*world, blue, EntityHandle{});
+        world->match.record_flag_capture(*world, blue, EntityHandle{});
+        const auto winner = world->match.winner_if_finished(*world);
+        CHECK(winner.has_value());
+        CHECK(*winner == (game_type == gt::kFlagBall ? 1 : 0));
+    }
+
+    MatchRules zero_flag_me;
+    zero_flag_me.game_type = gt::kFlagMe;
+    zero_flag_me.max_score = 0;
+    world->match.configure(zero_flag_me);
+    world->match.upsert_player({blue, 0, "Blue"});
+    CHECK(!world->match.winner_if_finished(*world).has_value());
+
+    MatchRules zero_flag_ball;
+    zero_flag_ball.game_type = gt::kFlagBall;
+    zero_flag_ball.max_score = 0;
+    world->match.configure(zero_flag_ball);
+    world->match.upsert_player({blue, 0, "Blue"});
+    const auto zero_winner = world->match.winner_if_finished(*world);
+    CHECK(zero_winner.has_value() && *zero_winner == 1);
 }
 
 void test_aas_capture_scoring_and_outcomes() {
@@ -231,7 +545,7 @@ void test_aas_capture_scoring_and_outcomes() {
 
     world->registry.get(z2)->team = 2;
     for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick();
+        world->match.advance_tick(*world);
     const auto tied_zones = world->match.winner_if_finished(*world);
     CHECK(tied_zones.has_value() && *tied_zones == 0);
 
@@ -291,7 +605,7 @@ void test_coop_remains_script_owned() {
     const EntityHandle red = player(*world, 1, 2, "Red");
     world->match.record_death(*world, red, blue);
     for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick();
+        world->match.advance_tick(*world);
     CHECK(world->match.remaining_ticks() == -1); // waypoint Co-op never seeds GameTime
     CHECK(!world->match.winner_if_finished(*world).has_value());
     world->process_round_end(1); // the WAC/BMS path used by cooperative missions
@@ -313,10 +627,13 @@ void test_coop_remains_script_owned() {
 } // namespace
 
 int main() {
+    test_every_retail_default_score_row();
     test_retail_default_score_values();
     test_tdm_scoring_is_event_exact();
     test_live_entity_team_and_class_drive_scoring_and_board();
     test_tdm_limit_and_clock_decisions();
+    test_deathmatch_and_hill_outcomes();
+    test_demolition_flag_and_flagball_gameplay();
     test_aas_capture_scoring_and_outcomes();
     test_end_result_is_frozen_in_retail_board_order();
     test_coop_remains_script_owned();

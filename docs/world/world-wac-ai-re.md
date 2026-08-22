@@ -366,11 +366,15 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 
 ## 5. Per-system equivalence verdict (2026-06-10, infantry port complete)
 
-- **Round-outcome loop** (§20, 2026-07-16 session 6: `Server_ProcessRoundEnd @ 0x5164f0`
-  → `World::process_round_end`; WAC win/lose + the named-value builtins; the BMS win
-  actions; the SP auto-lose; the kill tallies; the SP end presentation): **MATCHING at
-  the SP core** with the D-AI-10 stand-ins (counts-only tallies, shell end screens, MP
-  legs stubbed). Evidence: `wac_behavior` (outcome builtins + the verbatim 04TR else-if
+- **Round-outcome loop** (§20, 2026-07-16 session 6; multiplayer completion
+  2026-08-22: `Server_ProcessRoundEnd @ 0x5164f0` →
+  `World::process_round_end`; `Server_CheckWinConditions @0x51ad40` →
+  `world::Match`; WAC win/lose + the named-value builtins; the BMS win actions;
+  the SP auto-lose; kill tallies; the SP end presentation): **MATCHING at the
+  shared outcome core**. All retail multiplayer game-type arms and co-op's
+  script-owned result now converge through the same latch; D-AI-10 retains only
+  its explicitly listed SP scoring/presentation residuals. Evidence:
+  `match`, `wac_behavior` (outcome builtins + the verbatim 04TR else-if
   block), `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution),
   and the in-game `round_outcome_probe.gd` 04TR PASS (real-round teammate kill →
   bluekills → Lose(1) → the retail KILLEDBLUE string → round end winner 2 → the
@@ -4004,6 +4008,17 @@ Two load/response-time resolutions the probe forced out:
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, saved-game list, or end-music switch; (d) `sub_5280B0` music-park and the `@0x3245B08` end-track selector remain unported; (e) the SP gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
+
+**D-AI-10 update (2026-08-22, superseding the TDM/A&S-only wording above):**
+`world::Match` now implements every branch of `Server_CheckWinConditions
+@0x51AD40`: DM/TDM, solo/team KOTH, S&D/A&D, CTF, FlagBall, Flag Me, A&S/C&C,
+plus the universal all-zones-owned check; co-op remains intentionally
+WAC/BMS-owned. It also owns the recovered per-mode `sub_52C850 @0x52C850`
+primary score, flag carry/pickup/save/capture/return transitions, demolition
+target scoring, live 0x16 team projection, and authored objective census.
+Therefore residual (b) no longer applies to these retail game-mode producers.
+The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
+ordinary combat event producer not enumerated here.
 
 `D-AI-6` update (2026-07-20): the aim-error global `@ 0xC6EAE8` is the WAC
 named variable **accuracyspread** — its config source is mission scripts (the

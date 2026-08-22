@@ -206,6 +206,9 @@ int main() {
 	host_cfg.config.replay_enabled = game_rules::kDefaultReplayEnabled;
 	host_cfg.config.max_team_lives = game_rules::kDefaultMaxTeamLives;
 	host_cfg.config.score_limit = game_rules::kDefaultScoreLimit;
+	host_cfg.config.max_score = game_rules::kDefaultMaxScore;
+	host_cfg.config.koth_delta = game_rules::kDefaultKothDelta;
+	host_cfg.config.flag_return_ticks = game_rules::kDefaultFlagReturnTicks;
 	host_cfg.config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
 	host_cfg.config.start_delay = game_rules::kDefaultStartDelay;
 	host_cfg.config.destroy_buildings = game_rules::kDefaultDestroyBuildings;

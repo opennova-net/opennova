@@ -1566,6 +1566,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
+		} else if (m.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+			ObjectiveEntityState state;
+			std::size_t consumed = 0;
+			if (decode_objective_entity_state(
+					m.payload.data(), m.payload.size(), state, consumed) &&
+					consumed == m.payload.size()) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.

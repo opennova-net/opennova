@@ -11,6 +11,7 @@
 #include <io/le.h>
 #include <npwire/game_type.h>
 #include <world/match.h>
+#include <world/world.h>
 
 namespace opennova::np {
 namespace gtype = opennova::game_type;
@@ -189,7 +190,7 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 
 std::vector<uint8_t> serialize_session_status(
 		const GameConfig &config, uint32_t uptime_ms,
-		uint32_t active_players) {
+		uint32_t active_players, world::World *match_world) {
 	std::vector<uint8_t> out;
 	// Napi_CopyString stores at most 31/63 characters in the 32/64-byte report
 	// fields before the serializer walks the resulting C strings.
@@ -220,6 +221,35 @@ std::vector<uint8_t> serialize_session_status(
 	if (game_type == gtype::kKingOfTheHill || game_type == gtype::kTeamKingOfTheHill) {
 		options.emplace_back(2, config.time_limit_minutes);
 	}
+	// The four authored-target globals are populated by the round-start entity
+	// census. Their option order and asymmetric keys are the literal status
+	// writer order: S&D/A&D 3 then 4; CTF 7 then 6; zero targets are omitted.
+	// [orig: reset_round_counters @0x516C50; Server_BuildStatusReport
+	// @0x530A60, target rows @0x530B7C..0x530C04]
+	if (match_world != nullptr &&
+			(game_type == gtype::kSearchAndDestroy ||
+			 game_type == gtype::kAttackDefend)) {
+		const int32_t team2_target =
+				match_world->match.demolition_target(*match_world, 2);
+		const int32_t team1_target =
+				match_world->match.demolition_target(*match_world, 1);
+		if (team2_target > 0)
+			options.emplace_back(3, static_cast<uint32_t>(team2_target));
+		if (team1_target > 0)
+			options.emplace_back(4, static_cast<uint32_t>(team1_target));
+	}
+	if (match_world != nullptr && game_type == gtype::kCaptureTheFlag) {
+		const int32_t team1_target =
+				match_world->match.flag_capture_target(*match_world, 1);
+		const int32_t team2_target =
+				match_world->match.flag_capture_target(*match_world, 2);
+		if (team1_target > 0)
+			options.emplace_back(7, static_cast<uint32_t>(team1_target));
+		if (team2_target > 0)
+			options.emplace_back(6, static_cast<uint32_t>(team2_target));
+	}
+	if (game_type == gtype::kFlagBall || game_type == gtype::kFlagMe)
+		options.emplace_back(5, config.max_score);
 	// Every live non-objective session with a nonzero respawn time appends key
 	// 8. Objective Co-op (0x30020) suppresses it; training Co-op (0x10020)
 	// therefore carries both key 9 and key 8 in the retail oracle.

@@ -570,6 +570,11 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		// [orig: Game_StartMission seed @0x524F66]
 		match_rules.game_time_minutes = owner.ctx.config.respawn_time;
 		match_rules.score_limit = owner.ctx.config.score_limit;
+		match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;
+		match_rules.hill_delta = owner.ctx.config.koth_delta;
+		match_rules.max_score = owner.ctx.config.max_score;
+		match_rules.flag_return_ticks = owner.ctx.config.flag_return_ticks;
+		match_rules.team_count = owner.ctx.config.num_teams;
 		match_rules.score_values = owner.ctx.config.session_status_stat_values;
 		match_rules.score_fields.reserve(owner.ctx.config.scoreboard_fields.size());
 		for (const auto &[field, enabled] : owner.ctx.config.scoreboard_fields)

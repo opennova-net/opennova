@@ -305,6 +305,7 @@ private:
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
+	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
 	void erase_entity_tree(uint16_t root_handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /
 	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +
