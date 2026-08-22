@@ -394,6 +394,15 @@ int main() {
 				}
 				if (g == 0) return;
 				++owners; gun_total += g; gun_filled += f;
+				for (const w::Seat &st : en.seats) {
+					if (st.type != w::SeatType::Gunner || !st.occupant.valid()) continue;
+					const w::Entity *oc = world.registry.get(st.occupant);
+					const w::AiEntity *ob = ai.for_handle(st.occupant);
+					std::printf("   GUNNER occ=%-6u kind=%d mounted=%d mtype=%d hasAI=%d anim=%d\n",
+							unsigned(st.occupant.packed), oc ? int(oc->kind) : -1,
+							oc ? int(oc->mounted) : -1, oc ? int(oc->mount_type) : -1,
+							ob ? 1 : 0, ob ? ob->inf.anim_state : -1);
+				}
 				std::printf("   GUNSEAT owner=%-6u item=%-6d guns=%d filled=%d parent=%u\n",
 						unsigned(en.handle.packed), en.item_id, g, f,
 						unsigned(en.emplacement_parent.packed));
