@@ -268,6 +268,16 @@ int main() {
 	// never described the vehicle -- not that the vehicle is broken.
 	if (report) {
 		std::vector<uint16_t> seen;
+		// The nav ENTRY payloads for one carrier channel. f[0] is what the advance
+		// gate compares the remaining distance against (kWpNodeVal / "animTime").
+		if (const w::NavChannel *nc13 = ai.nav.channel(13)) {
+			std::printf("nav channel 13: count=%d loopflag=%d\n", nc13->count, nc13->loopflag);
+			for (int k = 0; k < nc13->count && k < 6; ++k) {
+				const w::NavEntry *ne = ai.nav.entry(nc13->entries[k]);
+				if (ne) std::printf("   node %d: f0=%-12d x=%-12d y=%-12d z=%-12d f4=%d\n",
+						k, ne->f[0], ne->f[1], ne->f[2], ne->f[3], ne->f[4]);
+			}
+		}
 		std::printf("board carriers:\n");
 		for (int j = 0; j < n; ++j) {
 			const w::AiEntity *e = ai.at(j);
@@ -285,9 +295,30 @@ int main() {
 				const double vdy = double(int32_t(veh->position.y * 65536.0f)) - cs->second.second;
 				vtravel = std::sqrt(vdx * vdx + vdy * vdy) / 65536.0;
 			}
-			std::printf("   carrier handle=%-6u item_id=%-6d seats=%-3zu net_id=%-5d moved=%.2f\n",
+			// Does the CARRIER itself carry a route? wpType/wpChan 0 means it was
+			// never ordered anywhere (a missing script order or an unpromoted
+			// route); non-zero with moved=0 means the drive gate blocks it.
+			int vt = -1, vc = -1, vn = -1, vmm = -1;
+			double aix = -1.0, aiy = -1.0;
+			if (veh != nullptr) {
+				if (const w::AiEntity *vb = ai.for_handle(ch)) {
+					vt = vb->brain.f[w::AiBrain::kWpType];
+					vc = vb->brain.f[w::AiBrain::kWpChannel];
+					vn = vb->brain.f[w::AiBrain::kWpNode];
+					vmm = vb->inf.move_mode;
+					aix = vb->pos[0] / 65536.0;
+					aiy = vb->pos[1] / 65536.0;
+				}
+			}
+			std::printf("   carrier handle=%-6u item_id=%-6d seats=%-3zu net_id=%-5d "
+					"pos=(%.1f,%.1f) aipos=(%.1f,%.1f) wpType=%-3d wpChan=%-3d wpNode=%-3d/%-3d mm=%-3d moved=%.2f\n",
 					unsigned(ch.packed), veh ? veh->item_id : -1,
-					veh ? veh->seats.size() : size_t(0), veh ? veh->net_id : -1, vtravel);
+					veh ? veh->seats.size() : size_t(0), veh ? veh->net_id : -1,
+					veh ? veh->position.x : 0.0f, veh ? veh->position.y : 0.0f,
+					aix, aiy,
+					vt, vc, vn,
+					(vc > 0 && ai.nav.channel(vc)) ? ai.nav.channel(vc)->count : -1,
+					vmm, vtravel);
 		}
 	}
 
