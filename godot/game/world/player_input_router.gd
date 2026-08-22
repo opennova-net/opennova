@@ -23,6 +23,7 @@ var _autofire_env := OS.get_environment("NW_LAN_AUTOFIRE")
 var _reload_was_down := false
 var _scope_was_down := false
 var _look_delta := Vector2.ZERO
+var _elapsed := 0.0
 var _frame_sequence := 0
 # The manual weapon-switch keys — the retail defaults from the shipped binding
 # catalog: rows 28-36 Knife '1' / Secondary '2' / Primary '3' / Flashbang '4' /
@@ -91,6 +92,15 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 	# unattended session can fly a helicopter the player has been seated in.
 	# Value is a direction word: f/b/l/r. Inert without the env var.
 	var fly_hold := OS.get_environment("NW_FLY_HOLD")
+	# NW_FLY_HOLD2 + NW_FLY_HOLD_AT switch to a second direction word after N
+	# seconds, so one unattended run can climb and then come back down -- the
+	# only way to exercise the landing legs without a human at the stick.
+	var hold_at := float(OS.get_environment("NW_FLY_HOLD_AT"))
+	if hold_at > 0.0 and _elapsed >= hold_at:
+		var second := OS.get_environment("NW_FLY_HOLD2")
+		if not second.is_empty():
+			fly_hold = second
+	_elapsed += delta
 	if not fly_hold.is_empty():
 		# u/d ride the LEAN keys: retail packs lean_left/lean_right as MoveOrder
 		# bits 0x40/0x80, and the aircraft mover reads those same two bits as

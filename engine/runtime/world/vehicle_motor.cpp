@@ -1973,19 +1973,20 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
             m.net_alt_target = 0x1000000;
         }
         if (climb < 0) {
-            // DIVERGENCE (unported half of the witnessed clamp pair): retail's
-            // companion clamp here is `[548] < 0 -> [548] = 0, [524] = ground`
-            // — a floor, not a shutdown; its landed reset lives in the separate
-            // not-airborne branch (`entity+36 >= 0` @0x490d5c) which we fold in
-            // here. Splitting them needs a landing round to validate, so it is
-            // the named next step, not a silent rewrite.
-            // Landed: the engine-off reset — commands zero, steer holds the
-            // hull's own heading, the target parks below ground level.
-            m.net_alt_target = ground - 0x4000;
-            m.cmd_speed = 0;
-            m.cmd_lateral_speed = 0;
-            m.steer_target_bam = m.yaw_bam;
-            return;
+            // The companion clamp, and ALL it does: a target below the ground
+            // floors AT the ground. It is a floor, not a shutdown -- retail
+            // neither zeroes the commands here nor abandons the rest of the
+            // input staging, which is why a pilot can still slide along at
+            // hover height with the collective held down.
+            //
+            // We used to fold retail's separate engine-off landed reset into
+            // this arm (parking the target at ground - 0x4000, zeroing both
+            // commands, pinning the steer, and returning early). That reset is
+            // a DIFFERENT branch on a different gate, and the rotor start-up
+            // hold now covers the case that folding was standing in for.
+            // [orig: LABEL_175 @0x4912xx -- `if ([548] < 0) { [548] = 0;
+            //  [524] = v78; }` with v78 the average ground height]
+            m.net_alt_target = ground;
         }
     }
     (void)pz;
