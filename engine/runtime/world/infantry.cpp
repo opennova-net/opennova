@@ -450,8 +450,49 @@ static void commit_body_state(InfantryState &inf, int resolved,
     }
 }
 
-void AiSystem::infantry_select(AiEntity &e) {
+void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
     InfantryState &inf = e.inf;
+
+    // EMPLACED. A mounted body in a GUNNER seat takes the emplaced state and
+    // skips the gait/idle selection entirely:
+    //
+    //     v99 = entity->parentSlot == 3;
+    //     if ( v99 ) {
+    //         Entity_AttachToBoneAndUpdateTransform(entity, v455);
+    //         entity->pendingAnimStateId = nullptr;
+    //         entity->animStateId = 67;
+    //         if ( itemDef->gap_86c == 1 && animMap[68] != *animMap ) = 68;
+    //         if ( itemDef->gap_86c == 2 && animMap[69] != *animMap ) = 69;
+    //     }
+    //
+    // [orig: Entity_UpdateInfantryAI @0x4b9910, the isInVehicle branch; the same
+    //  block appears in the player body @0x4b40e0.] SeatType::Gunner IS retail's
+    //  parentSlot 3, and `gap_86c` is the itemDef mount config our ItemSeatSpec
+    //  carries as mount_config and promote stamps onto the occupant as
+    //  mounted_config.
+    //
+    // Without this a seated gunner fell through to the not-moving branch and
+    // idled: measured on the wire, retail spends 21.3% of all infantry rows in
+    // state 67 and we emitted it 0.0% of the time, while idling 47% against
+    // retail's 9.7%.
+    //
+    // DIVERGENCE, declared: retail tests `animMap[68] != *animMap`, i.e. the
+    // variant row differs from the default entry. We ask the root-motion source
+    // whether the clip exists, which is the same question our anim registry can
+    // answer; the bone attach and pendingAnimStateId clear that retail does here
+    // belong to the presentation/attach path and are not reproduced in the
+    // selector.
+    if (self != nullptr && self->mounted && self->mount_type == SeatType::Gunner) {
+        int emplaced = anim_state::kEmplaced; // 67
+        if (self->mounted_config_valid && root_motion != nullptr) {
+            if (self->mounted_config == 1 && root_motion->has_clip(inf.adm_id, 68))
+                emplaced = 68;
+            if (self->mounted_config == 2 && root_motion->has_clip(inf.adm_id, 69))
+                emplaced = 69;
+        }
+        commit_body_state(inf, infantry_resolve_state(inf.adm_id, emplaced), root_motion);
+        return;
+    }
     // The WALK-vs-RUN gate, ported 1:1 from the move-state selection:
     //
     //     v99 = entity->damageTimer == 0;
@@ -1196,7 +1237,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
              kEntityFlagLadderContact) != 0)
             inf.move_mode = 0;
         else
-            infantry_select(e);
+            infantry_select(e, tick_entity);
     }
 
     // 2c. The on-ladder override + player dismounts (org2; EVERY tick — the

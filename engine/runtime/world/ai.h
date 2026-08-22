@@ -1014,7 +1014,7 @@ public:
     void infantry_board_think(AiEntity &e, World &world, int32_t command);
     // Map the movement order to an anim state (walk/run/jog/turn/stop/wounded + availability
     // fallbacks) and commit it under the lock/emote rules.
-    void infantry_select(AiEntity &e);
+    void infantry_select(AiEntity &e, const Entity *self);
     // The witnessed org2 PLAYER-BODY selection, shared by the local player and the
     // authority-side remote-player path (the original runs ONE function for both):
     // moving base 1/11/19 + direction offset; idle 48 / 45 (46 idle_mortar for
