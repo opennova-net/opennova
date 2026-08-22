@@ -261,9 +261,24 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     // itemDef / model preamble, the groundEntity path, Entity_IsBoneInProximity,
     // and the Flags&0x2000 + 16-unit savedLivePose arm) remain unported — only
     // the attrib gate that guards the CALL is ported here.
-    const bool target_admits_occupants =
-            (target->item_attrib & kItemAttribPlayerControl) != 0;
-    if (target_admits_occupants && seat_idx >= 0 && !target->seats.empty())
+    // RETRACTED 2026-08-22: this branch previously required
+    // `target->item_attrib & kItemAttribPlayerControl` before mounting. The
+    // attrib 0x40 test IS witnessed, but it guards the Entity_CanEnterVehicle
+    // CONSULT, not the attach itself:
+    //
+    //     if ((v158->itemDef->attrib & 0x40) != 0) { CanEnterVehicle = ...; }
+    //     LABEL_308: walk toward the target
+    //
+    // Gating the MOUNT on it was an over-application of the witness, and the wire
+    // refutes it: retail emplaces SEVEN AI at ~100% of their rows, and three of
+    // them are handles 42/43/51 -- exactly the soldiers 00TRg orders onto the
+    // 1902 tripods (attrib EWeap, no PlayerControl). Retail mans those tripods;
+    // the gate stopped us doing so. [orig: Entity_UpdateInfantryAI @0x4b9910.]
+    //
+    // The attach path retail takes for a non-PlayerControl target is NOT yet
+    // witnessed (the LABEL_363 leg is unread), so no replacement gate is invented
+    // here: the admit condition returns to "the target owns a seat we selected".
+    if (seat_idx >= 0 && !target->seats.empty())
         world.commands.mount_boarding_command(self->net_id, target_ssn,
                                               static_cast<uint8_t>(command));
 }

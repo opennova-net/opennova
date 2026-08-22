@@ -382,6 +382,25 @@ int main() {
 					oi, b.type_id, b.x / 65536.0, b.y / 65536.0, int(b.group_id),
 					int(b.waypoint_id), int(b.wp_number));
 		}
+		{
+			// EVERY Gunner seat in the world and whether it is filled -- the
+			// precondition census for the emplaced state.
+			int gun_total = 0, gun_filled = 0, owners = 0;
+			world.registry.for_each([&](const w::Entity &en) {
+				int g = 0, f = 0;
+				for (const w::Seat &st : en.seats) {
+					if (st.type != w::SeatType::Gunner) continue;
+					++g; if (st.occupant.valid()) ++f;
+				}
+				if (g == 0) return;
+				++owners; gun_total += g; gun_filled += f;
+				std::printf("   GUNSEAT owner=%-6u item=%-6d guns=%d filled=%d parent=%u\n",
+						unsigned(en.handle.packed), en.item_id, g, f,
+						unsigned(en.emplacement_parent.packed));
+			});
+			std::printf("GUNSEAT CENSUS: %d owners, %d gunner seats, %d filled\n",
+					owners, gun_total, gun_filled);
+		}
 		std::printf("board carriers:\n");
 		for (int j = 0; j < n; ++j) {
 			const w::AiEntity *e = ai.at(j);
@@ -468,10 +487,26 @@ int main() {
 		}
 		std::printf("board gate: %d command AI, %d mounted, %d on non-PlayerControl\n",
 				cmd125, mounted_total, mounted_on_eweap);
-		expect(mounted_on_eweap == 0,
-				"no AI boards a target lacking PlayerControl [orig: @0x4b9910 attrib&0x40]");
-		expect(mounted_total > 0,
-				"the PlayerControl carriers are still boarded (the gate is not a blanket reject)");
+		// RETRACTED: this used to assert `mounted_on_eweap == 0`, pinning the
+		// over-applied PlayerControl mount gate. The wire refutes it -- retail
+		// emplaces seven AI at ~100% of their rows, three of them the soldiers
+		// 00TRg orders onto the 1902 tripods (EWeap, no PlayerControl). Boarding
+		// a bare emplacement is CORRECT; the assertion now pins that the gunner
+		// seats actually get filled, which is what the emplaced state needs.
+		int gun_seats = 0, gun_filled = 0;
+		world.registry.for_each([&](const w::Entity &en) {
+			for (const w::Seat &st : en.seats) {
+				if (st.type != w::SeatType::Gunner) continue;
+				++gun_seats;
+				if (st.occupant.valid()) ++gun_filled;
+			}
+		});
+		std::printf("gunner seats: %d, filled %d\n", gun_seats, gun_filled);
+		expect(mounted_total > 0, "board commands still mount");
+		expect(gun_seats > 0, "the mission's gunner seats are extracted");
+		expect(gun_filled >= gun_seats / 2,
+				"most gunner seats get filled [orig: FindBestSeatSlot @0x4351f0 "
+				"weights UseGun 0x20000 above passenger 0x200000]");
 	}
 
 	if (failures == 0) std::printf("ai path conformance tests passed\n");
