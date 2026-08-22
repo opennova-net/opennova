@@ -11,6 +11,8 @@
 namespace opennova::bink {
 namespace {
 
+// [orig: BinkVideo_DecodeFrame @ 0x3001F260 and
+// BinkVideo_DecodePlane @ 0x3001D2C0 in the retail Bink 1.5u decoder.]
 constexpr uint32_t kBikiMagic = 0x694b4942U;
 constexpr uint32_t kHeaderSize = 44;
 constexpr uint32_t kMaximumDimension = 16384;
