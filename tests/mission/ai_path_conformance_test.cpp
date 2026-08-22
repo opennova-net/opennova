@@ -298,13 +298,34 @@ int main() {
 						k, ne->f[0], ne->f[1], ne->f[2], ne->f[3], ne->f[4]);
 			}
 		}
+		// Every RedirectGroupTo / RedirectSingleTo in the mission, with the event
+		// that carries it: does the script ever re-task the tripod gunners?
+		for (size_t ei = 0; ei < m.events.size(); ++ei) {
+			const bms::Event &ev = m.events[ei];
+			for (int ai2 = 0; ai2 < ev.action_count; ++ai2) {
+				const size_t idx = size_t(ev.action_index) + size_t(ai2);
+				if (idx >= m.actions.size()) continue;
+				const bms::Action &ac = m.actions[idx];
+				const int t = int(ac.action_type);
+				if (t != 1 && t != 19) continue;   // RedirectGroupTo / RedirectSingleTo
+				std::printf("   REDIR ev=%zu type=%d sub=%d p1=%d p2=%d p3=%d p4=%d\n",
+						ei, t, ac.action_sub_type, ac.param1, ac.param2, ac.param3, ac.param4);
+			}
+		}
 		// AUTHORED organic spawns straight off the BMS, the arbiter for any
 		// placement claim: whichever capture matches these is the correct one.
+		std::printf("authored items: %zu\n", m.items.size());
+		for (size_t ii = 0; ii < m.items.size(); ++ii) {
+			const bms::Entity &b = m.items[ii];
+			if (b.id != 64 && b.id != 65 && b.id != 68 && b.id != 60 && b.type_id != 1902) continue;
+			std::printf("   BMSITEM %zu id=%d type=%d pos=(%.1f,%.1f)\n",
+					ii, b.id, b.type_id, b.x / 65536.0, b.y / 65536.0);
+		}
 		std::printf("authored organics: %zu\n", m.organics.size());
 		for (size_t oi = 0; oi < m.organics.size(); ++oi) {
 			const bms::Entity &b = m.organics[oi];
-			std::printf("   BMSORG %zu type=%d pos=(%.1f,%.1f) wp=%d wpnum=%d\n",
-					oi, b.type_id, b.x / 65536.0, b.y / 65536.0,
+			std::printf("   BMSORG %zu type=%d pos=(%.1f,%.1f) grp=%d wp=%d wpnum=%d\n",
+					oi, b.type_id, b.x / 65536.0, b.y / 65536.0, int(b.group_id),
 					int(b.waypoint_id), int(b.wp_number));
 		}
 		std::printf("board carriers:\n");
