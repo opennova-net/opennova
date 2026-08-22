@@ -302,7 +302,7 @@ int main() {
 		// TRANSPORT TRACE: the two 1294s (bms 58/63) across event 10 at ~139 s
 		// (tick 8688), which redirects them to channels 13/14 to clear the drop
 		// point. Question: does the order land, and do they then drive?
-		if (std::getenv("NW_TRUCK_TRACE") != nullptr && (t % 625) == 0) {
+		if (std::getenv("NW_TRUCK_TRACE") != nullptr && (t % (std::getenv("NW_TRK_EVERY") ? std::atoi(std::getenv("NW_TRK_EVERY")) : 625)) == 0) {
 			world.registry.for_each([&](const w::Entity &en) {
 				if (en.bms_id != 58 && en.bms_id != 63) return;
 				const w::AiEntity *ae = ai.for_handle(en.handle);
