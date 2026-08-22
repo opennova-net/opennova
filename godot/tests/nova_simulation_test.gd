@@ -306,6 +306,24 @@ func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 	sim.free()
 
 
+func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
+	var sim := Simulation.new()
+	sim.configure_host_session({
+		"gametype": NetProtocol.GAME_TYPE_FLAGBALL,
+		"max_score": 9,
+		"koth_delta": 7,
+		"flag_return_ticks": 333,
+		"num_teams": 4,
+	})
+	var options: Dictionary = sim.get_host_session_config()
+	assert_eq(int(options.get("gametype", -1)), NetProtocol.GAME_TYPE_FLAGBALL)
+	assert_eq(int(options.get("max_score", -1)), 9)
+	assert_eq(int(options.get("koth_delta", -1)), 7)
+	assert_eq(int(options.get("flag_return_ticks", -1)), 333)
+	assert_eq(int(options.get("num_teams", -1)), 4)
+	sim.free()
+
+
 func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
 	var sim := Simulation.new()
 	assert_eq(String(sim.get_host_session_config().get("integrity_profile", "x")), "",

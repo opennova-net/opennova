@@ -31,7 +31,10 @@ frame pipeline. [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) then
 completed the no-compat cutover to portable `opennova::inmatch::Session` in
 `engine/net/inmatch`, made `world::Match` the shared all-retail-mode/co-op gameplay
 owner, and demoted `npruntime`/`netsim` from public layers to implementation
-directories. `godot/game/world/game_frame_pipeline.gd` remains the
+directories. The same typed host request now carries every mode's rule inputs
+(including flag limit/return time, KOTH delta, and two/four-side selection),
+with an explicit Flag Me route for retail's otherwise-unreachable task-12
+launch branch. `godot/game/world/game_frame_pipeline.gd` remains the
 device-order owner, superseding ADR 0033's R1 callback-bus design; PR #468 moved local-player camera placement plus
 the ObjectModel material loop onto pipeline legs. The P1 rewrite queue that
 followed (env/weather, placer,

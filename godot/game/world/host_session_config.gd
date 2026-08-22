@@ -22,6 +22,7 @@ const GAME_TYPE_COOP := NetProtocol.GAME_TYPE_COOP                           # L
 const GAME_TYPE_TRAINING_COOP := NetProtocol.GAME_TYPE_TRAINING_COOP         # LTGT_COOP (stock)
 const GAME_TYPE_DEATHMATCH := NetProtocol.GAME_TYPE_DEATHMATCH               # LTGT_DM
 const GAME_TYPE_KING_OF_THE_HILL := NetProtocol.GAME_TYPE_KING_OF_THE_HILL   # LTGT_KOTH
+const GAME_TYPE_FLAG_ME := NetProtocol.GAME_TYPE_FLAG_ME                     # LTGT_FM
 const GAME_TYPE_TEAM_DEATHMATCH := NetProtocol.GAME_TYPE_TEAM_DEATHMATCH     # LTGT_TDM
 const GAME_TYPE_TEAM_KING_OF_THE_HILL := NetProtocol.GAME_TYPE_TEAM_KING_OF_THE_HILL # LTGT_TKOTH
 const GAME_TYPE_ATTACK_AND_DEFEND := NetProtocol.GAME_TYPE_ATTACK_AND_DEFEND # LTGT_AD
@@ -89,6 +90,10 @@ var time_limit_minutes := NetProtocol.DEFAULT_TIME_LIMIT_MINUTES
 var replay_enabled := NetProtocol.DEFAULT_REPLAY_ENABLED
 var max_team_lives := NetProtocol.DEFAULT_MAX_TEAM_LIVES
 var score_limit := NetProtocol.DEFAULT_SCORE_LIMIT
+var max_score := NetProtocol.DEFAULT_MAX_SCORE
+var koth_delta := NetProtocol.DEFAULT_KOTH_DELTA
+var flag_return_ticks := NetProtocol.DEFAULT_FLAG_RETURN_TICKS
+var num_teams := NetProtocol.DEFAULT_NUM_TEAMS
 var respawn_timeout := NetProtocol.DEFAULT_RESPAWN_TIMEOUT
 var start_delay := NetProtocol.DEFAULT_START_DELAY
 var destroy_buildings := NetProtocol.DEFAULT_DESTROY_BUILDINGS
@@ -126,6 +131,10 @@ func to_session_options() -> Dictionary:
 		"replay_enabled": replay_enabled,
 		"max_team_lives": max_team_lives,
 		"score_limit": score_limit,
+		"max_score": max_score,
+		"koth_delta": koth_delta,
+		"flag_return_ticks": flag_return_ticks,
+		"num_teams": num_teams,
 		"respawn_timeout": respawn_timeout,
 		"start_delay": start_delay,
 		"destroy_buildings": destroy_buildings,

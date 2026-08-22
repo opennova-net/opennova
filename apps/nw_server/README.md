@@ -22,6 +22,12 @@ the default resource root for its `.env` and the retail WAC layers
 environment file, or `NW_RESOURCE_ROOT` when the shared WAC layers were exported
 to a different directory. A present WAC layer that cannot be read or compiled
 aborts before the UDP socket opens; having no WAC layers is a valid BMS-only
-mission. The mission's authored mode selects the live game type (including TDM,
-Advance and Secure, and co-op); an optional loose `score.ini` in the resource
-root overlays the retail default score table and is rejected if malformed.
+mission. The mission's authored mode normally selects the live game type. Set
+`NW_GAME_TYPE` to an exact decimal or `0x`-prefixed `g_GameType` code when a
+wire capture needs an explicit mode, and `NW_NUM_TEAMS=4` for retail's
+four-side TDM, team KOTH, or FlagBall form. This override is also how the
+harness reaches Flag Me (`0x8`): retail retains a type-12 load branch but its
+BMS task-bit mapper has no path that returns 12
+[`AI_GetTaskTypeFromFlags @0x40DAE0`; `Game_StartMission @0x524360`]. An
+optional loose `score.ini` in the resource root overlays the retail default
+score table and is rejected if malformed.

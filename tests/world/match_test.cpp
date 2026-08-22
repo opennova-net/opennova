@@ -726,30 +726,32 @@ void test_end_result_is_frozen_in_retail_board_order() {
 }
 
 void test_coop_remains_script_owned() {
-    auto world = std::make_unique<World>();
-    world->registry.configure_pool(0, 4);
-    world->match.configure(rules(kCoop, 1, 50));
-    const EntityHandle blue = player(*world, 0, 1, "Blue");
-    const EntityHandle red = player(*world, 1, 2, "Red");
-    world->match.record_death(*world, red, blue);
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
-    CHECK(world->match.remaining_ticks() == -1); // waypoint Co-op never seeds GameTime
-    CHECK(!world->match.winner_if_finished(*world).has_value());
-    world->process_round_end(1); // the WAC/BMS path used by cooperative missions
-    CHECK(world->match.outcome().ended);
-    CHECK(world->match.outcome().winner_team == 1);
-    CHECK(world->match.result().team_scores[0] == 10);
-    CHECK(world->match.result().team_scores[1] == -2);
-    CHECK(!world->match.result().draw);
-    CHECK(world->match.result().players[0].primary_score == 10);
-    CHECK(world->match.result().score_fields.size() == 7);
-    CHECK(world->match.result().score_fields.front().field == 19 &&
-          world->match.result().score_fields.front().enabled);
-    CHECK(world->match.result().score_fields.back().field == 21 &&
-          world->match.result().score_fields.back().enabled);
-    world->process_round_end(2);
-    CHECK(world->match.outcome().winner_team == 1); // shared double-run latch
+    for (const uint32_t game_type : {gt::kCoop, gt::kObjectiveCoop}) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->match.configure(rules(game_type, 1, 50));
+        const EntityHandle blue = player(*world, 0, 1, "Blue");
+        const EntityHandle red = player(*world, 1, 2, "Red");
+        world->match.record_death(*world, red, blue);
+        for (int i = 0; i < 60 * 62; ++i)
+            world->match.advance_tick(*world);
+        CHECK(world->match.remaining_ticks() == -1); // waypoint Co-op never seeds GameTime
+        CHECK(!world->match.winner_if_finished(*world).has_value());
+        world->process_round_end(1); // the WAC/BMS path used by cooperative missions
+        CHECK(world->match.outcome().ended);
+        CHECK(world->match.outcome().winner_team == 1);
+        CHECK(world->match.result().team_scores[0] == 10);
+        CHECK(world->match.result().team_scores[1] == -2);
+        CHECK(!world->match.result().draw);
+        CHECK(world->match.result().players[0].primary_score == 10);
+        CHECK(world->match.result().score_fields.size() == 7);
+        CHECK(world->match.result().score_fields.front().field == 19 &&
+              world->match.result().score_fields.front().enabled);
+        CHECK(world->match.result().score_fields.back().field == 21 &&
+              world->match.result().score_fields.back().enabled);
+        world->process_round_end(2);
+        CHECK(world->match.outcome().winner_team == 1); // shared double-run latch
+    }
 }
 
 } // namespace

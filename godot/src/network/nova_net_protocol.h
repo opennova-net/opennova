@@ -37,6 +37,7 @@ public:
 		// beyond the objective bit — never decompose them).
 		GAME_TYPE_DEATHMATCH = opennova::game_type::kDeathmatch,
 		GAME_TYPE_KING_OF_THE_HILL = opennova::game_type::kKingOfTheHill,
+		GAME_TYPE_FLAG_ME = opennova::game_type::kFlagMe,
 		GAME_TYPE_TEAM_DEATHMATCH = opennova::game_type::kTeamDeathmatch,
 		GAME_TYPE_TEAM_KING_OF_THE_HILL = opennova::game_type::kTeamKingOfTheHill,
 		GAME_TYPE_ATTACK_AND_DEFEND = opennova::game_type::kAttackDefend,
@@ -70,6 +71,10 @@ public:
 		DEFAULT_REPLAY_ENABLED = opennova::game_rules::kDefaultReplayEnabled,
 		DEFAULT_MAX_TEAM_LIVES = opennova::game_rules::kDefaultMaxTeamLives,
 		DEFAULT_SCORE_LIMIT = opennova::game_rules::kDefaultScoreLimit,
+		DEFAULT_MAX_SCORE = opennova::game_rules::kDefaultMaxScore,
+		DEFAULT_KOTH_DELTA = opennova::game_rules::kDefaultKothDelta,
+		DEFAULT_FLAG_RETURN_TICKS = opennova::game_rules::kDefaultFlagReturnTicks,
+		DEFAULT_NUM_TEAMS = opennova::game_rules::kDefaultNumTeams,
 		DEFAULT_RESPAWN_TIMEOUT = opennova::game_rules::kDefaultRespawnTimeout,
 		DEFAULT_START_DELAY = opennova::game_rules::kDefaultStartDelay,
 		DEFAULT_DESTROY_BUILDINGS = opennova::game_rules::kDefaultDestroyBuildings,
