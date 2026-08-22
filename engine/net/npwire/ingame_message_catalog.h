@@ -70,6 +70,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::CHAR_MINIMAP_UPDATE,       "char-minimap-update",     MsgCoverage::PrinterOnly, "[u8 pool0Idx][u8 team][u8 flags7][u16 packedCharId] → NetId + CharacterEntity rebind @0x427D00 (§5.59)"},
 		{'S', s2c::CHAT_HISTORY,              "chat-history",            MsgCoverage::Decoded,     "§5.35 decode_chat_history_entry"},
 		{'S', s2c::MISSION_MAP_NAMES,         "mission-map-names",       MsgCoverage::Decoded,     "§5.51 decode_mission_map_names (join burst)"},
+		{'S', s2c::OBJECTIVE_ENTITY_STATE,    "objective-entity-state",  MsgCoverage::Decoded,     "decode_objective_entity_state: 19-B flag/carryable pose + occupant + ground links; NapiNPClientMsg_0x02F @0x430E10"},
 		{'S', s2c::ENTITY_CHECKSUM_REQ,       "entity-checksum-req",     MsgCoverage::Decoded,     "§5.35 decode_entity_checksum_request (-> C2S 0x20)"},
 		{'S', s2c::LOADOUT_CRC_REQ,           "loadout-crc-req",         MsgCoverage::Decoded,     "§5.35 decode_loadout_crc_request (3 B ammo-def CRC request → C2S 0x21 @0x4311E0)"},
 		{'S', s2c::PLAY_SOUND,                "play-sound",              MsgCoverage::Decoded,     "§5.50 decode_play_sound (profile name + optional 3D pos)"},

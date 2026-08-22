@@ -162,6 +162,7 @@ enum class DeathMotionMode : uint8_t {
 // static_asserts against def.h live in npruntime/src/weapon_table_build.cpp.
 // [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155]
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
+inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
 inline constexpr uint32_t kItemAttribSpawnPoint = 0x40000u;
@@ -178,10 +179,11 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // The retail entity Flags dword bits (Entity::engine_flags + the organic
 // low-byte legacy `flags` mirror; entity+36). ONE home for every bit with a
 // witnessed meaning; the consolidated per-bit table is
-// docs/world/world-wac-ai-re.md § "The entity Flags dword". Known-but-unnamed
-// bits stay raw at use sites — do not name: 0x1, 0x10000, 0x2000000,
+// docs/world/world-wac-ai-re.md § "The entity Flags dword". Remaining
+// known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
 // 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
 // meanings unwitnessed).
+inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachToVehicle @0x43C130]
 inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
 inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
 inline constexpr uint32_t kEntityFlagNVGWorn = 0x4;           // organics: NVG draw, same bit kind-dependent
@@ -691,9 +693,9 @@ struct Entity {
     // family above. Read by the GroupHoldingGroup/SingleHoldingGroup trigger
     // conditions against the held object's command group. Every witnessed
     // producer is the CTF/carryable pickup-drop-capture family or the savegame
-    // restore (bms-event-runtime-re §3b item 4) — none of those systems are
-    // ported yet, so the link stays kInvalid in our sim until the carry system
-    // lands; the conditions themselves are live. [orig: set
+    // restore (bms-event-runtime-re §3b item 4). Match owns the live flag
+    // producer; the conditions and savegame consumer share this same link.
+    // [orig: set
     // Entity_AttachToVehicle @0x43c130; cleared Entity_DropCarriedObject
     // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing

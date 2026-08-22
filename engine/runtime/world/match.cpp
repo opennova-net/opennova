@@ -1,45 +1,110 @@
 #include "world/match.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
+#include "world/game_type.h"
 #include "world/world.h"
 
 namespace opennova::world {
 namespace {
 
-constexpr uint32_t kGameTypeTeamDeathmatch = 0x10000u;
-constexpr uint32_t kGameTypeTeamKingOfTheHill = 0x10001u;
-constexpr uint32_t kGameTypeFlagBall = 0x10008u;
-constexpr uint32_t kGameTypeAdvanceAndSecure = 0x10010u;
-constexpr uint32_t kGameTypeConquerAndControl = 0x50010u;
-constexpr uint32_t kWaypointFamilyMask = 0xFFFDFFFFu;
-constexpr uint32_t kWaypointFamilyValue = 0x10020u;
+namespace gt = opennova::game_type;
+
 constexpr int32_t kTicksPerMinute = 60 * 62;
+constexpr int32_t kBlueFlag = 4091;
+constexpr int32_t kRedFlag = 4093;
+constexpr int32_t kNeutralFlag = 4095;
+constexpr int32_t kBlueBay = 4098;
+constexpr int32_t kRedBay = 4100;
+constexpr int32_t kTeam4Bay = 4102;
+constexpr int32_t kTeam3Bay = 4103;
+constexpr int32_t kHill = 6006;
+
+bool is_flag(int32_t item_id) {
+    return item_id == kBlueFlag || item_id == kRedFlag || item_id == kNeutralFlag;
+}
+
+bool is_flag_bay(int32_t item_id) {
+    return item_id == kBlueBay || item_id == kRedBay ||
+           item_id == kTeam4Bay || item_id == kTeam3Bay;
+}
+
+bool overlaps_objective(const Entity &player, const Entity &objective) {
+    const float dx = player.position.x - objective.position.x;
+    const float dy = player.position.y - objective.position.y;
+    const float dz = player.position.z - objective.position.z;
+    const float radius = std::max(2.0f, player.bound_radius + objective.bound_radius);
+    return dx * dx + dy * dy + dz * dz <= radius * radius;
+}
+
+int32_t unique_best_team(const std::array<int32_t, 5> &scores) {
+    int32_t best = std::numeric_limits<int32_t>::min();
+    int32_t winner = 0;
+    bool tied = false;
+    for (uint8_t team = 1; team <= 4; ++team) {
+        if (scores[team] > best) {
+            best = scores[team];
+            winner = team;
+            tied = false;
+        } else if (scores[team] == best) {
+            tied = true;
+        }
+    }
+    return tied ? 0 : winner;
+}
 
 bool is_waypoint_family(uint32_t game_type) {
-    return (game_type & kWaypointFamilyMask) == kWaypointFamilyValue;
+    return gt::is_waypoint_family(game_type);
 }
 
 std::vector<MatchScoreField> make_default_score_fields(uint32_t game_type) {
-    // These are the four target rows installed by
-    // GameType_CreateDefaultSettings, including disabled columns and their
-    // original order. score.ini can replace the whole row later.
+    // Every row installed by GameType_CreateDefaultSettings, including
+    // disabled columns and original order. score.ini replaces the whole row.
     // [orig: GameType_CreateDefaultSettings @0x52DD00]
-    if (game_type == kGameTypeTeamDeathmatch) {
+    if (game_type == gt::kDeathmatch) {
+        return {{19, 1}, {3, 1}, {4, 1}, {1, 0}, {15, 0},
+                {16, 0}, {17, 0}, {27, 0}, {21, 1}};
+    }
+    if (game_type == gt::kTeamDeathmatch) {
         return {
             {19, 1}, {3, 1},  {2, 0},  {4, 1},  {1, 0},  {30, 1}, {10, 1},
             {11, 0}, {12, 0}, {13, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1},
         };
     }
-    if (game_type == kGameTypeAdvanceAndSecure) {
+    if (game_type == gt::kKingOfTheHill) {
+        return {{19, 1}, {5, 1}, {22, 1}, {18, 1}, {3, 1}, {4, 1},
+                {1, 0}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
+    }
+    if (game_type == gt::kTeamKingOfTheHill) {
+        return {{19, 1}, {5, 1}, {22, 1}, {18, 1}, {3, 1}, {2, 0},
+                {4, 1}, {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0},
+                {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
+    }
+    if (game_type == gt::kSearchAndDestroy || game_type == gt::kAttackDefend) {
+        return {{19, 1}, {8, 1}, {3, 1}, {2, 0}, {4, 1}, {1, 0}, {30, 1},
+                {10, 1}, {11, 0}, {12, 0}, {13, 1}, {15, 0}, {16, 0},
+                {17, 0}, {27, 0}, {21, 1}};
+    }
+    if (game_type == gt::kCaptureTheFlag) {
+        return {{19, 1}, {6, 1}, {7, 1}, {14, 1}, {3, 1}, {2, 0}, {4, 1},
+                {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0}, {13, 0},
+                {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
+    }
+    if (game_type == gt::kFlagBall) {
+        return {{19, 1}, {6, 1}, {14, 1}, {29, 1}, {28, 1}, {3, 1}, {2, 0},
+                {4, 1}, {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0},
+                {13, 0}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
+    }
+    if (game_type == gt::kAdvanceAndSecure) {
         return {
             {19, 1}, {3, 1},  {2, 0},  {4, 1},  {1, 0},  {30, 1}, {10, 1}, {11, 0},
             {32, 1}, {12, 0}, {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1},
         };
     }
-    if (game_type == kGameTypeConquerAndControl) {
+    if (game_type == gt::kConquerAndControl) {
         return {
             {19, 1}, {6, 1},  {14, 1}, {29, 1}, {28, 1}, {3, 1},  {2, 0},
             {4, 1},  {1, 0},  {30, 1}, {10, 1}, {11, 0}, {32, 1}, {12, 0},
@@ -55,13 +120,8 @@ std::vector<MatchScoreField> make_default_score_fields(uint32_t game_type) {
 }
 
 uint8_t scoreboard_team_row_count(const MatchRules &rules) {
-    if ((rules.game_type & 0x10000u) == 0)
-        return 0;
-    if (rules.team_count == 4 &&
-        (rules.game_type == kGameTypeTeamDeathmatch ||
-         rules.game_type == kGameTypeTeamKingOfTheHill || rules.game_type == kGameTypeFlagBall))
-        return 5;
-    return 3;
+    const uint8_t teams = gt::active_team_count(rules.game_type, rules.team_count);
+    return teams == 0 ? 0 : static_cast<uint8_t>(teams + 1);
 }
 
 void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
@@ -96,32 +156,76 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
 
 std::array<int32_t, 39> default_match_score_values(uint32_t game_type) {
     std::array<int32_t, 39> values{};
-    const bool common_scoring = game_type == kGameTypeTeamDeathmatch ||
-                                game_type == kGameTypeAdvanceAndSecure ||
-                                game_type == kGameTypeConquerAndControl ||
-                                is_waypoint_family(game_type);
-    if (!common_scoring)
-        return values;
-
-    // The TDM and Co-op rows share these nonzero VAR defaults. A&S/CAC add
-    // their zone-presence and takeover values below. Indices are scorer slots
-    // 74+n and therefore match MatchRules::score_values directly.
     // [orig: GameType_CreateDefaultSettings @0x52DD00]
-    values[3] = 5;   // ENEMYKILL
-    values[6] = 1;   // MEDICHEAL
-    values[7] = 2;   // MEDICSAVE
-    values[15] = 12; // PSPTAKEOVER
-    values[16] = 10; // MULTIPLEKILL
-    values[17] = 5;  // HEADSHOTKILL
-    values[18] = 1;  // KNIFEKILL
-    values[37] = 5;  // VATTACHKILL
-    if (game_type == kGameTypeAdvanceAndSecure ||
-        game_type == kGameTypeConquerAndControl) {
-        values[12] = 5;  // ZONEQUANTUM
-        values[24] = 2;  // MEINMYZONEKILL
-        values[26] = 2;  // MEINTHEIRZONEKILL
-        values[31] = 1;  // INAZONE
-        values[34] = 15; // LFPTAKEOVER
+    auto common_combat = [&] {
+        values[3] = 5;
+        values[6] = 1;
+        values[7] = 2;
+        values[15] = 12;
+        values[16] = 10;
+        values[17] = 5;
+        values[18] = 1;
+        values[37] = 5;
+    };
+
+    if (game_type == gt::kDeathmatch) {
+        values[3] = 5;
+        values[16] = 10;
+        values[17] = 5;
+        values[18] = 1;
+        values[37] = 5;
+    } else if (game_type == gt::kTeamDeathmatch || is_waypoint_family(game_type)) {
+        common_combat();
+    } else if (game_type == gt::kKingOfTheHill) {
+        values[3] = 2;
+        values[12] = 5;
+        values[16] = 10;
+        values[17] = 5;
+        values[18] = 1;
+        values[21] = 5;
+        values[22] = 5;
+        values[33] = 1;
+        values[37] = 5;
+    } else if (game_type == gt::kTeamKingOfTheHill) {
+        values[3] = 2;
+        values[6] = 1;
+        values[7] = 2;
+        values[12] = 10;
+        values[15] = 12;
+        values[16] = 10;
+        values[17] = 5;
+        values[18] = 1;
+        values[21] = 5;
+        values[22] = 5;
+        values[33] = 1;
+        values[37] = 5;
+    } else if (game_type == gt::kSearchAndDestroy || game_type == gt::kAttackDefend) {
+        common_combat();
+        values[13] = 50;
+        values[24] = 2;
+        if (game_type == gt::kSearchAndDestroy)
+            values[26] = 2;
+        else
+            values[23] = 1;
+    } else if (game_type == gt::kCaptureTheFlag) {
+        common_combat();
+        values[9] = 10;
+        values[10] = 20;
+        values[11] = 2;
+        values[20] = 5;
+    } else if (game_type == gt::kFlagBall) {
+        common_combat();
+        values[10] = 40;
+        values[11] = 2;
+        values[20] = 5;
+    } else if (game_type == gt::kAdvanceAndSecure ||
+               game_type == gt::kConquerAndControl) {
+        common_combat();
+        values[12] = 5;
+        values[24] = 2;
+        values[26] = 2;
+        values[31] = 1;
+        values[34] = 15;
     }
     return values;
 }
@@ -145,8 +249,10 @@ int32_t match_score_field_value(const MatchStats &stats, uint8_t field, uint32_t
     case 4:
         return stats[7];
     case 5:
-        return game_type == 1u || game_type == kGameTypeTeamKingOfTheHill ? stats[31]
-                                                                          : stats[32] + stats[33];
+        return game_type == gt::kKingOfTheHill ||
+                       game_type == gt::kTeamKingOfTheHill
+                   ? stats[31]
+                   : stats[32] + stats[33];
     case 6:
         return stats[12];
     case 7:
@@ -210,8 +316,15 @@ void Match::configure(const MatchRules &rules) {
         rules_.score_values = default_match_score_values(rules_.game_type);
     players_.clear();
     teams_ = {};
+    team_hold_ticks_ = {};
+    periodic_second_timer_ = 0;
     outcome_ = {};
     result_ = {};
+    objective_census_ready_ = false;
+    flag_capture_targets_ = {};
+    demolition_targets_ = {};
+    carry_objectives_.clear();
+    gameplay_events_.clear();
     // Game_StartMission starts at -1 and seeds GameTime only for a network
     // session outside the Co-op waypoint family, and only when nonzero.
     // [orig: g_round_time_remaining=-1 @0x524A89; seed
@@ -240,10 +353,10 @@ void Match::upsert_player(const MatchPlayerIdentity &identity) {
         return p.identity.slot == identity.slot;
     });
     if (by_slot != players_.end()) {
-        *by_slot = MatchPlayer{identity, {}};
+        *by_slot = MatchPlayer{identity, {}, 0};
         return;
     }
-    players_.push_back(MatchPlayer{identity, {}});
+    players_.push_back(MatchPlayer{identity, {}, 0});
 }
 
 void Match::remove_player(EntityHandle entity) {
@@ -270,6 +383,20 @@ const MatchStats &Match::team_stats(uint8_t team) const {
     return team < teams_.size() ? teams_[team] : empty;
 }
 
+int32_t Match::flag_capture_target(const World &world, uint8_t scoring_team) {
+    ensure_objective_census(world);
+    return scoring_team < flag_capture_targets_.size()
+               ? flag_capture_targets_[scoring_team]
+               : 0;
+}
+
+int32_t Match::demolition_target(const World &world, uint8_t scoring_team) {
+    ensure_objective_census(world);
+    return scoring_team < demolition_targets_.size()
+               ? demolition_targets_[scoring_team]
+               : 0;
+}
+
 int32_t Match::score_value(size_t status_index) const {
     return rules_.score_values.has_value() && status_index < rules_.score_values->size()
                ? (*rules_.score_values)[status_index]
@@ -288,15 +415,239 @@ void Match::add_team_event(uint8_t team, size_t counter, int32_t points) {
     teams_[team][MatchStats::kPoints] += points;
 }
 
-void Match::record_death(const World &world, EntityHandle victim_handle,
+void Match::ensure_objective_census(const World &world) {
+    if (objective_census_ready_)
+        return;
+    flag_capture_targets_ = {};
+    demolition_targets_ = {};
+    world.registry.for_each([&](const Entity &entity) {
+        // CTF's two target globals count the authored opposing flags once at
+        // round start. Capturing one removes its entity but not the target.
+        // [orig: reset_round_counters @0x516C50; CTF arm @0x51B0F0]
+        if (entity.item_id == kRedFlag)
+            ++flag_capture_targets_[1];
+        else if (entity.item_id == kBlueFlag)
+            ++flag_capture_targets_[2];
+
+        // S&D/AD count item-attrib 0x8000 targets by defending team; the
+        // opposite team must destroy that complete authored census.
+        // [orig: reset_round_counters @0x516C50; win arm @0x51B18B]
+        if ((entity.item_attrib & kItemAttribObjectiveTarget) != 0) {
+            if (entity.team == 1)
+                ++demolition_targets_[2];
+            else if (entity.team == 2)
+                ++demolition_targets_[1];
+        }
+    });
+    objective_census_ready_ = true;
+}
+
+Match::CarryObjectiveState *Match::carry_state(World &world, EntityHandle objective) {
+    Entity *entity = world.registry.get(objective);
+    if (entity == nullptr || !is_flag(entity->item_id))
+        return nullptr;
+    auto found = std::find_if(carry_objectives_.begin(), carry_objectives_.end(),
+                              [&](const CarryObjectiveState &state) {
+                                  return state.objective == objective &&
+                                         state.spawn_id == entity->registry_spawn_id;
+                              });
+    if (found != carry_objectives_.end())
+        return &*found;
+    carry_objectives_.erase(
+        std::remove_if(carry_objectives_.begin(), carry_objectives_.end(),
+                       [&](const CarryObjectiveState &state) {
+                           return state.objective == objective;
+                       }),
+        carry_objectives_.end());
+    carry_objectives_.push_back(
+        {objective, entity->registry_spawn_id, entity->spawn_position, 0});
+    return &carry_objectives_.back();
+}
+
+void Match::record_flag_pickup(World &world, EntityHandle player_handle,
+                               EntityHandle flag_handle) {
+    if (outcome_.ended)
+        return;
+    MatchPlayer *scorer = player(player_handle);
+    Entity *carrier = world.registry.get(player_handle);
+    Entity *flag = world.registry.get(flag_handle);
+    CarryObjectiveState *state = carry_state(world, flag_handle);
+    if (scorer == nullptr || carrier == nullptr || flag == nullptr || state == nullptr ||
+        carrier->mounted_child.valid() || flag->primary_occupant.valid())
+        return;
+
+    carrier->mounted_child = flag_handle;
+    flag->primary_occupant = player_handle;
+    flag->flags |= kEntityFlagCarried;
+    state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
+    add_event(*scorer, MatchStats::kFlagPickups, score_value(11));
+    add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
+                                player_handle,
+                                flag_handle,
+                                flag->position,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                player_handle,
+                                flag->ground_target,
+                                false});
+}
+
+void Match::return_flag_home(World &world, EntityHandle flag_handle,
+                             MatchGameplayEventKind kind, EntityHandle actor) {
+    CarryObjectiveState *state = carry_state(world, flag_handle);
+    Entity *flag = world.registry.get(flag_handle);
+    if (state == nullptr || flag == nullptr)
+        return;
+    const Vec3 event_position = flag->position;
+    if (Entity *carrier = world.registry.get(flag->primary_occupant);
+        carrier != nullptr && carrier->mounted_child == flag_handle)
+        carrier->mounted_child = EntityHandle{};
+    flag->primary_occupant = EntityHandle{};
+    flag->ground_target = EntityHandle{};
+    flag->flags &= ~kEntityFlagCarried;
+    flag->position = state->home;
+    flag->alive = true;
+    state->return_ticks = 0;
+    gameplay_events_.push_back({kind,
+                                actor,
+                                flag_handle,
+                                event_position,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                EntityHandle{},
+                                flag->ground_target,
+                                false});
+}
+
+void Match::record_flag_save(World &world, EntityHandle player_handle,
+                             EntityHandle flag_handle) {
+    MatchPlayer *scorer = player(player_handle);
+    const Entity *entity = world.registry.get(player_handle);
+    if (outcome_.ended || scorer == nullptr || entity == nullptr)
+        return;
+    return_flag_home(world, flag_handle, MatchGameplayEventKind::FlagSave,
+                     player_handle);
+    add_event(*scorer, MatchStats::kFlagSaves, score_value(9));
+    add_team_event(entity->team, MatchStats::kFlagSaves, score_value(9));
+}
+
+void Match::record_flag_capture(World &world, EntityHandle player_handle,
+                                EntityHandle flag_handle) {
+    if (outcome_.ended)
+        return;
+    ensure_objective_census(world);
+    MatchPlayer *scorer = player(player_handle);
+    Entity *carrier = world.registry.get(player_handle);
+    if (scorer == nullptr || carrier == nullptr)
+        return;
+    Entity *flag = world.registry.get(flag_handle);
+    add_event(*scorer, MatchStats::kFlagCaptures, score_value(10));
+    uint8_t scoring_team = carrier->team;
+    // CTF's two globals are routed by the FLAG TYPE, not by a caller-supplied
+    // scorer team: red captures advance team 1, blue captures team 2. Valid
+    // bay interactions imply the same team, but keeping the original routing
+    // matters for script-authored/scorer calls and hostile state.
+    // [orig: Server_CheckWinConditions @0x51B0F0; the red/blue counter writes
+    // reached from Server_ProcessScoringAndBroadcast @0x5169C0]
+    if (rules_.game_type == gt::kCaptureTheFlag && flag != nullptr) {
+        if (flag->item_id == kRedFlag)
+            scoring_team = 1;
+        else if (flag->item_id == kBlueFlag)
+            scoring_team = 2;
+    }
+    add_team_event(scoring_team, MatchStats::kFlagCaptures, score_value(10));
+    if (flag == nullptr)
+        return;
+    const Vec3 capture_position = flag->position;
+    const uint8_t flags_before = static_cast<uint8_t>(flag->flags);
+    carrier->mounted_child = EntityHandle{};
+    flag->primary_occupant = EntityHandle{};
+    const bool remove = rules_.game_type == gt::kCaptureTheFlag;
+    MatchGameplayEvent event{MatchGameplayEventKind::FlagCapture,
+                             player_handle,
+                             flag_handle,
+                             capture_position,
+                             capture_position,
+                             flags_before,
+                             EntityHandle{},
+                             flag->ground_target,
+                             remove};
+    if (remove) {
+        world.registry.despawn(flag_handle);
+    } else {
+        CarryObjectiveState *state = carry_state(world, flag_handle);
+        if (state != nullptr) {
+            flag = world.registry.get(flag_handle);
+            flag->flags &= ~kEntityFlagCarried;
+            flag->position = state->home;
+            flag->ground_target = EntityHandle{};
+            state->return_ticks = 0;
+            event.objective_position = flag->position;
+            event.objective_flags = static_cast<uint8_t>(flag->flags);
+            event.ground = flag->ground_target;
+        }
+    }
+    gameplay_events_.push_back(event);
+}
+
+void Match::record_target_destroyed(const World &world, EntityHandle target_handle,
+                                    EntityHandle attacker_handle) {
+    if (outcome_.ended)
+        return;
+    const Entity *target = world.registry.get(target_handle);
+    const Entity *attacker_entity = world.registry.get(attacker_handle);
+    MatchPlayer *attacker = player(attacker_handle);
+    if (target == nullptr || attacker_entity == nullptr || attacker == nullptr ||
+        (target->item_attrib & kItemAttribObjectiveTarget) == 0)
+        return;
+    // Scorer event 11 increments raw stats[14] and applies table[87], i.e.
+    // status VAR index 13. [orig: GameEvent_ProcessScoring @0x52F550]
+    add_event(*attacker, MatchStats::kTargetsDestroyed, score_value(13));
+    add_team_event(attacker_entity->team, MatchStats::kTargetsDestroyed, score_value(13));
+}
+
+void Match::drop_carried_object(World &world, EntityHandle player_handle) {
+    Entity *carrier = world.registry.get(player_handle);
+    if (carrier == nullptr || !carrier->mounted_child.valid())
+        return;
+    const EntityHandle flag_handle = carrier->mounted_child;
+    Entity *flag = world.registry.get(flag_handle);
+    CarryObjectiveState *state = carry_state(world, flag_handle);
+    carrier->mounted_child = EntityHandle{};
+    if (flag == nullptr || state == nullptr)
+        return;
+    flag->primary_occupant = EntityHandle{};
+    flag->flags &= ~kEntityFlagCarried;
+    flag->position = carrier->position;
+    flag->alive = true;
+    state->return_ticks = rules_.flag_return_ticks < 5
+                              ? 210
+                              : static_cast<int32_t>(rules_.flag_return_ticks);
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
+                                player_handle,
+                                flag_handle,
+                                flag->position,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                EntityHandle{},
+                                flag->ground_target,
+                                false});
+}
+
+void Match::record_death(World &world, EntityHandle victim_handle,
                          EntityHandle killer_handle) {
     if (outcome_.ended)
         return;
-    MatchPlayer *victim = player(victim_handle);
-    if (victim == nullptr)
-        return;
+    drop_carried_object(world, victim_handle);
     const Entity *victim_entity = world.registry.get(victim_handle);
     if (victim_entity == nullptr)
+        return;
+    if ((victim_entity->item_attrib & kItemAttribObjectiveTarget) != 0)
+        record_target_destroyed(world, victim_handle, killer_handle);
+
+    MatchPlayer *victim = player(victim_handle);
+    if (victim == nullptr)
         return;
 
     const uint8_t victim_team = victim_entity->team;
@@ -351,26 +702,272 @@ void Match::record_numbered_zone_capture(const World &world,
     }
 }
 
-void Match::advance_tick() {
-    if (!outcome_.ended && remaining_ticks_ > 0)
+void Match::update_hill_presence(const World &world) {
+    if (rules_.game_type != gt::kKingOfTheHill &&
+        rules_.game_type != gt::kTeamKingOfTheHill)
+        return;
+
+    std::array<int32_t, 5> holders{};
+    for (MatchPlayer &match_player : players_) {
+        const Entity *player_entity = world.registry.get(match_player.identity.entity);
+        bool in_hill = false;
+        if (player_entity != nullptr && player_entity->alive &&
+            (player_entity->flags & kEntityFlagDead) == 0) {
+            world.registry.for_each([&](const Entity &objective) {
+                if (in_hill)
+                    return;
+                const bool hill = objective.item_id == kHill || objective.is_capture_trigger;
+                if (!hill)
+                    return;
+                if (rules_.game_type == gt::kTeamKingOfTheHill && objective.team != 0)
+                    return;
+                const float radius = objective.bound_radius > 0.0f
+                                         ? objective.bound_radius
+                                         : static_cast<float>(objective.zone_radius);
+                if (radius <= 0.0f)
+                    return;
+                const float dx = player_entity->position.x - objective.position.x;
+                const float dy = player_entity->position.y - objective.position.y;
+                in_hill = dx * dx + dy * dy <= radius * radius;
+            });
+        }
+        if (in_hill) {
+            if (player_entity->team < holders.size())
+                ++holders[player_entity->team];
+            if (match_player.objective_ticks < std::numeric_limits<int32_t>::max())
+                ++match_player.objective_ticks;
+        } else if (match_player.objective_ticks > 0) {
+            --match_player.objective_ticks;
+        }
+    }
+    if (rules_.game_type == gt::kTeamKingOfTheHill) {
+        for (uint8_t team = 0; team < team_hold_ticks_.size(); ++team) {
+            if (holders[team] > 0) {
+                if (team_hold_ticks_[team] < std::numeric_limits<int32_t>::max())
+                    ++team_hold_ticks_[team];
+            } else if (team_hold_ticks_[team] > 0) {
+                team_hold_ticks_[team] = std::max<int32_t>(
+                    0, team_hold_ticks_[team] - static_cast<int32_t>(rules_.hill_delta));
+            }
+        }
+    }
+}
+
+void Match::update_flag_objectives(World &world, bool advance_return_timers) {
+    if (rules_.game_type != gt::kCaptureTheFlag &&
+        rules_.game_type != gt::kFlagBall && rules_.game_type != gt::kFlagMe)
+        return;
+    ensure_objective_census(world);
+
+    // Dropped flags count down to their authored home. A carried flag keeps
+    // the timer armed but does not consume it.
+    std::vector<EntityHandle> returns;
+    for (CarryObjectiveState &state : carry_objectives_) {
+        Entity *flag = world.registry.get(state.objective);
+        if (flag == nullptr || flag->registry_spawn_id != state.spawn_id ||
+            flag->primary_occupant.valid() || state.return_ticks <= 0 ||
+            !advance_return_timers)
+            continue;
+        if (--state.return_ticks <= 0)
+            returns.push_back(state.objective);
+    }
+    for (EntityHandle flag : returns)
+        return_flag_home(world, flag, MatchGameplayEventKind::FlagReturn);
+
+    std::vector<const MatchPlayer *> ordered;
+    ordered.reserve(players_.size());
+    for (const MatchPlayer &p : players_)
+        ordered.push_back(&p);
+    std::sort(ordered.begin(), ordered.end(), [](const MatchPlayer *a, const MatchPlayer *b) {
+        return a->identity.slot < b->identity.slot;
+    });
+
+    std::vector<EntityHandle> objectives;
+    world.registry.for_each([&](const Entity &entity) {
+        if (is_flag(entity.item_id) || is_flag_bay(entity.item_id))
+            objectives.push_back(entity.handle);
+    });
+    std::sort(objectives.begin(), objectives.end(),
+              [](EntityHandle a, EntityHandle b) { return a.packed < b.packed; });
+
+    for (const MatchPlayer *match_player : ordered) {
+        Entity *carrier = world.registry.get(match_player->identity.entity);
+        if (carrier == nullptr || !carrier->alive ||
+            (carrier->flags & kEntityFlagDead) != 0 ||
+            (carrier->net_move_input & Entity::kMoveOrderMoving) == 0)
+            continue;
+
+        // Retail only dispatches waypoint interactions from a successful
+        // movement collision and repeats the MoveOrder bit-3 gate here.
+        // [orig: Entity_MovementCollisionResolver ->
+        // Entity_ProcessWaypointInteraction @0x4AD820]
+
+        if (carrier->mounted_child.valid()) {
+            Entity *flag = world.registry.get(carrier->mounted_child);
+            if (flag == nullptr) {
+                carrier->mounted_child = EntityHandle{};
+                continue;
+            }
+            for (EntityHandle handle : objectives) {
+                const Entity *bay = world.registry.get(handle);
+                if (bay == nullptr || !is_flag_bay(bay->item_id) ||
+                    !overlaps_objective(*carrier, *bay))
+                    continue;
+                const bool neutral = flag->item_id == kNeutralFlag;
+                const bool accepted =
+                    (bay->item_id == kBlueBay &&
+                     (rules_.game_type == gt::kFlagMe || carrier->team == 1) &&
+                     (flag->item_id == kRedFlag || neutral)) ||
+                    (bay->item_id == kRedBay && carrier->team == 2 &&
+                     (flag->item_id == kBlueFlag || neutral)) ||
+                    (bay->item_id == kTeam3Bay && carrier->team == 3 && neutral) ||
+                    (bay->item_id == kTeam4Bay && carrier->team == 4 && neutral);
+                if (accepted) {
+                    record_flag_capture(world, match_player->identity.entity,
+                                        carrier->mounted_child);
+                    break;
+                }
+            }
+            continue;
+        }
+
+        for (EntityHandle handle : objectives) {
+            Entity *flag = world.registry.get(handle);
+            if (flag == nullptr || !is_flag(flag->item_id) ||
+                flag->primary_occupant.valid() || !overlaps_objective(*carrier, *flag))
+                continue;
+            CarryObjectiveState *state = carry_state(world, handle);
+            const bool own_flag = (carrier->team == 1 && flag->item_id == kBlueFlag) ||
+                                  (carrier->team == 2 && flag->item_id == kRedFlag);
+            if (own_flag && state != nullptr && state->return_ticks > 0) {
+                record_flag_save(world, match_player->identity.entity, handle);
+                break;
+            }
+            if (!own_flag || rules_.game_type == gt::kFlagBall ||
+                rules_.game_type == gt::kFlagMe) {
+                record_flag_pickup(world, match_player->identity.entity, handle);
+                break;
+            }
+        }
+    }
+}
+
+void Match::advance_tick(World &world) {
+    if (outcome_.ended)
+        return;
+    ensure_objective_census(world);
+    // The shared periodic service starts armed at zero, executes immediately,
+    // then reloads 62 and decrements-before-testing on later simulation ticks.
+    // KOTH accumulation and dropped-flag return callbacks both ride it.
+    // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
+    // Server_UpdateCaptureZoneProximity @0x5086A0; flag callback @0x408430]
+    if (periodic_second_timer_ > 0)
+        --periodic_second_timer_;
+    const bool periodic_second = periodic_second_timer_ == 0;
+    if (periodic_second) {
+        periodic_second_timer_ = 62;
+        update_hill_presence(world);
+    }
+    update_flag_objectives(world, periodic_second);
+    if (remaining_ticks_ > 0)
         --remaining_ticks_;
 }
 
-int32_t Match::primary_score(const MatchStats &stats) const {
+std::vector<MatchGameplayEvent> Match::drain_gameplay_events() {
+    std::vector<MatchGameplayEvent> out;
+    out.swap(gameplay_events_);
+    return out;
+}
+
+int32_t Match::primary_score(const MatchStats &stats, int32_t objective_ticks) const {
     // [orig: sub_52C850 @0x52C850]
     if (is_waypoint_family(rules_.game_type))
         return stats[MatchStats::kPoints];
-    if (rules_.game_type == kGameTypeAdvanceAndSecure ||
-        rules_.game_type == kGameTypeConquerAndControl)
+    if (rules_.game_type == gt::kAdvanceAndSecure ||
+        rules_.game_type == gt::kConquerAndControl)
         return stats[MatchStats::kZoneTakeovers];
-    if (rules_.game_type == kGameTypeTeamDeathmatch || rules_.game_type == 0)
+    if (rules_.game_type == gt::kDeathmatch || rules_.game_type == gt::kTeamDeathmatch)
         return stats[MatchStats::kEnemyKills];
+    if (rules_.game_type == gt::kKingOfTheHill ||
+        rules_.game_type == gt::kTeamKingOfTheHill)
+        return objective_ticks;
+    if (rules_.game_type == gt::kSearchAndDestroy ||
+        rules_.game_type == gt::kAttackDefend)
+        return stats[MatchStats::kTargetsDestroyed];
+    if (rules_.game_type == gt::kCaptureTheFlag ||
+        rules_.game_type == gt::kFlagBall || rules_.game_type == gt::kFlagMe)
+        return stats[MatchStats::kFlagCaptures];
     return 0;
 }
 
-std::optional<int32_t> Match::winner_if_finished(const World &world) const {
+int32_t Match::primary_score(const MatchPlayer &match_player) const {
+    return primary_score(match_player.stats, match_player.objective_ticks);
+}
+
+int32_t Match::team_objective_ticks(const World &world, uint8_t team) const {
+    int64_t total = 0;
+    for (const MatchPlayer &match_player : players_) {
+        const Entity *entity = world.registry.get(match_player.identity.entity);
+        if (entity != nullptr && entity->team == team)
+            total += match_player.objective_ticks;
+    }
+    return static_cast<int32_t>(std::clamp<int64_t>(
+        total, std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()));
+}
+
+int32_t Match::team_primary_score(const World &world, uint8_t team) const {
+    if (team >= teams_.size())
+        return 0;
+    return primary_score(teams_[team], team_objective_ticks(world, team));
+}
+
+MatchLiveScoreboard Match::live_scoreboard(World &world) {
+    MatchLiveScoreboard out;
+    out.team_count = gt::active_team_count(rules_.game_type, rules_.team_count);
+    out.team_mode = out.team_count != 0;
+    // Bit 1 is literal game-type 1 only; team KOTH uses its per-team auxiliary
+    // bytes instead. [orig: Server_BuildAndBroadcastScoreboard @0x50D960]
+    out.timed_score_mode = rules_.game_type == gt::kKingOfTheHill;
+    for (uint8_t team = 1; team <= out.team_count; ++team) {
+        out.teams[team].primary_score = team_primary_score(world, team);
+        out.teams[team].points = teams_[team][MatchStats::kPoints];
+    }
+
+    if (rules_.game_type == gt::kTeamKingOfTheHill) {
+        std::array<uint32_t, 5> alive{};
+        for (const MatchPlayer &match_player : players_) {
+            const Entity *entity = world.registry.get(match_player.identity.entity);
+            if (entity != nullptr && entity->team < alive.size() && entity->alive &&
+                (entity->flags & kEntityFlagDead) == 0)
+                ++alive[entity->team];
+        }
+        for (uint8_t team = 1; team <= out.team_count; ++team)
+            out.teams[team].alive_players = static_cast<uint8_t>(alive[team]);
+    }
+
+    if (rules_.game_type == gt::kCaptureTheFlag) {
+        ensure_objective_census(world);
+        // The row byte is the side's OWN authored flag count, while the win
+        // target is the opposing flag count; invert the scorer-facing census.
+        out.teams[1].authored_objectives =
+            static_cast<uint8_t>(flag_capture_targets_[2]);
+        out.teams[2].authored_objectives =
+            static_cast<uint8_t>(flag_capture_targets_[1]);
+    } else if (rules_.game_type == gt::kSearchAndDestroy ||
+               rules_.game_type == gt::kAttackDefend) {
+        ensure_objective_census(world);
+        out.teams[1].authored_objectives =
+            static_cast<uint8_t>(demolition_targets_[2]);
+        out.teams[2].authored_objectives =
+            static_cast<uint8_t>(demolition_targets_[1]);
+    }
+    return out;
+}
+
+std::optional<int32_t> Match::winner_if_finished(const World &world) {
     if (outcome_.ended)
         return std::nullopt;
+    ensure_objective_census(world);
 
     // The uniform-zone test is first and game-type independent. Empty chains
     // do not win. [orig: Server_CheckWinConditions @0x51AD8A ->
@@ -396,36 +993,143 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) const {
     if (saw_zone && uniform_team != 0)
         return static_cast<int32_t>(uniform_team);
 
-    if (rules_.game_type == kGameTypeTeamDeathmatch) {
-        // A zero score limit returns from the TDM arm before even considering
-        // clock expiry. [orig: @0x51AE47]
+    if (rules_.game_type == gt::kDeathmatch) {
+        if (rules_.score_limit != 0) {
+            for (const MatchPlayer &match_player : players_) {
+                if (world.registry.get(match_player.identity.entity) != nullptr &&
+                    match_player.stats[MatchStats::kEnemyKills] >=
+                        static_cast<int32_t>(rules_.score_limit))
+                    return 0;
+            }
+        }
+        return remaining_ticks_ == 0 ? std::optional<int32_t>{0} : std::nullopt;
+    }
+
+    if (rules_.game_type == gt::kTeamDeathmatch) {
+        // A zero score limit returns from the entire TDM arm before clock
+        // expiry. [orig: Server_CheckWinConditions @0x51AE47]
         if (rules_.score_limit == 0)
             return std::nullopt;
         for (uint8_t team = 0; team < teams_.size(); ++team) {
-            if (teams_[team][MatchStats::kEnemyKills] >= static_cast<int32_t>(rules_.score_limit))
+            if (teams_[team][MatchStats::kEnemyKills] >=
+                static_cast<int32_t>(rules_.score_limit))
                 return static_cast<int32_t>(team);
         }
         if (remaining_ticks_ != 0)
             return std::nullopt;
-
-        int32_t best = std::numeric_limits<int32_t>::min();
-        int32_t winner = 0;
-        bool tied = false;
-        for (uint8_t team = 1; team <= 4; ++team) {
-            const int32_t score = teams_[team][MatchStats::kEnemyKills];
-            if (score > best) {
-                best = score;
-                winner = team;
-                tied = false;
-            } else if (score == best) {
-                tied = true;
-            }
-        }
-        return tied ? 0 : winner;
+        std::array<int32_t, 5> scores{};
+        for (uint8_t team = 1; team <= 4; ++team)
+            scores[team] = teams_[team][MatchStats::kEnemyKills];
+        return unique_best_team(scores);
     }
 
-    if ((rules_.game_type == kGameTypeAdvanceAndSecure ||
-         rules_.game_type == kGameTypeConquerAndControl) &&
+    const int64_t hill_threshold = int64_t{60} * rules_.hill_limit_minutes;
+    if (rules_.game_type == gt::kKingOfTheHill) {
+        for (const MatchPlayer &match_player : players_) {
+            if (world.registry.get(match_player.identity.entity) != nullptr &&
+                int64_t{match_player.objective_ticks} >= hill_threshold)
+                return 0;
+        }
+        return remaining_ticks_ == 0 ? std::optional<int32_t>{0} : std::nullopt;
+    }
+
+    if (rules_.game_type == gt::kTeamKingOfTheHill) {
+        for (uint8_t team = 1; team <= 4; ++team) {
+            if (int64_t{team_hold_ticks_[team]} >= hill_threshold)
+                return static_cast<int32_t>(team);
+        }
+
+        std::array<int32_t, 5> objective_scores{};
+        for (uint8_t team = 1; team <= 4; ++team)
+            objective_scores[team] = team_objective_ticks(world, team);
+        if (remaining_ticks_ > 0) {
+            for (uint8_t team = 1; team <= 4; ++team) {
+                const int64_t floor = int64_t{objective_scores[team]} -
+                                      int64_t{remaining_ticks_} * rules_.hill_delta;
+                bool clinched = true;
+                for (uint8_t other = 1; other <= 4; ++other) {
+                    if (other != team &&
+                        floor <= int64_t{objective_scores[other]} + remaining_ticks_) {
+                        clinched = false;
+                        break;
+                    }
+                }
+                if (clinched) {
+                    remaining_ticks_ = 0;
+                    break;
+                }
+            }
+        }
+        if (remaining_ticks_ != 0)
+            return std::nullopt;
+        return unique_best_team(team_hold_ticks_);
+    }
+
+    if (rules_.game_type == gt::kCaptureTheFlag) {
+        const int32_t team1 = teams_[1][MatchStats::kFlagCaptures];
+        const int32_t team2 = teams_[2][MatchStats::kFlagCaptures];
+        const int32_t target1 = flag_capture_targets_[1];
+        const int32_t target2 = flag_capture_targets_[2];
+        if (target1 != 0 && team1 >= target1)
+            return 1;
+        if (target2 == 0 || team2 < target2) {
+            if (remaining_ticks_ != 0)
+                return std::nullopt;
+            if (target2 != 0) {
+                if (target1 == 0)
+                    return 1;
+                if (team2 <= team1)
+                    return team1 > team2 ? 1 : 0;
+            }
+        }
+        return 2;
+    }
+
+    if (rules_.game_type == gt::kSearchAndDestroy ||
+        rules_.game_type == gt::kAttackDefend) {
+        const int32_t team1 = teams_[1][MatchStats::kTargetsDestroyed];
+        const int32_t team2 = teams_[2][MatchStats::kTargetsDestroyed];
+        const int32_t target1 = demolition_targets_[1];
+        const int32_t target2 = demolition_targets_[2];
+        if (target1 != 0 && team1 >= target1)
+            return 1;
+        if (target2 == 0 || team2 < target2) {
+            if (remaining_ticks_ != 0)
+                return std::nullopt;
+            if (target2 != 0)
+                return target1 == 0 ? 1 : 0;
+        }
+        return 2;
+    }
+
+    if (rules_.game_type == gt::kFlagBall) {
+        for (uint8_t team = 1; team <= 4; ++team) {
+            if (teams_[team][MatchStats::kFlagCaptures] >=
+                static_cast<int32_t>(rules_.max_score))
+                return static_cast<int32_t>(team);
+        }
+        if (remaining_ticks_ != 0)
+            return std::nullopt;
+        std::array<int32_t, 5> scores{};
+        for (uint8_t team = 1; team <= 4; ++team)
+            scores[team] = teams_[team][MatchStats::kFlagCaptures];
+        return unique_best_team(scores);
+    }
+
+    if (rules_.game_type == gt::kFlagMe) {
+        if (rules_.max_score == 0)
+            return std::nullopt;
+        for (const MatchPlayer &match_player : players_) {
+            if (world.registry.get(match_player.identity.entity) != nullptr &&
+                match_player.stats[MatchStats::kFlagCaptures] >=
+                    static_cast<int32_t>(rules_.max_score))
+                return 0;
+        }
+        return std::nullopt;
+    }
+
+    if ((rules_.game_type == gt::kAdvanceAndSecure ||
+         rules_.game_type == gt::kConquerAndControl) &&
         remaining_ticks_ == 0) {
         int32_t team1 = 0;
         int32_t team2 = 0;
@@ -438,12 +1142,13 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) const {
             else if (zone->team == 2)
                 ++team2;
         }
-        // [orig: A&S clock-expiry tail @0x51B35B]
         if (team1 == team2)
             return 0;
         return team1 > team2 ? 1 : 2;
     }
 
+    // Co-op/waypoint outcomes remain owned by WAC/BMS and converge through
+    // World::process_round_end. [orig: Server_CheckWinConditions @0x51AD40]
     return std::nullopt;
 }
 
@@ -469,8 +1174,8 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.score_fields = rules_.score_fields;
     result_.team_stats = teams_;
     result_.team_row_count = scoreboard_team_row_count(rules_);
-    if (rules_.game_type == kGameTypeAdvanceAndSecure ||
-        rules_.game_type == kGameTypeConquerAndControl) {
+    if (rules_.game_type == gt::kAdvanceAndSecure ||
+        rules_.game_type == gt::kConquerAndControl) {
         for (const EntityHandle handle : world.zone_chain.zones) {
             const Entity *zone = world.registry.get(handle);
             if (zone == nullptr)
@@ -481,8 +1186,8 @@ bool Match::finish(int32_t winner_team, const World &world) {
                 ++result_.team_scores[1];
         }
     } else {
-        result_.team_scores[0] = primary_score(teams_[1]);
-        result_.team_scores[1] = primary_score(teams_[2]);
+        result_.team_scores[0] = team_primary_score(world, 1);
+        result_.team_scores[1] = team_primary_score(world, 2);
     }
     result_.draw = result_.team_scores[0] == result_.team_scores[1];
     result_.players.reserve(players_.size());
@@ -493,7 +1198,8 @@ bool Match::finish(int32_t winner_team, const World &world) {
             entity != nullptr ? entity->team : uint8_t{0},
             entity != nullptr ? entity->player_class : uint8_t{0},
             player.stats,
-            primary_score(player.stats),
+            player.objective_ticks,
+            primary_score(player),
         });
     }
     sort_scoreboard_players(result_.players);

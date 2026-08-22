@@ -948,6 +948,21 @@ std::vector<uint8_t> encode_entity_remove(const EntityRemove &removal) {
 	return out;
 }
 
+// [orig: serialize_entity_with_parent_and_target @0x505810]
+std::vector<uint8_t> encode_objective_entity_state(
+		const ObjectiveEntityState &state) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(state.entity_handle);
+	w.u8(state.flags_byte);
+	w.u32(static_cast<uint32_t>(state.pos_x));
+	w.u32(static_cast<uint32_t>(state.pos_y));
+	w.u32(static_cast<uint32_t>(state.pos_z));
+	w.u16(state.attach_handle);
+	w.u16(state.ground_handle);
+	return out;
+}
+
 // [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600 -> the pool-0 walk + append
 //  builder @ 0x5160f0 — a bare index run, no count word]
 std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list) {

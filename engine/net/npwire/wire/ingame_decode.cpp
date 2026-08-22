@@ -1463,6 +1463,26 @@ bool decode_entity_remove(const uint8_t *body, size_t len,
 	return consumed == 2;
 }
 
+// S2C 0x2F flag/carryable state — fixed 19 bytes. Retail's guarded cursor
+// zero-fills a short body; the safe wire boundary rejects it instead.
+// [orig: NapiNPClientMsg_0x02F @0x430E10]
+bool decode_objective_entity_state(const uint8_t *body, size_t len,
+	                               ObjectiveEntityState &out,
+	                               size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	out.flags_byte = c.u8();
+	out.pos_x = c.i32();
+	out.pos_y = c.i32();
+	out.pos_z = c.i32();
+	out.attach_handle = c.u16();
+	out.ground_handle = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 19;
+}
+
 // S2C 0x59 deployed-item spawn-or-update — fixed 32-B record (the handler
 // reads 15 u16s = 30 B; 2 trailing reserved). pos = 3×i32 16.16; angles 3×u16
 // (the yaw/pitch/roll high halves). [orig: NapiNPClientMsg_0x059 @ 0x4228E0

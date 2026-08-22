@@ -19,6 +19,7 @@
 #include <npwire/ingame_message_id.h>
 
 #include <world/ai.h>
+#include <world/game_type.h>
 #include <world/player_spawn.h>
 #include <world/world.h>
 #include <world/zone_chain.h>
@@ -357,6 +358,88 @@ void test_aas_events_use_spawn_registry_index() {
 			"A&S authority flips the target and emits its capture event family");
 }
 
+void test_ctf_pickup_and_capture_wire_transaction() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	w::Entity *blue_entity = world.registry.get(blue);
+	blue_entity->position = {10.0f, 20.0f, 3.0f};
+	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+
+	w::Entity red_flag;
+	red_flag.kind = w::EntityKind::Item;
+	red_flag.item_id = 4093; // Flag (Red) [orig: item-id branch @0x43C1B7]
+	red_flag.position = blue_entity->position;
+	red_flag.spawn_position = red_flag.position;
+	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
+	w::Entity blue_bay;
+	blue_bay.kind = w::EntityKind::Item;
+	blue_bay.item_id = 4098; // Blue bay [orig: Entity_ProcessWaypointInteraction @0x4AD8D4]
+	blue_bay.position = blue_entity->position;
+	const w::EntityHandle bay = world.registry.spawn(1, blue_bay);
+	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
+
+	ns::LoopbackChannel wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+
+	np::Server_TickUpdate(ctx); // contact -> pickup
+	bool saw_pickup = false;
+	ns::Datagram datagram;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag != s2c::OBJECTIVE_ENTITY_STATE) continue;
+		ObjectiveEntityState state;
+		size_t consumed = 0;
+		if (decode_objective_entity_state(
+				datagram.body.data(), datagram.body.size(), state, consumed) &&
+				consumed == datagram.body.size() && state.entity_handle == flag.packed &&
+				state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0)
+			saw_pickup = true;
+	}
+	expect(saw_pickup,
+			"CTF pickup fans the retail 19-byte 0x2F carried-state record");
+
+	np::Server_TickUpdate(ctx); // carried flag overlaps bay -> capture
+	bool saw_capture_event = false;
+	bool saw_remove = false;
+	bool saw_reset = false;
+	int capture_order = -1;
+	int remove_order = -1;
+	int order = 0;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag == s2c::GAME_EVENT && datagram.body.size() == 8 &&
+				datagram.body[0] == 0x13 && datagram.body[1] == blue.slot()) {
+			saw_capture_event = true;
+			capture_order = order;
+		}
+		if (datagram.tag == s2c::ENTITY_REMOVE) {
+			EntityRemove removal;
+			size_t consumed = 0;
+			if (decode_entity_remove(datagram.body.data(), datagram.body.size(),
+					removal, consumed) && removal.entity_handle == flag.packed) {
+				saw_remove = true;
+				remove_order = order;
+			}
+		}
+		if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) saw_reset = true;
+		++order;
+	}
+	expect(saw_capture_event && saw_remove && !saw_reset &&
+			capture_order >= 0 && remove_order > capture_order,
+			"CTF capture fans event 19 then 0x12 removal, never a reset 0x2F");
+}
+
 } // namespace
 
 int main() {
@@ -450,6 +533,7 @@ int main() {
 	test_tdm_round_wire_and_linger();
 	test_aas_and_coop_share_round_wire();
 	test_aas_events_use_spawn_registry_index();
+	test_ctf_pickup_and_capture_wire_transaction();
 
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;

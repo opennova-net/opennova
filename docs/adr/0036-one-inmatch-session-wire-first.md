@@ -32,8 +32,9 @@ the code harder to change without helping a retail peer.
    `inmatch::TickTarget`, implemented by the Godot simulation and headless host.
 3. Authoritative gameplay belongs to `world::Match`, not to protocol handlers.
    It owns rules, the 42-field retail player stat block, team rows, the match
-   clock, winner evaluation, and the immutable `MatchResult`. TDM, Advance and
-   Secure, and script-driven co-op all finish through
+   clock, objective carrying, winner evaluation, and the immutable
+   `MatchResult`. Every retail mode (DM, TDM, KOTH, TKOTH, S&D, A&D, CTF,
+   FlagBall, Flag Me, A&S, C&C, and the co-op family) finishes through
    `World::process_round_end`; the network runtime serializes that frozen
    result and does not decide the outcome a second time.
 4. `npruntime` and `netsim` remain implementation directories inside the net
@@ -63,11 +64,15 @@ the code harder to change without helping a retail peer.
 
 ## Verification
 
-- `tests/world/match_test.cpp` pins retail scoring indices, TDM and A&S win
-  conditions, clocks, draw handling, and immutable results.
-- `tests/npruntime/round_end_test.cpp` pins TDM, A&S, and co-op through
-  the shared live transition, exact `0x61`/`0x1D` delivery, requester-only
-  `0x2B`/`0x56` board pulls, and the 2790-tick linger.
+- `tests/world/match_test.cpp` pins every retail score schema, primary-score
+  selector, automatic win arm, clock/draw rule, flag transition, and immutable
+  result. These branches follow `Server_CheckWinConditions @0x51AD40`,
+  `GameEvent_ProcessScoring @0x52F550`, and
+  `GameType_CreateDefaultSettings @0x52DD00`.
+- `tests/npruntime/round_end_test.cpp` pins multiplayer and co-op through the
+  shared live transition, exact objective-state/event routing, `0x61`/`0x1D`
+  delivery, requester-only `0x2B`/`0x56` board pulls, and the 2790-tick linger
+  (`Server_ProcessRoundEnd @0x5164F0`).
 - `tests/npruntime/client_runtime_test.cpp` pins automatic multi-chunk
   client pulls and board reassembly.
 - `tests/frame/inmatch_session_test.cpp` pins the sole lifecycle/cadence API.

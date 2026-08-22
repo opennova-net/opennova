@@ -341,7 +341,7 @@ sweep; blank = not yet characterized.
 | 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
 | 0x2D | 0x427E90 | `_0x02D` | |
 | 0x2E | 0x427F80 | `_0x02E` | |
-| 0x2F | 0x430E10 | `_0x02F` | |
+| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client writes the low Flags byte, position, and both topology handles. Retail producer `serialize_entity_with_parent_and_target @0x505810`; flag pickup/drop/save/non-CTF capture use this record, while CTF capture removes the consumed flag with 0x12. |
 | 0x30 | 0x431170 | `_HandleChecksumRequest` | entity-checksum request `[u8 entityId][u16 checksum]` → reply **C2S 0x20** (NOT 0x21; §5.35), 5 B `[u8 id][u32 challenge ^ source]`; reply builder + literal-42 arm §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x31 | 0x4311E0 | `_0x031` | ammo-definition CRC request `[u8 ammoIndex][u16 xorKey]` (3 B) → reply **C2S 0x21**, 9 B `[u8 index][u32 xorKey^crc][u32 echoed key]`; field map + reply builder §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x32 | 0x428060 | `_0x032` | |
@@ -3031,6 +3031,10 @@ row_count × { [u8 slot_id][u16 statusFlags LE][u16 score1 LE][u16 score2 LE][u8
 - **Folded on the client since 2026-08-19**: `netsim::ClientReplicaPipeline::apply_player_list` / `apply_player_sync` keep the board and its connection-slot roster in `ClientState`, reproducing the witnessed parser shape: every well-formed 0x16 applies UNCONDITIONALLY (retail zeroes `g_scoreboard_row_count` before the row loop and parses the team table + trailer even for a zero-row list `[orig: @0x42fb46]` — an empty update yields an empty board; the drawer skips the row walk at zero `[orig: @0x423c46]`), rows for roster-unknown slots DROP (`[orig: @0x42fc05]`; the C2S 0x22 retry send is a D-HUD-24 residual), and name/clan join INTO the row at apply time exactly where retail copies them into its 56-B records `[orig: @0x42fd4c..0x42fd8f]` — so a later 0x46 removal (which deactivates and wipes the slot via `PlayerSlot_ClearAndUnlink @0x434730`; a re-bind re-inits every field `@0x4346c0`) never blanks rows already on the board. An accepted row also refreshes the slot's team and its live entity's team `[orig: @0x42fc7c/@0x42fc88]`. Rows are kept in WIRE ORDER; the client never re-sorts `[orig: the record walk in HUD_DrawKillList @0x423A30]`. (The 2026-08-19 draft's “an empty 0x16 never clobbers” / “a removal keeps the name binding” rules were refuted the same day against @0x42fb46/@0x434730.)
 - **Byte 0 is a FLAGS byte, not max_players** (2026-07-03 correction): bit0 = team-mode, bit1 =
   timed-scores → `g_scoreboard_flags @ 0xA823B8` (renamed 2026-07-03 from the bare dword label).
+  The writer sets bit0 iff its computed team count is nonzero and sets bit1 only
+  for solo KOTH (`g_GameType == 1`) `[orig: Server_BuildAndBroadcastScoreboard
+  @0x50D960]`; DM, KOTH, and Flag Me therefore serialize `team_count=0` and one
+  neutral row.
 - Row flags: **bit0 = SPECTATOR** (from slot+100567; the old "alive" reading was a decode-era
   guess), `team = flags >> 1`. Probe: host slot0 flags=0x02 (team1/Blue), joiner slot1 flags=0x04
   (team2/Red).
@@ -3052,9 +3056,14 @@ row_count × { [u8 slot_id][u16 statusFlags LE][u16 score1 LE][u16 score2 LE][u8
   staging memset `[orig: @0x50d9c6]`). Each row's u16 pair carries the SAME two accessors as the
   player rows — the mode stat and the accumulated points, read from the per-team stats objects
   `[orig: @0x50dcb8/@0x50dce4]` (the probe's accruing values were these, mislabelled “deaths” in
-  the capture-era read). The byte pair is mode-specific: KOTH hold (type 0x10001 `[orig:
-  @0x50dc62]`) and the CTF flag state (types 0x10002/0x90002/0x10004 `[orig: @0x50dd30]`); the
-  4-team variant fills T3/T4 under `g_num_teams_config==4` `[orig: @0x50db5f]`.
+  the capture-era read). The first auxiliary byte for team KOTH is the team's
+  alive-player census produced by `Game_CountAlivePlayersPerTeam @0x5001C0`
+  (the historical `kothHold` field name is retained at the codec boundary).
+  The second holds each side's authored own-flag count in CTF or authored own
+  demolition-target count in S&D/A&D, frozen by `reset_round_counters
+  @0x516C50`. Four teams are allowed only for TDM, team KOTH, and FlagBall when
+  `g_num_teams_config==4`; every other team mode stays at two `[orig:
+  Server_BuildAndBroadcastScoreboard @0x50D960]`.
 - The server may **re-sort the player rows between frames** — `slot_id` is authoritative, not row
   position.
 

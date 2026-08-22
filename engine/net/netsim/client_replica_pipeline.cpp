@@ -210,6 +210,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::ENTITY_REMOVE: // live packed-handle retirement (0x12)
 		apply_entity_remove(body);
 		break;
+	case s2c::OBJECTIVE_ENTITY_STATE: // flag/carryable pose + carry links (0x2F)
+		apply_objective_entity_state(body);
+		break;
 	default:
 		// Game-start scalars / world-state-load and other non-entity tags.
 		++unknown_tags_;

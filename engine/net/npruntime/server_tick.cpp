@@ -265,6 +265,67 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 	}
 }
 
+// Drain the match domain's objective transitions through retail's two wire
+// lanes. Pickup/drop/save/return and non-CTF capture publish the complete 19-B
+// flag state (0x2F). A CTF capture retires the captured flag with 0x12 instead.
+// Save/capture also precede that state mutation with the 8-B 0x1E event record,
+// matching the original transaction order.
+// [orig: Entity_AttachToVehicle @0x43C130 -> Server_SendDestructibleDeathPacket
+// @0x50D900; Server_BroadcastEntityDeathEvent @0x517A90 (save event 0x15 then
+// 0x2F); Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then
+// CTF remove / other-mode reset)]
+void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
+	std::vector<world::MatchGameplayEvent> events =
+			world.match.drain_gameplay_events();
+	if (!ctx.is_in_session || events.empty()) return;
+
+	for (const world::MatchGameplayEvent &event : events) {
+		std::vector<uint8_t> feed;
+		if (event.kind == world::MatchGameplayEventKind::FlagCapture ||
+				event.kind == world::MatchGameplayEventKind::FlagSave) {
+			feed.push_back(event.kind == world::MatchGameplayEventKind::FlagCapture
+					? uint8_t{0x13} : uint8_t{0x15});
+			feed.push_back(pool0_index_byte(event.actor.packed));
+			feed.push_back(0xFF);
+			feed.push_back(0xFF);
+			put_u16le(feed, static_cast<uint16_t>(static_cast<int16_t>(
+					std::lround(event.position.x))));
+			put_u16le(feed, static_cast<uint16_t>(static_cast<int16_t>(
+					std::lround(event.position.y))));
+		}
+
+		std::vector<uint8_t> state_body;
+		if (!event.remove_objective) {
+			ObjectiveEntityState state;
+			state.entity_handle = event.objective.packed;
+			state.flags_byte = event.objective_flags;
+			state.pos_x = world::to_fixed(event.objective_position.x);
+			state.pos_y = world::to_fixed(event.objective_position.y);
+			state.pos_z = world::to_fixed(event.objective_position.z);
+			state.attach_handle = event.parent.packed;
+			state.ground_handle = event.ground.packed;
+			state_body = encode_objective_entity_state(state);
+		}
+
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr ||
+					conn.link.mode == netsim::TransportMode::Loopback)
+				continue;
+			if (!feed.empty())
+				conn.link.transport->host_send(s2c::GAME_EVENT, feed);
+			if (event.remove_objective) {
+				EntityRemove removal;
+				removal.entity_handle = event.objective.packed;
+				conn.link.transport->host_send(
+						s2c::ENTITY_REMOVE, encode_entity_remove(removal));
+			} else {
+				conn.link.transport->host_send(
+						s2c::OBJECTIVE_ENTITY_STATE, state_body);
+			}
+		}
+	}
+}
+
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
@@ -843,13 +904,14 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
 	world.run_logic_tick(/*is_authority=*/true);
-	world.match.advance_tick();
+	world.match.advance_tick(world);
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
 	// health byte carries the same-frame damage regardless).
 	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
+	route_match_gameplay_events(ctx, world);
 	release_due_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,

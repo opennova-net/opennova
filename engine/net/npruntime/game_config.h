@@ -71,6 +71,11 @@ struct GameConfig {
 	// reply bodies, the BuildFlags team-gate (game_settings.game_type copy, equal in a live session),
 	// and Server_AssignPlayerTeam. Default 0 (a fresh/dev host); a real host seeds the mission gametype.
 	uint32_t game_type = 0;                     // [orig g_GameType @0x24D2128 == game_settings +0xCC]
+	// Process-global side count. Only TDM/TKOTH/FlagBall honor four; every
+	// other team mode remains two-sided in the retail scoreboards.
+	// [orig: g_MpNumTeams @0x2550B40 -> g_num_teams_config @0x24D2150;
+	// Server_BuildAndBroadcastScoreboard @0x50D960]
+	uint8_t num_teams = 2;
 	// mpattrib bitmask — the BuildFlags team-branch input [orig game_settings +0xD0] AND the 0x64
 	// mission-metadata blob's attrib dword. Observed bits (docs/net/novaworld-net-re.md §6.4;
 	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0]):
@@ -104,6 +109,11 @@ struct GameConfig {
 	uint32_t replay_enabled = 0;      // [orig g_replay_enabled @0x24D2120 <- cfg `replay` @0x2550B24]      dword[2]
 	uint32_t max_team_lives = 0;      // [orig g_max_team_lives @0x24D2130 <- cfg `max_team_lives` @0x2550ABC] dword[4]
 	uint32_t score_limit = 0;         // [orig g_score_limit @0x24D2134]       dword[5]; SET `KillLimit` (name-swap)
+	// Gameplay-only rule globals omitted from S2C 0x08 but consumed by the
+	// witnessed KOTH/flag win and return paths.
+	uint32_t max_score = 0;           // [orig g_kill_limit @0x24D2138] SET `MaxScore`
+	uint32_t koth_delta = 5;          // [orig dword_24D2148] cfg `koth_delta`
+	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime_2 @0x24D2174]
 	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160]        dword[7]; SET `StartDelay`
@@ -130,8 +140,8 @@ struct GameConfig {
 	std::vector<std::pair<uint8_t, uint8_t>> scoreboard_fields;
 
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
-	// sources): the trailing flags dword of the 0x08 block. (`MaxScore`->`g_kill_limit @0x24D2138`
-	// (§6.9 name-swap) is NOT in the 0x08 wire block — omitted until a cfg-persistence pass needs it.)
+	// sources): the trailing flags dword of the 0x08 block. `MaxScore` is retained
+	// above for gameplay/session-status, but retail does not put it in this 0x08 block.
 	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
 	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000

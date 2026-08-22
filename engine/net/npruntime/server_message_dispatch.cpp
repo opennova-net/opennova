@@ -362,10 +362,25 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // players -> a single default entry). The wire SERIALIZE lives in encode_player_list (novaworld); this is
 // just the npruntime-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
 // entry list.
-std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &roster,
+std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
+	                                    const std::vector<NapiNPConnection> &roster,
                                         const PlayerReplicationState &fallback,
-                                        const world::World *world) {
+                                        world::World *world) {
 	PlayerListFrame frame;
+	world::MatchLiveScoreboard scoreboard;
+	if (world != nullptr) {
+		scoreboard = world->match.live_scoreboard(*world);
+	} else {
+		scoreboard.team_count = game_type::active_team_count(
+				config.game_type, config.num_teams);
+		scoreboard.team_mode = scoreboard.team_count != 0;
+		scoreboard.timed_score_mode =
+				config.game_type == game_type::kKingOfTheHill;
+	}
+	frame.flags = static_cast<uint8_t>(
+			(scoreboard.team_mode ? 1u : 0u) |
+			(scoreboard.timed_score_mode ? 2u : 0u));
+	frame.team_count = scoreboard.team_count;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
 		// Rows carry only IN-GAME players — a still-loading joiner (mid world-stream) is
@@ -384,7 +399,7 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 			if (const world::MatchPlayer *player =
 					world->match.player(c.link.owned_entity)) {
 				row.score1 = static_cast<uint16_t>(
-						world->match.primary_score(player->stats));
+						world->match.primary_score(*player));
 				row.score2 = static_cast<uint16_t>(
 						player->stats[world::MatchStats::kPoints]);
 			}
@@ -400,15 +415,12 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 		frame.players.push_back(row);
 	}
 	frame.teams.resize(size_t(frame.team_count) + 1);
-	if (world != nullptr) {
-		for (size_t team = 0; team < frame.teams.size(); ++team) {
-			const world::MatchStats &stats =
-					world->match.team_stats(static_cast<uint8_t>(team));
-			frame.teams[team].score1 = static_cast<uint16_t>(
-					world->match.primary_score(stats));
-			frame.teams[team].score2 = static_cast<uint16_t>(
-					stats[world::MatchStats::kPoints]);
-		}
+	for (size_t team = 1; team < frame.teams.size(); ++team) {
+		const world::MatchLiveTeamScore &source = scoreboard.teams[team];
+		frame.teams[team].score1 = static_cast<uint16_t>(source.primary_score);
+		frame.teams[team].score2 = static_cast<uint16_t>(source.points);
+		frame.teams[team].koth_hold = source.alive_players;
+		frame.teams[team].ctf_flag = source.authored_objectives;
 	}
 	frame.in_game_count = static_cast<uint8_t>(
 			std::min<size_t>(frame.players.size(), 0xFFu));
@@ -1809,7 +1821,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						s2c::SESSION_STATUS,
 						serialize_session_status(
 								config, session_uptime_ms,
-								active_players)));
+								active_players, world)));
 				break;
 			}
 			case c2s::EMPTY_SLOT_SWEEP_REQUEST: { // EMPTY-SLOT SWEEP REQUEST -> S2C 0x5D to the REQUESTER ONLY.
@@ -1926,13 +1938,13 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          const world::World *world) {
+                                          world::World *world) {
 	// `fallback` only matters for an empty roster (World-less path); a real host always has >=1 bound
 	// player, so the enumerated roster wins. Build a minimal fallback rep from the config.
 	PlayerReplicationState fallback;
 	fallback.player_name = config.player_name;
 	ProtocolMessage message = make_protocol_message(
-			s2c::PLAYER_LIST, build_reply_tag_16(roster, fallback, world));
+			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, fallback, world));
 	message.reliable = false; // Server_BuildAndBroadcastScoreboard @0x50DE00 userParam=1
 	return message;
 }

@@ -1663,6 +1663,25 @@ struct EntityRemove {
 bool decode_entity_remove(const uint8_t *body, size_t len,
 	                      EntityRemove &out, size_t &consumed);
 
+// S2C 0x2F — complete live state for flag/carryable objectives. The first
+// relationship is entity+368 occupantEntity (the carrier); the second is
+// entity+40 groundEntity. The flags field is deliberately one byte: retail
+// merges it into the low byte of the client's existing entity flags.
+// [orig: serialize_entity_with_parent_and_target @0x505810;
+// NapiNPClientMsg_0x02F @0x430E10]
+struct ObjectiveEntityState {
+	uint16_t entity_handle = 0xFFFF;
+	uint8_t flags_byte = 0;
+	int32_t pos_x = 0;
+	int32_t pos_y = 0;
+	int32_t pos_z = 0;
+	uint16_t attach_handle = 0xFFFF;
+	uint16_t ground_handle = 0xFFFF;
+};
+bool decode_objective_entity_state(const uint8_t *body, size_t len,
+	                               ObjectiveEntityState &out,
+	                               size_t &consumed);
+
 // S2C 0x59 — deployed-item spawn-or-update. Fixed 32-B record. The host
 // streams the placeable entities a player drops (mines, beacons, satchels,
 // deployed guns…). The handler searches the 512-entry ROUND pool (the same

@@ -670,6 +670,32 @@ int check_S_12_entity_remove() {
 	return 0;
 }
 
+// S2C 0x2F — flag/carryable state: [u16 handle][u8 low flags][3xi32 pos]
+// [u16 occupant/carrier][u16 ground]. [orig: serialize_entity_with_parent_and_target
+// @0x505810; NapiNPClientMsg_0x02F @0x430E10]
+int check_S_2F_objective_entity_state() {
+	LE w;
+	w.u16(0x1007);
+	w.u8(0x01);
+	w.u32(0x00120000);
+	w.u32(0xFFF00000);
+	w.u32(0x00030000);
+	w.u16(0x0004);
+	w.u16(0xFFFF);
+	EXPECT(w.b.size() == 19);
+	ObjectiveEntityState state;
+	size_t consumed = 0;
+	EXPECT(decode_objective_entity_state(
+		w.b.data(), w.b.size(), state, consumed));
+	EXPECT(consumed == 19);
+	EXPECT(state.entity_handle == 0x1007 && state.flags_byte == 0x01);
+	EXPECT(state.pos_x == 0x00120000 && state.pos_y == -0x00100000 &&
+	       state.pos_z == 0x00030000);
+	EXPECT(state.attach_handle == 0x0004 && state.ground_handle == 0xFFFF);
+	cover('S', 0x2F);
+	return 0;
+}
+
 // S2C 0x30 — entity-checksum request: [u8 entityId][u16 checksum] (3 B).
 int check_S_30_checksum_request() {
 	LE w;
@@ -1353,6 +1379,7 @@ int main() {
 	if (check_S_49_weapon_reload()) return 1;
 	if (check_C_25_reload_request()) return 1;
 	if (check_S_12_entity_remove()) return 1;
+	if (check_S_2F_objective_entity_state()) return 1;
 	if (check_S_13_entity_death()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_31_loadout_crc_request()) return 1;

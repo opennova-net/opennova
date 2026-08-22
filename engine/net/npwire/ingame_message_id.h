@@ -49,6 +49,7 @@ inline constexpr uint8_t KILL_SYNC = 0x26;                  // §5.26 kill recor
 inline constexpr uint8_t CHAR_MINIMAP_UPDATE = 0x29;        // §5.59 NetId + CharacterEntity rebind
 inline constexpr uint8_t CHAT_HISTORY = 0x2A;               // §5.35 chat history entry
 inline constexpr uint8_t MISSION_MAP_NAMES = 0x2C;          // §5.51 server name + map file (join burst)
+inline constexpr uint8_t OBJECTIVE_ENTITY_STATE = 0x2F;     // flag/carryable pose + occupant + ground links
 inline constexpr uint8_t ENTITY_CHECKSUM_REQ = 0x30;        // §5.35 -> c2s::ENTITY_CHECKSUM_REPLY
 inline constexpr uint8_t LOADOUT_CRC_REQ = 0x31;            // §5.35 ammo-def CRC request -> c2s::CHECKSUM_REPLY
 inline constexpr uint8_t PLAY_SOUND = 0x34;                 // §5.50 sound profile + optional 3D pos (retired misnomer: "GotoTeleport")

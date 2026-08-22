@@ -1169,6 +1169,40 @@ static int test_deployed_item_lifecycle_roundtrip() {
 	return 0;
 }
 
+static int test_objective_entity_state_roundtrip() {
+	ObjectiveEntityState in{};
+	in.entity_handle = 0x1007;
+	in.flags_byte = 0xA5;
+	in.pos_x = 0x12345678;
+	in.pos_y = -0x1020304;
+	in.pos_z = 0x01020304;
+	in.attach_handle = 0x0009;
+	in.ground_handle = 0x1002;
+
+	const std::vector<uint8_t> wire = encode_objective_entity_state(in);
+	EXPECT(wire.size() == 19);
+	EXPECT(wire[0] == 0x07 && wire[1] == 0x10 && wire[2] == 0xA5);
+	EXPECT(wire[3] == 0x78 && wire[4] == 0x56 &&
+	       wire[5] == 0x34 && wire[6] == 0x12);
+	EXPECT(wire[15] == 0x09 && wire[16] == 0x00 &&
+	       wire[17] == 0x02 && wire[18] == 0x10);
+
+	ObjectiveEntityState out{};
+	size_t consumed = 0;
+	EXPECT(decode_objective_entity_state(
+		wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == 19);
+	EXPECT(out.entity_handle == in.entity_handle &&
+	       out.flags_byte == in.flags_byte && out.pos_x == in.pos_x &&
+	       out.pos_y == in.pos_y && out.pos_z == in.pos_z &&
+	       out.attach_handle == in.attach_handle &&
+	       out.ground_handle == in.ground_handle);
+	EXPECT(!decode_objective_entity_state(
+		wire.data(), wire.size() - 1, out, consumed));
+	std::printf("PASS objective_entity_state_roundtrip\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -1205,6 +1239,7 @@ int main() {
 	rc |= test_full_entity_spawn_seat_block_roundtrip();
 	rc |= test_full_entity_spawn_empty_slot_record();
 	rc |= test_deployed_item_lifecycle_roundtrip();
+	rc |= test_objective_entity_state_roundtrip();
 	if (rc == 0) std::printf("ALL nw_ingame_encode tests passed\n");
 	return rc;
 }
