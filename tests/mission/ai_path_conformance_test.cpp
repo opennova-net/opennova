@@ -268,6 +268,25 @@ int main() {
 	int peak_targets = 0;
 	for (int t = 0; t < ticks; ++t) {
 		world.run_logic_tick(/*is_authority=*/true);
+		// TRANSPORT TRACE: the two 1294s (bms 58/63) across event 10 at ~139 s
+		// (tick 8688), which redirects them to channels 13/14 to clear the drop
+		// point. Question: does the order land, and do they then drive?
+		if (std::getenv("NW_TRUCK_TRACE") != nullptr && (t % 625) == 0) {
+			world.registry.for_each([&](const w::Entity &en) {
+				if (en.bms_id != 58 && en.bms_id != 63) return;
+				const w::AiEntity *ae = ai.for_handle(en.handle);
+				std::printf("  TRK t=%6d (%5.1fs) bms=%d pos=(%7.1f,%7.1f) wp=%d "
+				            "brain[type=%d ch=%d node=%d spd=%d] slot[35=%d 37=%d 38=%d]\n",
+						t, t / 62.5, en.bms_id, en.position.x, en.position.y,
+						int(en.waypoint_id),
+						ae ? ae->brain.f[w::AiBrain::kWpType] : -1,
+						ae ? ae->brain.f[w::AiBrain::kWpChannel] : -1,
+						ae ? ae->brain.f[w::AiBrain::kWpNode] : -1,
+						ae ? ae->brain.f[w::AiBrain::kOutSpeed] : -1,
+						ae ? ae->slot.f[35] : -1, ae ? ae->slot.f[37] : -1,
+						ae ? ae->slot.f[38] : -1);
+			});
+		}
 		{
 			int now = 0;
 			for (int k = 0; k < ai.count(); ++k) {
