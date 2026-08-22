@@ -237,6 +237,8 @@ private:
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
 	bool slot_shadow_person_ = false;
+	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
+	float entity_bound_radius_ = 0.0f;  // entity+0; 0 = none (no collision block)
 	ObjectID slot_shadow_capture_with_;
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
@@ -440,6 +442,19 @@ public:
 	// +0xA0 decal, see docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
+	// The two radii retail's shadow slot reads, world units, stamped by the
+	// placer from the .3di: the MODEL SPHERE (the header's origin sphere,
+	// gpm[5] — simassets model_bound_radius_from_3di) sizes the silhouette
+	// capture extent and the depth clip; the ENTITY BOUND (entity+0: that
+	// sphere raised to the husk model's, + the 0x1000 pad, written only for a
+	// model with a collision block) sizes the slot lod/patch and the light
+	// query (retail: Entity_InitFromModel @0x40dc30; RenderSlot_AllocSlot
+	// @0x5d5773 reads entity+0; RenderSlot_RenderEntityAndChildren
+	// @0x5d7835 reads gpm[5]; see docs/render/render-lighting-re.md). A model
+	// sphere of 0 = unstamped (SlotShadow falls back to the render bounds).
+	void set_shadow_bound_radii(float p_model_sphere, float p_entity_bound);
+	float get_model_sphere_radius() const;
+	float get_entity_bound_radius() const;
 	// Capture-with link: this model renders into ANOTHER caster's slot
 	// (retail renders held weapons and mounted/standing children inside the
 	// parent entity's slot RT — the RenderSlot_RenderEntityAndChildren

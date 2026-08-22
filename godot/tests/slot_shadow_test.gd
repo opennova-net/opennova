@@ -193,6 +193,54 @@ func test_local_player_first_person_drape_gates() -> void:
 			"below shadow detail 2 the first-person local drape is skipped")
 
 
+## The drape is bounded by the retail lod x lod patch and clipped by the
+## shadowztex depth stage: a bound silhouette slot publishes a non-degenerate
+## world patch of side 6..20 u around the caster, its depth-clip texgen rows,
+## and the shared 32x4 step texture [orig: RenderSlot_RebuildPatchVertexBuffer
+##  @0x5d5130; build_shadow_cascade_uv_matrices @0x58cf10;
+##  shadow_system_init_resources @0x5d6260 — renderer::slot_patch_bounds,
+##  slot_depth_clip, shadowztex_pixels].
+func test_bound_slot_publishes_its_patch_and_depth_clip() -> void:
+	var environment := _environment()
+	_camera()
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(4.0)
+	caster.set_shadow_bound_radii(2.0, 2.0625)  # lod 5 -> floor 6 at noon, <= 20 grazing
+	shadow.advance_frame()
+	var drape := SlotShadow.get_drape_material()
+	var ztex: Texture2D = drape.get_shader_parameter("u_shadowztex")
+	assert_not_null(ztex, "the depth-clip texture is bound once on the drape")
+	if ztex != null:
+		assert_eq(ztex.get_width(), 32)
+		assert_eq(ztex.get_height(), 4)
+	var patches: PackedVector4Array = drape.get_shader_parameter("u_slot_patch")
+	assert_eq(patches.size(), 12)
+	var patch := patches[0]
+	var side_x := patch.z - patch.x
+	var side_z := patch.w - patch.y
+	assert_almost_eq(side_x, side_z, 0.001, "the patch is a square")
+	assert_true(side_x >= 6.0 and side_x <= 20.0,
+			"the patch side is the clamped lod (6..20 u): %s" % str(side_x))
+	assert_true(patch.x <= caster.global_position.x and caster.global_position.x <= patch.z,
+			"the patch straddles the caster east-west")
+	assert_true(patch.y <= caster.global_position.z and caster.global_position.z <= patch.w,
+			"the patch straddles the caster north-south")
+	var clip_u: PackedVector4Array = drape.get_shader_parameter("u_slot_clip_u")
+	var clip_v: PackedVector4Array = drape.get_shader_parameter("u_slot_clip_v")
+	assert_eq(clip_u.size(), 12)
+	assert_eq(clip_v.size(), 12)
+	assert_gt(Vector3(clip_u[0].x, clip_u[0].y, clip_u[0].z).length(), 0.0,
+			"the clip u row carries the steepened slot direction")
+	assert_gt(Vector3(clip_v[0].x, clip_v[0].y, clip_v[0].z).length(), 0.0,
+			"the clip v row carries the far-fade direction")
+	# The caster's own position sits beyond the plane through lp = pos - dir
+	# (u2 > 0.5): the black half keeps the shadow under the caster.
+	var u2 := Vector3(clip_u[0].x, clip_u[0].y, clip_u[0].z).dot(caster.global_position) + clip_u[0].w
+	assert_gt(u2, 0.5, "the ground under the caster lies in the drawn half")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
 func test_terrain_material_chains_the_shared_drape_passes() -> void:
 	var drape: ShaderMaterial = SlotShadow.get_drape_material()
 	assert_not_null(drape, "the shared drape material exists")

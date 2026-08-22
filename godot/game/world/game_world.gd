@@ -1015,6 +1015,10 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.tile_info_override = tile_info
 	_terrain_data = data
 	_terrain.terrain_data = data
+	if _slot_shadow != null:
+		# The shadow anchor march probes this terrain (retail:
+		# Terrain_GetHeightAtPosition @0x606720 in RenderSlot_UpdateEntityLight).
+		_slot_shadow.set_terrain_data(data)
 	_terrain.build()
 	if _water != null:
 		_water.terrain_data = data

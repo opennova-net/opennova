@@ -1,5 +1,6 @@
 #include "env/nova_slot_shadow.h"
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -19,11 +20,13 @@
 #include "lights/nova_light_scene.h"
 #include "object/nova_object_model.h"
 #include "resource_index/nova_resource_root.h"
+#include "terrain/nova_terrain_data.h"
 
 namespace godot {
 
 Ref<ShaderMaterial> SlotShadow::drape_material_;
 Ref<ShaderMaterial> SlotShadow::blob_material_;
+Ref<ImageTexture> SlotShadow::shadowztex_;
 
 // Free visual layers reserved as per-slot capture channels (device plumbing;
 // the 12-slot budget itself is the retail RT chain — render_slot_shadow.h).
@@ -107,12 +110,31 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 			renderer::kDrapeFadeEndUnits - renderer::kDrapeFadeStartUnits);
 	drape_material_->set_shader_parameter("u_drape_fade_range", fade_range);
 	blob_material_->set_shader_parameter("u_drape_fade_range", fade_range);
+	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
+	// CLAMP + bilinear by the shader's sampler hints (retail:
+	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
+	// the fill law, renderer::shadowztex_pixels).
+	const auto px = renderer::shadowztex_pixels();
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(px.size()) * 4);
+	for (size_t i = 0; i < px.size(); ++i) {
+		const uint32_t argb = px[i];
+		bytes[static_cast<int64_t>(i) * 4 + 0] = static_cast<uint8_t>((argb >> 16) & 0xFF);
+		bytes[static_cast<int64_t>(i) * 4 + 1] = static_cast<uint8_t>((argb >> 8) & 0xFF);
+		bytes[static_cast<int64_t>(i) * 4 + 2] = static_cast<uint8_t>(argb & 0xFF);
+		bytes[static_cast<int64_t>(i) * 4 + 3] = static_cast<uint8_t>((argb >> 24) & 0xFF);
+	}
+	const Ref<Image> image = Image::create_from_data(renderer::kShadowZTexWidth,
+			renderer::kShadowZTexHeight, false, Image::FORMAT_RGBA8, bytes);
+	shadowztex_ = ImageTexture::create_from_image(image);
+	drape_material_->set_shader_parameter("u_shadowztex", shadowztex_);
 	return drape_material_;
 }
 
 void SlotShadow::cleanup_statics() {
 	drape_material_.unref();
 	blob_material_.unref();
+	shadowztex_.unref();
 	// Release the uniform-name table before the engine tears the StringName
 	// table down (the function-local static would otherwise outlive it).
 	SlotUniformNames &names = slot_uniforms();
@@ -127,6 +149,8 @@ SlotShadow::SlotShadow() {}
 void SlotShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_environment_node", "environment"),
 			&SlotShadow::set_environment_node);
+	ClassDB::bind_method(D_METHOD("set_terrain_data", "terrain"),
+			&SlotShadow::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("set_light_scene", "scene"),
 			&SlotShadow::set_light_scene);
 	ClassDB::bind_method(
@@ -155,6 +179,10 @@ void SlotShadow::set_environment_node(MissionEnvironment *p_environment) {
 	environment_node_id_ = p_environment != nullptr
 			? ObjectID(p_environment->get_instance_id())
 			: ObjectID();
+}
+
+void SlotShadow::set_terrain_data(const Ref<TerrainData> &p_terrain) {
+	terrain_data_ = p_terrain;
 }
 
 void SlotShadow::set_light_scene(const Ref<LightScene> &p_scene) {
@@ -389,11 +417,25 @@ void SlotShadow::advance_frame() {
 			applied_bits_[id] = 0;
 		}
 		const Vector3 pos = model->get_global_position();
-		const AABB bounds = model->get_world_bounds();
-		const float radius = MAX(0.5f, float(bounds.size.length()) * 0.5f);
+		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
+		// capture extent and the depth clip; the entity bound (entity+0 —
+		// the sphere raised to the husk's, + 0x1000, and 0 without a
+		// collision block) sizes the lod/patch and the light query (retail:
+		// RenderSlot_RenderEntityAndChildren @0x5d7835 reads the model's
+		// +0x14; RenderSlot_AllocSlot @0x5d5773 and the light query read
+		// entity+0, Entity_InitFromModel @0x40dc30). A model the placer did
+		// not stamp falls back to half its render-bounds diagonal for both.
+		float capture_radius = model->get_model_sphere_radius();
+		float slot_radius = model->get_entity_bound_radius();
+		if (capture_radius <= 0.0f) {
+			const AABB bounds = model->get_world_bounds();
+			capture_radius = MAX(0.5f, float(bounds.size.length()) * 0.5f);
+			slot_radius = capture_radius;
+		}
+		info.capture_radius = capture_radius;
 		renderer::SlotCandidateState &state = info.state;
 		state.pos2d = {float(pos.x), float(pos.z)};
-		state.bound_radius = radius;
+		state.bound_radius = slot_radius;
 		state.dead = !model->is_visible_in_tree();
 		// A caster parented under another caster renders with its parent in
 		// retail (the seat/standing child walk of the parent's slot RT);
@@ -445,6 +487,40 @@ void SlotShadow::advance_frame() {
 	silhouette_terms.resize(renderer::kSlotCaptureCount);
 	PackedVector4Array blob_terms;
 	blob_terms.resize(renderer::kSlotCaptureCount);
+	// Per-slot drape patch (world min_x, min_z, max_x, max_z) and the
+	// depth-clip texgen rows for the silhouette pass; the blob pass takes the
+	// same patch (retail drapes both legs over the slot's patch).
+	PackedVector4Array silhouette_patches;
+	silhouette_patches.resize(renderer::kSlotCaptureCount);
+	PackedVector4Array blob_patches;
+	blob_patches.resize(renderer::kSlotCaptureCount);
+	PackedVector4Array clip_u;
+	clip_u.resize(renderer::kSlotCaptureCount);
+	PackedVector4Array clip_v;
+	clip_v.resize(renderer::kSlotCaptureCount);
+	// The slot's lod x lod patch around the marched anchor
+	// (renderer::slot_patch_bounds; the march probes TerrainData when set).
+	// Planar mission north is Godot -z, so the patch's north range maps to
+	// z in [-max_north, -min_north].
+	const auto slot_patch = [&](const Vector3 &p_pos, const Vector3 &p_dir,
+									float p_radius, float p_dir_y_raw) {
+		const int base_lod = renderer::slot_lod_for_radius(p_radius);
+		const int lod = renderer::grazing_slot_lod(base_lod, p_dir_y_raw);
+		std::array<float, 2> anchor = {float(p_pos.x), float(p_pos.z)};
+		if (terrain_data_.is_valid()) {
+			const TerrainData *terrain = terrain_data_.ptr();
+			anchor = renderer::march_shadow_anchor(
+					{float(p_pos.x), float(p_pos.y), float(p_pos.z)},
+					{float(p_dir.x), float(p_dir.y), float(p_dir.z)},
+					[terrain](float x, float z) {
+						return terrain->get_height_world(Vector3(x, 0.0f, z));
+					});
+		}
+		const renderer::SlotPatch patch =
+				renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
+		return Vector4(patch.min_x, -patch.max_north, patch.max_x,
+				-patch.min_north);
+	};
 	int blob_cursor = 0;
 	report_bound_ = report_captures_ = report_blobs_ = 0;
 
@@ -493,6 +569,56 @@ void SlotShadow::advance_frame() {
 		if (assignment.bound && !assignment.excluded) {
 			++report_bound_;
 		}
+		// The dominant-light pick for every bound slot (the clamped sun by
+		// default; the strongest nearby point light overrides) — retail runs
+		// it from the entity update for silhouette and blob slots alike, so
+		// the blob leg's patch follows the same stored direction (retail:
+		// RenderSlot_UpdateEntityLight @0x5d6a30 <- Entity_UpdateAllEntities).
+		const Vector3 center = model->get_world_bounds().get_center();
+		renderer::SlotLightPick pick;
+		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
+		pick.attached_handle = 0;
+		Vector3 attached_color;
+		float attached_atten = 0.0f;
+		if (light_scene_.is_valid() && assignment.bound && !assignment.excluded) {
+			Weather *weather = Object::cast_to<Weather>(
+					ObjectDB::get_instance(weather_id_));
+			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
+					light_gain_, light_time_ms_, weather, slot_lights_);
+			pick = renderer::pick_dominant_light(
+					{float(center.x), float(center.y), float(center.z)},
+					{default_dir.x, default_dir.y, default_dir.z},
+					slot_lights_.data(), slot_lights_.size(),
+					info.state.interior);
+			if (pick.attached_handle != 0) {
+				for (const renderer::SlotPointLight &point : slot_lights_) {
+					if (point.handle == pick.attached_handle) {
+						attached_color = Vector3(point.color[0],
+								point.color[1], point.color[2]);
+						const float dx = center.x - point.position[0];
+						const float dy = center.y - point.position[1];
+						const float dz = center.z - point.position[2];
+						const float d2 = dx * dx + dy * dy + dz * dz;
+						attached_atten = 1.0f /
+								MAX(0.001f,
+										d2 * point.attenuation[2] +
+												point.attenuation[0]);
+						break;
+					}
+				}
+			}
+		}
+		const Vector3 dir = Vector3(pick.direction[0], pick.direction[1],
+				pick.direction[2])
+									.normalized();
+		// The slot direction as stored: the RAW clamped-negated sun, or the
+		// unit attached-light direction — what the grazing rescale's vertical
+		// and the depth clip read (retail: slot+0x68..0x70, RenderSlot_Update-
+		// EntityLight @0x5d6d5c; RenderSlot_DrawSilhouetteDrape @0x5d5d66).
+		const float dir_y_raw = pick.attached_handle != 0 ? dir.y : sun_dir[1];
+		const std::array<float, 3> stored_dir = pick.attached_handle != 0
+				? std::array<float, 3>{float(dir.x), float(dir.y), float(dir.z)}
+				: sun_dir;
 		if (!captures) {
 			if (assignment.draws_blob && !assignment.excluded &&
 					blob_cursor < renderer::kSlotCaptureCount) {
@@ -526,55 +652,19 @@ void SlotShadow::advance_frame() {
 							_drape_projection(projector, w * 0.5f, l * 0.5f,
 									200.0f));
 					blob_terms[slot] = Vector4(0, 0, 0, 2.0f);
+					blob_patches[slot] = slot_patch(pos, dir,
+							info.state.bound_radius, dir_y_raw);
 					++report_blobs_;
 				}
 			}
 			continue;
 		}
 
-		// The dominant-light pick for this slot (the clamped sun by
-		// default; the strongest nearby point light overrides).
-		const Vector3 center = model->get_world_bounds().get_center();
-		renderer::SlotLightPick pick;
-		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
-		pick.attached_handle = 0;
-		Vector3 attached_color;
-		float attached_atten = 0.0f;
-		if (light_scene_.is_valid()) {
-			Weather *weather = Object::cast_to<Weather>(
-					ObjectDB::get_instance(weather_id_));
-			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
-					light_gain_, light_time_ms_, weather, slot_lights_);
-			pick = renderer::pick_dominant_light(
-					{float(center.x), float(center.y), float(center.z)},
-					{default_dir.x, default_dir.y, default_dir.z},
-					slot_lights_.data(), slot_lights_.size(),
-					info.state.interior);
-			if (pick.attached_handle != 0) {
-				for (const renderer::SlotPointLight &point : slot_lights_) {
-					if (point.handle == pick.attached_handle) {
-						attached_color = Vector3(point.color[0],
-								point.color[1], point.color[2]);
-						const float dx = center.x - point.position[0];
-						const float dy = center.y - point.position[1];
-						const float dz = center.z - point.position[2];
-						const float d2 = dx * dx + dy * dy + dz * dz;
-						attached_atten = 1.0f /
-								MAX(0.001f,
-										d2 * point.attenuation[2] +
-												point.attenuation[0]);
-						break;
-					}
-				}
-			}
-		}
-		const Vector3 dir = Vector3(pick.direction[0], pick.direction[1],
-				pick.direction[2])
-									.normalized();
-
-		// Capture camera along the slot direction.
+		// Capture camera along the slot direction, sized from the MODEL
+		// sphere (retail: RenderSlot_RenderEntityAndChildren @0x5d7835 —
+		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)).
 		const int order = assignment.capture_order;
-		const float radius = info.state.bound_radius;
+		const float radius = info.capture_radius;
 		const float half_extent = renderer::silhouette_half_extent(radius);
 		const float cam_dist = radius * 2.0f + 2.0f;
 		Camera3D *slot_camera = cameras_[order];
@@ -640,11 +730,28 @@ void SlotShadow::advance_frame() {
 				_drape_projection(pose, half_extent, half_extent,
 						slot_camera->get_far()));
 		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
+		// The patch around the marched anchor, from the stored direction.
+		const Vector3 entity_pos = model->get_global_position();
+		silhouette_patches[order] =
+				slot_patch(entity_pos, dir, info.state.bound_radius, dir_y_raw);
+		// The depth-clip texgen from the stored direction, the capture half
+		// size and the person steepening (renderer::slot_depth_clip).
+		const renderer::SlotDepthClip clip = renderer::slot_depth_clip(
+				stored_dir, half_extent, info.state.is_person,
+				{float(entity_pos.x), float(entity_pos.y), float(entity_pos.z)});
+		clip_u[order] = Vector4(clip.u_axis[0], clip.u_axis[1], clip.u_axis[2],
+				clip.u_offset);
+		clip_v[order] = Vector4(clip.v_axis[0], clip.v_axis[1], clip.v_axis[2],
+				clip.v_offset);
 		++report_captures_;
 	}
 
 	drape->set_shader_parameter("u_slot_term", silhouette_terms);
+	drape->set_shader_parameter("u_slot_patch", silhouette_patches);
+	drape->set_shader_parameter("u_slot_clip_u", clip_u);
+	drape->set_shader_parameter("u_slot_clip_v", clip_v);
 	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
+	blob_material_->set_shader_parameter("u_slot_patch", blob_patches);
 
 	// Casters the full table refused (no assignment row of their own): a
 	// linked child still rides its parent's slot RT — retail's child walk

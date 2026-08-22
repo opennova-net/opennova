@@ -8,6 +8,8 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include <simassets/model_builders.h>
+
 #include "env/nova_water.h"
 #include "mission/nova_mission_data.h"
 
@@ -1410,13 +1412,53 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	p_model->set_shadow_caster_enabled(item_casts_dynamic_shadow(
 			item_db_->get_item_type(p_item_id),
 			item_db_->get_attrib(p_item_id), item_db_->get_attrib2(p_item_id)));
-	// The render-slot ground-shadow profile: person-type drapes elongate 4x,
-	// and vehicles may author an items.def `shadow` blob decal — the drape
-	// fallback for a bound slot past the silhouette-capture budget (retail:
-	// itemdef type 3 gate @0x5d5d7f, the +0xA0 decal via @0x5d59d0; see
-	// docs/render/render-lighting-re.md).
+	// The render-slot ground-shadow profile: person-type casters steepen the
+	// drape's depth-clip plane 4x (the shadowztex stage, not the silhouette
+	// projection), and vehicles may author an items.def `shadow` blob decal —
+	// the drape fallback for a bound slot past the silhouette-capture budget
+	// (retail: itemdef type 3 gate @0x5d5d7f, the +0xA0 decal via @0x5d59d0;
+	// see docs/render/render-lighting-re.md).
 	p_model->set_slot_shadow_person(
 			item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON);
+	// The two radii the shadow slot reads. The MODEL SPHERE is the .3di
+	// header's origin sphere (gpm[5]) — the silhouette capture extent and the
+	// depth clip size from it. The ENTITY BOUND (entity+0) is that sphere
+	// raised to the first husk stage's sphere and padded + 0x1000, written
+	// only when the graphic carries a collision block — the slot lod/patch
+	// and the light query size from it (retail: Entity_InitFromModel
+	// @0x40dc30 — the gpm[44] collision-block gate, the husk max, the
+	// + 0x1000; the authored def scale fold is not applied, D-COL-3 like the
+	// engine's own entity law in simassets/collision_resolve.cpp).
+	const String graphic = _graphic_for(p_item_id);
+	if (!graphic.is_empty()) {
+		const Ref<ObjectData> data = _load_object_data(graphic);
+		if (data.is_valid()) {
+			// 0 for a document without LOD 0 (nothing loaded): stays unstamped.
+			const float model_sphere =
+					opennova::simassets::model_bound_radius_from_3di(
+							data->native_model());
+			if (model_sphere > 0.0f) {
+				float entity_bound = 0.0f;
+				if (data->has_collision()) {
+					float bound = model_sphere;
+					String husk = item_db_->get_husk(p_item_id);
+					if (husk.is_empty()) {
+						husk = item_db_->get_huskfinal(p_item_id);
+					}
+					if (!husk.is_empty()) {
+						const Ref<ObjectData> husk_data = _load_object_data(husk);
+						if (husk_data.is_valid()) {
+							bound = MAX(bound,
+									opennova::simassets::model_bound_radius_from_3di(
+											husk_data->native_model()));
+						}
+					}
+					entity_bound = bound + 0.0625f;
+				}
+				p_model->set_shadow_bound_radii(model_sphere, entity_bound);
+			}
+		}
+	}
 	String decal_texture;
 	Vector4 decal_dims;
 	if (item_db_->get_shadow_decal(p_item_id, decal_texture, decal_dims)) {

@@ -163,23 +163,90 @@ int main() {
 
 	// --- anchor march [orig: @ 0x5d6c86..0x5d6d67].
 	{
-		// Flat terrain at 0, entity 2 u up, light straight along +x at the
-		// clamp floor: planar unit steps, vertical clamped to -0.5/step ->
-		// 4 steps to ground.
+		// Flat terrain at 0, entity 2 u up, light along +x at the clamp
+		// floor: planar unit steps, the TRUE vertical rate of -0.25/step is
+		// kept (the -0.5 substitute is for non-descending steps only
+		// @ 0x5d6cd7..0x5d6cdf) -> 8 steps to ground.
 		const auto flat = [](float, float) { return 0.0f; };
 		const auto anchor = march_shadow_anchor(
 				{0.0f, 2.0f, 0.0f}, {1.0f, -0.25f, 0.0f}, flat);
-		CHECK(near_f(anchor[0], 4.0f));
+		CHECK(near_f(anchor[0], 8.0f));
 		CHECK(near_f(anchor[1], 0.0f));
 		// A steep direction keeps its own vertical rate.
 		const auto steep = march_shadow_anchor(
 				{0.0f, 2.0f, 0.0f}, {0.5f, -1.0f, 0.0f}, flat);
 		CHECK(near_f(steep[0], 1.0f));
+		// A level or rising direction takes the -0.5 u substitute.
+		const auto level = march_shadow_anchor(
+				{0.0f, 2.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, flat);
+		CHECK(near_f(level[0], 4.0f));
 		// Terrain above the start: the anchor stays at the entity.
 		const auto high = [](float, float) { return 10.0f; };
 		const auto at_start = march_shadow_anchor(
 				{3.0f, 2.0f, 4.0f}, {1.0f, -1.0f, 0.0f}, high);
 		CHECK(near_f(at_start[0], 3.0f) && near_f(at_start[1], 4.0f));
+	}
+
+	// --- the drape patch [orig: RenderSlot_RebuildPatchVertexBuffer
+	// @ 0x5d5130 — origin anchor - lod/2 east / + lod/2 north, rounded to
+	// the lod band's grid, lod cells east and south].
+	{
+		// lod 6 (1 u grid): anchor (10.3, 20.6) -> origin (7, 24) rounded
+		// from (7.3, 23.6); the square runs [7, 13] x [18, 24].
+		const SlotPatch p6 = slot_patch_bounds(10.3f, 20.6f, 6);
+		CHECK(near_f(p6.min_x, 7.0f) && near_f(p6.max_x, 13.0f));
+		CHECK(near_f(p6.min_north, 18.0f) && near_f(p6.max_north, 24.0f));
+		// lod 12 (2 u grid): (10.3 - 6, 20.6 + 6) = (4.3, 26.6) -> (4, 26).
+		const SlotPatch p12 = slot_patch_bounds(10.3f, 20.6f, 12);
+		CHECK(near_f(p12.min_x, 4.0f) && near_f(p12.max_x, 16.0f));
+		CHECK(near_f(p12.min_north, 14.0f) && near_f(p12.max_north, 26.0f));
+		// lod 20 (4 u grid): (0.3, 30.6) -> (0, 32); the 20 u cap.
+		const SlotPatch p20 = slot_patch_bounds(10.3f, 20.6f, 20);
+		CHECK(near_f(p20.min_x, 0.0f) && near_f(p20.max_x, 20.0f));
+		CHECK(near_f(p20.min_north, 12.0f) && near_f(p20.max_north, 32.0f));
+	}
+
+	// --- the depth-clip stage [orig: shadow_system_init_resources
+	// @ 0x5d6260..0x5d62a7; build_shadow_cascade_uv_matrices @ 0x58cf10].
+	{
+		const auto px = shadowztex_pixels();
+		CHECK(px.size() == 128);
+		CHECK(px[0] == 0xFFFFFFFFu && px[15] == 0xFFFFFFFFu);  // row 0 white below 16
+		CHECK(px[16] == 0xFF808080u);                           // the gray texel
+		CHECK(px[17] == 0xFF000000u && px[31] == 0xFF000000u);  // black beyond
+		CHECK(px[2 * 32 + 20] == 0xFF000000u);                  // row 2 same
+		CHECK(px[3 * 32 + 20] == 0xFFFFFFFFu);                  // row 3 all white
+		// A unit slot direction straight down the +x slope (x 0.8, y -0.6),
+		// half size 2 -> k = 0.25; entity at the origin, lp = -dir.
+		const std::array<float, 3> dir = {0.8f, -0.6f, 0.0f};
+		const SlotDepthClip clip = slot_depth_clip(dir, 2.0f, false, {0, 0, 0});
+		const auto u_at = [&](float x, float y, float z) {
+			return clip.u_axis[0] * x + clip.u_axis[1] * y + clip.u_axis[2] * z +
+					clip.u_offset;
+		};
+		const auto v_at = [&](float x, float y, float z) {
+			return clip.v_axis[0] * x + clip.v_axis[1] * y + clip.v_axis[2] * z +
+					clip.v_offset;
+		};
+		// The caster plane through lp: u2 = 0.5 + k * dir.(p - lp); at p = lp
+		// u2 = 0.5, at the entity (p - lp = dir) u2 = 0.75 — beyond the plane
+		// (away from the light) the black half draws.
+		CHECK(near_f(u_at(-0.8f, 0.6f, 0.0f), 0.5f));
+		CHECK(near_f(u_at(0.0f, 0.0f, 0.0f), 0.75f));
+		// Toward the light (p - lp = -dir) the white half suppresses.
+		CHECK(u_at(-1.6f, 1.2f, 0.0f) < 0.5f);
+		// v2 = 0.5 + 0.333 k^2 dir.(p - lp): 4 u along the light past lp is
+		// 0.5 + 0.333 * 0.0625 * 4.
+		CHECK(near_f(v_at(-0.8f + 3.2f, 0.6f - 2.4f, 0.0f),
+				0.5f + 0.333f * 0.0625f * 4.0f));
+		// A person steepens the clip direction's vertical x4 before the
+		// normalize: f2 = normalize(0.8, -2.4, 0) = (0.316, -0.949, 0).
+		const SlotDepthClip person = slot_depth_clip(dir, 2.0f, true, {0, 0, 0});
+		CHECK(near_f(person.u_axis[0], 0.25f * 0.3162f, 1.0e-3f));
+		CHECK(near_f(person.u_axis[1], 0.25f * -0.9487f, 1.0e-3f));
+		// ...and leaves the v (far-fade) row on the unscaled direction.
+		CHECK(near_f(person.v_axis[0], clip.v_axis[0]));
+		CHECK(near_f(person.v_axis[1], clip.v_axis[1]));
 	}
 
 	// --- priority scoring [orig: RenderSlot_SortAndAssign

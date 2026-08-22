@@ -18,14 +18,35 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 //                    q_c = sun_c*|dir_y| / (sun_c*|dir_y| + sky_c)
 //                    (retail: render_sector_model @0x5d5f63..0x5d6008);
 //                    a = 0 off, 1 silhouette, 2 authored blob
-// Shadowed terrain = terrain * (1 - (1-fade) * q * mask) — exactly retail's
-// multiply blend of (silhouette + ambient-law material) over the patch.
+//   u_slot_patch[i] : the lod x lod terrain patch the slot is draped over,
+//                    as world (min_x, min_z, max_x, max_z) — retail builds a
+//                    (lod+1)^2 terrain-following mesh of side lod = the
+//                    grazing-scaled clamp(2r+1, 6, 20) u around the marched
+//                    anchor and draws nothing outside it (retail:
+//                    RenderSlot_RebuildPatchVertexBuffer @0x5d5130;
+//                    renderer::slot_patch_bounds)
+//   u_slot_clip_u[i], u_slot_clip_v[i] : the depth-clip stage's texgen as
+//                    world dot products (xyz . p + w) into u_shadowztex —
+//                    retail's second texture stage ADDs that 32x4 texture to
+//                    the silhouette term, so its white half (toward the light
+//                    / in front of the caster plane) and its far row suppress
+//                    the shadow and its black half keeps it (retail:
+//                    build_shadow_cascade_uv_matrices @0x58cf10,
+//                    shadow_system_init_resources @0x5d6260;
+//                    renderer::slot_depth_clip, shadowztex_pixels)
+// Shadowed terrain = terrain * sat((1 - (1-fade) * q * mask) + ztex) inside
+// the patch — exactly retail's two-stage ADD under the multiply blend.
 
 const int MAX_SLOTS = 12;
 // The drape distance fade (start, range) in world units; SlotShadow pushes
 // the pair from renderer::kDrapeFadeStartUnits/kDrapeFadeEndUnits.
 uniform vec2 u_drape_fade_range = vec2(40.0, 40.0);
 uniform vec4 u_slot_term[12];
+uniform vec4 u_slot_patch[12];
+uniform vec4 u_slot_clip_u[12];
+uniform vec4 u_slot_clip_v[12];
+// The 32x4 "shadowztex" step, CLAMP + bilinear like retail's sampler.
+uniform sampler2D u_shadowztex : filter_linear, repeat_disable;
 uniform sampler2D u_slot_tex_0 : source_color, filter_linear, repeat_disable;
 uniform sampler2D u_slot_tex_1 : source_color, filter_linear, repeat_disable;
 uniform sampler2D u_slot_tex_2 : source_color, filter_linear, repeat_disable;
@@ -102,6 +123,12 @@ void fragment() {
 		if (mode < 0.5) {
 			continue;
 		}
+		// The drape patch: nothing outside the slot's lod x lod square.
+		vec4 patch = u_slot_patch[i];
+		if (v_world.x < patch.x || v_world.x > patch.z ||
+				v_world.z < patch.y || v_world.z > patch.w) {
+			continue;
+		}
 		vec4 p = slot_matrix(i) * vec4(v_world, 1.0);
 		if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 ||
 				p.z <= 0.0 || p.z >= 1.0) {
@@ -110,8 +137,13 @@ void fragment() {
 		vec4 s = slot_sample(i, p.xy);
 		if (mode < 1.5) {
 			// Silhouette: mask = capture alpha; the multiply removes the
-			// faded sun term per channel.
-			factor *= vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb * s.a;
+			// faded sun term per channel — then the depth-clip stage ADDs
+			// shadowztex and saturates (retail stage 1 COLOROP ADD).
+			vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, v_world) + u_slot_clip_u[i].w,
+					dot(u_slot_clip_v[i].xyz, v_world) + u_slot_clip_v[i].w);
+			float ztex = texture(u_shadowztex, zuv).r;
+			vec3 shadowed = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb * s.a;
+			factor *= min(vec3(1.0), shadowed + vec3(ztex));
 		} else {
 			// Authored blob decal: retail multiplies the terrain by the
 			// decal texture directly, no distance fade on this leg

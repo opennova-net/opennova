@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
@@ -21,6 +22,7 @@ class LightScene;
 class MissionEnvironment;
 class ObjectModel;
 class ResourceRoot;
+class TerrainData;
 class Weather;
 
 // The render-slot entity ground-shadow device (the Godot half of
@@ -35,8 +37,10 @@ class Weather;
 // slots past the capture budget.
 //
 // Device folds (documented on docs/render/render-lighting-re.md): the drape
-// projects per-pixel — the retail 21x21 anchor-marched patch is that
-// projection's placement device, so the march needs no separate device leg;
+// projects per-pixel over the terrain surface, bounded by the retail lod x
+// lod patch placed by the anchor march (renderer::slot_patch_bounds over the
+// TerrainData height query) and clipped by the shadowztex depth stage
+// (renderer::slot_depth_clip) — both published per slot to the shader;
 // capture-with linked children (held weapons, mounted riders) render into
 // their parent's slot RT through the per-frame claim pass — the
 // RenderSlot_RenderEntityAndChildren child walk — while tree-parented riders
@@ -65,6 +69,11 @@ public:
 	SlotShadow();
 
 	void set_environment_node(MissionEnvironment *p_environment);
+	// The terrain the anchor march probes (retail: Terrain_GetHeightAtPosition
+	// @0x606720 inside RenderSlot_UpdateEntityLight); without it the anchor
+	// stays at the entity (the march's step-0 exit on a ground-standing
+	// caster).
+	void set_terrain_data(const Ref<TerrainData> &p_terrain);
 	void set_light_scene(const Ref<LightScene> &p_scene);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
 			Weather *p_weather);
@@ -93,7 +102,11 @@ protected:
 private:
 	struct CasterInfo {
 		ObjectModel *model = nullptr;
-		renderer::SlotCandidateState state;
+		renderer::SlotCandidateState state;  // bound_radius = entity+0 (lod, light query)
+		// The model sphere (gpm[5]) the silhouette capture extent and the
+		// depth clip size from (retail: RenderSlot_RenderEntityAndChildren
+		// @0x5d7835 reads the model's +0x14, not entity+0).
+		float capture_radius = 1.0f;
 	};
 
 	void _ensure_captures();
@@ -112,6 +125,7 @@ private:
 	// The per-slot dominant-light query buffer (reused across frames).
 	std::vector<renderer::SlotPointLight> slot_lights_;
 	ObjectID environment_node_id_;
+	Ref<TerrainData> terrain_data_;
 	Ref<LightScene> light_scene_;
 	Vector3 light_gain_ = Vector3(1, 1, 1);
 	int light_time_ms_ = 0;
@@ -128,6 +142,9 @@ private:
 
 	static Ref<ShaderMaterial> drape_material_;
 	static Ref<ShaderMaterial> blob_material_;
+	// The depth-clip stage's 32x4 "shadowztex" (renderer::shadowztex_pixels),
+	// bound once on the shared drape material.
+	static Ref<ImageTexture> shadowztex_;
 };
 
 }  // namespace godot

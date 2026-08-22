@@ -34,11 +34,13 @@
 //
 // This unit carries every planning/selection/color law as a structural
 // translation; the device half (godot/src) realizes the silhouette capture
-// and the terrain drape. The retail anchor march is the patch PLACEMENT for
-// the drape mesh — a per-pixel projective drape computes the same terrain
-// intersection the march approximates (its vertical step is clamped to
-// >= 0.5 u per planar unit), so a projective device realizes the march's
-// observable exactly; the march law is still ported here for parity tests.
+// and the terrain drape. The retail anchor march PLACES the lod x lod
+// terrain patch the drape is drawn over (slot_patch_bounds), and the drape's
+// second texture stage clips the projected silhouette by depth
+// (slot_depth_clip over shadowztex_pixels) — a projective device computes the
+// projection per pixel but must still bound it by that patch and that clip,
+// or every object's shadow runs the whole capture frustum (the 2026-08-22
+// "objects cast too-tall shadows" report).
 #pragma once
 
 #include <array>
@@ -190,18 +192,76 @@ SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
 
 // Marches from the entity position along the (downward) slot direction in
 // unit-planar steps until the terrain height reaches the ray; the vertical
-// step is clamped to at least 0.5 u of drop per iteration
-// (fixed -32768 [orig: @ 0x5d6cdd..0x5d6cdf]), so for suns below ~30
-// degrees the march descends steeper than the true projection — the anchor
-// only PLACES the drape patch; the projected UV matrices land the
-// silhouette. Coordinates are (x, z planar, y vertical up). Returns the
-// planar anchor. march start is the entity position (retail substitutes the
-// rotated bbox-center anchor when the entity flag word is zero
+// step keeps the direction's own rate and is SUBSTITUTED by 0.5 u of drop
+// only when it would not descend (fixed -32768 stored for a non-negative
+// step [orig: @ 0x5d6cd7..0x5d6cdf]). The anchor PLACES the drape patch
+// (slot_patch_bounds); the projected UV matrices land the silhouette.
+// Coordinates are (x, z planar, y vertical up). Returns the planar anchor.
+// march start is the entity position (retail substitutes the rotated
+// bbox-center anchor when the entity flag word is zero
 // [orig: @ 0x5d6ce7..0x5d6d2d]).
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,
 		int max_steps = 4096);
+
+// ---------------------------------------------------------------------------
+// The drape patch [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130]
+// ---------------------------------------------------------------------------
+
+// The lod x lod world-axis-aligned square the drape is drawn over: its
+// origin is the marched anchor backed off lod/2 west and lod/2 north,
+// rounded to the lod band's grid (1 u below lod 10, 2 u for 10..15, 4 u from
+// 16), and the (lod + 1)^2 terrain-following vertices run east and south at
+// 1 u — so no entity's ground shadow ever covers more than the 20 u cap
+// [orig: @ 0x5d5142..0x5d519d the origin and its snap; @ 0x5d527a/@ 0x5d52f7
+//  the column/row steps]. Planar mission units (x east, north).
+struct SlotPatch {
+	float min_x = 0.0f;
+	float max_x = 0.0f;
+	float min_north = 0.0f;
+	float max_north = 0.0f;
+};
+SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod);
+
+// ---------------------------------------------------------------------------
+// The depth-clip stage [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0 ->
+// build_shadow_cascade_uv_matrices @ 0x58cf10; shadow_system_init_resources
+// @ 0x5d6230]
+// ---------------------------------------------------------------------------
+
+// "shadowztex": the 32x4 ARGB texture the drape's second stage ADDs to the
+// silhouette term — rows 0..2 are white below column 16, one gray texel
+// at column 16 and black beyond; row 3 is all white. Sampled CLAMP +
+// bilinear [orig: @ 0x5d6260..0x5d62a7 the fill; flags 1 -> clamp
+//  (apply_texture_stages @ 0x680870), linear min/mag]. Because the stage
+// ADDs and saturates, WHITE suppresses the shadow and BLACK keeps it:
+// u2 > 0.5 (ground beyond the plane through the caster, away from the
+// light) draws, u2 < 0.5 (toward the light) is suppressed, and v2 >= 0.75
+// (far along the light) fades to white.
+inline constexpr int kShadowZTexWidth = 32;
+inline constexpr int kShadowZTexHeight = 4;
+std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels();
+
+// The stage's texgen, as world-space dot products: u2 = 0.5 + k·f2·(p − lp),
+// v2 = 0.5 + 0.333·k²·f1·(p − lp) with k = 0.5 / half_size, lp = entity
+// position − the slot direction, f1 = the normalized slot direction and f2
+// the same direction with its VERTICAL component x 4 for a person-class
+// caster (itemdef type 3) before normalizing — the steepened clip plane
+// that cuts a soldier's shadow nearer its feet. u2 = u_axis·p + u_offset,
+// v2 = v_axis·p + v_offset. [orig: the two direction copies and the x4
+//  @ 0x5d5d66..0x5d5d91; light_pos @ 0x5d5d95..0x5d5dd4; k @ 0x58cf2f; the
+//  detail u row @ 0x58d1cc..0x58d204; the detail v row from the k-scaled
+//  depth column x 0.333 k @ 0x58d222..0x58d249]
+inline constexpr float kPersonClipSteepening = 4.0f;  // flt_7C44B8
+struct SlotDepthClip {
+	std::array<float, 3> u_axis{};
+	float u_offset = 0.5f;
+	std::array<float, 3> v_axis{};
+	float v_offset = 0.5f;
+};
+SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
+		float half_size, bool person, const std::array<float, 3> &entity_pos);
 
 // ---------------------------------------------------------------------------
 // Slot assignment [orig: RenderSlot_SortAndAssign @ 0x5d6530]
@@ -227,8 +287,8 @@ inline constexpr float kSlotBindMaxDistance = 320.0f;
 // build_shadow_cascade_uv_matrices @ 0x58cf10: lookat_dir1 (primary,
 // unscaled) vs lookat_dir2 (detail, y x4); re-witnessed 2026-08-21 — the
 // earlier "elongate 4x along the direction" reading drew every person
-// shadow four times its projected length]. The depth-clip stage is the
-// render-slot side's open residual (render-lighting-re.md).
+// shadow four times its projected length]. The depth-clip stage is
+// slot_depth_clip above (ported 2026-08-22).
 struct SlotCandidateState {
 	std::array<float, 2> pos2d{};  // world planar (x, z)
 	float bound_radius = 1.0f;     // world units
