@@ -29,6 +29,11 @@
 #include "mission/bms.h"
 
 #include "world/ai.h"
+#include "world/collision.h"
+#include "world/occlusion.h"
+#include "simassets/collision_resolve.h"
+#include "simassets/sim_collision_pose.h"
+#include "simassets/sim_model_cache.h"
 #include "world/world.h"
 
 #include <def/def.h>
@@ -211,6 +216,32 @@ int main() {
 	if (items.count > 0) {
 		simassets::resolve_item_traits(world, items,
 				[](int32_t) -> uint8_t { return 0; });
+	}
+
+	// COLLISION. Without this the rig walks every body and vehicle through empty
+	// space, which is why its "60 AI, 56 moved" reports looked healthy for an
+	// entire slice while the live game was pinning AI against a truck, and why
+	// the transports here sail to their drive-on node when the game's do not
+	// (concept 6.4p / 6.4t). Same pipeline the game uses:
+	// ResourceIndex -> SimModelCache -> resolve_collision_instances.
+	w::CollisionWorld collision;
+	w::OcclusionWorld occlusion;
+	simassets::SimCollisionPoseProvider collision_pose;
+	simassets::SimModelCache collision_models;
+	simassets::CollisionResolveState collision_state;
+	if (std::getenv("NW_NO_COLLISION") == nullptr) {
+		collision_models.set_index(&index);
+		collision_pose.set_resource_index(&index);
+		const simassets::CollisionResolveDeps deps{collision, occlusion,
+		                                           collision_pose, collision_models};
+		const int attached =
+				simassets::resolve_collision_instances(world, items, collision_state, deps);
+		collision.set_section_matrix_provider(&collision_pose);
+		world.collision = &collision;
+		ai.collision = &collision;
+		std::printf("collision: %d entities attached to a model\n", attached);
+	} else {
+		std::printf("collision: DISABLED (NW_NO_COLLISION)\n");
 	}
 
 	world.add_system(&events);
