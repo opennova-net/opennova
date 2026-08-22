@@ -166,6 +166,8 @@ int main() {
 	// passengers collapsing onto ONE identical coordinate (371.41, -342.30) and
 	// locking, while the one AI that dismounted 8 u clear of the pile walked away.
 	// A single-capsule harness cannot show that. NW_BODIES overrides the count.
+	const char *slv = std::getenv("NW_SLOPE");
+	const double slope = (slv != nullptr && slv[0] != 0) ? std::atof(slv) : 0.0;
 	const char *nb = std::getenv("NW_BODIES");
 	const int body_count = (nb != nullptr && nb[0] != 0) ? std::atoi(nb) : 6;
 	struct Body { w::EntityHandle h; int32_t pos[3]; int32_t vel[3]; bool done; };
@@ -206,6 +208,16 @@ int main() {
 			                  0, 0, /*is_player=*/false, /*is_authority=*/true, t,
 			                  /*anim=*/149, 0u, health);
 			if (bx != b.pos[0] || by != b.pos[1]) ++pushed_ticks;
+			// SYNTHETIC ground ramp (NW_SLOPE = units of rise per unit of +y).
+			// NOT a parity model -- the repro has no real terrain, and the live
+			// drop site IS sloped: bms 17's ground reads 12.9 -> 14.4 -> 16.6 ->
+			// 18.7 -> 23.5 -> 26.6 as it walks away, while the pinned six sit at a
+			// flat 15.0. This only tests whether a slope beside the truck is the
+			// missing ingredient.
+			if (slope != 0.0) {
+				const double gy = b.pos[1] / 65536.0;
+				b.pos[2] = fx(slope * gy);
+			}
 			if (w::Entity *se = world.registry.get(b.h))
 				se->position = {static_cast<float>(b.pos[0] / 65536.0),
 				                static_cast<float>(b.pos[1] / 65536.0),
