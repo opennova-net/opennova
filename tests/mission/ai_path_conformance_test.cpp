@@ -352,6 +352,12 @@ int main() {
 			for (int k = 0; k < nc->count && k < 32; ++k) {
 				const w::NavEntry *ne = ai.nav.entry(nc->entries[k]);
 				if (ne == nullptr) continue;
+				// AUTHORED destination coordinates for the convoy channels: 3 is the
+				// trigger path (event 11 fires on group 3 reaching node 20) and 11/12
+				// are where that event sends the riders.
+				if (ch == 3 || ch == 11 || ch == 12)
+					std::printf("       NODE ch=%d k=%d radius=%d pos=%d,%d,%d wait=%d\n",
+							ch, k, ne->f[0], ne->f[1], ne->f[2], ne->f[3], ne->wait_ticks);
 				waitsum += ne->wait_ticks;
 				if (ne->wait_ticks > waitmax) waitmax = ne->wait_ticks;
 			}
