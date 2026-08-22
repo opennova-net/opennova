@@ -2398,6 +2398,10 @@ add_executable(coop_convoy_test mission/coop_convoy_test.cpp)
 target_link_libraries(coop_convoy_test PRIVATE opennova_runtime opennova_formats)
 add_test(NAME mission_coop_convoy COMMAND coop_convoy_test)
 
+add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
+target_link_libraries(ai_path_conformance_test PRIVATE opennova_runtime opennova_formats)
+add_test(NAME mission_ai_path_conformance COMMAND ai_path_conformance_test)
+
 add_executable(npruntime_death_broadcast_test npruntime/death_broadcast_test.cpp)
 target_link_libraries(npruntime_death_broadcast_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_death_broadcast COMMAND npruntime_death_broadcast_test)
