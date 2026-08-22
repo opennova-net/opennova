@@ -23,6 +23,7 @@
 // REPORT MODE: set OPENNOVA_AI_PATH_REPORT=1 to dump the full per-slot table
 // (authored group/waypoint/wp_number + brain waypoint state + travel). That dump
 // is the diagnosis surface; the assertions below are the regression pins.
+#include "mission/event_runtime.h"
 #include "mission/promote.h"
 
 #include "mission/bms.h"
@@ -99,6 +100,12 @@ int main() {
 	w::World world;
 	w::AiSystem ai;
 	world.ai = &ai;
+	// The BMS EVENT SYSTEM issues the scripted route orders (RedirectGroupTo and
+	// friends). Without it the mission's own scripting never runs and a large
+	// share of the AI never receive the route the mission intends -- another way
+	// for the harness to measure its own omission (7.4c).
+	mission::BmsEventSystem events;
+	events.load(m.events, m.triggers, m.actions);
 	const mission::PromoteResult promo = mission::promote_mission(m, world, ai);
 	expect(promo.nav_channels > 0, "nav channels promoted");
 
@@ -126,6 +133,7 @@ int main() {
 		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
 	}
 
+	world.add_system(&events);
 	world.add_system(&ai);
 	world.load_systems();
 
@@ -140,13 +148,22 @@ int main() {
 
 	// 2500 ticks = ~40 s of mission time at the 62.5 Hz logic rate — the same
 	// budget coop_convoy_test uses, and long enough for an authored patrol leg.
-	for (int t = 0; t < 2500; ++t) world.run_logic_tick(/*is_authority=*/true);
+	// Default 2500 ticks = ~40 s of mission time, the coop_convoy budget. The
+	// capture baseline is 430 s, so comparing counts against it needs
+	// OPENNOVA_AI_PATH_TICKS=27000 -- a 40 s run scoring fewer movers than a
+	// 430 s capture is a BUDGET difference, not a defect.
+	int ticks = 2500;
+	if (const char *tv = std::getenv("OPENNOVA_AI_PATH_TICKS")) {
+		const int parsed = std::atoi(tv);
+		if (parsed > 0) ticks = parsed;
+	}
+	for (int t = 0; t < ticks; ++t) world.run_logic_tick(/*is_authority=*/true);
 
 	const bool report = std::getenv("OPENNOVA_AI_PATH_REPORT") != nullptr;
 	if (report) {
-		std::printf("%-5s %-6s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %10s\n", "ai#",
+		std::printf("%-5s %-6s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %-6s %-7s %-4s %10s\n", "ai#",
 				"handle", "grp", "wpId", "wpNum", "wpType", "wpChan", "wpNode",
-				"moveMd", "travel_u");
+				"moveMd", "cmd37", "carr36", "mnt", "travel_u");
 		std::printf("--------------------------------------------------------------------\n");
 	}
 
@@ -166,16 +183,20 @@ int main() {
 				wpid = m.organics[size_t(i)].waypoint_id;
 				wpnum = m.organics[size_t(i)].wp_number;
 			}
-			std::printf("%-5d %-6u %-4d %-4d %-6d %-8d %-6d %-6d %-6d %10.2f\n", i,
+			std::printf("%-5d %-6u %-4d %-4d %-6d %-8d %-6d %-6d %-6d %-6d %-7d %-4d %10.2f\n", i,
 					unsigned(e->handle.packed), grp, wpid, wpnum,
 					e->brain.f[w::AiBrain::kWpType],
 					e->brain.f[w::AiBrain::kWpChannel],
 					e->brain.f[w::AiBrain::kWpNode],
 					e->inf.move_mode,
+					e->slot.f[37],   // the reserved command (BMS waypoint_id)
+					e->slot.f[36],   // the cached board carrier, 125 only
+					(world.registry.get(e->handle) != nullptr &&
+							world.registry.get(e->handle)->mounted) ? 1 : 0,
 					travel);
 		}
 	}
-	std::printf("ai path: %d AI, %d moved, %d still after 2500 ticks\n", n, moved, still);
+	std::printf("ai path: %d AI, %d moved, %d still after %d ticks\n", n, moved, still, ticks);
 
 	// --- the regression pins --------------------------------------------------
 	// Retail leaves exactly THREE AI stationary on this mission (s8/s15/s16, the
