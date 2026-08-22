@@ -738,14 +738,18 @@ int main() {
 	for (int i = 0; i < 3; ++i) np::Server_TickUpdate(ctx);
 	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
 	if (!expect(world.registry.get(hc)->health == 90, "150 - 60 kinetic damage = 90")) return 1;
-	// The hit queued ONE impact for the presenting host: tag 2 'player' (pool-0
-	// organics), direction = the normalized flight ray, position on the hit sphere
-	// short of the victim at x=30 [orig: Projectile_HandleEntityImpact ->
-	// Projectile_SpawnImpactEffect @ 0x4e9b80].
+	// The hit queued ONE impact for the presenting host: tag 23 'flesh'. The person
+	// leg splits on identity — the LOCAL player takes tag 2 'player', everyone else
+	// takes tag 23 — and this authority has no local avatar, so the victim is a
+	// non-local person. Direction = the normalized flight ray, position on the hit
+	// sphere short of the victim at x=30.
+	// [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — local-player compare
+	//  @0x4e9a55, push 2 @0x4e9aa1, push 17h @0x4e9ad7]
 	if (!expect(world.round_sim.impacts.size() == 1, "one impact queued for the hit")) return 1;
 	{
 		const w::RoundImpact &imp = world.round_sim.impacts[0];
-		if (!expect(imp.effect_tag == 2, "entity hit selects tag 2 'player'")) return 1;
+		if (!expect(imp.effect_tag == 23, "a non-local person hit selects tag 23 'flesh'"))
+			return 1;
 		if (!expect(imp.ammo_index == 1, "impact carries the round's ammo index")) return 1;
 		if (!expect(std::fabs(imp.direction.x - 1.0f) < 0.01f, "impact direction = +X flight"))
 			return 1;

@@ -1462,7 +1462,7 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# The listen-server loopback handler skips C2S 0x06 because retail local fire
 	# already appends/spawns synchronously. Pin that local action seam end-to-end:
-	# FSM fired -> RoundSim -> organic tag-2 effects_table row.
+	# FSM fired -> RoundSim -> the organic effects_table row.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Spawn yaw 0 = mission yaw 0 = engine heading 90 BAM-deg, which faces
@@ -1522,8 +1522,13 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_eq(int(weapon_state.get("last_round_seq", 0)), 1)
 	assert_eq(impacts.size(), 1, "one local shot reaches the target and emits one impact")
 	if impacts.size() == 1:
+		# The victim is a NON-LOCAL person, so the flesh row (23), not the local
+		# player's row (2). Real small-arms ammo authors Effect_AmHitBody on both,
+		# so only the SOUND distinguishes them.
+		# [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — local-player compare
+		#  @0x4e9a55, push 2 @0x4e9aa1, push 17h @0x4e9ad7]
 		assert_eq(String((impacts[0] as Dictionary).get("effect", "")), "Effect_AmHitBody")
-		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_PLAYER")
+		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_FLESH")
 		# The drained position is Godot-space (x, z_up, -y): the +y_m flight lands
 		# near (0, ~eye, -8). Pins the local fire bearing = the engine heading
 		# frame (D-WPN-18; RoundSim's wire-validated (cos, sin) mapping).
