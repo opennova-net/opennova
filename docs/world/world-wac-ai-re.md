@@ -5417,7 +5417,7 @@ the shared ring keeps it, while the entity-local REFLECTION fold flips it and
 those triangles are re-wound — the scorch `cull_back` then culls what retail's
 CCW cull culls (the probe's front/behind captures prove it). **Fixed
 2026-08-21**: the first cut
-hosted both strips as one alpha-scissor-0.5 material, which in Godot means the
+drew both strips through one alpha-scissor-0.5 material, which in Godot means the
 opaque pass with no blend — every scorch drew as an opaque black blob
 (the "pitch black, no texture" report); the scissor was a misread of the
 inert 128 latch.
