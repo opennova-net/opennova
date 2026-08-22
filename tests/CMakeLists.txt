@@ -1380,6 +1380,12 @@ target_include_directories(bunker_walkin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(bunker_walkin_test PRIVATE cxx_std_17)
 add_test(NAME bunker_walkin COMMAND bunker_walkin_test)
 
+add_executable(truck_dismount_test world/truck_dismount_test.cpp)
+target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
+target_include_directories(truck_dismount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(truck_dismount_test PRIVATE cxx_std_17)
+add_test(NAME truck_dismount COMMAND truck_dismount_test)
+
 # Authoritative projectile consequences through RoundSim's CollisionWorld seam:
 # pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
 add_executable(projectile_combat_test world/projectile_combat_test.cpp)
