@@ -59,7 +59,10 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
     for (const int cap : {20, 40, 60}) {                          // [orig: @0x501301..]
         if (team_size > cap) team_size = cap + (team_size - cap) / 2;
     }
-    int base = 12; // setting -1/default [orig: @0x5012c4 switch on g_capture_speed_setting]
+    // Unknown/legacy settings use the 12-second base. Retail's configured
+    // default is setting 1 (base 24), established by Config_SetDefaults.
+    // [orig: Config_SetDefaults @0x54D030; switch @0x5012c4]
+    int base = 12;
     if (input.speed_setting == 1) base = 24;
     else if (input.speed_setting == 2) base = 48;
     double speed = static_cast<double>(team_size) * base;
@@ -98,21 +101,116 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
     return delta;
 }
 
-void zone_capture_tick(World &world, ZoneChain &chain, ZoneCaptureEvents &out,
-                       int capture_speed_setting) {
-    out.clear();
-    if (chain.empty()) return;
+namespace {
 
-    // Playing-player census: per-team counts + the handles for the radius tests.
+ZoneCaptureState::Active *find_active(ZoneCaptureState &state,
+                                      EntityHandle zone) {
+    for (auto &entry : state.active)
+        if (entry.zone == zone) return &entry;
+    return nullptr;
+}
+
+void remove_zone_requests(ZoneCaptureState &state, EntityHandle zone) {
+    state.requests.erase(
+            std::remove_if(state.requests.begin(), state.requests.end(),
+                           [&](const auto &request) { return request.zone == zone; }),
+            state.requests.end());
+}
+
+uint16_t wire_word(int32_t value) {
+    return static_cast<uint16_t>(static_cast<uint32_t>(value));
+}
+
+ZoneCaptureEvents::TimerWindow timer_window(const Entity &zone,
+                                            const ZoneCaptureState::Active &active) {
+    return {zone.handle, zone.team, active.team, wire_word(active.progress),
+            wire_word(active.limit), active.rate};
+}
+
+bool capture_request_available(const World &world, const Entity &zone) {
+    if (zone.zone_number == 0) return true;
+    return zone_chain_is_capturable(world, world.zone_chain, 1, zone) ||
+           zone_chain_is_capturable(world, world.zone_chain, 2, zone);
+}
+
+} // namespace
+
+void zone_capture_contact_tick(World &world) {
+    // The collision callback is multiplayer/team-family gated in retail. This
+    // raw bit test intentionally includes C&C and every other team mode that
+    // happens to author a ChangeTeam trigger. [orig: @0x4B2F90..0x4B2FD0]
+    if ((world.match.rules().game_type & 0x30000u) == 0) return;
+
+    std::vector<const Entity *> movers;
+    std::vector<const Entity *> zones;
+    world.registry.for_each([&](const Entity &entity) {
+        if (is_playing_player(entity) &&
+                (entity.net_move_input & Entity::kMoveOrderMoving) != 0)
+            movers.push_back(&entity);
+        if (entity.is_capture_trigger && entity.alive)
+            zones.push_back(&entity);
+    });
+
+    ZoneCaptureState &state = world.zone_capture_state;
+    for (const Entity *zone : zones) {
+        for (const Entity *player : movers) {
+            if ((player->team != 1 && player->team != 2) ||
+                    !in_zone_radius(*player, *zone))
+                continue;
+            // Server_OnPlayerTouchCaptureZone rejects an enemy touching a still
+            // secured numbered zone. Unnumbered objectives always pass.
+            if (zone->zone_number != 0 && player->team != zone->team &&
+                    zone->zone_control > 0)
+                continue;
+
+            if (ZoneCaptureState::Active *active = find_active(state, zone->handle)) {
+                if (active->presence.size() < 32 &&
+                        std::find(active->presence.begin(), active->presence.end(),
+                                  player->handle) == active->presence.end())
+                    active->presence.push_back(player->handle);
+            }
+
+            if (!capture_request_available(world, *zone)) continue;
+            const auto duplicate = std::find_if(
+                    state.requests.begin(), state.requests.end(),
+                    [&](const auto &request) {
+                        return request.zone == zone->handle &&
+                               request.team == player->team;
+                    });
+            if (duplicate == state.requests.end())
+                state.requests.push_back(
+                        {zone->handle, player->team, player->handle});
+        }
+    }
+}
+
+void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
+    out.clear();
+    ZoneChain &chain = world.zone_chain;
+    ZoneCaptureState &state = world.zone_capture_state;
+    const MatchRules &rules = world.match.rules();
+
+    // Playing-player census: per-team counts + stable handles for radius/scoring.
     int team_players[ZoneChain::kTeamCount] = {0, 0, 0, 0, 0};
     int total_players = 0;
     std::vector<const Entity *> players;
-    world.registry.for_each([&](const Entity &e) {
-        if (!is_playing_player(e)) return;
-        players.push_back(&e);
+    world.registry.for_each([&](const Entity &entity) {
+        if (!is_playing_player(entity)) return;
+        players.push_back(&entity);
         ++total_players;
-        if (e.team < ZoneChain::kTeamCount) ++team_players[e.team];
+        if (entity.team < ZoneChain::kTeamCount) ++team_players[entity.team];
     });
+
+    // Active capture rates are based on unique movement contacts since the last
+    // second. Retail compares the raw count before clamping zero back to one.
+    for (auto &active : state.active) {
+        const int raw_count = static_cast<int>(active.presence.size());
+        if (raw_count != active.rate) {
+            active.rate = static_cast<uint8_t>(std::clamp(raw_count, 1, 32));
+            out.presence.push_back({active.zone, active.rate});
+        }
+        active.presence.clear();
+    }
 
     // The delta producer scans the sorted spawn-zone registry, not just capture
     // triggers: every nonzero-number entry contributes to ownership imbalance,
@@ -122,54 +220,37 @@ void zone_capture_tick(World &world, ZoneChain &chain, ZoneCaptureEvents &out,
     int owned_spawn_zones[ZoneChain::kTeamCount] = {};
     int numbered_spawn_zones = 0;
     const SpawnZoneRegistry spawn_zones = build_spawn_zone_list(world);
-    for (const EntityHandle h : spawn_zones.entries) {
-        const Entity *z = world.registry.get(h);
-        if (z == nullptr || z->zone_number == 0) continue;
+    for (const EntityHandle handle : spawn_zones.entries) {
+        const Entity *zone = world.registry.get(handle);
+        if (zone == nullptr || zone->zone_number == 0) continue;
         ++numbered_spawn_zones;
-        if (z->zone_number < 32) ++shared_count[z->zone_number];
-        if (z->team < ZoneChain::kTeamCount) ++owned_spawn_zones[z->team];
+        if (zone->zone_number < 32) ++shared_count[zone->zone_number];
+        if (zone->team < ZoneChain::kTeamCount)
+            ++owned_spawn_zones[zone->team];
     }
 
-    // ---- The secure/control pass [orig: Server_UpdateCaptureZoneEntities @0x519690] ----
-    struct FlipRequest {
-        EntityHandle zone;
-        EntityHandle capturer;
-        uint8_t capturer_team = 0;
-    };
-    std::vector<FlipRequest> flip_requests;
-    for (size_t zi = 0; zi < chain.zones.size(); ++zi) {
-        Entity *z = world.registry.get(chain.zones[zi]);
-        if (z == nullptr) continue;
-        const int32_t before = z->zone_control;
+    // ---- Secure/control pass [orig: Server_UpdateCaptureZoneEntities @0x519690].
+    for (const EntityHandle zone_handle : chain.zones) {
+        Entity *zone = world.registry.get(zone_handle);
+        if (zone == nullptr) continue;
+        const int32_t before = zone->zone_control;
 
-        // In-radius census for this zone: friendlies = the zone team's players;
-        // enemies = players of a team the FRONTIER lets capture this zone
-        // [orig: the frontier-eligible enemy filter inside the delta's presence count].
         int friendlies = 0;
         int enemies = 0;
         int attackers_by_team[ZoneChain::kTeamCount] = {};
-        EntityHandle first_attacker[ZoneChain::kTeamCount] = {};
-        for (const Entity *p : players) {
-            if (!in_zone_radius(*p, *z)) continue;
-            if (z->team != 0 && p->team == z->team) {
+        for (const Entity *player : players) {
+            if (!in_zone_radius(*player, *zone)) continue;
+            if (zone->team != 0 && player->team == zone->team) {
                 ++friendlies;
-            } else if (zone_chain_is_capturable(world, chain, p->team, *z)) {
+            } else if (zone_chain_is_capturable(world, chain, player->team, *zone)) {
                 ++enemies;
-                if (p->team < ZoneChain::kTeamCount) {
-                    if (attackers_by_team[p->team]++ == 0)
-                        first_attacker[p->team] = p->handle;
-                }
+                if (player->team < ZoneChain::kTeamCount)
+                    ++attackers_by_team[player->team];
             }
         }
 
-        // A neutral objective can be reached by both frontiers. Capture remains
-        // attributable only while one eligible team is present; opposing teams
-        // contest instead of allowing registry order to choose a winner.
-        // [orig: Server_UpdateCaptureZoneProximity @0x5086A0 maintains the
-        // per-team rows consumed by Server_UpdateCaptureZones @0x53B8F0]
         uint8_t attacker_team = 0;
         int attacker_count = 0;
-        EntityHandle attacker;
         bool multiple_attacker_teams = false;
         for (uint8_t team = 1; team < ZoneChain::kTeamCount; ++team) {
             if (attackers_by_team[team] == 0) continue;
@@ -177,145 +258,231 @@ void zone_capture_tick(World &world, ZoneChain &chain, ZoneCaptureEvents &out,
             if (attacker_team == 0) {
                 attacker_team = team;
                 attacker_count = attackers_by_team[team];
-                attacker = first_attacker[team];
             }
         }
 
         int16_t wire_delta = 0;
-        bool reachable_by_enemy = z->team == 0;
+        bool reachable_by_enemy = zone->team == 0;
         for (uint8_t team = 1;
                 team < ZoneChain::kTeamCount && !reachable_by_enemy; ++team) {
-            if (team != z->team &&
-                    zone_chain_is_capturable(world, chain, team, *z))
+            if (team != zone->team &&
+                    zone_chain_is_capturable(world, chain, team, *zone))
                 reachable_by_enemy = true;
         }
         if (!reachable_by_enemy) {
-            // The secure latch: the enemy frontier cannot reach it [orig: @0x519764].
-            z->zone_control = 0x10000;
+            zone->zone_control = 0x10000;
         } else {
             const int presence = multiple_attacker_teams
                     ? 0
                     : friendlies - attacker_count;
             if (presence != 0) {
-                const int side = presence > 0 ? z->team : attacker_team;
-                const int side_players =
+                const int side = presence > 0 ? zone->team : attacker_team;
+                ZoneCaptureDeltaInput input;
+                input.presence = presence;
+                input.capturing_side_players =
                         side < ZoneChain::kTeamCount ? team_players[side] : 0;
-                const int shared_n =
-                        z->zone_number < 32 ? shared_count[z->zone_number] : 1;
-                ZoneCaptureDeltaInput delta_input;
-                delta_input.presence = presence;
-                delta_input.capturing_side_players = side_players;
-                delta_input.total_players = total_players;
-                delta_input.speed_setting = capture_speed_setting;
-                delta_input.shared_zone_entities = shared_n;
-                delta_input.capturing_side_zones =
-                        side < ZoneChain::kTeamCount ? owned_spawn_zones[side] : 0;
+                input.total_players = total_players;
+                input.speed_setting = rules.capture_speed_setting;
+                input.shared_zone_entities = zone->zone_number < 32
+                        ? shared_count[zone->zone_number]
+                        : 1;
+                input.capturing_side_zones = side < ZoneChain::kTeamCount
+                        ? owned_spawn_zones[side]
+                        : 0;
                 const uint8_t opposing_side = side == 1 ? 2 : 1;
-                delta_input.opposing_side_zones = owned_spawn_zones[opposing_side];
-                delta_input.numbered_spawn_zones = numbered_spawn_zones;
-                delta_input.remaining_ticks = world.match.remaining_ticks();
-                delta_input.game_time_minutes = world.match.rules().game_time_minutes;
-                const int32_t delta = zone_capture_control_delta(delta_input);
-                wire_delta = static_cast<int16_t>(
-                        delta > 32767 ? 32767 : (delta < -32768 ? -32768 : delta));
-                int64_t c = static_cast<int64_t>(z->zone_control) + delta;
-                if (c < 0) c = 0;
-                if (c > 0x10000) c = 0x10000;
-                z->zone_control = static_cast<int32_t>(c); // [orig: clamp @0x501499]
+                input.opposing_side_zones = owned_spawn_zones[opposing_side];
+                input.numbered_spawn_zones = numbered_spawn_zones;
+                input.remaining_ticks = world.match.remaining_ticks();
+                input.game_time_minutes = rules.game_time_minutes;
+                const int32_t delta = zone_capture_control_delta(input);
+                wire_delta = static_cast<int16_t>(std::clamp(
+                        delta, int32_t{-32768}, int32_t{32767}));
+                zone->zone_control = static_cast<int32_t>(std::clamp<int64_t>(
+                        static_cast<int64_t>(zone->zone_control) + delta,
+                        0, 0x10000));
             }
         }
 
-        // Secure edges [orig: 0x3B on became-1.0 @0x519839 / 0x3C on became-0 @0x51988E].
-        if (before < 0x10000 && z->zone_control >= 0x10000)
-            out.secure_edges.push_back({z->handle, z->team, true});
-        else if (before > 0 && z->zone_control <= 0)
-            out.secure_edges.push_back({z->handle, z->team, false});
+        if (before < 0x10000 && zone->zone_control >= 0x10000)
+            out.secure_edges.push_back({zone->handle, zone->team, true});
+        else if (before > 0 && zone->zone_control <= 0)
+            out.secure_edges.push_back({zone->handle, zone->team, false});
+        out.control.push_back(
+                {zone->handle, zone->team, zone->zone_control, wire_delta,
+                 static_cast<uint8_t>(std::min(friendlies, 255)),
+                 static_cast<uint8_t>(std::min(enemies, 255))});
 
-        // The 0x6F body, every pass [orig: emit @0x5197D9].
-        out.control.push_back({z->handle, z->team, z->zone_control, wire_delta,
-                               static_cast<uint8_t>(friendlies > 255 ? 255 : friendlies),
-                               static_cast<uint8_t>(enemies > 255 ? 255 : enemies)});
-
-        // A frontier-eligible enemy standing on an UNSECURED zone queues the flip
-        // [orig: the touch gate `un-numbered || owner || control <= 0`
-        // @Server_OnPlayerTouchCaptureZone @0x500BA0; drained by @0x53B8F0 — our
-        // request source is this same 1 Hz proximity sample (D-NET-162 note)].
-        if (!multiple_attacker_teams && attacker_team != 0 &&
-                z->zone_control <= 0)
-            flip_requests.push_back({z->handle, attacker, attacker_team});
-    }
-
-    // ---- Queue drain: numbered zones flip INSTANTLY [orig: @0x53B8F0 drain leg] ----
-    for (const FlipRequest &req : flip_requests) {
-        Entity *z = world.registry.get(req.zone);
-        if (z == nullptr) continue;
-        const uint8_t old_team = z->team;
-        // A numbered objective changes through neutral and onto the requesting
-        // team in the SAME queue drain. The intermediate neutral write is
-        // observable to team-change bookkeeping but is not a second gameplay
-        // state/tick. [orig: Server_UpdateCaptureZones @0x53BC70 (team 0),
-        // @0x53BC80 (capturing team), before scoring @0x53BC94]
-        const uint8_t new_team = req.capturer_team;
-        const uint8_t cap_frontier_before =
-                zone_chain_frontier_zone(world, chain, req.capturer_team);
-        const uint8_t loser_frontier_before =
-                zone_chain_frontier_zone(world, chain, enemy_of(req.capturer_team));
-
-        if (old_team != 0) z->team = 0;      // retail's intermediate team-change transaction
-        z->team = new_team;                 // [orig: Server_ChangeEntityTeam @0x518D70]
-        z->zone_control = 0;                // the new owner must SECURE it (the AS beat)
-        zone_chain_rebuild_masks(world, chain);
-
-        ZoneCaptureEvents::Flip flip;
-        flip.zone = z->handle;
-        flip.capturer = req.capturer;
-        for (const Entity *player : players) {
-            if (player->team == req.capturer_team && in_zone_radius(*player, *z))
-                flip.scorers.push_back(player->handle);
-        }
-        flip.old_team = old_team;
-        flip.new_team = new_team;
-        flip.capturer_team = req.capturer_team;
-        flip.capturer_frontier =
-                zone_chain_frontier_zone(world, chain, req.capturer_team);
-        flip.loser_frontier =
-                zone_chain_frontier_zone(world, chain, enemy_of(req.capturer_team));
-        flip.frontier_changed = flip.capturer_frontier != cap_frontier_before ||
-                                flip.loser_frontier != loser_frontier_before;
-        // Suppress the capture banner only when this flip actually completed
-        // the ownership chain. [orig: GameEvent_FlagCapture @0x50F70B ->
-        // ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920]
-        flip.suppressed = match_decided(world, chain);
-        out.flips.push_back(flip);
-    }
-
-    // ---- Team enforcement [orig: Server_EnforceZoneEntityTeams @0x519600]: every
-    // zone-numbered entity is forced onto the team whose OWNED mask holds its zone
-    // number (team 1 precedence) — this flips the co-located SpawnPoint objects when
-    // the trigger objects change hands. ----
-    if (!out.flips.empty()) {
-        std::vector<EntityHandle> numbered;
-        world.registry.for_each([&](const Entity &e) {
-            // The TRIGGER entities drive ownership and are never force-converted (a
-            // freshly neutralized bunker must not snap back while its number-sharing
-            // sibling still holds the mask bit); only the co-located non-trigger
-            // objects (SpawnPoint-only tents, props) follow the mask
-            // [orig: "flips the co-located 0x40000 spawn objects when the 0x20000
-            // trigger objects change hands" — §5.61 item 7].
-            if (e.zone_number != 0 && !e.is_capture_trigger && e.is_spawn_point)
-                numbered.push_back(e.handle);
+        // Pool-1/2 live entities carrying ItemDefAttrib2 bit 2 inherit the
+        // numbered trigger's owner while physically inside its radius.
+        // [orig: Server_UpdateCaptureZoneEntities @0x519690]
+        std::vector<EntityHandle> converts;
+        world.registry.for_each([&](const Entity &entity) {
+            if ((entity.handle.pool() == 1 || entity.handle.pool() == 2) &&
+                    entity.handle != zone->handle && entity.alive &&
+                    (entity.item_attrib2 & 2u) != 0 &&
+                    in_zone_radius(entity, *zone))
+                converts.push_back(entity.handle);
         });
-        for (const EntityHandle h : numbered) {
-            Entity *e = world.registry.get(h);
-            if (e == nullptr || e->zone_number >= 32) continue;
-            const uint32_t bit = 1u << e->zone_number;
-            uint8_t forced = 0;
-            if ((chain.owned_mask[1] & bit) != 0) forced = 1; // team-1 precedence
-            else if ((chain.owned_mask[2] & bit) != 0) forced = 2;
-            if (forced != 0 && e->team != forced) e->team = forced;
+        for (const EntityHandle handle : converts) {
+            if (Entity *entity = world.registry.get(handle))
+                entity->team = zone->team;
         }
-        zone_chain_rebuild_masks(world, chain);
     }
+
+    // ---- Active timed entries [orig: first two loops @0x53B8F0].
+    for (size_t index = 0; index < state.active.size();) {
+        auto &active = state.active[index];
+        Entity *zone = world.registry.get(active.zone);
+        if (zone == nullptr) {
+            remove_zone_requests(state, active.zone);
+            state.active.erase(state.active.begin() + index);
+            continue;
+        }
+
+        const auto opposing = std::find_if(
+                state.requests.begin(), state.requests.end(),
+                [&](const auto &request) {
+                    return request.zone == active.zone &&
+                           request.team != active.team;
+                });
+        if (opposing != state.requests.end()) {
+            active.team = opposing->team;
+            active.progress = 0;
+            active.limit = rules.capture_duration_seconds;
+            out.timer_windows.push_back(timer_window(*zone, active));
+            ++index;
+            continue;
+        }
+
+        active.progress += active.rate;
+        out.timer_windows.push_back(timer_window(*zone, active));
+        if (active.progress < active.limit) {
+            remove_zone_requests(state, active.zone);
+            ++index;
+            continue;
+        }
+
+        zone->team = active.team;
+        out.timed_completions.push_back(
+                {zone->handle, active.capturer, active.team,
+                 zone->is_spawn_point});
+        remove_zone_requests(state, active.zone);
+        state.active.erase(state.active.begin() + index);
+    }
+
+    // ---- Request drain. Opposing touches contest; numbered/zero-duration
+    // zones flip immediately, while unnumbered zones start/restart ACTIVE state.
+    // [orig: queue loop @0x53BB80..0x53BCC4]
+    while (!state.requests.empty()) {
+        const ZoneCaptureState::Request request = state.requests.front();
+        Entity *zone = world.registry.get(request.zone);
+        const Entity *capturer = world.registry.get(request.capturer);
+        if (zone == nullptr || capturer == nullptr || capturer->team != request.team) {
+            remove_zone_requests(state, request.zone);
+            continue;
+        }
+
+        const bool current_owner_present = std::any_of(
+                state.requests.begin(), state.requests.end(),
+                [&](const auto &queued) {
+                    return queued.zone == request.zone &&
+                           queued.team == zone->team;
+                });
+        const bool conflicting = std::any_of(
+                state.requests.begin(), state.requests.end(),
+                [&](const auto &queued) {
+                    return queued.zone == request.zone &&
+                           queued.team != request.team;
+                });
+        if (current_owner_present || conflicting) {
+            remove_zone_requests(state, request.zone);
+            continue;
+        }
+
+        if (zone->zone_number != 0 || rules.capture_duration_seconds <= 0) {
+            const uint8_t old_team = zone->team;
+            const uint8_t cap_frontier_before =
+                    zone_chain_frontier_zone(world, chain, request.team);
+            const uint8_t loser_frontier_before =
+                    zone_chain_frontier_zone(world, chain, enemy_of(request.team));
+            if (old_team != 0) zone->team = 0;
+            zone->team = request.team;
+            zone->zone_control = 0;
+            zone_chain_rebuild_masks(world, chain);
+
+            ZoneCaptureEvents::Flip flip;
+            flip.zone = zone->handle;
+            flip.capturer = request.capturer;
+            if (zone->zone_number != 0) {
+                for (const Entity *player : players) {
+                    if (player->team == request.team &&
+                            in_zone_radius(*player, *zone))
+                        flip.scorers.push_back(player->handle);
+                }
+            } else {
+                flip.scorers.push_back(request.capturer);
+            }
+            flip.old_team = old_team;
+            flip.new_team = request.team;
+            flip.capturer_team = request.team;
+            flip.capturer_frontier =
+                    zone_chain_frontier_zone(world, chain, request.team);
+            flip.loser_frontier = zone_chain_frontier_zone(
+                    world, chain, enemy_of(request.team));
+            flip.frontier_changed =
+                    flip.capturer_frontier != cap_frontier_before ||
+                    flip.loser_frontier != loser_frontier_before;
+            flip.suppressed = zone->zone_number != 0 && match_decided(world, chain);
+            flip.announce = zone->is_spawn_point;
+            out.flips.push_back(std::move(flip));
+            remove_zone_requests(state, request.zone);
+            continue;
+        }
+
+        if (zone->team != 0) zone->team = 0;
+        ZoneCaptureState::Active *active = find_active(state, request.zone);
+        bool started = false;
+        if (active == nullptr) {
+            state.active.push_back({request.zone, request.team, 0,
+                                    rules.capture_duration_seconds,
+                                    request.capturer, {}, 1});
+            active = &state.active.back();
+            started = true;
+        } else if (active->capturer != request.capturer) {
+            active->team = request.team;
+            active->progress = 0;
+            active->limit = rules.capture_duration_seconds;
+            active->capturer = request.capturer;
+            started = true;
+        }
+        if (started) {
+            out.timer_windows.push_back(timer_window(*zone, *active));
+            if (zone->is_spawn_point)
+                out.timed_starts.push_back(
+                        {zone->handle, active->capturer, active->team});
+        }
+        remove_zone_requests(state, request.zone);
+    }
+
+    // Every pass forces authored numbered spawn objects to the wholly-owned
+    // mask (team 1 precedence). Triggers themselves remain ownership sources.
+    // [orig: Server_EnforceZoneEntityTeams @0x519600]
+    std::vector<EntityHandle> numbered;
+    world.registry.for_each([&](const Entity &entity) {
+        if (entity.zone_number != 0 && !entity.is_capture_trigger &&
+                entity.is_spawn_point)
+            numbered.push_back(entity.handle);
+    });
+    for (const EntityHandle handle : numbered) {
+        Entity *entity = world.registry.get(handle);
+        if (entity == nullptr || entity->zone_number >= 32) continue;
+        const uint32_t bit = 1u << entity->zone_number;
+        uint8_t forced = 0;
+        if ((chain.owned_mask[1] & bit) != 0) forced = 1;
+        else if ((chain.owned_mask[2] & bit) != 0) forced = 2;
+        if (forced != 0 && entity->team != forced) entity->team = forced;
+    }
+    zone_chain_rebuild_masks(world, chain);
 }
 
 } // namespace opennova::world

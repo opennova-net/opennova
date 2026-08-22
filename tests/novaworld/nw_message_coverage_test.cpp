@@ -1058,6 +1058,24 @@ int check_S_53_zone_timer_window() {
 	return 0;
 }
 
+// S2C 0x6C — active timed-capture presence (§5.61): fixed 3 B.
+// [orig: NapiNPClientMsg_0x06C @0x428FC0;
+// NetPacket_WriteZonePresenceCount @0x506DE0]
+int check_S_6C_zone_presence_count() {
+	LE w;
+	w.u16(0x1003);
+	w.u8(2);
+	EXPECT(w.b.size() == 3);
+	ZonePresenceCount out;
+	size_t consumed = 0;
+	EXPECT(decode_zone_presence_count(w.b.data(), w.b.size(), out, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(out.zone_handle == 0x1003 && out.count == 2);
+	EXPECT(!decode_zone_presence_count(w.b.data(), 2, out, consumed));
+	cover('S', 0x6C);
+	return 0;
+}
+
 // S2C 0x34 — play-sound (§5.50): flag 1 carries the 3×i16 position block.
 int check_S_34_play_sound() {
 	LE w;
@@ -1394,6 +1412,7 @@ int main() {
 	if (check_S_58_session_status()) return 1;
 	if (check_S_6F_zone_timer_value()) return 1;
 	if (check_S_53_zone_timer_window()) return 1;
+	if (check_S_6C_zone_presence_count()) return 1;
 	if (check_S_34_play_sound()) return 1;
 	if (check_S_2C_mission_map_names()) return 1;
 	if (check_chat_pair()) return 1;

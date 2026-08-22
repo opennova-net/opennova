@@ -1628,6 +1628,17 @@ bool decode_zone_timer_window(const uint8_t *body, size_t len,
 	return c.ok;
 }
 
+// §5.61 S2C 0x6C — [orig: NapiNPClientMsg_0x06C @ 0x428FC0]. Fixed 3 B.
+bool decode_zone_presence_count(const uint8_t *body, size_t len,
+                                ZonePresenceCount &out, size_t &consumed) {
+	out = ZonePresenceCount{};
+	Cursor c{body, body + len, true};
+	out.zone_handle = c.u16();
+	out.count = c.u8();
+	consumed = c.ok ? size_t(c.p - body) : 0;
+	return c.ok;
+}
+
 // §5.50 S2C 0x34 — [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]. The
 // position block exists on the wire only when flag == 1.
 bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out) {

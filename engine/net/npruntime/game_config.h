@@ -114,6 +114,8 @@ struct GameConfig {
 	uint32_t max_score = 0;           // [orig g_kill_limit @0x24D2138] SET `MaxScore`
 	uint32_t koth_delta = 5;          // [orig dword_24D2148] cfg `koth_delta`
 	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime_2 @0x24D2174]
+	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
+	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
 	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160]        dword[7]; SET `StartDelay`

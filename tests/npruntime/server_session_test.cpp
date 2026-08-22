@@ -2709,6 +2709,131 @@ bool check_score_ini_drives_session_status_values() {
 	              "Flag Me's out-of-range retail score row cannot inherit COOP score.ini");
 }
 
+// The host carries the persistent unnumbered capture transaction all the way to
+// retail bodies: 0x53 start/progress/completion, 0x6C unique presence changes,
+// and 0x1E 41/43 start/completion events. Numbered instant flips deliberately
+// have no synthetic 0x53. [orig: CaptureCtx_* / Server_UpdateCaptureZones
+// @0x53B340..0x53B8F0; NetPacket writers @0x506D00/@0x506DE0]
+bool check_timed_capture_host_wire_transaction() {
+	opennova::np::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::World world;
+	world.mp_session = true;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	rules.capture_duration_seconds = 3;
+	world.match.configure(rules);
+
+	opennova::world::Entity zone;
+	zone.kind = opennova::world::EntityKind::Item;
+	zone.is_capture_trigger = true;
+	zone.is_spawn_point = true;
+	zone.zone_radius = 70;
+	zone.team = 2;
+	zone.health = 1;
+	zone.alive = true;
+	zone.position = {20.0f, 30.0f, 4.0f};
+	const auto zone_handle = world.registry.spawn(1, zone);
+	auto soldier = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.player_class = 8;
+		entity.team = team;
+		entity.health = 150;
+		entity.alive = true;
+		entity.net_move_input =
+				opennova::world::Entity::kMoveOrderMoving;
+		entity.position = zone.position;
+		return world.registry.spawn(0, entity);
+	};
+	const auto first = soldier(1);
+	world.match.upsert_player({first, 0, "Blue", {}, {}});
+
+	opennova::netsim::UdpSessionTransport transport(
+			opennova::netsim::UdpSessionTransport::Role::Host);
+	opennova::np::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = opennova::np::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = opennova::netsim::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = first;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	using Record = std::pair<uint8_t, std::vector<uint8_t>>;
+	auto tick_second = [&]() {
+		for (int i = 0; i < 62; ++i)
+			opennova::np::Server_TickUpdate(ctx);
+		std::vector<Record> records;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw)) {
+			if (raw.empty()) continue;
+			records.emplace_back(
+					raw.front(), std::vector<uint8_t>(raw.begin() + 1, raw.end()));
+		}
+		return records;
+	};
+	auto bodies = [](const std::vector<Record> &records, uint8_t tag) {
+		std::vector<std::vector<uint8_t>> out;
+		for (const auto &record : records)
+			if (record.first == tag) out.push_back(record.second);
+		return out;
+	};
+
+	const auto started = tick_second();
+	const auto start_53 = bodies(started, opennova::s2c::ZONE_TIMER_WINDOW);
+	const auto start_events = bodies(started, 0x1E);
+	const std::vector<uint8_t> expected_start = {
+			static_cast<uint8_t>(zone_handle.packed),
+			static_cast<uint8_t>(zone_handle.packed >> 8),
+			0, 1, 0, 0, 3, 0, 1};
+	if (!expect(start_53.size() == 1 && start_53[0] == expected_start &&
+	                    std::find(start_events.begin(), start_events.end(),
+	                              std::vector<uint8_t>{41, 0, 0xFF, 0xFF,
+	                                                   0, 0, 0, 0}) !=
+	                            start_events.end() &&
+	                    world.registry.get(zone_handle)->team == 0,
+	            "timed capture starts with exact 0x53/event-41 and neutral owner"))
+		return false;
+
+	const auto second = soldier(1);
+	const auto advanced = tick_second();
+	const auto advance_53 = bodies(advanced, opennova::s2c::ZONE_TIMER_WINDOW);
+	const auto advance_6c = bodies(advanced, opennova::s2c::ZONE_PRESENCE_COUNT);
+	const std::vector<uint8_t> expected_6c = {
+			static_cast<uint8_t>(zone_handle.packed),
+			static_cast<uint8_t>(zone_handle.packed >> 8), 2};
+	if (!expect(advance_53.size() == 1 && advance_53[0].size() == 9 &&
+	                    advance_53[0][4] == 2 && advance_53[0][8] == 2 &&
+	                    advance_6c.size() == 1 && advance_6c[0] == expected_6c,
+	            "two unique movers emit exact 0x6C and advance 0x53 by rate two"))
+		return false;
+
+	world.registry.get(second)->position = {500.0f, 500.0f, 0.0f};
+	const auto completed = tick_second();
+	const auto complete_53 = bodies(completed, opennova::s2c::ZONE_TIMER_WINDOW);
+	const auto complete_6c = bodies(completed, opennova::s2c::ZONE_PRESENCE_COUNT);
+	const auto complete_events = bodies(completed, 0x1E);
+	const auto *scorer = world.match.player(first);
+	return expect(complete_53.size() == 1 && complete_53[0][4] == 3 &&
+	                      complete_6c.size() == 1 && complete_6c[0][2] == 1 &&
+	                      std::find(complete_events.begin(), complete_events.end(),
+	                                std::vector<uint8_t>{43, 0, 0xFF, 0xFF,
+	                                                     0, 0, 0, 0}) !=
+	                              complete_events.end() &&
+	                      world.registry.get(zone_handle)->team == 1 &&
+	                      scorer != nullptr &&
+	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 1 &&
+	                      scorer->stats[opennova::world::MatchStats::kPoints] == 15,
+	              "timed completion emits 0x53/event-43, owns zone, and scores once");
+}
+
 // Retail's S2C 0x40 producer is the general minimap-overlay stream, not an AS
 // capture-zone-only packet. 00TRg has no zone chain, yet its retail host sends
 // two initial persistent batches for pool-2 buildings/armories (16 + 8), then
@@ -2894,6 +3019,7 @@ int main() {
 	ok = check_session_status_reply_matches_retail_writer() && ok;
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;
+	ok = check_timed_capture_host_wire_transaction() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

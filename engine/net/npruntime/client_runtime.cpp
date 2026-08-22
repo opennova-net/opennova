@@ -155,6 +155,17 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 	entry.value_active = false;
 }
 
+void ClientRuntime::apply_zone_presence_count(
+		const ZonePresenceCount &presence) {
+	const auto found = zone_states_.find(presence.zone_handle);
+	// Retail resolves the handle, then updates only when it is the currently
+	// selected timed-window entity. In the per-zone runtime image, a witnessed
+	// 0x53 is the corresponding selection prerequisite. [orig: @0x428FC0]
+	if (found == zone_states_.end() || !found->second.has_window) return;
+	found->second.has_presence = true;
+	found->second.presence_count = presence.count;
+}
+
 bool ClientRuntime::apply_zone_timer_body(
 		uint8_t tag, const std::vector<uint8_t> &body) {
 	std::size_t consumed = 0;
@@ -172,6 +183,14 @@ bool ClientRuntime::apply_zone_timer_body(
 					body.data(), body.size(), window, consumed) &&
 		    consumed == body.size())
 			apply_zone_timer_window(window);
+		return true;
+	}
+	if (tag == s2c::ZONE_PRESENCE_COUNT) {
+		ZonePresenceCount presence;
+		if (decode_zone_presence_count(
+					body.data(), body.size(), presence, consumed) &&
+		    consumed == body.size())
+			apply_zone_presence_count(presence);
 		return true;
 	}
 	return false;
@@ -551,6 +570,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 				else if (const auto *window =
 				         std::get_if<ZoneTimerWindow>(&update))
 					apply_zone_timer_window(*window);
+				else if (const auto *presence =
+				         std::get_if<ZonePresenceCount>(&update))
+					apply_zone_presence_count(*presence);
 			}
 			// The local-team latch has client-session consequences beyond entity state.
 			if (pr.self_team_changed) ++self_team_revision_;

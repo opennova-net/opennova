@@ -72,6 +72,23 @@ bool apply_env_u32(const char *name, uint32_t &value) {
 	return true;
 }
 
+bool apply_env_i32(const char *name, int32_t &value) {
+	const char *text = std::getenv(name);
+	if (text == nullptr || *text == '\0') return true;
+	char *end = nullptr;
+	errno = 0;
+	const long parsed = std::strtol(text, &end, 0);
+	if (errno == ERANGE || end == text || *end != '\0' ||
+			parsed < std::numeric_limits<int32_t>::min() ||
+			parsed > std::numeric_limits<int32_t>::max()) {
+		std::fprintf(stderr,
+				"nw-server: %s must be an int32 (decimal or 0x hex)\n", name);
+		return false;
+	}
+	value = static_cast<int32_t>(parsed);
+	return true;
+}
+
 // The dedicated host's one adapter to inmatch::Session. The portable session
 // decides when a fixed tick is due; this adapter performs that real tick using
 // the shared network owner loop.
@@ -227,6 +244,10 @@ int main() {
 	host_cfg.config.max_score = game_rules::kDefaultMaxScore;
 	host_cfg.config.koth_delta = game_rules::kDefaultKothDelta;
 	host_cfg.config.flag_return_ticks = game_rules::kDefaultFlagReturnTicks;
+	host_cfg.config.capture_duration_seconds =
+			game_rules::kDefaultCaptureDurationSeconds;
+	host_cfg.config.capture_speed_setting =
+			game_rules::kDefaultCaptureSpeedSetting;
 	host_cfg.config.num_teams = static_cast<uint8_t>(game_rules::kDefaultNumTeams);
 	host_cfg.config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
 	host_cfg.config.start_delay = game_rules::kDefaultStartDelay;
@@ -242,6 +263,13 @@ int main() {
 		return 2;
 	uint32_t configured_teams = host_cfg.config.num_teams;
 	if (!apply_env_u32("NW_NUM_TEAMS", configured_teams))
+		return 2;
+	if (!apply_env_i32(
+			"NW_CAPTURE_DURATION_SECONDS",
+			host_cfg.config.capture_duration_seconds) ||
+			!apply_env_i32(
+					"NW_CAPTURE_SPEED_SETTING",
+					host_cfg.config.capture_speed_setting))
 		return 2;
 	if (configured_teams > 0xFFu) {
 		std::fprintf(stderr, "nw-server: NW_NUM_TEAMS must fit a uint8\n");

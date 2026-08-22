@@ -37,6 +37,8 @@ struct MatchRules {
     uint32_t hill_delta = 5;         // cfg koth_delta / dword_24D2148
     uint32_t max_score = 0;          // SET MaxScore / g_kill_limit
     uint32_t flag_return_ticks = 210;
+    int32_t capture_duration_seconds = 15;  // SET TakeoverTime / g_capture_duration
+    int32_t capture_speed_setting = 1;       // cfg takeover speed / g_capture_speed_setting
     // Absent means the exact GameType_CreateDefaultSettings row. Present is a
     // fully materialized score.ini overlay and may intentionally contain zero
     // in every slot; absence is therefore not encoded as a magic all-zero row.
@@ -221,9 +223,10 @@ class Match {
     void record_target_destroyed(const World &world, EntityHandle target,
                                  EntityHandle attacker);
 
-    // Event 24 for a numbered objective is awarded to every living same-team
-    // Player inside the zone, supplied by the capture census in stable slot order.
-    void record_numbered_zone_capture(const World &world, const std::vector<EntityHandle> &scorers);
+    // Capture event 24: numbered zones supply every living same-team Player in
+    // radius; an unnumbered timed completion supplies its retained capturer.
+    void record_zone_capture(const World &world,
+                             const std::vector<EntityHandle> &scorers);
 
     // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
     void advance_tick(World &world);

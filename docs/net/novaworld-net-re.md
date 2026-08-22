@@ -7923,8 +7923,11 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
    number shared by N registry entries then divides speed by N. `delta = 65536 × presence /
    speed` (ftol; minimum
    magnitude 1, sign = presence), accumulated into `+540` with clamp [0, 0x10000]. At the
-   observed default (`g_capture_speed_setting = −1` ⇒ base 12): one attacker on an empty
-   3-player-team server secures ~0x10000/1820 ≈ 36 s.
+   retail configured default (`g_capture_speed_setting = 1` ⇒ base 24): one attacker on an
+   otherwise empty 3-player-team server secures a uniquely numbered zone in ~72 s. A zone
+   number represented by two spawn-registry entries divides that denominator by two and
+   secures in ~36 s. `[orig: Config_SetDefaults @0x54D030; settings copy
+   @0x551D3E..0x551D55]`
 5. **The timed-capture engine** `[orig: Server_UpdateCaptureZones @ 0x53B8F0]`, ctx
    `captureCtx @ 0xC947A8` (`+8/+12` = the request queue, 12-B `{zone, team, player}`;
    `+24/+28` = active captures, 152-B `{zone@0, team@4, progress@8, limit@12, player@16,
@@ -7969,8 +7972,9 @@ zone-event attacker bytes (`SpawnZoneList_IndexOf @ 0x43B990`).
 `apply_session_settings_to_globals @ 0x551500 @ 0x551D3E..0x551DBD`): `g_capture_duration
 @ 0x24D2248` (un-numbered flag capture time, wire `limit`), `g_capture_speed_setting
 @ 0x24D2254`, `g_spawn_wave_time_base @ 0x24D224C`, `g_spawn_wave_time_zone @ 0x24D2250`,
-`g_respawn_requires_team_dead @ 0x24D2260`. Observed defaults in the live IDB snapshot:
-speed setting −1 (base 12), waves unset.
+`g_respawn_requires_team_dead @ 0x24D2260`. `Config_SetDefaults @0x54D030` writes takeover
+duration 15, takeover-speed setting 1 (base 24), base-wave time 0, and zone-wave time 10;
+the runtime copy above publishes those exact values.
 
 **Follow-ups (open):** the per-team `dword_C87B54 + 85·team` CRenderState field-6 gate that
 can skip the primary marker chain in `Server_PositionPlayerForSpawn @ 0x50D1DB`; the
@@ -8018,19 +8022,23 @@ reproduced). Slice-1 deferrals (all §5.61-cited in code): the spawn-wave system
 retail defaults), vehicle-seat deploys (seat model unported), deploy-time 0x61/0x1D
 re-sends, and the 6007 in-zone scatter + userpoint offset.
 
-**Reimpl (slice 2 — the capture loop, completed 2026-08-22, D-NET-162).** Ported:
-`world::zone_capture_tick` (engine/runtime/world/zone_capture.{h,cpp} — the 1 Hz secure/control
-pass with the enemy-frontier latch, the complete control-delta formula including its
-spawn-registry ownership/clock term, secure edges,
-instant numbered flips via neutral, mask rebuilds, non-trigger zone-object team
-enforcement) + the npruntime 1 Hz wire block (0x6F change-gated + deploy-screen refresh,
-the 0x1E zone-event family 0x3B/0x3C/50-53/56/57 team-filtered, 0x53 on flips, and the
-0x40 zone + vehicle-blip overlay feed). The 0x1E actor uses retail's sorted
+**Reimpl (slice 2 — the capture loop, completed 2026-08-22, D-NET-162).** Ported as two
+deep operations: `world::zone_capture_contact_tick` records moving pool-0 touches and
+active-capture presence each host logic tick; `world::zone_capture_second_tick` owns the
+1 Hz transaction (enemy-frontier latch, the complete control-delta formula including its
+spawn-registry ownership/clock term, secure edges, request arbitration, instant numbered
+flips via neutral, un-numbered timed active entries, `item_attrib2 & 2` entity conversion,
+mask rebuilds, and zone-object team enforcement). The npruntime fold emits strict 0x6F,
+the four 0x53 timed-window states, 0x6C only when active presence changes, and the 0x1E
+0x3B/0x3C/43/44/50-53/56/57 families. Numbered instant flips do **not** fabricate 0x53;
+retail's four 0x53 call sites all belong to ACTIVE timed entries. The independent 0x40
+overlay feed remains on its witnessed 14-tick cadence. The 0x1E actor uses retail's sorted
 `SpawnZoneList_IndexOf` space, not the internal zone-chain index. `zone_chain_test` pins
-the delta formula and the full flip→secure→contest→neutralize→retake cycle; the registry
-index divergence is pinned by `npruntime_round_end_test`. Deferrals remain in the
-D-NET-162 row. `[orig: calculate_capture_zone_control_delta @0x501120;
-SpawnZoneList_IndexOf @0x43B990]`
+the control/timed/contact/conversion transaction, while `npruntime_server_session_test`
+pins the exact `0x53`/`0x6C` progression and once-only scoring. Residuals remain in the
+D-NET-162 row. `[orig: Server_OnPlayerTouchCaptureZone @0x500BA0;
+Server_UpdateCaptureZoneEntities @0x519690; Server_UpdateCaptureZones @0x53B8F0;
+calculate_capture_zone_control_delta @0x501120; SpawnZoneList_IndexOf @0x43B990]`
 
 **Reimpl (slice 3 — match rules and round transaction, 2026-08-22).**
 `world::Match` now owns the exact 42-word player/team stat records, clock, and
@@ -11610,38 +11618,50 @@ on every join (§5.33) and both replies are ported, so either going missing is a
 allowlists, so losing any of them is now a hard test failure. The lone allowed spurious `0x18` remains
 the separately tracked D-NET-133 repair-path residual.
 
-**D-NET-162** [reimpl gap, PORTED 2026-07-04; formula, scoring, and registry-index parity completed 2026-08-22; 00TRg overlay cadence validated 2026-08-02] **The AS capture loop
-now runs on our host** — the §5.61 1 Hz block was witnessed round 13 but unported (v33: no
-map colors, no LFP capture). Ported: `world::zone_capture_tick`
-(engine/runtime/world/zone_capture.{h,cpp}) — the per-second secure/control pass (the enemy-frontier
-latch + `calculate_capture_zone_control_delta @ 0x501120` verbatim incl. the small-server
-boost, the 20/40/60 soft caps, the 12/24/48 base table, the sorted spawn-registry owner
-census, the late-round ownership-leader acceleration, the shared-zone-number divide, and
-the ±1 minimum), secure edges, the instant numbered-zone flips (owned → neutral → capturer,
-control zeroed — the Advance-and-Secure beat), mask rebuilds, and non-trigger zone-object
-team enforcement `[orig: Server_UpdateCaptureZoneEntities @ 0x519690;
-Server_UpdateCaptureZones @ 0x53B8F0 drain; GameEvent_FlagCapture @ 0x50F6F0;
-Server_EnforceZoneEntityTeams @ 0x519600]` — plus the npruntime 1 Hz wire block
-(server_tick.cpp): 0x6F (15 B, change-gated to all + the full set to deploy-pending/dead
-recipients), the 0x1E zone events (0x3B/0x3C edges; flips 50/51/52/53 team-filtered + the
-56/57 banner) with the actor byte in sorted `SpawnZoneList_IndexOf @0x43B990` space, and
-0x53 on flips. Numbered flips award scorer event 24 to every living same-team player in
-radius (`raw[39]` plus score-table status 34). The 0x40 producer runs on its own witnessed 14-tick
-cadence (this section's earlier "1 Hz-coupled" prose was stale against the
-shipped code) per §5.19 (`Server_BuildOverlayStateForPlayer @0x517FC0` →
-`Entity_ClassifyForMinimap @0x50FA70` → staging flush `@0x50FE20`); 2026-08-13
-adds HostClient loopback delivery and moves the classifier into the portable
-`world/minimap_overlay.*`. Pinned by `zone_chain_test`
-(control-delta formula pins; the full flip→secure→contest→neutralize→retake cycle) and
-`npruntime_round_end_test` (spawn-registry index distinct from chain index).
-Tracked divergences: our flip-request source is the same 1 Hz proximity sample the drain
-consumes (retail queues per-touch through the physics pass); 0x6F is change-gated (the golden's 268 non-periodic emits refute a steady
-per-second stream; the exact retail emit filter is unwitnessed); 0x40 classifier
-residuals are now limited to the vehicle-bay group, supply-crate, medic-revivable,
-and exact pool-0 producer tails (ordinary active-player refresh separately rides 0x6B — the joiner fold applies via the reducer stream; the HOST-side 0x6B producer is NEEDS-RE, its retail server emitter unwitnessed);
-the timed-capture engine's ACTIVE entries + 0x6C presence counts (un-numbered flag zones —
-none authored on ASH_I5A), spawn-wave resets, the 0x81 proximity-score refresh packet, and
-the `def+88 & 2` in-radius team conversion are all deferred.
+**D-NET-162** [reimpl gap, PORTED 2026-07-04; full contact/timed-capture transaction,
+formula, scoring, registry-index, and takeover-option parity completed 2026-08-22; 00TRg
+overlay cadence validated 2026-08-02] **The AS capture loop now runs on our host.**
+`world::zone_capture_contact_tick` is the per-logic-tick producer: moving live pool-0
+players touching a capture trigger queue one zone/team request and mark unique presence in
+an ACTIVE timed entry (maximum 32). `world::zone_capture_second_tick` owns the retail 1 Hz
+transaction: enemy-frontier latch; `calculate_capture_zone_control_delta @0x501120`
+verbatim (small-server boost, 20/40/60 soft caps, 12/24/48 base table, sorted
+spawn-registry census, late-round ownership-leader acceleration, shared-number divide,
+and ±1 minimum); secure edges; opposing-request restart/contest arbitration; instant
+numbered flips (owned → neutral → capturer, control zeroed); un-numbered timed entries;
+`def+88 & 2` pool-1/2 entity conversion; mask rebuilds; and zone-object team enforcement.
+`Config_SetDefaults @0x54D030` and `apply_session_settings_to_globals
+@0x551D3E..0x551D55` pin and publish takeover duration 15 and speed setting 1.
+
+The npruntime wire fold emits 0x6F (15 B, change-gated to all plus the full set to
+deploy-pending/dead recipients), 0x53 (9 B) for ACTIVE timed entry start/progress/restart/
+completion, 0x6C (3 B) when its presence count changes, and 0x1E 0x3B/0x3C/43/44/
+50-53/56/57 events. Numbered flips intentionally emit no 0x53: every retail 0x53 call site
+inside `Server_UpdateCaptureZones @0x53B8F0` belongs to an ACTIVE entry. Event actor bytes
+use sorted `SpawnZoneList_IndexOf @0x43B990` space for numbered zones and pool-0 actor slots
+for timed 43/44. Capture scoring records event 24 (`raw[39]`, score-table status 34) once
+for each eligible same-team player, retaining the original timed capturer. The client
+strictly decodes 0x6C and folds it only into a pre-existing 0x53 window, matching
+`NapiNPClientMsg_0x06C @0x428FC0`'s tracked-window gate.
+
+The 0x40 producer runs independently on its witnessed 14-tick cadence per §5.19
+(`Server_BuildOverlayStateForPlayer @0x517FC0` → `Entity_ClassifyForMinimap @0x50FA70` →
+flush `@0x50FE20`). `zone_chain_test` pins control, timed capture, movement gating,
+contests, conversion, and enforcement; `npruntime_server_session_test` pins the exact
+`0x53` 0→2→3 plus `0x6C` 2→1 progression and once-only score; client/catalog tests pin
+strict decode and ordered folding.
+
+Tracked residuals: capture contact currently approximates the authored CT collision shape
+with the trigger radius (it is per tick, no longer a 1 Hz request sample); 0x6F's exact
+retail emit filter remains unwitnessed; spawn-wave list/reset behavior and 0x6E scheduling;
+the 0x81 proximity-score refresh and proximity-bit mirror; and the 0x40 vehicle-bay,
+supply-crate, medic-revivable, and exact pool-0 classifier tails. Ordinary active-player
+refresh separately rides 0x6B; its joiner fold is ported, while its retail host producer
+remains unwitnessed. `[orig: Server_OnPlayerTouchCaptureZone @0x500BA0;
+Server_UpdateCaptureZoneProximity @0x5086A0; Server_UpdateCaptureZoneEntities @0x519690;
+Server_UpdateCaptureZones @0x53B8F0; GameEvent_FlagCapture @0x50F6F0;
+Server_EnforceZoneEntityTeams @0x519600; NetPacket_WriteZoneTimerWindow @0x506D00;
+NetPacket_WriteZonePresenceCount @0x506DE0]`
 
 **D-NET-161** [reimpl gap, PORTED 2026-07-04 (ground-family core; verify v35)] **The host
 never simulated vehicles** — the whole v33 "second model + can't drive" defect (see the

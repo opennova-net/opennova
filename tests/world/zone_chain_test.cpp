@@ -5,6 +5,7 @@
 // [orig: ZoneSlotChain_* @0x4A2350..0x4A2DE0; Server_ResolveSpawnTargetHandle @0x4fe110;
 //  find_spawn_entity_for_team @0x4fc810]
 #include "world/entity.h"
+#include "world/game_type.h"
 #include "world/spawn_select.h"
 #include "world/world.h"
 #include "world/zone_capture.h"
@@ -58,6 +59,9 @@ struct AshFixture {
         z3 = spawn_zone(w, 3, 2, {338.2f, 371.2f, 26.6f});
         spawn_team_marker(w, 6003, {-394.1f, 449.6f, 11.0f});
         spawn_team_marker(w, 6004, {443.5f, -172.5f, 11.0f});
+        MatchRules rules;
+        rules.game_type = opennova::game_type::kAdvanceAndSecure;
+        w.match.configure(rules);
         zone_chain_build_from_mission(w, w.zone_chain);
         zone_chain_latch_control(w, w.zone_chain);
     }
@@ -215,7 +219,13 @@ EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
     e.position = pos;
     e.health = 150;
     e.alive = true;
+    e.net_move_input = Entity::kMoveOrderMoving;
     return w.registry.spawn(0, e);
+}
+
+void capture_second(World &w, ZoneCaptureEvents &events) {
+    zone_capture_contact_tick(w);
+    zone_capture_second_tick(w, events);
 }
 
 // The control-delta formula pins [orig: calculate_capture_zone_control_delta @0x501120].
@@ -230,12 +240,13 @@ void test_control_delta_formula() {
         input.shared_zone_entities = shared_n;
         return zone_capture_control_delta(input);
     };
-    // 1 attacker, 3-per-team server (6 total, no small-server boost), default base 12:
+    // 1 attacker, 3-per-team server (6 total, no small-server boost), fallback base 12:
     // speed = 3*12 = 36 -> delta = 65536/36 = 1820 (secure in ~36 s at 1 Hz).
     CHECK(delta(1, 3, 6, -1, 1) == 65536 / 36);
     // Small-server boost: 1v1 (2 total) -> teamSize = 1 + (6-2)/2 = 3 -> speed 36.
     CHECK(delta(1, 1, 2, -1, 1) == 65536 / 36);
-    // Speed setting 1 doubles the base (24); negative presence mirrors the sign.
+    // Retail's configured default, speed setting 1, selects base 24; negative
+    // presence mirrors the sign. [orig: Config_SetDefaults @0x54D030]
     CHECK(delta(-2, 3, 6, 1, 1) == -(2 * 65536) / (3 * 24));
     // A zone number shared by 2 entities halves the speed (doubles the rate).
     CHECK(delta(1, 3, 6, -1, 2) == 65536 / 18);
@@ -280,7 +291,7 @@ void test_capture_loop_flip_and_secure() {
     f.w.registry.get(f.z3)->zone_radius = 70;
     const EntityHandle s1 = spawn_soldier(f.w, 1, z2a->position);
     ZoneCaptureEvents ev;
-    zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+    capture_second(f.w, ev);
     CHECK(ev.control.size() == 4);            // 0x6F body per registered zone, every pass
     CHECK(ev.flips.size() == 1);              // the instant numbered flip
     if (!ev.flips.empty()) {
@@ -299,16 +310,17 @@ void test_capture_loop_flip_and_secure() {
     int passes = 0;
     bool edged = false;
     while (passes < 200 && !edged) {
-        zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+        capture_second(f.w, ev);
         for (const auto &se : ev.secure_edges)
             if (se.zone == f.z2a && se.secured) edged = true;
         ++passes;
     }
     CHECK(edged);
     CHECK(z2a->zone_control == 0x10000);
-    // 1 securer on a 1-player server: teamSize = 1 + (6-1)/2 = 3, base 12 -> speed 36,
-    // HALVED by the shared zone number (two number-2 bunkers) -> delta 3640 -> ~18 s.
-    CHECK(passes >= 15 && passes <= 22);
+    // 1 securer on a 1-player server: teamSize = 1 + (6-1)/2 = 3, retail's
+    // default TakeoverSpeed setting 1 selects base 24; the shared number halves
+    // speed 72 to 36 -> delta 1820 -> ~36 s. [orig: Config_SetDefaults @0x54D030]
+    CHECK(passes >= 32 && passes <= 40);
 
     // An ENEMY (team 2) walks in while it is secured: control must FALL first (the
     // touch gate rejects a flip at control > 0), then the zero edge (0x3C) fires,
@@ -318,13 +330,13 @@ void test_capture_loop_flip_and_secure() {
     s1e->position = {0.0f, 0.0f, 0.0f}; // the defender leaves
     const EntityHandle s2 = spawn_soldier(f.w, 2, z2a->position);
     (void)s2;
-    zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+    capture_second(f.w, ev);
     CHECK(ev.flips.empty());                  // still partially secured -> no flip yet
     CHECK(z2a->zone_control < 0x10000);
     bool zero_edge = false;
     int flip_pass = -1;
     for (int i = 0; i < 200 && flip_pass < 0; ++i) {
-        zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+        capture_second(f.w, ev);
         for (const auto &se : ev.secure_edges)
             if (se.zone == f.z2a && !se.secured) zero_edge = true;
         if (!ev.flips.empty()) flip_pass = i;
@@ -346,7 +358,7 @@ void test_neutral_capture_is_symmetric_and_actor_attributed() {
         zone->zone_radius = 70;
         const EntityHandle red = spawn_soldier(f.w, 2, zone->position);
         ZoneCaptureEvents ev;
-        zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+        capture_second(f.w, ev);
         CHECK(ev.flips.size() == 1);
         CHECK(zone->team == 2);
         if (!ev.flips.empty()) {
@@ -362,11 +374,129 @@ void test_neutral_capture_is_symmetric_and_actor_attributed() {
         spawn_soldier(f.w, 1, zone->position);
         spawn_soldier(f.w, 2, zone->position);
         ZoneCaptureEvents ev;
-        zone_capture_tick(f.w, f.w.zone_chain, ev, -1);
+        capture_second(f.w, ev);
         CHECK(ev.flips.empty());
         CHECK(zone->team == 0);
         CHECK(zone->zone_control == 0);
     }
+}
+
+EntityHandle spawn_unnumbered_zone(World &w, uint8_t team, Vec3 pos) {
+    Entity zone;
+    zone.kind = EntityKind::Item;
+    zone.item_id = 1359;
+    zone.position = pos;
+    zone.team = team;
+    zone.zone_radius = 70;
+    zone.zone_number = 0;
+    zone.is_capture_trigger = true; // ItemDefAttrib 0x20000 ChangeTeam
+    zone.is_spawn_point = true;     // ItemDefAttrib 0x40000 event gate
+    zone.alive = true;
+    return w.registry.spawn(1, zone);
+}
+
+// A movement collision queues the request; the periodic drain starts the timed
+// transaction. The active entry then reports unique presence and advances by
+// that rate until it changes the zone owner. [orig:
+// Entity_MovementCollisionResolver @0x4B2BD0 -> Server_OnPlayerTouchCaptureZone
+// @0x500BA0; CaptureCtx_* / Server_UpdateCaptureZones @0x53B340..0x53B8F0]
+void test_unnumbered_timed_capture_and_presence() {
+    AshFixture f;
+    MatchRules rules = f.w.match.rules();
+    rules.capture_duration_seconds = 3;
+    f.w.match.configure(rules);
+
+    const Vec3 pos{20.0f, 30.0f, 4.0f};
+    const EntityHandle zone = spawn_unnumbered_zone(f.w, 2, pos);
+    const EntityHandle first = spawn_soldier(f.w, 1, pos);
+    ZoneCaptureEvents ev;
+
+    capture_second(f.w, ev);
+    CHECK(f.w.registry.get(zone)->team == 0); // old owner neutralized at start
+    CHECK(ev.timed_starts.size() == 1);
+    CHECK(ev.timer_windows.size() == 1);
+    if (!ev.timer_windows.empty()) {
+        CHECK(ev.timer_windows[0].zone == zone);
+        CHECK(ev.timer_windows[0].current_team == 0);
+        CHECK(ev.timer_windows[0].capturing_team == 1);
+        CHECK(ev.timer_windows[0].progress == 0);
+        CHECK(ev.timer_windows[0].limit == 3);
+        CHECK(ev.timer_windows[0].rate == 1);
+    }
+
+    // A second unique live mover raises the active rate to two and emits 0x6C.
+    const EntityHandle second = spawn_soldier(f.w, 1, pos);
+    capture_second(f.w, ev);
+    CHECK(ev.presence.size() == 1);
+    CHECK(ev.presence[0].zone == zone && ev.presence[0].count == 2);
+    CHECK(ev.timer_windows.size() == 1);
+    CHECK(ev.timer_windows[0].progress == 2 && ev.timer_windows[0].rate == 2);
+    CHECK(ev.timed_completions.empty());
+
+    // Back to one occupant: 0x6C reports one, progress reaches the authored limit,
+    // and completion retains the original capturer for score/event attribution.
+    f.w.registry.get(second)->position = {500.0f, 500.0f, 0.0f};
+    capture_second(f.w, ev);
+    CHECK(ev.presence.size() == 1);
+    CHECK(ev.presence[0].count == 1);
+    CHECK(ev.timer_windows.size() == 1 && ev.timer_windows[0].progress == 3);
+    CHECK(ev.timed_completions.size() == 1);
+    CHECK(f.w.registry.get(zone)->team == 1);
+    if (!ev.timed_completions.empty()) {
+        CHECK(ev.timed_completions[0].zone == zone);
+        CHECK(ev.timed_completions[0].capturer == first);
+        CHECK(ev.timed_completions[0].new_team == 1);
+    }
+}
+
+// Contact is produced by the movement resolver, not by mere overlap. Opposing
+// requests in one drain contest and cancel rather than selecting pool order.
+// [orig: movement callsite @0x4B2F90..0x4B2FD0; conflicting-request leg
+// @0x53BBEE..0x53BC15]
+void test_capture_contact_movement_gate_and_contest() {
+    AshFixture f;
+    const Vec3 pos{20.0f, 30.0f, 4.0f};
+    const EntityHandle zone = spawn_unnumbered_zone(f.w, 0, pos);
+    const EntityHandle blue = spawn_soldier(f.w, 1, pos);
+    f.w.registry.get(blue)->net_move_input = 0;
+    ZoneCaptureEvents ev;
+    capture_second(f.w, ev);
+    CHECK(ev.timed_starts.empty());
+    CHECK(f.w.registry.get(zone)->team == 0);
+
+    f.w.registry.get(blue)->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle red = spawn_soldier(f.w, 2, pos);
+    capture_second(f.w, ev);
+    CHECK(ev.timed_starts.empty());
+    CHECK(ev.timer_windows.empty());
+    CHECK(f.w.registry.get(zone)->team == 0);
+    (void)red;
+}
+
+// The secure pass also converts live pool-1/2 entities carrying ItemDefAttrib2
+// bit 2 when they sit inside a numbered zone. Pool 3 and out-of-radius entities
+// are untouched. [orig: Server_UpdateCaptureZoneEntities @0x519690]
+void test_numbered_zone_converts_attrib2_entities() {
+    AshFixture f;
+    Entity *zone = f.w.registry.get(f.z1);
+    zone->zone_radius = 70;
+    auto spawn_convertible = [&](int pool, Vec3 pos) {
+        Entity e;
+        e.kind = pool == 2 ? EntityKind::Building : EntityKind::Item;
+        e.position = pos;
+        e.team = 2;
+        e.item_attrib2 = 2;
+        e.alive = true;
+        return f.w.registry.spawn(pool, e);
+    };
+    const EntityHandle inside = spawn_convertible(2, zone->position);
+    const EntityHandle outside = spawn_convertible(1, {500.0f, 500.0f, 0.0f});
+    const EntityHandle wrong_pool = spawn_convertible(3, zone->position);
+    ZoneCaptureEvents ev;
+    capture_second(f.w, ev);
+    CHECK(f.w.registry.get(inside)->team == 1);
+    CHECK(f.w.registry.get(outside)->team == 2);
+    CHECK(f.w.registry.get(wrong_pool)->team == 2);
 }
 
 // The deploy/spawn-zone registry: collect pools 2 then 1, sort by the composite
@@ -424,6 +554,9 @@ int main() {
     test_control_delta_formula();
     test_capture_loop_flip_and_secure();
     test_neutral_capture_is_symmetric_and_actor_attributed();
+    test_unnumbered_timed_capture_and_presence();
+    test_capture_contact_movement_gate_and_contest();
+    test_numbered_zone_converts_attrib2_entities();
     test_spawn_zone_registry();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

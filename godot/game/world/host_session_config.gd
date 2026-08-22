@@ -93,6 +93,8 @@ var score_limit := NetProtocol.DEFAULT_SCORE_LIMIT
 var max_score := NetProtocol.DEFAULT_MAX_SCORE
 var koth_delta := NetProtocol.DEFAULT_KOTH_DELTA
 var flag_return_ticks := NetProtocol.DEFAULT_FLAG_RETURN_TICKS
+var capture_duration_seconds := NetProtocol.DEFAULT_CAPTURE_DURATION_SECONDS
+var capture_speed_setting := NetProtocol.DEFAULT_CAPTURE_SPEED_SETTING
 var num_teams := NetProtocol.DEFAULT_NUM_TEAMS
 var respawn_timeout := NetProtocol.DEFAULT_RESPAWN_TIMEOUT
 var start_delay := NetProtocol.DEFAULT_START_DELAY
@@ -134,6 +136,8 @@ func to_session_options() -> Dictionary:
 		"max_score": max_score,
 		"koth_delta": koth_delta,
 		"flag_return_ticks": flag_return_ticks,
+		"capture_duration_seconds": capture_duration_seconds,
+		"capture_speed_setting": capture_speed_setting,
 		"num_teams": num_teams,
 		"respawn_timeout": respawn_timeout,
 		"start_delay": start_delay,

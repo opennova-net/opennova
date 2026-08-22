@@ -684,8 +684,8 @@ void Match::record_death(World &world, EntityHandle victim_handle,
     }
 }
 
-void Match::record_numbered_zone_capture(const World &world,
-                                         const std::vector<EntityHandle> &scorers) {
+void Match::record_zone_capture(const World &world,
+                                const std::vector<EntityHandle> &scorers) {
     if (outcome_.ended)
         return;
     for (const EntityHandle handle : scorers) {
