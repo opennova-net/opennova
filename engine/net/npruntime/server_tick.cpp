@@ -381,17 +381,42 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 						? static_cast<uint16_t>(dead->death_anim_state)
 						: uint16_t(0));
 			}
+			// The 8-byte game-event body is [type][e1][e2][e3][posX u16][posY u16]
+			// [orig: GameEvent_BuildPayload @0x5054E0]. GameEvent_PlayerDeath has TWO
+			// legs and passes literal 0,0 for the position on BOTH of them
+			// [orig: @0x516DD0 -> the two @0x5054E0 call sites], so the death feed
+			// never carries coordinates -- we were sending the victim's position.
 			std::vector<uint8_t> body1e;
 			if (victim_is_player) {
-				const world::Entity *victim = world.registry.get(d.victim);
-				body1e.push_back(4); // standard kill [orig: @0x517237]
-				body1e.push_back(pool0_index_byte(d.killer_handle));
-				body1e.push_back(pool0_index_byte(d.victim_handle));
-				body1e.push_back(0xFF); // aux actor: none
-				const int16_t px = victim ? static_cast<int16_t>(std::lround(victim->position.x)) : 0;
-				const int16_t py = victim ? static_cast<int16_t>(std::lround(victim->position.y)) : 0;
-				put_u16le(body1e, static_cast<uint16_t>(px));
-				put_u16le(body1e, static_cast<uint16_t>(py));
+				if (d.killer.valid()) {
+					// Killer attributed: e1 = killer, e2 = victim, e3 = aux
+					// [orig: @0x516DD0 `v35 = damage_source_ptr` (the killer index read
+					// from victim+94), `v36 = v42 = v13` (the victim index)].
+					body1e.push_back(4); // standard kill [orig: @0x517237]
+					body1e.push_back(pool0_index_byte(d.killer_handle));
+					body1e.push_back(pool0_index_byte(d.victim_handle));
+					// UNWITNESSED residual: retail's standard-kill leg sets e3 from
+					// `Pool_GetIndexFromPtr(0, *(void **)(killer_ptr + 368))`, and only
+					// its TEAM-KILL leg hardcodes -1. We send 0xFF on both because
+					// killer+368 is not yet witnessed (the same offset holds an int
+					// timer on the victim, so the kong's pointer read is unconfirmed).
+					body1e.push_back(0xFF);
+				} else {
+					// NO killer attribution -> event type 22, and retail puts the
+					// VICTIM index in e1 (the field nw_pp prints as "attacker"),
+					// zeroing e2/e3 [orig: GameEvent_PlayerDeath @0x516DD0 --
+					// `v37 = 0; v36 = 0; v35 = v13; v34 = 22;`, the else-branch of
+					// `if (killer_entity)`, where v13 = Pool_GetIndexFromPtr(0,
+					// victim_entity)]. This is the flavor the retail 00TRg capture
+					// carries twice; we previously reported every death as a
+					// standard kill with a bogus killer byte.
+					body1e.push_back(22);
+					body1e.push_back(pool0_index_byte(d.victim_handle));
+					body1e.push_back(0);
+					body1e.push_back(0);
+				}
+				put_u16le(body1e, 0);
+				put_u16le(body1e, 0);
 			}
 			for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 				if (!is_in_match(c) || c.link.transport == nullptr) continue;

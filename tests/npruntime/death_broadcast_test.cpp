@@ -66,6 +66,16 @@ int count_tag(ns::LoopbackChannel &channel, uint8_t tag) {
 	return n;
 }
 
+// Drain the channel and return the LAST payload carrying `tag` (empty if none).
+std::vector<uint8_t> last_payload(ns::LoopbackChannel &channel, uint8_t tag) {
+	std::vector<uint8_t> found;
+	ns::Datagram dg;
+	while (channel.client_recv(dg)) {
+		if (dg.tag == tag) found = dg.body;
+	}
+	return found;
+}
+
 } // namespace
 
 int main() {
@@ -131,7 +141,9 @@ int main() {
 		       "0x13: the victim carries the wire-dead bit");
 	}
 
-	// --- 2. A PLAYER victim also raises the 0x1E kill event; an NPC victim does not. ---
+	// --- 2. A PLAYER victim with a KILLER: the attributed-kill leg. ---
+	// Body is [type][e1][e2][e3][posX u16][posY u16]
+	// [orig: GameEvent_BuildPayload @0x5054E0 -- always 8 bytes].
 	{
 		w::RoundDeath d;
 		d.victim = joiner_player;
@@ -140,8 +152,45 @@ int main() {
 		d.killer_handle = victim.packed;
 		world.round_sim.deaths.push_back(d);
 		np::Server_TickUpdate(ctx);
-		expect(count_tag(joiner_link, s2c::GAME_EVENT) == 1,
-		       "0x1E: a player victim raises exactly one kill event");
+		const std::vector<uint8_t> ev = last_payload(joiner_link, s2c::GAME_EVENT);
+		expect(ev.size() == 8, "0x1E: the game-event body is 8 bytes");
+		if (ev.size() == 8) {
+			expect(ev[0] == 4, "0x1E: an attributed kill is a standard-kill type");
+			expect(ev[1] == static_cast<uint8_t>(victim.slot()),
+			       "0x1E: e1 is the KILLER pool index [orig: v35 = damage_source_ptr]");
+			expect(ev[2] == static_cast<uint8_t>(joiner_player.slot()),
+			       "0x1E: e2 is the VICTIM pool index [orig: v36 = v42 = v13]");
+			// Retail passes literal 0,0 for the position on BOTH death legs
+			// [orig: GameEvent_PlayerDeath @0x516DD0 -> @0x5054E0(.., 0, 0)].
+			expect(ev[4] == 0 && ev[5] == 0 && ev[6] == 0 && ev[7] == 0,
+			       "0x1E: the death feed carries no position");
+		}
+	}
+
+	// --- 3. A PLAYER victim with NO killer: the type-22 leg. ---
+	// [orig: GameEvent_PlayerDeath @0x516DD0 -- the else-branch of
+	//  `if (killer_entity)` sets `v37 = 0; v36 = 0; v35 = v13; v34 = 22;`, so the
+	//  VICTIM index rides in e1 and e2/e3 are zero. This is the flavor the retail
+	//  00TRg capture carries (nw_pp labels e1 "attacker" -- a decoder misnomer).]
+	{
+		w::RoundDeath d;
+		d.victim = joiner_player;
+		d.killer = w::EntityHandle{}; // unattributed
+		d.victim_handle = joiner_player.packed;
+		d.killer_handle = 0xFFFF;
+		world.round_sim.deaths.push_back(d);
+		np::Server_TickUpdate(ctx);
+		const std::vector<uint8_t> ev = last_payload(joiner_link, s2c::GAME_EVENT);
+		expect(ev.size() == 8, "0x1E/22: the game-event body is 8 bytes");
+		if (ev.size() == 8) {
+			expect(ev[0] == 22, "0x1E/22: an unattributed death is event type 22");
+			expect(ev[1] == static_cast<uint8_t>(joiner_player.slot()),
+			       "0x1E/22: e1 carries the VICTIM index [orig: v35 = v13]");
+			expect(ev[2] == 0 && ev[3] == 0,
+			       "0x1E/22: e2 and e3 are zero [orig: v36 = 0; v37 = 0]");
+			expect(ev[4] == 0 && ev[5] == 0 && ev[6] == 0 && ev[7] == 0,
+			       "0x1E/22: no position");
+		}
 	}
 
 	if (failures == 0) std::printf("death broadcast tests passed\n");

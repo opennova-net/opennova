@@ -885,9 +885,14 @@ int main() {
 		if (!expect(f[1] == uint8_t(hb.packed & 0xFF) && f[2] == uint8_t(hc.packed & 0xFF),
 		            "0x1E attacker/victim pool-0 index bytes"))
 			return 1;
+		// Retail's death sender passes LITERAL 0,0 for the position on both of its
+		// legs [orig: GameEvent_PlayerDeath @0x516DD0 -> GameEvent_BuildPayload
+		// @0x5054E0(buf, 4096, type, e1, e2, e3, 0, 0)], so the kill feed never
+		// carries coordinates. This assertion previously demanded the victim's
+		// position in metres, pinning our own invention rather than retail.
 		const int16_t px = int16_t(f[4] | (f[5] << 8));
 		const int16_t py = int16_t(f[6] | (f[7] << 8));
-		if (!expect(px == 30 && py == 0, "0x1E event position in metres")) return 1;
+		if (!expect(px == 0 && py == 0, "0x1E carries no position [orig: @0x516DD0]")) return 1;
 	}
 	if (!expect(ctx.respawn_queue.empty(), "a client-owned victim does NOT auto-respawn"))
 		return 1;
