@@ -9793,6 +9793,15 @@ too. The native connection/header transaction is the reimpl gate; it does not
 copy retail's unrelated global variable. Remaining presentation work is the
 `stat.mnu` surface.
 
+The co-op phase claim is composed at the host boundary for both wire game-type
+codes. Stock Co-op executes a WAC `Win(2)` on the VM's 62-tick cadence;
+Objective Co-op dispatches an unconditional BMS `RedWin` on the normal
+16-tick pass. Each action ends the world during the logic step, after which the
+same server tick announces 0x61/0x1D and leaves 2789 linger ticks. No direct
+test-only round latch or co-op protocol adapter participates. `[orig:
+WacAction_Win @0x4ED4A0; EventAction_Dispatch RedWin @0x454495;
+Server_TickUpdate @0x51DA04; Server_ProcessRoundEnd @0x5164F0]`
+
 **Payload grammar** (the reassembled stream; every read is bounds-checked and
 yields 0/empty past the end — retail TOLERATES truncation, leaving a partly
 zeroed board):

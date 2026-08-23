@@ -210,7 +210,10 @@ NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
 Its winner check implements the universal all-zones-owned rule and
 every retail competitive branch: DM/TDM, KOTH/TKOTH, S&D/A&D, CTF, FlagBall,
 Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same
-`World::process_round_end` transaction. `[orig: GameEvent_ProcessScoring
+`World::process_round_end` transaction; the host regression executes WAC
+`Win` for stock Co-op and a BMS `RedWin` event for Objective Co-op before
+checking the common 0x61/0x1D output. `[orig: WacAction_Win @0x4ED4A0;
+EventAction_Dispatch RedWin @0x454495; GameEvent_ProcessScoring
 @0x52F550; Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5;
 GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
 @0x52D8A0; Server_CheckWinConditions @0x51AD40]`

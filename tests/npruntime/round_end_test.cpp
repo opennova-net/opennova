@@ -11,6 +11,8 @@
 #include <npruntime/server_message_dispatch.h>
 #include <npruntime/server_tick.h>
 
+#include <mission/event_runtime.h>
+
 #include <netsim/loopback_channel.h>
 
 #include <npwire/replication_model.h>
@@ -25,8 +27,12 @@
 #include <world/world.h>
 #include <world/zone_chain.h>
 
+#include <wac/compiler.h>
+#include <wac/wac_system.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -400,62 +406,112 @@ void test_demolition_death_routes_score_and_round_wire() {
 	}
 }
 
-void test_aas_and_coop_share_round_wire() {
-	for (const uint32_t game_type : {0x10010u, 0x10020u}) {
+void test_aas_round_wire() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+	const w::EntityHandle red = match_player(world, 4, 2, "Red");
+	w::Entity z1;
+	z1.kind = w::EntityKind::Item;
+	z1.team = 2;
+	z1.zone_number = 1;
+	w::Entity z2 = z1;
+	z2.zone_number = 2;
+	world.zone_chain.zones.push_back(world.registry.spawn(1, z1));
+	world.zone_chain.zones.push_back(world.registry.spawn(1, z2));
+
+	ns::LoopbackChannel wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kAdvanceAndSecure;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
+	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
+	wire.clear();
+	np::Server_TickUpdate(ctx);
+
+	EndRoundHeader header;
+	expect(drain_round_header(wire, header),
+			"A&S uses the shared 0x61/0x1D transition");
+	expect(header.winner_team == 2 && header.team_score_0 == 0 &&
+			header.team_score_1 == 2,
+			"A&S header preserves the winner and owned-zone scores");
+	expect(ctx.round_end_linger_ticks == 2790,
+			"automatic A&S outcome does not consume its announcement tick");
+}
+
+void test_coop_script_producers_share_round_wire() {
+	auto run_case = [](uint32_t game_type_code, bool use_wac) {
 		w::World world;
 		world.registry.configure_pool(0, 4);
-		world.registry.configure_pool(1, 4);
 		world.mp_session = true;
 		w::MatchRules rules;
-		rules.game_type = game_type;
+		rules.game_type = game_type_code;
 		world.match.configure(rules);
 		const w::EntityHandle red = match_player(world, 4, 2, "Red");
-		if (game_type == 0x10010u) {
-			w::Entity z1;
-			z1.kind = w::EntityKind::Item;
-			z1.team = 2;
-			z1.zone_number = 1;
-			w::Entity z2 = z1;
-			z2.zone_number = 2;
-			world.zone_chain.zones.push_back(world.registry.spawn(1, z1));
-			world.zone_chain.zones.push_back(world.registry.spawn(1, z2));
+
+		opennova::wac::WacSystem wac_system;
+		opennova::mission::BmsEventSystem bms_system;
+		int producer_tick = 0;
+		if (use_wac) {
+			opennova::wac::CompileEnv env;
+			auto program = opennova::wac::compile_source(
+					"if never() then win(2) endif\n", env);
+			expect(program.ok(), "stock Co-op WAC win program compiles");
+			wac_system.set_program(std::move(program));
+			world.add_system(&wac_system);
+			producer_tick = opennova::wac::WacSystem::kTicksPerExecution;
 		} else {
-			// Co-op has no automatic winner; WAC/BMS owns this edge.
-			world.process_round_end(2);
+			opennova::bms::Event event{};
+			event.action_count = 1;
+			opennova::bms::Action action{};
+			action.action_type = opennova::bms::ActionType::RedWin;
+			bms_system.load({event}, {}, {action});
+			world.add_system(&bms_system);
+			producer_tick = 16;
 		}
+		world.load_systems();
 
 		ns::LoopbackChannel wire;
 		np::NapiNPServerCtx ctx;
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
-		ctx.config.game_type = game_type;
+		ctx.config.game_type = game_type_code;
 		ctx.np_protocol.connection_list.push_back(
 				make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
 		ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
-		if (game_type == 0x10010u) {
-			for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
-			wire.clear();
-		}
+
+		for (int tick = 1; tick < producer_tick; ++tick)
+			np::Server_TickUpdate(ctx);
+		expect(!world.match.outcome().ended,
+				"Co-op does not end before its authored script action");
+		wire.clear();
 		np::Server_TickUpdate(ctx);
+		expect(world.match.outcome().ended &&
+				world.match.outcome().winner_team == 2,
+				"WAC/BMS action owns the Co-op result edge");
 
 		EndRoundHeader header;
-		expect(drain_round_header(wire, header),
-				game_type == 0x10010u
-						? "A&S uses the shared 0x61/0x1D transition"
-						: "network Co-op uses the shared 0x61/0x1D transition");
-		expect(header.winner_team == 2,
-				"A&S/Co-op header preserves the authoritative winner");
-		if (game_type == 0x10010u) {
-			expect(header.team_score_0 == 0 && header.team_score_1 == 2,
-					"A&S header scores are owned-zone counts");
-			expect(ctx.round_end_linger_ticks == 2790,
-					"automatic A&S outcome does not consume its announcement tick");
-		} else {
-			expect(ctx.round_end_linger_ticks == 2789,
-					"script-driven Co-op outcome consumes the originating server tick");
-		}
-	}
+		expect(drain_round_header(wire, header) && header.winner_team == 2,
+				"scripted Co-op result reaches exact 0x61/0x1D round wire");
+		expect(ctx.round_end_linger_ticks == 2789,
+				"scripted Co-op outcome consumes its originating server tick");
+	};
+
+	// Stock Co-op is WAC-owned; Objective Co-op exercises the sibling BMS
+	// result action. Both front ends call the same retail round transaction.
+	// [orig: WacAction_Win @0x4ED4A0; EventAction_Dispatch RedWin
+	// @0x454495; Server_ProcessRoundEnd @0x5164F0]
+	run_case(game_type::kCoop, true);
+	run_case(game_type::kObjectiveCoop, false);
 }
 
 void test_aas_events_use_spawn_registry_index() {
@@ -908,7 +964,8 @@ int main() {
 
 	test_tdm_round_wire_and_linger();
 	test_demolition_death_routes_score_and_round_wire();
-	test_aas_and_coop_share_round_wire();
+	test_aas_round_wire();
+	test_coop_script_producers_share_round_wire();
 	test_aas_events_use_spawn_registry_index();
 	test_ctf_pickup_and_capture_wire_transaction();
 	test_flag_timeout_wire_transaction();

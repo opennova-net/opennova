@@ -83,11 +83,15 @@ that ownership invariant at compile time.
   `GameType_CreateDefaultSettings @0x52DD00`. It also preserves Flag Me's
   retail row-12 defect: objective wire transitions remain live, but the
   12-row scorer/status table rejects its score row.
-- `tests/npruntime/round_end_test.cpp` pins multiplayer and co-op through the
-  shared live transition, real remote-body objective collisions, exact
+- `tests/npruntime/round_end_test.cpp` pins multiplayer and both co-op variants
+  through the shared live transition: stock Co-op reaches it from a real WAC
+  `Win` execution and Objective Co-op from a real BMS `RedWin` event, while
+  competitive modes use their gameplay producers. It also pins real
+  remote-body objective collisions, exact
   objective-state/event routing, `0x61`/`0x1D`
   delivery, requester-only `0x2B`/`0x56` board pulls, and the 2790-tick linger
-  (`Server_ProcessRoundEnd @0x5164F0`).
+  (`WacAction_Win @0x4ED4A0`; `EventAction_Dispatch RedWin @0x454495`;
+  `Server_ProcessRoundEnd @0x5164F0`).
 - `tests/npruntime/client_runtime_test.cpp` pins automatic multi-chunk
   client pulls and board reassembly.
 - `tests/frame/inmatch_session_test.cpp` pins the sole lifecycle/cadence API.
