@@ -953,6 +953,8 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 		// cyclic pair, and the altitude target.
 		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT 6.12g):
 		// the integrated speed vs the command names which stage loses the pace.
+		out["vp"] = ve->pitch;
+		out["vr"] = ve->roll;
 		out["mspd"] = ve->veh.speed;
 		{
 			Array wc;

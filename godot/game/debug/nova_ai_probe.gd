@@ -122,6 +122,8 @@ func tick(world: GameWorld, delta: float) -> void:
 				"mspd": int(card.get("mspd", 0)),
 				"macc": int(card.get("macc", 0)),
 				"mgnd": bool(card.get("mgnd", false)),
+				"vp": int(card.get("vp", 0)),
+				"vr": int(card.get("vr", 0)),
 				"wc": card.get("wc", []),
 				"eo": bool(card.get("engine_on", false)),
 				"pm": int(card.get("pilot_move", -1)),
