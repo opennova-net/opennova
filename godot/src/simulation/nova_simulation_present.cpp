@@ -954,6 +954,11 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT 6.12g):
 		// the integrated speed vs the command names which stage loses the pace.
 		out["mspd"] = ve->veh.speed;
+		{
+			Array wc;
+			for (int wi = 0; wi < 4; ++wi) wc.append(ve->veh.wheel_comp[wi]);
+			out["wc"] = wc;
+		}
 		out["macc"] = ve->veh.speed_accel;
 		out["mgnd"] = ve->veh.grounded;
 		out["cmd_fwd"] = ve->veh.cmd_speed;
