@@ -1467,6 +1467,11 @@ void test_local_player_swims_on_the_plane() {
     // Selection: idle -> swim_idle 36, straight (no gait, no arbitration).
     CHECK(e->inf.anim_state == anim_state::kSwimIdle);
     CHECK(e->inf.anim_pending == 0);
+    // ONE commit per selection pass: the crossfade must complete and stay
+    // complete -- the land-commit + swim-override double stamp restarted the
+    // blend every 4th tick (weight wedged <= 0.4, pose frozen at the mix, and
+    // the stale blend SOURCE kept feeding its root motion).
+    CHECK(e->inf.anim_blend_weight >= 1.0f);
 
     // Forward -> 37; the direction index collapses to the four strokes.
     PlayerBodyInput in;

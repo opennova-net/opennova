@@ -633,14 +633,22 @@ void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
         if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
     }
 
-    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
-
-    // SWIM. After the arbitration (and retail's wash overlay 27/28, unported), a
-    // body on the float latch (0x8000) that is not dead takes the swim state
-    // STRAIGHT -- no availability test, no flag-table arbitration, pending
-    // cleared: moving -> the direction index picks 37 forward / 38 left / 40
-    // back / 39 right; idle -> 36. The same MoveOrder&7 index the land gaits
-    // use, collapsed to four strokes.
+    // SWIM. After the land selection (and retail's wash overlay 27/28,
+    // unported), a body on the float latch (0x8000) that is not dead takes the
+    // swim state STRAIGHT -- no availability test, no flag-table arbitration,
+    // pending cleared: moving -> the direction index picks 37 forward / 38
+    // left / 40 back / 39 right; idle -> 36. The same MoveOrder&7 index the
+    // land gaits use, collapsed to four strokes.
+    //
+    // Retail computes the land state into the same plain field and then
+    // OVERWRITES it here; only the final value reaches the anim layer. Our
+    // crossfade channel restarts on every intermediate stamp (the same reason
+    // the ladder override skips the selection), so the swim override REPLACES
+    // the land commit instead of following it -- one commit per pass, the same
+    // final value. Committing both thrashed the blend at the 4-tick cadence:
+    // the weight never passed ~0.4, the pose looked frozen, and the never-
+    // evicted blend SOURCE (the entry tick's jump_loop) kept feeding its
+    // root-motion forward step -- the "auto swims forward" defect.
     // [orig: Entity_UpdateInfantryPlayerBody, kong 148422-148452:
     //  `(Flags & 0x8000) && !(Flags & 2)`; switch(MoveOrder & 7) case 0: 37;
     //  1,2: 38; 3,4,5: 40; 6,7: 39; else 36; pendingAnimStateId = 0]
@@ -657,7 +665,10 @@ void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
         }
         inf.begin_body_transition(swim);
         inf.anim_pending = 0;
+        return;
     }
+
+    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
 }
 
 // The physical recoil accumulator's per-body decay and orientation drift.

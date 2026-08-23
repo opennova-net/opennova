@@ -154,6 +154,15 @@ func tick(world: GameWorld, delta: float) -> void:
 	if outcome.has("humans"):
 		humans = int(outcome["humans"])
 	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards,
+			# The local player's BODY CHANNEL as the presenter consumes it:
+			# key + playhead + blend. A frozen "ph" with a live key is a sim
+			# channel that stopped advancing; a moving "ph" with a frozen pose
+			# is a presenter defect (the swim diagnosis seam, 2026-08-23).
+			"pl": {"k": String(sim.get_local_player_anim_key()),
+					"ph": int(sim.get_local_player_anim_phase_ticks()),
+					"sk": String(sim.get_local_player_anim_source_key()),
+					"sph": int(sim.get_local_player_anim_source_phase_ticks()),
+					"bw": float(sim.get_local_player_anim_blend_weight())},
 			"ev": {"n": nfired, "of": fired.size(), "idx": fired_idx},
 			"humans": humans,
 			# Mission variables v1..v8. 05TRcoop's WAC drives its whole co-op
