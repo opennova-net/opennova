@@ -83,6 +83,7 @@ func tick(world: GameWorld, delta: float) -> void:
 			"cdx": int(card.get("res_dx", 0)),
 			"cdy": int(card.get("res_dy", 0)),
 			"citem": int(card.get("contact_item", 0)),
+			"dead": bool(card.get("health", 1) <= 0),
 			# AI decision state, named to match the retail probe (onhook ai_probe.c)
 			# so the two recordings join field-for-field.
 			"parent": int(card.get("parent", -1)),
