@@ -559,12 +559,31 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                 m.vel_y = detail::q16_mul_rhu(m.speed, fwd_q16[1]);
                 m.slide_z = detail::q16_mul_rhu(m.speed, fwd_q16[2]);
             } else {
-                const int32_t c = cos22_of_bam(m.yaw_bam) >> 6; // 2^22 -> 16.16 unit
-                const int32_t s = sin22_of_bam(m.yaw_bam) >> 6;
-                m.vel_x = static_cast<int32_t>((static_cast<int64_t>(m.speed) * c + 0x8000) >> 16);
-                m.vel_y = static_cast<int32_t>((static_cast<int64_t>(m.speed) * s + 0x8000) >> 16);
-                m.slide_z = 0; // level dir frame — the slope vertical term rides the clamp
-                               // below (pitch/roll contact solve deferred, D-NET-161)
+                // The GROUND core's own grounded build is the SAME full-basis
+                // form: dir rows from the euler matrix, and slideDecay REPLACED
+                // by speed*fwd.z while the crash latch is clear. The former
+                // yaw-only leg with slide_z = 0 was the D-NET-161 stand-in; it
+                // left LEVEL velocity at every contact loss, so a crest sent the
+                // hull sailing horizontally while the road dropped -- 27% of the
+                // 00TRg convoy's drive read airborne and the witnessed coast
+                // brake ate the route pace (AI-PARITY-CONCEPT 6.12g/h; the
+                // 13-pin's root). Retail's frozen ballistic velocity follows the
+                // slope and re-contacts at once.
+                // [orig: Entity_UpdateVehiclePhysics @0x48AF00 grounded build,
+                //  kong 116425-116490 -- Math_BuildFixedPointMatrixFromEuler-
+                //  Angles rows 0/2, velocity = speed*row products @116804-116831,
+                //  slideDecay = v139 (= speed*fwd.z) @116470 gated on the
+                //  aimHeading crash byte == 0]
+                const VehicleEulerBasis gb = vehicle_euler_basis(
+                        m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+                const int32_t gfwd[3] = {
+                    static_cast<int32_t>(gb.fwd[0] * 65536.0),
+                    static_cast<int32_t>(gb.fwd[1] * 65536.0),
+                    static_cast<int32_t>(gb.fwd[2] * 65536.0)};
+                m.vel_x = detail::q16_mul_rhu(m.speed, gfwd[0]);
+                m.vel_y = detail::q16_mul_rhu(m.speed, gfwd[1]);
+                if (m.crashed == 0) // [orig: the aimHeading-byte gate @116468]
+                    m.slide_z = detail::q16_mul_rhu(m.speed, gfwd[2]);
             }
         }
         if (traits.family == VehicleFamily::Bike) {
