@@ -107,6 +107,27 @@ struct Connection {
 	// a deploy from an alive-but-undeployed player (the dead-or-pending gate @0x519cc7).
 	// Death does NOT set it — the death screen is client-local (D-NET-156).
 	bool respawn_pending = false;
+
+	// Retail's post-death player-slot counters. Both are whole seconds and are
+	// decremented by the authority's 1 Hz player maintenance. +360 rejects every
+	// C2S 0x0E deployment pick; +364 rejects only picks that resolve to a real
+	// spawn target. The phase-0 S2C 0x0A header exposes their low bytes, with
+	// +360 suppressed unless the owned entity is dead.
+	// [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb;
+	// Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2;
+	// NetPacket_WritePlayerState @0x4ff81b]
+	uint32_t respawn_delay_seconds = 0;      // playerSlot+360
+	uint32_t spawn_target_hold_seconds = 0; // playerSlot+364
+	bool respawn_hold_armed = false;
+
+	// The authority tick of the last completed deployment. Validity is explicit
+	// because tick zero is a real stamp and unsigned subtraction preserves the
+	// original counter's wrap behavior. A death within 620 ticks forces the
+	// +360/+364 hold to three seconds even when the configured timeout is larger.
+	// [orig: playerSlot+96456 read @0x516edc; deployment stamp in the
+	// Server_ProcessPlayerDeath path @0x517740]
+	uint32_t last_deploy_tick = 0;
+	bool last_deploy_tick_valid = false;
 };
 
 } // namespace opennova::netsim

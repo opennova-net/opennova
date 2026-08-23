@@ -167,15 +167,6 @@ struct NapiNPServerCtx {
 	// NetSystem (retired P8): the drain/emit primitives live in netsim/connection_fan.h.
 	world::World *world = nullptr;
 
-	// Dead host-side players awaiting their respawn release [orig: the death queue +
-	// respawn timers Server_ProcessPlayerDeath / GameEvent_PlayerDeath set (slot +360/+364,
-	// the 620-tick recent-spawn rule); a joiner's respawn instead rides its own deploy
-	// request]. Drained by Server_TickUpdate; §5.60.
-	struct PendingRespawn {
-		world::EntityHandle victim;
-		uint32_t due_tick = 0;
-	};
-	std::vector<PendingRespawn> respawn_queue;
 	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
 	// per-second stream (268 across a whole session): unchanged bodies are withheld and
 	// pending/dead (deploy-screen) recipients get the full set at 1 Hz instead

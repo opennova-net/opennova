@@ -7,14 +7,16 @@
 // min/max_damage], clamped to remaining health [orig: @0x4e8064], and a health<=0 victim
 // raises the death routing [orig: Entity_CheckAndProcessDeath @0x51b550]: S2C 0x13
 // [u16 victim][u16 killerSource] to every non-host in-match connection + the S2C 0x1E
-// kill-feed event for player victims; a dead HOST player enters the respawn queue and
-// releases back to its spawn point at template health [orig: Entity_ResetToSpawnState
-// @0x4b9610].
+// kill-feed event for player victims; every victim receives the retail +360/+364
+// post-death hold, early C2S 0x0E picks are dropped, and the listen host's local
+// presentation fallback releases through the same deployment transaction at expiry
+// [orig: GameEvent_PlayerDeath @0x516dd0; Server_ProcessClientRequestRespawn @0x519af0].
 //
 // Coverage: build_ammo_table + round_type resolve; fire -> one live round with the
 // velocity/62 step; three body hits kill a 150-hp player (60/60/30 clamped); 0x13 + 0x1E
-// staged on both client transports, none on the loopback; a client-owned victim does NOT
-// auto-respawn; a dead loopback (host) victim respawns after the timer at spawn health.
+// staged on both client transports, none on the loopback; configured and recent-spawn
+// hold branches; exact silent-drop/accept boundary; a dead loopback victim releases at
+// spawn health without a second respawn implementation.
 
 #include <npruntime/ammo_table_build.h>
 #include <npruntime/napi_np_connection.h>
@@ -704,6 +706,7 @@ int main() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.config.respawn_timeout = 5;
 	// This scenario is an MP session (three players over transports): stamp the
 	// world-side flag too, or the SP-only round-outcome legs (kill tallies + the
 	// death auto-lose in check_win_conditions) run and hold the respawn queue.
@@ -712,6 +715,19 @@ int main() {
 	roster.push_back(make_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
 	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
+	// These fixture players predate the measured 620-tick recent-spawn window.
+	// Individual sub-cases below stamp a fresh deploy when they exercise that arm.
+	for (np::NapiNPConnection &conn : roster) {
+		conn.link.last_deploy_tick = world.logic_tick - 620u;
+		conn.link.last_deploy_tick_valid = true;
+	}
+	auto advance_second_boundaries = [&](int count) {
+		int crossed = 0;
+		while (crossed < count) {
+			np::Server_TickUpdate(ctx);
+			if (world.logic_tick % 62u == 0) ++crossed;
+		}
+	};
 
 
 	// --- 1. Fire spawns one live round with the witnessed velocity step. ---
@@ -883,11 +899,43 @@ int main() {
 		const int16_t py = int16_t(f[6] | (f[7] << 8));
 		if (!expect(px == 30 && py == 0, "0x1E event position in metres")) return 1;
 	}
-	if (!expect(ctx.respawn_queue.empty(), "a client-owned victim does NOT auto-respawn"))
+	if (!expect(roster[2].link.respawn_delay_seconds == 5,
+	            "death arms the configured +360 hold outside the recent-spawn window"))
+		return 1;
+	if (!expect(roster[2].link.spawn_target_hold_seconds == 0,
+	            "a mission without spawn zones clears the +364 target hold"))
+		return 1;
+	std::vector<ProtocolMessage> default_pick{
+			make_protocol_message(0x0E, {0xFF, 0xFF})};
+	auto request_client_respawn = [&]() {
+		return np::dispatch_session_replies(
+				ctx.config, roster[2], default_pick, world.logic_tick,
+				roster, &world, ctx.np_protocol.session_seed_id);
+	};
+	if (!expect(request_client_respawn().empty() &&
+	                    world.registry.get(hc)->health == 0,
+	            "an early default 0x0E pick is silently dropped by +360"))
+		return 1;
+	advance_second_boundaries(4);
+	if (!expect(roster[2].link.respawn_delay_seconds == 1 &&
+	                    request_client_respawn().empty(),
+	            "the universal hold remains closed through four one-second decrements"))
+		return 1;
+	advance_second_boundaries(1);
+	if (!expect(roster[2].link.respawn_delay_seconds == 0 &&
+	                    world.registry.get(hc)->health == 0,
+	            "the fifth boundary expires the hold without auto-respawning a client"))
+		return 1;
+	const std::vector<ProtocolMessage> client_release = request_client_respawn();
+	if (!expect(client_release.size() >= 2 &&
+	                    world.registry.get(hc)->health == 150 &&
+	                    roster[2].link.last_deploy_tick == world.logic_tick,
+	            "the first post-expiry pick runs the shared deployment release"))
 		return 1;
 
-	// --- 4. Kill the HOST player (loopback-owned): it queues for respawn and
-	// releases at spawn health/position. Retail corpses remain ballistic
+	// --- 4. Kill the HOST player (loopback-owned): its fresh deployment selects
+	// the exact three-second recent-spawn arm and the local presentation fallback
+	// releases through the same deployment transaction. Retail corpses remain ballistic
 	// colliders (the proximity walk does not skip Flags bit 1 / dead), so move
 	// the already-verified client corpse off this unrelated line-of-fire fixture.
 	// Retail checks the dead-state gate after geometric impact, so a corpse is
@@ -895,13 +943,17 @@ int main() {
 	// lane before the separate host-player kill scenario below; the focused
 	// projectile_combat test pins corpse interception itself.
 	world.registry.get(hc)->position.y = 20.0f;
+	roster[0].link.last_deploy_tick = world.logic_tick;
+	roster[0].link.last_deploy_tick_valid = true;
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 		for (int i = 0; i < 6; ++i) np::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(ha)->health == 0, "host player dead")) return 1;
-	if (!expect(ctx.respawn_queue.size() == 1, "host player queued for respawn")) return 1;
+	if (!expect(roster[0].link.respawn_delay_seconds == 3,
+	            "a death within 620 ticks forces the retail three-second hold"))
+		return 1;
 	{
 		// Displace the corpse to prove the release snaps back [orig: the D-NET-66
 		// death/respawn teleport]. The listen host's own player is MOTOR-simulated, and
@@ -917,8 +969,15 @@ int main() {
 		            "the host player is motor-simulated")) return 1;
 		host_ae->pos[0] = w::to_fixed(12.0);
 		host_ae->inf.stance = w::InfantryState::Stance::kProne;
-		for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx);
-		if (!expect(ctx.respawn_queue.empty(), "respawn released after the timer")) return 1;
+		advance_second_boundaries(2);
+		if (!expect(roster[0].link.respawn_delay_seconds == 1 && host->health == 0,
+		            "local fallback remains held through two second boundaries"))
+			return 1;
+		advance_second_boundaries(1);
+		if (!expect(roster[0].link.respawn_delay_seconds == 0 && host->health == 0,
+		            "expiry and deployment remain distinct retail phases"))
+			return 1;
+		np::Server_TickUpdate(ctx);
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;
 		if (!expect(std::fabs(host->position.x - 60.0f) < 0.01f,
@@ -953,6 +1012,31 @@ int main() {
 		w::Entity *je = world.registry.get(jb);
 		je->flags |= 1u; // the join-time hidden bit rides with pending
 		conn.reply.last_loadout_reply = {8, 2, 255, 0, 0, 0xFF}; // a granted 0x5A body
+
+		// +364 gates only a pick that resolves to a real target. A Default
+		// Spawn pick bypasses it, then clears both counters in the release.
+		// [orig: Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2]
+		world.registry.configure_pool(2, 8);
+		w::Entity spawn_zone;
+		spawn_zone.kind = w::EntityKind::Item;
+		spawn_zone.has_item_def = true;
+		spawn_zone.is_spawn_point = true;
+		spawn_zone.alive = true;
+		spawn_zone.team = je->team;
+		spawn_zone.position = {25.0f, 25.0f, 0.0f};
+		const w::EntityHandle zone = world.registry.spawn(2, spawn_zone);
+		if (!expect(zone.valid(), "target-hold spawn zone created")) return 1;
+		conn.link.spawn_target_hold_seconds = 2;
+		std::vector<ProtocolMessage> target_pick;
+		target_pick.push_back(make_protocol_message(
+				0x0E, {static_cast<uint8_t>(zone.packed),
+				       static_cast<uint8_t>(zone.packed >> 8)}));
+		if (!expect(np::dispatch_session_replies(
+		                    ctx.config, conn, target_pick, 99, roster, &world,
+		                    0xA1B2C3D4u).empty() &&
+		                    conn.link.respawn_pending,
+		            "+364 silently rejects a real spawn-target pick"))
+			return 1;
 
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x0E, {0xFF, 0xFF})); // param-0 pick (base deploy)

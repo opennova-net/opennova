@@ -304,6 +304,7 @@ void test_aas_events_use_spawn_registry_index() {
 	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
 	world.registry.get(blue)->player_class = 8;
 	world.registry.get(blue)->position = {100.0f, 0.0f, 0.0f};
+	world.registry.get(blue)->net_move_input |= w::Entity::kMoveOrderMoving;
 
 	// A sorted pool-2 spawn object precedes the three pool-1 capture zones. The
 	// target zone is therefore spawn-registry index 2 but zone-chain index 1.
@@ -374,12 +375,16 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	w::Entity red_flag;
 	red_flag.kind = w::EntityKind::Item;
 	red_flag.item_id = 4093; // Flag (Red) [orig: item-id branch @0x43C1B7]
+	red_flag.has_item_def = true;
+	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = blue_entity->position;
 	red_flag.spawn_position = red_flag.position;
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	w::Entity blue_bay;
 	blue_bay.kind = w::EntityKind::Item;
 	blue_bay.item_id = 4098; // Blue bay [orig: Entity_ProcessWaypointInteraction @0x4AD8D4]
+	blue_bay.has_item_def = true;
+	blue_bay.item_attrib = w::kItemAttribMoveCallback;
 	blue_bay.position = blue_entity->position;
 	const w::EntityHandle bay = world.registry.spawn(1, blue_bay);
 	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
