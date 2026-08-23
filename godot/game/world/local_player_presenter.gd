@@ -275,6 +275,15 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 			delta, capture_mouse, gameplay_input_active)
 
 
+# NW_SP_DEBUG_THIRD_PERSON=1 (dev/headless, beside NW_SP_MISSION): arm this
+# presenter's own F3 "third person on foot" affordance once the player exists,
+# so an unattended NW_SHOT_DIR run frames the local player's body (the
+# swim/float checks) instead of the first-person view. One-shot, self-owned:
+# the presenter is the object the F3 checkbox flips, so the env arming lives
+# with it rather than in the shell's frame loop.
+var _debug_third_person_env := OS.get_environment("NW_SP_DEBUG_THIRD_PERSON") == "1"
+
+
 func after_world_tick() -> void:
 	if not has_player():
 		_set_world_nvg_view(false, 0)
@@ -287,6 +296,9 @@ func after_world_tick() -> void:
 			_weapon_effects.reset()
 		_view = null
 		return
+	if _debug_third_person_env:
+		_debug_third_person_env = false
+		set_debug_third_person(true)
 	_view = _world.local_player_view()
 	# The camera mode is the sim's resolved word (the arbiter ran this tick).
 	_third_person = _view != null and _view.third_person
