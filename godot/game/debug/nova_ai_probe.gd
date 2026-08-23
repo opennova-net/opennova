@@ -7,6 +7,13 @@ extends RefCounted
 ## interest scheduler never resent it". Inert without the env var.
 
 const INTERVAL_S := 5.0
+# NW_AI_PROBE_INTERVAL=<seconds> overrides the cadence. The retail hook samples
+# every 30 rendered frames (~0.145 s at its frame rate); at the 5 s default our
+# side was 36x coarser, which turned the one-second stand-up-and-walk-off
+# transition after a dismount into a fake anim/ground divergence (retail itself
+# reads 22/22 at anim 149 by +7 s). The selftest passes 0.15 to match.
+var _interval := OS.get_environment("NW_AI_PROBE_INTERVAL").to_float() \
+		if not OS.get_environment("NW_AI_PROBE_INTERVAL").is_empty() else INTERVAL_S
 
 var _path := OS.get_environment("NW_AI_PROBE")
 var _accum := 0.0
@@ -35,7 +42,7 @@ func tick(world: GameWorld, delta: float) -> void:
 		return
 	_tp_elapsed += delta
 	_accum += delta
-	if _accum < INTERVAL_S:
+	if _accum < _interval:
 		return
 	_accum = 0.0
 	_tp_tick(world)
