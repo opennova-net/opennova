@@ -7896,9 +7896,13 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
    4-byte S2C 0x81 on change (`@ 0x508790`); set bit 0..4 for pool-1 def-types
    4095/4091/4093/4097/4096 within 20.0 (a carried flag counts at the carrier's position);
    set bit `1 << zone.team` for pool-3 6006 radius zones and for frontier-active numbered
-   `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2); drive the presence counters
-   `[23593..95]` against the per-gametype config table (`sub_52D430(g_GameType, 0xC/0x24)` —
-   follow-up) into `GameEvent_ProcessScoring @ 0x52F550`.
+   `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2). The existence of ANY such
+   numbered entity globally supersedes every 6006 volume for presence; with neither family
+   present `[23593..95]` do not decay. Otherwise the three counters chase zero outside/dead,
+   `+23595` accumulates primary hill time inside, `+23593` resets at
+   `max(1, sub_52D430(gameType, 0xC))`, and `+23594` resets at 10. The mask then feeds six
+   independent kill bonuses in `GameEvent_ProcessScoring @ 0x52F550` (neutral-objective
+   victim/attacker and team-relative victim/attacker × own/enemy objective).
 2. **Capture requests** ride the CT (Change Team Box) physics touch, not this block:
    a live player touching a `0x20000` entity (authority, no preround,
    gametype & 0x30000) calls
@@ -11678,10 +11682,16 @@ Server_UpdateCaptureZoneProximity @0x5086A0;
 CRenderState_GetFieldByIndex @0x52D7D0;
 NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]`
 
+The authoritative `world::Match` fold now carries that same per-player proximity byte,
+the three presence counters, numbered-over-6006 source precedence, no-source hold, TKOTH
+team hold, and all six player/team score events. `match_test` pins each branch. The two
+generic `GameEvent_ProcessScoring` calls driven by score-table indices 0x0C/0x24 remain a
+separate scoring-producer residual; their decompiled two-argument call sites do not expose
+the hidden event selector and are not guessed.
+
 Tracked residuals: capture contact currently approximates the authored CT collision shape
 with the trigger radius (it is per tick, no longer a 1 Hz request sample); 0x6F's exact
-retail emit filter remains unwitnessed; spawn-wave list/reset behavior and 0x6E scheduling;
-the proximity-bit mirror; and the 0x40 vehicle-bay,
+retail emit filter remains unwitnessed; and the 0x40 vehicle-bay,
 supply-crate, medic-revivable, and exact pool-0 classifier tails. Ordinary active-player
 refresh separately rides 0x6B; its joiner fold is ported, while its retail host producer
 remains unwitnessed. `[orig: Server_OnPlayerTouchCaptureZone @0x500BA0;

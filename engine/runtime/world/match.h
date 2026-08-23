@@ -91,6 +91,12 @@ struct MatchStats {
     static constexpr size_t kFlagCaptures = 12;
     static constexpr size_t kFlagPickups = 13;
     static constexpr size_t kTargetsDestroyed = 14;
+    static constexpr size_t kVictimNearNeutralObjectiveKills = 22;
+    static constexpr size_t kAttackerNearNeutralObjectiveKills = 23;
+    static constexpr size_t kVictimNearAttackerObjectiveKills = 24;
+    static constexpr size_t kAttackerNearOwnObjectiveKills = 25;
+    static constexpr size_t kVictimNearOwnObjectiveKills = 26;
+    static constexpr size_t kAttackerNearVictimObjectiveKills = 27;
     static constexpr size_t kPoints = 29;
     static constexpr size_t kRoundMarker = 35;
     static constexpr size_t kZoneTakeovers = 39;
@@ -120,6 +126,17 @@ struct MatchPlayer {
     // Player-slot +23595, maintained by the retail capture-proximity pass and
     // supplied as sub_52C850's external score for KOTH/TKOTH.
     int32_t objective_ticks = 0;
+    // Player-slot +89868: bit 0 is the neutral-objective/hill bit; bits 1..4
+    // identify team-owned objectives. The kill scorer consumes this byte
+    // verbatim. [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+    // GameEvent_ProcessScoring @0x52F550]
+    uint8_t objective_proximity_mask = 0;
+    // Player-slot +23593/+23594. They chase zero while outside a relevant
+    // capture source, reset at the score-table capture interval and ten
+    // service passes respectively, and remain untouched when the mission has
+    // no capture source at all. [orig: @0x50890A..0x508A05]
+    int32_t capture_score_ticks = 0;
+    int32_t capture_period_ticks = 0;
 };
 
 // One outcome latch for every producer: automatic multiplayer rules and the
@@ -263,7 +280,7 @@ class Match {
     void drop_carried_object(World &world, EntityHandle player);
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
-    void update_hill_presence(const World &world);
+    void update_objective_proximity(const World &world);
     void update_flag_objectives(World &world, bool advance_return_timers);
     int32_t team_objective_ticks(const World &world, uint8_t team) const;
 
