@@ -121,14 +121,9 @@ public:
     bool group_alive(int group) const;  // true if any member alive
 
     // --- mount / emplacement (AttachToEmplaced) ---
-    // [orig: Entity_FindBestSeatSlot @0x4351f0] Pick the best free seat on `target` for `occupant`:
-    // skip None/taken seats, weight by type (driver/ctrl 0x2000 < gunner 0x20000 < passenger
-    // 0x200000; lower wins), return its index or -1. Child-entity traversal is deferred — tracked.
-    int find_best_seat(const Entity &target, EntityHandle occupant,
-                       SeatSelectionMode mode = SeatSelectionMode::Any) const;
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best
-    // free seat: reject if the occupant is already mounted or the target has no free seat; write both
-    // sides + pose immediately. Returns false on any reject.
+    // free root/child seat through the canonical vehicle attach operation. Reject if the
+    // occupant is already mounted or the target has no free seat. Returns false on any reject.
     bool mount(uint16_t occupant_ssn, uint16_t target_ssn,
                SeatSelectionMode mode = SeatSelectionMode::Any);
     // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail

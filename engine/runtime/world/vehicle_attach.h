@@ -1,7 +1,6 @@
-// Wire-side vehicle attach/detach — the server acceptors behind the C2S 0x26/0x27
-// vehicle messages (net-re §5.61 round 14). Handle-keyed and validation-ordered per the
-// witnessed originals; the WAC/BMS mount commands (EntityCommands::mount, SSN-keyed,
-// script semantics) stay separate.
+// Vehicle attach/detach — the authoritative relationship operations behind the
+// C2S 0x26/0x27 wire handlers, WAC/BMS mount commands, use-key mounting, and
+// mobile-spawn deployment. Handle-keyed and validation-ordered per the originals.
 //
 // [orig: NapiNPServerMsg_HandleVehicleAttach @0x502390 -> Entity_ProcessVehicleAttach
 //  @0x435AA0 -> Entity_AttachToVehicleSlot @0x4946D0 / Entity_AttachToUseGunSlot @0x546B80;
@@ -14,6 +13,7 @@
 #include <cstdint>
 
 #include "world/entity.h"
+#include "world/vehicle_mount.h"
 
 namespace opennova::world {
 
@@ -55,12 +55,31 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
 // Returns true iff the entity was mounted.
 bool entity_detach_from_vehicle(World &world, EntityHandle player);
 
-// One free seat (or armory point) found by the use-key/label proximity scan.
-struct NearestSeatHit {
+// One selected vehicle seat, or an armory point returned by the proximity scan.
+struct VehicleSeatSelection {
     EntityHandle vehicle;
     int seat_index = -1; // seat index, or the armory_points index in armory mode
     SeatType type = SeatType::None;
 };
+
+// FindBestSeatSlot's weighted root+child walk. The requested root is considered
+// first, followed by live entities whose ground_target is that root. Controller
+// and Driver are root-only; lower weights win: root control/driver 0x2000,
+// Gunner 0x20000, root Passenger 0x200000, child Passenger 0x2000000. A seat
+// occupied by the requester remains eligible.
+// [orig: Entity_FindBestSeatSlot @0x4351F0]
+bool find_best_vehicle_seat(
+        const World &world, EntityHandle root_vehicle, EntityHandle occupant,
+        VehicleSeatSelection &out,
+        SeatSelectionMode mode = SeatSelectionMode::Any);
+
+// Validate and atomically attach to an already selected seat. This is the one
+// authoritative relationship-write path used by wire requests, script mounts,
+// use-key mounts, and mobile-spawn deployment.
+// [orig: Entity_RequestVehicleAttach @0x4364A0 ->
+//  Entity_ProcessVehicleAttach @0x435AA0]
+bool attach_to_vehicle_seat(World &world, EntityHandle player,
+                            const VehicleSeatSelection &selection);
 
 // The use-key nearest-seat scan [orig: Entity_FindNearestSeatOrArmory @0x435d50]: for
 // every live seat-bearing entity, test each FREE seat's world position against the player
@@ -78,7 +97,8 @@ struct NearestSeatHit {
 // vehicle outright (the own-hull LOS occlusion stand-in until pool-1 collision lands —
 // USE exits, never cycles seats; j), and the emplaced-gun carrier LOS/reject legs
 // (def attrib 0x20 -> groundEntity) are unmodeled.
-bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
+bool find_nearest_free_seat(World &world, const Entity &player,
+                            VehicleSeatSelection &out,
                             bool armory_mode);
 
 // The USE-ITEM mount toggle's weapon-busy gate [orig: Entity_ToggleVehicleMount
@@ -92,7 +112,7 @@ bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_actio
 // player standing on a seat-bearing ground target takes that carrier's best
 // seat first; otherwise the nearest-free-seat scan above (seats mode).
 bool find_mount_toggle_candidate(World &world, const Entity &player,
-                                 NearestSeatHit &r_hit);
+                                 VehicleSeatSelection &r_hit);
 
 // One floating attach label [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the
 // selection half; projection and drawing stay host-side]. world_pos carries the witnessed

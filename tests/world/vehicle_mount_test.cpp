@@ -561,6 +561,79 @@ void test_toggle_nearest_seat() {
     }
 }
 
+// Entity_FindBestSeatSlot walks the requested root and its ground-attached
+// children. Control/driver seats belong to the root only; a child UseGun still
+// outranks a root passenger. The chosen entity is part of the result because
+// Entity_RequestVehicleAttach boards that child, not the root.
+// [orig: Entity_FindBestSeatSlot @0x4351F0;
+//  Entity_RequestVehicleAttach @0x4364A0]
+void test_best_seat_walks_vehicle_children() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 8);
+
+    Entity root;
+    root.kind = EntityKind::Item;
+    root.health = 100;
+    root.alive = true;
+    Seat passenger;
+    passenger.type = SeatType::Passenger;
+    passenger.bone_index = 3;
+    root.seats.push_back(passenger);
+    const EntityHandle root_h = w.registry.spawn(1, root);
+
+    Entity child;
+    child.kind = EntityKind::Item;
+    child.health = 100;
+    child.alive = true;
+    child.ground_target = root_h;
+    Seat child_controller;
+    child_controller.type = SeatType::Controller;
+    child_controller.bone_index = 4;
+    child.seats.push_back(child_controller);
+    Seat gunner;
+    gunner.type = SeatType::Gunner;
+    gunner.bone_index = 5;
+    child.seats.push_back(gunner);
+    const EntityHandle child_h = w.registry.spawn(1, child);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.health = 100;
+    player.alive = true;
+    const EntityHandle player_h = w.registry.spawn(0, player);
+
+    VehicleSeatSelection selected;
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
+    CHECK(selected.vehicle == child_h);
+    CHECK(selected.seat_index == 1);
+    CHECK(selected.type == SeatType::Gunner);
+    CHECK(attach_to_vehicle_seat(w, player_h, selected));
+    CHECK(w.registry.get(player_h)->mount_target == child_h);
+    CHECK(w.registry.get(child_h)->seats[1].occupant == player_h);
+
+    CHECK(entity_detach_from_vehicle(w, player_h));
+    Seat controller;
+    controller.type = SeatType::Controller;
+    controller.bone_index = 6;
+    w.registry.get(root_h)->seats.push_back(controller);
+    selected = {};
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
+    CHECK(selected.vehicle == root_h);
+    CHECK(selected.seat_index == 1);
+    CHECK(selected.type == SeatType::Controller);
+
+    // Child control seats are never eligible; command 123 also narrows the
+    // walk to passenger seats without changing root-before-child weighting.
+    w.registry.get(root_h)->seats[1].occupant = EntityHandle::make(0, 3);
+    selected = {};
+    CHECK(find_best_vehicle_seat(
+            w, root_h, player_h, selected,
+            SeatSelectionMode::PassengerOnly));
+    CHECK(selected.vehicle == root_h);
+    CHECK(selected.seat_index == 0);
+}
+
 // The portable whole-registry walk is only for a world that never built the
 // collision tables. Once a live table build has happened, the retail BSS-zero
 // cadence leaves the first 16 ticks deliberately sliceless.
@@ -569,7 +642,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         Rig r(2.0f);
         CollisionWorld cw;
         r.w.collision = &cw;
-        NearestSeatHit hit;
+        VehicleSeatSelection hit;
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
     }
@@ -584,7 +657,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         cw.build_tick_tables(r.w);
         CHECK(cw.tick_tables_ready());
         CHECK(!cw.attach_candidate_slices_authoritative());
-        NearestSeatHit hit;
+        VehicleSeatSelection hit;
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
     }
@@ -601,13 +674,13 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         cw.build_tick_tables(r.w);
         CHECK(cw.tick_tables_ready());
         CHECK(!cw.attach_candidate_slices_authoritative());
-        NearestSeatHit hit;
+        VehicleSeatSelection hit;
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
         for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
         CHECK(cw.attach_candidate_slices_authoritative());
         CHECK(cw.candidate_count(r.player_h) == 1);
-        hit = NearestSeatHit{};
+        hit = VehicleSeatSelection{};
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
         CHECK(provider.calls == 0);
@@ -618,7 +691,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         r.w.collision = &cw;
         r.veh().bound_radius = 3.0f;
         cw.build_tick_tables(r.w);
-        NearestSeatHit hit;
+        VehicleSeatSelection hit;
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
         for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
         CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
@@ -662,7 +735,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     const Entity *player = w.registry.get(player_h);
     CHECK(player != nullptr);
     if (player != nullptr) {
-        NearestSeatHit hit;
+        VehicleSeatSelection hit;
         CHECK(find_nearest_free_seat(w, *player, hit, false));
         CHECK(hit.vehicle == vehicle_h);
     }
@@ -696,12 +769,12 @@ void test_restore_refreshes_completed_candidate_epoch() {
 
     r.player().position = {202.0f, 200.0f, 10.0f};
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
-    NearestSeatHit hit;
+    VehicleSeatSelection hit;
     CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
     CHECK(hit.vehicle == other_h);
 
     r.w.restore(baseline);
-    hit = NearestSeatHit{};
+    hit = VehicleSeatSelection{};
     CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
     CHECK(hit.vehicle == r.veh_h);
 }
@@ -777,7 +850,7 @@ void test_enemy_occupant_blocks_scan() {
         collect_attach_labels(r.w, r.player(), false, false, labels);
         return labels.size();
     };
-    NearestSeatHit hit;
+    VehicleSeatSelection hit;
     CHECK(!player_toggle_vehicle_mount(r.w, r.player_h));
     CHECK(!r.player().mounted);
     CHECK(!find_nearest_free_seat(r.w, r.player(), hit, false));
@@ -1638,6 +1711,7 @@ int main() {
     test_remote_player_control_seat_preserves_wire_look();
     test_live_mounted_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
+    test_best_seat_walks_vehicle_children();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
     test_restore_refreshes_completed_candidate_epoch();

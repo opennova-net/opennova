@@ -188,18 +188,6 @@ bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicl
     return false;
 }
 
-bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
-    switch (mode) {
-        case SeatSelectionMode::PassengerOnly:
-            return type == SeatType::Passenger;
-        case SeatSelectionMode::RejectController:
-            return type != SeatType::Controller;
-        case SeatSelectionMode::Any:
-        default:
-            return true;
-    }
-}
-
 static int16_t mounted_pose_yaw(const Entity &vehicle, const Seat &seat) {
     if (seat.attachment_frame)
         return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
@@ -836,30 +824,6 @@ bool EntityCommands::group_dead(int group) const {
 
 // --- mount / emplacement (AttachToEmplaced) ---
 
-int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant,
-                                   SeatSelectionMode mode) const {
-    // [orig: Entity_FindBestSeatSlot @0x4351f0] lowest weight wins; skip None/taken seats.
-    int best = -1;
-    int32_t best_weight = 65536000; // [orig: bestWeight init sentinel]
-    for (int i = 0; i < static_cast<int>(target.seats.size()); ++i) {
-        const Seat &s = target.seats[i];
-        if (s.type == SeatType::None) continue;           // [orig: boneIdx != 0]
-        if (!seat_allowed_for_mode(s.type, mode)) continue;
-        if (s.occupant.valid() && s.occupant != occupant) // [orig: owner==0xFFFF || owner==self]
-            continue;
-        int32_t w;
-        switch (s.type) {
-            case SeatType::Controller:
-            case SeatType::Driver:    w = 0x2000;   break; // [orig: case 2/5]
-            case SeatType::Passenger: w = 0x200000; break; // [orig: case 1, on-vehicle]
-            case SeatType::Gunner:
-            default:                  w = 0x20000;  break; // [orig: default (UseGun)]
-        }
-        if (w < best_weight) { best = i; best_weight = w; }
-    }
-    return best;
-}
-
 bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelectionMode mode) {
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] resolve both; reject already-mounted /
     // seatless; pick the best seat; write both sides; pose now.
@@ -867,46 +831,10 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     EntityHandle th = resolve_ssn(target_ssn);
     Entity *occ = world_.registry.get(oh);
     Entity *tgt = world_.registry.get(th);
-    if (!occ || !tgt) return false;
-    if (occ->mounted) return false;       // [orig: entity->pad8[8] set -> return 0]
-    if (tgt->seats.empty()) return false; // [orig: no model+144 vehicle / no seats]
-    const int seat_idx = find_best_seat(*tgt, oh, mode);
-    if (seat_idx < 0) return false;
-    Seat &s = tgt->seats[seat_idx];
-    presnap_vehicle_attach_heading(world_, *occ, *tgt, s);
-    s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]
-    occ->mount_target = th;                                // [orig: occupant+364]
-    occ->mount_target_net_id = tgt->net_id;
-    occ->mount_target_bms_id = tgt->bms_id;
-    occ->mount_target_spawn_origin = tgt->spawn_origin;
-    occ->mount_seat = static_cast<int8_t>(seat_idx);       // [orig: occupant+360]
-    occ->mount_type = s.type;
-    occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
-    occ->mounted = true;
-    if (s.type == SeatType::Gunner) {
-        // UseGun clears the transient drowning/in-air pair but does not set the
-        // generic carried/vehicle flag. [orig: Entity_AttachToUseGunSlot
-        // @0x546c56-0x546c7c clears 0xA000]
-        occ->flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
-        occ->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
-    } else {
-        // Ordinary vehicle slots clear the pair and mark the occupant carried.
-        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775, the
-        // `& 0xFFFF5FBF | 0x40` form — the masks are static_asserted at the
-        // vehicle_attach.cpp twin]
-        occ->flags = (occ->flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
-                     kEntityFlagMounted;
-        occ->engine_flags =
-                (occ->engine_flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
-                kEntityFlagMounted;
-    }
-    occ->mounted_config_valid = tgt->emplaced_config_valid;
-    occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
-    if (s.type == SeatType::Gunner)
-        vehicle_bind_use_gun_slot(world_, *occ, *tgt);
-    pose_mounted_occupant(world_, *occ, *tgt, s);
-    vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
-    return true;
+    if (!occ || !tgt || occ->mounted) return false;
+    VehicleSeatSelection selection;
+    if (!find_best_vehicle_seat(world_, th, oh, selection, mode)) return false;
+    return attach_to_vehicle_seat(world_, oh, selection);
 }
 
 bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn,
@@ -938,7 +866,8 @@ bool EntityCommands::mount_best(uint16_t occupant_ssn) {
     double best_d2 = kMountRadius * kMountRadius + 1.0;
     world_.registry.for_each([&](const Entity &e) {
         if (e.handle == oh || e.seats.empty()) return;
-        if (find_best_seat(e, oh) < 0) return; // no free seat for this occupant
+        VehicleSeatSelection selection;
+        if (!find_best_vehicle_seat(world_, e.handle, oh, selection)) return;
         const double dx = e.position.x - p.x, dy = e.position.y - p.y, dz = e.position.z - p.z;
         const double d2 = dx * dx + dy * dy + dz * dz;
         if (d2 <= kMountRadius * kMountRadius && d2 < best_d2) { best_d2 = d2; best = e.handle; }
@@ -949,42 +878,7 @@ bool EntityCommands::mount_best(uint16_t occupant_ssn) {
 }
 
 bool EntityCommands::dismount(uint16_t occupant_ssn) {
-    // [orig: Entity_DetachFromVehicle @0x4355f0] free the seat + clear the occupant's mount ref.
-    Entity *occ = world_.registry.get(resolve_ssn(occupant_ssn));
-    if (!occ || !occ->mounted) return false;
-    const bool claim_capable_seat = occ->mount_type != SeatType::Passenger &&
-                                    occ->mount_type != SeatType::None;
-    const uint16_t target_net_id = occ->mount_target_net_id;
-    const int32_t target_bms_id = occ->mount_target_bms_id;
-    const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
-    const uint16_t target_wire_handle = occ->mount_target.packed;
-    const EntityHandle oh = occ->handle;
-    Entity *tgt = world_.registry.get(occ->mount_target);
-    if (tgt && occ->mount_seat >= 0 && occ->mount_seat < static_cast<int>(tgt->seats.size()))
-        tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
-    vehicle_release_use_gun_slot(*occ, tgt);
-    occ->mounted = false;
-    occ->flags &= ~kEntityFlagMounted;
-    occ->engine_flags &= ~kEntityFlagMounted;
-    occ->mount_target = EntityHandle{};
-    occ->mount_target_net_id = 0;
-    occ->mount_target_bms_id = 0;
-    occ->mount_target_spawn_origin = 0;
-    occ->mount_seat = -1;
-    occ->mount_type = SeatType::None;
-    occ->mount_bone = 0;
-    occ->mounted_config_valid = false;
-    occ->mounted_config = 0;
-    if (tgt != nullptr) {
-        vehicle_release_primary_occupant(world_, *tgt, oh); // [orig: +368 leg @0x4356e9]
-    } else if (claim_capable_seat) {
-        // The vehicle entity is already gone; its stored identity carries the stop so the
-        // host tears the presentation down (host cleanup — the claimant check is
-        // unavailable, and a spurious stop is idempotent downstream).
-        emit_vehicle_control_stopped(world_, target_net_id, target_bms_id,
-                                     target_spawn_origin, target_wire_handle);
-    }
-    return true;
+    return entity_detach_from_vehicle(world_, resolve_ssn(occupant_ssn));
 }
 
 uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {

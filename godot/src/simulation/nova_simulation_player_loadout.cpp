@@ -188,7 +188,7 @@ bool Simulation::local_player_toggle_mount() {
 		if (toggle_player->mounted)
 			return runtime_->queue_vehicle_detach(
 					toggle_player->mount_target.packed);
-		opennova::world::NearestSeatHit hit;
+		opennova::world::VehicleSeatSelection hit;
 		if (!opennova::world::find_mount_toggle_candidate(
 					*world_, *toggle_player, hit))
 			return false;
@@ -207,7 +207,7 @@ bool Simulation::local_player_toggle_mount() {
 	// [orig: Entity_AttachToUseGunSlot @0x546b80, reject
 	//  !is_in_session && Flags&0x100 && !EquippedSlot @0x546c07]
 	if (!listen_server_ && !local_weapon_.active) {
-		opennova::world::NearestSeatHit hit;
+		opennova::world::VehicleSeatSelection hit;
 		if (opennova::world::find_mount_toggle_candidate(
 					*world_, *toggle_player, hit) &&
 				hit.type == opennova::world::SeatType::Gunner)
