@@ -369,7 +369,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	world.match.configure(rules);
 	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
 	w::Entity *blue_entity = world.registry.get(blue);
-	blue_entity->position = {10.0f, 20.0f, 3.0f};
+	blue_entity->position = {10.75f, -3.25f, 3.0f};
 	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
 	const w::EntityHandle host = match_player(world, 1, 1, "Host");
 	world.registry.get(host)->position = {1000.0f, 1000.0f, 3.0f};
@@ -406,33 +406,66 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
 
 	np::Server_TickUpdate(ctx); // contact -> pickup
+	bool saw_pickup_event = false;
 	bool saw_pickup = false;
+	int pickup_event_order = -1;
+	int pickup_state_order = -1;
+	int order = 0;
 	ns::Datagram datagram;
 	while (wire.client_recv(datagram)) {
-		if (datagram.tag != s2c::OBJECTIVE_ENTITY_STATE) continue;
-		ObjectiveEntityState state;
-		size_t consumed = 0;
-		if (decode_objective_entity_state(
-				datagram.body.data(), datagram.body.size(), state, consumed) &&
-				consumed == datagram.body.size() && state.entity_handle == flag.packed &&
-				state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0)
-			saw_pickup = true;
+		if (datagram.tag == s2c::GAME_EVENT &&
+				datagram.body == std::vector<uint8_t>{
+						0x14, static_cast<uint8_t>(blue.slot()),
+						0xFF, 0xFF, 10, 0, 0xFC, 0xFF}) {
+			saw_pickup_event = true;
+			pickup_event_order = order;
+		}
+		if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+			ObjectiveEntityState state;
+			size_t consumed = 0;
+			if (decode_objective_entity_state(
+					datagram.body.data(), datagram.body.size(), state, consumed) &&
+					consumed == datagram.body.size() && state.entity_handle == flag.packed &&
+					state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0) {
+				saw_pickup = true;
+				pickup_state_order = order;
+			}
+		}
+		++order;
 	}
-	expect(saw_pickup,
-			"CTF pickup fans the retail 19-byte 0x2F carried-state record");
+	expect(saw_pickup_event && saw_pickup && pickup_event_order >= 0 &&
+			pickup_state_order > pickup_event_order,
+			"CTF pickup fans exact event 20 before the 19-byte 0x2F carried state");
+	bool host_saw_pickup_event = false;
 	bool host_saw_pickup = false;
+	int host_pickup_event_order = -1;
+	int host_pickup_state_order = -1;
+	order = 0;
 	while (host_wire.client_recv(datagram)) {
-		if (datagram.tag != s2c::OBJECTIVE_ENTITY_STATE) continue;
-		ObjectiveEntityState state;
-		size_t consumed = 0;
-		if (decode_objective_entity_state(
-				datagram.body.data(), datagram.body.size(), state, consumed) &&
-				consumed == datagram.body.size() && state.entity_handle == flag.packed &&
-				state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0)
-			host_saw_pickup = true;
+		if (datagram.tag == s2c::GAME_EVENT &&
+				datagram.body == std::vector<uint8_t>{
+						0x14, static_cast<uint8_t>(blue.slot()),
+						0xFF, 0xFF, 10, 0, 0xFC, 0xFF}) {
+			host_saw_pickup_event = true;
+			host_pickup_event_order = order;
+		}
+		if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+			ObjectiveEntityState state;
+			size_t consumed = 0;
+			if (decode_objective_entity_state(
+					datagram.body.data(), datagram.body.size(), state, consumed) &&
+					consumed == datagram.body.size() && state.entity_handle == flag.packed &&
+					state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0) {
+				host_saw_pickup = true;
+				host_pickup_state_order = order;
+			}
+		}
+		++order;
 	}
-	expect(host_saw_pickup,
-			"CTF pickup mask 0x80 includes the listen-host loopback");
+	expect(host_saw_pickup_event && host_saw_pickup &&
+			host_pickup_event_order >= 0 &&
+			host_pickup_state_order > host_pickup_event_order,
+			"CTF pickup mask 0x80 includes the host with event-before-state ordering");
 
 	np::Server_TickUpdate(ctx); // carried flag overlaps bay -> capture
 	bool saw_capture_event = false;
@@ -440,7 +473,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	bool saw_reset = false;
 	int capture_order = -1;
 	int remove_order = -1;
-	int order = 0;
+	order = 0;
 	while (wire.client_recv(datagram)) {
 		if (datagram.tag == s2c::GAME_EVENT && datagram.body.size() == 8 &&
 				datagram.body[0] == 0x13 && datagram.body[1] == blue.slot()) {
@@ -487,6 +520,99 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	expect(host_saw_capture_event && !host_saw_remove &&
 			host_capture_order >= 0 && host_remove_order < 0,
 			"CTF capture sends the 0x80 event to the host but its 0x90 removal only remotely");
+}
+
+void test_flag_timeout_wire_transaction() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kFlagBall;
+	rules.max_score = 99;
+	rules.flag_return_ticks = 5;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	w::Entity *blue_entity = world.registry.get(blue);
+	blue_entity->position = {30.0f, 40.0f, 2.0f};
+	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+	const w::EntityHandle host = match_player(world, 1, 1, "Host");
+	world.registry.get(host)->position = {1000.0f, 1000.0f, 2.0f};
+
+	w::Entity red_flag;
+	red_flag.kind = w::EntityKind::Item;
+	red_flag.item_id = 4093;
+	red_flag.has_item_def = true;
+	red_flag.item_attrib = w::kItemAttribMoveCallback;
+	red_flag.position = blue_entity->position;
+	red_flag.spawn_position = {5.0f, 6.0f, 2.0f};
+	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
+	expect(flag.valid(), "FlagBall timeout fixture spawns its red flag");
+
+	ns::LoopbackChannel remote_wire;
+	ns::LoopbackChannel host_wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &remote_wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 2, &host_wire, ns::TransportMode::Loopback, host, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
+
+	np::Server_TickUpdate(ctx); // pickup arms the return state
+	remote_wire.clear();
+	host_wire.clear();
+	world.match.record_death(world, blue); // drop without waiting for combat routing
+	blue_entity = world.registry.get(blue);
+	blue_entity->alive = false;
+	blue_entity->flags |= w::kEntityFlagDead;
+	blue_entity->net_move_input = 0;
+	np::Server_TickUpdate(ctx); // route the drop
+	remote_wire.clear();
+	host_wire.clear();
+
+	for (int tick = 0; tick < 330; ++tick)
+		np::Server_TickUpdate(ctx);
+
+	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
+		bool saw_event = false;
+		bool saw_state = false;
+		int event_order = -1;
+		int state_order = -1;
+		int order = 0;
+		ns::Datagram datagram;
+		while (channel.client_recv(datagram)) {
+			if (datagram.tag == s2c::GAME_EVENT &&
+					datagram.body == std::vector<uint8_t>{
+							0x24, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0}) {
+				saw_event = true;
+				event_order = order;
+			}
+			if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+				ObjectiveEntityState state;
+				size_t consumed = 0;
+				if (decode_objective_entity_state(
+						datagram.body.data(), datagram.body.size(), state, consumed) &&
+						consumed == datagram.body.size() &&
+						state.entity_handle == flag.packed &&
+						state.attach_handle == 0xFFFF &&
+						state.pos_x == 5 * 65536 && state.pos_y == 6 * 65536) {
+					saw_state = true;
+					state_order = order;
+				}
+			}
+			++order;
+		}
+		return saw_event && saw_state && event_order >= 0 && state_order > event_order;
+	};
+	expect(saw_exact_return(remote_wire),
+			"red-flag timeout fans event 36 before the exact home-state 0x2F");
+	expect(saw_exact_return(host_wire),
+			"flag-timeout mask 0x80 includes the host with event-before-state ordering");
 }
 
 } // namespace
@@ -583,6 +709,7 @@ int main() {
 	test_aas_and_coop_share_round_wire();
 	test_aas_events_use_spawn_registry_index();
 	test_ctf_pickup_and_capture_wire_transaction();
+	test_flag_timeout_wire_transaction();
 
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;

@@ -204,6 +204,9 @@ struct MatchGameplayEvent {
     EntityHandle parent;
     EntityHandle ground;
     bool remove_objective = false;
+    // Immutable ItemDef id for event families whose wire code is selected by
+    // the objective type after the domain mutation (flag timeout 35/36/37).
+    uint16_t objective_item_id = 0;
 };
 
 // Resolve one retail scoreboard FIELD ID against the direct CPlayerStats
