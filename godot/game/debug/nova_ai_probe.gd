@@ -84,6 +84,12 @@ func tick(world: GameWorld, delta: float) -> void:
 			"cdy": int(card.get("res_dy", 0)),
 			"citem": int(card.get("contact_item", 0)),
 			"dead": bool(card.get("health", 1) <= 0),
+			# `pool` lets BOTH sides be filtered identically -- without it our rows
+			# mix pool-1 vehicles (hp 3000/10000) into an infantry comparison.
+			"pool": int(card.get("pool", -1)),
+			# retail's parentSlot carries the SeatType enum (0 none / 1 passenger /
+			# 2 controller / 3 gunner), which is our mount_type -- not mount_seat.
+			"pslot": int(card.get("mount_type", 0)),
 			# AI decision state, named to match the retail probe (onhook ai_probe.c)
 			# so the two recordings join field-for-field.
 			"parent": int(card.get("parent", -1)),
