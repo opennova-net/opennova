@@ -386,7 +386,12 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
             if (has(anim_state::kWalkForward)) return anim_state::kWalkForward;
             break;
         case anim_state::kStop:
-            // [orig: 4084 — a missing stop clip forces idle (147 -> 43), not a gait]
+            // [orig: Entity_UpdateInfantryAI @0x4b9910 post-pass, kong 154811:
+            //  animStateId == 147 && animMap[147] == animMap[0] -> 43]. Retail
+            // converts AFTER the commit, at the end of the same think with no
+            // observer in between; resolving before the commit is a declared
+            // placement adaptation. Data-driven per body: 29 of the 219 retail
+            // .adms author anim_stop and play 147; Eindo_R.adm does not.
             break;
         case anim_state::kIdle2:
         case anim_state::kIdle3:
@@ -408,8 +413,9 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
         default:
             break;
     }
-    if (has(anim_state::kIdle)) return anim_state::kIdle;
-    return -1; // nothing playable: keep the current state
+    // [orig: targetAnimState seeds 43 with no availability test; an unauthored
+    //  idle plays slot 0's node through the registration fill]
+    return anim_state::kIdle;
 }
 
 // Commit a resolved target state under the flag-table arbitration [orig:
