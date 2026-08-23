@@ -403,6 +403,55 @@ void test_deathmatch_and_hill_outcomes() {
     CHECK(world->match.team_primary_score(*world, 1) == 60);
 }
 
+void test_retail_zone_and_tkoth_win_quirks() {
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(1, 4);
+        MatchRules aas;
+        aas.game_type = gt::kAdvanceAndSecure;
+        aas.game_time_minutes = 1;
+        world->match.configure(aas);
+        zone(*world, 1, 0);
+        zone(*world, 2, 0);
+        tick_to_zero(*world);
+
+        // A uniform neutral chain makes the retail helper return true with
+        // outTeamId=0. Server_CheckWinConditions then returns without ending
+        // the round, so the ordinary A&S clock-expiry draw arm is unreachable.
+        // [orig: ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920;
+        // Server_CheckWinConditions @0x51AD8A..0x51ADA3]
+        CHECK(!world->match.winner_if_finished(*world).has_value());
+    }
+
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(3, 4);
+        MatchRules tkoth;
+        tkoth.game_type = gt::kTeamKingOfTheHill;
+        tkoth.game_time_minutes = 1;
+        tkoth.hill_limit_minutes = 99;
+        world->match.configure(tkoth);
+        const EntityHandle team4 = player(*world, 0, 4, "TeamFour");
+        world->registry.get(team4)->position = {0.0f, 0.0f, 0.0f};
+        Entity hill;
+        hill.kind = EntityKind::Item;
+        hill.item_id = 6006;
+        hill.position = {0.0f, 0.0f, 0.0f};
+        hill.bound_radius = 10.0f;
+        hill.alive = true;
+        world->registry.spawn(3, hill);
+        tick_to_zero(*world);
+
+        // The retail timeout comparison for a unique team-4 lead jumps to
+        // LABEL_95, the team-1 round-end label. Preserve that observable bug;
+        // the earlier hill-limit arm still reports team 4 normally.
+        // [orig: Server_CheckWinConditions @0x51B01A..0x51B040]
+        const auto timeout_winner = world->match.winner_if_finished(*world);
+        CHECK(timeout_winner.has_value() && *timeout_winner == 1);
+    }
+}
+
 void test_demolition_flag_and_flagball_gameplay() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 8);
@@ -763,6 +812,7 @@ int main() {
     test_live_entity_team_and_class_drive_scoring_and_board();
     test_tdm_limit_and_clock_decisions();
     test_deathmatch_and_hill_outcomes();
+    test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();

@@ -984,25 +984,30 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     // do not win. [orig: Server_CheckWinConditions @0x51AD8A ->
     // ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920]
     bool saw_zone = false;
+    bool uniform_zones = true;
     uint8_t uniform_team = 0;
     for (const EntityHandle handle : world.zone_chain.zones) {
         const Entity *zone = world.registry.get(handle);
         if (zone == nullptr)
             continue;
-        saw_zone = true;
-        if (zone->team == 0) {
-            uniform_team = 0;
-            break;
-        }
-        if (uniform_team == 0)
+        if (!saw_zone) {
+            saw_zone = true;
             uniform_team = zone->team;
-        else if (uniform_team != zone->team) {
-            uniform_team = 0;
+        } else if (uniform_team != zone->team) {
+            uniform_zones = false;
             break;
         }
     }
-    if (saw_zone && uniform_team != 0)
-        return static_cast<int32_t>(uniform_team);
+    if (saw_zone && uniform_zones) {
+        // The helper's success bit is independent of the returned team. A
+        // uniformly neutral chain therefore suppresses every later win arm
+        // without producing a winner. [orig:
+        // ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920;
+        // Server_CheckWinConditions @0x51AD8A..0x51ADA3]
+        if (uniform_team != 0)
+            return static_cast<int32_t>(uniform_team);
+        return std::nullopt;
+    }
 
     if (rules_.game_type == gt::kDeathmatch) {
         if (rules_.score_limit != 0) {
@@ -1073,7 +1078,13 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         }
         if (remaining_ticks_ != 0)
             return std::nullopt;
-        return unique_best_team(team_hold_ticks_);
+        const int32_t winner = unique_best_team(team_hold_ticks_);
+        // Retail's final team-4 comparison jumps to LABEL_95, which is the
+        // team-1 round-end label. This defect is confined to the timeout/
+        // clinch resolution; reaching the hill limit above still awards team
+        // 4 normally. [orig: Server_CheckWinConditions
+        // @0x51B01A..0x51B040]
+        return winner == 4 ? 1 : winner;
     }
 
     if (rules_.game_type == gt::kCaptureTheFlag) {
