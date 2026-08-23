@@ -1,9 +1,13 @@
 #include "world/spawn_select.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <limits>
 #include <vector>
 
+#include "world/angle.h"
+#include "world/collision.h"
 #include "world/entity.h" // Entity, EntityKind
 #include "world/world.h"  // World, EntityRegistry registry
 #include "world/zone_chain.h"
@@ -18,6 +22,8 @@ SpawnPointResult select_player_spawn(const World &world, const int32_t *types, s
         int32_t type;
         Vec3 pos;
         int16_t yaw;
+        int16_t pitch;
+        int16_t roll;
     };
     std::vector<Marker> markers;
     std::vector<Vec3> avoid;
@@ -30,7 +36,7 @@ SpawnPointResult select_player_spawn(const World &world, const int32_t *types, s
     // push-apart). [orig: Entity_FindBestSpawnPoint @0x50ccc0]
     world.registry.for_each([&](const Entity &e) {
         if (e.kind == EntityKind::Marker) {
-            markers.push_back({e.item_id, e.position, e.yaw});
+            markers.push_back({e.item_id, e.position, e.yaw, e.pitch, e.roll});
         } else if (e.kind == EntityKind::Organic && e.alive) {
             avoid.push_back(e.position);
         }
@@ -65,6 +71,8 @@ SpawnPointResult select_player_spawn(const World &world, const int32_t *types, s
             r.found = true;
             r.position = best->pos;
             r.yaw = best->yaw;
+            r.pitch = best->pitch;
+            r.roll = best->roll;
             return r;
         }
     }
@@ -329,15 +337,69 @@ const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chai
     return nullptr;
 }
 
-SpawnPointResult spawn_pose_for_target(const Entity &target) {
-    // [orig: Server_PositionPlayerForSpawn @0x50cf60 pick path — pose copy @0x50cfbe,
-    //  z += 1.0 when the model has no spawn userpoint @0x50d01c. The userpoint offset
-    //  and the 6007 in-zone scatter are tracked §5.61 deferrals.]
+SpawnPointResult spawn_pose_for_target(World &world, const Entity &target) {
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 pick path — pose copy
+    // @0x50CFBE, no-userpoint z lift @0x50D01C, 6007 scan/choice
+    // @0x50D04D..0x50D18D.]
     SpawnPointResult r;
     r.found = true;
     r.position = target.position;
     r.position.z += 1.0f;
     r.yaw = target.yaw;
+    r.pitch = target.pitch;
+    r.roll = target.roll;
+
+    if (target.zone_number == 0)
+        return r;
+
+    std::array<const Entity *, 32> nearby{};
+    size_t count = 0;
+    world.registry.for_each([&](const Entity &candidate) {
+        if (count == nearby.size() || candidate.handle.pool() != 3 ||
+            !candidate.has_item_def || candidate.item_id != 6007)
+            return;
+        const double dx = static_cast<double>(candidate.position.x) - target.position.x;
+        const double dy = static_cast<double>(candidate.position.y) - target.position.y;
+        const double radius = static_cast<double>(target.zone_radius);
+        if (dx * dx + dy * dy <= radius * radius)
+            nearby[count++] = &candidate;
+    });
+    if (count == 0)
+        return r;
+
+    const size_t choice = world.spawn_cycle_counter % (count + 1);
+    ++world.spawn_cycle_counter;
+    if (choice == 0)
+        return r;
+
+    const Entity &marker = *nearby[choice - 1];
+    r.position = marker.position;
+    r.yaw = marker.yaw;
+    r.pitch = marker.pitch;
+    r.roll = marker.roll;
+    const Entity *parent = world.registry.get(marker.ground_target);
+    if (parent == nullptr)
+        return r;
+
+    const int32_t parent_position[3] = {
+        to_fixed(parent->position.x), to_fixed(parent->position.y),
+        to_fixed(parent->position.z)};
+    const CollisionMatrix parent_pose = collision_matrix_from_euler(
+        bam_heading_from_mission_yaw_deg(static_cast<double>(parent->yaw)),
+        bam_from_degrees_wrapped(static_cast<double>(parent->pitch)),
+        bam_from_degrees_wrapped(static_cast<double>(parent->roll)),
+        parent_position);
+    const int32_t local[3] = {
+        to_fixed(marker.position.x), to_fixed(marker.position.y),
+        to_fixed(marker.position.z)};
+    int32_t transformed[3] = {};
+    parent_pose.transform_point(local, transformed);
+    constexpr float kFromFixed = 1.0f / 65536.0f;
+    r.position = {transformed[0] * kFromFixed,
+                  transformed[1] * kFromFixed,
+                  transformed[2] * kFromFixed};
+    r.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
+        static_cast<double>(parent->yaw) + marker.yaw - 90.0)));
     return r;
 }
 

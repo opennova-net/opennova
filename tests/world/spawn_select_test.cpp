@@ -17,13 +17,14 @@ static int failures = 0;
 
 namespace {
 
-void spawn_marker(World &w, int32_t item_id, Vec3 pos, int16_t yaw = 0) {
+EntityHandle spawn_marker(World &w, int32_t item_id, Vec3 pos, int16_t yaw = 0) {
     Entity e;
     e.kind = EntityKind::Marker; // markers promote into pool 3
     e.item_id = item_id;
+    e.has_item_def = true;
     e.position = pos;
     e.yaw = yaw;
-    w.registry.spawn(3, e);
+    return w.registry.spawn(3, e);
 }
 
 void spawn_npc(World &w, Vec3 pos) {
@@ -132,6 +133,93 @@ int main() {
         CHECK(approx(r.position.x, 11.0f));
         CHECK(approx(r.position.y, 22.0f));
         CHECK(r.yaw == 45);
+    }
+
+    // --- A numbered deploy target cycles over the target itself plus the first
+    //     32 in-radius pool-3 type-6007 markers. Counter 0 retains the target's
+    //     userpoint fallback (+1 z); marker choices replace the complete pose
+    //     and do not inherit that lift.
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60, scatter arm
+    //  @0x50D04D..0x50D18D]
+    {
+        World w;
+        w.registry.configure_pool(2, 4);
+        w.registry.configure_pool(3, 8);
+        const EntityHandle zone = spawn_zone(w, 2, 1, 1);
+        Entity *target = w.registry.get(zone);
+        target->position = {10.0f, 20.0f, 3.0f};
+        target->yaw = 30;
+        target->zone_radius = 5;
+        spawn_marker(w, 6007, {12.0f, 20.0f, 7.0f}, 60);
+        spawn_marker(w, 6007, {100.0f, 20.0f, 9.0f}, 90); // outside
+
+        SpawnPointResult pose = spawn_pose_for_target(w, *target);
+        CHECK(pose.found && approx(pose.position.x, 10.0f));
+        CHECK(approx(pose.position.z, 4.0f));
+        CHECK(pose.yaw == 30);
+        CHECK(w.spawn_cycle_counter == 1);
+
+        pose = spawn_pose_for_target(w, *target);
+        CHECK(approx(pose.position.x, 12.0f));
+        CHECK(approx(pose.position.z, 7.0f));
+        CHECK(pose.yaw == 60);
+        CHECK(w.spawn_cycle_counter == 2);
+
+        pose = spawn_pose_for_target(w, *target);
+        CHECK(approx(pose.position.x, 10.0f));
+        CHECK(approx(pose.position.z, 4.0f));
+        CHECK(w.spawn_cycle_counter == 3);
+    }
+
+    // --- A parented 6007 keeps local coordinates until selected, then takes
+    //     Entity_TransformLocalToWorld's full parent pose. The transform adds
+    //     headings while leaving the marker pitch/roll local.
+    // [orig: Server_PositionPlayerForSpawn @0x50D155;
+    // Entity_TransformLocalToWorld @0x43BD00]
+    {
+        World w;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(2, 4);
+        w.registry.configure_pool(3, 4);
+        const EntityHandle zone = spawn_zone(w, 2, 1, 2);
+        Entity *target = w.registry.get(zone);
+        target->position = {0.0f, 0.0f, 0.0f};
+        target->zone_radius = 5;
+
+        Entity parent;
+        parent.kind = EntityKind::Item;
+        parent.position = {100.0f, 50.0f, 10.0f};
+        parent.yaw = 0; // heading 90 degrees: local +X becomes world +Y
+        const EntityHandle parent_handle = w.registry.spawn(1, parent);
+        const EntityHandle marker = spawn_marker(w, 6007, {1.0f, 0.0f, 2.0f}, 90);
+        w.registry.get(marker)->pitch = 4;
+        w.registry.get(marker)->roll = 5;
+        w.registry.get(marker)->ground_target = parent_handle;
+
+        (void)spawn_pose_for_target(w, *target); // cycle 0 = target
+        const SpawnPointResult pose = spawn_pose_for_target(w, *target);
+        CHECK(approx(pose.position.x, 100.0f));
+        CHECK(approx(pose.position.y, 51.0f));
+        CHECK(approx(pose.position.z, 12.0f));
+        CHECK(pose.yaw == 0);
+        CHECK(pose.pitch == 4);
+        CHECK(pose.roll == 5);
+    }
+
+    // With no in-radius 6007 candidate the retail counter is untouched.
+    {
+        World w;
+        w.registry.configure_pool(2, 4);
+        w.registry.configure_pool(3, 4);
+        const EntityHandle zone = spawn_zone(w, 2, 1, 3);
+        Entity *target = w.registry.get(zone);
+        target->position = {0.0f, 0.0f, 0.0f};
+        target->zone_radius = 2;
+        spawn_marker(w, 6007, {10.0f, 0.0f, 0.0f});
+        w.spawn_cycle_counter = 17;
+        const SpawnPointResult pose = spawn_pose_for_target(w, *target);
+        CHECK(approx(pose.position.z, 1.0f));
+        CHECK(w.spawn_cycle_counter == 17);
     }
 
 	// --- SpawnWaveList_BuildFromMission: retail defaults put NUMBERED zones on

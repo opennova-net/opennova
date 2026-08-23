@@ -8034,10 +8034,14 @@ the per-team join placement (`Server_BuildPlayerInfoAndAdd` assigns the team BEF
 §5.2c marker scan — previously both AS teams spawned at the first family type present, i.e.
 team 1's base). Pinned by `zone_chain_test` (the ASH_I5A shape: masks/frontier/latch,
 capture progression, auto-pick, pick resolve, per-team markers — golden mask 0x8
-reproduced). Remaining placement residuals (all §5.61-cited in code): vehicle-seat deploys
-(seat model unported), deploy-time 0x1D, and the 6007 in-zone scatter + userpoint offset.
-Spawn waves, requester-specific 0x6E, and deploy-time 0x61 are ported with the retail 0/10
-base/numbered defaults.
+reproduced). The numbered-zone placement now also ports the first-32/radius-gated type-6007
+scatter, the shared `g_spawn_cycle_counter % (count+1)` sequence, every selected pose field,
+and the original full-Euler parent transform (`Server_PositionPlayerForSpawn @ 0x50CF60`;
+`Entity_TransformLocalToWorld @ 0x43BD00`), pinned by `spawn_select_test`. Remaining placement
+residuals (all §5.61-cited in code): vehicle-seat deploys (seat model unported), deploy-time
+0x1D, and the model-userpoint offset whose runtime name has not been recovered. Spawn waves,
+requester-specific 0x6E, and deploy-time 0x61 are ported with the retail 0/10 base/numbered
+defaults.
 
 **Reimpl (slice 2 — the capture loop, completed 2026-08-22, D-NET-162).** Ported as two
 deep operations: `world::zone_capture_contact_tick` records moving pool-0 touches and

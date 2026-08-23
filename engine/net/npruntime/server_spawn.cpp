@@ -155,6 +155,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
+		spawn.pitch = sel.pitch;
+		spawn.roll = sel.roll;
 	} else {
 		// No start marker authored: spawn at the mission origin (terrain clamp grounds it). Never an
 		// NPC position. [orig: Entity_FindBestSpawnPoint @0x50ccc0 returns no marker -> caller fallback]

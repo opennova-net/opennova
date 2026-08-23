@@ -182,6 +182,8 @@ int Simulation::spawn_local_player_at_start() {
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
+		spawn.pitch = sel.pitch;
+		spawn.roll = sel.roll;
 	} else {
 		// No player-start marker authored: spawn at the mission origin (the terrain clamp grounds
 		// it). NEVER fall back to an NPC's position — that is the bug this replaces.
