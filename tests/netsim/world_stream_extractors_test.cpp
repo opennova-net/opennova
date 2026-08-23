@@ -78,10 +78,11 @@ w::World make_four_pool_world(bool pool1_ai_capable = false) {
 
 	w::Entity marker;
 	marker.kind = w::EntityKind::Marker;
-	marker.item_id = 0x1773;      // a start marker
+	marker.item_id = 6006;        // authored KOTH hill marker
 	marker.position = {1.0f, 2.0f, 3.0f};
 	marker.yaw = 270;
 	marker.team = 1;
+	marker.bound_radius = 25.5f;
 	world.registry.spawn(3, marker);
 	return world;
 }
@@ -267,9 +268,11 @@ bool run_pool3_marker() {
 	if (!expect(nw::decode_pool3_sync_batch(wire.data(), wire.size(), out), "0x20 round-trip")) return false;
 	if (!expect(out.records.size() == 1, "one decoded marker")) return false;
 	const nw::Pool3SyncRecord &r = out.records[0];
-	if (!expect(r.item_type_id == 0x1773, "marker type id")) return false;
+	if (!expect(r.item_type_id == 6006, "marker type id")) return false;
 	if (!expect(r.net_handle == w::EntityHandle::make(3, 0).packed, "net_handle = pool-3 handle")) return false;
 	if (!expect(r.movement_val == static_cast<uint32_t>(heading_bam(270)), "movement_val = heading BAM (D-NET-59)")) return false;
+	if (!expect(r.orientation_val == static_cast<uint32_t>(w::to_fixed(25.5f)),
+	            "orientation_val = entity+0 authored marker radius")) return false;
 	if (!expect(r.team_byte == 1, "team carried")) return false;
 	std::printf("PASS pool3_marker\n");
 	return true;

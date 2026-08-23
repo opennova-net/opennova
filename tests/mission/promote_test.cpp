@@ -1,6 +1,7 @@
 // Mission -> world promotion: a synthetic BMS mission is promoted into a live world +
 // AI system, then the AI is ticked to prove the brains/nav are wired to the real mission
 // data (entities patrol their authored routes). See engine/runtime/mission/promote.cpp.
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -522,6 +523,38 @@ int main() {
         CHECK(wz.registry.area(0) != nullptr);  // the zone populated the table (was empty before)
         CHECK(wz.commands.ssn_in_area(1, 0));    // organic at origin is inside zone 0
         CHECK(!wz.commands.ssn_in_area(2, 0));   // organic at x=100 is outside
+    }
+
+    // ---- marker entity+0 radius overrides survive mission promotion ----
+    // The 6006 hill proximity pass reads the marker entity's Q16 dword at +0,
+    // not the +350 u16 used by numbered capture entities. Waypoint (6005) and
+    // location (2044) markers share the same authored/default radius writer.
+    // [orig: Entity_SpawnFromBMSRecord @0x40F05A..0x40F173 and
+    // @0x40F213..0x40F227; Server_UpdateCaptureZoneProximity
+    // @0x5089E8..0x508A68]
+    {
+        bms::File radii{};
+        radii.markers.push_back(marker(0, 0, 0));
+        radii.markers.back().type_id = 6006;
+        radii.markers.back().wp_distance = 25;
+        radii.markers.push_back(marker(100 << 16, 0, 0));
+        radii.markers.back().type_id = 6005;
+        radii.markers.push_back(marker(200 << 16, 0, 0));
+        radii.markers.back().type_id = 2044;
+
+        World radius_world;
+        AiSystem radius_ai;
+        mission::promote_mission(radii, radius_world, radius_ai);
+        std::array<float, 3> promoted_radii{};
+        radius_world.registry.for_each([&](const Entity &entity) {
+            if (entity.handle.pool() != 3) return;
+            if (entity.item_id == 6006) promoted_radii[0] = entity.bound_radius;
+            if (entity.item_id == 6005) promoted_radii[1] = entity.bound_radius;
+            if (entity.item_id == 2044) promoted_radii[2] = entity.bound_radius;
+        });
+        CHECK(promoted_radii[0] == 25.0f);
+        CHECK(promoted_radii[1] == 0.5f);
+        CHECK(promoted_radii[2] == 0.5f);
     }
 
     // ---- the player waypoint track: the BLUE-flagged route + the marker fields ----

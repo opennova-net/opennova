@@ -564,7 +564,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(vehicles));
 
 	nw::Pool3SyncRecord marker;
-	marker.item_type_id = 6002;
+	marker.item_type_id = 6006;
 	// The 0x20 handler selects slot start_index+i. Its net_handle field is a
 	// separate value stored on that exact row (retail @0x425C00/+124).
 	marker.net_handle = 0x0777;
@@ -573,6 +573,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 	marker.pos_z = 0;
 	marker.movement_val = static_cast<uint32_t>(
 			w::bam_heading_from_mission_yaw_deg(91.0));
+	marker.orientation_val = 25u << 16;
 	marker.team_byte = 1;
 	nw::Pool3SyncBatch markers;
 	markers.start_index = 11;
@@ -693,9 +694,10 @@ bool decoded_world_stream_materializes_exact_rows() {
 
 	const w::Entity *start = world.registry.get(w::EntityHandle{0x300B});
 	if (!expect(start != nullptr && start->kind == w::EntityKind::Marker &&
-			start->item_id == 6002 && start->team == 1 &&
-			start->net_id == 0x0777,
-			"pool-3 materialization separates start-index handle from net id"))
+			start->item_id == 6006 && start->team == 1 &&
+			start->net_id == 0x0777 &&
+			std::fabs(start->bound_radius - 25.0f) < 0.0001f,
+			"pool-3 materialization preserves handle, net id, and entity+0 radius"))
 		return false;
 
 	const uint64_t repeated_spawn_id = boat->registry_spawn_id;

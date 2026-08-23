@@ -4022,6 +4022,16 @@ Therefore residual (b) no longer applies to these retail game-mode producers.
 The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
 ordinary combat event producer not enumerated here.
 
+KOTH/TKOTH now retains the authored mission producer as well as the decision
+branch. BMS type 6006 copies `wp_distance << 16` (or default `0x8000`) into
+entity+0; the 1 Hz proximity pass compares players against that exact hill
+radius. The pool-3 S2C 0x20 load writer and client handler carry the same raw
+dword under flag 0x02, so a joining replica reconstructs the authored volume
+without a mode-only side channel. `[orig: Entity_SpawnFromBMSRecord
+@0x40F157..0x40F173; Server_UpdateCaptureZoneProximity
+@0x5089E8..0x508A68; serialize_entity_pool_to_packet
+@0x503593..0x5035A9; NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
+
 S&D/A&D demolition is connected to ordinary combat rather than a script-only
 score hook. A lethal kinetic or blast hit on an ItemDef-attrib `0x8000` target
 stages the shared `RoundDeath`; host death routing records scorer event 11

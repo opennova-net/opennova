@@ -192,6 +192,14 @@ intentionally materialize an all-zero row. At the 1 Hz authority pass Match
 services hill occupancy and dropped-flag returns. Per tick it services flag
 contacts drained from `CollisionWorld`'s exact successful MoveCB/non-Powerup
 movement-collision stream; it does not perform a second radius/overlap query.
+Mission promotion stamps a type-6006 hill's authored waypoint distance into
+the same entity+0 Q16 radius that the authority reads, and the shared pool-3
+load stream carries that raw field so joining clients materialize the same
+marker. This remains one entity-data path rather than a KOTH-specific network
+adapter. `[orig: Entity_SpawnFromBMSRecord @0x40F157..0x40F173;
+Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
+serialize_entity_pool_to_packet @0x503593..0x5035A9;
+NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
 Its winner check implements the universal all-zones-owned rule and
 every retail competitive branch: DM/TDM, KOTH/TKOTH, S&D/A&D, CTF, FlagBall,
 Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same

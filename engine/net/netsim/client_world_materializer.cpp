@@ -68,6 +68,8 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.sub_type = row.spawn_sub_type;
 	seed.zone_number = static_cast<uint8_t>(row.zone_number_rank & 0x1Fu);
 	seed.zone_radius = row.zone_radius;
+	seed.bound_radius = static_cast<float>(row.spawn_bound_radius_q16) /
+			65536.0f;
 	seed.spawn_origin = world::kSpawnOriginNone;
 	return seed;
 }
