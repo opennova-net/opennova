@@ -72,6 +72,11 @@ bool overlaps_objective(const Entity &player, const Entity &objective) {
     return dx * dx + dy * dy + dz * dz <= radius * radius;
 }
 
+int32_t wrap_add(int32_t value, int32_t delta) {
+    return static_cast<int32_t>(static_cast<uint32_t>(value) +
+                                static_cast<uint32_t>(delta));
+}
+
 int32_t unique_best_team(const std::array<int32_t, 5> &scores) {
     int32_t best = std::numeric_limits<int32_t>::min();
     int32_t winner = 0;
@@ -435,18 +440,22 @@ int32_t Match::score_value(size_t status_index) const {
                : 0;
 }
 
-void Match::add_event(MatchPlayer &player, size_t counter, int32_t points) {
+void Match::add_event(MatchPlayer &player, size_t counter, int32_t points,
+                      int32_t raw_delta) {
     if (!gt::has_score_table(rules_.game_type))
         return;
-    ++player.stats[counter];
-    player.stats[MatchStats::kPoints] += points;
+    player.stats[counter] = wrap_add(player.stats[counter], raw_delta);
+    player.stats[MatchStats::kPoints] =
+        wrap_add(player.stats[MatchStats::kPoints], points);
 }
 
-void Match::add_team_event(uint8_t team, size_t counter, int32_t points) {
+void Match::add_team_event(uint8_t team, size_t counter, int32_t points,
+                           int32_t raw_delta) {
     if (!gt::has_score_table(rules_.game_type) || team >= teams_.size())
         return;
-    ++teams_[team][counter];
-    teams_[team][MatchStats::kPoints] += points;
+    teams_[team][counter] = wrap_add(teams_[team][counter], raw_delta);
+    teams_[team][MatchStats::kPoints] =
+        wrap_add(teams_[team][MatchStats::kPoints], points);
 }
 
 void Match::ensure_objective_census(const World &world) {
@@ -791,6 +800,25 @@ void Match::update_objective_proximity(const World &world) {
             continue;
         const bool live = is_live_player(player_entity);
 
+        // This counter is independent of capture contact. Retail increments
+        // it for every live, non-respawn-pending player and dispatches event
+        // 25 on exact multiples of status value 36 (values < 1 use 0xffff).
+        // Event 25 updates only the player: raw stat 40 receives the original
+        // status-36 value and points receive status value 35.
+        // [orig: Server_UpdateCaptureZoneProximity @0x5087C9..0x5087F1;
+        // GameEvent_ProcessScoring case 25 @0x530968..0x530990]
+        if (live) {
+            match_player.periodic_score_ticks =
+                wrap_add(match_player.periodic_score_ticks, 1);
+            int32_t scoring_interval = score_value(36);
+            if (scoring_interval < 1)
+                scoring_interval = 0xffff;
+            if (match_player.periodic_score_ticks % scoring_interval == 0) {
+                add_event(match_player, MatchStats::kPeriodicScoreUnits,
+                          score_value(35), score_value(36));
+            }
+        }
+
         // Pool-1 flag/objective types use a fixed 20-unit horizontal radius.
         // A carried objective is tested at its owner's live position.
         // [orig: Server_UpdateCaptureZoneProximity @0x50870D..0x50880A]
@@ -855,8 +883,48 @@ void Match::update_objective_proximity(const World &world) {
         if (match_player.objective_ticks < std::numeric_limits<int32_t>::max())
             ++match_player.objective_ticks;
         const int32_t capture_threshold = std::max<int32_t>(1, score_value(12));
-        if (++match_player.capture_score_ticks >= capture_threshold)
+        if (++match_player.capture_score_ticks >= capture_threshold) {
             match_player.capture_score_ticks = 0;
+            const int32_t raw_delta = score_value(12);
+            if (rules_.game_type == gt::kKingOfTheHill ||
+                rules_.game_type == gt::kTeamKingOfTheHill) {
+                // Events 18: hill time/status 12, points/status 33.
+                // [orig: call @0x508CE2..0x508CEA; scorer
+                // @0x5307B8..0x530821]
+                add_event(match_player, MatchStats::kHillTime,
+                          score_value(33), raw_delta);
+                if (team_mode)
+                    add_team_event(player_entity->team, MatchStats::kHillTime,
+                                   score_value(33), raw_delta);
+            } else {
+                const bool friendly_zone = player_entity->team < 8u &&
+                    (match_player.objective_proximity_mask &
+                     static_cast<uint8_t>(1u << player_entity->team)) != 0;
+                if (friendly_zone) {
+                    // Event 20 writes friendly time to the player, but retail
+                    // writes hostile time to the team row. The mismatch is in
+                    // the original scorer and is intentionally retained.
+                    // [orig: call @0x508CBE..0x508CEA; player/team split
+                    // @0x530890..0x5308F9]
+                    add_event(match_player, MatchStats::kFriendlyZoneTime,
+                              score_value(32), raw_delta);
+                    if (team_mode)
+                        add_team_event(player_entity->team,
+                                       MatchStats::kHostileZoneTime,
+                                       score_value(32), raw_delta);
+                } else {
+                    // Event 19: hostile-zone time/status 12 and
+                    // points/status 31. [orig: call @0x508C95..0x508CB1;
+                    // scorer @0x530824..0x53088D]
+                    add_event(match_player, MatchStats::kHostileZoneTime,
+                              score_value(31), raw_delta);
+                    if (team_mode)
+                        add_team_event(player_entity->team,
+                                       MatchStats::kHostileZoneTime,
+                                       score_value(31), raw_delta);
+                }
+            }
+        }
         if (++match_player.capture_period_ticks >= 10)
             match_player.capture_period_ticks = 0;
     }

@@ -11726,7 +11726,8 @@ allowlists, so losing any of them is now a hard test failure. The lone allowed s
 the separately tracked D-NET-133 repair-path residual.
 
 **D-NET-162** [reimpl gap, PORTED 2026-07-04; full contact/timed-capture transaction,
-formula, scoring, registry-index, and takeover-option parity completed 2026-08-22; 00TRg
+formula, scoring, registry-index, and takeover-option parity completed 2026-08-22;
+proximity score-event parity completed 2026-08-23; 00TRg
 overlay cadence validated 2026-08-02] **The AS capture loop now runs on our host.**
 `world::zone_capture_contact_tick` is the per-logic-tick producer: moving live pool-0
 players touching a capture trigger queue one zone/team request and mark unique presence in
@@ -11773,11 +11774,22 @@ CRenderState_GetFieldByIndex @0x52D7D0;
 NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]`
 
 The authoritative `world::Match` fold now carries that same per-player proximity byte,
-the three presence counters, numbered-over-6006 source precedence, no-source hold, TKOTH
-team hold, and all six player/team score events. `match_test` pins each branch. The two
-generic `GameEvent_ProcessScoring` calls driven by score-table indices 0x0C/0x24 remain a
-separate scoring-producer residual; their decompiled two-argument call sites do not expose
-the hidden event selector and are not guessed.
+the three capture-presence counters, the independent live-player score counter,
+numbered-over-6006 source precedence, no-source hold, TKOTH team hold, all six kill-bonus
+events, and the complete interval/threshold scorer transaction. The apparent two-argument
+scorer calls were a bad prototype: call-site assembly shows all five pushes. Status value
+36 supplies the independent interval (values below one become `0xffff`); its exact
+multiple dispatches event 25, adding status 36 to player raw stat 40 and status 35 to
+Points, with no team leg `[orig: interval lookup @0x5086BD..0x5086D5; call
+@0x5087C9..0x5087F1; scorer @0x530968..0x530990]`. Status value 12 supplies the capture
+threshold (values below one become one). At the threshold KOTH/TKOTH dispatch event 18
+(raw stat 31/status 12, Points/status 33); other modes dispatch event 19 when the zone's
+owner bit is hostile (raw stat 32/status 12, Points/status 31) or event 20 when friendly
+(player raw stat 33/status 12, Points/status 32). Event 20's retail team leg incorrectly
+records raw stat 32 rather than 33; the port preserves it `[orig: threshold lookup
+@0x5086DD..0x5086F6; selection/calls @0x508C67..0x508CEA; scorer cases 18/19/20
+@0x5307B8..0x5308F9]`. `match_test` pins every boundary, points delta, team projection,
+and the event-20 defect.
 
 Tracked residuals: capture contact currently approximates the authored CT collision shape
 with the trigger radius (it is per tick, no longer a 1 Hz request sample); 0x6F's exact
