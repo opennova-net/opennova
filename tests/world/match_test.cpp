@@ -368,6 +368,7 @@ void test_deathmatch_and_hill_outcomes() {
     Entity hill;
     hill.kind = EntityKind::Item;
     hill.item_id = 6006;
+    hill.has_item_def = true;
     hill.position = {0.0f, 0.0f, 0.0f};
     hill.bound_radius = 10.0f;
     hill.alive = true;
@@ -401,6 +402,126 @@ void test_deathmatch_and_hill_outcomes() {
     CHECK(tkoth_limit.has_value() && *tkoth_limit == 1);
     CHECK(world->match.primary_score(*world->match.player(solo)) == 60);
     CHECK(world->match.team_primary_score(*world, 1) == 60);
+}
+
+void test_retail_objective_proximity_state_and_kill_bonuses() {
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 8);
+        MatchRules tdm = rules(kTdm, 10, 99);
+        (*tdm.score_values)[21] = 7;  // victim near neutral objective
+        (*tdm.score_values)[22] = 11; // attacker near neutral objective
+        world->match.configure(tdm);
+        const EntityHandle blue = player(*world, 0, 1, "Blue");
+        const EntityHandle red = player(*world, 1, 2, "Red");
+        world->registry.get(blue)->position = {0.0f, 0.0f, 0.0f};
+        world->registry.get(red)->position = {5.0f, 0.0f, 0.0f};
+        objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+
+        // The one-second proximity service runs for every game type, not only
+        // KOTH. A neutral objective within 20 units sets bit 0 on both slots;
+        // the subsequent enemy kill awards scorer events 21 and 22.
+        // [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+        // GameEvent_ProcessScoring @0x52F550]
+        world->match.advance_tick(*world);
+        world->match.record_death(*world, red, blue);
+        const MatchPlayer *scorer = world->match.player(blue);
+        CHECK(scorer->stats[MatchStats::kVictimNearNeutralObjectiveKills] == 1);
+        CHECK(scorer->stats[MatchStats::kAttackerNearNeutralObjectiveKills] == 1);
+        CHECK(scorer->stats[MatchStats::kPoints] == 28);
+        CHECK(world->match.team_stats(1)[MatchStats::kVictimNearNeutralObjectiveKills] == 1);
+        CHECK(world->match.team_stats(1)[MatchStats::kAttackerNearNeutralObjectiveKills] == 1);
+    }
+
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 8);
+        MatchRules tdm = rules(kTdm, 10, 99);
+        (*tdm.score_values)[23] = 3;
+        (*tdm.score_values)[24] = 4;
+        (*tdm.score_values)[25] = 5;
+        (*tdm.score_values)[26] = 6;
+        world->match.configure(tdm);
+        const EntityHandle blue = player(*world, 0, 1, "Blue");
+        const EntityHandle red = player(*world, 1, 2, "Red");
+        world->registry.get(blue)->position = {0.0f, 0.0f, 0.0f};
+        world->registry.get(red)->position = {0.0f, 0.0f, 0.0f};
+        objective(*world, 4091, 1, {0.0f, 0.0f, 0.0f});
+        objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
+
+        // Team-objective bits are literal 1<<team masks. With both players by
+        // both flags, all four attacker/victim x own/enemy scorer cases fire.
+        // [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+        // GameEvent_ProcessScoring @0x52F550]
+        world->match.advance_tick(*world);
+        world->match.record_death(*world, red, blue);
+        const MatchPlayer *scorer = world->match.player(blue);
+        CHECK(scorer->stats[MatchStats::kVictimNearAttackerObjectiveKills] == 1);
+        CHECK(scorer->stats[MatchStats::kAttackerNearOwnObjectiveKills] == 1);
+        CHECK(scorer->stats[MatchStats::kVictimNearOwnObjectiveKills] == 1);
+        CHECK(scorer->stats[MatchStats::kAttackerNearVictimObjectiveKills] == 1);
+        CHECK(scorer->stats[MatchStats::kPoints] == 28);
+    }
+
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        world->registry.configure_pool(3, 4);
+        MatchRules koth;
+        koth.game_type = gt::kKingOfTheHill;
+        world->match.configure(koth);
+        const EntityHandle solo = player(*world, 0, 1, "Solo");
+        MatchPlayer *state = world->match.player(solo);
+        state->objective_ticks = 3;
+
+        // With neither kind of capture source in the mission retail skips the
+        // capture counters entirely; absence does not mean "outside."
+        // [orig: Server_UpdateCaptureZoneProximity @0x5088F6..0x50890A]
+        world->match.advance_tick(*world);
+        CHECK(state->objective_ticks == 3);
+    }
+
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        world->registry.configure_pool(3, 4);
+        MatchRules koth;
+        koth.game_type = gt::kKingOfTheHill;
+        world->match.configure(koth);
+        const EntityHandle solo = player(*world, 0, 1, "Solo");
+        world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
+        world->match.player(solo)->objective_ticks = 3;
+
+        Entity hill;
+        hill.kind = EntityKind::Item;
+        hill.item_id = 6006;
+        hill.has_item_def = true;
+        hill.position = {0.0f, 0.0f, 0.0f};
+        hill.bound_radius = 10.0f;
+        hill.alive = true;
+        world->registry.spawn(3, hill);
+
+        Entity numbered;
+        numbered.kind = EntityKind::Item;
+        numbered.has_item_def = true;
+        numbered.item_attrib = kItemAttribSpawnPoint;
+        numbered.zone_number = 1;
+        numbered.zone_radius = 10;
+        numbered.position = {100.0f, 0.0f, 0.0f};
+        numbered.alive = true;
+        world->registry.spawn(1, numbered);
+
+        // The existence of any numbered capturable entity globally supersedes
+        // every type-6006 volume. This player is therefore outside and decays,
+        // despite standing in the hill trigger.
+        // [orig: Server_UpdateCaptureZoneProximity @0x508869..0x50890A]
+        world->match.advance_tick(*world);
+        CHECK(world->match.player(solo)->objective_ticks == 2);
+    }
 }
 
 void test_retail_zone_and_tkoth_win_quirks() {
@@ -437,6 +558,7 @@ void test_retail_zone_and_tkoth_win_quirks() {
         Entity hill;
         hill.kind = EntityKind::Item;
         hill.item_id = 6006;
+        hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
         hill.bound_radius = 10.0f;
         hill.alive = true;
@@ -812,6 +934,7 @@ int main() {
     test_live_entity_team_and_class_drive_scoring_and_board();
     test_tdm_limit_and_clock_decisions();
     test_deathmatch_and_hill_outcomes();
+    test_retail_objective_proximity_state_and_kill_bonuses();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
     test_flag_me_keeps_retails_unreachable_score_arm();

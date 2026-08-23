@@ -17,6 +17,8 @@ constexpr int32_t kTicksPerMinute = 60 * 62;
 constexpr int32_t kBlueFlag = 4091;
 constexpr int32_t kRedFlag = 4093;
 constexpr int32_t kNeutralFlag = 4095;
+constexpr int32_t kTeam4Objective = 4096;
+constexpr int32_t kTeam3Objective = 4097;
 constexpr int32_t kBlueBay = 4098;
 constexpr int32_t kRedBay = 4100;
 constexpr int32_t kTeam4Bay = 4102;
@@ -30,6 +32,36 @@ bool is_flag(int32_t item_id) {
 bool is_flag_bay(int32_t item_id) {
     return item_id == kBlueBay || item_id == kRedBay ||
            item_id == kTeam4Bay || item_id == kTeam3Bay;
+}
+
+uint8_t objective_proximity_bit(int32_t item_id) {
+    switch (item_id) {
+    case kNeutralFlag:
+        return 0x01;
+    case kBlueFlag:
+        return 0x02;
+    case kRedFlag:
+        return 0x04;
+    case kTeam3Objective:
+        return 0x08;
+    case kTeam4Objective:
+        return 0x10;
+    default:
+        return 0;
+    }
+}
+
+bool is_live_player(const Entity *entity) {
+    return entity != nullptr && entity->alive &&
+           (entity->flags & kEntityFlagDead) == 0;
+}
+
+bool within_2d(const Vec3 &a, const Vec3 &b, float radius) {
+    if (radius < 0.0f)
+        return false;
+    const double dx = static_cast<double>(a.x) - static_cast<double>(b.x);
+    const double dy = static_cast<double>(a.y) - static_cast<double>(b.y);
+    return dx * dx + dy * dy <= static_cast<double>(radius) * radius;
 }
 
 bool overlaps_objective(const Entity &player, const Entity &objective) {
@@ -681,6 +713,36 @@ void Match::record_death(World &world, EntityHandle victim_handle,
         // [orig: GameEvent_ProcessScoring @0x52FC99]
         add_event(*killer, MatchStats::kEnemyKills, score_value(3));
         add_team_event(killer_team, MatchStats::kEnemyKills, score_value(3));
+
+        // The six objective-proximity bonuses are independent tests and may
+        // all fire for one kill. Bit 0 works in solo and team modes; the four
+        // team-relative tests require the team stats rows retail materializes
+        // only when g_GameType carries 0x10000.
+        // [orig: GameEvent_ProcessScoring @0x52F550]
+        const bool team_mode = (rules_.game_type & 0x10000u) != 0;
+        const uint8_t attacker_mask = killer->objective_proximity_mask;
+        const uint8_t victim_mask = victim->objective_proximity_mask;
+        auto bonus = [&](size_t counter, size_t score_index) {
+            add_event(*killer, counter, score_value(score_index));
+            if (team_mode)
+                add_team_event(killer_team, counter, score_value(score_index));
+        };
+        if ((victim_mask & 0x01u) != 0)
+            bonus(MatchStats::kVictimNearNeutralObjectiveKills, 21);
+        if ((attacker_mask & 0x01u) != 0)
+            bonus(MatchStats::kAttackerNearNeutralObjectiveKills, 22);
+        if (team_mode && attacker_mask > 1u && killer_team < 8u &&
+            (attacker_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
+            bonus(MatchStats::kAttackerNearOwnObjectiveKills, 24);
+        if (team_mode && victim_mask > 1u && victim_team < 8u &&
+            (victim_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
+            bonus(MatchStats::kVictimNearOwnObjectiveKills, 25);
+        if (team_mode && attacker_mask > 1u && victim_team < 8u &&
+            (attacker_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
+            bonus(MatchStats::kAttackerNearVictimObjectiveKills, 26);
+        if (team_mode && victim_mask > 1u && killer_team < 8u &&
+            (victim_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
+            bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
     }
 }
 
@@ -704,45 +766,115 @@ void Match::record_zone_capture(const World &world,
     }
 }
 
-void Match::update_hill_presence(const World &world) {
-    if (rules_.game_type != gt::kKingOfTheHill &&
-        rules_.game_type != gt::kTeamKingOfTheHill)
-        return;
+void Match::update_objective_proximity(const World &world) {
+    std::vector<const Entity *> proximity_objectives;
+    std::vector<const Entity *> hills;
+    std::vector<const Entity *> capturable_entities;
+    world.registry.for_each([&](const Entity &entity) {
+        const int pool = entity.handle.pool();
+        if (pool == 1 && entity.has_item_def &&
+            objective_proximity_bit(entity.item_id) != 0)
+            proximity_objectives.push_back(&entity);
+        if (pool == 3 && entity.has_item_def && entity.item_id == kHill)
+            hills.push_back(&entity);
+        if ((pool == 1 || pool == 2) && entity.has_item_def &&
+            (entity.item_attrib & kItemAttribSpawnPoint) != 0 &&
+            entity.zone_number != 0)
+            capturable_entities.push_back(&entity);
+    });
 
-    std::array<int32_t, 5> holders{};
+    const bool team_mode = (rules_.game_type & 0x10000u) != 0;
     for (MatchPlayer &match_player : players_) {
         const Entity *player_entity = world.registry.get(match_player.identity.entity);
+        match_player.objective_proximity_mask = 0;
+        if (player_entity == nullptr)
+            continue;
+        const bool live = is_live_player(player_entity);
+
+        // Pool-1 flag/objective types use a fixed 20-unit horizontal radius.
+        // A carried objective is tested at its owner's live position.
+        // [orig: Server_UpdateCaptureZoneProximity @0x50870D..0x50880A]
+        for (const Entity *objective : proximity_objectives) {
+            const Entity *position_source = objective;
+            if (const Entity *owner = world.registry.get(objective->primary_occupant))
+                position_source = owner;
+            if (live && within_2d(player_entity->position,
+                                  position_source->position, 20.0f))
+                match_player.objective_proximity_mask |=
+                    objective_proximity_bit(objective->item_id);
+        }
+
         bool in_hill = false;
-        if (player_entity != nullptr && player_entity->alive &&
-            (player_entity->flags & kEntityFlagDead) == 0) {
-            world.registry.for_each([&](const Entity &objective) {
-                if (in_hill)
-                    return;
-                const bool hill = objective.item_id == kHill || objective.is_capture_trigger;
-                if (!hill)
-                    return;
-                if (rules_.game_type == gt::kTeamKingOfTheHill && objective.team != 0)
-                    return;
-                const float radius = objective.bound_radius > 0.0f
-                                         ? objective.bound_radius
-                                         : static_cast<float>(objective.zone_radius);
-                if (radius <= 0.0f)
-                    return;
-                const float dx = player_entity->position.x - objective.position.x;
-                const float dy = player_entity->position.y - objective.position.y;
-                in_hill = dx * dx + dy * dy <= radius * radius;
-            });
+        for (const Entity *hill : hills) {
+            if (!within_2d(player_entity->position, hill->position,
+                           hill->bound_radius))
+                continue;
+            if (live && hill->team < 8u)
+                match_player.objective_proximity_mask |=
+                    team_mode ? static_cast<uint8_t>(1u << hill->team) : 0x01u;
+            if (!team_mode || hill->team == 0)
+                in_hill = true;
         }
-        if (in_hill) {
-            if (player_entity->team < holders.size())
-                ++holders[player_entity->team];
-            if (match_player.objective_ticks < std::numeric_limits<int32_t>::max())
-                ++match_player.objective_ticks;
-        } else if (match_player.objective_ticks > 0) {
-            --match_player.objective_ticks;
+
+        bool in_capturable_entity = false;
+        for (const Entity *zone : capturable_entities) {
+            const float radius = static_cast<float>(zone->zone_radius);
+            const float dz = std::fabs(player_entity->position.z - zone->position.z);
+            if (!within_2d(player_entity->position, zone->position, radius) ||
+                dz > radius * 0.5f)
+                continue;
+            if (!zone_chain_is_capturable(world, world.zone_chain, 1, *zone) &&
+                !zone_chain_is_capturable(world, world.zone_chain, 2, *zone))
+                continue;
+            in_capturable_entity = true;
+            if (live && team_mode && zone->team < 8u)
+                match_player.objective_proximity_mask |=
+                    static_cast<uint8_t>(1u << zone->team);
         }
+
+        // A numbered capturable entity anywhere in the mission globally wins
+        // source precedence over every type-6006 volume. If neither source
+        // family exists, retail skips these counters instead of decaying them.
+        // [orig: Server_UpdateCaptureZoneProximity @0x508869..0x50890A]
+        const bool has_capture_source =
+            !capturable_entities.empty() || !hills.empty();
+        if (!has_capture_source)
+            continue;
+        const bool inside = !capturable_entities.empty()
+                                ? in_capturable_entity
+                                : in_hill;
+        if (!inside || !live) {
+            if (match_player.objective_ticks > 0)
+                --match_player.objective_ticks;
+            if (match_player.capture_score_ticks > 0)
+                --match_player.capture_score_ticks;
+            if (match_player.capture_period_ticks > 0)
+                --match_player.capture_period_ticks;
+            continue;
+        }
+        if (match_player.objective_ticks < std::numeric_limits<int32_t>::max())
+            ++match_player.objective_ticks;
+        const int32_t capture_threshold = std::max<int32_t>(1, score_value(12));
+        if (++match_player.capture_score_ticks >= capture_threshold)
+            match_player.capture_score_ticks = 0;
+        if (++match_player.capture_period_ticks >= 10)
+            match_player.capture_period_ticks = 0;
     }
-    if (rules_.game_type == gt::kTeamKingOfTheHill) {
+
+    // Game_AccumulateTeamScores consumes the freshly rebuilt bit-0 masks. It
+    // runs for every team game, although only TKOTH exposes this hold counter
+    // as a win condition. [orig: Game_CountAlivePlayersPerTeam @0x5001C0;
+    // Game_AccumulateTeamScores @0x508D70]
+    if (team_mode) {
+        std::array<int32_t, 5> holders{};
+        for (const MatchPlayer &match_player : players_) {
+            const Entity *entity = world.registry.get(match_player.identity.entity);
+            if (!is_live_player(entity) ||
+                (match_player.objective_proximity_mask & 0x01u) == 0 ||
+                entity->team >= holders.size())
+                continue;
+            ++holders[entity->team];
+        }
         for (uint8_t team = 0; team < team_hold_ticks_.size(); ++team) {
             if (holders[team] > 0) {
                 if (team_hold_ticks_[team] < std::numeric_limits<int32_t>::max())
@@ -877,7 +1009,7 @@ void Match::advance_tick(World &world) {
     const bool periodic_second = periodic_second_timer_ == 0;
     if (periodic_second) {
         periodic_second_timer_ = 62;
-        update_hill_presence(world);
+        update_objective_proximity(world);
     }
     update_flag_objectives(world, periodic_second);
     if (remaining_ticks_ > 0)
