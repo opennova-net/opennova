@@ -65,14 +65,18 @@ the code harder to change without helping a retail peer.
 ## Verification
 
 - `tests/world/match_test.cpp` pins every retail score schema, primary-score
-  selector, automatic win arm, clock/draw rule, flag transition, and immutable
-  result. These branches follow `Server_CheckWinConditions @0x51AD40`,
+  selector, automatic win arm, clock/draw rule, exact collision-fed flag
+  transition, and immutable result. `tests/world/collision_test.cpp` pins the
+  MoveCB/Powerup callback-before-force branch and authority contact stream.
+  These branches follow `Entity_MovementCollisionResolver
+  @0x4B2F90..0x4B2FF5`, `Server_CheckWinConditions @0x51AD40`,
   `GameEvent_ProcessScoring @0x52F550`, and
   `GameType_CreateDefaultSettings @0x52DD00`. It also preserves Flag Me's
   retail row-12 defect: objective wire transitions remain live, but the
   12-row scorer/status table rejects its score row.
 - `tests/npruntime/round_end_test.cpp` pins multiplayer and co-op through the
-  shared live transition, exact objective-state/event routing, `0x61`/`0x1D`
+  shared live transition, real remote-body objective collisions, exact
+  objective-state/event routing, `0x61`/`0x1D`
   delivery, requester-only `0x2B`/`0x56` board pulls, and the 2790-tick linger
   (`Server_ProcessRoundEnd @0x5164F0`).
 - `tests/npruntime/client_runtime_test.cpp` pins automatic multi-chunk

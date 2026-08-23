@@ -4035,9 +4035,13 @@ Server_CheckWinConditions @0x51AD40]`
 C&C keeps both halves of its retail objective vocabulary. Flag and bay contact
 is item-ID driven, not game-type gated, so C&C can carry/capture/reset authored
 flags while numbered-zone takeovers remain its primary score and win metric.
-The authority contact projection also preserves the resolver's ItemDef gate:
-`MoveCB` must be set and `Powerup` clear before a flag or bay can interact.
-`[orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FD0;
+The authority path now consumes the resolver's exact successful first-pass
+contact stream; the former gameplay-side sphere-overlap scan is deleted.
+`MoveCB` must be set and `Powerup` clear, and those callback targets suppress
+ordinary solid push. The sole retail callsite then repeats the source
+`MoveOrder & 8`, player-class (`Flags & 0x100`), and not-dead gates before
+dispatching flag/bay item IDs. `[orig: Entity_MovementCollisionResolver
+@0x4B2F90..0x4B2FF5; sole handler xref @0x4B2FF5;
 Entity_ProcessWaypointInteraction @0x4AD820;
 GameType_CreateDefaultSettings @0x52DD00]`
 

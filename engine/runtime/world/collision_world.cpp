@@ -253,13 +253,21 @@ void CollisionWorld::build_tick_tables(World &world) {
     // match may deliberately skip the gameplay drain, so never carry a touch
     // into a later tick.
     change_team_contacts_.clear();
+    movement_callback_contacts_.clear();
     build_tables(world, true);
 }
 
-std::vector<CollisionWorld::ChangeTeamContact>
+std::vector<CollisionWorld::GameplayContact>
 CollisionWorld::take_change_team_contacts() {
-    std::vector<ChangeTeamContact> contacts;
+    std::vector<GameplayContact> contacts;
     contacts.swap(change_team_contacts_);
+    return contacts;
+}
+
+std::vector<CollisionWorld::GameplayContact>
+CollisionWorld::take_movement_callback_contacts() {
+    std::vector<GameplayContact> contacts;
+    contacts.swap(movement_callback_contacts_);
     return contacts;
 }
 

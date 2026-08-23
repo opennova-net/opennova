@@ -926,9 +926,9 @@ public:
     // resolved ground Z): <= 0 grounded (caller lifts by the return), > 0xF000
     // airborne. [orig: movement collision resolver @ 0x4b2bd0]
     // capsule_bottom/top are the anim frame's 16.16 capsule extents (out[3]/out[4]).
-    struct ChangeTeamContact {
+    struct GameplayContact {
         EntityHandle source;
-        EntityHandle trigger;
+        EntityHandle target;
     };
 
     // Drain the exact type-10 Change Team Box touches produced by this tick's
@@ -936,7 +936,13 @@ public:
     // gameplay owns the capture request transaction.
     // [orig: contact flag 0x200 @0x4AEB7B; resolver dispatch/callback
     // @0x4B31DD..0x4B3238]
-    std::vector<ChangeTeamContact> take_change_team_contacts();
+    std::vector<GameplayContact> take_change_team_contacts();
+
+    // Drain successful first-pass MoveCB/non-Powerup contacts. Retail routes
+    // these through Entity_ProcessWaypointInteraction instead of treating the
+    // target as solid geometry; gameplay interprets the contacted item ID.
+    // [orig: resolver attrib branches/call @0x4B2F90..0x4B2FF5]
+    std::vector<GameplayContact> take_movement_callback_contacts();
 
     struct ResolveState {
         int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
@@ -1177,8 +1183,10 @@ private:
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
     void record_change_team_contact(EntityHandle source, EntityHandle trigger);
+    void record_movement_callback_contact(EntityHandle source, EntityHandle target);
 
-    std::vector<ChangeTeamContact> change_team_contacts_;
+    std::vector<GameplayContact> change_team_contacts_;
+    std::vector<GameplayContact> movement_callback_contacts_;
 
     struct Instance {
         int32_t model_id = -1;

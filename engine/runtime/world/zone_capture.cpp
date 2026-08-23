@@ -161,7 +161,7 @@ bool capture_request_available(const World &world, const Entity &zone) {
 
 void zone_capture_contact_tick(World &world) {
     if (world.collision == nullptr) return;
-    const std::vector<CollisionWorld::ChangeTeamContact> contacts =
+    const std::vector<CollisionWorld::GameplayContact> contacts =
             world.collision->take_change_team_contacts();
 
     // The collision callback is multiplayer/team-family gated in retail. This
@@ -172,9 +172,9 @@ void zone_capture_contact_tick(World &world) {
     if ((world.match.rules().game_type & 0x30000u) == 0) return;
 
     ZoneCaptureState &state = world.zone_capture_state;
-    for (const CollisionWorld::ChangeTeamContact &contact : contacts) {
+    for (const CollisionWorld::GameplayContact &contact : contacts) {
         const Entity *player = world.registry.get(contact.source);
-        const Entity *zone = world.registry.get(contact.trigger);
+        const Entity *zone = world.registry.get(contact.target);
         if (player == nullptr || zone == nullptr ||
                 !is_playing_player(*player) ||
                 !zone->is_capture_trigger || !zone->alive ||
