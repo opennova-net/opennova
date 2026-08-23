@@ -70,6 +70,7 @@ func _build() -> void:
 	# The FP viewmodel debug experiments live with the player they act on.
 	add_option_check(&"force_fp_arms")
 	add_option_check(&"body_in_first_person")
+	add_option_check(&"third_person_on_foot")
 
 	var edit_header := Label.new()
 	edit_header.text = "Teleport (mission coordinates)"
