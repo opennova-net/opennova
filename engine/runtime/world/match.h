@@ -99,8 +99,12 @@ struct MatchStats {
     static constexpr size_t kVictimNearOwnObjectiveKills = 26;
     static constexpr size_t kAttackerNearVictimObjectiveKills = 27;
     static constexpr size_t kPoints = 29;
+    static constexpr size_t kHillTime = 31;
+    static constexpr size_t kHostileZoneTime = 32;
+    static constexpr size_t kFriendlyZoneTime = 33;
     static constexpr size_t kRoundMarker = 35;
     static constexpr size_t kZoneTakeovers = 39;
+    static constexpr size_t kPeriodicScoreUnits = 40;
 
     std::array<int32_t, kFieldCount> fields{};
 
@@ -138,6 +142,10 @@ struct MatchPlayer {
     // no capture source at all. [orig: @0x50890A..0x508A05]
     int32_t capture_score_ticks = 0;
     int32_t capture_period_ticks = 0;
+    // Player-slot +103 (+0x19c): independent live-player service counter for
+    // score event 25. It advances for every periodic pass, whether or not the
+    // mission contains a capture source. [orig: @0x5087C9..0x5087F1]
+    int32_t periodic_score_ticks = 0;
 };
 
 // One outcome latch for every producer: automatic multiplayer rules and the
@@ -276,8 +284,10 @@ class Match {
     };
 
     int32_t score_value(size_t status_index) const;
-    void add_event(MatchPlayer &player, size_t counter, int32_t points);
-    void add_team_event(uint8_t team, size_t counter, int32_t points);
+    void add_event(MatchPlayer &player, size_t counter, int32_t points,
+                   int32_t raw_delta = 1);
+    void add_team_event(uint8_t team, size_t counter, int32_t points,
+                        int32_t raw_delta = 1);
     void ensure_objective_census(const World &world);
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);

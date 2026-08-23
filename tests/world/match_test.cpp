@@ -112,6 +112,16 @@ void tick_to_zero(World &world) {
         world.match.advance_tick(world);
 }
 
+void advance_initial_periodic_passes(World &world, int passes) {
+    if (passes <= 0)
+        return;
+    world.match.advance_tick(world);
+    for (int pass = 1; pass < passes; ++pass) {
+        for (int tick = 0; tick < 62; ++tick)
+            world.match.advance_tick(world);
+    }
+}
+
 void expect_fields(uint32_t game_type,
                    std::initializer_list<std::pair<uint8_t, uint8_t>> expected) {
     const std::vector<MatchScoreField> actual = default_match_score_fields(game_type);
@@ -521,6 +531,117 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
         // [orig: Server_UpdateCaptureZoneProximity @0x508869..0x50890A]
         world->match.advance_tick(*world);
         CHECK(world->match.player(solo)->objective_ticks == 2);
+    }
+}
+
+void test_retail_objective_proximity_scoring_events() {
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(3, 4);
+        MatchRules koth;
+        koth.game_type = gt::kKingOfTheHill;
+        world->match.configure(koth);
+        const EntityHandle solo = player(*world, 0, 0, "Solo");
+        world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
+
+        Entity hill;
+        hill.kind = EntityKind::Item;
+        hill.item_id = 6006;
+        hill.has_item_def = true;
+        hill.position = {0.0f, 0.0f, 0.0f};
+        hill.bound_radius = 10.0f;
+        hill.alive = true;
+        world->registry.spawn(3, hill);
+
+        // Event 18 fires only when the capture counter reaches status value
+        // 12. It records that complete interval in raw stat 31 and awards
+        // status value 33; the first four one-second passes award nothing.
+        // [orig: threshold/call @0x508C67..0x508CEA; scorer case 18
+        // @0x5307B8..0x530821]
+        advance_initial_periodic_passes(*world, 4);
+        CHECK(world->match.player(solo)->objective_ticks == 4);
+        CHECK(world->match.player(solo)->stats[MatchStats::kHillTime] == 0);
+        CHECK(world->match.player(solo)->stats[MatchStats::kPoints] == 0);
+        for (int tick = 0; tick < 62; ++tick)
+            world->match.advance_tick(*world);
+        CHECK(world->match.player(solo)->objective_ticks == 5);
+        CHECK(world->match.player(solo)->stats[MatchStats::kHillTime] == 5);
+        CHECK(world->match.player(solo)->stats[MatchStats::kPoints] == 1);
+        CHECK(world->match.team_stats(1)[MatchStats::kHillTime] == 0);
+    }
+
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules aas;
+        aas.game_type = gt::kAdvanceAndSecure;
+        aas.score_values = default_match_score_values(aas.game_type);
+        (*aas.score_values)[32] = 3;
+        world->match.configure(aas);
+        const EntityHandle blue = player(*world, 0, 1, "Blue");
+        world->registry.get(blue)->position = {0.0f, 0.0f, 0.0f};
+
+        Entity numbered;
+        numbered.kind = EntityKind::Item;
+        numbered.has_item_def = true;
+        numbered.item_attrib = kItemAttribSpawnPoint;
+        numbered.zone_number = 1;
+        numbered.zone_radius = 10;
+        numbered.team = 2;
+        numbered.position = {0.0f, 0.0f, 0.0f};
+        numbered.alive = true;
+        const EntityHandle zone_handle = world->registry.spawn(1, numbered);
+
+        // A hostile owner bit selects event 19: raw stat 32/status 12 and
+        // points/status 31. Five passes are one complete default interval.
+        // [orig: branch/call @0x508C95..0x508CB1; scorer case 19
+        // @0x530824..0x53088D]
+        advance_initial_periodic_passes(*world, 5);
+        CHECK(world->match.player(blue)->stats[MatchStats::kHostileZoneTime] == 5);
+        CHECK(world->match.player(blue)->stats[MatchStats::kFriendlyZoneTime] == 0);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 1);
+        CHECK(world->match.team_stats(1)[MatchStats::kHostileZoneTime] == 5);
+
+        // A friendly owner bit selects event 20. Retail records stat 33 on
+        // the player but stat 32 on the team; preserve that observable quirk.
+        // [orig: branch/call @0x508CBE..0x508CEA; scorer case 20 player/team
+        // split @0x530890..0x5308F9]
+        world->registry.get(zone_handle)->team = 1;
+        for (int tick = 0; tick < 5 * 62; ++tick)
+            world->match.advance_tick(*world);
+        CHECK(world->match.player(blue)->stats[MatchStats::kHostileZoneTime] == 5);
+        CHECK(world->match.player(blue)->stats[MatchStats::kFriendlyZoneTime] == 5);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 4);
+        CHECK(world->match.team_stats(1)[MatchStats::kHostileZoneTime] == 10);
+        CHECK(world->match.team_stats(1)[MatchStats::kFriendlyZoneTime] == 0);
+        CHECK(world->match.team_stats(1)[MatchStats::kPoints] == 4);
+    }
+
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        MatchRules tdm = rules(kTdm, 1, 99);
+        (*tdm.score_values)[35] = 7;
+        (*tdm.score_values)[36] = 3;
+        world->match.configure(tdm);
+        const EntityHandle blue = player(*world, 0, 1, "Blue");
+
+        // The independent live-player counter calls event 25 at each status
+        // value 36 interval. It records that interval in raw stat 40, awards
+        // status value 35, and deliberately has no team-stat leg.
+        // [orig: interval/call @0x5087C9..0x5087F1; scorer case 25
+        // @0x530968..0x530990]
+        advance_initial_periodic_passes(*world, 2);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPeriodicScoreUnits] == 0);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 0);
+        for (int tick = 0; tick < 62; ++tick)
+            world->match.advance_tick(*world);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPeriodicScoreUnits] == 3);
+        CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 7);
+        CHECK(world->match.team_stats(1)[MatchStats::kPeriodicScoreUnits] == 0);
+        CHECK(world->match.team_stats(1)[MatchStats::kPoints] == 0);
     }
 }
 
@@ -935,6 +1056,7 @@ int main() {
     test_tdm_limit_and_clock_decisions();
     test_deathmatch_and_hill_outcomes();
     test_retail_objective_proximity_state_and_kill_bonuses();
+    test_retail_objective_proximity_scoring_events();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
     test_flag_me_keeps_retails_unreachable_score_arm();
