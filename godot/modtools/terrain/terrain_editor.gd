@@ -1369,6 +1369,33 @@ func apply_bulk_edit(kind: int, mutator: Callable) -> bool:
 	return true
 
 
+## Invalidate after a PROGRAMMATIC brush run, given apply_brush_stroke's changed_* flags.
+##
+## The interactive drag (_brush_ops._apply_brush_stroke) deliberately does a lighter subset per
+## frame -- it skips the surface-input heightfield rebuild and the foliage mark, which are too
+## expensive to redo on every motion event and get caught up when the drag ends. A one-shot call
+## has no "when the drag ends", so it does the full refresh here. The CDEP blocks are already
+## clamped: every dab clamps its own rect as it lands.
+func invalidate_after_brush_run(changed: Dictionary) -> void:
+	var height: bool = bool(changed.get("changed_heightmap", false))
+	var blend: bool = bool(changed.get("changed_blendmap", false))
+	var color: bool = bool(changed.get("changed_colormap", false))
+	if height:
+		terrain_mesh.set_heightmap(_heightmap_image)
+		_height_revision += 1
+		_brush_ops._refresh_surface_input_heightfield()
+		_mark_foliage_preview_dirty()
+		_mark_tile_overlay_dirty()
+	if blend:
+		_blendmap_tex.update(_blendmap_image)
+		_brush_ops._refresh_surface_input_blend()
+	if color:
+		_colormap_tex.update(_colormap_image)
+	if height or blend or color:
+		is_dirty = true
+		_mark_ui_state_changed()
+
+
 func _editable_image_for_kind(kind: int) -> Image:
 	match kind:
 		TerrainEditHistory.Kind.HEIGHTMAP:
