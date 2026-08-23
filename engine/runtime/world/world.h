@@ -452,6 +452,11 @@ public:
     // gives immediate picks and timed releases one lifecycle and no host-only
     // shadow table. [orig: SpawnWaveList_BuildFromMission @0x52A920]
     SpawnWaveList spawn_waves;
+    // One mission-global round-robin shared by default spawn selection and a
+    // picked numbered zone's type-6007 scatter choices.
+    // [orig: g_spawn_cycle_counter @0x24C10D0;
+    // Server_PositionPlayerForSpawn @0x50CF60]
+    uint32_t spawn_cycle_counter = 0;
 
     // The player waypoint track (built by mission promotion from the blue-route
     // nav channel; empty when the mission authors none). Advanced per logic tick
@@ -574,6 +579,7 @@ public:
         EnvNetworkState network_env;
         Match match;
         SpawnWaveList spawn_waves;
+        uint32_t spawn_cycle_counter = 0;
         uint32_t logic_tick = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
         EntityHandle local_player;

@@ -909,12 +909,14 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 			? world.registry.get(target_zone)
 			: nullptr;
 	world::SpawnPointResult pose = target != nullptr
-			? world::spawn_pose_for_target(*target)
+			? world::spawn_pose_for_target(world, *target)
 			: world::select_player_spawn_for_team(
 					world, player->team, config.game_type);
 	if (pose.found) {
 		player->position = pose.position;
 		player->yaw = pose.yaw;
+		player->pitch = pose.pitch;
+		player->roll = pose.roll;
 	}
 	world::entity_reset_to_spawn_state(*player);
 	if (world.player_has_item_def && world.player_item_hp != 0)
@@ -1351,8 +1353,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// stops accepting spawns). An ALIVE in-session player's request is a no-op [orig: the
 				// @0x519cce dead-or-flagged gate; only !is_in_session falls through @0x519cd7]; a DEAD
 				// one deploys at the selected zone's wave boundary, or NOW when that zone has no
-				// wave row: position at the pick (zone origin, §5.61 6007-scatter/userpoint
-				// deferral) else the per-team marker chain, reset-to-spawn-state, template health —
+				// wave row: position at the pick (including §5.61's shared-counter 6007 scatter;
+				// only the runtime-named model userpoint remains open) else the per-team marker chain,
+				// reset-to-spawn-state, template health —
 				// Server_ProcessPlayerDeath's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
 				// @0x50cf60 -> Entity_ResetToSpawnState @0x4B9610]. Deploy-time 0x61 seed re-send and
 				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). A newly queued pick

@@ -173,7 +173,7 @@ void test_resolve_spawn_target() {
     CHECK(resolve_spawn_target(f.w, 1, 0xFFFF) == nullptr);
     CHECK(resolve_spawn_target(f.w, 1, static_cast<uint16_t>(0x3000)) == nullptr);
     // The deploy pose: target origin z+1, target yaw [orig: @0x50d01c].
-    const SpawnPointResult pose = spawn_pose_for_target(*t);
+    const SpawnPointResult pose = spawn_pose_for_target(f.w, *t);
     CHECK(pose.found);
     CHECK(pose.position.z > t->position.z + 0.5f && pose.position.z < t->position.z + 1.5f);
 }

@@ -41,6 +41,8 @@ struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     Vec3 position{};    // mission space (Z-up), copied from the chosen marker
     int16_t yaw = 0;    // mission yaw (degrees); spawn_player applies the (90 - yaw) heading
+    int16_t pitch = 0;
+    int16_t roll = 0;
 };
 
 // Select the player-start: scan `types` (priority order); the FIRST type with any promoted marker
@@ -178,14 +180,15 @@ inline constexpr uint32_t kGameTypeObjectiveBit = 0x20000;
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
                                        uint8_t team, uint32_t game_type);
 
-// Deploy pose at a picked spawn target: the target's position with z + 1.0 and its
-// yaw. Deferrals (net-re §5.61 follow-ups): the model-userpoint offset (name string
-// is runtime-set in the original) and the numbered-zone round-robin over in-radius
-// pool-3 type-6007 sub-spawn markers (the zone radius source entity+350 is
-// unwitnessed; ASH_I5A authors no 6007 markers, so the fallback IS the retail
-// behavior there). [orig: Server_PositionPlayerForSpawn @0x50cf60 pick path
-// @0x50cfbe (pose copy) / @0x50d01c (z += 0x10000 when no userpoint)]
-SpawnPointResult spawn_pose_for_target(const Entity &target);
+// Deploy pose at a picked spawn target. The target first supplies its complete
+// pose and the no-userpoint +1 z fallback. A numbered target then round-robins
+// over itself plus the first 32 in-radius pool-3 type-6007 markers; a selected
+// marker replaces the complete pose and is parent-transformed when entity+40 is
+// set. The model-userpoint name remains unrecovered runtime data, so this layer
+// deliberately keeps the witnessed no-userpoint fallback instead of inventing
+// an asset seam. [orig: Server_PositionPlayerForSpawn @0x50CF60;
+// Entity_TransformLocalToWorld @0x43BD00]
+SpawnPointResult spawn_pose_for_target(World &world, const Entity &target);
 
 } // namespace opennova::world
 

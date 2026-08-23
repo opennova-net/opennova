@@ -59,6 +59,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;
+    seed.pitch = spawn.pitch;
+    seed.roll = spawn.roll;
     seed.team = spawn.team;
     seed.health = hp;     // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
