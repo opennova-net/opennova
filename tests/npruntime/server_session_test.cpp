@@ -2918,10 +2918,11 @@ bool check_score_ini_drives_session_status_values() {
 }
 
 // The host carries the persistent unnumbered capture transaction all the way to
-// retail bodies: 0x53 start/progress/completion, 0x6C unique presence changes,
-// and 0x1E 41/43 start/completion events. Numbered instant flips deliberately
-// have no synthetic 0x53. [orig: CaptureCtx_* / Server_UpdateCaptureZones
-// @0x53B340..0x53B8F0; NetPacket writers @0x506D00/@0x506DE0]
+// retail bodies: 0x50 ownership changes, 0x53 start/progress/completion, 0x6C
+// unique presence changes, and 0x1E 41/43 start/completion events. Numbered
+// instant flips deliberately have no synthetic 0x53. [orig: CaptureCtx_* /
+// Server_UpdateCaptureZones @0x53B340..0x53B8F0; Server_ChangeEntityTeam
+// @0x518D70; NetPacket writers @0x506AD0/@0x506D00/@0x506DE0]
 bool check_timed_capture_host_wire_transaction() {
 	opennova::np::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
@@ -2993,21 +2994,44 @@ bool check_timed_capture_host_wire_transaction() {
 			if (record.first == tag) out.push_back(record.second);
 		return out;
 	};
+	auto record_index = [](const std::vector<Record> &records, uint8_t tag,
+	                       const std::vector<uint8_t> &body) {
+		for (size_t i = 0; i < records.size(); ++i)
+			if (records[i].first == tag && records[i].second == body) return i;
+		return records.size();
+	};
 
 	const auto started = tick_second();
+	const auto start_50 = bodies(started, opennova::s2c::TEAM_ASSIGN);
 	const auto start_53 = bodies(started, opennova::s2c::ZONE_TIMER_WINDOW);
 	const auto start_events = bodies(started, 0x1E);
+	const std::vector<uint8_t> expected_start_50 = {
+			static_cast<uint8_t>(zone_handle.packed),
+			static_cast<uint8_t>(zone_handle.packed >> 8),
+			0, 0, 0, 0};
 	const std::vector<uint8_t> expected_start = {
 			static_cast<uint8_t>(zone_handle.packed),
 			static_cast<uint8_t>(zone_handle.packed >> 8),
 			0, 1, 0, 0, 3, 0, 1};
-	if (!expect(start_53.size() == 1 && start_53[0] == expected_start &&
+	const std::vector<uint8_t> expected_start_event = {
+			41, 0, 0xFF, 0xFF, 0, 0, 0, 0};
+	if (!expect(start_50.size() == 1 && start_50[0] == expected_start_50 &&
+	                    start_53.size() == 1 && start_53[0] == expected_start &&
 	                    std::find(start_events.begin(), start_events.end(),
-	                              std::vector<uint8_t>{41, 0, 0xFF, 0xFF,
-	                                                   0, 0, 0, 0}) !=
+	                              expected_start_event) !=
 	                            start_events.end() &&
+	                    record_index(started, opennova::s2c::TEAM_ASSIGN,
+	                                 expected_start_50) <
+	                            record_index(started,
+	                                         opennova::s2c::ZONE_TIMER_WINDOW,
+	                                         expected_start) &&
+	                    record_index(started,
+	                                 opennova::s2c::ZONE_TIMER_WINDOW,
+	                                 expected_start) <
+	                            record_index(started, 0x1E,
+	                                         expected_start_event) &&
 	                    world.registry.get(zone_handle)->team == 0,
-	            "timed capture starts with exact 0x53/event-41 and neutral owner"))
+	            "timed capture starts with ordered 0x50/0x53/event-41 and neutral owner"))
 		return false;
 
 	const auto second = soldier(1);
@@ -3025,16 +3049,35 @@ bool check_timed_capture_host_wire_transaction() {
 
 	world.registry.get(second)->position = {500.0f, 500.0f, 0.0f};
 	const auto completed = tick_second();
+	const auto complete_50 = bodies(completed, opennova::s2c::TEAM_ASSIGN);
 	const auto complete_53 = bodies(completed, opennova::s2c::ZONE_TIMER_WINDOW);
 	const auto complete_6c = bodies(completed, opennova::s2c::ZONE_PRESENCE_COUNT);
 	const auto complete_events = bodies(completed, 0x1E);
+	const std::vector<uint8_t> expected_complete_50 = {
+			static_cast<uint8_t>(zone_handle.packed),
+			static_cast<uint8_t>(zone_handle.packed >> 8),
+			1, 0, 0, 0};
+	const std::vector<uint8_t> expected_complete_event = {
+			43, 0, 0xFF, 0xFF, 0, 0, 0, 0};
 	const auto *scorer = world.match.player(first);
-	return expect(complete_53.size() == 1 && complete_53[0][4] == 3 &&
+	return expect(complete_50.size() == 1 &&
+	                      complete_50[0] == expected_complete_50 &&
+	                      complete_53.size() == 1 && complete_53[0][4] == 3 &&
 	                      complete_6c.size() == 1 && complete_6c[0][2] == 1 &&
 	                      std::find(complete_events.begin(), complete_events.end(),
-	                                std::vector<uint8_t>{43, 0, 0xFF, 0xFF,
-	                                                     0, 0, 0, 0}) !=
+	                                expected_complete_event) !=
 	                              complete_events.end() &&
+	                      record_index(completed,
+	                                   opennova::s2c::ZONE_TIMER_WINDOW,
+	                                   complete_53[0]) <
+	                              record_index(completed,
+	                                           opennova::s2c::TEAM_ASSIGN,
+	                                           expected_complete_50) &&
+	                      record_index(completed,
+	                                   opennova::s2c::TEAM_ASSIGN,
+	                                   expected_complete_50) <
+	                              record_index(completed, 0x1E,
+	                                           expected_complete_event) &&
 	                      world.registry.get(zone_handle)->team == 1 &&
 	                      scorer != nullptr &&
 	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 1 &&

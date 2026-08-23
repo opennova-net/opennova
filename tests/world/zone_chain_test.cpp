@@ -231,6 +231,15 @@ void capture_second(World &w, ZoneCaptureEvents &events) {
     zone_capture_second_tick(w, events);
 }
 
+template <typename T>
+std::vector<T> events_of(const ZoneCaptureEvents &events) {
+    std::vector<T> selected;
+    for (const ZoneCaptureEvents::Event &event : events.ordered)
+        if (const T *value = std::get_if<T>(&event))
+            selected.push_back(*value);
+    return selected;
+}
+
 // The control-delta formula pins [orig: calculate_capture_zone_control_delta @0x501120].
 void test_control_delta_formula() {
     auto delta = [](int presence, int side_players, int total_players, int speed_setting,
@@ -295,15 +304,17 @@ void test_capture_loop_flip_and_secure() {
     const EntityHandle s1 = spawn_soldier(f.w, 1, z2a->position);
     ZoneCaptureEvents ev;
     capture_second(f.w, ev);
-    CHECK(ev.control.size() == 4);            // 0x6F body per registered zone, every pass
-    CHECK(ev.flips.size() == 1);              // the instant numbered flip
-    if (!ev.flips.empty()) {
-        CHECK(ev.flips[0].old_team == 0);
-        CHECK(ev.flips[0].new_team == 1);     // neutral -> capturer directly
-        CHECK(ev.flips[0].capturer_team == 1);
-        CHECK(ev.flips[0].capturer == s1);    // scoring follows the actual touching Player
-        CHECK(ev.flips[0].scorers.size() == 1 && ev.flips[0].scorers[0] == s1);
-        CHECK(!ev.flips[0].suppressed);
+    const auto controls = events_of<ZoneCaptureEvents::Control>(ev);
+    const auto flips = events_of<ZoneCaptureEvents::Flip>(ev);
+    CHECK(controls.size() == 4);            // 0x6F body per registered zone, every pass
+    CHECK(flips.size() == 1);               // the instant numbered flip
+    if (!flips.empty()) {
+        CHECK(flips[0].old_team == 0);
+        CHECK(flips[0].new_team == 1);      // neutral -> capturer directly
+        CHECK(flips[0].capturer_team == 1);
+        CHECK(flips[0].capturer == s1);     // scoring follows the actual touching Player
+        CHECK(flips[0].scorers.size() == 1 && flips[0].scorers[0] == s1);
+        CHECK(!flips[0].suppressed);
     }
     CHECK(z2a->team == 1);
     CHECK(z2a->zone_control == 0);            // the new owner must SECURE it
@@ -314,7 +325,7 @@ void test_capture_loop_flip_and_secure() {
     bool edged = false;
     while (passes < 200 && !edged) {
         capture_second(f.w, ev);
-        for (const auto &se : ev.secure_edges)
+        for (const auto &se : events_of<ZoneCaptureEvents::Secure>(ev))
             if (se.zone == f.z2a && se.secured) edged = true;
         ++passes;
     }
@@ -334,15 +345,15 @@ void test_capture_loop_flip_and_secure() {
     const EntityHandle s2 = spawn_soldier(f.w, 2, z2a->position);
     (void)s2;
     capture_second(f.w, ev);
-    CHECK(ev.flips.empty());                  // still partially secured -> no flip yet
+    CHECK(events_of<ZoneCaptureEvents::Flip>(ev).empty()); // still partially secured
     CHECK(z2a->zone_control < 0x10000);
     bool zero_edge = false;
     int flip_pass = -1;
     for (int i = 0; i < 200 && flip_pass < 0; ++i) {
         capture_second(f.w, ev);
-        for (const auto &se : ev.secure_edges)
+        for (const auto &se : events_of<ZoneCaptureEvents::Secure>(ev))
             if (se.zone == f.z2a && !se.secured) zero_edge = true;
-        if (!ev.flips.empty()) flip_pass = i;
+        if (!events_of<ZoneCaptureEvents::Flip>(ev).empty()) flip_pass = i;
     }
     CHECK(zero_edge);
     CHECK(flip_pass >= 0);
@@ -362,12 +373,13 @@ void test_neutral_capture_is_symmetric_and_actor_attributed() {
         const EntityHandle red = spawn_soldier(f.w, 2, zone->position);
         ZoneCaptureEvents ev;
         capture_second(f.w, ev);
-        CHECK(ev.flips.size() == 1);
+        const auto flips = events_of<ZoneCaptureEvents::Flip>(ev);
+        CHECK(flips.size() == 1);
         CHECK(zone->team == 2);
-        if (!ev.flips.empty()) {
-            CHECK(ev.flips[0].capturer_team == 2);
-            CHECK(ev.flips[0].capturer == red);
-            CHECK(ev.flips[0].scorers.size() == 1 && ev.flips[0].scorers[0] == red);
+        if (!flips.empty()) {
+            CHECK(flips[0].capturer_team == 2);
+            CHECK(flips[0].capturer == red);
+            CHECK(flips[0].scorers.size() == 1 && flips[0].scorers[0] == red);
         }
     }
     {
@@ -378,7 +390,7 @@ void test_neutral_capture_is_symmetric_and_actor_attributed() {
         spawn_soldier(f.w, 2, zone->position);
         ZoneCaptureEvents ev;
         capture_second(f.w, ev);
-        CHECK(ev.flips.empty());
+        CHECK(events_of<ZoneCaptureEvents::Flip>(ev).empty());
         CHECK(zone->team == 0);
         CHECK(zone->zone_control == 0);
     }
@@ -416,39 +428,46 @@ void test_unnumbered_timed_capture_and_presence() {
 
     capture_second(f.w, ev);
     CHECK(f.w.registry.get(zone)->team == 0); // old owner neutralized at start
-    CHECK(ev.timed_starts.size() == 1);
-    CHECK(ev.timer_windows.size() == 1);
-    if (!ev.timer_windows.empty()) {
-        CHECK(ev.timer_windows[0].zone == zone);
-        CHECK(ev.timer_windows[0].current_team == 0);
-        CHECK(ev.timer_windows[0].capturing_team == 1);
-        CHECK(ev.timer_windows[0].progress == 0);
-        CHECK(ev.timer_windows[0].limit == 3);
-        CHECK(ev.timer_windows[0].rate == 1);
+    const auto starts = events_of<ZoneCaptureEvents::TimedStart>(ev);
+    const auto start_windows = events_of<ZoneCaptureEvents::TimerWindow>(ev);
+    CHECK(starts.size() == 1);
+    CHECK(start_windows.size() == 1);
+    if (!start_windows.empty()) {
+        CHECK(start_windows[0].zone == zone);
+        CHECK(start_windows[0].current_team == 0);
+        CHECK(start_windows[0].capturing_team == 1);
+        CHECK(start_windows[0].progress == 0);
+        CHECK(start_windows[0].limit == 3);
+        CHECK(start_windows[0].rate == 1);
     }
 
     // A second unique live mover raises the active rate to two and emits 0x6C.
     const EntityHandle second = spawn_soldier(f.w, 1, pos);
     capture_second(f.w, ev);
-    CHECK(ev.presence.size() == 1);
-    CHECK(ev.presence[0].zone == zone && ev.presence[0].count == 2);
-    CHECK(ev.timer_windows.size() == 1);
-    CHECK(ev.timer_windows[0].progress == 2 && ev.timer_windows[0].rate == 2);
-    CHECK(ev.timed_completions.empty());
+    const auto advanced_presence = events_of<ZoneCaptureEvents::Presence>(ev);
+    const auto advanced_windows = events_of<ZoneCaptureEvents::TimerWindow>(ev);
+    CHECK(advanced_presence.size() == 1);
+    CHECK(advanced_presence[0].zone == zone && advanced_presence[0].count == 2);
+    CHECK(advanced_windows.size() == 1);
+    CHECK(advanced_windows[0].progress == 2 && advanced_windows[0].rate == 2);
+    CHECK(events_of<ZoneCaptureEvents::TimedCompletion>(ev).empty());
 
     // Back to one occupant: 0x6C reports one, progress reaches the authored limit,
     // and completion retains the original capturer for score/event attribution.
     f.w.registry.get(second)->position = {500.0f, 500.0f, 0.0f};
     capture_second(f.w, ev);
-    CHECK(ev.presence.size() == 1);
-    CHECK(ev.presence[0].count == 1);
-    CHECK(ev.timer_windows.size() == 1 && ev.timer_windows[0].progress == 3);
-    CHECK(ev.timed_completions.size() == 1);
+    const auto completed_presence = events_of<ZoneCaptureEvents::Presence>(ev);
+    const auto completed_windows = events_of<ZoneCaptureEvents::TimerWindow>(ev);
+    const auto completions = events_of<ZoneCaptureEvents::TimedCompletion>(ev);
+    CHECK(completed_presence.size() == 1);
+    CHECK(completed_presence[0].count == 1);
+    CHECK(completed_windows.size() == 1 && completed_windows[0].progress == 3);
+    CHECK(completions.size() == 1);
     CHECK(f.w.registry.get(zone)->team == 1);
-    if (!ev.timed_completions.empty()) {
-        CHECK(ev.timed_completions[0].zone == zone);
-        CHECK(ev.timed_completions[0].capturer == first);
-        CHECK(ev.timed_completions[0].new_team == 1);
+    if (!completions.empty()) {
+        CHECK(completions[0].zone == zone);
+        CHECK(completions[0].capturer == first);
+        CHECK(completions[0].new_team == 1);
     }
 }
 
@@ -464,14 +483,14 @@ void test_capture_contact_movement_gate_and_contest() {
     f.w.registry.get(blue)->net_move_input = 0;
     ZoneCaptureEvents ev;
     capture_second(f.w, ev);
-    CHECK(ev.timed_starts.empty());
+    CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).empty());
     CHECK(f.w.registry.get(zone)->team == 0);
 
     f.w.registry.get(blue)->net_move_input = Entity::kMoveOrderMoving;
     const EntityHandle red = spawn_soldier(f.w, 2, pos);
     capture_second(f.w, ev);
-    CHECK(ev.timed_starts.empty());
-    CHECK(ev.timer_windows.empty());
+    CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).empty());
+    CHECK(events_of<ZoneCaptureEvents::TimerWindow>(ev).empty());
     CHECK(f.w.registry.get(zone)->team == 0);
     (void)red;
 }
@@ -486,6 +505,7 @@ void test_numbered_zone_converts_attrib2_entities() {
     auto spawn_convertible = [&](int pool, Vec3 pos) {
         Entity e;
         e.kind = pool == 2 ? EntityKind::Building : EntityKind::Item;
+        e.has_item_def = true;
         e.position = pos;
         e.team = 2;
         e.item_attrib2 = 2;
@@ -500,6 +520,84 @@ void test_numbered_zone_converts_attrib2_entities() {
     CHECK(f.w.registry.get(inside)->team == 1);
     CHECK(f.w.registry.get(outside)->team == 2);
     CHECK(f.w.registry.get(wrong_pool)->team == 2);
+    const auto changes = events_of<ZoneCaptureEvents::TeamChange>(ev);
+    CHECK(changes.size() == 1);
+    if (!changes.empty()) {
+        CHECK(changes[0].entity == inside && changes[0].team == 1);
+        CHECK(changes[0].net_id == 0 && changes[0].anim_slot == 0);
+    }
+}
+
+// An owned instant capture emits two distinct S2C 0x50 snapshots before its
+// capture announcement: old owner -> neutral, then neutral -> capturer. Keeping
+// only the final entity state would turn both records into team 2.
+// [orig: Server_UpdateCaptureZones @0x53BC46..0x53BC68;
+// Server_ChangeEntityTeam @0x518D70]
+void test_instant_capture_preserves_team_change_order() {
+    AshFixture f;
+    Entity *zone = f.w.registry.get(f.z2a);
+    zone->zone_radius = 70;
+    zone->team = 1;
+    zone->zone_control = 0;
+    zone_chain_rebuild_masks(f.w, f.w.zone_chain);
+    spawn_soldier(f.w, 2, zone->position);
+
+    ZoneCaptureEvents ev;
+    capture_second(f.w, ev);
+    CHECK(ev.ordered.size() >= 3);
+    if (ev.ordered.size() >= 3) {
+        const size_t tail = ev.ordered.size() - 3;
+        const auto *neutral = std::get_if<ZoneCaptureEvents::TeamChange>(
+                &ev.ordered[tail]);
+        const auto *captured = std::get_if<ZoneCaptureEvents::TeamChange>(
+                &ev.ordered[tail + 1]);
+        const auto *flip = std::get_if<ZoneCaptureEvents::Flip>(
+                &ev.ordered[tail + 2]);
+        CHECK(neutral != nullptr && neutral->entity == f.z2a &&
+              neutral->team == 0);
+        CHECK(captured != nullptr && captured->entity == f.z2a &&
+              captured->team == 2);
+        CHECK(flip != nullptr && flip->zone == f.z2a &&
+              flip->old_team == 1 && flip->new_team == 2);
+    }
+}
+
+// The enforcement list is ItemDefAttrib2 FARP (0x2000), not SpawnPoint. It can
+// force a numbered entity neutral, and because enforcement precedes the capture
+// queue drain it observes a new owner on the following second.
+// [orig: Entity_BuildProximityListFromPools @0x43ED60;
+// Server_EnforceZoneEntityTeams @0x519600; Server_TickUpdate @0x51DF7D]
+void test_farp_enforcement_uses_prior_capture_masks() {
+    AshFixture f;
+    Entity *zone = f.w.registry.get(f.z2a);
+    zone->zone_radius = 70;
+
+    Entity farp;
+    farp.kind = EntityKind::Building;
+    farp.has_item_def = true;
+    farp.item_attrib2 = 0x2000;
+    farp.zone_number = 2;
+    farp.team = 2;
+    farp.alive = true;
+    const EntityHandle farp_handle = f.w.registry.spawn(2, farp);
+    spawn_soldier(f.w, 1, zone->position);
+
+    ZoneCaptureEvents ev;
+    capture_second(f.w, ev);
+    CHECK(zone->team == 1);
+    CHECK(f.w.registry.get(farp_handle)->team == 0);
+    auto changes = events_of<ZoneCaptureEvents::TeamChange>(ev);
+    CHECK(changes.size() == 2);
+    if (changes.size() == 2) {
+        CHECK(changes[0].entity == farp_handle && changes[0].team == 0);
+        CHECK(changes[1].entity == f.z2a && changes[1].team == 1);
+    }
+
+    capture_second(f.w, ev);
+    CHECK(f.w.registry.get(farp_handle)->team == 1);
+    changes = events_of<ZoneCaptureEvents::TeamChange>(ev);
+    CHECK(changes.size() == 1 && changes[0].entity == farp_handle &&
+          changes[0].team == 1);
 }
 
 // The deploy/spawn-zone registry: collect pools 2 then 1, sort by the composite
@@ -589,6 +687,8 @@ int main() {
     test_unnumbered_timed_capture_and_presence();
     test_capture_contact_movement_gate_and_contest();
     test_numbered_zone_converts_attrib2_entities();
+    test_instant_capture_preserves_team_change_order();
+    test_farp_enforcement_uses_prior_capture_masks();
     test_spawn_zone_registry();
     test_spawn_zone_zero_key_uses_retail_pool_address_order();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");

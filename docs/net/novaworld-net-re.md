@@ -8065,11 +8065,20 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
    match decided. The kill-feed body stays the §5.26 8-byte `GameEvent_BuildPayload
    @ 0x5054E0` shape — for zone events the "attacker/victim" bytes are the zone-list index
    and team/frontier numbers, NOT pool-0 indices.
-7. **Team enforcement** `[orig: Server_EnforceZoneEntityTeams @ 0x519600]` — every numbered
-   entity in the per-tick zone-numbered registry (`dword_A892D0/D4`, rebuilt by
-   `Server_BuildEntitySlotLists @ 0x4F97A0`) is forced onto the team whose OWNED mask
-   contains its zone number (team 1 precedence) — this is what flips the co-located
-   `0x40000` spawn objects when the `0x20000` trigger objects change hands.
+7. **Team enforcement** `[orig: Server_EnforceZoneEntityTeams @ 0x519600]` — the walked
+   `dword_A892D0/D4` list is built ONCE at mission start by
+   `Entity_BuildProximityListFromPools @0x43ED60`: pools 1 then 2, live ItemDef pointer,
+   `def+88 & 0x2000` (**FARP**). Every numbered member is forced from the OWNED masks:
+   team 2 first, then team 1 overrides it, and no matching bit forces **team 0**. This pass
+   runs at `Server_TickUpdate @0x51DF7D`, before `Server_UpdateCaptureZones @0x51DF87`, so
+   a capture changes co-numbered FARPs on the following 1 Hz pass, not the capture pass.
+8. **Every actual ownership mutation is wire-visible.** `Server_ChangeEntityTeam @0x518D70`
+   writes `entity+354`, then `write_entity_handle_packet @0x506AD0` builds S2C **0x50** as
+   `[u16 handle][u8 team][u16 NetId][u8 animSlot]`; the identity pair is live only when
+   `Flags & 0x100`, otherwise both fields are zero. Secure-pass `def+88 & 2` conversion,
+   FARP enforcement, timed completion, timed neutralization, and instant flips all use this
+   producer. An owned instant flip therefore sends two ordered 0x50 records—team 0, then
+   the capturer—before `GameEvent_FlagCapture`.
 
 The deploy/spawn-zone REGISTRY (`g_spawn_zone_list/count @ 0xA89188/0xA89184`, rebuilt by
 `Entity_BuildSpawnZoneList @ 0x43EAE0` — ex-"BuildSortedRenderList"): every pools-2/1
@@ -8143,16 +8152,20 @@ active-capture presence each host logic tick; `world::zone_capture_second_tick` 
 1 Hz transaction (enemy-frontier latch, the complete control-delta formula including its
 spawn-registry ownership/clock term, secure edges, request arbitration, instant numbered
 flips via neutral, un-numbered timed active entries, `item_attrib2 & 2` entity conversion,
-mask rebuilds, and zone-object team enforcement). The npruntime fold emits strict 0x6F,
-the four 0x53 timed-window states, 0x6C only when active presence changes, and the 0x1E
+mask rebuilds, and pre-capture FARP (`item_attrib2 & 0x2000`) enforcement). One ordered
+semantic stream preserves the original mutation callsites. The npruntime fold emits strict
+0x6F; every six-byte 0x50 team mutation (including the instant neutral/new pair); the four
+0x53 timed-window states; 0x6C only when active presence changes; and the 0x1E
 0x3B/0x3C/43/44/50-53/56/57 families. Numbered instant flips do **not** fabricate 0x53;
 retail's four 0x53 call sites all belong to ACTIVE timed entries. The independent 0x40
 overlay feed remains on its witnessed 14-tick cadence. The 0x1E actor uses retail's sorted
 `SpawnZoneList_IndexOf` space, not the internal zone-chain index. `zone_chain_test` pins
-the control/timed/contact/conversion transaction, while `npruntime_server_session_test`
-pins the exact `0x53`/`0x6C` progression and once-only scoring. Residuals remain in the
+the control/timed/contact/conversion transaction, ordered owned→neutral→capturer changes,
+and next-second FARP propagation; `npruntime_server_session_test` pins the exact
+`0x50`/`0x53`/`0x6C` progression and once-only scoring. Residuals remain in the
 D-NET-162 row. `[orig: Server_OnPlayerTouchCaptureZone @0x500BA0;
 Server_UpdateCaptureZoneEntities @0x519690; Server_UpdateCaptureZones @0x53B8F0;
+Server_ChangeEntityTeam @0x518D70; Entity_BuildProximityListFromPools @0x43ED60;
 calculate_capture_zone_control_delta @0x501120; SpawnZoneList_IndexOf @0x43B990]`
 
 **Reimpl (slice 3 — match rules and round transaction, 2026-08-22).**
@@ -11745,7 +11758,7 @@ the separately tracked D-NET-133 repair-path residual.
 
 **D-NET-162** [reimpl gap, PORTED 2026-07-04; full contact/timed-capture transaction,
 formula, scoring, registry-index, and takeover-option parity completed 2026-08-22;
-proximity score-event parity completed 2026-08-23; 00TRg
+proximity score-event parity and ordered 0x50/FARP enforcement completed 2026-08-23; 00TRg
 overlay cadence validated 2026-08-02] **The AS capture loop now runs on our host.**
 `world::zone_capture_contact_tick` is the per-logic-tick producer: moving live pool-0
 players touching a capture trigger queue one zone/team request and mark unique presence in
@@ -11755,14 +11768,18 @@ verbatim (small-server boost, 20/40/60 soft caps, 12/24/48 base table, sorted
 spawn-registry census, late-round ownership-leader acceleration, shared-number divide,
 and ±1 minimum); secure edges; opposing-request restart/contest arbitration; instant
 numbered flips (owned → neutral → capturer, control zeroed); un-numbered timed entries;
-`def+88 & 2` pool-1/2 entity conversion; mask rebuilds; and zone-object team enforcement.
+`def+88 & 2` pool-1/2 entity conversion; mask rebuilds; and the mission-start pools-1/2
+`def+88 & 0x2000` FARP list's team-0/1/2 enforcement before the capture drain.
 `Config_SetDefaults @0x54D030` and `apply_session_settings_to_globals
 @0x551D3E..0x551D55` pin and publish takeover duration 15 and speed setting 1.
 
-The npruntime wire fold emits 0x6F (15 B, change-gated to all plus the full set to
-deploy-pending/dead recipients), 0x53 (9 B) for ACTIVE timed entry start/progress/restart/
+The npruntime wire fold consumes one ordered transaction and emits 0x6F (15 B,
+change-gated to all plus the full set to deploy-pending/dead recipients), 0x50 (6 B)
+for every actual team mutation, 0x53 (9 B) for ACTIVE timed entry start/progress/restart/
 completion, 0x6C (3 B) when its presence count changes, and 0x1E 0x3B/0x3C/43/44/
-50-53/56/57 events. Numbered flips intentionally emit no 0x53: every retail 0x53 call site
+50-53/56/57 events. `Server_ChangeEntityTeam @0x518D70` plus
+`write_entity_handle_packet @0x506AD0` pin the 0x50 body and the non-player zero identity
+pair. Numbered flips intentionally emit no 0x53: every retail 0x53 call site
 inside `Server_UpdateCaptureZones @0x53B8F0` belongs to an ACTIVE entry. Event actor bytes
 use sorted `SpawnZoneList_IndexOf @0x43B990` space for numbered zones and pool-0 actor slots
 for timed 43/44. Capture scoring records event 24 (`raw[39]`, score-table status 34) once
@@ -11773,8 +11790,9 @@ strictly decodes 0x6C and folds it only into a pre-existing 0x53 window, matchin
 The 0x40 producer runs independently on its witnessed 14-tick cadence per §5.19
 (`Server_BuildOverlayStateForPlayer @0x517FC0` → `Entity_ClassifyForMinimap @0x50FA70` →
 flush `@0x50FE20`). `zone_chain_test` pins control, timed capture, movement gating,
-contests, conversion, and enforcement; `npruntime_server_session_test` pins the exact
-`0x53` 0→2→3 plus `0x6C` 2→1 progression and once-only score; client/catalog tests pin
+contests, conversion, ordered neutral/new snapshots, and next-pass FARP enforcement;
+`npruntime_server_session_test` pins the exact `0x50` ownership bodies, `0x53` 0→2→3,
+`0x6C` 2→1 progression, and once-only score; client/catalog tests pin
 strict decode and ordered folding.
 
 The requester-local **S2C 0x81 score refresh is also ported end to end**. At the

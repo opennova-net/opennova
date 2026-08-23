@@ -127,6 +127,28 @@ ZoneCaptureEvents::TimerWindow timer_window(const Entity &zone,
             wire_word(active.limit), active.rate};
 }
 
+// The capture transaction's one ownership mutation primitive. Snapshot the
+// complete six-byte 0x50 semantic payload at mutation time: instant captures
+// deliberately call this twice (old owner -> 0 -> capturer), and a later entity
+// lookup would erase the neutral record. [orig: Server_ChangeEntityTeam
+// @0x518D70; write_entity_handle_packet @0x506AD0]
+bool change_entity_team(World &world, ZoneCaptureEvents &out,
+                        EntityHandle handle, uint8_t team) {
+    Entity *entity = world.registry.get(handle);
+    if (entity == nullptr || entity->team == team) return false;
+    entity->team = team;
+
+    ZoneCaptureEvents::TeamChange change;
+    change.entity = handle;
+    change.team = team;
+    if ((entity->flags & kEntityFlagPlayer) != 0) {
+        change.net_id = entity->minimap_net_id;
+        change.anim_slot = entity->anim_slot;
+    }
+    out.ordered.emplace_back(change);
+    return true;
+}
+
 bool capture_request_available(const World &world, const Entity &zone) {
     if (zone.zone_number == 0) return true;
     return zone_chain_is_capturable(world, world.zone_chain, 1, zone) ||
@@ -200,17 +222,6 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         ++total_players;
         if (entity.team < ZoneChain::kTeamCount) ++team_players[entity.team];
     });
-
-    // Active capture rates are based on unique movement contacts since the last
-    // second. Retail compares the raw count before clamping zero back to one.
-    for (auto &active : state.active) {
-        const int raw_count = static_cast<int>(active.presence.size());
-        if (raw_count != active.rate) {
-            active.rate = static_cast<uint8_t>(std::clamp(raw_count, 1, 32));
-            out.presence.push_back({active.zone, active.rate});
-        }
-        active.presence.clear();
-    }
 
     // The delta producer scans the sorted spawn-zone registry, not just capture
     // triggers: every nonzero-number entry contributes to ownership imbalance,
@@ -303,14 +314,19 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
             }
         }
 
+        // Retail sends the 0x6F record before either secure-edge event for this
+        // zone. Keep that order in the semantic transaction.
+        // [orig: emit @0x5197D9, edges @0x519839/@0x51988E]
+        out.ordered.emplace_back(ZoneCaptureEvents::Control{
+                zone->handle, zone->team, zone->zone_control, wire_delta,
+                static_cast<uint8_t>(std::min(friendlies, 255)),
+                static_cast<uint8_t>(std::min(enemies, 255))});
         if (before < 0x10000 && zone->zone_control >= 0x10000)
-            out.secure_edges.push_back({zone->handle, zone->team, true});
+            out.ordered.emplace_back(
+                    ZoneCaptureEvents::Secure{zone->handle, zone->team, true});
         else if (before > 0 && zone->zone_control <= 0)
-            out.secure_edges.push_back({zone->handle, zone->team, false});
-        out.control.push_back(
-                {zone->handle, zone->team, zone->zone_control, wire_delta,
-                 static_cast<uint8_t>(std::min(friendlies, 255)),
-                 static_cast<uint8_t>(std::min(enemies, 255))});
+            out.ordered.emplace_back(
+                    ZoneCaptureEvents::Secure{zone->handle, zone->team, false});
 
         // Pool-1/2 live entities carrying ItemDefAttrib2 bit 2 inherit the
         // numbered trigger's owner while physically inside its radius.
@@ -318,20 +334,54 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         std::vector<EntityHandle> converts;
         world.registry.for_each([&](const Entity &entity) {
             if ((entity.handle.pool() == 1 || entity.handle.pool() == 2) &&
-                    entity.handle != zone->handle && entity.alive &&
+                    entity.has_item_def &&
+                    ((entity.flags | entity.engine_flags) &
+                     kEntityFlagCarried) == 0 &&
                     (entity.item_attrib2 & 2u) != 0 &&
                     in_zone_radius(entity, *zone))
                 converts.push_back(entity.handle);
         });
-        for (const EntityHandle handle : converts) {
-            if (Entity *entity = world.registry.get(handle)) {
-                entity->team = zone->team;
-                world.spawn_waves.reset_on_zone_team_change(world, handle);
-            }
-        }
+        for (const EntityHandle handle : converts)
+            change_entity_team(world, out, handle, zone->team);
     }
 
-    // ---- Active timed entries [orig: first two loops @0x53B8F0].
+    // ---- FARP ownership enforcement. Retail's mission-start proximity list is
+    // pools 1/2 with a live ItemDef whose Attrib2 carries FARP (0x2000). Every
+    // numbered member is forced to team 2, then team 1 takes precedence; an
+    // unowned number forces team 0 too. This precedes Server_UpdateCaptureZones,
+    // so a capture flip affects these entities on the NEXT 1 Hz pass.
+    // [orig: Entity_BuildProximityListFromPools @0x43ED60;
+    // Server_EnforceZoneEntityTeams @0x519600..0x51966C]
+    std::vector<EntityHandle> farp_entities;
+    world.registry.for_each([&](const Entity &entity) {
+        if ((entity.handle.pool() == 1 || entity.handle.pool() == 2) &&
+                entity.has_item_def && entity.zone_number != 0 &&
+                (entity.item_attrib2 & 0x2000u) != 0)
+            farp_entities.push_back(entity.handle);
+    });
+    for (const EntityHandle handle : farp_entities) {
+        Entity *entity = world.registry.get(handle);
+        if (entity == nullptr || entity->zone_number >= 32) continue;
+        const uint32_t bit = 1u << entity->zone_number;
+        uint8_t forced = 0;
+        if ((chain.owned_mask[2] & bit) != 0) forced = 2;
+        if ((chain.owned_mask[1] & bit) != 0) forced = 1;
+        change_entity_team(world, out, handle, forced);
+    }
+
+    // ---- Active timed entries [orig: the rate pass + active loop @0x53B8F0].
+    // Rate updates are the first wire output from Server_UpdateCaptureZones,
+    // after both ownership-maintenance passes above.
+    for (auto &active : state.active) {
+        const int raw_count = static_cast<int>(active.presence.size());
+        if (raw_count != active.rate) {
+            active.rate = static_cast<uint8_t>(std::clamp(raw_count, 1, 32));
+            out.ordered.emplace_back(
+                    ZoneCaptureEvents::Presence{active.zone, active.rate});
+        }
+        active.presence.clear();
+    }
+
     for (size_t index = 0; index < state.active.size();) {
         auto &active = state.active[index];
         Entity *zone = world.registry.get(active.zone);
@@ -351,24 +401,24 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
             active.team = opposing->team;
             active.progress = 0;
             active.limit = rules.capture_duration_seconds;
-            out.timer_windows.push_back(timer_window(*zone, active));
+            out.ordered.emplace_back(timer_window(*zone, active));
             ++index;
             continue;
         }
 
         active.progress += active.rate;
-        out.timer_windows.push_back(timer_window(*zone, active));
+        out.ordered.emplace_back(timer_window(*zone, active));
         if (active.progress < active.limit) {
             remove_zone_requests(state, active.zone);
             ++index;
             continue;
         }
 
-        zone->team = active.team;
+        change_entity_team(world, out, zone->handle, active.team);
         world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
-        out.timed_completions.push_back(
-                {zone->handle, active.capturer, active.team,
-                 zone->is_spawn_point});
+        out.ordered.emplace_back(ZoneCaptureEvents::TimedCompletion{
+                zone->handle, active.capturer, active.team,
+                zone->is_spawn_point});
         remove_zone_requests(state, active.zone);
         state.active.erase(state.active.begin() + index);
     }
@@ -408,8 +458,9 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
                     zone_chain_frontier_zone(world, chain, request.team);
             const uint8_t loser_frontier_before =
                     zone_chain_frontier_zone(world, chain, enemy_of(request.team));
-            if (old_team != 0) zone->team = 0;
-            zone->team = request.team;
+            if (old_team != 0)
+                change_entity_team(world, out, zone->handle, 0);
+            change_entity_team(world, out, zone->handle, request.team);
             world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
             zone->zone_control = 0;
             zone_chain_rebuild_masks(world, chain);
@@ -438,13 +489,13 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
                     flip.loser_frontier != loser_frontier_before;
             flip.suppressed = zone->zone_number != 0 && match_decided(world, chain);
             flip.announce = zone->is_spawn_point;
-            out.flips.push_back(std::move(flip));
+            out.ordered.emplace_back(std::move(flip));
             remove_zone_requests(state, request.zone);
             continue;
         }
 
         if (zone->team != 0) {
-            zone->team = 0;
+            change_entity_team(world, out, zone->handle, 0);
             world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
         }
         ZoneCaptureState::Active *active = find_active(state, request.zone);
@@ -463,35 +514,14 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
             started = true;
         }
         if (started) {
-            out.timer_windows.push_back(timer_window(*zone, *active));
+            out.ordered.emplace_back(timer_window(*zone, *active));
             if (zone->is_spawn_point)
-                out.timed_starts.push_back(
-                        {zone->handle, active->capturer, active->team});
+                out.ordered.emplace_back(ZoneCaptureEvents::TimedStart{
+                        zone->handle, active->capturer, active->team});
         }
         remove_zone_requests(state, request.zone);
     }
 
-    // Every pass forces authored numbered spawn objects to the wholly-owned
-    // mask (team 1 precedence). Triggers themselves remain ownership sources.
-    // [orig: Server_EnforceZoneEntityTeams @0x519600]
-    std::vector<EntityHandle> numbered;
-    world.registry.for_each([&](const Entity &entity) {
-        if (entity.zone_number != 0 && !entity.is_capture_trigger &&
-                entity.is_spawn_point)
-            numbered.push_back(entity.handle);
-    });
-    for (const EntityHandle handle : numbered) {
-        Entity *entity = world.registry.get(handle);
-        if (entity == nullptr || entity->zone_number >= 32) continue;
-        const uint32_t bit = 1u << entity->zone_number;
-        uint8_t forced = 0;
-        if ((chain.owned_mask[1] & bit) != 0) forced = 1;
-        else if ((chain.owned_mask[2] & bit) != 0) forced = 2;
-        if (forced != 0 && entity->team != forced) {
-            entity->team = forced;
-            world.spawn_waves.reset_on_zone_team_change(world, entity->handle);
-        }
-    }
     zone_chain_rebuild_masks(world, chain);
 }
 
