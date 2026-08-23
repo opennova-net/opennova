@@ -153,10 +153,10 @@ struct GameConfig {
 	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
 	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
-	// Both flags named 2026-07-01: dword_2550A04 is the mpattrib BITFIELD store itself
-	// (ServerConfig_ApplyHostSetting @0x4a6000: SET `TeamChoose`->bit 0x4 direct, `TeamFF`->0x200
-	// inverted, `FriendlyTag`->0x400 inverted, `ClaymorePref` ...).
-	bool team_choose = false;          // [orig dword_2550A04 & 4 = SET `TeamChoose` @0x4a63d9] -> |0x4
+	// dword_2550A04 is already represented once by mp_attributes above. In
+	// particular SET `TeamChoose` writes bit 0x4 directly; there is no parallel
+	// boolean setting in retail. [orig: ServerConfig_ApplyHostSetting @0x4A6000,
+	// TeamChoose arm @0x4A63D9]
 	bool allow_sniper_scope_zoom = false; // [orig g_mp_allowsniperscopezoom @0x2550CA4, cfg
 	                                      //  `mp_allowsniperscopezoom` @0x550ac9; read by
 	                                      //  WeaponSlot_InitFromDef @0x53ee70] -> |0x10000

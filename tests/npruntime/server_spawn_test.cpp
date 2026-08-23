@@ -18,11 +18,13 @@
 
 #include <world/ai.h>
 #include <world/entity.h>
+#include <world/game_type.h>
 #include <world/player_spawn.h> // kPlayerInfantryTypeId
 #include <world/spawn_select.h>
 #include <world/world.h>
 
 #include <cstdio>
+#include <memory>
 #include <set>
 
 namespace {
@@ -240,6 +242,89 @@ int main() {
 					"slot reservation never escapes the advertised capacity")) {
 			return 1;
 		}
+	}
+
+	// Server_AssignPlayerTeam is one policy for every retail mode. Solo modes
+	// still store team 1 (otherwise ordinary DM/Flag Me deaths become teamkills),
+	// while team-choice is honored only when the mission attribute enables it.
+	// [orig: Server_AssignPlayerTeam @0x4FE398..0x4FE400,
+	// @0x4FE51A..0x4FE587]
+	{
+		auto team_world = std::make_unique<w::World>();
+		auto team_ai = std::make_unique<w::AiSystem>();
+		make_world(*team_world, *team_ai);
+
+		auto reserve_sequence = [&](np::GameConfig config,
+				std::initializer_list<uint8_t> requests) {
+			std::vector<np::NapiNPConnection> roster;
+			std::vector<uint8_t> teams;
+			roster.reserve(requests.size());
+			for (uint8_t request : requests) {
+				roster.emplace_back();
+				roster.back().char_vars.team_request = request;
+				teams.push_back(np::Server_ReservePlayerTeam(
+						config, true, roster, roster.back(), *team_world));
+			}
+			return teams;
+		};
+
+		np::GameConfig solo;
+		solo.game_type = opennova::game_type::kDeathmatch;
+		if (!expect(reserve_sequence(solo, {0xFF, 0xFF, 0xFF}) ==
+					std::vector<uint8_t>({1, 1, 1}),
+				"DM keeps every player on retail team 1")) return 1;
+		solo.game_type = opennova::game_type::kFlagMe;
+		if (!expect(reserve_sequence(solo, {0xFF, 0xFF, 0xFF}) ==
+					std::vector<uint8_t>({1, 1, 1}),
+				"Flag Me is solo CTF and keeps every player on team 1")) return 1;
+
+		np::GameConfig chosen;
+		chosen.game_type = opennova::game_type::kAttackDefend;
+		chosen.mp_attributes = np::GameConfig::kMpAttribTeamChoose;
+		if (!expect(reserve_sequence(chosen, {1, 0, 0xFF}) ==
+					std::vector<uint8_t>({2, 1, 1}),
+				"TeamChoose honors side B/A requests before deterministic balance")) return 1;
+		chosen.mp_attributes = 0;
+		if (!expect(reserve_sequence(chosen, {1, 1}) ==
+					std::vector<uint8_t>({1, 2}),
+				"team requests are ignored when TeamChoose is disabled")) return 1;
+		chosen.side_a_password = "side-a";
+		if (!expect(reserve_sequence(chosen, {0xFF}) ==
+					std::vector<uint8_t>({2}),
+				"an empty FID selects the only unprotected side")) return 1;
+		chosen.side_b_password = "side-b";
+		if (!expect(reserve_sequence(chosen, {0xFF}) ==
+					std::vector<uint8_t>({0}),
+				"an empty FID cannot select either protected side")) return 1;
+
+		// Four-side setup is intentionally peculiar in retail. With no side
+		// passwords, its stable count sort plus mixed-index availability lookup
+		// repeatedly chooses teams 1/2; it does not spread an empty lobby across
+		// all four advertised columns. Preserve that defect for compatibility.
+		// [orig: @0x4FE62C..0x4FE723]
+		np::GameConfig four;
+		four.game_type = opennova::game_type::kTeamDeathmatch;
+		four.num_teams = 4;
+		four.mp_attributes = 0;
+		if (!expect(reserve_sequence(four, {0xFF, 0xFF, 0xFF, 0xFF}) ==
+					std::vector<uint8_t>({1, 2, 1, 2}),
+				"retail four-team auto assignment retains its 1/2-only empty-lobby sequence")) return 1;
+
+		std::vector<np::NapiNPConnection> mixed(4);
+		for (std::size_t i = 0; i < 3; ++i) {
+			mixed[i].assigned_team_valid = true;
+			mixed[i].assigned_team = static_cast<uint8_t>(i == 2 ? 4 : i + 1);
+		}
+		mixed.back().char_vars.team_request = 0xFF;
+		if (!expect(np::Server_ReservePlayerTeam(
+					four, true, mixed, mixed.back(), *team_world) == 2,
+				"four-team mixed-index lookup is reproduced exactly")) return 1;
+
+		four.side_a_password = "side-a";
+		four.side_b_password = "side-b";
+		if (!expect(reserve_sequence(four, {0xFF}) ==
+					std::vector<uint8_t>({3}),
+				"four-team password flags feed retail's mixed-index availability lookup")) return 1;
 	}
 
 	// --- D-NET-146: the character stamp — per-side CU vars picked by ASSIGNED team. ---

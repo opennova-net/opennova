@@ -23,25 +23,51 @@ namespace {
 // the WAC/BMS find_by_net_id SSN space (authored mission entities own that space); tracking is by handle +
 // owner_connection_id. [orig: Server_PlayerAdd @0x51cbc0 / Entity_SpawnFromAnimSlotProperty @0x43c390]
 
-// [orig: Server_AssignPlayerTeam @0x4fe310; D-NET-113] The spawning player's team.
-// Witnessed branch order (Server_AssignPlayerTeam): (0) spectator (+100567 && is_in_session) -> 0;
-// (1) co-op gametype ((game_type & 0xFFFDFFFF) == 0x10020) or any non-MP session (!is_in_session)
-// -> 1; (2) DM/TDM -> requested team name / preference, then autobalance. We DROP branch (0) — no
-// spectator field exists in the reimpl yet — so SP / co-op LAN land on team 1 faithfully via branch
-// (1), and a real DM/TDM session autobalances to the least-populated side over the LIVE pool-0
-// players already added (2-team: (t1 > t2) + 1). The spectator branch, the requested-team-name
-// (g_team1/2_name) and team-preference legs, and 4-team placement are the follow-up MP path (the
-// join request carries no team/spectator field yet); they default into the autobalance below.
+// [orig: Server_AssignPlayerTeam @0x4FE310; D-NET-113] One assignment policy for every mode.
+// Retail's misleading g_team1_name/g_team2_name symbols are the live SidePasswordA/B strings
+// (apply_session_settings_to_globals @0x552043/@0x552054), not a second team-name domain.
+// The current join protocol carries no FID credential, so the submitted-password leg is empty;
+// closing password-protected admission remains D-NET-167. Spectator is the other structural
+// residual because NapiNPConnection has no spectator bit.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world) {
 	const uint32_t gt = config.game_type;
 	if (!is_in_session || opennova::game_type::is_waypoint_family(gt)) return 1;
-	uint32_t team1 = 0, team2 = 0;
+
+	// A freshly allocated solo player is already present in retail's fixed slot
+	// table, so the no-team-bit scan finds the same pointer and stores team 1.
+	// Do not autobalance DM/Flag Me into a fictitious team 2.
+	// [orig: Server_AssignPlayerTeam @0x4FE398..0x4FE400]
+	if (!opennova::game_type::is_team(gt)) return 1;
+
+	const uint8_t active_teams =
+			opennova::game_type::active_team_count(gt, config.num_teams);
+	const bool side_a_locked = !config.side_a_password.empty();
+	const bool side_b_locked = !config.side_b_password.empty();
+
+	// With the presently empty submitted FID, retail's two-team password leg
+	// rejects two protected sides or selects the one unprotected side.
+	// Four-team mode deliberately skips this branch.
+	// [orig: @0x4FE4AE..0x4FE519; D-NET-167]
+	if (active_teams == 2) {
+		if (side_a_locked && side_b_locked) return 0;
+		if (side_a_locked) return 2;
+		if (side_b_locked) return 1;
+	}
+
+	// jsp[60] is signed at the original call site: 0/1 request side A/B and
+	// 0xFF means automatic. A locked requested side falls through to balance.
+	// [orig: Server_PlayerAdd @0x51CF24; assignment @0x4FE51A..0x4FE587]
+	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
+		if (joining.char_vars.team_request == 0 && !side_a_locked) return 1;
+		if (joining.char_vars.team_request == 1 && !side_b_locked) return 2;
+	}
+
+	std::array<uint32_t, 4> counts{};
 	world.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
-		if (e.team == 1) ++team1;
-		else if (e.team == 2) ++team2;
+		if (e.team >= 1 && e.team <= 4) ++counts[e.team - 1];
 	});
 	// Reservations without an entity are already player-slot assignments for
 	// balancing. Spawned reservations are represented by the World walk above.
@@ -49,10 +75,35 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		if (&c == &joining || !c.assigned_team_valid ||
 		    c.link.owned_entity.valid())
 			continue;
-		if (c.assigned_team == 1) ++team1;
-		else if (c.assigned_team == 2) ++team2;
+		if (c.assigned_team >= 1 && c.assigned_team <= 4)
+			++counts[c.assigned_team - 1];
 	}
-	return static_cast<uint8_t>((team1 > team2) + 1);
+
+	if (active_teams == 2)
+		return static_cast<uint8_t>((counts[0] > counts[1]) + 1);
+
+	// Retail pairwise-sorts both the counts and their original indices. It then
+	// overwrites sorted count slots 0/1 with SidePasswordA/B-present booleans,
+	// but probes that array with the ORIGINAL indices. That mixed index space is
+	// a shipped defect: an unprotected empty lobby alternates 1,2,1,2; protected
+	// four-team configurations can select team 3. Preserve the instructions,
+	// rather than substituting an ideal least-populated-four policy.
+	// [orig: @0x4FE62C..0x4FE723]
+	std::array<uint8_t, 4> original_indices = {0, 1, 2, 3};
+	for (std::size_t i = 0; i < counts.size() - 1; ++i) {
+		for (std::size_t j = i + 1; j < counts.size(); ++j) {
+			if (counts[i] <= counts[j]) continue;
+			std::swap(counts[i], counts[j]);
+			std::swap(original_indices[i], original_indices[j]);
+		}
+	}
+	counts[0] = side_a_locked ? 1u : 0u;
+	counts[1] = side_b_locked ? 1u : 0u;
+	for (uint8_t original_index : original_indices) {
+		if (counts[original_index] == 0)
+			return static_cast<uint8_t>(original_index + 1);
+	}
+	return 0;
 }
 
 // Roster slots are stable identities. Retail walks the fixed player-slot table and installs the

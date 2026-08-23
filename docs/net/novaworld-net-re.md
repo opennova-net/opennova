@@ -5914,7 +5914,8 @@ Replication: `g_priority_ref_x/y/z` (`0xC867A4/A8/AC`, the broadcast-origin eye 
 default 600), `g_entity_action_queue` (`0xC86FDC`). Rules/config:
 `g_score_limit`/`g_kill_limit`/`g_time_limit_minutes`/`g_respawn_time` (`0x24D2134/38/44/40`),
 `g_autobalance_enabled`/`_min_diff`/`_trigger_diff` (`0x24D2190/94/98`), `g_team_change_entity_list`
-(`0xC947C8`), `g_team1_name`/`g_team2_name` (`0x24D1FF5`/`0x24D2006`), `g_num_teams_config` (`0x24D2150`),
+(`0xC947C8`), `g_team1_name`/`g_team2_name` (misleading IDB names for live SidePasswordA/B,
+`0x24D1FF5`/`0x24D2006`), `g_num_teams_config` (`0x24D2150`),
 `g_capture_duration` (`0x24D2248`), `g_round_wins_team1..4` (`0xC8FF0C/10/14/18`), `g_total_rounds_played`
 (`0xC8FF1C`), `g_round_winning_team` (`0x24C1924`), `g_mission_time_ticks` (`0x24C1944`). Join/moderation:
 `g_expansion_checksum` (`0xB4C5A4`), `g_banned_name_count`/`g_banned_name_list`/`g_banned_id_list`
@@ -6064,19 +6065,36 @@ ids directly (`nova_listen_server` 0xFFF0, `host_session_accept_gut`/`coop_two_s
 tests from net_id to ownerConnectionId(dcb)+handle. Setting player net_id=0 naively breaks the avatar
 tracking + those tests — which is precisely why this is a dedicated session, not an inline edit.
 
-**D-NET-113** [behavior, MATCHING] **Player team assignment.** `Server_AssignPlayerTeam @0x4fe310`
-(called from `Server_PlayerAdd`, writes `playerSlot+416`):
-- spectator (`+100567 && is_in_session`) → team **0**;
-- co-op / non-MP (`(g_GameType & 0xFFFDFFFF) == 0x10020` **or** `!is_in_session`) → team **1**;
-- otherwise (DM/TDM, and the 4-team gametypes `0x10000/65537/65544` when `g_num_teams_config==4`):
-  requested team name (`g_team1_name`/`g_team2_name`, case-insensitive), then a team preference
-  (`teamPref`), then **autobalance** to the least-populated team — 2-team: `(team1Count >
-  team2Count) + 1`; 4-team: count per team over the player slots, shell-sort, pick the
-  least-populated *existing* (named) team; `rand()`-free, deterministic by count.
+**D-NET-113** [behavior, PARTIAL — all reachable passwordless non-spectator branches MATCHING]
+**Player team assignment.** `Server_AssignPlayerTeam @0x4FE310` is called from
+`Server_PlayerAdd @0x51CF4A` and writes `playerSlot+416`:
+- exactly TDM/TKOTH/FlagBall use four teams when `g_num_teams_config == 4`; all other team modes
+  use two (`@0x4FE316..0x4FE349`);
+- spectator (`playerSlot+100567 && is_in_session`) → team **0** (`@0x4FE34D..0x4FE37B`);
+- co-op family / non-MP (`(g_GameType & 0xFFFDFFFF) == 0x10020` or `!is_in_session`) → team **1**
+  (`@0x4FE37C..0x4FE392`, `@0x4FE730..0x4FE743`);
+- a solo-mode player already present in the fixed player-slot table is assigned team **1**
+  (`@0x4FE398..0x4FE400`). Thus DM and Flag Me do **not** alternate across teams 1/2;
+- the caller's `teamNameReq` is actually its copied `FID` credential at entry-data `+0x50`, while
+  the misleading `g_team1_name`/`g_team2_name` globals are `SidePasswordA`/`SidePasswordB`
+  (`apply_session_settings_to_globals @0x552043/@0x552054`). A case-insensitive password match
+  selects side A/B; with no match, a two-side game rejects two protected sides or selects the sole
+  unprotected side (`@0x4FE41C..0x4FE519`);
+- `g_mpattrib_flags & 4` honors signed preference 0/1 only when that side is unprotected; otherwise
+  the routine counts teams 1..4 over occupied player slots, excluding the joining slot
+  (`@0x4FE51A..0x4FE5F8`). Two-side balance is exactly `(team1Count > team2Count) + 1`, ties to
+  team 1 (`@0x4FE5FC..0x4FE62B`);
+- the four-side branch has a shipped mixed-index defect, not an ideal least-populated-four policy.
+  It pairwise stable-sorts both counts and original indices, overwrites sorted count slots 0/1 with
+  the two side-password-present booleans, then probes that array using the **original** indices
+  (`@0x4FE62C..0x4FE723`). With no passwords an empty lobby consequently assigns
+  **1,2,1,2…**; both passwords present select team 3 repeatedly from an empty start.
 
-  ⇒ The reimpl's `spawn.team = 1` is **faithful for the current co-op/SP target** (the
-  `!is_in_session`/co-op branch); the MP team path is the autobalance/name-match logic above,
-  to be ported when a DM/TDM gametype is wired. `[orig: Server_AssignPlayerTeam @0x4fe310]`
+`Server_ReservePlayerTeam` now ports this as the single spawn/slot assignment policy, including the
+solo invariant, `mp_attributes` TeamChoose bit, pending reservations, all four counts, and the exact
+mixed-index defect. The duplicate `GameConfig::team_choose` boolean was deleted: retail owns only
+the bit in `dword_2550A04`. Remaining structural legs are spectator admission and the missing FID
+credential/password gate (D-NET-167). `[orig: Server_AssignPlayerTeam @0x4FE310]`
 
 **D-NET-114** [behavior, MATCHING — reimpl divergence FIXED here] **The §5.2a initial-state burst
 is one-shot per join.** `Server_OnPlayerJoin @0x51a680` emits the *entire* sequence — 0x42 input
