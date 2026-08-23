@@ -60,7 +60,7 @@ constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
 //  @0x4bfb87 gated on `(Flags & 0x8000) == 0`, the latch
 //  `(Flags & ~0x2000) | 0x8000` @0x4bfc48 and the quarter-chase tail @0x4bfc65.
 //  The player twin @0x4b8020 carries the same shape plus swim control and a
-//  second, shallower dive edge (Flags 0x200000) — both stay with D-INF-3.]
+//  second, shallower dive edge (Flags 0x200000) — player_water_block below.]
 void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
                                     int32_t capsule_bottom, uint32_t logic_tick) {
     if (tick_entity == nullptr) return;
