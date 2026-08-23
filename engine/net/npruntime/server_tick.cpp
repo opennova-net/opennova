@@ -608,6 +608,28 @@ bool scoreboard_recipient(const NapiNPConnection &conn) {
 			conn.link.owned_entity.valid() && conn.link.transport != nullptr;
 }
 
+void emit_requester_score_refreshes(NapiNPServerCtx &ctx,
+		world::World &world) {
+	if (!ctx.is_in_session) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || conn.link.transport == nullptr ||
+				!conn.link.owned_entity.valid())
+			continue;
+		const world::MatchPlayer *player =
+				world.match.player(conn.link.owned_entity);
+		if (player == nullptr) continue;
+		const int32_t score =
+				player->stats[world::MatchStats::kPoints];
+		if (score == conn.reply.score_delta_sound_value) continue;
+		conn.reply.score_delta_sound_value = score;
+		std::vector<uint8_t> body;
+		put_u32le(body, static_cast<uint32_t>(score));
+		conn.link.transport->host_send(
+				s2c::SCORE_DELTA_SOUND, std::move(body),
+				/*reliable=*/true);
+	}
+}
+
 // Emit the stock host's player maintenance requests. Integrity is a global
 // scoreboard-cadence broadcast and remains active while a live player holds the
 // deployment UI. Network quality owns a separate global countdown. The control
@@ -920,6 +942,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
 	route_match_gameplay_events(ctx, world);
+	// Retail's per-player proximity pass begins by comparing CRenderState field
+	// 0x1C (raw accumulated Points) with a player-slot cache and targets reliable
+	// S2C 0x81 to that requester on change. Keep it after the authority's event
+	// scorers and before the 1 Hz capture transaction; zone-capture points are
+	// therefore observed by the following authority pass, as in retail.
+	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0]
+	emit_requester_score_refreshes(ctx, world);
 	release_due_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,

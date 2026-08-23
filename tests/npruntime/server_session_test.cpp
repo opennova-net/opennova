@@ -2011,6 +2011,79 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 	return true;
 }
 
+// The host compares each active player's accumulated Points field with the
+// per-slot cache every authority pass and sends a reliable requester-only 0x81
+// on change. The primary-score projection is deliberately not involved.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+//        CRenderState_GetFieldByIndex(player+18, 0x1C) @0x5086E5]
+bool check_requester_score_delta_refresh() {
+	opennova::np::NapiNPServerCtx ctx;
+	opennova::np::set_connection_mode(
+			ctx, opennova::np::ConnectionMode::HostOnly);
+	opennova::np::GameConfig config;
+	config.game_type = opennova::game_type::kDeathmatch;
+	opennova::np::create_session(
+			ctx, config, opennova::np::SessionStartup{}, nullptr);
+
+	opennova::world::World world;
+	world.mp_session = true;
+	world.registry.configure_pool(0, 4);
+	opennova::world::Entity player_entity;
+	player_entity.kind = opennova::world::EntityKind::Organic;
+	player_entity.alive = true;
+	player_entity.health = 100;
+	const opennova::world::EntityHandle player =
+			world.registry.spawn(0, player_entity);
+	opennova::world::MatchRules rules;
+	rules.game_type = config.game_type;
+	world.match.configure(rules);
+	world.match.upsert_player({player, 0, "Points", {}, {}});
+	world.match.player(player)->stats[opennova::world::MatchStats::kPoints] = -5;
+	ctx.world = &world;
+
+	opennova::netsim::UdpSessionTransport transport(
+			opennova::netsim::UdpSessionTransport::Role::Host);
+	opennova::np::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = opennova::np::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = opennova::netsim::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	auto drain_scores = [&]() {
+		std::vector<opennova::netsim::Datagram> scores;
+		opennova::netsim::Datagram datagram;
+		while (transport.pop_outbound(datagram)) {
+			if (datagram.tag == opennova::s2c::SCORE_DELTA_SOUND)
+				scores.push_back(std::move(datagram));
+		}
+		return scores;
+	};
+
+	opennova::np::Server_TickUpdate(ctx);
+	std::vector<opennova::netsim::Datagram> scores = drain_scores();
+	if (!expect(scores.size() == 1 && scores[0].reliable &&
+	                    scores[0].body ==
+	                            std::vector<uint8_t>({0xFB, 0xFF, 0xFF, 0xFF}),
+	            "changed signed Points emits one reliable requester 0x81"))
+		return false;
+
+	opennova::np::Server_TickUpdate(ctx);
+	if (!expect(drain_scores().empty(),
+	            "unchanged Points is suppressed by the per-player cache"))
+		return false;
+
+	world.match.player(player)->stats[opennova::world::MatchStats::kPoints] = 17;
+	opennova::np::Server_TickUpdate(ctx);
+	scores = drain_scores();
+	return expect(scores.size() == 1 && scores[0].reliable &&
+	                      scores[0].body ==
+	                              std::vector<uint8_t>({0x11, 0x00, 0x00, 0x00}),
+	              "later Points change refreshes requester immediately");
+}
+
 bool check_listen_host_receives_targeted_maintenance() {
 	opennova::netsim::LoopbackChannel loopback;
 	opennova::np::NapiNPServerCtx ctx;
@@ -3014,6 +3087,7 @@ int main() {
 	ok = check_host_pump_reconnect_keeps_fresh_connection() && ok;
 	ok = check_global_scoreboard_integrity_phase() && ok;
 	ok = check_scoreboard_active_slot_filter_is_distinct() && ok;
+	ok = check_requester_score_delta_refresh() && ok;
 	ok = check_listen_host_receives_targeted_maintenance() && ok;
 	ok = check_spawned_peer_gets_periodic_retail_maintenance() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;

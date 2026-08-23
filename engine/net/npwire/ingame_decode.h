@@ -1347,6 +1347,18 @@ struct SpawnWaveStatus {
 };
 bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &out);
 
+// S2C 0x81 — requester-local accumulated points `[i32 score]`. This is
+// CRenderState field 0x1C (the direct array word at index 29), not the
+// game-type-specific primary score shown in the first scoreboard column.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+//        CRenderState_GetFieldByIndex @0x52D7D0;
+//        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+struct ScoreDeltaSound {
+	int32_t score = 0;
+};
+bool decode_score_delta_sound(const uint8_t *body, size_t len,
+		ScoreDeltaSound &out);
+
 
 // S2C 0x7B — full player/session info (§5.32). Five NUL-terminated strings, then
 // `[u32 extra]`, then two more NUL-terminated strings. The retail handler caps the

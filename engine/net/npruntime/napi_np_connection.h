@@ -294,6 +294,11 @@ struct SessionReplyState {
 	bool minimap_initial_scan_pending = true;
 	uint8_t minimap_overlay_cooldown = 0;
 	uint8_t minimap_pool1_phase = 0;
+	// Last CRenderState Points value sent to this requester in S2C 0x81.
+	// Retail stores the same signed dword at player-slot word 83 and starts at
+	// zero, so a zero score has no initial packet.
+	// [orig: Server_UpdateCaptureZoneProximity @0x5086E5..0x508724]
+	int32_t score_delta_sound_value = 0;
 
 	// Joiner pose cached from the pre-spawn C2S 0x0C — the host's pose fallback when no World entity
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).

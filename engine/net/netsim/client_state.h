@@ -620,6 +620,16 @@ struct ClientEndRoundStats {
 	uint32_t chunks_seen = 0;
 };
 
+// Requester-local S2C 0x81 sample. `updates` is the consume edge for the
+// presentation/audio owner; `delta` retains retail's wrapping signed
+// current-minus-previous result. The periodic Tab board remains independent.
+// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+struct ClientScoreFeedback {
+	int32_t score = 0;
+	int32_t delta = 0;
+	uint32_t updates = 0;
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -660,6 +670,7 @@ struct ClientState {
 	// [orig: NapiNPClientMsg_0x056 @0x431D10].
 	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
+	ClientScoreFeedback score_feedback;
 	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;

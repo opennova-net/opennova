@@ -111,7 +111,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::PLAYER_NAME,               "player-name",             MsgCoverage::PrinterOnly, "player name (≤64) → server-info struct @0x429B40"},
 		{'S', s2c::FULL_PLAYER_INFO,          "full-player-info",        MsgCoverage::Decoded,     "§5.32 decode_full_player_info"},
 		{'S', s2c::SERVER_CONFIG_STRINGS,     "server-config-strings",   MsgCoverage::Decoded,     "decode_server_config_strings: two cstrings → byte_A86520/byte_A86120 @0x425E20"},
-		{'S', s2c::SCORE_DELTA_SOUND,         "score-delta-sound",       MsgCoverage::PrinterOnly, "[i32 score]; positive delta plays tiered hit-confirm sound @0x42A0B0"},
+		{'S', s2c::SCORE_DELTA_SOUND,         "score-delta-sound",       MsgCoverage::Decoded,     "decode_score_delta_sound — requester-local CRenderState points [i32] @0x5086A0/@0x42A0B0"},
 		// ---- C2S (client -> server) ----
 		{'C', c2s::JOIN,                      "JOIN",                    MsgCoverage::PrinterOnly, "join request"},
 		{'C', c2s::JOIN_FORM_POST,            "join-form-post",          MsgCoverage::PrinterOnly, "§6.4 early-join side-password compare @0x512ED0"},
