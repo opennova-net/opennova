@@ -951,6 +951,11 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 		// Flight-command chain, so a "the helicopter will not move" report can
 		// name WHICH link is dead: the pilot's packed MoveOrder, the staged
 		// cyclic pair, and the altitude target.
+		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT 6.12g):
+		// the integrated speed vs the command names which stage loses the pace.
+		out["mspd"] = ve->veh.speed;
+		out["macc"] = ve->veh.speed_accel;
+		out["mgnd"] = ve->veh.grounded;
 		out["cmd_fwd"] = ve->veh.cmd_speed;
 		out["cmd_lat"] = ve->veh.cmd_lateral_speed;
 		out["alt_tgt"] = ve->veh.net_alt_target;
