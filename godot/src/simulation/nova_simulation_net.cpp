@@ -289,8 +289,7 @@ void Simulation::drain_host_client_gameplay_requests() {
 		std::vector<opennova::ProtocolMessage> replies =
 				opennova::np::dispatch_session_replies(
 						ctx_.config, *local, messages, host_owner_.now_tick,
-						ctx_.np_protocol.connection_list, world_.get(),
-						ctx_.np_protocol.session_seed_id);
+						ctx_.np_protocol.connection_list, world_.get());
 		// A loopback direct reply is already an inner {tag,body} datagram. The
 		// 0x25 handler itself returns no direct reply; its 0x49 is broadcast to
 		// every transport (including this one) inside the shared dispatcher.

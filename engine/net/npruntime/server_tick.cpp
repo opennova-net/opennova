@@ -8,11 +8,13 @@
 
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
+#include <npwire/nw_session_framing.h> // per-player 0x61 tick-seed roll
 #include <npwire/protocol_message.h>
 #include <npwire/session_hello.h>
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/geom.h>                // to_fixed
+#include <world/infantry.h>            // drown death animation selection
 #include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <world/spawn_select.h>         // sorted SpawnZoneList index for capture events
 #include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
@@ -33,6 +35,138 @@ uint8_t pool0_index_byte(uint16_t handle) {
 	if (!h.valid() || h.pool() != 0) return 0xFF;
 	const int slot = h.slot();
 	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
+}
+
+uint8_t death_family_variant(world::World &world, uint8_t base) {
+	return static_cast<uint8_t>(
+			base + ((3u * uint32_t(world.next_prng16())) >> 16));
+}
+
+bool is_retail_flag_type(const world::World &world,
+		world::EntityHandle carried) {
+	const world::Entity *item = world.registry.get(carried);
+	return item != nullptr &&
+			(item->item_id == 4091 || item->item_id == 4093 ||
+			 item->item_id == 4095);
+}
+
+struct PlayerDeathFeed {
+	uint8_t event_type = 22;
+	uint8_t attacker = 0;
+	uint8_t victim = 0;
+	uint8_t aux = 0;
+};
+
+constexpr uint32_t kRetailBreathSeconds = 20;
+constexpr uint32_t kBreathSampleLimit = 4u * kRetailBreathSeconds;
+
+// Classify the one S2C 0x1E record before Match drops the victim's carried
+// objective. The original reads the transient entity+44 cause word in this
+// priority order and consumes it inline. In particular, 4091/4093/4095 are
+// carried flag ItemDefs (STRCND22 "killed flag carrier"), 0x800 is the
+// STRCND08 headshot family, and AMMO_60MM_MORTAR selects STRCND47.
+// The 0x100 branch really is a retail quirk: its CRT rand() is shifted to a
+// 0..127 word and then divided by 21845, so this producer always emits 32 even
+// though the client retains strings for 33/34.
+// [orig: GameEvent_PlayerDeath @0x516DD0, classifier @0x5170E0..0x51724A;
+// GameEvent_BuildPayload @0x51737B]
+PlayerDeathFeed classify_player_death(
+		world::World &world, const world::RoundDeath &death,
+		const world::Entity *victim_entity,
+		const world::Entity *killer_entity,
+		uint32_t underwater_breath_samples) {
+	PlayerDeathFeed out;
+	const uint8_t victim_index = pool0_index_byte(death.victim_handle);
+	if (killer_entity == nullptr) {
+		if (underwater_breath_samples > kBreathSampleLimit)
+			out.event_type = 26;
+		else if ((death.event_flags & 0x200u) != 0u)
+			out.event_type = 23;
+		out.attacker = victim_index;
+		return out;
+	}
+	if ((killer_entity->flags & world::kEntityFlagPlayer) == 0u) {
+		out.event_type = 22;
+		out.attacker = victim_index;
+		return out;
+	}
+	if (death.killer == death.victim) {
+		out.event_type = death_family_variant(world, 1);
+		out.attacker = victim_index;
+		return out;
+	}
+
+	const uint8_t killer_index = pool0_index_byte(death.killer_handle);
+	if (victim_entity != nullptr && victim_entity->team != 0 &&
+			victim_entity->team == killer_entity->team) {
+		out.event_type = death_family_variant(world, 7);
+		out.attacker = killer_index;
+		out.victim = victim_index;
+		out.aux = 0xFF;
+		return out;
+	}
+
+	if (victim_entity != nullptr &&
+			is_retail_flag_type(world, victim_entity->mounted_child)) {
+		out.event_type = 24;
+	} else if ((death.event_flags & 0x100u) != 0u) {
+		out.event_type = 32;
+	} else if ((death.event_flags & 0x800u) != 0u) {
+		out.event_type = death_family_variant(world, 10);
+	} else if ((death.event_flags & 0x400u) != 0u) {
+		out.event_type = death_family_variant(world, 13);
+	} else {
+		const world::AmmoTableEntry *ammo =
+				world.ammo.by_index(death.ammo_index);
+		out.event_type = ammo != nullptr &&
+					world.ammo.index_of("AMMO_60MM_MORTAR") == death.ammo_index
+				? 49u
+				: death_family_variant(world, 4);
+	}
+	out.attacker = killer_index;
+	out.victim = victim_index;
+	out.aux = pool0_index_byte(killer_entity->primary_occupant.packed);
+	return out;
+}
+
+// Retail samples breath every 32 authority ticks, not every frame. While an
+// active living player's eye is strictly below the authored water plane,
+// playerSlot+460 increments; sample 81 selects death_drown and runs the ordinary
+// no-killer death transaction. Dry or dead players clear the counter. The
+// breath global is initialized to 20 and has no other writer in the retail
+// image, so keep it a local invariant rather than another configuration seam.
+// [orig: Server_TickUpdate gate @0x51D8C4..0x51D8D7;
+// Server_UpdateEntityIdleTimers @0x50D770;
+// WacScript_FreeAll initializes dword_C6EAE0=20 @0x4F6381]
+void tick_player_breath(NapiNPServerCtx &ctx, world::World &world) {
+	if ((world.logic_tick & 0x1Fu) != 0u) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
+		world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr || !player->alive || player->health <= 0 ||
+				(player->flags & world::kEntityFlagDead) != 0u ||
+				world.env.water_z == 0) {
+			conn.link.underwater_breath_samples = 0;
+			continue;
+		}
+
+		const int64_t eye_z = int64_t(world::to_fixed(player->position.z)) +
+				int64_t(player->eye_offset_z);
+		if (eye_z >= int64_t(world.env.water_z)) {
+			conn.link.underwater_breath_samples = 0;
+			continue;
+		}
+
+		if (++conn.link.underwater_breath_samples <= kBreathSampleLimit)
+			continue;
+		player->death_anim_state = world::compute_death_anim_state(
+				0, 0, world::death_cause::kDrown);
+		player->health = -1;
+		world::RoundDeath death;
+		death.victim = player->handle;
+		death.victim_handle = player->handle.packed;
+		world.round_sim.deaths.push_back(death);
+	}
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
@@ -197,18 +331,6 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
-// Route the deaths the damage pass raised this tick [orig: health<=0 detection in the
-// entity update -> Entity_CheckAndProcessDeath @0x51b550 -> GameEvent_PlayerDeath
-// @0x516dd0 (players, Flags & 0x100) / the 0x13-only AI leg @0x51b573]. Emits, per
-// death: the S2C 0x13 death notify `[u16 victim][u16 killerSource]`
-// [orig: BuildDeathNotifyPayload @0x5036e0, mask 0x90 = alive+not-host] and — for
-// player victims — the S2C 0x1E kill-feed event (§5.26 8-B body; standard-kill
-// event_type 4: the original picks rand(0-2)+4 @0x517237, a presentation-only variant;
-// zone-flag types (headshot 32 / vehicle 10 / knife 13) wait on the bone-hit port).
-// Deferred (§5.60): 0x52 kill-detail stats, 0x54 death/wounded markers, and
-// 0x32 name broadcast. Core player/team scoring is consumed here by world::Match.
-// A dead HOST player (the loopback's own entity) is queued for the respawn
-// release; a joiner's respawn rides its own deploy request instead.
 // Route placed-device lifetimes created or retired by this authoritative tick.
 // Retail's filtered send excludes the host itself (mask 0x90): the listen
 // client's native World already owns the row, while every remote client needs
@@ -323,9 +445,37 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
+// Drain each transport-free RoundDeath through the one retail player-death
+// transaction: 0x13 remote fan, victim 0x61 seed, victim 0x52 camera, optional
+// 0x1E active-player feed, conditional 0x54 Medic state, scoring, and respawn
+// holds. AI victims stop after the 0x13/scoring leg.
+// [orig: Entity_CheckAndProcessDeath @0x51B550 ->
+// GameEvent_PlayerDeath @0x516DD0]
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		const world::Entity *victim_entity = world.registry.get(d.victim);
+		const world::Entity *killer_entity = world.registry.get(d.killer);
+		const bool victim_is_player = victim_entity != nullptr &&
+				(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
+		NapiNPConnection *victim_connection = nullptr;
+		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+			if (!c.link.owned_entity.valid() ||
+					c.link.owned_entity.packed != d.victim_handle)
+				continue;
+			victim_connection = &c;
+			break;
+		}
+		// Match drops a carried objective, so capture the retail classifier's
+		// mountedChild and player-slot inputs before handing the transaction to
+		// its score ledger.
+		const PlayerDeathFeed feed = victim_is_player
+				? classify_player_death(
+						world, d, victim_entity, killer_entity,
+						victim_connection != nullptr
+								? victim_connection->link.underwater_breath_samples
+								: 0u)
+				: PlayerDeathFeed{};
 		// The authoritative score ledger consumes the same death transaction as
 		// the kill-feed; non-roster actors are ignored by Match.
 		world.match.record_death(world, d.victim, d.killer);
@@ -342,21 +492,9 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			victim->alive = false;
 			victim->damage_state = -1;
 		}
-		// Who controls the victim? Player-controlled == some connection owns it — the
-		// semantic behind the original's Flags & 0x100 check [orig: @0x51b55d].
-		bool victim_is_player = false;
-		NapiNPConnection *victim_connection = nullptr;
-		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-			if (!c.link.owned_entity.valid() || c.link.owned_entity.packed != d.victim_handle)
-				continue;
-			victim_is_player = true;
-			victim_connection = &c;
-			break;
-		}
-		const world::Entity *victim_entity = world.registry.get(d.victim);
 		if (victim_connection != nullptr) {
 			// A normal other-player kill opens the exact 120-second revive
-			// window. Self/environment and knife/vehicle death families clear it.
+			// window. Self/environment and knife/headshot cause bits clear it.
 			// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368]
 			victim_connection->link.downed_revive_seconds =
 					d.killer.valid() && d.killer != d.victim &&
@@ -372,16 +510,15 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			put_u16le(body13, d.killer_handle); // the killerSource stamp [orig: entity+704]
 			std::vector<uint8_t> body1e;
 			if (victim_is_player) {
-				body1e.push_back(4); // standard kill [orig: @0x517237]
-				body1e.push_back(pool0_index_byte(d.killer_handle));
-				body1e.push_back(pool0_index_byte(d.victim_handle));
-				body1e.push_back(0xFF); // aux actor: none
-				const int16_t px = victim_entity
-						? static_cast<int16_t>(std::lround(victim_entity->position.x)) : 0;
-				const int16_t py = victim_entity
-						? static_cast<int16_t>(std::lround(victim_entity->position.y)) : 0;
-				put_u16le(body1e, static_cast<uint16_t>(px));
-				put_u16le(body1e, static_cast<uint16_t>(py));
+				body1e.push_back(feed.event_type);
+				body1e.push_back(feed.attacker);
+				body1e.push_back(feed.victim);
+				body1e.push_back(feed.aux);
+				// Every PlayerDeath call passes literal zero/zero; positions belong
+				// to other 0x1E producers, not this feed family.
+				// [orig: GameEvent_BuildPayload call @0x51737B]
+				put_u16le(body1e, 0);
+				put_u16le(body1e, 0);
 			}
 			// First broadcast the ordinary death record with mask 0x90
 			// (active players, not the listen host).
@@ -389,6 +526,18 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				if (!is_in_match(c) || c.link.transport == nullptr) continue;
 				if (c.link.mode == netsim::TransportMode::Loopback) continue;
 				c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
+			}
+
+			// Retail re-anchors the victim immediately after 0x13 and before the
+			// camera/feed tail. The same roll becomes that slot's fire-freshness
+			// floor. [orig: GameEvent_PlayerDeath @0x516EF4 ->
+			// Server_SendRandomSeedToPlayer @0x5101A0]
+			if (victim_connection != nullptr &&
+					is_in_match(*victim_connection) &&
+					victim_connection->link.transport != nullptr) {
+				victim_connection->link.transport->host_send(
+						s2c::TICK_SEED,
+						Server_RerollPlayerTickSeed(*victim_connection));
 			}
 
 			// Then target the victim with the fixed-point position used by the
@@ -413,12 +562,13 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 						encode_death_camera_target(target));
 			}
 
-			// The kill-feed follows the victim camera target and retains the
-			// same not-host recipient mask as the 0x13 broadcast.
-			if (!body1e.empty()) {
+			// The kill feed uses mask 0x80 (every active player, including the
+			// listen host), unlike 0x13's 0x90 host exclusion. `deathmes=0`
+			// suppresses this record only; seed/camera/medic state still flow.
+			// [orig: GameEvent_PlayerDeath @0x51725F/@0x51734E]
+			if (!body1e.empty() && ctx.config.death_messages != 0u) {
 				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-					if (!is_in_match(c) || c.link.transport == nullptr ||
-							c.link.mode == netsim::TransportMode::Loopback)
+					if (!is_in_match(c) || c.link.transport == nullptr)
 						continue;
 					c.link.transport->host_send(s2c::GAME_EVENT, body1e);
 				}
@@ -924,6 +1074,16 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 
 } // namespace
 
+std::vector<uint8_t> Server_RerollPlayerTickSeed(
+		NapiNPConnection &connection) {
+	connection.tick_seed =
+			((make_random_session_u32() & 0xFEu) + 1u) << 16;
+	std::vector<uint8_t> body;
+	body.reserve(4);
+	put_u32le(body, connection.tick_seed);
+	return body;
+}
+
 bool Server_StageHostDisconnect(
 		NapiNPConnection &connection, const DisconnectEvent &event) {
 	return stage_host_disconnect(connection, event);
@@ -995,6 +1155,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 		world.cached.humans = humans;
 	}
+
+	// The sampled breath state belongs to the authoritative player slot and
+	// runs at the same pre-entity-update point as retail.
+	tick_player_breath(ctx, world);
 
 	// (2) one logic tick (the host is always authority here). WAC/BMS/AI advance the world.
 	// [D-NET-123] Server_TickUpdate OWNS this logic tick — the inverse of the legacy seam, where the

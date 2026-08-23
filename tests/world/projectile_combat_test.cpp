@@ -443,7 +443,16 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         r.fire_and_tick();
         CHECK(r.world.round_sim.hits.size() == 1);
         CHECK(r.world.round_sim.hits[0].damage == 1860); // ordinary critical zone: x3
-        CHECK((r.target_entity()->flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0); // cause is not an Entity Flags bit
+        CHECK(r.world.round_sim.deaths.empty());
+    }
+    {
+        PosedDamageRig r(13);
+        r.target_entity()->health = 1000;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.deaths.size() == 1);
+        CHECK((r.world.round_sim.deaths[0].event_flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
     }
 
     // ItemDefAttrib 0x200 selects the retail section-code switch. These four
@@ -456,7 +465,7 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         CHECK(r.world.round_sim.hits.size() == 1);
         CHECK(r.world.round_sim.hits[0].damage == 3720); // 620 * 6.0
         CHECK(r.target_entity()->health == 1280);
-        CHECK((r.target_entity()->flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
     }
 
     // A walk crossing TWO spheres splits the channels: ray[31] keeps the first/
@@ -468,7 +477,7 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         r.fire_and_tick();
         CHECK(r.world.round_sim.hits.size() == 1);
         CHECK(r.world.round_sim.hits[0].damage == 3720); // seat code 7 via ray[31]
-        CHECK((r.target_entity()->flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
     }
     // The normal-infantry table keeps reading ray[32] (@0x4ec9bf): final zone 4
     // takes 1.25x even though the primary bone 7 sits in the 1.0x band.

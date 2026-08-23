@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <vector>
+
 #include <npwire/protocol_message.h> // JO_ENGINE_TICK_RATE
 
 #include <npwire/session_hello.h> // DisconnectEvent
@@ -29,6 +32,13 @@ bool Server_StageHostDisconnect(
 		NapiNPConnection &connection, const DisconnectEvent &event);
 bool Server_StageHostPunt(
 		NapiNPConnection &connection, uint32_t mismatch_type);
+
+// Re-roll one player's retained fire-freshness/tick anchor and return its
+// exact 4-byte S2C 0x61 body. Join, death, and deployment all call this one
+// transaction so the connection field and wire value cannot diverge.
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0]
+std::vector<uint8_t> Server_RerollPlayerTickSeed(
+		NapiNPConnection &connection);
 
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine
 // tick (the original 62 Hz cadence). Walks the SINGLE-OWNER connection table

@@ -131,6 +131,15 @@ struct Connection {
 	bool auto_medic_enabled = true;     // inverse playerSlot+372
 	bool medic_request_active = false;  // playerSlot+89856
 
+	// Number of 32-host-tick samples for which the player's eye
+	// (Position.Z + CameraOffset.Z) has remained strictly below the authored
+	// water plane. Sample 81 (4 * the fixed retail breath value 20 + 1) kills
+	// the player; GameEvent_PlayerDeath reads the still-live value to select
+	// drowned event 26. Dry/dead samples clear it.
+	// [orig: playerSlot+460 in Server_UpdateEntityIdleTimers @0x50D770;
+	// GameEvent_PlayerDeath @0x5172EC..0x51732A]
+	uint32_t underwater_breath_samples = 0;
+
 	// The authority tick of the last completed deployment. Validity is explicit
 	// because tick zero is a real stamp and unsigned subtraction preserves the
 	// original counter's wrap behavior. A death within 620 ticks forces the

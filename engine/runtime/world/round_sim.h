@@ -309,10 +309,13 @@ struct RoundDeath {
     uint16_t victim_handle = 0xFFFF;
     uint16_t killer_handle = 0xFFFF;
     uint8_t adm_index = 0;
-	// GameEvent_PlayerDeath suppresses the revive window when either 0x400 or
-	// 0x800 is set (knife/vehicle death families). Current ballistic/blast
-	// producers are ordinary zero-flag deaths; later cause classifiers can stamp
-	// this transport-free event without changing the net layer.
+	// AmmoDef identity used by GameEvent_PlayerDeath's exact special-ammo
+	// classifier. -1 means the death has no ammo source.
+	int32_t ammo_index = -1;
+	// GameEvent_PlayerDeath's entity+44 cause bits. 0x100 is the same-bullet
+	// multi-kill family, 0x400 knife, and 0x800 critical/headshot. This is event
+	// state, deliberately distinct from Entity::flags (entity+36). The revive
+	// window is suppressed by either 0x400 or 0x800.
 	uint32_t event_flags = 0;
 };
 

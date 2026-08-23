@@ -7366,31 +7366,50 @@ weaponDef+46, LINEAR distance falloff (blast radius), separate infantry (type 3)
 vehicle section paths, kill credit via `Score_ProcessKillEvent`.
 
 **Death detection + the broadcast family** (every emit goes through
-`NapiNPServer_SendFiltered @ 0x4C87E0`; mask 0x90 = alive + not-host):
+`NapiNPServer_SendFiltered @ 0x4C87E0`; the masks differ per record below):
 
 - Per-tick `Entity_UpdateInfantryPlayerBody` / `Entity_UpdateInfantryAI` detect health ≤ 0
   → `Entity_CheckAndProcessDeath @ 0x51B550`: `Flags & 0x100` (player-controlled) →
   `GameEvent_PlayerDeath @ 0x516DD0`; else (AI) → S2C 0x13 death notify
   (`BuildDeathNotifyPayload`, mask 0x90) + scoring.
+- `Server_UpdateEntityIdleTimers @ 0x50D770` is the authority's drowning producer despite
+  its old generic name. `Server_TickUpdate` calls it only when `current_tick & 0x1F == 0`
+  (`@0x51D8C4..0x51D8D7`). For each active, living player it compares
+  `Position.Z + CameraOffset.Z` (entity +12 plus +0x74) strictly below
+  `Env_WaterHeightFixed`; wet samples increment playerSlot+460, while a dry/dead sample
+  clears it. The fixed breath global is initialized to 20 at `WacScript_FreeAll @0x4F6381`.
+  Sample `4*20+1` selects death animation cause 5 (`death_drown` 175), writes health -1,
+  and invokes the ordinary player-death callback. This is about 41.8 seconds at 62 Hz,
+  because the counter advances once per 32 host ticks, not every tick.
 - `GameEvent_PlayerDeath @ 0x516DD0` [authority-gated at entry]: vehicle detach, clears
   every pool-0 entity's live-target (+92) that references the victim (the §5.9.1 0x40-word
   source), S2C 0x13 (`@0x516e9a`), respawn timer (620-tick recent-spawn rule /
-  `g_respawn_timeout`, floor 3, slots +360/+364), random-seed resend, scoring
+  `g_respawn_timeout`, floor 3, slots +360/+364), victim-only S2C 0x61 random-seed
+  resend (`Server_SendRandomSeedToPlayer @ 0x5101A0`), scoring
   accumulators (`Score_AccumulateKillByEntityType` ×2 + weapon stats), kill-type
-  classification for the feed — suicide rand(0-2)+1, team kill rand+7, explosive weapon
-  type_id 4091/4093/4095 → 24, special 49, HEADSHOT (flag 0x100 from CalcImpactDamage) →
-  rand+32, vehicle kill (flag 0x800) → rand+10, knife (flag 0x400) → rand+13, standard
-  rand+4, drowned 22, crashed (0x200) 23, environment 26 — then exactly one
+  classification for the feed — suicide `1..3`, team kill `7..9`; killing a carrier whose
+  `mountedChild` ItemDef type is 4091/4093/4095 → event 24 (`STRCND22`, “killed flag
+  carrier”); entity+44 bit 0x100 → event 32, the same-bullet/multiple-kill branch
+  (`STRCND36`; its `rand() >> 8` value is only 0..127 and division by 21845 makes the
+  nominal 33/34 variants unreachable at this producer, `@0x51718A..0x5171C7`); bit
+  0x800 → headshot/critical `10..12`; bit 0x400 → knife `13..15`; last AmmoDef equal to
+  the `AMMO_60MM_MORTAR` slot resolved by `AmmoDef_LoadAll @ 0x40B0B0` → 49; standard
+  `4..6`; non-player killer 22. With no killer, playerSlot+460 above `4*20` selects
+  drowned event 26 (`STRCND29`); otherwise entity+44 bit 0x200 selects crash event 23
+  (and is cleared), or the ordinary self-death event is 22 — then exactly one
   victim-targeted S2C 0x52 (`NetPacket_WriteThreeInt32s @0x506CB0`: the killer's fixed XYZ when
-  present, otherwise the victim's), S2C 0x1E (`GameEvent_BuildPayload`: event_type +
-  three pool indices + position — the §5.26 kill feed), and conditional S2C 0x54
+  present, otherwise the victim's), S2C 0x1E (`GameEvent_BuildPayload @0x51737B`:
+  event_type + three pool indices + literal zero/zero position — the §5.26 kill feed),
+  and conditional S2C 0x54
   recipient groups (`NetPacket_WriteEntityHandleWithByte @0x507030`). The non-self, non-0xC00
   death gate arms playerSlot+368 to exactly 120 seconds. The `send_mask 0x580` group means
   active/alive + same team + `AnimMap_IsSlotActive(playerClass, Medic)`; if playerSlot+372 is
   zero (Auto Medic), that group receives +368. If +372 is nonzero (manual), the group first
   receives zero and the victim alone receives +368. S2C 0x54 is also emitted
   by `GameEvent_RevivePlayer @ 0x517DB4` and `Server_BroadcastMedicRequest @ 0x515390`,
-  D-NET-108).
+  D-NET-108). Wire order is 0x13 (mask 0x90, host excluded) → victim 0x61 → victim
+  0x52 → 0x1E (mask 0x80, host included) → 0x54. In-session `deathmes=0` suppresses
+  only 0x1E (`@0x51725F`); it does not suppress the other death records.
 - `Server_KillPlayerAndNotify @ 0x519E00` [authority]: marks the slot dead (+100567;
   entity+292 = −1 — the exact flag `Projectile_ProcessDamageOnTarget` checks), calls
   `Server_ProcessPlayerDeath`, optional S2C 0x32 sub-type 5 carrying the player NAME.
