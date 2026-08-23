@@ -265,18 +265,11 @@ const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
 }
 
 bool world_has_spawn_zone(const World &world) {
-    // [orig: SpawnZoneList_GetCount() > 0 — the join-time bit4 gate @0x51a6f2 and the
-    //  0x0F game_flags bit0 @0x502da7. The list registers alive def-attrib-0x40000
-    //  entities from pools 2+1 (Entity_BuildSpawnZoneList @0x43EAE0 is the client-side
-    //  twin of the same scan).]
-    bool any = false;
-    world.registry.for_each([&](const Entity &e) {
-        if (any) return;
-        const int pool = e.handle.pool();
-        if (pool != 1 && pool != 2) return;
-        if (e.is_spawn_point && e.alive) any = true;
-    });
-    return any;
+    // SpawnZoneList membership has no alive filter. Use the canonical registry
+    // builder so join, 0x0F and deploy gameplay cannot acquire different lists.
+    // [orig: SpawnZoneList_GetCount @0x43B950;
+    // Entity_BuildSpawnZoneList @0x43EAE0]
+    return !build_spawn_zone_list(world).empty();
 }
 
 SpawnZoneRegistry build_spawn_zone_list(const World &world) {
@@ -341,6 +334,20 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle) 
     for (size_t i = 0; i < registry.entries.size(); ++i)
         if (registry.entries[i].packed == handle.packed) return static_cast<int>(i);
     return -1;
+}
+
+bool team_has_available_spawn_zone(const World &world, uint8_t team) {
+    // Despite the original helper's reverse-engineered name, its loop is over
+    // SpawnZoneList and contains no player/alive census. +538 is zone number;
+    // +540 is 16.16 control. [orig: Entity_HasAliveEntityOfTeam @0x4FC7B0]
+    const SpawnZoneRegistry registry = build_spawn_zone_list(world);
+    for (const EntityHandle handle : registry.entries) {
+        const Entity *zone = world.registry.get(handle);
+        if (zone == nullptr || zone->team != team) continue;
+        if (zone->zone_number == 0 || zone->zone_control >= 0x10000)
+            return true;
+    }
+    return false;
 }
 
 uint16_t SpawnWaveEntry::requester_countdown(EntityHandle requester) const {

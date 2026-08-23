@@ -382,6 +382,7 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_eq(int(options.get("capture_speed_setting", -1)), 1)
 	assert_eq(int(options.get("spawn_wave_time_base", -1)), 0)
 	assert_eq(int(options.get("spawn_wave_time_zone", -1)), 10)
+	assert_eq(int(options.get("default_spawn_requires_no_team_zone", -1)), 0)
 	assert_eq(int(options.get("num_teams", -1)), 2)
 	assert_eq(int(options.get("respawn_timeout", -1)), 5)
 	assert_eq(int(options.get("start_delay", -1)), 0)

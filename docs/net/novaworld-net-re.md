@@ -3499,7 +3499,7 @@ player+88664][u16 pool3Count + {u16 id, u16 val, u8}× when player+354 == 1][u16
 | 0 | i32 | sessionTick | → `dword_A82368` |
 | 4 | i32 ×3 | posX/Y/Z | local-player spawn (16.16); → entity+4/8/12 when `!is_authority` |
 | 16 | i16 ×3 | yaw/pitch/roll | each `<< 16` to 16.16 → entity Yaw/Pitch/Roll |
-| 22 | u8 | gameFlags | bit0 = spawn zones exist (server: `SpawnZoneList_GetCount() != 0` @ 0x502da7) → sets `g_deploy_screen_active @ 0xA860DC` ONCE (gated on `g_death_screen_active @ 0xA860EC == 0`) — momentary without the 0x0A flags1-bit1 hold (§5.9/D-NET-156); bit1 = `g_respawn_requires_team_dead && in_session` → `A860DD`; bit2 → `A860DE`; bit3 = ceasefire |
+| 22 | u8 | gameFlags | bit0 = spawn zones exist (server: `SpawnZoneList_GetCount() != 0` @ 0x502da7) → sets `g_deploy_screen_active @ 0xA860DC` ONCE (gated on `g_death_screen_active @ 0xA860EC == 0`) — momentary without the 0x0A flags1-bit1 hold (§5.9/D-NET-156); bit1 = `g_respawn_requires_team_dead && in_session` → `A860DD`. The global name is misleading: cfg key `nodefaultspawnpoints` controls the target-less spawn-zone availability rule described in §5.61, not a living-player census; bit2 → `A860DE`; bit3 = ceasefire |
 | 23 | i32 ×128 | slotTypeScores | **FIXED 128-entry block** — the **per-slot-type SCORE table** (client outTable @ 0xB75FE8; readers `Entity_GetScoreValueBySlotType` / `WeaponSlot_*`; server source player+88664), NOT zone data — zeros are benign for the deploy picker (2026-07-03 correction of the "teamScores" reading). Fills `[outTable, data)` @ 0x42e324 (512 B; the bulk of the body) |
 | 535 | u16 | waypointCount | |
 | 537 | … | waypointRecords | `{ u16 slotId, u16 nameId, u8 pad }` × waypointCount — **present ONLY for a waypoint gametype** `(g_GameType & 0xFFFDFFFF) == 0x10020`; that gate is **not on the wire** (off-wire, like the §5.9 0x0A objective block), so the decoder takes the `is_waypoint_gametype` hint. **First witnessed in probe3** (Co-op `g_GameType 0x30020`): `waypointCount=4` (slots p3/6-9), `teamNameCount=0`; byte-exact once the hint is supplied (D-NET-75). TDM/A&S send count 0 |
@@ -7788,7 +7788,10 @@ target (`ItemDef.type == 1` + attrib `0x40000`) must be alive with a free seat
 (`Entity_FindBestSeatSlot @ 0x4351F0`; the deploy then latches `entity+44 |= 0x4000` and
 boards the seat after the reset), a NUMBERED zone requires `team match && control ≥ 0x10000`
 (a contested zone stops accepting spawns), and the config `g_respawn_requires_team_dead
-@ 0x24D2260` denies a target-less respawn while the team still has a live entity. The
+@ 0x24D2260` (retail cfg key `nodefaultspawnpoints`) denies a target-less respawn while
+`Entity_HasAliveEntityOfTeam @0x4FC7B0` finds a same-team SpawnZoneList entry whose
+zone number is zero or whose control is at least `0x10000`. The helper/global names are
+misleading: neither path counts living players. The
 requester must be dead (`entity+36 & 2`) or respawn-flagged (`+89912 & 0x10`)
 (@ 0x519cc7 — the dead-or-pending gate).
 
@@ -8090,9 +8093,11 @@ zone-event attacker bytes (`SpawnZoneList_IndexOf @ 0x43B990`).
 `apply_session_settings_to_globals @ 0x551500 @ 0x551D3E..0x551DBD`): `g_capture_duration
 @ 0x24D2248` (un-numbered flag capture time, wire `limit`), `g_capture_speed_setting
 @ 0x24D2254`, `g_spawn_wave_time_base @ 0x24D224C`, `g_spawn_wave_time_zone @ 0x24D2250`,
-`g_respawn_requires_team_dead @ 0x24D2260`. `Config_SetDefaults @0x54D030` writes takeover
-duration 15, takeover-speed setting 1 (base 24), base-wave time 0, and zone-wave time 10;
-the runtime copy above publishes those exact values.
+`g_respawn_requires_team_dead @ 0x24D2260`. `Config_SetDefaults @0x54D030/@0x54D34C`
+writes takeover duration 15, takeover-speed setting 1 (base 24), base-wave time 0,
+zone-wave time 10, and the misleadingly named spawn restriction 0 (disabled).
+`Config_ParseSettingsLine @0x550C73` reads that last value from
+`nodefaultspawnpoints`; the runtime copy above publishes those exact values.
 
 **Follow-ups (open):** the userpoint NAME used for spawn offsets (`off_7CF9C4` is runtime-set —
 static bytes are code);

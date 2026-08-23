@@ -252,6 +252,8 @@ int main() {
 			game_rules::kDefaultSpawnWaveTimeBase;
 	host_cfg.config.spawn_wave_time_zone =
 			game_rules::kDefaultSpawnWaveTimeZone;
+	host_cfg.config.default_spawn_requires_no_team_zone =
+			game_rules::kDefaultSpawnRequiresNoTeamZone;
 	host_cfg.config.num_teams = static_cast<uint8_t>(game_rules::kDefaultNumTeams);
 	host_cfg.config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
 	host_cfg.config.start_delay = game_rules::kDefaultStartDelay;
@@ -279,7 +281,10 @@ int main() {
 					host_cfg.config.spawn_wave_time_base) ||
 			!apply_env_i32(
 					"NW_SPAWN_WAVE_TIME_ZONE",
-					host_cfg.config.spawn_wave_time_zone))
+					host_cfg.config.spawn_wave_time_zone) ||
+			!apply_env_u32(
+					"NW_DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE",
+					host_cfg.config.default_spawn_requires_no_team_zone))
 		return 2;
 	if (configured_teams > 0xFFu) {
 		std::fprintf(stderr, "nw-server: NW_NUM_TEAMS must fit a uint8\n");

@@ -28,6 +28,7 @@ the strays, and new hooks land here in the same PR that adds them.
 | `NW_NUM_TEAMS=<1..255>` | active-team count for retail's multi-team modes (normally 2 or 4) |
 | `NW_CAPTURE_DURATION_SECONDS=<i32>` | un-numbered takeover duration; retail default 15, values ≤0 select the instant branch `[orig: Config_SetDefaults @0x54D030; Server_UpdateCaptureZones @0x53B8F0]` |
 | `NW_CAPTURE_SPEED_SETTING=<i32>` | numbered-zone secure-speed selector; retail default 1 (bases: fallback 12, 1→24, 2→48) `[orig: Config_SetDefaults @0x54D030; calculate_capture_zone_control_delta @0x501120]` |
+| `NW_DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE=<u32>` | nonzero enables retail cfg `nodefaultspawnpoints`: target-less deployment is denied while the team owns an unnumbered or fully controlled numbered spawn zone `[orig: Server_ProcessClientRequestRespawn @0x519C8E; Entity_HasAliveEntityOfTeam @0x4FC7B0]` |
 
 ## Diagnostics (all off by default)
 

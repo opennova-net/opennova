@@ -356,6 +356,28 @@ int main() {
         CHECK(w.spawn_cycle_counter == 17);
     }
 
+	// --- SpawnZoneList membership, and the target-less respawn restriction's
+	//     exact team-zone predicate. The original helper does not count living
+	//     players (despite its provisional reverse-engineered name): an
+	//     unnumbered same-team zone always qualifies, while a numbered one must
+	//     have full control. Registry membership itself has no alive filter.
+	// [orig: Entity_BuildSpawnZoneList @0x43EAE0;
+	//  Entity_HasAliveEntityOfTeam @0x4FC7B0]
+	{
+		World w;
+		w.registry.configure_pool(2, 4);
+		const EntityHandle base = spawn_zone(w, 2, 1, 0);
+		w.registry.get(base)->alive = false;
+		const EntityHandle numbered = spawn_zone(w, 2, 2, 1, 0xFFFF);
+
+		CHECK(world_has_spawn_zone(w));
+		CHECK(team_has_available_spawn_zone(w, 1));
+		CHECK(!team_has_available_spawn_zone(w, 2));
+		w.registry.get(numbered)->zone_control = 0x10000;
+		CHECK(team_has_available_spawn_zone(w, 2));
+		CHECK(!team_has_available_spawn_zone(w, 3));
+	}
+
 	// --- SpawnWaveList_BuildFromMission: retail defaults put NUMBERED zones on
 	//     the 10-second list while an unnumbered base remains immediate. A zero
 	//     numbered-zone option falls back to the nonzero base option.

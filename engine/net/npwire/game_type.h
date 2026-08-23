@@ -196,6 +196,13 @@ inline constexpr int32_t kDefaultCaptureSpeedSetting = 1;
 // dword_2550B80=10; apply_session_settings_to_globals @0x551D3E..0x551D55]
 inline constexpr int32_t kDefaultSpawnWaveTimeBase = 0;
 inline constexpr int32_t kDefaultSpawnWaveTimeZone = 10;
+// Retail names the parsed setting `nodefaultspawnpoints` and the live global
+// g_respawn_requires_team_dead, but the gameplay predicate checks spawn-zone
+// availability, not living players: Default Spawn is denied while the team has
+// an unnumbered zone or a fully controlled numbered zone.
+// [orig: Config_SetDefaults @0x54D34C writes dword_2550B94=0;
+// Config_ParseSettingsLine @0x550C73; Entity_HasAliveEntityOfTeam @0x4FC7B0]
+inline constexpr uint32_t kDefaultSpawnRequiresNoTeamZone = 0;
 // [orig: Config_SetDefaults @0x54D030 writes g_MpNumTeams = 2]
 inline constexpr uint32_t kDefaultNumTeams = 2;
 inline constexpr uint32_t kDefaultRespawnTimeout = 5;
