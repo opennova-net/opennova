@@ -1,6 +1,7 @@
 // Observable projectile consequence tests through RoundSim's public seam:
 // arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -21,8 +22,15 @@ int failures = 0;
         }                                                                              \
     } while (0)
 
-struct Rig {
-    World world;
+// World is large and has stable identity. Keeping it at its final heap address
+// also prevents a function with several lifetime-disjoint rigs from exhausting
+// MSVC's Debug stack frame.
+struct HeapWorldFixture {
+    std::unique_ptr<World> world_owner = std::make_unique<World>();
+    World &world = *world_owner;
+};
+
+struct Rig : HeapWorldFixture {
     EntityHandle shooter;
     EntityHandle target;
 
@@ -83,8 +91,7 @@ struct Rig {
 // projectile ray; every other section is translated far off-axis. This lets the
 // public RoundSim seam exercise the exact retail section/zone code without
 // reaching into the private damage helper.
-struct PosedDamageRig {
-    World world;
+struct PosedDamageRig : HeapWorldFixture {
     CollisionWorld collision;
     EntityHandle shooter;
     EntityHandle target;
