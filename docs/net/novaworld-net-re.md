@@ -7808,10 +7808,12 @@ overwrite the selected pose; successful deploy dispatch fences all pre-release s
 `coop_two_sim_test.gd` pins both the live initial-pick hold and the death/stale-positive boundary
 over real loopback UDP.
 
-Reimpl (2026-07-24, the deploy-screen slice): `world::build_spawn_zone_list` /
-`spawn_zone_index_of` (engine/runtime/world/spawn_select — the sorted registry + true-min/max
-AABB; the both-zero-key address tie is modeled as collect order, documented in the
-header); `JoinerConnection::set_player_paced_deployment` + `frame_deployment_pick`
+Reimpl (2026-07-24, the deploy-screen slice; address tie completed 2026-08-22):
+`world::build_spawn_zone_list` / `spawn_zone_index_of`
+(engine/runtime/world/spawn_select — the sorted registry + true-min/max AABB; the
+both-zero-key address tie uses retail's fixed contiguous pool offsets from
+`EntityPool_Allocate @0x442130`: pool 1 precedes pool 2);
+`JoinerConnection::set_player_paced_deployment` + `frame_deployment_pick`
 (the AwaitDeployPick stage — the shell paces the pick, re-picks allowed, headless
 callers keep the auto parameter-0 default) + `frame_loadout_resubmit` (the armory
 ACCEPT re-send) with `ClientRuntime` queueing; `Simulation.get_deploy_spawn_zones`

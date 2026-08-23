@@ -86,11 +86,12 @@ bool world_has_spawn_zone(const World &world);
 //   ((type==1 ? 2 : type==32 ? 1 : 0) << 16) | ((unitType & 0xFF) << 8) | (zone# & 0x1F)
 // so ground zones lead and vehicles trail. Equal nonzero keys keep collect
 // order (the original's bubble sort is stable there); BOTH-ZERO keys tie-break
-// by entity ADDRESS in the original (allocation order across pools) — modeled
-// here as collect order, a documented approximation that only reorders
-// zero-key zones split across pools.
-// [orig: Entity_BuildSpawnZoneList @0x43EAE0 (collect @0x43eb2e/@0x43ebad, AABB
-//  @0x43eb59.., sort keys @0x43ec9b/@0x43ecb6, zero-key address tie @0x43ecc6);
+// by entity ADDRESS. Retail's single contiguous pool allocation fixes pool 1
+// at +232420 (stride 1360) and pool 2 at +1865416 (stride 812), so this order
+// is reproduced without depending on the reimplementation allocator.
+// [orig: EntityPool_Allocate @0x442130; Entity_BuildSpawnZoneList @0x43EAE0
+//  (collect @0x43eb2e/@0x43ebad, AABB @0x43eb59.., sort keys
+//  @0x43ec9b/@0x43ecb6, zero-key address tie @0x43ecc6);
 //  SpawnZoneList_IndexOf @0x43B990]
 struct SpawnZoneRegistry {
     std::vector<EntityHandle> entries;

@@ -289,6 +289,7 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world) {
     struct Row {
         EntityHandle handle;
         int32_t key = 0;
+        uint32_t retail_address = 0;
     };
     std::vector<Row> rows;
     auto collect_pool = [&](int pool) {
@@ -303,6 +304,13 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world) {
             const uint8_t unit_type =
                     traits ? static_cast<uint8_t>(traits->unit_type) : 0;
             row.key = (type_priority << 16) | (unit_type << 8) | (e.zone_number & 0x1F);
+            // Retail owns every pool in one contiguous allocation. Recreate
+            // the two relevant pointer offsets so the raw-address fallback is
+            // deterministic without exposing host allocator addresses.
+            // [orig: EntityPool_Allocate @0x442130; compare @0x43ECC6]
+            row.retail_address = pool == 1
+                    ? 232420u + static_cast<uint32_t>(e.handle.slot()) * 1360u
+                    : 1865416u + static_cast<uint32_t>(e.handle.slot()) * 812u;
             rows.push_back(row);
             const int32_t x = to_fixed(e.position.x);
             const int32_t y = to_fixed(e.position.y);
@@ -314,11 +322,15 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world) {
     };
     collect_pool(2);
     collect_pool(1);
-    // Ascending stable sort = the original bubble sort's behavior for nonzero keys.
-    // The original's BOTH-ZERO-key address tie (@0x43ecc6) is modeled as collect
-    // order (see the header note).
+    // Ascending stable sort = the original bubble sort's behavior. Equal
+    // nonzero keys keep collection order; a both-zero pair compares the exact
+    // virtual address within retail's contiguous entity-pool allocation.
     std::stable_sort(rows.begin(), rows.end(),
-                     [](const Row &a, const Row &b) { return a.key < b.key; });
+                     [](const Row &a, const Row &b) {
+                         if (a.key != b.key) return a.key < b.key;
+                         return a.key == 0 &&
+                                a.retail_address < b.retail_address;
+                     });
     reg.entries.reserve(rows.size());
     for (const Row &row : rows) reg.entries.push_back(row.handle);
     return reg;
