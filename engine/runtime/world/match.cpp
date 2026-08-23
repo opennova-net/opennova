@@ -528,12 +528,13 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
                                 player_handle,
                                 flag_handle,
-                                flag->position,
+                                carrier->position,
                                 flag->position,
                                 static_cast<uint8_t>(flag->flags),
                                 player_handle,
                                 flag->ground_target,
-                                false});
+                                false,
+                                static_cast<uint16_t>(flag->item_id)});
 }
 
 void Match::return_flag_home(World &world, EntityHandle flag_handle,
@@ -560,7 +561,8 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
                                 static_cast<uint8_t>(flag->flags),
                                 EntityHandle{},
                                 flag->ground_target,
-                                false});
+                                false,
+                                static_cast<uint16_t>(flag->item_id)});
 }
 
 void Match::record_flag_save(World &world, EntityHandle player_handle,
@@ -615,7 +617,8 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
                              flags_before,
                              EntityHandle{},
                              flag->ground_target,
-                             remove};
+                             remove,
+                             static_cast<uint16_t>(flag->item_id)};
     if (remove) {
         world.registry.despawn(flag_handle);
     } else {
@@ -675,7 +678,8 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
                                 static_cast<uint8_t>(flag->flags),
                                 EntityHandle{},
                                 flag->ground_target,
-                                false});
+                                false,
+                                static_cast<uint16_t>(flag->item_id)});
 }
 
 void Match::record_death(World &world, EntityHandle victim_handle,

@@ -396,31 +396,60 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 // Drain the match domain's objective transitions through retail's two wire
 // lanes. Pickup/drop/save/return and non-CTF capture publish the complete 19-B
 // flag state (0x2F). A CTF capture retires the captured flag with 0x12 instead.
-// Save/capture also precede that state mutation with the 8-B 0x1E event record.
+// Pickup/save/capture/timeout-return also precede that state mutation with the
+// corresponding 8-B 0x1E event record.
 // The event and 0x2F state use active-player mask 0x80 (host included); CTF's
 // following 0x12 removal uses 0x90 (host excluded).
-// [orig: Entity_AttachToVehicle @0x43C130 -> Server_SendDestructibleDeathPacket
-// @0x50D900; Server_BroadcastEntityDeathEvent @0x517A90 (save event 0x15 then
-// 0x2F); Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then
-// CTF remove / other-mode reset); Server_RemoveEntityAndNotify @0x50A270]
+// [orig: Entity_AttachToVehicle @0x43C130 -> Server_HandleEntityDeath @0x517460
+// (pickup event 0x14) -> Server_SendDestructibleDeathPacket @0x50D900;
+// Server_BroadcastEntityDeathEvent @0x517A90 (save event 0x15 then 0x2F);
+// Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then CTF
+// remove / other-mode reset); Entity_UpdateIdleCheck @0x408430 ->
+// Server_BroadcastOverlayDeathEvent @0x50F5A0 (return 0x23/0x24/0x25 then 0x2F);
+// Server_RemoveEntityAndNotify @0x50A270]
 void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 	std::vector<world::MatchGameplayEvent> events =
 			world.match.drain_gameplay_events();
 	if (!ctx.is_in_session || events.empty()) return;
 
 	for (const world::MatchGameplayEvent &event : events) {
+		uint8_t feed_type = 0;
+		uint8_t feed_actor = 0xFF;
+		world::Vec3 feed_position{};
+		switch (event.kind) {
+		case world::MatchGameplayEventKind::FlagPickup:
+			feed_type = 0x14;
+			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_position = event.position;
+			break;
+		case world::MatchGameplayEventKind::FlagSave:
+			feed_type = 0x15;
+			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_position = event.position;
+			break;
+		case world::MatchGameplayEventKind::FlagCapture:
+			feed_type = 0x13;
+			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_position = event.position;
+			break;
+		case world::MatchGameplayEventKind::FlagReturn:
+			if (event.objective_item_id == 4091) feed_type = 0x23;
+			else if (event.objective_item_id == 4093) feed_type = 0x24;
+			else if (event.objective_item_id == 4095) feed_type = 0x25;
+			break;
+		case world::MatchGameplayEventKind::FlagDrop:
+			break;
+		}
 		std::vector<uint8_t> feed;
-		if (event.kind == world::MatchGameplayEventKind::FlagCapture ||
-				event.kind == world::MatchGameplayEventKind::FlagSave) {
-			feed.push_back(event.kind == world::MatchGameplayEventKind::FlagCapture
-					? uint8_t{0x13} : uint8_t{0x15});
-			feed.push_back(pool0_index_byte(event.actor.packed));
+		if (feed_type != 0) {
+			feed.push_back(feed_type);
+			feed.push_back(feed_actor);
 			feed.push_back(0xFF);
 			feed.push_back(0xFF);
-			put_u16le(feed, static_cast<uint16_t>(static_cast<int16_t>(
-					std::lround(event.position.x))));
-			put_u16le(feed, static_cast<uint16_t>(static_cast<int16_t>(
-					std::lround(event.position.y))));
+			put_u16le(feed, static_cast<uint16_t>(
+					static_cast<uint32_t>(world::to_fixed(feed_position.x)) >> 16));
+			put_u16le(feed, static_cast<uint16_t>(
+					static_cast<uint32_t>(world::to_fixed(feed_position.y)) >> 16));
 		}
 
 		std::vector<uint8_t> state_body;
