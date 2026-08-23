@@ -3,97 +3,247 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
+#include <cstdlib>
 #include <vector>
 
 #include "world/angle.h"
 #include "world/collision.h"
-#include "world/entity.h" // Entity, EntityKind
+#include "world/entity.h" // Entity
+#include "world/game_type.h"
 #include "world/world.h"  // World, EntityRegistry registry
 #include "world/zone_chain.h"
 
 namespace opennova::world {
 
-SpawnPointResult select_player_spawn(const World &world, const int32_t *types, size_t count) {
-    // One pass: bucket every start-family marker (by type) and collect the "avoid" set (live enemy
-    // organics). [orig: Entity_FindBestSpawnPoint @0x50ccc0 scores pool-3 markers against pool-0
-    // entities flagged 0x100; build_entity_position_list @0x509660 enumerates the 60xx start family.]
-    struct Marker {
-        int32_t type;
-        Vec3 pos;
-        int16_t yaw;
-        int16_t pitch;
-        int16_t roll;
-    };
-    std::vector<Marker> markers;
-    std::vector<Vec3> avoid;
-    // The avoid set is every live Organic — which INCLUDES already-spawned players (they are
-    // Organic). This is the witnessed spread mechanism (D-NET-115): the original scores markers by
-    // nearest distance to any pool-0 entity with Flags & 0x100, and that flagged set contains the
-    // players already added, so the second player to spawn scores the first player's marker low and
-    // a different marker wins. With multiple start markers, players spread; with exactly ONE marker,
-    // every player lands on it — single-marker stacking is FAITHFUL (the original has no further
-    // push-apart). [orig: Entity_FindBestSpawnPoint @0x50ccc0]
-    world.registry.for_each([&](const Entity &e) {
-        if (e.kind == EntityKind::Marker) {
-            markers.push_back({e.item_id, e.position, e.yaw, e.pitch, e.roll});
-        } else if (e.kind == EntityKind::Organic && e.alive) {
-            avoid.push_back(e.position);
-        }
-    });
+namespace {
 
-    SpawnPointResult r;
-    // Priority scan: the FIRST start-marker type with any marker wins (a mission is authored for one
-    // mode, so typically exactly one type is present), then farthest-from-enemy within it. This
-    // unifies Server_PositionPlayerForSpawn's per-game-type resolution over the whole family. [§5.2c D-NET-88]
-    for (size_t i = 0; i < count; ++i) {
-        const int32_t want = types[i];
-        const Marker *best = nullptr;
-        double best_score = -1.0;
-        for (const Marker &m : markers) {
-            if (m.type != want) continue;
-            // Each candidate's score is its MIN squared 2D distance (mission x/y; z is up) to any
-            // avoid entity; choose the MAX. With no enemies every score is +inf and the first is
-            // kept (faithful: any start is valid). The rand() tiebreak is deferred. [orig: @0x50ccc0]
-            double nearest = std::numeric_limits<double>::infinity();
-            for (const Vec3 &a : avoid) {
-                const double dx = static_cast<double>(m.pos.x) - static_cast<double>(a.x);
-                const double dy = static_cast<double>(m.pos.y) - static_cast<double>(a.y);
-                const double d2 = dx * dx + dy * dy;
-                if (d2 < nearest) nearest = d2;
-            }
-            if (best == nullptr || nearest > best_score) {
-                best_score = nearest;
-                best = &m;
-            }
-        }
-        if (best != nullptr) {
-            r.found = true;
-            r.position = best->pos;
-            r.yaw = best->yaw;
-            r.pitch = best->pitch;
-            r.roll = best->roll;
-            return r;
-        }
-    }
-    return r; // found=false -> caller falls back, never to an NPC position
+SpawnPointResult entity_pose(const Entity &entity) {
+    SpawnPointResult out;
+    out.found = true;
+    out.position = entity.position;
+    out.yaw = entity.yaw;
+    out.pitch = entity.pitch;
+    out.roll = entity.roll;
+    return out;
 }
 
-SpawnPointResult select_player_spawn_for_team(const World &world, uint8_t team,
-                                              uint32_t game_type) {
-    // Team gametype: the team's own marker types first — primary 6096-6099, fallback
-    // 6003/6004/6090/6091 — then the unified family scan as the safety net.
-    // [orig: Server_PositionPlayerForSpawn @0x50cf60 @0x50d266/@0x50d320]
-    if ((game_type & 0x10000u) != 0 && team >= 1 && team <= 4) {
-        const int32_t primary = 6095 + team; // 6096/6097/6098/6099 [orig: @0x50d266]
-        const int32_t fallback =             // 6003/6004/6090/6091 [orig: @0x50d320]
-                team == 1 ? 6003 : team == 2 ? 6004 : team == 3 ? 6090 : 6091;
-        SpawnPointResult r = select_player_spawn(world, &primary, 1);
-        if (r.found) return r;
-        r = select_player_spawn(world, &fallback, 1);
-        if (r.found) return r;
+SpawnPointResult marker_pose(const World &world, const Entity &marker) {
+    SpawnPointResult out = entity_pose(marker);
+    const Entity *parent = world.registry.get(marker.ground_target);
+    if (parent == nullptr)
+        return out;
+
+    const int32_t parent_position[3] = {
+        to_fixed(parent->position.x), to_fixed(parent->position.y),
+        to_fixed(parent->position.z)};
+    const CollisionMatrix parent_pose = collision_matrix_from_euler(
+        bam_heading_from_mission_yaw_deg(static_cast<double>(parent->yaw)),
+        bam_from_degrees_wrapped(static_cast<double>(parent->pitch)),
+        bam_from_degrees_wrapped(static_cast<double>(parent->roll)),
+        parent_position);
+    const int32_t local[3] = {
+        to_fixed(marker.position.x), to_fixed(marker.position.y),
+        to_fixed(marker.position.z)};
+    int32_t transformed[3] = {};
+    parent_pose.transform_point(local, transformed);
+    constexpr float kFromFixed = 1.0f / 65536.0f;
+    out.position = {transformed[0] * kFromFixed,
+                    transformed[1] * kFromFixed,
+                    transformed[2] * kFromFixed};
+    // Entity_TransformLocalToWorld adds heading while retaining the marker's
+    // local pitch and roll. Entity stores the inverse mission-yaw convention.
+    out.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
+        static_cast<double>(parent->yaw) + marker.yaw - 90.0)));
+    return out;
+}
+
+std::vector<const Entity *> markers_of_type(const World &world, int32_t type) {
+    std::vector<const Entity *> out;
+    world.registry.for_each([&](const Entity &entity) {
+        if (entity.handle.pool() == 3 && entity.item_id == type)
+            out.push_back(&entity);
+    });
+    return out;
+}
+
+struct ScoredMarker {
+    int32_t score = 0;
+    SpawnPointResult pose;
+};
+
+void retail_shell_sort_descending(std::vector<ScoredMarker> &rows) {
+    // Exact strict comparison and Knuth gap sequence.
+    // [orig: CPairList_ShellSortByValue @0x526CF0]
+    size_t gap = 1;
+    while (gap <= rows.size() / 9)
+        gap = 3 * gap + 1;
+    do {
+        for (size_t i = gap; i < rows.size(); ++i) {
+            const ScoredMarker insert = rows[i];
+            size_t j = i;
+            while (j >= gap && rows[j - gap].score < insert.score) {
+                rows[j] = rows[j - gap];
+                j -= gap;
+            }
+            rows[j] = insert;
+        }
+        gap /= 3;
+    } while (gap != 0);
+}
+
+SpawnPointResult best_marker_pose(const World &world, int32_t marker_type,
+                                  EntityHandle spawning_player) {
+    const std::vector<const Entity *> markers = markers_of_type(world, marker_type);
+    if (markers.empty())
+        return {};
+
+    std::vector<Vec3> avoid;
+    world.registry.for_each([&](const Entity &entity) {
+        if (entity.handle.pool() == 0 && entity.handle != spawning_player &&
+            (entity.flags & kEntityFlagPlayer) != 0)
+            avoid.push_back(entity.position);
+    });
+
+    // flt_7C19E0 is the shared float-to-int guard. The random arm is not an
+    // equal-distance tie-break: it runs only when every candidate/avoid pair
+    // remains at this clamp.
+    // [orig: Entity_FindBestSpawnPoint @0x50CCC0]
+    constexpr int64_t kDistanceClampFixed = 0x7FFF0000ll;
+    bool any_below_clamp = false;
+    std::vector<ScoredMarker> rows;
+    rows.reserve(markers.size());
+    for (const Entity *marker : markers) {
+        ScoredMarker row;
+        row.pose = marker_pose(world, *marker);
+        int64_t nearest = kDistanceClampFixed;
+        for (const Vec3 &other : avoid) {
+            const long double dx =
+                static_cast<long double>(to_fixed(row.pose.position.x)) -
+                to_fixed(other.x);
+            const long double dy =
+                static_cast<long double>(to_fixed(row.pose.position.y)) -
+                to_fixed(other.y);
+            const long double distance = std::sqrt(dx * dx + dy * dy);
+            if (distance < static_cast<long double>(nearest)) {
+                nearest = static_cast<int64_t>(distance);
+                any_below_clamp = true;
+            }
+        }
+        row.score = static_cast<int32_t>(nearest >> 16);
+        rows.push_back(row);
     }
-    return select_player_spawn(world);
+    if (!avoid.empty() && !any_below_clamp) {
+        for (ScoredMarker &row : rows)
+            row.score = static_cast<uint16_t>(std::rand() >> 8);
+    }
+    retail_shell_sort_descending(rows);
+    return rows.front().pose;
+}
+
+SpawnPointResult target_pose(World &world, const Entity &target) {
+    // The runtime-set model-userpoint name remains unrecovered; retain the
+    // exact no-userpoint +1 z arm rather than inventing a name.
+    SpawnPointResult out = entity_pose(target);
+    out.position.z += 1.0f;
+    if (target.zone_number == 0)
+        return out;
+
+    std::array<const Entity *, 32> nearby{};
+    size_t count = 0;
+    world.registry.for_each([&](const Entity &candidate) {
+        if (count == nearby.size() || candidate.handle.pool() != 3 ||
+            !candidate.has_item_def || candidate.item_id != 6007)
+            return;
+        const double dx = static_cast<double>(candidate.position.x) - target.position.x;
+        const double dy = static_cast<double>(candidate.position.y) - target.position.y;
+        const double radius = static_cast<double>(target.zone_radius);
+        if (dx * dx + dy * dy <= radius * radius)
+            nearby[count++] = &candidate;
+    });
+    if (count == 0)
+        return out;
+
+    const size_t choice = world.spawn_cycle_counter % (count + 1);
+    ++world.spawn_cycle_counter;
+    return choice == 0 ? out : marker_pose(world, *nearby[choice - 1]);
+}
+
+SpawnPointResult objective_coop_entity_pose(const World &world, uint8_t team) {
+    const Entity *selected = nullptr;
+    for (int pool : {1, 2}) {
+        world.registry.for_each([&](const Entity &entity) {
+            if (selected != nullptr || entity.handle.pool() != pool ||
+                !entity.has_item_def || !entity.is_spawn_point ||
+                entity.zone_number == 0 || entity.team != team)
+                return;
+            selected = &entity;
+        });
+        if (selected != nullptr)
+            break;
+    }
+    if (selected == nullptr)
+        return {};
+    SpawnPointResult out = entity_pose(*selected);
+    out.position.z += 1.0f; // unrecovered userpoint name: exact absent arm
+    return out;
+}
+
+int32_t team_fallback_marker(uint8_t team) {
+    switch (team) {
+    case 1: return 6003;
+    case 2: return 6004;
+    case 3: return 6090;
+    case 4: return 6091;
+    default: return 0;
+    }
+}
+
+SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
+                              uint8_t player_slot, uint8_t team,
+                              uint32_t game_type_value) {
+    const bool primary_allowed =
+        world.match.team_stats(team)[MatchStats::kFlagCaptures] == 0;
+    if (game_type::is_waypoint_family(game_type_value)) {
+        if (primary_allowed) {
+            const std::vector<const Entity *> primary = markers_of_type(world, 6094);
+            if (!primary.empty())
+                return marker_pose(world, *primary[player_slot % primary.size()]);
+        }
+        const std::vector<const Entity *> fallback = markers_of_type(world, 6001);
+        if (!fallback.empty())
+            return marker_pose(world, *fallback[player_slot % fallback.size()]);
+        return game_type::is_objective(game_type_value)
+            ? objective_coop_entity_pose(world, team)
+            : SpawnPointResult{};
+    }
+
+    const bool team_mode = game_type::is_team(game_type_value);
+    const int32_t primary_type = team_mode && team >= 1 && team <= 4
+        ? 6095 + team
+        : team_mode ? 0 : 6095;
+    if (primary_allowed && primary_type != 0 &&
+        !markers_of_type(world, primary_type).empty()) {
+        ++world.spawn_cycle_counter;
+        return best_marker_pose(world, primary_type, spawning_player);
+    }
+
+    const int32_t fallback_type = team_mode ? team_fallback_marker(team) : 6002;
+    ++world.spawn_cycle_counter;
+    return fallback_type != 0
+        ? best_marker_pose(world, fallback_type, spawning_player)
+        : SpawnPointResult{};
+}
+
+} // namespace
+
+SpawnPointResult resolve_player_spawn_pose(
+    World &world, EntityHandle spawning_player, EntityHandle target,
+    uint8_t player_slot, uint8_t team, uint32_t game_type_value) {
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60]
+    if (const Entity *target_entity = world.registry.get(target))
+        return target_pose(world, *target_entity);
+    return no_pick_pose(world, spawning_player, player_slot, team,
+                        game_type_value);
 }
 
 const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
@@ -306,10 +456,10 @@ void SpawnWaveList::reset_on_zone_team_change(const World &world,
 }
 
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
-                                       uint8_t team, uint32_t game_type) {
+                                       uint8_t team, uint32_t game_type_value) {
     // [orig: find_spawn_entity_for_team @0x4fc810]
     const Entity *found = nullptr;
-    if ((game_type & kGameTypeObjectiveBit) != 0) {
+    if (game_type::is_objective(game_type_value)) {
         // Co-op branch: the LAST team-matching un-numbered spawn entity [orig: @0x4fc834].
         world.registry.for_each([&](const Entity &e) {
             const int pool = e.handle.pool();
@@ -335,72 +485,6 @@ const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chai
         if ((enemy_front || at_frontier) && e->zone_control >= 0x10000) return e;
     }
     return nullptr;
-}
-
-SpawnPointResult spawn_pose_for_target(World &world, const Entity &target) {
-    // [orig: Server_PositionPlayerForSpawn @0x50CF60 pick path — pose copy
-    // @0x50CFBE, no-userpoint z lift @0x50D01C, 6007 scan/choice
-    // @0x50D04D..0x50D18D.]
-    SpawnPointResult r;
-    r.found = true;
-    r.position = target.position;
-    r.position.z += 1.0f;
-    r.yaw = target.yaw;
-    r.pitch = target.pitch;
-    r.roll = target.roll;
-
-    if (target.zone_number == 0)
-        return r;
-
-    std::array<const Entity *, 32> nearby{};
-    size_t count = 0;
-    world.registry.for_each([&](const Entity &candidate) {
-        if (count == nearby.size() || candidate.handle.pool() != 3 ||
-            !candidate.has_item_def || candidate.item_id != 6007)
-            return;
-        const double dx = static_cast<double>(candidate.position.x) - target.position.x;
-        const double dy = static_cast<double>(candidate.position.y) - target.position.y;
-        const double radius = static_cast<double>(target.zone_radius);
-        if (dx * dx + dy * dy <= radius * radius)
-            nearby[count++] = &candidate;
-    });
-    if (count == 0)
-        return r;
-
-    const size_t choice = world.spawn_cycle_counter % (count + 1);
-    ++world.spawn_cycle_counter;
-    if (choice == 0)
-        return r;
-
-    const Entity &marker = *nearby[choice - 1];
-    r.position = marker.position;
-    r.yaw = marker.yaw;
-    r.pitch = marker.pitch;
-    r.roll = marker.roll;
-    const Entity *parent = world.registry.get(marker.ground_target);
-    if (parent == nullptr)
-        return r;
-
-    const int32_t parent_position[3] = {
-        to_fixed(parent->position.x), to_fixed(parent->position.y),
-        to_fixed(parent->position.z)};
-    const CollisionMatrix parent_pose = collision_matrix_from_euler(
-        bam_heading_from_mission_yaw_deg(static_cast<double>(parent->yaw)),
-        bam_from_degrees_wrapped(static_cast<double>(parent->pitch)),
-        bam_from_degrees_wrapped(static_cast<double>(parent->roll)),
-        parent_position);
-    const int32_t local[3] = {
-        to_fixed(marker.position.x), to_fixed(marker.position.y),
-        to_fixed(marker.position.z)};
-    int32_t transformed[3] = {};
-    parent_pose.transform_point(local, transformed);
-    constexpr float kFromFixed = 1.0f / 65536.0f;
-    r.position = {transformed[0] * kFromFixed,
-                  transformed[1] * kFromFixed,
-                  transformed[2] * kFromFixed};
-    r.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-        static_cast<double>(parent->yaw) + marker.yaw - 90.0)));
-    return r;
 }
 
 } // namespace opennova::world

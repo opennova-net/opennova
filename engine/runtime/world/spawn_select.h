@@ -1,13 +1,8 @@
-// Faithful-in-outcome player spawn-point selection (net-re §5.2c). The original picks the human
-// player's start pose from the mission's named START markers, NOT from any NPC's position. The
-// exact selection is per-game-type and fragmented across several functions [orig:
-// Server_PositionPlayerForSpawn @0x50cf60 → Entity_FindBestSpawnPoint @0x50ccc0; the 60xx start family is
-// enumerated by build_entity_position_list @0x509660; a real SP mission (00TRa) can ship only a
-// 6001 marker that the strict 6002 SP path never reaches]. We UNIFY that machinery to a priority
-// scan over the start-marker family: the first present type wins, farthest-from-enemy within it —
-// a tracked simplification (§5.2c, D-NET-88) that finds the authored start for any mission mode.
-// NPCs take their authored BMS positions on a separate path [orig: Entity_SpawnFromBMSRecord
-// @0x40e9f0] — so the player never inherits an NPC's spot.
+// Retail player spawn selection (net-re §5.2c/§5.61). One operation owns both
+// picked deploy targets and the no-pick game-type marker chain; NPC placement
+// remains the separate Entity_SpawnFromBMSRecord path.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60;
+// Entity_FindBestSpawnPoint @0x50CCC0]
 //
 // Lives in engine/runtime/world (no engine/runtime/mission dependency, like player_spawn.h); scans the world
 // registry's promoted markers by item_id (== the raw BMS type_id, make_seed promote.cpp:78),
@@ -26,17 +21,6 @@ namespace opennova::world {
 
 class World;
 
-// The 60xx player-start marker family, in selection priority (SP/DM, then coop, then team). A
-// mission is authored for one mode, so typically exactly one of these is present.
-// [orig: build_entity_position_list @0x509660 enumerates 6001/6002/6003/6004/6090/6091/6094-6099;
-//  Server_PositionPlayerForSpawn @0x50cf60 — 6002 SP/DM, 6095 non-team, 6094 coop insertion, 6001 coop
-//  fallback (+ the dedicated 6001 reader @0x41f25e), 6096-6099 team, 6003/6004/6090/6091 TDM teams.]
-inline constexpr int32_t kSpawnMarkerStartTypes[] = {
-    6002, 6095, 6094, 6001, 6096, 6097, 6098, 6099, 6003, 6004, 6090, 6091,
-};
-inline constexpr size_t kSpawnMarkerStartTypeCount =
-    sizeof(kSpawnMarkerStartTypes) / sizeof(kSpawnMarkerStartTypes[0]);
-
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     Vec3 position{};    // mission space (Z-up), copied from the chosen marker
@@ -45,28 +29,34 @@ struct SpawnPointResult {
     int16_t roll = 0;
 };
 
-// Select the player-start: scan `types` (priority order); the FIRST type with any promoted marker
-// (EntityKind::Marker, item_id == type) wins, returning the one FARTHEST (mission 2D) from any live
-// enemy organic. [orig: Entity_FindBestSpawnPoint @0x50ccc0 — min 2D distance to a pool-0 "avoid"
-// entity (flags & 0x100), pick the max.] The avoid set is approximated by live organic soldiers (a
-// tracked divergence; the faithful flags&0x100 set is unmodeled — §5.2c). At select time the player
-// has not spawned, so every organic is an NPC. Returns found=false when no family marker exists, so
-// the caller can pick a safe fallback — never an NPC position.
-SpawnPointResult select_player_spawn(const World &world, const int32_t *types, size_t count);
-
-// Convenience overload: scan the default start-marker family in priority order.
-inline SpawnPointResult select_player_spawn(const World &world) {
-    return select_player_spawn(world, kSpawnMarkerStartTypes, kSpawnMarkerStartTypeCount);
+// The marker ids admitted to the retail player-start registry. Keep the
+// classification private behind a predicate; callers must not infer a spawn
+// priority from this unordered family.
+// [orig: build_entity_position_list @0x509660]
+constexpr bool is_player_spawn_marker_type(int32_t item_id) {
+    switch (item_id) {
+    case 6001: case 6002: case 6003: case 6004:
+    case 6090: case 6091: case 6094: case 6095:
+    case 6096: case 6097: case 6098: case 6099:
+        return true;
+    default:
+        return false;
+    }
 }
 
-// Team-mode start selection (net-re §5.61, refining §5.2c): a team gametype
-// (game_type & 0x10000) resolves the TEAM's marker types — primary 6096-6099[team],
-// fallback 6003/6004/6090/6091[team] — before the unified family scan. Without the
-// per-team split, every AS team spawns at the FIRST family type present (both teams
-// in team 1's base). [orig: Server_PositionPlayerForSpawn @0x50cf60 team switch
-// @0x50d266 (6096-6099) / @0x50d320 (6003/6004/6090/6091)]
-SpawnPointResult select_player_spawn_for_team(const World &world, uint8_t team,
-                                              uint32_t game_type);
+// Resolve one complete spawn pose. A valid target selects the picked-zone path
+// (including numbered-zone 6007 scatter). Without one, the retail mode chain is
+// exact: 6095→6002 solo; 6096..6099→6003/6004/6090/6091 team; and
+// 6094→6001→numbered entity Co-op. `player_slot` is Co-op's direct-marker
+// rotation input; `spawning_player` is excluded from the Flags&0x100 avoidance
+// set used by non-Co-op marker scoring. The mission-global cycle advances at
+// the same non-Co-op/scatter sites as retail.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60;
+// Entity_FindBestSpawnPoint @0x50CCC0; CRenderState_GetFieldByIndex
+// @0x52D7D0 field 6]
+SpawnPointResult resolve_player_spawn_pose(
+    World &world, EntityHandle spawning_player, EntityHandle target,
+    uint8_t player_slot, uint8_t team, uint32_t game_type);
 
 struct ZoneChain; // world/zone_chain.h
 
@@ -166,11 +156,6 @@ private:
 inline constexpr uint16_t kDeployPickNone = 0xFFFF;
 inline constexpr uint16_t kDeployPickAutoTeam = 0xFFFE;
 
-// The one witnessed g_GameType BIT the spawn picker tests. engine/runtime/world stays
-// net-agnostic, so this mirrors npwire's game_type::kObjectiveBit; engine/net/netsim
-// static_asserts the two agree (entity_wire_bridge.cpp).
-inline constexpr uint32_t kGameTypeObjectiveBit = 0x20000;
-
 // The 0xFFFE auto-deploy pick: the requester team's own zone that sits ON the
 // frontier — enemy-capturable, or carrying the team's frontier number — with
 // control fully secured (>= 0x10000). Co-op gametypes (game_type & 0x20000) take
@@ -178,17 +163,7 @@ inline constexpr uint32_t kGameTypeObjectiveBit = 0x20000;
 // (the caller falls back to the marker chain). [orig: find_spawn_entity_for_team
 // @0x4fc810]
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
-                                       uint8_t team, uint32_t game_type);
-
-// Deploy pose at a picked spawn target. The target first supplies its complete
-// pose and the no-userpoint +1 z fallback. A numbered target then round-robins
-// over itself plus the first 32 in-radius pool-3 type-6007 markers; a selected
-// marker replaces the complete pose and is parent-transformed when entity+40 is
-// set. The model-userpoint name remains unrecovered runtime data, so this layer
-// deliberately keeps the witnessed no-userpoint fallback instead of inventing
-// an asset seam. [orig: Server_PositionPlayerForSpawn @0x50CF60;
-// Entity_TransformLocalToWorld @0x43BD00]
-SpawnPointResult spawn_pose_for_target(World &world, const Entity &target);
+                                       uint8_t team, uint32_t game_type_value);
 
 } // namespace opennova::world
 

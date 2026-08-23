@@ -1,7 +1,7 @@
 #include "npruntime/server_spawn.h"
 
 #include <world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
-#include <world/spawn_select.h> // select_player_spawn (§5.2c) / world_has_spawn_zone (§5.61)
+#include <world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
 #include <world/world.h>        // World, registry, cached
 
 #include <npwire/game_type.h>
@@ -151,7 +151,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
 			conn, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	const world::SpawnPointResult sel =
-			world::select_player_spawn_for_team(world, spawn.team, ctx.config.game_type);
+			world::resolve_player_spawn_pose(
+					world, world::EntityHandle{}, world::EntityHandle{},
+					*player_slot, spawn.team, ctx.config.game_type);
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
@@ -293,7 +295,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // round-over gate to world::Match's sole outcome latch but has no dword_24D1DE0
 // equivalent — acceptable today because callers wire ctx.world AFTER the world
 // is loaded with its markers. A production driver that wires
-// ctx.world DURING load must add a load-complete gate here, else select_player_spawn finds no marker and
+// ctx.world DURING load must add a load-complete gate here, else the spawn resolver finds no marker and
 // the idempotent origin fallback below latches the player at (0,0,0) permanently.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_authority || world.match.outcome().ended) return 0;

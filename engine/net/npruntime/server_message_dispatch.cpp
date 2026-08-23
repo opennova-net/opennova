@@ -20,7 +20,7 @@
 
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
 #include <world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
-#include <world/spawn_select.h>  // resolve_spawn_target / find_spawn_zone_for_team / spawn_pose_for_target
+#include <world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
 #include <world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
 #include <world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
@@ -905,13 +905,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) return replies;
-	const world::Entity *target = target_zone.valid()
-			? world.registry.get(target_zone)
-			: nullptr;
-	world::SpawnPointResult pose = target != nullptr
-			? world::spawn_pose_for_target(world, *target)
-			: world::select_player_spawn_for_team(
-					world, player->team, config.game_type);
+	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
+			world, player->handle, target_zone, conn.reply.player_slot,
+			player->team, config.game_type);
 	if (pose.found) {
 		player->position = pose.position;
 		player->yaw = pose.yaw;

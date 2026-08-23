@@ -2,7 +2,6 @@
 
 #include <cmath>      // std::lround
 
-#include <npwire/game_type.h>     // kObjectiveBit (pinned below)
 #include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
 #include <npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
 #include <terrain_query/height_field.h>  // TerrainHeightField::valid
@@ -11,7 +10,7 @@
 #include <world/geom.h>        // to_fixed / from_fixed
 #include <world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
 #include <world/infantry.h>    // kInfantryAirborneGap / remote body state
-#include <world/spawn_select.h> // kSpawnMarkerStartTypes + kGameTypeObjectiveBit (pinned below)
+#include <world/spawn_select.h> // is_player_spawn_marker_type
 #include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
 namespace opennova::netsim {
@@ -24,7 +23,6 @@ static_assert(wire_handle::kPoolCount == world::kEntityPoolCount);
 static_assert(wire_handle::make(3, 5) == world::EntityHandle::make(3, 5).packed);
 static_assert(wire_handle::pool(0x2123) == world::EntityHandle{0x2123}.pool() &&
               wire_handle::slot(0x2123) == world::EntityHandle{0x2123}.slot());
-static_assert(game_type::kObjectiveBit == world::kGameTypeObjectiveBit);
 static_assert(kPlayerPersonTypeId == world::kPlayerInfantryTypeId);
 
 
@@ -609,10 +607,7 @@ Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w) {
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 3) return;
 		// Only the 60xx start-marker family — the spawn points the client's spawn-select reads.
-		bool is_spawn = false;
-		for (size_t i = 0; i < world::kSpawnMarkerStartTypeCount; ++i) {
-			if (e.item_id == world::kSpawnMarkerStartTypes[i]) { is_spawn = true; break; }
-		}
+		const bool is_spawn = world::is_player_spawn_marker_type(e.item_id);
 		if (!is_spawn) return;
 		batch.records.push_back(pool3_record_of(e));
 	});
