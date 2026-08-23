@@ -353,6 +353,18 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			victim_connection = &c;
 			break;
 		}
+		const world::Entity *victim_entity = world.registry.get(d.victim);
+		if (victim_connection != nullptr) {
+			// A normal other-player kill opens the exact 120-second revive
+			// window. Self/environment and knife/vehicle death families clear it.
+			// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368]
+			victim_connection->link.downed_revive_seconds =
+					d.killer.valid() && d.killer != d.victim &&
+					(d.event_flags & 0xC00u) == 0u
+							? 120u
+							: 0u;
+			victim_connection->link.medic_request_active = false;
+		}
 
 		if (ctx.is_in_session) {
 			std::vector<uint8_t> body13;
@@ -360,22 +372,100 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			put_u16le(body13, d.killer_handle); // the killerSource stamp [orig: entity+704]
 			std::vector<uint8_t> body1e;
 			if (victim_is_player) {
-				const world::Entity *victim = world.registry.get(d.victim);
 				body1e.push_back(4); // standard kill [orig: @0x517237]
 				body1e.push_back(pool0_index_byte(d.killer_handle));
 				body1e.push_back(pool0_index_byte(d.victim_handle));
 				body1e.push_back(0xFF); // aux actor: none
-				const int16_t px = victim ? static_cast<int16_t>(std::lround(victim->position.x)) : 0;
-				const int16_t py = victim ? static_cast<int16_t>(std::lround(victim->position.y)) : 0;
+				const int16_t px = victim_entity
+						? static_cast<int16_t>(std::lround(victim_entity->position.x)) : 0;
+				const int16_t py = victim_entity
+						? static_cast<int16_t>(std::lround(victim_entity->position.y)) : 0;
 				put_u16le(body1e, static_cast<uint16_t>(px));
 				put_u16le(body1e, static_cast<uint16_t>(py));
 			}
+			// First broadcast the ordinary death record with mask 0x90
+			// (active players, not the listen host).
 			for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 				if (!is_in_match(c) || c.link.transport == nullptr) continue;
-				// mask 0x90 NOT_HOST: the host's in-process view skips the wire.
 				if (c.link.mode == netsim::TransportMode::Loopback) continue;
 				c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
-				if (!body1e.empty()) c.link.transport->host_send(s2c::GAME_EVENT, body1e);
+			}
+
+			// Then target the victim with the fixed-point position used by the
+			// third-person death camera: killer position when one resolves, else
+			// the victim position. Mask 0x20 includes the listen host.
+			// [orig: GameEvent_PlayerDeath @0x516DD0 ->
+			// NetPacket_WriteThreeInt32s @0x506CB0]
+			if (victim_connection != nullptr &&
+					is_in_match(*victim_connection) &&
+					victim_connection->link.transport != nullptr) {
+				const world::Entity *camera_entity = d.killer.valid()
+						? world.registry.get(d.killer) : nullptr;
+				if (camera_entity == nullptr) camera_entity = victim_entity;
+				DeathCameraTarget target;
+				if (camera_entity != nullptr) {
+					target.x = world::to_fixed(camera_entity->position.x);
+					target.y = world::to_fixed(camera_entity->position.y);
+					target.z = world::to_fixed(camera_entity->position.z);
+				}
+				victim_connection->link.transport->host_send(
+						s2c::DEATH_CAMERA_TARGET,
+						encode_death_camera_target(target));
+			}
+
+			// The kill-feed follows the victim camera target and retains the
+			// same not-host recipient mask as the 0x13 broadcast.
+			if (!body1e.empty()) {
+				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+					if (!is_in_match(c) || c.link.transport == nullptr ||
+							c.link.mode == netsim::TransportMode::Loopback)
+						continue;
+					c.link.transport->host_send(s2c::GAME_EVENT, body1e);
+				}
+			}
+
+			// Finally publish the revive window to active, alive same-team
+			// Medics. Manual Auto-Medic preference first clears their marker and
+			// sends the live window to the victim alone; automatic mode sends the
+			// window directly to the Medic group. Mask 0x580 does include the host.
+			// [orig: GameEvent_PlayerDeath @0x516DD0;
+			// NapiNPServer_SendFiltered @0x4C87E0]
+			if (victim_connection != nullptr && victim_entity != nullptr &&
+					victim_connection->link.downed_revive_seconds != 0u) {
+				auto send_downed = [&](NapiNPConnection &recipient,
+						uint8_t seconds) {
+					PlayerDownedState state;
+					state.entity_handle = d.victim_handle;
+					state.revive_seconds = seconds;
+					recipient.link.transport->host_send(
+							s2c::PLAYER_DOWNED_STATE,
+							encode_player_downed_state(state));
+				};
+				for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
+					if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
+							!candidate.link.owned_entity.valid())
+						continue;
+					const world::Entity *medic =
+							world.registry.get(candidate.link.owned_entity);
+					if (medic == nullptr || !medic->alive ||
+							(medic->flags & world::kEntityFlagDead) != 0u ||
+							medic->team != victim_entity->team ||
+							!world.class_has_attribute(
+									medic->player_class, world::World::kCharAttrMedic))
+						continue;
+					send_downed(candidate,
+							victim_connection->link.auto_medic_enabled
+									? static_cast<uint8_t>(
+											victim_connection->link.downed_revive_seconds)
+									: uint8_t{0});
+				}
+				if (!victim_connection->link.auto_medic_enabled &&
+						is_in_match(*victim_connection) &&
+						victim_connection->link.transport != nullptr) {
+					send_downed(*victim_connection,
+							static_cast<uint8_t>(
+									victim_connection->link.downed_revive_seconds));
+				}
 			}
 		}
 
@@ -528,7 +618,7 @@ void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 // The original stores seconds, not tick deadlines. Its periodic player-slot
-// maintenance decrements both nonzero dwords once per 62-tick second.
+// maintenance decrements all three nonzero dwords once per 62-tick second.
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 	if (world.logic_tick % 62u != 0) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -536,6 +626,8 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 			--conn.link.respawn_delay_seconds;
 		if (conn.link.spawn_target_hold_seconds != 0)
 			--conn.link.spawn_target_hold_seconds;
+		if (conn.link.downed_revive_seconds != 0)
+			--conn.link.downed_revive_seconds;
 	}
 }
 

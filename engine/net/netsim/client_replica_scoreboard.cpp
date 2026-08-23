@@ -165,6 +165,14 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 		apply_team_to_entity(state_, slot, sync.team); // [orig: @0x4315fc]
 		changed |= team_changed && slot.entity_slot < 0;
 	}
+	if ((sync.field_bitmask & kPlayerSyncHasDownedState) != 0u) {
+		const uint8_t seconds = static_cast<uint8_t>(sync.downed_state & 0x7Fu);
+		const bool request = (sync.downed_state & 0x80u) != 0u;
+		changed |= slot.downed_revive_seconds != seconds ||
+				slot.medic_request_active != request;
+		slot.downed_revive_seconds = seconds;
+		slot.medic_request_active = request;
+	}
 	if ((sync.field_bitmask & kPlayerSyncHasQuality) != 0u) {
 		const uint8_t quality = sync.quality > 4u ? uint8_t{4} : sync.quality; // [orig: @0x43170d]
 		changed |= slot.quality != quality;

@@ -681,8 +681,22 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.player_name = conn.reply.player_name;
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
-		if (world != nullptr)
-			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) ctx.team = e->team;
+		if (world != nullptr) {
+			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
+				ctx.team = e->team;
+				// Field 0x0008 is present only when the requester asks for it.
+				// Its value is nonzero only for a dead player whose automatic
+				// preference or explicit request exposes the revive window.
+				// [orig: NetPacket_SerializePlayerSync0x46 @0x505E80]
+				if ((e->flags & world::kEntityFlagDead) != 0u &&
+						(conn.link.auto_medic_enabled ||
+						 conn.link.medic_request_active)) {
+					ctx.downed_state = static_cast<uint8_t>(
+							(conn.link.downed_revive_seconds & 0x7Fu) |
+							(conn.link.medic_request_active ? 0x80u : 0u));
+				}
+			}
+		}
 	}
 	// The recipient's deploy-map owned-zone mask (0x0F variant-0 u32) from the live chain; a
 	// chain-less world keeps the golden ASH_I5A default 0x8. [orig: ZoneSlotChain_GetOwnedZoneMask
@@ -946,6 +960,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.link.respawn_delay_seconds = 0;
 	conn.link.spawn_target_hold_seconds = 0;
 	conn.link.respawn_hold_armed = false;
+	conn.link.downed_revive_seconds = 0;
+	conn.link.medic_request_active = false;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
 	player->flags &= ~1u;
@@ -1070,6 +1086,19 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::JOIN: // JOIN ack [orig: NapiNPServerMsg_0x000 @0x512AA0]
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				break;
+			case c2s::AUTO_MEDIC_PREFERENCE: {
+				// One inverse checkbox dword copied to playerSlot+372: zero is
+				// automatic requests enabled, any nonzero value is manual.
+				// [orig: NapiNPServerMsg_SetPlayerValue @0x501BE0;
+				// OPTIONS_AUTOMEDIC @0x5549E7/@0x554E40]
+				AutoMedicPreference preference;
+				size_t consumed = 0;
+				if (decode_auto_medic_preference(
+						msg.payload.data(), msg.payload.size(),
+						preference, consumed) && consumed == msg.payload.size())
+					conn.link.auto_medic_enabled = preference.enabled;
+				break;
+			}
 			case c2s::CHARATTR_CRC_REPLY:
 				// The host discards the returned checksum and only clears this
 				// player's silence counter. [orig: NapiNPServerMsg_0x01C

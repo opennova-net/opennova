@@ -488,7 +488,7 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
 inline constexpr uint16_t kPlayerSyncHasName         = 0x0001; // cstr
 inline constexpr uint16_t kPlayerSyncHasTeamString   = 0x0002; // cstr; retail always "" (@0x505ff7)
 inline constexpr uint16_t kPlayerSyncHasTeamByte     = 0x0004;
-inline constexpr uint16_t kPlayerSyncHasClassByte    = 0x0008; // type|subtype (outside the 0x1CF7 set)
+inline constexpr uint16_t kPlayerSyncHasDownedState  = 0x0008; // revive seconds low7 | medic-request bit7
 inline constexpr uint16_t kPlayerSyncHasVehicleName  = 0x0010; // cstr (§5.21 "id" label)
 inline constexpr uint16_t kPlayerSyncHasVehicleScore = 0x0020;
 inline constexpr uint16_t kPlayerSyncHasSquad        = 0x0040;
@@ -525,7 +525,7 @@ struct PlayerSync {
 	std::string clan;                // 0x0002
 	std::string id_label;            // 0x0010
 	uint8_t  team = 0;               // 0x0004
-	uint8_t  type_subtype = 0;       // 0x0008 (type = v & 0x7F, subtype = v >> 7)
+	uint8_t  downed_state = 0;       // 0x0008 (revive seconds = v & 0x7F; medic request = v >> 7)
 	uint8_t  field_0020 = 0;         // 0x0020
 	uint8_t  field_1000 = 0;         // 0x1000
 	uint8_t  field_0040 = 0;         // 0x0040
@@ -885,7 +885,7 @@ struct FrameWeaponBlock {
 	bool     present = false;
 	uint8_t  preround_timer = 0; // [orig: g_preround_delay_timer @0xC8D824] → dword_A85B64 [0x430064]
 	uint8_t  slot_state360 = 0;  // playerSlot+360 (0 unless entity+36 bit 1) → dword_A85B5C [0x430084]
-	uint8_t  slot_state368 = 0;  // playerSlot+368 (0 unless entity+36 bit 1) → dword_A85B60 [0x43009F]
+	uint8_t  slot_state368 = 0;  // revive seconds, playerSlot+368 (0 unless dead) → dword_A85B60 [0x43009F]
 	uint8_t  slot_state364 = 0;  // playerSlot+364 → dword_A85B68  [0x4300C3]
 	uint8_t  slot_state356 = 0;  // playerSlot+356 → dword_A85B6C  [0x4300E3]
 	uint8_t  slot_state460 = 0;  // playerSlot+460 → word_A85B7C   [0x430104]
@@ -1598,6 +1598,20 @@ bool decode_mounted_weapon_slot_selection(
 		const uint8_t *body, size_t len,
 		MountedWeaponSlotSelection &out, size_t &consumed);
 
+// C2S 0x03 — the inverse OPTIONS_AUTOMEDIC preference. Retail writes the
+// profile dword at +1660; zero means the checkbox is enabled, nonzero means a
+// downed player must explicitly request a medic. The authority retains that
+// value at playerSlot+372 and tests only zero versus nonzero.
+// [orig: NetPacket_WriteSessionTick @0x42A400 (misnamed); producer
+// MultiPlayer_JoinSessionStateMachine @0x56A340; consumer
+// NapiNPServerMsg_SetPlayerValue @0x501BE0]
+struct AutoMedicPreference {
+	bool enabled = true;
+};
+bool decode_auto_medic_preference(
+		const uint8_t *body, size_t len,
+		AutoMedicPreference &out, size_t &consumed);
+
 // S2C 0x13 — entity death (the SECOND death path, beside 0x26 kill-sync).
 // `[u16 entityHandle][i16 killerSource]` (4 B). The handler sets the entity's
 // Health=0, stores killerSource at entity+pad9[36], clears entity+pad8[86], and
@@ -1611,6 +1625,33 @@ struct EntityDeathRecord {
 };
 bool decode_entity_death(const uint8_t *body, size_t len,
                          EntityDeathRecord &out, size_t &consumed);
+
+// S2C 0x52 — victim-only third-person death-camera target. Retail sends the
+// killer's fixed position when a killer exists, otherwise the victim's, and the
+// client stores the triple for Camera_ComputeThirdPersonPositions.
+// [orig: GameEvent_PlayerDeath @0x516DD0 -> NetPacket_WriteThreeInt32s
+// @0x506CB0; NapiNPClientMsg_0x052 @0x428A80; camera consumer @0x438B80]
+struct DeathCameraTarget {
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;
+};
+bool decode_death_camera_target(const uint8_t *body, size_t len,
+		DeathCameraTarget &out, size_t &consumed);
+
+// S2C 0x54 — one player slot's downed/revive state. The low seven bits are
+// the remaining whole-second revive window (retail arms 120); bit seven is the
+// retained medic-request flag. The handler resolves entity -> roster slot and
+// splits the byte into playerSlot+16/+44.
+// [orig: NetPacket_WriteEntityHandleWithByte @0x507030;
+// NapiNPClientMsg_0x054 @0x429040 -> PlayerSlot_SetTypeAndSubtype @0x4348D0]
+struct PlayerDownedState {
+	uint16_t entity_handle = 0xFFFF;
+	uint8_t revive_seconds = 0;
+	bool medic_request_active = false;
+};
+bool decode_player_downed_state(const uint8_t *body, size_t len,
+		PlayerDownedState &out, size_t &consumed);
 
 // S2C 0x30 — entity-checksum request. `[u8 entityId][u16 checksum]` (3 B). The
 // client builds NetPacket_WriteEntityChecksum(entityId, checksum) and replies

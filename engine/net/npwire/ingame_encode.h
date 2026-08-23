@@ -358,6 +358,16 @@ std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
 std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 		const MountedWeaponSlotSelection &selection);
 
+// C2S 0x03 — canonical i32 inverse-Auto-Medic preference (0 enabled, 1 disabled).
+std::vector<uint8_t> encode_auto_medic_preference(
+		const AutoMedicPreference &preference);
+
+// The two fixed player-death tail bodies emitted by GameEvent_PlayerDeath.
+std::vector<uint8_t> encode_death_camera_target(
+		const DeathCameraTarget &target);
+std::vector<uint8_t> encode_player_downed_state(
+		const PlayerDownedState &state);
+
 // Fixed placed-device lifecycle bodies: S2C 0x59 is 32 bytes and S2C 0x12 is
 // one packed handle. [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770;
 // Server_RemoveEntityAndNotify @0x50A270]

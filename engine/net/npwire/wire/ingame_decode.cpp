@@ -365,7 +365,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	if (m & kPlayerSyncHasTeamString) out.clan = c.cstr();
 	if (m & kPlayerSyncHasVehicleName) out.id_label = c.cstr();
 	if (m & kPlayerSyncHasTeamByte) out.team = c.u8();
-	if (m & kPlayerSyncHasClassByte) out.type_subtype = c.u8();
+	if (m & kPlayerSyncHasDownedState) out.downed_state = c.u8();
 	if (m & kPlayerSyncHasVehicleScore) out.field_0020 = c.u8();
 	if (m & kPlayerSyncHasLateJoinFlag) out.field_1000 = c.u8();
 	if (m & kPlayerSyncHasSquad) out.field_0040 = c.u8();
@@ -1379,6 +1379,21 @@ bool decode_mounted_weapon_slot_selection(
 	return true;
 }
 
+bool decode_auto_medic_preference(
+		const uint8_t *body, size_t len,
+		AutoMedicPreference &out, size_t &consumed) {
+	out = AutoMedicPreference{};
+	consumed = 0;
+	if (body == nullptr || len != 4) return false;
+	const uint32_t disabled = static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) |
+			(static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24);
+	out.enabled = disabled == 0;
+	consumed = 4;
+	return true;
+}
+
 // S2C 0x13 entity death (second path) — [u16 handle][i16 killerSource] (4 B).
 // [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
 bool decode_entity_death(const uint8_t *body, size_t len,
@@ -1390,6 +1405,35 @@ bool decode_entity_death(const uint8_t *body, size_t len,
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 4;
+}
+
+bool decode_death_camera_target(const uint8_t *body, size_t len,
+		DeathCameraTarget &out, size_t &consumed) {
+	out = DeathCameraTarget{};
+	consumed = 0;
+	if (body == nullptr || len != 12) return false;
+	Cursor c{body, body + len, true};
+	out.x = c.i32();
+	out.y = c.i32();
+	out.z = c.i32();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 12;
+}
+
+bool decode_player_downed_state(const uint8_t *body, size_t len,
+		PlayerDownedState &out, size_t &consumed) {
+	out = PlayerDownedState{};
+	consumed = 0;
+	if (body == nullptr || len != 3) return false;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	const uint8_t packed = c.u8();
+	if (!c.ok) return false;
+	out.revive_seconds = static_cast<uint8_t>(packed & 0x7Fu);
+	out.medic_request_active = (packed & 0x80u) != 0;
+	consumed = size_t(c.p - body);
+	return consumed == 3;
 }
 
 // S2C 0x30 entity-checksum request — [u8 entityId][u16 checksum] (3 B) → C2S 0x20.

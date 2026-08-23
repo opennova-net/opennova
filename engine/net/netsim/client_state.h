@@ -30,6 +30,8 @@ struct ClientRosterSlot {
 	std::string clan;         // 0x0002 (the serializer's "team string"; retail ships "")
 	uint8_t team = 0;         // 0x0004 [orig: @0x4315f7]; every accepted 0x16 row
 	                          // refreshes it too [orig: @0x42fc7c]
+	uint8_t downed_revive_seconds = 0; // 0x0008 / S2C 0x54 low seven bits
+	bool medic_request_active = false; // 0x0008 / S2C 0x54 bit seven
 	uint8_t quality = 0;      // 0x0400, clamped 4 [orig: @0x43170d] — the connection-icon band
 	int16_t entity_slot = -1; // pool-0 slot this connection drives; -1 = none
 	                          // [orig: the no-entity -1 store @0x431489]
@@ -640,6 +642,17 @@ struct ClientSpawnWaveStatus {
 	SpawnWaveStatus value;
 };
 
+// Latest victim-local S2C 0x52 camera anchor. Retail stores the three fixed
+// coordinates globally and Camera_ComputeThirdPersonPositions consumes them.
+// [orig: NapiNPClientMsg_0x052 @0x428A80; consumer @0x438B80]
+struct ClientDeathCameraTarget {
+	bool known = false;
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;
+	uint32_t updates = 0;
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -682,6 +695,7 @@ struct ClientState {
 	ClientScoreboard scoreboard;
 	ClientScoreFeedback score_feedback;
 	ClientSpawnWaveStatus spawn_waves;
+	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;

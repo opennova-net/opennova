@@ -714,8 +714,8 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
 	if (field_flags & kPlayerSyncHasTeamByte)
 		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
-	if (field_flags & kPlayerSyncHasClassByte)
-		w.u8(0);        // class/subtype byte (outside the 0x1CF7 set; slot-state default 0)
+	if (field_flags & kPlayerSyncHasDownedState)
+		w.u8(ctx.downed_state);
 	if (field_flags & kPlayerSyncHasVehicleScore)
 		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
 	if (field_flags & kPlayerSyncHasLateJoinFlag)
@@ -918,6 +918,37 @@ std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u16(selection.use_parent_slot ? 1u : 0u);
+	return out;
+}
+
+std::vector<uint8_t> encode_auto_medic_preference(
+		const AutoMedicPreference &preference) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	// The profile stores the inverse checkbox value: zero means Auto Medic on.
+	// [orig: NetPacket_WriteSessionTick @0x42A400; OPTIONS_AUTOMEDIC
+	// reads/writes @0x5549E7/@0x554E40]
+	w.u32(preference.enabled ? 0u : 1u);
+	return out;
+}
+
+std::vector<uint8_t> encode_death_camera_target(
+		const DeathCameraTarget &target) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u32(static_cast<uint32_t>(target.x));
+	w.u32(static_cast<uint32_t>(target.y));
+	w.u32(static_cast<uint32_t>(target.z));
+	return out;
+}
+
+std::vector<uint8_t> encode_player_downed_state(
+		const PlayerDownedState &state) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(state.entity_handle);
+	w.u8(static_cast<uint8_t>((state.revive_seconds & 0x7Fu) |
+			(state.medic_request_active ? 0x80u : 0u)));
 	return out;
 }
 

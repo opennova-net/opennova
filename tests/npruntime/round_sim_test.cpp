@@ -6,15 +6,17 @@
 // @0x4ec920 — min(62*|vel|,1219) * weight_in_grains / 875, floored/capped by
 // min/max_damage], clamped to remaining health [orig: @0x4e8064], and a health<=0 victim
 // raises the death routing [orig: Entity_CheckAndProcessDeath @0x51b550]: S2C 0x13
-// [u16 victim][u16 killerSource] to every non-host in-match connection + the S2C 0x1E
-// kill-feed event for player victims; every victim receives the retail +360/+364
+// [u16 victim][u16 killerSource] to every non-host in-match connection, victim-only
+// S2C 0x52 killer position, S2C 0x1E kill-feed, and the conditional S2C 0x54
+// downed/revive-window split; every victim receives the retail +360/+364
 // post-death hold, early C2S 0x0E picks are dropped, and the listen host's local
 // presentation fallback releases through the same deployment transaction at expiry
 // [orig: GameEvent_PlayerDeath @0x516dd0; Server_ProcessClientRequestRespawn @0x519af0].
 //
 // Coverage: build_ammo_table + round_type resolve; fire -> one live round with the
-// velocity/62 step; three body hits kill a 150-hp player (60/60/30 clamped); 0x13 + 0x1E
-// staged on both client transports, none on the loopback; configured and recent-spawn
+// velocity/62 step; three body hits kill a 150-hp player (60/60/30 clamped); exact
+// 0x13 -> victim-only 0x52 -> 0x1E -> conditional 0x54 route, none of the broadcast
+// pair on the loopback; configured and recent-spawn
 // hold branches; exact silent-drop/accept boundary; a dead loopback victim releases at
 // spawn health without a second respawn implementation.
 
@@ -33,6 +35,8 @@
 
 #include <npwire/protocol_message.h>
 #include <npwire/replication_model.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 
 #include <terrain_query/height_field.h>
 
@@ -700,7 +704,9 @@ int main() {
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport client_b_in(ns::UdpSessionTransport::Role::Client);
+	ns::UdpSessionTransport client_c_in(ns::UdpSessionTransport::Role::Client);
 	ns::ClientReplicaPipeline client_b_view;
+	ns::ClientReplicaPipeline client_c_view;
 
 	np::NapiNPServerCtx ctx;
 	ctx.world = &world;
@@ -720,6 +726,33 @@ int main() {
 	for (np::NapiNPConnection &conn : roster) {
 		conn.link.last_deploy_tick = world.logic_tick - 620u;
 		conn.link.last_deploy_tick_valid = true;
+	}
+	// Only the shooter is a Medic. Retail's send mask 0x580 is the conjunction of
+	// active/alive + same team + the charattr Medic bit [orig:
+	// NapiNPServer_SendFiltered @0x4C87E0]. The victim disables OPTIONS_AUTOMEDIC
+	// through C2S 0x03, so their death exercises the split branch: medics get state
+	// zero while the victim alone gets the live 120-second revive window [orig:
+	// NapiNPServerMsg_SetPlayerValue @0x501BE0; GameEvent_PlayerDeath @0x516DD0].
+	world.registry.get(ha)->player_class = 7;
+	world.registry.get(hb)->player_class = 8;
+	world.registry.get(hc)->player_class = 7;
+	world.class_attribute_flags[(8u - 1u) & 0xFu] |= w::World::kCharAttrMedic;
+	// Both decoded views know the victim's roster binding before the live 0x54
+	// edge arrives, matching the retail join-time 0x46 roster walk.
+	PlayerReplicationState victim_rep;
+	victim_rep.player_slot = 2;
+	victim_rep.entity_handle = hc.packed;
+	victim_rep.team = world.registry.get(hc)->team;
+	const std::vector<uint8_t> victim_sync = encode_player_sync(
+			victim_rep, kPlayerSyncHasTeamByte | kPlayerSyncHasDownedState);
+	client_b_view.apply(s2c::PLAYER_SYNC, victim_sync);
+	client_c_view.apply(s2c::PLAYER_SYNC, victim_sync);
+	{
+		std::vector<ProtocolMessage> manual_medic{
+				make_protocol_message(0x03, {1, 0, 0, 0})};
+		np::dispatch_session_replies(
+				ctx.config, roster[2], manual_medic, world.logic_tick,
+				roster, &world, ctx.np_protocol.session_seed_id);
 	}
 	auto advance_second_boundaries = [&](int count) {
 		int crossed = 0;
@@ -830,7 +863,7 @@ int main() {
 	}
 
 	// --- 3. Two more hits kill: 90 -> 30 -> 0 (the last clamped to remaining health
-	// [orig: @0x4e8064]); the death routes 0x13 + 0x1E to both clients, not the host. ---
+	// [orig: @0x4e8064]); death routes the complete retail packet transaction. ---
 	const Drained before_kill_b = drain_all(udp_b);
 	deliver_all(before_kill_b, client_b_in);
 	client_b_view.pump(client_b_in);
@@ -851,8 +884,30 @@ int main() {
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	const Drained after_kill_b = drain_all(udp_b);
 	const Drained after_kill_c = drain_all(udp_c);
+	{
+		auto death_tags = [](const Drained &drained) {
+			std::vector<uint8_t> tags;
+			for (const std::vector<uint8_t> &raw : drained.raw) {
+				if (raw.empty()) continue;
+				if (raw[0] == 0x13 || raw[0] == 0x52 ||
+						raw[0] == 0x1E || raw[0] == 0x54)
+					tags.push_back(raw[0]);
+			}
+			return tags;
+		};
+		if (!expect(death_tags(after_kill_b) ==
+		                    std::vector<uint8_t>({0x13, 0x1E, 0x54}),
+		            "medic observer receives the retail death-tail order"))
+			return 1;
+		if (!expect(death_tags(after_kill_c) ==
+		                    std::vector<uint8_t>({0x13, 0x52, 0x1E, 0x54}),
+		            "victim receives exact 0x13 -> 0x52 -> 0x1E -> 0x54 order"))
+			return 1;
+	}
 	deliver_all(after_kill_b, client_b_in);
 	client_b_view.pump(client_b_in);
+	deliver_all(after_kill_c, client_c_in);
+	client_c_view.pump(client_c_in);
 	const ns::ClientEntityState *remote_dead = client_b_view.state().find(hc.packed);
 	if (!expect(remote_dead != nullptr,
 	            "observer retained the remote victim through the death handoff"))
@@ -899,8 +954,59 @@ int main() {
 		const int16_t py = int16_t(f[6] | (f[7] << 8));
 		if (!expect(px == 30 && py == 0, "0x1E event position in metres")) return 1;
 	}
+	{
+		const auto death_pos_b = after_kill_b.tag(0x52);
+		const auto death_pos_c = after_kill_c.tag(0x52);
+		if (!expect(death_pos_b.empty() && death_pos_c.size() == 1,
+		            "S2C 0x52 is targeted only to the victim"))
+			return 1;
+		const std::vector<uint8_t> &p = death_pos_c[0];
+		if (!expect(p.size() == 12,
+		            "0x52 body is [i32 killerX][i32 killerY][i32 killerZ]"))
+			return 1;
+		const int32_t x = static_cast<int32_t>(
+				uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
+				(uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24));
+		const int32_t y = static_cast<int32_t>(
+				uint32_t(p[4]) | (uint32_t(p[5]) << 8) |
+				(uint32_t(p[6]) << 16) | (uint32_t(p[7]) << 24));
+		const int32_t z = static_cast<int32_t>(
+				uint32_t(p[8]) | (uint32_t(p[9]) << 8) |
+				(uint32_t(p[10]) << 16) | (uint32_t(p[11]) << 24));
+		if (!expect(x == 0 && y == 0 && z == w::to_fixed(10.0),
+		            "0x52 carries the killer's authoritative fixed-point position"))
+			return 1;
+		const ns::ClientDeathCameraTarget &folded =
+				client_c_view.state().death_camera;
+		if (!expect(folded.known && folded.updates == 1 &&
+		                    folded.x == x && folded.y == y && folded.z == z,
+		            "the victim client folds 0x52 into its canonical camera target"))
+			return 1;
+	}
+	{
+		const auto marker_b = after_kill_b.tag(0x54);
+		const auto marker_c = after_kill_c.tag(0x54);
+		if (!expect(marker_b.size() == 1 && marker_c.size() == 1,
+		            "manual-medic death sends one 0x54 to medics and one to the victim"))
+			return 1;
+		if (!expect(marker_b[0] == std::vector<uint8_t>({
+		                    uint8_t(hc.packed & 0xFF), uint8_t(hc.packed >> 8), 0}),
+		            "manual-medic branch hides the downed marker from eligible medics"))
+			return 1;
+		if (!expect(marker_c[0] == std::vector<uint8_t>({
+		                    uint8_t(hc.packed & 0xFF), uint8_t(hc.packed >> 8), 120}),
+		            "manual-medic victim receives the exact 120-second revive window"))
+			return 1;
+		if (!expect(client_b_view.state().roster[2].downed_revive_seconds == 0 &&
+		                    client_c_view.state().roster[2].downed_revive_seconds == 120,
+		            "decoded roster state preserves the manual-medic recipient split"))
+			return 1;
+	}
 	if (!expect(roster[2].link.respawn_delay_seconds == 5,
 	            "death arms the configured +360 hold outside the recent-spawn window"))
+		return 1;
+	if (!expect(roster[2].link.downed_revive_seconds == 120,
+	            "ordinary other-player death arms playerSlot+368 to 120 seconds"))
 		return 1;
 	if (!expect(roster[2].link.spawn_target_hold_seconds == 0,
 	            "a mission without spawn zones clears the +364 target hold"))
@@ -918,18 +1024,21 @@ int main() {
 		return 1;
 	advance_second_boundaries(4);
 	if (!expect(roster[2].link.respawn_delay_seconds == 1 &&
+	                    roster[2].link.downed_revive_seconds == 116 &&
 	                    request_client_respawn().empty(),
-	            "the universal hold remains closed through four one-second decrements"))
+	            "death and revive counters decrement at the same four 1 Hz boundaries"))
 		return 1;
 	advance_second_boundaries(1);
 	if (!expect(roster[2].link.respawn_delay_seconds == 0 &&
+	                    roster[2].link.downed_revive_seconds == 115 &&
 	                    world.registry.get(hc)->health == 0,
 	            "the fifth boundary expires the hold without auto-respawning a client"))
 		return 1;
 	const std::vector<ProtocolMessage> client_release = request_client_respawn();
 	if (!expect(client_release.size() >= 2 &&
 	                    world.registry.get(hc)->health == 150 &&
-	                    roster[2].link.last_deploy_tick == world.logic_tick,
+	                    roster[2].link.last_deploy_tick == world.logic_tick &&
+	                    roster[2].link.downed_revive_seconds == 0,
 	            "the first post-expiry pick runs the shared deployment release"))
 		return 1;
 
@@ -945,6 +1054,7 @@ int main() {
 	world.registry.get(hc)->position.y = 20.0f;
 	roster[0].link.last_deploy_tick = world.logic_tick;
 	roster[0].link.last_deploy_tick_valid = true;
+	drain_all(udp_b);
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
@@ -954,6 +1064,14 @@ int main() {
 	if (!expect(roster[0].link.respawn_delay_seconds == 3,
 	            "a death within 620 ticks forces the retail three-second hold"))
 		return 1;
+	{
+		const auto automatic_marker = drain_all(udp_b).tag(0x54);
+		if (!expect(automatic_marker.size() == 1 &&
+		                    automatic_marker[0] == std::vector<uint8_t>({
+		                            uint8_t(ha.packed & 0xFF), uint8_t(ha.packed >> 8), 120}),
+		            "auto-medic death exposes the 120-second revive window to medics"))
+			return 1;
+	}
 	{
 		// Displace the corpse to prove the release snaps back [orig: the D-NET-66
 		// death/respawn teleport]. The listen host's own player is MOTOR-simulated, and

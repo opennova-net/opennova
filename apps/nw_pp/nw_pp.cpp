@@ -1355,9 +1355,11 @@ void print_tag_46(const std::vector<uint8_t> &body) {
 		return;
 	}
 	std::printf("        [0x46] slot=0x%02x bitmask=0x%04x entity=0x%04x team=%u "
-	            "name=\"%s\"%s%s\n",
+	            "downed=%u medicRequest=%u name=\"%s\"%s%s\n",
 	            ps.slot_id, ps.field_bitmask, unsigned(ps.entity_slot_id), ps.team,
-	            ps.name.c_str(), ps.queue_ack ? " +ack" : "",
+	            unsigned(ps.downed_state & 0x7Fu),
+	            unsigned((ps.downed_state >> 7) & 1u), ps.name.c_str(),
+	            ps.queue_ack ? " +ack" : "",
 	            clean ? "" : " INCOMPLETE");
 }
 
@@ -1617,6 +1619,48 @@ void print_tag_13(const std::vector<uint8_t> &body) {
 	}
 	std::printf("        [0x13] entity-death handle=%s killerSource=%d\n",
 	            handle_str(d.entity_handle).c_str(), int(d.killer_source));
+}
+
+void print_tag_52(const std::vector<uint8_t> &body) {
+	DeathCameraTarget target;
+	size_t used = 0;
+	if (!decode_death_camera_target(
+			body.data(), body.size(), target, used)) {
+		std::printf("        [0x52] death-camera-target decode failed (need 12 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x52] death-camera-target fixed=(%d,%d,%d) world=(%.2f,%.2f,%.2f)\n",
+	            target.x, target.y, target.z,
+	            fp16(target.x), fp16(target.y), fp16(target.z));
+}
+
+void print_tag_54(const std::vector<uint8_t> &body) {
+	PlayerDownedState state;
+	size_t used = 0;
+	if (!decode_player_downed_state(
+			body.data(), body.size(), state, used)) {
+		std::printf("        [0x54] player-downed-state decode failed (need 3 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x54] player-downed-state handle=%s reviveSeconds=%u medicRequest=%u\n",
+	            handle_str(state.entity_handle).c_str(),
+	            unsigned(state.revive_seconds),
+	            state.medic_request_active ? 1u : 0u);
+}
+
+void print_tag_03_c2s(const std::vector<uint8_t> &body) {
+	AutoMedicPreference preference;
+	size_t used = 0;
+	if (!decode_auto_medic_preference(
+			body.data(), body.size(), preference, used)) {
+		std::printf("        [0x03 C2S] auto-medic-preference decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x03 C2S] auto-medic=%s\n",
+	            preference.enabled ? "enabled" : "manual");
 }
 
 // S2C 0x30 entity-checksum request -> reply C2S 0x20.
@@ -1879,6 +1923,8 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::MINIMAP_OVERLAY) print_tag_6b(payload);
 	else if (dir == 'S' && tag == s2c::WEAPON_RELOAD) print_tag_49(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_DEATH) print_tag_13(payload);
+	else if (dir == 'S' && tag == s2c::DEATH_CAMERA_TARGET) print_tag_52(payload);
+	else if (dir == 'S' && tag == s2c::PLAYER_DOWNED_STATE) print_tag_54(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_CHECKSUM_REQ) print_tag_30(payload);
 	else if (dir == 'S' && tag == s2c::LOADOUT_CRC_REQ) print_tag_31(payload);
 	else if (dir == 'S' && tag == s2c::INPUT_STATE_FLAGS) print_tag_42(payload);
@@ -1900,6 +1946,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::JOIN_PADDING_PROBE) print_tag_02_s2c(payload);
 	else if (dir == 'S' && tag == s2c::SPAWN_ACK_TIMESTAMP) print_tag_19(payload);
 	else if (dir == 'C' && tag == c2s::CHAT_MESSAGE) print_tag_0d_c2s(payload);
+	else if (dir == 'C' && tag == c2s::AUTO_MEDIC_PREFERENCE) print_tag_03_c2s(payload);
 	else if (dir == 'C' && tag == c2s::ENTITY_INFO_QUERY) print_tag_0f_c2s(payload);
 	else if (dir == 'C' && tag == c2s::LOADOUT_SUBMIT) print_tag_2f_c2s(payload);
 	else if (dir == 'C' && tag == c2s::RTT_CONSUMED) print_tag_2c_c2s(payload);
