@@ -160,7 +160,7 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
         d.killer = attacker;
         d.victim_handle = target.handle.packed;
         d.killer_handle = attacker.packed;
-        (void)ammo_index;
+        d.ammo_index = ammo_index;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -241,6 +241,7 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
                 d.killer = attacker;
                 d.victim_handle = target.handle.packed;
                 d.killer_handle = attacker.packed;
+                d.ammo_index = e.ammo_index;
                 world.round_sim.deaths.push_back(d);
             }
         }

@@ -509,6 +509,14 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     }
 }
 
+bool impact_is_critical(const Entity &target, int32_t hit_zone,
+                        int32_t hit_bone) {
+    if (target.item_type != 3) return false;
+    return (target.item_attrib & kItemAttribLandable) != 0
+        ? seat_hit_bone_is_critical(hit_bone)
+        : hit_zone_is_critical(hit_zone);
+}
+
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
 // units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
 // applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
@@ -518,7 +526,7 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
 // (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42). Multiplayer authority and
 // OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
 int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
-                           int32_t hit_zone, int32_t hit_bone, Entity &target,
+                           int32_t hit_zone, int32_t hit_bone, const Entity &target,
                            const Entity *shooter, int32_t ammo_index,
                            const World &world) {
     if (world.mp_session) {
@@ -539,10 +547,8 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
             // the normal-infantry table below reads (@0x4ec9bf). The two differ
             // whenever the bone walk crosses more than one sphere.
             zone_scale = seat_hit_bone_damage_multiplier(hit_bone);
-            if (seat_hit_bone_is_critical(hit_bone)) target.flags |= 0x800u;
         } else {
             zone_scale = hit_zone_damage_multiplier(hit_zone);
-            if (hit_zone_is_critical(hit_zone)) target.flags |= 0x800u;
         }
         damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
 
@@ -1426,6 +1432,16 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (authoritative && target != nullptr && target->has_item_def &&
             !not_armed && ammo != nullptr) {
             const Entity *shooter = world.registry.get(r.owner);
+            // Weapon_CalcImpactDamage writes the critical/headshot cause bit
+            // into its caller-owned event flags, not GamePlayerEntity::Flags.
+            // OneShotKill returns before the zone branch and therefore carries
+            // no critical bit even when the ray crossed a critical section.
+            // [orig: Weapon_CalcImpactDamage @0x4EC920;
+            // GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
+            const bool critical_hit =
+                !(world.mp_session && world.one_shot_kill) &&
+                impact_is_critical(*target, collision.hit_zone,
+                                   collision.bone_index);
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
@@ -1506,6 +1522,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     d.victim_handle = damage_entity.packed;
                     d.killer_handle = r.shooter_handle;
                     d.adm_index = r.adm_index;
+                    d.ammo_index = r.ammo_index;
+                    if (critical_hit) d.event_flags |= 0x800u;
                     deaths.push_back(d);
                 }
             }

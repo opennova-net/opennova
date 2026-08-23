@@ -972,12 +972,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	replies.push_back(make_protocol_message(
 			0x5A, build_current_loadout_reply(
 					conn.reply.last_loadout_reply, player->player_class, armory)));
-	conn.tick_seed = ((make_random_session_u32() & 0xFEu) + 1u) << 16;
 	replies.push_back(make_protocol_message(
-			0x61, {static_cast<uint8_t>(conn.tick_seed & 0xFFu),
-			       static_cast<uint8_t>((conn.tick_seed >> 8) & 0xFFu),
-			       static_cast<uint8_t>((conn.tick_seed >> 16) & 0xFFu),
-			       static_cast<uint8_t>((conn.tick_seed >> 24) & 0xFFu)}));
+			0x61, Server_RerollPlayerTickSeed(conn)));
 	const uint8_t frontier = world::zone_chain_frontier_zone(
 			world, world.zone_chain, player->team);
 	if (frontier != 0)
@@ -992,7 +988,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
-                                                      uint32_t session_seed,
                                                       uint32_t session_uptime_ms,
 	                                                  const MissionMetadataBlob *mission_metadata_blob) {
 	std::vector<ProtocolMessage> replies;

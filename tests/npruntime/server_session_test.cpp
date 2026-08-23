@@ -2758,7 +2758,7 @@ bool check_session_status_reply_matches_retail_writer() {
 					config, roster[1],
 					{opennova::make_protocol_message(
 							opennova::c2s::BURST_MEMBER_2D, {})},
-					17u, roster, nullptr, 0, 111844u);
+					17u, roster, nullptr, 111844u);
 	if (!expect(replies.size() == 1 &&
 	                    replies.front().tag == opennova::s2c::SESSION_STATUS,
 	            "C2S 0x2D receives one requester-only S2C 0x58"))

@@ -7,7 +7,8 @@
 // min/max_damage], clamped to remaining health [orig: @0x4e8064], and a health<=0 victim
 // raises the death routing [orig: Entity_CheckAndProcessDeath @0x51b550]: S2C 0x13
 // [u16 victim][u16 killerSource] to every non-host in-match connection, victim-only
-// S2C 0x52 killer position, S2C 0x1E kill-feed, and the conditional S2C 0x54
+// S2C 0x61 tick seed + 0x52 killer position, mask-0x80 S2C 0x1E kill-feed, and
+// the conditional S2C 0x54
 // downed/revive-window split; every victim receives the retail +360/+364
 // post-death hold, early C2S 0x0E picks are dropped, and the listen host's local
 // presentation fallback releases through the same deployment transaction at expiry
@@ -15,8 +16,8 @@
 //
 // Coverage: build_ammo_table + round_type resolve; fire -> one live round with the
 // velocity/62 step; three body hits kill a 150-hp player (60/60/30 clamped); exact
-// 0x13 -> victim-only 0x52 -> 0x1E -> conditional 0x54 route, none of the broadcast
-// pair on the loopback; configured and recent-spawn
+// 0x13 -> victim-only 0x61 -> victim-only 0x52 -> 0x1E -> conditional 0x54
+// route, including the 0x1E-only loopback leg; configured and recent-spawn
 // hold branches; exact silent-drop/accept boundary; a dead loopback victim releases at
 // spawn health without a second respawn implementation.
 
@@ -163,6 +164,248 @@ Drained drain_all(ns::UdpSessionTransport &t) {
 	std::vector<uint8_t> raw;
 	while (t.pop_outbound(raw)) out.raw.push_back(raw);
 	return out;
+}
+
+Drained drain_all(ns::LoopbackChannel &t) {
+	Drained out;
+	ns::Datagram datagram;
+	while (t.client_recv(datagram)) {
+		std::vector<uint8_t> raw;
+		raw.reserve(1 + datagram.body.size());
+		raw.push_back(datagram.tag);
+		raw.insert(raw.end(), datagram.body.begin(), datagram.body.end());
+		out.raw.push_back(std::move(raw));
+	}
+	return out;
+}
+
+bool run_death_feed_classifier_matrix() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	world.mp_session = true;
+
+	w::Entity attacker_seed;
+	attacker_seed.kind = w::EntityKind::Organic;
+	attacker_seed.has_item_def = true;
+	attacker_seed.item_type = 3;
+	attacker_seed.flags = w::kEntityFlagPlayer;
+	attacker_seed.alive = true;
+	attacker_seed.health = 100;
+	attacker_seed.team = 1;
+	const w::EntityHandle attacker = world.registry.spawn(0, attacker_seed);
+
+	w::Entity victim_seed = attacker_seed;
+	victim_seed.team = 2;
+	const w::EntityHandle victim = world.registry.spawn(0, victim_seed);
+	if (!expect(attacker.valid() && victim.valid(),
+	            "death classifier fixture players spawned"))
+		return false;
+
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.has_item_def = true;
+	flag_seed.item_id = 4091;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	if (!expect(flag.valid(), "death classifier fixture flag spawned")) return false;
+
+	world.ammo.entries.resize(2);
+	world.ammo.entries[0].valid = true;
+	world.ammo.entries[0].name = "AMMO_TEST_RIFLE";
+	world.ammo.entries[1].valid = true;
+	world.ammo.entries[1].name = "AMMO_60MM_MORTAR";
+
+	ns::LoopbackChannel host;
+	ns::UdpSessionTransport victim_wire(ns::UdpSessionTransport::Role::Host);
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.respawn_timeout = 3;
+	ctx.config.death_messages = 1;
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(make_conn(
+			1, 2, &host, ns::TransportMode::Loopback, attacker, true));
+	roster.push_back(make_conn(
+			2, 1, &victim_wire, ns::TransportMode::Client, victim, true));
+
+	auto reset = [&]() {
+		w::Entity *a = world.registry.get(attacker);
+		w::Entity *v = world.registry.get(victim);
+		a->flags = w::kEntityFlagPlayer;
+		a->alive = true;
+		a->health = 100;
+		a->team = 1;
+		v->flags = w::kEntityFlagPlayer;
+		v->alive = true;
+		v->health = 100;
+		v->damage_state = 0;
+		v->team = 2;
+		v->mounted_child = w::EntityHandle{};
+		roster[1].link.respawn_pending = false;
+		roster[1].link.respawn_hold_armed = false;
+		roster[1].link.respawn_delay_seconds = 0;
+		roster[1].link.spawn_target_hold_seconds = 0;
+		roster[1].link.downed_revive_seconds = 0;
+		roster[1].link.medic_request_active = false;
+		roster[1].link.underwater_breath_samples = 0;
+		ctx.config.death_messages = 1;
+		world.env.water_z = 0;
+		drain_all(host);
+		drain_all(victim_wire);
+	};
+	auto death = [&](w::EntityHandle killer) {
+		w::RoundDeath d;
+		d.victim = victim;
+		d.killer = killer;
+		d.victim_handle = victim.packed;
+		d.killer_handle = killer.packed;
+		d.ammo_index = 0;
+		return d;
+	};
+	auto route = [&](const w::RoundDeath &d) {
+		world.round_sim.deaths.push_back(d);
+		np::Server_TickUpdate(ctx);
+		const Drained host_out = drain_all(host);
+		drain_all(victim_wire);
+		return host_out.tag(0x1E);
+	};
+	auto expect_family = [&](uint8_t lo, uint8_t hi, w::RoundDeath d,
+	                         const char *message) {
+		const auto feed = route(d);
+		return expect(feed.size() == 1 && feed[0].size() == 8 &&
+		                      feed[0][0] >= lo && feed[0][0] <= hi,
+		              message);
+	};
+
+	reset();
+	if (!expect_family(4, 6, death(attacker), "ordinary kills use event types 4..6"))
+		return false;
+	reset();
+	{
+		w::RoundDeath d = death(attacker);
+		d.event_flags = 0x800u;
+		if (!expect_family(10, 12, d, "critical/headshot kills use event types 10..12"))
+			return false;
+	}
+	reset();
+	{
+		w::RoundDeath d = death(attacker);
+		d.event_flags = 0x400u;
+		if (!expect_family(13, 15, d, "knife kills use event types 13..15"))
+			return false;
+	}
+	reset();
+	{
+		w::RoundDeath d = death(attacker);
+		d.event_flags = 0x100u;
+		if (!expect_family(32, 32, d,
+		                  "retail's narrowed CRT roll makes the same-bullet branch event 32"))
+			return false;
+	}
+	reset();
+	{
+		world.registry.get(victim)->mounted_child = flag;
+		w::RoundDeath d = death(attacker);
+		d.event_flags = 0x800u;
+		if (!expect_family(24, 24, d,
+		                  "killing the carrier of a retail flag type uses event 24"))
+			return false;
+	}
+	reset();
+	{
+		w::RoundDeath d = death(attacker);
+		d.ammo_index = 1;
+		if (!expect_family(49, 49, d, "60 mm mortar kills use event 49")) return false;
+	}
+	reset();
+	world.registry.get(attacker)->team = 2;
+	if (!expect_family(7, 9, death(attacker), "same-team kills use event types 7..9"))
+		return false;
+	reset();
+	{
+		const auto feed = route(death(victim));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 &&
+		                    feed[0][0] >= 1 && feed[0][0] <= 3 &&
+		                    feed[0][1] == uint8_t(victim.slot()) &&
+		                    feed[0][2] == 0 && feed[0][3] == 0,
+		            "suicide uses 1..3 and the retail self-death actor shape"))
+			return false;
+	}
+	reset();
+	world.registry.get(attacker)->flags = 0;
+	{
+		const auto feed = route(death(attacker));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 &&
+		                    feed[0][0] == 22 &&
+		                    feed[0][1] == uint8_t(victim.slot()) &&
+		                    feed[0][2] == 0 && feed[0][3] == 0,
+		            "a non-player killer uses event 22 and the self-death actor shape"))
+			return false;
+	}
+	reset();
+	{
+		const auto feed = route(death(w::EntityHandle{}));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 &&
+		                    feed[0][0] == 22 &&
+		                    feed[0][1] == uint8_t(victim.slot()) &&
+		                    feed[0][2] == 0 && feed[0][3] == 0,
+		            "a killer-less ordinary death uses event 22 and the self-death actor shape"))
+			return false;
+	}
+	reset();
+	{
+		w::RoundDeath d = death(w::EntityHandle{});
+		d.event_flags = 0x200u;
+		if (!expect_family(23, 23, d,
+		                  "a killer-less crash cause at the breath boundary uses event 23"))
+			return false;
+	}
+	reset();
+	{
+		roster[1].link.underwater_breath_samples = 80;
+		if (!expect_family(22, 22, death(w::EntityHandle{}),
+		                  "retail keeps sample 4*20 inside the ordinary no-killer family"))
+			return false;
+	}
+	reset();
+	{
+		roster[1].link.underwater_breath_samples = 81;
+		if (!expect_family(26, 26, death(w::EntityHandle{}),
+		                  "sample 4*20+1 selects the drowned event 26"))
+			return false;
+	}
+	reset();
+	ctx.config.death_messages = 0;
+	{
+		const auto feed = route(death(attacker));
+		if (!expect(feed.empty(), "deathmes=0 suppresses the S2C 0x1E feed"))
+			return false;
+	}
+
+	// The same +460 counter is produced by the authority every 32 host ticks.
+	// At the first sample beyond 4*20, the eye-under-water predicate kills the
+	// player with the drown animation and routes the same no-killer transaction.
+	// [orig: Server_UpdateEntityIdleTimers @0x50D770, call gate @0x51D8C4;
+	// GameEvent_PlayerDeath @0x5172EC..0x51734D]
+	reset();
+	world.logic_tick = 32;
+	world.env.water_z = 1 << 16;
+	w::Entity *submerged = world.registry.get(victim);
+	submerged->position.z = 0.0f;
+	submerged->eye_offset_z = 0;
+	roster[1].link.underwater_breath_samples = 80;
+	np::Server_TickUpdate(ctx);
+	{
+		const Drained host_out = drain_all(host);
+		drain_all(victim_wire);
+		const auto feed = host_out.tag(0x1E);
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26 &&
+		                    submerged->health <= 0 && submerged->death_anim_state == 175,
+		            "the 32-tick authority breath sample produces a drowned player death"))
+			return false;
+	}
+	return true;
 }
 
 void deliver_all(const Drained &drained, ns::UdpSessionTransport &client) {
@@ -584,6 +827,7 @@ int main() {
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
+	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;
@@ -713,6 +957,7 @@ int main() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.config.respawn_timeout = 5;
+	ctx.config.death_messages = 1;
 	// This scenario is an MP session (three players over transports): stamp the
 	// world-side flag too, or the SP-only round-outcome legs (kill tallies + the
 	// death auto-lose in check_win_conditions) run and hold the respawn queue.
@@ -752,7 +997,7 @@ int main() {
 				make_protocol_message(0x03, {1, 0, 0, 0})};
 		np::dispatch_session_replies(
 				ctx.config, roster[2], manual_medic, world.logic_tick,
-				roster, &world, ctx.np_protocol.session_seed_id);
+				roster, &world);
 	}
 	auto advance_second_boundaries = [&](int count) {
 		int crossed = 0;
@@ -867,6 +1112,7 @@ int main() {
 	const Drained before_kill_b = drain_all(udp_b);
 	deliver_all(before_kill_b, client_b_in);
 	client_b_view.pump(client_b_in);
+	drain_all(loop);
 	const ns::ClientEntityState *remote_before = client_b_view.state().find(hc.packed);
 	if (!expect(remote_before != nullptr,
 	            "observer decoded the live remote victim before lethal damage"))
@@ -884,12 +1130,13 @@ int main() {
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	const Drained after_kill_b = drain_all(udp_b);
 	const Drained after_kill_c = drain_all(udp_c);
+	const Drained after_kill_host = drain_all(loop);
 	{
 		auto death_tags = [](const Drained &drained) {
 			std::vector<uint8_t> tags;
 			for (const std::vector<uint8_t> &raw : drained.raw) {
 				if (raw.empty()) continue;
-				if (raw[0] == 0x13 || raw[0] == 0x52 ||
+				if (raw[0] == 0x13 || raw[0] == 0x61 || raw[0] == 0x52 ||
 						raw[0] == 0x1E || raw[0] == 0x54)
 					tags.push_back(raw[0]);
 			}
@@ -900,8 +1147,12 @@ int main() {
 		            "medic observer receives the retail death-tail order"))
 			return 1;
 		if (!expect(death_tags(after_kill_c) ==
-		                    std::vector<uint8_t>({0x13, 0x52, 0x1E, 0x54}),
-		            "victim receives exact 0x13 -> 0x52 -> 0x1E -> 0x54 order"))
+		                    std::vector<uint8_t>({0x13, 0x61, 0x52, 0x1E, 0x54}),
+		            "victim receives exact 0x13 -> 0x61 -> 0x52 -> 0x1E -> 0x54 order"))
+			return 1;
+		if (!expect(death_tags(after_kill_host) ==
+		                    std::vector<uint8_t>({0x1E}),
+		            "mask 0x80 includes the listen host for the kill feed only"))
 			return 1;
 	}
 	deliver_all(after_kill_b, client_b_in);
@@ -942,17 +1193,38 @@ int main() {
 			return 1;
 	}
 	{
+		const auto seed_b = after_kill_b.tag(0x61);
+		const auto seed_c = after_kill_c.tag(0x61);
+		if (!expect(seed_b.empty() && seed_c.size() == 1,
+		            "death-time S2C 0x61 is targeted only to the victim"))
+			return 1;
+		const std::vector<uint8_t> &seed = seed_c[0];
+		if (!expect(seed.size() == 4, "0x61 body is one u32 tick seed")) return 1;
+		const uint32_t value = uint32_t(seed[0]) | (uint32_t(seed[1]) << 8) |
+		                       (uint32_t(seed[2]) << 16) |
+		                       (uint32_t(seed[3]) << 24);
+		if (!expect(value == roster[2].tick_seed &&
+		                    (value & 0xFF00FFFFu) == 0u &&
+		                    ((value >> 16) & 1u) == 1u,
+		            "0x61 carries the connection's re-rolled odd high-byte tick seed"))
+			return 1;
+	}
+	{
 		auto feed_b = after_kill_b.tag(0x1E);
 		if (!expect(feed_b.size() == 1, "one S2C 0x1E kill-feed event")) return 1;
 		const std::vector<uint8_t> &f = feed_b[0];
 		if (!expect(f.size() == 8, "0x1E body is 8 B (§5.26)")) return 1;
-		if (!expect(f[0] == 4, "standard-kill event_type 4")) return 1;
+		if (!expect(f[0] >= 4 && f[0] <= 6,
+		            "standard-kill event_type is the retail 4..6 presentation family"))
+			return 1;
 		if (!expect(f[1] == uint8_t(hb.packed & 0xFF) && f[2] == uint8_t(hc.packed & 0xFF),
 		            "0x1E attacker/victim pool-0 index bytes"))
 			return 1;
 		const int16_t px = int16_t(f[4] | (f[5] << 8));
 		const int16_t py = int16_t(f[6] | (f[7] << 8));
-		if (!expect(px == 30 && py == 0, "0x1E event position in metres")) return 1;
+		if (!expect(px == 0 && py == 0,
+		            "player-death 0x1E carries the retail zero position"))
+			return 1;
 	}
 	{
 		const auto death_pos_b = after_kill_b.tag(0x52);
@@ -1016,7 +1288,7 @@ int main() {
 	auto request_client_respawn = [&]() {
 		return np::dispatch_session_replies(
 				ctx.config, roster[2], default_pick, world.logic_tick,
-				roster, &world, ctx.np_protocol.session_seed_id);
+				roster, &world);
 	};
 	if (!expect(request_client_respawn().empty() &&
 	                    world.registry.get(hc)->health == 0,
@@ -1150,8 +1422,7 @@ int main() {
 				0x0E, {static_cast<uint8_t>(zone.packed),
 				       static_cast<uint8_t>(zone.packed >> 8)}));
 		if (!expect(np::dispatch_session_replies(
-		                    ctx.config, conn, target_pick, 99, roster, &world,
-		                    0xA1B2C3D4u).empty() &&
+		                    ctx.config, conn, target_pick, 99, roster, &world).empty() &&
 		                    conn.link.respawn_pending,
 		            "+364 silently rejects a real spawn-target pick"))
 			return 1;
@@ -1159,7 +1430,7 @@ int main() {
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x0E, {0xFF, 0xFF})); // param-0 pick (base deploy)
 		std::vector<ProtocolMessage> replies = np::dispatch_session_replies(
-				np::GameConfig{}, conn, msgs, 100, roster, &world, 0xA1B2C3D4u);
+				np::GameConfig{}, conn, msgs, 100, roster, &world);
 
 		bool saw_5a = false, saw_61 = false;
 		for (const ProtocolMessage &m : replies) {
@@ -1198,7 +1469,7 @@ int main() {
 		// An alive DEPLOYED player's 0x0E is a no-op (the dead-or-pending gate @0x519cc7):
 		// no bundle, no reposition.
 		std::vector<ProtocolMessage> again = np::dispatch_session_replies(
-				np::GameConfig{}, conn, msgs, 101, roster, &world, 0xA1B2C3D4u);
+				np::GameConfig{}, conn, msgs, 101, roster, &world);
 		for (const ProtocolMessage &m : again)
 			if (!expect(m.tag != 0x5A && m.tag != 0x61,
 			            "alive deployed 0x0E draws no release bundle"))

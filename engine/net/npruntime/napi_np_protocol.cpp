@@ -737,7 +737,6 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
 			                         ctx.np_protocol.connection_list, ctx.world,
-			                         ctx.np_protocol.session_seed_id,
 			                         ctx.np_protocol.host_run_duration_ms,
 			                         &ctx.mission_metadata_blob);
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
