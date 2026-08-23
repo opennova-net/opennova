@@ -539,6 +539,15 @@ Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
 serialize_entity_pool_to_packet @0x503593..0x5035A9;
 NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
 
+**D-AI-10 co-op producer correction (2026-08-23):** both waypoint-family
+variants now have composed authority-to-wire proof. A real WAC `Win` execution
+ends stock Co-op and a real BMS `RedWin` event ends Objective Co-op; both enter
+the common end transaction from inside `Server_TickUpdate`, emit 0x61/0x1D,
+and consume the script-action tick from the linger. The former direct-latch
+host fixture is removed. `[orig: WacAction_Win @0x4ED4A0;
+EventAction_Dispatch RedWin @0x454495; Server_TickUpdate @0x51DA04;
+Server_ProcessRoundEnd @0x5164F0]`
+
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 

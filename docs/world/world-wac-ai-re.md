@@ -4022,6 +4022,15 @@ Therefore residual (b) no longer applies to these retail game-mode producers.
 The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
 ordinary combat event producer not enumerated here.
 
+The co-op family is now composed through its authored result producers at the
+host boundary instead of being inferred from a direct latch test. Stock Co-op
+executes WAC `Win` on the VM's 62-tick cadence; Objective Co-op dispatches BMS
+`RedWin` on the normal 16-tick event pass. Both are observed entering
+`Server_ProcessRoundEnd`, emitting 0x61/0x1D, and consuming their originating
+tick from the 2790-tick linger exactly like retail. `[orig: WacAction_Win
+@0x4ED4A0; EventAction_Dispatch RedWin @0x454495;
+Server_TickUpdate @0x51DA04; Server_ProcessRoundEnd @0x5164F0]`
+
 KOTH/TKOTH now retains the authored mission producer as well as the decision
 branch. BMS type 6006 copies `wp_distance << 16` (or default `0x8000`) into
 entity+0; the 1 Hz proximity pass compares players against that exact hill
