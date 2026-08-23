@@ -213,6 +213,22 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::OBJECTIVE_ENTITY_STATE: // flag/carryable pose + carry links (0x2F)
 		apply_objective_entity_state(body);
 		break;
+	case s2c::SCORE_DELTA_SOUND: {
+		ScoreDeltaSound sample;
+		if (!decode_score_delta_sound(body.data(), body.size(), sample)) {
+			++malformed_bodies_;
+			break;
+		}
+		ClientScoreFeedback &feedback = state_.score_feedback;
+		if (sample.score == feedback.score) break;
+		feedback.delta = static_cast<int32_t>(
+				static_cast<uint32_t>(sample.score) -
+				static_cast<uint32_t>(feedback.score));
+		feedback.score = sample.score;
+		++feedback.updates;
+		state_.mark_changed();
+		break;
+	}
 	default:
 		// Game-start scalars / world-state-load and other non-entity tags.
 		++unknown_tags_;

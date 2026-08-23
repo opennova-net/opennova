@@ -1142,6 +1142,14 @@ bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &
 	return (c.p == c.end);
 }
 
+bool decode_score_delta_sound(const uint8_t *body, size_t len,
+		ScoreDeltaSound &out) {
+	out = ScoreDeltaSound{};
+	Cursor c{body, body + len, true};
+	out.score = c.i32();
+	return c.ok && c.p == c.end;
+}
+
 // S2C 0x7B full player info. [orig: NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0]
 bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &out) {
 	out = FullPlayerInfo{};

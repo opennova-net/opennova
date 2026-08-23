@@ -11651,10 +11651,24 @@ contests, conversion, and enforcement; `npruntime_server_session_test` pins the 
 `0x53` 0→2→3 plus `0x6C` 2→1 progression and once-only score; client/catalog tests pin
 strict decode and ordered folding.
 
+The requester-local **S2C 0x81 score refresh is also ported end to end**. At the
+start of retail's proximity pass, `CRenderState_GetFieldByIndex(player+18, 0x1C)`
+returns the direct render-state word at index 29—the accumulated signed Points
+field, not the game-type-specific primary scoreboard value. A change from the
+player-slot cache sends reliable `[i32 points]` only to that player. The client
+strictly decodes four bytes, computes wrapping `current - previous`, and publishes
+the change edge used by the positive-delta fanfare owner; duplicate values are
+no-ops. `nw_message_coverage_test`, `client_replica_scoreboard_test`, and
+`npruntime_server_session_test` pin the signed codec, reducer, requester filter,
+reliability, and changed-value suppression. `[orig:
+Server_UpdateCaptureZoneProximity @0x5086A0;
+CRenderState_GetFieldByIndex @0x52D7D0;
+NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]`
+
 Tracked residuals: capture contact currently approximates the authored CT collision shape
 with the trigger radius (it is per tick, no longer a 1 Hz request sample); 0x6F's exact
 retail emit filter remains unwitnessed; spawn-wave list/reset behavior and 0x6E scheduling;
-the 0x81 proximity-score refresh and proximity-bit mirror; and the 0x40 vehicle-bay,
+the proximity-bit mirror; and the 0x40 vehicle-bay,
 supply-crate, medic-revivable, and exact pool-0 classifier tails. Ordinary active-player
 refresh separately rides 0x6B; its joiner fold is ported, while its retail host producer
 remains unwitnessed. `[orig: Server_OnPlayerTouchCaptureZone @0x500BA0;

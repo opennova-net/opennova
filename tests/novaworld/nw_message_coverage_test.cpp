@@ -407,6 +407,22 @@ int check_S_6E_spawn_wave_status() {
 	return 0;
 }
 
+// S2C 0x81 — requester-local accumulated points. The payload is the signed
+// CRenderState field 0x1C, not the mode's primary scoreboard value.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+//        CRenderState_GetFieldByIndex @0x52D7D0;
+//        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+int check_S_81_score_delta_sound() {
+	LE w;
+	w.u32(0xFFFFFFD6u); // -42
+	ScoreDeltaSound out;
+	EXPECT(decode_score_delta_sound(w.b.data(), w.b.size(), out));
+	EXPECT(out.score == -42);
+	EXPECT(!decode_score_delta_sound(w.b.data(), w.b.size() - 1, out));
+	cover('S', 0x81);
+	return 0;
+}
+
 // S2C 0x7B — full player info: 5 cstrings + u32 + 2 cstrings.
 int check_S_7B_full_player_info() {
 	LE w;
@@ -1383,6 +1399,7 @@ int main() {
 	if (check_C_21_checksum_reply()) return 1;
 	if (check_S_5A_weapon_loadout()) return 1;
 	if (check_S_6E_spawn_wave_status()) return 1;
+	if (check_S_81_score_delta_sound()) return 1;
 	if (check_S_7B_full_player_info()) return 1;
 	if (check_S_0F_world_state()) return 1;
 	if (check_S_60_64_file_transfer()) return 1;
