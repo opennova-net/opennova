@@ -62,6 +62,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_body_arbitration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_pipeline.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_placed_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_guided.cpp  # the 0x44 guidance fold + client flight (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_feed.cpp  # the S2C 0x1E feed fold

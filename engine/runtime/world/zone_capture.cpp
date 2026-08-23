@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 #include "world/spawn_select.h"
 #include "world/world.h"
@@ -307,7 +308,9 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
                 input.game_time_minutes = rules.game_time_minutes;
                 const int32_t delta = zone_capture_control_delta(input);
                 wire_delta = static_cast<int16_t>(std::clamp(
-                        delta, int32_t{-32768}, int32_t{32767}));
+                        delta,
+                        int32_t{std::numeric_limits<int16_t>::min()},
+                        int32_t{std::numeric_limits<int16_t>::max()}));
                 zone->zone_control = static_cast<int32_t>(std::clamp<int64_t>(
                         static_cast<int64_t>(zone->zone_control) + delta,
                         0, 0x10000));
