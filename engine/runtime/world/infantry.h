@@ -52,6 +52,9 @@ enum : int {
     kClimbTop = 35,
     kSwimIdle = 36,
     kSwimForward = 37,
+    kSwimLeft = 38,  // player swim strokes from MoveOrder&7 [orig: kong 148429-148442]
+    kSwimRight = 39,
+    kSwimBack = 40,
     kRollLeft = 41,  // prone lean, MoveOrder bit 6 [orig: @0x4b7335]
     kRollRight = 42, // prone lean, MoveOrder bit 7 [orig: @0x4b734c]
     kIdle = 43,

@@ -1366,6 +1366,149 @@ void test_player_idle_skip_throttle_no_bounce() {
     CHECK(std::abs(e->pos[2] - settled) <= 208);
 }
 
+// The local player's WATER channel + swim selection: a player body standing on a
+// riverbed 5u under the plane latches the float bit (0x8000) once it is
+// head-under, rises to the surface line instead of walking the bed, and the
+// 4th-tick selection then takes the swim strokes straight from the float latch
+// and the direction index -- idle 36, forward 37, left 38, back 40, right 39 --
+// bypassing the flag-table arbitration. Leaving the water (dry land above the
+// plane) clears the latch and the land selection resumes.
+// [orig: Entity_UpdateInfantryPlayerBody water block @0x4b8020-0x4b8373; swim
+//  selection kong 148422-148452; exe constants 0x7C9BD0 = 3.1, 0x7C9BC8 = -1224]
+void test_local_player_swims_on_the_plane() {
+    Field flat([](int) { return static_cast<uint16_t>(0); });
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+    world.env.water_z = fx(5.0);
+
+    Entity far_building;
+    far_building.kind = EntityKind::Building;
+    far_building.position = {200.0f, 200.0f, 0.0f};
+    const EntityHandle bh = world.registry.spawn(2, far_building);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.position = {10.0f, 10.0f, 0.05f};
+    player.health = 100;
+    player.health_max = 100;
+    const EntityHandle ph = world.registry.spawn(0, player);
+
+    CollisionWorld collision;
+    collision.terrain = &flat.field;
+    const int32_t model_id = collision.add_model(hurt_box_model());
+    collision.assign_entity(bh, model_id);
+
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    ai.collision = &collision;
+    TestSource source;
+    source.clips = {anim_state::kIdle, anim_state::kWalkForward, anim_state::kSwimIdle,
+                    anim_state::kSwimForward, anim_state::kSwimLeft, anim_state::kSwimRight,
+                    anim_state::kSwimBack};
+    source.step = 0;
+    ai.root_motion = &source;
+    AiEntity *e = ai.at(ai.attach(ph));
+    e->inf.active = true;
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->pos[0] = fx(10.0);
+    e->pos[1] = fx(10.0);
+    e->pos[2] = fx(0.05);
+
+    Entity *ent = world.registry.get(ph);
+    CHECK(ent != nullptr);
+
+    // Tick 0, 5u under: well past the 0.625u head-under entry -> the float latch
+    // takes on the first tick (never beside the airborne bit), the entry splash
+    // fans once, and -- being under the surface line by more than 0x2000 -- the
+    // dive bit latches with its own splash: exactly TWO crossings.
+    run_ticks(ai, world, 0, 1);
+    CHECK((ent->flags & kEntityFlagDrowning) != 0);
+    CHECK((ent->flags & kEntityFlagInAir) == 0);
+    CHECK((ent->flags & 0x200000u) != 0);
+    CHECK(!e->inf.airborne);
+    CHECK(world.water_crossings.events.size() == 2);
+    if (!world.water_crossings.events.empty()) {
+        CHECK(world.water_crossings.events[0].water_z == fx(5.0));
+        CHECK(!world.water_crossings.events[0].airborne);
+    }
+
+    // The buoyant rise from deep water: z climbs every tick by the witnessed
+    // |base>>4| + 0x70 (base = -1225 -/+ the bob, zero capsule bottom here) --
+    // a bounded step, never a snap, never back toward the bed -- and no
+    // re-splash while afloat.
+    int32_t prev_z = e->pos[2];
+    for (uint32_t t = 1; t < 64; ++t) {
+        run_ticks(ai, world, t, t + 1);
+        const int32_t dz = e->pos[2] - prev_z;
+        // The rise step is 112..265 (the bob swings |base>>4| through 0..153);
+        // the entry tick's gravity velocity (-208, decayed by the drag) still
+        // integrates underneath it for the first ticks, so pin the bound and
+        // the sign, not the exact step.
+        CHECK(dz > 0 && dz <= 0x70 + ((1225 + 1224) >> 4) + 1);
+        prev_z = e->pos[2];
+    }
+    CHECK((ent->flags & kEntityFlagDrowning) != 0);
+    CHECK(world.water_crossings.events.size() == 2);
+
+    // Near the surface: the line water + base/2 - eye/2 clamps from above and
+    // clears the dive bit; the body rides UNDER the plane, not on the bed.
+    e->pos[2] = fx(4.9);
+    ent->position.z = 4.9f;
+    run_ticks(ai, world, 64, 90); // a few rise steps reach the line
+    CHECK(e->pos[2] < fx(5.0));
+    CHECK(e->pos[2] > fx(4.0));
+    CHECK((ent->flags & 0x200000u) == 0);
+    const int32_t surfaced = e->pos[2];
+    run_ticks(ai, world, 90, 130);
+    CHECK(std::abs(e->pos[2] - surfaced) <= 1224); // held at the line (+- the bob)
+
+    // Selection: idle -> swim_idle 36, straight (no gait, no arbitration).
+    CHECK(e->inf.anim_state == anim_state::kSwimIdle);
+    CHECK(e->inf.anim_pending == 0);
+
+    // Forward -> 37; the direction index collapses to the four strokes.
+    PlayerBodyInput in;
+    in.moving = true;
+    in.move_dir_index = 0;
+    apply_player_body_input(*e, in);
+    run_ticks(ai, world, 130, 134);
+    CHECK(e->inf.anim_state == anim_state::kSwimForward);
+    in.move_dir_index = 2; // L
+    apply_player_body_input(*e, in);
+    run_ticks(ai, world, 134, 138);
+    CHECK(e->inf.anim_state == anim_state::kSwimLeft);
+    in.move_dir_index = 4; // B
+    apply_player_body_input(*e, in);
+    run_ticks(ai, world, 138, 142);
+    CHECK(e->inf.anim_state == anim_state::kSwimBack);
+    in.move_dir_index = 7; // F+R
+    apply_player_body_input(*e, in);
+    run_ticks(ai, world, 142, 146);
+    CHECK(e->inf.anim_state == anim_state::kSwimRight);
+    in.moving = false;
+    apply_player_body_input(*e, in);
+    run_ticks(ai, world, 146, 150);
+    CHECK(e->inf.anim_state == anim_state::kSwimIdle);
+
+    // Leaving the water: drop the plane under the bed -> the first tick at or
+    // above the plane clears the float + dive bits; the body falls to the bed
+    // (selection is skipped while airborne) and the land idle resumes on landing.
+    world.env.water_z = fx(-5.0);
+    run_ticks(ai, world, 150, 151);
+    CHECK((ent->flags & (kEntityFlagDrowning | 0x200000u)) == 0);
+    run_ticks(ai, world, 151, 500);
+    CHECK(!e->inf.airborne);
+    CHECK(e->inf.anim_state == anim_state::kIdle);
+
+    // No water plane at all: the channel is off and can never latch.
+    world.env.water_z = 0;
+    run_ticks(ai, world, 500, 520);
+    CHECK((ent->flags & kEntityFlagDrowning) == 0);
+    CHECK(e->inf.anim_state == anim_state::kIdle);
+}
+
 // The upper-body weapon channel (the entity's SECONDARY AnimMap channel), local-player
 // slice: the rifle-mirror default, the 80-tick reload window -> state 65, the locked
 // commit rule (65 = flag 0x84 defers exits to clip end), and the clip-end promotion.
@@ -3601,6 +3744,7 @@ int main() {
     test_npc_ledge_fall_keeps_clip();
     test_dead_player_ledge_fall_edge_is_suppressed();
     test_player_idle_skip_throttle_no_bounce();
+    test_local_player_swims_on_the_plane();
     test_player_weapon_channel();
     test_player_weapon_channel_blend_window();
     test_player_weapon_channel_variant_ring();
