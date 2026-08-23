@@ -41,6 +41,10 @@ void ClientReplicaPipeline::apply_deployed_item(
 	uint16_t selected_type = spawn.item_id;
 	const ClientEntityState *owner = state_.find(spawn.owner_handle);
 	const ClientEntityState *viewer = state_.find(viewer_handle_);
+	const bool owner_team_known = owner != nullptr && owner->team_known;
+	const uint8_t owner_team = owner_team_known ? owner->team : uint8_t{0xFF};
+	const bool viewer_team_known = viewer != nullptr && viewer->team_known;
+	const uint8_t viewer_team = viewer_team_known ? viewer->team : uint8_t{0xFF};
 	ClientEntityState *existing = state_.find(spawn.slot_handle);
 	// The team-variant pick runs only on the FRESH-SPAWN leg (retail's
 	// found/update path never touches the item id) and only when BOTH
@@ -52,11 +56,10 @@ void ClientReplicaPipeline::apply_deployed_item(
 	//  update @0x546828..0x54697a leaves the type alone]
 	if (existing != nullptr) {
 		selected_type = existing->type_id;
-	} else if (owner != nullptr && viewer != nullptr &&
-			owner->team_known && viewer->team_known &&
+	} else if (owner_team_known && viewer_team_known &&
 			spawn.friendly_item_id != 0 && spawn.enemy_item_id != 0) {
 		const bool enemy = (mp_attributes_ & 0x8000u) != 0 ||
-				owner->team != viewer->team;
+				owner_team != viewer_team;
 		selected_type = enemy ? spawn.enemy_item_id
 				      : spawn.friendly_item_id;
 	}
@@ -116,8 +119,8 @@ void ClientReplicaPipeline::apply_deployed_item(
 	row.parent_handle = wire_handle::kInvalid;
 	row.target_handle = spawn.parent_handle;
 	row.parent_pose_valid = false;
-	if (owner != nullptr && owner->team_known) {
-		row.team = owner->team;
+	if (owner_team_known) {
+		row.team = owner_team;
 		row.team_known = true;
 	} else {
 		row.team = 0xFF;
