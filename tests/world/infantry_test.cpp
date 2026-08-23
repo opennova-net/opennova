@@ -1497,10 +1497,14 @@ void test_local_player_swims_on_the_plane() {
     run_ticks(ai, world, 146, 150);
     CHECK(e->inf.anim_state == anim_state::kSwimIdle);
 
-    // Leaving the water: drop the plane under the bed -> the first tick at or
-    // above the plane clears the float + dive bits; the body falls to the bed
-    // (selection is skipped while airborne) and the land idle resumes on landing.
+    // Leaving the water: drop the plane under the bed (and stage the body just
+    // above the floor -- a >2u free fall outruns the witnessed 2u ground probe
+    // in this bare rig, the same trap the idle-throttle test documents) -> the
+    // first tick at or above the plane clears the float + dive bits, the short
+    // fall lands, and the land idle resumes.
     world.env.water_z = fx(-5.0);
+    e->pos[2] = fx(0.5);
+    ent->position.z = 0.5f;
     run_ticks(ai, world, 150, 151);
     CHECK((ent->flags & (kEntityFlagDrowning | 0x200000u)) == 0);
     run_ticks(ai, world, 151, 500);
