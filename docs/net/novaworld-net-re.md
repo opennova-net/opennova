@@ -2414,7 +2414,7 @@ Cross-witnessed against 792 records over 29 retail payloads in the same loopback
 | 7 | 4 | posY | non-empty | entitySlot+8 |
 | 11 | 4 | posZ | non-empty | entitySlot+12 |
 | — | 4 | **movementVal** | `flags & 0x01` | entitySlot+16 — raw u32 (32-bit BAM heading for markers), NOT a `pool<<12\|slot` parent; D-NET-59 |
-| — | 4 | orientationVal | `flags & 0x02` | entitySlot+0 |
+| — | 4 | orientationVal | `flags & 0x02` | entitySlot+0 — raw Q16 marker radius for BMS types 6005/6006/2044; authored `wp_distance << 16`, default `0x8000` |
 | — | 2 | ammoCount | `flags & 0x04` | entitySlot+290 |
 | — | 2 | netHandle | non-empty (ALWAYS) | entitySlot+124 (zero-ext to u32) |
 | — | 1 | teamByte | `flags & 0x08` | entitySlot+354 |
@@ -2435,8 +2435,17 @@ use (per-tag semantic — Hex-Rays auto-named).
 RAW (no pool-resolve), NOT a `pool<<12|slot` parent handle. For pool-3 start markers it carries
 a full 32-bit **BAM heading**: the controlled probe's Blue starts = `0x40000000` (90.00°), Red
 starts = `0xc0000000` (270.00°) — values that are not valid pool handles and are strictly
-team-correlated. The companion `flags & 0x02` field (`orientationVal` → entitySlot+0) is the
-other angle slot. `[orig: serialize_entity_pool_to_packet @ 0x503460 (movement_val = entry[4] @ 0x50350c, written raw) / NapiNPClientMsg_0x020 @ 0x425C00]`
+team-correlated. The companion `flags & 0x02` field (`orientationVal` → entitySlot+0) is a raw
+entity dword, not generically an angle. For BMS marker types 6005, 6006, and
+2044 the spawn path replaces it with `wp_distance << 16`, or `0x8000` when the
+authored distance is zero. In particular, the KOTH proximity pass reads type
+6006's same entity+0 value as its hill radius; the load stream must therefore
+preserve it for a retail-compatible joining client. `[orig:
+serialize_entity_pool_to_packet @0x503460 (movement_val = entry[4] @0x50350C;
+entity+0 test/write @0x503593..0x5035A9); NapiNPClientMsg_0x020 @0x425C00
+(flag-0x02 read/store @0x425D07..0x425D1B); Entity_SpawnFromBMSRecord
+@0x40F05A..0x40F173/@0x40F213..0x40F227;
+Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68]`
 
 **Team byte == raw BMS team (controlled witness 2026-06-17):** first capture with authored-known
 teams confirms the `flags & 0x08` byte at entitySlot+354 is the **raw BMS team integer, no remap**

@@ -115,6 +115,7 @@ The loader/format slice. The event runtime, tick cadence, and promotion are the
 | `bms::parse` / `parse_header` (`engine/formats/mission/src/bms.cpp`) | `Mission_LoadBMSFile` | `0x40f4e0` | full `.bms` loader: header, loadout, 4 entity pools, waypoints, groups/layers, triggers, bboxes | section order + `fread` sizes; fixture byte-match | divergent → fixed (version, 2nd chunk) |
 | magic+version gate in `parse_header` | `BMS_LoadAndValidateHeader` | `0x40e250` | magic 'BMS' + version ≥ 19 + count clamps | `byte_A761D3 < 19` @ 0x40e30a; "Too many" strings @ 0x40e326+ | divergent → fixed |
 | `bms::parse_entity` | `Entity_SpawnFromBMSRecord` | `0x40e9f0` | 172B record → entity; pos/rot/AI/type branches | offset-by-offset; `(90−yaw)` @ 0x40eb66 | matching (DOC refinements) |
+| `mission::make_seed` marker bound-radius promotion | `Entity_SpawnFromBMSRecord` marker 6005/6006/2044 arms | `0x40F05A..0x40F173`, `0x40F213..0x40F227` | BMS `wp_distance << 16` replaces entity+0; zero defaults to `0x8000`; type 6006 supplies the KOTH proximity radius | disasm + `promote` regression | matching |
 | events/triggers/actions in `bms::parse` | `EventTrigger_LoadAllData` | `0x453eb0` | 3 i32 counts + 24/32/32-byte records, contiguous | `AE0700/08/10` sizes; event +4/+8 fixup | matching |
 | `bms::parse_waypoint_record` | waypoint loop in `Mission_LoadBMSFile` | `0x40fb72` | 136B record; 1-marker → DoesNotLoop fixup | `int* += 136` (4 rec/iter); `dword@4==1 → dword@0\|=1` | matching (runtime fixup not applied at parse, by design) |
 | `bms::parse_bounding_box` | bbox loop in `Mission_LoadBMSFile` | `0x40fcf4` | 36B nav-zone; min/max canonicalize on load | per-axis swap `if min>max` | matching (no parse-time swap, by design) |
@@ -291,7 +292,7 @@ via `apps/common/pcap_reader`, `nw_pool_decode_unit_test` inline-pcap round-trip
 |---|---|---|---|---|
 | `NapiNPClientMsg_0x00C` | `0x42E730` | S2C 0x0C pool-0 organic spawn batch — flat slotId-first field map; team@entity+354 | D-NET-62 | matching |
 | `NapiNPClientMsg_0x00D` | `0x432C40` | S2C 0x0D pool-1 spawn — type/pos/team reproduce vs authored knowns | D-NET-58/62 | matching |
-| `NapiNPClientMsg_0x020` | `0x425C00` | S2C 0x20 pool-3 sync — type/pos/team/heading (90−facing) vs authored knowns | D-NET-59/62 | matching |
+| `NapiNPClientMsg_0x020` / pool-3 host bridge + client materializer | `0x425C00` / `serialize_entity_pool_to_packet @0x503460` | S2C 0x20 pool-3 sync — type/pos/team/heading (90−facing) plus flag-0x02 entity+0 Q16 marker radius (`@0x425D07..0x425D1B`, writer `@0x503593..0x5035A9`) | D-NET-59/62; authored 6006 KOTH load-stream regression | matching |
 | `serialize_entity_pool_to_packet_0` | `0x503940` | team source = entity+354 (onhook +146/+196 ruled out) | D-NET-62 | matching |
 
 C2S 0x0F entity-info query → S2C 0x18 full-entity-spawn self-heal (§5.46; grill 2026-07-01; reimpl

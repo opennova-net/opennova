@@ -2006,6 +2006,8 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		es.spawn_entity_flags = 0;
 		es.spawn_section_mask = 0;
 		es.spawn_ammo_count = rec.ammo_count;
+		es.spawn_bound_radius_q16 =
+				static_cast<int32_t>(rec.orientation_val);
 		es.spawn_ref_num = 0;
 		es.spawn_sub_type = 0;
 		es.spawn_revision = next_spawn_revision;

@@ -248,6 +248,10 @@ struct ClientEntityState {
 	// identically placed weapon_byte/attach_ref fields land here too.
 	uint8_t zone_number_rank = 0;
 	uint16_t zone_radius = 0;
+	// Pool-3 S2C 0x20 flag 0x02 carries the raw entity+0 Q16 dword. Marker
+	// 6005/6006/2044 use it as their authored waypoint/proximity radius.
+	// [orig: NapiNPClientMsg_0x020 @0x425D07..0x425D1B]
+	int32_t spawn_bound_radius_q16 = 0;
 	// Full load-stream entity metadata needed to construct a client-side World
 	// row when the joiner loaded only the 616-byte BMS header. These are kept
 	// separate from the live compact state_flags byte: the 0x0D/0x10 dword is

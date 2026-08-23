@@ -528,6 +528,17 @@ residuals are spectator/status-word production, not gameplay score authority.
 `[orig: Server_BuildAndBroadcastScoreboard @0x50D960;
 Game_CountAlivePlayersPerTeam @0x5001C0; sub_52C850 @0x52C850]`
 
+**D-AI-10 KOTH producer correction (2026-08-23):** the competitive-branch
+closure includes the authored hill data path, not only its decision logic.
+Mission promotion preserves type 6006's BMS `wp_distance` as the entity+0 Q16
+radius, the host carries that dword under pool-3 S2C 0x20 flag 0x02, and the
+joining client materializes it back into the shared entity model. Numbered
+capture-zone radius remains the distinct entity+350 u16 field. `[orig:
+Entity_SpawnFromBMSRecord @0x40F157..0x40F173;
+Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
+serialize_entity_pool_to_packet @0x503593..0x5035A9;
+NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
+
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 

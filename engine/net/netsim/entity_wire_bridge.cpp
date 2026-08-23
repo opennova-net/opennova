@@ -588,6 +588,12 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	rec.pos_y = world::to_fixed(e.position.y);
 	rec.pos_z = world::to_fixed(e.position.z);
 	rec.movement_val = static_cast<uint32_t>(engine_heading_bam(e.yaw)); // entry+16 BAM (D-NET-59)
+	// Pool-3 flag 0x02 is the raw entity+0 dword. For marker types whose
+	// BMS waypoint distance overrides that field (notably KOTH's 6006), this
+	// is the authored Q16 radius rather than an Euler component.
+	// [orig: serialize_entity_pool_to_packet @0x503593/@0x5035A9]
+	rec.orientation_val = static_cast<uint32_t>(
+			world::to_fixed(e.bound_radius));
 	rec.team_byte = e.team;
 	return rec;
 }
