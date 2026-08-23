@@ -190,11 +190,14 @@ indices. One shared retail-default table feeds both gameplay and S2C 0x58 when
 `score.ini` is absent; a VERSION 40 file overlays that table and may
 intentionally materialize an all-zero row. At the 1 Hz authority pass Match
 services hill occupancy and dropped-flag returns. Per tick it services flag
-contacts; its winner check implements the universal all-zones-owned rule and
+contacts drained from `CollisionWorld`'s exact successful MoveCB/non-Powerup
+movement-collision stream; it does not perform a second radius/overlap query.
+Its winner check implements the universal all-zones-owned rule and
 every retail competitive branch: DM/TDM, KOTH/TKOTH, S&D/A&D, CTF, FlagBall,
 Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same
 `World::process_round_end` transaction. `[orig: GameEvent_ProcessScoring
-@0x52F550; GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
+@0x52F550; Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5;
+GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
 @0x52D8A0; Server_CheckWinConditions @0x51AD40]`
 
 The one typed host request carries the gameplay inputs needed by those

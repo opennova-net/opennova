@@ -378,7 +378,7 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
     CHECK(contacts.size() == 1);
     if (!contacts.empty()) {
         CHECK(contacts[0].source == player_handle);
-        CHECK(contacts[0].trigger == trigger_handle);
+        CHECK(contacts[0].target == trigger_handle);
     }
 }
 

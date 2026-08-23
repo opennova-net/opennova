@@ -317,13 +317,24 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
                 ContactResult res;
                 const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
-                // The force fold PRECEDES the flag dispatch — a fresh CL entry
-                // below then zeroes the accumulated force, this candidate's
-                // included. Down-force suppression: a mostly-vertical negative
-                // force is dropped (standing pressure, not a wall).
-                // [orig: fold @ 0x4b3002-0x4b30af / @ 0x4b3603-0x4b36b9 before
-                //  the dispatch @ 0x4b30b7; the f[2]<0 gate @ 0x4b3010]
-                if (contact && !suppress_model_force) {
+                const Entity *target_entity = world.registry.get(ch);
+                const bool powerup = contact && target_entity != nullptr &&
+                    target_entity->has_item_def &&
+                    (target_entity->item_attrib & kItemAttribPowerup) != 0;
+                const bool move_callback = contact && target_entity != nullptr &&
+                    target_entity->has_item_def && !powerup &&
+                    (target_entity->item_attrib & kItemAttribMoveCallback) != 0;
+                if (pass == 0 && is_authority && move_callback)
+                    record_movement_callback_contact(source, ch);
+                // Powerup and MoveCB ItemDefs bypass the ordinary solid-force
+                // fold. MoveCB publishes above; the distinct Powerup callback
+                // remains D-COL-8. A fresh CL entry below zeroes accumulated
+                // ordinary force; mostly-vertical negative force is standing
+                // pressure and is dropped.
+                // [orig: attrib branches @0x4B2F90..0x4B2FF5; force fold
+                // @0x4B3002..0x4B30AF/@0x4B3603..0x4B36B9]
+                if (contact && !powerup && !move_callback &&
+                    !suppress_model_force) {
                     int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
                     if (f[2] < 0) {
                         if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {
@@ -999,10 +1010,19 @@ bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
 void CollisionWorld::record_change_team_contact(EntityHandle source,
                                                  EntityHandle trigger) {
     if (!source.valid() || !trigger.valid()) return;
-    for (const ChangeTeamContact &contact : change_team_contacts_) {
-        if (contact.source == source && contact.trigger == trigger) return;
+    for (const GameplayContact &contact : change_team_contacts_) {
+        if (contact.source == source && contact.target == trigger) return;
     }
     change_team_contacts_.push_back({source, trigger});
+}
+
+void CollisionWorld::record_movement_callback_contact(EntityHandle source,
+                                                       EntityHandle target) {
+    if (!source.valid() || !target.valid()) return;
+    for (const GameplayContact &contact : movement_callback_contacts_) {
+        if (contact.source == source && contact.target == target) return;
+    }
+    movement_callback_contacts_.push_back({source, target});
 }
 
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside

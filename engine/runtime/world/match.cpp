@@ -5,6 +5,7 @@
 #include <limits>
 #include <utility>
 
+#include "world/collision.h"
 #include "world/game_type.h"
 #include "world/world.h"
 
@@ -62,14 +63,6 @@ bool within_2d(const Vec3 &a, const Vec3 &b, float radius) {
     const double dx = static_cast<double>(a.x) - static_cast<double>(b.x);
     const double dy = static_cast<double>(a.y) - static_cast<double>(b.y);
     return dx * dx + dy * dy <= static_cast<double>(radius) * radius;
-}
-
-bool overlaps_objective(const Entity &player, const Entity &objective) {
-    const float dx = player.position.x - objective.position.x;
-    const float dy = player.position.y - objective.position.y;
-    const float dz = player.position.z - objective.position.z;
-    const float radius = std::max(2.0f, player.bound_radius + objective.bound_radius);
-    return dx * dx + dy * dy + dz * dz <= radius * radius;
 }
 
 int32_t wrap_add(int32_t value, int32_t delta) {
@@ -981,89 +974,62 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
     for (EntityHandle flag : returns)
         return_flag_home(world, flag, MatchGameplayEventKind::FlagReturn);
 
-    std::vector<const MatchPlayer *> ordered;
-    ordered.reserve(players_.size());
-    for (const MatchPlayer &p : players_)
-        ordered.push_back(&p);
-    std::sort(ordered.begin(), ordered.end(), [](const MatchPlayer *a, const MatchPlayer *b) {
-        return a->identity.slot < b->identity.slot;
-    });
-
-    std::vector<EntityHandle> objectives;
-    world.registry.for_each([&](const Entity &entity) {
-        // The movement resolver dispatches this callback only for a live
-        // ItemDef carrying MoveCB and not Powerup. Preserve that target gate
-        // here for both locally simulated and authority-snapped remote players.
-        // [orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FD0]
-        const bool move_callback = entity.has_item_def &&
-            (entity.item_attrib & kItemAttribMoveCallback) != 0 &&
-            (entity.item_attrib & kItemAttribPowerup) == 0;
-        if (move_callback &&
-            (is_flag(entity.item_id) || is_flag_bay(entity.item_id)))
-            objectives.push_back(entity.handle);
-    });
-    std::sort(objectives.begin(), objectives.end(),
-              [](EntityHandle a, EntityHandle b) { return a.packed < b.packed; });
-
-    for (const MatchPlayer *match_player : ordered) {
-        Entity *carrier = world.registry.get(match_player->identity.entity);
-        if (carrier == nullptr || !carrier->alive ||
-            (carrier->flags & kEntityFlagDead) != 0 ||
+    if (world.collision == nullptr)
+        return;
+    const std::vector<CollisionWorld::GameplayContact> contacts =
+        world.collision->take_movement_callback_contacts();
+    for (const CollisionWorld::GameplayContact &contact : contacts) {
+        MatchPlayer *match_player = player(contact.source);
+        Entity *carrier = world.registry.get(contact.source);
+        Entity *target = world.registry.get(contact.target);
+        const bool move_callback = target != nullptr && target->has_item_def &&
+            (target->item_attrib & kItemAttribMoveCallback) != 0 &&
+            (target->item_attrib & kItemAttribPowerup) == 0;
+        if (match_player == nullptr || carrier == nullptr || !move_callback ||
+            (carrier->flags & (kEntityFlagDead | kEntityFlagPlayer)) !=
+                kEntityFlagPlayer ||
             (carrier->net_move_input & Entity::kMoveOrderMoving) == 0)
             continue;
 
-        // Retail only dispatches waypoint interactions from a successful
-        // movement collision and repeats the MoveOrder bit-3 gate here.
-        // [orig: Entity_MovementCollisionResolver ->
-        // Entity_ProcessWaypointInteraction @0x4AD820]
-
+        // Preserve resolver/candidate order. If one movement pass touches a
+        // flag and its bay, retail mutates the carried link inline before the
+        // later callback. [orig: sole caller @0x4B2FF5; handler @0x4AD820]
         if (carrier->mounted_child.valid()) {
             Entity *flag = world.registry.get(carrier->mounted_child);
             if (flag == nullptr) {
                 carrier->mounted_child = EntityHandle{};
                 continue;
             }
-            for (EntityHandle handle : objectives) {
-                const Entity *bay = world.registry.get(handle);
-                if (bay == nullptr || !is_flag_bay(bay->item_id) ||
-                    !overlaps_objective(*carrier, *bay))
-                    continue;
-                const bool neutral = flag->item_id == kNeutralFlag;
-                const bool accepted =
-                    (bay->item_id == kBlueBay &&
-                     (rules_.game_type == gt::kFlagMe || carrier->team == 1) &&
-                     (flag->item_id == kRedFlag || neutral)) ||
-                    (bay->item_id == kRedBay && carrier->team == 2 &&
-                     (flag->item_id == kBlueFlag || neutral)) ||
-                    (bay->item_id == kTeam3Bay && carrier->team == 3 && neutral) ||
-                    (bay->item_id == kTeam4Bay && carrier->team == 4 && neutral);
-                if (accepted) {
-                    record_flag_capture(world, match_player->identity.entity,
-                                        carrier->mounted_child);
-                    break;
-                }
-            }
+            if (!is_flag_bay(target->item_id))
+                continue;
+            const bool neutral = flag->item_id == kNeutralFlag;
+            const bool accepted =
+                (target->item_id == kBlueBay &&
+                 (rules_.game_type == gt::kFlagMe || carrier->team == 1) &&
+                 (flag->item_id == kRedFlag || neutral)) ||
+                (target->item_id == kRedBay && carrier->team == 2 &&
+                 (flag->item_id == kBlueFlag || neutral)) ||
+                (target->item_id == kTeam3Bay && carrier->team == 3 && neutral) ||
+                (target->item_id == kTeam4Bay && carrier->team == 4 && neutral);
+            if (accepted)
+                record_flag_capture(world, contact.source,
+                                    carrier->mounted_child);
             continue;
         }
 
-        for (EntityHandle handle : objectives) {
-            Entity *flag = world.registry.get(handle);
-            if (flag == nullptr || !is_flag(flag->item_id) ||
-                flag->primary_occupant.valid() || !overlaps_objective(*carrier, *flag))
-                continue;
-            CarryObjectiveState *state = carry_state(world, handle);
-            const bool own_flag = (carrier->team == 1 && flag->item_id == kBlueFlag) ||
-                                  (carrier->team == 2 && flag->item_id == kRedFlag);
-            if (own_flag && state != nullptr && state->return_ticks > 0) {
-                record_flag_save(world, match_player->identity.entity, handle);
-                break;
-            }
-            if (!own_flag || rules_.game_type == gt::kFlagBall ||
-                rules_.game_type == gt::kFlagMe) {
-                record_flag_pickup(world, match_player->identity.entity, handle);
-                break;
-            }
+        if (!is_flag(target->item_id) || target->primary_occupant.valid())
+            continue;
+        CarryObjectiveState *state = carry_state(world, contact.target);
+        const bool own_flag =
+            (carrier->team == 1 && target->item_id == kBlueFlag) ||
+            (carrier->team == 2 && target->item_id == kRedFlag);
+        if (own_flag && state != nullptr && state->return_ticks > 0) {
+            record_flag_save(world, contact.source, contact.target);
+            continue;
         }
+        if (!own_flag || rules_.game_type == gt::kFlagBall ||
+            rules_.game_type == gt::kFlagMe)
+            record_flag_pickup(world, contact.source, contact.target);
     }
 }
 

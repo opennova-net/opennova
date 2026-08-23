@@ -31,7 +31,10 @@ frame pipeline. [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) then
 completed the no-compat cutover to portable `opennova::inmatch::Session` in
 `engine/net/inmatch`, made `world::Match` the shared all-retail-mode/co-op gameplay
 owner, and demoted `npruntime`/`netsim` from public layers to implementation
-directories. The same typed host request now carries every mode's rule inputs
+directories. Flag-family gameplay now consumes the collision owner's exact
+MoveCB/non-Powerup contact stream; the former gameplay radius scan is deleted
+(`Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5`). The same typed host
+request now carries every mode's rule inputs
 (including flag limit/return time, KOTH delta, and two/four-side selection),
 with an explicit Flag Me route for retail's otherwise-unreachable task-12
 launch branch. `godot/game/world/game_frame_pipeline.gd` remains the

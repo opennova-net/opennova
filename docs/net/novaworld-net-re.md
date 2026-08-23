@@ -9844,7 +9844,18 @@ reset wire transaction still occur. `[orig: load_scoring_table_for_game_type
 @0x52D300; GameEvent_ProcessScoring @0x52F550;
 Server_ProcessScoringAndBroadcast @0x5169C0]`
 
-**Ported (completed 2026-08-22):** `engine/net/npwire` owns strict codecs for
+Every flag-family wire transition now starts at the retail contact producer,
+not a gameplay proximity surrogate. An authority first-pass collision with a
+MoveCB/non-Powerup ItemDef publishes the exact player/objective pair; the sole
+waypoint handler then dispatches the 4091/4093/4095 flag and 4098/4100/4102/4103
+bay cases for CTF, FlagBall, Flag Me, and C&C. The resulting immutable event is
+fanned in retail order as 0x1E before 0x2F, or 0x1E before remote-only 0x12 for a
+CTF capture. `[orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5;
+Entity_ProcessWaypointInteraction @0x4AD820;
+Server_ProcessScoringAndBroadcast @0x5169C0]`
+
+**Ported (wire transaction completed 2026-08-22; exact contact producer
+completed 2026-08-23):** `engine/net/npwire` owns strict codecs for
 the 0x1D header, 0x2B request, 0x56 envelope, and reassembled board;
 `npruntime/end_round_protocol` translates only the immutable semantic result
 into the witnessed producer order. The default/`score.ini` field schema,
@@ -11845,12 +11856,16 @@ records raw stat 32 rather than 33; the port preserves it `[orig: threshold look
 @0x5307B8..0x5308F9]`. `match_test` pins every boundary, points delta, team projection,
 and the event-20 defect.
 
-Tracked residuals: capture contact currently approximates the authored CT collision shape
-with the trigger radius (it is per tick, no longer a 1 Hz request sample); 0x6F's exact
-retail emit filter remains unwitnessed; and the 0x40 vehicle-bay,
+The former capture-shape residual is closed: the authority player-body resolver
+publishes the exact source/trigger pair only when it intersects an authored type-10
+CT volume; the trigger radius remains exclusive to the separate proximity scorer.
+There is no radius fallback. Tracked residuals are 0x6F's exact retail emit filter
+and the 0x40 vehicle-bay,
 supply-crate, medic-revivable, and exact pool-0 classifier tails. Ordinary active-player
 refresh separately rides 0x6B; its joiner fold is ported, while its retail host producer
 remains unwitnessed. `[orig: Server_OnPlayerTouchCaptureZone @0x500BA0;
+Entity_ComputeBoneCollisionForce @0x4AE150; Entity_MovementCollisionResolver
+@0x4B31DD..0x4B3238;
 Server_UpdateCaptureZoneProximity @0x5086A0; Server_UpdateCaptureZoneEntities @0x519690;
 Server_UpdateCaptureZones @0x53B8F0; GameEvent_FlagCapture @0x50F6F0;
 Server_EnforceZoneEntityTeams @0x519600; NetPacket_WriteZoneTimerWindow @0x506D00;

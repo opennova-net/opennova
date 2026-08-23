@@ -4,6 +4,7 @@
 // [orig: CPlayerStats_RecordEvent @0x52C8E0; GameEvent_ProcessScoring @0x52F550;
 // Server_CheckWinConditions @0x51AD40; Server_ProcessRoundEnd @0x5164F0]
 #include "world/match.h"
+#include "world/collision.h"
 #include "world/game_type.h"
 #include "world/world.h"
 
@@ -93,9 +94,91 @@ EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 positio
     entity.position = position;
     entity.spawn_position = position;
     entity.bound_radius = 2.0f;
+    entity.yaw = 90;
     entity.alive = true;
     return world.registry.spawn(1, entity);
 }
+
+CollisionModel waypoint_contact_model() {
+    CollisionModel model;
+    auto plane = [&](int nx, int ny, int nz, float distance) {
+        CollisionPlane value;
+        value.nx = static_cast<int16_t>(nx);
+        value.ny = static_cast<int16_t>(ny);
+        value.nz = static_cast<int16_t>(nz);
+        value.dist = static_cast<int32_t>(distance * 65536.0f);
+        model.planes.push_back(value);
+    };
+    plane(16384, 0, 0, -2.0f);
+    plane(-16384, 0, 0, -2.0f);
+    plane(0, 16384, 0, -2.0f);
+    plane(0, -16384, 0, -2.0f);
+    plane(0, 0, 16384, -3.0f);
+    plane(0, 0, -16384, 0.0f);
+
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = volume.min_y = -2 * 65536;
+    volume.max_x = volume.max_y = 2 * 65536;
+    volume.min_z = 0;
+    volume.max_z = 3 * 65536;
+    volume.plane_count = 6;
+    model.volumes.push_back(volume);
+
+    CollisionSection section;
+    section.volume_count = 1;
+    model.sections.push_back(section);
+    return model;
+}
+
+struct WaypointContactHarness {
+    CollisionWorld collision;
+    int32_t model_id = -1;
+
+    explicit WaypointContactHarness(World &world) {
+        model_id = collision.add_model(waypoint_contact_model());
+        world.collision = &collision;
+    }
+
+    void bind(EntityHandle target) {
+        collision.assign_entity(target, model_id);
+    }
+
+    void touch(World &world, EntityHandle source, EntityHandle target,
+               bool authority = true) {
+        Entity *source_entity = world.registry.get(source);
+        const Entity *target_entity = world.registry.get(target);
+        CHECK(source_entity != nullptr && target_entity != nullptr);
+        if (source_entity == nullptr || target_entity == nullptr)
+            return;
+        source_entity->position = {
+            target_entity->position.x + 1.6f,
+            target_entity->position.y,
+            target_entity->position.z,
+        };
+        for (int i = 0; i < 17; ++i)
+            collision.build_tick_tables(world);
+
+        CollisionWorld::ResolveState state;
+        state.prev_valid = true;
+        state.prev_pos[0] = static_cast<int32_t>(
+            (target_entity->position.x + 3.5f) * 65536.0f);
+        state.prev_pos[1] = static_cast<int32_t>(
+            target_entity->position.y * 65536.0f);
+        state.prev_pos[2] = static_cast<int32_t>(
+            target_entity->position.z * 65536.0f);
+        int32_t pos[3] = {
+            static_cast<int32_t>(source_entity->position.x * 65536.0f),
+            static_cast<int32_t>(source_entity->position.y * 65536.0f),
+            static_cast<int32_t>(source_entity->position.z * 65536.0f),
+        };
+        int32_t velocity[3] = {};
+        int16_t health = source_entity->health;
+        collision.resolve_entity(world, source, state, pos, velocity,
+                                 velocity[2], 0, 2 * 65536, 0, 0, true,
+                                 authority, 0, 43, 1u, health);
+    }
+};
 
 EntityHandle demolition_target(World &world, uint8_t team) {
     Entity entity;
@@ -699,6 +782,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 16);
+    WaypointContactHarness contacts(*world);
 
     const EntityHandle blue = player(*world, 0, 1, "Blue");
     const EntityHandle red = player(*world, 1, 2, "Red");
@@ -734,6 +818,8 @@ void test_demolition_flag_and_flagball_gameplay() {
     const EntityHandle blue_flag = objective(*world, 4091, 1, {80.0f, 0.0f, 0.0f});
     const EntityHandle red_flag = objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
     const EntityHandle blue_bay = objective(*world, 4098, 1, {50.0f, 0.0f, 0.0f});
+    contacts.bind(red_flag);
+    contacts.bind(blue_bay);
     world->match.advance_tick(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
@@ -744,12 +830,16 @@ void test_demolition_flag_and_flagball_gameplay() {
     // @0x4AD820, caller in Entity_MovementCollisionResolver]
     world->registry.get(blue)->net_move_input |= Entity::kMoveOrderMoving;
     world->match.advance_tick(*world);
+    CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
+    contacts.touch(*world, blue, red_flag);
+    world->match.advance_tick(*world);
     CHECK(world->registry.get(blue)->mounted_child == red_flag);
     CHECK(world->registry.get(red_flag)->primary_occupant == blue);
     CHECK((world->registry.get(red_flag)->flags & kEntityFlagCarried) != 0);
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 1);
 
-    world->registry.get(blue)->position = {50.0f, 0.0f, 0.0f};
+    contacts.touch(*world, blue, blue_bay);
     world->match.advance_tick(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->registry.get(red_flag) == nullptr); // CTF consumes captured flags
@@ -782,6 +872,8 @@ void test_demolition_flag_and_flagball_gameplay() {
     blue_entity->position = {10.0f, 0.0f, 0.0f};
     const EntityHandle timed_flag =
         objective(*world, 4095, 0, {10.0f, 0.0f, 0.0f});
+    contacts.bind(timed_flag);
+    contacts.touch(*world, blue, timed_flag);
     world->match.advance_tick(*world); // immediate service + per-tick pickup
     CHECK(blue_entity->mounted_child == timed_flag);
     blue_entity->position = {0.0f, 0.0f, 0.0f};
@@ -821,6 +913,7 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
+    WaypointContactHarness contacts(*world);
 
     MatchRules rules;
     rules.game_type = gt::kFlagMe;
@@ -838,11 +931,14 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
     carrier_entity->position = {0.0f, 0.0f, 0.0f};
     carrier_entity->net_move_input = Entity::kMoveOrderMoving;
     const EntityHandle flag = objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
-    objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+    const EntityHandle bay = objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+    contacts.bind(flag);
+    contacts.bind(bay);
 
+    contacts.touch(*world, carrier, flag);
     world->match.advance_tick(*world);
     CHECK(carrier_entity->mounted_child == flag);
-    carrier_entity->position = {20.0f, 0.0f, 0.0f};
+    contacts.touch(*world, carrier, bay);
     world->match.advance_tick(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
     CHECK(world->registry.get(flag) != nullptr);
@@ -874,6 +970,7 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
+    WaypointContactHarness contacts(*world);
 
     MatchRules rules;
     rules.game_type = gt::kFlagBall;
@@ -883,15 +980,19 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
     carrier_entity->net_move_input = Entity::kMoveOrderMoving;
 
     const EntityHandle inert = objective(*world, 4095, 0, {}, 0);
+    contacts.bind(inert);
+    contacts.touch(*world, carrier, inert);
     world->match.advance_tick(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
 
     world->registry.get(inert)->item_attrib =
         kItemAttribMoveCallback | kItemAttribPowerup;
+    contacts.touch(*world, carrier, inert);
     world->match.advance_tick(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
 
     world->registry.get(inert)->item_attrib = kItemAttribMoveCallback;
+    contacts.touch(*world, carrier, inert);
     world->match.advance_tick(*world);
     CHECK(carrier_entity->mounted_child == inert);
 }
@@ -930,10 +1031,65 @@ void test_aas_capture_scoring_and_outcomes() {
     CHECK(red_all_owned.has_value() && *red_all_owned == 2);
 }
 
+void test_flagball_four_team_bays_consume_exact_contacts() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+
+    MatchRules flagball;
+    flagball.game_type = gt::kFlagBall;
+    flagball.max_score = 99;
+    world->match.configure(flagball);
+
+    struct Side {
+        uint8_t team;
+        int32_t bay_item_id;
+        float x;
+    };
+    for (const Side side : {Side{3, 4103, 0.0f}, Side{4, 4102, 30.0f}}) {
+        const EntityHandle carrier = player(
+            *world, side.team, side.team, side.team == 3 ? "TeamThree" : "TeamFour");
+        Entity *carrier_entity = world->registry.get(carrier);
+        carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+        const EntityHandle flag = objective(
+            *world, 4095, 0, {side.x, 0.0f, 0.0f});
+        const EntityHandle bay = objective(
+            *world, side.bay_item_id, side.team, {side.x + 10.0f, 0.0f, 0.0f});
+        contacts.bind(flag);
+        contacts.bind(bay);
+
+        contacts.touch(*world, carrier, flag);
+        world->match.advance_tick(*world);
+        CHECK(carrier_entity->mounted_child == flag);
+        contacts.touch(*world, carrier, bay);
+        world->match.advance_tick(*world);
+        CHECK(carrier_entity->mounted_child == EntityHandle{});
+        CHECK(world->registry.get(flag) != nullptr);
+        CHECK(world->registry.get(flag)->position.x == side.x);
+        CHECK(world->match.player(carrier)->stats[MatchStats::kFlagPickups] == 1);
+        CHECK(world->match.player(carrier)->stats[MatchStats::kFlagCaptures] == 1);
+        CHECK(world->match.player(carrier)->stats[MatchStats::kPoints] == 42);
+        CHECK(world->match.team_stats(side.team)[MatchStats::kFlagCaptures] == 1);
+    }
+
+    const std::vector<MatchGameplayEvent> events =
+        world->match.drain_gameplay_events();
+    CHECK(events.size() == 4);
+    if (events.size() == 4) {
+        CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(events[3].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(!events[1].remove_objective && !events[3].remove_objective);
+    }
+}
+
 void test_cac_combines_flag_and_zone_objectives() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
 
     MatchRules cac;
     cac.game_type = gt::kConquerAndControl;
@@ -945,11 +1101,14 @@ void test_cac_combines_flag_and_zone_objectives() {
     blue_entity->net_move_input = Entity::kMoveOrderMoving;
     const EntityHandle flag =
         objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
-    objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+    const EntityHandle bay = objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+    contacts.bind(flag);
+    contacts.bind(bay);
 
+    contacts.touch(*world, blue, flag);
     world->match.advance_tick(*world);
     CHECK(blue_entity->mounted_child == flag);
-    blue_entity->position = {20.0f, 0.0f, 0.0f};
+    contacts.touch(*world, blue, bay);
     world->match.advance_tick(*world);
     CHECK(blue_entity->mounted_child == EntityHandle{});
     CHECK(world->registry.get(flag) != nullptr);
@@ -1062,6 +1221,7 @@ int main() {
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
     test_aas_capture_scoring_and_outcomes();
+    test_flagball_four_team_bays_consume_exact_contacts();
     test_cac_combines_flag_and_zone_objectives();
     test_end_result_is_frozen_in_retail_board_order();
     test_coop_remains_script_owned();

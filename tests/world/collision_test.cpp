@@ -543,6 +543,66 @@ void test_resolver_wall_pushout() {
 }
 
 // ---------------------------------------------------------------------------
+void test_resolver_move_callback_contact_replaces_solid_push() {
+    auto resolve_transition = [](Rig &rig, bool authority) {
+        Entity *soldier = rig.world.registry.get(rig.soldier);
+        rig.move_soldier(12.8, 10.0, 0.0);
+        int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
+                              0, fx(1.8), 0, 0, true, authority, 0, 43, 1u,
+                              health);
+        soldier->position.x = 11.6f;
+        rig.rebuild();
+        pos[0] = fx(11.6);
+        const int32_t before = pos[0];
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
+                              0, fx(1.8), 0, 0, true, authority, 1, 43, 1u,
+                              health);
+        return std::pair<int32_t, int32_t>{before, pos[0]};
+    };
+
+    // A successful first-pass collision against MoveCB invokes the waypoint
+    // callback instead of folding the model force. The authority publishes the
+    // exact source/target pair once even if the resolver is repeated.
+    // [orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5]
+    Rig callback(box_model(1, 0, 2.0, 2.0, 3.0));
+    Entity *target = callback.world.registry.get(callback.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribMoveCallback;
+    const auto callback_pos = resolve_transition(callback, true);
+    CHECK(callback_pos.second == callback_pos.first);
+    const auto callback_contacts =
+        callback.cw.take_movement_callback_contacts();
+    CHECK(callback_contacts.size() == 1);
+    if (!callback_contacts.empty()) {
+        CHECK(callback_contacts[0].source == callback.soldier);
+        CHECK(callback_contacts[0].target == callback.building);
+    }
+
+    // Powerup wins the retail attrib branch and suppresses both waypoint
+    // dispatch and solid force. A non-authority resolve likewise cannot author
+    // a gameplay contact.
+    Rig powerup(box_model(1, 0, 2.0, 2.0, 3.0));
+    target = powerup.world.registry.get(powerup.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribMoveCallback | kItemAttribPowerup;
+    const auto powerup_pos = resolve_transition(powerup, true);
+    CHECK(powerup_pos.second == powerup_pos.first);
+    CHECK(powerup.cw.take_movement_callback_contacts().empty());
+
+    Rig replica(box_model(1, 0, 2.0, 2.0, 3.0));
+    target = replica.world.registry.get(replica.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribMoveCallback;
+    const auto replica_pos = resolve_transition(replica, false);
+    CHECK(replica_pos.second == replica_pos.first);
+    CHECK(replica.cw.take_movement_callback_contacts().empty());
+}
+
+// ---------------------------------------------------------------------------
 void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -890,7 +950,7 @@ void test_resolver_damage_grades_and_zones() {
     CHECK(ct_contacts.size() == 1);
     if (!ct_contacts.empty()) {
         CHECK(ct_contacts[0].source == ct_rig.soldier);
-        CHECK(ct_contacts[0].trigger == ct_rig.building);
+        CHECK(ct_contacts[0].target == ct_rig.building);
     }
     CollisionWorld::ResolveState client_state;
     ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, client_state,
@@ -4526,6 +4586,7 @@ int main() {
     test_ray_clip();
     test_ground_probe_roof();
     test_resolver_wall_pushout();
+    test_resolver_move_callback_contact_replaces_solid_push();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();

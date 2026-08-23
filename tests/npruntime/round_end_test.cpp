@@ -19,6 +19,7 @@
 #include <npwire/ingame_message_id.h>
 
 #include <world/ai.h>
+#include <world/collision.h>
 #include <world/game_type.h>
 #include <world/player_spawn.h>
 #include <world/world.h>
@@ -70,12 +71,95 @@ w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 		const char *name) {
 	w::Entity e;
 	e.kind = w::EntityKind::Organic;
+	e.player_class = 8;
 	e.team = team;
 	e.health = 100;
 	e.alive = true;
+	e.flags = w::kEntityFlagPlayer;
+	e.engine_flags = w::kEntityFlagPlayer;
 	const w::EntityHandle handle = world.registry.spawn(0, e);
 	world.match.upsert_player({handle, slot, name});
 	return handle;
+}
+
+int32_t fixed(float value) {
+	return static_cast<int32_t>(value * 65536.0f);
+}
+
+w::CollisionModel contact_box(int32_t type) {
+	w::CollisionModel model;
+	auto plane = [&](int nx, int ny, int nz, float distance) {
+		w::CollisionPlane value;
+		value.nx = static_cast<int16_t>(nx);
+		value.ny = static_cast<int16_t>(ny);
+		value.nz = static_cast<int16_t>(nz);
+		value.dist = fixed(distance);
+		model.planes.push_back(value);
+	};
+	plane(16384, 0, 0, -2.0f);
+	plane(-16384, 0, 0, -2.0f);
+	plane(0, 16384, 0, -2.0f);
+	plane(0, -16384, 0, -2.0f);
+	plane(0, 0, 16384, -3.0f);
+	plane(0, 0, -16384, 0.0f);
+
+	w::CollisionVolume volume;
+	volume.type = type;
+	volume.min_x = volume.min_y = fixed(-2.0f);
+	volume.max_x = volume.max_y = fixed(2.0f);
+	volume.min_z = 0;
+	volume.max_z = fixed(3.0f);
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+
+	w::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	return model;
+}
+
+void install_collision_system(w::World &world, w::CollisionWorld &collision,
+		w::AiSystem &ai) {
+	world.collision = &collision;
+	world.ai = &ai;
+	ai.collision = &collision;
+	world.add_system(&ai);
+}
+
+w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
+		w::EntityHandle handle, float previous_x) {
+	w::Entity *entity = world.registry.get(handle);
+	if (entity == nullptr) return nullptr;
+	w::AiEntity *body = ai.at(ai.attach(handle));
+	if (body == nullptr) return nullptr;
+	body->inf.active = true;
+	body->net_is_remote_peer = true;
+	body->health = entity->health;
+	body->team = entity->team;
+	body->pos[0] = fixed(entity->position.x);
+	body->pos[1] = fixed(entity->position.y);
+	body->pos[2] = fixed(entity->position.z);
+	body->collide_state.prev_valid = true;
+	body->collide_state.prev_pos[0] = fixed(previous_x);
+	body->collide_state.prev_pos[1] = body->pos[1];
+	body->collide_state.prev_pos[2] = body->pos[2];
+	return body;
+}
+
+void move_remote_body(w::World &world, w::AiSystem &ai,
+		w::EntityHandle handle, const w::Vec3 &position) {
+	w::Entity *entity = world.registry.get(handle);
+	w::AiEntity *body = ai.for_handle(handle);
+	if (entity == nullptr || body == nullptr) return;
+	entity->position = position;
+	body->pos[0] = fixed(position.x);
+	body->pos[1] = fixed(position.y);
+	body->pos[2] = fixed(position.z);
+}
+
+void prime_collision_tables(w::World &world, w::CollisionWorld &collision) {
+	for (int i = 0; i < 17; ++i)
+		collision.build_tick_tables(world);
 }
 
 void ready_mp_connection(np::NapiNPConnection &conn, uint8_t slot) {
@@ -294,6 +378,9 @@ void test_aas_and_coop_share_round_wire() {
 
 void test_aas_events_use_spawn_registry_index() {
 	w::World world;
+	w::CollisionWorld collision;
+	w::AiSystem ai;
+	install_collision_system(world, collision, ai);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.registry.configure_pool(2, 4);
@@ -321,6 +408,7 @@ void test_aas_events_use_spawn_registry_index() {
 		zone.zone_number = number;
 		zone.zone_radius = 70;
 		zone.position = {x, 0.0f, 0.0f};
+		zone.yaw = 90;
 		zone.is_capture_trigger = true;
 		zone.is_spawn_point = true;
 		zone.alive = true;
@@ -331,6 +419,12 @@ void test_aas_events_use_spawn_registry_index() {
 	spawn_zone(3, 2, 300.0f);
 	w::zone_chain_build_from_mission(world, world.zone_chain);
 	w::zone_chain_latch_control(world, world.zone_chain);
+	const int32_t capture_model = collision.add_model(
+		contact_box(w::bvol_type::kChangeTeamCT));
+	collision.assign_entity(target, capture_model);
+	expect(attach_remote_body(world, ai, blue, 100.0f) != nullptr,
+			"A&S authority body fixture attaches");
+	prime_collision_tables(world, collision);
 
 	ns::LoopbackChannel wire;
 	np::NapiNPServerCtx ctx;
@@ -361,6 +455,9 @@ void test_aas_events_use_spawn_registry_index() {
 
 void test_ctf_pickup_and_capture_wire_transaction() {
 	w::World world;
+	w::CollisionWorld collision;
+	w::AiSystem ai;
+	install_collision_system(world, collision, ai);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.mp_session = true;
@@ -369,7 +466,9 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	world.match.configure(rules);
 	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
 	w::Entity *blue_entity = world.registry.get(blue);
-	blue_entity->position = {10.75f, -3.25f, 3.0f};
+	const w::Vec3 flag_position{10.75f, -3.25f, 3.0f};
+	const w::Vec3 bay_position{19.75f, -3.25f, 3.0f};
+	blue_entity->position = flag_position;
 	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
 	const w::EntityHandle host = match_player(world, 1, 1, "Host");
 	world.registry.get(host)->position = {1000.0f, 1000.0f, 3.0f};
@@ -379,17 +478,25 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	red_flag.item_id = 4093; // Flag (Red) [orig: item-id branch @0x43C1B7]
 	red_flag.has_item_def = true;
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
-	red_flag.position = blue_entity->position;
+	red_flag.position = flag_position;
 	red_flag.spawn_position = red_flag.position;
+	red_flag.yaw = 90;
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	w::Entity blue_bay;
 	blue_bay.kind = w::EntityKind::Item;
 	blue_bay.item_id = 4098; // Blue bay [orig: Entity_ProcessWaypointInteraction @0x4AD8D4]
 	blue_bay.has_item_def = true;
 	blue_bay.item_attrib = w::kItemAttribMoveCallback;
-	blue_bay.position = blue_entity->position;
+	blue_bay.position = bay_position;
+	blue_bay.yaw = 90;
 	const w::EntityHandle bay = world.registry.spawn(1, blue_bay);
 	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
+	const int32_t waypoint_model = collision.add_model(contact_box(1));
+	collision.assign_entity(flag, waypoint_model);
+	collision.assign_entity(bay, waypoint_model);
+	expect(attach_remote_body(world, ai, blue, flag_position.x + 3.5f) != nullptr,
+			"CTF authority body fixture attaches");
+	prime_collision_tables(world, collision);
 
 	ns::LoopbackChannel wire;
 	ns::LoopbackChannel host_wire;
@@ -467,7 +574,8 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 			host_pickup_state_order > host_pickup_event_order,
 			"CTF pickup mask 0x80 includes the host with event-before-state ordering");
 
-	np::Server_TickUpdate(ctx); // carried flag overlaps bay -> capture
+	move_remote_body(world, ai, blue, bay_position);
+	np::Server_TickUpdate(ctx); // carried flag contacts bay -> capture
 	bool saw_capture_event = false;
 	bool saw_remove = false;
 	bool saw_reset = false;
@@ -524,6 +632,9 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 
 void test_flag_timeout_wire_transaction() {
 	w::World world;
+	w::CollisionWorld collision;
+	w::AiSystem ai;
+	install_collision_system(world, collision, ai);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.mp_session = true;
@@ -534,7 +645,9 @@ void test_flag_timeout_wire_transaction() {
 	world.match.configure(rules);
 	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
 	w::Entity *blue_entity = world.registry.get(blue);
-	blue_entity->position = {30.0f, 40.0f, 2.0f};
+	const w::Vec3 flag_position{30.0f, 40.0f, 2.0f};
+	blue_entity->position = {flag_position.x + 1.6f,
+			flag_position.y, flag_position.z};
 	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
 	const w::EntityHandle host = match_player(world, 1, 1, "Host");
 	world.registry.get(host)->position = {1000.0f, 1000.0f, 2.0f};
@@ -544,10 +657,16 @@ void test_flag_timeout_wire_transaction() {
 	red_flag.item_id = 4093;
 	red_flag.has_item_def = true;
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
-	red_flag.position = blue_entity->position;
+	red_flag.position = flag_position;
 	red_flag.spawn_position = {5.0f, 6.0f, 2.0f};
+	red_flag.yaw = 90;
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	expect(flag.valid(), "FlagBall timeout fixture spawns its red flag");
+	const int32_t waypoint_model = collision.add_model(contact_box(1));
+	collision.assign_entity(flag, waypoint_model);
+	expect(attach_remote_body(world, ai, blue, flag_position.x + 3.5f) != nullptr,
+			"FlagBall authority body fixture attaches");
+	prime_collision_tables(world, collision);
 
 	ns::LoopbackChannel remote_wire;
 	ns::LoopbackChannel host_wire;
