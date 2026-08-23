@@ -245,6 +245,51 @@ void test_explosion_damage_gates() {
     w.ammo.entries[1].flags = 0;
 }
 
+// `destroybuild` gates only Building targets in a network session. Offline
+// damage ignores the setting, and enabled multiplayer uses the ordinary blast
+// path. No other retail consumer reads the option.
+// [orig: Entity_ApplyWeaponDamage @0x4E682E..0x4E6860]
+void test_multiplayer_destroy_buildings_rule() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(2, 2);
+
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 501;
+    seed.health = 120;
+    seed.health_max = 120;
+    seed.position = Vec3{10.0f, 0.0f, 0.0f};
+    seed.bound_radius = 1.0f;
+    const EntityHandle building = w.registry.spawn(2, seed);
+    w.item_death_traits.set(501, barrel_traits());
+
+    ExplosionEntry blast;
+    blast.pos = seed.position;
+    blast.type = ammo_kz::kStandard;
+    blast.ammo_index = 1;
+    auto apply_blast = [&] {
+        w.explosions.queue_explosion(w, blast);
+        w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.destruction);
+    };
+
+    w.mp_session = true;
+    w.destroy_buildings = false;
+    apply_blast();
+    CHECK(w.registry.get(building)->health == 120);
+
+    w.destroy_buildings = true;
+    apply_blast();
+    CHECK(w.registry.get(building)->health == 20);
+
+    w.registry.get(building)->health = 120;
+    w.mp_session = false;
+    w.destroy_buildings = false;
+    apply_blast();
+    CHECK(w.registry.get(building)->health == 20);
+}
+
 // The pool-1 LOS ray starts at the victim position, inside its own collision
 // hull. Retail excludes the endpoint entity from the sector walk; otherwise
 // every collision-wired movable item shields itself from blast damage.
@@ -1767,6 +1812,7 @@ int main() {
     test_wreck_fire_crackle_rolls_on_the_engine_prng();
     test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();
+    test_multiplayer_destroy_buildings_rule();
     test_explosion_los_excludes_victim_hull();
     test_radius_blast_skips_pool1_los();
     test_organic_blast_los_is_unlifted();

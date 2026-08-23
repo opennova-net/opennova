@@ -328,6 +328,11 @@ public:
     bool projectile_authority = true;
     bool fat_bullets = false;
     bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
+    // Multiplayer blast damage to Building ItemDefs is disabled unless the
+    // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
+    // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
+    // @0x4E682E..0x4E6860]
+    bool destroy_buildings = false;
     // An embedding adapter may own the local player's borrowed UseGun slot so
     // it can supply trigger/reload/scope input and drain presentation events.
     // Standalone World users keep the default global mounted-slot pump.

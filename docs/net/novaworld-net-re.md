@@ -10226,6 +10226,16 @@ global each:
   Reimpl `GameConfig` fields renamed accordingly (`replay_enabled`/`max_team_lives`/`respawn_timeout`/
   `destroy_buildings`/`death_messages`/`team_choose`/`allow_sniper_scope_zoom`).
 
+  **Retail use audit (2026-08-23).** Whole-image xrefs to `g_max_team_lives @0x24D2130`
+  end at the settings copy (`apply_session_settings_to_globals @0x551500`) and 0x08 serializer
+  (`ServerConfig_SerializeToPacket @0x505BD0`); no retail gameplay function reads the live value.
+  It is therefore a compatibility field, not evidence for a team-lives rule. Conversely,
+  `Entity_ApplyWeaponDamage @0x4E682E..0x4E6860` has the exact `destroybuild` consumer: during a
+  network session it rejects blast damage to item type Building when `g_destroy_buildings == 0`;
+  offline damage bypasses that rule. The reimplementation preserves both observations: it carries
+  `max_team_lives` on 0x08 without inventing gameplay and feeds `destroy_buildings` into the shared
+  world damage path.
+
 **Consequence for the reimpl (D-NET-132, ADR 0013) — IMPLEMENTED:** team/class/slot/kills/deaths
 are derived from the authoritative pool-0 entity, so `NapiNPConnection` holds the entity *handle*
 (`link.owned_entity`) as the single binding and the §5.1 reply builders read team (@entity+344) and
@@ -10842,7 +10852,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`engine/net/netsim/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
 | 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < g_max_player_slots`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
 | 0x0A header/tail | `build_0a_frame`/`emit_connection_s2c` (`engine/net/netsim/connection_fan.cpp`) | complete phase/tail **matching** (D-NET-134 FIXED 2026-08-03); health byte **matching** (D-NET-138 FIXED 2026-07-02, pack ported from `Entity_GetHealthClassification @ 0x4AD4E0`; live v11: 0 C 0x0F) | `Server_SendEntityStateToPlayer @ 0x517ba0` (deploy gate `+32==6`, `++phase` before first write, eye ref, budget halving `+89876`/uptime>2000, unreliable send flags (0,1)); all four sub-blocks and variable phase-8 mounted-ammo body ported; sub-block 0 = weapon/reload/uniform (`@ 0x4ff81b`; `FrameAimBlock` → `FrameWeaponBlock` rename everywhere); sub-block 1 values confirmed (C6EAE0=20/C6EAE4=13/fps/cpu/round-secs). |
-| GameConfig unwitnessed fields | `engine/net/npruntime/game_config.h` | **all 7 named** (§6.9 update) | `Config_ParseSettingsLine @ 0x54f740` + `apply_session_settings_to_globals @ 0x551500` + `ServerConfig_ApplyHostSetting @ 0x4a6000`: `replay`/`max_team_lives`/`timeout`/`destroybuild`/`deathmes`/`TeamChoose`(bit 0x4 of the mpattrib store `dword_2550A04`)/`mp_allowsniperscopezoom`. |
+| GameConfig formerly-unwitnessed fields | `engine/net/npruntime/game_config.h` | **all 7 named; gameplay consumers audited** (§6.9 update) | `Config_ParseSettingsLine @ 0x54f740` + `apply_session_settings_to_globals @ 0x551500` + `ServerConfig_ApplyHostSetting @ 0x4a6000`: `replay`/`max_team_lives`/`timeout`/`destroybuild`/`deathmes`/`TeamChoose`(bit 0x4 of the mpattrib store `dword_2550A04`)/`mp_allowsniperscopezoom`. Whole-image xrefs leave `max_team_lives` wire-only; the `destroybuild` multiplayer-Building blast gate at `Entity_ApplyWeaponDamage @0x4E682E..0x4E6860` is ported. |
 | D-NET-127 post-handshake bodies | `emit_post_handshake_burst` (`server_message_dispatch.cpp`) | **fully witnessed; observation-carry closed** (§5.45 update) | trio owner = `CNapiServer_ProcessPendingPlayerSpawns @ 0x4c8dc0`; `0x03` = `NetPacket_WriteWeaponRestrictionFlag @ 0x502ac0`; `0x05` = `NetPacket_WriteBoolTrue @ 0x502c00`; `0x04` = `NetPacket_WriteSlotAssignment @ 0x502b30` (24-B field map); `0x00` pair = `CNapiNPConnection_SendConfigUpdate @ 0x6286e0`. |
 
 Evidence tests: full ctest green post-fix (226 tests, incl. `npruntime_golden_lan_join`,
