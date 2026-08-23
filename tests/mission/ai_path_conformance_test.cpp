@@ -304,11 +304,15 @@ int main() {
 		// point. Question: does the order land, and do they then drive?
 		if (std::getenv("NW_TRUCK_TRACE") != nullptr && (t % (std::getenv("NW_TRK_EVERY") ? std::atoi(std::getenv("NW_TRK_EVERY")) : 625)) == 0) {
 			world.registry.for_each([&](const w::Entity &en) {
-				if (en.bms_id != 58 && en.bms_id != 63) return;
+				const bool is_pax = (en.bms_id == 21 || en.bms_id == 24 ||
+				                     en.bms_id == 27 || en.bms_id == 32 ||
+				                     en.bms_id == 36 || en.bms_id == 45 ||
+				                     en.bms_id == 17);
+				if (en.bms_id != 58 && en.bms_id != 63 && !is_pax) return;
 				const w::AiEntity *ae = ai.for_handle(en.handle);
 				std::printf("  TRK t=%6d (%5.1fs) bms=%d pos=(%7.1f,%7.1f) wp=%d "
 				            "brain[type=%d ch=%d node=%d spd=%d spdA=%d spdB=%d st=%d dist=%d nv=%d]\n",
-						t, t / 62.5, en.bms_id, en.position.x, en.position.y,
+						t, t / 62.5, en.bms_id, en.position.x, en.position.z,
 						int(en.waypoint_id),
 						ae ? ae->brain.f[w::AiBrain::kWpType] : -1,
 						ae ? ae->brain.f[w::AiBrain::kWpChannel] : -1,

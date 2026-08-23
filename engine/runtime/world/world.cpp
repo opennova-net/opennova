@@ -1,4 +1,3 @@
-#include "world/collision_detail.h"
 #include "world/world.h"
 
 #include <algorithm>
@@ -1104,39 +1103,6 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
     Entity *tgt = world_.registry.get(occ->mount_target);
     if (tgt && occ->mount_seat >= 0 && occ->mount_seat < static_cast<int>(tgt->seats.size()))
         tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
-    // ADAPTATION, DECLARED -- this is NOT a port. Retail performs no reposition on
-    // detach (Entity_DetachFromVehicle @0x4355f0 and Entity_DetachFromVehicleIfServer
-    // @0x4359d0 both read in full; neither touches Position), and it snaps a seated
-    // child to the seat bone exactly as we do [orig: Entity_AttachToBoneAndUpdateTransform
-    // @0x5463D0]. Retail's ground probe also accepts a vehicle as standing support
-    // [orig: Entity_RaycastGroundHeightAndObject @0x414320 -> raycast_entity_collision
-    // @0x413760 -- itemDef + AABB only, no type filter], so on the evidence a retail
-    // passenger should be left standing on the bed too. The mechanism that actually
-    // gets it onto the ground was searched for and NOT FOUND; this drops the body to
-    // the terrain beneath it instead.
-    //
-    // Why it is needed: a passenger detaches at its seat bone, which for a cargo
-    // truck is +2.54 u up, INSIDE the bed. Our bed is walkable (6 type-1 volumes), so
-    // the body stands on it, walks into the back of the cab and is pinned forever.
-    // Measured on 00TRg: six of seven passengers of transport 63 read ground 15.0
-    // (the bed floor = truck origin 13.06 + ~2.0) and never move again, while the one
-    // that got clear early read 12.9 (terrain) and walked away. The offline repro
-    // (tests/world/truck_dismount_test.cpp) pins at seat height for 1161 of 1200 ticks
-    // and clears in two at ground level.
-    //
-    // Only Z moves: no lateral exit offset is invented here. If the witness for
-    // retail's real mechanism is ever found, DELETE this and port that instead.
-    if (world_.terrain != nullptr && occ->kind == EntityKind::Organic) {
-        int32_t p[3];
-        detail::entity_pos_fixed(*occ, p);
-        const GroundClearance clearance{};
-        const int32_t ground =
-                calc_average_ground_height(*world_.terrain, p, 0x50000, clearance);
-        if (ground != INT32_MIN) {
-            const float ground_f = static_cast<float>(ground) / 65536.0f;
-            if (occ->position.z > ground_f) occ->position.z = ground_f;
-        }
-    }
     vehicle_release_use_gun_slot(*occ, tgt);
     occ->mounted = false;
     occ->flags &= ~kEntityFlagMounted;
