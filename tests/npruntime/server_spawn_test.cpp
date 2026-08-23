@@ -37,14 +37,14 @@ bool expect(bool cond, const char *msg) {
 }
 
 // A World with an AiSystem (spawn_player requires it), pools 0 (players) and 3 (markers) configured,
-// and one authored 6002 SP start marker so select_player_spawn finds a real spawn pose.
+// and one authored 6002 DM fallback marker so the retail resolver finds a real spawn pose.
 void make_world(w::World &world, w::AiSystem &ai) {
 	world.ai = &ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	w::Entity start;
 	start.kind = w::EntityKind::Marker;
-	start.item_id = 6002; // SP/DM player-start (kSpawnMarkerStartTypes[0])
+	start.item_id = 6002; // non-team fallback player start
 	start.position = {123.0f, 456.0f, 7.0f};
 	start.yaw = 30;
 	world.registry.spawn(3, start);

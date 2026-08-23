@@ -173,7 +173,8 @@ void test_resolve_spawn_target() {
     CHECK(resolve_spawn_target(f.w, 1, 0xFFFF) == nullptr);
     CHECK(resolve_spawn_target(f.w, 1, static_cast<uint16_t>(0x3000)) == nullptr);
     // The deploy pose: target origin z+1, target yaw [orig: @0x50d01c].
-    const SpawnPointResult pose = spawn_pose_for_target(f.w, *t);
+    const SpawnPointResult pose = resolve_player_spawn_pose(
+        f.w, EntityHandle{}, t->handle, 0, 1, 0x10010u);
     CHECK(pose.found);
     CHECK(pose.position.z > t->position.z + 0.5f && pose.position.z < t->position.z + 1.5f);
 }
@@ -182,8 +183,10 @@ void test_team_marker_selection() {
     AshFixture f;
     // AS (0x10010): team 1 -> the 6003 marker, team 2 -> the 6004 marker (net-re §5.61 —
     // without the split both teams landed on the first family type present).
-    const SpawnPointResult t1 = select_player_spawn_for_team(f.w, 1, 0x10010u);
-    const SpawnPointResult t2 = select_player_spawn_for_team(f.w, 2, 0x10010u);
+    const SpawnPointResult t1 = resolve_player_spawn_pose(
+        f.w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10010u);
+    const SpawnPointResult t2 = resolve_player_spawn_pose(
+        f.w, EntityHandle{}, EntityHandle{}, 1, 2, 0x10010u);
     CHECK(t1.found && t1.position.x < 0.0f);  // 6003 sits west
     CHECK(t2.found && t2.position.x > 0.0f);  // 6004 sits east
 }

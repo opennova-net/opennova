@@ -68,7 +68,7 @@ bool character_vars_from_profile(const Dictionary &p_profile,
 // P7: per-load host bring-up — the faithful §5.0 mode-3 in-process listen server
 // [orig: SinglePlayer_StartMission @0x561af0], mirroring apps/nw_server/main.cpp. The host's own
 // player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
-// select_player_spawn start marker), and its own loopback client renders the per-frame 0x0A.
+// resolve_player_spawn_pose marker chain), and its own loopback client renders the per-frame 0x0A.
 void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 	namespace np = opennova::np;
 	// Persist the mission so ctx_.mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)

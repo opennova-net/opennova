@@ -1528,19 +1528,20 @@ NEVER read an NPC's position.
 | 6095 | non-team primary | non-team, attempted first |
 | 6096–6099 | per-team starts (team 1–4) | `g_GameType & 0x10000` (team) |
 | 6001 | co-op fallback | co-op only |
-| **6002** | **non-team, non-coop = single-player / campaign / DM** | the SP fall-through |
+| **6002** | **non-team, non-Co-op fallback** | DM/KOTH/Flag Me fallback |
 | 6003 / 6004 / 6090 / 6091 | TDM team starts 1–4 | TDM alt path |
 
-`g_GameType` bitfield: `& 0x10000` = team mode; `& 0x20000` = vehicle/coop insertion;
-`(g_GameType & 0xFFFDFFFF) == 0x10020` = cooperative; small/zero = SP/campaign/DM. For single
-player the selector attempts 6095 first and, with no 6095 markers, falls through to **6002**,
-handing it to the distance selector.
+`g_GameType` bitfield: `& 0x10000` = team mode; `& 0x20000` = objective Co-op insertion;
+`(g_GameType & 0xFFFDFFFF) == 0x10020` = the Co-op family. Non-team, non-Co-op modes attempt
+6095 first and, with no 6095 markers, fall through to **6002**, handing it to the distance
+selector.
 
 **`Entity_FindBestSpawnPoint @ 0x50ccc0` — farthest-from-enemy.** For the resolved type it counts
 pool-3 entities whose `entity+28` (the `gItemDefs` index from `ItemList_FindIndexByTypeId`, NOT the
 raw type-id) matches; for each candidate the score is the min 2D distance to any pool-0 entity with
-`Flags & 0x100` (the "avoid" / enemy set), excluding self `[orig: @0x50ce0d]`; a `CPairList`
-shell-sort by score picks the farthest (`rand()` tiebreak when all are equidistant). The winner's
+`Flags & 0x100` (the "avoid" / player set), excluding self `[orig: @0x50ce0d]`; a `CPairList`
+shell-sort by score picks the farthest (the `rand()` arm is all-clamped, not an ordinary tie;
+D-NET-115). The winner's
 `pos` (`+4/+8/+12`) and orientation (`+16/+20/+24`) are copied into the player; `+16` is the
 `(90 − yaw)` BAM heading authored at BMS load `[orig: Entity_SpawnFromBMSRecord @ 0x40eb42]`
 (D-NET-86), so it is copied VERBATIM (no re-conversion). In SP the player's TEAM is NOT taken from
@@ -1556,41 +1557,25 @@ match cannot. The type-ids are BMS-style `6xxx` used verbatim (no `+100000` item
 `[orig: ItemList_FindIndexByTypeId @ 0x49e120 compares gItemDefs[i].id (stride 2780, .id @+0x50) to
 the raw arg]`.
 
-**Real-mission machinery — the SP marker chain alone is incomplete (2026-06-22b).** Grilling
-against a shipped SP mission (00TRa.bms, "Training: Basics / Armory", `attrib_flags=0x3` ⇒ no
-game-mode bit ⇒ `g_GameType=0`) found the per-game-type chain above does NOT cover real authored
-starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `Server_PositionPlayerForSpawn` with spawn-param
-low-word **0** (not 0xFFFF), so the engine first tries `[orig: Server_ResolveSpawnTargetHandle @0x4fe110]` — which is a
-live-entity **handle** resolver (`poolType = handle>>12`, `index = handle & 0xFFF`, fetch
-`g_pool_list[poolType][index]`, gate on model flag `0x40000` + team), NOT a spawn-point lookup; at
-join (handle 0, no live entity yet) it returns null and the marker chain runs. 00TRa ships ZERO
-6002 markers and exactly ONE type-**6001** marker (+ 53× type-6005 waypoints), so the SP chain
-`6095 → 6002 → Entity_FindBestSpawnPoint(6002)` finds 0 candidates and is a **no-op**
-`[orig: Entity_FindBestSpawnPoint @0x50ccc0 zero-candidate epilogue @0x50cf53 — bare ret, no write
-to entity+4/+8/+12]`. The 6001 marker is instead consumed by the broader start-point family
-machinery: `[orig: build_entity_position_list @0x509660]` enumerates the family
-`{6001,6002,6003,6004,6090,6091,6094-6099}`, and the dedicated 6001 reader
-`[orig: CineEditor_FindSpectatorSpawn @0x41f25e]` copies the 6001 marker's X/Y/Z. The exact branch
-that places 00TRa's player is runtime-`g_GameType`/pool-3-data-dependent, but every path points at
-the single 6001 marker.
+**00TRa correction (2026-08-22).** The earlier D-NET-88 mandate incorrectly concluded that a
+mission with no multiplayer-mode bit becomes `g_GameType=0`, then used that false premise to justify
+a cross-mode marker-family scan. Retail instead maps no/unknown mission mode to stock Co-op
+**0x10020** (`AI_GetTaskTypeFromFlags @0x40DAE0` → `Game_StartMission @0x524360`), so 00TRa's
+single type-6001 marker is the exact Co-op fallback. `Server_OnPlayerJoin @0x51A680` still calls
+`Server_PositionPlayerForSpawn` with a zero low-word target; `Server_ResolveSpawnTargetHandle
+@0x4FE110` rejects it and the ordinary 6094→6001 Co-op chain runs. The obsolete unified-family
+mandate and APIs are removed.
 
-**Reimpl (the SP-as-listen-server fix, 2026-06-22; revised 2026-06-22b — D-NET-88).** Because a
-byte-faithful port of the fragmented, data-dependent machinery is impractical (and the strict SP
-path no-ops on a 6001-only mission), the reimpl UNIFIES it: `select_player_spawn`
-(`engine/runtime/world/src/spawn_select.cpp`) scans the registry's promoted markers (`EntityKind::Marker`)
-over the start-marker family priority list
-`kSpawnMarkerStartTypes = {6002, 6095, 6094, 6001, 6096-6099, 6003, 6004, 6090, 6091}` — the FIRST
-present type wins, returning the one farthest (mission 2D) from any live `EntityKind::Organic` (the
-avoid set; the faithful `Flags & 0x100` set is approximated by live soldiers — at select time the
-player has not spawned, so every organic is an NPC). A mission is authored for one mode, so
-typically exactly one family type is present (00TRa → its 6001). `Simulation::spawn_local_player_at_start`
-feeds the result into the §5.2b `spawn_player`; `mission_presentation.gd` calls it instead of the prior
-placeholder that read `get_entity_position(0)` (= the first promoted organic = NPC #0), which spawned
-the player on top of the first soldier. No family marker → a safe fallback origin, never an NPC
-position. **D-NET-88 divergence:** the unified family scan replaces the exact per-game-type
-resolution (`g_GameType`-driven order, the `Server_ResolveSpawnTargetHandle` handle pre-check, the cycling-vs-farthest
-distinction, the separate 6001/cinematic consumers, the `"psp"` bone offset + `+0x10000` Z nudge) —
-all deferred. Guarded by `tests/world/spawn_select_test.cpp` (incl. the 6001-only 00TRa shape).
+**Reimpl (full cutover, 2026-08-22 — D-NET-88 FIXED).** `resolve_player_spawn_pose`
+(`engine/runtime/world/spawn_select.cpp`) is the sole placement operation used by initial host
+admission, deploy/redeploy, and offline mission startup. It owns the exact mode branches, the
+CRenderState field-6 primary-marker gate, Co-op's `playerSlot % count` direct selection, the
+6095/6096..6099 primary and 6002/6003/6004/6090/6091 fallback chains, Objective Co-op's first
+pool-1-then-pool-2 numbered team entity, full parent-transformed poses, the shared global cycle,
+and the picked-zone 6007 scatter. No cross-family safety net or legacy overload remains. The only
+placement input still unwitnessed is the runtime-set model-userpoint name; the port therefore takes
+the cited `+0x10000` no-userpoint arm. `spawn_select_test` pins every branch, including 00TRa's
+6001-only stock-Co-op shape.
 
 ### 5.3 Tag direction asymmetry (durable warning)
 
@@ -6066,19 +6051,23 @@ reimpl advanced exactly one §5.2a phase per `tick_connections` pass (~20 ticks 
 join); the faithful behaviour is to drain the whole track in one call.
 `[orig: Server_OnPlayerJoin @0x51a680]`
 
-**D-NET-115** [behavior, MATCHING] **Spawn placement + the rand tiebreak + the player avoid-set.**
+**D-NET-115** [behavior, MATCHING] **Spawn placement + the clamp-random arm + the player avoid-set.**
 `Entity_FindBestSpawnPoint @0x50ccc0`: for each pool-3 marker matching the start-family type,
 score = min 2D distance (`sqrt(dx²+dy²)`, mission x/y) to any **pool-0 entity with `Flags & 0x100`
-that is not the spawning entity** — and that flagged set **includes already-spawned players**, so
+that is not the spawning entity** (alive is not tested) — and that flagged set **includes
+already-spawned players**, so
 the second player to spawn scores the first player's marker low and a *different* marker wins
 (this is how players spread across markers). `CPairList_AddEntry` collects (score, marker);
-`CPairList_ShellSortByValue` orders; the farthest-from-enemy marker wins. **When the markers are
-equidistant (a tie), each score is overwritten with `rand() >> 8 & 0xFFFF` before the sort**, so
-ties break randomly. A mission authored with exactly one start marker places every player at that
+`CPairList_ShellSortByValue @0x526CF0` orders descending; the farthest marker wins. The old
+"equidistant random tie" reading was wrong: the boolean is cleared by any distance below
+`flt_7C19E0 = 0x7FFF0000`, so `rand() >> 8 & 0xFFFF` replaces scores only when **every**
+candidate/avoid distance remains at that clamp. Ordinary whole-unit ties do not randomize; they
+retain the strict shell-sort result. A mission authored with exactly one start marker places every player at that
 single marker — i.e. **single-marker stacking is faithful** (the original has no further push-
-apart); spread relies on multiple markers + the player avoid-set. The reimpl's `select_player_spawn`
-already scores farthest-from-enemy over the start family but (a) its avoid-set must include spawned
-players and (b) the `rand()` tiebreak was deferred. `[orig: Entity_FindBestSpawnPoint @0x50ccc0]`
+apart); spread relies on multiple markers + the player avoid-set. `resolve_player_spawn_pose`
+ports the player-bit set, self exclusion, parent transform before scoring, fixed/whole-unit clamp,
+random arm, and the original Knuth-gap strict-comparison sort. `[orig: Entity_FindBestSpawnPoint
+@0x50CCC0]`
 
 **D-NET-116** [behavior, DOCUMENTED] **The pending-spawn loop gates on the mission-load flag.**
 `CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0` runs only when `is_authority && !g_net_spawn_suspended &&
@@ -7993,9 +7982,8 @@ zone-event attacker bytes (`SpawnZoneList_IndexOf @ 0x43B990`).
 duration 15, takeover-speed setting 1 (base 24), base-wave time 0, and zone-wave time 10;
 the runtime copy above publishes those exact values.
 
-**Follow-ups (open):** the per-team `dword_C87B54 + 85·team` CRenderState field-6 gate that
-can skip the primary marker chain in `Server_PositionPlayerForSpawn @ 0x50D1DB`; the
-userpoint NAME used for spawn offsets (`off_7CF9C4` is runtime-set — static bytes are code);
+**Follow-ups (open):** the userpoint NAME used for spawn offsets (`off_7CF9C4` is runtime-set —
+static bytes are code);
 the `sub_52D430 @ 0x52D430` per-gametype config table (indices 0xC = capture-score
 threshold, 0x24 = scoring interval) and its table source; which gametype 0x50010 is (the
 zone-chain-exempt sibling — KOTH family suspected); the exact session-settings VarList keys
@@ -8024,8 +8012,8 @@ owned-zone mask, the control latch), `Entity::zone_number` (BMS byte 155 `lfp_gr
 by `mission/promote.cpp`) / `zone_control` / `is_capture_trigger` / `is_spawn_point`
 (items.def attribs `changeteam 0x20000` / `spawnpoint 0x40000`, already parsed by
 `engine/formats/def`; stamped + chain built + latched in `Simulation::resolve_item_traits`);
-`resolve_spawn_target` / `find_spawn_zone_for_team` / `spawn_pose_for_target` /
-`select_player_spawn_for_team` (`world/spawn_select`); the full C2S 0x0E handler
+`resolve_spawn_target` / `find_spawn_zone_for_team` / the single deep
+`resolve_player_spawn_pose` operation (`world/spawn_select`); the full C2S 0x0E handler
 (`npruntime/server_message_dispatch.cpp` — pick resolve, the zone control/team gate, the
 0xFFFE frontier auto-pick, dead-only deploy, per-team marker fallback, the computed 0x1E
 ev-0x3A frontier hint replacing the golden byte-blob); the per-recipient 0x0A phase-0
@@ -8034,7 +8022,10 @@ the per-team join placement (`Server_BuildPlayerInfoAndAdd` assigns the team BEF
 §5.2c marker scan — previously both AS teams spawned at the first family type present, i.e.
 team 1's base). Pinned by `zone_chain_test` (the ASH_I5A shape: masks/frontier/latch,
 capture progression, auto-pick, pick resolve, per-team markers — golden mask 0x8
-reproduced). The numbered-zone placement now also ports the first-32/radius-gated type-6007
+reproduced). The no-pick arm now ports the exact solo/team/Co-op marker dispatch, CRenderState
+field-6 primary suppression, Co-op slot rotation and numbered-entity tail, player-bit avoid set,
+fixed-distance clamp/random arm, parent transform, and strict retail shell sort. The picked
+numbered-zone placement ports the first-32/radius-gated type-6007
 scatter, the shared `g_spawn_cycle_counter % (count+1)` sequence, every selected pose field,
 and the original full-Euler parent transform (`Server_PositionPlayerForSpawn @ 0x50CF60`;
 `Entity_TransformLocalToWorld @ 0x43BD00`), pinned by `spawn_select_test`. Remaining placement
