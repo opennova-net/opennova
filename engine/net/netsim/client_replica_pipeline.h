@@ -285,6 +285,12 @@ private:
 	void apply_entity_death(uint16_t handle_packed, int16_t killer_source);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
+	// Small per-match state messages live together in client_replica_match.cpp;
+	// this remains one pipeline with no secondary client state or router.
+	void apply_death_camera_target(const std::vector<uint8_t> &body);
+	void apply_player_downed_state(const std::vector<uint8_t> &body);
+	void apply_spawn_wave_status(const std::vector<uint8_t> &body);
+	void apply_score_delta_sound(const std::vector<uint8_t> &body);
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
 	// ClientState::end_round and decodes when the board completes.
 	void apply_end_round_header(const std::vector<uint8_t> &body);
