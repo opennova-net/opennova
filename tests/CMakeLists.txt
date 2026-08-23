@@ -541,11 +541,11 @@ target_compile_definitions(minimal_mnu_validate_test PRIVATE
 add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
 
 # Minimal set's custom map — the .env + .bms legs (the .trn rides its own slice).
-add_executable(minimal_map_gen_test fixtures/minimal_map_gen.cpp)
-target_link_libraries(minimal_map_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_map_gen_test PRIVATE
+add_executable(minimal_map_validate_test fixtures/minimal_map_validate.cpp)
+target_link_libraries(minimal_map_validate_test PRIVATE opennova_formats)
+target_compile_definitions(minimal_map_validate_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_map_gen COMMAND minimal_map_gen_test)
+add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
@@ -557,11 +557,11 @@ add_test(NAME minimal_trn_gen COMMAND minimal_trn_gen_test)
 
 # Minimal map's source-art images (colormap/detail/tilestrip TGAs, charmap/
 # foliagemap PCX) the .trn references — authored + validated.
-add_executable(minimal_art_gen_test fixtures/minimal_art_gen.cpp)
-target_link_libraries(minimal_art_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_art_gen_test PRIVATE
+add_executable(minimal_art_validate_test fixtures/minimal_art_validate.cpp)
+target_link_libraries(minimal_art_validate_test PRIVATE opennova_formats)
+target_compile_definitions(minimal_art_validate_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_art_gen COMMAND minimal_art_gen_test)
+add_test(NAME minimal_art_validate COMMAND minimal_art_validate_test)
 
 # Minimal set's generated boot font (minimal_fnt_builder.h): validity +
 # byte-stable roundtrip + label glyphs drawable. Always-on; the font itself is
