@@ -514,6 +514,33 @@ func save_as(dir_path: String) -> Error:
 	return err
 
 
+## String tables are addressed by exact filename (gametext.bin, vmacros.bin, keyhelp.bin,
+## menutxt.bin), so Save As offers a file picker rather than a folder.
+func uses_save_file_dialog() -> bool:
+	return true
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.bin,*.BIN ; NovaLogic String Table"])
+
+
+func get_save_file_dialog_default_name() -> String:
+	if strings_editor != null and not strings_editor.current_path.is_empty():
+		return String(strings_editor.current_path).get_file()
+	return "strings.bin"
+
+
+func save_as_file(path: String) -> Error:
+	_ensure_editor()
+	if strings_editor == null:
+		return ERR_UNAVAILABLE
+	var err := strings_editor.save_as_path(path) as Error
+	if err == OK:
+		_tabs.notify_changed()  # tab label follows the new filename
+		_save_state()
+	return err
+
+
 func get_save_dialog_title() -> String:
 	return "Choose where to save the strings .bin"
 

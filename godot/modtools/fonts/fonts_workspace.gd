@@ -272,7 +272,28 @@ func save_current() -> Error:
 
 
 func save_as(dir_path: String) -> Error:
-	return _document.save_as(dir_path)
+	return save_as_file(dir_path.path_join(get_save_file_dialog_default_name()))
+
+
+## Fonts are addressed by exact filename, not by folder: retail loads its boot faces by the
+## hardcoded names in HUD_InitAllFonts (Arial12b/14n/14b/16n/16b, Impac22b/38b), so saving a
+## generated face has to be able to land on one of those names. The base document already
+## exposes the exact-path seam; this is what finally reaches it.
+func uses_save_file_dialog() -> bool:
+	return true
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.fnt,*.FNT ; NovaLogic Font"])
+
+
+func get_save_file_dialog_default_name() -> String:
+	var current := _document.current_path if _document != null else ""
+	return current.get_file() if not current.is_empty() else "font.fnt"
+
+
+func save_as_file(path: String) -> Error:
+	return _document.save_as_path(path)
 
 
 func get_save_dialog_title() -> String:

@@ -97,15 +97,25 @@ func save_current() -> Error:
 func save_as(dir_path: String) -> Error:
 	if dir_path.is_empty():
 		return ERR_INVALID_PARAMETER
+	return save_as_path(dir_path.path_join(_export_filename()))
+
+
+## Save to an exact path and adopt it. Sound banks are addressed by filename -- the mission
+## family is <stem>.lwf beside <stem>.bms, and the boot slots are named outright
+## (gamelocl/game/game2/game3.lwf) -- so a folder picker with a derived basename cannot author
+## them. EditorDocument, unlike EditorResourceDocument, has no save API to inherit.
+func save_as_path(path: String) -> Error:
+	if path.is_empty() or path.get_extension().to_lower() != "lwf":
+		return ERR_INVALID_PARAMETER
 	flush_edit()
-	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
+	var dir := path.get_base_dir()
+	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir)
 	if mkdir_err != OK:
 		return mkdir_err
-	var path := dir_path.path_join(_export_filename())
 	var err := data.save_file(path)
 	if err == OK:
 		set_current_path(path)
-		remember_save_dir(dir_path)
+		remember_save_dir(dir)
 		mark_clean()
 		edited.emit()
 	return err

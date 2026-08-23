@@ -275,6 +275,34 @@ func _path_exists(path: String) -> bool:
 	return FileAccess.file_exists(path)
 
 
+## Save the pair to an exact location, named after `sbf_path`'s basename: the bank lands on
+## `sbf_path` and the script on its `.bin` sibling.
+##
+## Music is the one two-file document in the editor, and the game dir is filename-addressed --
+## retail loads MENUMUS.SBF alongside MENUMUS.BIN, and GAMEMUS the same way
+## [orig: Expansion_LoadAssets @ 0x4a4730]. A folder picker that derives a basename cannot
+## author that pair by name, and setting bank_path/script_path directly skips the directory
+## creation and the path adoption that saving is supposed to do.
+func save_as_pair(sbf_path: String) -> int:
+	var clean := sbf_path.strip_edges()
+	if clean.is_empty() or clean.get_extension().to_lower() != "sbf":
+		return ERR_INVALID_PARAMETER
+	var dir := clean.get_base_dir()
+	var mkdir := DirAccess.make_dir_recursive_absolute(dir)
+	if mkdir != OK:
+		return mkdir
+	if not bank_loaded() and not script_loaded():
+		# Neither half is open: there is nothing to write, and reporting OK for a save that
+		# produced no file is worse than refusing.
+		return ERR_UNAVAILABLE
+	var base := clean.get_file().get_basename()
+	if bank_loaded():
+		bank_path = clean
+	if script_loaded():
+		script_path = dir.path_join("%s.bin" % base)
+	return save_to_disk()
+
+
 func save_to_disk() -> int:
 	# Compile-on-Save: when the script side has uncommitted edits, run the
 	# compiler first so the saver writes fresh bytecode. A failed compile bails

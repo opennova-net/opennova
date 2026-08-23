@@ -81,15 +81,25 @@ func save_current() -> Error:
 func save_as(dir_path: String) -> Error:
 	if dir_path.is_empty():
 		return ERR_INVALID_PARAMETER
+	return save_as_path(dir_path.path_join(_export_filename()))
+
+
+## Save to an exact path and adopt it. The game dir is filename-addressed -- retail loads
+## gametext.bin, vmacros.bin and keyhelp.bin by those exact names and EXITS without any of
+## them -- so a folder picker with a derived basename cannot author them. EditorDocument,
+## unlike EditorResourceDocument, has no save API to inherit, hence this.
+func save_as_path(path: String) -> Error:
+	if path.is_empty():
+		return ERR_INVALID_PARAMETER
 	flush_edit()
-	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
+	var dir := path.get_base_dir()
+	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir)
 	if mkdir_err != OK:
 		return mkdir_err
-	var path := dir_path.path_join(_export_filename())
 	var err := string_table.save_to_path(path)
 	if err == OK:
 		set_current_path(path)
-		remember_save_dir(dir_path)
+		remember_save_dir(dir)
 		mark_clean()
 		edited.emit()
 	return err
