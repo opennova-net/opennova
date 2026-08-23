@@ -372,9 +372,9 @@ sweep; blank = not yet characterized.
 | 0x4F | 0x4286C0 | `_0x04F` | |
 | 0x50 | 0x431910 | `_TeamAssign` | **TEAM ASSIGN — decoded + PORTED 2026-07-25** (`decode_team_assign`). Body (6 B): `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]`; a SHORT body defaults each remaining field to 0. The trailing two fields are the target's IDENTITY, not squad state — the former `spawnPointId`/`squadLeader` names were guesses and are RETIRED 2026-07-25: the producer writes `entity+0x15C` (the packed character / minimap id) and `entity+0x374` (the character selector), and ZEROES both for a non-player behind the `Flags & 0x100` gate `@0x506b3d` (live arms `@0x506b51`/`@0x506b6b`) [orig: `write_entity_handle_packet @0x506ad0`]; the consumer stores them straight back (`@0x431b46` netId, `@0x431b3a` animSlot). Gates: `handle != 0xFFFF`, `(handle & 0xF000) < 0x5000`, `slot < pool capacity`. Legs, in order: (1) entity == local player → `byte_A85B48 = team` @0x4319db — **the SAME latch the S2C `0x04` tail byte writes**, so this message is the SECOND of the latch's three writers (D-NET-168); (2) if NOT authority → `entity->Team = team` @0x4319ee, for ANY pool 0..4 entity; (3) the player-slot team byte mirrors it (slot+14, @0x431a0b); (4) if `entity->Flags & 0x100` (a player) AND entity == local player: retail re-selects the per-side profile (team 1/3 → side A block, else side B), refreshes `restrictionData`, and **RE-SENDS ONE C2S `0x2F`** via `NetPacket_SendLoadoutSubmit` @0x431a9e with the NEW team, the per-side profile class, and slot **195 raw** (the pre-`Player_InitPlayer` form — NOT the live `g_currentWeaponSlot`), then C2S `0x22`/`0x23` acks (@0x431acb..0x431b05), `Player_InitPlayer(1)` @0x431b14 and the netId/animSlot identity restore (@0x431b3a..0x431b91). PORTED: legs 1, 2 and the leg-4 `0x2F` re-submission (slot 195 raw). DEFERRED with witnesses (D-NET-168): the leg-4 per-side profile CLASS reselect @0x431a35..0x431a9a (we hold ONE applied kit), the `0x22`/`0x23` acks, `Player_InitPlayer`, the identity restore, and leg 3 (we keep no client-side player-slot team byte). Producer: also the ZONE-FLIP broadcast — `Server_ChangeEntityTeam @0x518D70` (ex-`Server_ChangePlayerTeam`; retargets ANY entity incl. capture zones/spawn objects, §5.61) |
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
-| 0x52 | 0x428A80 | `_0x052` | |
+| 0x52 | 0x428A80 | `_0x052` | **DEATH-CAMERA TARGET (decoded + PORTED 2026-08-22)** — exact 12-B `[i32 x][i32 y][i32 z]`; short reads zero-fill in retail. `GameEvent_PlayerDeath @0x516DD0` targets the victim only (mask 0x20) with the killer entity's fixed XYZ when present, otherwise the victim's. The client stores the triple in `dword_A860E0/E4/E8`; `Camera_ComputeThirdPersonPositions @0x438B80` consumes it. Retail capture confirms `0x13 → 0x52 → 0x1E` ordering (§5.60) |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
-| 0x54 | 0x429040 | `_0x054` | death/wounded minimap marker `[u16 entityHandle][u8 state]` — server emits from `GameEvent_PlayerDeath @0x516dd0` ×2, `GameEvent_RevivePlayer @0x517db4`, `Server_BroadcastMedicRequest @0x515390` (D-NET-108); handler body unwitnessed (§5.60) |
+| 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetTypeAndSubtype @0x4348D0` splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to alive same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
 | 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; stat.mnu remains presentation residue |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
@@ -433,7 +433,7 @@ This is what a reimplemented server must **handle**.
 | 0x00 | 0x512AA0 | **JOIN** — initial client→server packet (allocates session, returns session key) |
 | 0x01 | 0x512ED0 | likely FORM_POST; also compares side passwords during early join (§6.4) |
 | 0x02 | 0x512FD0 | likely GLB_JOIN |
-| 0x03 | 0x501BE0 | `[i32]` → requester player entity+372 (0x174) |
+| 0x03 | 0x501BE0 | **AUTO-MEDIC PREFERENCE (decoded + PORTED 2026-08-22)** — exact `[i32 disabled]` copied to requester playerSlot+372: zero enables automatic requests, nonzero selects manual. Producer `NetPacket_WriteSessionTick @0x42A400` (misleading historical name) actually writes profile+1660; `OPTIONS_AUTOMEDIC` reads/writes its inverse at `0x5549E7/0x554E40` |
 | 0x04 | 0x5199D0 | |
 | 0x06 | 0x513310 | `_0x006_ClientFiredRound` |
 | 0x07 | 0x4FC970 | |
@@ -3066,7 +3066,7 @@ then present fields IN SOURCE ORDER (NON-numeric — 0x10 before 0x04, 0x1000 be
   0x0002 clan   cstr (≤15 + NUL)
   0x0010 id/label cstr (NUL-term)
   0x0004 u8 team
-  0x0008 u8 type|subtype   (type=v&0x7F→slot+16, subtype=v>>7→slot+44)
+  0x0008 u8 downedState    (reviveSeconds=v&0x7F→slot+16, medicRequest=v>>7→slot+44)
   0x0020 u8 → slot+45
   0x1000 u8 → slot+46
   0x0040 u8 → slot+48
@@ -3083,9 +3083,11 @@ bit 0x4000 (no body byte) → client queues a C2S 0x22 ack
 - Team byte (bit 0x04): host=1 (Blue), joiner=2 (Red) — matches §5.20 `flags>>1` and the 0x04 path
   is gated by `g_GameType & 0x10000`; for the A&S probe (attrib 0x10000) the `|=0x200` branch is
   skipped, confirming `g_GameType` holds the gametype-attribute word `[orig: g_GameType @ 0x24D2128]`.
-- **Residual follow-up:** the bit-0x08 byte is stored in the type/subtype slot per IDA, but in the
-  probe its runtime content streams a respawn countdown (0x77→0x00 on the joiner). Layout solid;
-  the runtime semantic of that byte needs a producer-side grill.
+- Bit 0x0008 is the same packed downed state as S2C 0x54, not a soldier-class byte. The server
+  writes `(playerSlot+368 & 0x7F) | (playerSlot+89856 ? 0x80 : 0)` only while the entity is dead
+  and either Auto Medic is enabled or the explicit request latch is set; otherwise it writes zero
+  `[orig: NetPacket_SerializePlayerSync0x46 @0x505E80]`. This resolves the probe's 0x77→0x00
+  countdown and removes the former class/subtype interpretation.
 
 ### Cross-note — pool-0 organic spawn path (controlled capture 2026-06-17)
 
@@ -5902,10 +5904,14 @@ mode / target conn / target slot / target team); not a bug, an artifact of the c
   the two args; it is a pure read (no state change, no packet). Old name and a stale "processes pending team
   change… sends packets" disasm comment were both wrong. The exact meaning of the two key ints (`+48`/`+52`
   of the inner net object) is **not yet witnessed** — follow-up. `[orig: Server_FindPlayerSlotByNetKeys @0x5008b0]`
-- **D-NET-108** [naming, FIXED] `server_broadcast_entity_kill @0x515390` → **`Server_BroadcastMedicRequest`**:
-  net msg handler (table `@0x82b5d8`) for a wounded player's medic call — formats `STRSRV_MEDREQ` with the
-  player name, broadcasts msg 0x54 (entity handle) + msg 0x14 (chat), sets `slot+89856` so it fires once, and
-  plays the help sound. No kill is involved. Signature restored to `(int connectionCtx, u8 *data, int dataLen)`.
+- **D-NET-108** [naming, FIXED; wire semantics resolved 2026-08-22]
+  `server_broadcast_entity_kill @0x515390` → **`Server_BroadcastMedicRequest`**: net msg handler
+  (table `@0x82b5d8`) for a wounded player's manual medic call. It requires alive + `slot+368>0` +
+  manual Auto-Medic preference `slot+372!=0` + clear once-only latch, sends S2C 0x54
+  `[entityHandle][slot+368]` to the active/alive same-team Medic group, formats `STRSRV_MEDREQ` into
+  S2C 0x14, sets `slot+89856`, and plays the help sound. No kill is involved. Signature restored to
+  `(int connectionCtx, u8 *data, int dataLen)`. The death-path 0x54 split and decoded client state are
+  ported; this explicit manual-call/chat action remains a gameplay follow-up.
   `[orig: Server_BroadcastMedicRequest @0x515390]`
 - **D-NET-109** [naming, FIXED] `Server_ValidateAndFireRound @0x50baa0` → **`Server_ClientFiredRound`**: own
   log string `"server_ClientFiredRound: …"` is the original name; the function validates a client fired-round
@@ -7375,12 +7381,14 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   type_id 4091/4093/4095 → 24, special 49, HEADSHOT (flag 0x100 from CalcImpactDamage) →
   rand+32, vehicle kill (flag 0x800) → rand+10, knife (flag 0x400) → rand+13, standard
   rand+4, drowned 22, crashed (0x200) 23, environment 26 — then exactly one
-  victim-targeted S2C 0x52 (`NetPacket_WriteThreeInt32s`: the killer's fixed XYZ when
+  victim-targeted S2C 0x52 (`NetPacket_WriteThreeInt32s @0x506CB0`: the killer's fixed XYZ when
   present, otherwise the victim's), S2C 0x1E (`GameEvent_BuildPayload`: event_type +
   three pool indices + position — the §5.26 kill feed), and conditional S2C 0x54
-  recipient groups (`NetPacket_WriteEntityHandleWithByte` — the death/wounded minimap marker;
-  the victim receives state +368, while an eligible friendly-medic group can receive state 0;
-  not an unconditional “×2”). S2C 0x54 is also emitted
+  recipient groups (`NetPacket_WriteEntityHandleWithByte @0x507030`). The non-self, non-0xC00
+  death gate arms playerSlot+368 to exactly 120 seconds. The `send_mask 0x580` group means
+  active/alive + same team + `AnimMap_IsSlotActive(playerClass, Medic)`; if playerSlot+372 is
+  zero (Auto Medic), that group receives +368. If +372 is nonzero (manual), the group first
+  receives zero and the victim alone receives +368. S2C 0x54 is also emitted
   by `GameEvent_RevivePlayer @ 0x517DB4` and `Server_BroadcastMedicRequest @ 0x515390`,
   D-NET-108).
 - `Server_KillPlayerAndNotify @ 0x519E00` [authority]: marks the slot dead (+100567;
@@ -7404,7 +7412,7 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   arms a 30-tick timer at entity+885/886), weapon-fire/camera math for some types — NOT a
   death message. Only S2C 0x13 is the death notify.
 
-**PORTED (2026-07-03, the MVP slice — same session as the witness pass).** `engine/formats/def`
+**PORTED (2026-08-22; the 2026-07-03 MVP plus exact death wire).** `engine/formats/def`
 ammo.def parse (the §5.60 token subset incl. the flag/kztype tables; `def_parse_ammo_memory`;
 pinned by `def_parse_ammo` against the real 75-entry fixture — the 5.56 block field-for-field)
 → `world::AmmoTable` + the weapon `round_type` → ammo-index resolve (`ammo_table_build`,
@@ -7412,13 +7420,16 @@ the adm+84 pair equivalent) → `world::RoundSim` (512-slot pool; spawn SYNCHRON
 0x06 ring append; velocity = ammo/62 per tick with wire yaw used directly as the mission
 bearing; per-tick segment test vs pool-0 organics + the bilinear terrain column; the kinetic
 damage number `min(62·|vel|,1219)·grains/875` floored/capped, clamped to remaining health)
-→ death routing in `Server_TickUpdate` (S2C 0x13 `[victim][killerSource]` + S2C 0x1E
-standard-kill feed event to every non-host in-match connection; every player slot arms
-the configured +360/+364 second counters with the exact floor-3 / recent-spawn-force-3
+→ death routing in `Server_TickUpdate` (S2C 0x13 `[victim][killerSource]`, victim-only
+S2C 0x52 death-camera fixed XYZ, S2C 0x1E standard-kill feed, then the conditional S2C 0x54
+Auto-Medic/manual recipient split; every player slot arms the configured +360/+364 counters
+and ordinary other-player kills arm +368 to 120 seconds; all decrement at the retail 1 Hz cadence;
+the respawn holds retain the exact floor-3 / recent-spawn-force-3
 rule; early C2S 0x0E picks drop silently; all successful immediate, wave, and listen-host
 fallback deployments enter one `Server_ReleasePlayerDeployment` transaction) → engine feed `Simulation::load_ammo_table`
 (mission_presentation.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
-spawn velocity/frame, 3-hit kill at 60/60/30, 0x13/0x1E bytes, both hold branches and
+spawn velocity/frame, 3-hit kill at 60/60/30, exact 0x13→0x52→0x1E→0x54 bytes and recipient
+sets, decoded client folds, both hold branches and
 their exact pick boundary, no-auto-respawn for clients, shared host respawn snap). The
 phase-0 counter bytes are independently pinned by `netsim_two_peer_fanout`. That historical MVP deliberately used coarse collision and damage;
 the current collision/damage status is the alignment record immediately below.

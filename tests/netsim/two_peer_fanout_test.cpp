@@ -1116,10 +1116,12 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	if (!expect((rec->player.state_flags & 0x02) != 0,
 	            "record byte13 carries the dead bit")) return false;
 
-	// Phase 0 carries the recipient slot's two retail respawn counters. +360 is
-	// visible only while the owned entity has Flags bit1; +364 is always written.
+	// Phase 0 carries the recipient slot's three retail death/respawn counters.
+	// +360/+368 are visible only while the owned entity has Flags bit1; +364 is
+	// always written.
 	// [orig: NetPacket_WritePlayerState @0x4ff81b..0x4ff8e8]
 	conns[0].respawn_delay_seconds = 7;
+	conns[0].downed_revive_seconds = 120;
 	conns[0].spawn_target_hold_seconds = 9;
 	conns[0].s2c_phase = 3; // preincrement -> phase 4 / sub-block 0
 	ns::test::emit_all(world, conns);
@@ -1127,8 +1129,9 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	if (!expect(nw::decode_frame_update(
 	                    dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) &&
 	                    fu.weapon.present && fu.weapon.slot_state360 == 7 &&
+	                    fu.weapon.slot_state368 == 120 &&
 	                    fu.weapon.slot_state364 == 9,
-	            "phase-0 wire carries dead +360 and unconditional +364"))
+	            "phase-0 wire carries dead +360/+368 and unconditional +364"))
 		return false;
 	e->flags &= ~2u;
 	e->health = 150;
@@ -1138,8 +1141,9 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	if (!expect(nw::decode_frame_update(
 	                    dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) &&
 	                    fu.weapon.slot_state360 == 0 &&
+	                    fu.weapon.slot_state368 == 0 &&
 	                    fu.weapon.slot_state364 == 9,
-	            "phase-0 wire suppresses +360 while live but retains +364"))
+	            "phase-0 wire suppresses +360/+368 while live but retains +364"))
 		return false;
 	std::printf("PASS 0a_deploy_hold_and_tail_stance\n");
 	return true;

@@ -145,6 +145,46 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		apply_entity_death(death.entity_handle, death.killer_source);
 		break;
 	}
+	case s2c::DEATH_CAMERA_TARGET: {
+		DeathCameraTarget target;
+		size_t consumed = 0;
+		if (!decode_death_camera_target(
+				body.data(), body.size(), target, consumed) ||
+				consumed != body.size()) {
+			++malformed_bodies_;
+			break;
+		}
+		state_.death_camera.known = true;
+		state_.death_camera.x = target.x;
+		state_.death_camera.y = target.y;
+		state_.death_camera.z = target.z;
+		++state_.death_camera.updates;
+		state_.mark_changed();
+		break;
+	}
+	case s2c::PLAYER_DOWNED_STATE: {
+		PlayerDownedState downed;
+		size_t consumed = 0;
+		if (!decode_player_downed_state(
+				body.data(), body.size(), downed, consumed) ||
+				consumed != body.size()) {
+			++malformed_bodies_;
+			break;
+		}
+		const world::EntityHandle handle{downed.entity_handle};
+		if (!handle.valid() || handle.pool() != 0) break;
+		for (ClientRosterSlot &slot : state_.roster) {
+			if (!slot.bound || slot.entity_slot != handle.slot()) continue;
+			const bool changed =
+					slot.downed_revive_seconds != downed.revive_seconds ||
+					slot.medic_request_active != downed.medic_request_active;
+			slot.downed_revive_seconds = downed.revive_seconds;
+			slot.medic_request_active = downed.medic_request_active;
+			if (changed) state_.mark_changed();
+			break;
+		}
+		break;
+	}
 	case s2c::KILL_SYNC: {
 		// The SECOND client death route — the destructible deathCallback's own
 		// authority resend rides this tag. Entity_KillBySlotId resolves the

@@ -924,7 +924,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// packet. This exchange runs before wire-header world construction; 0x48 echoes ServerAuth.MI.
 			out.outbound.push_back(frame_session({
 					make_protocol_message(c2s::GAME_START_ACK, std::vector<uint8_t>(4, 0)),
-					make_protocol_message(c2s::SET_PLAYER_VALUE, std::vector<uint8_t>(4, 0)),
+					make_protocol_message(
+							c2s::AUTO_MEDIC_PREFERENCE,
+							encode_auto_medic_preference(AutoMedicPreference{})),
 					make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
 					make_protocol_message(c2s::PING, {}),
 					make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0)),
@@ -1608,6 +1610,24 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			std::size_t death_consumed = 0;
 			if (decode_entity_death(
 					m.payload.data(), m.payload.size(), death, death_consumed)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::DEATH_CAMERA_TARGET) {
+			DeathCameraTarget target;
+			std::size_t consumed = 0;
+			if (decode_death_camera_target(
+					m.payload.data(), m.payload.size(), target, consumed) &&
+					consumed == m.payload.size()) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::PLAYER_DOWNED_STATE) {
+			PlayerDownedState state;
+			std::size_t consumed = 0;
+			if (decode_player_downed_state(
+					m.payload.data(), m.payload.size(), state, consumed) &&
+					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}

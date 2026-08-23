@@ -312,21 +312,23 @@ int check_S_16_player_list() {
 	return 0;
 }
 
-// S2C 0x46 — player-sync: name(0x0001) + team(0x0004) + ack(0x4000), source order.
+// S2C 0x46 — player-sync: name + team + downed state + ack, source order.
 int check_S_46_player_sync() {
 	LE w;
 	w.u8(0x01);         // slot_id
-	w.u16(0x4005);      // bitmask: name | team | ack
+	w.u16(0x400D);      // bitmask: name | team | downed state | ack
 	w.u8(0x05);         // entity_slot_id
 	w.u8('P'); w.u8(0); // name cstr "P"
 	w.u8(0x02);         // team
-	EXPECT(w.b.size() == 7);
+	w.u8(0x85);         // 5 seconds | explicit medic-request bit
+	EXPECT(w.b.size() == 8);
 	PlayerSync out;
 	EXPECT(decode_player_sync(w.b.data(), w.b.size(), out));
 	EXPECT(!out.removal);
 	EXPECT(out.entity_slot_id == 0x05);
 	EXPECT(out.name == "P");
 	EXPECT(out.team == 0x02);
+	EXPECT(out.downed_state == 0x85);
 	EXPECT(out.queue_ack);
 	cover('S', 0x46);
 	return 0;
@@ -649,6 +651,21 @@ int check_C_25_reload_request() {
 	return 0;
 }
 
+// C2S 0x03 — inverse Auto Medic preference: zero enables automatic requests.
+int check_C_03_auto_medic_preference() {
+	AutoMedicPreference input;
+	input.enabled = false;
+	const std::vector<uint8_t> wire = encode_auto_medic_preference(input);
+	EXPECT(wire == std::vector<uint8_t>({1, 0, 0, 0}));
+	AutoMedicPreference output;
+	size_t consumed = 0;
+	EXPECT(decode_auto_medic_preference(
+			wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 4 && !output.enabled);
+	cover('C', 0x03);
+	return 0;
+}
+
 // S2C 0x13 — entity death (second path): [u16 handle][i16 killerSource] (4 B).
 int check_S_13_entity_death() {
 	LE w;
@@ -662,6 +679,43 @@ int check_S_13_entity_death() {
 	EXPECT(d.entity_handle == 0x0006);
 	EXPECT(d.killer_source == -1);
 	cover('S', 0x13);
+	return 0;
+}
+
+// S2C 0x52 — victim-local fixed-point death-camera target.
+int check_S_52_death_camera_target() {
+	DeathCameraTarget input;
+	input.x = -0x123400;
+	input.y = 0x556677;
+	input.z = 0x010000;
+	const std::vector<uint8_t> wire = encode_death_camera_target(input);
+	EXPECT(wire.size() == 12);
+	DeathCameraTarget output;
+	size_t consumed = 0;
+	EXPECT(decode_death_camera_target(
+			wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 12);
+	EXPECT(output.x == input.x && output.y == input.y && output.z == input.z);
+	cover('S', 0x52);
+	return 0;
+}
+
+// S2C 0x54 — packed player handle + revive seconds/request bit.
+int check_S_54_player_downed_state() {
+	PlayerDownedState input;
+	input.entity_handle = 0x0006;
+	input.revive_seconds = 120;
+	input.medic_request_active = true;
+	const std::vector<uint8_t> wire = encode_player_downed_state(input);
+	EXPECT(wire == std::vector<uint8_t>({0x06, 0x00, 0xF8}));
+	PlayerDownedState output;
+	size_t consumed = 0;
+	EXPECT(decode_player_downed_state(
+			wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(output.entity_handle == input.entity_handle);
+	EXPECT(output.revive_seconds == 120 && output.medic_request_active);
+	cover('S', 0x54);
 	return 0;
 }
 
@@ -1413,9 +1467,12 @@ int main() {
 	if (check_S_6B_minimap()) return 1;
 	if (check_S_49_weapon_reload()) return 1;
 	if (check_C_25_reload_request()) return 1;
+	if (check_C_03_auto_medic_preference()) return 1;
 	if (check_S_12_entity_remove()) return 1;
 	if (check_S_2F_objective_entity_state()) return 1;
 	if (check_S_13_entity_death()) return 1;
+	if (check_S_52_death_camera_target()) return 1;
+	if (check_S_54_player_downed_state()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_31_loadout_crc_request()) return 1;
 	if (check_S_42_input_flags()) return 1;

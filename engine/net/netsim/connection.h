@@ -120,6 +120,17 @@ struct Connection {
 	uint32_t spawn_target_hold_seconds = 0; // playerSlot+364
 	bool respawn_hold_armed = false;
 
+	// Retail's downed/medic player-slot state. +368 is the whole-second revive
+	// window (armed to 120 for a revivable player death and decremented at 1 Hz).
+	// +372 is the inverse OPTIONS_AUTOMEDIC preference: zero on the retail wire
+	// means automatic requests are enabled. The separate request latch supplies
+	// bit seven of both S2C 0x54 and player-sync field 0x0008.
+	// [orig: GameEvent_PlayerDeath @0x516DD0; NapiNPServerMsg_SetPlayerValue
+	// @0x501BE0; NetPacket_SerializePlayerSync0x46 @0x505E80]
+	uint32_t downed_revive_seconds = 0; // playerSlot+368
+	bool auto_medic_enabled = true;     // inverse playerSlot+372
+	bool medic_request_active = false;  // playerSlot+89856
+
 	// The authority tick of the last completed deployment. Validity is explicit
 	// because tick zero is a real stamp and unsigned subtraction preserves the
 	// original counter's wrap behavior. A death within 620 ticks forces the

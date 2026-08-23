@@ -40,6 +40,11 @@ struct PlayerReplicationState {
 	uint16_t roll = 0;
 	// Player entity item-template id. `0x14B9` (5305) = retail's "default infantry player" template.
 	uint16_t entity_type_id = 0x14B9u;
+	// Player-slot downed state serialized only when field bit 0x0008 is requested:
+	// low seven bits are the revive window and bit seven is the explicit medic-request
+	// latch. This is not the soldier class; class arrives through the entity/loadout
+	// streams. [orig: NetPacket_SerializePlayerSync0x46 @0x505E80]
+	uint8_t downed_state = 0;
 	// Spawn-point/menu labels for tag=0x0F. Empty preserves the retail ASH_I5A witness tail; configured
 	// sessions set this from their selected mission so a non-ASH host does not advertise the ASH names.
 	std::vector<std::string> spawn_names;
