@@ -32,6 +32,10 @@ const AI_TYPE := 0x14BF       # Generic Soldier (items.def id 105311, org1 Perso
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
 const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x40000)
+# Objective Co-op's no-pick primary. Retail indexes the authored 6094 rows by
+# player slot; it does not fall through to DM's 6002 family.
+# [orig: Server_PositionPlayerForSpawn @0x50D1A7..0x50D201]
+const OBJECTIVE_COOP_START_TYPE := 6094
 
 # S16 native seat tables: the Dictionary install seam is gone. Tests compose a
 # flat asset dir under the gitignored res://.godot (ResourceRoot rejects
@@ -173,18 +177,18 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 func _combat_mission() -> MissionData:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	# Two independent north-facing fire lanes. Spawn selection puts the host at
-	# x=20 first (farthest from the two organics), then the joiner at x=0
-	# (farthest from the already-spawned host). Both yaw-zero players therefore
+	# Two independent north-facing fire lanes. Objective Co-op indexes 6094
+	# starts by player slot, so the host takes x=20 and the joiner takes x=0.
+	# Both yaw-zero players therefore
 	# have a Generic Soldier down their own +mission-y lane (host at nine
-	# metres, joiner at eight); the unequal scores avoid the retail rand tie.
+	# metres, joiner at eight).
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(20, 9, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -192,15 +196,15 @@ func _combat_mission() -> MissionData:
 func _peer_duel_mission() -> MissionData:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	# The host first takes the marker farthest from the lone organic: (0, 8).
-	# Once the host is in the retail avoid set, the joiner takes (0, 0). Both
+	# Objective Co-op's slot-indexed start order puts the host at (0, 8) and the
+	# joiner at (0, 0). Both
 	# yaw-zero players face +mission-y, putting the host directly in the
 	# joiner's fire lane without a debug teleport or invented aim override.
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -219,13 +223,13 @@ func _vehicle_peer_mission() -> MissionData:
 	# local control-seat body following the final predicted carrier pose.
 	assert_false(md.add_entity(MissionData.KIND_ITEM, 105008,
 			Vector3(2, 0, 0), Vector3(13, 0, -17)).is_empty())
-	# Break the deploy-marker tie deliberately: the host takes (0, 8), then the
-	# joiner takes (0, 0), within the retail four-unit seat scan of the boat.
+	# Slot order puts the host at (0, 8), then the joiner at (0, 0), within the
+	# retail four-unit seat scan of the boat.
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -2284,17 +2288,17 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_eq(host_mission.create_default(), OK)
 	assert_false(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	var joiner_mission := MissionData.new()
 	assert_eq(joiner_mission.create_default(), OK)
 	assert_false(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 12, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 
 	var host := Simulation.new()
@@ -2522,9 +2526,9 @@ func _subrate_walk_mission() -> MissionData:
 	for i in range(8):
 		assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -2650,9 +2654,9 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var gunner_ssn := int(gunner.get("bms_id", 0))
 	assert_gt(gunner_ssn, 0)
 	# Deploy markers away from the emplacement so neither player spawns into it.
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(24, 0, 0), Vector3.ZERO).is_empty())
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.
