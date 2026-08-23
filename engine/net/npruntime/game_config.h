@@ -121,6 +121,14 @@ struct GameConfig {
 	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
 	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]
 	int32_t spawn_wave_time_zone = 10;     // [orig g_spawn_wave_time_zone @0x24D2250]
+	// True limits target-less deployment to the absence of an eligible same-team
+	// spawn zone. The clean name reflects the actual predicate; retail's global
+	// g_respawn_requires_team_dead and cfg key `nodefaultspawnpoints` are
+	// historical misnomers and are retained only as provenance.
+	// [orig: apply_session_settings_to_globals @0x551D96;
+	// Server_ProcessClientRequestRespawn @0x519C8E;
+	// Entity_HasAliveEntityOfTeam @0x4FC7B0]
+	uint32_t default_spawn_requires_no_team_zone = 0;
 	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160] dword[7]; SET `StartDelay`;

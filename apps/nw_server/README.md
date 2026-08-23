@@ -33,5 +33,10 @@ A&S/C&C capture probe can override the retail takeover defaults (15 seconds,
 speed setting 1) with signed `NW_CAPTURE_DURATION_SECONDS` and
 `NW_CAPTURE_SPEED_SETTING`; duration ≤0 selects retail's instant path
 [`Config_SetDefaults @0x54D030`; `Server_UpdateCaptureZones @0x53B8F0`]. An
+`NW_DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE=1` probe enables retail cfg
+`nodefaultspawnpoints`: target-less deployment is denied while the team has an
+unnumbered or fully controlled numbered spawn zone
+[`Server_ProcessClientRequestRespawn @0x519C8E`;
+`Entity_HasAliveEntityOfTeam @0x4FC7B0`]. An
 optional loose `score.ini` in the resource root overlays the retail default
 score table and is rejected if malformed.

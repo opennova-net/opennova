@@ -68,7 +68,7 @@ struct ZoneChain; // world/zone_chain.h
 const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
                                    uint16_t handle);
 
-// The world offers at least one deploy-selectable spawn zone (an alive attrib-0x40000
+// The world offers at least one registered spawn zone (an attrib-0x40000
 // "SpawnPoint" entity). Gates the join-time respawn-pending flag — the deploy screen only
 // holds when the mission has zones to pick [orig: Server_OnPlayerJoin @0x51a6f2
 // `|= 0x10 iff SpawnZoneList_GetCount() > 0`; same count gates the 0x0F game_flags bit0
@@ -104,6 +104,12 @@ struct SpawnZoneRegistry {
 SpawnZoneRegistry build_spawn_zone_list(const World &world);
 // Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
 int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
+
+// Whether retail's target-less respawn gate considers this team to have an
+// available spawn zone. This walks SpawnZoneList, not the player roster: an
+// unnumbered same-team zone qualifies regardless of control; a numbered one
+// qualifies at full control. [orig: Entity_HasAliveEntityOfTeam @0x4FC7B0]
+bool team_has_available_spawn_zone(const World &world, uint8_t team);
 
 // One retail spawn-wave group. The original stores eight player pointers,
 // queued_count, the zone pointer, interval/countdown/pre-delay, and a cached

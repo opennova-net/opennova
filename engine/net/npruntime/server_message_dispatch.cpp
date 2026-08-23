@@ -1429,6 +1429,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					    (target->team != player->team || target->zone_control < 0x10000))
 						break;
 				}
+				// Retail's `nodefaultspawnpoints` option is named after its UI,
+				// not its actual predicate. It applies only to a target-less pick
+				// and walks SpawnZoneList for an unnumbered or fully controlled
+				// same-team zone; it never counts living teammates.
+				// [orig: Server_ProcessClientRequestRespawn @0x519C8E..0x519CB2;
+				// Entity_HasAliveEntityOfTeam @0x4FC7B0]
+				if (config.default_spawn_requires_no_team_zone != 0 &&
+						target == nullptr &&
+						world::team_has_available_spawn_zone(*world, player->team))
+					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
 				// player's request is a no-op; an alive-but-undeployed joiner deploys now.

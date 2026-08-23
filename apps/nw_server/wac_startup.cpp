@@ -129,7 +129,9 @@ bool initialize_mission_startup(
 	mission::register_mission_systems(
 			world, wac_system, bms_system, ai);
 	// PreMission BMS events settle before play; WAC explicitly skips this pass.
-	world.run_logic_tick(/*is_authority=*/true, /*pre_mission=*/true);
+	world.run_logic_tick(
+			/*is_authority=*/true,
+			opennova::world::TickPhase::PreMission);
 	if (wac_loaded && wac_system.vm().loaded() &&
 			!wac_system.execute_initial(world)) {
 		error = "loaded WAC program refused its mission-start execution";

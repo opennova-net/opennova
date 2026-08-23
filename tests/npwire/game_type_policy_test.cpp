@@ -75,6 +75,8 @@ int main() {
 			"capture-duration default");
 	CHECK(game_rules::kDefaultCaptureSpeedSetting == 1,
 			"capture-speed default");
+	CHECK(game_rules::kDefaultSpawnRequiresNoTeamZone == 0,
+			"default-spawn restriction starts disabled");
 	CHECK(game_rules::kDefaultNumTeams == 2, "team-count default");
 	CHECK(game_rules::kMaxCallsignLength == 15, "callsign cap = Name[16]");
 	CHECK(np::kMaxPlayersCap == 65, "player cap [orig: the 1..65 clamp]");

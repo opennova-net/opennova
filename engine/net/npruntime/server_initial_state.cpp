@@ -195,8 +195,15 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, 0);                                // roll
 	const bool has_spawn_zones =
 			ctx.world != nullptr && world::world_has_spawn_zone(*ctx.world);
-	b.push_back(has_spawn_zones ? 0x01 : 0x00);  // gameFlags bit0 = spawn zones exist
-	                                             // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
+	uint8_t game_flags = has_spawn_zones ? 0x01u : 0x00u;
+	if (ctx.config.default_spawn_requires_no_team_zone != 0 &&
+			ctx.is_in_session != 0) {
+		game_flags |= 0x02u;
+	}
+	b.push_back(game_flags);
+	// bit0 = SpawnZoneList nonempty; bit1 = the target-less spawn restriction
+	// while in session. [orig: NetPacket_WriteWorldStateLoad0x0F
+	// @0x502DA7..0x502DC4; g_respawn_requires_team_dead @0x24D2260]
 	// The fixed 128-i32 block is the authority player's per-ammo-class pool
 	// table (serverPlayer+88664 -> client g_localAmmoPools @0xB75FE8), retained
 	// when this connection's C2S 0x2F loadout is accepted.

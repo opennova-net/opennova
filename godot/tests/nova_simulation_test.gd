@@ -317,6 +317,7 @@ func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 		"capture_speed_setting": 2,
 		"spawn_wave_time_base": 4,
 		"spawn_wave_time_zone": 12,
+		"default_spawn_requires_no_team_zone": 1,
 		"num_teams": 4,
 	})
 	var options: Dictionary = sim.get_host_session_config()
@@ -328,6 +329,7 @@ func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 	assert_eq(int(options.get("capture_speed_setting", -1)), 2)
 	assert_eq(int(options.get("spawn_wave_time_base", -1)), 4)
 	assert_eq(int(options.get("spawn_wave_time_zone", -1)), 12)
+	assert_eq(int(options.get("default_spawn_requires_no_team_zone", -1)), 1)
 	assert_eq(int(options.get("num_teams", -1)), 4)
 	sim.free()
 

@@ -78,6 +78,7 @@ public:
 		DEFAULT_CAPTURE_SPEED_SETTING = opennova::game_rules::kDefaultCaptureSpeedSetting,
 		DEFAULT_SPAWN_WAVE_TIME_BASE = opennova::game_rules::kDefaultSpawnWaveTimeBase,
 		DEFAULT_SPAWN_WAVE_TIME_ZONE = opennova::game_rules::kDefaultSpawnWaveTimeZone,
+		DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE = opennova::game_rules::kDefaultSpawnRequiresNoTeamZone,
 		DEFAULT_NUM_TEAMS = opennova::game_rules::kDefaultNumTeams,
 		DEFAULT_RESPAWN_TIMEOUT = opennova::game_rules::kDefaultRespawnTimeout,
 		DEFAULT_START_DELAY = opennova::game_rules::kDefaultStartDelay,

@@ -27,6 +27,7 @@
 #include <world/ai.h>
 #include <world/game_type.h>
 #include <world/player_spawn.h>
+#include <world/spawn_select.h>
 #include <world/world.h>
 
 #include <cstdio>
@@ -2731,6 +2732,113 @@ bool check_spawn_wave_queue_and_release_wire() {
 	              "post-release 0x6E carries the remaining member at interval ETA");
 }
 
+// Retail's cfg key `nodefaultspawnpoints` is backed by a misleadingly named
+// global/helper pair. It does not wait for a whole team to die: a target-less
+// 0x0E is denied while the requester's team has an unnumbered zone or a fully
+// controlled numbered zone. A resolved target bypasses this one gate.
+// [orig: Server_ProcessClientRequestRespawn @0x519AF0;
+//  Entity_HasAliveEntityOfTeam @0x4FC7B0]
+bool check_default_spawn_requires_no_team_zone() {
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	world.registry.configure_pool(3, 4);
+
+	opennova::world::Entity player_seed;
+	player_seed.kind = opennova::world::EntityKind::Organic;
+	player_seed.flags = opennova::world::kEntityFlagPlayer;
+	player_seed.engine_flags = opennova::world::kEntityFlagDead;
+	player_seed.team = 1;
+	player_seed.alive = false;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const opennova::world::EntityHandle player =
+			world.registry.spawn(0, player_seed);
+
+	opennova::world::Entity marker;
+	marker.kind = opennova::world::EntityKind::Marker;
+	marker.item_id = 6003;
+	marker.position = {20.0f, 0.0f, 0.0f};
+	world.registry.spawn(3, marker);
+
+	opennova::world::Entity zone_seed;
+	zone_seed.kind = opennova::world::EntityKind::Item;
+	zone_seed.team = 1;
+	zone_seed.alive = true;
+	zone_seed.is_spawn_point = true;
+	zone_seed.zone_number = 0;
+	zone_seed.zone_control = 0;
+	const opennova::world::EntityHandle zone =
+			world.registry.spawn(2, zone_seed);
+
+	opennova::np::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	config.default_spawn_requires_no_team_zone = 1;
+	std::vector<opennova::np::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = opennova::np::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.reply.player_slot = 0;
+
+	const std::vector<opennova::ProtocolMessage> default_pick{
+			opennova::make_protocol_message(
+					opennova::c2s::RESPAWN_REQUEST, {0xFF, 0xFF})};
+	auto reset_player = [&]() {
+		opennova::world::Entity *entity = world.registry.get(player);
+		entity->alive = false;
+		entity->health = 0;
+		entity->engine_flags |= opennova::world::kEntityFlagDead;
+		conn.link.respawn_pending = false;
+		conn.link.respawn_delay_seconds = 0;
+		conn.link.spawn_target_hold_seconds = 0;
+	};
+	auto dispatch = [&](const std::vector<opennova::ProtocolMessage> &messages) {
+		return opennova::np::dispatch_session_replies(
+				config, conn, messages, 100, roster, &world);
+	};
+
+	reset_player();
+	if (!expect(dispatch(default_pick).empty() &&
+	                    world.registry.get(player)->health == 0,
+	            "an unnumbered team zone denies the restricted Default Spawn"))
+		return false;
+
+	reset_player();
+	const std::vector<opennova::ProtocolMessage> explicit_pick{
+			opennova::make_protocol_message(
+					opennova::c2s::RESPAWN_REQUEST,
+					{static_cast<uint8_t>(zone.packed),
+					 static_cast<uint8_t>(zone.packed >> 8)})};
+	if (!expect(!dispatch(explicit_pick).empty() &&
+	                    world.registry.get(player)->health == 100,
+	            "a resolved spawn target bypasses the target-less restriction"))
+		return false;
+
+	opennova::world::Entity *zone_entity = world.registry.get(zone);
+	zone_entity->zone_number = 1;
+	zone_entity->zone_control = 0xFFFF;
+	reset_player();
+	if (!expect(!dispatch(default_pick).empty() &&
+	                    world.registry.get(player)->health == 100,
+	            "a partially controlled numbered zone does not deny Default Spawn"))
+		return false;
+
+	zone_entity->zone_control = 0x10000;
+	reset_player();
+	if (!expect(dispatch(default_pick).empty() &&
+	                    world.registry.get(player)->health == 0,
+	            "a fully controlled numbered team zone denies Default Spawn"))
+		return false;
+
+	config.default_spawn_requires_no_team_zone = 0;
+	reset_player();
+	return expect(!dispatch(default_pick).empty() &&
+	                      world.registry.get(player)->health == 100,
+	              "the retail-default disabled rule permits Default Spawn");
+}
+
 // Retail answers the world-state-load burst's empty C2S 0x2D member with a
 // requester-only S2C 0x58. Its body is built from the live session report, not
 // a captured blob: game/mission names, game type, player cap, session uptime,
@@ -3324,6 +3432,7 @@ int main() {
 	ok = check_listen_host_receives_targeted_maintenance() && ok;
 	ok = check_spawned_peer_gets_periodic_retail_maintenance() && ok;
 	ok = check_spawn_wave_queue_and_release_wire() && ok;
+	ok = check_default_spawn_requires_no_team_zone() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;
