@@ -12,11 +12,7 @@
 #include <npwire/session_hello.h>
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <world/ai.h>                  // AiEntity / AiSystem::for_handle (the motor store)
-#include <world/angle.h>               // bam_heading_from_mission_yaw_deg
-#include <world/entity_spawn.h>        // entity_reset_to_spawn_state (respawn release)
 #include <world/geom.h>                // to_fixed
-#include <world/infantry.h>            // infantry_respawn_snap (the motor half of a respawn)
 #include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <world/spawn_select.h>         // sorted SpawnZoneList index for capture events
 #include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
@@ -349,12 +345,12 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// Who controls the victim? Player-controlled == some connection owns it — the
 		// semantic behind the original's Flags & 0x100 check [orig: @0x51b55d].
 		bool victim_is_player = false;
-		bool victim_is_host_player = false;
+		NapiNPConnection *victim_connection = nullptr;
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 			if (!c.link.owned_entity.valid() || c.link.owned_entity.packed != d.victim_handle)
 				continue;
 			victim_is_player = true;
-			victim_is_host_player = (c.link.mode == netsim::TransportMode::Loopback);
+			victim_connection = &c;
 			break;
 		}
 
@@ -433,14 +429,22 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			}
 		}
 
-		if (victim_is_host_player) {
-			// [orig: respawn timer floor 3 / g_respawn_timeout / the 620-tick
-			// recent-spawn rule @0x516ec4 — the session respawn setting is unplumbed, so
-			// 620 ticks (10 s) stands in; tracked §5.60.]
-			NapiNPServerCtx::PendingRespawn pr;
-			pr.victim = d.victim;
-			pr.due_tick = world.logic_tick + 620;
-			ctx.respawn_queue.push_back(pr);
+		if (victim_connection != nullptr) {
+			// Every player slot gets the same two whole-second counters. A
+			// configured timeout below three is floored; a spawn less than 620
+			// authority ticks ago forces exactly three. +364 retains the greater
+			// value only when a spawn-target registry exists.
+			// [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb]
+			netsim::Connection &link = victim_connection->link;
+			uint32_t hold = std::max(ctx.config.respawn_timeout, 3u);
+			if (link.last_deploy_tick_valid &&
+					static_cast<uint32_t>(world.logic_tick - link.last_deploy_tick) < 620u)
+				hold = 3;
+			link.respawn_delay_seconds = hold;
+			link.spawn_target_hold_seconds = world::world_has_spawn_zone(world)
+					? std::max(link.spawn_target_hold_seconds, hold)
+					: 0u;
+			link.respawn_hold_armed = true;
 		}
 	}
 	world.round_sim.deaths.clear();
@@ -498,61 +502,40 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	return true;
 }
 
-// Release due respawns: back to the spawn point at full health [orig:
-// Server_ProcessPlayerDeath -> Entity_ResetToSpawnState @0x4B9610; the D-NET-66
-// death/respawn teleport — a snap, never motion].
-void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
-	// Respawns are gate-blocked once the round has ended — the queue simply holds
-	// [orig: the respawn request path checks g_spawn_success_gate,
-	// Server_ProcessClientRequestRespawn @0x519af6].
+// The listen host has no socket-side death picker in the current presentation,
+// so expiry supplies the Default Spawn command locally. It still enters the ONE
+// deployment transaction used by C2S 0x0E and spawn-wave releases; there is no
+// second entity-reset implementation. Remote players remain dead until a pick.
+void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.match.outcome().ended) return;
-	for (auto it = ctx.respawn_queue.begin(); it != ctx.respawn_queue.end();) {
-		if (world.logic_tick < it->due_tick) {
-			++it;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.link.mode != netsim::TransportMode::Loopback ||
+				!conn.link.respawn_hold_armed ||
+				conn.link.respawn_delay_seconds != 0 ||
+				!conn.link.owned_entity.valid())
 			continue;
-		}
-		world::Entity *e = world.registry.get(it->victim);
-		if (e != nullptr) {
-			// Respawn placement = the recorded spawn point (the D-NET-66 death/respawn
-			// TELEPORT — a snap, never motion); entity_reset_to_spawn_state then re-backs
-			// it up and clears the movement gate + the dead bit [orig: the deploy flow
-			// places the entity, then Entity_ResetToSpawnState @0x4B9610 records Position].
-			e->position = e->spawn_position;
-			world::entity_reset_to_spawn_state(*e);
-			e->alive = true; // the route_round_deaths dead mark lifts with the respawn
-			e->hidden = false;
-			e->death_anim_state = 0;
-			e->corpse_timer = 0;
-			// Spawn health = the item template's healthMax [orig: Entity_InitFromItemDef
-			// @0x49e550; the player_item_hp mirror, D-NET-144]. Same signed-i16 gate as
-			// the first spawn (player_spawn.cpp) — healthMax is a signed WORD in retail.
-			if (world.player_has_item_def && world.player_item_hp != 0)
-				e->health = world::retail_signed_i16(world.player_item_hp);
-			else if (e->health_max > 0)
-				e->health = e->health_max;
-			else
-				e->health = 100;
-			// The listen host's own player is MOTOR-simulated, and the motor is the writer
-			// of the Entity/AiEntity pose pair (finish_infantry_tick mirrors AiEntity.pos
-			// into Entity.position every tick). Writing only the registry store above put
-			// the player back at full health but left the body — and its death clip — at
-			// the spot where it was killed, which reads as "I cannot respawn". Reset the
-			// motor half to the same deployed pose so the one original store is modelled.
-			world::AiEntity *ae =
-					world.ai ? world.ai->for_handle(it->victim) : nullptr;
-			if (ae != nullptr && ae->inf.active) {
-				const int32_t pos[3] = {
-						world::to_fixed(e->position.x),
-						world::to_fixed(e->position.y),
-						world::to_fixed(e->position.z),
-				};
-				world::infantry_respawn_snap(
-						*ae, pos,
-						world::bam_heading_from_mission_yaw_deg(e->yaw),
-						e->health);
-			}
-		}
-		it = ctx.respawn_queue.erase(it);
+		const world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr || (player->flags & 2u) == 0) continue;
+		std::vector<ProtocolMessage> deployment =
+				Server_ReleasePlayerDeployment(
+						ctx.config, conn, world, world::EntityHandle{});
+		if (conn.link.transport == nullptr) continue;
+		for (ProtocolMessage &message : deployment)
+			conn.link.transport->host_send(
+					message.tag, std::move(message.payload), message.reliable,
+					message.flags.raw, message.capacity_exempt);
+	}
+}
+
+// The original stores seconds, not tick deadlines. Its periodic player-slot
+// maintenance decrements both nonzero dwords once per 62-tick second.
+void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
+	if (world.logic_tick % 62u != 0) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.link.respawn_delay_seconds != 0)
+			--conn.link.respawn_delay_seconds;
+		if (conn.link.spawn_target_hold_seconds != 0)
+			--conn.link.spawn_target_hold_seconds;
 	}
 }
 
@@ -949,7 +932,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// therefore observed by the following authority pass, as in retail.
 	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0]
 	emit_requester_score_refreshes(ctx, world);
-	release_due_respawns(ctx, world);
+	release_expired_local_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,
 	// so those script-driven outcomes consume this tick; automatic MP outcomes found
@@ -964,6 +947,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Server_TickUpdate — reload 62 @0x51db93 — calls Server_CheckWinConditions
 	// @0x51df5a once per second].
 	if (world.logic_tick % 62u == 0) check_win_conditions(ctx, world);
+	tick_respawn_holds(ctx, world);
 	announce_round_end(ctx, world);
 
 	// Spawn-wave release precedes capture-zone mutation on the shared 1 Hz

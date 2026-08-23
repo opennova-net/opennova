@@ -44,6 +44,8 @@ struct FrameHeaderState {
 	int16_t tail_health = 150;
 	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
 	// derived once before budgeting so the conditional header width and bytes agree.
+	uint8_t respawn_delay_seconds = 0;
+	uint8_t spawn_target_hold_seconds = 0;
 	FrameEnv env{};
 	FrameMountAmmo mount_ammo{};
 };
@@ -83,6 +85,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// still emits the witnessed byte. (Renamed from the FrameAimBlock misnomer to
 		// FrameWeaponBlock, grill 2026-07-01.)
 		fu.weapon.present = true;
+		fu.weapon.slot_state360 = hdr.respawn_delay_seconds;
+		fu.weapon.slot_state364 = hdr.spawn_target_hold_seconds;
 		fu.weapon.uniform_team_mask = ctx.uniform_team_mask;
 		break;
 	case 1:
@@ -941,6 +945,14 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
 	if (conn.owned_entity.valid()) {
 		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
+			// +360 is zero unless entity Flags bit1 is set; +364 is
+			// unconditional. Both dword stores cross this header as low bytes.
+			// [orig: NetPacket_WritePlayerState @0x4ff81b]
+			hs.respawn_delay_seconds = (own->flags & 2u) != 0
+					? static_cast<uint8_t>(conn.respawn_delay_seconds)
+					: uint8_t{0};
+			hs.spawn_target_hold_seconds =
+					static_cast<uint8_t>(conn.spawn_target_hold_seconds);
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
 			if (own->mounted && own->mount_target.valid()) {
 				hs.tail_mount_handle = own->mount_target.packed;

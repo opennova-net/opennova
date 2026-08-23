@@ -913,6 +913,13 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		player->yaw = pose.yaw;
 		player->pitch = pose.pitch;
 		player->roll = pose.roll;
+	} else {
+		// No authored marker: the deploy transaction restores the position
+		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
+		// shared release makes C2S, wave, and listen-host paths identical.
+		// [orig: Server_ProcessPlayerDeath @0x517740 ->
+		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
+		player->position = player->spawn_position;
 	}
 	world::entity_reset_to_spawn_state(*player);
 	if (world.player_has_item_def && world.player_item_hp != 0)
@@ -936,6 +943,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	}
 	conn.discard_pre_deploy_uplinks = true;
 	conn.link.respawn_pending = false;
+	conn.link.respawn_delay_seconds = 0;
+	conn.link.spawn_target_hold_seconds = 0;
+	conn.link.respawn_hold_armed = false;
+	conn.link.last_deploy_tick = world.logic_tick;
+	conn.link.last_deploy_tick_valid = true;
 	player->flags &= ~1u;
 	player->alive = true;
 	const world::WeaponTable *armory = !world.weapons.empty()
@@ -1380,6 +1392,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				} else if (pick != 0 && pick != 0xFFFF) {
 					target = world::resolve_spawn_target(*world, player->team, pick);
 					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
+				}
+				// +364 is tested only after the requested handle resolves to a
+				// real target. Default Spawn, and an auto pick with no frontier,
+				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
+				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
+					break;
+				if (target != nullptr) {
 					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
 					// control(+540) >= 0x10000].
 					if (target->zone_number != 0 &&
@@ -1390,6 +1409,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
 				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
 				if (!conn.link.respawn_pending && player->health > 0) break;
+				// +360 follows the dead-or-pending test and silently rejects every
+				// pick, including Default Spawn. [orig: @0x519cf2]
+				if (conn.link.respawn_delay_seconds != 0) break;
 				if (target != nullptr) {
 					if (world->spawn_waves.try_queue(
 							*world, target->handle, player->handle)) {
