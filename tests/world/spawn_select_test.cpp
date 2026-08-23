@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 using namespace opennova::world;
 
@@ -68,13 +69,16 @@ void credit_team_capture(World &w, EntityHandle player) {
 } // namespace
 
 int main() {
+    // MSVC reserves every block-local in one Debug stack frame. Keep these
+    // large, stable-identity mission worlds at their final heap addresses.
     // --- Non-team primary 6095 wins over fallback 6002. Best-point scoring
     //     considers every pool-0 Flags&0x100 row (even dead), ignores NPCs,
     //     and excludes the player being positioned.
     // [orig: Server_PositionPlayerForSpawn @0x50D213;
     // Entity_FindBestSpawnPoint @0x50CCC0]
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
 
@@ -99,7 +103,8 @@ int main() {
     //     first fallback marker wins. Whole-unit distance ties also retain
     //     pool order under retail's descending shell sort.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
         const EntityHandle self = spawn_body(w, {0.0f, 0.0f, 0.0f}, true);
@@ -118,7 +123,8 @@ int main() {
     //     maps to game type 0x10020, whose 6094 primary falls back to 6001.
     //     Direct Co-op selection uses player-slot modulo count, not distance.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
         spawn_body(w, {297.81f, -409.12f, 27.14f}, true);
@@ -136,7 +142,8 @@ int main() {
     // --- A parented Co-op primary keeps its full local pose, then applies
     //     Entity_TransformLocalToWorld. Pitch/roll remain marker-local.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(3, 16);
         Entity parent;
@@ -162,7 +169,8 @@ int main() {
     //     marker in solo, team and Co-op families, leaving the fallback.
     // [orig: CRenderState_GetFieldByIndex(..., 6) @0x50D1DB]
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
         const EntityHandle scorer = spawn_body(w, {}, true, true, 1);
@@ -173,7 +181,8 @@ int main() {
             w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10010u);
         CHECK(r.found && approx(r.position.x, 100.0f));
 
-        World coop;
+        auto coop_storage = std::make_unique<World>();
+        World &coop = *coop_storage;
         coop.registry.configure_pool(0, 4);
         coop.registry.configure_pool(3, 4);
         const EntityHandle coop_scorer = spawn_body(coop, {}, true, true, 1);
@@ -184,7 +193,8 @@ int main() {
             coop, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
         CHECK(r.found && approx(r.position.x, 50.0f));
 
-        World solo;
+        auto solo_storage = std::make_unique<World>();
+        World &solo = *solo_storage;
         solo.registry.configure_pool(0, 4);
         solo.registry.configure_pool(3, 4);
         const EntityHandle solo_scorer = spawn_body(solo, {}, true, true, 0);
@@ -200,7 +210,8 @@ int main() {
     //     selector families; this guards future mode additions from acquiring
     //     a fourth, accidental dispatch policy.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(3, 8);
         spawn_marker(w, 6095, {10.0f, 0.0f, 0.0f});
         spawn_marker(w, 6097, {20.0f, 0.0f, 0.0f});
@@ -231,7 +242,8 @@ int main() {
     //     numbered team spawn entity. It gets the named-userpoint fallback
     //     lift but does not enter the picked-zone 6007 scatter arm.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(2, 4);
         w.registry.configure_pool(3, 4);
@@ -253,7 +265,8 @@ int main() {
     //     markers. The failed non-Co-op fallback still advances the shared
     //     cycle exactly once.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(3, 8);
         spawn_marker(w, 6001, {1.0f, 1.0f, 0.0f});
         spawn_marker(w, 6096, {2.0f, 2.0f, 0.0f});
@@ -270,7 +283,8 @@ int main() {
     // [orig: Server_PositionPlayerForSpawn @0x50CF60, scatter arm
     //  @0x50D04D..0x50D18D]
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(2, 4);
         w.registry.configure_pool(3, 8);
         const EntityHandle zone = spawn_zone(w, 2, 1, 1);
@@ -308,7 +322,8 @@ int main() {
     // [orig: Server_PositionPlayerForSpawn @0x50D155;
     // Entity_TransformLocalToWorld @0x43BD00]
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(2, 4);
         w.registry.configure_pool(3, 4);
@@ -341,7 +356,8 @@ int main() {
 
     // With no in-radius 6007 candidate the retail counter is untouched.
     {
-        World w;
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
         w.registry.configure_pool(2, 4);
         w.registry.configure_pool(3, 4);
         const EntityHandle zone = spawn_zone(w, 2, 1, 3);
@@ -364,7 +380,8 @@ int main() {
 	// [orig: Entity_BuildSpawnZoneList @0x43EAE0;
 	//  Entity_HasAliveEntityOfTeam @0x4FC7B0]
 	{
-		World w;
+		auto w_storage = std::make_unique<World>();
+		World &w = *w_storage;
 		w.registry.configure_pool(2, 4);
 		const EntityHandle base = spawn_zone(w, 2, 1, 0);
 		w.registry.get(base)->alive = false;
@@ -383,7 +400,8 @@ int main() {
 	//     numbered-zone option falls back to the nonzero base option.
 	// [orig: Config_SetDefaults @0x54D030; SpawnWaveList_BuildFromMission @0x52A920]
 	{
-		World w;
+		auto w_storage = std::make_unique<World>();
+		World &w = *w_storage;
 		w.registry.configure_pool(1, 16);
 		w.registry.configure_pool(2, 16);
 		const EntityHandle numbered = spawn_zone(w, 2, 1, 3);
@@ -406,7 +424,8 @@ int main() {
 	// [orig: SpawnWaveList_TryQueuePlayer @0x52A490;
 	//  SpawnWaveList_GetEntryInfo @0x52A700]
 	{
-		World w;
+		auto w_storage = std::make_unique<World>();
+		World &w = *w_storage;
 		w.registry.configure_pool(0, 16);
 		w.registry.configure_pool(2, 16);
 		const EntityHandle a = spawn_zone(w, 2, 1, 1);
@@ -445,7 +464,8 @@ int main() {
 	// [orig: SpawnWaveList_TickEntry @0x52A330;
 	//  SpawnWaveList_ResetOnZoneTeamChange @0x52A5B0]
 	{
-		World w;
+		auto w_storage = std::make_unique<World>();
+		World &w = *w_storage;
 		w.registry.configure_pool(0, 8);
 		w.registry.configure_pool(2, 8);
 		const EntityHandle zone = spawn_zone(w, 2, 1, 1);
