@@ -32,6 +32,8 @@
 #include "simassets/collision_resolve.h"
 #include "simassets/model_builders.h"
 #include "simassets/sim_model_cache.h"
+#include "terrain_query/height_field.h"
+#include "world/ai.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -144,10 +146,41 @@ int main() {
 	truck.alive = true;
 	truck.position = {0.0f, 0.0f, 0.0f};
 	truck.yaw = 0;
+	// Seats, from the authored user points. The real pipeline fills these via
+	// simassets::extract_item_seat_specs; this harness builds the truck by hand,
+	// so without them mount() finds no seat and the dismount path is never
+	// exercised (which silently made an earlier run of this test meaningless).
+	{
+		const double sx6[6] = {-1.068, 1.054, -1.068, 1.054, -1.068, 1.054};
+		const double sy6[6] = {-2.039, -5.124, -3.569, -3.595, -5.138, -2.026};
+		for (int k = 0; k < 6; ++k) {
+			w::Seat st{};
+			st.type = w::SeatType::Passenger;
+			st.retail_slot = uint8_t(k);
+			st.seat_local = {static_cast<float>(sx6[k]), static_cast<float>(sy6[k]),
+			                 2.539f};
+			truck.seats.push_back(st);
+		}
+	}
 	const w::EntityHandle th = world.registry.spawn(1, truck);
 	w::Entity *te = world.registry.get(th);
 	if (te == nullptr) { std::fprintf(stderr, "FAIL: truck spawn\n"); return 1; }
 
+	// A flat synthetic height field at z=0 so the dismount ground-drop has a
+	// ground to find. Raw16 = height_units * 256, so 0 == height 0.
+	std::vector<uint16_t> heightmap(64 * 64, 0);
+	opennova::terrain::TerrainHeightField hf;
+	hf.heightmap = heightmap.data();
+	hf.dim = 64;
+	world.terrain = &hf;
+
+	{
+		int32_t probe[3] = {fx(-1.07), fx(-2.04), fx(2.54)};
+		const w::GroundClearance gcz{};
+		const int32_t g = w::calc_average_ground_height(hf, probe, 0x50000, gcz);
+		std::printf("  synthetic ground sample at (-1.07,-2.04): %s\n",
+		            g == INT32_MIN ? "NO COVERAGE" : std::to_string(g / 65536.0).c_str());
+	}
 	w::CollisionWorld cw;
 	const int32_t mid = cw.add_model(std::move(model));
 	cw.assign_entity(th, mid, te->registry_spawn_id);
@@ -197,6 +230,26 @@ int main() {
 		b.pos[0] = fx(seat_x[bi]); b.pos[1] = fx(seat_y[bi]); b.pos[2] = fx(sz);
 		b.done = false;
 		bodies.push_back(b);
+	}
+	// Mount ALL first, then dismount ALL: mounting and dismounting one at a time
+	// frees seat 0 each round, so every body would take the same seat and land on
+	// the same spot -- which is not the live case (six distinct seats).
+	if (std::getenv("NW_NO_MOUNT") == nullptr) {
+		int mounted_n = 0, dropped_n = 0;
+		for (size_t bi = 0; bi < bodies.size(); ++bi)
+			if (world.commands.mount(uint16_t(70002 + bi), truck.net_id)) ++mounted_n;
+		for (size_t bi = 0; bi < bodies.size(); ++bi)
+			if (world.commands.dismount(uint16_t(70002 + bi))) ++dropped_n;
+		std::printf("  mounted %d, dismounted %d\n", mounted_n, dropped_n);
+		for (size_t bi = 0; bi < bodies.size(); ++bi) {
+			if (const w::Entity *se = world.registry.get(bodies[bi].h)) {
+				bodies[bi].pos[0] = fx(se->position.x);
+				bodies[bi].pos[1] = fx(se->position.y);
+				bodies[bi].pos[2] = fx(se->position.z);
+				std::printf("    body %zu at (%.2f,%.2f,%.2f)\n", bi,
+				            se->position.x, se->position.y, se->position.z);
+			}
+		}
 	}
 	for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
