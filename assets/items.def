@@ -15,7 +15,7 @@ begin "Drivable Dune Buggy"
 end
 
 begin "ATV Quad"
-  id 108003
+  id 101292
   type vehicle
   graphic Datv1
   sid datv1
@@ -35,7 +35,7 @@ begin "Marker Alpha"
 end
 
 begin "Guard Tower"
-  id 108002
+  id 102001
   type building
   graphic GuardTwr1
   sid guardtwr1
