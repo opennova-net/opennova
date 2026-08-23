@@ -55,7 +55,8 @@ bool read_bytes(const fs::path &p, std::vector<uint8_t> &b) {
 const char *kLanguage[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
                            "menutxt.bin", "mnml.bin",     "mnml.pcx",    "mnml.lwf"};
 const char *kLocalres[] = {"items.def", "weapon.def", "ammo.def",
-                           "main.mnu",  "mp.mnu",     "mnml.bms",
+                           "main.mnu",  "mp.mnu",     "sp.mnu",
+                           "mnml.bms",
                            "menu_style.mns", "newarow1.tga", "mnml.dbf"};
 
 // The boot font set is HARDCODED by name [orig: HUD_InitAllFonts @ 0x51ee20:
@@ -117,11 +118,117 @@ bool write_and_verify(const fs::path &root, const char *archive,
 	return missing == 0;
 }
 
+// Assemble a complete runnable install at `out`: every authored file flat next
+// to the exe, plus a ZERO-ENTRY resource.pff. Retail is archive-only by default,
+// so the install runs with `/d` (loose-first); the token archive exists only to
+// clear the boot gate, which counts archives OPENED rather than entries
+// [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44 — witnessed with
+// a 20-byte archive on retail 2026-08-23, docs/vfs/vfs-pff-mount-re.md].
+//
+// The hard rule for this layout is NO .dds anywhere: under /d,
+// Texture_LoadByNameWithChannel @ 0x58b470 truncates a model's texture name at
+// the first extension and probes it loose, and a loose hit routes to the
+// TGA/MDT/PCX branch, which returns 0 for a .dds name (checkerboard). Every
+// authored texture here is .tga/.pcx, so the archive stays empty.
+bool emit_loose_install(const fs::path &out, const fs::path &root,
+                        const std::vector<std::pair<std::string, fs::path>> &language,
+                        const std::vector<std::pair<std::string, fs::path>> &localres,
+                        const std::vector<std::pair<std::string, fs::path>> &resource) {
+	std::error_code ec;
+	fs::create_directories(out, ec);
+
+	size_t n = 0;
+	for (const auto *list : {&language, &localres, &resource}) {
+		for (const auto &entry : *list) {
+			const std::string &name = entry.first;
+			const std::string ext = fs::path(name).extension().string();
+			if (ext == ".dds" || ext == ".DDS") {
+				std::fprintf(stderr, "FAIL: %s is .dds - unloadable loose under /d\n", name.c_str());
+				return false;
+			}
+			fs::copy_file(entry.second, out / name, fs::copy_options::overwrite_existing, ec);
+			if (ec) {
+				std::fprintf(stderr, "FAIL: copy %s -> %s: %s\n", entry.second.string().c_str(),
+				             name.c_str(), ec.message().c_str());
+				return false;
+			}
+			++n;
+		}
+	}
+
+	// The .sbf banks stream loose by path in every layout (they never resolve
+	// through the archives) [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60].
+	for (const char *b : {"menumus.sbf", "gamemus.sbf"}) {
+		if (fs::exists(root / b)) {
+			fs::copy_file(root / b, out / b, fs::copy_options::overwrite_existing, ec);
+			if (!ec) ++n;
+		}
+	}
+
+	// The boot token: zero entries, 20 bytes, under a name the fixed table probes.
+	const std::string token = (out / "resource.pff").string();
+	const int rc = pff_write_archive(token.c_str(), PFF_FORMAT_PFF3, nullptr, 0);
+	if (rc != PFF_WRITE_OK) {
+		std::fprintf(stderr, "FAIL: zero-entry resource.pff rc=%d\n", rc);
+		return false;
+	}
+
+	// Pre-archive error text, read loose before any mount
+	// [orig: Game_ShowEarlyError @ 0x4a68a0]; line 3 is the no-archives message,
+	// line 4 the missing-gameerr.bin one.
+	{
+		std::ofstream f(out / "earlyerr.txt", std::ios::binary);
+		f << "OpenNova minimal\r\n"
+		  << "Startup error.\r\n"
+		  << "No resource archives could be opened.\r\n"
+		  << "Unable to load error strings (gameerr.bin).\r\n";
+	}
+
+	// The retail runtime the authored set is validated against. NOT part of the
+	// authored set and never committed - OPENNOVA_JO_DIR points at the user's own
+	// install (docs/asset-gated-tests.md). Without it the install is complete but
+	// has no exe to run.
+	//   * binkw32_.dll is the real Bink; a JOTAC install's binkw32.dll is an
+	//     unrelated hook shim, so prefer the underscored one when present.
+	//   * game.cfg matters: on a FIRST launch with no config, retail's video
+	//     enumeration hangs before the menu (reproduced 2026-08-23). Seeding the
+	//     install's config skips that. It is machine state, not game content.
+	if (const char *jo = std::getenv("OPENNOVA_JO_DIR")) {
+		const fs::path src(jo);
+		auto copy_one = [&](const fs::path &from, const char *to) {
+			std::error_code e;
+			if (!fs::exists(from)) return false;
+			fs::copy_file(from, out / to, fs::copy_options::overwrite_existing, e);
+			return !e;
+		};
+		const bool exe = copy_one(src / "Jointops.exe", "Jointops.exe");
+		const bool bink = copy_one(src / "binkw32_.dll", "binkw32.dll") ||
+		                  copy_one(src / "binkw32.dll", "binkw32.dll");
+		const bool cfg = copy_one(src / "game.cfg", "game.cfg");
+		std::printf("  retail runtime from OPENNOVA_JO_DIR: exe=%s bink=%s game.cfg=%s\n",
+		            exe ? "yes" : "NO", bink ? "yes" : "NO", cfg ? "yes" : "NO");
+	} else {
+		std::printf("  (set OPENNOVA_JO_DIR to also stage Jointops.exe + binkw32.dll + game.cfg)\n");
+	}
+
+	std::printf("wrote loose install: %zu files + zero-entry resource.pff -> %s\n",
+	            n, out.string().c_str());
+	std::printf("  run: Jointops.exe /w /d   (add /FRISK to log loads)\n");
+	return true;
+}
+
 } // namespace
 
 int main() {
-	if (!std::getenv("OPENNOVA_BUILD_MINIMAL_PFF")) {
-		std::printf("[skip] set OPENNOVA_BUILD_MINIMAL_PFF=1 to build the ~10 MB terrain + PFFs\n");
+	// Two layouts over one terrain build: OPENNOVA_BUILD_MINIMAL_PFF=1 writes the
+	// three boot-table archives into fixtures/minimal (the retail-validated shape);
+	// OPENNOVA_MINIMAL_INSTALL=<dir> assembles a runnable loose install there.
+	// Either one triggers the heavy generate step.
+	const char *install_env = std::getenv("OPENNOVA_MINIMAL_INSTALL");
+	const bool want_pff = std::getenv("OPENNOVA_BUILD_MINIMAL_PFF") != nullptr;
+	if (!want_pff && install_env == nullptr) {
+		std::printf("[skip] set OPENNOVA_BUILD_MINIMAL_PFF=1 to build the ~10 MB terrain + PFFs, "
+		            "or OPENNOVA_MINIMAL_INSTALL=<dir> for a runnable loose install\n");
 		return 0; // generate-at-package: not run per build
 	}
 
@@ -139,9 +246,15 @@ int main() {
 	proj.terrain_name = "mnml";
 	proj.depthmap = (work / "mnml_depth.raw").string();
 	proj.output = "mnml";
+	// JO/DFX read the compressed depth format; DPTH is the BHD-era raw one and is
+	// what TerrainBuildOptions defaults to, so it must be set explicitly here or
+	// retail gets a .cpt it cannot decode. ONED's own export defaults to DFX_JO
+	// for the same reason (godot/src/terrain/nova_terrain_builder.cpp).
+	opennova::TerrainBuildOptions build_options;
+	build_options.depth_format = opennova::DepthFormat::CDEP;
 	std::printf("building terrain (this takes ~35 s)...\n");
 	try {
-		opennova::build_terrain(proj, work.string());
+		opennova::build_terrain(proj, work.string(), build_options);
 	} catch (const std::exception &e) {
 		std::fprintf(stderr, "FAIL: build_terrain: %s\n", e.what());
 		return 1;
@@ -218,15 +331,33 @@ int main() {
 	for (const char *n : kFonts) localres.emplace_back(n, fonts_dir / n);
 	for (const char *n : {"menumus.bin", "gamemus.bin"}) localres.emplace_back(n, mus_dir / n);
 	for (const char *n : kResource) resource.emplace_back(n, sources / n);
+	// build_terrain also drops its per-tile .tml/.tms intermediates and the .dep
+	// index beside the .cpt. Those are inputs to the CPT export passes, not runtime
+	// resources: neither extension appears anywhere in a full retail /FRISK play
+	// session (apps/retail_minimal_00tra.txt, 2750 names), and the .cpt carries the
+	// polydata on its own. Shipping them would be ~680 dead files.
 	for (const fs::directory_entry &de : fs::directory_iterator(work)) {
 		if (!de.is_regular_file()) continue;
 		const std::string fn = de.path().filename().string();
 		if (fn == "mnml_depth.raw") continue;
+		const std::string ext = de.path().extension().string();
+		if (ext == ".tml" || ext == ".tms" || ext == ".dep") continue;
 		resource.emplace_back(fn, de.path());
 	}
 
-	// 5) Write + verify each boot-table archive: the boot bins in language, the
-	//    mission/menu/font/music set in localres, the map polydata in resource.
+	// 5a) The loose layout: everything flat plus the zero-entry boot token.
+	if (install_env != nullptr &&
+	    !emit_loose_install(fs::path(install_env), root, language, localres, resource))
+		return 1;
+
+	if (!want_pff) {
+		std::printf("OK: loose install assembled (set OPENNOVA_BUILD_MINIMAL_PFF=1 "
+		            "to also write the boot-table archives)\n");
+		return 0;
+	}
+
+	// 5b) Write + verify each boot-table archive: the boot bins in language, the
+	//     mission/menu/font/music set in localres, the map polydata in resource.
 	if (!write_and_verify(root, "language.pff", language,
 	                      {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
 	                       "menutxt.bin", "mnml.bin", "mnml.pcx", "mnml.lwf"}))

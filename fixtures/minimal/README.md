@@ -103,6 +103,31 @@ Videos (`BIK`) stay omitted **by design**: they load loose via Win32
 the PFFs, and a miss skips playback — the menu background just stays black
 (cosmetic). `nw_cdata.coo` misses gracefully.
 
+### CRLF is mandatory for every authored text resource
+
+Retail's text parsers are **not LF-tolerant, and they fail silently.** A
+LF-only file still "loads" (it is logged by `/FRISK`), the parse stops early,
+and the game hangs or draws nothing instead of reporting an error.
+
+Witnessed on retail 2026-08-23: a LF-only `menu_style.mns` dead-ends the menu
+shell — `/FRISK` logs it twice and boot stops there, never reaching `main.mnu`,
+with the window Not Responding. The byte-identical file converted to CRLF takes
+the same install from 18 logged loads to 28, straight through `main.mnu`, the
+hardcoded fonts and the cursor. Retail's own `menu_style.mns` ships CRLF, and
+its file header documents a line-oriented parser with backslash continuations.
+
+The same rule was already known one format over: "a bare LF between blocks
+stopped retail's parser after block 0" (`apps/retail_minimal.py`, which
+preserves each `.def`'s existing line ending for exactly this reason).
+
+The writer-produced members of the set (`.trn` via `save_trn`, `.env` via
+`save_env`) emit CRLF from the engine libraries already. The committed
+hand-authored files — `items.def`, `weapon.def`, `ammo.def`, `main.mnu`,
+`mp.mnu`, `menu_style.mns` — have no writer to enforce it, and `fixtures/**`
+is `-text -eol` in `.gitattributes`, so git will not normalize them either
+way. One editor save in LF mode silently breaks the boot again, so
+`minimal_eol_guard` (ctest) pins all six.
+
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
 
 All music (`SBF`/`BIN`), videos (`BIK` — see above),

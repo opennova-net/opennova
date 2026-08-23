@@ -517,6 +517,15 @@ target_compile_definitions(minimal_rtxt_gen_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
+# Minimal set's hand-authored text resources must be CRLF: retail's text
+# parsers are not LF-tolerant and fail SILENTLY (a LF-only menu_style.mns
+# dead-ends the menu shell before main.mnu; a bare LF stops the .def parser
+# after block 0). Witnessed on retail 2026-08-23.
+add_executable(minimal_eol_guard_test fixtures/minimal_eol_guard.cpp)
+target_compile_definitions(minimal_eol_guard_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_eol_guard COMMAND minimal_eol_guard_test)
+
 # Minimal set's text .def files parse through our loaders (items/weapon/ammo).
 add_executable(minimal_def_validate_test fixtures/minimal_def_validate.cpp)
 target_link_libraries(minimal_def_validate_test PRIVATE opennova_formats)

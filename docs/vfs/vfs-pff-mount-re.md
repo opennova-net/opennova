@@ -38,9 +38,15 @@ stands confirmed.
    3 = `localres.pff`, 4 = `resource.pff`, 5 = unused (no writer). Each open
    registers into the 16-slot secondary array (`@ 0x3341818`) at the
    name-table index — **slot order IS lookup precedence**. Only all-failed is
-   fatal (earlyerr line 3, check @ 0x4a6f44 — required-resources.md). Archive
-   paths open CWD-relative via raw `_lopen` (probe `File_CheckExists
-   @ 0x75a5d0`).
+   fatal (earlyerr line 3, check @ 0x4a6f44 — required-resources.md). The count
+   is of archives OPENED, not of entries: a zero-entry archive (the 20-byte
+   header our `pff_write_archive` emits for n == 0) mounts and satisfies the
+   gate — witnessed on retail 2026-08-23, `/FRISK` logging `LOADED FILE:
+   resource.pff` and boot continuing to the `gametext.bin` fatal, against a
+   control run with the archive removed that writes no `_filelog.txt` at all.
+   Consistent with `PFF_Open` doing no count/magic/entry_size validation (step
+   2). Archive paths open CWD-relative via raw `_lopen` (probe
+   `File_CheckExists @ 0x75a5d0`).
 2. **Container open** (`PFF_Open @ 0x7682e0`): 188-byte handle; first dword =
    header_size; header read to +132 (magic/count/entry_size/table_offset at
    +136/+140/+144/+148); entries read into a `36*count` buffer; then

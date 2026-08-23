@@ -46,12 +46,22 @@ TrnConfig build_config() {
 	c.tilestrip = "mnml_t.tga";
 	c.detail_density = 128;
 	c.detail_density2 = 8;
-	c.sector_count = 1;            // one active sector for the smallest map
+	// sector_count is the grid WIDTH, not the number of active sectors: save_trn
+	// emits `sector_count` columns per polytrn_sectors row and load_trn reads that
+	// many, edge-replicating the rest. A value of 1 therefore emits column 0 only
+	// and silently drops every sector placed further right.
+	c.sector_count = 8;
 	c.origin_x = -4;
 	c.origin_y = -4;
 	c.water_height = 0;
-	// A single active sector in the grid centre — mirrors Dvxi5's sparse grid.
+	// The 2x2 quadrant block at rows/cols 3-4, addressing the four quadrants of the
+	// 1024x1024 heightmap atlas (COORDS_ATLAS_SIZE). Byte-identical to the grid in
+	// fixtures/godot/dvxi5/Dvxi5.trn and to ONED's DEFAULT_SECTOR_PATTERN
+	// (godot/modtools/terrain/terrain_editor.gd), which is the retail-shaped layout.
 	c.sector_grid[3][3] = 1;
+	c.sector_grid[3][4] = 3;
+	c.sector_grid[4][3] = 2;
+	c.sector_grid[4][4] = 4;
 	c.sector_rows = 8;
 	return c;
 }
@@ -76,6 +86,13 @@ int main() {
 	CHECK(reloaded.charmap == "mnml_m.pcx", "trn names the charmap");
 	CHECK(reloaded.foliagemap == "mnml_f.pcx", "trn names the foliagemap");
 	CHECK(reloaded.colormap == "mnml_c.tga", "trn names the colormap");
+	// The sector grid is what gives the map ground. A grid that reloads all-zero
+	// means save_trn dropped columns (sector_count is the grid WIDTH) and retail
+	// gets a terrain with no active sectors — boot still succeeds, nothing renders.
+	CHECK(reloaded.sector_count == 8, "trn keeps the 8-wide sector grid");
+	CHECK(reloaded.sector_grid[3][3] == 1 && reloaded.sector_grid[3][4] == 3 &&
+	              reloaded.sector_grid[4][3] == 2 && reloaded.sector_grid[4][4] == 4,
+	      "trn round-trips the active quadrant block");
 
 	const std::string trn_path = path("mnml.trn");
 	if (write_mode) {
@@ -99,6 +116,9 @@ int main() {
 				std::istringstream cis(committed);
 				CHECK(load_trn(cis, c, e2), e2.c_str());
 				CHECK(c.polydata == "mnml.cpt", "committed .trn names the polydata");
+				CHECK(c.sector_grid[3][3] == 1 && c.sector_grid[3][4] == 3 &&
+				              c.sector_grid[4][3] == 2 && c.sector_grid[4][4] == 4,
+				      "committed .trn carries the active quadrant block");
 			}
 		}
 	}

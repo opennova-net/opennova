@@ -831,7 +831,10 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 		} else if (i == hovered) {
 			style = kStateMouseover;
 		}
-		const StatePass(&row_states)[4] = w.list_box.items.present
+		// A conditional whose operands are arrays decays both to pointers, so the
+		// result cannot bind to a StatePass(&)[4]; the pointer form is the same
+		// object and indexes identically.
+		const StatePass *row_states = w.list_box.items.present
 				? node.popup_items_states
 				: node.items_states;
 		if (style >= 0 && row_states[style].present) {

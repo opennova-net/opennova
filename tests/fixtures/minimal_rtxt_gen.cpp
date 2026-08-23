@@ -60,18 +60,34 @@ File keyhelp_table() { return File{}; }
 // Error strings: valid-but-empty — every error dialog falls back to its
 // literal, and the ShowEarlyError(4) boot noise goes away.
 File gameerr_table() { return File{}; }
-// The mission's briefing text (<stem>.bin, retail family member in
-// language.pff): valid-but-empty until the briefing screen names its keys.
-File mnmlbin_table() { return File{}; }
+// The mission's text sidecar (<stem>.bin, retail family member in
+// language.pff). [Info] TITLE is what the mission list shows for the row
+// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250 via
+// SinglePlayer_PopulateMissionList @ 0x561840]; with no title the populate
+// falls back to the BMS header mission_name, then to the raw filename.
+// BRIEFING fills the briefing pane when the row is selected.
+File mnmlbin_table() {
+	return make_table("Info", {
+	                              {"TITLE", "Minimal"},
+	                              {"BRIEFING", "A minimal authored map."},
+	                          });
+}
 // Menu labels: the string ids the authored main.mnu / mp.mnu reference via
 // TEXT_RSRC menutxt.BIN (retail ships menutxt.bin in language.pff).
 File menutxt_table() {
 	return make_table("Menu", {
+	                              {"MM_Singleplayer", "Single Player"},
 	                              {"MM_LANMultiplayer", "LAN Multiplayer"},
 	                              {"MM_Exit", "Exit"},
 	                              {"MP_Host", "Host"},
 	                              {"MP_Join", "Join"},
 	                              {"MP_Back", "Back"},
+	                              // sp.mnu (ids match retail's own sp.mnu so the
+	                              // screen stays swappable against the retail one).
+	                              {"SP_Campaigns", "Missions"},
+	                              {"SP_MissionDesc", "Briefing"},
+	                              {"NAV_ACCEPT", "Accept"},
+	                              {"NAV_BACK", "Back"},
 	                          });
 }
 
