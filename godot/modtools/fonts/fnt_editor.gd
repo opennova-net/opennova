@@ -50,7 +50,7 @@ var _sample_edit: LineEdit
 var _page_spin: SpinBox
 var _zoom_label: Label
 var _brush_spin: SpinBox
-var _shadow_spin: SpinBox
+var _spacing_spin: SpinBox
 var _glyph_page_spin: SpinBox
 var _glyph_x_spin: SpinBox
 var _glyph_y_spin: SpinBox
@@ -537,11 +537,11 @@ func _build_inspector_rows(box: VBoxContainer) -> void:
 	_glyph_title.text = "Glyph"
 	box.add_child(_glyph_title)
 
-	_shadow_spin = _add_spin_row(box, "Shadow", -64, 64, 1)
-	_shadow_spin.tooltip_text = "Shadow offset baked into glyph advance (-3 = shadowed)"
-	_shadow_spin.value_changed.connect(func(v: float) -> void:
+	_spacing_spin = _add_spin_row(box, "Spacing", -64, 64, 1)
+	_spacing_spin.tooltip_text = "Pixels added between glyphs. Text advances by the glyph's width plus this, minus one."
+	_spacing_spin.value_changed.connect(func(v: float) -> void:
 		if not _suppress_inspector_signals:
-			_on_shadow_changed(int(v)))
+			_on_spacing_changed(int(v)))
 
 	_glyph_page_spin = _add_spin_row(box, "Page", 0, 15, 1)
 	_glyph_page_spin.value_changed.connect(func(_v: float) -> void: _apply_glyph_meta())
@@ -646,10 +646,10 @@ func _assign_owner(node: Node) -> void:
 
 # --- inspector editing ----------------------------------------------------------
 
-func _on_shadow_changed(v: int) -> void:
+func _on_spacing_changed(v: int) -> void:
 	if _document == null or _document.resource == null:
 		return
-	_document.resource.set_shadow_offset(v)
+	_document.resource.set_glyph_spacing(v)
 	_refresh_sample()
 
 
@@ -736,8 +736,8 @@ func _refresh_selection() -> void:
 	_suppress_inspector_signals = true
 	if _glyph_title != null:
 		_glyph_title.text = "Glyph %d  '%s'" % [_selected_char, _glyph_label(_selected_char)]
-	if _shadow_spin != null:
-		_shadow_spin.set_value_no_signal(_document.resource.get_shadow_offset())
+	if _spacing_spin != null:
+		_spacing_spin.set_value_no_signal(_document.resource.get_glyph_spacing())
 	if _glyph_page_spin != null:
 		_glyph_page_spin.set_value_no_signal(maxi(0, page))
 	if _glyph_x_spin != null:

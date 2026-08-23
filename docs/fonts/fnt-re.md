@@ -30,7 +30,7 @@ The parser validates `fontData[0] == 0x30544E46` ("FNT0"; `-1` on mismatch), the
 | `+0` | magic `"FNT0"` | validated == `0x30544E46` |
 | `+4` | **design width** | `this+4844 = 800.0 / fontData[1]` — a per-font design-space SCALE reference, **never validated** (D-FNT-1) |
 | `+8` | `pageCount` | `this+352`; the number of 256×256×4 texture pages |
-| `+12` | `hdr3` | copied to `this+356` (stored; not consumed by the loader — our model names it `shadow_offset`, D-FNT-3) |
+| `+12` | **`glyph_spacing`** | copied to `this+356` (the loader only stores it; the text engine consumes it as the inter-glyph advance term — D-FNT-3) |
 | `+32` | glyph table | **224 glyphs × 5 DWORDs (20 B)** copied verbatim to `this+364` (`srcGlyph = fontData+8` dword-index; `dstGlyph += 5` × 224). The 5 DWORDs are `[page, u0, v0, u1, v1]` (our `fnt_glyph_t`: `uint32 page` + `fnt_uv_t{u0,v0,u1,v1}`) |
 | `+4512` | pixel pages | `pageCount` × **0x40000 B** each (256×256×4 RGBA; `pixelDataPtr += 0x10000` DWORDs/page, backup `memcpy 0x40000`). First-char = glyph 0 = ASCII 32 (space); glyphs 32..255 |
 
@@ -52,13 +52,32 @@ Each page becomes a GPU texture named `GFONT<this>:<NN>` (`GTexture_FindOrCreate
 |---|---|---|---|
 | D-FNT-1 | A | **FIXED 2026-07-05** | Offset `+4` is the design-width scale reference (`this+4844 = 800.0 / it`), NOT a version — the engine never validates it. Our reader treated it as a version and rejected `!= 800`. **Fixed:** `fnt_parse_header` drops the equality gate; a non-800 font parses (pinned in `fnt_roundtrip_test`). `engine/formats/fnt` `fnt_font_t.version` renamed to `design_width`. |
 | D-FNT-2 | A | **FIXED 2026-07-05** | The per-font design scale `800.0 / designWidth` is now retained: `fnt_parse` stores the file's `+4` word into `design_width`, `fnt_design_scale()` computes `800/dw` `[orig: @ 0x674740]`, and the from-scratch writer emits the font's own design width. The reimpl applies the scale at render (ENG-4). |
-| D-FNT-3 | B | NEEDS-RE (narrowed) | Offset `+12` (`hdr3`, `this+356`) is named `shadow_offset` but the loader only STORES it. **Narrowed 2026-07-05:** the text drawer `CGameFont_DrawText @ 0x6752c0` renders its shadow from a FORMAT FLAG (`BYTE1(textBuffer)`) + fixed sub-pixel offsets (`cursorX-0.5`, `y-1.5`), NOT from `this+356` — so "shadow_offset" is unsupported by the draw path. Its real consumer (if any) is elsewhere; leave the name until a positive `this+356` reader is found rather than rename speculatively. |
+| D-FNT-3 | B | **FIXED 2026-08-23** | Offset `+12` (`hdr3`, `this+356`) is the inter-glyph **SPACING** term, not a shadow offset. The loader only stores it, which is why the first pass found no reader; its consumers are the text engine, where both the measurer and the drawer advance by `glyph_width + (glyph_spacing - 1) * scale` and the measured width strips the trailing pad `[orig: CGameFont_MeasureText @ 0x674e70 this+356; CGameFont_DrawText @ 0x6752c0]`. The drawer's shadow is unrelated — it comes from a format flag (`BYTE1(textBuffer)`) plus fixed sub-pixel offsets (`cursorX-0.5`, `y-1.5`), so the old name described a field the draw path never reads. **Fixed:** `fnt_font_t.shadow_offset` → `glyph_spacing` (`engine/formats/fnt/fnt.h`), and the Godot binding followed — `FntResource.get/set_glyph_spacing`, with the editor's spin relabelled "Spacing". `FntResource::to_font_file` applies `glyph_spacing - 1` per glyph and `strings_encoding_test.gd` pins it. Retail's shipped fonts carry both 0 (Serpen24) and -3 (Gunpl22b). |
 | D-FNT-4 | A | **FIXED 2026-07-19** | Retail indexes glyphs BY BYTE: printable bytes directly select their 20-byte FNT records, while 0x7F/0x80/0x81 are skipped by both measurement and drawing `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]`. The reimpl now single-sources the RTXT and font-boundary mapping in `util/nova_cp1252.h`; `FntResource::to_font_file` keys each printable byte's record at the decoded cp1252 Unicode codepoint, omits the three retail controls, and disables system-font fallback. `strings_encoding_test.gd` pins byte 0x93 → U+201C with the source slot's 9 px metric, the control omissions, and no fallback. This closes the shipped-data-visible substitution (67/98 JO bins carry bytes ≥ 0x80). |
 
 **D-FNT-2 render-scale confirmed:** the same drawer reads `this+4844` (our
 `fnt_design_scale` = `800/dw`) and multiplies it into every glyph's width/height
 (`v161 = this+4844 * scaleX`, `v163 = this+4844 * scaleY`) — the design scale we
 now retain is exactly the engine's glyph render scale `[orig: @ 0x6752c0]`.
+
+## Authoring policy: the glyph rect IS the advance
+
+Consequence of the D-FNT-3 formula, and the rule our rasterizer follows. The format has no
+advance table and no side-bearing fields, so everything the engine knows about horizontal
+metrics comes from the glyph's rect width plus the one font-wide spacing term. Authoring a
+face therefore means baking each glyph's advance into its cell, not its ink box:
+
+- Cell width = the typeface's advance for that glyph (+1, since we emit `glyph_spacing` 0 and
+  the engine subtracts one); the coverage is blitted at its left side bearing inside that cell.
+- A glyph with **no ink still needs a cell** — space above all. A 0x0 rect advances by
+  `0 + (0 - 1)` = -1 px and runs words together. Retail sizes its space like any other glyph
+  (9x19 in `Gunpl22b`, 7x17 in `Serpen24`).
+- One cell height for the whole font (ascent + descent), which is what keeps baselines aligned;
+  retail's shipped faces are uniform this way.
+
+`godot/modtools/fonts/fnt_rasterizer.gd` implements this and `godot/tests/fnt_rasterizer_metrics_test.gd`
+pins it. Like `fnt_pack_shelf`, this is authoring policy chosen to satisfy the witnessed reader,
+not witnessed engine behavior.
 
 ## Cross-references
 

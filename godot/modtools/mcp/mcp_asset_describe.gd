@@ -249,7 +249,7 @@ static func _describe_font(ctx: McpToolContext, out: Dictionary, resolved: Dicti
 		"page_count": font.get_page_count(),
 		"glyph_count": font.get_glyph_count(),
 		"first_char": font.get_first_char(),
-		"shadow_offset": font.get_shadow_offset(),
+		"glyph_spacing": font.get_glyph_spacing(),
 		"page_sizes": pages,
 	}
 	if full:

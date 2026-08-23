@@ -167,11 +167,11 @@ func _populate_inspector() -> void:
 			var r: Rect2i = res.get_glyph_rect(first + i)
 			if r.size.x > 0 and r.size.y > 0:
 				drawn += 1
-		meta_label.text = "%d page(s)\n%d glyphs (%d drawn)\nshadow %d" % [
+		meta_label.text = "%d page(s)\n%d glyphs (%d drawn)\nspacing %d" % [
 			res.get_page_count(),
 			res.get_glyph_count(),
 			drawn,
-			res.get_shadow_offset(),
+			res.get_glyph_spacing(),
 		]
 
 
@@ -185,6 +185,37 @@ func get_new_action_label() -> String:
 
 func new_current() -> Error:
 	return _document.create_new()
+
+
+## Rasterize an installed system font (by family name) or a .ttf/.otf/.ttc path into the
+## current document, replacing its glyphs. Flags are FntRasterizer.FLAG_BOLD/ITALIC/OUTLINE.
+##
+## The Generate dialog reaches the same document method through FntEditor; this is the entry
+## the MCP uses, so an agent authors a face by exactly the path a human does, and neither can
+## produce something the other could not.
+func generate_from_font_source(source: String, px_size: int, flags: int) -> Error:
+	var font := FntRasterizer.build_font_source(source)
+	if font == null:
+		return ERR_FILE_NOT_FOUND
+	return _document.generate_from_font(font, px_size, flags)
+
+
+## The font-wide inter-glyph spacing (the header +12 word): retail advances the text cursor by
+## the glyph's rect width plus this, minus one [orig: CGameFont_MeasureText @ 0x674e70].
+## Rasterized faces bake the true advance into each rect and emit 0 here.
+## The live FntResource, or null when nothing is loaded. Read-only surface for callers that
+## need the glyph metrics (the MCP's font_state); mutation still goes through the seams above.
+func get_font_resource() -> FntResource:
+	return _document.resource if _document != null else null
+
+
+func set_glyph_spacing(spacing: int) -> Error:
+	if _document == null or _document.resource == null:
+		return ERR_UNAVAILABLE
+	_document.resource.set_glyph_spacing(spacing)
+	_document.mark_dirty()
+	_document.state_changed.emit()
+	return OK
 
 
 func can_open() -> bool:

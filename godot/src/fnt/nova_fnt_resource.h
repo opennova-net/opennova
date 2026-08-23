@@ -38,15 +38,15 @@ public:
 	// quintuples per input cell, or an empty array on overflow/bad input.
 	static PackedInt32Array pack_shelf(const PackedInt32Array &p_sizes);
 
-	Error create_blank(int p_page_count, int p_shadow_offset);
+	Error create_blank(int p_page_count, int p_glyph_spacing);
 	Error load_from_bytes(const PackedByteArray &p_bytes);
 	PackedByteArray to_bytes() const;
 
 	int get_page_count() const;
 	int get_glyph_count() const;
 	int get_first_char() const;
-	int get_shadow_offset() const;
-	void set_shadow_offset(int p_shadow_offset);
+	int get_glyph_spacing() const;
+	void set_glyph_spacing(int p_glyph_spacing);
 
 	Ref<Image> get_page_image(int p_page) const;
 	Error set_page_image(int p_page, const Ref<Image> &p_image);

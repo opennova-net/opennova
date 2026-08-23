@@ -22,6 +22,8 @@ var tools: EditorMcpTools
 var mission_tools: EditorMcpMissionTools
 var menu_tools: EditorMcpMenuTools
 var object_tools: EditorMcpObjectTools
+var font_tools: EditorMcpFontTools
+var music_tools: EditorMcpMusicTools
 var pack_tools: EditorMcpPackTools
 var game_tools: EditorMcpGameTools
 var editor: Node = null
@@ -62,6 +64,10 @@ func setup(
 	menu_tools.register_all(server.registry)
 	object_tools = EditorMcpObjectTools.new(self)
 	object_tools.register_all(server.registry)
+	font_tools = EditorMcpFontTools.new(self)
+	font_tools.register_all(server.registry)
+	music_tools = EditorMcpMusicTools.new(self)
+	music_tools.register_all(server.registry)
 	pack_tools = EditorMcpPackTools.new(self)
 	pack_tools.register_all(server.registry)
 	game_tools = EditorMcpGameTools.new(self, game_run_bridge)

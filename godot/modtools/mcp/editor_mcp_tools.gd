@@ -28,6 +28,7 @@ Typical flows:
 - Author a mission: open_in_workspace(workspace="mission", path=...) -> list_items -> place_entities (grounded for you) -> edit_waypoint_path -> set_mission_header -> set_camera + screenshot to inspect. Repair floating/sunken layouts with reground_mission.
 - Test in the real game: run_game(op="start", mode="game"|"mission") -> ensure any player-paced start-mission splash has been dismissed (captures fail closed while it owns the viewport) -> game_render_diagnostics -> game_capture_bundle for a lossless PNG+state sidecar (game_state/game_debug/game_screenshot remain available) -> run_game(op="stop").
 - Author a menu: open_in_workspace(workspace="mnu", path=...) or menu_tabs(op="new") -> get_menu -> add_menu_widgets / edit_menu_widget / set_widget_actions -> menu_screenshot to look -> preview_menu to click through the navigation. describe_api(topic="menus") has the vocabulary.
+- Author the boot resources: font_new -> font_generate(source=<installed family>, px_size=N) -> font_state (space MUST have a non-zero rect, or words run together) -> font_save_as under retail's exact name. Music pairs the same way: music_new(script_name) -> music_add_track(seconds=...) -> music_insert_play -> music_save_as("<name>.sbf"), which writes the .bin sibling too. Then pack_game and run_game(mode="retail") to see it in the original engine.
 
 Be a good guest: narrate risky operations with show_status_message; the human's unsaved work matters."""
 
