@@ -543,6 +543,35 @@ void test_spawn_zone_registry() {
     CHECK(reg.min_y == to_fixed(-700.0) && reg.max_y == to_fixed(600.0));
 }
 
+// A both-zero composite key falls through to raw entity-address order. Retail
+// owns all five pools in one contiguous allocation: pool 1 starts at +232420,
+// pool 2 at +1865416, so an unnumbered pool-1 spawn point sorts before a
+// pool-2 spawn point even though collection walks pool 2 first.
+// [orig: EntityPool_Allocate @0x442130; Entity_BuildSpawnZoneList
+// @0x43EAE0, address compare @0x43ECC6]
+void test_spawn_zone_zero_key_uses_retail_pool_address_order() {
+    World world;
+    world.registry.configure_pool(1, 2);
+    world.registry.configure_pool(2, 2);
+
+    Entity pool2;
+    pool2.kind = EntityKind::Building;
+    pool2.is_spawn_point = true;
+    pool2.alive = true;
+    const EntityHandle pool2_handle = world.registry.spawn(2, pool2);
+
+    Entity pool1;
+    pool1.kind = EntityKind::Item;
+    pool1.is_spawn_point = true;
+    pool1.alive = true;
+    const EntityHandle pool1_handle = world.registry.spawn(1, pool1);
+
+    const SpawnZoneRegistry reg = build_spawn_zone_list(world);
+    CHECK(reg.entries.size() == 2);
+    CHECK(reg.entries[0] == pool1_handle);
+    CHECK(reg.entries[1] == pool2_handle);
+}
+
 } // namespace
 
 int main() {
@@ -561,6 +590,7 @@ int main() {
     test_capture_contact_movement_gate_and_contest();
     test_numbered_zone_converts_attrib2_entities();
     test_spawn_zone_registry();
+    test_spawn_zone_zero_key_uses_retail_pool_address_order();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
