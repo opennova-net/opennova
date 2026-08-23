@@ -30,10 +30,14 @@ const LOOSE_EXTENSIONS := [".sbf", ".txt"]
 ## Never packed and never copied: the retail runtime, its own writes, and any archive already
 ## present (packing an archive into an archive). The runtime binaries are staged separately from
 ## the configured retail dir, not taken from the asset root.
-const EXCLUDED_EXTENSIONS := [".pff", ".exe", ".dll", ".sav", ".log", ".ini", ".cfg"]
+const EXCLUDED_EXTENSIONS := [".pff", ".exe", ".dll", ".sav", ".log", ".ini", ".cfg",
+	# Repo metadata that lives beside the assets but is not game data.
+	".md", ".gitignore", ".gitattributes"]
 
 ## Subdirectories of the asset root that hold authoring sources, not game files. `src/` is
 ## `.blend`/`.ase` — retail resolves bare filenames at the root, so nothing there is loadable.
+## DirAccess.get_files_at does not descend, so this is belt-and-braces for a name that
+## arrives with a directory prefix.
 const EXCLUDED_DIRS := ["src/"]
 
 
@@ -60,10 +64,15 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 		result["error"] = "Cannot create output directory: %s" % out_dir
 		return result
 
-	# Every file the mounted VFS knows about. Deliberately NOT the ResourceIndex: that skips
-	# anything it cannot classify (`if (kind.empty()) continue;`), which drops items.def,
-	# weapon.def, ammo.def and every .dbf/.tga/.pcx — i.e. most of the game.
-	var names: PackedStringArray = root.list_files()
+	# Walk the directory. Deliberately NOT ResourceRoot.list_files() or the ResourceIndex:
+	# both classify, and `scan()` drops whatever it cannot name a kind for
+	# (`if (kind.empty()) continue;`). On this very asset set that reported 16 of 26 files —
+	# it omitted items.def (fatal for retail), weapon.def, ammo.def, the .dbf, and every
+	# image including the menu cursor. Those are browse indexes; a packer wants the game dir.
+	var names := PackedStringArray()
+	for file_name in DirAccess.get_files_at(root_dir):
+		names.append(String(file_name))
+	names.sort()
 	if names.is_empty():
 		result["error"] = "Mounted root has no files: %s" % root_dir
 		return result
@@ -81,7 +90,6 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 
 		var src := root_dir.path_join(name)
 		if not FileAccess.file_exists(src):
-			# Archived-only entries have no loose source to copy; they are already packed.
 			skipped.append(name)
 			continue
 

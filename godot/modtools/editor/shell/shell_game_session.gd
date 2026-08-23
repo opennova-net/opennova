@@ -61,13 +61,21 @@ class GameRunRequest:
 class LaunchPlan:
 	extends RefCounted
 
-	var path: String
-	var args: PackedStringArray
+	var path: String = ""
+	var args := PackedStringArray()
+	# The child's working directory. Empty means "inherit ours", which is what our own
+	# runtime wants. Retail needs it set: it opens its boot archives CWD-relative through a
+	# raw _lopen [orig: PFF_OpenAllArchives @ 0x4a4310], so launched from anywhere but the
+	# packed dir it finds no archives and dies on the zero-archives gate with
+	# ShowEarlyError(3) -- before writing a single /FRISK line to say why.
+	var cwd: String = ""
 
-	static func make(plan_path: String, plan_args: PackedStringArray) -> LaunchPlan:
+	static func make(plan_path: String, plan_args: PackedStringArray,
+			plan_cwd: String = "") -> LaunchPlan:
 		var plan := LaunchPlan.new()
 		plan.path = plan_path
 		plan.args = plan_args
+		plan.cwd = plan_cwd
 		return plan
 
 
@@ -348,7 +356,8 @@ static func launch_plan(
 		# log every resolved load. It understands none of runtime_flags' OpenNova arguments.
 		if request.exe_path.is_empty() or not bool(file_exists.call(request.exe_path)):
 			return null
-		return LaunchPlan.make(request.exe_path, PackedStringArray(["/w", "/d", "/FRISK"]))
+		return LaunchPlan.make(request.exe_path, PackedStringArray(["/w", "/d", "/FRISK"]),
+				request.exe_path.get_base_dir())
 	var runtime_args := runtime_flags(request)
 	var exe_dir := editor_exe.get_base_dir()
 	for candidate in PACKAGED_RUNTIME_CANDIDATES:
@@ -483,6 +492,11 @@ func _build_request(mode: int, report_error: bool = true) -> GameRunRequest:
 			if report_error:
 				_show(_last_error, &"warn")
 			return null
+		if not Process.supports_working_directory():
+			_last_error = "Play in Retail needs a working-directory spawn (Windows only)."
+			if report_error:
+				_show(_last_error, &"warn")
+			return null
 		if not bool(_file_exists.call(retail.path_join("Jointops.exe"))):
 			_last_error = "Play in Retail: no Jointops.exe in %s." % retail
 			if report_error:
@@ -530,7 +544,7 @@ func _spawn_request(request: GameRunRequest) -> bool:
 		_last_error = "Run game: no game runtime is available beside this editor."
 		_show(_last_error, &"error")
 		return false
-	var pid := int(_spawn.call(plan.path, plan.args))
+	var pid := int(_spawn.call(plan.path, plan.args, plan.cwd))
 	if pid <= 0:
 		_last_error = "Could not launch the game runtime."
 		_show(_last_error, &"error")
@@ -594,6 +608,10 @@ func _begin_stop() -> bool:
 
 func _request_graceful_quit() -> bool:
 	if not _runtime_quit_requester.is_valid() or _active_request == null:
+		return false
+	if _active_request.mode == Mode.RETAIL:
+		# Retail is not our runtime: there is no debug peer to ask, so asking would start a
+		# grace period that nothing can ever satisfy and leave the child running. Kill it.
 		return false
 	return bool(_runtime_quit_requester.call(
 		_active_request.run_id,
@@ -693,6 +711,8 @@ func retail_install_dir() -> String:
 func retail_available() -> bool:
 	var dir := retail_install_dir()
 	if dir.is_empty() or not _pack_retail.is_valid() or not _file_exists.is_valid():
+		return false
+	if not Process.supports_working_directory():
 		return false
 	return bool(_file_exists.call(dir.path_join("Jointops.exe")))
 

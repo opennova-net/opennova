@@ -116,6 +116,7 @@ add_library(${TARGET_NAME} SHARED
     util/engine_caches.cpp
     util/nova_data_format.cpp
     util/nova_paths.cpp
+    util/nova_process.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp

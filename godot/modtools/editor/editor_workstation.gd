@@ -219,7 +219,12 @@ func _ready() -> void:
 		func() -> String: return _resource_library.get_root_dir(),
 		func() -> String: return OnedSettings.get_expansion(),
 		func() -> String: return OnedSettings.get_game(),
-		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
+		# cwd matters for retail only, but routing every launch through one spawn keeps the
+		# seam single. An empty cwd behaves exactly like OS.create_process.
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
+			if cwd.is_empty():
+				return OS.create_process(path, args)
+			return Process.spawn_in_dir(path, args, cwd),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		get_unsaved_workspace_labels,
 		show_status_message,
@@ -230,8 +235,17 @@ func _ready() -> void:
 			return {
 				"path": mission_workspace.get_current_resource_path(),
 			},
-		func(pid: int) -> bool: return OS.is_process_running(pid),
-		func(pid: int) -> int: return OS.kill(pid),
+		func(pid: int) -> bool:
+			if Process.supports_working_directory():
+				return Process.is_running(pid)
+			return OS.is_process_running(pid),
+		# Symmetric with the spawn above: a child we started with Process.spawn_in_dir is not
+		# one OS.kill() reliably reaches, which once left the session reporting "stopped"
+		# while retail was still running.
+		func(pid: int) -> int:
+			if Process.supports_working_directory():
+				return OK if Process.kill_pid(pid) else FAILED
+			return OS.kill(pid),
 		func() -> int: return Time.get_ticks_msec(),
 		_play_current_mission_button,
 		_stop_game_button,

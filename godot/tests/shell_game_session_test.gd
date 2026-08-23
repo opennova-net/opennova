@@ -137,10 +137,10 @@ func _make_session(
 			return {"path": "C:/assets/alpha.bms"},
 		func() -> PackedStringArray:
 			return unsaved_workspaces,
-		func(path: String, args: PackedStringArray) -> int:
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
 			var pid: int = int(next_pid[0])
 			next_pid[0] += 1
-			spawned.append({"path": path, "args": args, "pid": pid})
+			spawned.append({"path": path, "args": args, "pid": pid, "cwd": cwd})
 			alive[pid] = true
 			return pid,
 		func(path: String) -> bool:
@@ -255,7 +255,7 @@ func test_f5_warns_for_every_dirty_workspace_without_mutating_editor_state() -> 
 		func() -> PackedStringArray:
 			dirty_reads[0] += 1
 			return PackedStringArray(["Terrain", "Sounds", "Terrain", ""]),
-		func(path: String, args: PackedStringArray) -> int:
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
 			spawned.append({"path": path, "args": args})
 			return 4000,
 		func(_path: String) -> bool: return false,
@@ -460,10 +460,10 @@ func _make_retail_session(
 		func() -> String: return "jo",
 		func() -> Dictionary: return {"path": "C:/assets/alpha.bms"},
 		func() -> PackedStringArray: return PackedStringArray(),
-		func(path: String, args: PackedStringArray) -> int:
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
 			var pid: int = int(next_pid[0])
 			next_pid[0] += 1
-			spawned.append({"path": path, "args": args, "pid": pid})
+			spawned.append({"path": path, "args": args, "pid": pid, "cwd": cwd})
 			return pid,
 		func(path: String) -> bool:
 			var lower := path.replace("\\", "/").to_lower()
@@ -495,6 +495,12 @@ func test_retail_packs_once_then_launches_the_packed_exe() -> void:
 			"retail launches the exe the pack step staged, not our runtime")
 	assert_eq(Array(spawned[0]["args"] as PackedStringArray), ["/w", "/d", "/FRISK"],
 			"retail gets retail's flags and none of ours")
+	# Retail opens its boot archives CWD-relative, so launching it from anywhere but the
+	# packed dir finds no archives and dies on the zero-archives gate with no /FRISK line
+	# to explain why. This is the assertion that catches that regression.
+	assert_eq(String(spawned[0]["cwd"]),
+			String(spawned[0]["path"]).get_base_dir(),
+			"retail launches with the packed dir as its working directory")
 	assert_eq(String(session.get_state()["mode"]), "retail")
 
 
