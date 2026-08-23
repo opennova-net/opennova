@@ -3,6 +3,11 @@
 #
 # Expects $GODOT_BIN to point at Godot 4.6.1. Falls back to the binary
 # at .godot-bin/ if one isn't set.
+#
+# The suite runs against an ISOLATED user:// (see below). Tests that persist
+# settings or drop scratch files therefore cannot reach the developer's real
+# Godot user directory -- a run must never change which resource directory ONED
+# or the game opens next time, nor leave debris behind.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,6 +24,29 @@ fi
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
+
+# --- isolate user:// ----------------------------------------------------------
+# Godot derives user:// from the platform data dir ($APPDATA on Windows,
+# $XDG_DATA_HOME/$HOME elsewhere). Point those at a scratch dir for the run so a
+# test physically cannot write the developer's real config.
+#
+# This is not hypothetical: the suite had leaked settings and scratch files into
+# the real user dir for a long time -- persisted resource roots, an MCP
+# enabled/port pair that then failed a later run's defaults assertion, plus
+# mission_authoring_rt_*.bms, render-fixture-* trees, test_perf_overlay_*.cfg,
+# test_sbf_*.sbf and more. Per-test snapshot/restore only ever covered the files
+# somebody remembered; this covers all of them, including files added later.
+#
+# Set OPENNOVA_TEST_KEEP_USER_DIR=1 to inspect what a run wrote.
+user_dir="$root/.godot-test-user"
+rm -rf "$user_dir"
+mkdir -p "$user_dir"
+export APPDATA="$user_dir"
+export XDG_DATA_HOME="$user_dir"
+export HOME="$user_dir"
+if [[ -z "${OPENNOVA_TEST_KEEP_USER_DIR:-}" ]]; then
+  trap 'rm -f "$log"; rm -rf "$user_dir"' EXIT
+fi
 
 set +e
 "$GODOT_BIN" --headless --path "$root/godot" \
