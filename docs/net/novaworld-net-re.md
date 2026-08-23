@@ -9854,6 +9854,15 @@ CTF capture. `[orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5;
 Entity_ProcessWaypointInteraction @0x4AD820;
 Server_ProcessScoringAndBroadcast @0x5169C0]`
 
+The S&D/A&D producer reaches this same round-end wire without a mode adapter.
+A lethal kinetic or blast hit on an attrib-`0x8000` objective stages the normal
+entity death; the authority routes that record through scorer event 11 before
+the periodic demolition census check. Completing the authored opposing target
+count therefore yields the ordinary S2C 0x13 death record followed, at the 1 Hz
+decision boundary, by the shared 0x61/0x1D round transition. `[orig:
+Entity_ApplyWeaponDamage @0x4E6820; GameEvent_ProcessScoring @0x52F550;
+Server_CheckWinConditions @0x51B18B; Server_ProcessRoundEnd @0x5164F0]`
+
 **Ported (wire transaction completed 2026-08-22; exact contact producer
 completed 2026-08-23):** `engine/net/npwire` owns strict codecs for
 the 0x1D header, 0x2B request, 0x56 envelope, and reassembled board;

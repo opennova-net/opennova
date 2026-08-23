@@ -318,6 +318,88 @@ void test_tdm_round_wire_and_linger() {
 			"MP session closes at exactly 2790 post-announcement ticks");
 }
 
+void test_demolition_death_routes_score_and_round_wire() {
+	for (const uint32_t game_type : {
+			game_type::kSearchAndDestroy, game_type::kAttackDefend}) {
+		w::World world;
+		world.registry.configure_pool(0, 4);
+		world.registry.configure_pool(2, 4);
+		world.mp_session = true;
+		w::MatchRules rules;
+		rules.game_type = game_type;
+		rules.game_time_minutes = 1;
+		world.match.configure(rules);
+		const w::EntityHandle attacker = match_player(world, 3, 1, "Blue");
+
+		w::Entity objective;
+		objective.kind = w::EntityKind::Building;
+		objective.team = 2;
+		objective.health = 0;
+		objective.alive = true;
+		objective.has_item_def = true;
+		objective.item_attrib = w::kItemAttribObjectiveTarget;
+		const w::EntityHandle target = world.registry.spawn(2, objective);
+		expect(target.valid(), "demolition objective fixture spawns");
+
+		ns::LoopbackChannel wire;
+		np::NapiNPServerCtx ctx;
+		ctx.world = &world;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = game_type;
+		ctx.np_protocol.connection_list.push_back(
+				make_conn(1, 1, &wire, ns::TransportMode::Client,
+						attacker, true));
+		ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+
+		// Projectile and blast damage both stage this same transport-free death
+		// record. The host consumes it only after Match has frozen the authored
+		// objective census for the frame. [orig: Entity_ApplyWeaponDamage
+		// @0x4E6FB4; GameEvent_ProcessScoring case 11 @0x52F550;
+		// Server_CheckWinConditions demolition arm @0x51B18B]
+		push_death(world, target, attacker);
+		np::Server_TickUpdate(ctx);
+		const w::MatchPlayer *scorer = world.match.player(attacker);
+		expect(scorer != nullptr &&
+				scorer->stats[w::MatchStats::kTargetsDestroyed] == 1 &&
+				scorer->stats[w::MatchStats::kPoints] == 50 &&
+				world.match.team_stats(1)[w::MatchStats::kTargetsDestroyed] == 1,
+			"S&D/A&D death routing awards the exact target event to player and team");
+		const w::Entity *dead_target = world.registry.get(target);
+		expect(dead_target != nullptr && !dead_target->alive &&
+				(dead_target->flags & w::kEntityFlagDead) != 0,
+			"demolition target enters the shared authoritative dead state");
+
+		bool saw_death = false;
+		ns::Datagram datagram;
+		while (wire.client_recv(datagram)) {
+			if (datagram.tag != s2c::ENTITY_DEATH) continue;
+			EntityDeathRecord death;
+			size_t consumed = 0;
+			if (decode_entity_death(datagram.body.data(), datagram.body.size(),
+					death, consumed) && consumed == datagram.body.size() &&
+					death.entity_handle == target.packed &&
+					static_cast<uint16_t>(death.killer_source) == attacker.packed)
+				saw_death = true;
+		}
+		expect(saw_death,
+			"demolition target death fans the exact 0x13 target/killer handles");
+
+		for (int i = 0; i < 60; ++i) np::Server_TickUpdate(ctx);
+		wire.clear();
+		np::Server_TickUpdate(ctx); // the 62-tick win-condition boundary
+		expect(world.match.outcome().ended &&
+				world.match.outcome().winner_team == 1,
+			"S&D/A&D complete authored target census ends for the attacker team");
+
+		EndRoundHeader header;
+		expect(drain_round_header(wire, header) &&
+				header.winner_team == 1 && header.team_score_0 == 1 &&
+				header.team_score_1 == 0,
+			"S&D/A&D target win reaches exact 0x61/0x1D round wire and scores");
+	}
+}
+
 void test_aas_and_coop_share_round_wire() {
 	for (const uint32_t game_type : {0x10010u, 0x10020u}) {
 		w::World world;
@@ -825,6 +907,7 @@ int main() {
 	expect(world.effects.count("round_end") == 1, "no second round_end effect");
 
 	test_tdm_round_wire_and_linger();
+	test_demolition_death_routes_score_and_round_wire();
 	test_aas_and_coop_share_round_wire();
 	test_aas_events_use_spawn_registry_index();
 	test_ctf_pickup_and_capture_wire_transaction();

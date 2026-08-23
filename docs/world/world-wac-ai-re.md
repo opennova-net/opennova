@@ -4022,6 +4022,16 @@ Therefore residual (b) no longer applies to these retail game-mode producers.
 The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
 ordinary combat event producer not enumerated here.
 
+S&D/A&D demolition is connected to ordinary combat rather than a script-only
+score hook. A lethal kinetic or blast hit on an ItemDef-attrib `0x8000` target
+stages the shared `RoundDeath`; host death routing records scorer event 11
+(raw field 14 plus the score-table delta) before the 1 Hz authored-census win
+check, and the result enters the same 0x61/0x1D round transaction. The composed
+native regression covers both game types from the death boundary through the
+wire, while the projectile/destruction regressions pin both upstream lethal
+producers. `[orig: Entity_ApplyWeaponDamage @0x4E6820;
+GameEvent_ProcessScoring @0x52F550; Server_CheckWinConditions @0x51B18B]`
+
 Flag Me retains one retail defect rather than silently becoming a private
 OpenNova ruleset. Its selector is 12, but the FIELD loader, event scorer, and
 session-status value copy each accept only rows `<=11`; captures still run the
