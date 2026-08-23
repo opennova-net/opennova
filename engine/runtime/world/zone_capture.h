@@ -8,10 +8,11 @@
 // timed-capture engine's queue drain (instant numbered flips + GameEvent_FlagCapture).
 //
 // The world side PRODUCES events; the host (npruntime Server_TickUpdate) encodes them
-// onto the wire (0x6F / 0x53 / 0x1E / 0x40). [orig: Server_UpdateCaptureZoneProximity
+// onto the wire (0x6F / 0x50 / 0x53 / 0x6C / 0x1E). [orig: Server_UpdateCaptureZoneProximity
 // @0x5086A0; Server_UpdateCaptureZoneEntities @0x519690;
 // calculate_capture_zone_control_delta @0x501120; Server_UpdateCaptureZones @0x53B8F0;
-// GameEvent_FlagCapture @0x50F6F0; Server_EnforceZoneEntityTeams @0x519600]
+// GameEvent_FlagCapture @0x50F6F0; Server_ChangeEntityTeam @0x518D70;
+// Server_EnforceZoneEntityTeams @0x519600]
 // Contact production deliberately lives beside the host movement snapshots: a
 // remote authority Player is net-snapped and does not traverse the local physics
 // resolver, but its retail MoveOrder moving bit still gates the same overlap.
@@ -22,6 +23,7 @@
 #define OPENNOVA_WORLD_ZONE_CAPTURE_H
 
 #include <cstdint>
+#include <variant>
 #include <vector>
 
 #include "world/entity.h"
@@ -79,6 +81,18 @@ struct ZoneCaptureEvents {
         EntityHandle zone;
         uint8_t zone_team = 0;
         bool secured = false; // true = 0x3B, false = 0x3C
+    };
+    // Immutable S2C 0x50 snapshot. A capture can transition owned -> neutral ->
+    // new owner in one drain, so looking the entity up after the transaction
+    // would collapse two distinct records into the final team. The identity
+    // pair is live only for Flags & 0x100 Players and zero for every objective.
+    // [orig: Server_ChangeEntityTeam @0x518D70;
+    // write_entity_handle_packet @0x506AD0]
+    struct TeamChange {
+        EntityHandle entity;
+        uint8_t team = 0;
+        uint16_t net_id = 0;
+        uint8_t anim_slot = 0;
     };
     // A numbered-zone INSTANT flip [orig: the queue drain @0x53B8F0 — numbered zones
     // flip immediately: team change (via neutral when previously owned), control = 0,
@@ -140,22 +154,15 @@ struct ZoneCaptureEvents {
         uint8_t new_team = 0;
         bool announce = false; // ItemDefAttrib 0x40000 event gate
     };
-    std::vector<Control> control;
-    std::vector<Secure> secure_edges;
-    std::vector<Flip> flips;
-    std::vector<TimerWindow> timer_windows;
-    std::vector<Presence> presence;
-    std::vector<TimedStart> timed_starts;
-    std::vector<TimedCompletion> timed_completions;
+    // A single sequence is load-bearing wire state. Retail sends directly from
+    // each mutation callsite; parallel per-kind buckets lose neutral/new pairs
+    // and reorder 0x50 relative to 0x53/0x1E.
+    using Event = std::variant<Control, Secure, TeamChange, Flip, TimerWindow,
+                               Presence, TimedStart, TimedCompletion>;
+    std::vector<Event> ordered;
 
     void clear() {
-        control.clear();
-        secure_edges.clear();
-        flips.clear();
-        timer_windows.clear();
-        presence.clear();
-        timed_starts.clear();
-        timed_completions.clear();
+        ordered.clear();
     }
 };
 

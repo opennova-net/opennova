@@ -1271,11 +1271,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->
 	// Server_UpdateCaptureZoneEntities (0x6F + 0x1E 0x3B/0x3C) -> Server_EnforceZoneEntityTeams
 	// -> Server_UpdateCaptureZones (instant numbered flips + timed active entries)].
-	// The world side runs in zone_capture_second_tick; this block encodes its events:
+	// The world side runs in zone_capture_second_tick; this block encodes its one
+	// ordered event stream without regrouping messages by tag:
 	//   0x6F 15 B [u16 handle][u8 team][i32 control][i32 0x10000][i16 delta][u8 f][u8 e]
 	//     [orig: NetPacket_WriteZoneTimerValue @0x506E70] — CHANGE-GATED to all in-match
 	//     conns + the full set at 1 Hz to deploy-pending/dead ones (the golden carries
 	//     0x6F in deploy-window bursts, not a steady per-second stream; D-NET-162);
+	//   0x50 6 B [u16 handle][u8 team][u16 netId][u8 animSlot] for every actual
+	//     ownership mutation, including the ordered team-0/new-team instant pair;
+	//     non-player identity is zero [orig: Server_ChangeEntityTeam @0x518D70;
+	//     write_entity_handle_packet @0x506AD0];
 	//   0x1E 8 B zone events [orig: GameEvent_BuildPayload @0x5054E0]: 0x3B/0x3C secure
 	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); flips
 	//     50/51 (frontier held) or 52/53 (victim =
@@ -1293,37 +1298,14 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			(world.match.rules().game_type & 0x30000u) != 0) {
 		world::ZoneCaptureEvents ev;
 		world::zone_capture_second_tick(world, ev);
-		for (const world::ZoneCaptureEvents::Flip &flip : ev.flips)
-			world.match.record_zone_capture(world, flip.scorers);
-		for (const auto &completion : ev.timed_completions)
-			world.match.record_zone_capture(
-					world, {completion.capturer});
-
-		// 0x6F bodies + the change gate.
-		std::vector<std::pair<uint16_t, std::vector<uint8_t>>> zone_6f; // (handle, body)
-		std::vector<uint16_t> changed_6f;
-		for (const auto &c : ev.control) {
-			std::vector<uint8_t> b;
-			put_u16le(b, c.zone.packed);
-			b.push_back(c.team);
-			const uint32_t ctrl = static_cast<uint32_t>(c.control);
-			b.push_back(static_cast<uint8_t>(ctrl & 0xFF));
-			b.push_back(static_cast<uint8_t>((ctrl >> 8) & 0xFF));
-			b.push_back(static_cast<uint8_t>((ctrl >> 16) & 0xFF));
-			b.push_back(static_cast<uint8_t>((ctrl >> 24) & 0xFF));
-			b.push_back(0x00); // limit = 0x10000 fixed [orig: @0x506e9d]
-			b.push_back(0x00);
-			b.push_back(0x01);
-			b.push_back(0x00);
-			put_u16le(b, static_cast<uint16_t>(c.delta));
-			b.push_back(c.friendlies);
-			b.push_back(c.enemies);
-			auto it = ctx.zone_6f_cache.find(c.zone.packed);
-			if (it == ctx.zone_6f_cache.end() || it->second != b) {
-				changed_6f.push_back(c.zone.packed);
-				ctx.zone_6f_cache[c.zone.packed] = b;
-			}
-			zone_6f.emplace_back(c.zone.packed, std::move(b));
+		for (const world::ZoneCaptureEvents::Event &event : ev.ordered) {
+			if (const auto *flip =
+						std::get_if<world::ZoneCaptureEvents::Flip>(&event))
+				world.match.record_zone_capture(world, flip->scorers);
+			else if (const auto *completion =
+						std::get_if<world::ZoneCaptureEvents::TimedCompletion>(&event))
+				world.match.record_zone_capture(
+						world, {completion->capturer});
 		}
 
 		const world::SpawnZoneRegistry spawn_zones =
@@ -1337,102 +1319,138 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		auto event_body = [](uint8_t ev_type, uint8_t attacker, uint8_t victim) {
 			return std::vector<uint8_t>{ev_type, attacker, victim, 0xFF, 0, 0, 0, 0};
 		};
+		auto send_all = [&](uint8_t tag, const std::vector<uint8_t> &body,
+		                    bool reliable = true) {
+			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+				conn.link.transport->host_send(tag, body, reliable);
+			}
+		};
+		auto connection_team = [&](const NapiNPConnection &conn) -> uint8_t {
+			if (!conn.link.owned_entity.valid()) return 0;
+			const world::Entity *entity =
+					world.registry.get(conn.link.owned_entity);
+			return entity != nullptr ? entity->team : 0;
+		};
 
-		std::vector<std::vector<uint8_t>> timer_53;
-		for (const auto &window : ev.timer_windows) {
-			std::vector<uint8_t> b;
-			put_u16le(b, window.zone.packed);
-			b.push_back(window.current_team);
-			b.push_back(window.capturing_team);
-			put_u16le(b, window.progress);
-			put_u16le(b, window.limit);
-			b.push_back(window.rate);
-			timer_53.push_back(std::move(b));
-		}
-		std::vector<std::vector<uint8_t>> presence_6c;
-		for (const auto &presence : ev.presence) {
-			std::vector<uint8_t> b;
-			put_u16le(b, presence.zone.packed);
-			b.push_back(presence.count);
-			presence_6c.push_back(std::move(b));
-		}
-
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-			if (conn.link.mode == netsim::TransportMode::Loopback) continue;
-			bool dead = false;
-			uint8_t conn_team = 0;
-			if (conn.link.owned_entity.valid()) {
-				if (const world::Entity *e = world.registry.get(conn.link.owned_entity)) {
-					dead = e->health <= 0;
-					conn_team = e->team;
+		// Consume the semantic stream once, in retail callsite order. In
+		// particular 0x50 neutral/new pairs must remain ahead of their 0x1E
+		// announcement, and timed completion is 0x53 -> 0x50 -> 0x1E.
+		for (const world::ZoneCaptureEvents::Event &event : ev.ordered) {
+			if (const auto *control =
+						std::get_if<world::ZoneCaptureEvents::Control>(&event)) {
+				std::vector<uint8_t> body;
+				put_u16le(body, control->zone.packed);
+				body.push_back(control->team);
+				const uint32_t value = static_cast<uint32_t>(control->control);
+				body.push_back(static_cast<uint8_t>(value & 0xFF));
+				body.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+				body.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+				body.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+				body.push_back(0x00); // fixed 0x10000 limit [orig: @0x506E9D]
+				body.push_back(0x00);
+				body.push_back(0x01);
+				body.push_back(0x00);
+				put_u16le(body, static_cast<uint16_t>(control->delta));
+				body.push_back(control->friendlies);
+				body.push_back(control->enemies);
+				auto cached = ctx.zone_6f_cache.find(control->zone.packed);
+				const bool changed = cached == ctx.zone_6f_cache.end() ||
+						cached->second != body;
+				if (changed) ctx.zone_6f_cache[control->zone.packed] = body;
+				for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+					if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+					bool dead = false;
+					if (conn.link.owned_entity.valid()) {
+						const world::Entity *entity =
+								world.registry.get(conn.link.owned_entity);
+						dead = entity != nullptr && entity->health <= 0;
+					}
+					if (changed || conn.link.respawn_pending || dead)
+						conn.link.transport->host_send(
+								s2c::ZONE_TIMER_VALUE, body,
+								/*reliable=*/false);
 				}
+				continue;
 			}
-			const bool deploy_screen = conn.link.respawn_pending || dead;
-
-			// 0x6F: changed zones to everyone; the full set to deploy-screen recipients.
-			for (const auto &zb : zone_6f) {
-				const bool changed = std::find(changed_6f.begin(), changed_6f.end(),
-				                               zb.first) != changed_6f.end();
-				if (changed || deploy_screen)
+			if (const auto *secure =
+						std::get_if<world::ZoneCaptureEvents::Secure>(&event)) {
+				send_all(0x1E, event_body(secure->secured ? 0x3B : 0x3C,
+				                            zone_index_of(secure->zone),
+				                            secure->zone_team));
+				continue;
+			}
+			if (const auto *change =
+						std::get_if<world::ZoneCaptureEvents::TeamChange>(&event)) {
+				TeamAssign assign;
+				assign.entity_handle = change->entity.packed;
+				assign.team = change->team;
+				assign.net_id = change->net_id;
+				assign.anim_slot = change->anim_slot;
+				send_all(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+				continue;
+			}
+			if (const auto *window =
+						std::get_if<world::ZoneCaptureEvents::TimerWindow>(&event)) {
+				std::vector<uint8_t> body;
+				put_u16le(body, window->zone.packed);
+				body.push_back(window->current_team);
+				body.push_back(window->capturing_team);
+				put_u16le(body, window->progress);
+				put_u16le(body, window->limit);
+				body.push_back(window->rate);
+				send_all(s2c::ZONE_TIMER_WINDOW, body);
+				continue;
+			}
+			if (const auto *presence =
+						std::get_if<world::ZoneCaptureEvents::Presence>(&event)) {
+				std::vector<uint8_t> body;
+				put_u16le(body, presence->zone.packed);
+				body.push_back(presence->count);
+				send_all(s2c::ZONE_PRESENCE_COUNT, body);
+				continue;
+			}
+			if (const auto *start =
+						std::get_if<world::ZoneCaptureEvents::TimedStart>(&event)) {
+				send_all(0x1E, event_body(start->team == 1 ? 41 : 42,
+				                            pool0_index_byte(start->capturer.packed),
+				                            0xFF));
+				continue;
+			}
+			if (const auto *completion =
+						std::get_if<world::ZoneCaptureEvents::TimedCompletion>(&event)) {
+				if (completion->announce)
+					send_all(0x1E, event_body(
+							completion->new_team == 1 ? 43 : 44,
+							pool0_index_byte(completion->capturer.packed), 0xFF));
+				continue;
+			}
+			const auto *flip =
+					std::get_if<world::ZoneCaptureEvents::Flip>(&event);
+			if (flip == nullptr || !flip->announce || flip->suppressed) continue;
+			const uint8_t zone_idx = zone_index_of(flip->zone);
+			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+				const uint8_t team = connection_team(conn);
+				if (team == flip->capturer_team) {
 					conn.link.transport->host_send(
-							s2c::ZONE_TIMER_VALUE, zb.second,
-							/*reliable=*/false);
-			}
-
-			// 0x1E secure edges (to all in-match) [orig: @0x519839/@0x51988E].
-			for (const auto &se : ev.secure_edges) {
-				conn.link.transport->host_send(
-						0x1E, event_body(se.secured ? 0x3B : 0x3C,
-						                         zone_index_of(se.zone), se.zone_team));
-			}
-
-			for (const auto &body : timer_53)
-				conn.link.transport->host_send(s2c::ZONE_TIMER_WINDOW, body);
-			for (const auto &body : presence_6c)
-				conn.link.transport->host_send(s2c::ZONE_PRESENCE_COUNT, body);
-			for (const auto &start : ev.timed_starts) {
-				const uint8_t actor = start.capturer.pool() == 0 &&
-						start.capturer.slot() <= 0xFE
-						? static_cast<uint8_t>(start.capturer.slot())
-						: uint8_t{0xFF};
-				conn.link.transport->host_send(
-						0x1E, event_body(start.team == 1 ? 41 : 42,
-						                 actor, 0xFF));
-			}
-			for (const auto &completion : ev.timed_completions) {
-				if (!completion.announce) continue;
-				const uint8_t actor = completion.capturer.pool() == 0 &&
-						completion.capturer.slot() <= 0xFE
-						? static_cast<uint8_t>(completion.capturer.slot())
-						: uint8_t{0xFF};
-				conn.link.transport->host_send(
-						0x1E, event_body(completion.new_team == 1 ? 43 : 44,
-						                 actor, 0xFF));
-			}
-
-			// Numbered instant-flip events.
-			for (const auto &f : ev.flips) {
-				if (!f.announce) continue;
-				if (f.suppressed) continue; // match decided [orig: @0x4A2920 gate]
-				const uint8_t zone_idx = zone_index_of(f.zone);
-				if (conn_team == f.capturer_team) {
-					conn.link.transport->host_send(
-							0x1E, f.frontier_changed
-							              ? event_body(53, zone_idx, f.capturer_frontier)
-							              : event_body(51, zone_idx, f.new_team));
+							0x1E, flip->frontier_changed
+							              ? event_body(53, zone_idx,
+							                           flip->capturer_frontier)
+							              : event_body(51, zone_idx,
+							                           flip->new_team));
 				} else {
 					conn.link.transport->host_send(
-							0x1E, f.frontier_changed
-							              ? event_body(52, zone_idx, f.loser_frontier)
-							              : event_body(50, zone_idx, f.new_team));
+							0x1E, flip->frontier_changed
+							              ? event_body(52, zone_idx,
+							                           flip->loser_frontier)
+							              : event_body(50, zone_idx,
+							                           flip->new_team));
 				}
-				// The banner pair keyed by the new owning team [orig: 0x38/0x39 @0x50F991].
 				conn.link.transport->host_send(
-						0x1E, event_body(f.new_team == conn_team ? 56 : 57, zone_idx,
-				                         f.new_team));
+						0x1E, event_body(flip->new_team == team ? 56 : 57,
+						                 zone_idx, flip->new_team));
 			}
-
 		}
 	}
 
