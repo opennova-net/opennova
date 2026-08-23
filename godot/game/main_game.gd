@@ -101,6 +101,10 @@ var _world_load_pending := false
 var _round_ended := false
 # Pending NW_SP_DEBUG_POSE teleport (see DebugPoseEnv).
 var _debug_pose_env := OS.get_environment("NW_SP_DEBUG_POSE")
+# NW_SP_DEBUG_THIRD_PERSON=1: arm the F3 Player page's on-foot third person
+# once the world is up, so an unattended NW_SHOT_DIR run frames the local
+# player's own body (the swim/float checks) instead of the first-person view.
+var _debug_third_person_env := OS.get_environment("NW_SP_DEBUG_THIRD_PERSON") == "1"
 var _end_winner := 0
 var _end_screen_delay := 0.0
 var _end_screen: MissionEndScreen = null
@@ -1115,6 +1119,10 @@ func _process(delta: float) -> void:
 	if not _debug_pose_env.is_empty() and _state == State.WORLD:
 		_debug_pose_env = DebugPoseEnv.apply(_debug_pose_env,
 				_world.get_sim() if _world != null else null)
+	if _debug_third_person_env and _state == State.WORLD and _player_presenter != null \
+			and _world != null and _world.is_loaded() and _world.get_sim() != null:
+		_debug_third_person_env = false
+		_player_presenter.set_debug_third_person(true)
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats.is_capture_active()
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
