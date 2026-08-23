@@ -83,6 +83,13 @@ func tick(world: GameWorld, delta: float) -> void:
 			"cdx": int(card.get("res_dx", 0)),
 			"cdy": int(card.get("res_dy", 0)),
 			"citem": int(card.get("contact_item", 0)),
+			# AI decision state, named to match the retail probe (onhook ai_probe.c)
+			# so the two recordings join field-for-field.
+			"parent": int(card.get("parent", -1)),
+			"ground": int(card.get("ground", -1)),
+			"s35": int(card.get("s35", 0)),
+			"s37": int(card.get("s37", 0)),
+			"s38": int(card.get("s38", 0)),
 			"fa": int(card.get("fires_aimed", 0)),
 			"fb": int(card.get("fires_body", 0)),
 			# fall-through instrument

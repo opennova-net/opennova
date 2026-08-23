@@ -970,6 +970,25 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["res_dx"] = e->inf.dbg_res_dx;
 	out["res_dy"] = e->inf.dbg_res_dy;
 	out["contact_item"] = e->inf.dbg_contact_item;
+	// AI DECISION STATE, named to match the retail probe (onhook ai_probe.c) so
+	// the two recordings join field-for-field. Retail reads these straight off
+	// the entity and its AiSlot; these are our equivalents:
+	//   parent  = the carrier we are mounted to   [orig: entity->parentEntity +364]
+	//   ground  = what we are standing on         [orig: entity->groundEntity +0x28]
+	//   s35/37/38 = has-route / command / node    [orig: AiSlot +140/+148/+152]
+	// Without them a retail-vs-OpenNova diff can see THAT a body is stuck but not
+	// what order it believes it is under, which is the question that matters.
+	out["parent"] = -1;
+	out["ground"] = -1;
+	if (const opennova::world::Entity *pe =
+				ent && ent->mounted ? world_->registry.get(ent->mount_target) : nullptr)
+		out["parent"] = static_cast<int>(pe->bms_id);
+	if (const opennova::world::Entity *ge =
+				ent ? world_->registry.get(ent->ground_target) : nullptr)
+		out["ground"] = static_cast<int>(ge->bms_id);
+	out["s35"] = e->slot.f[35];
+	out["s37"] = e->slot.f[37];
+	out["s38"] = e->slot.f[38];
 	out["fires_aimed"] = e->inf.dbg_fires_aimed;
 	out["fires_body"] = e->inf.dbg_fires_body;
 	// The fall-through instrument: the sim's own ground value under this body
