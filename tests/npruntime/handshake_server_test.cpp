@@ -328,7 +328,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	np::GameConfig config;
 	config.server_name = "Configured LAN Host";
 	config.game_type = 0x00010020u;
-	config.team_choose = true;
+	config.mp_attributes |= np::GameConfig::kMpAttribTeamChoose;
 	config.max_players = 11;
 	config.expansion = "jox99";
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Lan,

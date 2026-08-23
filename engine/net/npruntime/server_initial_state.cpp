@@ -64,12 +64,9 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
 	if (!ctx.is_in_session) return flags;     // gated on is_in_session (+0x58)
-	// dword_2550A04 is the live mp-attribute store; game_settings.mp_attributes
-	// is its session snapshot. OpenNova retains an explicit setting override as
-	// well, but either representation of the same live TeamChoose bit must feed
+	// dword_2550A04 is the one live mp-attribute store. Its TeamChoose bit feeds
 	// BuildFlags even for a non-team game (fresh retail DM advertises 0x904).
-	if (r.team_choose ||
-	    (r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
+	if ((r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
 		flags = 4;
 	switch (static_cast<uint32_t>(ctx.transport_mode)) {
 	case 1: flags |= 0x400u; break;           // single-player host
