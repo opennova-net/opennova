@@ -27,6 +27,21 @@ extends RefCounted
 ##    [orig: Game_ShowEarlyError @ 0x4a68a0] — inside an archive it could never be read.
 const LOOSE_EXTENSIONS := [".sbf", ".txt"]
 
+## Missions must ALSO stay loose, and this one is not obvious from the mount rules.
+##
+## Retail builds its mission table from two scans: a loose `FindFirstFile *.bms` walk of the
+## working directory, and a per-archive entry walk that visits only the localres/language volume
+## PAIRS [orig: MissionList_ScanAndBuildFromFiles @ 0x563170; Mission_BuildMapListFromPFF
+## @ 0x562910]. `resource.pff` is in neither, so a mission archived there is mounted and
+## perfectly loadable BY NAME and still never appears in any mission list — the file resolves,
+## the menu is simply empty. Witnessed 2026-08-23: identical boots, the archived mission absent
+## from the boot scan, the loose one logged as `LOADED FILE: mnml.bms` + `mnml.bin`.
+##
+## The sibling `<stem>.bin` carries the mission's `[Info] TITLE` and BRIEFING and is looked up
+## alongside it, so it travels with the .bms. Every OTHER `.bin` — the boot string tables and the
+## music scripts — resolves from the archive normally and must stay there.
+const MISSION_EXTENSION := ".bms"
+
 ## Never packed and never copied: the retail runtime, its own writes, and any archive already
 ## present (packing an archive into an archive). The runtime binaries are staged separately from
 ## the configured retail dir, not taken from the asset root.
@@ -82,6 +97,14 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 	var loose := PackedStringArray()
 	var skipped := PackedStringArray()
 
+	# The mission family: every <stem>.bms plus its sibling <stem>.bin.
+	var mission_family := {}
+	for name in names:
+		var lower_name := String(name).to_lower()
+		if lower_name.ends_with(MISSION_EXTENSION):
+			mission_family[lower_name] = true
+			mission_family["%s.bin" % lower_name.get_basename()] = true
+
 	for name in names:
 		var lower := String(name).to_lower()
 		if _in_excluded_dir(lower) or _has_extension(lower, EXCLUDED_EXTENSIONS):
@@ -93,7 +116,7 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 			skipped.append(name)
 			continue
 
-		if _has_extension(lower, LOOSE_EXTENSIONS):
+		if _has_extension(lower, LOOSE_EXTENSIONS) or mission_family.has(lower):
 			if _copy_file(src, out_dir.path_join(name.get_file())) == OK:
 				loose.append(name)
 			else:
