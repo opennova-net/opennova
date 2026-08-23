@@ -1110,6 +1110,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
 	world::World &world = *ctx.world;
 	const bool round_was_announced = ctx.round_end_announced;
+	// Snapshot the phase at frame entry. Retail decrements the timer later on
+	// the shared second boundary, after the entity-update gate has already been
+	// tested, so the 1 -> 0 transition frame remains frozen.
+	// [orig: entity gate @0x51D8BD; decrement @0x51DC20..0x51DC33]
+	const bool preround_active = world.preround_delay_seconds != 0;
 
 	// (1) net-before-logic: drain each in-match connection's queued C2S 0x0C and read-apply (SNAP).
 	// burst.spawned marks an in-match connection — a mid-burst peer is still receiving its §5.2a
@@ -1157,22 +1162,32 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	}
 
 	// The sampled breath state belongs to the authoritative player slot and
-	// runs at the same pre-entity-update point as retail.
-	tick_player_breath(ctx, world);
+	// runs at the same pre-entity-update point as retail. Its caller is skipped
+	// during pre-round just like the rest of Server_UpdateEntityIdleTimers.
+	// [orig: Server_TickUpdate @0x51D8C4..0x51D8D7;
+	// Server_UpdateEntityIdleTimers gate @0x50D773]
+	if (!preround_active) tick_player_breath(ctx, world);
 
 	// (2) one logic tick (the host is always authority here). WAC/BMS/AI advance the world.
 	// [D-NET-123] Server_TickUpdate OWNS this logic tick — the inverse of the legacy seam, where the
 	// C2S drain ran INSIDE run_logic_tick (a net ISystem, retired P8). A binding driving the runtime
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
-	world.run_logic_tick(/*is_authority=*/true);
-	world.match.advance_tick(world);
+	world.run_logic_tick(
+			/*is_authority=*/true,
+			preround_active ? world::TickPhase::PreRound
+			                : world::TickPhase::Gameplay);
+	world.match.advance_tick(
+			world,
+			preround_active ? world::TickPhase::PreRound
+			                : world::TickPhase::Gameplay);
 	// Retail produces capture requests from movement collisions throughout the
 	// logic tick, then drains them in the periodic block below. Remote authority
 	// players are snapshot-driven here, so the world-owned contact pass consumes
 	// their same MoveOrder bit and final host pose. [orig: collision callsite
 	// @0x4B2F90..0x4B2FD0; Server_OnPlayerTouchCaptureZone @0x500BA0]
-	if (ctx.is_in_session && !world.match.outcome().ended)
+	if (!preround_active && ctx.is_in_session &&
+			!world.match.outcome().ended)
 		world::zone_capture_contact_tick(world);
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
@@ -1199,10 +1214,23 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	const bool round_ended_at_retail_linger_phase =
 			world.match.outcome().ended;
 
+	// The pre-round seconds dword shares the ordinary 62-tick periodic
+	// boundary. A non-session authority clears it there; an active session
+	// decrements it once. The phase snapshot above deliberately remains true
+	// for this whole frame even when this store reaches zero.
+	// [orig: Server_TickUpdate @0x51DB6D..0x51DC33]
+	const bool periodic_second = world.logic_tick % 62u == 0;
+	if (periodic_second) {
+		if (!ctx.is_in_session)
+			world.preround_delay_seconds = 0;
+		else if (world.preround_delay_seconds != 0)
+			--world.preround_delay_seconds;
+	}
+
 	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in
 	// Server_TickUpdate — reload 62 @0x51db93 — calls Server_CheckWinConditions
 	// @0x51df5a once per second].
-	if (world.logic_tick % 62u == 0) check_win_conditions(ctx, world);
+	if (periodic_second) check_win_conditions(ctx, world);
 	tick_respawn_holds(ctx, world);
 	announce_round_end(ctx, world);
 
@@ -1212,7 +1240,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// transport. [orig: SpawnWaveList_Tick @0x52A550 from Server_TickUpdate;
 	// SpawnWaveList_TickEntry @0x52A330]
 	if (ctx.is_in_session && !world.match.outcome().ended &&
-			world.logic_tick % 62u == 0) {
+			periodic_second) {
 		for (const world::SpawnWaveRelease &release :
 				world.spawn_waves.tick(world)) {
 			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -1261,7 +1289,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// The independent general 0x40 minimap-overlay producer runs above at its
 	// retail 14-tick cadence. It is intentionally not gated on this AS chain.
 	if (ctx.is_in_session && !world.match.outcome().ended &&
-			world.logic_tick % 62u == 0 &&
+			periodic_second &&
 			(world.match.rules().game_type & 0x30000u) != 0) {
 		world::ZoneCaptureEvents ev;
 		world::zone_capture_second_tick(world, ev);
@@ -1414,7 +1442,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// includes the respawn-pending bit4 (slot+89912 & 0x10 @0x5074c2) and dead players;
 	// golden ASH_I5A deploy window carries 0x6E ×11 at ~1 Hz]
 	if (ctx.is_in_session && !world.match.outcome().ended &&
-			world.logic_tick % 62u == 0) {
+			periodic_second) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
 			bool dead = false;

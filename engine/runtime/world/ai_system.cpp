@@ -340,7 +340,7 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
 void AiSystem::tick(World &world, const TickContext &ctx) {
     // AI does not run during the BMS pre-mission script pass: that invocation only
     // settles initial scripted state (EventFlags PreMission), it does not step brains.
-    if (ctx.pre_mission) return;
+    if (ctx.phase != TickPhase::Gameplay) return;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain

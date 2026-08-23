@@ -2111,6 +2111,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.local_health = fu.health;
 		++state_.health_updates_applied;
 	}
+	if (fu.weapon.present) {
+		// Phase 0 is the sole retail mirror of g_preround_delay_timer.
+		// Retain it between phase cycles, exactly like the client global.
+		// [orig: NapiNPClientMsg_0x00A @0x430064]
+		state_.preround_delay_seconds = fu.weapon.preround_timer;
+	}
 	if (fu.objective.present) {
 		state_.objective_won = static_cast<uint32_t>(fu.objective.state[0]);
 		state_.objective_lost = static_cast<uint32_t>(fu.objective.state[1]);

@@ -121,6 +121,13 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
+	// reset_round_counters copies the configured StartDelay seconds into the
+	// one live pre-round timer. Keep the timer on World: it is the authority
+	// phase predicate and the source of the phase-0 0x0A projection, rather
+	// than a second connection-local countdown.
+	// [orig: reset_round_counters @0x516C50, store @0x516C8D]
+	if (ctx.world != nullptr)
+		ctx.world->preround_delay_seconds = ctx.config.start_delay;
 	// The stock round initializer clears the global S2C 0x79 countdown. Its next
 	// Server_TickUpdate boundary therefore emits immediately and reloads 0x136.
 	// [orig: Server_InitNewRoundState @0x51CA9E]

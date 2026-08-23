@@ -61,7 +61,7 @@ public:
 
     void tick(opennova::world::World &world, const opennova::world::TickContext &ctx) override {
         if (!ctx.is_authority) return; // WAC runs only on the authoritative host
-        if (ctx.pre_mission) return;   // WAC does not participate in the BMS pre-mission pass
+        if (ctx.phase != opennova::world::TickPhase::Gameplay) return;
         if (!vm_.loaded()) return;     // no program installed (e.g. a BMS-only mission)
         if (paused) return;            // [orig: dword_C6EB28 gate]
         if (++accum_ < kTicksPerExecution) return; // [orig: dword_C6EAD4 ++ / cmp 0x3E]

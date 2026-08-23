@@ -469,7 +469,8 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	}
 	// PreMission events settle initial scripted state before the clock starts (AI is skipped on
 	// the pre-mission pass). Snapshot AFTER it so Stop restores the true play-start state.
-	world_->run_logic_tick(/*is_authority=*/true, /*pre_mission=*/true);
+	world_->run_logic_tick(/*is_authority=*/true,
+			opennova::world::TickPhase::PreMission);
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
 	have_baseline_ = true;

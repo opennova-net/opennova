@@ -73,6 +73,10 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	send_hello_once(ctx.runtime, hooks.send);
 	hooks.deposit_inbound();
 	const FrameSignals decoded = run_client_net_frame(ctx, hooks);
+	// Phase 0 of the authoritative 0x0A is the client's one pre-round
+	// predicate. Mirror it onto World before any local entity/system work.
+	ctx.world.preround_delay_seconds =
+			ctx.runtime.state().preround_delay_seconds;
 	materialize_replica_world(ctx, hooks);
 	spawn_and_arm_local_player(ctx, hooks);
 	if (decoded.health) apply_authoritative_health(ctx, hooks);
@@ -86,21 +90,27 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	refresh_projectile_proxies(ctx, hooks);
 	apply_gameplay_events(ctx);
 
-	hooks.apply_input_pre_tick();                       // input -> L's body input
-	ctx.world.run_logic_tick(/*is_authority=*/false);   // local World tick: moves L's motor ONLY (never Server_TickUpdate)
-	mirror_predicted_vehicles(ctx); // predicted boat poses -> the presented rows
+	const bool preround_active = ctx.world.preround_delay_seconds != 0;
+	hooks.apply_input_pre_tick(); // input latches stay live through the phase
+	ctx.world.run_logic_tick(
+			/*is_authority=*/false,
+			preround_active ? world::TickPhase::PreRound
+			                : world::TickPhase::Gameplay);
+	if (!preround_active)
+		mirror_predicted_vehicles(ctx); // predicted boat poses -> presented rows
 	// Vehicle prediction is the final carrier mover on a joiner. Recompose every
 	// seat/deck/object attachment from that final pose in this same frame, then
 	// publish the refreshed rows back to the local registry consumers. This is
 	// the retail second carrier-follow phase; doing it before the world mover
 	// leaves children one tick behind their vehicle.
-	ctx.runtime.refresh_remote_attachments();
+	if (!preround_active) ctx.runtime.refresh_remote_attachments();
 	mirror_mission_entities(ctx);
 	// The local mounted body was seat-posed earlier in AiSystem::tick, before
 	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
 	// final same-frame transform so the camera/view never trails its seat by one
 	// mover tick. Remote riders were recomposed in ClientState just above.
-	if (ctx.world.ai != nullptr && ctx.world.cached.local_player.valid()) {
+	if (!preround_active && ctx.world.ai != nullptr &&
+			ctx.world.cached.local_player.valid()) {
 		if (world::AiEntity *local_ai =
 				ctx.world.ai->for_handle(ctx.world.cached.local_player)) {
 			ctx.world.ai->refresh_mounted_pose(*local_ai, ctx.world);

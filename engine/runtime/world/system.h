@@ -13,11 +13,17 @@ class World;
 // ----------------------------------------------------------------------------
 // Systems plugged into the tick service (WAC VM, BMS evaluator, ...).
 // ----------------------------------------------------------------------------
+enum class TickPhase : uint8_t {
+    Gameplay,
+    PreMission,
+    PreRound,
+};
+
 struct TickContext {
     World *world = nullptr;
     uint32_t logic_tick = 0;
     bool is_authority = true;
-    bool pre_mission = false; // BMS PreMission pass (EventFlags PreMission=2)
+    TickPhase phase = TickPhase::Gameplay;
 };
 
 struct ISystem {

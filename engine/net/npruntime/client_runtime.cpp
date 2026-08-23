@@ -620,23 +620,30 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
 	advance_zone_timers();
 	view_.tick_minimap_overlays();
-	view_.tick_guided_missiles();   // the client-flown §5.15 pursuit (D-NET-64)
+	const bool preround_active = view_.state().preround_delay_seconds != 0;
+	// Client_ProcessNetworkFrame and its maintenance continue, but the later
+	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is
+	// nonzero. These portable movers are that entity body, not network work.
+	// [orig: network pump @0x526692; entity gate @0x52672C]
+	if (!preround_active)
+		view_.tick_guided_missiles(); // the client-flown section 5.15 pursuit
 
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp
 	// @0x4b7dbf/@0x4b7dd6]
-	view_.tick_lean();
+	if (!preround_active) view_.tick_lean();
 	// The remote arms dip rides the same body tick as the lean integrator.
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
-	view_.tick_arms_dip();
+	if (!preround_active) view_.tick_arms_dip();
 
 	// The per-class between-update mover: one step per 62.5 Hz tick after the
 	// recv fold (retail order: net frame first, entity movers after). No-op on
 	// the HostClient role (mode never enabled — the authority never
 	// interpolates, D-NET-89). [net-re §5.38e, D-NET-196]
-	view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
-	                                 ? joiner_->self_handle()
-	                                 : 0xFFFFu);
+	if (!preround_active)
+		view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
+		                                 ? joiner_->self_handle()
+		                                 : 0xFFFFu);
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
 

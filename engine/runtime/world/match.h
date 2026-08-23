@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "world/entity.h"
+#include "world/system.h"
 
 namespace opennova::world {
 
@@ -246,7 +247,11 @@ class Match {
                              const std::vector<EntityHandle> &scorers);
 
     // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
-    void advance_tick(World &world);
+    // Advance the server-owned match services for one frame. The periodic
+    // proximity/score pass remains live during PreRound, as it does after the
+    // retail countdown block; carried-objective motion and round time do not.
+    void advance_tick(World &world,
+                      TickPhase phase = TickPhase::Gameplay);
 
     std::vector<MatchGameplayEvent> drain_gameplay_events();
 

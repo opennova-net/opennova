@@ -311,7 +311,7 @@ static void test_pre_mission_pass() {
     w.add_system(&sys);
     w.load_systems();
 
-    w.run_logic_tick(true, /*pre_mission=*/true); // one pre pass
+    w.run_logic_tick(true, opennova::world::TickPhase::PreMission); // one pre pass
     CHECK(w.effects.count("text") == 1); // only the PreMission event fired
     tick_n(w, kPass + kCycle); // normal passes touch only the normal event
     CHECK(w.effects.count("text") == 2); // +1 from the normal event, pre event excluded
@@ -891,7 +891,7 @@ static void test_trigger_relations_group_records() {
 
     // Initial counts land on the pre-mission pass, ordered after the pre
     // sweep [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b].
-    w.run_logic_tick(true, /*pre_mission=*/true);
+    w.run_logic_tick(true, opennova::world::TickPhase::PreMission);
     CHECK(w.relations.group(3).initial_count == 3);
     CHECK(w.relations.group(3).live_count == 3);
 

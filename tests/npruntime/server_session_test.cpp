@@ -3193,6 +3193,61 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	return true;
 }
 
+// StartDelay is a host-side seconds phase, not a second gameplay clock. The
+// ordinary 62 Hz clock and network maintenance continue, while the World
+// systems stay frozen through the boundary that changes 1 -> 0. Gameplay
+// resumes on the following frame.
+// [orig: reset_round_counters @0x516C8D; Server_TickUpdate
+// @0x51D8BD and @0x51DC20..0x51DC33]
+bool check_preround_delay_phase_boundary() {
+	struct CountingSystem final : opennova::world::ISystem {
+		int ticks = 0;
+		const char *name() const override { return "preround-counter"; }
+		void tick(opennova::world::World &,
+		          const opennova::world::TickContext &) override {
+			++ticks;
+		}
+	};
+
+	opennova::world::World world;
+	CountingSystem counter;
+	world.add_system(&counter);
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kDeathmatch;
+	rules.game_time_minutes = 1;
+	world.match.configure(rules);
+	const int32_t initial_round_ticks = world.match.remaining_ticks();
+	opennova::np::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.world = &world;
+	ctx.config.start_delay = 2;
+	opennova::np::Server_InitNewRoundState(ctx);
+	if (!expect(world.preround_delay_seconds == 2,
+	            "round init seeds StartDelay as whole seconds"))
+		return false;
+
+	for (int i = 0; i < 61; ++i) opennova::np::Server_TickUpdate(ctx);
+	if (!expect(world.logic_tick == 61 && world.preround_delay_seconds == 2 &&
+	                    counter.ticks == 0,
+	            "pre-round advances the frame clock without running gameplay"))
+		return false;
+	opennova::np::Server_TickUpdate(ctx);
+	if (!expect(world.preround_delay_seconds == 1 && counter.ticks == 0,
+	            "first 62-tick boundary decrements StartDelay once"))
+		return false;
+	for (int i = 0; i < 62; ++i) opennova::np::Server_TickUpdate(ctx);
+	if (!expect(world.logic_tick == 124 && world.preround_delay_seconds == 0 &&
+	                    counter.ticks == 0 &&
+	                    world.match.remaining_ticks() == initial_round_ticks,
+	            "transition frame freezes systems and the round clock"))
+		return false;
+	opennova::np::Server_TickUpdate(ctx);
+	return expect(world.logic_tick == 125 && counter.ticks == 1 &&
+	                      world.match.remaining_ticks() == initial_round_ticks - 1,
+	              "gameplay resumes on the frame after countdown expiry");
+}
+
 } // namespace
 
 int main() {
@@ -3231,6 +3286,7 @@ int main() {
 	ok = check_score_ini_drives_session_status_values() && ok;
 	ok = check_timed_capture_host_wire_transaction() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
+	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }
