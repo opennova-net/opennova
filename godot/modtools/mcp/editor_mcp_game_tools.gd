@@ -40,13 +40,15 @@ func _init(
 
 func register_all(registry: McpToolRegistry) -> void:
 	registry.register(McpToolDef.make("run_game",
-			"Manage ONED's one standalone game process. op=start restarts the current child in "
-			+ "mode=game (F5: normal boot) or mode=mission (F6: current saved top-level loose .bms); "
-			+ "op=stop is F8; op=state polls it. Running never saves, exports, copies, or stages "
-			+ "editor data. Unsaved edits are excluded.",
+			"Manage ONED's one managed child process. op=start restarts it in mode=game (F5: normal "
+			+ "boot), mode=mission (F6: current saved top-level loose .bms), or mode=retail (F7: pack "
+			+ "the mounted assets and launch retail Jointops.exe on them - the asset oracle, needs a "
+			+ "retail install configured in Settings); op=stop is F8; op=state polls it. Only retail "
+			+ "packs; game and mission never save, export, copy or stage editor data. Unsaved edits "
+			+ "are excluded from every mode.",
 			{
 				"op": {"type": "string", "enum": ["start", "stop", "state"]},
-				"mode": {"type": "string", "enum": ["game", "mission"], "default": "game"},
+				"mode": {"type": "string", "enum": ["game", "mission", "retail"], "default": "game"},
 			}, ["op"]), Callable(self, "_tool_run_game"))
 	for def in GameMcpCatalog.definitions():
 		# One persistent Streamable-HTTP connection backs the proxy. Keep every
@@ -308,6 +310,10 @@ func _tool_run_game(args: Dictionary, ctx: McpToolContext) -> Variant:
 				if restart_reason.is_empty():
 					restart_reason = "The replacement game process did not become ready."
 				return McpToolResult.error(restart_reason)
+			if String(state.get("mode", "")) == "retail":
+				# Retail is not our runtime: no descriptor, no debug peer. Asking for one would
+				# report a failure on a launch that actually succeeded.
+				return _managed_state(session)
 			var err: Error = await _ensure_peer(
 					String(state.get("run_id", "")),
 					String(state.get("descriptor_path", "")),

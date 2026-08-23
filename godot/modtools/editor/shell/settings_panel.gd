@@ -32,6 +32,8 @@ var _set_settings_visible: Callable
 
 var _settings_resource_dir_edit: LineEdit
 var _settings_browse_resource_dir_button: Button
+var _settings_retail_dir_edit: LineEdit
+var _settings_browse_retail_dir_button: Button
 var _settings_apply_resource_dir_button: Button
 var _settings_recent_row: HBoxContainer
 var _settings_recent_option: OptionButton
@@ -78,7 +80,9 @@ func bind_nodes(
 	expansion_row: HBoxContainer, view_section: VBoxContainer,
 	grid_toggle: CheckBox, axes_toggle: CheckBox,
 	mcp_toggle: CheckBox, mcp_port_edit: LineEdit, mcp_status_label: Label,
-	pff_tool_button: Button
+	pff_tool_button: Button,
+	retail_dir_edit: LineEdit = null,
+	browse_retail_dir_button: Button = null
 ) -> void:
 	_settings_resource_dir_edit = resource_dir_edit
 	_settings_browse_resource_dir_button = browse_button
@@ -93,9 +97,20 @@ func bind_nodes(
 	_settings_mcp_port_edit = mcp_port_edit
 	_settings_mcp_status_label = mcp_status_label
 	_settings_pff_tool_button = pff_tool_button
+	_settings_retail_dir_edit = retail_dir_edit
+	_settings_browse_retail_dir_button = browse_retail_dir_button
 
 
 func wire() -> void:
+	if _settings_browse_retail_dir_button != null \
+			and not _settings_browse_retail_dir_button.pressed.is_connected(_on_browse_retail_dir_pressed):
+		_settings_browse_retail_dir_button.pressed.connect(_on_browse_retail_dir_pressed)
+	if _settings_retail_dir_edit != null \
+			and not _settings_retail_dir_edit.text_submitted.is_connected(_on_retail_dir_submitted):
+		_settings_retail_dir_edit.text_submitted.connect(_on_retail_dir_submitted)
+	if _settings_retail_dir_edit != null \
+			and not _settings_retail_dir_edit.focus_exited.is_connected(_apply_retail_dir_from_field):
+		_settings_retail_dir_edit.focus_exited.connect(_apply_retail_dir_from_field)
 	if _settings_browse_resource_dir_button != null and not _settings_browse_resource_dir_button.pressed.is_connected(_on_browse_resource_dir_pressed):
 		_settings_browse_resource_dir_button.pressed.connect(_on_browse_resource_dir_pressed)
 	if _settings_apply_resource_dir_button != null and not _settings_apply_resource_dir_button.pressed.is_connected(_on_apply_resource_dir_pressed):
@@ -122,6 +137,8 @@ func wire() -> void:
 func sync_popup_state() -> void:
 	if _settings_resource_dir_edit != null:
 		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
+	if _settings_retail_dir_edit != null:
+		_settings_retail_dir_edit.text = OnedSettings.get_retail_dir()
 	_populate_expansion_options()
 	_populate_recent_dirs()
 	if _settings_grid_toggle != null:
@@ -300,3 +317,45 @@ func apply_view_guides_to_active() -> void:
 		return
 	workspace.set_grid_visible(_view_grid_visible)
 	workspace.set_axes_visible(_view_axes_visible)
+
+
+# --- Retail install -----------------------------------------------------------------
+# The directory Play in Retail (F7) stages Jointops.exe / binkw32.dll / game.cfg from.
+# Editor-only: the runtime never launches retail, so this lives in ONED's own settings.
+
+func _on_browse_retail_dir_pressed() -> void:
+	if not _open_dir_dialog.is_valid():
+		return
+	_open_dir_dialog.call(
+		"Select Retail Joint Operations Install",
+		func(dir_path: String) -> void: _apply_retail_dir(dir_path),
+		OnedSettings.get_retail_dir())
+
+
+func _on_retail_dir_submitted(path: String) -> void:
+	_apply_retail_dir(path)
+
+
+func _apply_retail_dir_from_field() -> void:
+	if _settings_retail_dir_edit != null:
+		_apply_retail_dir(_settings_retail_dir_edit.text)
+
+
+func _apply_retail_dir(path: String) -> void:
+	var clean := path.strip_edges()
+	OnedSettings.set_retail_dir(clean)
+	if _settings_retail_dir_edit != null:
+		_settings_retail_dir_edit.text = clean
+	if clean.is_empty():
+		_status("Retail install cleared; Play in Retail is disabled.")
+	elif not DirAccess.dir_exists_absolute(clean):
+		_status("Retail install not found: %s" % clean)
+	elif not FileAccess.file_exists(clean.path_join("Jointops.exe")):
+		_status("No Jointops.exe in %s; Play in Retail stays disabled." % clean)
+	else:
+		_status("Retail install set. Play in Retail (F7) is ready.")
+
+
+func _status(message: String) -> void:
+	if _show_status.is_valid():
+		_show_status.call(message)

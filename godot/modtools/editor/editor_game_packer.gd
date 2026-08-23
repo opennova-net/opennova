@@ -143,3 +143,46 @@ static func _copy_file(src: String, dst: String) -> Error:
 	out.store_buffer(bytes)
 	out.close()
 	return OK
+
+
+## Staged from the configured retail install into the packed dir. `binkw32_.dll` is the real
+## Bink; a JOTAC install's `binkw32.dll` is an unrelated hook shim, so prefer the underscored
+## one. `game.cfg` matters: a FIRST launch with no config hangs in retail's video enumeration
+## before the menu ever appears (reproduced 2026-08-23). It is machine state, not game content,
+## and it is never committed.
+const RETAIL_RUNTIME := [
+	{ "from": "Jointops.exe", "to": "Jointops.exe" },
+	{ "from": "binkw32_.dll", "to": "binkw32.dll", "fallback": "binkw32.dll" },
+	{ "from": "game.cfg", "to": "game.cfg" },
+]
+
+
+## Pack `root` into `out_dir` and stage the retail runtime beside it, ready to launch.
+##
+## Returns { ok, exe, packed_dir, archived, loose, error }. This is the seam
+## ShellGameSession's RETAIL mode injects, so Play in Retail and the MCP tool cannot drift.
+static func pack_for_retail(root: Object, out_dir: String, retail_dir: String) -> Dictionary:
+	var packed := pack(root, out_dir)
+	if not bool(packed.get("ok", false)):
+		return { "ok": false, "exe": "", "error": String(packed.get("error", "Packing failed.")) }
+
+	var clean_retail := retail_dir.strip_edges()
+	if clean_retail.is_empty() or not DirAccess.dir_exists_absolute(clean_retail):
+		return { "ok": false, "exe": "", "error": "Retail install directory not found: %s" % retail_dir }
+
+	for entry in RETAIL_RUNTIME:
+		var src := clean_retail.path_join(String(entry["from"]))
+		if not FileAccess.file_exists(src) and entry.has("fallback"):
+			src = clean_retail.path_join(String(entry["fallback"]))
+		if not FileAccess.file_exists(src):
+			continue
+		_copy_file(src, out_dir.path_join(String(entry["to"])))
+
+	var exe := out_dir.path_join("Jointops.exe")
+	if not FileAccess.file_exists(exe):
+		return { "ok": false, "exe": "",
+			"error": "No Jointops.exe in %s — cannot launch retail." % clean_retail }
+
+	packed["exe"] = exe
+	packed["packed_dir"] = out_dir
+	return packed

@@ -78,6 +78,9 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _play_in_game_button: Button = %PlayInGameButton
 @onready var _play_current_mission_button: Button = %PlayCurrentMissionButton
 @onready var _stop_game_button: Button = %StopGameButton
+@onready var _play_in_retail_button: Button = %PlayInRetailButton
+@onready var _settings_retail_dir_edit: LineEdit = %SettingsRetailDirEdit
+@onready var _settings_browse_retail_dir_button: Button = %SettingsBrowseRetailDirButton
 @onready var _browser_pane_mount: PanelContainer = %ResourceBrowserPaneMount
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -231,7 +234,14 @@ func _ready() -> void:
 		func(pid: int) -> int: return OS.kill(pid),
 		func() -> int: return Time.get_ticks_msec(),
 		_play_current_mission_button,
-		_stop_game_button
+		_stop_game_button,
+		func() -> String: return OnedSettings.get_retail_dir(),
+		# Pack the mounted assets and stage the retail runtime beside them. The session calls
+		# this from its ONE spawn funnel, so Play in Retail and the MCP tool share this path.
+		func(out_dir: String, retail_dir: String) -> Dictionary:
+			return EditorGamePacker.pack_for_retail(
+				_resource_library.get_resource_root(), out_dir, retail_dir),
+		_play_in_retail_button
 	)
 	_tile_gizmo_overlay.setup(_tile_gizmo, _tile_gizmo_label, _viewport_lane, active_workspace_supplier)
 	_tile_gizmo_overlay.wire_buttons(
@@ -274,7 +284,8 @@ func _ready() -> void:
 		_settings_apply_resource_dir_button, _settings_recent_row,
 		_settings_recent_option, _settings_expansion_row, _settings_view_section,
 		_settings_grid_toggle, _settings_axes_toggle, _settings_mcp_toggle,
-		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button)
+		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button,
+		_settings_retail_dir_edit, _settings_browse_retail_dir_button)
 	_settings_panel.load_view_state()
 	_layout.setup(
 		self,
@@ -427,11 +438,16 @@ func get_game_run_session() -> ShellGameSession:
 
 func run_game(mode: String = "game") -> bool:
 	var normalized := mode.strip_edges().to_lower()
-	if normalized != "game" and normalized != "mission":
-		show_status_message("Unknown run mode '%s'." % mode, 0.0, &"error")
-		return false
-	return _game_launch.run_current_mission() \
-			if normalized == "mission" else _game_launch.launch()
+	match normalized:
+		"game":
+			return _game_launch.launch()
+		"mission":
+			return _game_launch.run_current_mission()
+		"retail":
+			return _game_launch.run_retail()
+		_:
+			show_status_message("Unknown run mode '%s'." % mode, 0.0, &"error")
+			return false
 
 
 func stop_game() -> bool:
@@ -1237,6 +1253,10 @@ func _shortcut_input(event: InputEvent) -> void:
 				return
 			KEY_F6:
 				run_game("mission")
+				get_viewport().set_input_as_handled()
+				return
+			KEY_F7:
+				run_game("retail")
 				get_viewport().set_input_as_handled()
 				return
 			KEY_F8:
