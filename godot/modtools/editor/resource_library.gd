@@ -14,11 +14,10 @@ extends RefCounted
 # Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
 # via engine/resource_index/resource_dir_settings.gd so a directory picked in
 # either app is the same persisted value.
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 # Layout state (split offsets) shares the same config file as the resource dir,
 # but lives in its own section; the resource-dir section is owned by
-# ResourceDirSettings (load_state/save_state delegate to it).
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+# OnedSettings (load_state/save_state delegate to it).
+const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
@@ -122,7 +121,7 @@ func scan_root() -> Dictionary:
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 
-# Loads the persisted root from the shared ResourceDirSettings.
+# Loads the persisted root from OnedSettings (the editor's own config; the runtime keeps its own).
 # That helper drops a persisted root that no longer points at a real, sane resource
 # directory (moved/deleted dirs, or stale temp/test paths that leaked into the
 # shared state) so the browser shows a clean "no directory" state instead of a dead
@@ -130,7 +129,7 @@ func scan_root() -> Dictionary:
 func load_state() -> Dictionary:
 	# Resource-dir persistence lives in ResourceDirSettings (shared with the
 	# runtime); get_resource_dir() already drops stale/invalid paths.
-	_root_dir = ResourceDirSettings.get_resource_dir()
+	_root_dir = OnedSettings.get_resource_dir()
 	if _root_dir.is_empty():
 		_resource_root.clear()
 	else:
@@ -139,18 +138,18 @@ func load_state() -> Dictionary:
 
 
 func save_state() -> void:
-	ResourceDirSettings.set_resource_dir(_root_dir)
+	OnedSettings.set_resource_dir(_root_dir)
 
 
 # Recently used resource directories (shared with the runtime via
 # ResourceDirSettings). The shell reaches this state only through the library,
 # so these thin forwarders keep that boundary while the dropdown lives in the shell.
 func get_recent_dirs() -> PackedStringArray:
-	return ResourceDirSettings.get_recent_dirs()
+	return OnedSettings.get_recent_dirs()
 
 
 func clear_recent_dirs() -> void:
-	ResourceDirSettings.clear_recent_dirs()
+	OnedSettings.clear_recent_dirs()
 
 
 func canonical_key(path: String) -> String:

@@ -3,7 +3,7 @@ extends GutTest
 # Full runtime-shell regression: retail-shaped packed boot resources, public menu intents, and
 # the real blocking GameWorld load. It never relies on the test process having /d.
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")

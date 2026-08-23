@@ -1,7 +1,7 @@
 extends GutTest
 
 const TerrainEditorScript = preload("res://modtools/terrain/terrain_editor.gd")
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
 const TEST_ROOT := "opennova_state_test"
 
 var _saved_state_config := PackedByteArray()

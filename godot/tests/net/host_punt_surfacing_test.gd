@@ -28,7 +28,7 @@ const DeployHost := preload("res://game/world/deploy_screen_presenter.gd")
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const FIXTURE_DIR := "res://../assets"
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 # What JoinerConnection composes for the captured punt: the DPC/DC codes the client's own
 # exit-reason switch keys on, plus the sender's tag and formatted mismatch type.
 const PUNT_REASON := "the host closed the session (reason 33, class 2): LogPuntEvent t35"

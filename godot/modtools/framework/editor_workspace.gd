@@ -582,7 +582,7 @@ func _resource_root_or_settings() -> ResourceRoot:
 	var root := _resource_root()
 	if root != null:
 		return root
-	var dir := ResourceDirSettings.get_resource_dir()
+	var dir := OnedSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
 	var resources := ResourceRoot.new()

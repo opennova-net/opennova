@@ -11,7 +11,7 @@ const ShellPresentationSessionScript := preload(
 		"res://game/shell_presentation_session.gd")
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
 const POLICY_FILE := "policy.bin"
 const POLICY_PLAIN := "persisted game profile reached the mounted root"

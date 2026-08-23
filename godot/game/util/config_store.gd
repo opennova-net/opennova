@@ -6,7 +6,8 @@ extends RefCounted
 ## own path/section/keys and domain rules; this owns only the disk protocol —
 ## a read never fails (missing file = defaults), a write always preserves the
 ## other sections of a SHARED file (resource_dir_settings and mcp_settings
-## deliberately share user://terrain_editor_state.cfg).
+## each own a file: ONED user://oned.cfg, the runtime user://opennova.cfg,
+## and the agent servers user://mcp.cfg).
 
 
 ## The stored value, or `default` when the file or key is absent.

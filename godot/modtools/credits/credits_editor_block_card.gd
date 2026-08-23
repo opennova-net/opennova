@@ -1,7 +1,6 @@
 class_name CreditsEditorBlockCard
 extends PanelContainer
 
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
 # type chips so a selected card reads as its type at a glance. TEXT rides the
@@ -316,7 +315,7 @@ func _coerce_resource_root(value: Variant) -> ResourceRoot:
 		return value
 	var dir := String(value).strip_edges() if value != null else ""
 	if dir.is_empty():
-		dir = ResourceDirSettings.get_resource_dir()
+		dir = OnedSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
 	var resources := ResourceRoot.new()

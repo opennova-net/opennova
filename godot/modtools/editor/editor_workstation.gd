@@ -214,8 +214,8 @@ func _ready() -> void:
 	_game_launch.setup(
 		_play_in_game_button,
 		func() -> String: return _resource_library.get_root_dir(),
-		func() -> String: return ResourceDirSettings.get_expansion(),
-		func() -> String: return ResourceDirSettings.get_game(),
+		func() -> String: return OnedSettings.get_expansion(),
+		func() -> String: return OnedSettings.get_game(),
 		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		get_unsaved_workspace_labels,

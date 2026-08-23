@@ -1287,7 +1287,7 @@ func _on_camera_escape() -> void:
 
 func _load_editor_state() -> void:
 	var config := ConfigFile.new()
-	if config.load("user://terrain_editor_state.cfg") != OK:
+	if config.load(OnedSettings.CONFIG_PATH) != OK:
 		return
 	_last_open_dir = String(config.get_value("paths", "last_open_dir", ""))
 	_last_save_dir = String(config.get_value("paths", "last_save_dir", ""))
@@ -1296,11 +1296,11 @@ func _load_editor_state() -> void:
 
 func _save_editor_state() -> void:
 	var config := ConfigFile.new()
-	config.load("user://terrain_editor_state.cfg")
+	config.load(OnedSettings.CONFIG_PATH)
 	config.set_value("paths", "last_open_dir", _last_open_dir)
 	config.set_value("paths", "last_save_dir", _last_save_dir)
 	config.set_value("paths", "last_export_dir", _last_export_dir)
-	config.save("user://terrain_editor_state.cfg")
+	config.save(OnedSettings.CONFIG_PATH)
 
 
 func _remember_open_path(path: String) -> void:

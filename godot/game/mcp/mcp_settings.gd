@@ -2,7 +2,9 @@ class_name McpSettings
 extends RefCounted
 
 ## Persistence + launch flags for the embedded MCP server. Lives in the shared
-## editor/runtime config (user://terrain_editor_state.cfg) under [mcp],
+## own config (user://mcp.cfg) under [mcp] -- shared by BOTH agent servers
+## (ONED's and the runtime's) on purpose, so it belongs to neither app's
+## settings file,
 ## following the ResourceDirSettings pattern. The server is ON by default
 ## wherever ONED runs (project decision; the Settings toggle is the off
 ## switch, and a future release may flip the packaged default to opt-in) but
@@ -12,7 +14,7 @@ extends RefCounted
 ##   --mcp-port N   listen on N this launch (also forces the server on)
 ##   --mcp-off      do not start the server this launch
 
-const CONFIG_PATH := "user://terrain_editor_state.cfg"
+const CONFIG_PATH := "user://mcp.cfg"
 const SECTION := "mcp"
 const ENABLED_KEY := "enabled"
 const PORT_KEY := "port"
