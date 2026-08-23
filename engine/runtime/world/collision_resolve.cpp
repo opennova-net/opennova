@@ -341,6 +341,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     // The contact-flag dispatch runs whether or not the query
                     // produced force — a pure ladder/zone touch still latches.
                     // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
+                    if (is_authority && (res.flags & kTouchChangeTeam) != 0)
+                        record_change_team_contact(source, ch);
                     if ((res.flags & 0x1u) != 0 && ladder.valid) {
                         if (ladder_io == nullptr) {
                             // Latch-only channel (replica rows / harness callers):
@@ -994,6 +996,15 @@ bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
     return false;
 }
 
+void CollisionWorld::record_change_team_contact(EntityHandle source,
+                                                 EntityHandle trigger) {
+    if (!source.valid() || !trigger.valid()) return;
+    for (const ChangeTeamContact &contact : change_team_contacts_) {
+        if (contact.source == source && contact.trigger == trigger) return;
+    }
+    change_team_contacts_.push_back({source, trigger});
+}
+
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside
 // the resolver loop @ 0x4b30b7-0x4b351e]
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
@@ -1013,9 +1024,8 @@ void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &hea
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);
         if ((flags & 0x100u) != 0 && health > 0) health = static_cast<int16_t>(health - 50);
-        // CT/change-team touch (0x200) feeds the retail capture/team-change request
-        // callback (`Server_OnPlayerTouchCaptureZone @ 0x500ba0`). Ours still rides
-        // the zone system's independent proximity path (D-COL-6).
+        // CT/change-team touches are recorded above from pass 0 with both exact
+        // entity identities, then consumed by the capture transaction.
     }
     if ((flags & 0x4u) != 0) ent->flags |= kEntityFlagArmoryZone; // type 6 [orig: @ 0x4b34a0]
     if ((flags & 0x400u) != 0)

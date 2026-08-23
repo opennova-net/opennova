@@ -8158,9 +8158,11 @@ residuals (all §5.61-cited in code): vehicle-seat deploys (seat model unported)
 requester-specific 0x6E, and deploy-time 0x61 are ported with the retail 0/10 base/numbered
 defaults.
 
-**Reimpl (slice 2 — the capture loop, completed 2026-08-22, D-NET-162).** Ported as two
-deep operations: `world::zone_capture_contact_tick` records moving pool-0 touches and
-active-capture presence each host logic tick; `world::zone_capture_second_tick` owns the
+**Reimpl (slice 2 — the capture loop, completed 2026-08-22; exact CT producer completed
+2026-08-23, D-NET-162/D-COL-6).** Ported as two deep operations: authority movement
+resolves publish exact authored type-10 Change Team Box source/trigger pairs and
+`world::zone_capture_contact_tick` drains them into active-capture presence each host
+logic tick; `world::zone_capture_second_tick` owns the
 1 Hz transaction (enemy-frontier latch, the complete control-delta formula including its
 spawn-registry ownership/clock term, secure edges, request arbitration, instant numbered
 flips via neutral, un-numbered timed active entries, `item_attrib2 & 2` entity conversion,
@@ -11770,11 +11772,15 @@ the separately tracked D-NET-133 repair-path residual.
 
 **D-NET-162** [reimpl gap, PORTED 2026-07-04; full contact/timed-capture transaction,
 formula, scoring, registry-index, and takeover-option parity completed 2026-08-22;
-proximity score-event parity and ordered 0x50/FARP enforcement completed 2026-08-23; 00TRg
+proximity score-event parity, ordered 0x50/FARP enforcement, and exact CT collision
+producer completed 2026-08-23; 00TRg
 overlay cadence validated 2026-08-02] **The AS capture loop now runs on our host.**
-`world::zone_capture_contact_tick` is the per-logic-tick producer: moving live pool-0
-players touching a capture trigger queue one zone/team request and mark unique presence in
-an ACTIVE timed entry (maximum 32). `world::zone_capture_second_tick` owns the retail 1 Hz
+`CollisionWorld::resolve_entity` is the per-logic-tick producer: authority pass-0
+type-10 contacts publish exact source/trigger pairs, including snapshot-owned remote org2
+bodies at their host pose. `world::zone_capture_contact_tick` drains that stream; live
+pool-0 players touching a capture trigger queue one zone/team request and mark unique
+presence in an ACTIVE timed entry (maximum 32). There is no MoveOrder gate or radius
+fallback. `world::zone_capture_second_tick` owns the retail 1 Hz
 transaction: enemy-frontier latch; `calculate_capture_zone_control_delta @0x501120`
 verbatim (small-server boost, 20/40/60 soft caps, 12/24/48 base table, sorted
 spawn-registry census, late-round ownership-leader acceleration, shared-number divide,
@@ -11801,8 +11807,8 @@ strictly decodes 0x6C and folds it only into a pre-existing 0x53 window, matchin
 
 The 0x40 producer runs independently on its witnessed 14-tick cadence per §5.19
 (`Server_BuildOverlayStateForPlayer @0x517FC0` → `Entity_ClassifyForMinimap @0x50FA70` →
-flush `@0x50FE20`). `zone_chain_test` pins control, timed capture, movement gating,
-contests, conversion, ordered neutral/new snapshots, and next-pass FARP enforcement;
+flush `@0x50FE20`). `zone_chain_test` pins control, timed capture, stationary exact-shape
+contact, contests, conversion, ordered neutral/new snapshots, and next-pass FARP enforcement;
 `npruntime_server_session_test` pins the exact `0x50` ownership bodies, `0x53` 0→2→3,
 `0x6C` 2→1 progression, and once-only score; client/catalog tests pin
 strict decode and ordered folding.

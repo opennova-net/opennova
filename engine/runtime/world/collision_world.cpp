@@ -249,7 +249,18 @@ void CollisionWorld::invalidate_trace_views() {
 
 void CollisionWorld::build_tick_tables(World &world) {
     if (trace_profile_enabled_) trace_profile_ = TraceProfile{};
+    // Resolver contacts are a per-logic-tick stream. A pre-round or ended
+    // match may deliberately skip the gameplay drain, so never carry a touch
+    // into a later tick.
+    change_team_contacts_.clear();
     build_tables(world, true);
+}
+
+std::vector<CollisionWorld::ChangeTeamContact>
+CollisionWorld::take_change_team_contacts() {
+    std::vector<ChangeTeamContact> contacts;
+    contacts.swap(change_team_contacts_);
+    return contacts;
 }
 
 void CollisionWorld::build_initial_tables(World &world) {

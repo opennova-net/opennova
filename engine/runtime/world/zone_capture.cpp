@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <limits>
 
+#include "world/collision.h"
 #include "world/spawn_select.h"
 #include "world/world.h"
 
@@ -159,51 +160,50 @@ bool capture_request_available(const World &world, const Entity &zone) {
 } // namespace
 
 void zone_capture_contact_tick(World &world) {
+    if (world.collision == nullptr) return;
+    const std::vector<CollisionWorld::ChangeTeamContact> contacts =
+            world.collision->take_change_team_contacts();
+
     // The collision callback is multiplayer/team-family gated in retail. This
     // raw bit test intentionally includes C&C and every other team mode that
-    // happens to author a ChangeTeam trigger. [orig: @0x4B2F90..0x4B2FD0]
+    // happens to author a ChangeTeam trigger. There is no MoveOrder gate: the
+    // movement resolver's exact type-10 contact is the producer.
+    // [orig: @0x4B31DD..0x4B3238]
     if ((world.match.rules().game_type & 0x30000u) == 0) return;
 
-    std::vector<const Entity *> movers;
-    std::vector<const Entity *> zones;
-    world.registry.for_each([&](const Entity &entity) {
-        if (is_playing_player(entity) &&
-                (entity.net_move_input & Entity::kMoveOrderMoving) != 0)
-            movers.push_back(&entity);
-        if (entity.is_capture_trigger && entity.alive)
-            zones.push_back(&entity);
-    });
-
     ZoneCaptureState &state = world.zone_capture_state;
-    for (const Entity *zone : zones) {
-        for (const Entity *player : movers) {
-            if ((player->team != 1 && player->team != 2) ||
-                    !in_zone_radius(*player, *zone))
-                continue;
-            // Server_OnPlayerTouchCaptureZone rejects an enemy touching a still
-            // secured numbered zone. Unnumbered objectives always pass.
-            if (zone->zone_number != 0 && player->team != zone->team &&
-                    zone->zone_control > 0)
-                continue;
+    for (const CollisionWorld::ChangeTeamContact &contact : contacts) {
+        const Entity *player = world.registry.get(contact.source);
+        const Entity *zone = world.registry.get(contact.trigger);
+        if (player == nullptr || zone == nullptr ||
+                !is_playing_player(*player) ||
+                !zone->is_capture_trigger || !zone->alive ||
+                (player->team != 1 && player->team != 2))
+            continue;
 
-            if (ZoneCaptureState::Active *active = find_active(state, zone->handle)) {
-                if (active->presence.size() < 32 &&
-                        std::find(active->presence.begin(), active->presence.end(),
-                                  player->handle) == active->presence.end())
-                    active->presence.push_back(player->handle);
-            }
+        // Server_OnPlayerTouchCaptureZone rejects an enemy touching a still
+        // secured numbered zone. Unnumbered objectives always pass.
+        if (zone->zone_number != 0 && player->team != zone->team &&
+                zone->zone_control > 0)
+            continue;
 
-            if (!capture_request_available(world, *zone)) continue;
-            const auto duplicate = std::find_if(
-                    state.requests.begin(), state.requests.end(),
-                    [&](const auto &request) {
-                        return request.zone == zone->handle &&
-                               request.team == player->team;
-                    });
-            if (duplicate == state.requests.end())
-                state.requests.push_back(
-                        {zone->handle, player->team, player->handle});
+        if (ZoneCaptureState::Active *active = find_active(state, zone->handle)) {
+            if (active->presence.size() < 32 &&
+                    std::find(active->presence.begin(), active->presence.end(),
+                              player->handle) == active->presence.end())
+                active->presence.push_back(player->handle);
         }
+
+        if (!capture_request_available(world, *zone)) continue;
+        const auto duplicate = std::find_if(
+                state.requests.begin(), state.requests.end(),
+                [&](const auto &request) {
+                    return request.zone == zone->handle &&
+                           request.team == player->team;
+                });
+        if (duplicate == state.requests.end())
+            state.requests.push_back(
+                    {zone->handle, player->team, player->handle});
     }
 }
 

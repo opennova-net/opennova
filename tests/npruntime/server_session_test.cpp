@@ -25,6 +25,7 @@
 #include <npwire/session_keys.h>
 
 #include <world/ai.h>
+#include <world/collision.h>
 #include <world/game_type.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
@@ -3165,7 +3166,13 @@ bool check_timed_capture_host_wire_transaction() {
 	ctx.is_in_session = 1;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
+	opennova::world::CollisionWorld collision;
+	opennova::world::AiSystem ai;
 	world.mp_session = true;
+	world.collision = &collision;
+	world.ai = &ai;
+	ai.collision = &collision;
+	world.add_system(&ai);
 	ctx.world = &world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
@@ -3184,7 +3191,49 @@ bool check_timed_capture_host_wire_transaction() {
 	zone.health = 1;
 	zone.alive = true;
 	zone.position = {20.0f, 30.0f, 4.0f};
+	zone.yaw = 90; // mission yaw 90 is identity collision placement
 	const auto zone_handle = world.registry.spawn(1, zone);
+
+	// The transaction starts only when the authority player-body resolver
+	// intersects an authored type-10 Change Team Box. This is intentionally not
+	// derived from zone_radius: the latter belongs to the separate 1 Hz
+	// secure/proximity scorers. [orig: Entity_ComputeBoneCollisionForce
+	// @0x4AE150 type dispatch @0x4AEB7B; player-body resolver callback
+	// @0x4B31DD..0x4B3238]
+	auto capture_box = [] {
+		opennova::world::CollisionModel model;
+		auto plane = [&](int nx, int ny, int nz, float distance) {
+			opennova::world::CollisionPlane value;
+			value.nx = static_cast<int16_t>(nx);
+			value.ny = static_cast<int16_t>(ny);
+			value.nz = static_cast<int16_t>(nz);
+			value.dist = static_cast<int32_t>(distance * 65536.0f);
+			model.planes.push_back(value);
+		};
+		plane(16384, 0, 0, -70.0f);
+		plane(-16384, 0, 0, -70.0f);
+		plane(0, 16384, 0, -70.0f);
+		plane(0, -16384, 0, -70.0f);
+		plane(0, 0, 16384, -12.0f);
+		plane(0, 0, -16384, 0.0f);
+
+		opennova::world::CollisionVolume volume;
+		volume.type = opennova::world::bvol_type::kChangeTeamCT;
+		volume.min_x = volume.min_y = -70 * 65536;
+		volume.max_x = volume.max_y = 70 * 65536;
+		volume.min_z = 0;
+		volume.max_z = 12 * 65536;
+		volume.plane_count = 6;
+		model.volumes.push_back(volume);
+
+		opennova::world::CollisionSection section;
+		section.volume_count = 1;
+		model.sections.push_back(section);
+		return model;
+	};
+	const int capture_model = collision.add_model(capture_box());
+	collision.assign_entity(zone_handle, capture_model);
+
 	auto soldier = [&](uint8_t team) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
@@ -3192,10 +3241,17 @@ bool check_timed_capture_host_wire_transaction() {
 		entity.team = team;
 		entity.health = 150;
 		entity.alive = true;
-		entity.net_move_input =
-				opennova::world::Entity::kMoveOrderMoving;
 		entity.position = zone.position;
-		return world.registry.spawn(0, entity);
+		const auto handle = world.registry.spawn(0, entity);
+		opennova::world::AiEntity *body = ai.at(ai.attach(handle));
+		body->inf.active = true;
+		body->net_is_remote_peer = true;
+		body->health = 150;
+		body->team = team;
+		body->pos[0] = 20 * 65536;
+		body->pos[1] = 30 * 65536;
+		body->pos[2] = 4 * 65536;
+		return handle;
 	};
 	const auto first = soldier(1);
 	world.match.upsert_player({first, 0, "Blue", {}, {}});
@@ -3280,10 +3336,14 @@ bool check_timed_capture_host_wire_transaction() {
 	if (!expect(advance_53.size() == 1 && advance_53[0].size() == 9 &&
 	                    advance_53[0][4] == 2 && advance_53[0][8] == 2 &&
 	                    advance_6c.size() == 1 && advance_6c[0] == expected_6c,
-	            "two unique movers emit exact 0x6C and advance 0x53 by rate two"))
+	            "two unique contacts emit exact 0x6C and advance 0x53 by rate two"))
 		return false;
 
 	world.registry.get(second)->position = {500.0f, 500.0f, 0.0f};
+	opennova::world::AiEntity *second_body = ai.for_handle(second);
+	second_body->pos[0] = 500 * 65536;
+	second_body->pos[1] = 500 * 65536;
+	second_body->pos[2] = 0;
 	const auto completed = tick_second();
 	const auto complete_50 = bodies(completed, opennova::s2c::TEAM_ASSIGN);
 	const auto complete_53 = bodies(completed, opennova::s2c::ZONE_TIMER_WINDOW);

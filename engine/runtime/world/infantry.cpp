@@ -860,15 +860,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
 
-    // Network-snapped remote peer: its pose is SNAPPED each frame by the host read-apply
-    // (netsim EntityWireBridge::apply_player_intent), so the movement motor must NOT
-    // re-simulate it — it skips, exactly as the original exits before any motor work when
-    // the entity+0x24 bit0 net-snap flag is set. The host never interpolates; the
-    // smooth-target is staged for CLIENT-side interpolation only (a deferred concern).
-    // [orig: Entity_UpdateInfantryAI @0x4b9a03 `test [esi+24h], 1; jnz loc_4BFC8B`;
-    // docs/net/novaworld-net-re.md §5.38a / D-NET-89.]
-    // The body-ANIM selection is NOT part of that skip: on the authority it runs for every
-    // player from the replicated input, feeding the 0x0A anim bytes (D-NET-159).
+    // A remote player's locomotion source is its C2S pose snapshot, so do not
+    // run the NPC/local-input movement core over it. The authority still runs
+    // the org2 body animation and shared collision tail in
+    // remote_player_body_anim; retail's entity+0x24 bit 0 is the conditional
+    // hard-snap/freeze gate, not an all-remote-player classifier. [orig: org2
+    // head @0x4B411B..0x4B4127; hard-snap test @0x4C207E..0x4C2091;
+    // resolver call @0x4B7CE0..0x4B7CF4]
     if (e.net_is_remote_peer) {
         if (is_authority) remote_player_body_anim(e, world, logic_tick);
         return;
@@ -2298,19 +2296,18 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     }
 }
 
-// AUTHORITY body-anim selection for a net-snapped remote player (see the ai.h declaration).
-// Runs INSTEAD of the movement motor for wire-snapped peers: position/heading stay owned by
-// the read-apply snap; only the anim channel advances here. [orig: Entity_UpdateInfantryPlayerBody
-// @0x4b40e0 — the same function body the local player runs; the pose work is inert for a
-// net-snapped entity because the read-apply overwrites it, while the anim stores persist]
+// Authority org2 subset: C2S owns pose; the retail player-body function still
+// advances animation and its shared movement-collision tail.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0; resolver call @0x4B7CF4]
 void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     if (!inf.active) return;
     Entity *ent = world.registry.get(e.handle);
     if (ent == nullptr) return;
 
-    // HIDDEN entities skip the whole body motor — the retail head bails on Flags bit0
-    // before any anim work, which is why a deploy-pending (hidden) player's channel is
+    // A hard-snap/frozen entity skips the whole body motor — the retail head
+    // bails on Flags bit0 before any anim work, which is why a deploy-pending
+    // (hidden) player's channel is
     // FROZEN on the wire (golden pre-deploy ratio constant at 40; ours swept to 255 in
     // v32 until this gate). [orig: Entity_UpdateInfantryPlayerBody @0x4b411b-0x4b4127
     // `mov edx,[esi+24h]; test dl,1; jnz return`]
@@ -2320,6 +2317,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // returns before it); sync the health copy the selection/lean gates read.
     e.health = ent->health;
     int death_transition = -1;
+    RootMotionFrame collision_frame;
+    bool have_collision_frame = false;
 
     if (ent->health <= 0) {
         // Death edge — one-shot to the death pose, same policy as the motor's death edge
@@ -2433,17 +2432,20 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
     // .adm loop rate when the embedder has anim data; without it the phase self-advances on a
     // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
-    // anim data rate). Root motion output is discarded: the pose is wire-owned.
+    // anim data rate). Root translation remains wire-owned; the frame's capsule
+    // feeds the shared collision tail below.
     if (root_motion != nullptr) {
         if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-        RootMotionFrame discard;
-        if (advance_primary_channel(inf, *root_motion, discard)) {
-            inf.prev_capsule_bottom = discard.capsule_bottom;
+        have_collision_frame =
+                advance_primary_channel(inf, *root_motion, collision_frame);
+        if (have_collision_frame) {
+            inf.prev_capsule_bottom = collision_frame.capsule_bottom;
             // The remote-player eye-offset restamp: retail runs the same body
             // updater for net-snapped peers, and the +0x74 store persists while
             // the pose work is inert — the org2 non-local formula, lean at rest.
             // [orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]
-            const int32_t extent = discard.capsule_top - discard.capsule_bottom;
+            const int32_t extent = collision_frame.capsule_top -
+                                   collision_frame.capsule_bottom;
             int32_t eye_z = std::min(extent, 0xD000);
             if (eye_z < 0x2000) eye_z = 0x2000;
             inf.eye_offset_z = eye_z;
@@ -2463,6 +2465,29 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         advance_primary_channel_fallback(inf);
         if (death_transition >= 0)
             inf.begin_body_transition(death_transition);
+    }
+
+    // Snapshot ownership suppresses locomotion, not the retail collision tail.
+    // Resolve the current pose with the anim capsule and zero movement channels;
+    // mounted bodies retain the resolver's ordinary force-suppression rule.
+    // [orig: org2 resolver call @0x4B7CE0..0x4B7CF4; CT callback gate
+    // @0x4B31DD..0x4B3238]
+    if (collision != nullptr && collision->instance_count() != 0) {
+        int32_t contact_vel[2] = {0, 0}, contact_vel_z = 0;
+        const int32_t tick_start_z = e.pos[2];
+        const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
+        collision->resolve_entity(
+                world, e.handle, e.collide_state, e.pos, contact_vel,
+                contact_vel_z,
+                have_collision_frame ? collision_frame.capsule_bottom : 0,
+                have_collision_frame ? collision_frame.capsule_top : 0,
+                e.heading, e.pitch, /*is_player=*/true, is_authority,
+                logic_tick, inf.anim_state, infantry_anim_flags(inf.anim_state),
+                e.health, nullptr, &lio);
+        ent->health = e.health;
+        ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
+        ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
+        ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
     }
 
     // Present-pass clip for the host's own third-person view of this peer.

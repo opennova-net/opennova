@@ -792,8 +792,8 @@ void test_named_gameplay_volume_dispatch() {
     CHECK((cd.flags & 0x20u) != 0);
     CHECK(cd.door_sections == 1u);
 
-    // CT is the non-solid change-team box signal. Its downstream request bridge is
-    // deliberately tracked separately as D-COL-6.
+    // CT is the non-solid change-team box signal. The movement resolver drains
+    // this exact flag into the gameplay contact stream below.
     ContactResult ct;
     CHECK(!run(10, 0, false, ct));
     CHECK((ct.flags & 0x200u) != 0);
@@ -869,6 +869,34 @@ void test_resolver_damage_grades_and_zones() {
                            0, 0, false, true, 0, 43, 0u, ahealth);
     Entity *sa = arig.world.registry.get(arig.soldier);
     CHECK((sa->flags & kEntityFlagArmoryZone) != 0);
+
+    // The authority publishes the exact source/trigger pair once per tick even
+    // when the non-solid CT query returns no push. A client-side resolve cannot
+    // author gameplay contact. [orig: CT dispatch/callback
+    // @0x4B31DD..0x4B3238]
+    Rig ct_rig(box_model(10, 0, 3.0, 3.0, 3.0));
+    ct_rig.move_soldier(10.0, 10.0, 0.5);
+    int32_t ct_pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
+    int32_t ct_vel[3] = {0, 0, 0};
+    int16_t ct_health = 100;
+    CollisionWorld::ResolveState ct_state;
+    ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, ct_state,
+                             ct_pos, ct_vel, ct_vel[2], 0, fx(1.8), 0, 0,
+                             true, true, 0, 43, 1u, ct_health);
+    ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, ct_state,
+                             ct_pos, ct_vel, ct_vel[2], 0, fx(1.8), 0, 0,
+                             true, true, 0, 43, 1u, ct_health);
+    const auto ct_contacts = ct_rig.cw.take_change_team_contacts();
+    CHECK(ct_contacts.size() == 1);
+    if (!ct_contacts.empty()) {
+        CHECK(ct_contacts[0].source == ct_rig.soldier);
+        CHECK(ct_contacts[0].trigger == ct_rig.building);
+    }
+    CollisionWorld::ResolveState client_state;
+    ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, client_state,
+                             ct_pos, ct_vel, ct_vel[2], 0, fx(1.8), 0, 0,
+                             true, false, 0, 43, 1u, ct_health);
+    CHECK(ct_rig.cw.take_change_team_contacts().empty());
 }
 
 // ---------------------------------------------------------------------------
