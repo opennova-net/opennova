@@ -39,56 +39,57 @@ int32_t axis_bam(int16_t degrees) {
 // A world with one entity in each of the four pools (the four EntityKinds promote into).
 // `pool1_ai_capable` stamps the pool-1 item's Entity::is_ai_capable (items.def AIData /
 // ItemDefAttrib & 0x100000), which gates the faithful 0x0D AI-trailer (D-NET-97).
-w::World make_four_pool_world(bool pool1_ai_capable = false) {
-	w::World world;
-	world.registry.configure_pool(0, 8);
-	world.registry.configure_pool(1, 8);
-	world.registry.configure_pool(2, 8);
-	world.registry.configure_pool(3, 8);
+struct FourPoolWorld final : w::World {
+	explicit FourPoolWorld(bool pool1_ai_capable = false) {
+		w::World &world = *this;
+		world.registry.configure_pool(0, 8);
+		world.registry.configure_pool(1, 8);
+		world.registry.configure_pool(2, 8);
+		world.registry.configure_pool(3, 8);
 
-	w::Entity organic;
-	organic.kind = w::EntityKind::Organic;
-	organic.item_id = 0x0816;     // AI infantry
-	organic.name = "tango1";
-	organic.position = {10.0f, 20.0f, 1.5f};
-	organic.yaw = 30;
-	organic.team = 2;
-	organic.net_id = 0x4242;
-	organic.anim_slot = 5;
-	world.registry.spawn(0, organic);
+		w::Entity organic;
+		organic.kind = w::EntityKind::Organic;
+		organic.item_id = 0x0816;     // AI infantry
+		organic.name = "tango1";
+		organic.position = {10.0f, 20.0f, 1.5f};
+		organic.yaw = 30;
+		organic.team = 2;
+		organic.net_id = 0x4242;
+		organic.anim_slot = 5;
+		world.registry.spawn(0, organic);
 
-	w::Entity item;
-	item.kind = w::EntityKind::Item;
-	item.item_id = 0x050E;        // a truck / destructible
-	item.name = "crate";
-	item.position = {30.0f, 40.0f, 0.0f};
-	item.yaw = 90;
-	item.team = 1;
-	item.health = 250;
-	item.is_ai_capable = pool1_ai_capable;
-	world.registry.spawn(1, item);
+		w::Entity item;
+		item.kind = w::EntityKind::Item;
+		item.item_id = 0x050E;        // a truck / destructible
+		item.name = "crate";
+		item.position = {30.0f, 40.0f, 0.0f};
+		item.yaw = 90;
+		item.team = 1;
+		item.health = 250;
+		item.is_ai_capable = pool1_ai_capable;
+		world.registry.spawn(1, item);
 
-	w::Entity building;
-	building.kind = w::EntityKind::Building;
-	building.item_id = 0x0123;    // armory-shaped static
-	building.position = {-5.0f, 6.0f, 2.0f};
-	building.yaw = 45;
-	building.team = 0;
-	world.registry.spawn(2, building);
+		w::Entity building;
+		building.kind = w::EntityKind::Building;
+		building.item_id = 0x0123;    // armory-shaped static
+		building.position = {-5.0f, 6.0f, 2.0f};
+		building.yaw = 45;
+		building.team = 0;
+		world.registry.spawn(2, building);
 
-	w::Entity marker;
-	marker.kind = w::EntityKind::Marker;
-	marker.item_id = 6006;        // authored KOTH hill marker
-	marker.position = {1.0f, 2.0f, 3.0f};
-	marker.yaw = 270;
-	marker.team = 1;
-	marker.bound_radius = 25.5f;
-	world.registry.spawn(3, marker);
-	return world;
-}
+		w::Entity marker;
+		marker.kind = w::EntityKind::Marker;
+		marker.item_id = 6006;        // authored KOTH hill marker
+		marker.position = {1.0f, 2.0f, 3.0f};
+		marker.yaw = 270;
+		marker.team = 1;
+		marker.bound_radius = 25.5f;
+		world.registry.spawn(3, marker);
+	}
+};
 
 bool run_pool0_organic() {
-	w::World world = make_four_pool_world();
+	FourPoolWorld world;
 	nw::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
 	if (!expect(batch.records.size() == 1, "exactly one pool-0 organic")) return false;
 
@@ -130,7 +131,7 @@ bool check_pool1_common(const nw::PoolSpawnRecord &r) {
 // gate (itemDef.attrib & 0x100000 @0x433327), so it is crash-safe (the strcpy @0x433370 reads a
 // valid in-packet NUL-terminated name). [D-NET-97]
 bool run_pool1_spawn_ai_capable() {
-	w::World world = make_four_pool_world(/*pool1_ai_capable=*/true);
+	FourPoolWorld world(/*pool1_ai_capable=*/true);
 	nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);
 	if (!expect(batch.records.size() == 1, "exactly one pool-1 item")) return false;
 
@@ -151,7 +152,7 @@ bool run_pool1_spawn_ai_capable() {
 // the 0x0800 flag is clear and no name rides the wire, matching retail (the stock decoder never
 // enters its attrib-gated strcpy for a non-AI item). [D-NET-97]
 bool run_pool1_spawn_non_ai() {
-	w::World world = make_four_pool_world(/*pool1_ai_capable=*/false);
+	FourPoolWorld world(/*pool1_ai_capable=*/false);
 	nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);
 	if (!expect(batch.records.size() == 1, "exactly one pool-1 item")) return false;
 
@@ -216,7 +217,7 @@ bool run_pool1_spawn_mount_handles() {
 }
 
 bool run_pool2_static() {
-	w::World world = make_four_pool_world();
+	FourPoolWorld world;
 	nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
 	// Building is at slot 0, so a single slot-aligned record (no holes).
 	if (!expect(batch.start_index == 0, "start index 0")) return false;
@@ -259,7 +260,7 @@ bool run_pool2_static_slot_alignment() {
 }
 
 bool run_pool3_marker() {
-	w::World world = make_four_pool_world();
+	FourPoolWorld world;
 	nw::Pool3SyncBatch batch = ns::build_pool3_marker_batch(world);
 	if (!expect(batch.records.size() == 1, "exactly one pool-3 marker")) return false;
 
@@ -280,7 +281,7 @@ bool run_pool3_marker() {
 
 bool run_pools_are_disjoint() {
 	// Each extractor reads ONLY its own pool — no cross-contamination.
-	w::World world = make_four_pool_world();
+	FourPoolWorld world;
 	if (!expect(ns::build_pool0_organic_batch(world).records.size() == 1, "pool0 sees only organics")) return false;
 	if (!expect(ns::build_pool1_spawn_batch(world).records.size() == 1, "pool1 sees only items")) return false;
 	if (!expect(ns::build_pool3_marker_batch(world).records.size() == 1, "pool3 sees only markers")) return false;

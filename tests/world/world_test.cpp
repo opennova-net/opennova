@@ -1,12 +1,16 @@
 // engine/runtime/world substrate tests: addressable entities (faithful find_by_net_id),
 // shared var store, entity commands, tick cadence, snapshot/restore.
 #include <cstdio>
+#include <type_traits>
 #include <utility>
 
 #include "world/sound_emitter_mailbox.h"
 #include "world/world.h"
 
 using namespace opennova::world;
+
+static_assert(!std::is_copy_constructible_v<World>);
+static_assert(!std::is_move_constructible_v<World>);
 
 static int failures = 0;
 #define CHECK(c)                                                              \

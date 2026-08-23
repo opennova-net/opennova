@@ -281,6 +281,14 @@ class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer s
 class World {
 public:
     World() : commands(*this) {}
+    // World has stable identity: commands binds this object, net defaults to
+    // its local_sink member, and registered systems retain mission-lifetime
+    // relationships. Memberwise copy/move would preserve pointers/references
+    // into the source World and create a split simulation.
+    World(const World &) = delete;
+    World &operator=(const World &) = delete;
+    World(World &&) = delete;
+    World &operator=(World &&) = delete;
 
     EntityRegistry registry;
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)

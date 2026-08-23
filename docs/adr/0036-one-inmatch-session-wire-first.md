@@ -51,6 +51,13 @@ the code harder to change without helping a retail peer.
    preserves witnessed behavior and wire bytes, amend or supersede it in the
    same change rather than encoding the conflict into another layer.
 
+The concrete `World` also has stable mission-lifetime identity. It is neither
+copyable nor movable: `EntityCommands` binds the owning world, the default net
+sink points into it, and registered systems retain relationships to it.
+Constructors and fixtures therefore build a world directly at its final
+address instead of returning one by value. `tests/world/world_test.cpp` pins
+that ownership invariant at compile time.
+
 ## Consequences
 
 - Retail byte compatibility can be reviewed independently of our object model.
@@ -61,6 +68,8 @@ the code harder to change without helping a retail peer.
 - The source tree still contains `npruntime` and `netsim`; their presence does
   not authorize callers to treat them as stable product APIs.
 - Internal API breakage is resolved by updating all callers in one commit.
+- A `World` cannot be relocated after construction; mission owners keep it at
+  one address for the entire active-session lifetime.
 
 ## Verification
 

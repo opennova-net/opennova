@@ -81,6 +81,13 @@ BMS, AI, collision, and the selected network runtime. This is intentional
 locality—resource resolution and Godot value conversion do not leak into the
 portable session state machine.
 
+That `World` is constructed in place and keeps one address for the mission.
+It is deliberately non-copyable and non-movable because `EntityCommands`
+binds it, its default network sink is an embedded member, and registered
+systems retain mission-lifetime relationships. This prevents a returned or
+relocated world from splitting registry state from the commands and systems
+that operate on it; `tests/world/world_test.cpp` enforces the invariant.
+
 ### Godot adapter and presentation
 
 `Simulation` converts the typed input once, advances its mission kernel, and
