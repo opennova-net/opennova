@@ -15,6 +15,7 @@
 // out of this light header.
 namespace opennova::world {
 class World;
+struct EntityHandle;
 }
 
 // P8 — the reactive in-match gameplay-message reply path, ported off the retired
@@ -51,6 +52,23 @@ MissionMetadataBlob build_mission_metadata_blob(
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world);
+
+// Project the world-owned wave list into the requester-specific S2C 0x6E
+// body. Public because both the reactive 0x0E queue-join reply and the 1 Hz
+// host producer must use the exact same writer.
+// [orig: NetPacket_WriteSpawnWaveStatus @0x507490]
+std::vector<uint8_t> build_spawn_wave_status_body(
+		const world::World &world, world::EntityHandle requester);
+
+// Execute the ONE deploy-release transaction shared by immediate C2S 0x0E
+// picks and SpawnWaveList_Tick releases. `target_zone` invalid selects the
+// team's marker chain. Returns the private 0x5A/0x61/frontier bundle for the
+// owning connection; callers decide whether it is returned reactively or
+// staged on a transport.
+// [orig: Server_ProcessPlayerDeath deploy leg @0x517740]
+std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
+		const GameConfig &config, NapiNPConnection &conn,
+		world::World &world, world::EntityHandle target_zone);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into

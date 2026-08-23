@@ -116,6 +116,8 @@ struct GameConfig {
 	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime_2 @0x24D2174]
 	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
 	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
+	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]
+	int32_t spawn_wave_time_zone = 10;     // [orig g_spawn_wave_time_zone @0x24D2250]
 	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160]        dword[7]; SET `StartDelay`

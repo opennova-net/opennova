@@ -630,6 +630,16 @@ struct ClientScoreFeedback {
 	uint32_t updates = 0;
 };
 
+// Latest requester-specific deploy-wave panel plus a valid-packet edge. The
+// group body is already the strict npwire decode; retaining it here lets both
+// loopback and remote clients consume one canonical state.
+// [orig: NapiNPClientMsg_HandleSquadRosterSync @0x429880]
+struct ClientSpawnWaveStatus {
+	bool known = false;
+	uint32_t updates = 0;
+	SpawnWaveStatus value;
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -671,6 +681,7 @@ struct ClientState {
 	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
 	ClientScoreFeedback score_feedback;
+	ClientSpawnWaveStatus spawn_waves;
 	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;

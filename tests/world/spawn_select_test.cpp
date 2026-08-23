@@ -35,6 +35,18 @@ void spawn_npc(World &w, Vec3 pos) {
     w.registry.spawn(0, e);
 }
 
+EntityHandle spawn_zone(World &w, int pool, uint8_t team, uint8_t number,
+                        int32_t control = 0x10000) {
+    Entity e;
+    e.kind = EntityKind::Item;
+    e.is_spawn_point = true;
+    e.team = team;
+    e.zone_number = number;
+    e.zone_control = control;
+    e.alive = true;
+    return w.registry.spawn(pool, e);
+}
+
 bool approx(float a, float b) { return std::fabs(a - b) < 1e-3f; }
 
 } // namespace
@@ -121,6 +133,114 @@ int main() {
         CHECK(approx(r.position.y, 22.0f));
         CHECK(r.yaw == 45);
     }
+
+	// --- SpawnWaveList_BuildFromMission: retail defaults put NUMBERED zones on
+	//     the 10-second list while an unnumbered base remains immediate. A zero
+	//     numbered-zone option falls back to the nonzero base option.
+	// [orig: Config_SetDefaults @0x54D030; SpawnWaveList_BuildFromMission @0x52A920]
+	{
+		World w;
+		w.registry.configure_pool(1, 16);
+		w.registry.configure_pool(2, 16);
+		const EntityHandle numbered = spawn_zone(w, 2, 1, 3);
+		const EntityHandle base = spawn_zone(w, 1, 1, 0);
+		w.spawn_waves.build_from_mission(w, 0, 10);
+		CHECK(w.spawn_waves.entries().size() == 1);
+		CHECK(w.spawn_waves.has_entry(numbered));
+		CHECK(!w.spawn_waves.has_entry(base));
+		CHECK(w.spawn_waves.entries()[0].interval == 10);
+
+		w.spawn_waves.build_from_mission(w, 7, 0);
+		CHECK(w.spawn_waves.entries().size() == 2);
+		CHECK(w.spawn_waves.entries()[0].interval == 7);
+		CHECK(w.spawn_waves.entries()[1].interval == 7);
+	}
+
+	// --- Queue semantics: same-player duplicates are rejected, moving to a new
+	//     group evicts the old row, team mismatch is rejected, and a group caps
+	//     at the retail eight player pointers. Status ETA is position-sensitive.
+	// [orig: SpawnWaveList_TryQueuePlayer @0x52A490;
+	//  SpawnWaveList_GetEntryInfo @0x52A700]
+	{
+		World w;
+		w.registry.configure_pool(0, 16);
+		w.registry.configure_pool(2, 16);
+		const EntityHandle a = spawn_zone(w, 2, 1, 1);
+		const EntityHandle b = spawn_zone(w, 2, 1, 2);
+		w.spawn_waves.build_from_mission(w, 0, 10);
+		std::vector<EntityHandle> players;
+		for (int i = 0; i < 9; ++i) {
+			Entity p;
+			p.kind = EntityKind::Organic;
+			p.team = (i == 8) ? 2 : 1;
+			players.push_back(w.registry.spawn(0, p));
+		}
+		CHECK(w.spawn_waves.try_queue(w, a, players[0]));
+		CHECK(!w.spawn_waves.try_queue(w, a, players[0]));
+		CHECK(w.spawn_waves.try_queue(w, b, players[0]));
+		CHECK(w.spawn_waves.entries()[0].queued.empty());
+		CHECK(w.spawn_waves.entries()[1].queued.size() == 1);
+		CHECK(!w.spawn_waves.try_queue(w, b, players[8]));
+		for (int i = 1; i < 8; ++i)
+			CHECK(w.spawn_waves.try_queue(w, b, players[i]));
+		Entity extra;
+		extra.kind = EntityKind::Organic;
+		extra.team = 1;
+		const EntityHandle ninth = w.registry.spawn(0, extra);
+		CHECK(!w.spawn_waves.try_queue(w, b, ninth));
+		CHECK(w.spawn_waves.entries()[1].queued.size() == 8);
+		CHECK(w.spawn_waves.entries()[1].requester_countdown(players[0]) == 0);
+		CHECK(w.spawn_waves.entries()[1].requester_countdown(players[3]) == 30);
+		CHECK(w.spawn_waves.entries()[1].requester_countdown(ninth) == 80);
+	}
+
+	// --- Tick semantics: countdown zero releases the head on the next 1 Hz
+	//     pass, then exactly one member per interval. Losing full control while
+	//     counting down flushes the whole group and both timers. A team flip does
+	//     the same and refreshes the cached team.
+	// [orig: SpawnWaveList_TickEntry @0x52A330;
+	//  SpawnWaveList_ResetOnZoneTeamChange @0x52A5B0]
+	{
+		World w;
+		w.registry.configure_pool(0, 8);
+		w.registry.configure_pool(2, 8);
+		const EntityHandle zone = spawn_zone(w, 2, 1, 1);
+		Entity p1;
+		p1.kind = EntityKind::Organic;
+		p1.team = 1;
+		Entity p2 = p1;
+		const EntityHandle h1 = w.registry.spawn(0, p1);
+		const EntityHandle h2 = w.registry.spawn(0, p2);
+		w.spawn_waves.build_from_mission(w, 0, 2);
+		CHECK(w.spawn_waves.try_queue(w, zone, h1));
+		CHECK(w.spawn_waves.try_queue(w, zone, h2));
+		auto released = w.spawn_waves.tick(w);
+		CHECK(released.size() == 1 && released[0].player == h1 &&
+		      released[0].zone == zone);
+		CHECK(w.spawn_waves.entries()[0].countdown == 2);
+		CHECK(w.spawn_waves.tick(w).empty());
+		CHECK(w.spawn_waves.entries()[0].countdown == 1);
+		CHECK(w.spawn_waves.tick(w).empty());
+		CHECK(w.spawn_waves.entries()[0].countdown == 0);
+		released = w.spawn_waves.tick(w);
+		CHECK(released.size() == 1 && released[0].player == h2);
+
+		w.spawn_waves.build_from_mission(w, 0, 2);
+		CHECK(w.spawn_waves.try_queue(w, zone, h1));
+		CHECK(w.spawn_waves.tick(w).size() == 1);
+		CHECK(w.spawn_waves.try_queue(w, zone, h2));
+		w.registry.get(zone)->zone_control = 0xFFFF;
+		CHECK(w.spawn_waves.tick(w).empty());
+		CHECK(w.spawn_waves.entries()[0].queued.empty());
+		CHECK(w.spawn_waves.entries()[0].countdown == 0);
+
+		w.registry.get(zone)->zone_control = 0x10000;
+		CHECK(w.spawn_waves.try_queue(w, zone, h1));
+		w.registry.get(zone)->team = 2;
+		w.spawn_waves.reset_on_zone_team_change(w, zone);
+		CHECK(w.spawn_waves.entries()[0].queued.empty());
+		CHECK(w.spawn_waves.entries()[0].team == 2);
+	}
 
     if (failures == 0) std::printf("OK spawn_select\n");
     return failures == 0 ? 0 : 1;

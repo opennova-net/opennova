@@ -28,6 +28,7 @@
 #include "world/water_cross.h"
 #include "world/fire_sound.h"
 #include "world/sound_emitter_mailbox.h"
+#include "world/spawn_select.h"
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
 #include "world/ammo_table.h"
@@ -447,6 +448,10 @@ public:
     // scratch. Keeping it beside the chain prevents a second lifecycle or a
     // static server singleton. [orig: CaptureCtx_Reset @0x53BD00]
     ZoneCaptureState zone_capture_state;
+    // Mission-built deploy wave groups. Keeping them beside spawn selection
+    // gives immediate picks and timed releases one lifecycle and no host-only
+    // shadow table. [orig: SpawnWaveList_BuildFromMission @0x52A920]
+    SpawnWaveList spawn_waves;
 
     // The player waypoint track (built by mission promotion from the blue-route
     // nav channel; empty when the mission authors none). Advanced per logic tick
@@ -568,6 +573,7 @@ public:
         EnvState env;
         EnvNetworkState network_env;
         Match match;
+        SpawnWaveList spawn_waves;
         uint32_t logic_tick = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
         EntityHandle local_player;

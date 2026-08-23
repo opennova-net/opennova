@@ -190,6 +190,12 @@ inline constexpr uint32_t kDefaultFlagReturnTicks = 210;
 // g_capture_speed_setting @0x551D3E..0x551D55]
 inline constexpr int32_t kDefaultCaptureDurationSeconds = 15;
 inline constexpr int32_t kDefaultCaptureSpeedSetting = 1;
+// Deploy waves are asymmetric by default: unnumbered/base spawns deploy
+// immediately, while numbered zones release one player every ten seconds.
+// [orig: Config_SetDefaults @0x54D030 writes dword_2550B7C=0 and
+// dword_2550B80=10; apply_session_settings_to_globals @0x551D3E..0x551D55]
+inline constexpr int32_t kDefaultSpawnWaveTimeBase = 0;
+inline constexpr int32_t kDefaultSpawnWaveTimeZone = 10;
 // [orig: Config_SetDefaults @0x54D030 writes g_MpNumTeams = 2]
 inline constexpr uint32_t kDefaultNumTeams = 2;
 inline constexpr uint32_t kDefaultRespawnTimeout = 5;

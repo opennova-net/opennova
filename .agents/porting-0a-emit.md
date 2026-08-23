@@ -150,16 +150,17 @@ target) in net-re D-NET-146.
   team 2 wholly owns zone 3) + 0x40/0x6F/0x53/0x6E; the pick = C2S 0x0E [i16 handle]
   (0xFFFE=frontier auto) gated on team + control≥1.0; placement = zone origin/6007
   scatter/per-team markers (Server_PositionPlayerForSpawn, ex-CMap misnomer); waves =
-  g_spawn_wave_list drip (host options, default off); the whole capture loop runs in the
+  g_spawn_wave_list drip (base default 0, numbered-zone default 10 seconds); the whole capture loop runs in the
   1 Hz Server_TickUpdate block (control delta formula pinned incl. the underdog catch-up).
   ASH_I5A authors zones 1(t1)/2×2(neutral)/3(t2) as type-1359 bunkers. PORTED slice 1:
   `world::ZoneChain` + zone fields + 0x0E handler (deploy at pick, dead-only, computed 0x1E
   ev-0x3A hint) + per-recipient uniform mask + PER-TEAM join markers (both AS teams
   previously spawned in team 1's base — 6003 first-family-wins). `zone_chain_test` pins the
   ASH shape; 230/230 ctest; GDExtension rebuilt. Slice 2 now owns the contact/control/timed
-  capture transaction and its 0x6F/0x53/0x6C + 0x1E wire. Requester-local 0x81
-  Points refresh is also ported. Remaining riders are waves, exact authored CT
-  geometry, proximity bits, and seat deploys.
+  capture transaction and its 0x6F/0x53/0x6C + 0x1E wire. Spawn-wave construction,
+  queue/reset/tick behavior, requester-specific 0x6E, and the shared immediate/timed
+  deployment transaction are ported. Requester-local 0x81 Points refresh is also ported.
+  Remaining riders are exact authored CT geometry, proximity bits, and seat deploys.
   **v31 LIVE (same day): FOUR FAILED riders → the next round is an IDA ALIGNMENT PASS over
   the v31 wire.** (1) Deploy screen still absent — ZERO C2S 0x0E all session (the picker
   never appeared client-side; slice-1 handler unexercised). The advertising gap, ranked

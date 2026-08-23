@@ -76,6 +76,12 @@ static_assert(NetProtocol::DEFAULT_CAPTURE_DURATION_SECONDS ==
 static_assert(NetProtocol::DEFAULT_CAPTURE_SPEED_SETTING ==
 		opennova::game_rules::kDefaultCaptureSpeedSetting,
 		"DEFAULT_CAPTURE_SPEED_SETTING drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_SPAWN_WAVE_TIME_BASE ==
+		opennova::game_rules::kDefaultSpawnWaveTimeBase,
+		"DEFAULT_SPAWN_WAVE_TIME_BASE drifted from npwire game_type.h");
+static_assert(NetProtocol::DEFAULT_SPAWN_WAVE_TIME_ZONE ==
+		opennova::game_rules::kDefaultSpawnWaveTimeZone,
+		"DEFAULT_SPAWN_WAVE_TIME_ZONE drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_NUM_TEAMS == opennova::game_rules::kDefaultNumTeams,
 		"DEFAULT_NUM_TEAMS drifted from npwire game_type.h");
 static_assert(NetProtocol::DEFAULT_RESPAWN_TIMEOUT == opennova::game_rules::kDefaultRespawnTimeout,
@@ -171,6 +177,8 @@ void NetProtocol::_bind_methods() {
 	BIND_CONSTANT(DEFAULT_FLAG_RETURN_TICKS);
 	BIND_CONSTANT(DEFAULT_CAPTURE_DURATION_SECONDS);
 	BIND_CONSTANT(DEFAULT_CAPTURE_SPEED_SETTING);
+	BIND_CONSTANT(DEFAULT_SPAWN_WAVE_TIME_BASE);
+	BIND_CONSTANT(DEFAULT_SPAWN_WAVE_TIME_ZONE);
 	BIND_CONSTANT(DEFAULT_NUM_TEAMS);
 	BIND_CONSTANT(DEFAULT_RESPAWN_TIMEOUT);
 	BIND_CONSTANT(DEFAULT_START_DELAY);

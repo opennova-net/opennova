@@ -1553,6 +1553,7 @@ World::Snapshot World::snapshot() const {
     s.env = env;
     s.network_env = network_env;
     s.match = match;
+    s.spawn_waves = spawn_waves;
     s.logic_tick = logic_tick;
     s.prng16_state = prng16_state;
     s.local_player = cached.local_player;
@@ -1566,6 +1567,7 @@ void World::restore(const Snapshot &s) {
     env = s.env;
     network_env = s.network_env;
     match = s.match;
+    spawn_waves = s.spawn_waves;
     logic_tick = s.logic_tick;
     prng16_state = s.prng16_state;
     // Reset per-tick health/proximity counters, then restore only the stable

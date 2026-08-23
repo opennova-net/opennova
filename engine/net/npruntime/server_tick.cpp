@@ -966,6 +966,32 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	if (world.logic_tick % 62u == 0) check_win_conditions(ctx, world);
 	announce_round_end(ctx, world);
 
+	// Spawn-wave release precedes capture-zone mutation on the shared 1 Hz
+	// cadence. Each release runs the same deployment transaction as an
+	// immediate C2S 0x0E pick, then stages its private bundle on that player's
+	// transport. [orig: SpawnWaveList_Tick @0x52A550 from Server_TickUpdate;
+	// SpawnWaveList_TickEntry @0x52A330]
+	if (ctx.is_in_session && !world.match.outcome().ended &&
+			world.logic_tick % 62u == 0) {
+		for (const world::SpawnWaveRelease &release :
+				world.spawn_waves.tick(world)) {
+			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!is_in_match(conn) || conn.link.transport == nullptr ||
+						conn.link.owned_entity != release.player)
+					continue;
+				std::vector<ProtocolMessage> deployment =
+						Server_ReleasePlayerDeployment(
+								ctx.config, conn, world, release.zone);
+				for (ProtocolMessage &message : deployment)
+					conn.link.transport->host_send(
+							message.tag, std::move(message.payload),
+							message.reliable, message.flags.raw,
+							message.capacity_exempt);
+				break;
+			}
+		}
+	}
+
 	// Queue per-peer retail maintenance before the ordinary 0x0A fan so the
 	// requests share HostSession's next open S2C boundary.
 	if (!world.match.outcome().ended) {
@@ -1142,19 +1168,15 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 	}
 
-	// (2c) Spawn-wave status: S2C 0x6E at 1 Hz to every PENDING or DEAD in-match player —
-	// the deploy/death screen's team-roster + wave panel feed. With no host wave options
-	// configured the body is the empty-group form (a single 0x00 group-count byte); wave
-	// groups land with g_spawn_wave_list (§5.61 deferral). [orig: Server_TickUpdate
+	// (2c) Spawn-wave status: requester-specific S2C 0x6E at 1 Hz to every
+	// PENDING or DEAD in-match player. [orig: Server_TickUpdate
 	// @0x51e089 emits NetPacket_WriteSpawnWaveStatus @0x507490 at 1 Hz; the recipient mask
 	// includes the respawn-pending bit4 (slot+89912 & 0x10 @0x5074c2) and dead players;
 	// golden ASH_I5A deploy window carries 0x6E ×11 at ~1 Hz]
 	if (ctx.is_in_session && !world.match.outcome().ended &&
 			world.logic_tick % 62u == 0) {
-		static const std::vector<uint8_t> kEmptyWaveStatus{0x00};
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-			if (conn.link.mode == netsim::TransportMode::Loopback) continue;
 			bool dead = false;
 			if (conn.link.owned_entity.valid()) {
 				const world::Entity *e = world.registry.get(conn.link.owned_entity);
@@ -1162,7 +1184,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			}
 			if (conn.link.respawn_pending || dead)
 				conn.link.transport->host_send(
-						s2c::SPAWN_WAVE_STATUS, kEmptyWaveStatus,
+						s2c::SPAWN_WAVE_STATUS,
+						build_spawn_wave_status_body(
+								world, conn.link.owned_entity),
 						/*reliable=*/false);
 		}
 	}

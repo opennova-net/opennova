@@ -1431,6 +1431,9 @@ bool run_client_reducer_preserves_packet_message_order() {
 	// 0x44 sub-header [u16 shooter][i16 netId][u8 subtype] — the 5-byte
 	// minimum the decoder accepts (§5.36).
 	const std::vector<uint8_t> entity_routed{0x02, 0x00, 0x05, 0x00, 0x01};
+	const std::vector<uint8_t> spawn_wave{
+			1, 0x01, 0x20, 0x03, 0x00, 1, 0x0A, 0x00, 0x01, 0x00};
+	const std::vector<uint8_t> score_feedback{5, 0, 0, 0};
 	SessionSequencing server_tx{1, 0};
 	const std::vector<uint8_t> datagram = frame_server_session(
 			server_tx, server_scrk, 1u, {
@@ -1441,6 +1444,8 @@ bool run_client_reducer_preserves_packet_message_order() {
 							0x46, encode_player_sync(sync_rep, kPlayerSyncHasName)),
 					make_protocol_message(0x1E, game_event),
 					make_protocol_message(0x44, entity_routed),
+					make_protocol_message(0x6E, spawn_wave),
+					make_protocol_message(0x81, score_feedback),
 					make_protocol_message(0x40, {0}),
 					make_protocol_message(0x6B, {0}),
 			});
@@ -1448,8 +1453,8 @@ bool run_client_reducer_preserves_packet_message_order() {
 		return false;
 	const np::JoinerConnection::PollResult poll =
 			joiner.handle_datagram(datagram.data(), datagram.size());
-	const std::array<uint8_t, 8> expected{
-			{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x44, 0x40, 0x6B}};
+	const std::array<uint8_t, 10> expected{
+			{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x44, 0x6E, 0x81, 0x40, 0x6B}};
 	if (!expect(poll.inbound_reducer.size() == expected.size(),
 			"every validated reducer message enters the canonical stream"))
 		return false;
@@ -1459,7 +1464,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			return false;
 	}
 	return expect(poll.inbound_0a.size() == 1 &&
-				poll.inbound_gameplay.size() == 7,
+				poll.inbound_gameplay.size() == 9,
 			"legacy family vectors remain diagnostic views of the same packet");
 }
 

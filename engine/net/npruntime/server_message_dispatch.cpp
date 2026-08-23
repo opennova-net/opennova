@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <iterator>
 #include <utility>
 #include <io/le.h>
 
@@ -861,6 +862,104 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	return messages;
 }
 
+std::vector<uint8_t> build_spawn_wave_status_body(
+		const world::World &world, world::EntityHandle requester) {
+	std::vector<uint8_t> body;
+	const world::Entity *recipient = world.registry.get(requester);
+	const uint8_t team = recipient != nullptr ? recipient->team : 0;
+	const world::SpawnZoneRegistry zones = world::build_spawn_zone_list(world);
+	std::vector<const world::SpawnWaveEntry *> visible;
+	for (const world::SpawnWaveEntry &entry : world.spawn_waves.entries())
+		if (entry.team == team && visible.size() < 0xFFu)
+			visible.push_back(&entry);
+	body.reserve(1 + visible.size() * 9);
+	body.push_back(static_cast<uint8_t>(visible.size()));
+	for (const world::SpawnWaveEntry *entry : visible) {
+		const uint16_t zone = entry->zone.valid()
+				? entry->zone.packed
+				: uint16_t{0xFFFF};
+		body.push_back(static_cast<uint8_t>(zone));
+		body.push_back(static_cast<uint8_t>(zone >> 8));
+		const int zone_index = world::spawn_zone_index_of(zones, entry->zone);
+		const uint16_t wire_index = zone_index >= 0
+				? static_cast<uint16_t>(zone_index)
+				: uint16_t{0xFFFF};
+		body.push_back(static_cast<uint8_t>(wire_index));
+		body.push_back(static_cast<uint8_t>(wire_index >> 8));
+		body.push_back(static_cast<uint8_t>(entry->queued.size()));
+		const uint16_t countdown = entry->requester_countdown(requester);
+		body.push_back(static_cast<uint8_t>(countdown));
+		body.push_back(static_cast<uint8_t>(countdown >> 8));
+		for (const world::EntityHandle member : entry->queued) {
+			body.push_back(static_cast<uint8_t>(member.packed));
+			body.push_back(static_cast<uint8_t>(member.packed >> 8));
+		}
+	}
+	return body;
+}
+
+std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
+		const GameConfig &config, NapiNPConnection &conn,
+		world::World &world, world::EntityHandle target_zone) {
+	std::vector<ProtocolMessage> replies;
+	if (!conn.link.owned_entity.valid()) return replies;
+	world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return replies;
+	const world::Entity *target = target_zone.valid()
+			? world.registry.get(target_zone)
+			: nullptr;
+	world::SpawnPointResult pose = target != nullptr
+			? world::spawn_pose_for_target(*target)
+			: world::select_player_spawn_for_team(
+					world, player->team, config.game_type);
+	if (pose.found) {
+		player->position = pose.position;
+		player->yaw = pose.yaw;
+	}
+	world::entity_reset_to_spawn_state(*player);
+	if (world.player_has_item_def && world.player_item_hp != 0)
+		player->health = world::retail_signed_i16(world.player_item_hp);
+	else if (player->health_max > 0)
+		player->health = player->health_max;
+	else
+		player->health = 100;
+	if (world::AiEntity *motor =
+			world.ai ? world.ai->for_handle(player->handle) : nullptr;
+			motor != nullptr && motor->inf.active) {
+		const int32_t motor_position[3] = {
+				world::to_fixed(player->position.x),
+				world::to_fixed(player->position.y),
+				world::to_fixed(player->position.z),
+		};
+		world::infantry_respawn_snap(
+				*motor, motor_position,
+				world::bam_heading_from_mission_yaw_deg(player->yaw),
+				player->health);
+	}
+	conn.discard_pre_deploy_uplinks = true;
+	conn.link.respawn_pending = false;
+	player->flags &= ~1u;
+	player->alive = true;
+	const world::WeaponTable *armory = !world.weapons.empty()
+			? &world.weapons
+			: nullptr;
+	replies.push_back(make_protocol_message(
+			0x5A, build_current_loadout_reply(
+					conn.reply.last_loadout_reply, player->player_class, armory)));
+	conn.tick_seed = ((make_random_session_u32() & 0xFEu) + 1u) << 16;
+	replies.push_back(make_protocol_message(
+			0x61, {static_cast<uint8_t>(conn.tick_seed & 0xFFu),
+			       static_cast<uint8_t>((conn.tick_seed >> 8) & 0xFFu),
+			       static_cast<uint8_t>((conn.tick_seed >> 16) & 0xFFu),
+			       static_cast<uint8_t>((conn.tick_seed >> 24) & 0xFFu)}));
+	const uint8_t frontier = world::zone_chain_frontier_zone(
+			world, world.zone_chain, player->team);
+	if (frontier != 0)
+		replies.push_back(make_protocol_message(
+				s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
+	return replies;
+}
+
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
@@ -1251,14 +1350,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// NUMBERED zone additionally requires team match + control >= 1.0 (a contested zone
 				// stops accepting spawns). An ALIVE in-session player's request is a no-op [orig: the
 				// @0x519cce dead-or-flagged gate; only !is_in_session falls through @0x519cd7]; a DEAD
-				// one deploys NOW: position at the pick (zone origin, §5.61 6007-scatter/userpoint
+				// one deploys at the selected zone's wave boundary, or NOW when that zone has no
+				// wave row: position at the pick (zone origin, §5.61 6007-scatter/userpoint
 				// deferral) else the per-team marker chain, reset-to-spawn-state, template health —
 				// Server_ProcessPlayerDeath's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
 				// @0x50cf60 -> Entity_ResetToSpawnState @0x4B9610]. Deploy-time 0x61 seed re-send and
-				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). Deferred with the wave
-				// system: g_spawn_wave_list queueing + the 0x6E status (host wave options unmodeled —
-				// retail with default options deploys immediately, which this matches). The reply is
-				// the private 0x1E ev-0x3A frontier hint [orig: @0x517A1D, mask 0x20].
+				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). A newly queued pick
+				// receives requester-local unreliable 0x6E immediately; immediate and wave release
+				// share Server_ReleasePlayerDeployment. [orig: SpawnWaveList_TryQueuePlayer
+				// @0x52A490; Server_SendSpawnWaveStatusToPlayer @0x50FF10]
 				if (!conn.burst.spawned) break;
 				if (world == nullptr || !conn.link.owned_entity.valid()) {
 					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
@@ -1291,94 +1391,28 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
 				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
 				if (!conn.link.respawn_pending && player->health > 0) break;
-				world::SpawnPointResult pose;
 				if (target != nullptr) {
-					pose = world::spawn_pose_for_target(*target);
-				} else {
-					// No/auto pick: the per-team start-marker chain (6096-6099 -> 6003/6004/...)
-					// [orig: Server_PositionPlayerForSpawn @0x50cf60 path B; §5.2c/§5.61].
-					pose = world::select_player_spawn_for_team(*world, player->team,
-					                                           config.game_type);
+					if (world->spawn_waves.try_queue(
+							*world, target->handle, player->handle)) {
+						ProtocolMessage status = make_protocol_message(
+								s2c::SPAWN_WAVE_STATUS,
+								build_spawn_wave_status_body(*world, player->handle));
+						status.reliable = false;
+						replies.push_back(std::move(status));
+						break;
+					}
+					if (world->spawn_waves.has_entry(target->handle)) break;
 				}
-				if (pose.found) {
-					player->position = pose.position;
-					player->yaw = pose.yaw;
-				} // no marker at all: redeploy in place (never an NPC position)
-				// entity_reset_to_spawn_state re-backs spawn_position from the new pose and
-				// clears the movement gate [orig: Entity_ResetToSpawnState @0x4B9610].
-				world::entity_reset_to_spawn_state(*player);
-				// Same signed-i16 healthMax gate as the first spawn (player_spawn.cpp).
-				if (world->player_has_item_def && world->player_item_hp != 0)
-					player->health = world::retail_signed_i16(world->player_item_hp);
-				else if (player->health_max > 0) player->health = player->health_max;
-				else player->health = 100; // [orig: Entity_InitFromItemDef @0x49e550]
-				// Session receive dispatch handles this 0x0E now, but its earlier
-				// 0x0C events are applied at the next Server_TickUpdate. Fence those
-				// pre-release poses so the selected spawn remains authoritative.
-				// The infantry motor owns the live pose and mirrors AiEntity.pos back into
-				// Entity.position later in this same host tick. Retail has one entity store;
-				// keep our split stores coherent at the deploy teleport so the pre-pick
-				// motor pose cannot undo the selected spawn before 0x0A emits it.
-				if (world::AiEntity *motor =
-						world->ai ? world->ai->for_handle(player->handle) : nullptr;
-						motor != nullptr && motor->inf.active) {
-					const int32_t motor_position[3] = {
-							world::to_fixed(player->position.x),
-							world::to_fixed(player->position.y),
-							world::to_fixed(player->position.z),
-					};
-					world::infantry_respawn_snap(
-							*motor, motor_position,
-							world::bam_heading_from_mission_yaw_deg(player->yaw),
-							player->health);
-				}
-				conn.discard_pre_deploy_uplinks = true;
-				// Successful deploy CLEARS the respawn-pending flag + the hidden bit — the
-				// next 0x0A's flags1 bit1 drops, the client closes the deploy screen and
-				// enters the world; byte13 loses its 0x01. [orig: Server_ProcessPlayerDeath
-				// @0x517791 `and 0xEF` on slot+89912; the entity bit0 stops being re-ORed]
-				conn.link.respawn_pending = false;
-				player->flags &= ~1u;
-				player->alive = true;
-				// THE DEPLOY-RELEASE BUNDLE [orig: Server_ProcessPlayerDeath's deploy tail —
-				// the loadout re-send (Server_SendWeaponSlotListToPlayer @0x502550) + the 0x61
-				// seed (Server_SendRandomSeedToPlayer @0x5101a0, mode 1) + the 0x1E hint; golden
-				// deploy frame 240018 carries 0x5A + 0x61 + 0x1E in ONE datagram]. The 0x5A is
-				// the client's deploy UN-LATCHER: the 0x0E pick set its dword_81474C wait-gate
-				// (Input case 12 @0x49b17b) and ONLY the 0x5A apply resets it (§5.30,
-				// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0) — without this bundle the
-				// client NEVER resumes its per-frame C2S 0x0C uplink (v32 live: both joiners'
-				// uplinks stopped at the pick frame forever; the host-side entity pinned at the
-				// deploy spot = the rubber-band). Re-send the retained granted body; a client
-				// that never submitted 0x2F (unit paths) gets the empty slot table headed by
-				// its live class, the shape @0x502550 builds for a player with no loaded slots.
-				{
-					const world::WeaponTable *armory =
-							(world != nullptr && !world->weapons.empty()) ? &world->weapons
-							                                              : nullptr;
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(st.last_loadout_reply,
-							                                  player->player_class, armory)));
-				}
-				// The deploy-release tick seed is PER PLAYER and re-rolled here, not the
-				// session constant: a client anchors its whole network-role clock (and
-				// therefore its fire freshness) to this value, so handing every client the
-				// same number on every deploy would re-seed them all to the same tick.
-				// [orig: Server_SendRandomSeedToPlayer @0x5101a0 — value @0x5101d4
-				//  ((rand() & 0xFE) + 1) << 16; deploy-release sender @0x517e47]
-				conn.tick_seed = ((make_random_session_u32() & 0xFEu) + 1u) << 16;
-				replies.push_back(make_protocol_message(
-						0x61, {static_cast<uint8_t>(conn.tick_seed & 0xFFu),
-						       static_cast<uint8_t>((conn.tick_seed >> 8) & 0xFFu),
-						       static_cast<uint8_t>((conn.tick_seed >> 16) & 0xFFu),
-						       static_cast<uint8_t>((conn.tick_seed >> 24) & 0xFFu)}));
-				// The frontier hint, only when a frontier zone exists [orig: the @0x5179e0
-				// `if (AvailableSlot)` gate].
-				const uint8_t frontier = zone_chain_frontier_zone(*world, world->zone_chain,
-				                                                  player->team);
-				if (frontier != 0)
-					replies.push_back(
-							make_protocol_message(s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
+				world->spawn_waves.remove_player(player->handle);
+				const world::EntityHandle target_handle = target != nullptr
+						? target->handle
+						: world::EntityHandle{};
+				std::vector<ProtocolMessage> deployment =
+						Server_ReleasePlayerDeployment(
+								config, conn, *world, target_handle);
+				replies.insert(replies.end(),
+				               std::make_move_iterator(deployment.begin()),
+				               std::make_move_iterator(deployment.end()));
 				break;
 			}
 			case c2s::ENTITY_UPLINK: // C2S player-input uplink — cache the pre-spawn pose

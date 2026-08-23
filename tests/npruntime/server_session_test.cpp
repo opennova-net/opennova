@@ -2596,6 +2596,141 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	              "dead joiner receives exact empty spawn-wave status at 1 Hz");
 }
 
+// Numbered spawn points are wave-backed by default. Queue joins receive an
+// exact requester-specific transient 0x6E immediately; the 1 Hz owner tick
+// releases the head through the shared deploy transaction and publishes the
+// remaining member's positional countdown.
+// [orig: SpawnWaveList_TryQueuePlayer @0x52A490;
+// SpawnWaveList_TickEntry @0x52A330; NetPacket_WriteSpawnWaveStatus @0x507490]
+bool check_spawn_wave_queue_and_release_wire() {
+	opennova::world::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(2, 8);
+	auto make_player = [&]() {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = 1;
+		entity.alive = false;
+		entity.health = 0;
+		entity.health_max = 100;
+		return world.registry.spawn(0, entity);
+	};
+	const opennova::world::EntityHandle first = make_player();
+	const opennova::world::EntityHandle second = make_player();
+	opennova::world::Entity zone;
+	zone.kind = opennova::world::EntityKind::Item;
+	zone.team = 1;
+	zone.alive = true;
+	zone.is_spawn_point = true;
+	zone.zone_number = 1;
+	zone.zone_control = 0x10000;
+	const opennova::world::EntityHandle zone_handle =
+			world.registry.spawn(2, zone);
+	world.spawn_waves.build_from_mission(world, 0, 2);
+
+	opennova::np::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.world = &world;
+	ctx.config.game_type = opennova::game_type::kTeamDeathmatch;
+	opennova::world::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	opennova::netsim::UdpSessionTransport first_transport(
+			opennova::netsim::UdpSessionTransport::Role::Host);
+	opennova::netsim::UdpSessionTransport second_transport(
+			opennova::netsim::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.resize(2);
+	for (size_t i = 0; i < 2; ++i) {
+		auto &conn = ctx.np_protocol.connection_list[i];
+		conn.type = 1;
+		conn.phase = opennova::np::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::netsim::TransportMode::Client;
+		conn.link.transport = i == 0 ? &first_transport : &second_transport;
+		conn.link.owned_entity = i == 0 ? first : second;
+		conn.link.respawn_pending = true;
+	}
+	const std::vector<uint8_t> pick{
+			static_cast<uint8_t>(zone_handle.packed),
+			static_cast<uint8_t>(zone_handle.packed >> 8)};
+	auto queue = [&](size_t index) {
+		return opennova::np::dispatch_session_replies(
+				ctx.config, ctx.np_protocol.connection_list[index],
+				{opennova::make_protocol_message(
+						opennova::c2s::RESPAWN_REQUEST, pick)},
+				0, ctx.np_protocol.connection_list, &world);
+	};
+	const std::vector<opennova::ProtocolMessage> first_join = queue(0);
+	const std::vector<opennova::ProtocolMessage> second_join = queue(1);
+	if (!expect(first_join.size() == 1 && second_join.size() == 1 &&
+	                    first_join[0].tag == opennova::s2c::SPAWN_WAVE_STATUS &&
+	                    second_join[0].tag == opennova::s2c::SPAWN_WAVE_STATUS &&
+	                    !first_join[0].reliable && !second_join[0].reliable,
+	            "wave queue joins emit one transient requester-local 0x6E"))
+		return false;
+	opennova::SpawnWaveStatus first_status;
+	opennova::SpawnWaveStatus second_status;
+	if (!expect(opennova::decode_spawn_wave_status(
+	                    first_join[0].payload.data(), first_join[0].payload.size(),
+	                    first_status) &&
+	                    opennova::decode_spawn_wave_status(
+	                            second_join[0].payload.data(),
+	                            second_join[0].payload.size(), second_status) &&
+	                    first_status.groups.size() == 1 &&
+	                    first_status.groups[0].zone_handle == zone_handle.packed &&
+	                    first_status.groups[0].zone_index == 0 &&
+	                    first_status.groups[0].queued_count == 1 &&
+	                    first_status.groups[0].wave_countdown == 0 &&
+	                    second_status.groups[0].queued_count == 2 &&
+	                    second_status.groups[0].wave_countdown == 2,
+	            "queue-join 0x6E carries zone index, roster and positional ETA"))
+		return false;
+	if (!expect(queue(0).empty() &&
+	                    world.spawn_waves.entries()[0].queued.size() == 2,
+	            "duplicate wave pick waits without duplicate row or deployment"))
+		return false;
+
+	world.logic_tick = 61;
+	opennova::np::Server_TickUpdate(ctx);
+	if (!expect(world.registry.get(first)->health == 100 &&
+	                    !ctx.np_protocol.connection_list[0].link.respawn_pending &&
+	                    world.registry.get(second)->health == 0 &&
+	                    ctx.np_protocol.connection_list[1].link.respawn_pending,
+	            "first 1 Hz wave boundary releases only the queue head"))
+		return false;
+	std::vector<opennova::netsim::Datagram> first_out;
+	std::vector<opennova::netsim::Datagram> second_out;
+	opennova::netsim::Datagram datagram;
+	while (first_transport.pop_outbound(datagram))
+		first_out.push_back(std::move(datagram));
+	while (second_transport.pop_outbound(datagram))
+		second_out.push_back(std::move(datagram));
+	auto find = [](const auto &messages, uint8_t tag)
+			-> const opennova::netsim::Datagram * {
+		for (const auto &message : messages)
+			if (message.tag == tag) return &message;
+		return nullptr;
+	};
+	const auto *loadout = find(first_out, opennova::s2c::WEAPON_LOADOUT);
+	const auto *seed = find(first_out, opennova::s2c::TICK_SEED);
+	const auto *remaining = find(second_out, opennova::s2c::SPAWN_WAVE_STATUS);
+	if (!expect(loadout != nullptr && seed != nullptr && remaining != nullptr &&
+	                    !remaining->reliable,
+	            "wave release stages the shared deploy bundle and periodic 0x6E"))
+		return false;
+	opennova::SpawnWaveStatus remaining_status;
+	return expect(opennova::decode_spawn_wave_status(
+	                      remaining->body.data(), remaining->body.size(),
+	                      remaining_status) &&
+	                      remaining_status.groups.size() == 1 &&
+	                      remaining_status.groups[0].queued_count == 1 &&
+	                      remaining_status.groups[0].wave_countdown == 2 &&
+	                      remaining_status.groups[0].members ==
+	                              std::vector<uint16_t>{second.packed},
+	              "post-release 0x6E carries the remaining member at interval ETA");
+}
+
 // Retail answers the world-state-load burst's empty C2S 0x2D member with a
 // requester-only S2C 0x58. Its body is built from the live session report, not
 // a captured blob: game/mission names, game type, player cap, session uptime,
@@ -3090,6 +3225,7 @@ int main() {
 	ok = check_requester_score_delta_refresh() && ok;
 	ok = check_listen_host_receives_targeted_maintenance() && ok;
 	ok = check_spawned_peer_gets_periodic_retail_maintenance() && ok;
+	ok = check_spawn_wave_queue_and_release_wire() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;
