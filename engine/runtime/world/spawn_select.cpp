@@ -173,6 +173,130 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle) 
     return -1;
 }
 
+uint16_t SpawnWaveEntry::requester_countdown(EntityHandle requester) const {
+    size_t position = queued.size();
+    for (size_t i = 0; i < queued.size(); ++i) {
+        if (queued[i] == requester) {
+            position = i;
+            break;
+        }
+    }
+    // Retail writes the arithmetic into a u16 packet field; retain its low
+    // word rather than applying a reimplementation-only saturation policy.
+    const int64_t eta = static_cast<int64_t>(countdown) + pre_delay +
+            static_cast<int64_t>(position) * interval;
+    return static_cast<uint16_t>(eta);
+}
+
+void SpawnWaveList::build_from_mission(const World &world,
+                                       int32_t base_interval,
+                                       int32_t numbered_zone_interval) {
+    entries_.clear();
+    // Retail scans pool 2, then pool 1, and registers every SpawnPoint ItemDef
+    // regardless of alive state. A numbered zone uses its dedicated interval
+    // when nonzero, otherwise it falls back to the base interval.
+    // [orig: SpawnWaveList_BuildFromMission @0x52A920]
+    for (const int pool : {2, 1}) {
+        const size_t capacity = world.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const Entity *zone = world.registry.get(
+                    EntityHandle::make(pool, static_cast<int>(slot)));
+            if (zone == nullptr || !zone->is_spawn_point) continue;
+            const int32_t interval =
+                    zone->zone_number != 0 && numbered_zone_interval != 0
+                            ? numbered_zone_interval
+                            : base_interval;
+            if (interval == 0) continue;
+            SpawnWaveEntry entry;
+            entry.zone = zone->handle;
+            entry.team = zone->team;
+            entry.interval = interval;
+            entry.queued.reserve(8);
+            entries_.push_back(std::move(entry));
+        }
+    }
+}
+
+bool SpawnWaveList::has_entry(EntityHandle zone) const {
+    return std::any_of(entries_.begin(), entries_.end(),
+                       [&](const SpawnWaveEntry &entry) {
+                           return entry.zone == zone;
+                       });
+}
+
+bool SpawnWaveList::remove_player(EntityHandle player) {
+    bool removed = false;
+    for (SpawnWaveEntry &entry : entries_) {
+        const auto old_end = entry.queued.end();
+        const auto new_end = std::remove(entry.queued.begin(), old_end, player);
+        if (new_end != old_end) {
+            entry.queued.erase(new_end, old_end);
+            removed = true;
+        }
+    }
+    return removed;
+}
+
+bool SpawnWaveList::try_queue(const World &world, EntityHandle zone,
+                              EntityHandle player) {
+    const Entity *player_entity = world.registry.get(player);
+    if (player_entity == nullptr) return false;
+    auto target = std::find_if(entries_.begin(), entries_.end(),
+                               [&](const SpawnWaveEntry &entry) {
+                                   return entry.zone == zone &&
+                                          entry.team == player_entity->team;
+                               });
+    if (target == entries_.end()) return false;
+    if (std::find(target->queued.begin(), target->queued.end(), player) !=
+            target->queued.end())
+        return false;
+    if (target->queued.size() >= 8) return false;
+    // A player belongs to at most one wave group. Retail removes the pointer
+    // from all other rows before appending it to the selected row.
+    // [orig: SpawnWaveList_TryQueuePlayer @0x52A490]
+    remove_player(player);
+    target->queued.push_back(player);
+    return true;
+}
+
+std::vector<SpawnWaveRelease> SpawnWaveList::tick(const World &world) {
+    std::vector<SpawnWaveRelease> releases;
+    for (SpawnWaveEntry &entry : entries_) {
+        if (entry.pre_delay > 0) {
+            --entry.pre_delay;
+            continue;
+        }
+        if (entry.countdown > 0) {
+            --entry.countdown;
+            const Entity *zone = world.registry.get(entry.zone);
+            if (zone == nullptr || zone->zone_control < 0x10000) {
+                entry.queued.clear();
+                entry.countdown = 0;
+                entry.pre_delay = 0;
+            }
+            continue;
+        }
+        if (entry.queued.empty()) continue;
+        releases.push_back({entry.queued.front(), entry.zone});
+        entry.queued.erase(entry.queued.begin());
+        entry.countdown = entry.interval;
+    }
+    return releases;
+}
+
+void SpawnWaveList::reset_on_zone_team_change(const World &world,
+                                              EntityHandle zone_handle) {
+    const Entity *zone = world.registry.get(zone_handle);
+    if (zone == nullptr) return;
+    for (SpawnWaveEntry &entry : entries_) {
+        if (entry.zone != zone_handle || entry.team == zone->team) continue;
+        entry.queued.clear();
+        entry.countdown = 0;
+        entry.pre_delay = 0;
+        entry.team = zone->team;
+    }
+}
+
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
                                        uint8_t team, uint32_t game_type) {
     // [orig: find_spawn_entity_for_team @0x4fc810]

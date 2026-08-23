@@ -112,6 +112,51 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world);
 // Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
 int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 
+// One retail spawn-wave group. The original stores eight player pointers,
+// queued_count, the zone pointer, interval/countdown/pre-delay, and a cached
+// team in one 56-byte row. Handles make the same ownership explicit without
+// leaking allocator addresses into the portable world model.
+// [orig: g_spawn_wave_list @0x24E0E48; SpawnWaveList_AppendEntry @0x52AB60]
+struct SpawnWaveEntry {
+    EntityHandle zone;
+    uint8_t team = 0;
+    int32_t interval = 0;
+    int32_t countdown = 0;
+    int32_t pre_delay = 0;
+    std::vector<EntityHandle> queued;
+
+    // Countdown shown to this requester. Members see their position in the
+    // queue; a nonmember sees the tail ETA.
+    // [orig: SpawnWaveList_GetEntryInfo @0x52A700]
+    uint16_t requester_countdown(EntityHandle requester) const;
+};
+
+struct SpawnWaveRelease {
+    EntityHandle player;
+    EntityHandle zone;
+};
+
+// Spawn selection and its timed release list are one domain module: the host
+// asks this object whether a valid deploy pick queues, and consumes releases
+// from its 1 Hz tick. It has no transport dependency; S2C 0x6E is a projection
+// of entries(). [orig: SpawnWaveList_* @0x52A330..0x52AB60]
+class SpawnWaveList {
+public:
+    void clear() { entries_.clear(); }
+    void build_from_mission(const World &world, int32_t base_interval,
+                            int32_t numbered_zone_interval);
+    bool has_entry(EntityHandle zone) const;
+    bool try_queue(const World &world, EntityHandle zone, EntityHandle player);
+    bool remove_player(EntityHandle player);
+    std::vector<SpawnWaveRelease> tick(const World &world);
+    void reset_on_zone_team_change(const World &world, EntityHandle zone);
+
+    const std::vector<SpawnWaveEntry> &entries() const { return entries_; }
+
+private:
+    std::vector<SpawnWaveEntry> entries_;
+};
+
 // The C2S 0x2C deploy-pick sentinels [orig: Input_HandleActionBinding case 12
 // @0x49b0c5-0x49b17b - param 0 -> 0xFFFF (no pick), 65534 -> 0xFFFE (the
 // auto-team zone pick); host decode Server_ProcessClientRequestRespawn

@@ -1575,6 +1575,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
+		} else if (m.tag == s2c::SPAWN_WAVE_STATUS) {
+			SpawnWaveStatus status;
+			if (decode_spawn_wave_status(
+					m.payload.data(), m.payload.size(), status)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::SCORE_DELTA_SOUND) {
+			ScoreDeltaSound score;
+			if (decode_score_delta_sound(
+					m.payload.data(), m.payload.size(), score)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.

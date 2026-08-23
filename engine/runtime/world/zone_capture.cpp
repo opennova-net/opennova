@@ -324,8 +324,10 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
                 converts.push_back(entity.handle);
         });
         for (const EntityHandle handle : converts) {
-            if (Entity *entity = world.registry.get(handle))
+            if (Entity *entity = world.registry.get(handle)) {
                 entity->team = zone->team;
+                world.spawn_waves.reset_on_zone_team_change(world, handle);
+            }
         }
     }
 
@@ -363,6 +365,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         }
 
         zone->team = active.team;
+        world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
         out.timed_completions.push_back(
                 {zone->handle, active.capturer, active.team,
                  zone->is_spawn_point});
@@ -407,6 +410,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
                     zone_chain_frontier_zone(world, chain, enemy_of(request.team));
             if (old_team != 0) zone->team = 0;
             zone->team = request.team;
+            world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
             zone->zone_control = 0;
             zone_chain_rebuild_masks(world, chain);
 
@@ -439,7 +443,10 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
             continue;
         }
 
-        if (zone->team != 0) zone->team = 0;
+        if (zone->team != 0) {
+            zone->team = 0;
+            world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
+        }
         ZoneCaptureState::Active *active = find_active(state, request.zone);
         bool started = false;
         if (active == nullptr) {
@@ -480,7 +487,10 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         uint8_t forced = 0;
         if ((chain.owned_mask[1] & bit) != 0) forced = 1;
         else if ((chain.owned_mask[2] & bit) != 0) forced = 2;
-        if (forced != 0 && entity->team != forced) entity->team = forced;
+        if (forced != 0 && entity->team != forced) {
+            entity->team = forced;
+            world.spawn_waves.reset_on_zone_team_change(world, entity->handle);
+        }
     }
     zone_chain_rebuild_masks(world, chain);
 }

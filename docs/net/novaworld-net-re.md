@@ -7842,7 +7842,10 @@ entries `{player[8], count@+32, zoneEntity@+36, interval@+40, countdown@+44, pre
 team@+52}`, built at mission start from every `0x40000` pools-2/1 entity — numbered zones
 get `g_spawn_wave_time_zone @ 0x24D2250`, un-numbered (bases) `g_spawn_wave_time_base
 @ 0x24D224C` (both from `apply_session_settings_to_globals @ 0x551500`; entries only exist
-when the interval is configured — 0 ⇒ no wave system ⇒ instant deploys)
+when the selected interval is configured — 0 ⇒ no wave system ⇒ instant deploys). A numbered
+zone whose dedicated interval is zero falls back to the base interval. Retail's fresh defaults are
+**base 0, numbered zone 10 seconds**, not “waves off” `[orig: Config_SetDefaults @ 0x54D030
+writes dword_2550B7C=0 / dword_2550B80=10]`
 `[orig: SpawnWaveList_BuildFromMission @ 0x52A920]`. A 0x0E pick lands in the zone's group
 (`SpawnWaveList_TryQueuePlayer @ 0x52A490` — dedupes, caps 8, evicts the player from other
 groups) → the player gets S2C 0x6E and WAITS; if no group exists for the zone the deploy is
@@ -7857,6 +7860,16 @@ list index)][u8 queuedCount][u16 countdown][queuedCount × u16 playerHandle]`, s
 join (`Server_SendSpawnWaveStatusToPlayer @ 0x50FF10`) and every second to each dead or
 deploying player (mask 0x20) `[orig: NetPacket_WriteSpawnWaveStatus @ 0x507490;
 Server_TickUpdate @ 0x51E0CF]`.
+
+**Reimpl (completed 2026-08-22).** `world::SpawnWaveList` owns the mission-built groups beside
+the spawn registry. C2S 0x0E queue joins and the 1 Hz owner tick share one
+`Server_ReleasePlayerDeployment` transaction, so placement, health/motor reset, the 0x5A loadout
+unlatch, per-player 0x61 seed and frontier hint cannot drift between immediate and timed paths.
+`build_spawn_wave_status_body` is the single requester-specific 0x6E projection used by both
+producers; remote and loopback clients strict-decode it into `ClientState::spawn_waves`.
+`spawn_select_test`, `npruntime_server_session_test`, `client_replica_scoreboard_test`, and
+`npruntime_client_runtime_test` pin list construction, queue/reset/tick behavior, exact wire fields,
+delivery lifetime, release, and both client ingress roles.
 
 **Placement.** `Server_PositionPlayerForSpawn @ 0x50CF60` (ex-`CMap_SetupSpawnCamera`,
 §5.2c) is the placement for BOTH paths. Picked target: copy the target entity's pos+angles,
@@ -8017,10 +8030,10 @@ the per-team join placement (`Server_BuildPlayerInfoAndAdd` assigns the team BEF
 §5.2c marker scan — previously both AS teams spawned at the first family type present, i.e.
 team 1's base). Pinned by `zone_chain_test` (the ASH_I5A shape: masks/frontier/latch,
 capture progression, auto-pick, pick resolve, per-team markers — golden mask 0x8
-reproduced). Slice-1 deferrals (all §5.61-cited in code): the spawn-wave system
-(`g_spawn_wave_list` + 0x6E — host wave options default 0 = immediate deploys, matching
-retail defaults), vehicle-seat deploys (seat model unported), deploy-time 0x61/0x1D
-re-sends, and the 6007 in-zone scatter + userpoint offset.
+reproduced). Remaining placement residuals (all §5.61-cited in code): vehicle-seat deploys
+(seat model unported), deploy-time 0x1D, and the 6007 in-zone scatter + userpoint offset.
+Spawn waves, requester-specific 0x6E, and deploy-time 0x61 are ported with the retail 0/10
+base/numbered defaults.
 
 **Reimpl (slice 2 — the capture loop, completed 2026-08-22, D-NET-162).** Ported as two
 deep operations: `world::zone_capture_contact_tick` records moving pool-0 touches and

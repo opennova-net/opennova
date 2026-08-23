@@ -213,6 +213,18 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::OBJECTIVE_ENTITY_STATE: // flag/carryable pose + carry links (0x2F)
 		apply_objective_entity_state(body);
 		break;
+	case s2c::SPAWN_WAVE_STATUS: {
+		SpawnWaveStatus status;
+		if (!decode_spawn_wave_status(body.data(), body.size(), status)) {
+			++malformed_bodies_;
+			break;
+		}
+		state_.spawn_waves.known = true;
+		state_.spawn_waves.value = std::move(status);
+		++state_.spawn_waves.updates;
+		state_.mark_changed();
+		break;
+	}
 	case s2c::SCORE_DELTA_SOUND: {
 		ScoreDeltaSound sample;
 		if (!decode_score_delta_sound(body.data(), body.size(), sample)) {

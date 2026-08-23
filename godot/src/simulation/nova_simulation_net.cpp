@@ -874,6 +874,10 @@ void Simulation::configure_host_session(Dictionary p_options) {
 			p_options, "capture_duration_seconds", config.capture_duration_seconds);
 	config.capture_speed_setting = dictionary_i32(
 			p_options, "capture_speed_setting", config.capture_speed_setting);
+	config.spawn_wave_time_base = dictionary_i32(
+			p_options, "spawn_wave_time_base", config.spawn_wave_time_base);
+	config.spawn_wave_time_zone = dictionary_i32(
+			p_options, "spawn_wave_time_zone", config.spawn_wave_time_zone);
 	config.num_teams = static_cast<uint8_t>(dictionary_u32(
 			p_options, "num_teams", config.num_teams) & 0xFFu);
 	config.respawn_timeout = dictionary_u32(
@@ -975,6 +979,10 @@ Dictionary Simulation::get_host_session_config() const {
 			static_cast<int64_t>(session.capture_duration_seconds);
 	out["capture_speed_setting"] =
 			static_cast<int64_t>(session.capture_speed_setting);
+	out["spawn_wave_time_base"] =
+			static_cast<int64_t>(session.spawn_wave_time_base);
+	out["spawn_wave_time_zone"] =
+			static_cast<int64_t>(session.spawn_wave_time_zone);
 	out["num_teams"] = static_cast<int64_t>(session.num_teams);
 	out["respawn_timeout"] = static_cast<int64_t>(session.respawn_timeout);
 	out["start_delay"] = static_cast<int64_t>(session.start_delay);
