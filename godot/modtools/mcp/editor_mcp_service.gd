@@ -22,6 +22,7 @@ var tools: EditorMcpTools
 var mission_tools: EditorMcpMissionTools
 var menu_tools: EditorMcpMenuTools
 var object_tools: EditorMcpObjectTools
+var pack_tools: EditorMcpPackTools
 var game_tools: EditorMcpGameTools
 var editor: Node = null
 var shell: Node = null
@@ -61,6 +62,8 @@ func setup(
 	menu_tools.register_all(server.registry)
 	object_tools = EditorMcpObjectTools.new(self)
 	object_tools.register_all(server.registry)
+	pack_tools = EditorMcpPackTools.new(self)
+	pack_tools.register_all(server.registry)
 	game_tools = EditorMcpGameTools.new(self, game_run_bridge)
 	game_tools.register_all(server.registry)
 	_bind_game_session_status()
@@ -263,3 +266,9 @@ func _exit_tree() -> void:
 	stop()
 	if McpLogHub.instance == log_hub:
 		McpLogHub.instance = null
+
+
+## The configured retail install directory, or "" when unset. The packaging tools ask the
+## service rather than reading settings directly, so the retail dir has ONE reader.
+func get_retail_dir() -> String:
+	return OnedSettings.get_retail_dir()

@@ -338,8 +338,8 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 		"resource_root": {
 			"dir": shell.get_resource_root_dir() if shell != null else "",
 			"mounted": ctx.root() != null,
-			"expansion": ResourceDirSettings.get_expansion(),
-			"game": ResourceDirSettings.get_game(),
+			"expansion": OnedSettings.get_expansion(),
+			"game": OnedSettings.get_game(),
 		},
 		"active_workspace": String(active.get_workspace_id()) if active != null else "",
 		"workspaces": workspaces,
