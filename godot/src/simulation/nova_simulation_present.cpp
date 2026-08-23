@@ -926,7 +926,14 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["state"] = state;
 	out["state_name"] = ai_state_name(state);
 	out["pending_state"] = e->brain.f[AiBrain::kPendState];
-	out["alert"] = e->brain.f[AiBrain::kAlert];
+	// The BRAIN kAlert register is NOT what the think tests. Every alert gate in
+	// infantry.cpp reads slot.bytes()[AiSlot::kAlertByte] (slot byte 136), which
+	// is also what the retail probe reads (AiSlot dword 34). Emitting the brain
+	// register here made our side read 0 in every sample and produced a false
+	// "we never raise alert" divergence -- the fourth false friend in this
+	// effort, and the first one on our own side.
+	out["alert"] = e->slot.bytes()[opennova::world::AiSlot::kAlertByte];
+	out["alert_brain"] = e->brain.f[AiBrain::kAlert];
 	out["wp_channel"] = e->brain.f[AiBrain::kWpChannel];
 	out["wp_node"] = e->brain.f[AiBrain::kWpNode];
 	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
