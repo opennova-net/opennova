@@ -589,6 +589,8 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 				owner.ctx.config.spawn_wave_time_zone);
 		owner.ctx.world->mp_session =
 				cfg.socket_mode != SocketMode::Socketless;
+		owner.ctx.world->destroy_buildings =
+				owner.ctx.config.destroy_buildings != 0;
 		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
 		owner.ctx.world->throwables.team_trigger_claymore =
 				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;

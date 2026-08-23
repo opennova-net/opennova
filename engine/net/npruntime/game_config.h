@@ -107,6 +107,9 @@ struct GameConfig {
 	uint32_t respawn_time = 0;         // [orig g_respawn_time @0x24D2140]      dword[0]; SET `GameTime`
 	uint32_t time_limit_minutes = 0;  // [orig g_time_limit_minutes @0x24D2144] dword[1]; SET `KOTHLimit`
 	uint32_t replay_enabled = 0;      // [orig g_replay_enabled @0x24D2120 <- cfg `replay` @0x2550B24]      dword[2]
+	// Retail carries this setting through cfg/global/S2C 0x08 but never reads
+	// the live global in gameplay (whole-image xrefs: serializer + settings
+	// apply only). Keep its wire value; do not invent a team-lives system.
 	uint32_t max_team_lives = 0;      // [orig g_max_team_lives @0x24D2130 <- cfg `max_team_lives` @0x2550ABC] dword[4]
 	uint32_t score_limit = 0;         // [orig g_score_limit @0x24D2134]       dword[5]; SET `KillLimit` (name-swap)
 	// Gameplay-only rule globals omitted from S2C 0x08 but consumed by the
