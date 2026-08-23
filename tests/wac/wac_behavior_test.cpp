@@ -17,11 +17,9 @@ static int failures = 0;
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
     } while (0)
 
-static World make_world() {
-    World w;
-    w.registry.configure_pool(0, 64);
-    return w;
-}
+struct BehaviorWorld final : World {
+    BehaviorWorld() { registry.configure_pool(0, 64); }
+};
 
 // Run a program for `executions` VM executions. The VM self-gates to every 62nd
 // logic tick [orig: WacScript_AdvanceTick @0x4f81b1], so one execution = 62 ticks; WAC time
@@ -34,7 +32,7 @@ static void run(World &w, WacSystem &sys, int executions) {
 
 // The 62-tick divider itself: nothing executes before the 62nd tick.
 static void test_execution_cadence() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never() then set(v1,1) endif\n", env));
@@ -53,7 +51,7 @@ static void test_execution_cadence() {
 // 62-tick divider. Capturing/restoring that temporal state prevents initial
 // edge predicates from firing a second time after Stop/Play.
 static void test_initial_execution_and_runtime_state() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never() then inc(v1) endif\n", env));
@@ -86,7 +84,7 @@ static void test_initial_execution_and_runtime_state() {
 }
 
 static void test_var_math() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -107,7 +105,7 @@ static void test_var_math() {
 }
 
 static void test_ssn_kill() {
-    World w = make_world();
+    BehaviorWorld w;
     Entity a; a.net_id = 100; a.alive = true; w.registry.spawn(0, a);
     Entity b; b.net_id = 200; b.alive = true; w.registry.spawn(0, b);
 
@@ -126,7 +124,7 @@ static void test_ssn_kill() {
 }
 
 static void test_temporal_past() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if past(3) then set(v5,1) endif\n", env));
@@ -140,7 +138,7 @@ static void test_temporal_past() {
 }
 
 static void test_else_branch() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     // v1 starts 0 -> else branch sets v2=2; then set v1=1 -> then branch sets v2=1.
@@ -158,7 +156,7 @@ static void test_else_branch() {
 }
 
 static void test_environment() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source(
@@ -172,7 +170,7 @@ static void test_environment() {
 }
 
 static void test_paren_less_and_effects() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     // paren-less args + an unimplemented command recorded as an effect.
@@ -188,7 +186,7 @@ static void test_paren_less_and_effects() {
 // filename so the host can play it [orig: wave/pwave @ 0x4ED610]. Without the
 // explicit handler they fall through to the default case as an unrouted "wave".
 static void test_wac_wave_emits_dialog_wav() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never then wave(brief1) endif\n", env));
@@ -208,7 +206,7 @@ static void test_wac_wave_emits_dialog_wav() {
 // presentation, while consol/consol# and pconsol feed Chat_AddDebugMessage and
 // must remain distinguishable for embedders that deliberately do not present them.
 static void test_wac_text_and_console_use_distinct_effect_channels() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -248,7 +246,7 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
 }
 
 static void test_authority_gate() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never() then set(v9,1) endif\n", env));
@@ -268,7 +266,7 @@ static void test_authority_gate() {
 // (red wins = the player side loses); the world latch never double-fires.
 // [orig: WacAction_Lose @0x4ed3f0; Server_ProcessRoundEnd @0x5164f0]
 static void test_lose_ends_round_with_banner_key() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source("if true(greenkills) then lose(0) endif\n", env);
@@ -299,7 +297,7 @@ static void test_lose_ends_round_with_banner_key() {
 // Lose(n) for n outside {0,1} is a witnessed NO-OP [orig: WacAction_Lose returns 0
 // without touching the round @0x4ed45b..].
 static void test_lose_other_team_noop() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if past(1) then lose(2) endif\n", env));
@@ -315,7 +313,7 @@ static void test_lose_other_team_noop() {
 // (GameOver/WinVar/LoseVar/humans) read the witnessed derivations.
 // [orig: WacAction_Win @0x4ed4a0; the cache derivation @0x4f57bb/c9/cf]
 static void test_win_and_outcome_builtins() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -346,7 +344,7 @@ static void test_win_and_outcome_builtins() {
 
 // 04TR.WAC's outcome block, verbatim (JOX corpus): greenkills -> Lose(0).
 static void test_04tr_outcome_block_greenkills() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -372,7 +370,7 @@ static void test_04tr_outcome_block_greenkills() {
 
 // The same block with BOTH counters set: the bluekills branch wins the else-if chain.
 static void test_04tr_outcome_block_blue_priority() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source(
