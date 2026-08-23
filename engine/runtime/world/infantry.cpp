@@ -1586,6 +1586,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // resolve runs the same gated CL block (the latch-only channel here
         // would latch a carried body on any CL touch with no entry gate).
         // [orig: phase8 gate/call @0x4bf5a5..0x4bf5c3]
+        // The +0x74 CameraOffset the think produced above [orig: written
+        // @0x4b9910 kong 155519-155521 before either resolver call].
+        const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y,
+                                       inf.eye_offset_z};
         if ((key & 7u) == 0 && collision != nullptr) {
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
             collision->resolve_entity(
@@ -1593,7 +1597,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                     inf.is_local_player, is_authority, logic_tick, inf.anim_state,
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
-                    &mounted_lio);
+                    &mounted_lio, eye_offset);
         }
         finish_infantry_tick(e, world);
         return;
@@ -1898,12 +1902,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // pitch restore (infantry_ladder.cpp). [orig: the resolver reads
             // the same entity fields inline @ 0x4b3245-0x4b3495 /
             // @ 0x4b3c5c-0x4b3d55]
+            const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y,
+                                           inf.eye_offset_z}; // [orig: +0x74, see above]
             const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                 inf.is_local_player, is_authority, logic_tick, inf.anim_state,
-                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
+                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio,
+                eye_offset);
             // The ladder legs may have written the view channels (the yaw
             // chase, the pitch restore); refresh the mouse-instant mirrors so
             // the render/aim pose and the embedder write-back see them.
