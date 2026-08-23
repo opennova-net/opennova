@@ -318,6 +318,22 @@ bool run_joiner_uplink_snaps_peer() {
 	const w::AiEntity *hae = ai.for_handle(host_h);
 	if (!expect(hae != nullptr && !hae->net_is_remote_peer,
 	            "host player not net-snapped")) return false;
+
+	// During the retail pre-round countdown the server still drains 0x0C, but
+	// NetPacket_SerializePlayerState refuses its position/orientation apply.
+	// [orig: @0x4C2010..0x4C2028]
+	world.preround_delay_seconds = 3;
+	udp_join.client_send(0x0C, make_0c_uplink(
+			joiner_h.packed, w::to_fixed(300.0), w::to_fixed(400.0),
+			w::to_fixed(50.0), 0x4000, 0));
+	carry(udp_join, udp_host);
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
+	je = world.registry.get(joiner_h);
+	if (!expect(udp_host.inbound_pending() == 0 &&
+	                    je->position.x == static_cast<float>(w::from_fixed(wx)) &&
+	                    je->position.y == static_cast<float>(w::from_fixed(wy)) &&
+	                    je->position.z == static_cast<float>(w::from_fixed(wz)),
+	            "pre-round drains but ignores the remote pose uplink")) return false;
 	return true;
 }
 
@@ -474,6 +490,9 @@ bool run_0a_subblock_phase_cycle() {
 	world.network_env.rain_pct_current_q16 = 0x000056FFu;
 	world.network_env.overcast_blend_q16 = 0x000078AAu;
 	world.network_env.precipitation_kind = 0x1234569Au;
+	// The phase-0 writer truncates the seconds dword to its low wire byte.
+	// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
+	world.preround_delay_seconds = 0x123u;
 
 	// One full low-nibble cycle. Retail pre-increments, so the first flags2 is 1.
 	for (int i = 1; i <= 16; ++i) {
@@ -491,8 +510,16 @@ bool run_0a_subblock_phase_cycle() {
 			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
 		} else if ((i & 3u) == 0) {
 			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
+			if (!expect(fu.weapon.preround_timer == 0x23,
+			            "phase 0 carries the low byte of the live pre-round seconds"))
+				return false;
 			if (!expect(fu.weapon.uniform_team_mask == 0x8,
 			            "phase 0 uniform team mask = 8 (golden steady value)")) return false;
+			ns::ClientReplicaPipeline fold;
+			fold.apply(dg.tag, dg.body);
+			if (!expect(fold.state().preround_delay_seconds == 0x23,
+			            "client fold retains the authoritative pre-round timer"))
+				return false;
 		} else if ((i & 3u) == 2) {
 			if (!expect(fu.env.present, "phase 2 = environment sub-block present")) return false;
 			if (!expect(fu.env.fog_dist == 0x0123u && fu.env.fog_accel == 0x1235u &&

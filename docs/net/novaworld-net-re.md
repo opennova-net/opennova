@@ -5878,6 +5878,37 @@ are the two C2S handlers with self-name strings. The two priority-list builders 
 `g_periodic_second_timer` (`0xC8D83C`, 62), `g_preround_delay_timer` (`0xC8D824`, = `dword_24D2160` at round
 start), `g_playerslot_broadcast_timer` (`0xC8D838`, 310), `g_spectator_broadcast_timer` (`0xC8D840`, 310),
 `g_weapon_broadcast_slot_cursor` (`0xC8D844`), `g_weapon_resend_timer` (`0xC947A0`, 62, KOTH).
+**Pre-round/StartDelay lifecycle (ported 2026-08-23).**
+`reset_round_counters @0x516C50` copies `g_StartDelay @0x24D2160` into the
+whole-second `g_preround_delay_timer @0xC8D824` at `0x516C8D`. The shared
+periodic block reloads at 62 ticks and decrements the timer only there
+(`Server_TickUpdate @0x51DB6D..0x51DC33`); a non-session boundary clears it
+at `0x51DC0F`. Because the WAC/entity-idle gate was already tested at
+`0x51D8BD`, the frame that changes 1 to 0 remains frozen and gameplay resumes
+on the following frame. Round time is likewise suppressed while the timer is
+nonzero (`Game_ProcessMainFrame @0x5265F2..0x526602`). The later 1 Hz capture,
+team-score, win-condition, violation, spawn-wave, and capture-zone service
+still runs (`0x51DF50..0x51DF8C`), as do networking and the ungated
+`WeaponAction_ProcessAllEntities @0x526786`.
+
+Wire phase 0 writes the timer dword's low byte directly
+(`NetPacket_WritePlayerState @0x4FF82D..0x4FF837`), so values above 255 wrap
+on the wire. `NapiNPClientMsg_0x00A` retains that byte in `dword_A85B64`
+(`0x430064`), and `Game_ProcessMainFrame @0x52672C` uses the retained value to
+skip `Entity_UpdateAllEntities` while continuing the client network frame.
+The server continues to drain C2S 0x0C during the countdown, but the case-4
+player callback refuses the remote pose/state apply while the authority timer
+is nonzero (`NetPacket_SerializePlayerState @0x4C2010..0x4C2028`).
+
+OpenNova has one `World::preround_delay_seconds` owner: authority round init
+seeds it, the server phase projects it onto 0x0A, and a joiner folds that byte
+back onto its local World before simulation. `TickPhase::PreRound` is an
+explicit frame contract replacing the old pre-mission boolean; there is no
+legacy delay tick path or connection-local countdown. The
+`npruntime_server_session` boundary case pins ticks 61/62/124/125, and
+`netsim_two_peer_fanout` pins low-byte projection, client retention, and
+C2S drain-without-apply.
+
 Replication: `g_priority_ref_x/y/z` (`0xC867A4/A8/AC`, the broadcast-origin eye position),
 `g_priority_pairlist` (`0xC86FE0`), `g_entity_send_budget` (`0xC8FC50`, BANDWIDTH cmd sets it 100-1600,
 default 600), `g_entity_action_queue` (`0xC86FDC`). Rules/config:
@@ -6580,7 +6611,9 @@ mechanism by which a retail host replicates dozens of vehicles/AI a few per fram
 
 **Reimpl status.** The complete header phase counter and conditional bodies are ported
 (`netsim::Connection::s2c_phase` = `playerSlot+100566`; `emit_connection_s2c` pre-increments the
-free byte; `build_0a_frame` dispatches on `flags2 & 3`). Phase 2 is sourced from live mission/runtime
+free byte; `build_0a_frame` dispatches on `flags2 & 3`). Phase 0 carries the
+live pre-round timer's low byte and the joiner retains it as its entity-update
+freeze predicate. Phase 2 is sourced from live mission/runtime
 environment owners and quantized at the wire boundary; phase 3 emits authoritative `World::subgoals`
 only for objective game types; phase 8 carries the recipient's actual mount handle and mounted
 clip/reserve. The joiner folds the complete environment state and applies each revision once. Header

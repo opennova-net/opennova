@@ -320,7 +320,7 @@ int main() {
     CHECK(w.registry.get(post_restore)->registry_spawn_id >
           post_snapshot_spawn_id);
     const int32_t restored_health = w.registry.get(blast_victim)->health;
-    w.run_logic_tick(true, false);
+    w.run_logic_tick(true);
     CHECK(w.registry.get(blast_victim)->health == restored_health);
 
     std::printf(failures ? "WORLD TESTS FAILED (%d)\n" : "world tests passed\n", failures);

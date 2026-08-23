@@ -995,7 +995,7 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
     }
 }
 
-void Match::advance_tick(World &world) {
+void Match::advance_tick(World &world, TickPhase phase) {
     if (outcome_.ended)
         return;
     ensure_objective_census(world);
@@ -1011,6 +1011,8 @@ void Match::advance_tick(World &world) {
         periodic_second_timer_ = 62;
         update_objective_proximity(world);
     }
+    if (phase != TickPhase::Gameplay)
+        return;
     update_flag_objectives(world, periodic_second);
     if (remaining_ticks_ > 0)
         --remaining_ticks_;

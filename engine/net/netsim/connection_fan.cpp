@@ -44,6 +44,7 @@ struct FrameHeaderState {
 	int16_t tail_health = 150;
 	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
 	// derived once before budgeting so the conditional header width and bytes agree.
+	uint8_t preround_delay_seconds = 0;
 	uint8_t respawn_delay_seconds = 0;
 	uint8_t downed_revive_seconds = 0;
 	uint8_t spawn_target_hold_seconds = 0;
@@ -87,6 +88,10 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// still emits the witnessed byte. (Renamed from the FrameAimBlock misnomer to
 		// FrameWeaponBlock, grill 2026-07-01.)
 		fu.weapon.present = true;
+		// The global whole-second countdown is truncated directly to the wire
+		// byte; values above 255 wrap rather than clamp.
+		// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
+		fu.weapon.preround_timer = hdr.preround_delay_seconds;
 		fu.weapon.slot_state360 = hdr.respawn_delay_seconds;
 		fu.weapon.slot_state368 = hdr.downed_revive_seconds;
 		fu.weapon.slot_state364 = hdr.spawn_target_hold_seconds;
@@ -853,6 +858,11 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 		if (!decode_player_extended_uplink(dg.body.data() + consumed, dg.body.size() - consumed,
 		                                   up, body_consumed))
 			continue;
+		// The receive queue remains live during the countdown, but the player
+		// state callback does not apply its remote pose/state until the shared
+		// pre-round timer clears.
+		// [orig: NetPacket_SerializePlayerState @0x4C2010..0x4C2028]
+		if (world.preround_delay_seconds != 0) continue;
 
 		PlayerIntent intent;
 		intent.entity_handle = hdr.handle;
@@ -931,6 +941,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	// and quantizes only while writing the frame.
 	FrameHeaderState hs;
 	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
+	hs.preround_delay_seconds =
+			static_cast<uint8_t>(w.preround_delay_seconds);
 	const world::EnvNetworkState &env = w.network_env;
 	hs.env.present = true;
 	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16 >> 16);

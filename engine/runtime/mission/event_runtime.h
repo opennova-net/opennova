@@ -57,7 +57,7 @@ public:
     // it from mission teardown and the SP round restart, never periodically
     // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; callers
     // Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]
-    // (The pre pass is the tick()'s ctx.pre_mission path under the same
+    // (The pre pass is the tick()'s TickPhase::PreMission path under the same
     // one-call-per-transition contract [orig: Game_StartMission @0x525b86].)
     void run_post_mission_pass(opennova::world::World &w);
 

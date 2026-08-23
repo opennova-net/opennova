@@ -595,9 +595,9 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     const uint32_t pre_bit = static_cast<uint32_t>(bms::EventFlags::PreMission);
     const uint32_t post_bit = static_cast<uint32_t>(bms::EventFlags::PostMission);
 
-    if (ctx.pre_mission) {
+    if (ctx.phase == opennova::world::TickPhase::PreMission) {
         // Pre-mission pass: every PreMission-flag entry, one whole-list sweep.
-        // The embedder contract is ONE pre_mission tick per mission start, before
+        // The embedder contract is ONE PreMission tick per mission start, before
         // the clock runs (Simulation delivers exactly one) — retail's pre
         // pass is a single call, never periodic (D-EVT-4).
         // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0; sole caller

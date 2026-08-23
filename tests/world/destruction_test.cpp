@@ -1600,7 +1600,7 @@ void test_round_destroys_item() {
     // remaining health — one processed hit kills.
     CHECK(w.round_sim.spawn(w, p) >= 0);
     for (int t = 0; t < 30 && w.registry.get(barrel)->health > 0; ++t)
-        w.run_logic_tick(true, false);
+        w.run_logic_tick(true);
     Entity *b = w.registry.get(barrel);
     CHECK(b->health <= 0);
     CHECK((b->engine_flags & kEntityFlagHusk) != 0);
@@ -1696,7 +1696,7 @@ void test_net_kill_runs_client_side_death_chain() {
 
     // The non-authority client tick drains the queue exactly like retail's
     // shared per-frame update; the presentation counters advance.
-    w.run_logic_tick(/*is_authority=*/false, /*pre_mission=*/false);
+    w.run_logic_tick(/*is_authority=*/false);
     CHECK(w.explosions.queue.empty());
     CHECK(w.destruction.explosions_processed == 1);
 
@@ -1713,7 +1713,7 @@ void test_net_kill_runs_client_side_death_chain() {
     sb->health = 0;
     destruction_notify_item_damage(sp, *sb, 4);
     CHECK(sp.explosions.queue.size() == 1);
-    sp.run_logic_tick(/*is_authority=*/false, /*pre_mission=*/false);
+    sp.run_logic_tick(/*is_authority=*/false);
     CHECK(sp.explosions.queue.size() == 1); // still parked: not a visual client
 }
 

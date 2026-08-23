@@ -1365,7 +1365,7 @@ void World::load_systems() {
     for (ISystem *s : systems_) s->on_load(*this);
 }
 
-void World::run_logic_tick(bool is_authority, bool pre_mission) {
+void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
     // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
     // script evaluators read it. Deferred: the mission sim has no local-player avatar
@@ -1374,7 +1374,9 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ctx.world = this;
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
-    ctx.pre_mission = pre_mission;
+    ctx.phase = phase;
+    const bool pre_mission = phase == TickPhase::PreMission;
+    const bool gameplay = phase == TickPhase::Gameplay;
     vehicle_authority = is_authority;
     // The pending fire-sound countdown, before this tick's spawns: retail
     // drains after the client network frame (whose receive seeds our embedder
@@ -1397,14 +1399,16 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // local player (the §5.38 entity==local-player branch) and leaves every other
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
-    for (ISystem *s : systems_) s->tick(*this, ctx);
-    pose_emplacement_attachments(*this);
+    if (phase != TickPhase::PreRound) {
+        for (ISystem *s : systems_) s->tick(*this, ctx);
+        pose_emplacement_attachments(*this);
+    }
     // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
     // prevents a newly converted charge from losing an arm-delay tick and lets
     // claymore shrapnel fly later in its detonation frame [orig:
     // Entity_UpdatePool1Slot @0x4b8dd0 -> Weapon_UpdateAllProjectiles @0x4ec020].
     // These presentation events describe only the current authoritative tick.
-    if (is_authority && !pre_mission) {
+    if (is_authority && gameplay) {
         throwables.events.clear();
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     }
@@ -1413,7 +1417,12 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // become a same-frame round.
     // [orig: Entity_UpdateAllEntities @0x52674b, then
     //  WeaponAction_ProcessAllEntities @0x526786]
-    if (!pre_mission && ai != nullptr)
+    // WeaponAction_ProcessAllEntities is after the timer-gated entity update
+    // and is itself ungated, so an already-queued action may advance during
+    // PreRound even though its spawned projectile cannot move until gameplay.
+    // PreMission remains outside the frame pump entirely.
+    // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
+    if (phase != TickPhase::PreMission && ai != nullptr)
         ai->pump_mounted_weapon_slots(*this, logic_tick);
     // Live rounds step on the host and on an explicitly configured MP
     // non-authority client. The latter is the retail tag-2 visual re-sim path;
@@ -1421,10 +1430,10 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // sites, so only the host can mutate gameplay state. Do not infer a client
     // role from is_authority=false alone -- tests and pre-mission callers use it too.
     // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
-    if (!pre_mission &&
+    if (gameplay &&
         (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
-    if (!pre_mission &&
+    if (gameplay &&
         (is_authority || (mp_session && !projectile_authority))) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
@@ -1457,7 +1466,7 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // is that client — the pure-client view is D-HUD-16). Position converts to
     // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
     // @0x4de5f7]
-    if (is_authority && !pre_mission && !waypoints.empty()) {
+    if (is_authority && gameplay && !waypoints.empty()) {
         if (const Entity *lp = registry.get(cached.local_player))
             waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
                                    static_cast<int32_t>(lp->position.y * 65536.0f));
@@ -1556,6 +1565,7 @@ World::Snapshot World::snapshot() const {
     s.spawn_waves = spawn_waves;
     s.spawn_cycle_counter = spawn_cycle_counter;
     s.logic_tick = logic_tick;
+    s.preround_delay_seconds = preround_delay_seconds;
     s.prng16_state = prng16_state;
     s.local_player = cached.local_player;
     return s;
@@ -1571,6 +1581,7 @@ void World::restore(const Snapshot &s) {
     spawn_waves = s.spawn_waves;
     spawn_cycle_counter = s.spawn_cycle_counter;
     logic_tick = s.logic_tick;
+    preround_delay_seconds = s.preround_delay_seconds;
     prng16_state = s.prng16_state;
     // Reset per-tick health/proximity counters, then restore only the stable
     // ownership identity captured with the registry. A post-snapshot player may

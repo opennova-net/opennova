@@ -548,12 +548,24 @@ public:
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
 
+    // Authoritative whole-second pre-round phase. Networking and the frame
+    // clock remain live while World gameplay systems are frozen; phase-0 0x0A
+    // projects its low byte to each client. Joiners retain the same field from
+    // that wire projection, giving host and client one phase predicate.
+    // [orig: g_preround_delay_timer @0xC8D824; seed @0x516C8D;
+    // decrement @0x51DC20..0x51DC33; writer @0x4FF82D]
+    uint32_t preround_delay_seconds = 0;
+
     void add_system(ISystem *sys);
     void load_systems();       // calls on_load for each
 
-    // One authoritative logic tick: cache transient state, tick all systems,
-    // advance the tick counter (post-execution, faithful to WacScript_AdvanceTick @0x4f81d3).
-    void run_logic_tick(bool is_authority = true, bool pre_mission = false);
+    // One frame-clock tick. Gameplay runs every system; PreMission runs only
+    // the authored BMS pre-pass; PreRound advances shared clocks but freezes
+    // WAC/entities/projectiles. The explicit phase replaces the old boolean
+    // pre-mission seam so no caller can mistake a pre-round freeze for a script
+    // initialization pass.
+    void run_logic_tick(bool is_authority = true,
+                        TickPhase phase = TickPhase::Gameplay);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed
@@ -586,6 +598,7 @@ public:
         SpawnWaveList spawn_waves;
         uint32_t spawn_cycle_counter = 0;
         uint32_t logic_tick = 0;
+        uint32_t preround_delay_seconds = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
         EntityHandle local_player;
     };

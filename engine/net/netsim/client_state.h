@@ -668,6 +668,11 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// Latest phase-0 0x0A projection of the authority's whole-second
+	// pre-round timer. It is the client's Entity_UpdateAllEntities freeze gate;
+	// networking and maintenance remain live while nonzero.
+	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
+	std::uint8_t preround_delay_seconds = 0;
 	// Advances only when the complete seven-byte recipient-local 0x0A tail was
 	// decoded. frames_applied remains the lenient partial-presentation counter.
 	// Every compact entity record folded from an 0x0A. The replication heartbeat: it
