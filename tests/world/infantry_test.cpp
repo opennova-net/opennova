@@ -76,7 +76,7 @@ struct Field {
     }
 };
 
-CollisionModel hurt_box_model() {
+CollisionModel hurt_box_model(int32_t volume_type = 18) {
     CollisionModel model;
     auto plane = [&](int nx, int ny, int nz, double distance) {
         CollisionPlane p;
@@ -94,7 +94,7 @@ CollisionModel hurt_box_model() {
     plane(0, 0, -16384, 0.0);
 
     CollisionVolume hurt;
-    hurt.type = 18;
+    hurt.type = volume_type;
     hurt.min_x = fx(-3.0);
     hurt.max_x = fx(3.0);
     hurt.min_y = fx(-3.0);
@@ -326,6 +326,60 @@ void test_hurt_volume_updates_registry_health() {
     CHECK(observed != nullptr);
     CHECK(observed->health == 0);
     CHECK(!observed->alive);
+}
+
+void test_remote_player_body_publishes_exact_change_team_contact() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+
+    Entity trigger;
+    trigger.kind = EntityKind::Item;
+    trigger.position = {10.0f, 10.0f, 0.0f};
+    trigger.yaw = 90;
+    trigger.is_capture_trigger = true;
+    trigger.alive = true;
+    const EntityHandle trigger_handle = world.registry.spawn(1, trigger);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.position = {10.0f, 10.0f, 0.5f};
+    player.player_class = 5;
+    player.health = 100;
+    player.alive = true;
+    const EntityHandle player_handle = world.registry.spawn(0, player);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(
+            hurt_box_model(bvol_type::kChangeTeamCT));
+    collision.assign_entity(trigger_handle, model_id);
+    world.collision = &collision;
+
+    AiSystem ai;
+    ai.collision = &collision;
+    TestSource source;
+    source.clips = {anim_state::kIdle};
+    ai.root_motion = &source;
+    AiEntity *body = ai.at(ai.attach(player_handle));
+    body->inf.active = true;
+    body->net_is_remote_peer = true;
+    body->health = 100;
+    body->pos[0] = fx(10.0);
+    body->pos[1] = fx(10.0);
+    body->pos[2] = fx(0.5);
+
+    // The seventeenth pool build publishes the source's candidate slice; tick
+    // 22 is the next full resolve after the retail 11-on/10-off idle throttle.
+    // The stationary wire peer reaches the ordinary authority collision tail;
+    // no MoveOrder bit is required. [orig: org2 call @0x4B7CF4; CT callback
+    // @0x4B31DD..0x4B3238]
+    run_ticks(ai, world, 0, 23);
+    const auto contacts = collision.take_change_team_contacts();
+    CHECK(contacts.size() == 1);
+    if (!contacts.empty()) {
+        CHECK(contacts[0].source == player_handle);
+        CHECK(contacts[0].trigger == trigger_handle);
+    }
 }
 
 // ---- D-COL-5: the climb motor over a CL slab --------------------------------
@@ -3746,6 +3800,7 @@ int main() {
     test_local_player_uplink_carries_the_jump_bit();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
+    test_remote_player_body_publishes_exact_change_team_contact();
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();

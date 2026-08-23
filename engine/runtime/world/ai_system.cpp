@@ -405,19 +405,20 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
         if (e.inf.active) {
-            // Net-snapped peers do not locally simulate their body, but retain the
-            // existing seat-follow presentation phase. Simulated infantry enters the
-            // full retail body tick; its mounted return suppresses locomotion only.
+            // Joiners retain seat-follow presentation for wire-owned peers. The
+            // authority continues into the remote org2 animation/collision tail:
+            // mounted contact callbacks remain live while model push is suppressed.
             if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
                 advance_part_anim(e);
-                continue;
+                if (!is_authority) continue;
             }
-            // Net-snapped remote peers skip the movement motor, so their blink/indoors
-            // state comes from the position-only refresh instead. [orig: remote persons
+            // A client-only wire peer has no authority collision tail, so its
+            // blink/indoors presentation state comes from the position-only refresh.
+            // [orig: remote persons
             // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
             // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
             // walk is pool-2 statics on an 8-per-tick stagger, not persons]
-            if (collision_active && e.net_is_remote_peer) {
+            if (collision_active && e.net_is_remote_peer && !is_authority) {
                 if (Entity *ent = world.registry.get(e.handle))
                     collision->refresh_blink(world, *ent);
             }

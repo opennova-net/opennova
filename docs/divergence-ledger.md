@@ -356,13 +356,14 @@ Minted-and-closed 2026-08-16: **env #37** -> `FIXED` — Water reflection-sample
 | D-THROW-6 | `lndm` minefield items remain unported: `Entity_LandmineThink @0x441A40` is witnessed, but the def ammo-slot writers for +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE`) are not (world-wac-ai-re §27.6/§27.8) | B | NEEDS-RE (resolve the def wiring, then port the witnessed think) | PAR-WORLD / research starter |
 | D-COL-2 | Building destroyed/animated section skip not modeled — the itemDef+2192/2193 bone map + the `dword_A8A418` state table skip sections (gated !player); destroyed-wall pass-through rides the destruction system (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
 | D-COL-4 | Eye test point reuses the head column — retail's eye point is `pos + CameraOffset`, unmodeled until the camera entity fields land (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
-| D-COL-6 | `zone_capture_contact_tick` now forwards moving live pool-0 contacts every host logic tick into the retail request/presence transaction (`Server_OnPlayerTouchCaptureZone @0x500ba0`), but uses trigger-radius overlap rather than the authored CT Change Team Box (0x200) collision shape (full entry: world-wac-ai-re.md §15.5) | A | OPEN (shape only; touch cadence/transaction ported 2026-08-22) | PAR-WORLD |
 | D-COL-7 | Vertical ground probe = bilinear column height vs the `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect — equal for vertical rays on a heightfield; oblique rays use terrain_raycast_refined (full entry: world-wac-ai-re.md §15.5) | C | OPEN | PAR-WORLD |
 | D-COL-8 | Run-over kill / crush + walk-over-body sounds / the attrib 1/2 waypoint + collision callbacks / the CD 0x20 door-section vtbl callback / the blocked-push AI latch not ported — CD containment is detected but doors/lifts remain operationally inert (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
 | D-COL-10 | PANM rotation types 3/4 route through per-section matrices but `ObjectData::evaluate_panm` passes an identity `view_inverse` where retail derives the matrix from the current global inverse-view matrix — camera-facing/upright billboard parts can pose-mismatch (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
 | D-COL-11 | `LiveRound` has no BB/indoors state: retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`) — a shot inside an interior BB can falsely hit the heightfield; port after the probe radius/state lifetime is pinned (full entry: world-wac-ai-re.md §15.5) | B | OPEN | PAR-WORLD |
 
 Closed 2026-08-15: **D-COL-5** -> `FIXED` — the ladder climb state machine is ported end to end: entry gate + anchor snap/bump, the recontact mask 0x1 + 2-point capsule, the per-tick alignment chase, states 32–35 selection, gravity suppression + horizontal-root zeroing, the ±120° view clamp + arms lock, the side/back/bottom dismounts + on-ladder jump push + exit push/pitch restore, and the org1 `Flags 0x80` Z-chase variant `[orig: @ 0x4b3245..0x4b3495 / @ 0x4b7484..0x4b76d8 / @ 0x4bf917..0x4bfad8]`; residuals: the AI climb-order writer, the parachute/carried gate halves, the remote-climber authority display (full entry: world-wac-ai-re.md §15.5/§30).
+
+Closed 2026-08-23: **D-COL-6** -> `FIXED` — capture requests now consume the movement resolver's exact authored type-10 Change Team Box contacts. `CollisionWorld::resolve_entity` publishes deduplicated authority source/trigger pairs from pass 0, snapshot-owned remote org2 bodies run that shared collision tail, and `zone_capture_contact_tick` drains the stream with the retail secured-zone/request gates; the former MoveOrder test and trigger-radius fallback are removed `[orig: Entity_ComputeBoneCollisionForce @0x4AE150 flag @0x4AEB7B; callback callsite @0x4B31DD..0x4B3238; Server_OnPlayerTouchCaptureZone @0x500BA0]` (full entry: world-wac-ai-re.md §15.5).
 
 Closed 2026-08-15: **D-WPN-16** -> `FIXED` — every `instantkillzone` ammo keeps the immediate authority explosion path and Knife adds the effects-only ray with retail's strict terrain → water → PERSON-prox → buildings/items leg order and no bullet-sphere fallback; the PERSON leg's material 1 is the flesh row 23 `[orig: Weapon_RaycastAndSpawnImpact @0x4e8460; legs @0x4e86ad/@0x4e873f/@0x4e87cb; flesh remap @0x4e8880..0x4e8888]` (full entry: net-re §5.60).
 
@@ -994,7 +995,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 17 | 0 | 6 | 23 | 2 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
-| World / AI + events | 53 | 4 | 4 | 61 | 8 |
+| World / AI + events | 52 | 4 | 4 | 60 | 7 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 37 | 0 | 3 | 40 | 14 |
 | Mission `.mis` | 0 | 1 | 1 | 2 | 1 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -1008,7 +1009,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 2 | 0 | 1 | 3 | 0 |
 | Render — lighting | 4 | 0 | 0 | 4 | 0 |
-| **Total** | **119** | **11** | **20** | **150** | 24 |
+| **Total** | **118** | **11** | **20** | **149** | 24 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
 

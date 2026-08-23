@@ -1209,11 +1209,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			world,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
-	// Retail produces capture requests from movement collisions throughout the
-	// logic tick, then drains them in the periodic block below. Remote authority
-	// players are snapshot-driven here, so the world-owned contact pass consumes
-	// their same MoveOrder bit and final host pose. [orig: collision callsite
-	// @0x4B2F90..0x4B2FD0; Server_OnPlayerTouchCaptureZone @0x500BA0]
+	// Retail produces capture requests from exact Change Team Box contacts in
+	// the movement resolver, then drains that collision-owned stream here. The
+	// callback has no MoveOrder gate; snapshot-owned remote players run the same
+	// authority collision tail at their final host pose. [orig: collision
+	// callsite @0x4B31DD..0x4B3238;
+	// Server_OnPlayerTouchCaptureZone @0x500BA0]
 	if (!preround_active && ctx.is_in_session &&
 			!world.match.outcome().ended)
 		world::zone_capture_contact_tick(world);

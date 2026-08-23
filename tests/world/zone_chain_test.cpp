@@ -5,6 +5,7 @@
 // [orig: ZoneSlotChain_* @0x4A2350..0x4A2DE0; Server_ResolveSpawnTargetHandle @0x4fe110;
 //  find_spawn_entity_for_team @0x4fc810]
 #include "world/entity.h"
+#include "world/collision.h"
 #include "world/game_type.h"
 #include "world/spawn_select.h"
 #include "world/world.h"
@@ -21,11 +22,55 @@ static int failures = 0;
 
 namespace {
 
+constexpr int32_t fx(double units) {
+    return static_cast<int32_t>(units * 65536.0);
+}
+
+// One authored CT convex in section-local space. Retail produces capture
+// contact from the type-10 Change Team Box, not the objective's zone radius.
+// [orig: Entity_ComputeBoneCollisionForce @0x4AE150 type dispatch @0x4AEB7B;
+// movement resolver capture callsite @0x4B31DD..0x4B3238]
+CollisionModel capture_box_model(double half_x, double half_y, double height,
+                                 int32_t type = bvol_type::kChangeTeamCT) {
+    CollisionModel model;
+    auto plane = [&](int nx, int ny, int nz, double distance) {
+        CollisionPlane value;
+        value.nx = static_cast<int16_t>(nx);
+        value.ny = static_cast<int16_t>(ny);
+        value.nz = static_cast<int16_t>(nz);
+        value.dist = fx(distance);
+        model.planes.push_back(value);
+    };
+    plane(16384, 0, 0, -half_x);
+    plane(-16384, 0, 0, -half_x);
+    plane(0, 16384, 0, -half_y);
+    plane(0, -16384, 0, -half_y);
+    plane(0, 0, 16384, -height);
+    plane(0, 0, -16384, 0.0);
+
+    CollisionVolume volume;
+    volume.type = type;
+    volume.min_x = fx(-half_x);
+    volume.max_x = fx(half_x);
+    volume.min_y = fx(-half_y);
+    volume.max_y = fx(half_y);
+    volume.min_z = 0;
+    volume.max_z = fx(height);
+    volume.plane_count = 6;
+    model.volumes.push_back(volume);
+
+    CollisionSection section;
+    section.volume_count = 1;
+    model.sections.push_back(section);
+    return model;
+}
+
 EntityHandle spawn_zone(World &w, uint8_t zone_no, uint8_t team, Vec3 pos) {
     Entity e;
     e.kind = EntityKind::Item; // the ASH_I5A 1359 zone objects ride pool 1 (items)
     e.item_id = 1359;
     e.position = pos;
+    e.yaw = 90; // mission yaw 90 -> identity collision placement
     e.team = team;
     e.zone_number = zone_no;
     e.is_capture_trigger = true; // ItemDefAttrib 0x20000 "ChangeTeam"
@@ -47,6 +92,7 @@ void spawn_team_marker(World &w, int32_t type, Vec3 pos, uint8_t zone_no = 0) {
 // 6003/6004 base start markers (zone_number 0, as authored).
 struct AshFixture {
     World w;
+    CollisionWorld collision;
     EntityHandle z1, z2a, z2b, z3;
     AshFixture() {
         w.registry.configure_pool(0, 32); // organics (capture-loop soldiers)
@@ -57,6 +103,15 @@ struct AshFixture {
         z2a = spawn_zone(w, 2, 0, {163.3f, 4.8f, 46.0f});
         z2b = spawn_zone(w, 2, 0, {-310.1f, -74.0f, 62.0f});
         z3 = spawn_zone(w, 3, 2, {338.2f, 371.2f, 26.6f});
+        const int32_t capture_model =
+                collision.add_model(capture_box_model(80.0, 80.0, 80.0));
+        collision.assign_entity(z1, capture_model);
+        collision.assign_entity(z2a, capture_model);
+        collision.assign_entity(z2b, capture_model);
+        collision.assign_entity(z3, capture_model);
+        w.collision = &collision;
+        for (int tick = 0; tick < 17; ++tick)
+            collision.build_tick_tables(w);
         spawn_team_marker(w, 6003, {-394.1f, 449.6f, 11.0f});
         spawn_team_marker(w, 6004, {443.5f, -172.5f, 11.0f});
         MatchRules rules;
@@ -227,6 +282,28 @@ EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
 }
 
 void capture_second(World &w, ZoneCaptureEvents &events) {
+    if (w.collision != nullptr) {
+        w.collision->refresh_after_registry_change(w);
+        std::vector<EntityHandle> players;
+        w.registry.for_each([&](const Entity &entity) {
+            if (entity.handle.pool() == 0 && entity.player_class != 0 &&
+                    entity.alive && entity.health > 0)
+                players.push_back(entity.handle);
+        });
+        for (const EntityHandle handle : players) {
+            Entity *player = w.registry.get(handle);
+            int32_t pos[3] = {fx(player->position.x), fx(player->position.y),
+                              fx(player->position.z)};
+            int32_t vel[2] = {0, 0};
+            int32_t vel_z = 0;
+            int16_t health = static_cast<int16_t>(player->health);
+            CollisionWorld::ResolveState state;
+            w.collision->resolve_entity(
+                    w, handle, state, pos, vel, vel_z, 0, fx(1.8), 0, 0,
+                    /*is_player=*/true, /*is_authority=*/true, 0, 43, 1u,
+                    health);
+        }
+    }
     zone_capture_contact_tick(w);
     zone_capture_second_tick(w, events);
 }
@@ -401,13 +478,20 @@ EntityHandle spawn_unnumbered_zone(World &w, uint8_t team, Vec3 pos) {
     zone.kind = EntityKind::Item;
     zone.item_id = 1359;
     zone.position = pos;
+    zone.yaw = 90; // identity collision placement
     zone.team = team;
     zone.zone_radius = 70;
     zone.zone_number = 0;
     zone.is_capture_trigger = true; // ItemDefAttrib 0x20000 ChangeTeam
     zone.is_spawn_point = true;     // ItemDefAttrib 0x40000 event gate
     zone.alive = true;
-    return w.registry.spawn(1, zone);
+    const EntityHandle handle = w.registry.spawn(1, zone);
+    if (w.collision != nullptr) {
+        const int32_t model =
+                w.collision->add_model(capture_box_model(80.0, 80.0, 80.0));
+        w.collision->assign_entity(handle, model);
+    }
+    return handle;
 }
 
 // A movement collision queues the request; the periodic drain starts the timed
@@ -471,28 +555,70 @@ void test_unnumbered_timed_capture_and_presence() {
     }
 }
 
-// Contact is produced by the movement resolver, not by mere overlap. Opposing
-// requests in one drain contest and cancel rather than selecting pool order.
-// [orig: movement callsite @0x4B2F90..0x4B2FD0; conflicting-request leg
-// @0x53BBEE..0x53BC15]
-void test_capture_contact_movement_gate_and_contest() {
-    AshFixture f;
+// Contact is produced by the movement resolver's authored CT shape even when
+// MoveOrder is idle. Opposing requests in one drain contest and cancel rather
+// than selecting pool order. [orig: movement callsite @0x4B31DD..0x4B3238;
+// conflicting-request leg @0x53BBEE..0x53BC15]
+void test_capture_contact_has_no_move_gate_and_contests() {
     const Vec3 pos{20.0f, 30.0f, 4.0f};
-    const EntityHandle zone = spawn_unnumbered_zone(f.w, 0, pos);
-    const EntityHandle blue = spawn_soldier(f.w, 1, pos);
-    f.w.registry.get(blue)->net_move_input = 0;
-    ZoneCaptureEvents ev;
-    capture_second(f.w, ev);
-    CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).empty());
+    {
+        AshFixture f;
+        MatchRules rules = f.w.match.rules();
+        rules.capture_duration_seconds = 3;
+        f.w.match.configure(rules);
+        const EntityHandle zone = spawn_unnumbered_zone(f.w, 0, pos);
+        const EntityHandle blue = spawn_soldier(f.w, 1, pos);
+        f.w.registry.get(blue)->net_move_input = 0;
+        ZoneCaptureEvents ev;
+        capture_second(f.w, ev);
+        CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).size() == 1);
+        CHECK(f.w.registry.get(zone)->team == 0);
+    }
+    {
+        AshFixture f;
+        MatchRules rules = f.w.match.rules();
+        rules.capture_duration_seconds = 3;
+        f.w.match.configure(rules);
+        const EntityHandle zone = spawn_unnumbered_zone(f.w, 0, pos);
+        spawn_soldier(f.w, 1, pos);
+        spawn_soldier(f.w, 2, pos);
+        ZoneCaptureEvents ev;
+        capture_second(f.w, ev);
+        CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).empty());
+        CHECK(events_of<ZoneCaptureEvents::TimerWindow>(ev).empty());
+        CHECK(f.w.registry.get(zone)->team == 0);
+    }
+}
+
+// A point can be well inside the gameplay/proximity radius while remaining
+// outside the authored CT convex. Only the latter is the retail capture touch;
+// changing a trigger's authored collision model changes capture without
+// changing zone_radius. [orig: contact flag 0x200 @0x4AEB7B; gated callback
+// @0x4B31DD..0x4B3238; Server_OnPlayerTouchCaptureZone @0x500BA0]
+void test_capture_contact_uses_authored_change_team_box() {
+    AshFixture f;
+    MatchRules rules = f.w.match.rules();
+    rules.capture_duration_seconds = 3;
+    f.w.match.configure(rules);
+
+    const Vec3 center{20.0f, 30.0f, 4.0f};
+    const EntityHandle zone = spawn_unnumbered_zone(f.w, 0, center);
+    Entity *zone_entity = f.w.registry.get(zone);
+    zone_entity->zone_radius = 100;
+    const int32_t narrow_ct =
+            f.collision.add_model(capture_box_model(1.0, 4.0, 3.0));
+    f.collision.assign_entity(zone, narrow_ct);
+
+    const EntityHandle player =
+            spawn_soldier(f.w, 1, {center.x + 10.0f, center.y, center.z});
+    ZoneCaptureEvents events;
+    capture_second(f.w, events);
+    CHECK(events_of<ZoneCaptureEvents::TimedStart>(events).empty());
     CHECK(f.w.registry.get(zone)->team == 0);
 
-    f.w.registry.get(blue)->net_move_input = Entity::kMoveOrderMoving;
-    const EntityHandle red = spawn_soldier(f.w, 2, pos);
-    capture_second(f.w, ev);
-    CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).empty());
-    CHECK(events_of<ZoneCaptureEvents::TimerWindow>(ev).empty());
-    CHECK(f.w.registry.get(zone)->team == 0);
-    (void)red;
+    f.w.registry.get(player)->position = center;
+    capture_second(f.w, events);
+    CHECK(events_of<ZoneCaptureEvents::TimedStart>(events).size() == 1);
 }
 
 // The secure pass also converts live pool-1/2 entities carrying ItemDefAttrib2
@@ -685,7 +811,8 @@ int main() {
     test_capture_loop_flip_and_secure();
     test_neutral_capture_is_symmetric_and_actor_attributed();
     test_unnumbered_timed_capture_and_presence();
-    test_capture_contact_movement_gate_and_contest();
+    test_capture_contact_has_no_move_gate_and_contests();
+    test_capture_contact_uses_authored_change_team_box();
     test_numbered_zone_converts_attrib2_entities();
     test_instant_capture_preserves_team_change_order();
     test_farp_enforcement_uses_prior_capture_masks();
