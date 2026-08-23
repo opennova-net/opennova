@@ -1338,6 +1338,70 @@ func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Er
 	return _io_ops.export_terrain(output_dir, flavor)
 
 
+## Apply a programmatic edit to one editable atlas image as ONE undoable step.
+##
+## `kind` is a TerrainEditHistory.Kind (HEIGHTMAP / BLENDMAP / COLORMAP). `mutator` receives the
+## live Image, mutates it IN PLACE, and returns the Rect2i it touched (return null / anything
+## else and the whole atlas is assumed, which stores an 8 MiB undo step -- return a real rect).
+##
+## In place is not a style preference: TerrainData holds the SAME Ref<Image>, which is why the
+## C++ brush kernels and the editor see one buffer. Assigning a new Image through
+## _set_heightmap_image instead would desync the four objects holding that reference, and
+## _ensure_surface_inputs_rebuilt is identity-guarded, so the normal map would go stale.
+##
+## The interactive brush drives the same history per dab; this is the entry for edits that are
+## not a drag -- a generated relief, a fill, an imported region.
+func apply_bulk_edit(kind: int, mutator: Callable) -> bool:
+	if is_export_running() or not mutator.is_valid():
+		return false
+	var image: Image = _editable_image_for_kind(kind)
+	if image == null:
+		return false
+	_brush_session.begin_history_stroke(kind, image)
+	var touched: Variant = mutator.call(image)
+	var rect: Rect2i = touched if touched is Rect2i else Rect2i(0, 0, image.get_width(), image.get_height())
+	if rect.size.x <= 0 or rect.size.y <= 0:
+		_brush_session.end_history_stroke(null)  # nothing changed: drop the pending stroke
+		return false
+	_brush_session.expand_history_rect(rect)
+	_brush_session.end_history_stroke(image)
+	_invalidate_after_bulk_edit(kind, rect)
+	return true
+
+
+func _editable_image_for_kind(kind: int) -> Image:
+	match kind:
+		TerrainEditHistory.Kind.HEIGHTMAP:
+			return _heightmap_image
+		TerrainEditHistory.Kind.BLENDMAP:
+			return _blendmap_image
+		TerrainEditHistory.Kind.COLORMAP:
+			return _colormap_image
+	return null
+
+
+# The same invalidation _apply_history_snapshot performs for each kind. Height also re-clamps
+# the CDEP blocks it touched, exactly as every brush dab does -- the export would otherwise
+# carry violations for _auto_clamp_for_export_if_needed to silently fix later.
+func _invalidate_after_bulk_edit(kind: int, rect: Rect2i) -> void:
+	match kind:
+		TerrainEditHistory.Kind.HEIGHTMAP:
+			if _data != null:
+				_data.cdep_clamp_blocks_in_rect(rect)
+			terrain_mesh.set_heightmap(_heightmap_image)
+			_height_revision += 1
+			_brush_ops._refresh_surface_input_heightfield()
+			_mark_foliage_preview_dirty()
+			_mark_tile_overlay_dirty()
+		TerrainEditHistory.Kind.BLENDMAP:
+			_blendmap_tex.update(_blendmap_image)
+			_brush_ops._refresh_surface_input_blend()
+		TerrainEditHistory.Kind.COLORMAP:
+			_colormap_tex.update(_colormap_image)
+	is_dirty = true
+	_mark_ui_state_changed()
+
+
 func _set_heightmap_image(image: Image) -> void:
 	_document.set_heightmap_image(image)
 	terrain_mesh.set_heightmap(_heightmap_image)
