@@ -1,0 +1,13 @@
+// Minimal weapon.def for fixtures/minimal/ — one selectable rifle so a joined
+// player spawns with a weapon. Authored from scratch (no retail asset); parses
+// through libs/def def_parse_weapons. Grows only as host+join validation needs.
+ammoclass_max_carry CLASS_556MM		1000
+
+weapon "WPN_M4"
+	category 1
+	rank     0
+	statid   100
+	ammo     AM_556MM
+	clip     30
+	maxclips 7
+end

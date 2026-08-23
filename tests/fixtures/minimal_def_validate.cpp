@@ -3,7 +3,7 @@
 // [orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]. All three
 // are authored from scratch (no retail asset); this guards that they load and
 // carry the minimal content a joined player needs (a person to spawn as, a
-// selectable rifle, its round). See fixtures/minimal/README.md.
+// selectable rifle, its round). See assets/README.md.
 #include <def/def.h>
 
 #include <cstdio>
@@ -23,7 +23,7 @@ int fail = 0;
 		if (!expect((c), (m))) ++fail;                                                              \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
+std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
 bool has_ammo(const DefAmmoFile &f, const char *name) {
 	for (size_t i = 0; i < f.count; ++i)

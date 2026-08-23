@@ -83,7 +83,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 func test_height_precedence_is_direct_then_bms_then_signed_trn_then_env() -> void:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/minimal/resources")), OK)
+			"res://../assets")), OK)
 	var terrain := TerrainData.new()
 	assert_eq(terrain.load_from_resource_root(resource_root, "mnml.trn"), OK)
 	terrain.set_water_height(-20) # engine half-units -> -10 world units

@@ -4,7 +4,7 @@
 // own slice. Emits with OPENNOVA_WRITE_MINIMAL_FIXTURES=1; otherwise guards
 // each file round-trips (env: save->load; bms: write->parse) and carries the
 // minimal content a host+join needs (a named mission on the minimal terrain,
-// two team spawns). See fixtures/minimal/README.md.
+// two team spawns). See assets/README.md.
 #include <env/env.h>
 #include <mission/mission.h>
 
@@ -28,7 +28,7 @@ int fail = 0;
 
 const char kMapBase[] = "mnml"; // the minimal map's base name (mnml.bms/.trn/.env)
 
-std::string path(const std::string &name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
+std::string path(const std::string &name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
 bool read_file(const std::string &p, std::vector<uint8_t> &out) {
 	std::ifstream f(p, std::ios::binary | std::ios::ate);

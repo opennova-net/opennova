@@ -1,0 +1,18 @@
+// fixtures/minimal — authored menu stylesheet (no retail content).
+// The menu shell loads this by its canonical name at boot
+// [orig: sub_552500 @ 0x552604 -> NapiConfigMap_LoadIncludeFile], and the
+// key set below is the one retail's stylesheet defines (key NAMES witnessed
+// against the JOTAC JO install; every value here is ours). The DEF_FONTNAME_*
+// entries name fonts the packaging step generates (minimal_fnt_builder.h).
+DEF_FONTNAME Arial16n.fnt
+DEF_FONTNAME_LG Arial16b.fnt
+IMPACT_FONTNAME Impac38b.fnt
+DEF_TEXT_FG FFFFFFFF
+DEF_TEXT_MOUSEOVER_FG FFFFC040
+DEF_TEXT_SELECTED_FG FFFF8000
+DEF_TEXT_DISABLED_FG FF545252
+TRIM_COLOR FF808080
+ITEM_SELECTED_BG 80FF8000
+COLOR_BLACK FF000000
+SEMIOPAQUE_BLACK 80000000
+DEF_IMAGE_DEFAULT_BG FF000000

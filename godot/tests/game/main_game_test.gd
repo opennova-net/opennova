@@ -12,7 +12,7 @@ const ShellPresentationSessionScript := preload(
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
-const FIXTURE_DIR := "res://../fixtures/minimal/resources"
+const FIXTURE_DIR := "res://../assets"
 const POLICY_FILE := "policy.bin"
 const POLICY_PLAIN := "persisted game profile reached the mounted root"
 const SCR_KEY_DEFAULT := 0xabee_face
@@ -561,7 +561,7 @@ func test_crosshair_option_updates_an_existing_hud() -> void:
 
 func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 
 	var world := GameWorld.new()

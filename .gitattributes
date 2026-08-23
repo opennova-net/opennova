@@ -35,3 +35,20 @@ fixtures/**/.gitignore text eol=lf filter= diff= merge=
 # CRLF-written manifests must keep their bytes (-text, not eol=lf).
 screenshots/**/*.md -text filter= diff= merge=
 screenshots/**/*.json -text filter= diff= merge=
+
+# assets/ is the game's own authored asset tree. Binary assets stay in LFS via
+# the assets/** rule above; the TEXT ones are plain files in git so they diff
+# and review normally. They keep `-text -eol` rather than eol=lf because retail's
+# parsers are NOT LF-tolerant and fail silently: a LF-only menu_style.mns
+# dead-ends the menu shell before main.mnu (witnessed 2026-08-23), and a bare LF
+# stops the .def parser after block 0. Their CRLF must survive a round trip on
+# every platform, so git must not normalise them in either direction.
+# Last-match precedence: this block has to stay at the END of the file to win
+# over both assets/** and the *.env rule above.
+assets/**/*.def -text -eol filter= diff= merge=
+assets/**/*.mnu -text -eol filter= diff= merge=
+assets/**/*.mns -text -eol filter= diff= merge=
+assets/**/*.trn -text -eol filter= diff= merge=
+assets/**/*.env -text -eol filter= diff= merge=
+assets/**/*.wac -text -eol filter= diff= merge=
+assets/**/*.md  text eol=lf filter= diff= merge=

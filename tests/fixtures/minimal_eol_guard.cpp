@@ -36,7 +36,7 @@ const char *kAuthoredText[] = {
 };
 
 std::string path(const char *name) {
-	return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name;
+	return std::string(GAME_ASSETS_DIR) + "/" + name;
 }
 
 } // namespace

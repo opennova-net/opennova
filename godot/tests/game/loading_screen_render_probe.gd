@@ -15,7 +15,7 @@ extends SceneTree
 ## SceneTree frame, leaving the OS cursor responsive over a black client area.
 
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
-const MINIMAL_RESOURCE_DIR := "res://../fixtures/minimal/resources"
+const MINIMAL_RESOURCE_DIR := "res://../assets"
 const MISSION := "mnml.bms"
 const WINDOW_SIZE := Vector2i(960, 720)
 const MENU_WAIT_FRAMES := 180

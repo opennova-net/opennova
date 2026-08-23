@@ -4,7 +4,7 @@
 // mp.mnu the LAN host/join screen [orig: @ 0x5588fa]. Authored from scratch
 // (no retail asset). Navigation correctness is validated at the retail-launch
 // step; this guards the files parse + carry the right screens. See
-// fixtures/minimal/README.md.
+// assets/README.md.
 #include <mnu/mnu.h>
 
 #include <cstdio>
@@ -23,7 +23,7 @@ int fail = 0;
 		}                                                                                           \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
+std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
 } // namespace
 

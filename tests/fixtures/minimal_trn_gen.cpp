@@ -5,7 +5,7 @@
 // Authored from scratch by engine/formats/trn save_trn (no retail asset), modeled on
 // fixtures/godot/dvxi5/Dvxi5.trn for a small flat map. The heavy .cpt/tiles are
 // generate-at-package (not committed); this config IS committed + round-trip
-// guarded. See fixtures/minimal/README.md.
+// guarded. See assets/README.md.
 //
 // Emit with OPENNOVA_WRITE_MINIMAL_FIXTURES=1; else guard the config loads and
 // carries the expected references.
@@ -30,7 +30,7 @@ int fail = 0;
 		}                                                                                           \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
+std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
 // The minimal flat map's terrain config. Names mirror the packaging step's
 // output prefix (mnml) so the .cpt build output and the authored art line up.

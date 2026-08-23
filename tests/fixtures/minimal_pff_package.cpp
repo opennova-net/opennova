@@ -9,7 +9,7 @@
 // terrain/env/art → resource. This is the generate-at-package step
 // (build_terrain is ~35 s and emits ~10 MB / 685 files) — NOT committed, NOT
 // run per build: it SKIPS clean unless OPENNOVA_BUILD_MINIMAL_PFF=1. See
-// fixtures/minimal/README.md.
+// assets/README.md.
 #include "minimal_fnt_builder.h"
 #include "minimal_mus_builder.h"
 
@@ -31,7 +31,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string dir() { return MINIMAL_FIXTURE_DIR; }
+std::string dir() { return GAME_ASSETS_DIR; }
 
 bool read_bytes(const fs::path &p, std::vector<uint8_t> &b) {
 	std::ifstream f(p, std::ios::binary | std::ios::ate);
@@ -324,7 +324,7 @@ int main() {
 	//    placement; the generated fonts + music scripts ride localres.pff and
 	//    the generated terrain rides resource.pff (excluding the depthmap
 	//    build input).
-	const fs::path sources = root / "resources";
+	const fs::path sources = root; // assets/ is flat: authored sources live at the root
 	std::vector<std::pair<std::string, fs::path>> language, localres, resource;
 	for (const char *n : kLanguage) language.emplace_back(n, sources / n);
 	for (const char *n : kLocalres) localres.emplace_back(n, sources / n);

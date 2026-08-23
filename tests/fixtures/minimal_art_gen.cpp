@@ -4,7 +4,7 @@
 // the flat map. TGA is hand-rolled (uncompressed type-2 BGR, an 18-byte header);
 // the PCX maps go through engine/formats/pcx encode_pcx_indexed. Dimensions are a modest
 // minimal guess; which retail requires vs tolerates is validated at the retail
-// launch (see fixtures/minimal/README.md). Emit with
+// launch (see assets/README.md). Emit with
 // OPENNOVA_WRITE_MINIMAL_FIXTURES=1; else guard each decodes/round-trips.
 #include <pcx/pcx.h>
 #include <pcx/pcx_io.h>
@@ -29,7 +29,7 @@ int fail = 0;
 		}                                                                                           \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
+std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
 bool write_bytes(const std::string &p, const std::vector<uint8_t> &b) {
 	std::ofstream o(p, std::ios::binary);

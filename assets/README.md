@@ -1,10 +1,15 @@
-# `fixtures/minimal/` — the smallest authored game that hosts + joins
+# `assets/` — the game's own authored assets
 
-Goal: the **minimal resource set that runs retail `Jointops.exe` as a host and
-lets a second instance join**, over a **custom minimal map**, with every file
-**authored from scratch by our own writers** — no retail asset committed. Once
-retail↔retail works on this set, the *same* set is the seed for our engine's
-MVP (host + join our own runtime on the identical inputs).
+These are **the game's assets** — the ones OpenNova is built out from, authored
+in ONED and committed here. Not a test fixture: the per-format `fixtures/<fmt>/`
+sets and the retail-derived ones are expected to give way to this tree as it
+grows.
+
+Every byte is authored from scratch by our own writers and tools; no retail
+asset is committed. Retail `Jointops.exe` is the **oracle**, not the target: it
+is the original consumer, so an asset it loads and renders is a correct asset.
+That is the whole reason the retail loop exists — proving compatibility both
+validates what ONED wrote and tells our own engine what it has to accept.
 
 This is the concrete instantiation of the R8 required-resources manifest
 ([../../docs/required-resources.md](../../docs/required-resources.md)) — that
@@ -24,8 +29,11 @@ acceptance step, never a committed input.
 
 ## Layout
 
-- **`resources/`** — the committed authored sources (every file our writers
-  emit, guarded by the `minimal_*` ctests). Nothing here is retail.
+- **this root, flat** — the committed authored assets, guarded by the
+  `minimal_*` ctests, plus the game dir retail runs out of. Retail resolves
+  bare filenames here under `/d`, which is why `.gitignore` blanket-ignores the
+  root and allowlists our files BY NAME rather than excluding retail's.
+- **`src/`** — modelling sources (`.blend`, `.ase`) that retail never loads.
 - **this root** — the "game dir": the packaging tool writes the three
   boot-table `.pff`s here, and the asset-gated validation step drops the
   retail `Jointops.exe` (+ `binkw32.dll`, the Bink redistributable the exe

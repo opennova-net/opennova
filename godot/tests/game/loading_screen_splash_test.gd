@@ -7,7 +7,7 @@ extends GutTest
 ## [orig: show_start_mission_splash @ 0x520820; gate @ 0x525d38].
 
 const LoadingScreen := preload("res://game/ui/nova_loading_screen.gd")
-const ARROW_FIXTURE := "res://../fixtures/minimal/resources/newarow1.tga"
+const ARROW_FIXTURE := "res://../assets/newarow1.tga"
 
 var _temp_dirs: Array[String] = []
 
