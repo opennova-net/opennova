@@ -7824,6 +7824,13 @@ host-only deadline queue and duplicate entity-reset path were deleted. Pinned by
 `npruntime_round_sim_test` (configured five seconds, forced three inside 620 ticks,
 silent early default/target picks, exact expiry, remote request release, local shared
 release) and `netsim_two_peer_fanout` (+360/+364 phase-0 bytes and the live +360 mask).
+For a type-1 SpawnPoint target the request now runs the cited alive/free-seat gate;
+the shared release first detaches the requester, requires the target's non-null
+`occupantEntity(+0x170)`, repeats the exact root+ground-child weighted seat walk, resets
+the player, and boards the returned seat owner through the canonical attach operation.
+This two-stage distinction and the post-reset attach are pinned by
+`npruntime_server_session_test::check_vehicle_spawn_target_deploys_into_best_seat`
+and the child/control/passenger weights by `vehicle_mount_test`.
 
 **The deploy-screen HOLD chain (witness 2026-07-03, D-NET-156 — the v31 root cause).** The
 picker UI's lifetime is a per-frame SERVER signal, not a one-shot:

@@ -1612,7 +1612,7 @@ add_executable(mission_runtime_boot_test mission/runtime_boot_test.cpp)
 target_link_libraries(mission_runtime_boot_test PRIVATE opennova_runtime)
 add_test(NAME mission_runtime_boot COMMAND mission_runtime_boot_test)
 
-# Emplacement mount: the seat model + EntityCommands mount/dismount/find_best_seat
+# Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.
 add_executable(mount_test mission/mount_test.cpp)

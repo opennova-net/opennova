@@ -919,6 +919,22 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) return replies;
+	// Server_ProcessPlayerDeath always releases the old seat before inspecting
+	// a requested mobile spawn. If the requester was the vehicle's primary
+	// occupant, this clears +0x170 and the subsequent mobile-spawn gate rejects.
+	// [orig: Server_ProcessPlayerDeath @0x5177A9..0x5177DB]
+	if (player->mounted)
+		world::entity_detach_from_vehicle(world, player->handle);
+	const world::Entity *target = world.registry.get(target_zone);
+	const bool mobile_spawn = target != nullptr && target->is_spawn_point &&
+			target->item_type == 1;
+	if (mobile_spawn) {
+		world::VehicleSeatSelection selected;
+		if (!target->primary_occupant.valid() ||
+				!world::find_best_vehicle_seat(
+						world, target_zone, player->handle, selected))
+			return replies;
+	}
 	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
 			world, player->handle, target_zone, conn.reply.player_slot,
 			player->team, config.game_type);
@@ -942,6 +958,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		player->health = player->health_max;
 	else
 		player->health = 100;
+	player->alive = true;
 	if (world::AiEntity *motor =
 			world.ai ? world.ai->for_handle(player->handle) : nullptr;
 			motor != nullptr && motor->inf.active) {
@@ -965,7 +982,15 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
 	player->flags &= ~1u;
-	player->alive = true;
+	if (mobile_spawn) {
+		// Retail repeats FindBestSeatSlot after the reset, then requests the
+		// authoritative attach against the returned root/child seat owner.
+		// [orig: Server_ProcessPlayerDeath @0x517A3E..0x517A74]
+		world::VehicleSeatSelection selected;
+		if (world::find_best_vehicle_seat(
+					world, target_zone, player->handle, selected))
+			world::attach_to_vehicle_seat(world, player->handle, selected);
+	}
 	const world::WeaponTable *armory = !world.weapons.empty()
 			? &world.weapons
 			: nullptr;
@@ -1446,6 +1471,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// +360 follows the dead-or-pending test and silently rejects every
 				// pick, including Default Spawn. [orig: @0x519cf2]
 				if (conn.link.respawn_delay_seconds != 0) break;
+				if (target != nullptr && target->item_type == 1 &&
+						target->is_spawn_point) {
+					// A vehicle target is selectable only while alive and while its
+					// weighted root/child seat walk finds a free slot. The separate
+					// +0x170 primary-occupant gate belongs to release, below.
+					// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
+					world::VehicleSeatSelection selected;
+					if (!world::find_best_vehicle_seat(
+							*world, target->handle, player->handle, selected))
+						break;
+				}
 				if (target != nullptr) {
 					if (world->spawn_waves.try_queue(
 							*world, target->handle, player->handle)) {

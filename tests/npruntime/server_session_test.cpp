@@ -28,6 +28,7 @@
 #include <world/game_type.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
+#include <world/vehicle_attach.h>
 #include <world/world.h>
 
 #include <cstdio>
@@ -2839,6 +2840,133 @@ bool check_default_spawn_requires_no_team_zone() {
 	              "the retail-default disabled rule permits Default Spawn");
 }
 
+// A spawnable type-1 item is a mobile deploy target. The request handler first
+// requires a live target and a free best seat; Server_ProcessPlayerDeath repeats
+// the search, requires the target's +0x170 primary-occupant latch, resets the
+// player, then requests the authoritative attach.
+// [orig: Server_ProcessClientRequestRespawn @0x519AF0;
+//  Server_ProcessPlayerDeath @0x517740;
+//  Entity_FindBestSeatSlot @0x4351F0]
+bool check_vehicle_spawn_target_deploys_into_best_seat() {
+	opennova::world::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+
+	opennova::world::Entity vehicle_seed;
+	vehicle_seed.kind = opennova::world::EntityKind::Item;
+	vehicle_seed.has_item_def = true;
+	vehicle_seed.item_type = 1;
+	vehicle_seed.is_spawn_point = true;
+	vehicle_seed.team = 1;
+	vehicle_seed.alive = true;
+	vehicle_seed.health = 500;
+	vehicle_seed.health_max = 500;
+	vehicle_seed.position = {30.0f, 40.0f, 5.0f};
+	opennova::world::Seat controller;
+	controller.type = opennova::world::SeatType::Controller;
+	controller.bone_index = 4;
+	vehicle_seed.seats.push_back(controller);
+	opennova::world::Seat passenger;
+	passenger.type = opennova::world::SeatType::Passenger;
+	passenger.bone_index = 7;
+	passenger.seat_local = {2.0f, 0.0f, 1.0f};
+	vehicle_seed.seats.push_back(passenger);
+	const opennova::world::EntityHandle vehicle =
+			world.registry.spawn(1, vehicle_seed);
+
+	opennova::world::Entity driver_seed;
+	driver_seed.kind = opennova::world::EntityKind::Organic;
+	driver_seed.team = 1;
+	driver_seed.alive = true;
+	driver_seed.health = 100;
+	const opennova::world::EntityHandle driver =
+			world.registry.spawn(0, driver_seed);
+	if (!expect(opennova::world::entity_process_vehicle_attach(
+				world, driver, vehicle, 4),
+			"fixture driver claims the mobile spawn vehicle"))
+		return false;
+
+	opennova::world::Entity player_seed;
+	player_seed.kind = opennova::world::EntityKind::Organic;
+	player_seed.flags = opennova::world::kEntityFlagPlayer |
+			opennova::world::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.team = 1;
+	player_seed.alive = false;
+	player_seed.health = 0;
+	player_seed.health_max = 125;
+	player_seed.position = {-10.0f, -20.0f, 0.0f};
+	const opennova::world::EntityHandle player =
+			world.registry.spawn(0, player_seed);
+
+	opennova::np::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	std::vector<opennova::np::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = opennova::np::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.link.respawn_pending = true;
+	conn.reply.player_slot = 1;
+	const std::vector<opennova::ProtocolMessage> pick{
+		opennova::make_protocol_message(
+			opennova::c2s::RESPAWN_REQUEST,
+			{static_cast<uint8_t>(vehicle.packed),
+			 static_cast<uint8_t>(vehicle.packed >> 8)})};
+	auto dispatch = [&]() {
+		return opennova::np::dispatch_session_replies(
+				config, conn, pick, 100, roster, &world);
+	};
+	auto reset_player = [&]() {
+		opennova::world::Entity *entity = world.registry.get(player);
+		if (entity->mounted)
+			opennova::world::entity_detach_from_vehicle(world, player);
+		entity->alive = false;
+		entity->health = 0;
+		entity->flags |= opennova::world::kEntityFlagDead;
+		entity->engine_flags |= opennova::world::kEntityFlagDead;
+		entity->position = {-10.0f, -20.0f, 0.0f};
+		conn.link.respawn_pending = true;
+		conn.link.respawn_delay_seconds = 0;
+		conn.link.spawn_target_hold_seconds = 0;
+	};
+
+	// The first-stage request accepts the free seat, but the release leg stops
+	// before any player mutation when no primary occupant powers the vehicle.
+	world.registry.get(vehicle)->primary_occupant = {};
+	if (!expect(dispatch().empty() &&
+				world.registry.get(player)->health == 0 &&
+				world.registry.get(player)->position.x == -10.0f,
+			"mobile spawn release requires the primary-occupant latch"))
+		return false;
+	world.registry.get(vehicle)->primary_occupant = driver;
+
+	// The request-time best-seat gate is independent of the release latch.
+	world.registry.get(vehicle)->seats[1].occupant = driver;
+	reset_player();
+	if (!expect(dispatch().empty() && world.registry.get(player)->health == 0,
+			"mobile spawn request rejects a vehicle with no free seat"))
+		return false;
+	world.registry.get(vehicle)->seats[1].occupant = {};
+
+	world.registry.get(vehicle)->flags |= opennova::world::kEntityFlagDead;
+	reset_player();
+	if (!expect(dispatch().empty() && world.registry.get(player)->health == 0,
+			"mobile spawn request rejects a dead vehicle"))
+		return false;
+	world.registry.get(vehicle)->flags &= ~opennova::world::kEntityFlagDead;
+
+	reset_player();
+	const std::vector<opennova::ProtocolMessage> deployed = dispatch();
+	const opennova::world::Entity *live = world.registry.get(player);
+	return expect(deployed.size() >= 2 && live->alive && live->health == 125 &&
+				!conn.link.respawn_pending && live->mounted &&
+				live->mount_target == vehicle && live->mount_seat == 1 &&
+				world.registry.get(vehicle)->seats[1].occupant == player,
+			"mobile spawn resets then boards the best free vehicle seat");
+}
+
 // Retail answers the world-state-load burst's empty C2S 0x2D member with a
 // requester-only S2C 0x58. Its body is built from the live session report, not
 // a captured blob: game/mission names, game type, player cap, session uptime,
@@ -3433,6 +3561,7 @@ int main() {
 	ok = check_spawned_peer_gets_periodic_retail_maintenance() && ok;
 	ok = check_spawn_wave_queue_and_release_wire() && ok;
 	ok = check_default_spawn_requires_no_team_zone() && ok;
+	ok = check_vehicle_spawn_target_deploys_into_best_seat() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;

@@ -1,5 +1,6 @@
 // Emplacement / mount (Phase 2) tests: the seat model + EntityCommands mount primitives
-// (mount/mount_best/dismount/find_best_seat/find_mounted_on), the per-tick AI seat-follow,
+// (mount/mount_best/dismount/find_mounted_on), canonical best-seat selection/attach,
+// the per-tick AI seat-follow,
 // the BMS AttachToEmplaced action path (emits no unported_action), and snapshot/restore
 // rewinding the mount. [orig chain: EventAction_Dispatch case 0x25 @0x4542e0 ->
 // WacScript_TryMountEntityToVehicle @0x4f70f0 -> Entity_FindBestSeatSlot @0x4351f0.]
