@@ -32,7 +32,7 @@ int fail = 0;
 // absent: their CRLF is the engine writers' contract, pinned by their own tests.
 const char *kAuthoredText[] = {
     "items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu", "sp.mnu",
-    "menu_style.mns",
+    "menu_style.mns", "earlyerr.txt",
 };
 
 std::string path(const char *name) {

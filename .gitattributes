@@ -51,4 +51,5 @@ assets/**/*.mns -text -eol filter= diff= merge=
 assets/**/*.trn -text -eol filter= diff= merge=
 assets/**/*.env -text -eol filter= diff= merge=
 assets/**/*.wac -text -eol filter= diff= merge=
+assets/**/*.txt -text -eol filter= diff= merge=
 assets/**/*.md  text eol=lf filter= diff= merge=
