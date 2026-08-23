@@ -37,6 +37,15 @@ uint8_t pool0_index_byte(uint16_t handle) {
 	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
 }
 
+// NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
+// includes the listen host and does not inspect entity health; this runtime's
+// completed initial-state burst is the shared representation of that active
+// slot state. [orig: NapiNPServer_SendFiltered @0x4C8874..0x4C8894,
+// @0x4C893E..0x4C8953]
+bool active_player_recipient(const NapiNPConnection &conn) {
+	return is_in_match(conn) && conn.link.transport != nullptr;
+}
+
 uint8_t death_family_variant(world::World &world, uint8_t base) {
 	return static_cast<uint8_t>(
 			base + ((3u * uint32_t(world.next_prng16())) >> 16));
@@ -387,12 +396,13 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 // Drain the match domain's objective transitions through retail's two wire
 // lanes. Pickup/drop/save/return and non-CTF capture publish the complete 19-B
 // flag state (0x2F). A CTF capture retires the captured flag with 0x12 instead.
-// Save/capture also precede that state mutation with the 8-B 0x1E event record,
-// matching the original transaction order.
+// Save/capture also precede that state mutation with the 8-B 0x1E event record.
+// The event and 0x2F state use active-player mask 0x80 (host included); CTF's
+// following 0x12 removal uses 0x90 (host excluded).
 // [orig: Entity_AttachToVehicle @0x43C130 -> Server_SendDestructibleDeathPacket
 // @0x50D900; Server_BroadcastEntityDeathEvent @0x517A90 (save event 0x15 then
 // 0x2F); Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then
-// CTF remove / other-mode reset)]
+// CTF remove / other-mode reset); Server_RemoveEntityAndNotify @0x50A270]
 void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 	std::vector<world::MatchGameplayEvent> events =
 			world.match.drain_gameplay_events();
@@ -427,12 +437,11 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 		}
 
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr ||
-					conn.link.mode == netsim::TransportMode::Loopback)
-				continue;
+			if (!active_player_recipient(conn)) continue;
 			if (!feed.empty())
 				conn.link.transport->host_send(s2c::GAME_EVENT, feed);
 			if (event.remove_objective) {
+				if (conn.link.mode == netsim::TransportMode::Loopback) continue;
 				EntityRemove removal;
 				removal.entity_handle = event.objective.packed;
 				conn.link.transport->host_send(
@@ -810,16 +819,6 @@ const world::Entity *control_age_player(
 	return world.registry.get(conn.link.owned_entity);
 }
 
-bool network_quality_recipient(const NapiNPConnection &conn) {
-	// NapiNPServer_SendFiltered first requires a connected node with a player
-	// context, then its 0x80 arm accepts slot state 6 or 7. It does not exclude
-	// the listen host and does not inspect entity health. `burst.spawned` is this
-	// runtime's shared in-match/live-slot model, including a dead or
-	// respawn-pending player. [orig: @0x4C8874..0x4C8894,
-	// @0x4C893E..0x4C8953]
-	return is_in_match(conn) && conn.link.transport != nullptr;
-}
-
 bool scoreboard_recipient(const NapiNPConnection &conn) {
 	// The 0x16 send walk uses the broader active-player mask 0x20. It does not
 	// reuse either integrity's state-6/entity gate or quality's state-6/7
@@ -934,7 +933,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		// including dead or respawn-pending slots; no entity-health gate).
 		// This is one GLOBAL host boundary: a player filtered out at that instant
 		// waits for the next boundary and never receives a per-peer catch-up.
-		if (network_quality_boundary && network_quality_recipient(conn)) {
+		if (network_quality_boundary && active_player_recipient(conn)) {
 			conn.link.transport->host_send(
 					s2c::NETWORK_QUALITY, {ctx.host_network_quality});
 		}

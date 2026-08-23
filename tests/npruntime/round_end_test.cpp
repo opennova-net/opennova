@@ -371,6 +371,8 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	w::Entity *blue_entity = world.registry.get(blue);
 	blue_entity->position = {10.0f, 20.0f, 3.0f};
 	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+	const w::EntityHandle host = match_player(world, 1, 1, "Host");
+	world.registry.get(host)->position = {1000.0f, 1000.0f, 3.0f};
 
 	w::Entity red_flag;
 	red_flag.kind = w::EntityKind::Item;
@@ -390,6 +392,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
 
 	ns::LoopbackChannel wire;
+	ns::LoopbackChannel host_wire;
 	np::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
@@ -397,7 +400,10 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 2, &host_wire, ns::TransportMode::Loopback, host, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
 
 	np::Server_TickUpdate(ctx); // contact -> pickup
 	bool saw_pickup = false;
@@ -414,6 +420,19 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	}
 	expect(saw_pickup,
 			"CTF pickup fans the retail 19-byte 0x2F carried-state record");
+	bool host_saw_pickup = false;
+	while (host_wire.client_recv(datagram)) {
+		if (datagram.tag != s2c::OBJECTIVE_ENTITY_STATE) continue;
+		ObjectiveEntityState state;
+		size_t consumed = 0;
+		if (decode_objective_entity_state(
+				datagram.body.data(), datagram.body.size(), state, consumed) &&
+				consumed == datagram.body.size() && state.entity_handle == flag.packed &&
+				state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0)
+			host_saw_pickup = true;
+	}
+	expect(host_saw_pickup,
+			"CTF pickup mask 0x80 includes the listen-host loopback");
 
 	np::Server_TickUpdate(ctx); // carried flag overlaps bay -> capture
 	bool saw_capture_event = false;
@@ -443,6 +462,31 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	expect(saw_capture_event && saw_remove && !saw_reset &&
 			capture_order >= 0 && remove_order > capture_order,
 			"CTF capture fans event 19 then 0x12 removal, never a reset 0x2F");
+	bool host_saw_capture_event = false;
+	bool host_saw_remove = false;
+	int host_capture_order = -1;
+	int host_remove_order = -1;
+	order = 0;
+	while (host_wire.client_recv(datagram)) {
+		if (datagram.tag == s2c::GAME_EVENT && datagram.body.size() == 8 &&
+				datagram.body[0] == 0x13 && datagram.body[1] == blue.slot()) {
+			host_saw_capture_event = true;
+			host_capture_order = order;
+		}
+		if (datagram.tag == s2c::ENTITY_REMOVE) {
+			EntityRemove removal;
+			size_t consumed = 0;
+			if (decode_entity_remove(datagram.body.data(), datagram.body.size(),
+					removal, consumed) && removal.entity_handle == flag.packed) {
+				host_saw_remove = true;
+				host_remove_order = order;
+			}
+		}
+		++order;
+	}
+	expect(host_saw_capture_event && !host_saw_remove &&
+			host_capture_order >= 0 && host_remove_order < 0,
+			"CTF capture sends the 0x80 event to the host but its 0x90 removal only remotely");
 }
 
 } // namespace
