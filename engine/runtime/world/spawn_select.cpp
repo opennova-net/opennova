@@ -366,7 +366,9 @@ uint16_t SpawnWaveEntry::requester_countdown(EntityHandle requester) const {
     }
     // Retail writes the arithmetic into a u16 packet field; retain its low
     // word rather than applying a reimplementation-only saturation policy.
-    const int64_t eta = static_cast<int64_t>(countdown) + pre_delay +
+    // [orig: SpawnWaveEntry_MemberEta @0x52A2FF (countdown + index * interval);
+    // SpawnWaveEntry_TailEta @0x52A66E (countdown + count * interval)]
+    const int64_t eta = static_cast<int64_t>(countdown) +
             static_cast<int64_t>(position) * interval;
     return static_cast<uint16_t>(eta);
 }
@@ -445,17 +447,12 @@ bool SpawnWaveList::try_queue(const World &world, EntityHandle zone,
 std::vector<SpawnWaveRelease> SpawnWaveList::tick(const World &world) {
     std::vector<SpawnWaveRelease> releases;
     for (SpawnWaveEntry &entry : entries_) {
-        if (entry.pre_delay > 0) {
-            --entry.pre_delay;
-            continue;
-        }
         if (entry.countdown > 0) {
             --entry.countdown;
             const Entity *zone = world.registry.get(entry.zone);
             if (zone == nullptr || zone->zone_control < 0x10000) {
                 entry.queued.clear();
                 entry.countdown = 0;
-                entry.pre_delay = 0;
             }
             continue;
         }
@@ -475,7 +472,6 @@ void SpawnWaveList::reset_on_zone_team_change(const World &world,
         if (entry.zone != zone_handle || entry.team == zone->team) continue;
         entry.queued.clear();
         entry.countdown = 0;
-        entry.pre_delay = 0;
         entry.team = zone->team;
     }
 }

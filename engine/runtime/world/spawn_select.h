@@ -112,21 +112,27 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 bool team_has_available_spawn_zone(const World &world, uint8_t team);
 
 // One retail spawn-wave group. The original stores eight player pointers,
-// queued_count, the zone pointer, interval/countdown/pre-delay, and a cached
-// team in one 56-byte row. Handles make the same ownership explicit without
-// leaking allocator addresses into the portable world model.
-// [orig: g_spawn_wave_list @0x24E0E48; SpawnWaveList_AppendEntry @0x52AB60]
+// queued_count, the zone pointer, interval/countdown, a second timer word at
+// +48 and a cached team in one 56-byte row. Handles make the same ownership
+// explicit without leaking allocator addresses into the portable world model.
+// The +48 word is not carried: every store to it is zero (the mission build
+// @0x52A9BB/@0x52AA85, the control-loss flush @0x52A372, the team-flip reset
+// @0x52A5E1), so its tick decrement @0x52A339 never runs and its two ETA
+// reads (@0x52A2FF, @0x52A66E) add nothing.
+// [orig: g_spawn_wave_list @0x24E0E48; SpawnWaveList_AppendEntry @0x52AB60;
+// SpawnWaveList_TickEntry @0x52A330]
 struct SpawnWaveEntry {
     EntityHandle zone;
     uint8_t team = 0;
     int32_t interval = 0;
     int32_t countdown = 0;
-    int32_t pre_delay = 0;
     std::vector<EntityHandle> queued;
 
-    // Countdown shown to this requester. Members see their position in the
-    // queue; a nonmember sees the tail ETA.
-    // [orig: SpawnWaveList_GetEntryInfo @0x52A700]
+    // Countdown shown to this requester. Members see the countdown plus their
+    // position in the queue times the interval; a nonmember sees the tail ETA
+    // (countdown plus the whole queue).
+    // [orig: SpawnWaveList_GetEntryInfo @0x52A700 -> SpawnWaveEntry_MemberEta
+    // @0x52A2E0 / SpawnWaveEntry_TailEta @0x52A610]
     uint16_t requester_countdown(EntityHandle requester) const;
 };
 

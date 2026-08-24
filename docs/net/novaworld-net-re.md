@@ -8010,8 +8010,9 @@ re-pick → release; the auto mode unchanged) and `zone_chain_test`
 the per-zone occupant subrows still need deployed-roster data (D-HUD-19).
 
 **Spawn waves.** `g_spawn_wave_list @ 0x24E0E48` (renamed from `stru_24E0E48`): 56-byte
-entries `{player[8], count@+32, zoneEntity@+36, interval@+40, countdown@+44, preDelay@+48,
-team@+52}`, built at mission start from every `0x40000` pools-2/1 entity — numbered zones
+entries `{player[8], count@+32, zoneEntity@+36, interval@+40, countdown@+44, preDelay@+48
+(zero-only, no writer — every store is 0: `@0x52A9BB/@0x52AA85/@0x52A372/@0x52A5E1`, so the
+`@0x52A339` decrement is dead and the port carries no such field — 2026-08-24), team@+52}`, built at mission start from every `0x40000` pools-2/1 entity — numbered zones
 get `g_spawn_wave_time_zone @ 0x24D2250`, un-numbered (bases) `g_spawn_wave_time_base
 @ 0x24D224C` (both from `apply_session_settings_to_globals @ 0x551500`; entries only exist
 when the selected interval is configured — 0 ⇒ no wave system ⇒ instant deploys). A numbered
@@ -8020,7 +8021,9 @@ zone whose dedicated interval is zero falls back to the base interval. Retail's 
 writes dword_2550B7C=0 / dword_2550B80=10]`
 `[orig: SpawnWaveList_BuildFromMission @ 0x52A920]`. A 0x0E pick lands in the zone's group
 (`SpawnWaveList_TryQueuePlayer @ 0x52A490` — dedupes, caps 8, evicts the player from other
-groups) → the player gets S2C 0x6E and WAITS; if no group exists for the zone the deploy is
+groups) → the player gets S2C 0x6E and WAITS (its countdown word is `countdown + index × interval`
+for a member, `countdown + count × interval` for anyone else — `SpawnWaveList_GetEntryInfo @ 0x52A700`
+→ `SpawnWaveEntry_MemberEta @ 0x52A2E0` / `SpawnWaveEntry_TailEta @ 0x52A610`); if no group exists for the zone the deploy is
 immediate. The 1 Hz `SpawnWaveList_Tick @ 0x52A550` → `SpawnWaveList_TickEntry @ 0x52A330`
 releases ONE queued player per interval (`Server_ProcessPlayerDeath(player, zoneHandle)`,
 countdown reloads from `+40`), and FLUSHES the whole group the moment the zone's control

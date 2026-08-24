@@ -483,6 +483,12 @@ int main() {
         CHECK(released.size() == 1 && released[0].player == h1 &&
               released[0].zone == zone);
         CHECK(w.spawn_waves.entries()[0].countdown == 2);
+        // The requester ETA is countdown + position * interval for a member
+        // and countdown + count * interval for a nonmember; the row's +48 word
+        // contributes nothing (zero-only) [orig: SpawnWaveEntry_MemberEta
+        // @0x52A2FF; SpawnWaveEntry_TailEta @0x52A66E].
+        CHECK(w.spawn_waves.entries()[0].requester_countdown(h2) == 2);
+        CHECK(w.spawn_waves.entries()[0].requester_countdown(h1) == 4);
         CHECK(w.spawn_waves.tick(w).empty());
         CHECK(w.spawn_waves.entries()[0].countdown == 1);
         CHECK(w.spawn_waves.tick(w).empty());
