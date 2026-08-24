@@ -1061,12 +1061,15 @@ def assemble(src: Source, out: Path, man: Manifest, per: dict[str, list[dict]], 
         print(f"  wrote {n} loose files + localres.pff with {len(archived)} DDS textures")
     cfg = src.root / "game.cfg"
     if cfg.exists():  # the install's config (every key present) with the quality knobs pinned high
-        text = cfg.read_text(encoding="latin-1")
+        # Bytes, not text: read_text folds the CRLF retail writes into LF, and retail's line
+        # parsers fail silently on a bare LF (the .def / .mns lesson). The substitution stops
+        # before the \r so the line ending survives too.
+        text = cfg.read_bytes().decode("latin-1")
         for key, val in GAME_CFG_QUALITY.items():
-            text, n = re.subn(rf"(?m)^({key}\s*=\s*).*$", rf"\g<1>{val}", text)
+            text, n = re.subn(rf"(?m)^({key}\s*=\s*)[^\r\n]*", rf"\g<1>{val}", text)
             if n == 0:
                 print(f"  ! game.cfg has no key {key}")
-        (out / "game.cfg").write_text(text, encoding="latin-1", newline="")
+        (out / "game.cfg").write_bytes(text.encode("latin-1"))
     for src_name, dst_name in EXE_FILES.items():
         shutil.copy2(src.root / src_name, out / dst_name)
     for n in LOOSE_ROOT:
@@ -1159,7 +1162,16 @@ def verify(out: Path, log: str, reference: str | None) -> int:
     if err.exists():
         print("---- _errlog.txt ----")
         print(err.read_text(encoding="latin-1", errors="replace"))
-    return 1 if not_packed else 0
+    # The staged game.cfg must keep retail's CRLF: a bare LF is read as far as the parser gets
+    # and then silently falls back to defaults, undoing the pinned quality knobs.
+    bare_lf = 0
+    staged_cfg = out / "game.cfg"
+    if staged_cfg.exists():
+        raw = staged_cfg.read_bytes()
+        bare_lf = raw.count(b"\n") - raw.count(b"\r\n")
+        if bare_lf:
+            print(f"game.cfg has {bare_lf} bare LF line endings (retail writes CRLF)")
+    return 1 if (not_packed or bare_lf) else 0
 
 
 # --------------------------------------------------------------------------------------------

@@ -33,8 +33,13 @@ int fail = 0;
 	} while (0)
 
 const char *kMapBase = "mnml";
-// Only ids the engine addresses BY NUMBER are reserved; 106001 is the player start marker.
+// Only ids the engine addresses BY NUMBER are reserved; 106001 is the player start marker the
+// engine reads to place the hardcoded player item. The team starts are the MP spawn markers
+// the host/join acceptance step depends on -- a map without both loads completely and leaves
+// one team with nowhere to spawn.
 const int kPlayerStartItemId = 106001;
+const int kBlueTeamStartItemId = 106003;
+const int kRedTeamStartItemId = 106004;
 
 // start_time is Q8.8 HOURS [orig: the BMS header's Q8.8 start hour widens into the 8.24
 // accumulator at Game_StartMission @ 0x525371]. A mission that starts at 0 renders under the
@@ -66,6 +71,7 @@ int main() {
 	{
 		std::vector<uint8_t> committed;
 		CHECK(read_file(path(std::string(kMapBase) + ".env"), committed), "committed .env missing");
+		CHECK(!committed.empty(), "committed .env is empty");
 		if (!committed.empty() && !is_lfs_pointer(committed)) {
 			opennova::env::Config cfg;
 			std::string err;
@@ -79,6 +85,8 @@ int main() {
 	{
 		std::vector<uint8_t> committed;
 		CHECK(read_file(path(std::string(kMapBase) + ".bms"), committed), "committed .bms missing");
+		// An empty file is not a mission; it must not pass by having nothing to check.
+		CHECK(!committed.empty(), "committed .bms is empty");
 		if (committed.empty()) return fail == 0 ? 0 : 1;
 		if (is_lfs_pointer(committed)) {
 			std::printf("[skip] mnml.bms is an unpulled LFS pointer\n");
@@ -89,18 +97,21 @@ int main() {
 		CHECK(doc.load_bms_bytes(committed.data(), committed.size()), "committed .bms parses");
 
 		const size_t markers = doc.entity_count(opennova::mission::EntityKind::Marker);
-		CHECK(markers >= 3, "the map carries the player start plus the two team starts");
-
-		bool has_player_start = false;
+		int player_starts = 0;
+		int blue_starts = 0;
+		int red_starts = 0;
 		for (size_t i = 0; i < markers; ++i) {
 			opennova::mission::EntityRecord rec{};
-			if (doc.get_entity(opennova::mission::EntityKind::Marker, i, rec) &&
-			    rec.item_id == kPlayerStartItemId) {
-				has_player_start = true;
-			}
+			if (!doc.get_entity(opennova::mission::EntityKind::Marker, i, rec)) continue;
+			if (rec.item_id == kPlayerStartItemId) ++player_starts;
+			if (rec.item_id == kBlueTeamStartItemId) ++blue_starts;
+			if (rec.item_id == kRedTeamStartItemId) ++red_starts;
 		}
-		// A mission without one loads completely and then strands you with nowhere to spawn.
-		CHECK(has_player_start, "the map places the 106001 player start");
+		// A mission without one loads completely and then strands you with nowhere to spawn;
+		// retail's own missions carry exactly one (00TRa.bms: 1331 entities, one 106001).
+		CHECK(player_starts == 1, "the map places exactly one 106001 player start");
+		CHECK(blue_starts >= 1, "the map places a Blue Team start (106003) for host/join");
+		CHECK(red_starts >= 1, "the map places a Red Team start (106004) for host/join");
 		CHECK(doc.info().terrain == kMapBase, "the header points at the minimal terrain");
 
 		const int start_hour = doc.info().start_time / kQ8_8Hour;

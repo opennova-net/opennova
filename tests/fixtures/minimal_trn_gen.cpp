@@ -41,6 +41,10 @@ TrnConfig build_config() {
 	c.colormap = "mnml_c.tga";     // authored source art (packaging step)
 	c.detailmap = "mnml_dm.tga";
 	c.detailmap_c1 = "mnml_dc1.tga";
+	c.detailmap_c2 = "mnml_dc2.tga";
+	c.detailmap_c3 = "mnml_dc3.tga";
+	c.detailmapdist = "mnml_dmd.tga";
+	c.detailblendmap = "mnml_d1.tga";
 	c.charmap = "mnml_m.pcx";      // surface map (all one surface for the flat map)
 	c.foliagemap = "mnml_f.pcx";   // foliage placement (empty = no foliage)
 	c.tilestrip = "mnml_t.tga";
@@ -116,6 +120,14 @@ int main() {
 				std::istringstream cis(committed);
 				CHECK(load_trn(cis, c, e2), e2.c_str());
 				CHECK(c.polydata == "mnml.cpt", "committed .trn names the polydata");
+				// Every image the committed config names must be one the packager ships
+				// (minimal_pff_package kResource) and the art validator checks; a name added
+				// here without those two is a texture retail asks for and never finds.
+				CHECK(c.colormap == "mnml_c.tga" && c.detailmap == "mnml_dm.tga" &&
+				              c.detailmap_c1 == "mnml_dc1.tga" && c.detailmap_c2 == "mnml_dc2.tga" &&
+				              c.detailmap_c3 == "mnml_dc3.tga" && c.detailmapdist == "mnml_dmd.tga" &&
+				              c.detailblendmap == "mnml_d1.tga" && c.tilestrip == "mnml_t.tga",
+				      "committed .trn names exactly the shipped mnml_* source art");
 				CHECK(c.sector_grid[3][3] == 1 && c.sector_grid[3][4] == 3 &&
 				              c.sector_grid[4][3] == 2 && c.sector_grid[4][4] == 4,
 				      "committed .trn carries the active quadrant block");
