@@ -48,6 +48,8 @@
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
-    "debug_entity_picker.gd|static func pick_at_crosshair("
+    "debug_entity_picker.gd|static func pick_at_crosshair(",
+    "editor_game_packer.gd|static func pack(",
+    "editor_game_packer.gd|static func pack_for_retail("
   ]
 }

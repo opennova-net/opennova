@@ -24,7 +24,7 @@ class Process : public Object {
 public:
 	// Launch `path` with `args`, with the child's working directory set to `working_dir` (empty
 	// inherits ours, exactly like OS.create_process). Returns the child's process id, or -1 on
-	// failure (including any non-Windows host).
+	// failure (including any non-Windows platform).
 	//
 	// The process HANDLE is kept until release(): every later query about this pid goes through
 	// that handle, so a pid Windows has recycled to an unrelated process after the child exited
