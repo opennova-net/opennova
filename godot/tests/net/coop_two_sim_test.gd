@@ -1540,6 +1540,67 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 	host.free()
 
 
+# The camera arbiter enters the death lerp camera (mode 4) on the joiner's
+# death and leaves it when the deployment release brings the player back
+# alive [orig: Render_ProcessMainSceneFrame @0x5ca217..0x5ca24b -> 4;
+#  Camera_SetTrackedEntity @0x439257 computes the lerp; alive again -> 0].
+func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "CameraJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+			"alive on foot: first person")
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's death transaction killed the joiner")
+	if not joiner.is_local_player_dead():
+		joiner.free()
+		host.free()
+		return
+	joiner.step()
+	var view: Dictionary = joiner.get_local_player_view()
+	assert_eq(int(view.get("camera_mode", -1)), 4,
+			"the dead joiner's arbiter resolves the death lerp camera")
+	assert_true(bool(view.get("camera_pose_valid", false)),
+			"mode 4 composes a camera pose")
+	# The deployment release: pick the default spawn and pump until the host
+	# releases; the respawned player is alive again -> first person.
+	assert_true(joiner.is_join_deploy_pick_pending(),
+			"death re-arms the deploy pick")
+	# The host holds a fresh death's pick behind the +360/+364 penalty (three
+	# seconds after a death within 620 ticks of the deployment) and silently
+	# drops picks inside it, so re-click the default row like a player would.
+	var alive := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_local_player_dead() and not joiner.is_join_deploy_pick_pending():
+			alive = true
+			break
+		OS.delay_msec(1)
+	assert_true(alive, "the release brought the joiner back alive")
+	joiner.step()
+	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+			"alive again: the arbiter returns to first person")
+	joiner.free()
+	host.free()
+
+
 func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> void:
 	var mission := _vehicle_peer_mission()
 	var watercraft_db := _net_watercraft_item_db()

@@ -372,7 +372,7 @@ sweep; blank = not yet characterized.
 | 0x4F | 0x4286C0 | `_0x04F` | |
 | 0x50 | 0x431910 | `_TeamAssign` | **TEAM ASSIGN — decoded + PORTED 2026-07-25** (`decode_team_assign`). Body (6 B): `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]`; a SHORT body defaults each remaining field to 0. The trailing two fields are the target's IDENTITY, not squad state — the former `spawnPointId`/`squadLeader` names were guesses and are RETIRED 2026-07-25: the producer writes `entity+0x15C` (the packed character / minimap id) and `entity+0x374` (the character selector), and ZEROES both for a non-player behind the `Flags & 0x100` gate `@0x506b3d` (live arms `@0x506b51`/`@0x506b6b`) [orig: `write_entity_handle_packet @0x506ad0`]; the consumer stores them straight back (`@0x431b46` netId, `@0x431b3a` animSlot). Gates: `handle != 0xFFFF`, `(handle & 0xF000) < 0x5000`, `slot < pool capacity`. Legs, in order: (1) entity == local player → `byte_A85B48 = team` @0x4319db — **the SAME latch the S2C `0x04` tail byte writes**, so this message is the SECOND of the latch's three writers (D-NET-168); (2) if NOT authority → `entity->Team = team` @0x4319ee, for ANY pool 0..4 entity; (3) the player-slot team byte mirrors it (slot+14, @0x431a0b); (4) if `entity->Flags & 0x100` (a player) AND entity == local player: retail re-selects the per-side profile (team 1/3 → side A block, else side B), refreshes `restrictionData`, and **RE-SENDS ONE C2S `0x2F`** via `NetPacket_SendLoadoutSubmit` @0x431a9e with the NEW team, the per-side profile class, and slot **195 raw** (the pre-`Player_InitPlayer` form — NOT the live `g_currentWeaponSlot`), then C2S `0x22`/`0x23` acks (@0x431acb..0x431b05), `Player_InitPlayer(1)` @0x431b14 and the netId/animSlot identity restore (@0x431b3a..0x431b91). PORTED: legs 1, 2 and the leg-4 `0x2F` re-submission (slot 195 raw). DEFERRED with witnesses (D-NET-168): the leg-4 per-side profile CLASS reselect @0x431a35..0x431a9a (we hold ONE applied kit), the `0x22`/`0x23` acks, `Player_InitPlayer`, the identity restore, and leg 3 (we keep no client-side player-slot team byte). Producer: also the ZONE-FLIP broadcast — `Server_ChangeEntityTeam @0x518D70` (ex-`Server_ChangePlayerTeam`; retargets ANY entity incl. capture zones/spawn objects, §5.61) |
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
-| 0x52 | 0x428A80 | `_0x052` | **DEATH-CAMERA TARGET (decoded + PORTED 2026-08-22)** — exact 12-B `[i32 x][i32 y][i32 z]`; short reads zero-fill in retail. `GameEvent_PlayerDeath @0x516DD0` targets the victim only (mask 0x20) with the killer entity's fixed XYZ when present, otherwise the victim's. The client stores the triple in `dword_A860E0/E4/E8`; `Camera_ComputeThirdPersonPositions @0x438B80` consumes it. Retail capture confirms `0x13 → 0x52 → 0x1E` ordering (§5.60) |
+| 0x52 | 0x428A80 | `_0x052` | **DEATH-CAMERA TARGET (decoded + PORTED 2026-08-22)** — exact 12-B `[i32 x][i32 y][i32 z]`; short reads zero-fill in retail. `GameEvent_PlayerDeath @0x516DD0` targets the victim only (mask 0x20) with the killer entity's fixed XYZ when present, otherwise the victim's. The client stores the triple in `dword_A860E0/E4/E8`; `Camera_ComputeThirdPersonPositions @0x438B80` consumes it — **consumer PORTED 2026-08-24** (`world/death_camera.h`, the §5.39 mode-4 addendum): the arbiter's mode 4 computes the FROM/TO poses from the player and this anchor and the view lerps between them over 128 ticks. Retail capture confirms `0x13 → 0x52 → 0x1E` ordering (§5.60) |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
 | 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetDownedState @0x4348D0` (ex `PlayerSlot_SetTypeAndSubtype`) splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch); the window then counts down CLIENT-side at 1 Hz — `Client_ProcessNetworkFrame @0x42C27E..0x42C2DA`: `g_slotRefreshTimer @0xA85B80` +1 per frame, past 62 every active slot with an entity and `slot+16 > 0` gets `PlayerSlot_SetDownedState(slot+16 − 1, slot+44)`, timer reset (PORTED 2026-08-24 `ClientRuntime::tick_roster_revive_countdown`; consumer = the friendly tag's downed legs, hud-re.md D-HUD-20). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to alive same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
 | 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; stat.mnu remains presentation residue |
@@ -4889,6 +4889,39 @@ airborne/drowning/ladder/indoors bits, the new-row ADM and first-vehicle-compact
 timings, and replay/spectate source injection.
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
+
+**Mode-4 addendum (2026-08-24, PORTED — `engine/runtime/world/death_camera.{h,cpp}`,
+`PlayerViewState` arbiter inputs, `Simulation::enter_death_camera`).** The per-frame arbiter
+`Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca262` resolves `desired = 0`; the chase preference
+with parentSlot 2/5 → 1; with `g_death_screen_active` the sub-mode `dword_A860F0` 0 → 0, 1 → 1,
+2 → 0 (the kill-cam retarget lives in `Camera_SetTrackedEntity @0x4391d0`), else keep; else
+`Flags & 2` OR (`g_spawn_success_gate && parentEntity == 0`) → 4 unless `g_rules_flags & 1`; else
+in session with `g_rules_flags & 0x40` → 0. On a change `Camera_SetTrackedEntity(player, mode)`
+runs, and mode 4 calls `Camera_ComputeThirdPersonPositions @0x438b80` once: anchor = the 0x52
+triple on a joiner, the local entity's `+0x178` killer position on the authority (else self);
+`dir = normalise(anchor − player)` through the x87 (`flt_7C32BC` = 65536.0), `|d| < 0x10000` →
+dir (1,0,0) and TO = FROM; FROM starts at `player + (0,0,0x8000)`, tries the trial directions
+rotated `±k × 0x1000000` about the vertical through the BAM sin/cos tables (`(angle+0x200000)>>22`),
+each probed by `Camera_RaycastCollisionOffset(from, dir, 0x8000, 0x50000) @0x4378b0`; the first
+strictly-farther reach wins and a full 5.0 u reach ends the search; `from += best × reach`, yaw =
+`atan2(−best_y, −best_x)`, pitch = `atan2(−best_z, horiz)` (× `dbl_7C19D8` = 2^32/2π), roll 0. TO =
+the lifted player pushed back along `−dir` by its own probe, yaw = `atan2(dir_y, dir_x)`, pitch =
+`atan2(dir_z, horiz)`. Every rendered frame in mode 4 `@0x4389eb..0x438b49` lerps each channel
+`from + (((to − from) × t + 0x8000) >> 16)` with `t = min((tick − g_camera_lerp_start_tick) << 9,
+0x10000)` (128 ticks); the start tick is stamped on the local death path
+(`Entity_UpdateInfantryPlayerBody @0x4b4d00`, the same site that clears the medic cooldown) and by
+the 0x13 self record (`NapiNPClientMsg_EntityDeath @0x42ec0f`). The death screen bit is the 0x0A
+header's flags1 bit 0 EDGES (`@0x42ff88..0x43002b`: the rising edge zeroes the sub-mode / kill-cam
+target and arms `g_enemyTagsVisible`; the falling edge clears it) — `ClientState::death_screen_active`.
+The probe walks 0.25 u steps and, per collision bone of the tracked entity (`+444/+448`,
+`Entity_ComputeCollisionForceFromBones @0x4afff0`), adds the bone force and the terrain test
+(`Terrain_SampleHeightBilinear + lift > z`); with NO bones it returns the full reach untouched
+(`@0x4378c4`). Residues: the bone leg (the collision-bone list is unported — the reimpl feeds the
+count-0 path, so the first trial always wins at 5.0 u), mode 3 (the spectator camera) and the
+death-screen sub-mode writers (the spectate actions `@0x49bd67/@0x49bd89`, S2C 0x?? SetSpectatorMode
+`@0x4259e0`), and the two `g_rules_flags` bits (admin `set` commands, carried as inputs with no wire
+fold). The FP arms gate `g_camera_mode == 0 @0x40133e` rides the presenter's third-person flag.
+
 
 The moving player's view, witnessed for a faithful first-person camera (the §5.38 player). All
 anchored (decompiled this session); read-only, no IDB writes.
