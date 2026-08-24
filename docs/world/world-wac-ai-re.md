@@ -6449,6 +6449,7 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|
+| 0x1 | `kEntityFlagCarried` | carried object hidden while attached to its carrier (the flag/carryable pickup family); distinct from 0x40, which marks the CARRIER/mounted body | `[orig: Entity_AttachToVehicle @ 0x43C130]`; the Match flag producer (§15.5 D-COL-8 flag leg) |
 | 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
 | 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |

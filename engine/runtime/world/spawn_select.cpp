@@ -201,8 +201,14 @@ int32_t team_fallback_marker(uint8_t team) {
 SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
                               uint8_t player_slot, uint8_t team,
                               uint32_t game_type_value) {
+    // CRenderState_GetFieldByIndex(team, 6) returns team field 7: the Deaths
+    // counter (the accessor returns field[index+1]; event case 6 records a
+    // death). The initial-start markers therefore serve until the team's first
+    // death, after which the respawn chain takes over.
+    // [orig: Server_PositionPlayerForSpawn @0x50D1DB;
+    // CRenderState_GetFieldByIndex @0x52D7D0]
     const bool primary_allowed =
-        world.match.team_stats(team)[MatchStats::kFlagCaptures] == 0;
+        world.match.team_stats(team)[MatchStats::kDeaths] == 0;
     if (game_type::is_waypoint_family(game_type_value)) {
         if (primary_allowed) {
             const std::vector<const Entity *> primary = markers_of_type(world, 6094);
@@ -267,7 +273,7 @@ const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
 bool world_has_spawn_zone(const World &world) {
     // SpawnZoneList membership has no alive filter. Use the canonical registry
     // builder so join, 0x0F and deploy gameplay cannot acquire different lists.
-    // [orig: SpawnZoneList_GetCount @0x43B950;
+    // [orig: SpawnZoneList_GetCount @0x43B920;
     // Entity_BuildSpawnZoneList @0x43EAE0]
     return !build_spawn_zone_list(world).empty();
 }

@@ -604,6 +604,7 @@ public:
         EnvNetworkState network_env;
         Match match;
         SpawnWaveList spawn_waves;
+        ZoneCaptureState zone_capture_state;
         uint32_t spawn_cycle_counter = 0;
         uint32_t logic_tick = 0;
         uint32_t preround_delay_seconds = 0;

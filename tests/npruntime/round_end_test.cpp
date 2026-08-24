@@ -180,7 +180,9 @@ bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header) {
 	while (channel.client_recv(datagram)) {
 		if (datagram.tag == s2c::TICK_SEED)
 			saw_seed = datagram.body == std::vector<uint8_t>(4, 0);
-		if (datagram.tag == s2c::END_ROUND_HEADER) {
+		// The 0x61 seed precedes 0x1D on the wire; a header before it is a
+		// failure, not a pass.
+		if (datagram.tag == s2c::END_ROUND_HEADER && saw_seed) {
 			saw_header = decode_end_round_header(
 					datagram.body.data(), datagram.body.size(), header);
 		}
@@ -254,11 +256,16 @@ void test_tdm_round_wire_and_linger() {
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 7);
 
+	// The zero-armed one-second service fires on the first frame, then every
+	// 62 ticks; a death routed between boundaries waits for the next pass.
+	np::Server_TickUpdate(ctx);
 	push_death(world, red, blue);
 	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
+	expect(!world.match.outcome().ended,
+			"TDM kill-limit win waits for the 1 Hz win-condition pass");
 	blue_wire.clear();
 	red_wire.clear();
-	np::Server_TickUpdate(ctx); // the 62-tick win-condition boundary
+	np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
 	expect(world.match.outcome().ended &&
 			world.match.outcome().winner_team == 1,
 			"TDM kill limit ends for the killer's team");
@@ -363,6 +370,7 @@ void test_demolition_death_routes_score_and_round_wire() {
 		// objective census for the frame. [orig: Entity_ApplyWeaponDamage
 		// @0x4E6FB4; GameEvent_ProcessScoring case 11 @0x52F550;
 		// Server_CheckWinConditions demolition arm @0x51B18B]
+		np::Server_TickUpdate(ctx); // first-frame one-second service
 		push_death(world, target, attacker);
 		np::Server_TickUpdate(ctx);
 		const w::MatchPlayer *scorer = world.match.player(attacker);
@@ -392,8 +400,10 @@ void test_demolition_death_routes_score_and_round_wire() {
 			"demolition target death fans the exact 0x13 target/killer handles");
 
 		for (int i = 0; i < 60; ++i) np::Server_TickUpdate(ctx);
+		expect(!world.match.outcome().ended,
+				"demolition win waits for the 1 Hz win-condition pass");
 		wire.clear();
-		np::Server_TickUpdate(ctx); // the 62-tick win-condition boundary
+		np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
 		expect(world.match.outcome().ended &&
 				world.match.outcome().winner_team == 1,
 			"S&D/A&D complete authored target census ends for the attacker team");
@@ -433,8 +443,7 @@ void test_aas_round_wire() {
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
-	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
-	wire.clear();
+	// Every zone is already owned, so the first-frame service ends the round.
 	np::Server_TickUpdate(ctx);
 
 	EndRoundHeader header;
@@ -573,8 +582,8 @@ void test_aas_events_use_spawn_registry_index() {
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
-	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
-	wire.clear();
+	// The body already stands in the box, so the first-frame one-second
+	// service drains that contact and flips the numbered zone at once.
 	np::Server_TickUpdate(ctx);
 
 	bool saw_capture_event = false;

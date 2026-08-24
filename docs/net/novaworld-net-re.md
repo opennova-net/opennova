@@ -341,7 +341,7 @@ sweep; blank = not yet characterized.
 | 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
 | 0x2D | 0x427E90 | `_0x02D` | |
 | 0x2E | 0x427F80 | `_0x02E` | |
-| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client writes the low Flags byte, position, and both topology handles. `Server_SendDestructibleDeathPacket @0x50D900` calls `serialize_entity_with_parent_and_target @0x505810` and sends with mask `0x80` (listen host included). Flag pickup/drop/save/non-CTF capture use this record; CTF capture instead calls `Server_RemoveEntityAndNotify @0x50A270`, whose 0x12 mask is `0x90` (listen host excluded). |
+| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client applies the record only to the three flag ItemDefs 4091/4093/4095 (`@0x430F06..0x430F19`; any other handle is ignored) and writes the low Flags byte, position, and both topology handles. `Server_SendDestructibleDeathPacket @0x50D900` calls `serialize_entity_with_parent_and_target @0x505810` and sends with mask `0x80` (listen host included). Flag pickup/drop/save/non-CTF capture use this record; CTF capture instead calls `Server_RemoveEntityAndNotify @0x50A270`, whose 0x12 mask is `0x90` (listen host excluded). |
 | 0x30 | 0x431170 | `_HandleChecksumRequest` | entity-checksum request `[u8 entityId][u16 checksum]` → reply **C2S 0x20** (NOT 0x21; §5.35), 5 B `[u8 id][u32 challenge ^ source]`; reply builder + literal-42 arm §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x31 | 0x4311E0 | `_0x031` | ammo-definition CRC request `[u8 ammoIndex][u16 xorKey]` (3 B) → reply **C2S 0x21**, 9 B `[u8 index][u32 xorKey^crc][u32 echoed key]`; field map + reply builder §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x32 | 0x428060 | `_0x032` | |
@@ -4167,9 +4167,13 @@ vs **H2** the host snaps and only clients interpolate — decisively in favour o
   +0x14 (pitch), SNAPS the LIVE position +4/+8/+0xC **iff `(entity+0x24 & 1)`** (the net-snap flag),
   and resets the interp progress +0x27C = 0. If the entity is the local player it also caches heading
   into `dword_B75FCC`. [D-NET-90]
-- **`entity+0x24 bit0` = the network-snapped / motor-skip flag.** The motor full-skips a net-snapped
-  entity `[orig: Entity_UpdateInfantryAI @ 0x4b9a03 (test [esi+24h],1; jnz loc_4BFC8B)]` — it never
-  re-simulates a read-applied peer; the same bit gates the live-pos snap @0x4c207e. It is cleared
+- **`entity+0x24 bit0` = the network-snapped / motor-skip flag.** The org1 AI motor full-skips a
+  net-snapped entity `[orig: Entity_UpdateInfantryAI @ 0x4b9a03 (test [esi+24h],1; jnz loc_4BFC8B)]`
+  — it never re-simulates a read-applied peer; the same bit gates the live-pos snap @0x4c207e. The
+  org2 player-body updater has NO bit-0 test: `Entity_UpdateInfantryPlayerBody @0x4B40E0` integrates
+  and runs `Entity_MovementCollisionResolver @0x4B2BD0` from `@0x4B7CF4` for every player body,
+  local or remote, which is how a remote player's Change Team Box touch reaches
+  `Server_OnPlayerTouchCaptureZone` on the host (witnessed 2026-08-24; D-COL-6). It is cleared
   @0x4b99ff when `is_authority && entity+0x354 owner-ptr valid && team bytes (+0x162) match &&
   owner+0x21C >= 0x10000`. [D-NET-89]
 - **Heading/pitch receive framing — pure widen, no 90° offset (confirms §5.10).** Case 4 reads the

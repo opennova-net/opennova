@@ -227,7 +227,13 @@ class Match {
     const MatchResult &result() const { return result_; }
 
     void upsert_player(const MatchPlayerIdentity &identity);
-    void remove_player(EntityHandle entity);
+    // Drops the leaver's carried objective where the body stood, then forgets
+    // the roster row. Retail clears the carried link when the lingering body is
+    // finally destroyed by the sweep; the host retires the entity at teardown
+    // (D-NET-176 trigger relocation), so the drop lands here.
+    // [orig: Entity_Destroy @0x43E8B1..0x43E8B8: a def+0x5C == 3 body calls
+    // Entity_DropCarriedObject @0x439DF0 before its fields are wiped]
+    void remove_player(World &world, EntityHandle entity);
     const MatchPlayer *player(EntityHandle entity) const;
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
@@ -263,6 +269,13 @@ class Match {
     // retail countdown block; carried-objective motion and round time do not.
     void advance_tick(World &world,
                       TickPhase phase = TickPhase::Gameplay);
+
+    // True for the frame on which the shared one-second service fired. The
+    // host's Server_TickUpdate consumes this same countdown for its own 1 Hz
+    // legs (StartDelay, win conditions, waves, the capture transaction), so
+    // the world and the wire can never sit a frame apart.
+    // [orig: g_periodic_second_timer @0xC8D83C; reload 62 @0x51DB93]
+    bool periodic_second() const { return periodic_second_fired_; }
 
     std::vector<MatchGameplayEvent> drain_gameplay_events();
 
@@ -310,6 +323,7 @@ class Match {
     std::array<MatchStats, 5> teams_{};
     std::array<int32_t, 5> team_hold_ticks_{};
     int32_t periodic_second_timer_ = 0;
+    bool periodic_second_fired_ = false;
     bool objective_census_ready_ = false;
     std::array<int32_t, 5> flag_capture_targets_{};
     std::array<int32_t, 5> demolition_targets_{};

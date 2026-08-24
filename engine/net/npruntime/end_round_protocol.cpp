@@ -18,9 +18,10 @@ std::string capped(const std::string &value, size_t kept) {
 int16_t scoreboard_ratio(const world::MatchStats &stats) {
 	const int32_t denominator = stats[world::MatchStats::kEnemyKills];
 	if (denominator == 0) return -1;
-	const int64_t value =
-			(static_cast<int64_t>(stats[2]) * 65536) / denominator;
-	return wire_i16(static_cast<int32_t>(value));
+	// 32-bit `raw[2] << 16` exactly as the board builder computes it.
+	const int32_t numerator =
+			static_cast<int32_t>(static_cast<uint32_t>(stats[2]) << 16);
+	return wire_i16(numerator / denominator);
 }
 
 } // namespace

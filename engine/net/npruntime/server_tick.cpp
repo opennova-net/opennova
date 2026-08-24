@@ -78,7 +78,7 @@ constexpr uint32_t kBreathSampleLimit = 4u * kRetailBreathSeconds;
 // 0..127 word and then divided by 21845, so this producer always emits 32 even
 // though the client retains strings for 33/34.
 // [orig: GameEvent_PlayerDeath @0x516DD0, classifier @0x5170E0..0x51724A;
-// GameEvent_BuildPayload @0x51737B]
+// GameEvent_BuildPayload call @0x51737B]
 PlayerDeathFeed classify_player_death(
 		world::World &world, const world::RoundDeath &death,
 		const world::Entity *victim_entity,
@@ -153,15 +153,14 @@ void tick_player_breath(NapiNPServerCtx &ctx, world::World &world) {
 		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
 		world::Entity *player = world.registry.get(conn.link.owned_entity);
 		if (player == nullptr || !player->alive || player->health <= 0 ||
-				(player->flags & world::kEntityFlagDead) != 0u ||
-				world.env.water_z == 0) {
+				(player->flags & world::kEntityFlagDead) != 0u) {
 			conn.link.underwater_breath_samples = 0;
 			continue;
 		}
 
-		const int64_t eye_z = int64_t(world::to_fixed(player->position.z)) +
-				int64_t(player->eye_offset_z);
-		if (eye_z >= int64_t(world.env.water_z)) {
+		// The one underwater-eye predicate (no authored water is never below).
+		if (!world::entity_eye_below_water(world,
+					world::to_fixed(player->position.z), player->eye_offset_z)) {
 			conn.link.underwater_breath_samples = 0;
 			continue;
 		}
@@ -805,10 +804,12 @@ void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
-// The original stores seconds, not tick deadlines. Its periodic player-slot
-// maintenance decrements all three nonzero dwords once per 62-tick second.
+// The original stores seconds, not tick deadlines. The per-slot decrements sit
+// inside the same g_periodic_second_timer block as the win check and the
+// capture transaction, so they ride Match's countdown, not a second phase.
+// [orig: Server_TickUpdate @0x51DFB0..0x51E00B (slot +0x170/+0x168/+0x16C)]
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
-	if (world.logic_tick % 62u != 0) return;
+	if (!world.match.periodic_second()) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.link.respawn_delay_seconds != 0)
 			--conn.link.respawn_delay_seconds;
@@ -1225,13 +1226,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
 	route_match_gameplay_events(ctx, world);
-	// Retail's per-player proximity pass begins by comparing CRenderState field
-	// 0x1C (raw accumulated Points) with a player-slot cache and targets reliable
-	// S2C 0x81 to that requester on change. Keep it after the authority's event
-	// scorers and before the 1 Hz capture transaction; zone-capture points are
-	// therefore observed by the following authority pass, as in retail.
-	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0]
-	emit_requester_score_refreshes(ctx, world);
 	release_expired_local_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,
@@ -1247,14 +1241,27 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// boundary. A non-session authority clears it there; an active session
 	// decrements it once. The phase snapshot above deliberately remains true
 	// for this whole frame even when this store reaches zero.
-	// [orig: Server_TickUpdate @0x51DB6D..0x51DC33]
-	const bool periodic_second = world.logic_tick % 62u == 0;
+	// Match owns the one countdown (a zero-armed global that fires on the
+	// first frame, then every 62); this frame's verdict was settled by
+	// advance_tick above, so the world and the wire share one phase.
+	// [orig: Server_TickUpdate @0x51DB6D..0x51DC33; reload 62 @0x51DB93]
+	const bool periodic_second = world.match.periodic_second();
 	if (periodic_second) {
 		if (!ctx.is_in_session)
 			world.preround_delay_seconds = 0;
 		else if (world.preround_delay_seconds != 0)
 			--world.preround_delay_seconds;
 	}
+
+	// Retail's per-player proximity pass (item 1 of the one-second block)
+	// begins by comparing CRenderState field 0x1C (raw accumulated Points) with
+	// a player-slot cache and targets reliable S2C 0x81 to that requester on
+	// change. Match ran the pass itself in advance_tick; the wire half rides the
+	// same service, after the authority's event scorers and before the capture
+	// transaction, so zone-capture points are observed by the following pass.
+	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0; the 0x81 sync
+	// @0x508790]
+	if (periodic_second) emit_requester_score_refreshes(ctx, world);
 
 	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in
 	// Server_TickUpdate — reload 62 @0x51db93 — calls Server_CheckWinConditions

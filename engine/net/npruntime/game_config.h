@@ -132,7 +132,7 @@ struct GameConfig {
 	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160] dword[7]; SET `StartDelay`;
-	                                  //   reset_round_counters copies it to g_preround_delay_timer @0x516C8D
+	                                  //   reset_round_counters @0x516C50 copies it to g_preround_delay_timer @0xC8D824 (store @0x516C8D)
 	uint32_t destroy_buildings = 0;   // [orig g_destroy_buildings @0x24D2164 <- cfg `destroybuild` @0x2550ACC] dword[8];
 	                                  //   read by Entity_ApplyWeaponDamage @0x4e6820
 	uint32_t death_messages = 0;      // [orig g_death_messages @0x24D2168 <- cfg `deathmes` @0x2550AD0]    dword[9];

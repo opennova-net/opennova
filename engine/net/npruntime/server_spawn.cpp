@@ -393,7 +393,9 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	const world::EntityHandle h = world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;
 
+	bool created_connection = false;
 	if (conn == nullptr) {
+		created_connection = true;
 		NapiNPConnection c;
 		c.peer = peer;
 		c.type = 1; // server-side view of a remote client
@@ -414,6 +416,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 			std::min<uint32_t>(ctx.config.max_players, 251u));
 	if (!player_slot.has_value()) {
 		world.registry.despawn(h);
+		if (created_connection) ctx.np_protocol.connection_list.pop_back();
 		return {};
 	}
 	conn->assigned_team = spawn.team;
