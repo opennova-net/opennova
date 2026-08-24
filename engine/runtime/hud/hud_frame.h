@@ -617,7 +617,11 @@ inline constexpr int kHudFontSlotLabel = 1;     // g_hudLabelFont (Arial normal)
 inline constexpr int kHudFontSlotLabelBold = 2; // the bold slot (fontObj @ 0xB4C394)
 inline constexpr int kHudFontSlotLabelLarge = 3; // g_hudLabelFontLarge (Impac22b)
 inline constexpr int kHudFontSlotImpact38 = 4;   // g_hudLabelFontImpact38 (Impac38b)
-inline constexpr int kHudFontSlotCount = 4;
+inline constexpr int kHudFontSlotCount = 5;
+// The device leg sizes its page-texture table by the count; a slot past it
+// writes Ref<> handles off the end of that table (the 2026-08-24 load crash).
+static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
+              "every font slot must index inside kHudFontSlotCount");
 
 // Deep in-process module: the whole witnessed element walk, stance cross-fade
 // state, the clip-indicator flash state, and the triggered-text message ring
