@@ -55,6 +55,13 @@ Dictionary Simulation::get_end_round_state() const {
 	out["round_ticks"] = std::max(0, remaining);
 	out["death_screen"] = local_death_screen_active();
 	out["local_team"] = static_cast<int>(runtime_->assigned_team());
+	// The round-cycle handoff's session half: the host's post-round linger
+	// expiry closes the session (retail: Server_TickUpdate's drain sets
+	// g_mission_exit_reason = 3 @0x51db63 — the map cycle); a joiner's session
+	// dies with the host's exit.
+	out["session_open"] = joiner_
+			? !(runtime_ && runtime_->session_lost())
+			: ctx_.is_in_session != 0;
 	return out;
 }
 

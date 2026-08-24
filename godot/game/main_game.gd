@@ -863,6 +863,32 @@ func _on_join_deploy_pick_required() -> void:
 ##  Input_QueueEvent(3) @ 0x4c67a4, whose action sets g_mission_exit_reason = 1 and drops
 ##  the connection (Input_HandleActionBinding case 3 @ 0x49af2c) — reason 1 is the same
 ##  teardown + "MainMenu" push every abort leg takes @ 0x568654]
+## The host's round cycle: the 2790-tick post-round linger expiry EXITS THE
+## MISSION into the map cycle — retail's server sets exit reason 3 and reloads
+## the next rotation entry; the rotation itself is not modeled, so the shell
+## returns to the menu through the same teardown every mission exit takes. A
+## joiner's session dies with the host's exit and lands here too (its
+## net-session drive may also route the loss through _on_session_lost first —
+## whichever fires first tears down, the other sees MENU).
+## [orig: Server_TickUpdate linger drain @0x51da04..; g_mission_exit_reason = 3
+##  @0x51db63; every exit reason lands on the same teardown + nav push
+##  @0x568654. SP mission end runs the epilog flow instead.]
+func _maybe_exit_round_cycle() -> void:
+	if _state == State.MENU or _world_load_pending or _world == null:
+		return
+	var sim: Simulation = _world.get_sim()
+	if sim == null:
+		return
+	if not bool(sim.get_round_outcome_debug().get("mp_session", false)):
+		return
+	var er: Dictionary = sim.get_end_round_state()
+	if not bool(er.get("header_known", false)):
+		return
+	if bool(er.get("session_open", true)):
+		return
+	_abort_to_menu("round cycle", "the host's post-round linger expired (mission exit 3)")
+
+
 func _on_session_lost(reason: String) -> void:
 	# Already back in the menu with nothing loading: the teardown ran (this is the
 	# double-notification guard, not a state test the loss depends on). A loss during
@@ -1143,6 +1169,7 @@ func _process(delta: float) -> void:
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: sub_5C0060]
+	_maybe_exit_round_cycle()
 	if timing:
 		var probe_t4 := Time.get_ticks_usec()
 		if probe_enabled:
