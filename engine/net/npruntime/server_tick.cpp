@@ -633,16 +633,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 							encode_player_downed_state(state));
 				};
 				for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-					if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
-							!candidate.link.owned_entity.valid())
-						continue;
-					const world::Entity *medic =
-							world.registry.get(candidate.link.owned_entity);
-					if (medic == nullptr || !medic->alive ||
-							(medic->flags & world::kEntityFlagDead) != 0u ||
-							medic->team != victim_entity->team ||
-							!world.class_has_attribute(
-									medic->player_class, world::World::kCharAttrMedic))
+					if (!is_medic_recipient(candidate, world, victim_entity->team))
 						continue;
 					send_downed(candidate,
 							victim_connection->link.auto_medic_enabled

@@ -361,6 +361,18 @@ std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 		const MountedWeaponSlotSelection &selection);
 
 // C2S 0x03 — canonical i32 inverse-Auto-Medic preference (0 enabled, 1 disabled).
+// C2S 0x2E medic request: the requester's own entity slot index as one dword.
+// [orig: NetPacket_WriteEntityIndex32 from Input_HandleActionBinding case 217
+// @0x49B4EB]
+std::vector<uint8_t> encode_medic_request(const MedicRequest &request);
+
+// S2C 0x14 chat broadcast, the inverse of decode_chat_broadcast:
+// [u8 channel][u8 senderSlot][cstr text]. The host writer takes (senderSlot,
+// channel, text) and stores the channel FIRST.
+// [orig: NetPacket_WriteTwoBytesAndCString @0x5047A0 — byte2 @0x5047C1,
+// byte1 @0x5047CE, the string copy @0x5047F9..0x50480A]
+std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat);
+
 std::vector<uint8_t> encode_auto_medic_preference(
 		const AutoMedicPreference &preference);
 

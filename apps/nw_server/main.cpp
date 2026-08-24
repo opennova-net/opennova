@@ -22,6 +22,7 @@
 #include <mission/event_runtime.h> // BmsEventSystem
 #include <mission/mission.h> // MissionDocument
 #include <mission/promote.h> // promote_mission
+#include <rtxt/rtxt.h>        // the gametext "Server" strings (STRSRV_MEDREQ)
 
 #include <wac/wac_system.h>
 
@@ -325,6 +326,30 @@ int main() {
 	// optional row unset so Match and S2C 0x58 select that same default table.
 	// [orig: GameType_CreateDefaultSettings @0x52DD00;
 	// ScoreConfig_LoadFile @0x52D8A0]
+	// The "Server" chat strings: retail reads GameText("Server", key) from the
+	// gametext table loaded at init; this host reads a loose gametext.bin beside
+	// the mission when one is present and otherwise leaves the strings empty,
+	// which is retail's null lookup (the medic-call handler then no-ops).
+	// [orig: Game_InitSubsystems @0x4A6CD0; Server_BroadcastMedicRequest
+	// @0x5153C9]
+	{
+		const std::filesystem::path gametext_path = resource_root / "gametext.bin";
+		std::error_code gametext_exists_error;
+		if (std::filesystem::exists(gametext_path, gametext_exists_error)) {
+			opennova::rtxt::File gametext;
+			std::string gametext_error;
+			if (opennova::rtxt::parse_file(gametext_path.string(), gametext,
+					gametext_error)) {
+				np::ServerTextTable server_text;
+				server_text.medic_request_format =
+						gametext.get_in_section("Server", "STRSRV_MEDREQ");
+				np::set_server_text(owner.ctx, std::move(server_text));
+			} else {
+				std::fprintf(stderr, "nw-server: gametext '%s' unreadable: %s\n",
+						gametext_path.string().c_str(), gametext_error.c_str());
+			}
+		}
+	}
 	const std::filesystem::path score_path = resource_root / "score.ini";
 	std::error_code score_exists_error;
 	if (std::filesystem::exists(score_path, score_exists_error)) {

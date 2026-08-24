@@ -104,6 +104,7 @@ const char *sound_profile_slot_keyword(int slot);
 // 5 DEATH_K, 6 RECRUIT_ACCEPT, 7 RECRUIT, 8 TANK_COMAND).
 enum EntitySoundType {
     kEntitySoundDeath = 0,
+    kEntitySoundMedicRequest = 1, // the C2S 0x2E help call [orig: @ 0x515526]
     kEntitySoundDeathNight = 5, // the "_K" night composite
     kEntitySoundTypeCount = 9,
 };

@@ -23,6 +23,7 @@
 #include <world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
 #include <world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
+#include <audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
 
 #include <world/vehicle_mount.h>
@@ -1007,6 +1008,39 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	return replies;
 }
 
+bool is_medic_recipient(const NapiNPConnection &candidate,
+		const world::World &world, uint8_t team) {
+	if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
+			!candidate.link.owned_entity.valid())
+		return false;
+	const world::Entity *medic = world.registry.get(candidate.link.owned_entity);
+	return medic != nullptr && medic->alive &&
+			(medic->flags & world::kEntityFlagDead) == 0u &&
+			medic->team == team &&
+			world.class_has_attribute(medic->player_class,
+					world::World::kCharAttrMedic);
+}
+
+namespace {
+
+// The retail handler runs `sprintf(msg_buffer[128], format, name)`; the
+// shipped STRSRV_MEDREQ carries one `%s`. Substitute it here (the CRT call is a
+// platform primitive) and keep retail's 127-character buffer bound.
+std::string format_medic_request(const std::string &format,
+		const std::string &name) {
+	std::string out;
+	const size_t marker = format.find("%s");
+	if (marker == std::string::npos) {
+		out = format;
+	} else {
+		out = format.substr(0, marker) + name + format.substr(marker + 2);
+	}
+	if (out.size() > 127) out.resize(127);
+	return out;
+}
+
+} // namespace
+
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
@@ -1118,6 +1152,117 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.link.auto_medic_enabled = !decode_auto_medic_preference(
 						msg.payload.data(), msg.payload.size(),
 						preference, consumed) || preference.enabled;
+				break;
+			}
+			case c2s::MEDIC_REQUEST: {
+				// A downed player's manual medic call. The body is never read:
+				// the requester is the connection's own player. In order: the
+				// null GameText lookup no-ops the whole handler; the slot must
+				// be a live-roster player with an armed revive window
+				// (`!slot+100567 && slot+368 > 0`); the requester leaves its
+				// spawn-wave group; the message is formatted from the slot name;
+				// a manual-preference, not-yet-latched requester publishes the
+				// live window (no bit 7) to the 0x580 medic set; the chat goes
+				// reliably to that set minus the requester, then to the
+				// requester alone (the chat is NOT preference-gated); the
+				// once-only latch closes; and the MEDIC_REQUEST composite sound
+				// fans to alive players. The listen host's own player runs
+				// this handler too (no loopback early-out).
+				// [orig: Server_BroadcastMedicRequest @0x515390 — GameText
+				// @0x5153C9, gates @0x515406, SpawnWaveList_RemovePlayer
+				// @0x515412, sprintf @0x515421, 0x54 @0x515432..0x515484,
+				// 0x14 @0x5154AC..0x51550B, latch @0x515510, sound
+				// @0x515519..0x51552F]
+				if (inputs.medic_request_format == nullptr ||
+						inputs.medic_request_format->empty())
+					break;
+				if (world == nullptr || !conn.burst.spawned ||
+						!conn.link.owned_entity.valid())
+					break;
+				const world::Entity *requester =
+						world->registry.get(conn.link.owned_entity);
+				if (requester == nullptr || conn.link.downed_revive_seconds == 0u)
+					break;
+				world->spawn_waves.remove_player(conn.link.owned_entity);
+				const std::string message = format_medic_request(
+						*inputs.medic_request_format, requester->name);
+				if (!conn.link.auto_medic_enabled &&
+						!conn.link.medic_request_active) {
+					PlayerDownedState state;
+					state.entity_handle = conn.link.owned_entity.packed;
+					state.revive_seconds = static_cast<uint8_t>(
+							conn.link.downed_revive_seconds);
+					state.medic_request_active = false; // the raw slot+368 byte
+					const std::vector<uint8_t> downed =
+							encode_player_downed_state(state);
+					for (NapiNPConnection &candidate : roster) {
+						if (!is_medic_recipient(candidate, *world, requester->team))
+							continue;
+						candidate.link.transport->host_send(
+								s2c::PLAYER_DOWNED_STATE, downed);
+					}
+				}
+				ChatBroadcast chat;
+				chat.channel = 2;
+				chat.sender_slot = conn.reply.player_slot;
+				chat.text = message;
+				const std::vector<uint8_t> chat_body = encode_chat_broadcast(chat);
+				for (NapiNPConnection &candidate : roster) {
+					if (&candidate == &conn ||
+							!is_medic_recipient(candidate, *world, requester->team))
+						continue;
+					candidate.link.transport->host_send(
+							s2c::CHAT_BROADCAST, chat_body);
+				}
+				replies.push_back(make_protocol_message(
+						s2c::CHAT_BROADCAST, chat_body));
+				conn.link.medic_request_active = true;
+				// The help call: the requester's body-model composite
+				// "<prefix>_MEDIC_REQUEST", positioned at the requester, to
+				// every alive player (mask 128). The listen host's own copy
+				// rides the local slot-sound route the death scream uses.
+				// [orig: SoundProfile_FindByEntityAndType(entity, 1)
+				// @0x515526 -> Server_SendOverlayActionToAlive @0x50A1B0]
+				{
+					char set_name[24] = {};
+					audio::compose_entity_sound_set(requester->anim_slot,
+							audio::kEntitySoundMedicRequest, set_name,
+							sizeof(set_name));
+					PlaySoundCommand cmd;
+					cmd.flag = 1;
+					cmd.sound_name = set_name;
+					cmd.has_pos = true;
+					cmd.pos_x = static_cast<int16_t>(
+							world::to_fixed(requester->position.x) >> 16);
+					cmd.pos_y = static_cast<int16_t>(
+							world::to_fixed(requester->position.y) >> 16);
+					cmd.pos_z = static_cast<int16_t>(
+							world::to_fixed(requester->position.z) >> 16);
+					const std::vector<uint8_t> sound_body = encode_play_sound(cmd);
+					for (NapiNPConnection &candidate : roster) {
+						if (!is_in_match(candidate) ||
+								candidate.link.transport == nullptr ||
+								!candidate.link.owned_entity.valid())
+							continue;
+						const world::Entity *listener =
+								world->registry.get(candidate.link.owned_entity);
+						if (listener == nullptr || listener->health <= 0)
+							continue; // the mask-128 alive filter
+						if (candidate.link.mode == netsim::TransportMode::Loopback) {
+							world::SoundSlotEvent local;
+							local.source_handle = conn.link.owned_entity.packed;
+							local.pos[0] = world::to_fixed(requester->position.x);
+							local.pos[1] = world::to_fixed(requester->position.y);
+							local.pos[2] = world::to_fixed(requester->position.z);
+							local.slot = 0;
+							std::memcpy(local.set_name, set_name, sizeof(set_name));
+							world->slot_sounds.push_back(local);
+							continue;
+						}
+						candidate.link.transport->host_send(
+								s2c::PLAY_SOUND, sound_body, /*reliable=*/false);
+					}
+				}
 				break;
 			}
 			case c2s::CHARATTR_CRC_REPLY:

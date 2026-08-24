@@ -99,6 +99,12 @@ struct NapiNPProtocol {
 // [orig: g_napi_np_ctx @0xB5CBC8] NapiNPServerCtx (§6.3) — the game-level singleton, the full
 // in-match game-server state. CNapiNetwork-shaped header + game fields + np_protocol. Named
 // fields with cited offsets; idiomatic C++ types (no byte-exact padding — see fidelity decision).
+// The host-side rtxt "Server" strings (GameText section "Server"). Each is the
+// sprintf format the retail handler fills; empty means the string is absent.
+struct ServerTextTable {
+	std::string medic_request_format; // STRSRV_MEDREQ: "%s" = the requester's name
+};
+
 struct NapiNPServerCtx {
 	NetworkType transport_mode = NetworkType::Lan; // [orig +0x50]
 	SocketMode socket_state = SocketMode::Socketless; // [orig +0x54]
@@ -141,6 +147,13 @@ struct NapiNPServerCtx {
 	// XORs it even when no player is eligible. Neither session nor round init
 	// resets it, so keep it as NapiNPServerCtx-lifetime state.
 	bool integrity_entity_family_next = false;
+
+	// The rtxt "Server" section strings the host formats into chat
+	// (`GameText_GetString("Server", key)`), loaded by the embedder from its
+	// gametext table through set_server_text(). An EMPTY string is the null
+	// lookup: the consumer no-ops exactly as retail does when the text is
+	// absent. [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
+	ServerTextTable server_text;
 
 	// Host CNetQuality scalar sent as S2C 0x79. Retail derives this byte as
 	// max(frame-rate pressure, mean ping, packet loss) over a five-sample window.
@@ -242,5 +255,11 @@ struct NapiNPServerCtx {
 	NapiNPServerCtx(NapiNPServerCtx &&) noexcept = default;
 	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept = default;
 };
+
+// Install the embedder's "Server" strings (the Godot shell reads its gametext
+// table; nw_server reads a loose gametext.bin beside the mission).
+inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
+	ctx.server_text = std::move(text);
+}
 
 } // namespace opennova::np

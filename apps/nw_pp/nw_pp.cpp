@@ -1723,6 +1723,18 @@ void print_tag_03_c2s(const std::vector<uint8_t> &body) {
 	            preference.enabled ? "enabled" : "manual");
 }
 
+void print_tag_2e_c2s(const std::vector<uint8_t> &body) {
+	MedicRequest request;
+	size_t used = 0;
+	if (!decode_medic_request(body.data(), body.size(), request, used)) {
+		std::printf("        [0x2E C2S] medic-request decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x2E C2S] medic-request entityIndex=%u\n",
+	            unsigned(request.entity_index));
+}
+
 // S2C 0x30 entity-checksum request -> reply C2S 0x20.
 void print_tag_30(const std::vector<uint8_t> &body) {
 	EntityChecksumRequest r;
@@ -2011,6 +2023,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::SPAWN_ACK_TIMESTAMP) print_tag_19(payload);
 	else if (dir == 'C' && tag == c2s::CHAT_MESSAGE) print_tag_0d_c2s(payload);
 	else if (dir == 'C' && tag == c2s::AUTO_MEDIC_PREFERENCE) print_tag_03_c2s(payload);
+	else if (dir == 'C' && tag == c2s::MEDIC_REQUEST) print_tag_2e_c2s(payload);
 	else if (dir == 'C' && tag == c2s::END_ROUND_STATS_REQUEST) print_tag_2b_c2s(payload);
 	else if (dir == 'C' && tag == c2s::ENTITY_INFO_QUERY) print_tag_0f_c2s(payload);
 	else if (dir == 'C' && tag == c2s::LOADOUT_SUBMIT) print_tag_2f_c2s(payload);

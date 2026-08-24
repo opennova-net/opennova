@@ -1227,7 +1227,28 @@ int check_chat_pair() {
 	ChatBroadcast b;
 	EXPECT(decode_chat_broadcast(dn.b.data(), dn.b.size(), b));
 	EXPECT(b.sender_slot == 3 && b.channel == 2 && b.text == "P:hi");
+	// The host writer is the exact inverse: channel first, then the sender
+	// slot, then the C string [orig: NetPacket_WriteTwoBytesAndCString @0x5047A0].
+	EXPECT(encode_chat_broadcast(b) == dn.b);
 	cover('S', 0x14);
+	return 0;
+}
+
+// C2S 0x2E -- the downed player's manual medic call: [u32 entityIndex], a body
+// the host never reads [orig: Input_HandleActionBinding case 217 @0x49B4B4;
+// Server_BroadcastMedicRequest @0x515390].
+int check_C_2E_medic_request() {
+	EXPECT(lookup_ingame_message('C', 0x2E) != nullptr);
+	MedicRequest input;
+	input.entity_index = 0x00000123u;
+	const std::vector<uint8_t> wire = encode_medic_request(input);
+	EXPECT(wire == std::vector<uint8_t>({0x23, 0x01, 0, 0}));
+	MedicRequest output;
+	size_t consumed = 0;
+	EXPECT(decode_medic_request(wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 4 && output.entity_index == 0x123u);
+	EXPECT(!decode_medic_request(wire.data(), 3, output, consumed));
+	cover('C', 0x2E);
 	return 0;
 }
 
@@ -1468,6 +1489,7 @@ int main() {
 	if (check_S_49_weapon_reload()) return 1;
 	if (check_C_25_reload_request()) return 1;
 	if (check_C_03_auto_medic_preference()) return 1;
+	if (check_C_2E_medic_request()) return 1;
 	if (check_S_12_entity_remove()) return 1;
 	if (check_S_2F_objective_entity_state()) return 1;
 	if (check_S_13_entity_death()) return 1;

@@ -1396,6 +1396,19 @@ bool decode_auto_medic_preference(
 	return true;
 }
 
+bool decode_medic_request(const uint8_t *body, size_t len,
+		MedicRequest &out, size_t &consumed) {
+	out = MedicRequest{};
+	consumed = 0;
+	if (body == nullptr || len != 4) return false;
+	out.entity_index = static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) |
+			(static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24);
+	consumed = 4;
+	return true;
+}
+
 // S2C 0x13 entity death (second path) — [u16 handle][i16 killerSource] (4 B).
 // [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
 bool decode_entity_death(const uint8_t *body, size_t len,

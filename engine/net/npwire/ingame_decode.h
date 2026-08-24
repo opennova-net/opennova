@@ -1620,6 +1620,19 @@ bool decode_auto_medic_preference(
 		const uint8_t *body, size_t len,
 		AutoMedicPreference &out, size_t &consumed);
 
+// C2S 0x2E — a downed player's manual medic call. The client writes its own
+// entity's pool slot index as one dword (`NetPacket_WriteEntityIndex32`) and
+// sends it reliably under a 310-frame latch while dead and in session; the
+// host handler never reads the body — it resolves the requester from the
+// connection's player slot — so the dword is carried for the printer only.
+// [orig: Input_HandleActionBinding case 217 @0x49B4B4..0x49B51B;
+// Server_BroadcastMedicRequest @0x515390]
+struct MedicRequest {
+	uint32_t entity_index = 0;
+};
+bool decode_medic_request(const uint8_t *body, size_t len,
+		MedicRequest &out, size_t &consumed);
+
 // S2C 0x13 — entity death (the SECOND death path, beside 0x26 kill-sync).
 // `[u16 entityHandle][i16 killerSource]` (4 B). The handler sets the entity's
 // Health=0, stores killerSource at entity+pad9[36], clears entity+pad8[86], and
