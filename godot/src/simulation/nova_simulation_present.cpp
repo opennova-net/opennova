@@ -961,6 +961,11 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 			for (int wi = 0; wi < 4; ++wi) wc.append(ve->veh.wheel_comp[wi]);
 			out["wc"] = wc;
 		}
+		{
+			Array pd; // per-pad contact depths (diagnostic, §6.15 flap hunt)
+			for (int wi = 0; wi < 4; ++wi) pd.append(ve->veh.dbg_pad_depth[wi]);
+			out["pd"] = pd;
+		}
 		out["macc"] = ve->veh.speed_accel;
 		out["mgnd"] = ve->veh.grounded;
 		out["cmd_fwd"] = ve->veh.cmd_speed;

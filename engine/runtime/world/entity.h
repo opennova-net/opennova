@@ -829,6 +829,11 @@ struct Entity {
             float phase = 0.0f;    // +0x14
         };
         WheelOsc wheel_osc[4];
+        // DIAGNOSTIC ONLY (aiprobe "pd"): the ground solve's per-pad contact
+        // depths from the last solve — probe instrumentation for the 00TRg
+        // contact-flap hunt (AI-PARITY-CONCEPT §6.15). Not retail state; no
+        // gameplay reader.
+        int32_t dbg_pad_depth[4] = {};
         int32_t spring_energy = 0;   // +0x300 (the impact sink)
         // The crash latch bytes, named by retail offset (vehicle_suspension.h
         // documents each; Entity_RespawnVehicle @0x45FF40 is the one writer of
