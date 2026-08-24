@@ -1,20 +1,24 @@
 # Build and export OpenNova Godot applications for Windows.
 #
-# Produces (version read from godot/project.godot):
-#   dist\opennova-runtime-windows-v<version>.zip    (Runtime exe + GDExtension DLL)
-#   dist\opennova-modtools-windows-v<version>.zip   (Mod Tools exe + GDExtension DLL)
+# Produces (version read from godot/project.godot) ONE zip:
+#   dist\opennova-windows-v<version>.zip
+#       opennova-modtools.exe   the OpenNova Editor (ONED)
+#       opennova.exe            the game runtime
+#       libopennova.windows.<flavour>.x86_64.dll   the GDExtension both load
+#
+# One zip on purpose: the editor launches the runtime from its OWN directory
+# (ShellGameSession's PACKAGED_RUNTIME_CANDIDATES look for opennova.exe beside
+# opennova-modtools.exe for F5/F6), so two zips only ever paired a fresh editor
+# with a stale runtime and failed as an unexplained resource picker.
 #
 # Requires:
 #   - MSVC toolchain + cmake (preinstalled on windows-latest)
 #   - Git submodules already initialised (third_party/godot-cpp)
 #
 # Usage:
-#   pwsh -File scripts\package_godot_windows.ps1 [-Target all|editor|runtime]
-#                                                [-ExportMode release|debug] [-SkipBuild]
+#   pwsh -File scripts\package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
 
 param(
-    [ValidateSet("all", "editor", "runtime")]
-    [string]$Target = "all",
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
     # and downloads the DLLs into godot\bin; -SkipBuild then skips the per-job
     # rebuild. Local runs omit it and build normally. See
@@ -36,10 +40,6 @@ $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on larg
 
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $ROOT
-
-$PackageEditor = $Target -in @("all", "editor")
-$PackageRuntime = $Target -in @("all", "runtime")
-Write-Host "=== Godot package target: $Target ==="
 
 # Read Godot apps' component version from project.godot
 $projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
@@ -174,8 +174,7 @@ New-Item -ItemType Directory -Force -Path $DIST | Out-Null
 
 $RUNTIME_EXE = "$DIST\opennova.exe"
 $MODTOOLS_EXE = "$DIST\opennova-modtools.exe"
-$RUNTIME_ZIP = "$DIST\opennova-runtime-windows-v$Version.zip"
-$MODTOOLS_ZIP = "$DIST\opennova-modtools-windows-v$Version.zip"
+$APPS_ZIP = "$DIST\opennova-windows-v$Version.zip"
 
 function Invoke-GodotExport {
     param([string]$PresetName, [string]$OutputPath)
@@ -266,39 +265,41 @@ function Test-GodotAppBoot {
     }
 }
 
-if ($PackageEditor) {
-    Write-Host "=== Exporting opennova-modtools.exe ==="
-    Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
-    Test-GodotAppBoot -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE
-}
+Write-Host "=== Exporting opennova-modtools.exe ==="
+Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
+Test-GodotAppBoot -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE
 
-if ($PackageRuntime) {
-    Write-Host "=== Exporting opennova.exe ==="
-    Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
-    Test-GodotAppBoot -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE
-}
+Write-Host "=== Exporting opennova.exe ==="
+Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+Test-GodotAppBoot -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE
 
-function New-GodotAppZip {
+# ---------------------------------------------------------------------------
+# 5. One zip: both exes side by side with the single DLL they share
+# ---------------------------------------------------------------------------
+function New-GodotAppsZip {
     param(
-        [string]$PackageName,
-        [string]$ExePath,
+        [string[]]$ExePaths,
         [string]$ZipPath
     )
 
-    if (-not (Test-Path $ExePath)) {
-        throw "Cannot package '$PackageName'; exe is missing: $ExePath"
+    foreach ($exe in $ExePaths) {
+        if (-not (Test-Path $exe)) {
+            throw "Cannot package; exe is missing: $exe"
+        }
     }
     if (-not (Test-Path $SHIPPED_DLL)) {
-        throw "Cannot package '$PackageName'; shipped GDExtension DLL is missing: $SHIPPED_DLL"
+        throw "Cannot package; shipped GDExtension DLL is missing: $SHIPPED_DLL"
     }
 
-    $stageDir = Join-Path $DIST ".stage-$PackageName"
+    $stageDir = Join-Path $DIST ".stage-opennova-windows"
     if (Test-Path $stageDir) {
         Remove-Item -LiteralPath $stageDir -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
-    Copy-Item -LiteralPath $ExePath -Destination (Join-Path $stageDir (Split-Path $ExePath -Leaf)) -Force
+    foreach ($exe in $ExePaths) {
+        Copy-Item -LiteralPath $exe -Destination (Join-Path $stageDir (Split-Path $exe -Leaf)) -Force
+    }
     Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $stageDir (Split-Path $SHIPPED_DLL -Leaf)) -Force
 
     Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
@@ -306,26 +307,15 @@ function New-GodotAppZip {
     Remove-Item -LiteralPath $stageDir -Recurse -Force
 
     if (-not (Test-Path $ZipPath)) {
-        throw "Package '$PackageName' produced no zip at $ZipPath"
+        throw "Packaging produced no zip at $ZipPath"
     }
 }
 
-$ProducedZips = @()
-
-if ($PackageEditor) {
-    Write-Host "=== Packaging $(Split-Path $MODTOOLS_ZIP -Leaf) ==="
-    New-GodotAppZip -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE -ZipPath $MODTOOLS_ZIP
-    $ProducedZips += $MODTOOLS_ZIP
-}
-
-if ($PackageRuntime) {
-    Write-Host "=== Packaging $(Split-Path $RUNTIME_ZIP -Leaf) ==="
-    New-GodotAppZip -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE -ZipPath $RUNTIME_ZIP
-    $ProducedZips += $RUNTIME_ZIP
-}
+Write-Host "=== Packaging $(Split-Path $APPS_ZIP -Leaf) ==="
+New-GodotAppsZip -ExePaths @($MODTOOLS_EXE, $RUNTIME_EXE) -ZipPath $APPS_ZIP
 
 # ---------------------------------------------------------------------------
-# 5. Done
+# 6. Done
 # ---------------------------------------------------------------------------
 Write-Host "=== Done ==="
-Get-Item -LiteralPath $ProducedZips | Select-Object Name, Length
+Get-Item -LiteralPath $APPS_ZIP | Select-Object Name, Length

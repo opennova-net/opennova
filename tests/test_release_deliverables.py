@@ -13,9 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SOURCES = {
     "asset-importer": "onimport-v0.1.5.exe",
     "blender-ase-exporter": "opennova_blender-v0.0.5.zip",
-    "modding-editor": "opennova-modtools-windows-v0.0.10.zip",
-    "game-runtime": "opennova-runtime-windows-v0.0.10.zip",
+    "windows-apps": "opennova-windows-v0.0.10.zip",
 }
+
+# What the one Windows zip carries: the editor, the game runtime it launches
+# from beside itself, and the GDExtension DLL both load.
+WINDOWS_APPS_ENTRIES = ["opennova-modtools.exe", "opennova.exe"]
 
 
 def _load_validator():
@@ -57,18 +60,8 @@ def _write_deliverable_fixtures(dist: Path) -> None:
         ],
     )
     _write_zip(
-        dist / "opennova-modtools-windows-v0.0.10.zip",
-        [
-            "opennova-modtools.exe",
-            "libopennova.windows.template_release.x86_64.dll",
-        ],
-    )
-    _write_zip(
-        dist / "opennova-runtime-windows-v0.0.10.zip",
-        [
-            "opennova.exe",
-            "libopennova.windows.template_release.x86_64.dll",
-        ],
+        dist / FIXTURE_SOURCES["windows-apps"],
+        WINDOWS_APPS_ENTRIES + ["libopennova.windows.template_release.x86_64.dll"],
     )
 
 
@@ -98,8 +91,7 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
     assert public_names == [
         "opennova-asset-importer-windows-v0.0.10.exe",
         "opennova-blender-ase-exporter-v0.0.10.zip",
-        "opennova-game-runtime-windows-v0.0.10.zip",
-        "opennova-modding-editor-windows-v0.0.10.zip",
+        "opennova-windows-v0.0.10.zip",
     ]
     assert sorted(item.public_name for item in result.items) == public_names
 
@@ -109,6 +101,8 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
     assert "Install:" in text
     assert "Use:" in text
     assert "Blender" in text
+    # The one Windows zip's install hint tells the user the two exes belong together.
+    assert "side by side" in text
 
 
 def test_release_validator_selects_manifest_deliverables_in_manifest_order(
@@ -118,7 +112,7 @@ def test_release_validator_selects_manifest_deliverables_in_manifest_order(
     dist = tmp_path / "dist"
     stage = dist / "release-assets"
     body = tmp_path / "release-body.md"
-    selected_ids = {"modding-editor", "game-runtime"}
+    selected_ids = {"blender-ase-exporter", "windows-apps"}
     dist.mkdir()
     _write_deliverable_fixtures(dist)
     _keep_deliverable_fixtures(dist, selected_ids)
@@ -129,17 +123,17 @@ def test_release_validator_selects_manifest_deliverables_in_manifest_order(
         stage_dir=stage,
         release_body=body,
         release_version="v0.0.10",
-        deliverable_ids=["game-runtime", "modding-editor"],
+        deliverable_ids=["windows-apps", "blender-ase-exporter"],
     )
 
-    assert [item.id for item in result.items] == ["modding-editor", "game-runtime"]
+    assert [item.id for item in result.items] == ["blender-ase-exporter", "windows-apps"]
     assert {path.name for path in stage.iterdir()} == {
-        "opennova-modding-editor-windows-v0.0.10.zip",
-        "opennova-game-runtime-windows-v0.0.10.zip",
+        "opennova-blender-ase-exporter-v0.0.10.zip",
+        "opennova-windows-v0.0.10.zip",
     }
     body_text = body.read_text(encoding="utf-8")
-    assert "opennova-modding-editor-windows-v0.0.10.zip" in body_text
-    assert "opennova-game-runtime-windows-v0.0.10.zip" in body_text
+    assert "opennova-blender-ase-exporter-v0.0.10.zip" in body_text
+    assert "opennova-windows-v0.0.10.zip" in body_text
     assert "opennova-asset-importer-windows-v0.0.10.exe" not in body_text
     assert "macos" not in body_text.lower()
 
@@ -149,7 +143,7 @@ def test_release_validator_cli_accepts_repeated_only_id(tmp_path: Path) -> None:
     dist = tmp_path / "dist"
     stage = dist / "release-assets"
     body = tmp_path / "release-body.md"
-    selected_ids = {"modding-editor", "game-runtime"}
+    selected_ids = {"blender-ase-exporter", "windows-apps"}
     dist.mkdir()
     _write_deliverable_fixtures(dist)
     _keep_deliverable_fixtures(dist, selected_ids)
@@ -167,16 +161,16 @@ def test_release_validator_cli_accepts_repeated_only_id(tmp_path: Path) -> None:
             "--release-version",
             "v0.0.10",
             "--only-id",
-            "modding-editor",
+            "blender-ase-exporter",
             "--only-id",
-            "game-runtime",
+            "windows-apps",
         ]
     )
 
     assert exit_code == 0
     assert {path.name for path in stage.iterdir()} == {
-        "opennova-modding-editor-windows-v0.0.10.zip",
-        "opennova-game-runtime-windows-v0.0.10.zip",
+        "opennova-blender-ase-exporter-v0.0.10.zip",
+        "opennova-windows-v0.0.10.zip",
     }
 
 
@@ -185,8 +179,8 @@ def test_release_validator_cli_accepts_repeated_only_id(tmp_path: Path) -> None:
     [
         (["not-a-deliverable"], "Unknown deliverable IDs: not-a-deliverable"),
         (
-            ["modding-editor", "modding-editor"],
-            "Duplicate deliverable IDs: modding-editor",
+            ["windows-apps", "windows-apps"],
+            "Duplicate deliverable IDs: windows-apps",
         ),
         ([], "At least one deliverable ID must be selected"),
     ],
@@ -225,20 +219,16 @@ def test_release_validator_rejects_unselected_dist_files(tmp_path: Path) -> None
             stage_dir=dist / "release-assets",
             release_body=tmp_path / "release-body.md",
             release_version="0.0.10",
-            deliverable_ids=["modding-editor", "game-runtime"],
+            deliverable_ids=["windows-apps"],
         )
 
 
-def _write_debug_mode_godot_zips(dist: Path) -> None:
+def _write_debug_mode_windows_zip(dist: Path) -> None:
     # What pull-request CI packages: --export-debug exes beside the template_debug
     # GDExtension (see scripts/package_godot_windows.ps1 -ExportMode debug).
     _write_zip(
-        dist / FIXTURE_SOURCES["modding-editor"],
-        ["opennova-modtools.exe", "libopennova.windows.template_debug.x86_64.dll"],
-    )
-    _write_zip(
-        dist / FIXTURE_SOURCES["game-runtime"],
-        ["opennova.exe", "libopennova.windows.template_debug.x86_64.dll"],
+        dist / FIXTURE_SOURCES["windows-apps"],
+        WINDOWS_APPS_ENTRIES + ["libopennova.windows.template_debug.x86_64.dll"],
     )
 
 
@@ -247,12 +237,12 @@ def test_release_validator_selects_the_gdextension_flavour(tmp_path: Path) -> No
     dist = tmp_path / "dist"
     stage = dist / "release-assets"
     body = tmp_path / "release-body.md"
-    godot_ids = ["modding-editor", "game-runtime"]
+    godot_ids = ["windows-apps"]
     dist.mkdir()
     _write_deliverable_fixtures(dist)
     _keep_deliverable_fixtures(dist, set(godot_ids))
 
-    # Release-mode zips (the default flavour) do not satisfy the debug flavour...
+    # A release-mode zip (the default flavour) does not satisfy the debug flavour...
     with pytest.raises(
         validator.DeliverableValidationError,
         match="libopennova.windows.template_debug.x86_64.dll",
@@ -267,9 +257,9 @@ def test_release_validator_selects_the_gdextension_flavour(tmp_path: Path) -> No
             gdextension_target="template_debug",
         )
 
-    # ...and debug-mode zips satisfy template_debug (the PR CI path) but not the
+    # ...and a debug-mode zip satisfies template_debug (the PR CI path) but not the
     # default release flavour.
-    _write_debug_mode_godot_zips(dist)
+    _write_debug_mode_windows_zip(dist)
     result = validator.validate_release_deliverables(
         repo_root=ROOT,
         dist_dir=dist,
@@ -306,13 +296,35 @@ def test_release_validator_selects_the_gdextension_flavour(tmp_path: Path) -> No
         )
 
 
+def test_release_validator_requires_both_exes_in_the_windows_zip(tmp_path: Path) -> None:
+    # The editor launches opennova.exe from beside itself; a zip with only one of
+    # the two is the version-skew failure the single zip exists to prevent.
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    _write_zip(
+        dist / FIXTURE_SOURCES["windows-apps"],
+        ["opennova-modtools.exe", "libopennova.windows.template_release.x86_64.dll"],
+    )
+
+    with pytest.raises(validator.DeliverableValidationError, match="opennova.exe"):
+        validator.validate_release_deliverables(
+            repo_root=ROOT,
+            dist_dir=dist,
+            stage_dir=dist / "release-assets",
+            release_body=tmp_path / "release-body.md",
+            release_version="0.0.10",
+            deliverable_ids=["windows-apps"],
+        )
+
+
 def test_release_validator_cli_accepts_gdextension_target(tmp_path: Path) -> None:
     validator = _load_validator()
     dist = tmp_path / "dist"
     stage = dist / "release-assets"
     body = tmp_path / "release-body.md"
     dist.mkdir()
-    _write_debug_mode_godot_zips(dist)
+    _write_debug_mode_windows_zip(dist)
 
     exit_code = validator.main(
         [
@@ -329,17 +341,12 @@ def test_release_validator_cli_accepts_gdextension_target(tmp_path: Path) -> Non
             "--gdextension-target",
             "template_debug",
             "--only-id",
-            "modding-editor",
-            "--only-id",
-            "game-runtime",
+            "windows-apps",
         ]
     )
 
     assert exit_code == 0
-    assert {path.name for path in stage.iterdir()} == {
-        "opennova-modding-editor-windows-v0.0.0-ci.zip",
-        "opennova-game-runtime-windows-v0.0.0-ci.zip",
-    }
+    assert {path.name for path in stage.iterdir()} == {"opennova-windows-v0.0.0-ci.zip"}
 
 
 def test_release_validator_rejects_missing_archive_entry(tmp_path: Path) -> None:
@@ -382,8 +389,7 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
     package_jobs = [
         "package-addon",
         "package-importer",
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
+        "package-godot-windows",
     ]
 
     assert "scripts/validate_release_deliverables.py" in workflow
@@ -409,23 +415,26 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     package_jobs = [
         "package-addon",
         "package-importer",
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
+        "package-godot-windows",
     ]
     deferred_pr_jobs = ["package-addon", "package-importer"]
-    godot_package_jobs = ["package-godot-windows-editor", "package-godot-windows-runtime"]
 
     assert "validate-deliverables:" in workflow
-    assert "package-godot-windows-editor:" in workflow
-    assert "package-godot-windows-runtime:" in workflow
+    # One Windows package job: the editor and the runtime ship in ONE zip (the
+    # editor launches opennova.exe from beside itself), so the per-app jobs and
+    # their wrapper scripts are gone.
+    assert "package-godot-windows:" in workflow
+    assert "package-godot-windows-editor:" not in workflow
+    assert "package-godot-windows-runtime:" not in workflow
     assert "package-godot-macos-editor:" not in workflow
     assert "package-godot-macos-runtime:" not in workflow
     assert "package-godot:" not in workflow
     assert "package-godot-editor:" not in workflow
     assert "package-godot-runtime:" not in workflow
     assert "package-godot-macos:" not in workflow
-    assert "scripts/package_godot_editor_windows.ps1" in workflow
-    assert "scripts/package_godot_runtime_windows.ps1" in workflow
+    assert "scripts/package_godot_windows.ps1" in workflow
+    assert "scripts/package_godot_editor_windows.ps1" not in workflow
+    assert "scripts/package_godot_runtime_windows.ps1" not in workflow
     assert "scripts/package_godot_editor_macos.sh" not in workflow
     assert "scripts/package_godot_runtime_macos.sh" not in workflow
     assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
@@ -436,19 +445,15 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
         assert "if: github.event_name != 'pull_request'" in body
         assert "needs:" not in _workflow_job(workflow, package_job)
 
-    # Windows preview packages reuse the prebuilt GDExtension.
-    assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "package-godot-windows-editor")
-    assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "package-godot-windows-runtime")
-
-    for package_job in godot_package_jobs:
-        body = _workflow_job(workflow, package_job)
-        assert "Cache Godot binary" in body
-        assert "Cache Godot export templates" in body
+    # The Windows preview package reuses the prebuilt GDExtension.
+    windows_job = _workflow_job(workflow, "package-godot-windows")
+    assert "needs: [build-gdextension-windows]" in windows_job
+    assert "Cache Godot binary" in windows_job
+    assert "Cache Godot export templates" in windows_job
 
     validate_job = _workflow_job(workflow, "validate-deliverables")
     assert (
-        "needs: [test, godot-tests, package-addon, package-importer, "
-        "package-godot-windows-editor, package-godot-windows-runtime]"
+        "needs: [test, godot-tests, package-addon, package-importer, package-godot-windows]"
     ) in validate_job
     assert "always()" in validate_job
     for package_job in package_jobs:
@@ -458,8 +463,9 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     assert "--release-version 0.0.0-ci" in validate_job
     assert "--only-id asset-importer" in validate_job
     assert "--only-id blender-ase-exporter" in validate_job
-    assert validate_job.count("--only-id modding-editor") == 2
-    assert validate_job.count("--only-id game-runtime") == 2
+    assert validate_job.count("--only-id windows-apps") == 2
+    assert "--only-id modding-editor" not in validate_job
+    assert "--only-id game-runtime" not in validate_job
     # PR packages are debug-mode exports (template_debug GDExtension inside);
     # master/manual packages are release-mode like the release workflow.
     pr_validate, non_pr_validate = validate_job.split("- name: Validate non-PR deliverables", 1)
@@ -467,12 +473,19 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     assert "--gdextension-target template_release" in non_pr_validate
 
     assert "dist/onimport-v*.exe" in workflow
-    assert "dist/opennova-modtools-windows-v*.zip" in workflow
-    assert "dist/opennova-runtime-windows-v*.zip" in workflow
+    assert "dist/opennova-windows-v*.zip" in workflow
+    assert "dist/opennova-modtools-windows-v*.zip" not in workflow
+    assert "dist/opennova-runtime-windows-v*.zip" not in workflow
     assert "dist/onimport.exe" not in workflow
-    assert "dist/opennova-modtools-windows.zip" not in workflow
-    assert "dist/opennova-runtime-windows.zip" not in workflow
+    assert "dist/opennova-windows.zip" not in workflow
     assert "opennova_release_assets" not in workflow
+
+    # The PR comment links the one zip.
+    links_job = _workflow_job(workflow, "pr-build-links")
+    assert "needs: [package-godot-windows]" in links_job
+    assert "opennova-windows.zip" in links_job
+    assert "opennova-modtools-windows.zip" not in links_job
+    assert "opennova-runtime-windows.zip" not in links_job
 
 
 def test_windows_godot_tests_use_console_binary_for_bash_runner() -> None:
@@ -514,7 +527,7 @@ def test_ci_builds_windows_gdextension_per_flavour_and_caches_with_sccache() -> 
     assert "ilammy/msvc-dev-cmd" in win_build
     # One matrix leg per godot-cpp flavour, in parallel: a pull request builds
     # template_debug only (the editor/test flavour, also what its debug-mode
-    # packages ship); master pushes and manual runs add template_release. The
+    # package ships); master pushes and manual runs add template_release. The
     # target -> CMake config mapping lives in the build step, never in
     # matrix.include (an include entry whose target is absent from the active
     # list is added as an extra combination and would resurrect the release leg).
@@ -536,33 +549,23 @@ def test_ci_builds_windows_gdextension_per_flavour_and_caches_with_sccache() -> 
     # the editor binary that runs GUT needs template_debug only.
     assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "godot-tests")
     assert "name: gdext_windows_template_debug" in _workflow_job(workflow, "godot-tests")
-    consumers = [
-        "godot-tests",
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
-    ]
+    consumers = ["godot-tests", "package-godot-windows"]
     for job in consumers:
         body = _workflow_job(workflow, job)
         assert "actions/download-artifact" in body
         # No consumer recompiles the GDExtension inline.
         assert "cmake -S godot/src" not in body
-    for job in ["package-godot-windows-editor", "package-godot-windows-runtime"]:
-        body = _workflow_job(workflow, job)
-        assert "pattern: gdext_windows_*" in body
-        assert "merge-multiple: true" in body
-        # PRs package in debug export mode (debug template + template_debug DLL);
-        # master/manual runs package in release mode like the release workflow.
-        assert (
-            "-SkipBuild -ExportMode "
-            "${{ github.event_name == 'pull_request' && 'debug' || 'release' }}"
-        ) in body
+    windows_job = _workflow_job(workflow, "package-godot-windows")
+    assert "pattern: gdext_windows_*" in windows_job
+    assert "merge-multiple: true" in windows_job
+    # PRs package in debug export mode (debug template + template_debug DLL);
+    # master/manual runs package in release mode like the release workflow.
+    assert (
+        "-SkipBuild -ExportMode "
+        "${{ github.event_name == 'pull_request' && 'debug' || 'release' }}"
+    ) in windows_job
 
-    for job in [
-        "package-addon",
-        "package-importer",
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
-    ]:
+    for job in ["package-addon", "package-importer", "package-godot-windows"]:
         body = _workflow_job(workflow, job)
         assert "uses: actions/upload-artifact@v7" in body
         assert "archive: false" in body
@@ -617,59 +620,57 @@ def test_godot_test_wrapper_allows_fixture_inner_classes() -> None:
     assert all("Inner Class" not in pattern for pattern in collection_patterns)
 
 
-def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
+def test_release_packages_editor_and_runtime_in_one_job() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     package_jobs = [
         "package-addon",
         "package-importer",
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
-    ]
-    godot_package_jobs = [
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
+        "package-godot-windows",
     ]
 
-    assert "package-godot-windows-editor:" in workflow
-    assert "package-godot-windows-runtime:" in workflow
+    assert "package-godot-windows:" in workflow
+    assert "package-godot-windows-editor:" not in workflow
+    assert "package-godot-windows-runtime:" not in workflow
     assert "package-godot:" not in workflow
     assert "package-godot-editor:" not in workflow
     assert "package-godot-runtime:" not in workflow
     # macOS delivery removed 2026-08-11 (maintainer decision): release ships
     # Windows only; the engine stays portable but nothing packages for macOS.
     assert "macos" not in workflow.lower()
-    assert "scripts/package_godot_editor_windows.ps1" in workflow
-    assert "scripts/package_godot_runtime_windows.ps1" in workflow
+    assert "scripts/package_godot_windows.ps1" in workflow
+    assert "scripts/package_godot_editor_windows.ps1" not in workflow
+    assert "scripts/package_godot_runtime_windows.ps1" not in workflow
     assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
     for package_job in package_jobs:
         assert "needs:" not in _workflow_job(workflow, package_job)
     assert (
-        "needs: [test, package-addon, package-importer, "
-        "package-godot-windows-editor, package-godot-windows-runtime]"
+        "needs: [test, package-addon, package-importer, package-godot-windows]"
     ) in _workflow_job(workflow, "release")
-    for package_job in godot_package_jobs:
-        body = _workflow_job(workflow, package_job)
-        assert "Cache Godot binary" in body
-        assert "Cache Godot export templates" in body
+    windows_job = _workflow_job(workflow, "package-godot-windows")
+    assert "Cache Godot binary" in windows_job
+    assert "Cache Godot export templates" in windows_job
+    assert "dist/opennova-windows-v*.zip" in windows_job
 
 
-def test_godot_package_wrappers_target_editor_and_runtime() -> None:
-    windows_editor = (ROOT / "scripts/package_godot_editor_windows.ps1").read_text(encoding="utf-8")
-    windows_runtime = (ROOT / "scripts/package_godot_runtime_windows.ps1").read_text(encoding="utf-8")
+def test_godot_package_script_ships_both_apps_in_one_zip() -> None:
     windows_shared = (ROOT / "scripts/package_godot_windows.ps1").read_text(encoding="utf-8")
 
-    assert "-Target editor" in windows_editor
-    assert "-Target runtime" in windows_runtime
-    assert "[ValidateSet(\"all\", \"editor\", \"runtime\")]" in windows_shared
+    # The per-app wrappers and the -Target switch are gone: one script, one zip.
+    assert not (ROOT / "scripts/package_godot_editor_windows.ps1").exists()
+    assert not (ROOT / "scripts/package_godot_runtime_windows.ps1").exists()
+    assert "-Target" not in windows_shared
+    assert 'opennova-windows-v$Version.zip' in windows_shared
+    assert "opennova-modtools-windows" not in windows_shared
+    assert "opennova-runtime-windows" not in windows_shared
+    # Both presets are exported and boot-smoked, and both exes land in the zip.
+    assert '-PresetName "OpenNova Mod Tools"' in windows_shared
+    assert '-PresetName "OpenNova Runtime"' in windows_shared
+    assert "-ExePaths @($MODTOOLS_EXE, $RUNTIME_EXE)" in windows_shared
     # -ExportMode release (default; the release workflow) exports with
     # --export-release and ships template_release; -ExportMode debug (PR CI)
-    # exports with --export-debug and ships template_debug. The wrappers only
-    # forward it.
-    for script in [windows_shared, windows_editor, windows_runtime]:
-        assert "[ValidateSet(\"debug\", \"release\")]" in script
-        assert '[string]$ExportMode = "release"' in script
-    assert "-ExportMode $ExportMode" in windows_editor
-    assert "-ExportMode $ExportMode" in windows_runtime
+    # exports with --export-debug and ships template_debug.
+    assert "[ValidateSet(\"debug\", \"release\")]" in windows_shared
+    assert '[string]$ExportMode = "release"' in windows_shared
     assert "--path godot --export-$ExportMode " in windows_shared
     assert "--path godot --export-release " not in windows_shared
 
@@ -680,10 +681,11 @@ def test_readme_lists_public_asset_names_and_install_hints() -> None:
     for name in [
         "opennova-asset-importer-windows-v<version>.exe",
         "opennova-blender-ase-exporter-v<version>.zip",
-        "opennova-modding-editor-windows-v<version>.zip",
-        "opennova-game-runtime-windows-v<version>.zip",
+        "opennova-windows-v<version>.zip",
     ]:
         assert name in readme
+    assert "opennova-modding-editor-windows" not in readme
+    assert "opennova-game-runtime-windows" not in readme
     assert "Install from Blender" in readme
     assert "Extract the zip" in readme
 

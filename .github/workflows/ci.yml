@@ -510,12 +510,16 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  package-godot-windows-editor:
+  # One job, one zip: the editor (opennova-modtools.exe) and the game runtime
+  # (opennova.exe) ship side by side with the GDExtension DLL they share. The
+  # editor launches the runtime from its own directory (F5/F6), so two zips only
+  # ever paired a fresh editor with a stale runtime.
+  package-godot-windows:
     runs-on: windows-latest
     needs: [build-gdextension-windows]
     outputs:
-      artifact_url: ${{ steps.upload_modtools.outputs.artifact-url }}
-      artifact_id: ${{ steps.upload_modtools.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload_windows.outputs.artifact-url }}
+      artifact_id: ${{ steps.upload_windows.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -555,78 +559,21 @@ jobs:
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the flavour every editor session runs); master/manual runs export in
       # release mode like the release workflow.
-      - name: Package Godot Windows editor export
+      - name: Package Godot Windows apps
         shell: pwsh
-        run: scripts/package_godot_editor_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+        run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
-      - name: Upload opennova-modtools Windows zip
-        id: upload_modtools
+      - name: Upload OpenNova Windows zip
+        id: upload_windows
         uses: actions/upload-artifact@v7
         with:
-          path: dist/opennova-modtools-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-  package-godot-windows-runtime:
-    runs-on: windows-latest
-    needs: [build-gdextension-windows]
-    outputs:
-      artifact_url: ${{ steps.upload_runtime.outputs.artifact-url }}
-      artifact_id: ${{ steps.upload_runtime.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      # Every flavour this run built (template_debug only on a PR).
-      - name: Download GDExtension
-        uses: actions/download-artifact@v4
-        with:
-          pattern: gdext_windows_*
-          merge-multiple: true
-          path: godot/bin
-
-      # PRs export in debug mode (debug export template + the template_debug DLL,
-      # the flavour every editor session runs); master/manual runs export in
-      # release mode like the release workflow.
-      - name: Package Godot Windows runtime export
-        shell: pwsh
-        run: scripts/package_godot_runtime_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
-
-      - name: Upload opennova runtime Windows zip
-        id: upload_runtime
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-runtime-windows-v*.zip
+          path: dist/opennova-windows-v*.zip
           archive: false
           if-no-files-found: error
 
   validate-deliverables:
     runs-on: ubuntu-latest
-    needs: [test, godot-tests, package-addon, package-importer, package-godot-windows-editor, package-godot-windows-runtime]
+    needs: [test, godot-tests, package-addon, package-importer, package-godot-windows]
     # Tool-package jobs are skipped on PRs. always() avoids implicit skip
     # propagation; the explicit result checks still block failed dependencies.
     if: >-
@@ -634,8 +581,7 @@ jobs:
         always() &&
         needs.test.result == 'success' &&
         needs.godot-tests.result == 'success' &&
-        needs.package-godot-windows-editor.result == 'success' &&
-        needs.package-godot-windows-runtime.result == 'success' &&
+        needs.package-godot-windows.result == 'success' &&
         (
           github.event_name == 'pull_request' ||
           (
@@ -657,8 +603,7 @@ jobs:
         with:
           path: dist
           artifact-ids: >-
-            ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
+            ${{ needs.package-godot-windows.outputs.artifact_id }}
           merge-multiple: true
           skip-decompress: true
 
@@ -670,8 +615,7 @@ jobs:
           artifact-ids: >-
             ${{ needs.package-addon.outputs.artifact_id }},
             ${{ needs.package-importer.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
+            ${{ needs.package-godot-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -689,8 +633,7 @@ jobs:
           python scripts/validate_release_deliverables.py
           --release-version 0.0.0-ci
           --gdextension-target template_debug
-          --only-id modding-editor
-          --only-id game-runtime
+          --only-id windows-apps
 
       - name: Validate non-PR deliverables
         if: github.event_name != 'pull_request'
@@ -700,16 +643,15 @@ jobs:
           --gdextension-target template_release
           --only-id asset-importer
           --only-id blender-ase-exporter
-          --only-id modding-editor
-          --only-id game-runtime
+          --only-id windows-apps
 
-  # Surface the two Windows builds on the PR as a single comment that updates in
-  # place. Depends on the Windows package jobs (not the test jobs), so links only
-  # ever advance to a build that succeeded; a failed build skips this job and the
-  # previous comment is left untouched.
+  # Surface the Windows build on the PR as a single comment that updates in
+  # place. Depends on the Windows package job (not the test jobs), so the link
+  # only ever advances to a build that succeeded; a failed build skips this job
+  # and the previous comment is left untouched.
   pr-build-links:
     runs-on: ubuntu-latest
-    needs: [package-godot-windows-editor, package-godot-windows-runtime]
+    needs: [package-godot-windows]
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -718,8 +660,7 @@ jobs:
       - name: Post or update the build-links comment
         uses: actions/github-script@v7
         env:
-          MODTOOLS_URL: ${{ needs.package-godot-windows-editor.outputs.artifact_url }}
-          RUNTIME_URL: ${{ needs.package-godot-windows-runtime.outputs.artifact_url }}
+          WINDOWS_URL: ${{ needs.package-godot-windows.outputs.artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -733,12 +674,11 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows debug-mode builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})): debug export template plus the template_debug GDExtension, the flavour every editor session runs. Release-mode builds come from the release workflow.`,
+              `Windows debug-mode build for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})): debug export template plus the template_debug GDExtension, the flavour every editor session runs. Release-mode builds come from the release workflow.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| OpenNova Editor (Mod Tools) | [opennova-modtools-windows.zip](${process.env.MODTOOLS_URL}) |`,
-              `| Game runtime | [opennova-runtime-windows.zip](${process.env.RUNTIME_URL}) |`,
+              `| OpenNova Editor + game runtime (opennova-modtools.exe, opennova.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

@@ -42,8 +42,7 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 |---|---|---|
 | **`opennova-asset-importer-windows-v<version>.exe`** | Standalone Windows importer for converting models to `.blend`, `.ase`, and NovaLogic-compatible project files for tools like OED. | Run the exe directly, point it at your game directory, and select what to export. |
 | **`opennova-blender-ase-exporter-v<version>.zip`** | Blender 5.x ASE exporter addon with pre-built native libraries for Windows and Linux. | Install from Blender with `Edit > Preferences > Add-ons > Install`, then use `File > Export > Novalogic ASE (.ase)`. |
-| **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, object, mission, interface, audio, and environment mod data. | Extract the zip, then run `opennova-modtools.exe`. |
-| **`opennova-game-runtime-windows-v<version>.zip`** | Godot-based OpenNova runtime for loading exported scenes and runtime systems. | Extract the zip, then run `opennova.exe`. |
+| **`opennova-windows-v<version>.zip`** | The OpenNova Editor (ONED) for authoring terrain, object, mission, interface, audio, and environment mod data, together with the Godot-based game runtime it launches (F5/F6 run the game beside the editor; F7 runs retail on the packed assets). | Extract the zip, keeping the two exes side by side; run `opennova-modtools.exe` for the editor or `opennova.exe` for the game. |
 
 ## Asset Importer
 
@@ -275,7 +274,7 @@ Runs the GDScript suite under `godot/tests/` headless via GUT. Requires `GODOT_B
 
 ### Package Godot Exports
 
-Builds `dist/opennova-runtime-windows-v<version>.zip` and `dist/opennova-modtools-windows-v<version>.zip` via headless Godot export. Windows-only; requires MSVC and CMake.
+Builds `dist/opennova-windows-v<version>.zip` (the editor and the game runtime side by side, with the GDExtension DLL they share) via headless Godot export. Windows-only; requires MSVC and CMake.
 
 ```powershell
 scripts/package_godot_windows.ps1
