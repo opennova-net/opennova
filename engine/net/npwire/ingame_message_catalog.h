@@ -140,7 +140,6 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'C', c2s::WEAPON_RELOAD_REQUEST,     "weapon-reload-request",   MsgCoverage::Decoded,     "§5.58 decode_weapon_reload (same 4-B body as S2C 0x49; host broadcasts it back @0x514DF0; direction asymmetry vs S2C 0x25, §5.3)"},
 		{'C', c2s::VEHICLE_ATTACH_REQUEST,    "vehicle-attach-request",  MsgCoverage::PrinterOnly, "word0 overwritten with requester's own handle -> NapiNPServerMsg_HandleVehicleAttach @0x502390 -> Entity_ProcessVehicleAttach @0x435aa0"},
 		{'C', c2s::VEHICLE_DETACH_REQUEST,    "vehicle-detach-request",  MsgCoverage::PrinterOnly, "[u16 handle] -> Entity_DetachFromVehicle(entity, entity+364) @0x4FC980"},
-		{'C', c2s::MEDIC_REQUEST,             "medic-request",           MsgCoverage::PrinterOnly, "[i32 entityIndex] the dead player's medic call (encode_medic_request; client @0x49b4b4, host Server_BroadcastMedicRequest @0x515390)"},
 		{'C', c2s::END_ROUND_STATS_REQUEST,   "end-round-stats-request", MsgCoverage::Decoded,     "§5.68 decode_end_round_stats_request; [u16 offset] -> requester-only S2C 0x56, max 200 B"},
 		{'C', c2s::RTT_CONSUMED,              "rtt-consumed",            MsgCoverage::Decoded,     "§5.34 decode_rtt_sample"},
 		{'C', c2s::BURST_MEMBER_2D,           "burst-member-2d",         MsgCoverage::PrinterOnly, "§5.33 burst receiver @0x502430"},
