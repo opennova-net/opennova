@@ -10,6 +10,7 @@
 #include <npruntime/napi_np_server_ctx.h>
 #include <npruntime/server_message_dispatch.h>
 #include <npruntime/server_tick.h>
+#include <npruntime/end_round_protocol.h>
 
 #include <mission/event_runtime.h>
 
@@ -30,6 +31,7 @@
 #include <wac/compiler.h>
 #include <wac/wac_system.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <utility>
@@ -190,6 +192,25 @@ bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header) {
 	return saw_seed && saw_header;
 }
 
+// The 0x2B service reads the host's frozen board stream through the dispatch
+// inputs, exactly as the owner pump threads it.
+np::ServerDispatchInputs board_inputs(const np::NapiNPServerCtx &ctx) {
+	np::ServerDispatchInputs inputs;
+	inputs.round_end_board_stream = &ctx.round_end_board_stream;
+	return inputs;
+}
+
+std::vector<ProtocolMessage> request_board_chunk(
+		np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection,
+		w::World &world, uint16_t offset) {
+	return np::dispatch_session_replies(
+			ctx.config, connection,
+			{make_protocol_message(c2s::END_ROUND_STATS_REQUEST,
+					encode_end_round_stats_request(offset))},
+			world.logic_tick, ctx.np_protocol.connection_list, &world,
+			board_inputs(ctx));
+}
+
 bool pull_round_board(np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection,
 		w::World &world, EndRoundStats &board, size_t &chunk_count) {
 	std::vector<uint8_t> bytes;
@@ -197,11 +218,8 @@ bool pull_round_board(np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection
 	uint16_t total_size = 0;
 	chunk_count = 0;
 	for (;;) {
-		const std::vector<ProtocolMessage> replies = np::dispatch_session_replies(
-				ctx.config, connection,
-				{make_protocol_message(c2s::END_ROUND_STATS_REQUEST,
-						encode_end_round_stats_request(offset))},
-				world.logic_tick, ctx.np_protocol.connection_list, &world);
+		const std::vector<ProtocolMessage> replies =
+				request_board_chunk(ctx, connection, world, offset);
 		if (replies.size() != 1 || replies[0].tag != s2c::END_ROUND_STATS)
 			return false;
 
@@ -265,12 +283,45 @@ void test_tdm_round_wire_and_linger() {
 			"TDM kill-limit win waits for the 1 Hz win-condition pass");
 	blue_wire.clear();
 	red_wire.clear();
+	// Before the round-end producer runs there is no board stream to cut from:
+	// a 0x2B request receives nothing.
+	expect(ctx.round_end_board_stream.empty() &&
+			request_board_chunk(ctx, ctx.np_protocol.connection_list[0],
+					world, 0).empty(),
+			"C2S 0x2B before the round-end announce receives no 0x56");
 	np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
 	expect(world.match.outcome().ended &&
 			world.match.outcome().winner_team == 1,
 			"TDM kill limit ends for the killer's team");
 	expect(ctx.round_end_announced && ctx.round_end_linger_ticks == 2790,
 			"TDM announces once and seeds the exact MP linger");
+	// The producer froze the stream once (stru_C947D8) before the 0x61/0x1D
+	// push; every 0x2B pull cuts from that same byte sequence.
+	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
+	const std::vector<uint8_t> frozen_board = encode_end_round_stats(
+			np::build_end_round_stats(world.match.result()));
+	expect(!ctx.round_end_board_stream.empty() &&
+			ctx.round_end_board_stream == frozen_board,
+			"the announce freezes the encoded board stream once");
+	{
+		const std::vector<ProtocolMessage> first = request_board_chunk(
+				ctx, ctx.np_protocol.connection_list[0], world, 0);
+		const std::vector<ProtocolMessage> second = request_board_chunk(
+				ctx, ctx.np_protocol.connection_list[0], world, 0);
+		expect(first.size() == 1 && second.size() == 1 &&
+				first[0].tag == s2c::END_ROUND_STATS &&
+				first[0].payload == second[0].payload,
+				"two offset-0 pulls return byte-identical 0x56 chunks");
+		EndRoundStatsChunk chunk;
+		expect(first.size() == 1 &&
+				decode_end_round_stats_chunk(first[0].payload.data(),
+						first[0].payload.size(), chunk) &&
+				chunk.total_size == frozen_board.size() &&
+				chunk.chunk.size() == 200 &&
+				std::equal(chunk.chunk.begin(), chunk.chunk.end(),
+						frozen_board.begin()),
+				"the offset-0 chunk is the frozen stream's first 200 bytes");
+	}
 
 	EndRoundHeader blue_header;
 	EndRoundHeader red_header;
@@ -313,13 +364,8 @@ void test_tdm_round_wire_and_linger() {
 				board.team_rows[1][1] == 1,
 				"TDM trailing matrix carries neutral/team-1/team-2 score rows");
 	}
-	const std::vector<ProtocolMessage> invalid_offset_reply =
-			np::dispatch_session_replies(
-					ctx.config, ctx.np_protocol.connection_list[0],
-					{make_protocol_message(
-							c2s::END_ROUND_STATS_REQUEST,
-							encode_end_round_stats_request(UINT16_MAX))},
-					world.logic_tick, ctx.np_protocol.connection_list, &world);
+	const std::vector<ProtocolMessage> invalid_offset_reply = request_board_chunk(
+			ctx, ctx.np_protocol.connection_list[0], world, UINT16_MAX);
 	expect(invalid_offset_reply.empty(),
 			"C2S 0x2B offset beyond the frozen board receives no 0x56 reply");
 

@@ -447,9 +447,16 @@ bool check_create_session_brings_up_host() {
 	startup.host_start_tick = 100000;  // seed-injected (GetTickCount)
 	startup.session_seed_id = 654321;  // seed-injected
 
+	// A stale board stream from a previous round is cleared with the other
+	// round-end fields [orig: Server_ProcessRoundEnd's stru_C947D8 producer is
+	// the only writer; the session clear resets it].
+	ctx.round_end_board_stream = {1u, 2u, 3u};
 	opennova::np::create_session(ctx, settings, startup, &local_client);
 
 	if (!expect(ctx.is_in_session == 1, "in session after CreateSession")) return false;
+	if (!expect(ctx.round_end_board_stream.empty(),
+	            "create_session clears the frozen round-end board stream"))
+		return false;
 	if (!expect(ctx.np_protocol.host_running == 1, "host_running == 1 after StartServer"))
 		return false;
 	if (!expect(ctx.np_protocol.host_key == 0xABCD1234, "host_key stamped")) return false;
@@ -2999,12 +3006,14 @@ bool check_session_status_reply_matches_retail_writer() {
 	roster[1].phase = opennova::np::ConnectionPhase::InMatch;
 	roster[1].burst.spawned = true;
 
+	opennova::np::ServerDispatchInputs inputs;
+	inputs.session_uptime_ms = 111844u;
 	std::vector<opennova::ProtocolMessage> replies =
 			opennova::np::dispatch_session_replies(
 					config, roster[1],
 					{opennova::make_protocol_message(
 							opennova::c2s::BURST_MEMBER_2D, {})},
-					17u, roster, nullptr, 111844u);
+					17u, roster, nullptr, inputs);
 	if (!expect(replies.size() == 1 &&
 	                    replies.front().tag == opennova::s2c::SESSION_STATUS,
 	            "C2S 0x2D receives one requester-only S2C 0x58"))

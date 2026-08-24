@@ -1013,8 +1013,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
-                                                      uint32_t session_uptime_ms,
-	                                                  const MissionMetadataBlob *mission_metadata_blob) {
+                                                      const ServerDispatchInputs &inputs) {
 	std::vector<ProtocolMessage> replies;
 	// A staged high-table disconnect is terminal even though the owner retains
 	// the node briefly to flush that reliable record. Do not let a retransmitted
@@ -1296,7 +1295,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
 				replies.push_back(make_protocol_message(
 						s2c::MISSION_DATA_CHUNK,
-						build_tag64_mission_metadata(config, mission_metadata_blob)));
+						build_tag64_mission_metadata(config, inputs.mission_metadata_blob)));
 				// The retail 00TRg join tail shares one send boundary:
 				// queued 0x75, this 0x64, then the initial 0x16. Publishing the
 				// roster on the preceding host tick makes the client request an
@@ -1612,18 +1611,21 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::END_ROUND_STATS_REQUEST: {
-				// Retail serves the already-frozen board to this requester only. The
-				// request is exactly one u16 offset and every response carries at most
-				// 200 stream bytes. [orig: NapiNPServerMsg_0x02B @0x514FE0 ->
-				// NetPacket_WriteReplayStreamChunk @0x506F60]
-				if (world == nullptr || !world->match.result().ready) break;
+				// Retail serves the already-frozen board stream (stru_C947D8) to
+				// this requester only; the stream is built once by the round-end
+				// producer and this handler never rebuilds it. The request is
+				// exactly one u16 offset and every response carries at most 200
+				// stream bytes. [orig: NapiNPServerMsg_0x02B @0x514FE0 ->
+				// NetPacket_WriteReplayStreamChunk @0x506F60; producer
+				// Server_BuildEndOfRoundScoreboard @0x516590]
+				if (inputs.round_end_board_stream == nullptr ||
+						inputs.round_end_board_stream->empty())
+					break;
 				EndRoundStatsRequest request;
 				if (!decode_end_round_stats_request(
 						msg.payload.data(), msg.payload.size(), request)) break;
-				const std::vector<uint8_t> board = encode_end_round_stats(
-						build_end_round_stats(world->match.result()));
-				std::vector<uint8_t> chunk =
-						encode_end_round_stats_chunk(board, request.offset);
+				std::vector<uint8_t> chunk = encode_end_round_stats_chunk(
+						*inputs.round_end_board_stream, request.offset);
 				// NetPacket_WriteReplayStreamChunk returns zero for an offset
 				// beyond the stream and its caller sends only for len > 0.
 				// [orig: NapiNPServerMsg_0x02B @0x514FE0]
@@ -1947,7 +1949,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(
 						s2c::SESSION_STATUS,
 						serialize_session_status(
-								config, session_uptime_ms,
+								config, inputs.session_uptime_ms,
 								active_players, world)));
 				break;
 			}

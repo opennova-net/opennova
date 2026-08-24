@@ -759,6 +759,11 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 			!world.match.result().ready)
 		return false;
 	const world::MatchResult &result = world.match.result();
+	// The board stream is frozen ONCE here, before the per-slot push; the C2S
+	// 0x2B service only cuts chunks from it.
+	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
+	ctx.round_end_board_stream =
+			encode_end_round_stats(build_end_round_stats(result));
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
 		// The zero 0x61 precedes each recipient-specific 0x1D header, then the
