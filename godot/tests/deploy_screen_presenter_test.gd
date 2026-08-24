@@ -336,9 +336,8 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 				"list rows without occupants are all picks")
 	# The engine builder's row model IS what a wave group would insert: a
 	# synthetic occupant row at the presenter seam proves the guard.
-	presenter._spawn_rows.append({"label": "Ace", "param": -1})
-	presenter._on_widget_value_changed("SPAWNPOINTS_LIST", "list",
-			presenter._spawn_rows.size() - 1, "")
+	presenter.append_spawn_row("Ace", -1)
+	presenter.select_spawn_row(presenter.get_spawn_rows().size() - 1)
 	for _i in range(40):
 		pair.host.step()
 		pair.joiner.step()

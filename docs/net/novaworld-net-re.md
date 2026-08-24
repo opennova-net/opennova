@@ -323,7 +323,7 @@ sweep; blank = not yet characterized.
 | 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock) |
 | 0x1B | 0x426080 | `_0x01B` | |
 | 0x1C | 0x4227F0 | `_0x01C` | empty stub |
-| 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2). The payload is the END-ROUND BOARD HEADER (`EndRoundScoreboard_SerializeHeader @0x505280`, sent per slot from `Server_ProcessRoundEnd @0x516839`; draw flag `@0x430ac1`, `g_netPlayerCount = 0` `@0x430ac6`), and on an MP peer the handler KICKS the stat-board pull by queueing C2S 0x2B `[u16 0]` `@0x430ad5..0x430b03` (§5.68) |
+| 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2). The payload is the END-ROUND BOARD HEADER (`EndRoundScoreboard_SerializeHeader @0x505280`, sent per slot from `Server_ProcessRoundEnd @0x516839`; draw flag `@0x430ac1`, `g_netPlayerCount = 0` `@0x430ac6`), and on an MP peer the handler KICKS the stat-board pull by queueing C2S 0x2B `[u16 0]` `@0x430ad5..0x430b03` (§5.68). **Consumer PORTED 2026-08-24**: the overlay ladder `draw_endround_stats_overlay @0x5b7cd0` (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the header's non-team FORM (`in_session && !(GameType & 0x10000)`: three 32-byte names `byte_A81B40/60/80` + three i16 `dword_A81BA0/A4/A8` before the draw byte `@0x430889..0x4309af`) is NOT decoded yet — `decode_end_round_header` reads the 7-byte team form only, so the DM/KOTH name arms of the ladder stay empty (D-HUD-25) |
 | 0x1E | 0x426270 | `_0x01E` (`NetPacket_HandleGameEvent`) | 8-byte game event; does not unblock movement directly. The flag transaction family is pickup `0x14` (`Server_HandleEntityDeath @0x517460`: actor pool-0 index + player's X/Y high fixed-point words), save `0x15` (`Server_BroadcastEntityDeathEvent @0x517A90`), capture `0x13` (`Server_ProcessScoringAndBroadcast @0x5169C0`), and automatic blue/red/neutral return `0x23/0x24/0x25` (`Server_BroadcastOverlayDeathEvent @0x50F5A0`: all indices `0xFF`, position zero). Every producer sets `send_mask 0x80`, so state-6/7 players including the listen host receive the event before the following 0x2F state or CTF 0x12 removal. `GameEvent_BuildPayload @0x5054E0` writes the high 16 bits of fixed-point X/Y; it does not round a float to the nearest whole unit. |
 | 0x1F | 0x427CB0 | `_0x01F` | |
 | 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; `[u16 start_idx][u16 count]` header + per-entity record per the §5.12 field map (u16 type_id; `type_id==0` ⇒ empty-slot sentinel, no body; else u8 flags + 3×i32 pos always, then u32 movementVal/BAM-heading (f&1; D-NET-59), u32 orient (f&2), u16 ammo (f&4), u16 netHandle ALWAYS, u8 team (f&8), u16 weaponType (f&0x10), u8 score (f&0x20)); allocates pool-3 entries |
@@ -374,8 +374,8 @@ sweep; blank = not yet characterized.
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
 | 0x52 | 0x428A80 | `_0x052` | **DEATH-CAMERA TARGET (decoded + PORTED 2026-08-22)** — exact 12-B `[i32 x][i32 y][i32 z]`; short reads zero-fill in retail. `GameEvent_PlayerDeath @0x516DD0` targets the victim only (mask 0x20) with the killer entity's fixed XYZ when present, otherwise the victim's. The client stores the triple in `dword_A860E0/E4/E8`; `Camera_ComputeThirdPersonPositions @0x438B80` consumes it — **consumer PORTED 2026-08-24** (`world/death_camera.h`, the §5.39 mode-4 addendum): the arbiter's mode 4 computes the FROM/TO poses from the player and this anchor and the view lerps between them over 128 ticks. Retail capture confirms `0x13 → 0x52 → 0x1E` ordering (§5.60) |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
-| 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetDownedState @0x4348D0` (was `PlayerSlot_SetTypeAndSubtype`; D-NET-216) splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to alive same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
-| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; stat.mnu remains presentation residue |
+| 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetDownedState @0x4348D0` (was `PlayerSlot_SetTypeAndSubtype`; D-NET-216) splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch); the window then counts down CLIENT-side at 1 Hz — `Client_ProcessNetworkFrame @0x42C27E..0x42C2DA`: `g_slotRefreshTimer @0xA85B80` +1 per frame, past 62 every active slot with an entity and `slot+16 > 0` gets `PlayerSlot_SetDownedState(slot+16 − 1, slot+44)`, timer reset (PORTED 2026-08-24 `ClientRuntime::tick_roster_revive_countdown`; consumer = the friendly tag's downed legs, hud-re.md D-HUD-20). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to alive same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
+| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; the stat.mnu surface PORTED 2026-08-24 (`npruntime/stat_screen_feed.h` per `populate_stat_results_list @0x562240`, `EndRoundPresenter` over the in-tree `fixtures/mnu/jo_stat.mnu`) — the toggled column-row overlay `HUD_DrawEndRoundStatistics @0x5b7600` (`dword_24C18AC`, an action-binding toggle `@0x49bd46`) remains (D-HUD-25) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
 | 0x59 | 0x4228E0 | `_0x059` | deployed-item / weapon-overlay spawn (32 B): item ids + owner + slot + parent + 3×i32 pos + 3×u16 ang (§5.36) |
@@ -9924,6 +9924,51 @@ decode `@0x431e0b` — only the next offset-0 chunk does — so the fold retains
 too. The native connection/header transaction is the reimpl gate; it does not
 copy retail's unrelated global variable. Remaining presentation work is the
 `stat.mnu` surface.
+
+**Presentation port status (2026-08-24).** The END-ROUND OVERLAY and the STAT SCREEN are ported:
+`sub_5C0060 @0x5c0060` runs `UI_ProcessEndRoundScreenTransition @0x5b8600` every HUD frame while
+`g_spawn_success_gate && is_in_session` (`@0x5c0072`; a non-session host only resets the balance
+counters and tears the UI scene down `@0x5c0079..0x5c007e`). The transition's first pass runs
+`Server_ResetBalanceCounters`, `Game_InitRespawnState`, `Overlay_ComputeStatFieldColumnLayout(40, 984)
+@0x5b7a10` and latches `byte_28E561C`; every pass runs `sub_54E650` (the UI scene teardown — the
+deploy/armory screens close under the announcement) then `draw_endround_stats_overlay @0x5b7cd0`;
+once `g_scoreboardDirty && GetTickCount() − dword_A81B2C >= 6000` it opens `stat.mnu`/`STAT`
+exactly once (`byte_28E561D`), both bytes cleared by `sub_5B71B0` at `Game_StartMission @0x525903`.
+The overlay: `HUD_DrawLabelBox(8, top+8, 1015, bottom−8)` over the safe area
+(`dword_24C1900/04`, stamped by `Renderer_SetDisplayModeWithFallback @0x587634/@0x58760b`), then
+Impact38 (`g_hudLabelFontImpact38 @0xB4C3AC` = `Impac38b.fnt`, loaded at the large slot's scale
+`@0x51ef7b..0x51ef94`) centred at x 512 through `sub_580B80 @0x580b80`: the headline at y 300
+(`STROVER34` draw / `STROVER35` the two-name tie / `STROVER32,33,61,62` per winner team in team
+modes / `STROVER_PLAYERWIN` with the first name / `STROVER1` "!Mission Completed" fallback), the
+game-type second line at y 350 (then y = 382) — 0x10010/0x50010: `STROVER102` draw, else
+`STROVER100/101` (time remaining / not) with BLUE/REDTEAM; 0x10001/1: `STROVER105/117` draw,
+`STROVER118` tie, `STROVER103/104`; 0x10000/0: `STROVER108/115`, `STROVER116`, `STROVER106/107`;
+0x10004/0x10008/8: `STROVER111/119`, `STROVER120`, `STROVER109/110`; 0x10002/0x90002:
+`STROVER114`, `STROVER112/113`; the objective family (`& 0x20000`, no draw, no death screen):
+`STROVER1`/`STROVER2` by `winner == byte_A85B48` — then from y+32 the `"%s : %ld"` score lines
+stepping 40 (the BLUE/REDTEAM pair with the "!Joint Ops Team"/"!Rebel Team" fallbacks, or up to three
+named players; skipped for the objective family), +24, and `STROVER_GAMETIME "%s : %d:%02d:%02d"`
+with hours = t/62/60/60, minutes = t/62/60 (NOT modulo 60 — the retail quirk), seconds = t/62 % 60.
+The STAT screen (`populate_stat_results_list @0x562240` from the show callback `sub_562840`):
+RESULTLIST columns NAME (150 px, the table's rtxt `NAME` or "!Name") + "Squad" + one per enabled
+field (every field, with the `STROVER_STATFIELD%02d` keys, when the show-disabled toggle
+`byte_25DCD78` is set; else the `...SMALL%02d` keys) of width `(w − 150) / (cols − 1)`, the field id
+mapped through `dword_83C840` (identity except 30→33, 31→27, 32→34; a missing id reads "Unk entry
+%d"); rows walk the PLAYER SLOT table (team != 0) joined to the board row by slot id, name + squad
+tag or "-", cells field 5 `"%2i:%02i"`, −1 `"-"`, ids 1..4/6..18/20..32 `"%i"`, 19 `"%i"`, else `"??"`,
+row colour team 1 `0xFF00BFFF` / team 2 `0xFFFF0000`, the local row selected; `sub_562840` hides
+`RADIO_TAB_OVERALL/REDTEAM/BLUETEAM` for non-team modes and selects OVERALL otherwise;
+`stat_filter_tab_handler @0x562140`: tab 1 = team-2 rows, tab 2 = team-1 rows. Reimpl:
+`hud/end_round_overlay.{h,cpp}` (ladder + column layout, ctest `end_round_overlay`),
+`npruntime/stat_screen_feed.{h,cpp}` (ctest `stat_screen_feed`), `HudFrameCompiler::
+element_end_round_overlay` + the Impac38b slot, `Simulation::get_end_round_state/lines/columns/rows`
+(one `ClientEndRoundStats` for both roles), `godot/game/world/end_round_presenter.gd` +
+`MainGame.State.END_ROUND`. Residues (D-HUD-25): the toggled column-row overlay
+`HUD_DrawEndRoundStatistics @0x5b7600` (called from `sub_5C0060 @0x5c0092` only while
+`dword_24C18AC`, an action-binding toggle written `@0x49bd46` and cleared by
+`Game_InitRespawnState @0x499381`; its `HUD_DrawPlayerScoreRow/HUD_DrawTeamScoreRow` siblings have
+no other callers), the non-team 0x1D form, the joiner's `g_round_time_remaining` fold, and the
+stat.mnu exit's round-cycle handoff.
 
 The co-op phase claim is composed at the host boundary for both wire game-type
 codes. Stock Co-op executes a WAC `Win(2)` on the VM's 62-tick cadence;

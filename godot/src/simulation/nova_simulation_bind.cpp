@@ -140,6 +140,11 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_server_text", "medic_request_format"),
 	                     &Simulation::set_server_text);
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
+	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
+	ClassDB::bind_method(D_METHOD("get_end_round_lines"), &Simulation::get_end_round_lines);
+	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width"),
+	                     &Simulation::get_end_round_columns);
+	ClassDB::bind_method(D_METHOD("get_end_round_rows"), &Simulation::get_end_round_rows);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &Simulation::get_join_assigned_team);
 	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),

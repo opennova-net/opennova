@@ -208,6 +208,9 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_friendly_tags", "screens", "dists_q16",
 								  "names", "entity_ids", "health_ratios_fp16", "flags"),
 			&HudOverlay::set_friendly_tags);
+	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
+								  "texts", "ys"),
+			&HudOverlay::set_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("set_friendly_tag_mode", "mode"),
 			&HudOverlay::set_friendly_tag_mode);
 	ClassDB::bind_method(D_METHOD("get_friendly_tag_mode"),
@@ -299,6 +302,11 @@ void HudOverlay::clear_font_() {
 	}
 	label_font_large_ = {};
 	label_font_large_valid_ = false;
+	if (label_font_impact38_valid_) {
+		fnt_free(&label_font_impact38_);
+	}
+	label_font_impact38_ = {};
+	label_font_impact38_valid_ = false;
 	label_tier_ = -1;
 	page_textures_ = {};
 }
@@ -366,12 +374,21 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 	label_font_large_valid_ =
 			load_fnt_(String(choice.large_fnt), label_font_large_,
 					opennova::hud::kHudFontSlotLabelLarge);
+	if (label_font_impact38_valid_) {
+		fnt_free(&label_font_impact38_);
+		label_font_impact38_ = {};
+		label_font_impact38_valid_ = false;
+	}
+	label_font_impact38_valid_ =
+			load_fnt_(String(choice.impact38_fnt), label_font_impact38_,
+					opennova::hud::kHudFontSlotImpact38);
 	label_tier_ = choice.tier;
 	compiler_.configure_label_fonts(
 			label_font_valid_ ? &label_font_ : nullptr,
 			label_font_bold_valid_ ? &label_font_bold_ : nullptr,
 			label_font_large_valid_ ? &label_font_large_ : nullptr,
-			choice.scale, choice.large_scale);
+			choice.scale, choice.large_scale,
+			label_font_impact38_valid_ ? &label_font_impact38_ : nullptr);
 }
 
 Ref<Texture2D> HudOverlay::double_saturate_texture_(
@@ -820,6 +837,23 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 		p_sim->fill_scoreboard_rows(sb.rows);
 	} else {
 		sb.rows.clear();
+	}
+	queue_redraw();
+}
+
+void HudOverlay::set_end_round_overlay(bool p_shown, int p_top, int p_bottom,
+		const PackedStringArray &p_texts, const PackedInt32Array &p_ys) {
+	opennova::hud::HudEndRoundOverlayState &er = state_.end_round;
+	er.shown = p_shown;
+	er.top = p_top;
+	er.bottom = p_bottom;
+	er.lines.clear();
+	const int64_t count = std::min(p_texts.size(), p_ys.size());
+	for (int64_t i = 0; i < count; ++i) {
+		opennova::hud::HudEndRoundLine line;
+		line.text = p_texts[i].utf8().get_data();
+		line.y = p_ys[i];
+		er.lines.push_back(line);
 	}
 	queue_redraw();
 }

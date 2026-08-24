@@ -58,7 +58,7 @@ void HudFrameCompiler::configure(const HudLayout &layout,
 
 void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
 		const fnt_font_t *bold, const fnt_font_t *large, float scale,
-		float large_scale) {
+		float large_scale, const fnt_font_t *impact38) {
 	// [orig: HUD_InitAllFonts @ 0x51ee20 stores each slot through the
 	// {font, scale_x, scale_y} slot writer @ 0x580453..0x580468]
 	label_font_.set_font(normal);
@@ -70,6 +70,9 @@ void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
 	label_font_large_.set_font(large);
 	label_font_large_.set_page_base(
 			static_cast<uint32_t>(kHudFontSlotLabelLarge * FNT_MAX_PAGES));
+	label_font_impact38_.set_font(impact38);
+	label_font_impact38_.set_page_base(
+			static_cast<uint32_t>(kHudFontSlotImpact38 * FNT_MAX_PAGES));
 	label_scale_ = scale > 0.0f ? scale : 1.0f;
 	label_large_scale_ = large_scale > 0.0f ? large_scale : 1.0f;
 }
@@ -377,6 +380,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	//  @0x50b281].
 	element_message_log(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
+	element_end_round_overlay(state, surface_w, surface_h);
 	return draw_list_;
 }
 
@@ -1264,6 +1268,40 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 			}
 			emit_bare_count();
 		}
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
+		float w, float h) {
+	// [orig: draw_endround_stats_overlay @0x5b7cd0] The stdbox over the
+	// overlay safe area, then each resolved line centred on design x 512 in
+	// the Impact38 slot, half-bright like every HUD text
+	// [orig: HUD_DrawLabelBox(ctx, 8, top+8, 1015, bottom-8) @0x5b7d3e;
+	//  sub_580B80 -> Viewport_ScaleToVirtualCoords + HUD_DrawTextCentered_HalfBright].
+	const HudEndRoundOverlayState &er = state.end_round;
+	if (!er.shown) return;
+	emit_stdbox(sx(8.0f, w), sy(static_cast<float>(er.top + 8), h),
+			sx(1015.0f, w), sy(static_cast<float>(er.bottom - 8), h), w,
+			0xFFFFFFFFu, 0.0f);
+	// The Impact38 slot falls back to the large slot, then the bold label
+	// slot, then the hudpos font at scale 1 when the files are absent
+	// (layout-only embedders keep drawing, like the other label elements).
+	const bool have_impact = label_font_impact38_.font() != nullptr;
+	const bool have_large = label_font_large_.font() != nullptr;
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &lf = have_impact ? label_font_impact38_
+			: have_large ? label_font_large_
+			: have_bold ? label_font_bold_ : font_;
+	const float ls = (have_impact || have_large) ? label_large_scale_
+			: have_bold ? label_scale_ : 1.0f;
+	if (lf.font() == nullptr) return;
+	const uint32_t color = half_bright_keep_alpha(active_color(state));
+	for (const HudEndRoundLine &line : er.lines) {
+		if (line.text.empty()) continue;
+		const GameFontRun run = lf.layout(line.text.c_str(), sx(512.0f, w),
+				sy(static_cast<float>(line.y), h), ls, ls, kFontAlignCenter, color);
+		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
 	}
 	++draw_list_.elements_drawn;
 }

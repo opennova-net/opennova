@@ -595,6 +595,34 @@ func test_friendly_tags_draw_modes() -> void:
 	assert_true(is_instance_valid(hud), "friendly tags draw safely")
 
 
+# The end-of-round overlay element: the resolved Impact38 ladder centred on x
+# 512 inside the safe-area stdbox; hidden draws nothing.
+# [orig: draw_endround_stats_overlay @0x5b7cd0]
+func test_end_round_overlay_draws_the_ladder() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+	]), PackedStringArray())
+	_copy_font_into(fixture["dir"])
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture["layout"], root)
+	var before: Dictionary = hud.get_draw_list_stats()
+	hud.set_end_round_overlay(true, 0, 768,
+			PackedStringArray(["Mission Completed", "Blue Team : 12", "Game time : 0:01:05"]),
+			PackedInt32Array([300, 414, 478]))
+	var shown: Dictionary = hud.get_draw_list_stats()
+	assert_gt(int(shown["glyphs"]), int(before["glyphs"]),
+			"the ladder lays out its lines")
+	assert_gt(int(shown["elements_drawn"]), int(before["elements_drawn"]),
+			"the overlay element counts once")
+	await get_tree().process_frame
+	hud.set_end_round_overlay(false, 0, 768, PackedStringArray(), PackedInt32Array())
+	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), int(before["glyphs"]),
+			"hidden draws nothing")
+	assert_true(is_instance_valid(hud))
+
+
 # The weapon heat bar draws at nonzero heat inside the HUDHEAT rect and stays
 # hidden (draw-safe) at zero — the original's hudInfo+60 gate.
 # [orig: HUD_DrawWeaponHeatBar @0x599700 gate @0x59970a]

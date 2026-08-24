@@ -291,7 +291,7 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 	// The player walk's slot owner. On the authority the connection table IS
 	// the player-slot table: each link's owned entity, revive window, and
 	// medic-request latch (retail's PlayerSlot +0x24/+0x10/+0x2C).
-	const opennova::world::PlayerSlotLookup host_slots =
+	const opennova::world::PlayerSlotLookup authority_slot_lookup =
 			[this](opennova::world::EntityHandle entity,
 					opennova::world::PlayerSlotFacts &facts) {
 				for (const opennova::np::NapiNPConnection &conn :
@@ -304,7 +304,7 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 				}
 				return false;
 			};
-	if (!is_joiner()) ctx.slot_lookup = &host_slots;
+	if (!is_joiner()) ctx.slot_lookup = &authority_slot_lookup;
 	opennova::world::collect_friendly_tags(*world_, *player, tags, ctx);
 	if (is_joiner() && runtime_) {
 		// A joiner's players are decoded rows, not World twins: the roster walk

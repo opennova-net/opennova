@@ -43,6 +43,8 @@ const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
 # Deliberate correction: the old godot-side 0.25 approximated the tick rate.
 static var REFRESH_INTERVAL_S: float = 16.0 * Simulation.tick_dt()
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
+# The zone letters run 'A' + list index [orig: spawn_slot_index + 65 @0x553a5b].
+const ZONE_LETTER_BASE := 65
 
 signal opened
 signal closed
@@ -79,6 +81,19 @@ func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
 
 
+## Build + wire the presenter under `parent` in one call (the shell's seam):
+## `on_opened`/`on_closed` report the screen's cursor ownership.
+static func install(parent: Node, world: GameWorld, ui_parent: Node,
+		on_opened: Callable, on_closed: Callable) -> DeployScreenPresenter:
+	var presenter := DeployScreenPresenter.new()
+	presenter.name = "DeployScreenPresenter"
+	parent.add_child(presenter)
+	presenter.setup(world, ui_parent)
+	presenter.opened.connect(func() -> void: on_opened.call())
+	presenter.closed.connect(func() -> void: on_closed.call())
+	return presenter
+
+
 ## The live menu driver over the deploy frame (ADR 0018 read seam for tests and
 ## diagnostics; null until the first open builds the menu).
 func get_menu_driver() -> MenuDriver:
@@ -89,6 +104,17 @@ func get_menu_driver() -> MenuDriver:
 ## aligned with the compiled list's rows) — ADR 0018 read seam for tests.
 func get_spawn_rows() -> Array:
 	return _spawn_rows
+
+
+## ADR 0018 test seams over the row model: append one presenter row (the shape
+## the engine builder emits — an occupant row is {label, param: -1}) and fire
+## the list select the compiled list would raise for a row.
+func append_spawn_row(label: String, param: int) -> void:
+	_spawn_rows.append({"label": label, "param": param})
+
+
+func select_spawn_row(row: int) -> void:
+	_on_widget_value_changed(SPAWN_LIST, "list", row, "")
 
 
 ## Open over the live world when the join owes a deployment pick.
@@ -304,7 +330,7 @@ func _apply_statics(sim: Simulation) -> void:
 						int(status.get("queued_seconds", 0))])
 			else:
 				_driver.set_widget_text(respawn_id, "%s:  <cFF4040>%d" % [
-						String.chr(65 + zone_index),
+						String.chr(ZONE_LETTER_BASE + zone_index),
 						int(status.get("queued_seconds", 0))])
 	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
 	if psp_id >= 0:

@@ -213,7 +213,7 @@ void Simulation::set_local_player_debug_third_person(bool p_enabled) {
 bool Simulation::local_death_screen_active() const {
 	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 	// role's view folds (the listen host's own loopback included)
-	// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
+	// (retail: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b, see netsim/client_state.h).
 	return runtime_ != nullptr && runtime_->state().death_screen_active;
 }
 
@@ -416,7 +416,7 @@ Dictionary Simulation::get_local_player_view() const {
 	out["third_person"] = player_view_.third_person;
 	out["third_person_selected"] = player_view_.third_person_selected;
 	// The resolved mode word (0 first person, 1 chase, 4 the death lerp
-	// camera) [orig: g_camera_mode @0xA890C8].
+	// camera) (retail: g_camera_mode @0xA890C8, see world/player_view.h).
 	out["camera_mode"] = player_view_.camera_mode;
 	// The camera's mounted leg is engaged: a control seat with a live carrier
 	// (the per-tick carrier read in tick_local_player_view) AND the resolved

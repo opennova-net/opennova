@@ -101,6 +101,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation_player.cpp
     simulation/nova_simulation_player_loadout.cpp
     simulation/nova_simulation_deploy_screen.cpp
+    simulation/nova_simulation_end_round.cpp
     simulation/nova_simulation_player_view.cpp
     simulation/nova_simulation_player_weapon.cpp
     simulation/nova_simulation_present.cpp
