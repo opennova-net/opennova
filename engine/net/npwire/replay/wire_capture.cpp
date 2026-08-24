@@ -1,6 +1,7 @@
 #include <net/npwire/wire_capture.h>
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -72,14 +73,27 @@ struct Session {
 	DirState cstate, sstate;
 };
 
-// Identity space: auth-derived ids carry bit 32 so they can never collide with a
-// UDP port (< 65536) used by the fallback path.
-constexpr uint64_t kAuthIdBit = uint64_t(1) << 32;
-inline uint64_t auth_identity(uint32_t client_key) { return kAuthIdBit | client_key; }
+// Identity = (client UDP port, client key). Neither half is sufficient alone,
+// both measured on the Kutu capture (55 ClientAuths):
+//   * port alone -> 9 buckets: 42 clients collide on port 32768 and overwrite
+//     each other's SCRK (the bug this replaced).
+//   * client key alone -> 47 buckets, but 8 keys are reused by DIFFERENT
+//     clients (the key generator is a rolling pool, not random), which merges
+//     sessions the port keying had kept apart and truncates their streams.
+//   * (port, key) -> 52 buckets, no merge that port keying did not already
+//     make; the 3 residual collisions are same-port rejoins with a recycled
+//     key, which the port keying merged too (no regression, smaller residual).
+// Bit 63 marks the auth space so it can never alias a bare port key (< 65536)
+// used by the fallback path.
+constexpr uint64_t kAuthIdBit = uint64_t(1) << 63;
+inline uint64_t auth_identity(int client_port, uint32_t client_key) {
+	return kAuthIdBit | (uint64_t(uint32_t(client_port)) << 32) | client_key;
+}
 
 struct SessionTable {
 	std::unordered_map<uint64_t, Session> by_id;
-	std::unordered_map<uint32_t, uint64_t> id_by_server_key; // ServerAuth.sk -> identity
+	// (client port, ServerAuth.sk) -> identity, for routing the C2S direction.
+	std::map<std::pair<int, uint32_t>, uint64_t> id_by_server_key;
 };
 
 // Drive one datagram through the outer-decode pipeline, appending any completed
@@ -184,12 +198,14 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 		if (!parse_protocol_packet_header(body.data(), body.size(), hdr))
 			return uint64_t(session_key);
 		if (server_to_client) {
-			// session_id == the client's own key (ClientAuth.ck)
-			const uint64_t id = auth_identity(hdr.session_id);
+			// session_id == the client's own key (ClientAuth.ck); the datagram's
+			// client-side port is session_key, so the identity is direct.
+			const uint64_t id = auth_identity(session_key, hdr.session_id);
 			if (sessions.by_id.count(id)) return id;
 		} else {
 			// session_id == the server's key for this connection (ServerAuth.sk)
-			const auto it = sessions.id_by_server_key.find(hdr.session_id);
+			const auto it =
+					sessions.id_by_server_key.find({session_key, hdr.session_id});
 			if (it != sessions.id_by_server_key.end()) return it->second;
 		}
 		return uint64_t(session_key);
@@ -207,7 +223,8 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 		if (result.decoded) {
 			// Bind by the client key when present; the port bucket keeps the
 			// historical behaviour for captures without one.
-			const uint64_t id = a.ck ? auth_identity(a.ck) : uint64_t(session_key);
+			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
+			                         : uint64_t(session_key);
 			sessions.by_id[id].client_scrk = a.scrk;
 		}
 		break;
@@ -223,9 +240,10 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 		if (result.decoded) {
 			// ServerAuth echoes the client key and carries the server key, so
 			// this is where both directions' routing is bound.
-			const uint64_t id = a.ck ? auth_identity(a.ck) : uint64_t(session_key);
+			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
+			                         : uint64_t(session_key);
 			sessions.by_id[id].server_scrk = a.scrk;
-			if (a.sk) sessions.id_by_server_key[a.sk] = id;
+			if (a.sk) sessions.id_by_server_key[{session_key, a.sk}] = id;
 		}
 		break;
 	}
