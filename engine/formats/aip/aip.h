@@ -71,6 +71,25 @@ struct Profile {
     // matching the pre-extension ProfileSpeeds contract).
     int32_t patrol_speed = -1;   // +192 [orig: "patrol_speed"]
     int32_t combat_speed = -1;   // +196 [orig: "combat_speed"]
+
+    // --- the HELO (type 1) flight set [orig: the type-1 branch of
+    // AIProfile_ParseProperty — profile offsets +200..+244; same raw-value
+    // contract as patrol_speed/combat_speed: the authored number is stored
+    // verbatim and the consumer applies the engine scale (the retail parse
+    // multiplies through dbl_7C6A80/dbl_7C6BD0/dbl_7C6BC8/dbl_7C3CC0 —
+    // constants to pin at the flight-drive grill; altitudes are atol<<16 and
+    // turn_rate/accel_time carry their full witnessed formulas)] ---
+    int32_t helo_patrol_speed = -1;    // +200 [orig: "patrol_speed" (HELO branch)]
+    int32_t helo_patrol_altitude = 0;  // +204 [orig: "patrol_altitude" atol << 16]
+    int32_t helo_patrol_climb = -1;    // +208 raw [orig: "patrol_climb"]
+    int32_t helo_combat_speed = -1;    // +212 [orig: "combat_speed" (HELO branch)]
+    int32_t helo_combat_altitude = 0;  // +216 [orig: "combat_altitude" atol << 16]
+    int32_t helo_combat_climb = -1;    // +220 raw [orig: "combat_climb"]
+    int32_t turn_rate_bam_tick = 0;    // +224 [orig: "turn_rate" = 11930464 * deg / 62]
+    int32_t accel_ticks = 0;           // +228 [orig: "accel_time" = 62 * seconds]
+    int32_t use_waypoint_z = 0;        // +56  [orig: "use_waypoint_z" atol]
+    int32_t min_agl = 0;               // +232 [orig: "min_agl" atof -> 16.16]
+    int32_t min_speed = -1;            // +236 raw [orig: "min_speed"]
 };
 
 // Parse the witnessed keys from .aip text: line-oriented, whitespace
