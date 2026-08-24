@@ -1,5 +1,6 @@
 #include "npruntime/joiner_connection.h"
 
+#include <cstring>
 #include <mission/bms.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
@@ -14,6 +15,10 @@
 #include <limits>
 #include <string_view>
 #include <utility>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 // Verbatim port of novaworld::JoinerSession (the client mirror), with SCRK/seq/ack stored on the
 // type-2 NapiNPConnection conn_. The D.0 name-match in on_server_session is copied byte-for-byte.

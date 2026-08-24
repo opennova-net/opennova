@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "controls/controls.h"
+#include <cstddef>
 
 namespace opennova::controls {
 

@@ -3,6 +3,8 @@
 #include <hud/end_round_overlay.h> // stat_field_string_index
 
 #include <cstdio>
+#include <cstdint>
+#include <vector>
 
 namespace opennova::np {
 
