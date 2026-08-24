@@ -469,7 +469,7 @@ This is what a reimplemented server must **handle**.
 | 0x2B | 0x514FE0 | STAT-BOARD CHUNK REQUEST `[u16 offset]` (IDB name `NapiNPServerMsg_HandleReplayDataRequest` is a misnomer — it serves the end-of-round board): authority-only, replies to the REQUESTER alone (`send_mask 0x20`) with S2C 0x56 `[u16 streamLen][u16 offset][≤200 B]` cut from the server's board stream `stru_C947D8` by `NetPacket_WriteReplayStreamChunk @0x506F60` (also misnamed; the 200 clamp `@0x506fb9`, an out-of-range offset returns 0 bytes `@0x506fa0`). The stream is filled by `Server_BuildEndOfRoundScoreboard @0x508F30` from `Server_ProcessRoundEnd @0x5164f0` (the call `@0x516590`); no server path pushes 0x56 unrequested. §5.68 |
 | 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
 | 0x2D | 0x502430 | burst-member receiver |
-| 0x2E | 0x515390 | MEDIC REQUEST — `[i32 entityIndex]` 4 B (`NetPacket_WriteEntityIndex32` of the local entity). Client sender `Input_HandleActionBinding` case 217 (the MedicReq row 64) `@0x49b4b4..0x49b51b`: gates `is_in_session`, a local entity, `Flags & 2` (dead), `dword_B76804 == 0`; `QueueReliableMessage(0x2E, flags 1, param 0x136)` then `dword_B76804 = 310`, decremented once per frame in `Player_UpdatePerFrame @0x4de736..0x4de744` and zeroed on the local death path `@0x4b4d06` (the same site stamps `g_camera_lerp_start_tick`). PORTED 2026-08-24 (`c2s::MEDIC_REQUEST`, `encode_medic_request`, `ClientRuntime::queue_medic_request`, `Simulation::request_local_player_medic` + the 310-tick cooldown). Host: `Server_BroadcastMedicRequest` (D-NET-108) |
+| 0x2E | 0x515390 | **MEDIC REQUEST (decoded + host PORTED 2026-08-24; D-NET-108)** `[u32 entityIndex]` — the body is never read (the requester is the connection's slot). `Server_BroadcastMedicRequest`: authority-only; `GameText("Server","STRSRV_MEDREQ")` null ⇒ the whole handler no-ops `@0x5153D0`; the slot must be live and downed (`!slot+100567 && slot+368 > 0` `@0x515406`); `SpawnWaveList_RemovePlayer` `@0x515412`; `sprintf(fmt, slot+40 name)` `@0x515421`; if the preference is manual (`slot+372`) and the once-only latch `slot+89856` is clear: S2C 0x54 `[handle][slot+368]` (NO bit 7) with mask `0x580` + team filter `@0x515432..0x515484`; then S2C 0x14 `[2][slot+20][msg]` (`NetPacket_WriteTwoBytesAndCString @0x5047A0`) reliably (param 310) with mask `0x5C0` + target slot + team filter (the medic set minus the requester) `@0x5154DC` and again with mask `0x20` (the requester alone) `@0x51550B`; latch `@0x515510`; `SoundProfile_FindByEntityAndType(entity, 1)` ("<prefix>_MEDIC_REQUEST") → `Server_SendOverlayActionToAlive` (0x34, mask 128) `@0x515519..0x51552F`. Client sender: `Input_HandleActionBinding` case 217 `@0x49B4B4..0x49B51B` (in session, local entity dead `Flags & 2`, latch `dword_B76804 == 0` → reliable 0x2E, latch = 310 frames). §5.60 |
 | 0x2F | 0x515790 | LOADOUT SUBMIT (spawn-menu accept): [u8 team 1..4][u8 class 5..9][u32 weaponSlotIdx] + [u8 admIdx][u8 ammoPri][u8 ammoSec][u8 variant]× until 0xFF; class → entity+660 playerClass (class-allow mask g_hostClassAllowMask @0x24D59FC, out-of-range → 8); replies S2C 0x5A. Field map §5.56; client builder NetPacket_SendLoadoutSubmit @0x42cdc0 (decoded) |
 | 0x30 | 0x5029B0 | |
 | 0x31 | 0x5024A0 | |
@@ -5994,15 +5994,29 @@ mode / target conn / target slot / target team); not a bug, an artifact of the c
   the two args; it is a pure read (no state change, no packet). Old name and a stale "processes pending team
   change… sends packets" disasm comment were both wrong. The exact meaning of the two key ints (`+48`/`+52`
   of the inner net object) is **not yet witnessed** — follow-up. `[orig: Server_FindPlayerSlotByNetKeys @0x5008b0]`
-- **D-NET-108** [naming, FIXED; wire semantics resolved 2026-08-22]
+- **D-NET-108** [naming, FIXED; PORTED 2026-08-24]
   `server_broadcast_entity_kill @0x515390` → **`Server_BroadcastMedicRequest`**: net msg handler
-  (table `@0x82b5d8`) for a wounded player's manual medic call. It requires alive + `slot+368>0` +
-  manual Auto-Medic preference `slot+372!=0` + clear once-only latch, sends S2C 0x54
-  `[entityHandle][slot+368]` to the active/alive same-team Medic group, formats `STRSRV_MEDREQ` into
-  S2C 0x14, sets `slot+89856`, and plays the help sound. No kill is involved. Signature restored to
-  `(int connectionCtx, u8 *data, int dataLen)`. The death-path 0x54 split and decoded client state are
-  ported; this explicit manual-call/chat action remains a gameplay follow-up.
-  `[orig: Server_BroadcastMedicRequest @0x515390]`
+  (table `@0x82b5d8` entry 38 = C2S 0x2E) for a wounded player's manual medic call. It requires a live
+  downed slot (`!slot+100567 && slot+368>0`), drops the requester from its spawn-wave group, formats
+  `STRSRV_MEDREQ` with the slot name, and — only for the manual Auto-Medic preference `slot+372!=0`
+  with the once-only latch `slot+89856` clear — sends S2C 0x54 `[entityHandle][slot+368]` (no bit 7)
+  to the active/alive same-team Medic group (mask 0x580); the S2C 0x14 chat line
+  (`[2][slot+20][msg]`) then goes reliably to that group minus the requester (mask 0x5C0 + target
+  slot) and to the requester alone (mask 0x20) regardless of preference, the latch closes, and the
+  `<prefix>_MEDIC_REQUEST` composite fans as 0x34 to alive players. A null `STRSRV_MEDREQ` lookup
+  no-ops the whole handler. No kill is involved. Signature restored to
+  `(int connectionCtx, u8 *data, int dataLen)`. HOST PORTED 2026-08-24: `c2s::MEDIC_REQUEST`
+  (`decode_medic_request`, `encode_medic_request`, `encode_chat_broadcast`), the dispatcher case
+  keyed on the connection's own slot (the body is never read), the shared `is_medic_recipient`
+  predicate with the death-path 0x54 split, `ServerTextTable::medic_request_format` loaded by the
+  embedder (nw_server reads a loose `gametext.bin`; the Godot shell wires its gametext table), the
+  once-only latch feeding bit 7 of later 0x54/0x46, and the listen host's own copy of the sound
+  through the local slot-sound route (`npruntime_round_sim_test`, `nw_message_coverage`). The
+  client sender (`Input_HandleActionBinding` case 217 `@0x49B4B4..0x49B51B`: dead local entity,
+  310-frame latch `dword_B76804`, reliable param 310) rides the joiner/shell slice.
+  `[orig: Server_BroadcastMedicRequest @0x515390; NetPacket_WriteTwoBytesAndCString @0x5047A0;
+  NetPacket_WriteEntityHandleWithByte @0x507030; SoundProfile_FindByEntityAndType @0x528180 type 1;
+  Server_SendOverlayActionToAlive @0x50A1B0]`
 - **D-NET-109** [naming, FIXED] `Server_ValidateAndFireRound @0x50baa0` → **`Server_ClientFiredRound`**: own
   log string `"server_ClientFiredRound: …"` is the original name; the function validates a client fired-round
   request (ammo, distance, ownership, weapon CRC). Signature `()` →
@@ -6865,7 +6879,12 @@ feeds / §The Recent Messages window; D-HUD-6 narrowed). **Named residual** (the
 final review, 2026-08-21): the dispatcher's SENDER gate — `slot+0x4A & 2` (muted)
 and `slot+0x46 && !g_spawn_success_gate` (a spectator while the round runs) each
 drop the line — is applied NOWHERE in the port; `ClientRosterSlot` carries
-neither slot byte. No D-row.
+neither slot byte. No D-row. **Host encoder (2026-08-24):** `encode_chat_broadcast`
+is the exact inverse of the decoder — the writer takes `(byte1 = sender slot,
+byte2 = channel, text)` and stores the CHANNEL first (`@0x5047C1`), the sender
+second (`@0x5047CE`), then the C string; its first host producer is the C2S 0x2E
+medic call (`[2][slot+20][STRSRV_MEDREQ]`, §5.60 / D-NET-108). The 0x0D chat
+fan-out itself still rides its own slice.
 **§5.52a** C2S 0x0A SPAWN-MENU REQUEST (len 0) `[orig: NapiNPServerMsg_HandlePlayerSpawnRequest
 @ 0x513260]`: game state → 9 (spawning), session+32 = 4, replies **S2C 0x19** = `[u32 timestamp]`
 (NetPacket_WriteTimestampB) to the requester only → client stores it in `dword_A82360` (read by the

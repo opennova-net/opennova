@@ -132,6 +132,7 @@ inline constexpr uint8_t MEDIC_REQUEST = 0x2E;              // [i32 entity index
                                                             //  host Server_BroadcastMedicRequest @0x515390]
 inline constexpr uint8_t RTT_CONSUMED = 0x2C;               // §5.34 rtt sample
 inline constexpr uint8_t BURST_MEMBER_2D = 0x2D;            // §5.33 burst receiver
+inline constexpr uint8_t MEDIC_REQUEST = 0x2E;              // [u32 entityIndex] a downed player's manual medic call -> host 0x54/0x14/0x34 fan (§5.60, D-NET-108)
 inline constexpr uint8_t LOADOUT_SUBMIT = 0x2F;             // §5.56 team + class + weapon slot + ADM rows -> s2c::WEAPON_LOADOUT (D-NET-168)
 inline constexpr uint8_t EMPTY_SLOT_SWEEP_REQUEST = 0x32;   // no fields; answered s2c::EMPTY_SLOT_SWEEP to the requester only
 inline constexpr uint8_t FILE_CHUNK_REQUEST = 0x33;         // §5.28 [u32 id][u32 nextOffset] re-request for s2c::FILE_TRANSFER_CHUNK

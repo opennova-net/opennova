@@ -738,6 +738,7 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	dispatch_inputs.session_uptime_ms = ctx.np_protocol.host_run_duration_ms;
 	dispatch_inputs.mission_metadata_blob = &ctx.mission_metadata_blob;
 	dispatch_inputs.round_end_board_stream = &ctx.round_end_board_stream;
+	dispatch_inputs.medic_request_format = &ctx.server_text.medic_request_format;
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
 			                         ctx.np_protocol.connection_list, ctx.world,

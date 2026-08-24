@@ -939,6 +939,25 @@ std::vector<uint8_t> encode_auto_medic_preference(
 	return out;
 }
 
+std::vector<uint8_t> encode_medic_request(const MedicRequest &request) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	// [orig: NetPacket_WriteEntityIndex32 @0x49B4EB]
+	w.u32(request.entity_index);
+	return out;
+}
+
+std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	// [orig: NetPacket_WriteTwoBytesAndCString @0x5047A0: buffer[0] = the
+	// channel (byte2), buffer[1] = the sender slot (byte1), then the C string]
+	w.u8(static_cast<uint8_t>(chat.channel));
+	w.u8(chat.sender_slot);
+	w.cstr(chat.text);
+	return out;
+}
+
 std::vector<uint8_t> encode_death_camera_target(
 		const DeathCameraTarget &target) {
 	std::vector<uint8_t> out;

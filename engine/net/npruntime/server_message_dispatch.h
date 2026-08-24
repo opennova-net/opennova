@@ -92,7 +92,19 @@ struct ServerDispatchInputs {
 	// cuts chunks from it and never rebuilds. [orig: NapiNPServerMsg_0x02B
 	// @0x514FE0 -> NetPacket_WriteReplayStreamChunk @0x506F60]
 	const std::vector<uint8_t> *round_end_board_stream = nullptr;
+	// GameText("Server", "STRSRV_MEDREQ"): the C2S 0x2E handler's chat format;
+	// null or empty is retail's null lookup and the whole handler no-ops.
+	// [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
+	const std::string *medic_request_format = nullptr;
 };
+
+// The 0x580 send set shared by the player-death 0x54 split and the C2S 0x2E
+// medic call: an in-match connection whose owned entity is alive, on
+// `team`, and carries the charattr Medic bit.
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 — mask 0x580 = active/alive +
+// same team + Medic]
+bool is_medic_recipient(const NapiNPConnection &candidate,
+		const world::World &world, uint8_t team);
 
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,

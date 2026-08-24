@@ -972,6 +972,10 @@ int main() {
 	roster.push_back(make_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
 	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
+	// Distinct roster slot indexes (playerSlot+20): the chat sender byte and the
+	// C2S 0x22 slot pull below address players by this index.
+	for (size_t i = 0; i < roster.size(); ++i)
+		roster[i].reply.player_slot = static_cast<uint8_t>(i);
 	// These fixture players predate the measured 620-tick recent-spawn window.
 	// Individual sub-cases below stamp a fresh deploy when they exercise that arm.
 	for (np::NapiNPConnection &conn : roster) {
@@ -1294,6 +1298,125 @@ int main() {
 		            "decoded roster state preserves the manual-medic recipient split"))
 			return 1;
 	}
+
+	// --- 3a. The manual-mode victim calls a medic (C2S 0x2E). The medic gets
+	// the live window (0x54, no bit 7) + the chat line; the requester gets the
+	// chat line back; a same-team non-medic (the host) gets neither; the
+	// help call fans to alive players (the host's copy rides the local slot
+	// route); the once-only latch then hides the 0x54 on a repeat while the
+	// chat + sound repeat; later 0x46 folds bit 7; an alive requester and an
+	// absent STRSRV_MEDREQ both no-op.
+	// [orig: Server_BroadcastMedicRequest @0x515390; SoundProfile_FindByEntityAndType
+	// @0x528180 type 1 -> "<prefix>_MEDIC_REQUEST"]
+	{
+		ctx.server_text.medic_request_format = "%s needs a medic!";
+		auto send_medic_request = [&](np::NapiNPConnection &requester) {
+			np::ServerDispatchInputs inputs;
+			inputs.medic_request_format = &ctx.server_text.medic_request_format;
+			MedicRequest request;
+			request.entity_index = requester.link.owned_entity.packed & 0xFFFu;
+			return np::dispatch_session_replies(
+					ctx.config, requester,
+					{make_protocol_message(c2s::MEDIC_REQUEST,
+							encode_medic_request(request))},
+					world.logic_tick, roster, &world, inputs);
+		};
+		const std::vector<uint8_t> victim_window{
+				uint8_t(hc.packed & 0xFF), uint8_t(hc.packed >> 8), 120};
+		const std::vector<uint8_t> chat_line = encode_chat_broadcast(
+				ChatBroadcast{2, roster[2].reply.player_slot,
+						world.registry.get(hc)->name + " needs a medic!"});
+		drain_all(udp_b);
+		drain_all(udp_c);
+		drain_all(loop);
+		world.slot_sounds.clear();
+		const std::vector<ProtocolMessage> own = send_medic_request(roster[2]);
+		const Drained medic = drain_all(udp_b);
+		const Drained host_side = drain_all(loop);
+		if (!expect(medic.tag(0x54).size() == 1 && medic.tag(0x54)[0] == victim_window,
+		            "the medic receives the live revive window without bit 7"))
+			return 1;
+		if (!expect(medic.tag(0x14).size() == 1 && medic.tag(0x14)[0] == chat_line,
+		            "the medic receives STRSRV_MEDREQ as chat channel 2 from the victim's slot"))
+			return 1;
+		if (!expect(own.size() == 1 && own[0].tag == s2c::CHAT_BROADCAST &&
+		                    own[0].payload == chat_line,
+		            "the requester receives the chat line alone (mask 0x20), never a 0x54"))
+			return 1;
+		if (!expect(host_side.tag(0x54).empty() && host_side.tag(0x14).empty(),
+		            "a same-team non-medic receives neither the window nor the chat"))
+			return 1;
+		if (!expect(medic.tag(0x34).size() == 1 &&
+		                    medic.tag(0x34)[0][0] == 1 &&
+		                    std::string(reinterpret_cast<const char *>(
+		                            medic.tag(0x34)[0].data()) + 1) == "BM1_MEDIC_REQUEST",
+		            "alive players receive the positioned MEDIC_REQUEST composite (0x34)"))
+			return 1;
+		if (!expect(host_side.tag(0x34).empty() && world.slot_sounds.size() == 1 &&
+		                    std::string(world.slot_sounds[0].set_name) == "BM1_MEDIC_REQUEST" &&
+		                    world.slot_sounds[0].source_handle == hc.packed,
+		            "the listen host's own copy rides the local slot-sound route"))
+			return 1;
+		if (!expect(roster[2].link.medic_request_active, "the once-only latch closes"))
+			return 1;
+		if (!expect(drain_all(udp_c).tag(0x54).empty(),
+		            "the requester's transport carries no 0x54 for its own call"))
+			return 1;
+
+		// A repeat call: chat + sound again, no 0x54 (the latch).
+		world.slot_sounds.clear();
+		const std::vector<ProtocolMessage> again = send_medic_request(roster[2]);
+		const Drained medic_again = drain_all(udp_b);
+		if (!expect(medic_again.tag(0x54).empty() &&
+		                    medic_again.tag(0x14).size() == 1 &&
+		                    medic_again.tag(0x34).size() == 1 &&
+		                    again.size() == 1 && again[0].tag == s2c::CHAT_BROADCAST,
+		            "a repeat call re-sends the chat and sound but the latch hides the 0x54"))
+			return 1;
+		// The latched state now folds bit 7 into every later 0x54 / 0x46.
+		{
+			PlayerDownedState latched;
+			latched.entity_handle = hc.packed;
+			latched.revive_seconds = uint8_t(roster[2].link.downed_revive_seconds);
+			latched.medic_request_active = roster[2].link.medic_request_active;
+			if (!expect(encode_player_downed_state(latched)[2] == uint8_t(120 | 0x80),
+			            "a latched request folds bit 7 into the 0x54 state byte"))
+				return 1;
+			// A player-sync pull of the victim's slot with field 0x0008 folds the
+			// same latch into 0x46 [orig: NetPacket_SerializePlayerSync0x46 @0x505E80].
+			const std::vector<ProtocolMessage> sync = np::dispatch_session_replies(
+					ctx.config, roster[1],
+					{make_protocol_message(c2s::PLAYER_SYNC_REQUEST,
+							{roster[2].reply.player_slot, 0x08, 0x00})},
+					world.logic_tick, roster, &world);
+			PlayerSync folded;
+			if (!expect(sync.size() == 1 && sync[0].tag == s2c::PLAYER_SYNC &&
+			                    decode_player_sync(sync[0].payload.data(),
+			                            sync[0].payload.size(), folded) &&
+			                    folded.downed_state == uint8_t(120 | 0x80),
+			            "a latched request folds bit 7 into the 0x46 downed-state field"))
+				return 1;
+		}
+
+		// An alive requester: nothing at all.
+		drain_all(udp_b);
+		world.slot_sounds.clear();
+		const std::vector<ProtocolMessage> alive_call = send_medic_request(roster[1]);
+		if (!expect(alive_call.empty() && drain_all(udp_b).raw.empty() &&
+		                    drain_all(udp_c).tag(0x14).empty() && world.slot_sounds.empty() &&
+		                    !roster[1].link.medic_request_active,
+		            "an alive requester's medic call is ignored (slot+368 == 0)"))
+			return 1;
+
+		// An absent STRSRV_MEDREQ: the whole handler no-ops.
+		ctx.server_text.medic_request_format.clear();
+		const std::vector<ProtocolMessage> silent = send_medic_request(roster[2]);
+		if (!expect(silent.empty() && drain_all(udp_b).raw.empty() &&
+		                    world.slot_sounds.empty(),
+		            "a null STRSRV_MEDREQ lookup no-ops the medic call"))
+			return 1;
+		ctx.server_text.medic_request_format = "%s needs a medic!";
+	}
 	if (!expect(roster[2].link.respawn_delay_seconds == 5,
 	            "death arms the configured +360 hold outside the recent-spawn window"))
 		return 1;
@@ -1362,6 +1485,40 @@ int main() {
 		                    automatic_marker[0] == std::vector<uint8_t>({
 		                            uint8_t(ha.packed & 0xFF), uint8_t(ha.packed >> 8), 120}),
 		            "auto-medic death exposes the 120-second revive window to medics"))
+			return 1;
+	}
+	// --- 4a. The loopback host's own downed player runs the same 0x2E handler:
+	// automatic preference, so no 0x54, but the chat line reaches the host's
+	// same-team medic (hb) and comes back to the host, and the help call fans
+	// to alive players (the host is dead: the mask-128 alive filter drops its
+	// own local copy).
+	// [orig: Server_BroadcastMedicRequest @0x515390 — no loopback early-out]
+	{
+		np::ServerDispatchInputs inputs;
+		inputs.medic_request_format = &ctx.server_text.medic_request_format;
+		drain_all(udp_b);
+		drain_all(loop);
+		world.slot_sounds.clear();
+		const std::vector<ProtocolMessage> host_call = np::dispatch_session_replies(
+				ctx.config, roster[0],
+				{make_protocol_message(c2s::MEDIC_REQUEST,
+						encode_medic_request(MedicRequest{}))},
+				world.logic_tick, roster, &world, inputs);
+		const std::vector<uint8_t> host_line = encode_chat_broadcast(
+				ChatBroadcast{2, roster[0].reply.player_slot,
+						world.registry.get(ha)->name + " needs a medic!"});
+		if (!expect(host_call.size() == 1 && host_call[0].tag == s2c::CHAT_BROADCAST &&
+		                    host_call[0].payload == host_line,
+		            "the loopback host's own call returns its chat line"))
+			return 1;
+		const Drained medic_side = drain_all(udp_b);
+		if (!expect(medic_side.tag(0x54).empty() && medic_side.tag(0x14).size() == 1 &&
+		                    medic_side.tag(0x14)[0] == host_line &&
+		                    medic_side.tag(0x34).size() == 1,
+		            "the host's call reaches its medic as chat + help call, with no 0x54 in automatic mode"))
+			return 1;
+		if (!expect(world.slot_sounds.empty() && roster[0].link.medic_request_active,
+		            "a dead host gets no local copy (mask 128) and latches its request"))
 			return 1;
 	}
 	{
