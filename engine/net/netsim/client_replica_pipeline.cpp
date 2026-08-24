@@ -2032,6 +2032,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.local_revive_seconds = fu.weapon.slot_state368;
 		state_.spawn_hold_seconds = fu.weapon.slot_state364;
 	}
+	if (fu.timer.present) {
+		// The round clock: 62 x the wire's whole seconds, negative = untimed
+		// -1. [orig: NapiNPClientMsg_0x00A @0x430219..0x430235 —
+		//  g_round_time_remaining]
+		state_.round_time_remaining_ticks = fu.timer.timer_seconds < 0
+				? -1
+				: 62 * static_cast<int32_t>(fu.timer.timer_seconds);
+	}
 	if (fu.objective.present) {
 		state_.objective_won = static_cast<uint32_t>(fu.objective.state[0]);
 		state_.objective_lost = static_cast<uint32_t>(fu.objective.state[1]);

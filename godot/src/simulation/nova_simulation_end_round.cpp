@@ -46,10 +46,12 @@ Dictionary Simulation::get_end_round_state() const {
 	out["team_scores"] = scores;
 	out["draw"] = er.header.draw != 0;
 	out["my_index"] = static_cast<int>(er.header.player_index);
-	// The authority keeps its own round clock; the joiner's copy of
-	// g_round_time_remaining (the 0x0A sub-block-1 timer) is not folded yet.
-	int32_t remaining = 0;
-	if (world_ && !joiner_) remaining = world_->match.remaining_ticks();
+	// The authority reads its own Match clock; a joiner reads the folded
+	// 0x0A sub-block-1 copy. (retail: g_round_time_remaining @0x24C1958,
+	// the joiner store @0x430219..0x430235)
+	const int32_t remaining = joiner_
+			? runtime_->state().round_time_remaining_ticks
+			: (world_ ? world_->match.remaining_ticks() : -1);
 	out["round_ticks"] = std::max(0, remaining);
 	out["death_screen"] = local_death_screen_active();
 	out["local_team"] = static_cast<int>(runtime_->assigned_team());
@@ -79,7 +81,12 @@ TypedArray<Dictionary> Simulation::get_end_round_lines() const {
 		in.player_names[i] = er.header.player_names[i];
 		in.player_scores[i] = er.header.player_scores[i];
 	}
-	if (world_ && !joiner_) in.round_time_remaining_ticks = std::max(0, world_->match.remaining_ticks());
+	// Authority: the Match clock; joiner: the folded 0x0A sub-block-1 copy
+	// (retail: g_round_time_remaining @0x24C1958 — the game-time line and the
+	// timed/untimed arm picks read it on every role).
+	in.round_time_remaining_ticks = std::max(0, joiner_
+			? runtime_->state().round_time_remaining_ticks
+			: (world_ ? world_->match.remaining_ticks() : -1));
 	for (const opennova::hud::EndRoundLine &line : opennova::hud::end_round_overlay_lines(in)) {
 		Dictionary d;
 		d["key"] = String::utf8(line.key.c_str());

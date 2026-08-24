@@ -681,6 +681,14 @@ struct ClientState {
 	// networking and maintenance remain live while nonzero.
 	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
 	std::uint8_t preround_delay_seconds = 0;
+	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
+	// folded from the 0x0A sub-block-1 timer snapshot: 62 x the wire's whole
+	// seconds, or -1 when the wire value is negative. Feeds the end-round
+	// ladder's game-time line and timed/untimed arm picks (D-HUD-25).
+	// [orig: g_round_time_remaining @0x24C1958 — the store
+	//  NapiNPClientMsg_0x00A @0x430219..0x430235; mission-start seed -1
+	//  @0x524A89]
+	std::int32_t round_time_remaining_ticks = -1;
 	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
 	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
 	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f
