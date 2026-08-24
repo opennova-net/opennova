@@ -277,46 +277,6 @@ void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
     occ.roll = vehicle.roll;
 }
 
-Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
-    // Build the SAME frame collision serves (target_view): heading from the
-    // stored mission yaw, pitch/roll BAM-wrapped from degrees, through
-    // collision_matrix_from_euler [orig: @0x613f40]. Pure-yaw carriers keep the
-    // pre-existing 2D rotate bit-for-bit (the euler matrix reduces to it, but
-    // the trig paths differ in rounding; the fast path also skips the matrix).
-    const Vec3 &L = local;
-    if (vehicle.pitch == 0 && vehicle.roll == 0) {
-        constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
-        const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
-        const double ca = std::cos(a), sa = std::sin(a);
-        Vec3 p;
-        p.x = vehicle.position.x + static_cast<float>(L.x * ca - L.y * sa);
-        p.y = vehicle.position.y + static_cast<float>(L.x * sa + L.y * ca);
-        p.z = vehicle.position.z + L.z;
-        return p;
-    }
-    const int32_t heading =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
-    const int32_t origin[3] = {0, 0, 0};
-    const CollisionMatrix m = collision_matrix_from_euler(
-            heading,
-            bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch)),
-            bam_from_degrees_wrapped(static_cast<double>(vehicle.roll)), origin);
-    // seat_local is pre-swizzled ((-y, x, z) over the raw authored ints — a
-    // baked-in Rz(90)), while the collision euler matrix with heading
-    // bam(90 - yaw) expects RAW model coordinates: un-swizzle first, so the
-    // flat case reduces bit-for-bit to the legacy -yaw rotate above.
-    const int32_t lf[3] = {static_cast<int32_t>(L.y * 65536.0f),
-                           static_cast<int32_t>(-L.x * 65536.0f),
-                           static_cast<int32_t>(L.z * 65536.0f)};
-    int32_t wf[3];
-    m.rotate_point(lf, wf);
-    Vec3 p;
-    p.x = vehicle.position.x + static_cast<float>(wf[0]) / 65536.0f;
-    p.y = vehicle.position.y + static_cast<float>(wf[1]) / 65536.0f;
-    p.z = vehicle.position.z + static_cast<float>(wf[2]) / 65536.0f;
-    return p;
-}
-
 // Attached emplacement children are allocated breadth-first after their carrier,
 // so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
 // Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
