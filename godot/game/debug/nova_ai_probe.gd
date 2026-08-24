@@ -160,7 +160,14 @@ func tick(world: GameWorld, delta: float) -> void:
 	var outcome: Dictionary = sim.get_round_outcome_debug()
 	if outcome.has("humans"):
 		humans = int(outcome["humans"])
-	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(), "ai": cards,
+	# "tick" is the SIM clock, "ms" the wall clock. Both are needed: every
+	# cadence question in the 2026-08-24 parity work reduced to not knowing
+	# which tick a sample belonged to, and a live host does not deliver 62
+	# ticks per wall second (measured 53.1 -- AI-PARITY-CONCEPT 6.16e).
+	# Comparisons between a live round and the headless harness must be made
+	# at equal TICKS, never at equal wall time.
+	f.store_line(JSON.stringify({"ms": Time.get_ticks_msec(),
+			"tick": int(sim.get_logic_tick()), "ai": cards,
 			# The local player's BODY CHANNEL as the presenter consumes it:
 			# key + playhead + blend. A frozen "ph" with a live key is a sim
 			# channel that stopped advancing; a moving "ph" with a frozen pose
