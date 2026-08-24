@@ -557,7 +557,7 @@ func _can_summon_dir_picker() -> bool:
 # the shell holds no root) so boot continuations can gate on it.
 func _enter_menu(dir: String) -> bool:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := mount_boot_root(dir, LaunchFlags.boot_loose_allowed(dir))
+		var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
 		if root == null:
 			_request_resource_dir()
 			return false
@@ -683,10 +683,10 @@ func _on_dir_selected(dir: String) -> void:
 ## the signal callback above: an editor-managed run's directory is process-local,
 ## so persisting a picker escape would overwrite the SHARED editor+game key and
 ## repoint ONED's authoring root at whatever was picked here. Parameterized for
-## the same ADR-0018 reason as mount_boot_root; returns false when the pick
+## the same ADR-0018 reason as BootRootMount.mount; returns false when the pick
 ## would not mount (the picker is re-raised).
 func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
-	var root := mount_boot_root(dir, LaunchFlags.boot_loose_allowed(dir))
+	var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
 	if root == null:
 		_request_resource_dir()
 		return false
@@ -707,42 +707,6 @@ func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
 ## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
 ## Warns and returns null on failure. Public and parameterized so the fallback
 ## contract is testable without process arguments (ADR 0018).
-func mount_boot_root(dir: String, allow_loose_root: bool) -> ResourceRoot:
-	var root := ResourceRoot.new()
-	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := LaunchFlags.game(ResourceDirSettings.get_game())
-	var err: int = root.mount_runtime(
-			dir, expansion, LaunchFlags.loose_override_enabled(), game)
-	if err != OK:
-		# ERR_FILE_NOT_FOUND is specifically the zero-archives fatal; other
-		# errors (missing dir, unreadable root) fail the loose mount too.
-		if err == ERR_FILE_NOT_FOUND and allow_loose_root \
-				and root.set_root_dir(dir) == OK:
-			_report_missing_boot_resources(root)
-			return root
-		push_warning("MainGame: %s" % root.get_last_error())
-		return null
-	_report_missing_boot_resources(root)
-	return root
-
-
-# Honest missing-resource errors over the witnessed boot manifest (ENG-6,
-# docs/required-resources.md): name each missing fatal-set file with retail's
-# witnessed failure behavior instead of dead-ending silently later. Reported,
-# not enforced — this shell keeps running so a partial dir stays inspectable
-# (the picker flow), where retail shows a MessageBox and exits. On the
-# sanctioned loose-root play-test mount an authoring extract is expectedly
-# partial, so the same report warns instead of erroring.
-func _report_missing_boot_resources(root: ResourceRoot) -> void:
-	for name in root.list_missing_boot_resources():
-		var text := "MainGame: boot-required resource missing: %s — retail: %s" \
-				% [name, root.boot_resource_failure_text(name)]
-		if root.is_runtime_mount():
-			push_error(text)
-		else:
-			push_warning(text)
-
-
 func _on_dir_canceled() -> void:
 	_cleanup_picker()
 	_request_resource_dir()

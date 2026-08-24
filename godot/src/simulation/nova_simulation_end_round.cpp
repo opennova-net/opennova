@@ -135,8 +135,8 @@ TypedArray<Dictionary> Simulation::get_end_round_rows() const {
 	// board by the row's stored slot id and highlights the row whose slot
 	// matches board[player_index].slot; the same fold works for both roles
 	// because the listen host consumes its own loopback 0x1D.
-	// [orig: populate_stat_results_list @0x562240 — row slot store @0x562576,
-	//  board join @0x5624F3, selection compare @0x56272E]
+	// (retail: populate_stat_results_list @0x562240 — row slot store @0x562576,
+	//  board join @0x5624F3, selection compare @0x56272E)
 	int local_slot = -1;
 	const int8_t header_index = cs.end_round.header.player_index;
 	if (header_index >= 0 &&
