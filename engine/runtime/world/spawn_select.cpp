@@ -91,7 +91,7 @@ void retail_shell_sort_descending(std::vector<ScoredMarker> &rows) {
     } while (gap != 0);
 }
 
-SpawnPointResult best_marker_pose(const World &world, int32_t marker_type,
+SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
                                   EntityHandle spawning_player) {
     const std::vector<const Entity *> markers = markers_of_type(world, marker_type);
     if (markers.empty())
@@ -133,8 +133,11 @@ SpawnPointResult best_marker_pose(const World &world, int32_t marker_type,
         rows.push_back(row);
     }
     if (!avoid.empty() && !any_below_clamp) {
+        // One CRT draw per candidate, in row order, from the world's owned
+        // stream. [orig: Entity_FindBestSpawnPoint @0x50CEA2 — the per-entry
+        // `rand() >> 8 & 0xFFFF` loop @0x50CEA2..0x50CEB9]
         for (ScoredMarker &row : rows)
-            row.score = static_cast<uint16_t>(std::rand() >> 8);
+            row.score = static_cast<uint16_t>(world.crt_rand.next() >> 8);
     }
     retail_shell_sort_descending(rows);
     return rows.front().pose;

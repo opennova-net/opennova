@@ -119,6 +119,10 @@ PlayerDeathFeed classify_player_death(
 			is_retail_flag_type(world, victim_entity->mounted_child)) {
 		out.event_type = 24;
 	} else if ((death.event_flags & 0x100u) != 0u) {
+		// The roll still consumes one CRT draw before its narrowed quotient
+		// lands on 32, so the draw order of the shared stream stays
+		// structural. [orig: rand @0x51718A; imul/sar @0x51719A..0x5171A9]
+		(void)world.crt_rand.next();
 		out.event_type = 32;
 	} else if ((death.event_flags & 0x800u) != 0u) {
 		out.event_type = death_family_variant(world, 10);

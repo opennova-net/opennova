@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "audio/sound_profile.h"
+#include "io/crt_rand.h"
 #include "terrain_query/surface_type_map.h"
 #include "world/destruction.h"
 #include "world/entity.h"
@@ -311,6 +312,14 @@ public:
     static constexpr uint32_t kMissionPrng16Seed = 0x1A10101Au;
     uint32_t prng16_state = kMissionPrng16Seed;
     uint16_t next_prng16() noexcept;
+    // The simulation's owner of the CRT rand() recurrence retail draws from
+    // (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
+    // @0x51718A, ...). Retail seeds the process stream from the clock once at
+    // host start and never at mission start; the host seeds this owner from
+    // its session seed in create_session, so a session's draw sequence is
+    // reproducible where retail's is not (D-NET-115). Snapshotted with
+    // prng16_state. [orig: CRT rand @0x76B00A; srand @0x51C1AA]
+    io::CrtRand crt_rand;
     CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
                                          // the host owns the mission CollisionWorld.
     IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
@@ -609,6 +618,7 @@ public:
         uint32_t logic_tick = 0;
         uint32_t preround_delay_seconds = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
+        uint32_t crt_rand_state = 1;
         EntityHandle local_player;
     };
     Snapshot snapshot() const;

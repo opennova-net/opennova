@@ -299,8 +299,14 @@ bool run_death_feed_classifier_matrix() {
 	{
 		w::RoundDeath d = death(attacker);
 		d.event_flags = 0x100u;
+		const uint32_t state_before = world.crt_rand.state;
 		if (!expect_family(32, 32, d,
 		                  "retail's narrowed CRT roll makes the same-bullet branch event 32"))
+			return false;
+		// The roll spends exactly one draw of the owned CRT stream
+		// [orig: rand @0x51718A].
+		if (!expect(world.crt_rand.state == state_before * 214013u + 2531011u,
+		            "the 0x100 death branch consumes exactly one CRT draw"))
 			return false;
 	}
 	reset();
