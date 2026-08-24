@@ -1148,6 +1148,10 @@ public:
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
+	// The client-local death screen latch (retail g_death_screen_active): the
+	// pass-level gate of the friendly-tags walks and the camera arbiter's
+	// sub-mode source. Fed by the local-player view (nova_simulation_player_view.cpp).
+	bool local_death_screen_active() const;
 	// True while a live net session owns this sim: the world tick is the ONLY
 	// pump for the session socket, so the Play/Step/Stop transport locks out
 	// (retail multiplayer has no pause; a stopped listen host reaps every

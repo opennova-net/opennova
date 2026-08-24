@@ -208,6 +208,12 @@ void Simulation::set_local_player_debug_third_person(bool p_enabled) {
 // WeaponAction_ProcessAllEntities call, so this tick's settle promoter is visible to
 // action routing while an action's unscope/rescope begins easing on the next tick
 // [orig: call sites @ 0x42c18e / @ 0x526786; promoter @ 0x4de4f7].
+bool Simulation::local_death_screen_active() const {
+	// The client-local death-screen latch; the arbiter/tag consumers read it
+	// through this one seam (the fold lands with the view arbiter).
+	return false;
+}
+
 void Simulation::tick_local_player_view() {
 	if (!world_ || !world_->cached.local_player.valid()) {
 		// No seat without a player: the arbiter resolves to first person (or

@@ -31,6 +31,13 @@ ClientEntityState *ClientState::find(uint16_t handle) {
 	return nullptr;
 }
 
+const ClientEntityState *ClientState::find(uint16_t handle) const {
+	for (const ClientEntityState &entity : entities) {
+		if (entity.handle == handle) return &entity;
+	}
+	return nullptr;
+}
+
 ClientEntityState &ClientState::upsert(uint16_t handle) {
 	if (ClientEntityState *e = find(handle)) return *e;
 	ClientEntityState e;

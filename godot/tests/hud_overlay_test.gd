@@ -562,12 +562,30 @@ func test_friendly_tags_draw_modes() -> void:
 	assert_eq(int(hud.get_draw_list_stats()["quads_filled"]), 3,
 		"the medic plate adds the white square + two red cross bars")
 	await get_tree().process_frame
+	# The downed legs: dead (8) + slot (16) + a revive window (seconds << 8)
+	# appends ": 87" to the name [orig: "%s: %ld" @0x5a400e].
+	flags = PackedInt32Array([8 | 16 | (87 << 8)])
+	ratios = PackedInt32Array([0])
+	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
+	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 15,
+		"a downed slot entry appends the revive count to the label")
+	await get_tree().process_frame
+	ratios = PackedInt32Array([0x10000])
 	hud.set_friendly_tag_mode(3)
 	flags = PackedInt32Array([0])
 	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
 	var brief: Dictionary = hud.get_draw_list_stats()
 	assert_eq(int(brief["glyphs"]), 0, "BRIEF draws no text")
 	assert_eq(int(brief["lines"]), 3, "BRIEF draws the three tick lines")
+	await get_tree().process_frame
+	# BRIEF draws the bare count above the ticks [orig: "%ld" @0x5a41f0].
+	flags = PackedInt32Array([8 | 16 | (7 << 8)])
+	ratios = PackedInt32Array([0])
+	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
+	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 1,
+		"BRIEF draws the bare one-digit revive count")
+	ratios = PackedInt32Array([0x10000])
+	flags = PackedInt32Array([0])
 	await get_tree().process_frame
 	hud.set_friendly_tag_mode(0)
 	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)

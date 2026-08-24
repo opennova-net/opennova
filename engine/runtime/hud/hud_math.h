@@ -214,6 +214,19 @@ bool friendly_tag_text_visible(int mode, int32_t dist_q16);
 // positional voice start @0x4ece03]. Alpha byte passes through.
 uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255);
 
+// The medic-request pulse on a downed teammate's light-blue tag: a 64-frame
+// triangle wave on the HUD frame counter lifts every RGB channel toward white
+// and back — `t = (frame - 8) & 0x3F; if (t > 0x20) t = 0x3F - t;
+// c += ((255 - c) * t) >> 5` per channel, alpha untouched
+// [orig: HUD_DrawEntityLabel @0x5a3dfb..0x5a3e6d over g_hudColorLightBlue].
+uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter);
+
+// The two g_hudColorTable entries the downed legs read [orig:
+// HUD_InitTeamColorTable @0x51f26d table[3] light blue, @0x51f295 table[8]
+// gray; read @0x5a3deb / @0x5a3e77].
+inline constexpr uint32_t kFriendlyTagDownedLightBlue = 0xFF80A0FFu;
+inline constexpr uint32_t kFriendlyTagDownedGray = 0xFFA0A0A0u;
+
 // The unnamed-entity fallback: a literal '^' + the compiled-in 36-name table
 // indexed by the pool-encoded entity id [orig: @0x5a4047..0x5a40cd;
 // g_fallbackPeopleNames @0x840a78, count @0x840a0c].

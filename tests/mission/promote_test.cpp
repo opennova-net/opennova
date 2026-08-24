@@ -319,8 +319,13 @@ static void test_friendly_tag_names_and_gather() {
 
     Entity viewer{};
     viewer.team = 1; // a synthetic local player outside the registry
+    // The pass-level gate: `g_GameType || death screen` [orig: @0x5a44e8].
+    FriendlyTagPassContext ctx;
+    ctx.game_type = 0x30020u;
     std::vector<FriendlyTagSource> tags;
     collect_friendly_tags(*w, viewer, tags);
+    CHECK(tags.empty()); // game type 0 and no death screen draws nothing
+    collect_friendly_tags(*w, viewer, tags, ctx);
     CHECK(tags.size() == 2); // both team-1 organics, never the enemy
     bool saw_named = false;
     bool saw_unnamed = false;
@@ -335,22 +340,56 @@ static void test_friendly_tag_names_and_gather() {
             CHECK(t.name.empty()); // the compiler resolves '^' + table[id % 36]
         }
         CHECK(!t.player);
+        CHECK(!t.dead && !t.has_slot);
     }
     CHECK(saw_named && saw_unnamed);
 
-    // A dead entity drops [orig: the Flags & 1 / itemDef bails @0x5a39eb].
+    // A dead entity STAYS labelled, carrying the dead latch the bad tier's
+    // downed legs read [orig: `Flags & 2` @0x5a3c1c; the entry bails only
+    // test Flags & 1 @0x5a39eb]; a CARRIED one drops.
     named->alive = false;
     tags.clear();
-    collect_friendly_tags(*w, viewer, tags);
-    CHECK(tags.size() == 1);
+    collect_friendly_tags(*w, viewer, tags, ctx);
+    CHECK(tags.size() == 2);
+    for (const FriendlyTagSource &t : tags)
+        CHECK(t.dead == (t.net_id == 21));
     named->alive = true;
+    named->flags |= kEntityFlagCarried;
+    tags.clear();
+    collect_friendly_tags(*w, viewer, tags, ctx);
+    CHECK(tags.size() == 1 && tags[0].net_id == 22);
+    named->flags &= ~kEntityFlagCarried;
+
+    // The enemy is labelled only while the death screen is up
+    // [orig: the team gate's death-screen arm @0x5a44df].
+    FriendlyTagPassContext death_ctx = ctx;
+    death_ctx.death_screen = true;
+    tags.clear();
+    collect_friendly_tags(*w, viewer, tags, death_ctx);
+    CHECK(tags.size() == 3);
 
     // Player-controlled entities ride the slot walk, not the pool walk
-    // [orig: the Flags & 0x100 skip @0x5a44bc].
+    // [orig: the Flags & 0x100 skip @0x5a44bc]: without a slot owner they
+    // are never visited; with one they carry the slot's downed facts.
     unnamed->flags |= kEntityFlagPlayer;
     tags.clear();
-    collect_friendly_tags(*w, viewer, tags);
+    collect_friendly_tags(*w, viewer, tags, ctx);
     CHECK(tags.size() == 1 && tags[0].net_id == 21);
+    const PlayerSlotLookup slots = [&](EntityHandle h, PlayerSlotFacts &f) {
+        if (!(h == unnamed->handle)) return false;
+        f.revive_seconds = 87;
+        f.medic_request = true;
+        return true;
+    };
+    ctx.slot_lookup = &slots;
+    tags.clear();
+    collect_friendly_tags(*w, viewer, tags, ctx);
+    CHECK(tags.size() == 2);
+    for (const FriendlyTagSource &t : tags) {
+        if (t.net_id != 22) continue;
+        CHECK(t.player && t.has_slot && t.revive_seconds == 87 && t.medic_request);
+    }
+    ctx.slot_lookup = nullptr;
     unnamed->flags &= ~kEntityFlagPlayer;
 }
 

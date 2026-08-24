@@ -934,6 +934,14 @@ target_include_directories(client_replica_scoreboard_test PRIVATE ${CMAKE_CURREN
 target_compile_features(client_replica_scoreboard_test PRIVATE cxx_std_17)
 add_test(NAME client_replica_scoreboard COMMAND client_replica_scoreboard_test)
 
+# The joiner's player walk of the friendly-tags pass over ClientState
+# (D-HUD-20 residue a): roster slots with an entity, entry bails, gates, downed facts.
+add_executable(client_roster_tags_test netsim/client_roster_tags_test.cpp)
+target_link_libraries(client_roster_tags_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_roster_tags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(client_roster_tags_test PRIVATE cxx_std_17)
+add_test(NAME client_roster_tags COMMAND client_roster_tags_test)
+
 add_executable(client_replica_endround_test netsim/client_replica_endround_test.cpp)
 target_link_libraries(client_replica_endround_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(client_replica_endround_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

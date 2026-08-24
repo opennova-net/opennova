@@ -2718,6 +2718,65 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 	              "zone presence: untracked/short 0x6C rows fail closed");
 }
 
+// The client-side 1 Hz revive countdown: every 63rd client frame each active
+// roster slot with an entity and a nonzero window loses one second; the
+// medic-request latch survives [orig: Client_ProcessNetworkFrame
+// @0x42C27E..0x42C2DA -> PlayerSlot_SetDownedState @0x4348D0]. Both the
+// S2C 0x54 seed and the 0x46 bit-0x0008 seed feed the same slot bytes.
+bool run_roster_revive_countdown_ticks_once_per_63_frames() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+
+	PlayerReplicationState rep;
+	rep.player_slot = 3;
+	rep.player_name = "Downed";
+	rep.entity_handle = 0x0007;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasName));
+	PlayerDownedState downed;
+	downed.entity_handle = 0x0007;
+	downed.revive_seconds = 120;
+	downed.medic_request_active = true;
+	host_loop.host_send(s2c::PLAYER_DOWNED_STATE, encode_player_downed_state(downed));
+	host_view.Client_ProcessNetworkFrame();
+	const ns::ClientRosterSlot &slot = host_view.state().roster[3];
+	if (!expect(slot.bound && slot.entity_slot == 7 &&
+	                    slot.downed_revive_seconds == 120 && slot.medic_request_active,
+	            "revive countdown: the 0x54 seed lands on the slot the 0x46 bound"))
+		return false;
+	// Frames 2..62 leave the window alone; frame 63 is the first decrement.
+	for (int i = 0; i < 61; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 120,
+	            "revive countdown: 62 frames do not tick the window"))
+		return false;
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 119 && slot.medic_request_active,
+	            "revive countdown: the 63rd frame takes one second and keeps the request latch"))
+		return false;
+	for (int i = 0; i < 63; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 118,
+	            "revive countdown: the timer resets and fires again 63 frames later"))
+		return false;
+
+	// The 0x46 bit-0x0008 path seeds the same byte and counts down the same
+	// way [orig: NapiNPClientMsg_PlayerSync 0x0008 -> PlayerSlot_SetDownedState].
+	rep.downed_state = 0x05;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasDownedState));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 5 && !slot.medic_request_active,
+	            "revive countdown: the 0x46 bit-0x0008 field re-seeds the window"))
+		return false;
+	for (int i = 0; i < 62; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 4,
+	            "revive countdown: the 0x46 seed counts down on the same cadence"))
+		return false;
+	// A window at zero stays at zero (the > 0 gate @0x42C2B7).
+	rep.downed_state = 0x00;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasDownedState));
+	for (int i = 0; i < 130; ++i) host_view.Client_ProcessNetworkFrame();
+	return expect(slot.downed_revive_seconds == 0,
+	              "revive countdown: an exhausted window never wraps");
+}
+
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
 	ns::LoopbackChannel host_loop;
 	np::ClientRuntime host_view(host_loop);
@@ -4914,6 +4973,7 @@ int main() {
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
 	                run_zone_presence_updates_only_a_tracked_window() &&
+	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
 	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
 	                run_joiner_zone_timer_preserves_mixed_wire_order() &&
 	                run_host_as_client() &&
