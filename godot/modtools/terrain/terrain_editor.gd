@@ -1287,7 +1287,7 @@ func _on_camera_escape() -> void:
 
 func _load_editor_state() -> void:
 	var config := ConfigFile.new()
-	if config.load("user://terrain_editor_state.cfg") != OK:
+	if config.load(OnedSettings.CONFIG_PATH) != OK:
 		return
 	_last_open_dir = String(config.get_value("paths", "last_open_dir", ""))
 	_last_save_dir = String(config.get_value("paths", "last_save_dir", ""))
@@ -1296,11 +1296,11 @@ func _load_editor_state() -> void:
 
 func _save_editor_state() -> void:
 	var config := ConfigFile.new()
-	config.load("user://terrain_editor_state.cfg")
+	config.load(OnedSettings.CONFIG_PATH)
 	config.set_value("paths", "last_open_dir", _last_open_dir)
 	config.set_value("paths", "last_save_dir", _last_save_dir)
 	config.set_value("paths", "last_export_dir", _last_export_dir)
-	config.save("user://terrain_editor_state.cfg")
+	config.save(OnedSettings.CONFIG_PATH)
 
 
 func _remember_open_path(path: String) -> void:
@@ -1336,6 +1336,116 @@ func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO)
 
 func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Error:
 	return _io_ops.export_terrain(output_dir, flavor)
+
+
+## Apply a programmatic edit to one editable atlas image as ONE undoable step.
+##
+## `kind` is a TerrainEditHistory.Kind (HEIGHTMAP / BLENDMAP / COLORMAP). `mutator` receives the
+## live Image, mutates it IN PLACE, and returns the Rect2i it touched (return null / anything
+## else and the whole atlas is assumed, which stores an 8 MiB undo step -- return a real rect).
+##
+## In place is not a style preference: TerrainData holds the SAME Ref<Image>, which is why the
+## C++ brush kernels and the editor see one buffer. Assigning a new Image through
+## _set_heightmap_image instead would desync the four objects holding that reference, and
+## _ensure_surface_inputs_rebuilt is identity-guarded, so the normal map would go stale.
+##
+## The interactive brush drives the same history per dab; this is the entry for edits that are
+## not a drag -- a generated relief, a fill, an imported region.
+func apply_bulk_edit(kind: int, mutator: Callable) -> bool:
+	if is_export_running() or not mutator.is_valid():
+		return false
+	var image: Image = _editable_image_for_kind(kind)
+	if image == null:
+		return false
+	_brush_session.begin_history_stroke(kind, image)
+	var touched: Variant = mutator.call(image)
+	var rect: Rect2i = touched if touched is Rect2i else Rect2i(0, 0, image.get_width(), image.get_height())
+	if rect.size.x <= 0 or rect.size.y <= 0:
+		_brush_session.end_history_stroke(null)  # nothing changed: drop the pending stroke
+		return false
+	_brush_session.expand_history_rect(rect)
+	# Clamp BEFORE the "after" snapshot is taken, exactly as every interactive dab clamps its own
+	# rect before its stroke commits. The clamp mutates this same image in place, so clamping
+	# after end_history_stroke would leave the undo stack holding the unclamped heights: undo then
+	# redo would blit back a terrain that differs from what was displayed and carries the CDEP
+	# violations the clamp had just removed.
+	if kind == TerrainEditHistory.Kind.HEIGHTMAP and _data != null:
+		_data.cdep_clamp_blocks_in_rect(rect)
+	_brush_session.end_history_stroke(image)
+	_invalidate_after_bulk_edit(kind, rect)
+	return true
+
+
+## Invalidate after a PROGRAMMATIC brush run, given apply_brush_stroke's changed_* flags.
+##
+## The interactive drag (_brush_ops._apply_brush_stroke) deliberately does a lighter subset per
+## frame -- it skips the surface-input heightfield rebuild and the foliage mark, which are too
+## expensive to redo on every motion event and get caught up when the drag ends. A one-shot call
+## has no "when the drag ends", so it does the full refresh here. The CDEP blocks are already
+## clamped: every dab clamps its own rect as it lands.
+func invalidate_after_brush_run(changed: Dictionary) -> void:
+	var height: bool = bool(changed.get("changed_heightmap", false))
+	var blend: bool = bool(changed.get("changed_blendmap", false))
+	var color: bool = bool(changed.get("changed_colormap", false))
+	if height:
+		terrain_mesh.set_heightmap(_heightmap_image)
+		_height_revision += 1
+		_brush_ops._refresh_surface_input_heightfield()
+		_mark_foliage_preview_dirty()
+		_mark_tile_overlay_dirty()
+	if blend:
+		_blendmap_tex.update(_blendmap_image)
+		_brush_ops._refresh_surface_input_blend()
+	if color:
+		_colormap_tex.update(_colormap_image)
+	if height or blend or color:
+		is_dirty = true
+		_mark_ui_state_changed()
+
+
+func _editable_image_for_kind(kind: int) -> Image:
+	match kind:
+		TerrainEditHistory.Kind.HEIGHTMAP:
+			return _heightmap_image
+		TerrainEditHistory.Kind.BLENDMAP:
+			return _blendmap_image
+		TerrainEditHistory.Kind.COLORMAP:
+			return _colormap_image
+	return null
+
+
+# The same invalidation _apply_history_snapshot performs for each kind. The CDEP blocks are
+# already clamped by apply_bulk_edit, before the stroke committed -- the export would otherwise
+# carry violations for _auto_clamp_for_export_if_needed to silently fix later.
+func _invalidate_after_bulk_edit(kind: int, _rect: Rect2i) -> void:
+	match kind:
+		TerrainEditHistory.Kind.HEIGHTMAP:
+			terrain_mesh.set_heightmap(_heightmap_image)
+			_height_revision += 1
+			_brush_ops._refresh_surface_input_heightfield()
+			_mark_foliage_preview_dirty()
+			_mark_tile_overlay_dirty()
+		TerrainEditHistory.Kind.BLENDMAP:
+			_blendmap_tex.update(_blendmap_image)
+			_brush_ops._refresh_surface_input_blend()
+		TerrainEditHistory.Kind.COLORMAP:
+			_colormap_tex.update(_colormap_image)
+	is_dirty = true
+	_mark_ui_state_changed()
+
+
+## Replace the colormap wholesale (a resize, an import) rather than editing it in place.
+##
+## Undo cannot span this: TerrainEditHistory stores sub-rects of ONE image, so every snapshot
+## taken against the old image would blit a stale patch into the corner of the new one. The
+## history is cleared with the swap, and the caller should say so.
+func replace_colormap_image(image: Image) -> void:
+	if image == null:
+		return
+	_document.set_colormap_image(_get_material(), image)
+	_brush_session.clear_history()
+	is_dirty = true
+	_mark_ui_state_changed()
 
 
 func _set_heightmap_image(image: Image) -> void:

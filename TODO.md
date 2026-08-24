@@ -80,13 +80,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
       rattrib/pattrib magic values — #365 landed the net-message-id and
       witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
-- [ ] Editor/runtime version-skew guard: the two CI zips (`opennova-modtools-windows`,
-      `opennova-runtime-windows`) can pair a fixed editor with a stale `opennova.exe`
-      and fail as an unexplained resource picker. The child already writes a `version`
-      field into the run descriptor (`game_mcp_service.gd`) but the editor never
-      validates it — and the skew failure happens pre-descriptor anyway. Verify a
-      shared build id (descriptor check plus a boot-time check), or ship one combined
-      zip.
 - [ ] Cross-mission debug-intent replay: `DebugSession._explicit_values` is never
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on

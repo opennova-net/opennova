@@ -83,7 +83,7 @@ func _configure_failed_running_game(shell: Node) -> ShellGameSession:
 			func() -> String: return "jo",
 			Callable(),
 			Callable(),
-			func(_path: String, _args: PackedStringArray) -> int: return 4017,
+			func(_path: String, _args: PackedStringArray, _cwd: String) -> int: return 4017,
 			func(_path: String) -> bool: return false,
 			Callable(),
 			func(pid: int) -> bool: return pid == 4017,

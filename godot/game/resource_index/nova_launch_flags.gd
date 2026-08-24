@@ -84,6 +84,66 @@ static func resource_dir(fallback: String = "") -> String:
 	return value if not value.is_empty() else fallback.strip_edges()
 
 
+# The boot-table archive names our runtime mount probes (the fixed set retail's boot
+# table carries); any one present makes a directory a mountable game dir.
+const BUNDLED_BOOT_ARCHIVES := ["localres.pff", "resource.pff", "language.pff"]
+
+## Tests substitute the directory probed for a bundled game; the real runtime probes
+## its own exe's directory.
+static var bundled_probe_override: String = ""
+
+
+## The boot resource dir, in priority order: the editor-managed --resource-dir flag,
+## the persisted pick, then the game bundled around a shipped exe — the exe's own
+## directory when it carries a boot archive (the tagged release zip, retail-style), else
+## the loose assets/ beside it (the dev zip, where the game plays the same tree the
+## editor edits). The bundled defaults are per-boot and never persisted (an explicit
+## pick still writes the settings key through the picker's own path), and dev runs from
+## the Godot editor are unchanged: its binary's dir carries neither. "" means ask.
+static func boot_resource_dir(persisted: String) -> String:
+	var dir := resource_dir(persisted)
+	if dir.is_empty():
+		dir = bundled_game_dir(_bundled_probe_dir())
+	if dir.is_empty():
+		dir = bundled_assets_dir(_bundled_probe_dir())
+	return dir
+
+
+## Whether `dir` may fall back to the loose authoring mount when it holds no packed
+## archives: the ONED-managed --loose-root flag (ADR 0025), or the bundled loose
+## assets/ default itself — the dev zip ships sources only, and blessing exactly that
+## directory keeps a picked or persisted loose dir on retail's no-archives fatal.
+static func boot_loose_allowed(dir: String) -> bool:
+	if loose_root_allowed():
+		return true
+	return not dir.is_empty() and dir == bundled_assets_dir(_bundled_probe_dir())
+
+
+## `exe_dir` when it holds any boot-table archive — a shipped game dir — else "".
+static func bundled_game_dir(exe_dir: String) -> String:
+	if exe_dir.is_empty():
+		return ""
+	for archive_name in BUNDLED_BOOT_ARCHIVES:
+		if FileAccess.file_exists(exe_dir.path_join(archive_name)):
+			return exe_dir
+	return ""
+
+
+## The loose game sources bundled beside a shipped exe: `<exe_dir>/assets` when it
+## exists, else "".
+static func bundled_assets_dir(exe_dir: String) -> String:
+	if exe_dir.is_empty():
+		return ""
+	var dir := exe_dir.path_join("assets")
+	return dir if DirAccess.dir_exists_absolute(dir) else ""
+
+
+static func _bundled_probe_dir() -> String:
+	if not bundled_probe_override.is_empty():
+		return bundled_probe_override
+	return OS.get_executable_path().get_base_dir()
+
+
 ## A top-level loose BMS to boot directly, or "" for the normal menu flow.
 static func loose_mission() -> String:
 	return _value_after("--loose-mission")

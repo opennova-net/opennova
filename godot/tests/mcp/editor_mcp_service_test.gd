@@ -5,7 +5,8 @@ extends GutTest
 # carries the catalog), server.json lifecycle, and settings persistence.
 
 const McpClient := preload("res://tests/mcp/mcp_test_client.gd")
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
+const MCP_CONFIG_PATH := McpSettings.CONFIG_PATH
 
 const BUILTIN_TOOLS := [
 	"get_editor_state", "get_logs", "show_status_message", "describe_api",
@@ -101,6 +102,8 @@ class DelayedDisableGameTools:
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false
+var _saved_mcp_config := PackedByteArray()
+var _had_mcp_config := false
 var service: EditorMcpService
 var shell_stub: ShellStub
 
@@ -110,6 +113,10 @@ func before_each() -> void:
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
 	if _had_state_config:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	_had_mcp_config = FileAccess.file_exists(MCP_CONFIG_PATH)
+	_saved_mcp_config = FileAccess.get_file_as_bytes(MCP_CONFIG_PATH) if _had_mcp_config else PackedByteArray()
+	if _had_mcp_config:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(MCP_CONFIG_PATH))
 	service = add_child_autofree(EditorMcpService.new())
 	var editor_stub: Node = add_child_autofree(Node.new())
 	editor_stub.name = "EditorStub"
@@ -128,6 +135,14 @@ func after_each() -> void:
 	elif FileAccess.file_exists(STATE_CONFIG_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 	McpLogHub.instance = null
+	if _had_mcp_config:
+		var mcp_file := FileAccess.open(MCP_CONFIG_PATH, FileAccess.WRITE)
+		if mcp_file != null:
+			mcp_file.store_buffer(_saved_mcp_config)
+			mcp_file.close()
+	elif FileAccess.file_exists(MCP_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(MCP_CONFIG_PATH))
+
 
 
 func test_builtins_registered() -> void:

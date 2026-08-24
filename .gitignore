@@ -109,3 +109,11 @@ stripify_call_*.log
 
 # Loose scratch dumps at the repo root (retail-derived data: never commit).
 .scratch_*
+
+# MSVC incremental-link databases: build output, never tracked (a 165 MB one
+# was committed by accident in ba5db60c).
+*.ilk
+
+# Isolated user:// for the GUT suite (scripts/test_godot.sh) so tests cannot
+# write the developer's real Godot user directory.
+/.godot-test-user/

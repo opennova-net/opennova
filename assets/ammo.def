@@ -1,0 +1,20 @@
+// Minimal ammo.def for fixtures/minimal/ — the rifle round WPN_M4 fires plus
+// the null slot. Authored from scratch (no retail asset); parses through
+// libs/def def_parse_ammo.
+ammo AT_NULL
+	velocity            0
+	max_age             0
+	drag                1
+	min_damage          0
+	max_damage          0
+end
+
+ammo AM_556MM
+	velocity            3000
+	max_age             300
+	drag                1
+	weight_in_grains    62
+	min_damage          25
+	max_damage          40
+	penetration_impact  100
+end

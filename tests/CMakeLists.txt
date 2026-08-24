@@ -509,50 +509,59 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
 endforeach()
 
 # Minimal authored fixture set — the fatal-set RTXT string tables
-# (fixtures/minimal/). Regenerates each in memory and guards it byte-matches
-# the committed file + round-trips. See fixtures/minimal/README.md.
+# (assets/). Regenerates each in memory and guards it byte-matches
+# the committed file + round-trips. See assets/README.md.
 add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
 target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_rtxt_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
+
+# Minimal set's hand-authored text resources must be CRLF: retail's text
+# parsers are not LF-tolerant and fail SILENTLY (a LF-only menu_style.mns
+# dead-ends the menu shell before main.mnu; a bare LF stops the .def parser
+# after block 0). Witnessed on retail 2026-08-23.
+add_executable(minimal_eol_guard_test fixtures/minimal_eol_guard.cpp)
+target_compile_definitions(minimal_eol_guard_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_eol_guard COMMAND minimal_eol_guard_test)
 
 # Minimal set's text .def files parse through our loaders (items/weapon/ammo).
 add_executable(minimal_def_validate_test fixtures/minimal_def_validate.cpp)
 target_link_libraries(minimal_def_validate_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_def_validate_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_def_validate COMMAND minimal_def_validate_test)
 
 # Minimal set's menus parse (main Startup node + mp host/join screen).
 add_executable(minimal_mnu_validate_test fixtures/minimal_mnu_validate.cpp)
 target_link_libraries(minimal_mnu_validate_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_mnu_validate_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
 
 # Minimal set's custom map — the .env + .bms legs (the .trn rides its own slice).
-add_executable(minimal_map_gen_test fixtures/minimal_map_gen.cpp)
-target_link_libraries(minimal_map_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_map_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
-add_test(NAME minimal_map_gen COMMAND minimal_map_gen_test)
+add_executable(minimal_map_validate_test fixtures/minimal_map_validate.cpp)
+target_link_libraries(minimal_map_validate_test PRIVATE opennova_formats)
+target_compile_definitions(minimal_map_validate_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
 add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
 target_link_libraries(minimal_trn_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_trn_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_trn_gen COMMAND minimal_trn_gen_test)
 
 # Minimal map's source-art images (colormap/detail/tilestrip TGAs, charmap/
 # foliagemap PCX) the .trn references — authored + validated.
-add_executable(minimal_art_gen_test fixtures/minimal_art_gen.cpp)
-target_link_libraries(minimal_art_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_art_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
-add_test(NAME minimal_art_gen COMMAND minimal_art_gen_test)
+add_executable(minimal_art_validate_test fixtures/minimal_art_validate.cpp)
+target_link_libraries(minimal_art_validate_test PRIVATE opennova_formats)
+target_compile_definitions(minimal_art_validate_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_art_validate COMMAND minimal_art_validate_test)
 
 # Minimal set's generated boot font (minimal_fnt_builder.h): validity +
 # byte-stable roundtrip + label glyphs drawable. Always-on; the font itself is
@@ -566,7 +575,7 @@ add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
 target_link_libraries(minimal_companion_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_companion_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_companion_gen COMMAND minimal_companion_gen_test)
 
 # Minimal set's generated boot music (minimal_mus_builder.h): the silent SBF
@@ -582,7 +591,7 @@ add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
 target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
 target_compile_definitions(minimal_pff_package_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
 
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)

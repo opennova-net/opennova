@@ -31,7 +31,7 @@ int fail = 0;
 		}                                                                                           \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
+std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
 bool read_bytes(const std::string &p, std::vector<uint8_t> &b) {
 	std::ifstream f(p, std::ios::binary | std::ios::ate);

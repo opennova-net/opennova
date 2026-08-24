@@ -12,8 +12,8 @@
     "vfs"
   ],
   "counters": {
-    "adapter_cpp_orig_cites_device": 195,
-    "adapter_cpp_orig_cites_pushdown": 371,
+    "adapter_cpp_orig_cites_device": 196,
+    "adapter_cpp_orig_cites_pushdown": 370,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 49,
@@ -48,6 +48,10 @@
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
-    "debug_entity_picker.gd|static func pick_at_crosshair("
+    "debug_entity_picker.gd|static func pick_at_crosshair(",
+    "editor_game_packer.gd|static func pack(",
+    "editor_game_packer.gd|static func pack_for_retail(",
+    "editor_game_packer.gd|static func stage_loose(",
+    "editor_game_packer.gd|static func export_game("
   ]
 }

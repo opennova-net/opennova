@@ -22,7 +22,7 @@ func _make_launcher(button: Button, dir: String, spawned: Array, statuses: Array
 		func() -> String: return dir,
 		func() -> String: return "",
 		func() -> String: return "jo",
-		func(path: String, args: PackedStringArray) -> int:
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
 			spawned.append({"path": path, "args": args})
 			return spawn_result,
 		file_exists if file_exists.is_valid() \

@@ -1,20 +1,22 @@
 class_name ResourceDirSettings
 extends RefCounted
 
-## Shared persistence for the OpenNova resource/asset directory — the on-disk
-## folder of original .3di models and their textures. The editor's resource
-## browser (modtools/editor/resource_library.gd) and the runtime
-## (game/main_game.gd) read/write the SAME user:// config, so a directory picked
-## in either app is shared. This lives under engine/ (not modtools/) because the
-## runtime export excludes modtools/* and still needs the path + keys.
+## The RUNTIME's persisted settings: the asset directory it mounts (the on-disk folder of
+## .3di models and their textures), plus the player preferences that belong to playing rather
+## than authoring.
+##
+## ONED keeps its own ([OnedSettings], `user://oned.cfg`). The two shared one config until the
+## editor and the game routinely pointed at different things — ONED authors the loose asset tree
+## while the game runs a PACKED dir built from it, and sharing meant packing silently repointed
+## the editor at its own output. Clean cut: neither reads the other's file, nothing is migrated.
+##
+## Lives under game/ (not modtools/) because the runtime export excludes modtools/*.
 
-const CONFIG_PATH := "user://terrain_editor_state.cfg"
+const CONFIG_PATH := "user://opennova.cfg"
 const SECTION := "resources"
 const DIR_KEY := "resource_dir"
 const EXPANSION_KEY := "expansion"
 const GAME_KEY := "game"
-const RECENT_KEY := "recent_dirs"
-const RECENT_LIMIT := 8
 const PLAYER_SECTION := "player"
 const CROSSHAIR_STYLE_KEY := "crosshair_style"
 
@@ -32,11 +34,7 @@ static func get_resource_dir() -> String:
 ## editor (via resource_library.save_state) and the runtime (main_game) go
 ## through, so recording is automatic for both with one disk write.
 static func set_resource_dir(path: String) -> void:
-	var clean := path.strip_edges()
-	ConfigStore.update(CONFIG_PATH, func(config: ConfigFile) -> void:
-		config.set_value(SECTION, DIR_KEY, clean)
-		if not clean.is_empty() and is_valid_root(clean):
-			_merge_recent(config, clean))
+	ConfigStore.write(CONFIG_PATH, SECTION, DIR_KEY, path.strip_edges())
 
 
 ## The persisted expansion name (e.g. "jox01"), or "" for the base game. Not validated
@@ -86,70 +84,9 @@ static func is_valid_root(path: String) -> bool:
 	return ResourceRoot.is_valid_root(path)
 
 
-## The recently used resource directories, most-recent first. Stale, deleted, or
-## otherwise invalid entries are dropped on read (never written back), so the list
-## a caller sees always points at real directories.
-static func get_recent_dirs() -> PackedStringArray:
-	return _sanitize(ConfigStore.read(CONFIG_PATH, SECTION, RECENT_KEY, PackedStringArray()))
-
-
-## Record a directory at the front of the recently used list. Empty or invalid
-## paths are ignored. Preserves any other sections in the config. (set_resource_dir
-## already records on every successful apply; this is the explicit seam for callers
-## that want to record without changing the active directory, and for tests.)
-static func add_recent_dir(path: String) -> void:
-	var clean := path.strip_edges()
-	if clean.is_empty() or not is_valid_root(clean):
-		return
-	ConfigStore.update(CONFIG_PATH, func(config: ConfigFile) -> void:
-		_merge_recent(config, clean))
-
-
-## Forget every recently used directory, preserving any other sections.
-static func clear_recent_dirs() -> void:
-	ConfigStore.write(CONFIG_PATH, SECTION, RECENT_KEY, PackedStringArray())
-
-
 ## A case/slash-insensitive comparison key for a directory path. Mirrors the C++
 ## ResourceRoot::normalize_dir rule (which is not bound to GDScript) so
 ## "D:\Game", "D:/Game/" and "d:/game" collapse to one entry. Comparison only:
 ## the original stripped path is what gets stored and displayed.
 static func canonical_key(path: String) -> String:
 	return path.strip_edges().replace("\\", "/").rstrip("/").to_lower()
-
-
-# Prepend `clean` to the recents array already loaded in `config`, dropping any
-# existing entry that shares its canonical key and capping at RECENT_LIMIT. The
-# existing tail is sanitized too, so each rewrite also trims stale entries from
-# disk. The caller saves.
-static func _merge_recent(config: ConfigFile, clean: String) -> void:
-	var key := canonical_key(clean)
-	var merged := PackedStringArray([clean])
-	for text in _sanitize(config.get_value(SECTION, RECENT_KEY, PackedStringArray())):
-		if canonical_key(text) == key:
-			continue
-		merged.append(text)
-		if merged.size() >= RECENT_LIMIT:
-			break
-	config.set_value(SECTION, RECENT_KEY, merged)
-
-
-# Drop empty, invalid, and duplicate entries (keeping most-recent-first order),
-# capped at RECENT_LIMIT. Defensive against a corrupt / non-array stored value.
-static func _sanitize(raw: Variant) -> PackedStringArray:
-	var out := PackedStringArray()
-	if not (raw is PackedStringArray or raw is Array):
-		return out
-	var seen := {}
-	for entry in raw:
-		var text := String(entry).strip_edges()
-		if text.is_empty() or not is_valid_root(text):
-			continue
-		var key := canonical_key(text)
-		if seen.has(key):
-			continue
-		seen[key] = true
-		out.append(text)
-		if out.size() >= RECENT_LIMIT:
-			break
-	return out

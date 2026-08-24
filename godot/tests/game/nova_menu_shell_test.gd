@@ -33,7 +33,7 @@ class _MissingBankMusicRoot extends RefCounted:
 		return PackedByteArray([1])
 
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false

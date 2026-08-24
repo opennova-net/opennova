@@ -52,6 +52,12 @@ PRIVATE_POKE = re.compile(r"\._[a-z]")
 SELF_POKE = re.compile(r"self\._")
 
 
+def _in_build_dir(parts) -> bool:
+    """Local build output, not source. Generator dirs are named `build`,
+    `build-ninja`, `build-vs`, ... — any `build*` path segment qualifies."""
+    return any(part.startswith("build") for part in parts)
+
+
 def count_test_private_pokes() -> int:
     count = 0
     for path in (REPO / "godot" / "tests").rglob("*.gd"):
@@ -105,7 +111,7 @@ def _count_adapter_cites(pushdown: bool) -> int:
         if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
             continue
         rel_parts = path.relative_to(REPO).parts
-        if "build" in rel_parts:  # generated CMake tree (godot-cpp), not source
+        if _in_build_dir(rel_parts):  # generated CMake tree (godot-cpp), not source
             continue
         sub = path.relative_to(adapter).parts[0] if path.relative_to(adapter).parts else ""
         if (sub in ADAPTER_PUSHDOWN_DIRS) != pushdown:
@@ -163,8 +169,12 @@ def count_engine_stdout_prints() -> int:
 GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
 # CLI drivers whose stdout IS the product; everything else in the shipping
 # godot layer routes through push_error/push_warning, print_verbose, or the
-# F3 debug system.
-GD_PRINT_ALLOWLIST = {"godot/modtools/tools/screenshot_capture.gd"}
+# F3 debug system. CLI tool drivers are the exception: their console output IS
+# the interface.
+GD_PRINT_ALLOWLIST = {
+    "godot/modtools/tools/screenshot_capture.gd",
+    "godot/modtools/tools/pack_game_cli.gd",
+}
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
     r"|UtilityFunctions::print_rich\s*\("
@@ -216,7 +226,7 @@ def count_has_method_guards() -> int:
                 count += len(HAS_METHOD_GUARD.findall(line.split("#", 1)[0]))
     for pattern in ("*.cpp", "*.h"):
         for path in (REPO / "godot" / "src").rglob(pattern):
-            if "build" in path.relative_to(REPO).parts:
+            if _in_build_dir(path.relative_to(REPO).parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -238,7 +248,7 @@ def count_oversize_cpp_files() -> int:
     for root in ("engine", "apps", "godot/src"):
         for path in (REPO / root).rglob("*.cpp"):
             parts = path.relative_to(REPO).parts
-            if "build" in parts:  # local CMake/godot-cpp build output, not source
+            if _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -262,7 +272,7 @@ def count_oversize_gd_files() -> int:
     for root in ("godot/src", "godot/game", "godot/modtools"):
         for path in (REPO / root).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or "build" in parts:  # vendored addons / build output, not source
+            if "addons" in parts or _in_build_dir(parts):  # vendored addons / build output, not source
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -284,7 +294,7 @@ def count_cpp_binding_console_writes() -> int:
         if path.suffix.lower() not in (".cpp", ".h", ".hpp"):
             continue
         parts = path.relative_to(REPO).parts
-        if "build" in parts:  # local CMake/godot-cpp build output, not source
+        if _in_build_dir(parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

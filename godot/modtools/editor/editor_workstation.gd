@@ -72,12 +72,29 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _settings_mcp_port_edit: LineEdit = %SettingsMcpPortEdit
 @onready var _settings_mcp_status_label: Label = %SettingsMcpStatusLabel
 @onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
+
+
+# Export Game sits beside the PFF tool in the settings popover. Built in code (the
+# popover scene predates it): a sibling inserted right after the PFF tool button.
+func _make_export_game_button() -> Button:
+	if _settings_pff_tool_button == null:
+		return null
+	var button := Button.new()
+	button.name = "SettingsExportGameButton"
+	button.text = "Export Game…"
+	var parent := _settings_pff_tool_button.get_parent()
+	parent.add_child(button)
+	parent.move_child(button, _settings_pff_tool_button.get_index() + 1)
+	return button
 @onready var _asset_dock: Control = %AssetDock
 @onready var _right_split: SplitContainer = %RightSplit
 @onready var _browser_toggle_button: Button = %BrowserToggleButton
 @onready var _play_in_game_button: Button = %PlayInGameButton
 @onready var _play_current_mission_button: Button = %PlayCurrentMissionButton
 @onready var _stop_game_button: Button = %StopGameButton
+@onready var _play_in_retail_button: Button = %PlayInRetailButton
+@onready var _settings_retail_dir_edit: LineEdit = %SettingsRetailDirEdit
+@onready var _settings_browse_retail_dir_button: Button = %SettingsBrowseRetailDirButton
 @onready var _browser_pane_mount: PanelContainer = %ResourceBrowserPaneMount
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -214,9 +231,16 @@ func _ready() -> void:
 	_game_launch.setup(
 		_play_in_game_button,
 		func() -> String: return _resource_library.get_root_dir(),
-		func() -> String: return ResourceDirSettings.get_expansion(),
-		func() -> String: return ResourceDirSettings.get_game(),
-		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
+		func() -> String: return OnedSettings.get_expansion(),
+		func() -> String: return OnedSettings.get_game(),
+		# cwd matters for retail only, but where the platform has the handle-tracking spawner,
+		# EVERY child goes through it: liveness and kill below answer through the handle it
+		# keeps, so a pid Windows recycled after the child exited can never be mistaken for it.
+		# An empty cwd inherits ours, exactly like OS.create_process.
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
+			if Process.supports_working_directory():
+				return Process.spawn_in_dir(path, args, cwd)
+			return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		get_unsaved_workspace_labels,
 		show_status_message,
@@ -227,11 +251,36 @@ func _ready() -> void:
 			return {
 				"path": mission_workspace.get_current_resource_path(),
 			},
-		func(pid: int) -> bool: return OS.is_process_running(pid),
-		func(pid: int) -> int: return OS.kill(pid),
+		func(pid: int) -> bool:
+			if Process.supports_working_directory():
+				return Process.is_running(pid)
+			return OS.is_process_running(pid),
+		# Symmetric with the spawn above: a child we started with Process.spawn_in_dir is not
+		# one OS.kill() reliably reaches, which once left the session reporting "stopped"
+		# while retail was still running.
+		func(pid: int) -> int:
+			if Process.supports_working_directory():
+				return OK if Process.kill_pid(pid) else FAILED
+			return OS.kill(pid),
 		func() -> int: return Time.get_ticks_msec(),
 		_play_current_mission_button,
-		_stop_game_button
+		_stop_game_button,
+		func() -> String: return OnedSettings.get_retail_dir(),
+		# Pack the mounted assets and stage the retail runtime beside them. The session calls
+		# this from its ONE spawn funnel, so Play in Retail and the MCP tool share this path.
+		func(out_dir: String, retail_dir: String) -> Dictionary:
+			return EditorGamePacker.pack_for_retail(
+				_resource_library.get_resource_root(), out_dir, retail_dir),
+		_play_in_retail_button,
+		# A forced stop is only done once the child is GONE -- the restart repacks the archives
+		# it had open.
+		func(pid: int, timeout_msec: int) -> bool:
+			if Process.supports_working_directory():
+				return Process.wait_for_exit(pid, timeout_msec)
+			return not OS.is_process_running(pid),
+		func(pid: int) -> void:
+			if Process.supports_working_directory():
+				Process.release(pid)
 	)
 	_tile_gizmo_overlay.setup(_tile_gizmo, _tile_gizmo_label, _viewport_lane, active_workspace_supplier)
 	_tile_gizmo_overlay.wire_buttons(
@@ -267,14 +316,17 @@ func _ready() -> void:
 		_preferred_resource_root_dir,
 		_pff_tool.open,
 		_mcp_service,
-		func(active: bool) -> void: _popovers.set_settings_visible(active)
+		func(active: bool) -> void: _popovers.set_settings_visible(active),
+		func() -> void: _game_launch.refresh()
 	)
 	_settings_panel.bind_nodes(
 		_settings_resource_dir_edit, _settings_browse_resource_dir_button,
 		_settings_apply_resource_dir_button, _settings_recent_row,
 		_settings_recent_option, _settings_expansion_row, _settings_view_section,
 		_settings_grid_toggle, _settings_axes_toggle, _settings_mcp_toggle,
-		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button)
+		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button,
+		_settings_retail_dir_edit, _settings_browse_retail_dir_button,
+		_make_export_game_button())
 	_settings_panel.load_view_state()
 	_layout.setup(
 		self,
@@ -427,11 +479,16 @@ func get_game_run_session() -> ShellGameSession:
 
 func run_game(mode: String = "game") -> bool:
 	var normalized := mode.strip_edges().to_lower()
-	if normalized != "game" and normalized != "mission":
-		show_status_message("Unknown run mode '%s'." % mode, 0.0, &"error")
-		return false
-	return _game_launch.run_current_mission() \
-			if normalized == "mission" else _game_launch.launch()
+	match normalized:
+		"game":
+			return _game_launch.launch()
+		"mission":
+			return _game_launch.run_current_mission()
+		"retail":
+			return _game_launch.run_retail()
+		_:
+			show_status_message("Unknown run mode '%s'." % mode, 0.0, &"error")
+			return false
 
 
 func stop_game() -> bool:
@@ -1237,6 +1294,10 @@ func _shortcut_input(event: InputEvent) -> void:
 				return
 			KEY_F6:
 				run_game("mission")
+				get_viewport().set_input_as_handled()
+				return
+			KEY_F7:
+				run_game("retail")
 				get_viewport().set_input_as_handled()
 				return
 			KEY_F8:

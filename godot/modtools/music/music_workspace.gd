@@ -255,6 +255,26 @@ func save_as(dir_path: String) -> Error:
 	return _document.save_to_disk()
 
 
+## The pair is addressed by filename (MENUMUS.SBF + MENUMUS.BIN), so Save As offers a file
+## picker on the .sbf; the .bin sibling follows from its basename.
+func uses_save_file_dialog() -> bool:
+	return true
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.sbf,*.SBF ; NovaLogic Music Bank"])
+
+
+func get_save_file_dialog_default_name() -> String:
+	return "%s.sbf" % _basename_for_save_as()
+
+
+func save_as_file(path: String) -> Error:
+	if _document == null:
+		return ERR_UNAVAILABLE
+	return _document.save_as_pair(path) as Error
+
+
 func _basename_for_save_as() -> String:
 	if _document == null:
 		return "untitled"

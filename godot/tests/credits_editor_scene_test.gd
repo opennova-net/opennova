@@ -4,7 +4,6 @@ const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorBlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 const CreditsWorkspaceScript = preload("res://modtools/credits/credits_workspace.gd")
-const ResourceDirSettings = preload("res://game/resource_index/resource_dir_settings.gd")
 const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const CREDITS_FIXTURE_DIR := "res://../fixtures/cbin"
 const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.25\nvertical_space=18\ncenter_x=360\n\n[TEXT]\nApplied from source\n"
@@ -41,12 +40,12 @@ class RefShell:
 
 
 func before_all() -> void:
-	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir("")
+	_saved_resource_dir = OnedSettings.get_resource_dir()
+	OnedSettings.set_resource_dir("")
 
 
 func after_all() -> void:
-	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
+	OnedSettings.set_resource_dir(_saved_resource_dir)
 
 
 func test_block_card_scene_instantiates() -> void:

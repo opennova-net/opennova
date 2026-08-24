@@ -19,8 +19,8 @@ void FntResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_page_count"), &FntResource::get_page_count);
 	ClassDB::bind_method(D_METHOD("get_glyph_count"), &FntResource::get_glyph_count);
 	ClassDB::bind_method(D_METHOD("get_first_char"), &FntResource::get_first_char);
-	ClassDB::bind_method(D_METHOD("get_shadow_offset"), &FntResource::get_shadow_offset);
-	ClassDB::bind_method(D_METHOD("set_shadow_offset", "glyph_spacing"), &FntResource::set_shadow_offset);
+	ClassDB::bind_method(D_METHOD("get_glyph_spacing"), &FntResource::get_glyph_spacing);
+	ClassDB::bind_method(D_METHOD("set_glyph_spacing", "glyph_spacing"), &FntResource::set_glyph_spacing);
 
 	ClassDB::bind_method(D_METHOD("get_page_image", "page"), &FntResource::get_page_image);
 	ClassDB::bind_method(D_METHOD("set_page_image", "page", "image"), &FntResource::set_page_image);
@@ -107,9 +107,9 @@ bool FntResource::_char_to_index(int p_char_code, uint32_t &r_index) const {
 	return true;
 }
 
-Error FntResource::create_blank(int p_page_count, int p_shadow_offset) {
+Error FntResource::create_blank(int p_page_count, int p_glyph_spacing) {
 	fnt_font_t fresh;
-	fnt_error_t err = fnt_init_blank(&fresh, static_cast<uint32_t>(p_page_count), p_shadow_offset);
+	fnt_error_t err = fnt_init_blank(&fresh, static_cast<uint32_t>(p_page_count), p_glyph_spacing);
 	if (err != FNT_OK) {
 		return ERR_INVALID_PARAMETER;
 	}
@@ -167,15 +167,15 @@ int FntResource::get_first_char() const {
 	return FNT_FIRST_CHAR;
 }
 
-int FntResource::get_shadow_offset() const {
+int FntResource::get_glyph_spacing() const {
 	return _has_valid_font() ? font_.glyph_spacing : 0;
 }
 
-void FntResource::set_shadow_offset(int p_shadow_offset) {
-	if (!_has_valid_font() || font_.glyph_spacing == p_shadow_offset) {
+void FntResource::set_glyph_spacing(int p_glyph_spacing) {
+	if (!_has_valid_font() || font_.glyph_spacing == p_glyph_spacing) {
 		return;
 	}
-	font_.glyph_spacing = p_shadow_offset;
+	font_.glyph_spacing = p_glyph_spacing;
 	emit_changed();
 }
 

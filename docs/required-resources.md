@@ -30,7 +30,7 @@ stack — UNAUDITED); this record pins only the *names* and the boot contract.
 
 | Resource | Failure behavior [orig] |
 |---|---|
-| `resource.pff` / `localres.pff` / `language.pff` (+ expansion `<n>.pff`/`<n>L.pff` slots) | **zero archives opened → `earlyerr.txt` line-3 dialog + exit** [orig: PFF_OpenAllArchives @ 0x4a4310 over the name table @ 0x829f90; fatal check Game_InitSubsystems @ 0x4a6f44]. Any individual archive missing is tolerated; only all-missing is fatal. Loose-first only under `/d` or a consumer-forced override; the default is archive-only (corrected by PAR-R7, [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md)). |
+| `resource.pff` / `localres.pff` / `language.pff` (+ expansion `<n>.pff`/`<n>L.pff` slots) | **zero archives opened → `earlyerr.txt` line-3 dialog + exit** [orig: PFF_OpenAllArchives @ 0x4a4310 over the name table @ 0x829f90; fatal check Game_InitSubsystems @ 0x4a6f44]. Any individual archive missing is tolerated; only all-missing is fatal. The gate counts archives **opened**, not entries: a zero-entry (20-byte) archive under a table name satisfies it — witnessed on retail 2026-08-23, where `/FRISK` logs `LOADED FILE: resource.pff` and boot proceeds to the `gametext.bin` fatal, while the same run with the archive removed writes no `_filelog.txt` at all. Loose-first only under `/d` or a consumer-forced override; the default is archive-only (corrected by PAR-R7, [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md)). |
 | `gametext.bin` | "Unable to load game strings" MessageBox + **exit** [orig: Game_InitSubsystems @ 0x4a6fed] |
 | `vmacros.bin` | "Unable to load voice macro strings" MessageBox + **exit** [orig: @ 0x4a702f] |
 | `keyhelp.bin` | "Unable to load keyboard map strings" MessageBox + **exit** [orig: @ 0x4a7072] |
@@ -64,7 +64,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `charattr.def` | boot (soft) | [orig: Game_Run @ 0x4a7fe3 → CharAttr_LoadFromDef @ 0x412140] | missing → `_errlog.txt` "Server ERROR! Could not load charattr definitions.", continues |
 | `loading.pcx` | boot (soft) | [orig: Game_ShowLoadingScreen @ 0x4a544f] | graceful texture-miss pattern (not stepped through) |
 | `admin.cfg` | optional-fallback | [orig: CAdminServer_LoadConfig @ 0x406d80; callsite @ 0x4a72c2] | silent skip |
-| `*.npj` + `*.npz` (wildcard scan) | boot (mission list) | [orig: MissionList_ScanAndBuildFromFiles @ 0x563170] | none found → empty mission list (the only wildcard scan at boot) |
+| `*.bms` (loose walk + per-archive entry walk); `*.npj` + `*.npz` | boot (mission list) | [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 (loose `FindFirstFile`); Mission_BuildMapListFromPFF @ 0x562910 (the localres/language volumes)] | none found → empty mission list. The list is built from the `.bms` the two scans SEE: the loose `FindFirstFile *.bms` walk of the working directory (rows marked `*`, entry+4380) and the per-archive entry walk, which visits the localres/language volumes only — **a `.bms` archived in `resource.pff` mounts and loads by name yet never lists** (witnessed 2026-08-23: the menu simply empty, no error). Retail keeps its own where the walk looks: all 116 stock JO `.bms` live in `localres.pff` (none in resource.pff), and the `<stem>.bin` each is paired with for the title resolves through the ordinary by-name front door (88 of them in `language.pff`). ONED's packer names its single archive `localres.pff` for exactly this reason (`godot/modtools/editor/editor_game_packer.gd`). No shipped JO archive carries a `.npj`/`.npz`, and those legs are unported (`engine/runtime/mission/mission_catalog.h`). |
 | `hiscore.txt` | optional-fallback | [orig: HUD_LoadHighScoreText @ 0x5630e5] | silent skip |
 
 ### Main menu (Menu_InitShellResources enter)
@@ -119,7 +119,7 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
    [fatal] → `weapon.def` → `game.cfg` (again) → `Avatars.def` → video
    enumeration → `SndProf.def` → `gt.ssc` → **`items.def`** [fatal wired] →
    team names (from gametext.bin) → display mode → `loading.pcx` →
-   audio/particles/render init → mission-list scan (`*.npj`/`*.npz`) →
+   audio/particles/render init → mission-list scan (`*.bms`, loose + archives) →
    `hiscore.txt` → `admin.cfg`.
 3. `Game_Run` cont.: `charattr.def` → `Game_MainLoop @ 0x52b630`, state 2 =
    "MainMenu" (state record @ 0x83b400).

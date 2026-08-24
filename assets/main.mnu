@@ -1,0 +1,75 @@
+<!-- Minimal main.mnu for fixtures/minimal/ — the boot entry screen. The engine
+     loads main.mnu and selects the "Startup" node [orig: sub_552500 @ 0x552651
+     -> CUIScene_SelectNodeByName @ 0x63b6b0]. Authored from scratch (no retail
+     asset); parses through libs/mnu. Just the two paths a minimal host+join
+     needs: LAN multiplayer and exit. -->
+<SCREEN>
+	<NAME>STARTUP</NAME>
+	<MUSICVAR>1</MUSICVAR>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE type="custom" state="default"></APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>75</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>525</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<WINDOW type="window" name="BUTTONS">
+			<FONT>
+				<NAME>%DEF_FONTNAME_LG%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>453</TOP>
+			</POSITION>
+			<WINDOW type="button" name="SINGLE_PLAYER">
+				<ACTION type="screen" file="sp.mnu">SINGLE_PLAYER</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<APPEARANCE state="disabled"></APPEARANCE>
+				<POSITION>
+					<TOP>0</TOP>
+					<LEFT>40</LEFT>
+					<RIGHT>200</RIGHT>
+				</POSITION>
+				<STRING type="id" justify="LEFT">MM_Singleplayer</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="LAN_MULTI_PLAYER">
+				<ACTION type="screen" file="mp.mnu">LAN_MULTI_PLAYER</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<APPEARANCE state="disabled"></APPEARANCE>
+				<POSITION>
+					<TOP>0</TOP>
+					<LEFT>240</LEFT>
+					<RIGHT>520</RIGHT>
+				</POSITION>
+				<STRING type="id" justify="CENTER">MM_LANMultiplayer</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="EXIT">
+				<ACTION type="exit">EXIT</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<APPEARANCE state="disabled"></APPEARANCE>
+				<POSITION>
+					<TOP>0</TOP>
+					<LEFT>660</LEFT>
+					<RIGHT>760</RIGHT>
+				</POSITION>
+				<STRING type="id" justify="CENTER">MM_Exit</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>

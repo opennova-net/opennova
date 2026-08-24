@@ -60,7 +60,7 @@ func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
 		return
 
 	assert_eq(reloaded.get_page_count(), 1, "Reloaded blank font keeps page count.")
-	assert_eq(reloaded.get_shadow_offset(), -3, "Reloaded blank font keeps shadow offset.")
+	assert_eq(reloaded.get_glyph_spacing(), -3, "Reloaded blank font keeps glyph spacing.")
 	assert_eq(reloaded.get_glyph_rect(32), Rect2i(0, 0, 4, 3), "Glyph rect should round-trip.")
 	assert_eq(reloaded.get_pixel_alpha(0, 0, 0), 200, "Edited alpha should round-trip.")
 

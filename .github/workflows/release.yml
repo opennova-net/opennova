@@ -102,10 +102,14 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  package-godot-windows-editor:
+  # Tagged releases ship the GAME zip only: opennova.exe + the packed pffs,
+  # built by the exported editor's own --pack-game CLI, pre-configured to boot
+  # from its own directory. The dev build (game + editor + loose sources) comes
+  # from master CI runs, not releases.
+  package-godot-windows:
     runs-on: windows-latest
     outputs:
-      artifact_id: ${{ steps.upload_modtools.outputs.artifact-id }}
+      artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -134,65 +138,21 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
-      - name: Package Godot Windows editor export
+      - name: Package Godot Windows apps
         shell: pwsh
-        run: scripts/package_godot_editor_windows.ps1
+        run: scripts/package_godot_windows.ps1
 
-      - name: Upload opennova-modtools Windows zip
-        id: upload_modtools
+      - name: Upload OpenNova Windows game zip
+        id: upload_game
         uses: actions/upload-artifact@v7
         with:
-          path: dist/opennova-modtools-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-  package-godot-windows-runtime:
-    runs-on: windows-latest
-    outputs:
-      artifact_id: ${{ steps.upload_runtime.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Package Godot Windows runtime export
-        shell: pwsh
-        run: scripts/package_godot_runtime_windows.ps1
-
-      - name: Upload opennova runtime Windows zip
-        id: upload_runtime
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-runtime-windows-v*.zip
+          path: dist/opennova-game-windows-v*.zip
           archive: false
           if-no-files-found: error
 
   release:
     runs-on: ubuntu-latest
-    needs: [test, package-addon, package-importer, package-godot-windows-editor, package-godot-windows-runtime]
+    needs: [test, package-addon, package-importer, package-godot-windows]
     permissions:
       contents: write
     steps:
@@ -209,8 +169,7 @@ jobs:
           artifact-ids: >-
             ${{ needs.package-addon.outputs.artifact_id }},
             ${{ needs.package-importer.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
+            ${{ needs.package-godot-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -220,8 +179,15 @@ jobs:
           # (ci.yml's validate-deliverables download already does this; keep in sync.)
           skip-decompress: true
 
+      # Tagged releases carry the importer, the Blender addon, and the packed
+      # game only — no editor, no sources (those live in master CI dev builds).
       - name: Validate release deliverables
-        run: python scripts/validate_release_deliverables.py --release-version "$GITHUB_REF_NAME"
+        run: >-
+          python scripts/validate_release_deliverables.py
+          --release-version "$GITHUB_REF_NAME"
+          --only-id asset-importer
+          --only-id blender-ase-exporter
+          --only-id windows-game
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

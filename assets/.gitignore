@@ -1,0 +1,86 @@
+# assets/ is BOTH the game's authored asset tree AND the game dir we run retail
+# out of: Jointops.exe, binkw32.dll, the retail runtime's own writes (game.cfg,
+# player.sav, _filelog.txt, SYSDUMP.TXT, score.ini, ...), and the generated
+# packaging output all land here beside our sources.
+#
+# So this is a BLANKET ignore with an explicit allowlist of the files we author.
+# It is deliberately a list of NAMES WE ALLOW, never a list of names we exclude:
+# a denylist here once let loose retail copies slip into a commit. Adding an
+# asset means adding a line, and that is the point -- it forces the call to be
+# made consciously rather than by a wildcard that also sweeps in retail data.
+/*
+!/.gitignore
+!/README.md
+
+# --- Boot: the fatal set + menu strings (RTXT .bin) ---
+!/gameerr.bin
+!/gametext.bin
+!/vmacros.bin
+!/keyhelp.bin
+!/menutxt.bin
+
+# --- Pre-archive error text: read loose before any mount ---
+# Retail reads this before a single archive is open, so it can never live inside one; without
+# it the dialog degrades to "Error: Unable to open EARLYERR.TXT"
+# [orig: Game_ShowEarlyError @ 0x4a68a0]. Lines 3 and 4 are the no-archives and
+# missing-gameerr.bin messages. CRLF, like every authored text file here.
+!/earlyerr.txt
+
+# --- Music: the two script + bank pairs, loaded by name ---
+!/menumus.sbf
+!/menumus.bin
+!/gamemus.sbf
+!/gamemus.bin
+
+# --- Fonts: the boot face set ---
+# Retail looks these up by these exact names off a hardcoded table; a missing one is a null
+# slot that draws nothing at all [orig: HUD_InitAllFonts @ 0x51ee20].
+!/Arial12b.fnt
+!/Arial14n.fnt
+!/Arial14b.fnt
+!/Arial16n.fnt
+!/Arial16b.fnt
+!/Impac22b.fnt
+!/Impac38b.fnt
+
+# --- Definitions (plain text) ---
+!/items.def
+!/weapon.def
+!/ammo.def
+
+# --- Menus + stylesheet + cursor ---
+!/main.mnu
+!/mp.mnu
+!/sp.mnu
+!/menu_style.mns
+!/newarow1.tga
+
+# --- The mnml map: mission, terrain, environment, companions, source art ---
+!/mnml.bms
+!/mnml.trn
+!/mnml.env
+!/mnml.bin
+!/mnml.dbf
+!/mnml.lwf
+!/mnml.pcx
+!/mnml_c.tga
+!/mnml_dm.tga
+!/mnml.cpt
+!/mnml_dc1.tga
+!/mnml_dc2.tga
+!/mnml_dc3.tga
+!/mnml_dmd.tga
+!/mnml_d1.tga
+!/mnml_t.tga
+!/mnml_m.pcx
+!/mnml_f.pcx
+
+# --- Modelling sources (src/) ---------------------------------------------
+# .blend / .ase and their texture sources live in a SUBDIR, not the flat game
+# dir: retail resolves bare filenames at this root under /d, so anything here
+# is a file retail might try to load. src/ is ours alone, which is also why it
+# can be allowed wholesale -- no retail file ever lands there. Compiled .3di
+# and their .TGA textures DO go at the root (the engine loads them by
+# `graphic` + ".3di"), so they get allowlisted by name like everything else.
+!/src/
+!/src/**
