@@ -60,7 +60,7 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `gametext.bin` | `engine/formats/rtxt` | game strings RTXT `[orig: @ 0x4a6fed]` — minimal table (the menu/HUD keys the set references). |
 | `vmacros.bin` | `engine/formats/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `engine/formats/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
-| `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only the item types the map spawns (witnessed mapping, D-ITEMDEF-1). Ids the engine addresses **by number** are reserved (`106001` is the player-start marker the engine reads to place its hardcoded player item `105310`); ids that merely also exist in retail's catalogue are free, and our own content sits at `108001+`. |
+| `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`. |
 | `main.mnu` (`"Startup"` node) | ONED menu workspace | the entry screen `[orig: sub_552500 @ 0x552651]`. |
 
 ### Host + join + single player — mission start + menus
