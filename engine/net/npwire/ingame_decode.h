@@ -2009,18 +2009,31 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 // stream is per-session state with a lifetime the decoder does not own, and
 // retail keeps it in one global for the same reason. A consumer that only
 // decodes and never sends 0x2B receives the first 200 bytes and nothing else.
-// S2C 0x1D, exactly seven bytes. The final signed byte is this recipient's row
-// in the frozen board (-1 when absent). [orig: EndRoundScoreboard_SerializeHeader
-// @0x505280; NapiNPClientMsg_0x01D @0x430840]
+// S2C 0x1D. TWO forms, picked by session state on both ends — never by
+// length [orig: `is_in_session && !(g_GameType & 0x10000)` @0x5052a6 serializer,
+// @0x43086c..0x430883 client]. Team/offline form: exactly seven bytes,
+// [i8 winner][i16 score0][i16 score1][u8 draw][i8 index]. Non-team in-session
+// (DM/KOTH-family) form: the winner/team-score words are REPLACED by the top
+// three rows of the frozen board — three C-string names then three i16
+// primary scores — before the same draw/index tail. The receiving client
+// keeps at most 31 chars + NUL of each name while its cursor advances by the
+// sender's full string. The final signed byte is this recipient's row in the
+// frozen board (-1 when absent). [orig: EndRoundScoreboard_SerializeHeader
+// @0x505280 — names @0x5052bf.., scores @0x50535e..0x505381;
+// NapiNPClientMsg_0x01D @0x430840 — named parse @0x430889..0x4309af, name
+// commit Napi_CopyString(dst, 32) @0x430a70..0x430a92]
 struct EndRoundHeader {
 	int8_t winner_team = 0;
 	int16_t team_score_0 = 0;
 	int16_t team_score_1 = 0;
 	uint8_t draw = 0;
 	int8_t player_index = -1;
+	// Non-team form only; an empty name marks an absent board row.
+	std::string player_names[3];
+	int16_t player_scores[3] = {0, 0, 0};
 };
 bool decode_end_round_header(const uint8_t *body, size_t len,
-		EndRoundHeader &out);
+		bool non_team_form, EndRoundHeader &out);
 
 // C2S 0x2B, the next byte offset requested by the client.
 struct EndRoundStatsRequest {

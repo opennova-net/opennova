@@ -1622,10 +1622,22 @@ void print_tag_13(const std::vector<uint8_t> &body) {
 }
 
 void print_tag_1d(const std::vector<uint8_t> &body) {
+	// The form is session state, never length: in-session non-team carries
+	// the top-three names/scores instead of the winner/team-score words.
+	// [orig: NapiNPClientMsg_0x01D form pick @0x43086c..0x430883]
+	const bool non_team = (g_game_type & 0x10000u) == 0;
 	EndRoundHeader header;
-	if (!decode_end_round_header(body.data(), body.size(), header)) {
-		std::printf("        [0x1D] end-round-header decode failed (need 7 B got %zu)\n",
-		            body.size());
+	if (!decode_end_round_header(body.data(), body.size(), non_team, header)) {
+		std::printf("        [0x1D] end-round-header decode failed (%s form, got %zu B)\n",
+		            non_team ? "non-team" : "team", body.size());
+		return;
+	}
+	if (non_team) {
+		std::printf("        [0x1D] end-round-header top3=[\"%s\" %d, \"%s\" %d, \"%s\" %d] draw=%u board_index=%d\n",
+		            header.player_names[0].c_str(), int(header.player_scores[0]),
+		            header.player_names[1].c_str(), int(header.player_scores[1]),
+		            header.player_names[2].c_str(), int(header.player_scores[2]),
+		            unsigned(header.draw), int(header.player_index));
 		return;
 	}
 	std::printf("        [0x1D] end-round-header winner=%d team_scores=(%d,%d) draw=%u board_index=%d\n",

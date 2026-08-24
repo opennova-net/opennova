@@ -1755,12 +1755,26 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 }
 
 bool decode_end_round_header(const uint8_t *body, size_t len,
-		EndRoundHeader &out) {
+		bool non_team_form, EndRoundHeader &out) {
 	out = EndRoundHeader{};
 	Cursor c{body, body + len, true};
-	out.winner_team = static_cast<int8_t>(c.u8());
-	out.team_score_0 = c.i16();
-	out.team_score_1 = c.i16();
+	if (non_team_form) {
+		// The in-session non-team form replaces the winner/team-score words
+		// with the top three frozen-board rows. Retail keeps at most 31 chars
+		// of each name (32-byte staging + Napi_CopyString(dst, 32) commit)
+		// while the cursor advances by the sender's full string.
+		// [orig: NapiNPClientMsg_0x01D @0x430889..0x4309af, commit
+		// @0x430a70..0x430ac1]
+		for (std::string &name : out.player_names) {
+			name = c.cstr();
+			if (name.size() > 31) name.resize(31);
+		}
+		for (int16_t &score : out.player_scores) score = c.i16();
+	} else {
+		out.winner_team = static_cast<int8_t>(c.u8());
+		out.team_score_0 = c.i16();
+		out.team_score_1 = c.i16();
+	}
 	out.draw = c.u8();
 	out.player_index = static_cast<int8_t>(c.u8());
 	return c.ok && c.p == c.end;

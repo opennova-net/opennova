@@ -361,6 +361,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.drain_weapon_reloads();
 	view_.drain_entity_deaths();
 	view_.set_game_type(0);
+	view_.set_mp_session(true); // a joiner is in-session by definition
 	return joiner_->start();
 }
 
@@ -539,6 +540,7 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
 	                       std::move(server_scrk), next_seq, last_ack, self_handle, self_type,
 	                       game_type);
 	view_.set_game_type(game_type);
+	view_.set_mp_session(true);
 	deployed_ = true;     // a seeded replay is post-deploy (the captured client was uplinking)
 	authoritative_spawn_released_ = true;
 	replay_mode_ = replay_mode;

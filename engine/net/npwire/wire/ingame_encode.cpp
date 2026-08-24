@@ -784,14 +784,25 @@ std::vector<uint8_t> encode_player_list(const PlayerListFrame &frame) {
 	return out;
 }
 
-std::vector<uint8_t> encode_end_round_header(const EndRoundHeader &header) {
+std::vector<uint8_t> encode_end_round_header(const EndRoundHeader &header,
+		bool non_team_form) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	// Exact retail order and widths. [orig: EndRoundScoreboard_SerializeHeader
-	// @0x505280; client NapiNPClientMsg_0x01D @0x430840]
-	w.u8(static_cast<uint8_t>(header.winner_team));
-	w.u16(static_cast<uint16_t>(header.team_score_0));
-	w.u16(static_cast<uint16_t>(header.team_score_1));
+	// Exact retail order and widths; the form is session state, never length.
+	// [orig: EndRoundScoreboard_SerializeHeader @0x505280 — form pick
+	// @0x5052a6; client NapiNPClientMsg_0x01D @0x430840]
+	if (non_team_form) {
+		// Top three frozen-board rows: three name C-strings, then the three
+		// i16 primary scores the board builder stored at entry+0x40.
+		// [orig: @0x5052bf..0x505381]
+		for (const std::string &name : header.player_names) w.cstr(name);
+		for (const int16_t score : header.player_scores)
+			w.u16(static_cast<uint16_t>(score));
+	} else {
+		w.u8(static_cast<uint8_t>(header.winner_team));
+		w.u16(static_cast<uint16_t>(header.team_score_0));
+		w.u16(static_cast<uint16_t>(header.team_score_1));
+	}
 	w.u8(header.draw);
 	w.u8(static_cast<uint8_t>(header.player_index));
 	return out;

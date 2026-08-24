@@ -175,7 +175,8 @@ void ready_mp_connection(np::NapiNPConnection &conn, uint8_t slot) {
 	conn.admission_stage = np::GameAdmissionStage::Complete;
 }
 
-bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header) {
+bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header,
+		bool non_team_form = false) {
 	bool saw_seed = false;
 	bool saw_header = false;
 	ns::Datagram datagram;
@@ -183,10 +184,12 @@ bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header) {
 		if (datagram.tag == s2c::TICK_SEED)
 			saw_seed = datagram.body == std::vector<uint8_t>(4, 0);
 		// The 0x61 seed precedes 0x1D on the wire; a header before it is a
-		// failure, not a pass.
+		// failure, not a pass. The header form mirrors the receiving
+		// client's `is_in_session && !(g_GameType & 0x10000)` pick.
 		if (datagram.tag == s2c::END_ROUND_HEADER && saw_seed) {
 			saw_header = decode_end_round_header(
-					datagram.body.data(), datagram.body.size(), header);
+					datagram.body.data(), datagram.body.size(),
+					non_team_form, header);
 		}
 	}
 	return saw_seed && saw_header;
@@ -375,6 +378,79 @@ void test_tdm_round_wire_and_linger() {
 	np::Server_TickUpdate(ctx);
 	expect(ctx.is_in_session == 0 && ctx.round_end_linger_ticks == 0,
 			"MP session closes at exactly 2790 post-announcement ticks");
+}
+
+// The DM/KOTH-family 0x1D: an in-session non-team round end serializes the
+// top three frozen-board rows (name + primary score) instead of the
+// winner/team-score words, and the recipient index still names the frozen
+// board row. [orig: EndRoundScoreboard_SerializeHeader @0x5052a6..0x505381]
+void test_dm_round_wire_named_header() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kDeathmatch;
+	rules.score_limit = 1;
+	rules.score_values.emplace();
+	(*rules.score_values)[3] = 10;
+	world.match.configure(rules);
+	const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
+	const w::EntityHandle bee = match_player(world, 7, 2, "Bee");
+	const w::EntityHandle cid = match_player(world, 9, 2, "Cid");
+
+	ns::LoopbackChannel ace_wire;
+	ns::LoopbackChannel cid_wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &ace_wire, ns::TransportMode::Client, ace, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 1, &cid_wire, ns::TransportMode::Client, cid, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 9);
+
+	np::Server_TickUpdate(ctx);
+	push_death(world, cid, ace);
+	push_death(world, bee, ace);
+	push_death(world, cid, bee);
+	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
+	expect(!world.match.outcome().ended,
+			"DM kill-limit win waits for the 1 Hz win-condition pass");
+	ace_wire.clear();
+	cid_wire.clear();
+	np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
+	expect(world.match.outcome().ended, "DM score limit ends the round");
+	const w::MatchResult &result = world.match.result();
+	expect(result.players.size() == 3, "three frozen DM board rows");
+
+	EndRoundHeader ace_header;
+	expect(drain_round_header(ace_wire, ace_header, /*non_team_form=*/true),
+			"DM round end reaches the named 0x1D form on the wire");
+	for (size_t i = 0; i < 3 && i < result.players.size(); ++i) {
+		expect(ace_header.player_names[i] == result.players[i].identity.name,
+				"named header row matches the frozen board name");
+		expect(ace_header.player_scores[i] ==
+						static_cast<int16_t>(result.players[i].primary_score),
+				"named header score is the row's primary score");
+	}
+	expect(ace_header.player_names[0] == "Ace",
+			"the top scorer heads the named header");
+	expect(ace_header.draw == 0, "a decided DM round is not a draw");
+	expect(ace_header.player_index >= 0 &&
+					result.players[ace_header.player_index].identity.slot == 3,
+			"the recipient index names the recipient's frozen board row");
+
+	EndRoundHeader cid_header;
+	expect(drain_round_header(cid_wire, cid_header, /*non_team_form=*/true),
+			"every recipient gets the named form");
+	expect(cid_header.player_index >= 0 &&
+					result.players[cid_header.player_index].identity.slot == 9,
+			"the second recipient's index is its own frozen row");
+	expect(cid_header.player_names[0] == ace_header.player_names[0],
+			"the named rows are recipient-independent");
 }
 
 void test_demolition_death_routes_score_and_round_wire() {
@@ -1018,6 +1094,7 @@ int main() {
 	expect(world.effects.count("round_end") == 1, "no second round_end effect");
 
 	test_tdm_round_wire_and_linger();
+	test_dm_round_wire_named_header();
 	test_demolition_death_routes_score_and_round_wire();
 	test_aas_round_wire();
 	test_coop_script_producers_share_round_wire();

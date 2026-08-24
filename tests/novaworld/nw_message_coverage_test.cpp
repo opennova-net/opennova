@@ -939,20 +939,48 @@ int check_S_18_full_entity_spawn() {
 	return 0;
 }
 
-// S2C 0x1D + C2S 0x2B -- the fixed header and requester offset that start the
-// end-round board pull. [orig: NapiNPClientMsg_0x01D @0x430840;
+// S2C 0x1D + C2S 0x2B -- the two-form header and requester offset that start
+// the end-round board pull. The form is session state, never length.
+// [orig: NapiNPClientMsg_0x01D @0x430840 -- form pick @0x43086c..0x430883;
 // NapiNPServerMsg_0x02B @0x514FE0]
 int check_end_round_control_pair() {
 	const std::vector<uint8_t> header_body = {
 			2, 0x34, 0x12, 0xFE, 0xFF, 1, 0xFF};
 	EndRoundHeader header;
 	EXPECT(decode_end_round_header(
-			header_body.data(), header_body.size(), header));
+			header_body.data(), header_body.size(), false, header));
 	EXPECT(header.winner_team == 2 && header.team_score_0 == 0x1234);
 	EXPECT(header.team_score_1 == -2 && header.draw == 1 &&
 			header.player_index == -1);
 	EXPECT(!decode_end_round_header(
-			header_body.data(), header_body.size() - 1, header));
+			header_body.data(), header_body.size() - 1, false, header));
+
+	// The non-team form: three name C-strings + three i16 scores before the
+	// same draw/index tail. A 32+ char name decodes with 31 chars kept (the
+	// retail 32-byte staging + Napi_CopyString(dst, 32) commit) while the
+	// cursor still consumes the full sender string.
+	// [orig: @0x430889..0x4309af; commit @0x430a70..0x430a92]
+	LE named;
+	const std::string long_name(40, 'N');
+	named.b.insert(named.b.end(), long_name.begin(), long_name.end());
+	named.u8(0);
+	named.b.insert(named.b.end(), {'B', 'e', 'e'});
+	named.u8(0);
+	named.u8(0); // third name absent (empty string)
+	named.u16(uint16_t(int16_t(-7)));
+	named.u16(5);
+	named.u16(0);
+	named.u8(1);    // draw
+	named.u8(0xFF); // index -1
+	EXPECT(decode_end_round_header(
+			named.b.data(), named.b.size(), true, header));
+	EXPECT(header.player_names[0] == std::string(31, 'N'));
+	EXPECT(header.player_names[1] == "Bee" && header.player_names[2].empty());
+	EXPECT(header.player_scores[0] == -7 && header.player_scores[1] == 5 &&
+			header.player_scores[2] == 0);
+	EXPECT(header.draw == 1 && header.player_index == -1);
+	EXPECT(!decode_end_round_header(
+			named.b.data(), named.b.size() - 1, true, header));
 	cover('S', 0x1D);
 
 	const std::vector<uint8_t> request_body = {0x34, 0x12};
