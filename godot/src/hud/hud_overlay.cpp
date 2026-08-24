@@ -983,6 +983,10 @@ void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
 		tag.medic = (flags & 1) != 0;
 		tag.speaking = (flags & 2) != 0;
 		tag.player = (flags & 4) != 0;
+		tag.dead = (flags & 8) != 0;
+		tag.has_slot = (flags & 16) != 0;
+		tag.medic_request = (flags & 32) != 0;
+		tag.revive_seconds = static_cast<uint8_t>((flags >> 8) & 0xFF);
 		state_.friendly_tags.push_back(tag);
 	}
 	queue_redraw();

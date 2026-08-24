@@ -1153,6 +1153,22 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 											  : active_color(state))
 				: band == 1 ? layout_.tag_middle
 							: layout_.tag_bad;
+		// The bad tier's DOWNED legs: a dead entity with a slot still inside
+		// its revive window is light blue (table[3]), pulsing toward white
+		// while a medic request stands; dead without that is gray (table[8]);
+		// alive-but-bad keeps tagcolor_bad [orig: @0x5a3dc9..0x5a3e85 —
+		// `Flags & 2` -> slot && slot+0x10 ? (slot+0x2C ? pulse : light blue)
+		// : gray, else tagcolor_bad].
+		if (band == 2 && tag.dead) {
+			if (tag.has_slot && tag.revive_seconds != 0) {
+				rgb = tag.medic_request
+						? friendly_tag_revive_pulse(kFriendlyTagDownedLightBlue,
+								  state.ticks)
+						: kFriendlyTagDownedLightBlue;
+			} else {
+				rgb = kFriendlyTagDownedGray;
+			}
+		}
 		// The speaking pulse rides the voice output level [orig: @ 0x5a3e8f].
 		if (tag.speaking) {
 			rgb = friendly_tag_speaking_blend(rgb, state.speaking_level255);
@@ -1162,6 +1178,23 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				(static_cast<uint32_t>(friendly_tag_alpha(tag.dist_q16)) << 24) |
 				(rgb & 0xFFFFFFu);
 		const float top_y = tag.screen_y - font_h * 0.5f; // [orig: @ 0x5a4264]
+		// The revive count rides the label while the entity is dead with a
+		// slot inside its window [orig: the gate `dead && slot && slot+0x10`
+		// @0x5a3fdc..0x5a3ff8 (text), @0x5a41c0..0x5a41df (ticks),
+		// @0x5a4407..0x5a441b (bar)].
+		const bool show_count = tag.dead && tag.has_slot && tag.revive_seconds != 0;
+		// The tick and bar forms draw the bare count centered one fontH ABOVE
+		// the projected point in the tag color [orig: sprintf("%ld") @0x5a41f0 /
+		// @0x5a4428 -> HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
+		auto emit_bare_count = [&]() {
+			if (!show_count) return;
+			const std::string count = std::to_string(tag.revive_seconds);
+			const GameFontRun run = lf.layout(count.c_str(), tag.screen_x,
+					tag.screen_y - font_h, ls, ls, kFontAlignCenter,
+					half_bright_keep_alpha(argb));
+			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+					run.quads.end());
+		};
 
 		// A slot entry with an empty callsign draws the bar form
 		// [orig: the empty-name leg @ 0x5a4398 — y unadjusted, height fontH].
@@ -1175,6 +1208,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				bar.x1 = tag.screen_x;
 				bar.y1 = tag.screen_y + font_h;
 				draw_list_.lines.push_back(bar);
+				emit_bare_count();
 				continue;
 			}
 			// '^' + the compiled-in name table [orig: @ 0x5a4047..0x5a40cd].
@@ -1182,10 +1216,16 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 		}
 
 		if (friendly_tag_text_visible(state.friendly_tag_mode, tag.dist_q16)) {
+			// The text form appends the count to the name
+			// [orig: sprintf("%s: %ld", name, slot+0x10) @0x5a400e, else
+			//  sprintf("%s", name) @0x5a422e].
+			const std::string label = show_count
+					? resolved + ": " + std::to_string(tag.revive_seconds)
+					: resolved;
 			// Centered text at the projected point, half-bright with the
 			// distance alpha kept [orig: HUD_DrawTextHalfBrightF @ 0x5a4268 ->
 			// CGameFont_DrawText flags 1, the slot scales pushed @ 0x580720].
-			const GameFontRun run = lf.layout(resolved.c_str(), tag.screen_x,
+			const GameFontRun run = lf.layout(label.c_str(), tag.screen_x,
 					top_y, ls, ls, kFontAlignCenter,
 					half_bright_keep_alpha(argb));
 			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
@@ -1199,7 +1239,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				// then the two red bars, in the witnessed order.
 				int text_w = 0;
 				int text_h = 0;
-				lf.measure(resolved.c_str(), ls, ls, &text_w, &text_h);
+				lf.measure(label.c_str(), ls, ls, &text_w, &text_h);
 				const float x0 = tag.screen_x -
 						(static_cast<float>(text_w) * 0.5f + font_h) - 0.5f;
 				const float y0 = top_y - 0.5f;
@@ -1222,6 +1262,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				seg.y1 = tag.screen_y + half;
 				draw_list_.lines.push_back(seg);
 			}
+			emit_bare_count();
 		}
 	}
 	++draw_list_.elements_drawn;

@@ -432,6 +432,13 @@ private:
 	void apply_zone_timer_window(const ZoneTimerWindow &window);
 	void apply_zone_presence_count(const ZonePresenceCount &presence);
 	void advance_zone_timers();
+	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
+	// each active slot with an entity and a nonzero revive window loses one
+	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
+	// g_slotRefreshTimer > 62 -> PlayerSlot_SetDownedState(slot+0x10 - 1,
+	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
+	// loopback view runs it too (retail's client frame is role-agnostic).
+	void tick_roster_revive_countdown();
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only
@@ -469,6 +476,7 @@ private:
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
 	// emits and the send-holdoff send-block gate, deferred-and-logged at P5, ported here. ---
 	uint32_t current_tick_ = 0;          // [orig: currentTick @0xA8229C] bumped once per run_frame
+	uint32_t slot_refresh_frames_ = 0;   // [orig: g_slotRefreshTimer @0xA85B80] the 1 Hz revive countdown
 	uint32_t last_keepalive_tick_ = 0;   // [orig: g_lastKeepaliveTick @0xA822A0] 0x34 send latch
 	uint32_t net_quality_timer_ = 0;     // [orig: g_netQualityReportTimer @0xA85B84] 0x4C cadence
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send

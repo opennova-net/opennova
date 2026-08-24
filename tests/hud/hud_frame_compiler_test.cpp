@@ -1050,6 +1050,71 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 	}
 	state.friendly_tags[0].medic = false;
 
+	// The DOWNED legs of the bad tier [orig: @0x5a3dc9..0x5a3e85]: dead with
+	// a slot inside its revive window -> table[3] light blue, the name text
+	// gains ": <seconds>" [orig: "%s: %ld" @0x5a400e]; a standing medic
+	// request pulses the color toward white on the 64-frame triangle
+	// [orig: @0x5a3dfb..0x5a3e6d]; dead without a slot -> table[8] gray.
+	state.friendly_tags[0].health_ratio_fp16 = 0;
+	state.friendly_tags[0].dead = true;
+	state.friendly_tags[0].has_slot = true;
+	state.friendly_tags[0].revive_seconds = 87;
+	state.ticks = 8; // t = 0 -> no lift
+	const HudDrawList &downed = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t light_blue =
+			(217u << 24) | (opennova::hud::kFriendlyTagDownedLightBlue & 0xFFFFFFu);
+	CHECK(!downed.glyphs.empty() &&
+					downed.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(light_blue),
+			"dead + slot + revive window rides table[3] light blue");
+	CHECK(downed.glyphs.size() == 11 + 4,
+			"the text form appends ': 87' to the name");
+	state.friendly_tags[0].medic_request = true;
+	state.ticks = 8 + 32; // t = 0x20 -> full lift = white
+	const HudDrawList &pulse_peak = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(!pulse_peak.glyphs.empty() &&
+					pulse_peak.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(
+									(217u << 24) | 0xFFFFFFu),
+			"a medic request pulses to white at the triangle's peak");
+	state.ticks = 8;
+	const HudDrawList &pulse_base = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(!pulse_base.glyphs.empty() &&
+					pulse_base.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(light_blue),
+			"the pulse returns to table[3] at the triangle's base");
+	CHECK(opennova::hud::friendly_tag_revive_pulse(
+					opennova::hud::kFriendlyTagDownedLightBlue, 8 + 47) ==
+					opennova::hud::friendly_tag_revive_pulse(
+							opennova::hud::kFriendlyTagDownedLightBlue, 8 + 16),
+			"the triangle wave mirrors t -> 0x3F - t past the peak");
+	state.friendly_tags[0].medic_request = false;
+	state.friendly_tags[0].has_slot = false;
+	const HudDrawList &gray = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t downed_gray =
+			(217u << 24) | (opennova::hud::kFriendlyTagDownedGray & 0xFFFFFFu);
+	CHECK(!gray.glyphs.empty() &&
+					gray.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(downed_gray),
+			"dead without a slot rides table[8] gray");
+	CHECK(gray.glyphs.size() == 11, "no slot, no count");
+	// The BRIEF ticks draw the bare count one fontH above the point
+	// [orig: "%ld" @0x5a41f0 -> HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
+	state.friendly_tags[0].has_slot = true;
+	state.friendly_tag_mode = 3;
+	const HudDrawList &brief_count = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(brief_count.lines.size() == 3 && brief_count.glyphs.size() == 2,
+			"BRIEF draws the ticks plus the bare two-digit count");
+	CHECK(!brief_count.glyphs.empty() &&
+					brief_count.glyphs[0].y_top < 100.0f - 8.0f,
+			"the bare count sits a fontH above the projected point");
+	state.friendly_tag_mode = 2;
+	state.friendly_tags[0].dead = false;
+	state.friendly_tags[0].has_slot = false;
+	state.friendly_tags[0].revive_seconds = 0;
+	state.friendly_tags[0].health_ratio_fp16 = 0x10000;
+	state.ticks = 0;
+
 	// Gates: too close, fogged, FARBRIEF far, OFF.
 	state.friendly_tags[0].dist_q16 = 0x4000;
 	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),

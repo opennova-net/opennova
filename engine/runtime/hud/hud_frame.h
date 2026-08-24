@@ -357,6 +357,16 @@ struct HudFriendlyTag {
 	bool medic = false;     // CharAttr class flag 8 [orig: charattr.def Medic]
 	bool speaking = false;  // entity == g_voicePlaybackEntity @ 0xC6EC38
 	bool player = false;    // slot-walk entry (empty callsign draws the bar leg)
+	// The DOWNED legs [orig: HUD_DrawEntityLabel — dead = `Flags & 2`
+	// @0x5a3c1c; slot present + slot+0x10 revive seconds + slot+0x2C medic
+	// request @0x5a3ddd..0x5a3df5]: the bad tier recolors light blue / gray,
+	// the request pulses toward white, and the seconds are appended to the
+	// text (`"%s: %ld"` @0x5a400e) or drawn bare a fontH above the tick /
+	// bar forms (`"%ld"` @0x5a41f0 / @0x5a4428).
+	bool dead = false;
+	bool has_slot = false;
+	uint8_t revive_seconds = 0;
+	bool medic_request = false;
 };
 
 struct HudMessageLine {

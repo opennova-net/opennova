@@ -710,6 +710,7 @@ struct ClientState {
 	std::uint32_t frames_applied = 0;
 
 	ClientEntityState *find(uint16_t handle);
+	const ClientEntityState *find(uint16_t handle) const;
 	ClientEntityState &upsert(uint16_t handle);
 	void mark_changed() { ++revision; }
 	void mark_topology_changed() {

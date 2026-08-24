@@ -686,7 +686,7 @@ func _apply_friendly_tags() -> void:
 				names.append(String(tag.get("name", "")))
 				ids.append(int(tag.get("entity_id", 0)))
 				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
-				flags.append(4 if bool(tag.get("player", false)) else 0)
+				flags.append(_friendly_tag_flags(tag))
 	var fog_q16 := 0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null
@@ -694,6 +694,25 @@ func _apply_friendly_tags() -> void:
 		fog_q16 = int(env.get_fog_distance() * 65536.0)
 	_game_hud.set_friendly_tag_env(fog_q16, 0)
 	_game_hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
+
+
+# The HudOverlay friendly-tag flag word (hud_overlay.h documents the bits):
+# medic plate 1, speaking 2, player-slot entry 4, dead 8, has-slot 16, medic
+# request 32, revive seconds << 8.
+static func _friendly_tag_flags(tag: Dictionary) -> int:
+	var flags := 0
+	if bool(tag.get("medic", false)):
+		flags |= 1
+	if bool(tag.get("player", false)):
+		flags |= 4
+	if bool(tag.get("dead", false)):
+		flags |= 8
+	if bool(tag.get("has_slot", false)):
+		flags |= 16
+	if bool(tag.get("medic_request", false)):
+		flags |= 32
+	flags |= (clampi(int(tag.get("revive_seconds", 0)), 0, 255) << 8)
+	return flags
 
 
 # The label text per seat type, resolved in the gametext table's Overlays section with

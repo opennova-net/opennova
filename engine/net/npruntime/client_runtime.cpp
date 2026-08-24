@@ -222,6 +222,21 @@ void ClientRuntime::advance_zone_timers() {
 	}
 }
 
+void ClientRuntime::tick_roster_revive_countdown() {
+	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+	if (++slot_refresh_frames_ <= 62) return;
+	for (netsim::ClientRosterSlot &slot : view_.state().roster) {
+		// slot+0x0D active, slot+0x24 entity, slot+0x10 > 0 (unsigned).
+		if (!slot.bound || slot.entity_slot < 0 || slot.downed_revive_seconds == 0)
+			continue;
+		// PlayerSlot_SetDownedState(seconds - 1, slot+0x2C): the medic-request
+		// latch is re-stored unchanged [orig: @0x42C2B9..0x42C2C4].
+		--slot.downed_revive_seconds;
+		view_.state().mark_changed();
+	}
+	slot_refresh_frames_ = 0;
+}
+
 std::vector<uint8_t> ClientRuntime::start() {
 	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
 
@@ -247,6 +262,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	pending_deployment_pick_set_ = false;
 	pending_deployment_pick_ = 0xFFFFu;
 	current_tick_ = 0;
+	slot_refresh_frames_ = 0;
 	last_keepalive_tick_ = 0;
 	net_quality_timer_ = 0;
 	tag2c_send_cooldown_ = 0;
@@ -615,6 +631,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	if (role_ == Role::Joiner)
 		stage_reload_notifications_before_body_tick();
 
+	// The roster revive countdown precedes the zone-list advance in the frame
+	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA, then @0x42C2E1].
+	tick_roster_revive_countdown();
 	// Retail advances this shared list once after the complete receive pump,
 	// including on the authority's HostClient loopback path.
 	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
