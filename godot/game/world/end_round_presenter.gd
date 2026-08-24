@@ -136,11 +136,20 @@ func tick() -> void:
 		_header_edge_msec = Time.get_ticks_msec()
 		_stat_opened = false
 		_last_game_type = int(state.get("game_type", 0))
-	_tear_down_screens()
 	if not _stat_opened:
+		# Only the PRE-STAT phase tears the deploy/armory scene down (every
+		# pass) and draws the overlay; once the STAT phase latches, retail's
+		# transition returns immediately each frame — no teardown, no overlay
+		# — and after the player closes stat.mnu NOTHING from this path
+		# redraws until the host's round cycle exits the mission.
+		# [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — the locret
+		#  @0x5b864a once byte_28E561D is set; sub_54E650 @0x5b8674 pre-STAT
+		#  and once more on the open pass @0x5b862a]
+		_tear_down_screens()
 		_apply_overlay(sim)
 		if bool(state.get("board_known", false)) \
 				and Time.get_ticks_msec() - _header_edge_msec >= STAT_SCREEN_DELAY_MSEC:
+			_tear_down_screens()
 			_open_stat_screen(sim)
 	elif is_open():
 		_driver.tick(Time.get_ticks_msec())

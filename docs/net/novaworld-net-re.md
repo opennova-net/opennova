@@ -9980,7 +9980,26 @@ row colour team 1 `0xFF00BFFF` / team 2 `0xFFFF0000`, the local row selected; `s
 `npruntime/stat_screen_feed.{h,cpp}` (ctest `stat_screen_feed`), `HudFrameCompiler::
 element_end_round_overlay` + the Impac38b slot, `Simulation::get_end_round_state/lines/columns/rows`
 (one `ClientEndRoundStats` for both roles), `godot/game/world/end_round_presenter.gd` +
-`MainGame.State.END_ROUND`. Residue (D-HUD-25): the stat.mnu exit's round-cycle handoff.
+`MainGame.State.END_ROUND`. The round-cycle handoff is PORTED 2026-08-24 (closing
+D-HUD-25): once the STAT phase latches, the transition draws NOTHING more — no
+overlay, no per-pass UI teardown — every frame until the host's round cycle
+`[orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — the locret @0x5b864a once
+byte_28E561D is set; sub_54E650 runs @0x5b8674 pre-STAT and once on the open pass
+@0x5b862a]` (EndRoundPresenter.tick now gates its teardown/overlay on the pre-STAT
+phase); and the round cycle itself is the HOST's linger expiry EXITING THE MISSION —
+`Server_TickUpdate`'s drain sets `g_mission_exit_reason = 3` (4 with a pending replay
+transfer) into the map cycle `[orig: the drain @0x51da04..; the store @0x51db63;
+every exit reason lands on the same teardown + nav push @0x568654]`. Our session
+model closes the session at expiry (`ctx.is_in_session = 0`); the shell observes it
+(`Simulation::get_end_round_state.session_open`; `MainGame._maybe_exit_round_cycle`)
+and runs the same abort-to-menu teardown every mission exit takes — the map ROTATION
+(reloading the next entry) is not modeled, so the shell lands in the menu where a
+retail host would begin the next mission's load. A joiner's session dies with the
+host's exit and takes the same leg (or its net-session drive's session-lost path,
+whichever fires first). Client-side end-round state resets with the world teardown,
+the port of `Game_StartMission`'s clear (`g_spawn_success_gate = 0 @0x524a1f`; the
+once-only bytes via `sub_5B71B0 @0x525903`) — retail equally re-arms only through a
+fresh mission start, never within a round.
 The joiner's `g_round_time_remaining` fold is PORTED 2026-08-24: the 0x0A sub-block-1
 `timer_seconds` folds into `ClientState::round_time_remaining_ticks` as 62 x the wire's
 whole seconds, negative = untimed -1 `[orig: NapiNPClientMsg_0x00A @0x430219..0x430235]`,
