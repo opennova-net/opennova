@@ -323,7 +323,7 @@ sweep; blank = not yet characterized.
 | 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock) |
 | 0x1B | 0x426080 | `_0x01B` | |
 | 0x1C | 0x4227F0 | `_0x01C` | empty stub |
-| 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2). The payload is the END-ROUND BOARD HEADER (`EndRoundScoreboard_SerializeHeader @0x505280`, sent per slot from `Server_ProcessRoundEnd @0x516839`; draw flag `@0x430ac1`, `g_netPlayerCount = 0` `@0x430ac6`), and on an MP peer the handler KICKS the stat-board pull by queueing C2S 0x2B `[u16 0]` `@0x430ad5..0x430b03` (§5.68). **Consumer PORTED 2026-08-24**: the overlay ladder `draw_endround_stats_overlay @0x5b7cd0` (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the header's non-team FORM (`in_session && !(GameType & 0x10000)`: three 32-byte names `byte_A81B40/60/80` + three i16 `dword_A81BA0/A4/A8` before the draw byte `@0x430889..0x4309af`) is NOT decoded yet — `decode_end_round_header` reads the 7-byte team form only, so the DM/KOTH name arms of the ladder stay empty (D-HUD-25) |
+| 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2). The payload is the END-ROUND BOARD HEADER (`EndRoundScoreboard_SerializeHeader @0x505280`, sent per slot from `Server_ProcessRoundEnd @0x516839`; draw flag `@0x430ac1`, `g_netPlayerCount = 0` `@0x430ac6`), and on an MP peer the handler KICKS the stat-board pull by queueing C2S 0x2B `[u16 0]` `@0x430ad5..0x430b03` (§5.68). **Consumer PORTED 2026-08-24**: the overlay ladder `draw_endround_stats_overlay @0x5b7cd0` (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`). **Both header forms decode (2026-08-24)**: the non-team FORM (`in_session && !(GameType & 0x10000)` `@0x43086c..0x430883`) carries three C-STRING names + three i16 primary scores in place of the winner/team-score words; the client parses them into 32-byte staging `byte_A81B40/60/80` (at most 31 chars kept, the cursor advancing by the sender's full string) + `dword_A81BA0/A4/A8` `@0x430889..0x4309af`, then commits via `Napi_CopyString(dst, 32)` into board rows 0..2 `@0x430a70..0x430abb` — `decode_end_round_header(..., non_team_form)` mirrors the pick, and the DM/KOTH name arms of the ladder render from `EndRoundHeader.player_names/player_scores` |
 | 0x1E | 0x426270 | `_0x01E` (`NetPacket_HandleGameEvent`) | 8-byte game event; does not unblock movement directly. The flag transaction family is pickup `0x14` (`Server_HandleEntityDeath @0x517460`: actor pool-0 index + player's X/Y high fixed-point words), save `0x15` (`Server_BroadcastEntityDeathEvent @0x517A90`), capture `0x13` (`Server_ProcessScoringAndBroadcast @0x5169C0`), and automatic blue/red/neutral return `0x23/0x24/0x25` (`Server_BroadcastOverlayDeathEvent @0x50F5A0`: all indices `0xFF`, position zero). Every producer sets `send_mask 0x80`, so state-6/7 players including the listen host receive the event before the following 0x2F state or CTF 0x12 removal. `GameEvent_BuildPayload @0x5054E0` writes the high 16 bits of fixed-point X/Y; it does not round a float to the nearest whole unit. |
 | 0x1F | 0x427CB0 | `_0x01F` | |
 | 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; `[u16 start_idx][u16 count]` header + per-entity record per the §5.12 field map (u16 type_id; `type_id==0` ⇒ empty-slot sentinel, no body; else u8 flags + 3×i32 pos always, then u32 movementVal/BAM-heading (f&1; D-NET-59), u32 orient (f&2), u16 ammo (f&4), u16 netHandle ALWAYS, u8 team (f&8), u16 weaponType (f&0x10), u8 score (f&0x20)); allocates pool-3 entries |
@@ -6503,8 +6503,8 @@ captured bytes. The witnessed join burst is **leaner** — `Server_OnPlayerJoin 
 D-NET-114) emits only `0x42`(`NetPacket_WriteInputStateFlags @0x505ba0`) → world-stream
 (`Server_SendEntityStateToPlayer @0x517ba0`) → `0x0F`(`NetPacket_WriteWorldStateLoad0x0F @0x502d10`) →
 `0x4D`(player index byte) → seed (`Server_SendRandomSeedToPlayer @0x5101a0`, `0x61`) → `[0x14`
-cease-fire `NetPacket_WriteTwoBytesAndCString @0x5047a0]` → `[0x1D` weapon overlay
-`WeaponOverlay_SerializeToBuffer @0x505280` + game-state 11, when in-progress`]` → `0x3E`(empty
+cease-fire `NetPacket_WriteTwoBytesAndCString @0x5047a0]` → `[0x1D` end-round board header
+`EndRoundScoreboard_SerializeHeader @0x505280` (ex `WeaponOverlay_SerializeToBuffer` misnomer) + game-state 11, when in-progress`]` → `0x3E`(empty
 terminator). **P8 moves the reply machine to `npruntime` carrying these fixture bodies verbatim (zero
 wire regression); the faithful per-body port — emitting the serializers cited above — is the deferred
 grill wave** (mirrors the §5.2a serializer wave that P3–P6 left deferred). `[orig: Server_OnPlayerJoin
@@ -9899,10 +9899,22 @@ listen host never pulls) `@0x430ad5..0x430b03`. So the full sequence on a
 retail server is 0x61 + 0x1D pushed at round end, then 0x2B{0} → 0x56{0..199}
 → 0x2B{200} → 0x56{200..399} → … until `offset + len >= total`.
 
-The S2C 0x1D body is exactly seven bytes:
-`[u8 winner][s16 teamScore0][s16 teamScore1][u8 draw][s8 myEntryIndex]`.
-The last byte is the recipient's index in the already-frozen sorted player
-array, or -1. `[orig: EndRoundScoreboard_SerializeHeader @0x505280]`
+The S2C 0x1D body has TWO forms, picked by session state on both ends —
+never by length `[orig: is_in_session && !(g_GameType & 0x10000) — serializer
+@0x5052a6; client @0x43086c..0x430883]`. The team/offline form is exactly seven
+bytes: `[u8 winner][s16 teamScore0][s16 teamScore1][u8 draw][s8 myEntryIndex]`.
+The in-session non-team (DM/KOTH-family) form substitutes the top THREE rows of
+the already-frozen sorted board for the winner/team-score words:
+`[cstr name0][cstr name1][cstr name2][s16 score0][s16 score1][s16 score2]`
+before the same draw/index tail. The names are the entry-table rows' name field
+(`entry+4`, strcpy'd null-terminated `@0x5052bf..0x505337`); the scores are the
+game-type PRIMARY score `Server_BuildEndOfRoundScoreboard` selected into
+`entry+0x40` (the `sub_52C850(g_GameType, ...)` store `@0x509149..0x509152`,
+read back `@0x50535e..0x505381`). The receiving client keeps at most 31 chars +
+NUL of each name (32-byte staging, then `Napi_CopyString(dst, 32)` commit)
+while its cursor advances by the sender's full string `@0x430889..0x4309af`.
+The last byte is the recipient's index in the frozen board, or -1.
+`[orig: EndRoundScoreboard_SerializeHeader @0x505280]`
 
 **Port status (2026-08-22).** The complete transaction and producer schema are
 live. The authority freezes one `world::MatchResult`, pushes reliable S2C 0x61
@@ -9972,8 +9984,11 @@ element_end_round_overlay` + the Impac38b slot, `Simulation::get_end_round_state
 `HUD_DrawEndRoundStatistics @0x5b7600` (called from `sub_5C0060 @0x5c0092` only while
 `dword_24C18AC`, an action-binding toggle written `@0x49bd46` and cleared by
 `Game_InitRespawnState @0x499381`; its `HUD_DrawPlayerScoreRow/HUD_DrawTeamScoreRow` siblings have
-no other callers), the non-team 0x1D form, the joiner's `g_round_time_remaining` fold, and the
-stat.mnu exit's round-cycle handoff.
+no other callers), the joiner's `g_round_time_remaining` fold, and the
+stat.mnu exit's round-cycle handoff. The non-team 0x1D form is PORTED 2026-08-24 (`npwire`
+`decode/encode_end_round_header(..., non_team_form)`, `build_end_round_header` filling board rows
+0..2; ctests `nw_ingame_encode`, `nw_message_coverage`, `npruntime_round_end` DM,
+`npruntime_client_runtime` named form).
 
 The co-op phase claim is composed at the host boundary for both wire game-type
 codes. Stock Co-op executes a WAC `Win(2)` on the VM's 62-tick cadence;

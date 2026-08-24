@@ -63,7 +63,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::SPAWN_ACK_TIMESTAMP,       "spawn-ack-timestamp",     MsgCoverage::Decoded,     "§5.34-style decode_u32_scalar (ts ack of C2S 0x0A → dword_A82360)"},
 		{'S', s2c::WAIT_FOR_GAME_START_ACK,   "wait-for-game-start-ack", MsgCoverage::PrinterOnly, "game-start gate"},
 		{'S', s2c::NOOP,                      "noop",                    MsgCoverage::PrinterOnly, "empty stub @0x4227F0"},
-		{'S', s2c::END_ROUND_HEADER,          "end-round-header",        MsgCoverage::Decoded,     "§5.68 decode_end_round_header; fixed 7 B, then client requests C2S 0x2B offset 0"},
+		{'S', s2c::END_ROUND_HEADER,          "end-round-header",        MsgCoverage::Decoded,     "§5.68 decode_end_round_header; 7-B team form or the non-team top-three-names form, then client requests C2S 0x2B offset 0"},
 		{'S', s2c::GAME_EVENT,                "game-event",              MsgCoverage::Decoded,     "§5.26 decode_game_event"},
 		{'S', s2c::POOL3_SYNC,                "pool3-sync",              MsgCoverage::Decoded,     "§5.12 decode_pool3_sync_batch"},
 		{'S', s2c::KILL_SYNC,                 "kill-sync",               MsgCoverage::Decoded,     "§5.26 decode_kill_record"},

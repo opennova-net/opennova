@@ -95,6 +95,52 @@ void test_objective_and_non_team() {
 	lines = end_round_overlay_lines(dm);
 	CHECK(lines[0].key == "STROVER35" && lines[1].key == "STROVER116" &&
 			lines[1].args.size() == 2);
+	// The third name row: all three decoded header rows render.
+	dm.player_scores[1] = 4;
+	dm.player_names[2] = "Cid";
+	dm.player_scores[2] = -1;
+	lines = end_round_overlay_lines(dm);
+	CHECK(lines[4].args[0].literal == "Cid" && lines[4].args[1].number == -1 &&
+			lines[4].y == 494);
+	CHECK(lines[5].y == 558); // game time follows the third row + 24
+
+	// KOTH (0x1): the named winner arm STROVER103 (timed) / STROVER104, the
+	// draw STROVER117, the two-name tie STROVER118.
+	EndRoundOverlayInput koth;
+	koth.game_type = 0x1;
+	koth.player_names[0] = "Ace";
+	koth.player_scores[0] = 9;
+	koth.player_names[1] = "Bee";
+	koth.player_scores[1] = 4;
+	koth.round_time_remaining_ticks = 62;
+	lines = end_round_overlay_lines(koth);
+	CHECK(lines[0].key == "STROVER_PLAYERWIN" && lines[0].args[0].literal == "Ace");
+	CHECK(lines[1].key == "STROVER103" && lines[1].args[0].literal == "Ace");
+	koth.round_time_remaining_ticks = 0;
+	CHECK(end_round_overlay_lines(koth)[1].key == "STROVER104");
+	koth.draw = true;
+	CHECK(end_round_overlay_lines(koth)[1].key == "STROVER117");
+	koth.draw = false;
+	koth.player_scores[1] = 9; // the KOTH two-name tie
+	lines = end_round_overlay_lines(koth);
+	CHECK(lines[0].key == "STROVER35" && lines[1].key == "STROVER118" &&
+			lines[1].args.size() == 2 && lines[1].args[1].literal == "Bee");
+
+	// The KOTH family's non-team variant 0x8: STROVER109/110/119/120.
+	EndRoundOverlayInput koth8;
+	koth8.game_type = 0x8;
+	koth8.player_names[0] = "Ace";
+	koth8.player_scores[0] = 9;
+	koth8.round_time_remaining_ticks = 62;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER109");
+	koth8.round_time_remaining_ticks = 0;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER110");
+	koth8.draw = true;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER119");
+	koth8.draw = false;
+	koth8.player_names[1] = "Bee";
+	koth8.player_scores[1] = 9;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER120");
 }
 
 void test_column_layout() {

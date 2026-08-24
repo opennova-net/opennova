@@ -71,9 +71,13 @@ TypedArray<Dictionary> Simulation::get_end_round_lines() const {
 	in.death_screen = local_death_screen_active();
 	in.team_scores[0] = er.header.team_score_0;
 	in.team_scores[1] = er.header.team_score_1;
-	// The non-team 0x1D form (three named players + scores) is not decoded
-	// yet (net-re §5.68 residue): the names stay empty and the ladder takes
-	// its name-less arms.
+	// The non-team 0x1D form's three named players + primary scores; empty
+	// names take the ladder's name-less arms. (retail: the 0x1D commit
+	// @0x430a70..0x430abb into byte_24C1A98/B7C/C60 + dword_24C1AD4/BB8/C9C)
+	for (int i = 0; i < 3; ++i) {
+		in.player_names[i] = er.header.player_names[i];
+		in.player_scores[i] = er.header.player_scores[i];
+	}
 	if (world_ && !joiner_) in.round_time_remaining_ticks = std::max(0, world_->match.remaining_ticks());
 	for (const opennova::hud::EndRoundLine &line : opennova::hud::end_round_overlay_lines(in)) {
 		Dictionary d;

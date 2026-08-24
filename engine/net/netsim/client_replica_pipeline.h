@@ -268,6 +268,13 @@ public:
 	void set_game_type(uint32_t game_type) { game_type_ = game_type; }
 	uint32_t game_type() const { return game_type_; }
 
+	// The 0x1D header-form discriminator's session half: retail reads
+	// g_napi_np_ctx.is_in_session; a joiner is always in-session, while the
+	// listen host's loopback replica passes world.mp_session (retail SP never
+	// runs this client path at all). [orig: NapiNPClientMsg_0x01D @0x43086c]
+	void set_mp_session(bool mp_session) { mp_session_ = mp_session; }
+	bool mp_session() const { return mp_session_; }
+
 	// Recipient context for S2C 0x59's friend/foe item selection. Retail
 	// compares the placing owner's team with the local player's team and lets
 	// multiplayer attribute 0x8000 force the enemy presentation variant.
@@ -351,6 +358,7 @@ private:
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
+	bool mp_session_ = false;
 	uint16_t viewer_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this

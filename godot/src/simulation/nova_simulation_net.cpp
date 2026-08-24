@@ -170,6 +170,10 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// carried to remote clients in 0x7B extra; the local loopback has no
 		// handshake, so seed its view directly from the consolidated config.
 		runtime_->view().set_game_type(host_config.game_type);
+		// The 0x1D header-form session half: the loopback replica stands in
+		// world.mp_session for the retail is_in_session (SP listen stays the
+		// 7-byte team form). [orig: NapiNPClientMsg_0x01D @0x43086c]
+		runtime_->view().set_mp_session(world_ != nullptr && world_->mp_session);
 
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
 		// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
