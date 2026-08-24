@@ -30,6 +30,9 @@ const STAT_SCREEN_DELAY_S := 6.0
 # the full design frame here.
 const OVERLAY_TOP := 0
 const OVERLAY_BOTTOM := 768
+# The RESULTLIST's authored width (jo_stat.mnu: the STATS window spans 20..770)
+# when the compiled frame has not laid the table out yet.
+const RESULT_LIST_DEFAULT_WIDTH := 750
 
 signal opened
 signal closed
@@ -219,7 +222,7 @@ func _populate(sim: Simulation) -> void:
 	if list_id < 0:
 		return
 	var rect := _driver.widget_frame_rect(list_id)
-	var table_width := int(rect.size.x) if rect.size.x > 0.0 else 750
+	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
 	_driver.table_clear_rows(list_id)
 	var team_mode := (_last_game_type & 0x10000) != 0
 	for tab in ["RADIO_TAB_OVERALL", "RADIO_TAB_REDTEAM", "RADIO_TAB_BLUETEAM"]:
@@ -306,7 +309,7 @@ func _apply_tab_filter(tab: int) -> void:
 	if list_id < 0:
 		return
 	var rect := _driver.widget_frame_rect(list_id)
-	var table_width := int(rect.size.x) if rect.size.x > 0.0 else 750
+	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
 	_driver.table_clear_rows(list_id)
 	var headers := PackedStringArray()
 	for value in sim.get_end_round_columns(table_width):
