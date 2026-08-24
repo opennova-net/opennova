@@ -1041,6 +1041,10 @@ func _teardown_world_to_menu() -> void:
 	if _deploy_presenter != null:
 		_deploy_presenter.teardown()  # same stale-root hazard, and the shell's blanket
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
+	if _end_round_presenter != null:
+		_end_round_presenter.teardown()  # same stale-root hazard: the stat.mnu frame and
+		# its MenuAudio hold the OLD world's resource root, and a frame left visible when
+		# the session ends mid-STAT would be re-shown over the next mission
 	_world.unload()
 	if _player_presenter != null:
 		_player_presenter.setup(_world, _camera, _camera)

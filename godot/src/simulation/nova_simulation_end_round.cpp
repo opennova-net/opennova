@@ -84,6 +84,10 @@ TypedArray<Dictionary> Simulation::get_end_round_lines() const {
 		for (const opennova::hud::EndRoundArg &a : line.args) args.push_back(arg_to_dict(a));
 		d["args"] = args;
 		d["y"] = line.y;
+		// The empty-resolve fold the presenter applies (see
+		// hud::EndRoundEmptyFold): 1 = headline STROVER1 re-lookup,
+		// 2 = collapse the line and shift the ladder below it up 32 px.
+		d["fold"] = static_cast<int>(line.fold);
 		out.push_back(d);
 	}
 	return out;
@@ -109,8 +113,8 @@ TypedArray<Dictionary> Simulation::get_end_round_columns(int p_table_width) cons
 
 TypedArray<Dictionary> Simulation::get_end_round_rows() const {
 	// The PLAYER SLOT table retail walks is the roster every role's view
-	// folds from 0x46 (name / clan / team); a joiner's own slot is the
-	// header's player_index, the host's is its own connection slot.
+	// folds from 0x46 (name / clan / team). The local row comes from the 0x1D
+	// header's board index, resolved to a connection slot below.
 	TypedArray<Dictionary> out;
 	if (!runtime_) return out;
 	const opennova::netsim::ClientState &cs = runtime_->state();
@@ -126,7 +130,20 @@ TypedArray<Dictionary> Simulation::get_end_round_rows() const {
 		p.squad = slot.clan;
 		players.push_back(p);
 	}
-	const int local_slot = cs.end_round.header.player_index;
+	// The header's player_index is the recipient's index into the FROZEN
+	// (points-descending) board array, not a connection slot. Retail joins the
+	// board by the row's stored slot id and highlights the row whose slot
+	// matches board[player_index].slot; the same fold works for both roles
+	// because the listen host consumes its own loopback 0x1D.
+	// [orig: populate_stat_results_list @0x562240 — row slot store @0x562576,
+	//  board join @0x5624F3, selection compare @0x56272E]
+	int local_slot = -1;
+	const int8_t header_index = cs.end_round.header.player_index;
+	if (header_index >= 0 &&
+			static_cast<size_t>(header_index) <
+					cs.end_round.board.players.size()) {
+		local_slot = cs.end_round.board.players[header_index].slot;
+	}
 	for (const opennova::np::StatScreenRow &r :
 			opennova::np::stat_screen_rows(cs.end_round.board, players, false, local_slot)) {
 		Dictionary d;

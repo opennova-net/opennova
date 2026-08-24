@@ -160,10 +160,27 @@ func _apply_overlay(sim: Simulation) -> void:
 		return
 	var texts := PackedStringArray()
 	var ys := PackedInt32Array()
+	var y_shift := 0
 	for value in sim.get_end_round_lines():
 		var line := value as Dictionary
-		var fmt := _resolve(String(line.get("key", "")), String(line.get("fallback", "")),
-				String(line.get("literal", "")))
+		var key := String(line.get("key", ""))
+		var fold := int(line.get("fold", 0))
+		# The empty-resolve folds (a key PRESENT in gametext with an empty
+		# value; a missing key still takes the fallback): the headline
+		# re-looks-up Overlays/STROVER1 with the "!Mission Completed"
+		# fallback, the second line draws nothing and the ladder below it
+		# moves up 32 px so the score lines start at 382.
+		# [orig: LABEL_30 @0x5b7e59 -> @0x5b7e5b; LABEL_144 @0x5b83e5]
+		var fmt: String
+		if fold != 0 and _key_present_but_empty(key):
+			if fold == 1:
+				fmt = _resolve("STROVER1", "!Mission Completed", "")
+			else:
+				y_shift = 32
+				continue
+		else:
+			fmt = _resolve(key, String(line.get("fallback", "")),
+					String(line.get("literal", "")))
 		var args: Array = []
 		for raw in line.get("args", []):
 			var a := raw as Dictionary
@@ -178,7 +195,7 @@ func _apply_overlay(sim: Simulation) -> void:
 			var g := fmt.replace("%ld", "%d")
 			text = g % args if g.count("%") == args.size() else fmt
 		texts.append(text)
-		ys.append(int(line.get("y", 0)))
+		ys.append(int(line.get("y", 0)) - y_shift)
 	hud.set_end_round_overlay(true, OVERLAY_TOP, OVERLAY_BOTTOM, texts, ys)
 	_overlay_shown = true
 
@@ -189,6 +206,17 @@ func _hide_overlay() -> void:
 		hud.set_end_round_overlay(false, OVERLAY_TOP, OVERLAY_BOTTOM,
 				PackedStringArray(), PackedInt32Array())
 	_overlay_shown = false
+
+
+# True only for a key that EXISTS in the Overlays table with an empty value —
+# the case retail's composed text_buf ends up empty, distinct from a missing
+# key (which GameText_GetStringWithFallback folds to the fallback).
+func _key_present_but_empty(key: String) -> bool:
+	if key.is_empty():
+		return false
+	var t: RtxtStringFile = Strings.get_table("gametext")
+	return t != null and t.has_string_in_section("Overlays", key) \
+			and t.get_string_in_section("Overlays", key).is_empty()
 
 
 func _resolve(key: String, fallback: String, literal: String) -> String:
