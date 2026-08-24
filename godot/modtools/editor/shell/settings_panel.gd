@@ -29,6 +29,10 @@ var _open_pff_tool: Callable
 var _mcp_service: Callable
 # func(active) -> void: the dock's settings visibility (PFF button closes it).
 var _set_settings_visible: Callable
+# func() -> void: re-gate the launch toolbar after the retail install changes. Nothing else
+# observes that setting, so without this the F7 button reflects it only after an unrelated
+# workspace/root change.
+var _refresh_launch: Callable
 
 var _settings_resource_dir_edit: LineEdit
 var _settings_browse_resource_dir_button: Button
@@ -61,7 +65,8 @@ func setup(
 	preferred_resource_root_dir: Callable,
 	open_pff_tool: Callable,
 	mcp_service: Callable,
-	set_settings_visible: Callable
+	set_settings_visible: Callable,
+	refresh_launch: Callable = Callable()
 ) -> void:
 	_resource_library = resource_library
 	_get_active_workspace = get_active_workspace
@@ -72,6 +77,7 @@ func setup(
 	_open_pff_tool = open_pff_tool
 	_mcp_service = mcp_service
 	_set_settings_visible = set_settings_visible
+	_refresh_launch = refresh_launch
 
 
 func bind_nodes(
@@ -343,9 +349,15 @@ func _apply_retail_dir_from_field() -> void:
 
 func _apply_retail_dir(path: String) -> void:
 	var clean := path.strip_edges()
-	OnedSettings.set_retail_dir(clean)
 	if _settings_retail_dir_edit != null:
 		_settings_retail_dir_edit.text = clean
+	if clean == OnedSettings.get_retail_dir():
+		# focus_exited fires on every tab-through; an unchanged value is not a change to
+		# persist or announce.
+		return
+	OnedSettings.set_retail_dir(clean)
+	if _refresh_launch.is_valid():
+		_refresh_launch.call()
 	if clean.is_empty():
 		_status("Retail install cleared; Play in Retail is disabled.")
 	elif not DirAccess.dir_exists_absolute(clean):

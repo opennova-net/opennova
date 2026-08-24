@@ -219,12 +219,14 @@ func _ready() -> void:
 		func() -> String: return _resource_library.get_root_dir(),
 		func() -> String: return OnedSettings.get_expansion(),
 		func() -> String: return OnedSettings.get_game(),
-		# cwd matters for retail only, but routing every launch through one spawn keeps the
-		# seam single. An empty cwd behaves exactly like OS.create_process.
+		# cwd matters for retail only, but where the platform has the handle-tracking spawner,
+		# EVERY child goes through it: liveness and kill below answer through the handle it
+		# keeps, so a pid Windows recycled after the child exited can never be mistaken for it.
+		# An empty cwd inherits ours, exactly like OS.create_process.
 		func(path: String, args: PackedStringArray, cwd: String) -> int:
-			if cwd.is_empty():
-				return OS.create_process(path, args)
-			return Process.spawn_in_dir(path, args, cwd),
+			if Process.supports_working_directory():
+				return Process.spawn_in_dir(path, args, cwd)
+			return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		get_unsaved_workspace_labels,
 		show_status_message,
@@ -255,7 +257,16 @@ func _ready() -> void:
 		func(out_dir: String, retail_dir: String) -> Dictionary:
 			return EditorGamePacker.pack_for_retail(
 				_resource_library.get_resource_root(), out_dir, retail_dir),
-		_play_in_retail_button
+		_play_in_retail_button,
+		# A forced stop is only done once the child is GONE -- the restart repacks the archives
+		# it had open.
+		func(pid: int, timeout_msec: int) -> bool:
+			if Process.supports_working_directory():
+				return Process.wait_for_exit(pid, timeout_msec)
+			return not OS.is_process_running(pid),
+		func(pid: int) -> void:
+			if Process.supports_working_directory():
+				Process.release(pid)
 	)
 	_tile_gizmo_overlay.setup(_tile_gizmo, _tile_gizmo_label, _viewport_lane, active_workspace_supplier)
 	_tile_gizmo_overlay.wire_buttons(
@@ -291,7 +302,8 @@ func _ready() -> void:
 		_preferred_resource_root_dir,
 		_pff_tool.open,
 		_mcp_service,
-		func(active: bool) -> void: _popovers.set_settings_visible(active)
+		func(active: bool) -> void: _popovers.set_settings_visible(active),
+		func() -> void: _game_launch.refresh()
 	)
 	_settings_panel.bind_nodes(
 		_settings_resource_dir_edit, _settings_browse_resource_dir_button,

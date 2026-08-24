@@ -57,7 +57,9 @@ func setup(
 	stop_button: Button = null,
 	retail_dir: Callable = Callable(),
 	pack_retail: Callable = Callable(),
-	retail_button: Button = null
+	retail_button: Button = null,
+	wait_for_exit: Callable = Callable(),
+	release_process: Callable = Callable()
 ) -> void:
 	_button = button
 	_mission_button = mission_button
@@ -77,7 +79,9 @@ func setup(
 		kill_process,
 		now_msec,
 		retail_dir,
-		pack_retail)
+		pack_retail,
+		wait_for_exit,
+		release_process)
 	if _button != null:
 		_button.icon = EditorIconLibrary.resolve(&"play_in_game")
 		if not _button.pressed.is_connected(_on_pressed):
@@ -204,7 +208,12 @@ func _on_stop_pressed() -> void:
 ## Pack the mounted assets and launch retail on them — the asset oracle.
 ## Disabled unless a retail install is configured; the session owns the rest.
 func run_retail() -> bool:
-	return _session.start_mode("retail")
+	var started := _session.start_mode("retail")
+	# start_mode flips STOPPED -> RUNNING synchronously, between two polls, so poll()'s
+	# transition check never sees it: without this the Stop button stays disabled for the
+	# whole retail run.
+	refresh()
+	return started
 
 
 # Retail's gating is independent of the OpenNova runtime's: `available()` asks whether a

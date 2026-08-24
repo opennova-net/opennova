@@ -16,6 +16,10 @@ const PACKAGED_RUNTIME_CANDIDATES: Array[String] = [
 	"../../../opennova.app/Contents/MacOS/opennova",
 ]
 const STOP_GRACE_MSEC := 1000
+# How long a forced stop waits for the child to actually be gone. TerminateProcess only
+# requests the exit; a restart that repacked the archives on this same stack while the dying
+# child still held them open failed intermittently with a sharing violation.
+const STOP_KILL_WAIT_MSEC := 5000
 
 enum Mode { GAME, CURRENT_MISSION, RETAIL }
 enum State { STOPPED, RUNNING, STOPPING }
@@ -95,6 +99,12 @@ var _is_process_running: Callable
 var _kill_process: Callable
 var _now_msec: Callable
 var _show_status: Callable
+# func(pid, timeout_msec) -> bool: block until the child is gone. Optional; without it a
+# forced stop is reported done as soon as the kill call returns.
+var _wait_for_exit: Callable
+# func(pid) -> void: the spawner may hold OS state (a process handle) for the child; this
+# lets it go once the session has finished with the pid.
+var _release_process: Callable
 
 # Optional cross-process control seams. No MCP dependency lives here.
 # forwarder(run_id, descriptor_path, tool, args) -> Variant
@@ -128,7 +138,9 @@ func setup(
 	kill_process: Callable = Callable(),
 	now_msec: Callable = Callable(),
 	retail_dir: Callable = Callable(),
-	pack_retail: Callable = Callable()
+	pack_retail: Callable = Callable(),
+	wait_for_exit: Callable = Callable(),
+	release_process: Callable = Callable()
 ) -> void:
 	_resource_dir = resource_dir
 	_expansion = expansion
@@ -143,6 +155,8 @@ func setup(
 	_now_msec = now_msec
 	_retail_dir = retail_dir
 	_pack_retail = pack_retail
+	_wait_for_exit = wait_for_exit
+	_release_process = release_process
 
 
 ## Install the optional runtime peer after both shell and MCP service exist.
@@ -631,7 +645,13 @@ func _kill_now() -> bool:
 		return true
 	var err := int(_kill_process.call(_pid)) \
 			if _kill_process.is_valid() else int(OS.kill(_pid))
-	return err == OK
+	if err != OK:
+		return false
+	# Stopped means GONE, not "asked to go": the restart path repacks the archives the child
+	# had open as soon as this returns true.
+	if _wait_for_exit.is_valid():
+		return bool(_wait_for_exit.call(_pid, STOP_KILL_WAIT_MSEC))
+	return not _process_is_alive()
 
 
 func _finish_stopped(report_exit: bool) -> void:
@@ -643,6 +663,8 @@ func _finish_stopped(report_exit: bool) -> void:
 	_pid = -1
 	_active_request = null
 	_stop_deadline_msec = 0
+	if pid > 0 and _release_process.is_valid():
+		_release_process.call(pid)
 	if not run_id.is_empty():
 		run_stopped.emit(run_id, descriptor_path)
 	if report_exit:
