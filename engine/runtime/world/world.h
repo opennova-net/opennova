@@ -24,6 +24,7 @@
 #include "world/system.h"
 #include "world/trigger_relations.h"
 #include "world/round_ring.h"
+#include "world/water_cross.h"
 #include "world/fire_sound.h"
 #include "world/sound_emitter_mailbox.h"
 #include "world/var_store.h"
@@ -384,6 +385,9 @@ public:
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
     RoundRing rounds;
+    // Water-surface crossings recorded this tick; the host fan drains them
+    // into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
+    WaterCrossQueue water_crossings;
 
     // The ammo.def ballistics/damage table (empty until the host feeds it —
     // Simulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable

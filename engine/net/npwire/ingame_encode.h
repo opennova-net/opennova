@@ -354,4 +354,35 @@ std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list);
 //  stores them back @0x431b3a / @0x431b46]
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 
+// §5.50 S2C 0x34 — positioned sound. The host fans a sound-profile NAME plus an
+// optional world position; clients look the name up in their loaded profiles and
+// play it in 3D. Byte layout, witnessed exactly: [u8 actionType][cstr name], and
+// for actionType 1 three i16 world-unit coordinates (the engine's 16.16 fixed
+// positions shifted down 16). Retail's writer copies the name from the referenced
+// def's +4 field and appends the position triple only for type 1.
+// [orig: NetPacket_WriteOverlayAction @0x505d50; fanned by
+//  Server_SendOverlayActionToAlive @0x50a1b0 with send_mask 128 (alive players)]
+std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd);
+
+// The two water-crossing effect names retail fans through 0x34, both witnessed
+// in the Base Assault baseline capture (BODYWATER1 x24, SURFACE_WTR x15, all at
+// the water plane z=12/13).
+//
+// WHICH sound a crossing takes is witnessed and is not a family split: every
+// caller passes the same two sound globals and chooses on the crossing entity's
+// Flags & 0x2000 (airborne). Only the name-to-global binding is capture-derived,
+// by PROXIMITY: correlating every 0x34 against the absolute entity positions in
+// the surrounding frames gives BODYWATER1 a nearest-infantry median of 1.2u
+// (nearest vehicle 9.1u) and SURFACE_WTR a nearest-vehicle median of 3.4u
+// (nearest infantry 163u). That is consistent with the witnessed selector rather
+// than in tension with it: a soldier WALKS into a river (never airborne, so the
+// non-airborne sound) while a vehicle almost always leaves the bank with air
+// under it (airborne, so the other one). Naming them for the selector, not for
+// the population that happens to dominate each one in one capture.
+// [orig: the fan is Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128);
+//  the selector and both callers are quoted at world::WaterCrossEvent::airborne]
+inline constexpr char kWaterCrossWadeEffect[] = "BODYWATER1";      // entered grounded
+inline constexpr char kWaterCrossAirborneEffect[] = "SURFACE_WTR"; // entered from the air
+
+
 } // namespace opennova

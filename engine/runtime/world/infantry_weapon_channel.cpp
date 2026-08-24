@@ -233,4 +233,54 @@ bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_ha
            (infantry_anim_flags(inf.anim_state) & 0x40u) != 0;
 }
 
+
+// The physical recoil accumulator's per-body decay and orientation drift.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
+                          int32_t &pitch, int32_t random16) {
+    // The accumulator yields an eighth-step, then loses half of that step.
+    // Pitch receives one eighth of the pre-halved step and yaw receives the
+    // half-step with PRNG-selected sign. The caller draws PRNG_Next16 even when
+    // recoil is zero. [orig: the entity+0x380 body-update block]
+    const int32_t step = io::bam_sar(io::bam_add(inf.recoil_pitch, 4), 3);
+    const int32_t half = io::bam_sar(step, 1);
+    inf.recoil_pitch = io::bam_sub(inf.recoil_pitch, half);
+    if (inf.recoil_pitch <= 0x300) inf.recoil_pitch = 0;
+    pitch = io::bam_add(pitch, io::bam_sar(step, 3));
+    heading = (random16 & 1) == 0 ? io::bam_add(heading, half)
+                                  : io::bam_sub(heading, half);
+}
+
+void infantry_weapon_weight_spread_tick(
+        InfantryState &inf, const InfantryWeightSpreadInputs &inputs) {
+    if (inputs.produce) {
+        const int32_t weight = io::bam_add(inputs.weaponweight_fp16,
+                                           inputs.clipweight_fp16);
+        int32_t increment = 0;
+        if (inputs.aimed_shot_available ||
+            (inputs.prone && !inputs.drowning)) {
+            increment = weight / 3;
+        } else if (inputs.crouched && !inputs.drowning) {
+            increment = static_cast<int32_t>(
+                    static_cast<double>(weight) * 2.0 / 3.0);
+        } else {
+            increment = static_cast<int32_t>(static_cast<double>(weight) * 1.5);
+        }
+        inf.weapon_weight_spread =
+                io::bam_add(inf.weapon_weight_spread, increment);
+        if (inputs.airborne_rising) {
+            inf.weapon_weight_spread =
+                    io::bam_add(inf.weapon_weight_spread, 0x01000000);
+        }
+    }
+
+    // Shared decay is after the local producer; remote players and AI jump
+    // directly here. There is no upper clamp.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B5945]
+    inf.weapon_weight_spread = io::bam_sub(
+            inf.weapon_weight_spread,
+            io::bam_sar(io::bam_add(inf.weapon_weight_spread, 4), 4));
+    if (inf.weapon_weight_spread <= 0x300) inf.weapon_weight_spread = 0;
+}
+
 } // namespace opennova::world

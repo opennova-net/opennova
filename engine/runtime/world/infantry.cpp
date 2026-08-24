@@ -482,7 +482,7 @@ void AiSystem::infantry_select(AiEntity &e) {
 // entity+0x12C mirrors (player_moving / dir index / stance / lean bits) plus the
 // per-tick weapon mirrors (scope_raised, wpn_run_anim, wpn_force_crouch).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396]
-void AiSystem::player_body_select(AiEntity &e) {
+void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
     InfantryState &inf = e.inf;
     auto has = [&](int s) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
@@ -540,57 +540,46 @@ void AiSystem::player_body_select(AiEntity &e) {
         if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
     }
 
+    // SWIM. After the land selection (and retail's wash overlay 27/28,
+    // unported), a body on the float latch (0x8000) that is not dead takes the
+    // swim state STRAIGHT -- no availability test, no flag-table arbitration,
+    // pending cleared: moving -> the direction index picks 37 forward / 38
+    // left / 40 back / 39 right; idle -> 36. The same MoveOrder&7 index the
+    // land gaits use, collapsed to four strokes.
+    //
+    // Retail computes the land state into the same plain field and then
+    // OVERWRITES it here; only the final value reaches the anim layer. Our
+    // crossfade channel restarts on every intermediate stamp (the same reason
+    // the ladder override skips the selection), so the swim override REPLACES
+    // the land commit instead of following it -- one commit per pass, the same
+    // final value. Committing both thrashed the blend at the 4-tick cadence:
+    // the weight never passed ~0.4, the pose looked frozen, and the never-
+    // evicted blend SOURCE (the entry tick's jump_loop) kept feeding its
+    // root-motion forward step -- the "auto swims forward" defect.
+    // [orig: Entity_UpdateInfantryPlayerBody, kong 148422-148452:
+    //  `(Flags & 0x8000) && !(Flags & 2)`; switch(MoveOrder & 7) case 0: 37;
+    //  1,2: 38; 3,4,5: 40; 6,7: 39; else 36; pendingAnimStateId = 0]
+    if ((entity_flags & kEntityFlagDrowning) != 0 && (entity_flags & kEntityFlagDead) == 0) {
+        int swim = anim_state::kSwimIdle;
+        if (inf.player_moving) {
+            switch (inf.player_move_dir_index & 7) {
+                case 0: swim = anim_state::kSwimForward; break;
+                case 1: case 2: swim = anim_state::kSwimLeft; break;
+                case 3: case 4: case 5: swim = anim_state::kSwimBack; break;
+                case 6: case 7: swim = anim_state::kSwimRight; break;
+                default: break;
+            }
+        }
+        inf.begin_body_transition(swim);
+        inf.anim_pending = 0;
+        return;
+    }
+
     commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
 }
 
-// The physical recoil accumulator's per-body decay and orientation drift.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
-void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
-                          int32_t &pitch, int32_t random16) {
-    // The accumulator yields an eighth-step, then loses half of that step.
-    // Pitch receives one eighth of the pre-halved step and yaw receives the
-    // half-step with PRNG-selected sign. The caller draws PRNG_Next16 even when
-    // recoil is zero. [orig: the entity+0x380 body-update block]
-    const int32_t step = io::bam_sar(io::bam_add(inf.recoil_pitch, 4), 3);
-    const int32_t half = io::bam_sar(step, 1);
-    inf.recoil_pitch = io::bam_sub(inf.recoil_pitch, half);
-    if (inf.recoil_pitch <= 0x300) inf.recoil_pitch = 0;
-    pitch = io::bam_add(pitch, io::bam_sar(step, 3));
-    heading = (random16 & 1) == 0 ? io::bam_add(heading, half)
-                                  : io::bam_sub(heading, half);
-}
 
-void infantry_weapon_weight_spread_tick(
-        InfantryState &inf, const InfantryWeightSpreadInputs &inputs) {
-    if (inputs.produce) {
-        const int32_t weight = io::bam_add(inputs.weaponweight_fp16,
-                                           inputs.clipweight_fp16);
-        int32_t increment = 0;
-        if (inputs.aimed_shot_available ||
-            (inputs.prone && !inputs.drowning)) {
-            increment = weight / 3;
-        } else if (inputs.crouched && !inputs.drowning) {
-            increment = static_cast<int32_t>(
-                    static_cast<double>(weight) * 2.0 / 3.0);
-        } else {
-            increment = static_cast<int32_t>(static_cast<double>(weight) * 1.5);
-        }
-        inf.weapon_weight_spread =
-                io::bam_add(inf.weapon_weight_spread, increment);
-        if (inputs.airborne_rising) {
-            inf.weapon_weight_spread =
-                    io::bam_add(inf.weapon_weight_spread, 0x01000000);
-        }
-    }
 
-    // Shared decay is after the local producer; remote players and AI jump
-    // directly here. There is no upper clamp.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4B5945]
-    inf.weapon_weight_spread = io::bam_sub(
-            inf.weapon_weight_spread,
-            io::bam_sar(io::bam_add(inf.weapon_weight_spread, 4), 4));
-    if (inf.weapon_weight_spread <= 0x300) inf.weapon_weight_spread = 0;
-}
 
 // The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
 // every infantry body (the corpse keeps decaying, matching the original's placement
@@ -1062,7 +1051,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 ((ent->flags | ent->engine_flags) & kEntityFlagLadderContact) != 0;
         if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) {
             if (!ladder_latched) {
-                player_body_select(e);
+                player_body_select(e, ent != nullptr ? (ent->flags | ent->engine_flags) : 0u);
             } else if (inf.player_moving) {
                 inf.idle_counter = 0;
             } else if (inf.stance == InfantryState::Stance::kStand) {
@@ -1720,6 +1709,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // press, the climb_up/climb_top select. Body in infantry_ladder.cpp.
         // [orig: Entity_UpdateInfantryAI @ 0x4bf907-0x4bfad8]
         infantry_ladder_org1_block(e, world, tick_entity);
+
+        // org1 water (NPC, immediately after the ladder block, same as retail):
+        // float on the plane instead of walking along the riverbed, and fan the
+        // splash once on entry.
+        if (!inf.is_local_player)
+            infantry_water_block(e, world, tick_entity, frame.capsule_bottom, logic_tick);
+        // org2 water (the LOCAL player body, immediately after its jump block --
+        // the same mover-tail placement retail gives it @0x4b8020).
+        else
+            player_water_block(e, world, tick_entity, frame.capsule_bottom, is_authority,
+                               logic_tick);
     }
 
     finish_infantry_tick(e, world);
@@ -2405,7 +2405,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                              : ((ent->net_stance_bits & 0x2u) != 0
                                     ? InfantryState::Stance::kCrouch
                                     : InfantryState::Stance::kStand);
-            player_body_select(e);
+            player_body_select(e, ent->flags | ent->engine_flags);
         }
     }
     // The lean angle runs on the authority for every player body (the wire echoes the

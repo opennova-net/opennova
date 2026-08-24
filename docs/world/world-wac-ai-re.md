@@ -4253,8 +4253,11 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 1. The org2 parachute physics half `@ 0x4b7b18-0x4b7c8d` (auto-deploy at
    vel −14336 + aux 0x10, chute sounds/flap words, the chute brake
    `vel += 0x29C` under −0x1C00) — read 2026-08-06, still unported; rides
-   D-INF-20. The WATER half is §29.1 (witnessed + replica-ported; the local
-   motor's port rides D-INF-3).
+   D-INF-20. The WATER half is §29.1 (witnessed; replica-ported AND, 2026-08-24,
+   ported in the LOCAL motors — `AiSystem::infantry_water_block` /
+   `player_water_block` in world/infantry_water.cpp — with the swim selection
+   36-40; the wash 27/28, scope auto-untoggle and resolver swim-force damping
+   remain on D-INF-3).
 2. The mounted ±120° look clamp and true per-tick transform for generic non-UseGun seats remain;
    the host-fed seat frame synchronizes body/legs/pitch/roll while preserving the local look.
    UseGun root position now follows the live control-posed userpoint, but its full matrix basis is
@@ -6473,6 +6476,20 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   ride the cross-cutting sound/FX slice (open for local rows too — §22.5).
   `Env` source: the mission water plane (`World::EnvState.water_z`, 0 = no
   water = channel off with a self-healing `~0x208000` clear).
+  **2026-08-24 — the LOCAL motors are ported too** (world/infantry_water.cpp):
+  org1 verbatim; org2 with the LOCAL bob arm (`-1225 - sin·(-1224) + min(cb,0)`
+  — the negated amplitude is its own global `dbl_7C9BC8`) and the look-pitch
+  dive/rise term; the swim selection 36/37/38/39/40 (kong 148422-148452)
+  REPLACES the land commit as retail's overwrite semantics require of our
+  crossfade channel (one commit per selection pass — a double stamp wedges the
+  blend and lets the stale source's root motion self-propel the swimmer). The
+  bob phase pair is the LITERAL `1/256 · 3.1` (exe bytes @0x7C6950/@0x7C9BD0),
+  not pi/256 — corrected from the earlier port. Authored swim root velocity:
+  C4SwimfG.bad = constant 0.096 u/frame (2.88 u/s); a played retail session
+  measures ~2.30 u/s median forward — no swim scale exists at the root fold
+  (`@0x4b7cef`, 1x; root zeroes only while airborne 0x2000), so the residual
+  is measurement noise or an unwitnessed projection: OPEN, needs a controlled
+  straight-line comparison.
 
 ### 29.2 The deck-ride (groundEntity pose-follow)
 

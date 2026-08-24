@@ -926,6 +926,105 @@ static void test_mounted_gunner_acquires_and_fires() {
     CHECK(fired);
 }
 
+// The water-crossing edge: a hull that drops below the water plane records ONE
+// crossing, not one per frame, and stops recording while it stays under. This is
+// the trigger behind the S2C 0x34 fan retail emits at every splash - the last
+// message type our host recording was missing against the retail baseline.
+// [orig: the water block @0x482BB9..0x482C9D, gated on the 0x8000 latch]
+static void test_water_crossing_fires_once_on_entry() {
+    World w;
+    w.env.water_z = to_fixed(12.0);
+    WaterCrossQueue &q = w.water_crossings;
+    CHECK(q.events.empty());
+
+    // Entering: below the plane with the latch clear -> exactly one record.
+    q.add(to_fixed(-834.0), to_fixed(122.0), w.env.water_z, /*airborne=*/true);
+    CHECK(q.events.size() == 1);
+    CHECK(q.events[0].airborne);
+    CHECK(q.events[0].water_z == to_fixed(12.0));
+
+    // The queue is per-tick: the host drains and clears it, so a hull that stays
+    // submerged contributes nothing further.
+    q.clear();
+    CHECK(q.events.empty());
+
+    // The queue refuses to grow without bound if a pathological frame floods it.
+    for (int i = 0; i < 100; ++i)
+        q.add(0, 0, w.env.water_z, true);
+    CHECK(q.events.size() == WaterCrossQueue::kMax);
+    std::printf("  [water-cross] queue capped at %zu\n", q.events.size());
+}
+
+// The org1 float block, driven through the real motor entry point rather than by
+// poking the queue: a soldier who walks into a river floats on the plane, fans
+// exactly ONE splash, and the sound he fans is chosen by whether he was airborne
+// when he met the water - not by the fact that he is infantry.
+static void test_infantry_floats_and_splashes_once() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 4);
+    w->env.water_z = to_fixed(12.0);
+
+    Entity seed{};
+    seed.kind = EntityKind::Organic;
+    seed.team = 2;
+    seed.health = 100;
+    seed.net_id = 0x60;
+    seed.eye_offset_z = to_fixed(1.8); // a standing body's stamped eye height
+    const EntityHandle h = w->registry.spawn(0, seed);
+
+    AiSystem ai;
+    ai.is_authority = true;
+    w->ai = &ai;
+    AiEntity &npc = *ai.at(ai.attach(h));
+    Entity *ent = w->registry.get(h);
+
+    // Shallower than the hysteresis gap: retail does NOT start floating here, so
+    // a body wading the very edge of a river neither latches nor splashes. This
+    // is the assertion a naive `z < water` port fails.
+    npc.pos[2] = w->env.water_z - to_fixed(0.3);
+    ai.infantry_water_block(npc, *w, ent, 0, 1);
+    CHECK(w->water_crossings.events.empty());
+    CHECK((ent->flags & kEntityFlagDrowning) == 0);
+
+    // Past the gap, walking (not airborne): one crossing, carrying the wade sound.
+    npc.pos[2] = w->env.water_z - to_fixed(1.0);
+    const int32_t sank_to = npc.pos[2];
+    ai.infantry_water_block(npc, *w, ent, 0, 1);
+    CHECK(w->water_crossings.events.size() == 1);
+    CHECK(!w->water_crossings.events[0].airborne);
+    CHECK(w->water_crossings.events[0].water_z == w->env.water_z);
+    CHECK((ent->flags & kEntityFlagDrowning) != 0);
+    // He is being lifted toward the surface, not left on the riverbed.
+    CHECK(npc.pos[2] > sank_to);
+
+    // Still under, still latched: the host drained the queue and nothing refills it.
+    w->water_crossings.clear();
+    for (int i = 0; i < 8; ++i) ai.infantry_water_block(npc, *w, ent, 0, 2 + i);
+    CHECK(w->water_crossings.events.empty());
+    // Eight quarter-steps land him at the plane, within the bob's own amplitude.
+    const int32_t settled = npc.pos[2] - w->env.water_z;
+    CHECK(settled < 0 && settled > -to_fixed(1.0));
+    std::printf("  [inf-water] settled %.3f u under the plane\n",
+                static_cast<double>(settled) / 65536.0);
+
+    // Out of the water clears the latch, so the next entry can splash again.
+    npc.pos[2] = w->env.water_z + to_fixed(0.5);
+    ai.infantry_water_block(npc, *w, ent, 0, 20);
+    CHECK((ent->flags & kEntityFlagDrowning) == 0);
+
+    // Now the same body arrives from the AIR. Same family, same plane, DIFFERENT
+    // sound - the selector retail actually uses.
+    ent->flags |= kEntityFlagInAir;
+    npc.pos[2] = w->env.water_z - to_fixed(1.0);
+    ai.infantry_water_block(npc, *w, ent, 0, 21);
+    CHECK(w->water_crossings.events.size() == 1);
+    CHECK(w->water_crossings.events[0].airborne);
+    // Landing in water ends the fall: retail clears 0x2000 with the same store
+    // that sets the float latch.
+    CHECK((ent->flags & kEntityFlagInAir) == 0);
+    CHECK(!npc.inf.airborne);
+}
+
 static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
@@ -2646,6 +2745,8 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_water_crossing_fires_once_on_entry();
+    test_infantry_floats_and_splashes_once();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();

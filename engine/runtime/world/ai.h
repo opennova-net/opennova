@@ -995,9 +995,12 @@ public:
     // moving base 1/11/19 + direction offset; idle 48 / 45 (46 idle_mortar for
     // ForceCrouch weapons) / 43-then-44; the forward-walk run promotion (run_2/run_3
     // by 2 + run_anim, scope-suppressed); prone lean rolls 41/42; airborne jump_loop;
-    // commit via the flag-table arbitration. Callers gate it to every 4th tick.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; 4th-tick gate @0x4b70ce]
-    void player_body_select(AiEntity &e);
+    // commit via the flag-table arbitration; then the SWIM override (36-40 from the
+    // float latch in entity_flags, bypassing the arbitration). Callers gate it to
+    // every 4th tick.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; swim @0x4b73c0-0x4b7410
+    //  (kong 148422-148452); 4th-tick gate @0x4b70ce]
+    void player_body_select(AiEntity &e, uint32_t entity_flags);
     // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
     // alive + not prone + not latched on a ladder (entity_flags carries the retail
@@ -1015,6 +1018,15 @@ public:
     // select. Dormant in game until the AI climb-order writer lands.
     // [orig: Entity_UpdateInfantryAI @0x4bf907-0x4bfad8]
     void infantry_ladder_org1_block(AiEntity &e, World &world, Entity *tick_entity);
+    // The org1 float/splash block — body and witness in infantry.cpp.
+    // The org2 (player body) water block — the buoyant-rise float form with the
+    // local-only surface bob, the look-pitch dive/rise term, the velocity drags,
+    // the surface clamp and the dive bit 0x200000. Body in infantry.cpp.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b8020-0x4b8373]
+    void player_water_block(AiEntity &e, World &world, Entity *tick_entity,
+                            int32_t capsule_bottom, bool is_authority, uint32_t logic_tick);
+    void infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
+                              int32_t capsule_bottom, uint32_t logic_tick);
     // The torso-roll producer (entity+0x2DC), every body tick: prone idle 48 decays it
     // toward level (torso -= (torso+8)>>4); the combat rolls 41/42 RAMP it
     // -/+0x4000000 (5.625 deg) per tick — the FP barrel-roll view; otherwise it
