@@ -25,7 +25,7 @@ const STYLESHEET_FILE := "menu_style.mns"
 const RESULT_LIST := "RESULTLIST"
 const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
 # The stat-screen delay: 6000 ms after the announcement [orig: 0x1770 @0x5b8615].
-const STAT_SCREEN_DELAY_S := 6.0
+const STAT_SCREEN_DELAY_MSEC := 6000
 # The overlay safe area retail stamps at display-mode set (dword_24C1900/04);
 # the full design frame here.
 const OVERLAY_TOP := 0
@@ -140,7 +140,7 @@ func tick() -> void:
 	if not _stat_opened:
 		_apply_overlay(sim)
 		if bool(state.get("board_known", false)) \
-				and Time.get_ticks_msec() - _header_edge_msec >= int(STAT_SCREEN_DELAY_S * 1000.0):
+				and Time.get_ticks_msec() - _header_edge_msec >= STAT_SCREEN_DELAY_MSEC:
 			_open_stat_screen(sim)
 	elif is_open():
 		_driver.tick(Time.get_ticks_msec())
