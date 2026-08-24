@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "terrain_query/height_field.h"
+#include "io/bam.h"
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/world.h"
@@ -1692,6 +1693,74 @@ void test_ladder_exit_push_and_pitch_restore() {
                           true, true, 50, 32, 0x1u, health, nullptr, &lio.io);
     CHECK(!lio.restore_active);
     CHECK(lio.view_pitch == 0x5000000);
+}
+
+// ---------------------------------------------------------------------------
+void test_ladder_class_bit_climber_remote_and_local() {
+    // The resolver's player predicate is the wire class bit for every physics
+    // leg; only the local side-writes test the local entity. A REMOTE class-bit
+    // climber (an authority resolving a joiner's body: is_local_player false,
+    // no view-yaw channel) still passes the entry gate, still eases its body
+    // heading toward the frame yaw, and still takes the exit push, but never
+    // arms the pitch restore. The LOCAL twin does all of that plus the view
+    // yaw ease and the restore. [orig: Flags & 0x100 @ 0x4b33aa / @ 0x4b3c78;
+    // g_local_player_entity @ 0x4b33ca / @ 0x4b3cdc]
+    auto climb = [](bool local, int32_t &heading_after, bool &restore_armed,
+                    int32_t &view_yaw_after, int32_t &exit_dx) {
+        Rig rig(ladder_slab());
+        rig.move_soldier(10.6, 10.0, 0.0);
+        int32_t pos[3] = {fx(10.6), fx(10.0), 0};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        LadderIo lio(0);
+        lio.io.is_local_player = local;
+        if (!local) lio.io.view_yaw = nullptr;
+        // Body heading 0x90000000: 22.5 deg past the frame yaw (0x80000000),
+        // so the chase has a visible (delta+8)>>4 step.
+        lio.body_heading = static_cast<int32_t>(0x90000000u);
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, /*is_player_class=*/true, true, 0, 32, 0x1u, health,
+                              nullptr, &lio.io);
+        Entity *s = rig.world.registry.get(rig.soldier);
+        CHECK((s->flags & kEntityFlagLadderContact) != 0);
+        heading_after = lio.body_heading;
+        view_yaw_after = lio.view_yaw;
+        // Teleport clear of the slab: the exit leg fires once.
+        pos[0] = fx(14.0);
+        pos[2] = 0;
+        s->position.x = 14.0f;
+        rig.rebuild();
+        const int32_t x_before = pos[0];
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, /*is_player_class=*/true, true, 1, 32, 0x1u, health,
+                              nullptr, &lio.io);
+        CHECK((s->flags & kEntityFlagLadderContact) == 0);
+        exit_dx = pos[0] - x_before;
+        restore_armed = lio.restore_active;
+    };
+    const int32_t step = opennova::io::bam_sar(
+        opennova::io::bam_add(opennova::io::bam_sub(static_cast<int32_t>(0x80000000u),
+                                static_cast<int32_t>(0x90000000u)),
+                    8),
+        4);
+    CHECK(step != 0);
+
+    int32_t remote_heading = 0, remote_view = 0, remote_dx = 0;
+    bool remote_restore = true;
+    climb(false, remote_heading, remote_restore, remote_view, remote_dx);
+    CHECK(remote_heading == opennova::io::bam_add(static_cast<int32_t>(0x90000000u), step));
+    CHECK(remote_view == static_cast<int32_t>(0x80000000u)); // no view channel: untouched
+    CHECK(remote_dx != 0);        // the exit push is a class-bit leg
+    CHECK(!remote_restore);       // the pitch restore is local-only
+
+    int32_t local_heading = 0, local_view = 0, local_dx = 0;
+    bool local_restore = false;
+    climb(true, local_heading, local_restore, local_view, local_dx);
+    CHECK(local_heading == remote_heading);
+    CHECK(local_view == opennova::io::bam_add(static_cast<int32_t>(0x80000000u), step));
+    CHECK(local_dx == remote_dx);
+    CHECK(local_restore);
 }
 
 // ---------------------------------------------------------------------------
@@ -4604,6 +4673,7 @@ int main() {
     test_ladder_pitch_restore_from_below_snaps();
     test_ladder_recontact_inflated_and_relatch();
     test_ladder_exit_push_and_pitch_restore();
+    test_ladder_class_bit_climber_remote_and_local();
     test_replica_resolve_candidates_ground_and_peers();
     test_debug_seams();
     test_raycast_clear_los();

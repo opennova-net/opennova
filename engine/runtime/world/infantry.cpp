@@ -829,6 +829,16 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
 // ----------------------------------------------------------------------------
 // The per-tick motor. [orig: Entity_UpdateInfantryAI @0x4b9910]
 // ----------------------------------------------------------------------------
+// The resolver's player predicate is the entity's wire Player class bit, for
+// local and remote bodies alike; the resolver keys every physics leg on it and
+// reserves `entity == g_local_player_entity` for the local side-writes.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 — Flags & 0x100 @0x4B2CD9 /
+// @0x4B2F7C / @0x4B3271 / @0x4B33AA / @0x4B3C78]
+static bool entity_is_player_class(const World &world, EntityHandle handle) {
+    const Entity *ent = world.registry.get(handle);
+    return ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0;
+}
+
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Recoil/dispersion live ahead of the network-snap motor exit. Received
     // shots are applied during the network pump, then decay in this frame's
@@ -1253,7 +1263,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             collision->resolve_entity(
                     world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
-                    inf.is_local_player, is_authority, logic_tick, inf.anim_state,
+                    entity_is_player_class(world, e.handle), is_authority,
+                    logic_tick, inf.anim_state,
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
                     &mounted_lio);
         }
@@ -1547,8 +1558,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
-                inf.is_local_player, is_authority, logic_tick, inf.anim_state,
-                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
+                entity_is_player_class(world, e.handle), is_authority, logic_tick,
+                inf.anim_state, infantry_anim_flags(inf.anim_state), e.health,
+                nullptr, &lio);
             // The ladder legs may have written the view channels (the yaw
             // chase, the pitch restore); refresh the mouse-instant mirrors so
             // the render/aim pose and the embedder write-back see them.
@@ -2481,9 +2493,9 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                 contact_vel_z,
                 have_collision_frame ? collision_frame.capsule_bottom : 0,
                 have_collision_frame ? collision_frame.capsule_top : 0,
-                e.heading, e.pitch, /*is_player=*/true, is_authority,
-                logic_tick, inf.anim_state, infantry_anim_flags(inf.anim_state),
-                e.health, nullptr, &lio);
+                e.heading, e.pitch, ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0,
+                is_authority, logic_tick, inf.anim_state,
+                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
         ent->health = e.health;
         ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
         ent->position.y = static_cast<float>(from_fixed(e.pos[1]));

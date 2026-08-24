@@ -293,6 +293,7 @@ void test_hurt_volume_updates_registry_health() {
     infantry.position = {10.0f, 10.0f, 0.5f};
     infantry.health = 1;
     infantry.health_max = 1;
+    infantry.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle infantry_handle = world.registry.spawn(0, infantry);
 
     CollisionWorld collision;
@@ -347,6 +348,7 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
     player.player_class = 5;
     player.health = 100;
     player.alive = true;
+    player.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle player_handle = world.registry.spawn(0, player);
 
     CollisionWorld collision;
@@ -485,6 +487,10 @@ struct ClimbRig {
         body.position = {10.6f, 10.0f, 0.0f};
         body.health = 100;
         body.alive = true;
+        // The player rig carries the retail player classifier; the org1 rig is
+        // an NPC (the resolver keys its player legs on this bit, not on
+        // local ownership).
+        if (local_player) body.flags |= kEntityFlagPlayer;
         player_h = world.registry.spawn(0, body);
 
         collision.terrain = &flat.field;
@@ -808,6 +814,7 @@ void test_remote_player_body_anim() {
     seed.kind = EntityKind::Organic;
     seed.item_id = 0x14B9;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -910,6 +917,7 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -945,6 +953,7 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -990,6 +999,7 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1044,6 +1054,7 @@ void test_remote_player_jump_hold_release_cooldown_matches_retail() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1087,6 +1098,7 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1141,6 +1153,7 @@ void test_local_player_uplink_carries_the_jump_bit() {
     seed.kind = EntityKind::Organic;
     seed.item_id = 0x14B9;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1385,6 +1398,7 @@ void test_player_idle_skip_throttle_no_bounce() {
     player.position = {10.0f, 10.0f, 0.05f};
     player.health = 100;
     player.health_max = 100;
+    player.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle ph = world.registry.spawn(0, player);
 
     CollisionWorld collision;
@@ -1446,6 +1460,7 @@ void test_local_player_swims_on_the_plane() {
     player.position = {10.0f, 10.0f, 0.05f};
     player.health = 100;
     player.health_max = 100;
+    player.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle ph = world.registry.spawn(0, player);
 
     CollisionWorld collision;
@@ -2713,6 +2728,7 @@ void test_eye_offset_restamp() {
     w.registry.configure_pool(0, 4);
     Entity ent;
     ent.kind = EntityKind::Organic;
+    ent.flags |= kEntityFlagPlayer; // the retail player classifier
     w.registry.spawn(0, ent);
 
     run_ticks(ai, w, 0, 2);
