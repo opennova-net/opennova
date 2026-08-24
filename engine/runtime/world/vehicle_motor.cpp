@@ -433,16 +433,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // +25/tick jump-latch ramp is input-side; the flip simply does not
         // exist there) [orig: cbik speed servo @0x4853ac..0x4853eb].
         int32_t cmd = m.cmd_speed;
-        // DIAGNOSTIC ONLY (env NW_NO_COAST_FLIP): disables the witnessed
-        // airborne coast-brake to measure how much of the convoy-pace loss
-        // the contact-flag flapping causes (AI-PARITY-CONCEPT 6.12g). Not a
-        // port; never enabled outside the experiment.
-        static const bool kNoCoastFlip = []() {
-            const char *v = std::getenv("NW_NO_COAST_FLIP");
-            return v != nullptr && v[0] == '1';
-        }();
-
-        if (!kNoCoastFlip && traits.family != VehicleFamily::Bike &&
+if (traits.family != VehicleFamily::Bike &&
             traits.family != VehicleFamily::Tank &&
             !m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
             if (m.speed < 0) {
