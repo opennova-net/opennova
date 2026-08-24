@@ -42,8 +42,9 @@ acceptance step, never a committed input.
   once let loose retail copies slip into a commit. `.gitattributes` keeps that
   `.gitignore` a plain text blob on every checkout (an LFS pointer ignores
   nothing).
-- **`../packed/`** (gitignored, self-ignoring) — where ONED's Play in Retail
-  (F7) packs this tree and stages the retail runtime beside it.
+- ONED's Play in Retail (F7) packs this tree and stages the retail runtime
+  into the **editor's own data dir** (`user://packed`) — never beside the
+  assets, so a distributed editor works against any mounted directory.
 
 ## The set (grounded in required-resources.md)
 
@@ -200,8 +201,8 @@ throwaway generator:
   `game.cfg` from your own install (never committed).
 
 ONED's own Play in Retail (F7) is the everyday loop: it packs the mounted tree
-into a single `localres.pff` under `../packed/`, stages the retail runtime
-beside it, and launches — F8 stops it.
+into a single `localres.pff` under the editor's own data dir (`user://packed`),
+stages the retail runtime beside it, and launches — F8 stops it.
 
 ## Validation (asset-gated — needs a retail JO install)
 

@@ -504,6 +504,21 @@ func test_retail_packs_once_then_launches_the_packed_exe() -> void:
 	assert_eq(String(session.get_state()["mode"]), "retail")
 
 
+func test_retail_packs_into_the_editors_own_data_dir() -> void:
+	# The pack output is ours, so it goes in user://, never beside the mounted assets. The
+	# sibling-dir derivation this replaces broke the distributed exe: it littered whatever
+	# directory the assets sat in, and an existing unmarked sibling made the packer refuse.
+	var packs: Array = []
+	var session := _make_retail_session([], packs)
+
+	assert_true(session.start_mode("retail"))
+	var out_dir := String(packs[0]["out_dir"]).replace("\\", "/")
+	assert_eq(out_dir, ProjectSettings.globalize_path("user://packed").replace("\\", "/"),
+			"F7 packs into the editor's own data dir")
+	assert_false(out_dir.begins_with("C:/assets") or out_dir == "C:/packed",
+			"and never into or beside the mounted resource dir")
+
+
 func test_retail_carries_no_opennova_or_debug_arguments() -> void:
 	var spawned: Array = []
 	var session := _make_retail_session(spawned, [])

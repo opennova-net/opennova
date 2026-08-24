@@ -58,10 +58,10 @@ const EXCLUDED_DIRS := ["src/"]
 ## PFF entry names are 16 BYTES; a name that fits in 16 characters can still overflow in UTF-8.
 const PFF_NAME_BYTES := 16
 
-## Written into every packed dir. It makes the dir self-ignoring wherever it lands (the packed
-## dir is a sibling of whatever root is mounted, and that can be inside another repo), and it is
-## the marker that lets a repack wipe stale output: a non-empty dir WITHOUT it is somebody else's
-## and is never touched.
+## Written into every packed dir. F7 packs into the editor's own data dir (user://packed), but
+## the MCP pack_game tool takes an arbitrary out_dir, so the dir stays self-ignoring wherever it
+## lands -- and the marker is what lets a repack wipe stale output: a non-empty dir WITHOUT it
+## is somebody else's and is never touched.
 const MARKER_NAME := ".gitignore"
 const MARKER_HEADER := "# OpenNova packed game dir -- regenerated on every pack; nothing here is a source."
 const MARKER_TEXT := MARKER_HEADER + "\n*\n"

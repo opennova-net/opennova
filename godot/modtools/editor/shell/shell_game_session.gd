@@ -516,8 +516,12 @@ func _build_request(mode: int, report_error: bool = true) -> GameRunRequest:
 			if report_error:
 				_show(_last_error, &"warn")
 			return null
-		request.packed_dir = request.resource_dir.path_join("..").simplify_path() \
-				.path_join("packed")
+		# The pack output is OURS, so it lives in the editor's own data dir -- never beside
+		# the mounted assets. A sibling dir broke the moment the exe was distributed: it
+		# littered whatever directory (or repo) the assets sat in, and an existing sibling
+		# from anything else made the packer refuse. Retail runs fine from any path; its
+		# working directory is set to this dir at spawn.
+		request.packed_dir = ProjectSettings.globalize_path("user://packed")
 	_last_error = ""
 	return request
 

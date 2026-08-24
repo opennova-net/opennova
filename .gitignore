@@ -117,7 +117,3 @@ stripify_call_*.log
 # Isolated user:// for the GUT suite (scripts/test_godot.sh) so tests cannot
 # write the developer's real Godot user directory.
 /.godot-test-user/
-
-# Play in Retail's output: the packed game dir plus the retail runtime staged
-# into it. Regenerated on every launch; never committed (it contains retail binaries).
-/packed/
