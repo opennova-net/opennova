@@ -14,11 +14,10 @@ extends RefCounted
 # Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
 # via engine/resource_index/resource_dir_settings.gd so a directory picked in
 # either app is the same persisted value.
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 # Layout state (split offsets) shares the same config file as the resource dir,
 # but lives in its own section; the resource-dir section is owned by
-# ResourceDirSettings (load_state/save_state delegate to it).
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+# OnedSettings (load_state/save_state delegate to it).
+const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
 const RIGHT_SPLIT_KEY := "right_split_offset"
@@ -122,7 +121,7 @@ func scan_root() -> Dictionary:
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 
-# Loads the persisted root from the shared ResourceDirSettings.
+# Loads the persisted root from OnedSettings (the editor's own config; the runtime keeps its own).
 # That helper drops a persisted root that no longer points at a real, sane resource
 # directory (moved/deleted dirs, or stale temp/test paths that leaked into the
 # shared state) so the browser shows a clean "no directory" state instead of a dead
@@ -130,7 +129,13 @@ func scan_root() -> Dictionary:
 func load_state() -> Dictionary:
 	# Resource-dir persistence lives in ResourceDirSettings (shared with the
 	# runtime); get_resource_dir() already drops stale/invalid paths.
-	_root_dir = ResourceDirSettings.get_resource_dir()
+	_root_dir = OnedSettings.get_resource_dir()
+	if _root_dir.is_empty():
+		# A shipped editor defaults to the assets/ bundled beside its exe — the zip's
+		# game sources — so a fresh download opens ready to edit. Never persisted: an
+		# explicit Settings pick still owns the config, and dev runs (the Godot binary
+		# has no assets/ sibling) are unaffected.
+		_root_dir = bundled_assets_dir(_bundled_probe_dir())
 	if _root_dir.is_empty():
 		_resource_root.clear()
 	else:
@@ -138,19 +143,39 @@ func load_state() -> Dictionary:
 	return {"root_dir": _root_dir}
 
 
+## The game sources bundled beside a shipped editor: `<exe_dir>/assets` when it exists
+## and is a sane root, else "".
+static func bundled_assets_dir(exe_dir: String) -> String:
+	var dir := exe_dir.path_join("assets")
+	if DirAccess.dir_exists_absolute(dir) and ResourceDirSettings.is_valid_root(dir):
+		return dir
+	return ""
+
+
+## Tests substitute the directory probed for a bundled assets/ sibling; the real
+## editor probes its own exe's directory.
+var bundled_probe_override: String = ""
+
+
+func _bundled_probe_dir() -> String:
+	if not bundled_probe_override.is_empty():
+		return bundled_probe_override
+	return OS.get_executable_path().get_base_dir()
+
+
 func save_state() -> void:
-	ResourceDirSettings.set_resource_dir(_root_dir)
+	OnedSettings.set_resource_dir(_root_dir)
 
 
 # Recently used resource directories (shared with the runtime via
 # ResourceDirSettings). The shell reaches this state only through the library,
 # so these thin forwarders keep that boundary while the dropdown lives in the shell.
 func get_recent_dirs() -> PackedStringArray:
-	return ResourceDirSettings.get_recent_dirs()
+	return OnedSettings.get_recent_dirs()
 
 
 func clear_recent_dirs() -> void:
-	ResourceDirSettings.clear_recent_dirs()
+	OnedSettings.clear_recent_dirs()
 
 
 func canonical_key(path: String) -> String:

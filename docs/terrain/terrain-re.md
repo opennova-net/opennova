@@ -506,8 +506,26 @@ does not author `StaticShadow`.
 
 The result is receiver-scoped rather than ordinary model self-shadowing.
 `Terrain_CollectAndRenderTileModels` selects the dedicated temporary render
-target `dword_319A2D8` at `0x60D5BE`, rasterizes black PROJSHAD silhouettes,
-and restores it at `0x60DA4F`. `PolyTrn_RenderTile` then selects the destination
+target `dword_319A2D8` at `0x60D5BE` (cleared to depth 0.99995), rasterizes
+black PROJSHAD silhouettes, and restores it at `0x60DA4F`. The projection is
+the view/ortho pair `setup_shadow_cascade_matrices_0 @ 0x58D4B0` builds from
+the negated, vertical-clamped float direction (`@ 0x60D7FC..0x60D800`,
+ortho half-size `tileSize/2`): the direction is divided by its vertical
+(`@ 0x58D4F1..0x58D50E`) and the view rows `[0,−1,0] / [dz,−dx,1] /
+[1,0,0]` (`@ 0x58D523..0x58D583`) slide every vertex along the light until it
+meets the horizontal plane through `Terrain_GetHeightAtPosition(entity x, y)`
+(the caster's floor-cell ground height, subtracted from the entity's vertical
+`@ 0x60D8FA`); the ortho depth row is `z = h·0.0005 − 0.00005` with `w = 1`
+(`P[10] @ 0x58D5F8`, `P[14] @ 0x58D602`, `P[15] @ 0x58D60C`), so the D3D clip
+volume's near face removes every vertex lower than 0.1 u above that plane —
+buried skirts, foundations and half-sunk decorations cast nothing, and a
+triangle straddling the plane casts only its part above it. (The 00TRa
+sandbag walls are the visible case: `SBag02.3di` carries a 2.5 u skirt below
+its Ground anchor — 88 of its 787 LOD0 vertices lie under the anchor — which
+must never reach the page.) Whether the PROJSHAD pass touches
+`D3DRS_CLIPPING` is not witnessed (the technique state lives in the packed
+.fx); the −0.00005 bias exists to put h = 0 outside the volume, so the default
+clip is taken as the law. `PolyTrn_RenderTile` then selects the destination
 tile-cache RT at `0x60DCC5`, binds that temporary texture at
 `0x60E10A..0x60E112`, and composites it only when the collector returned a
 candidate (`0x60E0C6..0x60E19D`). The final cache is sampled as t0 by terrain
@@ -554,22 +572,37 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   contributions, and final RT edge/mip behavior. The analytic/editor cold
   fallback remains a lower-fidelity global overlay.
 
-  **Retail refresh cadence — WITNESSED 2026-08-18, divergence documented.**
+  **Retail refresh cadence — WITNESSED 2026-08-18, corrected 2026-08-22.**
   Retail's 128-slot hit compare keys ONLY on `(lod, tileCoord, tileRow,
   quadrant)` (`@ 0x60DAD1..0x60DAD7`); no caster, light-epoch, or TOD input
-  participates. Slots stamp `Env_TodMinutesElapsed` at compose time
-  (`@ 0x60DBC0`, `dword_319A2F8`), but that stamp is write-only (its sole
-  xref is the write), so composed tiles refresh solely through oldest-age LRU
-  turnover (`@ 0x60DAF3..0x60DB45`) — retail serves stale shadow/DOT3 content
-  until eviction. The reimpl deliberately diverges toward exactness: each
-  page's cache identity is a content stamp (per-intersecting-caster
-  transform/team/ground revision, the quantized light epoch, and the
+  participates in the HIT. Slots stamp `Env_TodMinutesElapsed` at compose
+  time (`@ 0x60DBC0`, `dword_319A2F8`), and that stamp is READ by the evictor:
+  `terrain_cache_evict_lru @ 0x604600` walks the 128 slots four at a time and
+  picks, among the slots whose stamp differs from the current
+  `Env_TodMinutesElapsed` (`@ 0x60463B/0x60465E/0x604681/0x6046A3` — indexed
+  reads through the slot base, which is why a plain xref of `dword_319A2F8`
+  shows only the write), the OLDEST-composed one (compose frame
+  `dword_319A2F4` vs the frame counter, min age 1) and invalidates it (`lod =
+  coord = -1`, last-use = frame − 0x10000 `@ 0x6046D2..0x6046EA`), one per
+  call. `PolyTrn_RenderFrame @ 0x60EAC0` calls it only on a frame where NO
+  tile was composed (`@ 0x60F0AB..0x60F0AD`) and then re-sweeps every visible
+  patch (`@ 0x60F0CF`), so the evicted tile recomposes with the current sun
+  that same frame. `Env_TodMinutesElapsed` steps every 311 logic ticks (~5 s)
+  while the clock advances (`Environment_UpdateWeatherTick @ 0x57E9DA..
+  0x57E9EF`). Net: retail re-bakes stale visible tiles one per all-hit frame
+  after every ~5 s TOD epoch, oldest first — static shadows track the sun with
+  a latency of roughly 5 s plus a frame per visible tile (the 2026-08-18
+  "write-only stamp, stale until LRU turnover" reading missed the indexed
+  reads). The reimpl's page identity is a content stamp (per-intersecting-
+  caster transform/team/ground revision, the quantized light epoch, and the
   enable/suppression config), so exactly the affected pages recompose on a
   real change, and during the asynchronous recompose the last-published page
   keeps serving (stale-while-recompose) while explicit control changes
-  (attach/enable/suppression/terrain swap) still drop payloads outright. The
-  visible stale window is therefore strictly narrower than retail's, never
-  wider.
+  (attach/enable/suppression/terrain swap) still drop payloads outright. Its
+  light epoch is the DOT3 byte triple (one step ≈ 2–3 mission minutes near
+  mid-afternoon), coarser than retail's ~5 s TOD epoch but re-baking every
+  affected page at once rather than one tile per frame; neither window is
+  visibly wider at ordinary clock rates.
 
   Fixture-output publication (not comparison registration) fails closed unless
   the post-freeze refresh has available cache/shadow devices, every required

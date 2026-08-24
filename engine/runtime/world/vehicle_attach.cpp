@@ -126,26 +126,96 @@ Vec3 seat_world_pos(const Entity &veh, const Seat &s) {
     return local_point_world_pos(veh, s.seat_local);
 }
 
-// Precise-seat attach for the local toggle (the seat is already picked; the wire path keeps
-// its bone resolution). Runs the same gate order as entity_process_vehicle_attach.
-bool attach_to_seat_index(World &world, EntityHandle player, EntityHandle vehicle,
-                          int seat_idx) {
-    Entity *occ = world.registry.get(player);
-    Entity *veh = world.registry.get(vehicle);
-    if (occ == nullptr || veh == nullptr) return false;
-    if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
-    if (veh->health <= 0 || !veh->alive || (veh->flags & 2u) != 0) return false;
-    if (seat_idx < 0 || seat_idx >= static_cast<int>(veh->seats.size())) return false;
-    if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
-    const Seat &s = veh->seats[seat_idx];
-    if (s.type == SeatType::None) return false;
-    if (s.occupant.valid() && s.occupant != player) return false;
-    if (occ->mounted) entity_detach_from_vehicle(world, player); // [orig: @0x435bce]
-    attach_apply(world, *occ, *veh, seat_idx, s.bone_index);
-    return true;
+bool seat_allowed_for_selection(SeatType type, SeatSelectionMode mode) {
+    switch (mode) {
+        case SeatSelectionMode::PassengerOnly:
+            return type == SeatType::Passenger;
+        case SeatSelectionMode::RejectController:
+            return type != SeatType::Controller;
+        case SeatSelectionMode::Any:
+        default:
+            return true;
+    }
 }
 
 } // namespace
+
+bool find_best_vehicle_seat(
+        const World &world, EntityHandle root_vehicle, EntityHandle occupant,
+        VehicleSeatSelection &out, SeatSelectionMode mode) {
+    out = {};
+    const Entity *root = world.registry.get(root_vehicle);
+    if (root == nullptr) return false;
+
+    int32_t best_weight = 65536000; // [orig: bestWeight sentinel @0x43520A]
+    const auto consider = [&](const Entity &candidate, bool is_root) {
+        // An unmodeled model pointer manifests as an empty seat vector in the
+        // portable world. Each root/child entry has its own dead gate.
+        if (!candidate.alive || candidate.health <= 0 ||
+            (candidate.flags & kEntityFlagDead) != 0)
+            return;
+        for (int i = 0; i < static_cast<int>(candidate.seats.size()); ++i) {
+            const Seat &seat = candidate.seats[static_cast<size_t>(i)];
+            if (seat.type == SeatType::None ||
+                !seat_allowed_for_selection(seat.type, mode))
+                continue;
+            if (!is_root && is_vehicle_control_seat(seat.type)) continue;
+            if (seat.occupant.valid() && seat.occupant != occupant) continue;
+
+            int32_t weight = 0x20000;
+            switch (seat.type) {
+                case SeatType::Controller:
+                case SeatType::Driver:
+                    weight = 0x2000;
+                    break;
+                case SeatType::Passenger:
+                    weight = is_root ? 0x200000 : 0x2000000;
+                    break;
+                case SeatType::Gunner:
+                default:
+                    break;
+            }
+            if (weight >= best_weight) continue;
+            best_weight = weight;
+            out.vehicle = candidate.handle;
+            out.seat_index = i;
+            out.type = seat.type;
+        }
+    };
+
+    consider(*root, true);
+    world.registry.for_each([&](const Entity &candidate) {
+        if (candidate.handle != root_vehicle &&
+            candidate.ground_target == root_vehicle)
+            consider(candidate, false);
+    });
+    return out.vehicle.valid();
+}
+
+bool attach_to_vehicle_seat(World &world, EntityHandle player,
+                            const VehicleSeatSelection &selection) {
+    Entity *occ = world.registry.get(player);
+    Entity *veh = world.registry.get(selection.vehicle);
+    if (occ == nullptr || veh == nullptr) return false;
+    if (occ->health <= 0 || !occ->alive ||
+        (occ->flags & kEntityFlagDead) != 0)
+        return false;
+    if (veh->health <= 0 || !veh->alive ||
+        (veh->flags & kEntityFlagDead) != 0)
+        return false;
+    if (selection.seat_index < 0 ||
+        selection.seat_index >= static_cast<int>(veh->seats.size()))
+        return false;
+    if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
+    const Seat &seat = veh->seats[static_cast<size_t>(selection.seat_index)];
+    if (seat.type == SeatType::None || seat.type != selection.type) return false;
+    if (seat.occupant.valid() && seat.occupant != player) return false;
+    if (occ->mounted)
+        entity_detach_from_vehicle(world, player); // [orig: @0x435BCE]
+    attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index);
+    world.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
+    return true;
+}
 
 bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHandle vehicle,
                                    uint8_t bone) {
@@ -174,22 +244,11 @@ bool entity_process_vehicle_attach(World &world, EntityHandle player, EntityHand
     }
     if (seat_idx < 0) return false;
 
-    // 3. Enemy-occupant gate [orig: @0x4359F0 via the reject @0x435b4b-ish].
-    if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
-
-    // 4. Occupancy: the matched seat must be free (or already ours) [orig: @0x435BA9].
-    const Seat &s = veh->seats[seat_idx];
-    if (s.occupant.valid() && s.occupant != player) return false;
-
-    // 5. Already mounted -> detach first [orig: @0x435bce].
-    if (occ->mounted) entity_detach_from_vehicle(world, player);
-
-    // 6. Writes [orig: Entity_AttachToVehicleSlot @0x4946D0 common tail @0x494752-75].
-    attach_apply(world, *occ, *veh, seat_idx, bone);
-    // 7. Boarding clears the player's impact-scar ring [orig: Entity_AttachToVehicle
-    //    @0x43c155 -> Scar_ClearEntriesByEntity @0x5ccec0].
-    world.scars.clear_entity(player);
-    return true;
+    VehicleSeatSelection selection;
+    selection.vehicle = vehicle;
+    selection.seat_index = seat_idx;
+    selection.type = veh->seats[static_cast<size_t>(seat_idx)].type;
+    return attach_to_vehicle_seat(world, player, selection);
 }
 
 bool entity_detach_from_vehicle(World &world, EntityHandle player) {
@@ -293,7 +352,7 @@ void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
 } // namespace
 
 static bool find_nearest_free_seat_impl(World &world, const Entity &player,
-                                        NearestSeatHit &out, bool armory_mode,
+                                        VehicleSeatSelection &out, bool armory_mode,
                                         const HostileMountIndex &hostile_mounts) {
     // Range caps, verbatim 16.16 [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0].
@@ -365,7 +424,8 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     return found;
 }
 
-bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
+bool find_nearest_free_seat(World &world, const Entity &player,
+                            VehicleSeatSelection &out,
                             bool armory_mode) {
     const HostileMountIndex hostile_mounts(world, player, nullptr);
     return find_nearest_free_seat_impl(
@@ -378,7 +438,7 @@ void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
     const HostileMountIndex hostile_mounts(world, player, stats);
     // No nearest hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory gate
     // @0x5a32e2 brackets the whole pass].
-    NearestSeatHit nearest;
+    VehicleSeatSelection nearest;
     if (!find_nearest_free_seat_impl(
                 world, player, nearest, armory_mode, hostile_mounts))
         return;
@@ -440,21 +500,24 @@ bool player_toggle_vehicle_mount(World &world, EntityHandle player) {
         // the generic ground_target carrier, not a CL ladder volume].
         Entity *g = world.registry.get(p->ground_target);
         if (g != nullptr && !g->seats.empty()) {
-            const int si = world.commands.find_best_seat(*g, player);
-            if (si >= 0 && attach_to_seat_index(world, player, g->handle, si)) return true;
+            VehicleSeatSelection selection;
+            if (find_best_vehicle_seat(
+                        world, g->handle, player, selection) &&
+                attach_to_vehicle_seat(world, player, selection))
+                return true;
         }
-        NearestSeatHit hit;
+        VehicleSeatSelection hit;
         if (find_nearest_free_seat(world, *p, hit, false))
-            return attach_to_seat_index(world, player, hit.vehicle, hit.seat_index);
+            return attach_to_vehicle_seat(world, player, hit);
         return false;
     }
 
     // Mounted: a seat in scan reach swaps [orig: @0x4369ac -> TryEnterNearestVehicle],
     // else detach [orig: Entity_SendDetachPacket @0x4369c7 — the authority applies
     // directly through the same server leg].
-    NearestSeatHit hit;
+    VehicleSeatSelection hit;
     if (find_nearest_free_seat(world, *p, hit, false))
-        return attach_to_seat_index(world, player, hit.vehicle, hit.seat_index);
+        return attach_to_vehicle_seat(world, player, hit);
     return entity_detach_from_vehicle(world, player);
 }
 
@@ -464,7 +527,7 @@ bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_actio
 }
 
 bool find_mount_toggle_candidate(World &world, const Entity &player,
-                                 NearestSeatHit &r_hit) {
+                                 VehicleSeatSelection &r_hit) {
     // The candidate-PREVIEW form of player_toggle_vehicle_mount's unmounted
     // search (a joiner picks its request target without mutating L): the same
     // ground-carrier preference [orig: the Flags 0x200 deck branch @0x4368cf
@@ -475,13 +538,8 @@ bool find_mount_toggle_candidate(World &world, const Entity &player,
     if (!player.mounted) {
         Entity *ground = world.registry.get(player.ground_target);
         if (ground != nullptr && !ground->seats.empty()) {
-            const int seat_index =
-                    world.commands.find_best_seat(*ground, player.handle);
-            if (seat_index >= 0) {
-                r_hit.vehicle = ground->handle;
-                r_hit.seat_index = seat_index;
-                r_hit.type =
-                        ground->seats[static_cast<size_t>(seat_index)].type;
+            if (find_best_vehicle_seat(
+                        world, ground->handle, player.handle, r_hit)) {
                 return true;
             }
         }

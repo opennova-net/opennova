@@ -30,6 +30,8 @@ struct ClientRosterSlot {
 	std::string clan;         // 0x0002 (the serializer's "team string"; retail ships "")
 	uint8_t team = 0;         // 0x0004 [orig: @0x4315f7]; every accepted 0x16 row
 	                          // refreshes it too [orig: @0x42fc7c]
+	uint8_t downed_revive_seconds = 0; // 0x0008 / S2C 0x54 low seven bits
+	bool medic_request_active = false; // 0x0008 / S2C 0x54 bit seven
 	uint8_t quality = 0;      // 0x0400, clamped 4 [orig: @0x43170d] — the connection-icon band
 	int16_t entity_slot = -1; // pool-0 slot this connection drives; -1 = none
 	                          // [orig: the no-entity -1 store @0x431489]
@@ -246,6 +248,10 @@ struct ClientEntityState {
 	// identically placed weapon_byte/attach_ref fields land here too.
 	uint8_t zone_number_rank = 0;
 	uint16_t zone_radius = 0;
+	// Pool-3 S2C 0x20 flag 0x02 carries the raw entity+0 Q16 dword. Marker
+	// 6005/6006/2044 use it as their authored waypoint/proximity radius.
+	// [orig: NapiNPClientMsg_0x020 @0x425D07..0x425D1B]
+	int32_t spawn_bound_radius_q16 = 0;
 	// Full load-stream entity metadata needed to construct a client-side World
 	// row when the joiner loaded only the 616-byte BMS header. These are kept
 	// separate from the live compact state_flags byte: the 0x0D/0x10 dword is
@@ -606,6 +612,8 @@ struct ClientMinimapState {
 // @0xA82324, reset only by an offset-0 chunk @0x431D79 and otherwise kept
 // across completed decodes].
 struct ClientEndRoundStats {
+	bool header_known = false;
+	EndRoundHeader header;
 	// True once a complete board has been decoded at least once. A later
 	// partial chunk does not clear it, so the screen keeps showing the last
 	// complete board while the next one streams in.
@@ -616,6 +624,41 @@ struct ClientEndRoundStats {
 	std::vector<uint8_t> buffer;
 	// Chunks that arrived since the last offset-0 reset -- diagnostic only.
 	uint32_t chunks_seen = 0;
+};
+
+// Requester-local S2C 0x81 sample. `updates` is the consume edge for the
+// presentation/audio owner; `delta` retains retail's wrapping signed
+// current-minus-previous result. The periodic Tab board remains independent.
+// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+struct ClientScoreFeedback {
+	int32_t score = 0;
+	int32_t delta = 0;
+	uint32_t updates = 0;
+};
+
+// Latest requester-specific deploy-wave panel plus a valid-packet edge. The
+// group body is already the strict npwire decode; retaining it here lets both
+// loopback and remote clients consume one canonical state.
+// [orig: NapiNPClientMsg_HandleSquadRosterSync @0x429880]
+struct ClientSpawnWaveStatus {
+	bool known = false;
+	uint32_t updates = 0;
+	SpawnWaveStatus value;
+	// The zone whose member list names the local player (retail word_A85BC0:
+	// reset to -1 at every fold, set to the group's zone handle when a member
+	// equals the local handle @0x429a04..0x429a0b); 0xFFFF = none.
+	uint16_t self_zone_handle = 0xFFFF;
+};
+
+// Latest victim-local S2C 0x52 camera anchor. Retail stores the three fixed
+// coordinates globally and Camera_ComputeThirdPersonPositions consumes them.
+// [orig: NapiNPClientMsg_0x052 @0x428A80; consumer @0x438B80]
+struct ClientDeathCameraTarget {
+	bool known = false;
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;
+	uint32_t updates = 0;
 };
 
 struct ClientState {
@@ -633,6 +676,31 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// Latest phase-0 0x0A projection of the authority's whole-second
+	// pre-round timer. It is the client's Entity_UpdateAllEntities freeze gate;
+	// networking and maintenance remain live while nonzero.
+	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
+	std::uint8_t preround_delay_seconds = 0;
+	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
+	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
+	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f
+	// dword_A85B60 (slot+368, the local revive window — STROVER_MEDICTIMER /
+	// STROVER_CALLMEDIC), @0x4300c3 dword_A85B68 (slot+364, the spawn-target
+	// hold — STROVER_PSPRESPAWN); consumer UI_UpdateDeathScreenContent
+	// @0x5536a0]. Retained between phase cycles like the client globals.
+	// The client-local death screen (retail g_death_screen_active): the 0x0A
+	// header's flags1 bit 0 EDGES — a rising edge opens it and zeroes the
+	// sub-mode / kill-cam target and arms the enemy-tag grant; a falling edge
+	// closes it and clears the grant [orig: NapiNPClientMsg_0x00A
+	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_enemyTagsVisible
+	// @0x42ffb2/@0x430025]. The sub-mode is written by the spectate actions
+	// (unported) and stays 0 here.
+	bool death_screen_active = false;
+	std::uint8_t death_screen_submode = 0;
+	bool enemy_tags_visible = false;
+	std::uint8_t respawn_penalty_seconds = 0;
+	std::uint8_t local_revive_seconds = 0;
+	std::uint8_t spawn_hold_seconds = 0;
 	// Advances only when the complete seven-byte recipient-local 0x0A tail was
 	// decoded. frames_applied remains the lenient partial-presentation counter.
 	// Every compact entity record folded from an 0x0A. The replication heartbeat: it
@@ -658,11 +726,18 @@ struct ClientState {
 	// [orig: NapiNPClientMsg_0x056 @0x431D10].
 	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
+	ClientScoreFeedback score_feedback;
+	// The host VarList's EXP_FANFARE u16 (lo/hi thresholds of the 0x81 tone
+	// ladder, hud/score_fanfare.h) [orig: g_sessionvar_exp_fanfare @0x24d5a10].
+	uint16_t exp_fanfare = 0;
+	ClientSpawnWaveStatus spawn_waves;
+	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 
 	ClientEntityState *find(uint16_t handle);
+	const ClientEntityState *find(uint16_t handle) const;
 	ClientEntityState &upsert(uint16_t handle);
 	void mark_changed() { ++revision; }
 	void mark_topology_changed() {

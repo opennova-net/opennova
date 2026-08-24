@@ -3,6 +3,8 @@
 // sibling nova_simulation_player_{view,weapon,loadout}.cpp TUs.
 #include "simulation/nova_simulation_internal.h"
 
+#include <mission/bms.h>
+#include <npwire/game_type.h>
 #include <world/music_vars.h>
 #include <world/player_view.h>
 
@@ -170,18 +172,27 @@ bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_t
 int Simulation::spawn_local_player_at_start() {
 	if (!world_installed_ || !world_ || !world_->ai) return -1;
 	// P7: the npruntime listen server auto-spawns the host's own player at bring-up via the SAME
-	// select_player_spawn start-marker scan (Server_BuildPlayerInfoAndAdd), so when a player already
+	// retail spawn-pose operation (Server_BuildPlayerInfoAndAdd), so when a player already
 	// exists this is a no-op success (the player is at its start, input seeded by bringup_host_runtime).
 	if (has_local_player()) return 1;
-	// Pick the player-start marker the original would — scan the 60xx start-marker family (SP/DM,
-	// coop, team), FARTHEST from the enemy set — instead of the first NPC's position. Finds the
-	// authored start whatever the mission mode (e.g. a 6001-only SP training mission like 00TRa).
+	// Derive the same g_GameType code word as the mission catalog. A mission
+	// with no multiplayer bit is stock Co-op (0x10020), which reaches 00TRa's
+	// exact 6001 fallback rather than requiring a cross-mode family scan.
 	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
-	const opennova::world::SpawnPointResult sel = opennova::world::select_player_spawn(*world_);
+	const uint32_t game_type = opennova::game_type::for_mission_mode(
+			opennova::bms::selected_game_mode(
+					static_cast<opennova::bms::AttribFlags>(
+							world_->mission_attrib_flags)));
+	const opennova::world::SpawnPointResult sel =
+			opennova::world::resolve_player_spawn_pose(
+					*world_, opennova::world::EntityHandle{},
+					opennova::world::EntityHandle{}, 0, 1, game_type);
 	opennova::world::PlayerSpawn spawn;
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
+		spawn.pitch = sel.pitch;
+		spawn.roll = sel.roll;
 	} else {
 		// No player-start marker authored: spawn at the mission origin (the terrain clamp grounds
 		// it). NEVER fall back to an NPC's position — that is the bug this replaces.
@@ -355,19 +366,9 @@ void Simulation::tick_hud_map_death_gate() {
 	// respawn re-opens nothing — only the M key does (witness at
 	// hud::HudMapControl::on_local_player_dead).
 	if (hud_map_control_.mode == 0) return;
-	bool dead = false;
-	if (joiner_) {
-		// The recipient-specific 0x0A tail is the joiner's authoritative
-		// local health channel (the same read run_frame's death edge uses).
-		dead = runtime_ != nullptr && runtime_->state().local_health <= 0;
-	} else if (world_ && world_->cached.local_player.valid()) {
-		const opennova::world::Entity *e =
-				world_->registry.get(world_->cached.local_player);
-		dead = e != nullptr &&
-				((e->flags | e->engine_flags) &
-						opennova::world::kEntityFlagDead) != 0;
-	}
-	if (dead) hud_map_control_.on_local_player_dead();
+	// The joiner reads its recipient-specific 0x0A health tail, the authority
+	// its entity flags — the one local_player_dead() seam.
+	if (local_player_dead()) hud_map_control_.on_local_player_dead();
 }
 
 bool Simulation::get_hud_map_flip_180() const {

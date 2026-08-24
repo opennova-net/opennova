@@ -337,6 +337,46 @@ int main() {
 	}
 	fs::remove_all(game);
 
+	// The effect catalog spans THREE extensions, not one. `.ptl` is the base set and
+	// `.ptu`/`.ptg` are the US/German gore sets — same grammar, same parse callback,
+	// differing only in which one the runtime selects. All three index as `particle`
+	// so the loader and the browser can see them; particle_extension() is the
+	// selection, driven by the presence of `fgn2.bin` (the German content marker).
+	// Regression: while only `.ptl` classified, `Effect_AmHitBody` (US_BLOOD.PTU,
+	// retail's blood puff) never reached the catalog and every flesh hit interned an
+	// invisible `stockeffect` clone instead — no blood, no error.
+	// [orig: CEffectSystem_Init @ 0x5f6070 matches ".ptl" OR the selected extension
+	//  @0x5f64f3; Game_LoadConfig @ 0x5514e8..0x5514fa sets the selector byte.]
+	{
+		const fs::path gore = fs::temp_directory_path() / "opennova_gore_index_test";
+		fs::remove_all(gore);
+		write_file(gore / "joammohit.ptl", "ptl");
+		write_file(gore / "us_blood.ptu", "ptu");
+		write_file(gore / "euro_blood.ptg", "ptg");
+
+		opennova::ResourceIndex gore_index;
+		TEST_EXPECT(gore_index.scan(gore.string()));
+		const std::vector<opennova::ResourceFileEntry> particles =
+		        gore_index.resource_files("particle");
+		TEST_EXPECT(particles.size() == 3);
+		TEST_EXPECT(has_relative_path(particles, "joammohit.ptl"));
+		TEST_EXPECT(has_relative_path(particles, "us_blood.ptu"));
+		TEST_EXPECT(has_relative_path(particles, "euro_blood.ptg"));
+		// The kind aliases reach the same bucket, so a `.ptu`-spelled query works.
+		TEST_EXPECT(gore_index.resource_files("ptu").size() == 3);
+		TEST_EXPECT(gore_index.resource_files("ptg").size() == 3);
+
+		// No fgn2.bin -> the US set. The German marker is presence-only: retail never
+		// reads the file, only asks whether it exists.
+		TEST_EXPECT(gore_index.particle_extension() == ".ptu");
+		write_file(gore / "fgn2.bin", "german content marker");
+		TEST_EXPECT(gore_index.scan(gore.string()));
+		TEST_EXPECT(gore_index.particle_extension() == ".ptg");
+
+		gore_index.clear();
+		fs::remove_all(gore);
+	}
+
 	// Release mounted .pff handles before deleting the directory: the VFS keeps archives
 	// open for the session (engine-faithful, fast reads), and Windows blocks deletion of
 	// open files.

@@ -230,6 +230,20 @@ uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255) {
 	return out;
 }
 
+uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter) {
+	// [orig: @0x5a3dfb..0x5a3e6d]
+	uint32_t t = (static_cast<uint32_t>(frame_counter) - 8u) & 0x3Fu;
+	if (t > 0x20u) t = 0x3Fu - t;
+	uint32_t out = argb & 0xFF000000u;
+	for (int shift = 0; shift <= 16; shift += 8) {
+		const uint32_t c = (argb >> shift) & 0xFFu;
+		// `add bl, cl` — the channel byte wraps like retail's byte add.
+		const uint32_t lifted = (c + (((255u - c) * t) >> 5)) & 0xFFu;
+		out |= lifted << shift;
+	}
+	return out;
+}
+
 // [orig: g_fallbackPeopleNames @0x840a78 — the 36 compiled-in name strings,
 // verbatim including the double-space rank padding; count @0x840a0c]
 static const char *const kFallbackPeopleNames[] = {
@@ -262,14 +276,14 @@ HudLabelFontChoice hud_label_font_choice(int surface_w) {
 	// [orig: g_hudLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
 	const float large_scale = static_cast<float>(surface_w) / 800.0f;
 	if (surface_w > 800) {
-		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt",
+		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt", "Impac38b.fnt",
 				static_cast<float>(surface_w) / 1024.0f, large_scale, 2};
 	}
 	if (surface_w > 640) {
-		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt",
+		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt", "Impac38b.fnt",
 				static_cast<float>(surface_w) / 800.0f, large_scale, 1};
 	}
-	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt",
+	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt", "Impac38b.fnt",
 			static_cast<float>(surface_w) / 640.0f, large_scale, 0};
 }
 

@@ -67,6 +67,7 @@ var _hud_color_index: int = clampi(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 				HUD_COLOR_CONFIG_KEY, 2)), 0, 5)
 var _hud_color_was_down := false
+var _score_fanfare := ScoreFanfarePresenter.new()  # the S2C 0x81 hit-confirm lane
 # The HUD declutter level, persisted like retail's config token round trip.
 # Default 0 = everything the masks author at level 0. [orig: cfg int
 # "hud_detail" — parse @0x550339, default 0 @0x54d3d8, applied to the live
@@ -294,6 +295,12 @@ func _load_hud_text_tables(root: ResourceRoot) -> void:
 	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
 	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
 	Strings.register_table("gametext", _load_rtxt(root, "gametext.bin"))
+	# The host's medic broadcast format [orig: Server_BroadcastMedicRequest @0x515390].
+	var sim = _world.get_sim() if _world != null else null
+	var gametext: RtxtStringFile = Strings.get_table("gametext")
+	if sim != null and gametext != null \
+			and gametext.has_string_in_section("Server", "STRSRV_MEDREQ"):
+		sim.set_server_text(gametext.get_string_in_section("Server", "STRSRV_MEDREQ"))
 	# The medmssn fallback fires only when the mission .bin does not EXIST — a
 	# present-but-unparseable file loads to nothing with no fallback.
 	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
@@ -534,6 +541,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
+	_score_fanfare.update(sim, _world)
 	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
 			hud_keys_chorded, gameplay_input_active)
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
@@ -658,6 +666,11 @@ const FRIENDLY_TAG_LIFT := 0.25
 #  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
 #  clip_point_to_frustum_and_project @0x5a3b47, fog Env_FogDistCurrent
 #  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
+## The live HudOverlay node (null until the first in-world HUD frame builds it).
+func get_game_hud() -> HudOverlay:
+	return _game_hud
+
+
 func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
@@ -686,7 +699,7 @@ func _apply_friendly_tags() -> void:
 				names.append(String(tag.get("name", "")))
 				ids.append(int(tag.get("entity_id", 0)))
 				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
-				flags.append(4 if bool(tag.get("player", false)) else 0)
+				flags.append(FriendlyTagFlags.pack(tag))
 	var fog_q16 := 0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null

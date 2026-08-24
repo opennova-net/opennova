@@ -1,7 +1,7 @@
 class_name MissionPresentation
 extends Node
 
-# The Godot presentation owner for one native MissionSession. It owns the
+# The Godot presentation owner for one native inmatch::Session. It owns the
 # Simulation adapter, present passes, and entity index; cadence, lifecycle, and
 # input retention remain native. GameWorld is its sole live owner.
 #
@@ -10,7 +10,7 @@ extends Node
 # [orig: WacScript_AdvanceTick runs the logic systems; the client then renders the entities. Terrain/foliage/audio
 #  are Godot render passes the caller composes around this.]
 #
-# Cadence: MissionSession banks wall clock and dispatches 0..N 62.5 Hz ticks;
+# Cadence: inmatch::Session banks wall clock and dispatches 0..N 62.5 Hz ticks;
 # tick() asks that same session for one deterministic local/test step. The
 # engine's WAC/BMS dividers remain inside their systems. Stop rewinds both the
 # native world baseline and the authored node transforms captured at setup.

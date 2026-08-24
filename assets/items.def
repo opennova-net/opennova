@@ -1,0 +1,57 @@
+// The minimal game's item catalogue: only what the mission places or the engine
+// spawns by fixed id. Model-bearing entries the map does not place are not here --
+// an entry is added when its model exists and a mission uses it, never ahead of that.
+// Ids the engine addresses BY NUMBER are reserved; ids that merely also exist in
+// retail's catalogue are free (our own content goes at 108001+).
+
+begin "Player #1, Single player"
+  id 105310
+  type person
+  graphic US01
+  graphicenemy Indo01
+  sid player1_sp
+  anim_def US01
+  hp 150
+  sound_profile SP_JO_SP_PlayerM1
+  sound_profileFemale SP_JO_SP_PlayerF1
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
+end
+
+// --- The canonical marker family -------------------------------------------
+// Mesh-less items the engine addresses by FIXED id rather than by placement, so
+// a map that wants a player start has to use these exact numbers. Taken from
+// the retail items.def, and confirmed against retail 00TRa.bms: it places
+// exactly one 106001 and 53 x 106005, and places NO player entity at all --
+// the engine spawns "Player #1 (Singleplayer)" 105310 by its own id and reads
+// 106001 to learn where. BMS records store these as type_id = id - 100000.
+begin "Null"
+  id 100000
+  type marker
+end
+
+begin "start, player"
+  id 106001
+  type marker
+end
+
+begin "start, dmatch"
+  id 106002
+  type marker
+end
+
+begin "start, Blue Team"
+  id 106003
+  type marker
+end
+
+begin "start, Red Team"
+  id 106004
+  type marker
+end
+
+begin "waypoint"
+  id 106005
+  type marker
+end

@@ -31,6 +31,8 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 struct PlayerSpawn {
     Vec3 position;
     int16_t yaw = 0;
+    int16_t pitch = 0;
+    int16_t roll = 0;
     uint8_t team = 0;
     uint16_t net_id = 0xFFF0;
     // Item-less FALLBACK only: when World::player_item_hp is resolved (the items.def Player hp,

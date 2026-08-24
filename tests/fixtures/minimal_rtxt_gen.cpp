@@ -5,7 +5,7 @@
 // gametext @ 0x4a6fed, vmacros @ 0x4a702f, keyhelp @ 0x4a7072]. Each file
 // needs only to LOAD as a valid RTXT (missing keys fall back to literals
 // in the engine), so these are minimal-but-valid tables authored from scratch
-// by our own writer — no retail asset. See fixtures/minimal/README.md.
+// by our own writer — no retail asset. See assets/README.md.
 //
 // Default: regenerate each table in memory, assert it byte-matches the
 // committed file and round-trips (parse->write is byte-stable). Run with
@@ -60,18 +60,34 @@ File keyhelp_table() { return File{}; }
 // Error strings: valid-but-empty — every error dialog falls back to its
 // literal, and the ShowEarlyError(4) boot noise goes away.
 File gameerr_table() { return File{}; }
-// The mission's briefing text (<stem>.bin, retail family member in
-// language.pff): valid-but-empty until the briefing screen names its keys.
-File mnmlbin_table() { return File{}; }
+// The mission's text sidecar (<stem>.bin, retail family member in
+// language.pff). [Info] TITLE is what the mission list shows for the row
+// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250 via
+// SinglePlayer_PopulateMissionList @ 0x561840]; with no title the populate
+// falls back to the BMS header mission_name, then to the raw filename.
+// BRIEFING fills the briefing pane when the row is selected.
+File mnmlbin_table() {
+	return make_table("Info", {
+	                              {"TITLE", "Minimal"},
+	                              {"BRIEFING", "A minimal authored map."},
+	                          });
+}
 // Menu labels: the string ids the authored main.mnu / mp.mnu reference via
 // TEXT_RSRC menutxt.BIN (retail ships menutxt.bin in language.pff).
 File menutxt_table() {
 	return make_table("Menu", {
+	                              {"MM_Singleplayer", "Single Player"},
 	                              {"MM_LANMultiplayer", "LAN Multiplayer"},
 	                              {"MM_Exit", "Exit"},
 	                              {"MP_Host", "Host"},
 	                              {"MP_Join", "Join"},
 	                              {"MP_Back", "Back"},
+	                              // sp.mnu (ids match retail's own sp.mnu so the
+	                              // screen stays swappable against the retail one).
+	                              {"SP_Campaigns", "Missions"},
+	                              {"SP_MissionDesc", "Briefing"},
+	                              {"NAV_ACCEPT", "Accept"},
+	                              {"NAV_BACK", "Back"},
 	                          });
 }
 
@@ -157,11 +173,11 @@ int run(const std::string &dir, bool write_mode) {
 } // namespace
 
 int main() {
-#ifndef MINIMAL_FIXTURE_DIR
-#define MINIMAL_FIXTURE_DIR "."
+#ifndef GAME_ASSETS_DIR
+#define GAME_ASSETS_DIR "."
 #endif
 	const bool write_mode = std::getenv("OPENNOVA_WRITE_MINIMAL_FIXTURES") != nullptr;
-	const int failures = run(MINIMAL_FIXTURE_DIR "/resources", write_mode);
+	const int failures = run(GAME_ASSETS_DIR, write_mode);
 	if (failures == 0) std::printf("OK: minimal RTXT fatal-set tables valid + byte-reproducible\n");
 	return failures == 0 ? 0 : 1;
 }

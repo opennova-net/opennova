@@ -564,7 +564,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(vehicles));
 
 	nw::Pool3SyncRecord marker;
-	marker.item_type_id = 6002;
+	marker.item_type_id = 6006;
 	// The 0x20 handler selects slot start_index+i. Its net_handle field is a
 	// separate value stored on that exact row (retail @0x425C00/+124).
 	marker.net_handle = 0x0777;
@@ -573,6 +573,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 	marker.pos_z = 0;
 	marker.movement_val = static_cast<uint32_t>(
 			w::bam_heading_from_mission_yaw_deg(91.0));
+	marker.orientation_val = 25u << 16;
 	marker.team_byte = 1;
 	nw::Pool3SyncBatch markers;
 	markers.start_index = 11;
@@ -693,9 +694,10 @@ bool decoded_world_stream_materializes_exact_rows() {
 
 	const w::Entity *start = world.registry.get(w::EntityHandle{0x300B});
 	if (!expect(start != nullptr && start->kind == w::EntityKind::Marker &&
-			start->item_id == 6002 && start->team == 1 &&
-			start->net_id == 0x0777,
-			"pool-3 materialization separates start-index handle from net id"))
+			start->item_id == 6006 && start->team == 1 &&
+			start->net_id == 0x0777 &&
+			std::fabs(start->bound_radius - 25.0f) < 0.0001f,
+			"pool-3 materialization preserves handle, net id, and entity+0 radius"))
 		return false;
 
 	const uint64_t repeated_spawn_id = boat->registry_spawn_id;
@@ -850,6 +852,67 @@ bool entity_remove_detaches_children_in_place() {
 			"0x12 removes only the named row; the child survives detached");
 }
 
+// S2C 0x2F updates the flag itself, its occupantEntity pointer, the carrier's
+// mountedChild back-link, and groundEntity. A later detached record clears both
+// sides without respawning the flag. [orig: NapiNPClientMsg_0x02F @0x430E10;
+// Entity_AttachToVehicle @0x43C130]
+bool objective_state_attaches_and_detaches_flag() {
+	ns::ClientReplicaPipeline pipeline;
+	nw::PoolSpawnRecord flag;
+	flag.slot_id = 0x1007;
+	flag.item_type_id = 4093;
+	nw::PoolSpawnBatch batch;
+	batch.records.push_back(flag);
+	pipeline.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(batch));
+
+	w::World world;
+	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+	w::Entity carrier_seed;
+	carrier_seed.kind = w::EntityKind::Organic;
+	carrier_seed.item_id = 1;
+	const w::EntityHandle carrier{0x0004};
+	if (!expect(world.registry.spawn_at(carrier, carrier_seed) == carrier,
+			"the objective carrier occupies its retail pool-0 handle"))
+		return false;
+
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), world);
+
+	nw::ObjectiveEntityState carried;
+	carried.entity_handle = flag.slot_id;
+	carried.flags_byte = 0x01;
+	carried.pos_x = 12 * 65536;
+	carried.pos_y = -3 * 65536;
+	carried.pos_z = 5 * 65536;
+	carried.attach_handle = carrier.packed;
+	carried.ground_handle = 0xFFFF;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE,
+			nw::encode_objective_entity_state(carried));
+	materializer.sync(pipeline.state(), world);
+
+	w::Entity *flag_entity = world.registry.get(w::EntityHandle{flag.slot_id});
+	w::Entity *carrier_entity = world.registry.get(carrier);
+	if (!expect(flag_entity != nullptr && carrier_entity != nullptr &&
+			flag_entity->primary_occupant == carrier &&
+			carrier_entity->mounted_child == w::EntityHandle{flag.slot_id} &&
+			(flag_entity->flags & 0xFFu) == 0x01u &&
+			std::fabs(flag_entity->position.x - 12.0f) < 0.001f,
+			"0x2F attaches the flag and applies its low flags and fixed position"))
+		return false;
+
+	carried.flags_byte = 0;
+	carried.attach_handle = 0xFFFF;
+	carried.ground_handle = 0x1002;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE,
+			nw::encode_objective_entity_state(carried));
+	materializer.sync(pipeline.state(), world);
+	return expect(flag_entity->primary_occupant == w::EntityHandle{} &&
+			carrier_entity->mounted_child == w::EntityHandle{} &&
+			flag_entity->ground_target == w::EntityHandle{},
+			"a detached 0x2F clears both carry links and ignores an unresolved ground row");
+}
+
 int main() {
 	if (!exact_registry_slot_contract()) return 1;
 	if (!registry_lifetime_rejects_handle_reuse()) return 1;
@@ -859,6 +922,7 @@ int main() {
 	if (!wire_target_authors_ground_separately_from_parent()) return 1;
 	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
 	if (!entity_remove_detaches_children_in_place()) return 1;
+	if (!objective_state_attaches_and_detaches_flag()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
 	if (!pool2_tail_beyond_1024_materializes()) return 1;
 	std::puts("client_world_materializer_test: PASS");

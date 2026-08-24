@@ -67,13 +67,13 @@ void test_def_keys_parse_raw() {
 	def_free_items(&file);
 }
 
-World make_world(bool authority) {
-	World w;
-	w.registry.configure_pool(0, 4);
-	w.registry.configure_pool(1, 4);
-	w.vehicle_authority = authority;
-	return w;
-}
+struct SuspensionWorld final : World {
+	explicit SuspensionWorld(bool authority) {
+		registry.configure_pool(0, 4);
+		registry.configure_pool(1, 4);
+		vehicle_authority = authority;
+	}
+};
 
 Entity &spawn_veh(World &w, EntityHandle &out) {
 	Entity veh;
@@ -100,7 +100,7 @@ VehicleTraits sprung_traits() {
 // POLARITY: a fresh row (no request pending) never arms — the spawn-park the
 // inverted gate produced is gone; the request arms, crashed blocks a re-arm.
 void test_fresh_row_never_arms() {
-	World w = make_world(true);
+	SuspensionWorld w(true);
 	EntityHandle h;
 	Entity &veh = spawn_veh(w, h);
 	for (int i = 0; i < 5; ++i)
@@ -113,7 +113,7 @@ void test_fresh_row_never_arms() {
 // client without the bit does not arm, a client WITH it does.
 void test_request_arms_by_role_and_replication() {
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.crash_request = 1;
@@ -130,7 +130,7 @@ void test_request_arms_by_role_and_replication() {
 		CHECK(!vehicle_suspension_arm(w, veh, false), "a crashed row does not re-arm");
 	}
 	{
-		World w = make_world(false);
+	SuspensionWorld w(false);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.crash_request = 1;
@@ -148,7 +148,7 @@ void test_request_arms_by_role_and_replication() {
 // Arming never touches the sinks, compressions or oscillators
 // (Entity_ClearSuspensionState is the chassis matrix reset).
 void test_arming_keeps_the_spring_state() {
-	World w = make_world(true);
+	SuspensionWorld w(true);
 	EntityHandle h;
 	Entity &veh = spawn_veh(w, h);
 	veh.veh.plat_acc[1] = 400;
@@ -202,7 +202,7 @@ void test_crash_tests() {
 	CHECK(flip_q16 == 29491, "flip 45 -> ftol(45 * 0.01 * 65536) = 29491");
 	{
 		// (a) tipped past the flip angle while airborne.
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.fresh_2f1 = 1;
@@ -229,13 +229,13 @@ void test_crash_tests() {
 	}
 	{
 		// (b) the authority's hard fall vs the client's replicated bit.
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.slide_z = -0x7001;
 		vehicle_suspension_crash_tests(w, veh, t, 60000, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1, "the authority: |vz| > 0x7000 requests");
-		World wc = make_world(false);
+		SuspensionWorld wc(false);
 		EntityHandle hc;
 		Entity &cv = spawn_veh(wc, hc);
 		cv.veh.fresh_2f1 = 1;
@@ -248,7 +248,7 @@ void test_crash_tests() {
 	}
 	{
 		// (c) the client crash window: ten ticks from the airborne stamp.
-		World w = make_world(false);
+	SuspensionWorld w(false);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		w.logic_tick = 100;
@@ -279,7 +279,7 @@ void test_crash_tests() {
 	{
 		// (c) the TANK window also waits on the settle latch; the tracked one
 		// does not read it.
-		World w = make_world(false);
+	SuspensionWorld w(false);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		w.logic_tick = 100;
@@ -296,7 +296,7 @@ void test_crash_tests() {
 
 // The bike's live crash test, and its seed ejecting the rider.
 void test_bike_crash_test_and_eject() {
-	World w = make_world(true);
+	SuspensionWorld w(true);
 	Entity bike;
 	bike.kind = EntityKind::Item;
 	bike.item_id = 1300;
@@ -343,7 +343,7 @@ void test_bike_crash_test_and_eject() {
 // Sink growth: off-ground pads only, gated on the latch bytes for the
 // tracked/tank families, ungated for the bike, skipped by the pre-gate.
 void test_sink_growth_and_gates() {
-	World w = make_world(true);
+	SuspensionWorld w(true);
 	EntityHandle h;
 	Entity &veh = spawn_veh(w, h);
 	const bool contact[4] = {true, false, false, true};
@@ -380,7 +380,7 @@ void test_sink_growth_and_gates() {
 void test_grounded_loop_settle_and_impulse() {
 	const VehicleTraits t = sprung_traits();
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		int32_t depth[4] = {4096, 0, 0, 0};
@@ -399,7 +399,7 @@ void test_grounded_loop_settle_and_impulse() {
 		CHECK(adj[0] == 0 && adj[1] == 0, "no sink: no catch-up term");
 	}
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.plat_acc[0] = 6000; // past the 5000 threshold (spring_comp 20 > 10)
@@ -415,7 +415,7 @@ void test_grounded_loop_settle_and_impulse() {
 		CHECK(depth[0] == 4096 - kSpringStepCap, "the depth resolves");
 	}
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		VehicleTraits unsprung = t;
@@ -429,7 +429,7 @@ void test_grounded_loop_settle_and_impulse() {
 	}
 	{
 		// A crashed row skips every wheel.
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.crashed = 1;
@@ -447,7 +447,7 @@ void test_grounded_loop_settle_and_impulse() {
 void test_airborne_loop_full_step_and_catch_up() {
 	const VehicleTraits t = sprung_traits();
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.wheel_osc[0].energy = 1000;
@@ -461,7 +461,7 @@ void test_airborne_loop_full_step_and_catch_up() {
 		CHECK(veh.veh.landing_2ee == 0, "a shallow drop is no hard landing");
 	}
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.plat_acc[2] = 6000;
@@ -472,7 +472,7 @@ void test_airborne_loop_full_step_and_catch_up() {
 				"a drop past -5000 while falling marks the hard landing");
 	}
 	{
-		World w = make_world(true);
+	SuspensionWorld w(true);
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		veh.veh.settle_2f0 = 1;
@@ -487,7 +487,7 @@ void test_airborne_loop_full_step_and_catch_up() {
 // The post-contact sink reset and the tick tail.
 void test_post_contact_and_tail() {
 	const VehicleTraits t = sprung_traits();
-	World w = make_world(true);
+	SuspensionWorld w(true);
 	EntityHandle h;
 	Entity &veh = spawn_veh(w, h);
 	const auto reseed = [&veh]() {
@@ -544,7 +544,7 @@ void test_post_contact_and_tail() {
 // The oscillator clamps the def's shock IN PLACE: a row the traits table
 // knows sees its shared entry clamped, as retail clamps the shared def.
 void test_shock_clamps_the_table_entry_in_place() {
-	World w = make_world(true);
+	SuspensionWorld w(true);
 	EntityHandle h;
 	Entity &veh = spawn_veh(w, h);
 	VehicleTraits t = sprung_traits();

@@ -128,25 +128,25 @@ func _run() -> void:
 		_fail("unknown weapon name must not install")
 		return
 
-	# The native MissionSession 62.5 Hz bank [orig: Game_MainLoop @ 0x52b630].
+	# The native inmatch::Session 62.5 Hz bank [orig: Game_MainLoop @ 0x52b630].
 	sim.resume_session()
 	var frame_input := MissionFrameInput.new()
 	frame_input.delta_seconds = 0.032
 	if int(sim.advance_session_frame(frame_input).get_ticks_run()) != 2:
 		sim.free()
-		_fail("MissionSession.advance(0.032) != 2 ticks")
+		_fail("inmatch::Session::advance(0.032) != 2 ticks")
 		return
 	frame_input = MissionFrameInput.new()
 	frame_input.delta_seconds = 0.001
 	if int(sim.advance_session_frame(frame_input).get_ticks_run()) != 0:
 		sim.free()
-		_fail("MissionSession.advance(0.001) != 0 ticks")
+		_fail("inmatch::Session::advance(0.001) != 0 ticks")
 		return
 	frame_input = MissionFrameInput.new()
 	frame_input.delta_seconds = 2.0
 	if int(sim.advance_session_frame(frame_input).get_ticks_run()) != 31:
 		sim.free()
-		_fail("MissionSession.advance(2.0) != 31 ticks (spiral clamp)")
+		_fail("inmatch::Session::advance(2.0) != 31 ticks (spiral clamp)")
 		return
 
 	sim.free()

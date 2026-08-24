@@ -306,6 +306,34 @@ func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 	sim.free()
 
 
+func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
+	var sim := Simulation.new()
+	sim.configure_host_session({
+		"gametype": NetProtocol.GAME_TYPE_FLAGBALL,
+		"max_score": 9,
+		"koth_delta": 7,
+		"flag_return_ticks": 333,
+		"capture_duration_seconds": 27,
+		"capture_speed_setting": 2,
+		"spawn_wave_time_base": 4,
+		"spawn_wave_time_zone": 12,
+		"default_spawn_requires_no_team_zone": 1,
+		"num_teams": 4,
+	})
+	var options: Dictionary = sim.get_host_session_config()
+	assert_eq(int(options.get("gametype", -1)), NetProtocol.GAME_TYPE_FLAGBALL)
+	assert_eq(int(options.get("max_score", -1)), 9)
+	assert_eq(int(options.get("koth_delta", -1)), 7)
+	assert_eq(int(options.get("flag_return_ticks", -1)), 333)
+	assert_eq(int(options.get("capture_duration_seconds", -1)), 27)
+	assert_eq(int(options.get("capture_speed_setting", -1)), 2)
+	assert_eq(int(options.get("spawn_wave_time_base", -1)), 4)
+	assert_eq(int(options.get("spawn_wave_time_zone", -1)), 12)
+	assert_eq(int(options.get("default_spawn_requires_no_team_zone", -1)), 1)
+	assert_eq(int(options.get("num_teams", -1)), 4)
+	sim.free()
+
+
 func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
 	var sim := Simulation.new()
 	assert_eq(String(sim.get_host_session_config().get("integrity_profile", "x")), "",
@@ -1462,7 +1490,7 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# The listen-server loopback handler skips C2S 0x06 because retail local fire
 	# already appends/spawns synchronously. Pin that local action seam end-to-end:
-	# FSM fired -> RoundSim -> organic tag-2 effects_table row.
+	# FSM fired -> RoundSim -> the organic effects_table row.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Spawn yaw 0 = mission yaw 0 = engine heading 90 BAM-deg, which faces
@@ -1522,8 +1550,13 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_eq(int(weapon_state.get("last_round_seq", 0)), 1)
 	assert_eq(impacts.size(), 1, "one local shot reaches the target and emits one impact")
 	if impacts.size() == 1:
+		# The victim is a NON-LOCAL person, so the flesh row (23), not the local
+		# player's row (2). Real small-arms ammo authors Effect_AmHitBody on both,
+		# so only the SOUND distinguishes them.
+		# [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — local-player compare
+		#  @0x4e9a55, push 2 @0x4e9aa1, push 17h @0x4e9ad7]
 		assert_eq(String((impacts[0] as Dictionary).get("effect", "")), "Effect_AmHitBody")
-		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_PLAYER")
+		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_FLESH")
 		# The drained position is Godot-space (x, z_up, -y): the +y_m flight lands
 		# near (0, ~eye, -8). Pins the local fire bearing = the engine heading
 		# frame (D-WPN-18; RoundSim's wire-validated (cos, sin) mapping).

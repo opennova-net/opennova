@@ -671,224 +671,6 @@ void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
     commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
 }
 
-// The physical recoil accumulator's per-body decay and orientation drift.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
-void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
-                          int32_t &pitch, int32_t random16) {
-    // The accumulator yields an eighth-step, then loses half of that step.
-    // Pitch receives one eighth of the pre-halved step and yaw receives the
-    // half-step with PRNG-selected sign. The caller draws PRNG_Next16 even when
-    // recoil is zero. [orig: the entity+0x380 body-update block]
-    const int32_t step = io::bam_sar(io::bam_add(inf.recoil_pitch, 4), 3);
-    const int32_t half = io::bam_sar(step, 1);
-    inf.recoil_pitch = io::bam_sub(inf.recoil_pitch, half);
-    if (inf.recoil_pitch <= 0x300) inf.recoil_pitch = 0;
-    pitch = io::bam_add(pitch, io::bam_sar(step, 3));
-    heading = (random16 & 1) == 0 ? io::bam_add(heading, half)
-                                  : io::bam_sub(heading, half);
-}
-
-void infantry_weapon_weight_spread_tick(
-        InfantryState &inf, const InfantryWeightSpreadInputs &inputs) {
-    if (inputs.produce) {
-        const int32_t weight = io::bam_add(inputs.weaponweight_fp16,
-                                           inputs.clipweight_fp16);
-        int32_t increment = 0;
-        if (inputs.aimed_shot_available ||
-            (inputs.prone && !inputs.drowning)) {
-            increment = weight / 3;
-        } else if (inputs.crouched && !inputs.drowning) {
-            increment = static_cast<int32_t>(
-                    static_cast<double>(weight) * 2.0 / 3.0);
-        } else {
-            increment = static_cast<int32_t>(static_cast<double>(weight) * 1.5);
-        }
-        inf.weapon_weight_spread =
-                io::bam_add(inf.weapon_weight_spread, increment);
-        if (inputs.airborne_rising) {
-            inf.weapon_weight_spread =
-                    io::bam_add(inf.weapon_weight_spread, 0x01000000);
-        }
-    }
-
-    // Shared decay is after the local producer; remote players and AI jump
-    // directly here. There is no upper clamp.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4B5945]
-    inf.weapon_weight_spread = io::bam_sub(
-            inf.weapon_weight_spread,
-            io::bam_sar(io::bam_add(inf.weapon_weight_spread, 4), 4));
-    if (inf.weapon_weight_spread <= 0x300) inf.weapon_weight_spread = 0;
-}
-
-// The org1 water block: an AI body that meets the water plane FLOATS on it
-// rather than continuing to fall, and fans one splash on the way in.
-//
-// Entry is hysteretic on purpose. A body that is not yet floating has to get
-// 0.625u BELOW the plane before the latch takes; once floating it keeps the
-// latch until it is back at or above the plane. Without that gap a body resting
-// at the surface would toggle the latch every tick and re-fan the splash with
-// it. A body latched to a ladder never floats — the climb owns its vertical.
-//
-// While the latch is set, the gravity column is skipped: that is the same
-// kEntityFlagDrowning half of the 0x108000 gate the fall path already reads, so
-// setting the flag here is what stops the body sinking, and the quarter-chase
-// below is what moves it. (The flag's name is ours and is narrower than the bit:
-// retail uses it as the generic afloat latch, not only for drowning.)
-//
-// [orig: Entity_UpdateInfantryAI @0x4bfb84..0x4bfc7a — entry
-//  `z - 0xA000*((Flags>>15)&1) + 0xA000 >= water || (Flags & 0x100000)`, the
-//  exit clear `Flags &= 0xFFDF7FFF`, the float target, the splash edge
-//  @0x4bfb87 gated on `(Flags & 0x8000) == 0`, the latch
-//  `(Flags & ~0x2000) | 0x8000` @0x4bfc48 and the quarter-chase tail @0x4bfc65.
-//  The player twin @0x4b8020 carries the same shape plus swim control and a
-//  second, shallower dive edge (Flags 0x200000) — both stay with D-INF-3.]
-void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
-                                    int32_t capsule_bottom, uint32_t logic_tick) {
-    if (tick_entity == nullptr) return;
-    const int32_t water = world.env.water_z;
-    if (water == 0) return; // our no-water-world sentinel (retail worlds always carry a plane)
-
-    // Retail has one Flags word; we carry two mirrors, so read their union and
-    // write both — the same discipline the jump stamp and the ladder unlatch use.
-    const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
-    const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
-    const int32_t entry_z = e.pos[2] + (was_afloat ? 0 : kWaterFloatHysteresis);
-    if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
-        // [orig: the 0xFFDF7FFF clear — its 0x200000 half is the player's dive
-        //  latch, which org1 never sets]
-        tick_entity->flags &= ~kEntityFlagDrowning;
-        tick_entity->engine_flags &= ~kEntityFlagDrowning;
-        return;
-    }
-
-    // The float target: the plane, plus a shallow bob whose phase is seeded from
-    // the body's own XY so a squad in the water is not in lockstep, minus half
-    // the eye offset and a fixed sink, plus the anim frame's capsule bottom when
-    // that hangs below the origin.
-    int32_t depth = capsule_bottom;
-    if (depth > 0) depth = 0;                       // [orig: the `> 0 -> 0` clamp]
-    const int32_t phase =
-            ((e.pos[1] + e.pos[0]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
-    const int32_t bob = static_cast<int32_t>(
-            std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * kWaterBobAmplitude);
-    const int32_t target = water + bob - (tick_entity->eye_offset_z >> 1)
-                         - kWaterFloatSink + depth;
-
-    // The entry edge, fanned once. Which of the two sounds it takes is the body's
-    // own airborne bit: a soldier who WADED in and one who JUMPED in are heard
-    // differently. Position is the body's XY at the PLANE, not at its own Z.
-    if (!was_afloat) {
-        world.water_crossings.add(e.pos[0], e.pos[1], water,
-                                  /*airborne=*/(flags & kEntityFlagInAir) != 0);
-    }
-    tick_entity->flags = (tick_entity->flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
-    tick_entity->engine_flags =
-            (tick_entity->engine_flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
-    e.inf.airborne = false; // the motor-side mirror of the 0x2000 clear
-
-    // The vertical is a QUARTER-step toward the target, not a snap: that is what
-    // makes a body entering water settle over a few ticks instead of popping.
-    e.pos[2] += (target - e.pos[2] + 2) >> 2;
-}
-
-// The org2 (player body) water block -- see the ai.h declaration. Same
-// hysteretic entry/exit as org1, then the BUOYANT-RISE form instead of the
-// snap: the body rises by a fixed step each tick and is clamped from above at
-// the surface line, the velocity triplet drags, and a look-pitch term lets a
-// moving swimmer dive and surface. The local player alone rides the surface
-// bob; a remote row on the authority gets the flat base.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b8020-0x4b8373; kong 149010-149165]
-void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity,
-                                  int32_t capsule_bottom, bool is_authority,
-                                  uint32_t logic_tick) {
-    if (tick_entity == nullptr) return;
-    InfantryState &inf = e.inf;
-    const int32_t water = world.env.water_z;
-    if (water == 0) {
-        // Our no-water-world sentinel: the channel is off, and stale float/dive
-        // bits clear so the gravity gate can never wedge on them.
-        tick_entity->flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        tick_entity->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        return;
-    }
-    const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
-    const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
-    // [orig: @0x4b8020-0x4b804d `z - 0xA000*((Flags>>15)&1) + 0xA000 >= water
-    //  || (Flags & 0x100000)` -> `Flags &= 0xFFDF7FFF`]
-    const int32_t entry_z = e.pos[2] + (was_afloat ? 0 : kWaterFloatHysteresis);
-    if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
-        tick_entity->flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        tick_entity->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        return;
-    }
-
-    int32_t depth = capsule_bottom;
-    if (depth > 0) depth = 0;                       // [orig: @0x4b8053 `> 0 -> 0`]
-    // base: the local player subtracts the NEGATED-amplitude bob (so it adds
-    // 1224*sin) and folds the capsule bottom; the else arm is the flat -1225.
-    // [orig: @0x4b8063-0x4b80a5 `v = -1225 - ftol(sin(...) * -1224.0) + cb`]
-    int32_t base;
-    if (inf.is_local_player) {
-        const int32_t phase =
-                ((e.pos[0] + e.pos[1]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
-        const int32_t bob = static_cast<int32_t>(
-                std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * -kWaterBobAmplitude);
-        base = -kWaterFloatSink - bob + depth;
-    } else {
-        base = -kWaterFloatSink;
-    }
-
-    // The look-pitch dive/rise term: a MOVING swimmer (MoveOrder bit 3) on the
-    // local or authority row scales |base/2| + 0x1000 by Pitch>>14 and clamps
-    // to +-0x800; everyone else gets zero. [orig: @0x4b80aa-0x4b8113]
-    int32_t pitch_term = 0;
-    if (inf.player_moving && (inf.is_local_player || is_authority)) {
-        const int32_t half = base >> 1;
-        const int64_t scale = (half < 0 ? -half : half) + kWaterPitchTermBase;
-        const int64_t term = ((static_cast<int64_t>(e.pitch >> 14) * scale) + 0x8000) >> 16;
-        pitch_term = static_cast<int32_t>(term);
-        if (pitch_term > kWaterPitchTermClamp) pitch_term = kWaterPitchTermClamp;
-        if (pitch_term < -kWaterPitchTermClamp) pitch_term = -kWaterPitchTermClamp;
-    }
-
-    // The buoyant rise and the velocity-triplet drag. [orig: @0x4b8124-0x4b8163]
-    const int32_t base_q = base >> 4;
-    e.pos[2] += (base_q < 0 ? -base_q : base_q) + pitch_term + kWaterRiseBias;
-    inf.vel[0] -= (inf.vel[0] + 16) >> 5;
-    inf.vel[1] -= (inf.vel[1] + 16) >> 5;
-    inf.vel[2] -= (inf.vel[2] + 16) >> 5;
-
-    // The surface line, clamped from above; the dive bit below it - 0x2000 with
-    // the dive splash once (the non-airborne sound; the overlay fan rides the
-    // crossing queue). [orig: @0x4b8169-0x4b81f5]
-    const int32_t surf = water + (base >> 1) - (tick_entity->eye_offset_z >> 1);
-    if (e.pos[2] < surf) {
-        if (e.pos[2] < surf - kWaterDiveDepth &&
-            (flags & kEntityFlagDiveLatch) == 0) {
-            tick_entity->flags |= kEntityFlagDiveLatch;
-            tick_entity->engine_flags |= kEntityFlagDiveLatch;
-            world.water_crossings.add(e.pos[0], e.pos[1], water, /*airborne=*/false);
-        }
-    } else {
-        tick_entity->flags &= ~kEntityFlagDiveLatch;
-        tick_entity->engine_flags &= ~kEntityFlagDiveLatch;
-        e.pos[2] = surf;
-    }
-
-    // The entry splash, once, selected by the was-airborne bit; then the latch
-    // `(Flags & ~0x2000) | 0x8000` -- swimming overrides airborne. The local
-    // scope auto-untoggle that sits between them (@0x4b8304-0x4b8360) is
-    // presentation and is not modeled here. [orig: @0x4b8182 / @0x4b8363]
-    if (!was_afloat) {
-        world.water_crossings.add(e.pos[0], e.pos[1], water,
-                                  /*airborne=*/(flags & kEntityFlagInAir) != 0);
-    }
-    tick_entity->flags = (tick_entity->flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
-    tick_entity->engine_flags =
-            (tick_entity->engine_flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
-    inf.airborne = false; // the motor-side mirror of the 0x2000 clear
-}
-
 // The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
 // every infantry body (the corpse keeps decaying, matching the original's placement
 // before the weapon-channel block); the ramp needs a live, non-prone body.
@@ -1137,6 +919,16 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
 // ----------------------------------------------------------------------------
 // The per-tick motor. [orig: Entity_UpdateInfantryAI @0x4b9910]
 // ----------------------------------------------------------------------------
+// The resolver's player predicate is the entity's wire Player class bit, for
+// local and remote bodies alike; the resolver keys every physics leg on it and
+// reserves `entity == g_local_player_entity` for the local side-writes.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 — Flags & 0x100 @0x4B2CD9 /
+// @0x4B2F7C / @0x4B3271 / @0x4B33AA / @0x4B3C78]
+static bool entity_is_player_class(const World &world, EntityHandle handle) {
+    const Entity *ent = world.registry.get(handle);
+    return ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0;
+}
+
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Recoil/dispersion live ahead of the network-snap motor exit. Received
     // shots are applied during the network pump, then decay in this frame's
@@ -1168,15 +960,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
 
-    // Network-snapped remote peer: its pose is SNAPPED each frame by the host read-apply
-    // (netsim EntityWireBridge::apply_player_intent), so the movement motor must NOT
-    // re-simulate it — it skips, exactly as the original exits before any motor work when
-    // the entity+0x24 bit0 net-snap flag is set. The host never interpolates; the
-    // smooth-target is staged for CLIENT-side interpolation only (a deferred concern).
-    // [orig: Entity_UpdateInfantryAI @0x4b9a03 `test [esi+24h], 1; jnz loc_4BFC8B`;
-    // docs/net/novaworld-net-re.md §5.38a / D-NET-89.]
-    // The body-ANIM selection is NOT part of that skip: on the authority it runs for every
-    // player from the replicated input, feeding the 0x0A anim bytes (D-NET-159).
+    // A remote player's locomotion source is its C2S pose snapshot, so do not
+    // run the NPC/local-input movement core over it. The authority still runs
+    // the org2 body animation and shared collision tail in
+    // remote_player_body_anim; retail's entity+0x24 bit 0 is the conditional
+    // hard-snap/freeze gate, not an all-remote-player classifier. [orig: org2
+    // head @0x4B411B..0x4B4127; hard-snap test @0x4C207E..0x4C2091;
+    // resolver call @0x4B7CE0..0x4B7CF4]
     if (e.net_is_remote_peer) {
         if (is_authority) remote_player_body_anim(e, world, logic_tick);
         return;
@@ -1606,7 +1396,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             collision->resolve_entity(
                     world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
-                    inf.is_local_player, is_authority, logic_tick, inf.anim_state,
+                    entity_is_player_class(world, e.handle), is_authority,
+                    logic_tick, inf.anim_state,
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
                     &mounted_lio, eye_offset);
         }
@@ -1950,9 +1741,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
-                inf.is_local_player, is_authority, logic_tick, inf.anim_state,
-                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio,
-                eye_offset);
+                entity_is_player_class(world, e.handle), is_authority, logic_tick,
+                inf.anim_state, infantry_anim_flags(inf.anim_state), e.health,
+                nullptr, &lio, eye_offset);
             // The ladder legs may have written the view channels (the yaw
             // chase, the pitch restore); refresh the mouse-instant mirrors so
             // the render/aim pose and the embedder write-back see them.
@@ -2521,84 +2312,6 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     }
 }
 
-void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const int32_t pos[3]) {
-    if (slot < 0 || slot >= audio::kSoundProfileSlotCount) return;
-    const auto &entries = world.sound_profiles.entries();
-    if (entries.empty()) return;
-    // An unresolved binding falls back to the "default" profile, which itself
-    // falls back to the first profile when no "default" exists — the alloc-time
-    // seed + the find-miss base return [orig: ItemDef_AllocateWithDefaults
-    // @0x49e3f5 seeds FindSlotByName("default"); @0x526e30 miss -> base].
-    int16_t profile_index = e.profile.sound_profile;
-    const Entity *source = world.registry.get(e.handle);
-    // Only player entities carry the packed avatar identity. NPC women author
-    // their own primary item profile and must not be reinterpreted through a
-    // coincident minimap/net id. Unknown character ids keep the primary.
-    // [orig: Entity_GetProfileSlotSound @0x528300, female byte @0x52831c]
-    if (source != nullptr && source->player_class != 0 &&
-        world.character_traits.is_female(source->minimap_net_id))
-        profile_index = e.profile.sound_profile_female;
-    const audio::SoundProfile *p =
-        (profile_index >= 0 && static_cast<size_t>(profile_index) < entries.size())
-            ? &entries[profile_index]
-            : world.sound_profiles.find("default");
-    if (p == nullptr) return;
-    const std::string &set = p->set_names[slot];
-    if (set.empty()) return; // the resolved-id-0 no-op [orig: table[slot] == 0]
-    SoundSlotEvent ev;
-    ev.source_handle = e.handle.packed;
-    ev.pos[0] = pos[0];
-    ev.pos[1] = pos[1];
-    ev.pos[2] = pos[2];
-    ev.slot = static_cast<uint8_t>(slot);
-    std::snprintf(ev.set_name, sizeof(ev.set_name), "%s", set.c_str());
-    world.slot_sounds.push_back(ev);
-}
-
-void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logic_tick,
-                                        int32_t capsule_bottom) {
-    InfantryState &inf = e.inf;
-    // Opposite tick halves: the NPC updater consumes on ODD ticks, the player
-    // body on EVEN [orig: org1 `and eax,1; jz skip` @0x4bf144-0x4bf156; org2
-    // `test current_tick,1; jnz skip` @0x4b76e6 (var = current_tick @0x4b4147)].
-    if (inf.is_local_player ? ((logic_tick & 1u) != 0) : ((logic_tick & 1u) == 0)) return;
-    const uint32_t ev = inf.last_events;
-    if (ev == 0) return; // [orig: org1 whole-block skip @0x4bf161-0x4bf163]
-
-    // The six anim-driven foley sounds, bit order 0x20..0x400 -> SSAudio1..6
-    // (JO persons author prone rolls, swim strokes, gear rustle here), at the
-    // entity origin [orig: org1 @0x4bf169-0x4bf23e; org2 @0x4b76f1-0x4b77c6].
-    for (int i = 0; i < 6; ++i) {
-        if ((ev & (0x20u << i)) != 0)
-            emit_slot_sound(world, e, audio::kSlotAudio1 + i, e.pos);
-    }
-
-    // Footsteps: bit 0x1 = left, 0x2 = right. The sound fires at FOOT level —
-    // pos.z dipped by the root-motion frame's capsule bottom (the same value
-    // the collision capsule uses; the original subtracts it in place, plays,
-    // and restores) — and the slot picks by, in order: feet under the water
-    // plane -> standing on an entity -> terrain surface 3 (snow) -> ground.
-    // [orig: org1 @0x4bf23e-0x4bf2b0; org2 @0x4b77c6-0x4b78a8; the dip slot is
-    // the AnimMap out[3] stack cell both bodies pass to the anim update]
-    const Entity *went = world.registry.get(e.handle);
-    for (int foot = 0; foot < 2; ++foot) {
-        if ((ev & (foot == 0 ? 0x1u : 0x2u)) == 0) continue;
-        const int32_t pos[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
-        // The witnessed test order lives in audio::footstep_slot, shared with
-        // the wire-fed remote body channel so both consume one implementation.
-        // The on-entity read is last tick's link: this pass runs BEFORE this
-        // tick's resolve, the same order as org1 (sound block @0x4bf23e
-        // precedes the resolve tail @0x4bf7b8+). Mounted bodies never reach
-        // here — seat clips author no foot-event bits.
-        const int slot = audio::footstep_slot(
-                pos[2], world.env.water_z,
-                went != nullptr && went->ground_target.valid(),
-                terrain::surface_type_at_fixed(world.surface_map, pos[0], pos[1]),
-                foot);
-        emit_slot_sound(world, e, slot, pos);
-    }
-}
-
 void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     // The trigger word is consumed on ODD ticks. [orig: v489 & 1 @0x4bf15c]
@@ -2755,19 +2468,18 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     }
 }
 
-// AUTHORITY body-anim selection for a net-snapped remote player (see the ai.h declaration).
-// Runs INSTEAD of the movement motor for wire-snapped peers: position/heading stay owned by
-// the read-apply snap; only the anim channel advances here. [orig: Entity_UpdateInfantryPlayerBody
-// @0x4b40e0 — the same function body the local player runs; the pose work is inert for a
-// net-snapped entity because the read-apply overwrites it, while the anim stores persist]
+// Authority org2 subset: C2S owns pose; the retail player-body function still
+// advances animation and its shared movement-collision tail.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0; resolver call @0x4B7CF4]
 void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     if (!inf.active) return;
     Entity *ent = world.registry.get(e.handle);
     if (ent == nullptr) return;
 
-    // HIDDEN entities skip the whole body motor — the retail head bails on Flags bit0
-    // before any anim work, which is why a deploy-pending (hidden) player's channel is
+    // A hard-snap/frozen entity skips the whole body motor — the retail head
+    // bails on Flags bit0 before any anim work, which is why a deploy-pending
+    // (hidden) player's channel is
     // FROZEN on the wire (golden pre-deploy ratio constant at 40; ours swept to 255 in
     // v32 until this gate). [orig: Entity_UpdateInfantryPlayerBody @0x4b411b-0x4b4127
     // `mov edx,[esi+24h]; test dl,1; jnz return`]
@@ -2777,6 +2489,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // returns before it); sync the health copy the selection/lean gates read.
     e.health = ent->health;
     int death_transition = -1;
+    RootMotionFrame collision_frame;
+    bool have_collision_frame = false;
 
     if (ent->health <= 0) {
         // Death edge — one-shot to the death pose, same policy as the motor's death edge
@@ -2890,17 +2604,20 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
     // .adm loop rate when the embedder has anim data; without it the phase self-advances on a
     // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
-    // anim data rate). Root motion output is discarded: the pose is wire-owned.
+    // anim data rate). Root translation remains wire-owned; the frame's capsule
+    // feeds the shared collision tail below.
     if (root_motion != nullptr) {
         if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-        RootMotionFrame discard;
-        if (advance_primary_channel(inf, *root_motion, discard)) {
-            inf.prev_capsule_bottom = discard.capsule_bottom;
+        have_collision_frame =
+                advance_primary_channel(inf, *root_motion, collision_frame);
+        if (have_collision_frame) {
+            inf.prev_capsule_bottom = collision_frame.capsule_bottom;
             // The remote-player eye-offset restamp: retail runs the same body
             // updater for net-snapped peers, and the +0x74 store persists while
             // the pose work is inert — the org2 non-local formula, lean at rest.
             // [orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]
-            const int32_t extent = discard.capsule_top - discard.capsule_bottom;
+            const int32_t extent = collision_frame.capsule_top -
+                                   collision_frame.capsule_bottom;
             int32_t eye_z = std::min(extent, 0xD000);
             if (eye_z < 0x2000) eye_z = 0x2000;
             inf.eye_offset_z = eye_z;
@@ -2920,6 +2637,29 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         advance_primary_channel_fallback(inf);
         if (death_transition >= 0)
             inf.begin_body_transition(death_transition);
+    }
+
+    // Snapshot ownership suppresses locomotion, not the retail collision tail.
+    // Resolve the current pose with the anim capsule and zero movement channels;
+    // mounted bodies retain the resolver's ordinary force-suppression rule.
+    // [orig: org2 resolver call @0x4B7CE0..0x4B7CF4; CT callback gate
+    // @0x4B31DD..0x4B3238]
+    if (collision != nullptr && collision->instance_count() != 0) {
+        int32_t contact_vel[2] = {0, 0}, contact_vel_z = 0;
+        const int32_t tick_start_z = e.pos[2];
+        const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
+        collision->resolve_entity(
+                world, e.handle, e.collide_state, e.pos, contact_vel,
+                contact_vel_z,
+                have_collision_frame ? collision_frame.capsule_bottom : 0,
+                have_collision_frame ? collision_frame.capsule_top : 0,
+                e.heading, e.pitch, ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0,
+                is_authority, logic_tick, inf.anim_state,
+                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
+        ent->health = e.health;
+        ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
+        ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
+        ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
     }
 
     // Present-pass clip for the host's own third-person view of this peer.

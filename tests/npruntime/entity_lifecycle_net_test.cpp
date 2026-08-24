@@ -843,7 +843,7 @@ bool run_host_answers_the_sweep_request() {
 	}
 
 	// Round over -> the handler is skipped entirely.
-	world.round_end.ended = true;
+	world.process_round_end(0);
 	const std::vector<ProtocolMessage> after_round = np::dispatch_session_replies(
 			np::GameConfig{}, roster[1], request, 102, roster, &world);
 	for (const ProtocolMessage &m : after_round)

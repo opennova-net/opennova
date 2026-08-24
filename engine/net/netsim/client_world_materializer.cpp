@@ -68,24 +68,35 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.sub_type = row.spawn_sub_type;
 	seed.zone_number = static_cast<uint8_t>(row.zone_number_rank & 0x1Fu);
 	seed.zone_radius = row.zone_radius;
+	seed.bound_radius = static_cast<float>(row.spawn_bound_radius_q16) /
+			65536.0f;
 	seed.spawn_origin = world::kSpawnOriginNone;
 	return seed;
 }
 
-bool update_deployed_item_pose(
+bool is_carry_objective(uint16_t item_id) {
+	return item_id == 4091 || item_id == 4093 || item_id == 4095;
+}
+
+bool update_live_row_state(
 		const ClientEntityState &row, world::Entity &entity) {
 	const world::Entity seed = seed_from(row);
 	const bool changed = entity.position.x != seed.position.x ||
 			entity.position.y != seed.position.y ||
 			entity.position.z != seed.position.z || entity.yaw != seed.yaw ||
 			entity.pitch != seed.pitch || entity.roll != seed.roll ||
-			entity.team != seed.team;
+			entity.team != seed.team ||
+			(is_carry_objective(row.type_id) &&
+			 (entity.flags & 0xFFu) != (row.spawn_entity_flags & 0xFFu));
 	if (!changed) return false;
 	entity.position = seed.position;
 	entity.yaw = seed.yaw;
 	entity.pitch = seed.pitch;
 	entity.roll = seed.roll;
 	entity.team = seed.team;
+	if (is_carry_objective(row.type_id))
+		entity.flags = (entity.flags & 0xFFFFFF00u) |
+				(row.spawn_entity_flags & 0xFFu);
 	return true;
 }
 
@@ -147,8 +158,9 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 			world::Entity *owned_row = world.registry.get(lifetime);
 			if (owned_row != nullptr) {
 				if (tracked->second.spawn_revision == row->spawn_revision) {
-					if (row->spawn_tag == s2c::DEPLOYED_ITEM &&
-							update_deployed_item_pose(*row, *owned_row))
+					if ((row->spawn_tag == s2c::DEPLOYED_ITEM ||
+								is_carry_objective(row->type_id)) &&
+							update_live_row_state(*row, *owned_row))
 						result.updated.push_back(lifetime);
 					continue;
 				}
@@ -202,6 +214,37 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 	for (const auto &[packed, row] : current) {
 		world::Entity *child = owned(world, world::EntityHandle{packed});
 		if (child == nullptr) continue;
+		if (is_carry_objective(row->type_id)) {
+			// The flag's parent field is occupantEntity, not the static-load
+			// emplacement metadata. Keep the carrier's mountedChild inverse in
+			// lockstep, including a carrier swap or detached update.
+			if (world::Entity *old_carrier =
+					world.registry.get(child->primary_occupant);
+					old_carrier != nullptr && old_carrier->mounted_child == child->handle)
+				old_carrier->mounted_child = world::EntityHandle{};
+			child->primary_occupant = world::EntityHandle{};
+			child->ground_target = world::EntityHandle{};
+			if (row->parent_handle != 0xFFFFu) {
+				const world::EntityHandle carrier_handle{row->parent_handle};
+				world::Entity *carrier = carrier_handle.pool() >= 1 &&
+						carrier_handle.pool() <= 3
+						? owned(world, carrier_handle)
+						: world.registry.get(carrier_handle);
+				if (carrier != nullptr) {
+					child->primary_occupant = carrier->handle;
+					carrier->mounted_child = child->handle;
+				}
+			}
+			if (row->target_handle != 0xFFFFu) {
+				const world::EntityHandle ground_handle{row->target_handle};
+				const world::Entity *ground = ground_handle.pool() >= 1 &&
+						ground_handle.pool() <= 3
+						? owned(world, ground_handle)
+						: world.registry.get(ground_handle);
+				if (ground != nullptr) child->ground_target = ground->handle;
+			}
+			continue;
+		}
 		child->emplacement_parent = world::EntityHandle{};
 		child->emplacement_parent_spawn_id = 0;
 		child->ground_target = world::EntityHandle{};

@@ -277,6 +277,25 @@ func save_as(dir_path: String) -> Error:
 	return controller.save_as(dir_path) if controller else ERR_UNAVAILABLE
 
 
+## Banks are addressed by exact filename, so Save As offers a file picker rather than a folder.
+func uses_save_file_dialog() -> bool:
+	return true
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.lwf,*.LWF ; NovaLogic Sound Bank"])
+
+
+func get_save_file_dialog_default_name() -> String:
+	if controller != null and not String(controller.current_path).is_empty():
+		return String(controller.current_path).get_file()
+	return "sound.lwf"
+
+
+func save_as_file(path: String) -> Error:
+	return controller.save_as_path(path) if controller else ERR_UNAVAILABLE
+
+
 func get_save_dialog_title() -> String:
 	return "Choose where to save the .lwf sound profile"
 

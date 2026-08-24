@@ -312,21 +312,23 @@ int check_S_16_player_list() {
 	return 0;
 }
 
-// S2C 0x46 — player-sync: name(0x0001) + team(0x0004) + ack(0x4000), source order.
+// S2C 0x46 — player-sync: name + team + downed state + ack, source order.
 int check_S_46_player_sync() {
 	LE w;
 	w.u8(0x01);         // slot_id
-	w.u16(0x4005);      // bitmask: name | team | ack
+	w.u16(0x400D);      // bitmask: name | team | downed state | ack
 	w.u8(0x05);         // entity_slot_id
 	w.u8('P'); w.u8(0); // name cstr "P"
 	w.u8(0x02);         // team
-	EXPECT(w.b.size() == 7);
+	w.u8(0x85);         // 5 seconds | explicit medic-request bit
+	EXPECT(w.b.size() == 8);
 	PlayerSync out;
 	EXPECT(decode_player_sync(w.b.data(), w.b.size(), out));
 	EXPECT(!out.removal);
 	EXPECT(out.entity_slot_id == 0x05);
 	EXPECT(out.name == "P");
 	EXPECT(out.team == 0x02);
+	EXPECT(out.downed_state == 0x85);
 	EXPECT(out.queue_ack);
 	cover('S', 0x46);
 	return 0;
@@ -404,6 +406,22 @@ int check_S_6E_spawn_wave_status() {
 	EXPECT(out.groups[0].members.size() == 1);
 	EXPECT(out.groups[0].members[0] == 0x0004);
 	cover('S', 0x6E);
+	return 0;
+}
+
+// S2C 0x81 — requester-local accumulated points. The payload is the signed
+// CRenderState field 0x1C, not the mode's primary scoreboard value.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+//        CRenderState_GetFieldByIndex @0x52D7D0;
+//        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+int check_S_81_score_delta_sound() {
+	LE w;
+	w.u32(0xFFFFFFD6u); // -42
+	ScoreDeltaSound out;
+	EXPECT(decode_score_delta_sound(w.b.data(), w.b.size(), out));
+	EXPECT(out.score == -42);
+	EXPECT(!decode_score_delta_sound(w.b.data(), w.b.size() - 1, out));
+	cover('S', 0x81);
 	return 0;
 }
 
@@ -633,6 +651,21 @@ int check_C_25_reload_request() {
 	return 0;
 }
 
+// C2S 0x03 — inverse Auto Medic preference: zero enables automatic requests.
+int check_C_03_auto_medic_preference() {
+	AutoMedicPreference input;
+	input.enabled = false;
+	const std::vector<uint8_t> wire = encode_auto_medic_preference(input);
+	EXPECT(wire == std::vector<uint8_t>({1, 0, 0, 0}));
+	AutoMedicPreference output;
+	size_t consumed = 0;
+	EXPECT(decode_auto_medic_preference(
+			wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 4 && !output.enabled);
+	cover('C', 0x03);
+	return 0;
+}
+
 // S2C 0x13 — entity death (second path): [u16 handle][i16 killerSource] (4 B).
 int check_S_13_entity_death() {
 	LE w;
@@ -646,6 +679,43 @@ int check_S_13_entity_death() {
 	EXPECT(d.entity_handle == 0x0006);
 	EXPECT(d.killer_source == -1);
 	cover('S', 0x13);
+	return 0;
+}
+
+// S2C 0x52 — victim-local fixed-point death-camera target.
+int check_S_52_death_camera_target() {
+	DeathCameraTarget input;
+	input.x = -0x123400;
+	input.y = 0x556677;
+	input.z = 0x010000;
+	const std::vector<uint8_t> wire = encode_death_camera_target(input);
+	EXPECT(wire.size() == 12);
+	DeathCameraTarget output;
+	size_t consumed = 0;
+	EXPECT(decode_death_camera_target(
+			wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 12);
+	EXPECT(output.x == input.x && output.y == input.y && output.z == input.z);
+	cover('S', 0x52);
+	return 0;
+}
+
+// S2C 0x54 — packed player handle + revive seconds/request bit.
+int check_S_54_player_downed_state() {
+	PlayerDownedState input;
+	input.entity_handle = 0x0006;
+	input.revive_seconds = 120;
+	input.medic_request_active = true;
+	const std::vector<uint8_t> wire = encode_player_downed_state(input);
+	EXPECT(wire == std::vector<uint8_t>({0x06, 0x00, 0xF8}));
+	PlayerDownedState output;
+	size_t consumed = 0;
+	EXPECT(decode_player_downed_state(
+			wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(output.entity_handle == input.entity_handle);
+	EXPECT(output.revive_seconds == 120 && output.medic_request_active);
+	cover('S', 0x54);
 	return 0;
 }
 
@@ -667,6 +737,32 @@ int check_S_12_entity_remove() {
 	EntityRemove bad;
 	EXPECT(!decode_entity_remove(w.b.data(), 1, bad, consumed));
 	cover('S', 0x12);
+	return 0;
+}
+
+// S2C 0x2F — flag/carryable state: [u16 handle][u8 low flags][3xi32 pos]
+// [u16 occupant/carrier][u16 ground]. [orig: serialize_entity_with_parent_and_target
+// @0x505810; NapiNPClientMsg_0x02F @0x430E10]
+int check_S_2F_objective_entity_state() {
+	LE w;
+	w.u16(0x1007);
+	w.u8(0x01);
+	w.u32(0x00120000);
+	w.u32(0xFFF00000);
+	w.u32(0x00030000);
+	w.u16(0x0004);
+	w.u16(0xFFFF);
+	EXPECT(w.b.size() == 19);
+	ObjectiveEntityState state;
+	size_t consumed = 0;
+	EXPECT(decode_objective_entity_state(
+		w.b.data(), w.b.size(), state, consumed));
+	EXPECT(consumed == 19);
+	EXPECT(state.entity_handle == 0x1007 && state.flags_byte == 0x01);
+	EXPECT(state.pos_x == 0x00120000 && state.pos_y == -0x00100000 &&
+	       state.pos_z == 0x00030000);
+	EXPECT(state.attach_handle == 0x0004 && state.ground_handle == 0xFFFF);
+	cover('S', 0x2F);
 	return 0;
 }
 
@@ -843,6 +939,33 @@ int check_S_18_full_entity_spawn() {
 	return 0;
 }
 
+// S2C 0x1D + C2S 0x2B -- the fixed header and requester offset that start the
+// end-round board pull. [orig: NapiNPClientMsg_0x01D @0x430840;
+// NapiNPServerMsg_0x02B @0x514FE0]
+int check_end_round_control_pair() {
+	const std::vector<uint8_t> header_body = {
+			2, 0x34, 0x12, 0xFE, 0xFF, 1, 0xFF};
+	EndRoundHeader header;
+	EXPECT(decode_end_round_header(
+			header_body.data(), header_body.size(), header));
+	EXPECT(header.winner_team == 2 && header.team_score_0 == 0x1234);
+	EXPECT(header.team_score_1 == -2 && header.draw == 1 &&
+			header.player_index == -1);
+	EXPECT(!decode_end_round_header(
+			header_body.data(), header_body.size() - 1, header));
+	cover('S', 0x1D);
+
+	const std::vector<uint8_t> request_body = {0x34, 0x12};
+	EndRoundStatsRequest request;
+	EXPECT(decode_end_round_stats_request(
+			request_body.data(), request_body.size(), request));
+	EXPECT(request.offset == 0x1234);
+	EXPECT(!decode_end_round_stats_request(
+			request_body.data(), request_body.size() - 1, request));
+	cover('C', 0x2B);
+	return 0;
+}
+
 // S2C 0x56 -- the end-of-round stat board, pulled in 200-byte chunks over C2S
 // 0x2B. Two decoders: the envelope per datagram, and the reassembled payload.
 // [orig: NapiNPClientMsg_0x056 @0x431D10]
@@ -909,7 +1032,8 @@ int check_S_56_end_round_stats() {
 	EXPECT(st.players[0].captures == 15 && st.players[0].flags == 16);
 	EXPECT(st.players[0].special == 17);
 	EXPECT(st.players[0].per_team.size() == 1 && st.players[0].per_team[0] == 21);
-	EXPECT(st.players[0].slot == 3 && st.players[0].team == 1 && st.players[0].side == 2);
+	EXPECT(st.players[0].slot == 3 && st.players[0].team == 1 &&
+			st.players[0].player_class == 2);
 	// The clan join, and its absence.
 	EXPECT(st.players[0].display_name() == "=X= Ace");
 	EXPECT(st.players[1].display_name() == "Solo");
@@ -929,7 +1053,7 @@ int check_S_56_end_round_stats() {
 	n.u8(9);                                   // slot
 	for (char ch : std::string("Neg")) n.u8(uint8_t(ch)); n.u8(0);
 	n.u8(0); n.u8(0);                          // empty clan, empty tag
-	n.u8(1); n.u8(1);                          // team, side
+	n.u8(1); n.u8(1);                          // team, player class
 	n.u16(1); n.u16(2); n.u16(3); n.u16(4); n.u16(5); n.u16(6); n.u16(7);
 	n.u8(1);                                   // one trailing team row, no columns
 	EndRoundStats neg;
@@ -1001,6 +1125,24 @@ int check_S_53_zone_timer_window() {
 	EXPECT(out.zone_handle == 0x3001 && out.mode_b == 4);
 	EXPECT(out.start_s == 10 && out.end_s == 40 && out.rate == 2);
 	cover('S', 0x53);
+	return 0;
+}
+
+// S2C 0x6C — active timed-capture presence (§5.61): fixed 3 B.
+// [orig: NapiNPClientMsg_0x06C @0x428FC0;
+// NetPacket_WriteZonePresenceCount @0x506DE0]
+int check_S_6C_zone_presence_count() {
+	LE w;
+	w.u16(0x1003);
+	w.u8(2);
+	EXPECT(w.b.size() == 3);
+	ZonePresenceCount out;
+	size_t consumed = 0;
+	EXPECT(decode_zone_presence_count(w.b.data(), w.b.size(), out, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(out.zone_handle == 0x1003 && out.count == 2);
+	EXPECT(!decode_zone_presence_count(w.b.data(), 2, out, consumed));
+	cover('S', 0x6C);
 	return 0;
 }
 
@@ -1085,7 +1227,28 @@ int check_chat_pair() {
 	ChatBroadcast b;
 	EXPECT(decode_chat_broadcast(dn.b.data(), dn.b.size(), b));
 	EXPECT(b.sender_slot == 3 && b.channel == 2 && b.text == "P:hi");
+	// The host writer is the exact inverse: channel first, then the sender
+	// slot, then the C string [orig: NetPacket_WriteTwoBytesAndCString @0x5047A0].
+	EXPECT(encode_chat_broadcast(b) == dn.b);
 	cover('S', 0x14);
+	return 0;
+}
+
+// C2S 0x2E -- the downed player's manual medic call: [u32 entityIndex], a body
+// the host never reads [orig: Input_HandleActionBinding case 217 @0x49B4B4;
+// Server_BroadcastMedicRequest @0x515390].
+int check_C_2E_medic_request() {
+	EXPECT(lookup_ingame_message('C', 0x2E) != nullptr);
+	MedicRequest input;
+	input.entity_index = 0x00000123u;
+	const std::vector<uint8_t> wire = encode_medic_request(input);
+	EXPECT(wire == std::vector<uint8_t>({0x23, 0x01, 0, 0}));
+	MedicRequest output;
+	size_t consumed = 0;
+	EXPECT(decode_medic_request(wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == 4 && output.entity_index == 0x123u);
+	EXPECT(!decode_medic_request(wire.data(), 3, output, consumed));
+	cover('C', 0x2E);
 	return 0;
 }
 
@@ -1311,6 +1474,7 @@ int main() {
 	if (check_C_21_checksum_reply()) return 1;
 	if (check_S_5A_weapon_loadout()) return 1;
 	if (check_S_6E_spawn_wave_status()) return 1;
+	if (check_S_81_score_delta_sound()) return 1;
 	if (check_S_7B_full_player_info()) return 1;
 	if (check_S_0F_world_state()) return 1;
 	if (check_S_60_64_file_transfer()) return 1;
@@ -1324,8 +1488,13 @@ int main() {
 	if (check_S_6B_minimap()) return 1;
 	if (check_S_49_weapon_reload()) return 1;
 	if (check_C_25_reload_request()) return 1;
+	if (check_C_03_auto_medic_preference()) return 1;
+	if (check_C_2E_medic_request()) return 1;
 	if (check_S_12_entity_remove()) return 1;
+	if (check_S_2F_objective_entity_state()) return 1;
 	if (check_S_13_entity_death()) return 1;
+	if (check_S_52_death_camera_target()) return 1;
+	if (check_S_54_player_downed_state()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_31_loadout_crc_request()) return 1;
 	if (check_S_42_input_flags()) return 1;
@@ -1334,10 +1503,12 @@ int main() {
 	if (check_S_59_deployed_item()) return 1;
 	if (check_S_45_terrain_load()) return 1;
 	if (check_S_18_full_entity_spawn()) return 1;
+	if (check_end_round_control_pair()) return 1;
 	if (check_S_56_end_round_stats()) return 1;
 	if (check_S_58_session_status()) return 1;
 	if (check_S_6F_zone_timer_value()) return 1;
 	if (check_S_53_zone_timer_window()) return 1;
+	if (check_S_6C_zone_presence_count()) return 1;
 	if (check_S_34_play_sound()) return 1;
 	if (check_S_2C_mission_map_names()) return 1;
 	if (check_chat_pair()) return 1;

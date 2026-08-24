@@ -4,12 +4,14 @@ const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
 
 
-static func _terrain_light_epoch(light: Vector3) -> Vector3i:
-	# Independent test oracle for retail's truncated (g2,g0,g1) terrain bytes.
+static func _terrain_light_epoch(raw_tuple: Vector3) -> Vector3i:
+	# Independent test oracle for retail's truncated (g2,g0,g1) terrain bytes,
+	# packed from the RAW Environment_GetLightDirectionFloat tuple (never the
+	# Godot-axes vector get_light_direction() serves).
 	return Vector3i(
-		int((clampf(light.z, -1.0, 1.0) + 1.0) * 127.5),
-		int((clampf(light.x, -1.0, 1.0) + 1.0) * 127.5),
-		int((clampf(light.y, -1.0, 1.0) + 1.0) * 127.5))
+		int((clampf(raw_tuple.z, -1.0, 1.0) + 1.0) * 127.5),
+		int((clampf(raw_tuple.x, -1.0, 1.0) + 1.0) * 127.5),
+		int((clampf(raw_tuple.y, -1.0, 1.0) + 1.0) * 127.5))
 
 
 func _settle_tile_cache(terrain: Terrain) -> Dictionary:
@@ -215,12 +217,12 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_ne(shadowed_hash, baseline_hash,
 		"the A-only silhouette must change the stable CPU page aggregate")
 
-	var previous_raw_light := environment.get_light_direction()
+	var previous_raw_light := environment.get_light_direction_render_tuple()
 	var initial_raw_light := previous_raw_light
 	var light_epoch := _terrain_light_epoch(previous_raw_light)
 	for tick_index in 3:
 		environment.advance_mission_clock(1)
-		var current_raw_light := environment.get_light_direction()
+		var current_raw_light := environment.get_light_direction_render_tuple()
 		assert_ne(current_raw_light, previous_raw_light,
 			"mission tick %d must move the raw projection vector" % tick_index)
 		assert_eq(_terrain_light_epoch(current_raw_light), light_epoch,
@@ -240,7 +242,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 			"unchanged terrain must not rescan page receiver samples")
 		previous_raw_light = current_raw_light
 	assert_eq(environment.debug_set_mission_minute_of_day(9.0 * 60.0), OK)
-	assert_eq(environment.get_light_direction(), initial_raw_light,
+	assert_eq(environment.get_light_direction_render_tuple(), initial_raw_light,
 		"restoring the exact test light keeps later output-hash checks comparable")
 	terrain.render_frame()
 	await get_tree().process_frame

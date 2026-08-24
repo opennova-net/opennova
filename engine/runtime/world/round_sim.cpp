@@ -509,6 +509,14 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     }
 }
 
+bool impact_is_critical(const Entity &target, int32_t hit_zone,
+                        int32_t hit_bone) {
+    if (target.item_type != 3) return false;
+    return (target.item_attrib & kItemAttribLandable) != 0
+        ? seat_hit_bone_is_critical(hit_bone)
+        : hit_zone_is_critical(hit_zone);
+}
+
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
 // units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
 // applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
@@ -518,7 +526,7 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
 // (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42). Multiplayer authority and
 // OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
 int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
-                           int32_t hit_zone, int32_t hit_bone, Entity &target,
+                           int32_t hit_zone, int32_t hit_bone, const Entity &target,
                            const Entity *shooter, int32_t ammo_index,
                            const World &world) {
     if (world.mp_session) {
@@ -539,10 +547,8 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
             // the normal-infantry table below reads (@0x4ec9bf). The two differ
             // whenever the bone walk crosses more than one sphere.
             zone_scale = seat_hit_bone_damage_multiplier(hit_bone);
-            if (seat_hit_bone_is_critical(hit_bone)) target.flags |= 0x800u;
         } else {
             zone_scale = hit_zone_damage_multiplier(hit_zone);
-            if (hit_zone_is_critical(hit_zone)) target.flags |= 0x800u;
         }
         damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
 
@@ -1426,6 +1432,16 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (authoritative && target != nullptr && target->has_item_def &&
             !not_armed && ammo != nullptr) {
             const Entity *shooter = world.registry.get(r.owner);
+            // Weapon_CalcImpactDamage writes the critical/headshot cause bit
+            // into its caller-owned event flags, not GamePlayerEntity::Flags.
+            // OneShotKill returns before the zone branch and therefore carries
+            // no critical bit even when the ray crossed a critical section.
+            // [orig: Weapon_CalcImpactDamage @0x4EC920;
+            // GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
+            const bool critical_hit =
+                !(world.mp_session && world.one_shot_kill) &&
+                impact_is_critical(*target, collision.hit_zone,
+                                   collision.bone_index);
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
@@ -1506,6 +1522,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     d.victim_handle = damage_entity.packed;
                     d.killer_handle = r.shooter_handle;
                     d.adm_index = r.adm_index;
+                    d.ammo_index = r.ammo_index;
+                    if (critical_hit) d.event_flags |= 0x800u;
                     deaths.push_back(d);
                 }
             }
@@ -1529,9 +1547,70 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = 11;
         } else if (person_collision) {
-            // A decoded remote-player proxy intentionally has no registry
-            // target, but it is still the retail person collision class.
-            imp.effect_tag = 2;
+            // The person leg. Bullets reach a person ONLY through the bone-section
+            // pass — Projectile_RaycastProximitySlots walks pool 2 (statics) for
+            // slotType 2 and pool 1 (items) for slotType 1, never pool 0, so the
+            // two proximity-slot dispatch cases cannot produce a person hit; pool 0
+            // is reached by Physics_RaycastAgainstProximityList, whose sole narrow
+            // phase is Physics_RaycastAgainstBoneSections. That is the pass we model
+            // here, and its impact handler owns the rules below.
+            // [orig: Entity_BuildProximityLists_Pool01 @0x4b9340 fills g_DynProx*
+            //  from pool 1 @0x4b9389 and g_PersonProx* from pool 0 @0x4b93eb;
+            //  Projectile_RaycastProximitySlots @0x4e5340; the bullet dispatch
+            //  Projectile_UpdatePhysics @0x4e9d70 calls slotType 2 @0x4ea4f5 and
+            //  slotType 1 @0x4ea535 only, then Physics_RaycastAgainstProximityList
+            //  @0x4ea5bf -> Physics_RaycastAgainstBoneSections @0x4e4670 (its only
+            //  caller, @0x4e4c59) -> Projectile_HandleTerrainImpact_0 @0x4e98f0]
+            //
+            // A victim already flagged dead presents NO impact effect at all; the
+            // two tag legs below are mutually exclusive, not additive.
+            // [orig: shouldPlayEffect = (hitEntity+36 & 2) == 0 @0x4e9920/@0x4e994f;
+            //  the local/non-local split @0x4e9a55..0x4e9a73]
+            const bool victim_dead =
+                impact_target != nullptr &&
+                (((impact_target->flags & kEntityFlagDead) != 0) ||
+                 ((impact_target->engine_flags & kEntityFlagDead) != 0));
+            const bool victim_is_local_player =
+                impact_target != nullptr && local_player.valid() &&
+                impact_target->handle == local_player;
+            if (victim_dead) {
+                imp.present_effect = false;
+                imp.present_sound = false;
+                imp.effect_tag = 2;
+            } else if (victim_is_local_player) {
+                // The local player takes the 'player' row.
+                // [orig: push 2 @0x4e9aa1 -> the shared call @0x4e9ada]
+                imp.effect_tag = 2;
+            } else {
+                // Everyone else takes the 'flesh' row — but retail SUPPRESSES it
+                // for a healthy squad-mate: the effect is spawned only when the
+                // victim's group differs from the local player's, OR the victim is
+                // already below half of its items.def hp. A same-group victim at or
+                // above half health shows nothing.
+                // [orig: group WORDs compared @0x4e9aac/@0x4e9ab3 (entity+0x11C);
+                //  healthMax WORD itemDef+0x17C halved by `sar dx,1` @0x4e9abf..
+                //  @0x4e9ac6; signed Health WORD entity+0x11E compared @0x4e9ac9
+                //  with `jge` skipping the spawn @0x4e9ad0; push 17h @0x4e9ad7]
+                imp.effect_tag = 23;
+                const Entity *local = world.registry.get(local_player);
+                // Retail dereferences the victim's ItemDef unconditionally, so a
+                // live person always has a real healthMax there. Ours carries 0 to
+                // mean UNRESOLVED (entity.h) — which would halve to 0 and suppress
+                // every same-group hit — so an unresolved max declines to suppress
+                // rather than inventing a threshold.
+                const int32_t victim_health_max =
+                    impact_target != nullptr
+                        ? retail_signed_i16(impact_target->health_max)
+                        : 0;
+                if (impact_target != nullptr && local != nullptr &&
+                    victim_health_max > 0 &&
+                    local->group_id == impact_target->group_id &&
+                    retail_signed_i16(impact_target->health) >=
+                        static_cast<int32_t>(victim_health_max >> 1)) {
+                    imp.present_effect = false;
+                    imp.present_sound = false;
+                }
+            }
         } else if (collision.surface_type >= 0 &&
                    collision.surface_type + 4 < kImpactEffectTagCount) {
             imp.effect_tag = collision.surface_type + 4;

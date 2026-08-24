@@ -1,7 +1,7 @@
 class_name GameFramePipeline
 extends RefCounted
 
-## The first-class Godot frame owner. MissionSession decides lifecycle,
+## The first-class Godot frame owner. inmatch::Session decides lifecycle,
 ## cadence, input consumption, catch-up, and cancellation; this pipeline orders the
 ## actual Godot devices around that one typed call. There is deliberately no
 ## generic renderer interface: every leg is a direct GameWorld/presentation

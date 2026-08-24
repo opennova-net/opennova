@@ -931,11 +931,37 @@ public:
     // resolved ground Z): <= 0 grounded (caller lifts by the return), > 0xF000
     // airborne. [orig: movement collision resolver @ 0x4b2bd0]
     // capsule_bottom/top are the anim frame's 16.16 capsule extents (out[3]/out[4]).
+    struct GameplayContact {
+        EntityHandle source;
+        EntityHandle target;
+    };
+
+    // Drain the exact type-10 Change Team Box touches produced by this tick's
+    // authority movement resolves. The collision module owns shape/cadence;
+    // gameplay owns the capture request transaction.
+    // [orig: contact flag 0x200 @0x4AEB7B; resolver dispatch/callback
+    // @0x4B31DD..0x4B3238]
+    std::vector<GameplayContact> take_change_team_contacts();
+
+    // Drain successful first-pass MoveCB/non-Powerup contacts. Retail routes
+    // these through Entity_ProcessWaypointInteraction instead of treating the
+    // target as solid geometry; gameplay interprets the contacted item ID.
+    // [orig: resolver attrib branches/call @0x4B2F90..0x4B2FF5]
+    std::vector<GameplayContact> take_movement_callback_contacts();
+
     struct ResolveState {
         int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
         bool prev_valid = false;
         uint8_t skip_counter = 0;   // [orig: entity pad_370[3] idle throttle]
     };
+    // is_player_class = the entity's wire Player class bit (Flags & 0x100):
+    // retail keys EVERY physics leg on it — the skip-path gravity undo
+    // (@ 0x4b2cd9), the candidate mask (@ 0x4b2f7c / @ 0x4b35af), the ladder
+    // entry/chase gates (@ 0x4b3271 / @ 0x4b32a5 / @ 0x4b33aa) and the exit
+    // push — for local and remote bodies alike; only the local side-writes
+    // (g_LocalPlayerLookYaw @ 0x4b33ca, the blink mirror @ 0x4b34ce, the pitch
+    // restore @ 0x4b3cdc / @ 0x4b3cfe) add `entity == g_local_player_entity`,
+    // and those ride LadderResolveIO::is_local_player.
     // anim_state_flags = the state's g_animStateFlagsTable word (bit 0 forces a
     // full update; the id itself picks the repulsion-exempt states).
     // out_ground (optional) receives the ground probe's hit entity — the same
@@ -952,7 +978,7 @@ public:
     int32_t resolve_entity(World &world, EntityHandle source, ResolveState &state,
                            int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                            int32_t capsule_bottom, int32_t capsule_top,
-                           int32_t heading, int32_t body_pitch, bool is_player,
+                           int32_t heading, int32_t body_pitch, bool is_player_class,
                            bool is_authority, uint32_t tick, int32_t anim_state_id,
                            uint32_t anim_state_flags, int16_t &health,
                            EntityHandle *out_ground = nullptr,
@@ -990,7 +1016,7 @@ public:
     int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                             int32_t vel_xy[2], int32_t &vel_z,
                             int32_t capsule_bottom, int32_t capsule_top,
-                            bool is_player, uint32_t tick, int32_t anim_state_id,
+                            bool is_player_class, uint32_t tick, int32_t anim_state_id,
                             uint32_t anim_state_flags, const ReplicaPeer *peers,
                             int32_t peer_count, uint16_t exclude_handle,
                             uint32_t *entity_flags, EntityHandle *out_ground);
@@ -1175,6 +1201,11 @@ private:
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
+    void record_change_team_contact(EntityHandle source, EntityHandle trigger);
+    void record_movement_callback_contact(EntityHandle source, EntityHandle target);
+
+    std::vector<GameplayContact> change_team_contacts_;
+    std::vector<GameplayContact> movement_callback_contacts_;
 
     struct Instance {
         int32_t model_id = -1;

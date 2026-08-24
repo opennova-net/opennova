@@ -3,8 +3,12 @@ extends RefCounted
 
 ## One managed standalone game process for ONED. The session owns launch
 ## lifecycle; UI and optional runtime-debug adapters use this public surface.
-## Starting another mode restarts the one child. Nothing here saves, exports,
-## copies, or stages authored data.
+## Starting another mode restarts the one child.
+##
+## RETAIL is the exception to "nothing here stages authored data": proving an asset
+## against its original consumer needs the assets PACKED first, so that one mode runs an
+## injected packer before it spawns. It still obeys every other invariant -- one managed
+## child, starting another mode restarts it, F8 stops it.
 
 const RUNTIME_SCENE := "res://game/main_game.tscn"
 const PACKAGED_RUNTIME_CANDIDATES: Array[String] = [
@@ -12,8 +16,12 @@ const PACKAGED_RUNTIME_CANDIDATES: Array[String] = [
 	"../../../opennova.app/Contents/MacOS/opennova",
 ]
 const STOP_GRACE_MSEC := 1000
+# How long a forced stop waits for the child to actually be gone. TerminateProcess only
+# requests the exit; a restart that repacked the archives on this same stack while the dying
+# child still held them open failed intermittently with a sharing violation.
+const STOP_KILL_WAIT_MSEC := 5000
 
-enum Mode { GAME, CURRENT_MISSION }
+enum Mode { GAME, CURRENT_MISSION, RETAIL }
 enum State { STOPPED, RUNNING, STOPPING }
 
 signal run_started(run_id: String, descriptor_path: String, pid: int)
@@ -28,6 +36,10 @@ class GameRunRequest:
 	var expansion: String = ""
 	var game_code: String = "jo"
 	var loose_mission: String = ""
+	# RETAIL only: the packed dir and the exe inside it, both resolved by the pack step
+	# in _spawn_request. Empty for every other mode.
+	var packed_dir: String = ""
+	var exe_path: String = ""
 	var unsaved_workspaces := PackedStringArray()
 	var run_id: String = ""
 	var descriptor_path: String = ""
@@ -53,13 +65,21 @@ class GameRunRequest:
 class LaunchPlan:
 	extends RefCounted
 
-	var path: String
-	var args: PackedStringArray
+	var path: String = ""
+	var args := PackedStringArray()
+	# The child's working directory. Empty means "inherit ours", which is what our own
+	# runtime wants. Retail needs it set: it opens its boot archives CWD-relative through a
+	# raw _lopen [orig: PFF_OpenAllArchives @ 0x4a4310], so launched from anywhere but the
+	# packed dir it finds no archives and dies on the zero-archives gate with
+	# ShowEarlyError(3) -- before writing a single /FRISK line to say why.
+	var cwd: String = ""
 
-	static func make(plan_path: String, plan_args: PackedStringArray) -> LaunchPlan:
+	static func make(plan_path: String, plan_args: PackedStringArray,
+			plan_cwd: String = "") -> LaunchPlan:
 		var plan := LaunchPlan.new()
 		plan.path = plan_path
 		plan.args = plan_args
+		plan.cwd = plan_cwd
 		return plan
 
 
@@ -79,6 +99,12 @@ var _is_process_running: Callable
 var _kill_process: Callable
 var _now_msec: Callable
 var _show_status: Callable
+# func(pid, timeout_msec) -> bool: block until the child is gone. Optional; without it a
+# forced stop is reported done as soon as the kill call returns.
+var _wait_for_exit: Callable
+# func(pid) -> void: the spawner may hold OS state (a process handle) for the child; this
+# lets it go once the session has finished with the pid.
+var _release_process: Callable
 
 # Optional cross-process control seams. No MCP dependency lives here.
 # forwarder(run_id, descriptor_path, tool, args) -> Variant
@@ -93,6 +119,10 @@ var _active_request: GameRunRequest
 var _queued_request: GameRunRequest
 var _stop_deadline_msec := 0
 var _last_error := ""
+# RETAIL seams: the configured retail install, and pack(out_dir) -> {ok, exe, error}.
+# Both optional so a session constructed without them simply cannot start RETAIL.
+var _retail_dir: Callable = Callable()
+var _pack_retail: Callable = Callable()
 
 
 func setup(
@@ -106,7 +136,11 @@ func setup(
 	show_status: Callable,
 	is_process_running: Callable = Callable(),
 	kill_process: Callable = Callable(),
-	now_msec: Callable = Callable()
+	now_msec: Callable = Callable(),
+	retail_dir: Callable = Callable(),
+	pack_retail: Callable = Callable(),
+	wait_for_exit: Callable = Callable(),
+	release_process: Callable = Callable()
 ) -> void:
 	_resource_dir = resource_dir
 	_expansion = expansion
@@ -119,6 +153,10 @@ func setup(
 	_is_process_running = is_process_running
 	_kill_process = kill_process
 	_now_msec = now_msec
+	_retail_dir = retail_dir
+	_pack_retail = pack_retail
+	_wait_for_exit = wait_for_exit
+	_release_process = release_process
 
 
 ## Install the optional runtime peer after both shell and MCP service exist.
@@ -213,13 +251,15 @@ func get_current_mission_unavailable_reason() -> String:
 	return reason
 
 
-## Public MCP/toolbar entry. Accepted values are "game" and "mission".
+## Public MCP/toolbar entry. Accepted values are "game", "mission" and "retail".
 func start_mode(mode: String) -> bool:
 	match mode.strip_edges().to_lower():
 		"game":
 			return _start_built_request(Mode.GAME)
 		"mission":
 			return _start_built_request(Mode.CURRENT_MISSION)
+		"retail":
+			return _start_built_request(Mode.RETAIL)
 		_:
 			_last_error = "Unknown run mode '%s'." % mode
 			_show(_last_error, &"error")
@@ -324,6 +364,14 @@ static func launch_plan(
 	request: GameRunRequest,
 	file_exists: Callable
 ) -> LaunchPlan:
+	if request.mode == Mode.RETAIL:
+		# Retail launches the exe the pack step staged, with retail's own flags: /w windowed,
+		# /d loose-first (the staged dir is all loose files plus the boot-token archive), /FRISK to
+		# log every resolved load. It understands none of runtime_flags' OpenNova arguments.
+		if request.exe_path.is_empty() or not bool(file_exists.call(request.exe_path)):
+			return null
+		return LaunchPlan.make(request.exe_path, PackedStringArray(["/w", "/d", "/FRISK"]),
+				request.exe_path.get_base_dir())
 	var runtime_args := runtime_flags(request)
 	var exe_dir := editor_exe.get_base_dir()
 	for candidate in PACKAGED_RUNTIME_CANDIDATES:
@@ -444,6 +492,36 @@ func _build_request(mode: int, report_error: bool = true) -> GameRunRequest:
 				_show(_last_error, &"warn")
 			return null
 		request.loose_mission = String(validated["name"])
+	if mode == Mode.RETAIL:
+		# Validation ONLY -- no packing, no writes. get_current_mission_unavailable_reason()
+		# calls this on every toolbar refresh purely to ask whether a mode is available.
+		var retail := retail_install_dir()
+		if retail.is_empty():
+			_last_error = "Play in Retail: configure a retail install directory in Settings."
+			if report_error:
+				_show(_last_error, &"warn")
+			return null
+		if not _pack_retail.is_valid():
+			_last_error = "Play in Retail is not configured."
+			if report_error:
+				_show(_last_error, &"warn")
+			return null
+		if not Process.supports_working_directory():
+			_last_error = "Play in Retail needs a working-directory spawn (Windows only)."
+			if report_error:
+				_show(_last_error, &"warn")
+			return null
+		if not bool(_file_exists.call(retail.path_join("Jointops.exe"))):
+			_last_error = "Play in Retail: no Jointops.exe in %s." % retail
+			if report_error:
+				_show(_last_error, &"warn")
+			return null
+		# The pack output is OURS, so it lives in the editor's own data dir -- never beside
+		# the mounted assets. A sibling dir broke the moment the exe was distributed: it
+		# littered whatever directory (or repo) the assets sat in, and an existing sibling
+		# from anything else made the packer refuse. Retail runs fine from any path; its
+		# working directory is set to this dir at spawn.
+		request.packed_dir = ProjectSettings.globalize_path("user://packed")
 	_last_error = ""
 	return request
 
@@ -465,7 +543,8 @@ func _stamp_identity(request: GameRunRequest) -> void:
 	request.run_id = ""
 	request.descriptor_path = ""
 	request.log_path = ""
-	if not _runtime_debug_enabled:
+	if not _runtime_debug_enabled or request.mode == Mode.RETAIL:
+		# Retail understands none of our identity flags, and has no descriptor to write.
 		return
 	request.run_id = "%d-%08x" % [Time.get_ticks_usec(), randi()]
 	request.descriptor_path = ProjectSettings.globalize_path(
@@ -476,12 +555,14 @@ func _stamp_identity(request: GameRunRequest) -> void:
 
 func _spawn_request(request: GameRunRequest) -> bool:
 	_stamp_identity(request)
+	if request.mode == Mode.RETAIL and not _pack_authored_assets(request):
+		return false
 	var plan := _current_plan(request)
 	if plan == null:
 		_last_error = "Run game: no game runtime is available beside this editor."
 		_show(_last_error, &"error")
 		return false
-	var pid := int(_spawn.call(plan.path, plan.args))
+	var pid := int(_spawn.call(plan.path, plan.args, plan.cwd))
 	if pid <= 0:
 		_last_error = "Could not launch the game runtime."
 		_show(_last_error, &"error")
@@ -492,7 +573,12 @@ func _spawn_request(request: GameRunRequest) -> bool:
 	_last_error = ""
 	run_started.emit(request.run_id, request.descriptor_path, pid)
 	var unsaved_note := _unsaved_note(request.unsaved_workspaces)
-	if request.mode == Mode.CURRENT_MISSION:
+	if request.mode == Mode.RETAIL:
+		if not unsaved_note.is_empty():
+			_show("Retail launched from the staged assets; %s" % unsaved_note, &"warn")
+		else:
+			_show("Retail launched from %s." % request.packed_dir, &"info")
+	elif request.mode == Mode.CURRENT_MISSION:
 		if not unsaved_note.is_empty():
 			_show("Running saved %s; %s" % [request.loose_mission, unsaved_note], &"warn")
 		else:
@@ -541,6 +627,10 @@ func _begin_stop() -> bool:
 func _request_graceful_quit() -> bool:
 	if not _runtime_quit_requester.is_valid() or _active_request == null:
 		return false
+	if _active_request.mode == Mode.RETAIL:
+		# Retail is not our runtime: there is no debug peer to ask, so asking would start a
+		# grace period that nothing can ever satisfy and leave the child running. Kill it.
+		return false
 	return bool(_runtime_quit_requester.call(
 		_active_request.run_id,
 		_active_request.descriptor_path))
@@ -559,7 +649,13 @@ func _kill_now() -> bool:
 		return true
 	var err := int(_kill_process.call(_pid)) \
 			if _kill_process.is_valid() else int(OS.kill(_pid))
-	return err == OK
+	if err != OK:
+		return false
+	# Stopped means GONE, not "asked to go": the restart path repacks the archives the child
+	# had open as soon as this returns true.
+	if _wait_for_exit.is_valid():
+		return bool(_wait_for_exit.call(_pid, STOP_KILL_WAIT_MSEC))
+	return not _process_is_alive()
 
 
 func _finish_stopped(report_exit: bool) -> void:
@@ -571,6 +667,8 @@ func _finish_stopped(report_exit: bool) -> void:
 	_pid = -1
 	_active_request = null
 	_stop_deadline_msec = 0
+	if pid > 0 and _release_process.is_valid():
+		_release_process.call(pid)
 	if not run_id.is_empty():
 		run_stopped.emit(run_id, descriptor_path)
 	if report_exit:
@@ -618,4 +716,48 @@ func _state_name() -> String:
 
 
 static func _mode_name(mode: int) -> String:
-	return "mission" if mode == Mode.CURRENT_MISSION else "game"
+	match mode:
+		Mode.CURRENT_MISSION:
+			return "mission"
+		Mode.RETAIL:
+			return "retail"
+		_:
+			return "game"
+
+
+## The configured retail install directory, or "" when unset / not a directory.
+func retail_install_dir() -> String:
+	if not _retail_dir.is_valid():
+		return ""
+	return String(_retail_dir.call()).strip_edges()
+
+
+## Whether Play in Retail can run right now — a configured install with an exe in it.
+## Cheap and side-effect-free; the toolbar polls it.
+func retail_available() -> bool:
+	var dir := retail_install_dir()
+	if dir.is_empty() or not _pack_retail.is_valid() or not _file_exists.is_valid():
+		return false
+	if not Process.supports_working_directory():
+		return false
+	return bool(_file_exists.call(dir.path_join("Jointops.exe")))
+
+
+# Pack the mounted assets into request.packed_dir and stage the retail runtime beside them,
+# resolving request.exe_path. Runs here rather than in launch_plan because launch_plan is
+# static, pure, and called from available() on every toolbar refresh — packing there would
+# rebuild an archive on UI events. This is the one funnel every launch passes through,
+# including the deferred queued-request path, so mode switching needs no second pack site.
+func _pack_authored_assets(request: GameRunRequest) -> bool:
+	var outcome_v: Variant = _pack_retail.call(request.packed_dir, retail_install_dir())
+	var outcome: Dictionary = outcome_v if outcome_v is Dictionary else {}
+	if not bool(outcome.get("ok", false)):
+		_last_error = String(outcome.get("error", "Play in Retail: packing failed."))
+		_show(_last_error, &"error")
+		return false
+	request.exe_path = String(outcome.get("exe", ""))
+	if request.exe_path.is_empty():
+		_last_error = "Play in Retail: packing reported no executable to launch."
+		_show(_last_error, &"error")
+		return false
+	return true

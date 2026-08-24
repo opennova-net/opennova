@@ -1,13 +1,8 @@
-// Faithful-in-outcome player spawn-point selection (net-re §5.2c). The original picks the human
-// player's start pose from the mission's named START markers, NOT from any NPC's position. The
-// exact selection is per-game-type and fragmented across several functions [orig:
-// Server_PositionPlayerForSpawn @0x50cf60 → Entity_FindBestSpawnPoint @0x50ccc0; the 60xx start family is
-// enumerated by build_entity_position_list @0x509660; a real SP mission (00TRa) can ship only a
-// 6001 marker that the strict 6002 SP path never reaches]. We UNIFY that machinery to a priority
-// scan over the start-marker family: the first present type wins, farthest-from-enemy within it —
-// a tracked simplification (§5.2c, D-NET-88) that finds the authored start for any mission mode.
-// NPCs take their authored BMS positions on a separate path [orig: Entity_SpawnFromBMSRecord
-// @0x40e9f0] — so the player never inherits an NPC's spot.
+// Retail player spawn selection (net-re §5.2c/§5.61). One operation owns both
+// picked deploy targets and the no-pick game-type marker chain; NPC placement
+// remains the separate Entity_SpawnFromBMSRecord path.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60;
+// Entity_FindBestSpawnPoint @0x50CCC0]
 //
 // Lives in engine/runtime/world (no engine/runtime/mission dependency, like player_spawn.h); scans the world
 // registry's promoted markers by item_id (== the raw BMS type_id, make_seed promote.cpp:78),
@@ -26,45 +21,42 @@ namespace opennova::world {
 
 class World;
 
-// The 60xx player-start marker family, in selection priority (SP/DM, then coop, then team). A
-// mission is authored for one mode, so typically exactly one of these is present.
-// [orig: build_entity_position_list @0x509660 enumerates 6001/6002/6003/6004/6090/6091/6094-6099;
-//  Server_PositionPlayerForSpawn @0x50cf60 — 6002 SP/DM, 6095 non-team, 6094 coop insertion, 6001 coop
-//  fallback (+ the dedicated 6001 reader @0x41f25e), 6096-6099 team, 6003/6004/6090/6091 TDM teams.]
-inline constexpr int32_t kSpawnMarkerStartTypes[] = {
-    6002, 6095, 6094, 6001, 6096, 6097, 6098, 6099, 6003, 6004, 6090, 6091,
-};
-inline constexpr size_t kSpawnMarkerStartTypeCount =
-    sizeof(kSpawnMarkerStartTypes) / sizeof(kSpawnMarkerStartTypes[0]);
-
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     Vec3 position{};    // mission space (Z-up), copied from the chosen marker
     int16_t yaw = 0;    // mission yaw (degrees); spawn_player applies the (90 - yaw) heading
+    int16_t pitch = 0;
+    int16_t roll = 0;
 };
 
-// Select the player-start: scan `types` (priority order); the FIRST type with any promoted marker
-// (EntityKind::Marker, item_id == type) wins, returning the one FARTHEST (mission 2D) from any live
-// enemy organic. [orig: Entity_FindBestSpawnPoint @0x50ccc0 — min 2D distance to a pool-0 "avoid"
-// entity (flags & 0x100), pick the max.] The avoid set is approximated by live organic soldiers (a
-// tracked divergence; the faithful flags&0x100 set is unmodeled — §5.2c). At select time the player
-// has not spawned, so every organic is an NPC. Returns found=false when no family marker exists, so
-// the caller can pick a safe fallback — never an NPC position.
-SpawnPointResult select_player_spawn(const World &world, const int32_t *types, size_t count);
-
-// Convenience overload: scan the default start-marker family in priority order.
-inline SpawnPointResult select_player_spawn(const World &world) {
-    return select_player_spawn(world, kSpawnMarkerStartTypes, kSpawnMarkerStartTypeCount);
+// The marker ids admitted to the retail player-start registry. Keep the
+// classification private behind a predicate; callers must not infer a spawn
+// priority from this unordered family.
+// [orig: build_entity_position_list @0x509660]
+constexpr bool is_player_spawn_marker_type(int32_t item_id) {
+    switch (item_id) {
+    case 6001: case 6002: case 6003: case 6004:
+    case 6090: case 6091: case 6094: case 6095:
+    case 6096: case 6097: case 6098: case 6099:
+        return true;
+    default:
+        return false;
+    }
 }
 
-// Team-mode start selection (net-re §5.61, refining §5.2c): a team gametype
-// (game_type & 0x10000) resolves the TEAM's marker types — primary 6096-6099[team],
-// fallback 6003/6004/6090/6091[team] — before the unified family scan. Without the
-// per-team split, every AS team spawns at the FIRST family type present (both teams
-// in team 1's base). [orig: Server_PositionPlayerForSpawn @0x50cf60 team switch
-// @0x50d266 (6096-6099) / @0x50d320 (6003/6004/6090/6091)]
-SpawnPointResult select_player_spawn_for_team(const World &world, uint8_t team,
-                                              uint32_t game_type);
+// Resolve one complete spawn pose. A valid target selects the picked-zone path
+// (including numbered-zone 6007 scatter). Without one, the retail mode chain is
+// exact: 6095→6002 solo; 6096..6099→6003/6004/6090/6091 team; and
+// 6094→6001→numbered entity Co-op. `player_slot` is Co-op's direct-marker
+// rotation input; `spawning_player` is excluded from the Flags&0x100 avoidance
+// set used by non-Co-op marker scoring. The mission-global cycle advances at
+// the same non-Co-op/scatter sites as retail.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60;
+// Entity_FindBestSpawnPoint @0x50CCC0; CRenderState_GetFieldByIndex
+// @0x52D7D0 field 6]
+SpawnPointResult resolve_player_spawn_pose(
+    World &world, EntityHandle spawning_player, EntityHandle target,
+    uint8_t player_slot, uint8_t team, uint32_t game_type);
 
 struct ZoneChain; // world/zone_chain.h
 
@@ -76,7 +68,7 @@ struct ZoneChain; // world/zone_chain.h
 const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
                                    uint16_t handle);
 
-// The world offers at least one deploy-selectable spawn zone (an alive attrib-0x40000
+// The world offers at least one registered spawn zone (an attrib-0x40000
 // "SpawnPoint" entity). Gates the join-time respawn-pending flag — the deploy screen only
 // holds when the mission has zones to pick [orig: Server_OnPlayerJoin @0x51a6f2
 // `|= 0x10 iff SpawnZoneList_GetCount() > 0`; same count gates the 0x0F game_flags bit0
@@ -94,11 +86,12 @@ bool world_has_spawn_zone(const World &world);
 //   ((type==1 ? 2 : type==32 ? 1 : 0) << 16) | ((unitType & 0xFF) << 8) | (zone# & 0x1F)
 // so ground zones lead and vehicles trail. Equal nonzero keys keep collect
 // order (the original's bubble sort is stable there); BOTH-ZERO keys tie-break
-// by entity ADDRESS in the original (allocation order across pools) — modeled
-// here as collect order, a documented approximation that only reorders
-// zero-key zones split across pools.
-// [orig: Entity_BuildSpawnZoneList @0x43EAE0 (collect @0x43eb2e/@0x43ebad, AABB
-//  @0x43eb59.., sort keys @0x43ec9b/@0x43ecb6, zero-key address tie @0x43ecc6);
+// by entity ADDRESS. Retail's single contiguous pool allocation fixes pool 1
+// at +232420 (stride 1360) and pool 2 at +1865416 (stride 812), so this order
+// is reproduced without depending on the reimplementation allocator.
+// [orig: EntityPool_Allocate @0x442130; Entity_BuildSpawnZoneList @0x43EAE0
+//  (collect @0x43eb2e/@0x43ebad, AABB @0x43eb59.., sort keys
+//  @0x43ec9b/@0x43ecb6, zero-key address tie @0x43ecc6);
 //  SpawnZoneList_IndexOf @0x43B990]
 struct SpawnZoneRegistry {
     std::vector<EntityHandle> entries;
@@ -112,17 +105,69 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world);
 // Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
 int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 
+// Whether retail's target-less respawn gate considers this team to have an
+// available spawn zone. This walks SpawnZoneList, not the player roster: an
+// unnumbered same-team zone qualifies regardless of control; a numbered one
+// qualifies at full control. [orig: Entity_HasAliveEntityOfTeam @0x4FC7B0]
+bool team_has_available_spawn_zone(const World &world, uint8_t team);
+
+// One retail spawn-wave group. The original stores eight player pointers,
+// queued_count, the zone pointer, interval/countdown, a second timer word at
+// +48 and a cached team in one 56-byte row. Handles make the same ownership
+// explicit without leaking allocator addresses into the portable world model.
+// The +48 word is not carried: every store to it is zero (the mission build
+// @0x52A9BB/@0x52AA85, the control-loss flush @0x52A372, the team-flip reset
+// @0x52A5E1), so its tick decrement @0x52A339 never runs and its two ETA
+// reads (@0x52A2FF, @0x52A66E) add nothing.
+// [orig: g_spawn_wave_list @0x24E0E48; SpawnWaveList_AppendEntry @0x52AB60;
+// SpawnWaveList_TickEntry @0x52A330]
+struct SpawnWaveEntry {
+    EntityHandle zone;
+    uint8_t team = 0;
+    int32_t interval = 0;
+    int32_t countdown = 0;
+    std::vector<EntityHandle> queued;
+
+    // Countdown shown to this requester. Members see the countdown plus their
+    // position in the queue times the interval; a nonmember sees the tail ETA
+    // (countdown plus the whole queue).
+    // [orig: SpawnWaveList_GetEntryInfo @0x52A700 -> SpawnWaveEntry_MemberEta
+    // @0x52A2E0 / SpawnWaveEntry_TailEta @0x52A610]
+    uint16_t requester_countdown(EntityHandle requester) const;
+};
+
+struct SpawnWaveRelease {
+    EntityHandle player;
+    EntityHandle zone;
+};
+
+// Spawn selection and its timed release list are one domain module: the host
+// asks this object whether a valid deploy pick queues, and consumes releases
+// from its 1 Hz tick. It has no transport dependency; S2C 0x6E is a projection
+// of entries(). [orig: SpawnWaveList_* @0x52A330..0x52AB60]
+class SpawnWaveList {
+public:
+    void clear() { entries_.clear(); }
+    void build_from_mission(const World &world, int32_t base_interval,
+                            int32_t numbered_zone_interval);
+    bool has_entry(EntityHandle zone) const;
+    bool try_queue(const World &world, EntityHandle zone, EntityHandle player);
+    bool remove_player(EntityHandle player);
+    std::vector<SpawnWaveRelease> tick(const World &world);
+    void reset_on_zone_team_change(const World &world, EntityHandle zone);
+
+    const std::vector<SpawnWaveEntry> &entries() const { return entries_; }
+
+private:
+    std::vector<SpawnWaveEntry> entries_;
+};
+
 // The C2S 0x2C deploy-pick sentinels [orig: Input_HandleActionBinding case 12
 // @0x49b0c5-0x49b17b - param 0 -> 0xFFFF (no pick), 65534 -> 0xFFFE (the
 // auto-team zone pick); host decode Server_ProcessClientRequestRespawn
 // @0x519AF0, net-re paragraph 5.61].
 inline constexpr uint16_t kDeployPickNone = 0xFFFF;
 inline constexpr uint16_t kDeployPickAutoTeam = 0xFFFE;
-
-// The one witnessed g_GameType BIT the spawn picker tests. engine/runtime/world stays
-// net-agnostic, so this mirrors npwire's game_type::kObjectiveBit; engine/net/netsim
-// static_asserts the two agree (entity_wire_bridge.cpp).
-inline constexpr uint32_t kGameTypeObjectiveBit = 0x20000;
 
 // The 0xFFFE auto-deploy pick: the requester team's own zone that sits ON the
 // frontier — enemy-capturable, or carrying the team's frontier number — with
@@ -131,16 +176,7 @@ inline constexpr uint32_t kGameTypeObjectiveBit = 0x20000;
 // (the caller falls back to the marker chain). [orig: find_spawn_entity_for_team
 // @0x4fc810]
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
-                                       uint8_t team, uint32_t game_type);
-
-// Deploy pose at a picked spawn target: the target's position with z + 1.0 and its
-// yaw. Deferrals (net-re §5.61 follow-ups): the model-userpoint offset (name string
-// is runtime-set in the original) and the numbered-zone round-robin over in-radius
-// pool-3 type-6007 sub-spawn markers (the zone radius source entity+350 is
-// unwitnessed; ASH_I5A authors no 6007 markers, so the fallback IS the retail
-// behavior there). [orig: Server_PositionPlayerForSpawn @0x50cf60 pick path
-// @0x50cfbe (pose copy) / @0x50d01c (z += 0x10000 when no userpoint)]
-SpawnPointResult spawn_pose_for_target(const Entity &target);
+                                       uint8_t team, uint32_t game_type_value);
 
 } // namespace opennova::world
 

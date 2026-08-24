@@ -35,7 +35,9 @@ func page_category() -> StringName:
 
 
 func _build() -> void:
-	add_theme_constant_override("separation", 8)
+	# 6 is the shared page rhythm (every other debug page); 8 pushed the
+	# populated summary past the 1600x900 dock once the third view check landed.
+	add_theme_constant_override("separation", 6)
 
 	add_child(_section_label("PlayerPoseHeading", "POSE"))
 	_player_mission_label = _info_label("PlayerMission")

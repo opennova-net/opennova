@@ -2,7 +2,6 @@ class_name CreditsEditorBlockList
 extends VBoxContainer
 
 const BlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 signal entries_reordered
 signal selection_changed(entry)
@@ -80,7 +79,7 @@ func _do_deferred_reconcile() -> void:
 func _coerce_resource_root(path: String) -> ResourceRoot:
 	var dir := path.strip_edges()
 	if dir.is_empty():
-		dir = ResourceDirSettings.get_resource_dir()
+		dir = OnedSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
 	var resources := ResourceRoot.new()

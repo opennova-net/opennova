@@ -108,8 +108,11 @@ int main() {
     const EntityHandle local = spawn_organic(w, 1, 1, true);
     const EntityHandle medic = spawn_organic(w, 1, 5, false);
     const EntityHandle rifle = spawn_organic(w, 1, 1, false);
+    // The pass gate `g_GameType || death screen` [orig: @0x5a44e8].
+    FriendlyTagPassContext ctx;
+    ctx.game_type = 0x30020u;
     std::vector<FriendlyTagSource> tags;
-    collect_friendly_tags(w, *w.registry.get(local), tags);
+    collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
     CHECK(tags.size() == 2);
     bool saw_medic = false, saw_rifle = false;
     for (const FriendlyTagSource &t : tags) {
@@ -124,7 +127,7 @@ int main() {
     CHECK(!w.class_has_attribute(5, World::kCharAttrMedic));
     CHECK(!w.class_has_attribute(1, 0x1u));
     tags.clear();
-    collect_friendly_tags(w, *w.registry.get(local), tags);
+    collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
     CHECK(tags.size() == 2);
     for (const FriendlyTagSource &t : tags) CHECK(!t.medic);
 

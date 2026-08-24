@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <npwire/protocol_message.h>
@@ -70,6 +71,11 @@ struct GameConfig {
 	// reply bodies, the BuildFlags team-gate (game_settings.game_type copy, equal in a live session),
 	// and Server_AssignPlayerTeam. Default 0 (a fresh/dev host); a real host seeds the mission gametype.
 	uint32_t game_type = 0;                     // [orig g_GameType @0x24D2128 == game_settings +0xCC]
+	// Process-global side count. Only TDM/TKOTH/FlagBall honor four; every
+	// other team mode remains two-sided in the retail scoreboards.
+	// [orig: g_MpNumTeams @0x2550B40 -> g_num_teams_config @0x24D2150;
+	// Server_BuildAndBroadcastScoreboard @0x50D960]
+	uint8_t num_teams = 2;
 	// mpattrib bitmask — the BuildFlags team-branch input [orig game_settings +0xD0] AND the 0x64
 	// mission-metadata blob's attrib dword. Observed bits (docs/net/novaworld-net-re.md §6.4;
 	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0]):
@@ -101,11 +107,32 @@ struct GameConfig {
 	uint32_t respawn_time = 0;         // [orig g_respawn_time @0x24D2140]      dword[0]; SET `GameTime`
 	uint32_t time_limit_minutes = 0;  // [orig g_time_limit_minutes @0x24D2144] dword[1]; SET `KOTHLimit`
 	uint32_t replay_enabled = 0;      // [orig g_replay_enabled @0x24D2120 <- cfg `replay` @0x2550B24]      dword[2]
+	// Retail carries this setting through cfg/global/S2C 0x08 but never reads
+	// the live global in gameplay (whole-image xrefs: serializer + settings
+	// apply only). Keep its wire value; do not invent a team-lives system.
 	uint32_t max_team_lives = 0;      // [orig g_max_team_lives @0x24D2130 <- cfg `max_team_lives` @0x2550ABC] dword[4]
 	uint32_t score_limit = 0;         // [orig g_score_limit @0x24D2134]       dword[5]; SET `KillLimit` (name-swap)
+	// Gameplay-only rule globals omitted from S2C 0x08 but consumed by the
+	// witnessed KOTH/flag win and return paths.
+	uint32_t max_score = 0;           // [orig g_kill_limit @0x24D2138] SET `MaxScore`
+	uint32_t koth_delta = 5;          // [orig dword_24D2148] cfg `koth_delta`
+	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime_2 @0x24D2174]
+	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
+	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
+	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]
+	int32_t spawn_wave_time_zone = 10;     // [orig g_spawn_wave_time_zone @0x24D2250]
+	// True limits target-less deployment to the absence of an eligible same-team
+	// spawn zone. The clean name reflects the actual predicate; retail's global
+	// g_respawn_requires_team_dead and cfg key `nodefaultspawnpoints` are
+	// historical misnomers and are retained only as provenance.
+	// [orig: apply_session_settings_to_globals @0x551D96;
+	// Server_ProcessClientRequestRespawn @0x519C8E;
+	// Entity_HasAliveEntityOfTeam @0x4FC7B0]
+	uint32_t default_spawn_requires_no_team_zone = 0;
 	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
-	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160]        dword[7]; SET `StartDelay`
+	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160] dword[7]; SET `StartDelay`;
+	                                  //   reset_round_counters @0x516C50 copies it to g_preround_delay_timer @0xC8D824 (store @0x516C8D)
 	uint32_t destroy_buildings = 0;   // [orig g_destroy_buildings @0x24D2164 <- cfg `destroybuild` @0x2550ACC] dword[8];
 	                                  //   read by Entity_ApplyWeaponDamage @0x4e6820
 	uint32_t death_messages = 0;      // [orig g_death_messages @0x24D2168 <- cfg `deathmes` @0x2550AD0]    dword[9];
@@ -119,18 +146,25 @@ struct GameConfig {
 	// may seed the structural values directly. [orig: GameType_CreateDefaultSettings
 	// @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport
 	// @0x530A60 copies row+300..+452]
-	std::array<int32_t, 39> session_status_stat_values{};
+	// Absent selects GameType_CreateDefaultSettings for game_type. A parsed or
+	// explicitly supplied row is present even when every value is zero.
+	std::optional<std::array<int32_t, 39>> session_status_stat_values;
+	// score.ini FIELD rows for the selected game type, in file order. Empty
+	// means the match should use GameType_CreateDefaultSettings' retail schema.
+	// The second byte is preserved rather than normalized because it is emitted
+	// verbatim in the S2C 0x56 end-round board.
+	std::vector<std::pair<uint8_t, uint8_t>> scoreboard_fields;
 
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
-	// sources): the trailing flags dword of the 0x08 block. (`MaxScore`->`g_kill_limit @0x24D2138`
-	// (§6.9 name-swap) is NOT in the 0x08 wire block — omitted until a cfg-persistence pass needs it.)
+	// sources): the trailing flags dword of the 0x08 block. `MaxScore` is retained
+	// above for gameplay/session-status, but retail does not put it in this 0x08 block.
 	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
 	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
-	// Both flags named 2026-07-01: dword_2550A04 is the mpattrib BITFIELD store itself
-	// (ServerConfig_ApplyHostSetting @0x4a6000: SET `TeamChoose`->bit 0x4 direct, `TeamFF`->0x200
-	// inverted, `FriendlyTag`->0x400 inverted, `ClaymorePref` ...).
-	bool team_choose = false;          // [orig dword_2550A04 & 4 = SET `TeamChoose` @0x4a63d9] -> |0x4
+	// dword_2550A04 is already represented once by mp_attributes above. In
+	// particular SET `TeamChoose` writes bit 0x4 directly; there is no parallel
+	// boolean setting in retail. [orig: ServerConfig_ApplyHostSetting @0x4A6000,
+	// TeamChoose arm @0x4A63D9]
 	bool allow_sniper_scope_zoom = false; // [orig g_mp_allowsniperscopezoom @0x2550CA4, cfg
 	                                      //  `mp_allowsniperscopezoom` @0x550ac9; read by
 	                                      //  WeaponSlot_InitFromDef @0x53ee70] -> |0x10000

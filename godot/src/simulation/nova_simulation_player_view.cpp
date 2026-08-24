@@ -4,8 +4,10 @@
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
+#include <terrain_query/height_field.h> // the death camera's terrain probe
 #include <world/vehicle_motor.h> // carrier_pose_fixed — the mounted camera's carrier read
 
+#include <climits>
 #include <cmath>
 
 using namespace novasim;
@@ -30,7 +32,7 @@ void Simulation::refresh_local_player_view_effects() {
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
 	const bool alive = local != nullptr && local->alive && local->health > 0;
-	const bool round_ended = world_ != nullptr && world_->round_end.ended;
+	const bool round_ended = world_ != nullptr && world_->match.outcome().ended;
 	opennova::world::player_view_update_effective_modes(
 			player_view_, alive, round_ended);
 }
@@ -208,6 +210,84 @@ void Simulation::set_local_player_debug_third_person(bool p_enabled) {
 // WeaponAction_ProcessAllEntities call, so this tick's settle promoter is visible to
 // action routing while an action's unscope/rescope begins easing on the next tick
 // [orig: call sites @ 0x42c18e / @ 0x526786; promoter @ 0x4de4f7].
+bool Simulation::local_death_screen_active() const {
+	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
+	// role's view folds (the listen host's own loopback included)
+	// (retail: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b, see netsim/client_state.h).
+	return runtime_ != nullptr && runtime_->state().death_screen_active;
+}
+
+void Simulation::feed_camera_arbiter_inputs(const opennova::world::Entity &e) {
+	// The remaining arbiter inputs (retail: Render_ProcessMainSceneFrame
+	// @0x5ca1f4..0x5ca24b; see world/player_view.h). The two g_rules_flags bits
+	// are admin `set` commands with no wire fold yet: carried false.
+	player_view_.local_dead = local_player_dead();
+	player_view_.death_screen_active = local_death_screen_active();
+	player_view_.death_screen_submode = runtime_ != nullptr
+			? runtime_->state().death_screen_submode : 0;
+	player_view_.round_ended = world_->match.outcome().ended ||
+			(runtime_ != nullptr && runtime_->state().end_round.known);
+	player_view_.on_foot = !e.mounted;
+	player_view_.in_session = runtime_ != nullptr;
+	player_view_.view_tick = world_->logic_tick;
+	// The death stamp (retail: g_camera_lerp_start_tick = current_tick on the
+	// local death path @0x4b4d00 / the 0x13 self record @0x42ec0f): the local
+	// dead EDGE.
+	if (player_view_.local_dead && !camera_local_dead_seen_) {
+		player_view_.death_cam.start_tick = world_->logic_tick;
+	}
+	camera_local_dead_seen_ = player_view_.local_dead;
+}
+
+void Simulation::enter_death_camera(const opennova::world::Entity &e) {
+	// The mode-4 transition computes the lerp camera once (retail:
+	// Camera_SetTrackedEntity @0x439257 -> Camera_ComputeThirdPersonPositions
+	// @0x438b80). The anchor: the joiner's S2C 0x52 triple (the last received
+	// one, zeros like retail's globals before any), the authority's +0x178
+	// killer entity position, else the player itself.
+	const int32_t player[3] = {
+		opennova::world::to_fixed(e.position.x), opennova::world::to_fixed(e.position.y),
+		opennova::world::to_fixed(e.position.z)};
+	int32_t anchor[3] = {player[0], player[1], player[2]};
+	if (joiner_) {
+		if (runtime_ != nullptr) {
+			const opennova::netsim::ClientDeathCameraTarget &t = runtime_->state().death_camera;
+			anchor[0] = t.x;
+			anchor[1] = t.y;
+			anchor[2] = t.z;
+		}
+	} else if (const opennova::world::Entity *killer = world_->registry.get(e.last_attacker)) {
+		anchor[0] = opennova::world::to_fixed(killer->position.x);
+		anchor[1] = opennova::world::to_fixed(killer->position.y);
+		anchor[2] = opennova::world::to_fixed(killer->position.z);
+	}
+	// The probe's bone leg (Entity_ComputeCollisionForceFromBones @0x4afff0
+	// over the tracked entity's collision-bone list) is unported, and with no
+	// bone list retail returns the full reach untouched (@0x4378c4): the
+	// count-0 path, fed here with the world terrain for when the bones land.
+	const opennova::terrain::TerrainHeightField *terrain =
+			world_->ai != nullptr ? world_->ai->terrain : nullptr;
+	const opennova::world::CameraTerrainSampler sampler =
+			[terrain](int32_t x, int32_t y) -> int32_t {
+				if (terrain == nullptr || !terrain->valid()) return INT32_MIN / 2;
+				// Engine ground plane (x, y) -> the atlas' (x, -y) sample, the
+				// calc_average_ground_height mapping player_view.cpp uses.
+				return opennova::world::to_fixed(
+						opennova::terrain::height_field_height_world_bilinear(*terrain,
+								static_cast<float>(x) / 65536.0f,
+								-static_cast<float>(y) / 65536.0f));
+			};
+	const opennova::world::CameraRayProbe probe =
+			[&sampler](const int32_t origin[3], const int32_t dir[3], int32_t lift,
+					int32_t max_dist) {
+				return opennova::world::death_camera_probe_terrain(
+						sampler, /*bone_count=*/0, origin, dir, lift, max_dist);
+			};
+	const uint32_t start_tick = player_view_.death_cam.start_tick;
+	opennova::world::death_camera_compute(player, anchor, probe, player_view_.death_cam);
+	player_view_.death_cam.start_tick = start_tick;
+}
+
 void Simulation::tick_local_player_view() {
 	if (!world_ || !world_->cached.local_player.valid()) {
 		// No seat without a player: the arbiter resolves to first person (or
@@ -215,7 +295,7 @@ void Simulation::tick_local_player_view() {
 		player_view_.mount = opennova::world::MountedCameraInput();
 		opennova::world::player_view_resolve_mode(player_view_);
 		opennova::world::player_view_update_effective_modes(
-				player_view_, false, world_ != nullptr && world_->round_end.ended);
+				player_view_, false, world_ != nullptr && world_->match.outcome().ended);
 		player_view_.tp_anchor_valid = false;
 		return;
 	}
@@ -260,7 +340,10 @@ void Simulation::tick_local_player_view() {
 		mount.water_z = static_cast<float>(world_->env.water_z) / 65536.0f;
 	}
 	player_view_.mount = mount;
+	feed_camera_arbiter_inputs(*e);
+	const int mode_before = player_view_.camera_mode;
 	opennova::world::player_view_resolve_mode(player_view_);
+	if (player_view_.camera_mode == 4 && mode_before != 4) enter_death_camera(*e);
 	refresh_local_player_view_effects();
 	// The per-tick movement delta the FP motion lead samples per render frame
 	// (retail: the (position - entity+0x80 prev-position) << 8 samples
@@ -347,6 +430,9 @@ Dictionary Simulation::get_local_player_view() const {
 	// [orig: g_camera_mode @ 0xA890C8; g_camera_third_person_selected @ 0xA860DF].
 	out["third_person"] = player_view_.third_person;
 	out["third_person_selected"] = player_view_.third_person_selected;
+	// The resolved mode word (0 first person, 1 chase, 4 the death lerp
+	// camera) (retail: g_camera_mode @0xA890C8, see world/player_view.h).
+	out["camera_mode"] = player_view_.camera_mode;
 	// The camera's mounted leg is engaged: a control seat with a live carrier
 	// (the per-tick carrier read in tick_local_player_view) AND the resolved
 	// third person — the compose fork's own gate.

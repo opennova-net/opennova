@@ -21,6 +21,13 @@ var _previous_window_min_size: Vector2i = Vector2i.ZERO
 
 
 func _ready() -> void:
+	# Headless CLI leg: `--pack-game <src> <game_dir>` packs and quits before any editor
+	# wiring runs (no window sizing, no MCP listener). CI uses it to build the shipped
+	# zip's game with this editor's own packer.
+	var user_args := OS.get_cmdline_user_args()
+	if PackGameCli.wants_run(user_args):
+		get_tree().quit(PackGameCli.run(user_args))
+		return
 	# Children are ready first: the terrain editor has built its world furniture
 	# and loaded its state. Inject the shared documents, hand the shell its
 	# editor, then seed the initial terrain — the same order the old

@@ -14,7 +14,6 @@ var _size_spin: SpinBox
 var _bold: CheckBox
 var _italic: CheckBox
 var _outline: CheckBox
-var _shadow: CheckBox
 var _status: Label
 var _files: FileDialogHelper
 
@@ -81,9 +80,7 @@ func _init() -> void:
 	_italic.text = "Italic"
 	_outline = CheckBox.new()
 	_outline.text = "Outline"
-	_shadow = CheckBox.new()
-	_shadow.text = "Shadow"
-	for cb in [_bold, _italic, _outline, _shadow]:
+	for cb in [_bold, _italic, _outline]:
 		flag_row.add_child(cb)
 	box.add_child(flag_row)
 
@@ -120,22 +117,12 @@ func _on_confirmed() -> void:
 		flags |= 2
 	if _outline.button_pressed:
 		flags |= 4
-	if _shadow.button_pressed:
-		flags |= 8
 	generate_requested.emit(font, int(_size_spin.value), flags)
 
 
 func _build_font() -> Font:
 	if _use_file.button_pressed:
-		var path := _file_edit.text.strip_edges()
-		if path.is_empty() or not FileAccess.file_exists(path):
-			return null
-		var ff := FontFile.new()
-		if ff.load_dynamic_font(path) != OK:
-			return null
-		return ff
+		return FntRasterizer.build_font_source(_file_edit.text)
 	if _system_option.item_count == 0 or _system_option.selected < 0:
 		return null
-	var sf := SystemFont.new()
-	sf.font_names = PackedStringArray([_system_option.get_item_text(_system_option.selected)])
-	return sf
+	return FntRasterizer.build_font_source(_system_option.get_item_text(_system_option.selected))

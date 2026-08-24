@@ -4,10 +4,13 @@
 The registered workflow imposes two timing/geometry constraints that an
 interactive operator cannot meet by issuing MCP calls one at a time:
 
-* ``register_retail_capture.py`` rejects a capture more than **120 frames**
-  after its fixture application. Calls issued separately through an agent or by
-  hand run 500-1800 frames apart; issued back-to-back on one stdio connection
-  they cost 3-5.
+* ``register_retail_capture.py`` requires the capture frame to carry the
+  hook's fixture-binding witness: the same exact apply, the applied time of
+  day still pinned, and a settle of at least its ``--min-settle-seconds``
+  floor. A fixture apply is a teleport, and retail's first-person motion lead
+  and ground snap take seconds to decay, so this driver waits
+  ``--settle-seconds`` (default 4.0) between the apply and the capture on ONE
+  stdio connection; the hook's time-advance lease holds the clock meanwhile.
 
 * ``build_retail_side_by_side.py`` requires the registered retail camera to
   match the catalog ``camera_bms`` within 0.05 per axis, but
@@ -173,6 +176,9 @@ def capture_fixture(
             "mission_sha256": catalog["missions"][fixture["mission"]],
         }
         fix = client.tool("onhook_apply_render_fixture", applied)
+        # Let retail's post-teleport motion lead and ground snap decay before
+        # the reference frame; the hook's lease keeps the clock pinned.
+        time.sleep(max(args.settle_seconds, 0.0))
         cap = client.tool("onhook_capture_retail_reference", {
             "fixture_id": fixture_id,
             "instance_id": instance_id,
@@ -180,20 +186,28 @@ def capture_fixture(
             "preview_max_dim": 64,
         })
         gap = int(cap["frame_serial"]) - int(fix["frame_serial"])
+        witness = cap.get("fixture_binding", {})
+        settled_seconds = float(witness.get("seconds_after_apply", 0.0))
+        pinned = witness.get("applied") is True \
+            and witness.get("time_of_day", {}).get("pinned") is True
         got = camera_bms(state)
         residual = [target["position"][i] - got[i] for i in range(3)]
         worst = max(abs(r) for r in residual)
-        print(f"  {fixture_id} try{attempt}: gap={gap} worst={worst:.4f} "
+        print(f"  {fixture_id} try{attempt}: gap={gap} "
+              f"settled={settled_seconds:.3f}s pinned={pinned} "
+              f"worst={worst:.4f} "
               f"camera=({got[0]:.4f},{got[1]:.4f},{got[2]:.4f})")
 
-        landed = (0 < gap <= 120) and (args.no_correct or worst <= TOLERANCE)
+        landed = gap > 0 and pinned \
+            and (args.no_correct or worst <= TOLERANCE)
         if landed:
             save(out_dir / "instance-status.json", instances)
             save(out_dir / "fixture-result.json", fix)
             save(out_dir / "capture-result.json", cap)
             shutil.copyfile(args.stage_manifest, out_dir / "retail-stage.json")
             shutil.copyfile(log_path, out_dir / "onhook.log")
-            print(f"OK  {fixture_id}: gap={gap} worst={worst:.4f}")
+            print(f"OK  {fixture_id}: gap={gap} settled={settled_seconds:.3f}s "
+                  f"worst={worst:.4f}")
             return True
 
         # Undamped correction 2-cycles where reachable camera heights straddle
@@ -217,6 +231,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stage-manifest", required=True, type=Path)
     parser.add_argument("--expansion", default="revx02")
     parser.add_argument("--attempts", type=int, default=5)
+    parser.add_argument(
+        "--settle-seconds", type=float, default=4.0,
+        help="seconds to let retail settle between the fixture apply and the "
+             "reference capture (the motion lead decays over ~200 ticks, "
+             "3.2 s); 0 reproduces the old back-to-back capture, which the "
+             "registrar's settle floor then refuses",
+    )
     parser.add_argument(
         "--no-correct", action="store_true",
         help="capture at the catalog's applied position verbatim (what a "

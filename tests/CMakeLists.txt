@@ -65,6 +65,16 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
+# Native BIKi menu-video decoder: a deterministic generated bitstream plus an
+# OPENNOVA_JO_DIR-gated retail smoke test.
+add_executable(bink_test bink/bink_test.cpp)
+target_link_libraries(bink_test PRIVATE opennova_formats)
+add_test(NAME bink COMMAND bink_test)
+
+add_executable(bink_retail_test bink/bink_retail_test.cpp)
+target_link_libraries(bink_retail_test PRIVATE opennova_formats)
+add_test(NAME bink_retail COMMAND bink_retail_test)
+
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
 # world<->local self-consistency on the real BINOC.bad fixture.
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
@@ -187,9 +197,9 @@ add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
 
-add_executable(mission_session_test frame/mission_session_test.cpp)
-target_link_libraries(mission_session_test PRIVATE opennova_net)
-add_test(NAME mission_session COMMAND mission_session_test)
+add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
+target_link_libraries(inmatch_session_test PRIVATE opennova_net)
+add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
 # loose .wav members (drives MNU hover/click via MnuMenu).
@@ -507,50 +517,59 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
 endforeach()
 
 # Minimal authored fixture set — the fatal-set RTXT string tables
-# (fixtures/minimal/). Regenerates each in memory and guards it byte-matches
-# the committed file + round-trips. See fixtures/minimal/README.md.
+# (assets/). Regenerates each in memory and guards it byte-matches
+# the committed file + round-trips. See assets/README.md.
 add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
 target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_rtxt_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
+
+# Minimal set's hand-authored text resources must be CRLF: retail's text
+# parsers are not LF-tolerant and fail SILENTLY (a LF-only menu_style.mns
+# dead-ends the menu shell before main.mnu; a bare LF stops the .def parser
+# after block 0). Witnessed on retail 2026-08-23.
+add_executable(minimal_eol_guard_test fixtures/minimal_eol_guard.cpp)
+target_compile_definitions(minimal_eol_guard_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_eol_guard COMMAND minimal_eol_guard_test)
 
 # Minimal set's text .def files parse through our loaders (items/weapon/ammo).
 add_executable(minimal_def_validate_test fixtures/minimal_def_validate.cpp)
 target_link_libraries(minimal_def_validate_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_def_validate_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_def_validate COMMAND minimal_def_validate_test)
 
 # Minimal set's menus parse (main Startup node + mp host/join screen).
 add_executable(minimal_mnu_validate_test fixtures/minimal_mnu_validate.cpp)
 target_link_libraries(minimal_mnu_validate_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_mnu_validate_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
 
 # Minimal set's custom map — the .env + .bms legs (the .trn rides its own slice).
-add_executable(minimal_map_gen_test fixtures/minimal_map_gen.cpp)
-target_link_libraries(minimal_map_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_map_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
-add_test(NAME minimal_map_gen COMMAND minimal_map_gen_test)
+add_executable(minimal_map_validate_test fixtures/minimal_map_validate.cpp)
+target_link_libraries(minimal_map_validate_test PRIVATE opennova_formats)
+target_compile_definitions(minimal_map_validate_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
 add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
 target_link_libraries(minimal_trn_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_trn_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_trn_gen COMMAND minimal_trn_gen_test)
 
 # Minimal map's source-art images (colormap/detail/tilestrip TGAs, charmap/
 # foliagemap PCX) the .trn references — authored + validated.
-add_executable(minimal_art_gen_test fixtures/minimal_art_gen.cpp)
-target_link_libraries(minimal_art_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_art_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
-add_test(NAME minimal_art_gen COMMAND minimal_art_gen_test)
+add_executable(minimal_art_validate_test fixtures/minimal_art_validate.cpp)
+target_link_libraries(minimal_art_validate_test PRIVATE opennova_formats)
+target_compile_definitions(minimal_art_validate_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_art_validate COMMAND minimal_art_validate_test)
 
 # Minimal set's generated boot font (minimal_fnt_builder.h): validity +
 # byte-stable roundtrip + label glyphs drawable. Always-on; the font itself is
@@ -564,7 +583,7 @@ add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
 target_link_libraries(minimal_companion_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_companion_gen_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_companion_gen COMMAND minimal_companion_gen_test)
 
 # Minimal set's generated boot music (minimal_mus_builder.h): the silent SBF
@@ -580,7 +599,7 @@ add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
 target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
 target_compile_definitions(minimal_pff_package_test PRIVATE
-    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
 
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
@@ -904,6 +923,27 @@ target_link_libraries(terrain_static_shadow_alpha_test PRIVATE opennova_runtime)
 target_include_directories(terrain_static_shadow_alpha_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_static_shadow_alpha COMMAND terrain_static_shadow_alpha_test)
 
+# The end-of-round overlay ladder + column layout (hud/end_round_overlay.h).
+add_executable(end_round_overlay_test hud/end_round_overlay_test.cpp)
+target_link_libraries(end_round_overlay_test PRIVATE opennova_runtime)
+target_include_directories(end_round_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(end_round_overlay_test PRIVATE cxx_std_17)
+add_test(NAME end_round_overlay COMMAND end_round_overlay_test)
+
+# The stat.mnu RESULTLIST feed (hud/stat_screen_feed.h).
+add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
+target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
+target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(stat_screen_feed_test PRIVATE cxx_std_17)
+add_test(NAME stat_screen_feed COMMAND stat_screen_feed_test)
+
+# The S2C 0x81 hit-confirm tone ladder (hud/score_fanfare.h).
+add_executable(score_fanfare_test hud/score_fanfare_test.cpp)
+target_link_libraries(score_fanfare_test PRIVATE opennova_runtime)
+target_include_directories(score_fanfare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(score_fanfare_test PRIVATE cxx_std_17)
+add_test(NAME score_fanfare COMMAND score_fanfare_test)
+
 add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -922,6 +962,22 @@ target_link_libraries(client_replica_scoreboard_test PRIVATE opennova_net openno
 target_include_directories(client_replica_scoreboard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(client_replica_scoreboard_test PRIVATE cxx_std_17)
 add_test(NAME client_replica_scoreboard COMMAND client_replica_scoreboard_test)
+
+# The joiner's player walk of the friendly-tags pass over ClientState
+# (D-HUD-20 residue a): roster slots with an entity, entry bails, gates, downed facts.
+add_executable(client_roster_tags_test netsim/client_roster_tags_test.cpp)
+target_link_libraries(client_roster_tags_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_roster_tags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(client_roster_tags_test PRIVATE cxx_std_17)
+add_test(NAME client_roster_tags COMMAND client_roster_tags_test)
+
+# The DEATH-screen facts of the replica fold: the 0x0A sub-block-0 slot timers
+# and the 0x6E self wave zone (client_replica_match.cpp).
+add_executable(client_replica_match_test netsim/client_replica_match_test.cpp)
+target_link_libraries(client_replica_match_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_replica_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(client_replica_match_test PRIVATE cxx_std_17)
+add_test(NAME client_replica_match COMMAND client_replica_match_test)
 
 add_executable(client_replica_endround_test netsim/client_replica_endround_test.cpp)
 target_link_libraries(client_replica_endround_test PRIVATE opennova_net opennova_runtime)
@@ -1457,6 +1513,21 @@ add_test(NAME weapon_inventory COMMAND weapon_inventory_test)
 # Local player view state (the ADS scope ease, the 3P anchor chase, the fov
 # policy) at the fixed 62.5 Hz tick — render-cadence invariance — plus the
 # input-dispatch gates in front of the FSM requests.
+# The DEATH deploy screen's content feed (D-HUD-19 residue b): row loops, sort,
+# occupant insertion quirk, status-line kinds, statics gates.
+add_executable(deploy_screen_feed_test world/deploy_screen_feed_test.cpp)
+target_link_libraries(deploy_screen_feed_test PRIVATE opennova_runtime)
+target_include_directories(deploy_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(deploy_screen_feed_test PRIVATE cxx_std_17)
+add_test(NAME deploy_screen_feed COMMAND deploy_screen_feed_test)
+
+# The mode-4 death lerp camera (world/death_camera.h): FROM/TO, probe, lerp.
+add_executable(death_camera_test world/death_camera_test.cpp)
+target_link_libraries(death_camera_test PRIVATE opennova_runtime)
+target_include_directories(death_camera_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(death_camera_test PRIVATE cxx_std_17)
+add_test(NAME death_camera COMMAND death_camera_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1538,6 +1609,15 @@ target_link_libraries(zone_chain_test PRIVATE opennova_runtime)
 target_include_directories(zone_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zone_chain_test PRIVATE cxx_std_17)
 add_test(NAME zone_chain COMMAND zone_chain_test)
+
+# The authoritative multiplayer rules/stats domain shared by TDM and A&S, with
+# Co-op pinned to the existing WAC/BMS outcome path. [orig:
+# GameEvent_ProcessScoring @0x52F550; Server_CheckWinConditions @0x51AD40]
+add_executable(match_test world/match_test.cpp)
+target_link_libraries(match_test PRIVATE opennova_runtime)
+target_include_directories(match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(match_test PRIVATE cxx_std_17)
+add_test(NAME match COMMAND match_test)
 
 # Host-authoritative ground-vehicle motor (net-re §5.13 drive-authority witness): the
 # items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive
@@ -1637,7 +1717,7 @@ add_executable(mission_runtime_boot_test mission/runtime_boot_test.cpp)
 target_link_libraries(mission_runtime_boot_test PRIVATE opennova_runtime)
 add_test(NAME mission_runtime_boot COMMAND mission_runtime_boot_test)
 
-# Emplacement mount: the seat model + EntityCommands mount/dismount/find_best_seat
+# Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.
 add_executable(mount_test mission/mount_test.cpp)

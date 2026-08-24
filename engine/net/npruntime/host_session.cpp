@@ -563,6 +563,34 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		}
 	}
 	if (owner.ctx.world != nullptr) {
+		world::MatchRules match_rules;
+		match_rules.game_type = owner.ctx.config.game_type;
+		// SET GameTime feeds g_respawn_time in retail. The existing host model
+		// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
+		// [orig: Game_StartMission seed @0x524F66]
+		match_rules.game_time_minutes = owner.ctx.config.respawn_time;
+		match_rules.score_limit = owner.ctx.config.score_limit;
+		match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;
+		match_rules.hill_delta = owner.ctx.config.koth_delta;
+		match_rules.max_score = owner.ctx.config.max_score;
+		match_rules.flag_return_ticks = owner.ctx.config.flag_return_ticks;
+		match_rules.capture_duration_seconds =
+				owner.ctx.config.capture_duration_seconds;
+		match_rules.capture_speed_setting =
+				owner.ctx.config.capture_speed_setting;
+		match_rules.team_count = owner.ctx.config.num_teams;
+		match_rules.score_values = owner.ctx.config.session_status_stat_values;
+		match_rules.score_fields.reserve(owner.ctx.config.scoreboard_fields.size());
+		for (const auto &[field, enabled] : owner.ctx.config.scoreboard_fields)
+			match_rules.score_fields.push_back({field, enabled});
+		owner.ctx.world->match.configure(match_rules);
+		owner.ctx.world->spawn_waves.build_from_mission(
+				*owner.ctx.world, owner.ctx.config.spawn_wave_time_base,
+				owner.ctx.config.spawn_wave_time_zone);
+		owner.ctx.world->mp_session =
+				cfg.socket_mode != SocketMode::Socketless;
+		owner.ctx.world->destroy_buildings =
+				owner.ctx.config.destroy_buildings != 0;
 		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
 		owner.ctx.world->throwables.team_trigger_claymore =
 				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;

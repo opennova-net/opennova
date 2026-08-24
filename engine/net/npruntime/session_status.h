@@ -6,6 +6,10 @@
 
 #include "npruntime/game_config.h"
 
+namespace opennova::world {
+class World;
+}
+
 namespace opennova::np {
 
 // Apply retail score.ini VERSION 40's VAR table for config.game_type to the
@@ -21,6 +25,6 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini);
 // SessionStatus_SerializeToBuffer @0x5310C0]
 std::vector<uint8_t> serialize_session_status(
 		const GameConfig &config, uint32_t uptime_ms,
-		uint32_t active_players);
+		uint32_t active_players, world::World *match_world);
 
 } // namespace opennova::np

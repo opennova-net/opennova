@@ -15,51 +15,15 @@
 // through the NetProtocol binding (godot/src/network/nova_net_protocol.h).
 
 #include <cstdint>
+#include <world/game_type.h>
 
 #include <mission/bms.h> // bms::AttribFlags — the mission-header game-mode bits
 
 namespace opennova::game_type {
 
 // The witnessed code words (retail LTGT_* keys).
-inline constexpr uint32_t kDeathmatch        = 0x00000; // LTGT_DM
-inline constexpr uint32_t kKingOfTheHill     = 0x00001; // LTGT_KOTH
-inline constexpr uint32_t kTeamDeathmatch    = 0x10000; // LTGT_TDM
-inline constexpr uint32_t kTeamKingOfTheHill = 0x10001; // LTGT_TKOTH
-inline constexpr uint32_t kAttackDefend      = 0x10002; // LTGT_AD
-inline constexpr uint32_t kCaptureTheFlag    = 0x10004; // LTGT_CTF
-inline constexpr uint32_t kFlagBall          = 0x10008; // LTGT_FB
-inline constexpr uint32_t kAdvanceAndSecure  = 0x10010; // LTGT_AAS
-inline constexpr uint32_t kCoop              = 0x10020; // LTGT_COOP (stock/training Co-op)
-inline constexpr uint32_t kSearchAndDestroy  = 0x90002; // LTGT_SD
-inline constexpr uint32_t kConquerAndControl = 0x50010; // LTGT_CAC
-
-// The two witnessed bits.
-inline constexpr uint32_t kObjectiveBit       = 0x20000;    // 0x0A sub-block 3 gate
-inline constexpr uint32_t kWaypointFamilyMask  = 0xFFFDFFFF; // the §5.32 selector pair
-inline constexpr uint32_t kWaypointFamilyValue = 0x10020;
-
-// Objective/waypoint Co-op — the shipped stock-mission gametype.
-inline constexpr uint32_t kObjectiveCoop = kCoop | kObjectiveBit;
-static_assert(kObjectiveCoop == 0x30020);
-
-// The waypoint gametype family: stock Co-op 0x10020 AND objective Co-op
-// 0x30020 (the objective bit is the one the mask forgives).
-constexpr bool is_waypoint_family(uint32_t g) {
-	return (g & kWaypointFamilyMask) == kWaypointFamilyValue;
-}
-constexpr bool is_objective(uint32_t g) {
-	return (g & kObjectiveBit) != 0;
-}
-// Retail's literal two-part stock-Co-op test (deliberately narrower than the
-// 0x7B selector — D-NET-205).
-constexpr bool is_stock_coop(uint32_t g) {
-	return is_waypoint_family(g) && !is_objective(g);
-}
-
-static_assert(is_waypoint_family(kCoop) && is_waypoint_family(kObjectiveCoop));
-static_assert(!is_waypoint_family(kTeamDeathmatch) && !is_waypoint_family(kDeathmatch));
-static_assert(is_stock_coop(kCoop) && !is_stock_coop(kObjectiveCoop));
-static_assert(is_objective(kObjectiveCoop) && !is_objective(kCoop));
+// Code words and structural predicates live in world/game_type.h so runtime
+// gameplay and this mission/wire adapter consume one vocabulary.
 
 // Retail's mission-attrib -> g_GameType selection: the single-select game-mode
 // bit from the mission header (bms::AttribFlags) picks the session code word.
@@ -132,7 +96,7 @@ constexpr int host_filter_category(uint32_t g) {
 	case kAttackDefend: return 6;
 	case kCaptureTheFlag: return 7;
 	case kFlagBall: return 8;
-	case 8: return 12;
+	case kFlagMe: return 12;
 	case kAdvanceAndSecure: return 9;
 	case kConquerAndControl: return 10;
 	default: return 0;
@@ -153,7 +117,7 @@ constexpr const char *host_abbreviation_key(uint32_t g) {
 	case kSearchAndDestroy: return "SD";
 	case kAttackDefend: return "AD";
 	case kFlagBall: return "FB";
-	case 8: return "FM";
+	case kFlagMe: return "FM";
 	case kAdvanceAndSecure: return "AAS";
 	case kConquerAndControl: return "CAC";
 	default: return "";
@@ -176,7 +140,7 @@ constexpr const char *overlay_label_key(uint32_t g) {
 	case kSearchAndDestroy: return "STROVER56";
 	case kAttackDefend: return "STROVER57";
 	case kFlagBall: return "STROVER58";
-	case 8: return "STROVER29";
+	case kFlagMe: return "STROVER29";
 	case kAdvanceAndSecure: return "STROVER92";
 	case kConquerAndControl: return "STROVER93";
 	default: return "";
@@ -216,6 +180,31 @@ inline constexpr uint32_t kDefaultTimeLimitMinutes = 10;
 inline constexpr uint32_t kDefaultReplayEnabled = 1;
 inline constexpr uint32_t kDefaultMaxTeamLives = 100;
 inline constexpr uint32_t kDefaultScoreLimit = 50;
+inline constexpr uint32_t kDefaultMaxScore = 5;
+inline constexpr uint32_t kDefaultKothDelta = 5;
+inline constexpr uint32_t kDefaultFlagReturnTicks = 210;
+// Unnumbered ChangeTeam triggers capture over this many 1 Hz passes; setting
+// zero or negative selects the retail instant branch. TakeoverSpeed 1 selects
+// the control-delta base 24. [orig: Config_SetDefaults @0x54D030 writes
+// dword_2550B78=15 / dword_2550B84=1; applied to g_capture_duration and
+// g_capture_speed_setting @0x551D3E..0x551D55]
+inline constexpr int32_t kDefaultCaptureDurationSeconds = 15;
+inline constexpr int32_t kDefaultCaptureSpeedSetting = 1;
+// Deploy waves are asymmetric by default: unnumbered/base spawns deploy
+// immediately, while numbered zones release one player every ten seconds.
+// [orig: Config_SetDefaults @0x54D030 writes dword_2550B7C=0 and
+// dword_2550B80=10; apply_session_settings_to_globals @0x551D3E..0x551D55]
+inline constexpr int32_t kDefaultSpawnWaveTimeBase = 0;
+inline constexpr int32_t kDefaultSpawnWaveTimeZone = 10;
+// Retail names the parsed setting `nodefaultspawnpoints` and the live global
+// g_respawn_requires_team_dead, but the gameplay predicate checks spawn-zone
+// availability, not living players: Default Spawn is denied while the team has
+// an unnumbered zone or a fully controlled numbered zone.
+// [orig: Config_SetDefaults @0x54D34C writes dword_2550B94=0;
+// Config_ParseSettingsLine @0x550C73; Entity_HasAliveEntityOfTeam @0x4FC7B0]
+inline constexpr uint32_t kDefaultSpawnRequiresNoTeamZone = 0;
+// [orig: Config_SetDefaults @0x54D030 writes g_MpNumTeams = 2]
+inline constexpr uint32_t kDefaultNumTeams = 2;
 inline constexpr uint32_t kDefaultRespawnTimeout = 5;
 inline constexpr uint32_t kDefaultStartDelay = 0;
 inline constexpr uint32_t kDefaultDestroyBuildings = 0;

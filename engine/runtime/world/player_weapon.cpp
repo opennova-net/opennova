@@ -550,7 +550,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.play_serial = 0;
 	w.anim_key.clear();
 	w.anim_variant = 0;
-	w.anim_tick = 0;
+	w.anim_advance_ticks = 0;
 	w.fired_serial = w.dry_serial = w.reload_serial = 0;
 	w.reload_applied_serial = 0;
 	w.reload_received_serial = 0;
@@ -587,7 +587,7 @@ void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.reload_pressed = false;
 	w.clip_rings.clear();
 	w.anim_variant = 0;
-	w.anim_tick = 0;
+	w.anim_advance_ticks = 0;
 	view.scope_engaged = false;
 	view.scope_step = 0;
 	view.ease_steps = kScopeEaseSteps;
@@ -772,7 +772,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	if (ev.play_anim) {
 		++w.play_serial;
 		w.anim_key = ev.anim_key;
-		w.anim_tick = world.logic_tick;
+		w.anim_advance_ticks = 0; // a play restarts the channel at t = 0
 		// The play consumes the slot ring and latches the served variant — the shell
 		// plays exactly this variant on every viewmodel part
 		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
@@ -781,6 +781,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		pending.anim_key = w.anim_key;
 		pending.anim_variant = w.anim_variant;
 		has_presentation_event = true;
+	}
+	if (ev.advance_anim) {
+		// One gated tick of channel time
+		// [orig: AnimChannel_AdvancePlayback @ 0x40b140].
+		++w.anim_advance_ticks;
 	}
 	if (ev.action_started >= 0) {
 		// Copy the begin leg while this def is mounted; a later weapon switch cannot

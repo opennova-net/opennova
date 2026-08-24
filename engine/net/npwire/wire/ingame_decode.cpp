@@ -365,7 +365,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	if (m & kPlayerSyncHasTeamString) out.clan = c.cstr();
 	if (m & kPlayerSyncHasVehicleName) out.id_label = c.cstr();
 	if (m & kPlayerSyncHasTeamByte) out.team = c.u8();
-	if (m & kPlayerSyncHasClassByte) out.type_subtype = c.u8();
+	if (m & kPlayerSyncHasDownedState) out.downed_state = c.u8();
 	if (m & kPlayerSyncHasVehicleScore) out.field_0020 = c.u8();
 	if (m & kPlayerSyncHasLateJoinFlag) out.field_1000 = c.u8();
 	if (m & kPlayerSyncHasSquad) out.field_0040 = c.u8();
@@ -1142,6 +1142,14 @@ bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &
 	return (c.p == c.end);
 }
 
+bool decode_score_delta_sound(const uint8_t *body, size_t len,
+		ScoreDeltaSound &out) {
+	out = ScoreDeltaSound{};
+	Cursor c{body, body + len, true};
+	out.score = c.i32();
+	return c.ok && c.p == c.end;
+}
+
 // S2C 0x7B full player info. [orig: NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0]
 bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &out) {
 	out = FullPlayerInfo{};
@@ -1371,6 +1379,36 @@ bool decode_mounted_weapon_slot_selection(
 	return true;
 }
 
+bool decode_auto_medic_preference(
+		const uint8_t *body, size_t len,
+		AutoMedicPreference &out, size_t &consumed) {
+	out = AutoMedicPreference{};
+	consumed = 0;
+	// The handler reads the first dword when at least four bytes arrived and
+	// ignores any tail. [orig: NapiNPServerMsg_AutoMedicPreference @0x501C12]
+	if (body == nullptr || len < 4) return false;
+	const uint32_t disabled = static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) |
+			(static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24);
+	out.enabled = disabled == 0;
+	consumed = 4;
+	return true;
+}
+
+bool decode_medic_request(const uint8_t *body, size_t len,
+		MedicRequest &out, size_t &consumed) {
+	out = MedicRequest{};
+	consumed = 0;
+	if (body == nullptr || len != 4) return false;
+	out.entity_index = static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) |
+			(static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24);
+	consumed = 4;
+	return true;
+}
+
 // S2C 0x13 entity death (second path) — [u16 handle][i16 killerSource] (4 B).
 // [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
 bool decode_entity_death(const uint8_t *body, size_t len,
@@ -1382,6 +1420,35 @@ bool decode_entity_death(const uint8_t *body, size_t len,
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 4;
+}
+
+bool decode_death_camera_target(const uint8_t *body, size_t len,
+		DeathCameraTarget &out, size_t &consumed) {
+	out = DeathCameraTarget{};
+	consumed = 0;
+	if (body == nullptr || len != 12) return false;
+	Cursor c{body, body + len, true};
+	out.x = c.i32();
+	out.y = c.i32();
+	out.z = c.i32();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 12;
+}
+
+bool decode_player_downed_state(const uint8_t *body, size_t len,
+		PlayerDownedState &out, size_t &consumed) {
+	out = PlayerDownedState{};
+	consumed = 0;
+	if (body == nullptr || len != 3) return false;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	const uint8_t packed = c.u8();
+	if (!c.ok) return false;
+	out.revive_seconds = static_cast<uint8_t>(packed & 0x7Fu);
+	out.medic_request_active = (packed & 0x80u) != 0;
+	consumed = size_t(c.p - body);
+	return consumed == 3;
 }
 
 // S2C 0x30 entity-checksum request — [u8 entityId][u16 checksum] (3 B) → C2S 0x20.
@@ -1461,6 +1528,26 @@ bool decode_entity_remove(const uint8_t *body, size_t len,
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 2;
+}
+
+// S2C 0x2F flag/carryable state — fixed 19 bytes. Retail's guarded cursor
+// zero-fills a short body; the safe wire boundary rejects it instead.
+// [orig: NapiNPClientMsg_0x02F @0x430E10]
+bool decode_objective_entity_state(const uint8_t *body, size_t len,
+	                               ObjectiveEntityState &out,
+	                               size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	out.flags_byte = c.u8();
+	out.pos_x = c.i32();
+	out.pos_y = c.i32();
+	out.pos_z = c.i32();
+	out.attach_handle = c.u16();
+	out.ground_handle = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 19;
 }
 
 // S2C 0x59 deployed-item spawn-or-update — fixed 32-B record (the handler
@@ -1608,6 +1695,17 @@ bool decode_zone_timer_window(const uint8_t *body, size_t len,
 	return c.ok;
 }
 
+// §5.61 S2C 0x6C — [orig: NapiNPClientMsg_0x06C @ 0x428FC0]. Fixed 3 B.
+bool decode_zone_presence_count(const uint8_t *body, size_t len,
+                                ZonePresenceCount &out, size_t &consumed) {
+	out = ZonePresenceCount{};
+	Cursor c{body, body + len, true};
+	out.zone_handle = c.u16();
+	out.count = c.u8();
+	consumed = c.ok ? size_t(c.p - body) : 0;
+	return c.ok;
+}
+
 // §5.50 S2C 0x34 — [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]. The
 // position block exists on the wire only when flag == 1.
 bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out) {
@@ -1654,6 +1752,26 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	out.sender_slot = c.u8();
 	out.text = c.cstr();
 	return c.ok && (c.p == c.end);
+}
+
+bool decode_end_round_header(const uint8_t *body, size_t len,
+		EndRoundHeader &out) {
+	out = EndRoundHeader{};
+	Cursor c{body, body + len, true};
+	out.winner_team = static_cast<int8_t>(c.u8());
+	out.team_score_0 = c.i16();
+	out.team_score_1 = c.i16();
+	out.draw = c.u8();
+	out.player_index = static_cast<int8_t>(c.u8());
+	return c.ok && c.p == c.end;
+}
+
+bool decode_end_round_stats_request(const uint8_t *body, size_t len,
+		EndRoundStatsRequest &out) {
+	out = EndRoundStatsRequest{};
+	Cursor c{body, body + len, true};
+	out.offset = c.u16();
+	return c.ok && c.p == c.end;
 }
 
 // §5.68 S2C 0x56 envelope — [orig: NapiNPClientMsg_0x056 @0x431D10, the two
@@ -1709,7 +1827,7 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 		if (r.clan.size() > 31) r.clan.resize(31);
 		if (r.tag.size() > 31) r.tag.resize(31);
 		r.team = c.u8();
-		r.side = c.u8();
+		r.player_class = c.u8();
 		// WIRE order; retail's slot shuffle is the column layout, not this.
 		r.kills = c.i16();
 		r.deaths = c.i16();

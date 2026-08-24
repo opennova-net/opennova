@@ -2,9 +2,9 @@ extends GutTest
 
 # Game selection that drives SCR decode keying: the persisted game code
 # (ResourceDirSettings) and the /game launch-flag fallback (LaunchFlags).
-# Snapshots user://terrain_editor_state.cfg around each test like recent_resource_dirs_test.gd.
+# Snapshots the runtime config around each test like recent_resource_dirs_test.gd.
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false

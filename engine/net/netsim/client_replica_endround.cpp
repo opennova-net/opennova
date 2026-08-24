@@ -35,10 +35,8 @@
 // `known` either, so the screen keeps showing the last complete board while
 // the next one streams in.
 //
-// An incomplete board is retail's cue to PULL the next chunk -- it queues
-// C2S 0x2B with the running byte count [orig: @0x431DB3..0x431DC4] -- which
-// this fold does not send (novaworld-net-re.md §5.68); it decodes what it is
-// handed.
+// The connection state machine owns the pull replies because it owns reliable
+// sequencing. This reducer owns only the header and reassembly state.
 
 #include "netsim/client_replica_pipeline.h"
 
@@ -50,6 +48,15 @@
 #include <vector>
 
 namespace opennova::netsim {
+
+void ClientReplicaPipeline::apply_end_round_header(
+		const std::vector<uint8_t> &body) {
+	EndRoundHeader header;
+	if (!decode_end_round_header(body.data(), body.size(), header)) return;
+	state_.end_round.header = header;
+	state_.end_round.header_known = true;
+	state_.mark_changed();
+}
 
 void ClientReplicaPipeline::apply_end_round_stats_chunk(
 		const std::vector<uint8_t> &body) {
@@ -76,7 +83,7 @@ void ClientReplicaPipeline::apply_end_round_stats_chunk(
 	++st.chunks_seen;
 
 	// Complete on >= this chunk's total [orig: @0x431D9B..0x431D9F]. Short of
-	// it, retail requests the next chunk (C2S 0x2B) -- unported.
+	// it, the connection state machine requests the next chunk (C2S 0x2B).
 	if (end < static_cast<size_t>(chunk.total_size)) return;
 
 	// Decode the stream AS IT STANDS and leave it standing [orig: the parse

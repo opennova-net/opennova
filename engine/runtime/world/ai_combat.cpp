@@ -62,7 +62,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     // [orig: g_spawn_success_gate @0x24C1928 nonzero -> return null @0x466fba]; the
     // teamless gate is mirrored in the scoring core (it is part of @0x466f60) — here it
     // only skips the wasted pool walk.
-    if (world.round_end.ended) return false;
+    if (world.match.outcome().ended) return false;
     if (e.team == 0 && !e.see_all) return acquire_target_from(e, scan_candidates_, out);
 
     const int32_t prio_packed = e.brain.f[AiBrain::kPriorityTarget];

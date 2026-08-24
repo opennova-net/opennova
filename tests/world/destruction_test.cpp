@@ -245,6 +245,51 @@ void test_explosion_damage_gates() {
     w.ammo.entries[1].flags = 0;
 }
 
+// `destroybuild` gates only Building targets in a network session. Offline
+// damage ignores the setting, and enabled multiplayer uses the ordinary blast
+// path. No other retail consumer reads the option.
+// [orig: Entity_ApplyWeaponDamage @0x4E682E..0x4E6860]
+void test_multiplayer_destroy_buildings_rule() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(2, 2);
+
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 501;
+    seed.health = 120;
+    seed.health_max = 120;
+    seed.position = Vec3{10.0f, 0.0f, 0.0f};
+    seed.bound_radius = 1.0f;
+    const EntityHandle building = w.registry.spawn(2, seed);
+    w.item_death_traits.set(501, barrel_traits());
+
+    ExplosionEntry blast;
+    blast.pos = seed.position;
+    blast.type = ammo_kz::kStandard;
+    blast.ammo_index = 1;
+    auto apply_blast = [&] {
+        w.explosions.queue_explosion(w, blast);
+        w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.destruction);
+    };
+
+    w.mp_session = true;
+    w.destroy_buildings = false;
+    apply_blast();
+    CHECK(w.registry.get(building)->health == 120);
+
+    w.destroy_buildings = true;
+    apply_blast();
+    CHECK(w.registry.get(building)->health == 20);
+
+    w.registry.get(building)->health = 120;
+    w.mp_session = false;
+    w.destroy_buildings = false;
+    apply_blast();
+    CHECK(w.registry.get(building)->health == 20);
+}
+
 // The pool-1 LOS ray starts at the victim position, inside its own collision
 // hull. Retail excludes the endpoint entity from the sector walk; otherwise
 // every collision-wired movable item shields itself from blast damage.
@@ -1555,7 +1600,7 @@ void test_round_destroys_item() {
     // remaining health — one processed hit kills.
     CHECK(w.round_sim.spawn(w, p) >= 0);
     for (int t = 0; t < 30 && w.registry.get(barrel)->health > 0; ++t)
-        w.run_logic_tick(true, false);
+        w.run_logic_tick(true);
     Entity *b = w.registry.get(barrel);
     CHECK(b->health <= 0);
     CHECK((b->engine_flags & kEntityFlagHusk) != 0);
@@ -1651,7 +1696,7 @@ void test_net_kill_runs_client_side_death_chain() {
 
     // The non-authority client tick drains the queue exactly like retail's
     // shared per-frame update; the presentation counters advance.
-    w.run_logic_tick(/*is_authority=*/false, /*pre_mission=*/false);
+    w.run_logic_tick(/*is_authority=*/false);
     CHECK(w.explosions.queue.empty());
     CHECK(w.destruction.explosions_processed == 1);
 
@@ -1668,7 +1713,7 @@ void test_net_kill_runs_client_side_death_chain() {
     sb->health = 0;
     destruction_notify_item_damage(sp, *sb, 4);
     CHECK(sp.explosions.queue.size() == 1);
-    sp.run_logic_tick(/*is_authority=*/false, /*pre_mission=*/false);
+    sp.run_logic_tick(/*is_authority=*/false);
     CHECK(sp.explosions.queue.size() == 1); // still parked: not a visual client
 }
 
@@ -1767,6 +1812,7 @@ int main() {
     test_wreck_fire_crackle_rolls_on_the_engine_prng();
     test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();
+    test_multiplayer_destroy_buildings_rule();
     test_explosion_los_excludes_victim_hull();
     test_radius_blast_skips_pool1_los();
     test_organic_blast_los_is_unlifted();

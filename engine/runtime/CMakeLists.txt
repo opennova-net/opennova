@@ -57,6 +57,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_vehicle_panel.cpp # the mounted-vehicle seat markers
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_vehicle_panel.cpp # its compile element
@@ -128,6 +129,7 @@ add_library(opennova_runtime STATIC
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,
     # weapons, zones (62 Hz tick)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
@@ -145,6 +147,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_water.cpp          # the §29.1 water/float channel
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_weapon_channel.cpp # the secondary AnimMap channel (§14.8)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
@@ -161,6 +165,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/impact_scar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/fire_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/friendly_tags.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/deploy_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/death_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/lfp_feed.cpp           # the AAS zone status panel's zone rows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_panel_feed.cpp # the mounted-vehicle panel's seat rows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp  # the stng pursuit integrator (D-NET-64)

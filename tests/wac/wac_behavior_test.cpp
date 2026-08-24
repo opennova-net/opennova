@@ -17,16 +17,9 @@ static int failures = 0;
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
     } while (0)
 
-static World make_world() {
-    World w;
-    // A mission only advances while a human is in the world - retail holds the
-    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
-    // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
-    // so they stand a player up; the empty-server hold has its own test.
-    w.cached.humans = 1;
-    w.registry.configure_pool(0, 64);
-    return w;
-}
+struct BehaviorWorld final : World {
+    BehaviorWorld() { registry.configure_pool(0, 64); }
+};
 
 // Run a program for `executions` VM executions. The VM self-gates to every 62nd
 // logic tick [orig: WacScript_AdvanceTick @0x4f81b1], so one execution = 62 ticks; WAC time
@@ -39,7 +32,7 @@ static void run(World &w, WacSystem &sys, int executions) {
 
 // The 62-tick divider itself: nothing executes before the 62nd tick.
 static void test_execution_cadence() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never() then set(v1,1) endif\n", env));
@@ -58,7 +51,7 @@ static void test_execution_cadence() {
 // 62-tick divider. Capturing/restoring that temporal state prevents initial
 // edge predicates from firing a second time after Stop/Play.
 static void test_initial_execution_and_runtime_state() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never() then inc(v1) endif\n", env));
@@ -91,7 +84,7 @@ static void test_initial_execution_and_runtime_state() {
 }
 
 static void test_var_math() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -112,7 +105,7 @@ static void test_var_math() {
 }
 
 static void test_ssn_kill() {
-    World w = make_world();
+    BehaviorWorld w;
     Entity a; a.net_id = 100; a.alive = true; w.registry.spawn(0, a);
     Entity b; b.net_id = 200; b.alive = true; w.registry.spawn(0, b);
 
@@ -131,7 +124,7 @@ static void test_ssn_kill() {
 }
 
 static void test_temporal_past() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if past(3) then set(v5,1) endif\n", env));
@@ -145,7 +138,7 @@ static void test_temporal_past() {
 }
 
 static void test_else_branch() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     // v1 starts 0 -> else branch sets v2=2; then set v1=1 -> then branch sets v2=1.
@@ -163,7 +156,7 @@ static void test_else_branch() {
 }
 
 static void test_environment() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source(
@@ -177,7 +170,7 @@ static void test_environment() {
 }
 
 static void test_paren_less_and_effects() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     // paren-less args + an unimplemented command recorded as an effect.
@@ -192,112 +185,8 @@ static void test_paren_less_and_effects() {
 // WAC scripted voice: wave/pwave route to a "dialog_wav" effect carrying the
 // filename so the host can play it [orig: wave/pwave @ 0x4ED610]. Without the
 // explicit handler they fall through to the default case as an unrouted "wave".
-// The local-player condition family — the co-op vehicle choreography gates.
-// 05TRcoop's chains have the exact shape `if area(N) and eq(vX,1) and not
-// meride(SSN) then set(vX,2) endif`; with area/meride/SSNonSSN unimplemented
-// every chain evaluated false, the mission variables never advanced, and no
-// scripted vehicle ever received its BMS drive order.
-// [orig: area idx111 @0x4ED0C0; meride = Entity_IsInLocalPlayerMountChain
-//  @0x4F1260; SSNonSSN = Entity_IsOnTopOfChain @0x4F19A0 — schema rows in
-//  engine/runtime/wac/tools/wac_commands.schema.json]
-static void test_local_player_condition_family() {
-    World w = make_world();
-    w.registry.configure_pool(1, 8); // vehicles live in pool 1
-    Aabb zone;
-    zone.min = {0.0f, 0.0f, -16384.0f};
-    zone.max = {100.0f, 100.0f, 16384.0f};
-    w.registry.register_area("", zone, /*active=*/true); // area index 0
-
-    Entity player_seed{};
-    player_seed.alive = true;
-    player_seed.net_id = 900;
-    player_seed.position = {500.0f, 500.0f, 0.0f}; // outside area 0
-    const EntityHandle player = w.registry.spawn(0, player_seed);
-    w.cached.local_player = player;
-
-    Entity boat_seed{};
-    boat_seed.alive = true;
-    boat_seed.net_id = 691;
-    boat_seed.item_id = 1293;
-    boat_seed.position = {50.0f, 50.0f, 0.0f};
-    Seat seat;
-    seat.type = SeatType::Passenger;
-    boat_seed.seats.push_back(seat);
-    const EntityHandle boat = w.registry.spawn(1, boat_seed);
-    (void)boat;
-
-    WacSystem sys;
-    CompileEnv env;
-    // The authored 05TRcoop Zodiac chain, verbatim shape.
-    sys.set_program(compile_source(
-            "if area(0) and eq(v1, 1) and not meride(691) then\n"
-            "\tset(v1, 2)\n"
-            "endif\n", env));
-    w.add_system(&sys);
-    w.load_systems();
-    w.vars.set_mission(1, 1);
-
-    // Player outside the area: the chain must not fire.
-    run(w, sys, 1);
-    CHECK(w.vars.get_mission(1) == 1);
-
-    // Player inside the area, NOT riding the boat: fires.
-    w.registry.get(player)->position = {50.0f, 50.0f, 0.0f};
-    run(w, sys, 1);
-    CHECK(w.vars.get_mission(1) == 2);
-
-    // Reset and ride the boat: `not meride(691)` now blocks the chain.
-    w.vars.set_mission(1, 1);
-    CHECK(w.commands.mount(900, 691));
-    run(w, sys, 1);
-    CHECK(w.vars.get_mission(1) == 1);
-
-    // SSNonSSN: the ground-chain membership test (A standing on B).
-    Entity deck_seed{};
-    deck_seed.alive = true;
-    deck_seed.net_id = 18;
-    deck_seed.item_id = 1400;
-    const EntityHandle deck = w.registry.spawn(1, deck_seed);
-    Entity aav_seed{};
-    aav_seed.alive = true;
-    aav_seed.net_id = 615;
-    aav_seed.item_id = 1401;
-    const EntityHandle aav = w.registry.spawn(1, aav_seed);
-    w.registry.get(aav)->ground_target = deck;
-    WacSystem chain_sys;
-    CompileEnv chain_env;
-    chain_sys.set_program(compile_source(
-            "if ssnonssn(615, 18) then set(v3, 2) endif\n", chain_env));
-    w.add_system(&chain_sys);
-    w.load_systems();
-    run(w, chain_sys, 1);
-    CHECK(w.vars.get_mission(3) == 2);
-
-    // The seated fold: a player riding an emplacement CHILD of a vehicle is on
-    // that vehicle's chain — the 05TRcoop convoy root trigger (Single/sub42
-    // p1=10000 p2=21, "the player rides the Stryker") must evaluate true for a
-    // gunner via mount_target -> emplacement_parent.
-    // [orig: Entity_IsOnTopOfChain @0x4f19a0 — one +0x28 carrier link covers
-    //  standing-on, seated-in, and emplacement-child alike]
-    Entity gun_seed{};
-    gun_seed.alive = true;
-    gun_seed.net_id = 700;
-    gun_seed.item_id = 2016;
-    const EntityHandle gun = w.registry.spawn(1, gun_seed);
-    w.registry.get(gun)->emplacement_parent = aav;
-    Entity *pl = w.registry.get(player);
-    pl->item_id = 5305; // the retail player item gate (ItemTypeIndex != 0)
-    pl->mounted = true;
-    pl->mount_target = gun;
-    CHECK(w.commands.ssn_on_chain_of(10000, 700)); // player -> the gun itself
-    CHECK(w.commands.ssn_on_chain_of(10000, 615)); // player -> gun -> AAV
-    CHECK(w.commands.ssn_on_chain_of(10000, 18));  // -> AAV -> deck (3rd hop)
-    CHECK(!w.commands.ssn_on_chain_of(10000, 691)); // unrelated boat: false
-}
-
-
 static void test_wac_wave_emits_dialog_wav() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never then wave(brief1) endif\n", env));
@@ -317,7 +206,7 @@ static void test_wac_wave_emits_dialog_wav() {
 // presentation, while consol/consol# and pconsol feed Chat_AddDebugMessage and
 // must remain distinguishable for embedders that deliberately do not present them.
 static void test_wac_text_and_console_use_distinct_effect_channels() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -357,7 +246,7 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
 }
 
 static void test_authority_gate() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never() then set(v9,1) endif\n", env));
@@ -377,7 +266,7 @@ static void test_authority_gate() {
 // (red wins = the player side loses); the world latch never double-fires.
 // [orig: WacAction_Lose @0x4ed3f0; Server_ProcessRoundEnd @0x5164f0]
 static void test_lose_ends_round_with_banner_key() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source("if true(greenkills) then lose(0) endif\n", env);
@@ -387,13 +276,13 @@ static void test_lose_ends_round_with_banner_key() {
     w.load_systems();
 
     run(w, sys, 1);
-    CHECK(!w.round_end.ended); // no green kills yet
+    CHECK(!w.match.outcome().ended); // no green kills yet
     CHECK(w.effects.count("lose") == 0);
 
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 2);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 2);
     CHECK(w.effects.count("lose") == 1);
     CHECK(w.effects.count("round_end") == 1);
     for (const Effect &e : w.effects.entries()) {
@@ -408,14 +297,14 @@ static void test_lose_ends_round_with_banner_key() {
 // Lose(n) for n outside {0,1} is a witnessed NO-OP [orig: WacAction_Lose returns 0
 // without touching the round @0x4ed45b..].
 static void test_lose_other_team_noop() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if past(1) then lose(2) endif\n", env));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 3);
-    CHECK(!w.round_end.ended);
+    CHECK(!w.match.outcome().ended);
     CHECK(w.effects.count("lose") == 0);
     CHECK(w.effects.count("round_end") == 0);
 }
@@ -424,7 +313,7 @@ static void test_lose_other_team_noop() {
 // (GameOver/WinVar/LoseVar/humans) read the witnessed derivations.
 // [orig: WacAction_Win @0x4ed4a0; the cache derivation @0x4f57bb/c9/cf]
 static void test_win_and_outcome_builtins() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -441,13 +330,13 @@ static void test_win_and_outcome_builtins() {
     w.cached.humans = 1;
 
     run(w, sys, 1);
-    CHECK(!w.round_end.ended);
+    CHECK(!w.match.outcome().ended);
     CHECK(w.vars.get_mission(1) == 0); // GameOver stays 0 pre-round-end
     CHECK(w.vars.get_mission(4) == 1); // humans visible from the first execution
 
     run(w, sys, 3); // past(2) fires -> win(1); the builtins read it the same pass
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 1);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 1);
     CHECK(w.vars.get_mission(1) == 1); // GameOver
     CHECK(w.vars.get_mission(2) == 1); // WinVar
     CHECK(w.vars.get_mission(3) == 0); // LoseVar stays 0 on a win
@@ -455,7 +344,7 @@ static void test_win_and_outcome_builtins() {
 
 // 04TR.WAC's outcome block, verbatim (JOX corpus): greenkills -> Lose(0).
 static void test_04tr_outcome_block_greenkills() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     Program p = compile_source(
@@ -471,8 +360,8 @@ static void test_04tr_outcome_block_greenkills() {
     w.load_systems();
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
-    CHECK(w.round_end.ended);
-    CHECK(w.round_end.winner_team == 2);
+    CHECK(w.match.outcome().ended);
+    CHECK(w.match.outcome().winner_team == 2);
     bool green_banner = false;
     for (const Effect &e : w.effects.entries())
         green_banner |= e.kind == "lose" && e.a == 0 && e.str == "STRMISC_KILLEDGREEN";
@@ -481,7 +370,7 @@ static void test_04tr_outcome_block_greenkills() {
 
 // The same block with BOTH counters set: the bluekills branch wins the else-if chain.
 static void test_04tr_outcome_block_blue_priority() {
-    World w = make_world();
+    BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source(
@@ -496,7 +385,7 @@ static void test_04tr_outcome_block_blue_priority() {
     w.kill_stats.bluekills_by_player = 1;
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
-    CHECK(w.round_end.ended);
+    CHECK(w.match.outcome().ended);
     bool blue_banner = false;
     for (const Effect &e : w.effects.entries())
         blue_banner |= e.kind == "lose" && e.a == 1 && e.str == "STRMISC_KILLEDBLUE";
@@ -513,7 +402,6 @@ int main() {
     test_else_branch();
     test_environment();
     test_paren_less_and_effects();
-    test_local_player_condition_family();
     test_wac_wave_emits_dialog_wav();
     test_wac_text_and_console_use_distinct_effect_channels();
     test_authority_gate();

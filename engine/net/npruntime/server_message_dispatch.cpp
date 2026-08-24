@@ -2,6 +2,7 @@
 
 
 #include "npruntime/integrity_challenge_profile.h"
+#include "npruntime/end_round_protocol.h"
 #include <npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
 #include "npruntime/server_spawn.h" // Server_ReservePlayerTeam (0x04/spawn identity)
 #include "npruntime/server_tick.h" // Server_StageHostDisconnect
@@ -19,9 +20,10 @@
 
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
 #include <world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
-#include <world/spawn_select.h>  // resolve_spawn_target / find_spawn_zone_for_team / spawn_pose_for_target
+#include <world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
 #include <world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
+#include <audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
 
 #include <world/vehicle_mount.h>
@@ -33,8 +35,16 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <iterator>
 #include <utility>
 #include <io/le.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace opennova::np {
 
@@ -361,10 +371,25 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // players -> a single default entry). The wire SERIALIZE lives in encode_player_list (novaworld); this is
 // just the npruntime-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
 // entry list.
-std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &roster,
+std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
+	                                    const std::vector<NapiNPConnection> &roster,
                                         const PlayerReplicationState &fallback,
-                                        const world::World *world) {
-	std::vector<PlayerListEntry> players;
+                                        world::World *world) {
+	PlayerListFrame frame;
+	world::MatchLiveScoreboard scoreboard;
+	if (world != nullptr) {
+		scoreboard = world->match.live_scoreboard(*world);
+	} else {
+		scoreboard.team_count = game_type::active_team_count(
+				config.game_type, config.num_teams);
+		scoreboard.team_mode = scoreboard.team_count != 0;
+		scoreboard.timed_score_mode =
+				config.game_type == game_type::kKingOfTheHill;
+	}
+	frame.flags = static_cast<uint8_t>(
+			(scoreboard.team_mode ? 1u : 0u) |
+			(scoreboard.timed_score_mode ? 2u : 0u));
+	frame.team_count = scoreboard.team_count;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
 		// Rows carry only IN-GAME players — a still-loading joiner (mid world-stream) is
@@ -376,12 +401,39 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 		uint8_t team = 1;
 		if (world != nullptr)
 			if (const world::Entity *e = world->registry.get(c.link.owned_entity)) team = e->team;
-		players.push_back({c.reply.player_slot, team});
+		PlayerListEntry row;
+		row.slot = c.reply.player_slot;
+		row.team = team;
+		if (world != nullptr) {
+			if (const world::MatchPlayer *player =
+					world->match.player(c.link.owned_entity)) {
+				row.score1 = static_cast<uint16_t>(
+						world->match.primary_score(*player));
+				row.score2 = static_cast<uint16_t>(
+						player->stats[world::MatchStats::kPoints]);
+			}
+		}
+		frame.players.push_back(row);
 	}
-	std::sort(players.begin(), players.end(),
+	std::sort(frame.players.begin(), frame.players.end(),
 	          [](const PlayerListEntry &a, const PlayerListEntry &b) { return a.slot < b.slot; });
-	if (players.empty()) players.push_back({fallback.player_slot, fallback.team});
-	return encode_player_list(players);
+	if (frame.players.empty()) {
+		PlayerListEntry row;
+		row.slot = fallback.player_slot;
+		row.team = fallback.team;
+		frame.players.push_back(row);
+	}
+	frame.teams.resize(size_t(frame.team_count) + 1);
+	for (size_t team = 1; team < frame.teams.size(); ++team) {
+		const world::MatchLiveTeamScore &source = scoreboard.teams[team];
+		frame.teams[team].score1 = static_cast<uint16_t>(source.primary_score);
+		frame.teams[team].score2 = static_cast<uint16_t>(source.points);
+		frame.teams[team].koth_hold = source.alive_players;
+		frame.teams[team].ctf_flag = source.authored_objectives;
+	}
+	frame.in_game_count = static_cast<uint8_t>(
+			std::min<size_t>(frame.players.size(), 0xFFu));
+	return encode_player_list(frame);
 }
 
 // tag=0x5A WEAPON-LOADOUT-SYNC, built from the joiner's own C2S 0x2F loadout submit.
@@ -637,8 +689,22 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.player_name = conn.reply.player_name;
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
-		if (world != nullptr)
-			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) ctx.team = e->team;
+		if (world != nullptr) {
+			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
+				ctx.team = e->team;
+				// Field 0x0008 is present only when the requester asks for it.
+				// Its value is nonzero only for a dead player whose automatic
+				// preference or explicit request exposes the revive window.
+				// [orig: NetPacket_SerializePlayerSync0x46 @0x505E80]
+				if ((e->flags & world::kEntityFlagDead) != 0u &&
+						(conn.link.auto_medic_enabled ||
+						 conn.link.medic_request_active)) {
+					ctx.downed_state = static_cast<uint8_t>(
+							(conn.link.downed_revive_seconds & 0x7Fu) |
+							(conn.link.medic_request_active ? 0x80u : 0u));
+				}
+			}
+		}
 	}
 	// The recipient's deploy-map owned-zone mask (0x0F variant-0 u32) from the live chain; a
 	// chain-less world keeps the golden ASH_I5A default 0x8. [orig: ZoneSlotChain_GetOwnedZoneMask
@@ -818,15 +884,177 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	return messages;
 }
 
+std::vector<uint8_t> build_spawn_wave_status_body(
+		const world::World &world, world::EntityHandle requester) {
+	std::vector<uint8_t> body;
+	const world::Entity *recipient = world.registry.get(requester);
+	const uint8_t team = recipient != nullptr ? recipient->team : 0;
+	const world::SpawnZoneRegistry zones = world::build_spawn_zone_list(world);
+	std::vector<const world::SpawnWaveEntry *> visible;
+	for (const world::SpawnWaveEntry &entry : world.spawn_waves.entries())
+		if (entry.team == team && visible.size() < 0xFFu)
+			visible.push_back(&entry);
+	body.reserve(1 + visible.size() * 9);
+	body.push_back(static_cast<uint8_t>(visible.size()));
+	for (const world::SpawnWaveEntry *entry : visible) {
+		const uint16_t zone = entry->zone.valid()
+				? entry->zone.packed
+				: uint16_t{0xFFFF};
+		body.push_back(static_cast<uint8_t>(zone));
+		body.push_back(static_cast<uint8_t>(zone >> 8));
+		const int zone_index = world::spawn_zone_index_of(zones, entry->zone);
+		const uint16_t wire_index = zone_index >= 0
+				? static_cast<uint16_t>(zone_index)
+				: uint16_t{0xFFFF};
+		body.push_back(static_cast<uint8_t>(wire_index));
+		body.push_back(static_cast<uint8_t>(wire_index >> 8));
+		body.push_back(static_cast<uint8_t>(entry->queued.size()));
+		const uint16_t countdown = entry->requester_countdown(requester);
+		body.push_back(static_cast<uint8_t>(countdown));
+		body.push_back(static_cast<uint8_t>(countdown >> 8));
+		for (const world::EntityHandle member : entry->queued) {
+			body.push_back(static_cast<uint8_t>(member.packed));
+			body.push_back(static_cast<uint8_t>(member.packed >> 8));
+		}
+	}
+	return body;
+}
+
+std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
+		const GameConfig &config, NapiNPConnection &conn,
+		world::World &world, world::EntityHandle target_zone) {
+	std::vector<ProtocolMessage> replies;
+	if (!conn.link.owned_entity.valid()) return replies;
+	world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return replies;
+	// Server_ProcessPlayerDeath always releases the old seat before inspecting
+	// a requested mobile spawn. If the requester was the vehicle's primary
+	// occupant, this clears +0x170 and the subsequent mobile-spawn gate rejects.
+	// [orig: Server_ProcessPlayerDeath @0x5177A9..0x5177DB]
+	if (player->mounted)
+		world::entity_detach_from_vehicle(world, player->handle);
+	const world::Entity *target = world.registry.get(target_zone);
+	const bool mobile_spawn = target != nullptr && target->is_spawn_point &&
+			target->item_type == 1;
+	if (mobile_spawn) {
+		world::VehicleSeatSelection selected;
+		if (!target->primary_occupant.valid() ||
+				!world::find_best_vehicle_seat(
+						world, target_zone, player->handle, selected))
+			return replies;
+	}
+	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
+			world, player->handle, target_zone, conn.reply.player_slot,
+			player->team, config.game_type);
+	if (pose.found) {
+		player->position = pose.position;
+		player->yaw = pose.yaw;
+		player->pitch = pose.pitch;
+		player->roll = pose.roll;
+	} else {
+		// No authored marker: the deploy transaction restores the position
+		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
+		// shared release makes C2S, wave, and listen-host paths identical.
+		// [orig: Server_ProcessPlayerDeath @0x517740 ->
+		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
+		player->position = player->spawn_position;
+	}
+	world::entity_reset_to_spawn_state(*player);
+	if (world.player_has_item_def && world.player_item_hp != 0)
+		player->health = world::retail_signed_i16(world.player_item_hp);
+	else if (player->health_max > 0)
+		player->health = player->health_max;
+	else
+		player->health = 100;
+	player->alive = true;
+	if (world::AiEntity *motor =
+			world.ai ? world.ai->for_handle(player->handle) : nullptr;
+			motor != nullptr && motor->inf.active) {
+		const int32_t motor_position[3] = {
+				world::to_fixed(player->position.x),
+				world::to_fixed(player->position.y),
+				world::to_fixed(player->position.z),
+		};
+		world::infantry_respawn_snap(
+				*motor, motor_position,
+				world::bam_heading_from_mission_yaw_deg(player->yaw),
+				player->health);
+	}
+	conn.discard_pre_deploy_uplinks = true;
+	conn.link.respawn_pending = false;
+	conn.link.respawn_delay_seconds = 0;
+	conn.link.spawn_target_hold_seconds = 0;
+	conn.link.respawn_hold_armed = false;
+	conn.link.downed_revive_seconds = 0;
+	conn.link.medic_request_active = false;
+	conn.link.last_deploy_tick = world.logic_tick;
+	conn.link.last_deploy_tick_valid = true;
+	player->flags &= ~1u;
+	if (mobile_spawn) {
+		// Retail repeats FindBestSeatSlot after the reset, then requests the
+		// authoritative attach against the returned root/child seat owner.
+		// [orig: Server_ProcessPlayerDeath @0x517A3E..0x517A74]
+		world::VehicleSeatSelection selected;
+		if (world::find_best_vehicle_seat(
+					world, target_zone, player->handle, selected))
+			world::attach_to_vehicle_seat(world, player->handle, selected);
+	}
+	const world::WeaponTable *armory = !world.weapons.empty()
+			? &world.weapons
+			: nullptr;
+	replies.push_back(make_protocol_message(
+			0x5A, build_current_loadout_reply(
+					conn.reply.last_loadout_reply, player->player_class, armory)));
+	replies.push_back(make_protocol_message(
+			0x61, Server_RerollPlayerTickSeed(conn)));
+	const uint8_t frontier = world::zone_chain_frontier_zone(
+			world, world.zone_chain, player->team);
+	if (frontier != 0)
+		replies.push_back(make_protocol_message(
+				s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
+	return replies;
+}
+
+bool is_medic_recipient(const NapiNPConnection &candidate,
+		const world::World &world, uint8_t team) {
+	if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
+			!candidate.link.owned_entity.valid())
+		return false;
+	const world::Entity *medic = world.registry.get(candidate.link.owned_entity);
+	return medic != nullptr && medic->alive &&
+			(medic->flags & world::kEntityFlagDead) == 0u &&
+			medic->team == team &&
+			world.class_has_attribute(medic->player_class,
+					world::World::kCharAttrMedic);
+}
+
+namespace {
+
+// The retail handler runs `sprintf(msg_buffer[128], format, name)`; the
+// shipped STRSRV_MEDREQ carries one `%s`. Substitute it here (the CRT call is a
+// platform primitive) and keep retail's 127-character buffer bound.
+std::string format_medic_request(const std::string &format,
+		const std::string &name) {
+	std::string out;
+	const size_t marker = format.find("%s");
+	if (marker == std::string::npos) {
+		out = format;
+	} else {
+		out = format.substr(0, marker) + name + format.substr(marker + 2);
+	}
+	if (out.size() > 127) out.resize(127);
+	return out;
+}
+
+} // namespace
+
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
-                                                      uint32_t session_seed,
-                                                      uint32_t session_uptime_ms,
-	                                                  const MissionMetadataBlob *mission_metadata_blob) {
+                                                      const ServerDispatchInputs &inputs) {
 	std::vector<ProtocolMessage> replies;
 	// A staged high-table disconnect is terminal even though the owner retains
 	// the node briefly to flush that reliable record. Do not let a retransmitted
@@ -918,6 +1146,132 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::JOIN: // JOIN ack [orig: NapiNPServerMsg_0x000 @0x512AA0]
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				break;
+			case c2s::AUTO_MEDIC_PREFERENCE: {
+				// One inverse checkbox dword copied to playerSlot+372: zero is
+				// automatic requests enabled, any nonzero value is manual. A body
+				// shorter than the dword stores 0 (automatic) rather than leaving
+				// the slot untouched; trailing bytes are ignored.
+				// [orig: NapiNPServerMsg_AutoMedicPreference @0x501BE0 (short
+				// body -> 0 @0x501C16, dword copy @0x501C1F);
+				// OPTIONS_AUTOMEDIC @0x5549E7/@0x554E40]
+				AutoMedicPreference preference;
+				size_t consumed = 0;
+				conn.link.auto_medic_enabled = !decode_auto_medic_preference(
+						msg.payload.data(), msg.payload.size(),
+						preference, consumed) || preference.enabled;
+				break;
+			}
+			case c2s::MEDIC_REQUEST: {
+				// A downed player's manual medic call. The body is never read:
+				// the requester is the connection's own player. In order: the
+				// null GameText lookup no-ops the whole handler; the slot must
+				// be a live-roster player with an armed revive window
+				// (`!slot+100567 && slot+368 > 0`); the requester leaves its
+				// spawn-wave group; the message is formatted from the slot name;
+				// a manual-preference, not-yet-latched requester publishes the
+				// live window (no bit 7) to the 0x580 medic set; the chat goes
+				// reliably to that set minus the requester, then to the
+				// requester alone (the chat is NOT preference-gated); the
+				// once-only latch closes; and the MEDIC_REQUEST composite sound
+				// fans to alive players. The listen host's own player runs
+				// this handler too (no loopback early-out).
+				// [orig: Server_BroadcastMedicRequest @0x515390 — GameText
+				// @0x5153C9, gates @0x515406, SpawnWaveList_RemovePlayer
+				// @0x515412, sprintf @0x515421, 0x54 @0x515432..0x515484,
+				// 0x14 @0x5154AC..0x51550B, latch @0x515510, sound
+				// @0x515519..0x51552F]
+				if (inputs.medic_request_format == nullptr ||
+						inputs.medic_request_format->empty())
+					break;
+				if (world == nullptr || !conn.burst.spawned ||
+						!conn.link.owned_entity.valid())
+					break;
+				const world::Entity *requester =
+						world->registry.get(conn.link.owned_entity);
+				if (requester == nullptr || conn.link.downed_revive_seconds == 0u)
+					break;
+				world->spawn_waves.remove_player(conn.link.owned_entity);
+				const std::string message = format_medic_request(
+						*inputs.medic_request_format, requester->name);
+				if (!conn.link.auto_medic_enabled &&
+						!conn.link.medic_request_active) {
+					PlayerDownedState state;
+					state.entity_handle = conn.link.owned_entity.packed;
+					state.revive_seconds = static_cast<uint8_t>(
+							conn.link.downed_revive_seconds);
+					state.medic_request_active = false; // the raw slot+368 byte
+					const std::vector<uint8_t> downed =
+							encode_player_downed_state(state);
+					for (NapiNPConnection &candidate : roster) {
+						if (!is_medic_recipient(candidate, *world, requester->team))
+							continue;
+						candidate.link.transport->host_send(
+								s2c::PLAYER_DOWNED_STATE, downed);
+					}
+				}
+				ChatBroadcast chat;
+				chat.channel = 2;
+				chat.sender_slot = conn.reply.player_slot;
+				chat.text = message;
+				const std::vector<uint8_t> chat_body = encode_chat_broadcast(chat);
+				for (NapiNPConnection &candidate : roster) {
+					if (&candidate == &conn ||
+							!is_medic_recipient(candidate, *world, requester->team))
+						continue;
+					candidate.link.transport->host_send(
+							s2c::CHAT_BROADCAST, chat_body);
+				}
+				replies.push_back(make_protocol_message(
+						s2c::CHAT_BROADCAST, chat_body));
+				conn.link.medic_request_active = true;
+				// The help call: the requester's body-model composite
+				// "<prefix>_MEDIC_REQUEST", positioned at the requester, to
+				// every alive player (mask 128). The listen host's own copy
+				// rides the local slot-sound route the death scream uses.
+				// [orig: SoundProfile_FindByEntityAndType(entity, 1)
+				// @0x515526 -> Server_SendOverlayActionToAlive @0x50A1B0]
+				{
+					char set_name[24] = {};
+					audio::compose_entity_sound_set(requester->anim_slot,
+							audio::kEntitySoundMedicRequest, set_name,
+							sizeof(set_name));
+					PlaySoundCommand cmd;
+					cmd.flag = 1;
+					cmd.sound_name = set_name;
+					cmd.has_pos = true;
+					cmd.pos_x = static_cast<int16_t>(
+							world::to_fixed(requester->position.x) >> 16);
+					cmd.pos_y = static_cast<int16_t>(
+							world::to_fixed(requester->position.y) >> 16);
+					cmd.pos_z = static_cast<int16_t>(
+							world::to_fixed(requester->position.z) >> 16);
+					const std::vector<uint8_t> sound_body = encode_play_sound(cmd);
+					for (NapiNPConnection &candidate : roster) {
+						if (!is_in_match(candidate) ||
+								candidate.link.transport == nullptr ||
+								!candidate.link.owned_entity.valid())
+							continue;
+						const world::Entity *listener =
+								world->registry.get(candidate.link.owned_entity);
+						if (listener == nullptr || listener->health <= 0)
+							continue; // the mask-128 alive filter
+						if (candidate.link.mode == netsim::TransportMode::Loopback) {
+							world::SoundSlotEvent local;
+							local.source_handle = conn.link.owned_entity.packed;
+							local.pos[0] = world::to_fixed(requester->position.x);
+							local.pos[1] = world::to_fixed(requester->position.y);
+							local.pos[2] = world::to_fixed(requester->position.z);
+							local.slot = 0;
+							std::memcpy(local.set_name, set_name, sizeof(set_name));
+							world->slot_sounds.push_back(local);
+							continue;
+						}
+						candidate.link.transport->host_send(
+								s2c::PLAY_SOUND, sound_body, /*reliable=*/false);
+					}
+				}
+				break;
+			}
 			case c2s::CHARATTR_CRC_REPLY:
 				// The host discards the returned checksum and only clears this
 				// player's silence counter. [orig: NapiNPServerMsg_0x01C
@@ -1093,7 +1447,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
 				replies.push_back(make_protocol_message(
 						s2c::MISSION_DATA_CHUNK,
-						build_tag64_mission_metadata(config, mission_metadata_blob)));
+						build_tag64_mission_metadata(config, inputs.mission_metadata_blob)));
 				// The retail 00TRg join tail shares one send boundary:
 				// queued 0x75, this 0x64, then the initial 0x16. Publishing the
 				// roster on the preceding host tick makes the client request an
@@ -1208,14 +1562,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// NUMBERED zone additionally requires team match + control >= 1.0 (a contested zone
 				// stops accepting spawns). An ALIVE in-session player's request is a no-op [orig: the
 				// @0x519cce dead-or-flagged gate; only !is_in_session falls through @0x519cd7]; a DEAD
-				// one deploys NOW: position at the pick (zone origin, §5.61 6007-scatter/userpoint
-				// deferral) else the per-team marker chain, reset-to-spawn-state, template health —
+				// one deploys at the selected zone's wave boundary, or NOW when that zone has no
+				// wave row: position at the pick (including §5.61's shared-counter 6007 scatter;
+				// only the runtime-named model userpoint remains open) else the per-team marker chain,
+				// reset-to-spawn-state, template health —
 				// Server_ProcessPlayerDeath's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
 				// @0x50cf60 -> Entity_ResetToSpawnState @0x4B9610]. Deploy-time 0x61 seed re-send and
-				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). Deferred with the wave
-				// system: g_spawn_wave_list queueing + the 0x6E status (host wave options unmodeled —
-				// retail with default options deploys immediately, which this matches). The reply is
-				// the private 0x1E ev-0x3A frontier hint [orig: @0x517A1D, mask 0x20].
+				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). A newly queued pick
+				// receives requester-local unreliable 0x6E immediately; immediate and wave release
+				// share Server_ReleasePlayerDeployment. [orig: SpawnWaveList_TryQueuePlayer
+				// @0x52A490; Server_SendSpawnWaveStatusToPlayer @0x50FF10]
 				if (!conn.burst.spawned) break;
 				if (world == nullptr || !conn.link.owned_entity.valid()) {
 					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
@@ -1238,104 +1594,69 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				} else if (pick != 0 && pick != 0xFFFF) {
 					target = world::resolve_spawn_target(*world, player->team, pick);
 					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
+				}
+				// +364 is tested only after the requested handle resolves to a
+				// real target. Default Spawn, and an auto pick with no frontier,
+				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
+				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
+					break;
+				if (target != nullptr) {
 					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
 					// control(+540) >= 0x10000].
 					if (target->zone_number != 0 &&
 					    (target->team != player->team || target->zone_control < 0x10000))
 						break;
 				}
+				// Retail's `nodefaultspawnpoints` option is named after its UI,
+				// not its actual predicate. It applies only to a target-less pick
+				// and walks SpawnZoneList for an unnumbered or fully controlled
+				// same-team zone; it never counts living teammates.
+				// [orig: Server_ProcessClientRequestRespawn @0x519C8E..0x519CB2;
+				// Entity_HasAliveEntityOfTeam @0x4FC7B0]
+				if (config.default_spawn_requires_no_team_zone != 0 &&
+						target == nullptr &&
+						world::team_has_available_spawn_zone(*world, player->team))
+					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
 				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
 				if (!conn.link.respawn_pending && player->health > 0) break;
-				world::SpawnPointResult pose;
+				// +360 follows the dead-or-pending test and silently rejects every
+				// pick, including Default Spawn. [orig: @0x519cf2]
+				if (conn.link.respawn_delay_seconds != 0) break;
+				if (target != nullptr && target->item_type == 1 &&
+						target->is_spawn_point) {
+					// A vehicle target is selectable only while alive and while its
+					// weighted root/child seat walk finds a free slot. The separate
+					// +0x170 primary-occupant gate belongs to release, below.
+					// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
+					world::VehicleSeatSelection selected;
+					if (!world::find_best_vehicle_seat(
+							*world, target->handle, player->handle, selected))
+						break;
+				}
 				if (target != nullptr) {
-					pose = world::spawn_pose_for_target(*target);
-				} else {
-					// No/auto pick: the per-team start-marker chain (6096-6099 -> 6003/6004/...)
-					// [orig: Server_PositionPlayerForSpawn @0x50cf60 path B; §5.2c/§5.61].
-					pose = world::select_player_spawn_for_team(*world, player->team,
-					                                           config.game_type);
+					if (world->spawn_waves.try_queue(
+							*world, target->handle, player->handle)) {
+						ProtocolMessage status = make_protocol_message(
+								s2c::SPAWN_WAVE_STATUS,
+								build_spawn_wave_status_body(*world, player->handle));
+						status.reliable = false;
+						replies.push_back(std::move(status));
+						break;
+					}
+					if (world->spawn_waves.has_entry(target->handle)) break;
 				}
-				if (pose.found) {
-					player->position = pose.position;
-					player->yaw = pose.yaw;
-				} // no marker at all: redeploy in place (never an NPC position)
-				// entity_reset_to_spawn_state re-backs spawn_position from the new pose and
-				// clears the movement gate [orig: Entity_ResetToSpawnState @0x4B9610].
-				world::entity_reset_to_spawn_state(*player);
-				// Same signed-i16 healthMax gate as the first spawn (player_spawn.cpp).
-				if (world->player_has_item_def && world->player_item_hp != 0)
-					player->health = world::retail_signed_i16(world->player_item_hp);
-				else if (player->health_max > 0) player->health = player->health_max;
-				else player->health = 100; // [orig: Entity_InitFromItemDef @0x49e550]
-				// Session receive dispatch handles this 0x0E now, but its earlier
-				// 0x0C events are applied at the next Server_TickUpdate. Fence those
-				// pre-release poses so the selected spawn remains authoritative.
-				// The infantry motor owns the live pose and mirrors AiEntity.pos back into
-				// Entity.position later in this same host tick. Retail has one entity store;
-				// keep our split stores coherent at the deploy teleport so the pre-pick
-				// motor pose cannot undo the selected spawn before 0x0A emits it.
-				if (world::AiEntity *motor =
-						world->ai ? world->ai->for_handle(player->handle) : nullptr;
-						motor != nullptr && motor->inf.active) {
-					const int32_t motor_position[3] = {
-							world::to_fixed(player->position.x),
-							world::to_fixed(player->position.y),
-							world::to_fixed(player->position.z),
-					};
-					world::infantry_respawn_snap(
-							*motor, motor_position,
-							world::bam_heading_from_mission_yaw_deg(player->yaw),
-							player->health);
-				}
-				conn.discard_pre_deploy_uplinks = true;
-				// Successful deploy CLEARS the respawn-pending flag + the hidden bit — the
-				// next 0x0A's flags1 bit1 drops, the client closes the deploy screen and
-				// enters the world; byte13 loses its 0x01. [orig: Server_ProcessPlayerDeath
-				// @0x517791 `and 0xEF` on slot+89912; the entity bit0 stops being re-ORed]
-				conn.link.respawn_pending = false;
-				player->flags &= ~1u;
-				player->alive = true;
-				// THE DEPLOY-RELEASE BUNDLE [orig: Server_ProcessPlayerDeath's deploy tail —
-				// the loadout re-send (Server_SendWeaponSlotListToPlayer @0x502550) + the 0x61
-				// seed (Server_SendRandomSeedToPlayer @0x5101a0, mode 1) + the 0x1E hint; golden
-				// deploy frame 240018 carries 0x5A + 0x61 + 0x1E in ONE datagram]. The 0x5A is
-				// the client's deploy UN-LATCHER: the 0x0E pick set its dword_81474C wait-gate
-				// (Input case 12 @0x49b17b) and ONLY the 0x5A apply resets it (§5.30,
-				// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0) — without this bundle the
-				// client NEVER resumes its per-frame C2S 0x0C uplink (v32 live: both joiners'
-				// uplinks stopped at the pick frame forever; the host-side entity pinned at the
-				// deploy spot = the rubber-band). Re-send the retained granted body; a client
-				// that never submitted 0x2F (unit paths) gets the empty slot table headed by
-				// its live class, the shape @0x502550 builds for a player with no loaded slots.
-				{
-					const world::WeaponTable *armory =
-							(world != nullptr && !world->weapons.empty()) ? &world->weapons
-							                                              : nullptr;
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(st.last_loadout_reply,
-							                                  player->player_class, armory)));
-				}
-				// The deploy-release tick seed is PER PLAYER and re-rolled here, not the
-				// session constant: a client anchors its whole network-role clock (and
-				// therefore its fire freshness) to this value, so handing every client the
-				// same number on every deploy would re-seed them all to the same tick.
-				// [orig: Server_SendRandomSeedToPlayer @0x5101a0 — value @0x5101d4
-				//  ((rand() & 0xFE) + 1) << 16; deploy-release sender @0x517e47]
-				conn.tick_seed = ((make_random_session_u32() & 0xFEu) + 1u) << 16;
-				replies.push_back(make_protocol_message(
-						0x61, {static_cast<uint8_t>(conn.tick_seed & 0xFFu),
-						       static_cast<uint8_t>((conn.tick_seed >> 8) & 0xFFu),
-						       static_cast<uint8_t>((conn.tick_seed >> 16) & 0xFFu),
-						       static_cast<uint8_t>((conn.tick_seed >> 24) & 0xFFu)}));
-				// The frontier hint, only when a frontier zone exists [orig: the @0x5179e0
-				// `if (AvailableSlot)` gate].
-				const uint8_t frontier = zone_chain_frontier_zone(*world, world->zone_chain,
-				                                                  player->team);
-				if (frontier != 0)
-					replies.push_back(
-							make_protocol_message(s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
+				world->spawn_waves.remove_player(player->handle);
+				const world::EntityHandle target_handle = target != nullptr
+						? target->handle
+						: world::EntityHandle{};
+				std::vector<ProtocolMessage> deployment =
+						Server_ReleasePlayerDeployment(
+								config, conn, *world, target_handle);
+				replies.insert(replies.end(),
+				               std::make_move_iterator(deployment.begin()),
+				               std::make_move_iterator(deployment.end()));
 				break;
 			}
 			case c2s::ENTITY_UPLINK: // C2S player-input uplink — cache the pre-spawn pose
@@ -1439,6 +1760,30 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world == nullptr || !conn.burst.spawned || !conn.link.owned_entity.valid())
 					break;
 				world::entity_detach_from_vehicle(*world, conn.link.owned_entity);
+				break;
+			}
+			case c2s::END_ROUND_STATS_REQUEST: {
+				// Retail serves the already-frozen board stream (stru_C947D8) to
+				// this requester only; the stream is built once by the round-end
+				// producer and this handler never rebuilds it. The request is
+				// exactly one u16 offset and every response carries at most 200
+				// stream bytes. [orig: NapiNPServerMsg_0x02B @0x514FE0 ->
+				// NetPacket_WriteReplayStreamChunk @0x506F60; producer
+				// Server_BuildEndOfRoundScoreboard @0x516590]
+				if (inputs.round_end_board_stream == nullptr ||
+						inputs.round_end_board_stream->empty())
+					break;
+				EndRoundStatsRequest request;
+				if (!decode_end_round_stats_request(
+						msg.payload.data(), msg.payload.size(), request)) break;
+				std::vector<uint8_t> chunk = encode_end_round_stats_chunk(
+						*inputs.round_end_board_stream, request.offset);
+				// NetPacket_WriteReplayStreamChunk returns zero for an offset
+				// beyond the stream and its caller sends only for len > 0.
+				// [orig: NapiNPServerMsg_0x02B @0x514FE0]
+				if (!chunk.empty())
+					replies.push_back(make_protocol_message(
+							s2c::END_ROUND_STATS, std::move(chunk)));
 				break;
 			}
 			case c2s::RTT_CONSUMED: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
@@ -1756,8 +2101,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(
 						s2c::SESSION_STATUS,
 						serialize_session_status(
-								config, session_uptime_ms,
-								active_players)));
+								config, inputs.session_uptime_ms,
+								active_players, world)));
 				break;
 			}
 			case c2s::EMPTY_SLOT_SWEEP_REQUEST: { // EMPTY-SLOT SWEEP REQUEST -> S2C 0x5D to the REQUESTER ONLY.
@@ -1768,7 +2113,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// @0x429730). The handler reads NO fields from the request, is
 				// authority-gated, and is SKIPPED while g_net_spawn_suspended or
 				// g_spawn_success_gate (round over) is set — our reachable analog of the
-				// latter is world->round_end.ended.
+				// latter is world->match.outcome().ended.
 				// DIVERGENCE (D-NET-176): retail walks the pool's fixed entry count. Our
 				// pool-0 capacity is an OpenNova sizing choice (1024 by default), so the
 				// walk stops at the highest OCCUPIED slot: a slot above that high-water
@@ -1779,7 +2124,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
 						msg.payload.data(), msg.payload.size(), consumed) ||
-				    world->round_end.ended) {
+				    world->match.outcome().ended) {
 					break;
 				}
 				const std::size_t capacity = world->registry.pool_capacity(0);
@@ -1874,13 +2219,13 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          const world::World *world) {
+                                          world::World *world) {
 	// `fallback` only matters for an empty roster (World-less path); a real host always has >=1 bound
 	// player, so the enumerated roster wins. Build a minimal fallback rep from the config.
 	PlayerReplicationState fallback;
 	fallback.player_name = config.player_name;
 	ProtocolMessage message = make_protocol_message(
-			s2c::PLAYER_LIST, build_reply_tag_16(roster, fallback, world));
+			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, fallback, world));
 	message.reliable = false; // Server_BuildAndBroadcastScoreboard @0x50DE00 userParam=1
 	return message;
 }

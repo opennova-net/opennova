@@ -170,6 +170,14 @@ public:
 	// remains unchanged until the host's S2C 0x49 echo appears in the reload drain.
 	bool queue_fired_round(const ClientFiredRound &round);
 	bool queue_reload_request(const WeaponReload &reload);
+	// The dead player's medic call: reliable C2S 0x2E carrying the local
+	// entity's packed index. The wire gates live here (in-session joiner
+	// with a self handle); the dead test and the 310-tick cooldown are the
+	// embedding sim's local-player facts [orig: Input_HandleActionBinding
+	// case 217 @0x49b4b4..0x49b51b — is_in_session, local entity, Flags & 2,
+	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
+	// (0x2E, param 0x136)].
+	bool queue_medic_request();
 	// Action 6 on a designated-G mounted EWeap selects the child's embedded
 	// MountSlot or its groundEntity vehicle slot. Authority confirms via the
 	// ordinary compact player echo; this only queues the reliable C2S 0x16.
@@ -360,11 +368,44 @@ public:
 	const std::string &expansion() const;
 	const std::string &last_error() const;
 
+	// The client's ONE tracked timed-capture window — the nearest-zone
+	// cluster dword_A85B88..A85BA0 the 0x53 handler seeds and the 0x6C handler
+	// re-rates. NO presentation consumer reads progress/target/limit in retail
+	// (an exhaustive immediate scan over 0x400000..0x7A0000 finds only the two
+	// handlers and the frame pump); the capture bar reads the 0x0A phase-0
+	// word_A85B7C instead. Kept as the exact retail image (net-re 0x6C).
+	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0 — same entity + same
+	//  modeB keeps progress, a different modeB re-seeds it @0x428d09..0x428d0c;
+	//  a different entity is adopted only when at least as near as the current
+	//  one and within 0x140000 = 20.0 u @0x428cf5; then rate = byte, entity,
+	//  modeA, modeB, target = 62*start, limit = 62*end, and start >= end zeroes
+	//  the whole cluster but progress @0x428d40..0x428d60;
+	//  NapiNPClientMsg_0x06C @0x428fc0 — rate = byte only when the handle is
+	//  the tracked entity @0x42902d..0x429038;
+	//  Client_ProcessNetworkFrame @0x42c2eb..0x42c347 — while limit != 0:
+	//  target == limit resets (entity/target/limit/progress = 0, rate = 1),
+	//  else progress += rate with the clamp progress <= target when rate > 0
+	//  and progress >= 0 when rate < 0 — so a positive 1..32 count never moves
+	//  a progress the 0x53 already parked at target]
+	struct TrackedCaptureWindow {
+		uint16_t zone = 0xFFFF; // dword_A85B88 (entity pointer; 0 = none)
+		int32_t mode_a = 0;     // dword_A85B8C
+		int32_t mode_b = 0;     // dword_A85B90
+		int32_t target = 0;     // dword_A85B94 (62 * start_s)
+		int32_t limit = 0;      // dword_A85B98 (62 * end_s)
+		int32_t progress = 0;   // dword_A85B9C
+		int32_t rate = 0;       // dword_A85BA0
+		bool tracked() const { return zone != 0xFFFF; }
+	};
+	const TrackedCaptureWindow &tracked_capture_window() const { return tracked_window_; }
+
 	struct ZoneState {
 		bool has_value = false;
 		ZoneTimerValue value;
 		bool has_window = false;
 		ZoneTimerWindow window;
+		bool has_presence = false;
+		uint8_t presence_count = 0;
 
 		// Exact semantic image of the retail 13-DWORD shared timer-list entry
 		// (the map key supplies DWORD 0). The raw latest records above remain for
@@ -428,7 +469,20 @@ private:
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
 	void apply_zone_timer_value(const ZoneTimerValue &value);
 	void apply_zone_timer_window(const ZoneTimerWindow &window);
+	void apply_zone_presence_count(const ZonePresenceCount &presence);
 	void advance_zone_timers();
+	// The tracked-window cluster's 0x53 adoption, 0x6C re-rate, and per-frame
+	// advance (TrackedCaptureWindow above).
+	void adopt_tracked_window(const ZoneTimerWindow &window);
+	void advance_tracked_window();
+	TrackedCaptureWindow tracked_window_;
+	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
+	// each active slot with an entity and a nonzero revive window loses one
+	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
+	// g_slotRefreshTimer > 62 -> PlayerSlot_SetDownedState(slot+0x10 - 1,
+	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
+	// loopback view runs it too (retail's client frame is role-agnostic).
+	void tick_roster_revive_countdown();
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only
@@ -466,6 +520,7 @@ private:
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
 	// emits and the send-holdoff send-block gate, deferred-and-logged at P5, ported here. ---
 	uint32_t current_tick_ = 0;          // [orig: currentTick @0xA8229C] bumped once per run_frame
+	uint32_t slot_refresh_frames_ = 0;   // [orig: g_slotRefreshTimer @0xA85B80] the 1 Hz revive countdown
 	uint32_t last_keepalive_tick_ = 0;   // [orig: g_lastKeepaliveTick @0xA822A0] 0x34 send latch
 	uint32_t net_quality_timer_ = 0;     // [orig: g_netQualityReportTimer @0xA85B84] 0x4C cadence
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send

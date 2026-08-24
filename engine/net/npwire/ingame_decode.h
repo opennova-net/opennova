@@ -488,7 +488,7 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
 inline constexpr uint16_t kPlayerSyncHasName         = 0x0001; // cstr
 inline constexpr uint16_t kPlayerSyncHasTeamString   = 0x0002; // cstr; retail always "" (@0x505ff7)
 inline constexpr uint16_t kPlayerSyncHasTeamByte     = 0x0004;
-inline constexpr uint16_t kPlayerSyncHasClassByte    = 0x0008; // type|subtype (outside the 0x1CF7 set)
+inline constexpr uint16_t kPlayerSyncHasDownedState  = 0x0008; // revive seconds low7 | medic-request bit7
 inline constexpr uint16_t kPlayerSyncHasVehicleName  = 0x0010; // cstr (§5.21 "id" label)
 inline constexpr uint16_t kPlayerSyncHasVehicleScore = 0x0020;
 inline constexpr uint16_t kPlayerSyncHasSquad        = 0x0040;
@@ -525,7 +525,7 @@ struct PlayerSync {
 	std::string clan;                // 0x0002
 	std::string id_label;            // 0x0010
 	uint8_t  team = 0;               // 0x0004
-	uint8_t  type_subtype = 0;       // 0x0008 (type = v & 0x7F, subtype = v >> 7)
+	uint8_t  downed_state = 0;       // 0x0008 (revive seconds = v & 0x7F; medic request = v >> 7)
 	uint8_t  field_0020 = 0;         // 0x0020
 	uint8_t  field_1000 = 0;         // 0x1000
 	uint8_t  field_0040 = 0;         // 0x0040
@@ -885,7 +885,7 @@ struct FrameWeaponBlock {
 	bool     present = false;
 	uint8_t  preround_timer = 0; // [orig: g_preround_delay_timer @0xC8D824] → dword_A85B64 [0x430064]
 	uint8_t  slot_state360 = 0;  // playerSlot+360 (0 unless entity+36 bit 1) → dword_A85B5C [0x430084]
-	uint8_t  slot_state368 = 0;  // playerSlot+368 (0 unless entity+36 bit 1) → dword_A85B60 [0x43009F]
+	uint8_t  slot_state368 = 0;  // revive seconds, playerSlot+368 (0 unless dead) → dword_A85B60 [0x43009F]
 	uint8_t  slot_state364 = 0;  // playerSlot+364 → dword_A85B68  [0x4300C3]
 	uint8_t  slot_state356 = 0;  // playerSlot+356 → dword_A85B6C  [0x4300E3]
 	uint8_t  slot_state460 = 0;  // playerSlot+460 → word_A85B7C   [0x430104]
@@ -1347,6 +1347,18 @@ struct SpawnWaveStatus {
 };
 bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &out);
 
+// S2C 0x81 — requester-local accumulated points `[i32 score]`. This is
+// CRenderState field 0x1C (the direct array word at index 29), not the
+// game-type-specific primary score shown in the first scoreboard column.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+//        CRenderState_GetFieldByIndex @0x52D7D0;
+//        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+struct ScoreDeltaSound {
+	int32_t score = 0;
+};
+bool decode_score_delta_sound(const uint8_t *body, size_t len,
+		ScoreDeltaSound &out);
+
 
 // S2C 0x7B — full player/session info (§5.32). Five NUL-terminated strings, then
 // `[u32 extra]`, then two more NUL-terminated strings. The retail handler caps the
@@ -1586,6 +1598,33 @@ bool decode_mounted_weapon_slot_selection(
 		const uint8_t *body, size_t len,
 		MountedWeaponSlotSelection &out, size_t &consumed);
 
+// C2S 0x03 — the inverse OPTIONS_AUTOMEDIC preference. Retail writes the
+// profile dword at +1660; zero means the checkbox is enabled, nonzero means a
+// downed player must explicitly request a medic. The authority retains that
+// value at playerSlot+372 and tests only zero versus nonzero.
+// [orig: NetPacket_WriteAutoMedicPreference @0x42A400 (was NetPacket_WriteSessionTick; D-NET-216); producer
+// MultiPlayer_JoinSessionStateMachine @0x56A340; consumer
+// NapiNPServerMsg_AutoMedicPreference @0x501BE0]
+struct AutoMedicPreference {
+	bool enabled = true;
+};
+bool decode_auto_medic_preference(
+		const uint8_t *body, size_t len,
+		AutoMedicPreference &out, size_t &consumed);
+
+// C2S 0x2E — a downed player's manual medic call. The client writes its own
+// entity's pool slot index as one dword (`NetPacket_WriteEntityIndex32`) and
+// sends it reliably under a 310-frame latch while dead and in session; the
+// host handler never reads the body — it resolves the requester from the
+// connection's player slot — so the dword is carried for the printer only.
+// [orig: Input_HandleActionBinding case 217 @0x49B4B4..0x49B51B;
+// Server_BroadcastMedicRequest @0x515390]
+struct MedicRequest {
+	uint32_t entity_index = 0;
+};
+bool decode_medic_request(const uint8_t *body, size_t len,
+		MedicRequest &out, size_t &consumed);
+
 // S2C 0x13 — entity death (the SECOND death path, beside 0x26 kill-sync).
 // `[u16 entityHandle][i16 killerSource]` (4 B). The handler sets the entity's
 // Health=0, stores killerSource at entity+pad9[36], clears entity+pad8[86], and
@@ -1599,6 +1638,33 @@ struct EntityDeathRecord {
 };
 bool decode_entity_death(const uint8_t *body, size_t len,
                          EntityDeathRecord &out, size_t &consumed);
+
+// S2C 0x52 — victim-only third-person death-camera target. Retail sends the
+// killer's fixed position when a killer exists, otherwise the victim's, and the
+// client stores the triple for Camera_ComputeThirdPersonPositions.
+// [orig: GameEvent_PlayerDeath @0x516DD0 -> NetPacket_WriteThreeInt32s
+// @0x506CB0; NapiNPClientMsg_0x052 @0x428A80; camera consumer @0x438B80]
+struct DeathCameraTarget {
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;
+};
+bool decode_death_camera_target(const uint8_t *body, size_t len,
+		DeathCameraTarget &out, size_t &consumed);
+
+// S2C 0x54 — one player slot's downed/revive state. The low seven bits are
+// the remaining whole-second revive window (retail arms 120); bit seven is the
+// retained medic-request flag. The handler resolves entity -> roster slot and
+// splits the byte into playerSlot+16/+44.
+// [orig: NetPacket_WriteEntityHandleWithByte @0x507030;
+// NapiNPClientMsg_0x054 @0x429040 -> PlayerSlot_SetDownedState @0x4348D0]
+struct PlayerDownedState {
+	uint16_t entity_handle = 0xFFFF;
+	uint8_t revive_seconds = 0;
+	bool medic_request_active = false;
+};
+bool decode_player_downed_state(const uint8_t *body, size_t len,
+		PlayerDownedState &out, size_t &consumed);
 
 // S2C 0x30 — entity-checksum request. `[u8 entityId][u16 checksum]` (3 B). The
 // client builds NetPacket_WriteEntityChecksum(entityId, checksum) and replies
@@ -1662,6 +1728,25 @@ struct EntityRemove {
 };
 bool decode_entity_remove(const uint8_t *body, size_t len,
 	                      EntityRemove &out, size_t &consumed);
+
+// S2C 0x2F — complete live state for flag/carryable objectives. The first
+// relationship is entity+368 occupantEntity (the carrier); the second is
+// entity+40 groundEntity. The flags field is deliberately one byte: retail
+// merges it into the low byte of the client's existing entity flags.
+// [orig: serialize_entity_with_parent_and_target @0x505810;
+// NapiNPClientMsg_0x02F @0x430E10]
+struct ObjectiveEntityState {
+	uint16_t entity_handle = 0xFFFF;
+	uint8_t flags_byte = 0;
+	int32_t pos_x = 0;
+	int32_t pos_y = 0;
+	int32_t pos_z = 0;
+	uint16_t attach_handle = 0xFFFF;
+	uint16_t ground_handle = 0xFFFF;
+};
+bool decode_objective_entity_state(const uint8_t *body, size_t len,
+	                               ObjectiveEntityState &out,
+	                               size_t &consumed);
 
 // S2C 0x59 — deployed-item spawn-or-update. Fixed 32-B record. The host
 // streams the placeable entities a player drops (mines, beacons, satchels,
@@ -1829,6 +1914,17 @@ struct ZoneTimerWindow {
 bool decode_zone_timer_window(const uint8_t *body, size_t len,
                               ZoneTimerWindow &out, size_t &consumed);
 
+// §5.61 S2C 0x6C — the unique contact count for the currently active timed
+// capture. Fixed 3 B: [u16 zone handle][u8 count]. The producer clamps the
+// advertised byte to 1..32. [orig: NapiNPClientMsg_0x06C @0x428FC0;
+// NetPacket_WriteZonePresenceCount @0x506DE0]
+struct ZonePresenceCount {
+	uint16_t zone_handle = 0;
+	uint8_t count = 0;
+};
+bool decode_zone_presence_count(const uint8_t *body, size_t len,
+                                ZonePresenceCount &out, size_t &consumed);
+
 // §5.50 S2C 0x34 — PLAY-SOUND by sound-profile name. flag 0 → flat/ambient
 // play; flag 1 → positioned 3D one-shot at full volume (the 3 i16 coords are
 // shifted << 16 into 16.16 world space). No position block on the wire when
@@ -1913,6 +2009,26 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 // stream is per-session state with a lifetime the decoder does not own, and
 // retail keeps it in one global for the same reason. A consumer that only
 // decodes and never sends 0x2B receives the first 200 bytes and nothing else.
+// S2C 0x1D, exactly seven bytes. The final signed byte is this recipient's row
+// in the frozen board (-1 when absent). [orig: EndRoundScoreboard_SerializeHeader
+// @0x505280; NapiNPClientMsg_0x01D @0x430840]
+struct EndRoundHeader {
+	int8_t winner_team = 0;
+	int16_t team_score_0 = 0;
+	int16_t team_score_1 = 0;
+	uint8_t draw = 0;
+	int8_t player_index = -1;
+};
+bool decode_end_round_header(const uint8_t *body, size_t len,
+		EndRoundHeader &out);
+
+// C2S 0x2B, the next byte offset requested by the client.
+struct EndRoundStatsRequest {
+	uint16_t offset = 0;
+};
+bool decode_end_round_stats_request(const uint8_t *body, size_t len,
+		EndRoundStatsRequest &out);
+
 struct EndRoundStatsChunk {
 	uint16_t total_size = 0;   // bytes in the whole board
 	uint16_t chunk_offset = 0; // where this chunk lands; 0 also means "restart"
@@ -1936,7 +2052,7 @@ struct EndRoundPlayerRow {
 	std::string clan;
 	std::string tag;    // the squad tag
 	uint8_t team = 0;
-	uint8_t side = 0;
+	uint8_t player_class = 0; // entity+660, the selected soldier type
 	int16_t kills = 0;
 	int16_t deaths = 0;
 	int16_t assists = 0;

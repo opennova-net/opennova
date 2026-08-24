@@ -5,6 +5,12 @@
 #include <npwire/ingame_message_id.h>
 
 #include <utility>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace opennova::np {
 
@@ -153,6 +159,95 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 	entry.value_limit = 0;
 	entry.window_active = true;
 	entry.value_active = false;
+	adopt_tracked_window(window);
+}
+
+void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {
+	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0, the cluster arm
+	//  @0x428c39..0x428d60]
+	const int32_t scaled_start = timer_scale_62(static_cast<int32_t>(window.start_s));
+	const int32_t scaled_end = timer_scale_62(static_cast<int32_t>(window.end_s));
+	bool adopt = false;
+	bool reseed_progress = false;
+	if (tracked_window_.tracked() && tracked_window_.zone == window.zone_handle) {
+		// Same entity: a changed modeB re-seeds the progress (LABEL_35), the
+		// same modeB keeps it (LABEL_36).
+		adopt = true;
+		reseed_progress = tracked_window_.mode_b != window.mode_b;
+	} else if (!tracked_window_.tracked()) {
+		adopt = true; // nothing tracked: take it, progress untouched
+	} else {
+		// Another entity: adopted only when at least as near as the tracked one
+		// and within 20.0 u of the local player. The local position is the
+		// recipient's 0x0A anchor (retail reads g_local_player_entity->Position).
+		const netsim::ClientState &cs = view_.state();
+		auto dist_to = [&](uint16_t handle) -> double {
+			const netsim::ClientEntityState *row = cs.find(handle);
+			if (row == nullptr) return 1.0e18;
+			const double dx = std::fabs(static_cast<double>(cs.anchor_x) - row->x);
+			const double dy = std::fabs(static_cast<double>(cs.anchor_y) - row->y);
+			const double dz = std::fabs(static_cast<double>(cs.anchor_z) - row->z);
+			return std::sqrt(dx * dx + dy * dy + dz * dz);
+		};
+		const double old_dist = dist_to(tracked_window_.zone);
+		const double new_dist = dist_to(window.zone_handle);
+		if (old_dist >= new_dist && new_dist <= 1310720.0) {
+			adopt = true;
+			reseed_progress = true;
+		}
+	}
+	if (!adopt) return;
+	if (reseed_progress) tracked_window_.progress = scaled_start;
+	tracked_window_.rate = window.rate;
+	tracked_window_.zone = window.zone_handle;
+	tracked_window_.mode_a = window.mode_a;
+	tracked_window_.mode_b = window.mode_b;
+	tracked_window_.target = scaled_start;
+	tracked_window_.limit = scaled_end;
+	if (scaled_start >= scaled_end) {
+		// A start at or past the end drops the cluster (progress survives).
+		tracked_window_.rate = 0;
+		tracked_window_.zone = 0xFFFF;
+		tracked_window_.mode_a = 0;
+		tracked_window_.mode_b = 0;
+		tracked_window_.target = 0;
+		tracked_window_.limit = 0;
+	}
+}
+
+void ClientRuntime::advance_tracked_window() {
+	// [orig: Client_ProcessNetworkFrame @0x42c2eb..0x42c347]
+	TrackedCaptureWindow &w = tracked_window_;
+	if (w.limit == 0) return;
+	if (w.target == w.limit) {
+		w.zone = 0xFFFF;
+		w.target = 0;
+		w.limit = 0;
+		w.rate = 1;
+		w.progress = 0;
+		return;
+	}
+	w.progress = timer_add(w.progress, w.rate);
+	if (w.rate > 0) {
+		if (w.progress > w.target) w.progress = w.target;
+	} else if (w.rate < 0) {
+		if (w.progress < 0) w.progress = 0;
+	}
+}
+
+void ClientRuntime::apply_zone_presence_count(
+		const ZonePresenceCount &presence) {
+	// The tracked cluster's rate override: only when the handle IS the tracked
+	// entity [orig: NapiNPClientMsg_0x06C @0x428fc0, the compare @0x42902d].
+	if (tracked_window_.tracked() && tracked_window_.zone == presence.zone_handle)
+		tracked_window_.rate = presence.count;
+	const auto found = zone_states_.find(presence.zone_handle);
+	// The per-zone diagnostic image the tests read: retail resolves the
+	// handle, then updates only when it is the currently selected timed-window
+	// entity; a witnessed 0x53 is the selection prerequisite. [orig: @0x428FC0]
+	if (found == zone_states_.end() || !found->second.has_window) return;
+	found->second.has_presence = true;
+	found->second.presence_count = presence.count;
 }
 
 bool ClientRuntime::apply_zone_timer_body(
@@ -172,6 +267,14 @@ bool ClientRuntime::apply_zone_timer_body(
 					body.data(), body.size(), window, consumed) &&
 		    consumed == body.size())
 			apply_zone_timer_window(window);
+		return true;
+	}
+	if (tag == s2c::ZONE_PRESENCE_COUNT) {
+		ZonePresenceCount presence;
+		if (decode_zone_presence_count(
+					body.data(), body.size(), presence, consumed) &&
+		    consumed == body.size())
+			apply_zone_presence_count(presence);
 		return true;
 	}
 	return false;
@@ -203,6 +306,21 @@ void ClientRuntime::advance_zone_timers() {
 	}
 }
 
+void ClientRuntime::tick_roster_revive_countdown() {
+	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+	if (++slot_refresh_frames_ <= 62) return;
+	for (netsim::ClientRosterSlot &slot : view_.state().roster) {
+		// slot+0x0D active, slot+0x24 entity, slot+0x10 > 0 (unsigned).
+		if (!slot.bound || slot.entity_slot < 0 || slot.downed_revive_seconds == 0)
+			continue;
+		// PlayerSlot_SetDownedState(seconds - 1, slot+0x2C): the medic-request
+		// latch is re-stored unchanged [orig: @0x42C2B9..0x42C2C4].
+		--slot.downed_revive_seconds;
+		view_.state().mark_changed();
+	}
+	slot_refresh_frames_ = 0;
+}
+
 std::vector<uint8_t> ClientRuntime::start() {
 	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
 
@@ -216,6 +334,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	pre_send_queue_.clear();
 	pending_reload_notifications_.clear();
 	zone_states_.clear();
+	tracked_window_ = TrackedCaptureWindow{};
 	authoritative_loadout_ = WeaponLoadout{};
 	authoritative_loadout_revision_ = 0;
 	deployed_ = false;
@@ -228,6 +347,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	pending_deployment_pick_set_ = false;
 	pending_deployment_pick_ = 0xFFFFu;
 	current_tick_ = 0;
+	slot_refresh_frames_ = 0;
 	last_keepalive_tick_ = 0;
 	net_quality_timer_ = 0;
 	tag2c_send_cooldown_ = 0;
@@ -288,6 +408,22 @@ bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
 		return false;
 	gameplay_send_queue_.push_back(
 			make_protocol_message(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload)));
+	return true;
+}
+
+bool ClientRuntime::queue_medic_request() {
+	// The retail gate is is_in_session, not the deploy gate: a dead player is
+	// back in the deploy flow (Driving) and the call still ships. It rides the
+	// held one-shot queue that flushes at the next open send boundary rather
+	// than the deploy-gated gameplay queue [orig: QueueReliableMessage(0x2E)
+	// @0x49b50c, outside the 0x0C/0x2C deploy gate of Client_ProcessNetworkFrame].
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session() ||
+	    !joiner_->has_self_handle())
+		return false;
+	MedicRequest request;
+	request.entity_index = joiner_->self_handle();
+	pre_send_queue_.push_back(
+			make_protocol_message(c2s::MEDIC_REQUEST, encode_medic_request(request)));
 	return true;
 }
 
@@ -551,6 +687,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 				else if (const auto *window =
 				         std::get_if<ZoneTimerWindow>(&update))
 					apply_zone_timer_window(*window);
+				else if (const auto *presence =
+				         std::get_if<ZonePresenceCount>(&update))
+					apply_zone_presence_count(*presence);
 			}
 			// The local-team latch has client-session consequences beyond entity state.
 			if (pr.self_team_changed) ++self_team_revision_;
@@ -590,31 +729,47 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// deployed gate on a fresh death frame before this same client frame reaches its send block.
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
 	}
-	if (role_ == Role::Joiner)
+	if (role_ == Role::Joiner) {
 		stage_reload_notifications_before_body_tick();
+		// The session var the 0x81 tone ladder reads, mirrored from the
+		// connection's server-info landing [orig: g_sessionvar_exp_fanfare].
+		view_.state().exp_fanfare = joiner_->exp_fanfare();
+	}
 
+	// The roster revive countdown precedes the zone-list advance in the frame
+	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA, then @0x42C2E1].
+	tick_roster_revive_countdown();
 	// Retail advances this shared list once after the complete receive pump,
-	// including on the authority's HostClient loopback path.
-	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
+	// including on the authority's HostClient loopback path, then pumps the
+	// tracked-window cluster.
+	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6, then @0x42C2EB]
 	advance_zone_timers();
+	advance_tracked_window();
 	view_.tick_minimap_overlays();
-	view_.tick_guided_missiles();   // the client-flown §5.15 pursuit (D-NET-64)
+	const bool preround_active = view_.state().preround_delay_seconds != 0;
+	// Client_ProcessNetworkFrame and its maintenance continue, but the later
+	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is
+	// nonzero. These portable movers are that entity body, not network work.
+	// [orig: network pump @0x526692; entity gate @0x52672C]
+	if (!preround_active)
+		view_.tick_guided_missiles(); // the client-flown section 5.15 pursuit
 
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp
 	// @0x4b7dbf/@0x4b7dd6]
-	view_.tick_lean();
+	if (!preround_active) view_.tick_lean();
 	// The remote arms dip rides the same body tick as the lean integrator.
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
-	view_.tick_arms_dip();
+	if (!preround_active) view_.tick_arms_dip();
 
 	// The per-class between-update mover: one step per 62.5 Hz tick after the
 	// recv fold (retail order: net frame first, entity movers after). No-op on
 	// the HostClient role (mode never enabled — the authority never
 	// interpolates, D-NET-89). [net-re §5.38e, D-NET-196]
-	view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
-	                                 ? joiner_->self_handle()
-	                                 : 0xFFFFu);
+	if (!preround_active)
+		view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
+		                                 ? joiner_->self_handle()
+		                                 : 0xFFFFu);
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
 

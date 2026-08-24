@@ -1,8 +1,7 @@
 #include "npruntime/server_initial_state.h"
 
 #include "npruntime/batch_chunker.h" // np::slice_batch_pages (the shared byte-budget pager, ADR 0013)
-
-#include <npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
+#include "npruntime/server_tick.h" // Server_RerollPlayerTickSeed
 
 #include <algorithm>
 #include <array>
@@ -65,12 +64,9 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
 	if (!ctx.is_in_session) return flags;     // gated on is_in_session (+0x58)
-	// dword_2550A04 is the live mp-attribute store; game_settings.mp_attributes
-	// is its session snapshot. OpenNova retains an explicit setting override as
-	// well, but either representation of the same live TeamChoose bit must feed
+	// dword_2550A04 is the one live mp-attribute store. Its TeamChoose bit feeds
 	// BuildFlags even for a non-team game (fresh retail DM advertises 0x904).
-	if (r.team_choose ||
-	    (r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
+	if ((r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
 		flags = 4;
 	switch (static_cast<uint32_t>(ctx.transport_mode)) {
 	case 1: flags |= 0x400u; break;           // single-player host
@@ -199,8 +195,15 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, 0);                                // roll
 	const bool has_spawn_zones =
 			ctx.world != nullptr && world::world_has_spawn_zone(*ctx.world);
-	b.push_back(has_spawn_zones ? 0x01 : 0x00);  // gameFlags bit0 = spawn zones exist
-	                                             // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
+	uint8_t game_flags = has_spawn_zones ? 0x01u : 0x00u;
+	if (ctx.config.default_spawn_requires_no_team_zone != 0 &&
+			ctx.is_in_session != 0) {
+		game_flags |= 0x02u;
+	}
+	b.push_back(game_flags);
+	// bit0 = SpawnZoneList nonempty; bit1 = the target-less spawn restriction
+	// while in session. [orig: NetPacket_WriteWorldStateLoad0x0F
+	// @0x502DA7..0x502DC4; g_respawn_requires_team_dead @0x24D2260]
 	// The fixed 128-i32 block is the authority player's per-ammo-class pool
 	// table (serverPlayer+88664 -> client g_localAmmoPools @0xB75FE8), retained
 	// when this connection's C2S 0x2F loadout is accepted.
@@ -510,12 +513,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// same value as that player's freshness floor. Never the session constant.
 			// [orig: Server_SendRandomSeedToPlayer @0x5101a0 — value @0x5101d4
 			//  ((rand() & 0xFE) + 1) << 16; join sender @0x51a982]
-			conn.tick_seed = ((make_random_session_u32() & 0xFEu) + 1u) << 16;
-			const uint32_t seed = conn.tick_seed;
-			step.messages.push_back(InitialStateMessage{0x61, {static_cast<uint8_t>(seed & 0xFFu),
-			                                                    static_cast<uint8_t>((seed >> 8) & 0xFFu),
-			                                                    static_cast<uint8_t>((seed >> 16) & 0xFFu),
-			                                                    static_cast<uint8_t>((seed >> 24) & 0xFFu)}}); // per-player tick seed [Server_SendRandomSeedToPlayer @0x5101a0]
+			step.messages.push_back(InitialStateMessage{
+					0x61, Server_RerollPlayerTickSeed(conn)}); // per-player tick seed [Server_SendRandomSeedToPlayer @0x5101a0]
 			step.messages.push_back(InitialStateMessage{0x3E, {}}); // terminator
 			opennova::io::logf(opennova::io::LogLevel::kWarn,
 		"[burst] game-start bundle: 0x42(2) 0x0F(%zu) 0x4D(1) 0x61(4) 0x3E(0) -> drives joiner deploy",

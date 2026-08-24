@@ -918,7 +918,7 @@ static void test_mounted_gunner_acquires_and_fires() {
         // action pump consumes it, then the projectile pass steps the new round.
         // [orig: Entity_UpdateAllEntities @0x52674b, WeaponAction_ProcessAllEntities
         //  @0x526786, Weapon_UpdateAllProjectiles @0x4ec020]
-        w->run_logic_tick(true, false);
+        w->run_logic_tick(true);
         acquired = acquired || npc.inf.combat_target == enemy_h;
         fired = fired || w->rounds.count > 0;
     }
@@ -1609,7 +1609,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
 
     const Vec3 before = w->registry.get(vehicle_h)->position;
     const int16_t yaw_before = w->registry.get(vehicle_h)->yaw;
-    w->run_logic_tick(false, false);
+    w->run_logic_tick(false);
 
     const Entity *after = w->registry.get(vehicle_h);
     CHECK(after != nullptr);
@@ -1640,14 +1640,14 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     // it must not refresh the idle registration indefinitely.
     w->sound_emitters.clear();
     npc_live->mounted = false;
-    w->run_logic_tick(false, false);
+    w->run_logic_tick(false);
     CHECK(w->sound_emitters.size() == 1);
     if (w->sound_emitters.size() == 1) {
         CHECK(w->sound_emitters[0].source_only);
     }
     for (int i = 0; i < 30; ++i) {
         w->sound_emitters.clear();
-        w->run_logic_tick(false, false);
+        w->run_logic_tick(false);
     }
     CHECK(w->sound_emitters.empty());
 }
@@ -2555,7 +2555,7 @@ int main() {
             AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
-            w.round_end.ended = true;
+            w.process_round_end(0);
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == false);
         }

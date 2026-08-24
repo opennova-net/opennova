@@ -397,6 +397,49 @@ void test_score_sign_extends() {
 		CHECK(view.state().scoreboard.rows[0].score1 == -2);
 }
 
+// S2C 0x81 owns a separate requester-local points sample. It does not mutate
+// the periodic Tab scoreboard; each accepted sample records the signed delta
+// used by retail's positive-score fanfare decision.
+// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+void test_score_delta_sound_fold() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x0A, 0x00, 0x00, 0x00});
+	CHECK(view.state().score_feedback.score == 10);
+	CHECK(view.state().score_feedback.delta == 10);
+	CHECK(view.state().score_feedback.updates == 1);
+	const std::uint64_t revision = view.state().revision;
+
+	view.apply(s2c::SCORE_DELTA_SOUND, {0xFD, 0xFF, 0xFF, 0xFF});
+	CHECK(view.state().score_feedback.score == -3);
+	CHECK(view.state().score_feedback.delta == -13);
+	CHECK(view.state().score_feedback.updates == 2);
+	CHECK(view.state().revision == revision + 1);
+
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x01, 0x00, 0x00});
+	CHECK(view.state().score_feedback.score == -3);
+	CHECK(view.state().score_feedback.updates == 2);
+}
+
+void test_spawn_wave_status_fold() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::SPAWN_WAVE_STATUS,
+	           {1, 0x01, 0x20, 0x03, 0x00, 2, 0x0A, 0x00,
+	            0x01, 0x00, 0x02, 0x00});
+	CHECK(view.state().spawn_waves.known);
+	CHECK(view.state().spawn_waves.updates == 1);
+	CHECK(view.state().spawn_waves.value.groups.size() == 1);
+	if (!view.state().spawn_waves.value.groups.empty()) {
+		const SpawnWaveGroup &group =
+				view.state().spawn_waves.value.groups.front();
+		CHECK(group.zone_handle == 0x2001);
+		CHECK(group.zone_index == 3);
+		CHECK(group.wave_countdown == 10);
+		CHECK(group.members.size() == 2);
+	}
+	view.apply(s2c::SPAWN_WAVE_STATUS, {1, 0});
+	CHECK(view.state().spawn_waves.updates == 1);
+}
+
 // A malformed body is counted, not folded.
 void test_malformed_body_is_rejected() {
 	ClientReplicaPipeline view;
@@ -422,6 +465,8 @@ int main() {
 	test_overlay_label_key_map();
 	test_projection_unknown_is_empty();
 	test_score_sign_extends();
+	test_score_delta_sound_fold();
+	test_spawn_wave_status_fold();
 	test_malformed_body_is_rejected();
 	if (failures == 0) std::printf("client_replica_scoreboard_test: all passed\n");
 	return failures == 0 ? 0 : 1;

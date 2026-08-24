@@ -568,14 +568,18 @@ them `<!-- bink panels begin-->`). Mechanism, all witnessed:
 - The intro path is separate: `Game_PlayIntroVideos @ 0x5637a0` plays
   `prolog.BIK`/`intro.BIK` through a BLOCKING player, not the slot machinery.
 
-**Reimpl** (2026-08-10): policy engine-side in `engine/runtime/menu/
+**Reimpl** (2026-08-22): policy engine-side in `engine/runtime/menu/
 menu_video.h` (slot table, STARTUP/strips gate, expansion-first resolution;
-`menu_video` ctest), the device leg is `MenuVideoUnderlay` (`godot/src/mnu`)
-drawing under the MenuFrame surface, wired by the menu shell at
-setup/expansion-change/in-game boundaries. Godot has no Bink decoder, so
-playback rides a converted `.ogv` sibling per movie (`onimport menu-movies`);
-a selected movie without a sibling stays empty exactly like retail's
-missing-file skip, counted via `get_unconverted_count()`.
+`menu_video` ctest), with the portable video-only BIKi decoder in
+`engine/formats/bink`. The `MenuVideoUnderlay` device leg (`godot/src/mnu`)
+opens the selected `.bik` directly, uploads decoded RGBA frames to a Godot
+texture, draws under the MenuFrame surface, and keeps hidden slots advancing.
+It is wired by the menu shell at setup/expansion-change/in-game boundaries;
+open/decode failures leave the selected slot empty and are counted via
+`get_failed_count()`. The old `.bik` -> `.ogv` importer workaround and its
+FFmpeg dependency are gone. This first slice covers the shipped video-only
+`main.bik`, `header.bik`, and `footer.bik`; Bink audio and the separate
+blocking intro path remain deferred.
 
 ## The custom-draw appearance hook (event 1) `[orig: CUIElement_DispatchCustomDrawEvent @ 0x647f10]` (grilled 2026-08-10)
 

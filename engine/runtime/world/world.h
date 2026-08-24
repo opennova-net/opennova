@@ -15,9 +15,11 @@
 #include <vector>
 
 #include "audio/sound_profile.h"
+#include "io/crt_rand.h"
 #include "terrain_query/surface_type_map.h"
 #include "world/destruction.h"
 #include "world/entity.h"
+#include "world/match.h"
 #include "world/entity_commands.h"
 #include "world/entity_registry.h"
 #include "world/net_command_sink.h"
@@ -27,6 +29,7 @@
 #include "world/water_cross.h"
 #include "world/fire_sound.h"
 #include "world/sound_emitter_mailbox.h"
+#include "world/spawn_select.h"
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
 #include "world/ammo_table.h"
@@ -36,6 +39,7 @@
 #include "world/vehicle_motor.h"
 #include "world/waypoint_track.h"
 #include "world/weapon_table.h"
+#include "world/zone_capture.h"
 #include "world/zone_chain.h"
 
 namespace opennova::terrain {
@@ -330,6 +334,14 @@ class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer s
 class World {
 public:
     World() : commands(*this) {}
+    // World has stable identity: commands binds this object, net defaults to
+    // its local_sink member, and registered systems retain mission-lifetime
+    // relationships. Memberwise copy/move would preserve pointers/references
+    // into the source World and create a split simulation.
+    World(const World &) = delete;
+    World &operator=(const World &) = delete;
+    World(World &&) = delete;
+    World &operator=(World &&) = delete;
 
     EntityRegistry registry;
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)
@@ -352,6 +364,14 @@ public:
     static constexpr uint32_t kMissionPrng16Seed = 0x1A10101Au;
     uint32_t prng16_state = kMissionPrng16Seed;
     uint16_t next_prng16() noexcept;
+    // The simulation's owner of the CRT rand() recurrence retail draws from
+    // (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
+    // @0x51718A, ...). Retail seeds the process stream from the clock once at
+    // host start and never at mission start; the host seeds this owner from
+    // its session seed in create_session, so a session's draw sequence is
+    // reproducible where retail's is not (D-NET-115). Snapshotted with
+    // prng16_state. [orig: CRT rand @0x76B00A; srand @0x51C1AA]
+    io::CrtRand crt_rand;
     CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
                                          // the host owns the mission CollisionWorld.
     IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
@@ -377,6 +397,11 @@ public:
     bool projectile_authority = true;
     bool fat_bullets = false;
     bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
+    // Multiplayer blast damage to Building ItemDefs is disabled unless the
+    // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
+    // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
+    // @0x4E682E..0x4E6860]
+    bool destroy_buildings = false;
     // An embedding adapter may own the local player's borrowed UseGun slot so
     // it can supply trigger/reload/scope input and drain presentation events.
     // Standalone World users keep the default global mounted-slot pump.
@@ -471,8 +496,9 @@ public:
     // snapshot (retail's caches live beside the renderer, not the entity pools).
     ScarCache scars;
 
-    // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
-    RoundEndState round_end;
+    // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
+    // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.
+    Match match;
     MissionKillStats kill_stats;
 
     // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
@@ -504,6 +530,19 @@ public:
     // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
     // from Game_StartMission; net-re §5.61]
     ZoneChain zone_chain;
+    // The capture request/active transaction is mission state, not host-wire
+    // scratch. Keeping it beside the chain prevents a second lifecycle or a
+    // static server singleton. [orig: CaptureCtx_Reset @0x53BD00]
+    ZoneCaptureState zone_capture_state;
+    // Mission-built deploy wave groups. Keeping them beside spawn selection
+    // gives immediate picks and timed releases one lifecycle and no host-only
+    // shadow table. [orig: SpawnWaveList_BuildFromMission @0x52A920]
+    SpawnWaveList spawn_waves;
+    // One mission-global round-robin shared by default spawn selection and a
+    // picked numbered zone's type-6007 scatter choices.
+    // [orig: g_spawn_cycle_counter @0x24C10D0;
+    // Server_PositionPlayerForSpawn @0x50CF60]
+    uint32_t spawn_cycle_counter = 0;
 
     // The player waypoint track (built by mission promotion from the blue-route
     // nav channel; empty when the mission authors none). Advanced per logic tick
@@ -612,13 +651,24 @@ public:
     bool script_may_advance() const {
         return cached.humans > 0 || cached.wac_ticks == 0;
     }
+    // Authoritative whole-second pre-round phase. Networking and the frame
+    // clock remain live while World gameplay systems are frozen; phase-0 0x0A
+    // projects its low byte to each client. Joiners retain the same field from
+    // that wire projection, giving host and client one phase predicate.
+    // [orig: g_preround_delay_timer @0xC8D824; seed @0x516C8D;
+    // decrement @0x51DC20..0x51DC33; writer @0x4FF82D]
+    uint32_t preround_delay_seconds = 0;
 
     void add_system(ISystem *sys);
     void load_systems();       // calls on_load for each
 
-    // One authoritative logic tick: cache transient state, tick all systems,
-    // advance the tick counter (post-execution, faithful to WacScript_AdvanceTick @0x4f81d3).
-    void run_logic_tick(bool is_authority = true, bool pre_mission = false);
+    // One frame-clock tick. Gameplay runs every system; PreMission runs only
+    // the authored BMS pre-pass; PreRound advances shared clocks but freezes
+    // WAC/entities/projectiles. The explicit phase replaces the old boolean
+    // pre-mission seam so no caller can mistake a pre-round freeze for a script
+    // initialization pass.
+    void run_logic_tick(bool is_authority = true,
+                        TickPhase phase = TickPhase::Gameplay);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed
@@ -638,17 +688,23 @@ public:
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the
-    // registry + vars + named WAC values + env + clock + stable local-player
-    // ownership; per-tick health/proximity/human-count caches reset and systems
-    // re-init on restore.
+    // registry + vars + named WAC values + env + clock + match + stable
+    // local-player ownership; per-tick health/proximity/human-count caches reset
+    // and systems re-init on restore.
     struct Snapshot {
         EntityRegistry registry;
         ScriptVarStore vars;
         WacNamedValues wac_values;
         EnvState env;
         EnvNetworkState network_env;
+        Match match;
+        SpawnWaveList spawn_waves;
+        ZoneCaptureState zone_capture_state;
+        uint32_t spawn_cycle_counter = 0;
         uint32_t logic_tick = 0;
+        uint32_t preround_delay_seconds = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
+        uint32_t crt_rand_state = 1;
         EntityHandle local_player;
     };
     Snapshot snapshot() const;

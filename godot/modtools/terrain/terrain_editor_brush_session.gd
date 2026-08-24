@@ -119,6 +119,35 @@ func end_brush_drag(current_image: Image) -> Dictionary:
 	return result
 
 
+## Programmatic history control, for edits that are not a drag.
+##
+## begin_brush_drag/end_brush_drag above are the INTERACTIVE path and also flip brush_active and
+## the stroke-tracking state, which a bulk edit has no business touching. These three are the
+## same TerrainEditHistory begin/expand/end, exposed so a caller that rewrites an atlas image
+## wholesale still lands exactly ONE undo entry.
+##
+## All three are load-bearing: end_stroke SILENTLY commits nothing when no rect was ever
+## expanded (it falls through to cancel_stroke), so skipping the middle call loses the undo
+## entry with no error anywhere.
+func begin_history_stroke(kind: int, source_image: Image) -> void:
+	if kind >= 0 and source_image != null:
+		_history.begin_stroke(kind, source_image)
+
+
+func expand_history_rect(rect: Rect2i) -> void:
+	_history.expand_rect(rect, HM_SIZE)
+
+
+func end_history_stroke(current_image: Image) -> bool:
+	if not _history.has_pending():
+		return false
+	if current_image == null:
+		_history.cancel_stroke()
+		return false
+	_history.end_stroke(current_image)
+	return true
+
+
 # `data` is the TerrainData that owns the editable height/colour/blend buffers;
 # every tool runs its C++ kernel through it. The brush is skipped when data is null
 # (production always passes the loaded data; only some unit tests may omit it).

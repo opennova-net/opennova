@@ -69,7 +69,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | WAC pipeline (`engine/formats/wac` front end + `engine/runtime/wac` compiler/VM) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
 | `player_toggle_vehicle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
 | `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u gate, score `horiz + d3/512`, enemy-occupant reject, LOS-last; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
-| `EntityCommands::find_best_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 weights re-verified (ctrl 0x2000 < gun 0x20000 < sitex 0x200000) | **matching** (child walk = D-AI-11 g) |
+| `find_best_vehicle_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 exact root/ground-child walk and weights (ctrl 0x2000 < gun 0x20000 < root sitex 0x200000 < child sitex 0x2000000) | **matching** (canonical world operation; D-AI-11 g closed) |
 | `presnap_vehicle_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
 | `Simulation::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
 | live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (joiner C2S 0x26/0x27 + requester-local 0x0A relationship confirmation landed; generic seats and the full matrix basis remain open) |
@@ -366,11 +366,15 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 
 ## 5. Per-system equivalence verdict (2026-06-10, infantry port complete)
 
-- **Round-outcome loop** (§20, 2026-07-16 session 6: `Server_ProcessRoundEnd @ 0x5164f0`
-  → `World::process_round_end`; WAC win/lose + the named-value builtins; the BMS win
-  actions; the SP auto-lose; the kill tallies; the SP end presentation): **MATCHING at
-  the SP core** with the D-AI-10 stand-ins (counts-only tallies, shell end screens, MP
-  legs stubbed). Evidence: `wac_behavior` (outcome builtins + the verbatim 04TR else-if
+- **Round-outcome loop** (§20, 2026-07-16 session 6; multiplayer completion
+  2026-08-22: `Server_ProcessRoundEnd @ 0x5164f0` →
+  `World::process_round_end`; `Server_CheckWinConditions @0x51ad40` →
+  `world::Match`; WAC win/lose + the named-value builtins; the BMS win actions;
+  the SP auto-lose; kill tallies; the SP end presentation): **MATCHING at the
+  shared outcome core**. All retail multiplayer game-type arms and co-op's
+  script-owned result now converge through the same latch; D-AI-10 retains only
+  its explicitly listed SP scoring/presentation residuals. Evidence:
+  `match`, `wac_behavior` (outcome builtins + the verbatim 04TR else-if
   block), `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution),
   and the in-game `round_outcome_probe.gd` 04TR PASS (real-round teammate kill →
   bluekills → Lose(1) → the retail KILLEDBLUE string → round end winner 2 → the
@@ -812,10 +816,12 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 
 ### 9.2 Port (engine/runtime/world + engine/runtime/mission) and tracked deviations
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
-rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_boarding_command,
-mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0;
-both the command mount and authoritative attach-apply paths run `presnap_vehicle_attach_heading`
-before writing the relationship. The request-time seat yaw is copied into `Entity.yaw` and the
+rewinds mounts for free); canonical `find_best_vehicle_seat`, `attach_to_vehicle_seat`, and
+`entity_detach_from_vehicle` operations plus `EntityCommands::{mount, mount_boarding_command,
+mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0.
+Wire, command, USE, and mobile-deployment entry points share those relationship operations;
+the former duplicate command-side write/detach blocks were removed. Every attach runs
+`presnap_vehicle_attach_heading` before writing the relationship. The request-time seat yaw is copied into `Entity.yaw` and the
 occupant's `AiEntity.heading`; for the local player it also initializes
 `InfantryState.target_heading`. `Simulation` owns an additional binding-only
 `PlayerInput.look_heading` latch that retail does not need because its input and entity yaw are one
@@ -1894,7 +1900,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
 | Contact force + type dispatch (`collision_contact_force`) | MATCHING (core paths; D-COL-2/4/5 tails) | `[orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]`; `collision` ctest push-out/hurt/zones |
 | World raycast + ground probes (`CollisionWorld::raycast_ground`) | MATCHING (vertical; D-COL-7 terrain leg) | `[orig: raycast_entity_collision @ 0x413760; Entity_RaycastGroundHeight @ 0x4142c0 / ...AndObject @ 0x414320]` |
 | Per-tick proximity tables + candidate slices | MATCHING (structural) | `[orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 / _Pool01 @ 0x4b9340 / FromPools @ 0x4b8eb0]` |
-| The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; the CL climb legs ported §30; deferrals D-COL-6/8) | `[orig: collision resolver @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
+| The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; the CL climb legs and CT contact stream ported; deferral D-COL-8) | `[orig: collision resolver @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
 | Blink boxes -> indoors | MATCHING | `[orig: @ 0x4aef90 / @ 0x4aea68-0x4aeae8 / Entity_BuildProximityList @ 0x4b3dc0]`; `collision` ctest blink cases |
 | Projectile per-section callback matrices | MATCHING for non-organic effective LOD-0 ordinary/spinner PANM and for pool-0 person current-pose skeletal spheres; camera-derived generic modes remain D-COL-10 | `[orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; Physics_RaycastAgainstBoneSections @ 0x4e4670; BoneCallback_Generic @ 0x4e26d0; BoneCallback_org0_Bone @ 0x4e34b0]`; strict COBJ ordinal providers, generic shared-DWORD PANM vs per-entity organic sim pose, one final-world composition; native + GUT source/clock/ordinal/person cases |
 | Armory/vehicle loadout-zone gates | MATCHING (read-only grill) | `[orig: Input_HandleActionBinding @ 0x49b83d case 218]`; menu side in [menu-re.md](../mnu/menu-re.md) §In-game armory |
@@ -2098,7 +2104,16 @@ D-INF-10/§22):
    hard-sets aimHeading/targetHeading/Yaw/bodyHeading, bodyPitch = frame pitch,
    +0x2C bit 4 disarmed, the 0.0625u facing press (sincos·4096, `<<12>>22`) plus
    the `(anchor-pos+32)>>6` X/Y chase — PORTED 2026-08-15, §30 (the earlier
-   "24576*sincos>>22 facing offset" gloss conflated the extraction pull-back);
+   "24576*sincos>>22 facing offset" gloss conflated the extraction pull-back).
+   The resolver's player predicate is the class bit at every physics leg
+   (`Flags & 0x100` @ 0x4b2cd9 / @ 0x4b2f7c / @ 0x4b3271 / @ 0x4b33aa /
+   @ 0x4b3c78) — local and remote bodies alike; only the local side-writes add
+   `entity == g_local_player_entity`: the blink mirror (@ 0x4b2d39 / @ 0x4b34ce),
+   the `g_LocalPlayerLookYaw` drag (@ 0x4b33ca, so a remote body's heading
+   eases without touching the local mirror) and the pitch restore (@ 0x4b3cdc /
+   @ 0x4b3cfe). The port's `is_player_class` argument is that flag bit at all
+   three motor call sites since 2026-08-24 (the local motor used to pass its
+   local-player bit, hiding the ladder legs from a listen host's remote bodies);
    0x4 -> Flags 0x400000
    (armory zone); 0x400 -> Flags 0x800 (vehicle-loadout zone); 0x800 -> the
    `+0x2c` aux 0x40 latch (CF/type 13, D-COL-9); 0x10 blink apply —
@@ -2213,10 +2228,10 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
-| D-COL-5 | PORTED 2026-08-15 (§30): entry gate + anchor snap/bump, recontact mask 0x1 + the 2-point capsule, the per-tick alignment chase, states 32–35 selection (org2 every-tick override; org1 33/35 select + congestion hold), gravity suppression + horizontal-root zeroing, the ±120° view clamp, the arms lock, the side/back dismounts, the on-ladder jump push, the grounded bottom dismount, the exit push + pitch restore, and the org1 `Flags 0x80` Z-chase gravity variant. Evidence: `collision` ctest (entry/recontact/exit trio) + `infantry` ctest (climb cycle, bottom exit + jump-off, org1 hold/top/0x80) | the same legs `@ 0x4b3245-0x4b3495 / 0x4b3c5c-0x4b3d69 / 0x4b7484-0x4b76d8 / 0x4b7f0c / 0x4b7fba-0x4b8019 / 0x4bf6c1-0x4bf6e5 / 0x4bf917-0x4bfad8` | residuals: the AI move-order WRITER (aiRuntime 0x400 entry orders, `attachParent==self` + `+0x2FC/+0x300` X/Y direct-move chase, MoveOrder 0x100/0x200 AI bump variants) rides the AI-order slice — the org1 legs are dormant until it lands; the carried/parachute halves of the shared 0x100060/0x100020 gates ride their slices; an authority does not resolve wire-snapped remote players, so a remote climber's authority-side anim derivation shows gait states (MP display residual). The earlier "platform/seat/deck carry" description was a terminology error corrected from the Super OED manual |
-| D-COL-6 | CT Change Team Box touch (0x200) is detected but not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` consumes the CT touch for capture/team-change requests | zone capture rides its own 1 Hz radius path today (zone_capture.cpp), so authored CT shape and touch timing are ignored; reconcile when contact-driven requests land |
+| D-COL-5 | PORTED 2026-08-15 (§30): entry gate + anchor snap/bump, recontact mask 0x1 + the 2-point capsule, the per-tick alignment chase, states 32–35 selection (org2 every-tick override; org1 33/35 select + congestion hold), gravity suppression + horizontal-root zeroing, the ±120° view clamp, the arms lock, the side/back dismounts, the on-ladder jump push, the grounded bottom dismount, the exit push + pitch restore, and the org1 `Flags 0x80` Z-chase gravity variant. Evidence: `collision` ctest (entry/recontact/exit trio) + `infantry` ctest (climb cycle, bottom exit + jump-off, org1 hold/top/0x80) | the same legs `@ 0x4b3245-0x4b3495 / 0x4b3c5c-0x4b3d69 / 0x4b7484-0x4b76d8 / 0x4b7f0c / 0x4b7fba-0x4b8019 / 0x4bf6c1-0x4bf6e5 / 0x4bf917-0x4bfad8` | residuals: the AI move-order WRITER (aiRuntime 0x400 entry orders, `attachParent==self` + `+0x2FC/+0x300` X/Y direct-move chase, MoveOrder 0x100/0x200 AI bump variants) rides the AI-order slice — the org1 legs are dormant until it lands; the carried/parachute halves of the shared 0x100060/0x100020 gates ride their slices; the authority now resolves a snapshot-owned remote player's collision tail, but `remote_player_body_anim` does not yet apply org2's every-tick climb-state override (MP display residual). The earlier "platform/seat/deck carry" description was a terminology error corrected from the Super OED manual |
+| D-COL-6 | **FIXED 2026-08-23:** authority pass-0 type-10 contacts are published as exact source/trigger pairs by `CollisionWorld::resolve_entity`; snapshot-owned remote org2 bodies run the same collision tail; `zone_capture_contact_tick` drains the stream into request/presence state with no MoveOrder or radius fallback | `Entity_ComputeBoneCollisionForce @0x4AE150` sets 0x200 at `@0x4AEB7B`; resolver callback gate `@0x4B31DD..0x4B3238`; `Server_OnPlayerTouchCaptureZone @0x500BA0` | Pinned by `collision_test` (authority/dedupe), `infantry_test` (stationary remote body producer), and `zone_chain_test` (authored narrow CT box vs broad gameplay radius) |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
-| D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the CD 0x20 door-section vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | CD containment and its section mask are detected, but doors/lifts remain operationally inert; needs the animated-object callback plus Score/net + sound + destruction hooks |
+| D-COL-8 | run-over kill / crush sound / walk-over-body sound / non-flag attrib-1 waypoint branches + the attrib-2 collision callback / the CD 0x20 door-section vtbl callback / the blocked-push AI latch (pad_368[1]) not ported; the shared ItemDef branch order and the exact attrib-1 flag-family contact producer are ported (2026-08-23); the resolver's player predicate is the class bit (`Flags & 0x100`) at every physics leg for local and remote bodies alike, the local-entity compare reserved for the side-writes (2026-08-24) | steps 4/5/6 above | CD containment and its section mask are detected, but doors/lifts remain operationally inert; needs the animated-object callback plus Score/net + sound + destruction hooks |
 | D-COL-9 | mounted-organic cadence and force suppression PORTED 2026-07-20: a live mounted source calls the resolver every eight salted ticks and still processes contact/flag callbacks, but skips model push accumulation when it has a live modeled parent or `Flags & 0x40`; the MoveOrder-0x100 bump and the `+0x2c` bit-4 pitch-restore latch landed with the ladder slice (§30) | `[orig: Entity_UpdateInfantryAI @ 0x4bf5a5-0x4bf5c6]`; `[orig: movement collision resolver @ 0x4b2be0-0x4b2d3f]`; force gates `@ 0x4b3045-0x4b30af` / `@ 0x4b3658-0x4b36b9` | mounted contact phase is live and no longer receives ordinary mover push; the step-up/auxiliary tails landed with the D-COL-5 port (§30) |
 | D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `ObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
 | D-COL-11 | `LiveRound` has no BB/indoors state; projectile terrain arbitration only has the ammo-flag bypass | retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`, refresh call `@ 0x4e9f21`, terrain gate `@ 0x413785`) | a shot inside an underground/interior BB can falsely hit the terrain heightfield. Port after the projectile probe radius/state lifetime is pinned; do not guess from the player’s 0.5 m BB sphere |
@@ -3864,7 +3879,8 @@ Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 0xC6EAE8`, `bluekills → 0xC6EAF8`, `GameOver → 0xC6EAD8`, ...) was wrong; the
 resolver decompile pins the true anchors (name @ +0, type @ +0x10, value @ +0x14).
 Port: `Builtin` ids 8-13 in `engine/runtime/wac` (`bluekills/greenkills/humans/GameOver/
-WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` / `round_end`.
+WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` /
+`World::match.outcome()`.
 The writable `accuracyspread` row is also ported: case-insensitive compilation
 resolves it as a named engine-value lvalue, VM reads/writes
 `World::wac_values.accuracy_spread`, and the infantry aim pass consumes that same
@@ -3892,10 +3908,14 @@ misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
 
 Team space matches the round-end codes: 0 = green, 1 = blue, 2+ = enemy. The
 epilog count lines sum the pairs (TEAMUNITS = `0xC846F0 + 0xC846C0`, etc.).
-Port: `MissionKillStats` counts only (points/difficulty unmodeled — D-AI-10),
+Port: `MissionKillStats` intentionally remains the count-only WAC/epilog view,
 tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
 `!world.mp_session` because our SP-as-listen-server always runs
-`ctx.is_in_session = 1`.
+`ctx.is_in_session = 1`. Independently, the same death enters `world::Match`'s
+42-field player/team records with the signed `score.ini` event values used by
+every competitive game type, co-op, and the end-round board. The SP epilog's difficulty-scaled
+score sums remain unmodeled. `[orig: GameEvent_ProcessScoring @0x52F550;
+CPlayerStats_RecordEvent @0x52C8E0]`
 
 ### 20.5 The outcome state + the client commit (S2C 0x1D)
 
@@ -3918,6 +3938,13 @@ authority [orig: @ 0x51d9cc] → mission metrics + `g_mission_exit_reason = 3`
 (4 when replay-chaining); `Client_ProcessNetworkFrame` drains the peer copy
 [orig: @ 0x42c3d1] → `reason = 4` → the "Game Loop" scene. SP never drains it —
 the epilog owns the SP exit (§20.6).
+
+Port (completed 2026-08-22): `World::process_round_end` latches one immutable
+`MatchResult`; the authority pushes 0x61 + the exact recipient-specific 0x1D,
+serves the board through requester-only 200-byte 0x56 chunks, and drains the
+2790-tick MP linger. The joiner starts and continues the 0x2B pull loop
+automatically. The full producer schema and its remaining presentation-only
+residue are tracked in net-re §5.68.
 
 ### 20.6 The SP end presentation
 
@@ -3991,7 +4018,77 @@ Two load/response-time resolutions the probe forced out:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-10 | Round-outcome stand-ins: (a) kill tallies are COUNTS only (no def+404 points, no difficulty scaling, no per-type enemy split, no human-player bucket); (b) the SP end presentation is a shell overlay — no flyaway cine / `.cne` playback, no score count-up lines, no saved-game list, no end-music track switch, a 3 s fade lead-in stands in for the cine fades, ESC/300 s stand in for the key/18600-tick exits; (c) the MP legs are cited stubs (0x61/0x1D wire, slot 6→7, `SetGameState(11)`, the 2790 linger, the round-win counters, the scoreboard block, `Server_CheckWinConditions` MP conditions); (d) `sub_5280B0` music-park and the `@ 0x3245B08` end-track selector are noted, unported; (e) the SP-gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @ 0x5164f0 flow + the §20.6 cines | SP outcome loop works end-to-end (probe PASS); the omissions are presentation/MP depth, each cited inline for the follow-up slices | 
+| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, saved-game list, or end-music switch; (d) `sub_5280B0` music-park and the `@0x3245B08` end-track selector remain unported; (e) the SP gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
+
+**D-AI-10 update (2026-08-22, superseding the TDM/A&S-only wording above):**
+`world::Match` now implements every branch of `Server_CheckWinConditions
+@0x51AD40`: DM/TDM, solo/team KOTH, S&D/A&D, CTF, FlagBall, Flag Me, A&S/C&C,
+plus the universal all-zones-owned check; co-op remains intentionally
+WAC/BMS-owned. It also owns the recovered per-mode `sub_52C850 @0x52C850`
+primary score, flag carry/pickup/save/capture/return transitions, demolition
+target scoring, live 0x16 team projection, and authored objective census.
+Therefore residual (b) no longer applies to these retail game-mode producers.
+The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
+ordinary combat event producer not enumerated here.
+
+The hill hold itself is accumulated by the per-second team pass: a team with at
+least one alive holder in the volume gains one tick, an empty team loses
+`koth_delta` per second clamped at zero, and the same pass folds each in-game
+player's slot dword 23595 (the objective-ticks counter) into the team row's
++328 accumulator. `[orig: Game_AccumulateTeamScores @0x508DA0..0x508DC2,
+@0x508DDE..0x508E19; koth_delta = g_koth_delta @0x24D2148]`
+
+The co-op family is now composed through its authored result producers at the
+host boundary instead of being inferred from a direct latch test. Stock Co-op
+executes WAC `Win` on the VM's 62-tick cadence; Objective Co-op dispatches BMS
+`RedWin` on the normal 16-tick event pass. Both are observed entering
+`Server_ProcessRoundEnd`, emitting 0x61/0x1D, and consuming their originating
+tick from the 2790-tick linger exactly like retail. `[orig: WacAction_Win
+@0x4ED4A0; EventAction_Dispatch RedWin @0x454495;
+Server_TickUpdate @0x51DA04; Server_ProcessRoundEnd @0x5164F0]`
+
+KOTH/TKOTH now retains the authored mission producer as well as the decision
+branch. BMS type 6006 copies `wp_distance << 16` (or default `0x8000`) into
+entity+0; the 1 Hz proximity pass compares players against that exact hill
+radius. The pool-3 S2C 0x20 load writer and client handler carry the same raw
+dword under flag 0x02, so a joining replica reconstructs the authored volume
+without a mode-only side channel. `[orig: Entity_SpawnFromBMSRecord
+@0x40F157..0x40F173; Server_UpdateCaptureZoneProximity
+@0x5089E8..0x508A68; serialize_entity_pool_to_packet
+@0x503593..0x5035A9; NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
+
+S&D/A&D demolition is connected to ordinary combat rather than a script-only
+score hook. A lethal kinetic or blast hit on an ItemDef-attrib `0x8000` target
+stages the shared `RoundDeath`; host death routing records scorer event 11
+(raw field 14 plus the score-table delta) before the 1 Hz authored-census win
+check, and the result enters the same 0x61/0x1D round transaction. The composed
+native regression covers both game types from the death boundary through the
+wire, while the projectile/destruction regressions pin both upstream lethal
+producers. `[orig: Entity_ApplyWeaponDamage @0x4E6820;
+GameEvent_ProcessScoring @0x52F550; Server_CheckWinConditions @0x51B18B]`
+
+Flag Me retains one retail defect rather than silently becoming a private
+OpenNova ruleset. Its selector is 12, but the FIELD loader, event scorer, and
+session-status value copy each accept only rows `<=11`; captures still run the
+ordinary event/reset transaction, while no player/team stat changes and the
+MaxScore winner arm is consequently unreachable through ordinary play. The
+shared `game_type::score_table_index` pins that fact for all three consumers.
+`[orig: load_scoring_table_for_game_type @0x52D300;
+GameEvent_ProcessScoring @0x52F550; Server_BuildStatusReport @0x530A60;
+Server_CheckWinConditions @0x51AD40]`
+
+C&C keeps both halves of its retail objective vocabulary. Flag and bay contact
+is item-ID driven, not game-type gated, so C&C can carry/capture/reset authored
+flags while numbered-zone takeovers remain its primary score and win metric.
+The authority path now consumes the resolver's exact successful first-pass
+contact stream; the former gameplay-side sphere-overlap scan is deleted.
+`MoveCB` must be set and `Powerup` clear, and those callback targets suppress
+ordinary solid push. The sole retail callsite then repeats the source
+`MoveOrder & 8`, player-class (`Flags & 0x100`), and not-dead gates before
+dispatching flag/bay item IDs. `[orig: Entity_MovementCollisionResolver
+@0x4B2F90..0x4B2FF5; sole handler xref @0x4B2FF5;
+Entity_ProcessWaypointInteraction @0x4AD820;
+GameType_CreateDefaultSettings @0x52DD00]`
 
 `D-AI-6` update (2026-07-20): the aim-error global `@ 0xC6EAE8` is the WAC
 named variable **accuracyspread** — its config source is mission scripts (the
@@ -4253,8 +4350,11 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 1. The org2 parachute physics half `@ 0x4b7b18-0x4b7c8d` (auto-deploy at
    vel −14336 + aux 0x10, chute sounds/flap words, the chute brake
    `vel += 0x29C` under −0x1C00) — read 2026-08-06, still unported; rides
-   D-INF-20. The WATER half is §29.1 (witnessed + replica-ported; the local
-   motor's port rides D-INF-3).
+   D-INF-20. The WATER half is §29.1 (witnessed; replica-ported AND, 2026-08-24,
+   ported in the LOCAL motors — `AiSystem::infantry_water_block` /
+   `player_water_block` in world/infantry_water.cpp — with the swim selection
+   36-40; the wash 27/28, scope auto-untoggle and resolver swim-force damping
+   remain on D-INF-3).
 2. The mounted ±120° look clamp and true per-tick transform for generic non-UseGun seats remain;
    the host-fed seat frame synchronizes body/legs/pitch/roll while preserving the local look.
    UseGun root position now follows the live control-posed userpoint, but its full matrix basis is
@@ -5169,7 +5269,7 @@ the FFI structs.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). New adjacent residual (2026-08-15, needs its own grill before changing): retail's bullet person-prox leg emits tag 23 for non-local persons and tag 2 for the LOCAL player (`Projectile_HandleTerrainImpact_0 @0x4e98f0`: `@0x4e9ada` / `@0x4e9aa3`) while ours emits 2 for all person collisions. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
+| D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
@@ -5189,6 +5289,7 @@ the FFI structs.
 | D-ITEM-18 | UnitType 3 spawns normal section pieces and installs an explicit `PiecePhysics` mode, but the shared production pass deliberately skips that mode rather than substituting Generic. Retail runs the specialized main-entity `DeathPiece_PhysicsUpdate` callback | `DeathPiece_PhysicsUpdate @ 0x48f500`: distinct air/water lateral motion, slope force, dual-blast, and landing legs | the unitType-3 husk does not receive its retail main-entity motion/presentation; the explicit sentinel prevents a falsely "matching" generic settle |
 | D-ITEM-19 | **FIXED 2026-08-15.** Collision resolution retains exact case-insensitive `DEAD` points from the first husk only; UnitType 11 transforms each through full Euler and emits one family-0 `Effect_ShockWaterBrdg` at raw water height, first transition only, with no origin fallback | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | `destruction_test::test_bridge_dead_points_emit_water_shocks` pins count, full-pose positions, zero water, first-transition gating, no fallback, and non-UnitType-11 silence; `nova_simulation_test` pins real 3DI user-point axes |
 | D-ITEM-20 | **FIXED 2026-07-22.** Building Static/collapse dispatch gates on `ItemDeathTraits::husk_model_loaded`, fed by successful live huskFinal/husk `ObjectData` resolution and kept separate from authored `has_husk` | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | missing/corrupt husk assets receive the matched-row death flags, but no pieces, Static motion, or collapse sound; valid first-stage and final-only models both open the gate |
+| D-ITEM-21 | **FIXED 2026-08-22 (grill).** The bullet person impact-effect leg. Correspondence first, because the dispatch is easy to misread: bullets reach a person ONLY through the bone-section pass. `Entity_BuildProximityLists_Pool01` fills `g_DynProx*` from pool 1 `@0x4b9389` and `g_PersonProx*` from pool 0 `@0x4b93eb`; `Projectile_RaycastProximitySlots` walks `g_StaticProx` for slotType 2 and `g_DynProx` for slotType 1, reaching `g_PersonProx` only on its DEFAULT leg `@0x4e57e7`, which the bullet dispatch never calls (it passes 2 `@0x4ea4f5` and 1 `@0x4ea535` only). Pool 0 is reached solely via `Physics_RaycastAgainstProximityList @0x4ea5bf` → `Physics_RaycastAgainstBoneSections @0x4e4670` (sole caller `@0x4e4c59`) → dispatch case 3 → `Projectile_HandleTerrainImpact_0 @0x4e98f0`, an auto-namer misnomer that is in fact the person-impact handler. Cases 1/2 therefore cannot produce a person hit, and the bone-bounds call inside `Projectile_HandleEntityImpact @0x4e9672` is a different thing (`Entity_ComputeBoneCollisionBounds`, gated `weaponType==15 && itemDef+92==5`). Ported from that handler: an already-dead victim (`hitEntity+36 & 2`) presents NOTHING; the LOCAL player takes tag 2 'player'; every other person takes tag 23 'flesh' but ONLY IF the victim's group differs from the local player's OR the victim is below half its items.def hp — a same-group victim at or above half health shows no impact effect at all (squad declutter). The two tag legs are mutually exclusive, not additive. Ours previously emitted tag 2 for every person collision | dead gate `@0x4e9920`/`@0x4e994f`; local compare `@0x4e9a55`, push 2 `@0x4e9aa1`; group WORDs +0x11C `@0x4e9aac`/`@0x4e9ab3`; healthMax WORD itemDef+0x17C halved by `sar dx,1` `@0x4e9abf`..`@0x4e9ac6`; signed Health WORD +0x11E compared with `jge` skipping the spawn `@0x4e9ac9`/`@0x4e9ad0`; push 17h `@0x4e9ad7` | shooting an enemy now plays the flesh row (`imp_bullet_flesh`) instead of the player row, and a healthy squad-mate no longer sprays. `projectile_combat::test_person_impact_tag_splits_on_identity_and_squad_health` pins all five branches; `npruntime_round_sim` and `nova_simulation_test` pin the non-local sound row. RESIDUAL: the ADDITIVE body-armor leg `@0x4e99f8`..`@0x4e9a38` (tag 24 'bodyarmor' when the hit zone `hitContext+0x80` is 0..4 UNSIGNED and `victim+0x2C & 8`, the armor carry bit from weapon def `flags & 0x1000` — `WeaponSlotTable_LoadAllFromDefs @0x5415ac`) is UNPORTED: `WeaponInventory::carry_flags` exists but has no per-entity mirror, so the victim's bit is unreadable. Needs an `Entity` field plus a host/wire feed |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
 
@@ -6364,6 +6465,7 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|
+| 0x1 | `kEntityFlagCarried` | carried object hidden while attached to its carrier (the flag/carryable pickup family); distinct from 0x40, which marks the CARRIER/mounted body | `[orig: Entity_AttachToVehicle @ 0x43C130]`; the Match flag producer (§15.5 D-COL-8 flag leg) |
 | 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
 | 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
@@ -6472,6 +6574,20 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   ride the cross-cutting sound/FX slice (open for local rows too — §22.5).
   `Env` source: the mission water plane (`World::EnvState.water_z`, 0 = no
   water = channel off with a self-healing `~0x208000` clear).
+  **2026-08-24 — the LOCAL motors are ported too** (world/infantry_water.cpp):
+  org1 verbatim; org2 with the LOCAL bob arm (`-1225 - sin·(-1224) + min(cb,0)`
+  — the negated amplitude is its own global `dbl_7C9BC8`) and the look-pitch
+  dive/rise term; the swim selection 36/37/38/39/40 (kong 148422-148452)
+  REPLACES the land commit as retail's overwrite semantics require of our
+  crossfade channel (one commit per selection pass — a double stamp wedges the
+  blend and lets the stale source's root motion self-propel the swimmer). The
+  bob phase pair is the LITERAL `1/256 · 3.1` (exe bytes @0x7C6950/@0x7C9BD0),
+  not pi/256 — corrected from the earlier port. Authored swim root velocity:
+  C4SwimfG.bad = constant 0.096 u/frame (2.88 u/s); a played retail session
+  measures ~2.30 u/s median forward — no swim scale exists at the root fold
+  (`@0x4b7cef`, 1x; root zeroes only while airborne 0x2000), so the residual
+  is measurement noise or an unwitnessed projection: OPEN, needs a controlled
+  straight-line comparison.
 
 ### 29.2 The deck-ride (groundEntity pose-follow)
 
@@ -6596,7 +6712,7 @@ write-back seam in `godot/src/simulation/nova_simulation_player.cpp`
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Resolver CL legs (entry gate, snap/bump, recontact, chase, exit + pitch restore) | MATCHING | 3 `collision` ctest cases (`test_ladder_entry_gate_snap_and_chase`, `test_ladder_recontact_inflated_and_relatch`, `test_ladder_exit_push_and_pitch_restore`); 20+ inline citations |
+| Resolver CL legs (entry gate, snap/bump, recontact, chase, exit + pitch restore) | MATCHING | 4 `collision` ctest cases (`test_ladder_entry_gate_snap_and_chase`, `test_ladder_recontact_inflated_and_relatch`, `test_ladder_exit_push_and_pitch_restore`, `test_ladder_class_bit_climber_remote_and_local`); 20+ inline citations. The resolver's player predicate is the class bit at every physics leg `@ 0x4b2cd9 / @ 0x4b2f7c / @ 0x4b3271 / @ 0x4b33aa / @ 0x4b3c78`; only the pitch restore `@ 0x4b3cdc / @ 0x4b3cfe` (and the `g_LocalPlayerLookYaw` / blink mirrors) test the local entity — the remote twin eases its heading and takes the exit push without arming the restore (2026-08-24) |
 | org2 climb block (states 32–34, dismounts, jump-off, bottom exit, gravity/root gates, view clamp) | MATCHING | 2 `infantry` ctest cases (`test_player_ladder_climb_cycle`, `test_player_ladder_bottom_exit_and_jump_off`) |
 | org1 on-ladder legs (congestion hold, press, 33/35 select, the `0x80` Z chase) | MATCHING (dormant in game until the AI-order writer lands) | `infantry` ctest `test_org1_ladder_hold_press_and_top_select` |
 | The arms lock (`Flags 0x100000` → aim overlay bypass) | MATCHING (read-only grill) | `@ 0x4b1cf1` anchors the bit as the LADDER latch; wired via `pose_inputs.h` |
@@ -6694,10 +6810,10 @@ next pre-tick input write cannot undo it
    move target (AI pathing onto ladders/rooftops) — rides the AI-order
    slice; the org1 legs here are live in tests via the latch and dormant in
    game until it lands.
-2. An authority does not resolve wire-snapped remote players, so a remote
-   climber's authority-side anim derivation (`remote_player_body_anim`)
-   shows gait states while the owner climbs — an MP display residual on the
-   D-NET-159 arc.
+2. The authority now runs the shared collision tail for snapshot-owned remote
+   players, including CL latching. `remote_player_body_anim` still lacks org2's
+   every-tick climb-state override, so a remote climber can show gait states —
+   an MP display residual on the D-NET-159 arc.
 3. The parachute/carried halves of the shared gates (the 0x100060 clamp
    legs, 0x100020 lean legs, the chute-cancel `@ 0x4b7b10`) ride D-INF-20 /
    the mount slice.

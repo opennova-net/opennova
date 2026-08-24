@@ -1,6 +1,7 @@
 // Observable projectile consequence tests through RoundSim's public seam:
 // arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -21,8 +22,15 @@ int failures = 0;
         }                                                                              \
     } while (0)
 
-struct Rig {
-    World world;
+// World is large and has stable identity. Keeping it at its final heap address
+// also prevents a function with several lifetime-disjoint rigs from exhausting
+// MSVC's Debug stack frame.
+struct HeapWorldFixture {
+    std::unique_ptr<World> world_owner = std::make_unique<World>();
+    World &world = *world_owner;
+};
+
+struct Rig : HeapWorldFixture {
     EntityHandle shooter;
     EntityHandle target;
 
@@ -83,8 +91,7 @@ struct Rig {
 // projectile ray; every other section is translated far off-axis. This lets the
 // public RoundSim seam exercise the exact retail section/zone code without
 // reaching into the private damage helper.
-struct PosedDamageRig {
-    World world;
+struct PosedDamageRig : HeapWorldFixture {
     CollisionWorld collision;
     EntityHandle shooter;
     EntityHandle target;
@@ -443,7 +450,16 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         r.fire_and_tick();
         CHECK(r.world.round_sim.hits.size() == 1);
         CHECK(r.world.round_sim.hits[0].damage == 1860); // ordinary critical zone: x3
-        CHECK((r.target_entity()->flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0); // cause is not an Entity Flags bit
+        CHECK(r.world.round_sim.deaths.empty());
+    }
+    {
+        PosedDamageRig r(13);
+        r.target_entity()->health = 1000;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.deaths.size() == 1);
+        CHECK((r.world.round_sim.deaths[0].event_flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
     }
 
     // ItemDefAttrib 0x200 selects the retail section-code switch. These four
@@ -456,7 +472,7 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         CHECK(r.world.round_sim.hits.size() == 1);
         CHECK(r.world.round_sim.hits[0].damage == 3720); // 620 * 6.0
         CHECK(r.target_entity()->health == 1280);
-        CHECK((r.target_entity()->flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
     }
 
     // A walk crossing TWO spheres splits the channels: ray[31] keeps the first/
@@ -468,7 +484,7 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
         r.fire_and_tick();
         CHECK(r.world.round_sim.hits.size() == 1);
         CHECK(r.world.round_sim.hits[0].damage == 3720); // seat code 7 via ray[31]
-        CHECK((r.target_entity()->flags & 0x800u) != 0);
+        CHECK((r.target_entity()->flags & 0x800u) == 0);
     }
     // The normal-infantry table keeps reading ray[32] (@0x4ec9bf): final zone 4
     // takes 1.25x even though the primary bone 7 sits in the 1.0x band.
@@ -779,7 +795,14 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     world.round_sim.tick(world, nullptr, &collision);
 
     CHECK(world.round_sim.impacts.size() == 1);
-    CHECK(world.round_sim.impacts[0].effect_tag == 2);
+    // A decoded remote-player proxy is a NON-LOCAL person, so it takes the flesh
+    // row, not the local player's. It carries no registry entity, so retail's
+    // same-group/half-health suppression cannot be evaluated for it and the effect
+    // is emitted unconditionally.
+    // [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — the non-local leg
+    //  @0x4e9aa5, push 17h @0x4e9ad7]
+    CHECK(world.round_sim.impacts[0].effect_tag == 23);
+    CHECK(world.round_sim.impacts[0].present_effect);
     CHECK(to_fixed(world.round_sim.impacts[0].position.x) == hit.position_q16.x);
     CHECK(world.round_sim.hits.empty());
     CHECK(world.round_sim.deaths.empty());
@@ -1462,6 +1485,115 @@ void test_signed_health_subtraction_wraps_at_entity_word() {
     CHECK(r.world.round_sim.deaths.size() == 1);
 }
 
+// The person impact-effect leg. Bullets reach a person only through the
+// bone-section pass, whose handler splits the effect tag on victim identity and
+// then suppresses the non-local row for a healthy squad-mate.
+// [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — dead gate
+//  @0x4e9920/@0x4e994f, local-player compare @0x4e9a55, push 2 @0x4e9aa1,
+//  group WORDs @0x4e9aac/@0x4e9ab3, healthMax `sar dx,1` @0x4e9abf..@0x4e9ac6,
+//  signed Health compare + `jge` skip @0x4e9ac9/@0x4e9ad0, push 17h @0x4e9ad7]
+void test_person_impact_tag_splits_on_identity_and_squad_health() {
+    // 1. The LOCAL player takes tag 2 'player'.
+    {
+        Rig r;
+        r.world.cached.local_player = r.target;
+        // World::tick stamps round_sim.local_player from cached each frame
+        // (world.cpp); these cases drive RoundSim::tick directly, so stamp it.
+        r.world.round_sim.local_player = r.target;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(r.world.round_sim.impacts[0].effect_tag == 2);
+        CHECK(r.world.round_sim.impacts[0].present_effect);
+    }
+
+    // 2. A non-local person in a DIFFERENT group takes tag 23 'flesh', at any
+    //    health — the group mismatch alone satisfies the gate.
+    {
+        Rig r;
+        Entity local;
+        local.kind = EntityKind::Organic;
+        local.item_type = 3;
+        local.position = {0.0f, 50.0f, 0.0f};
+        local.health = 100;
+        local.group_id = 1;
+        const EntityHandle local_h = r.world.registry.spawn(0, local);
+        r.world.cached.local_player = local_h;
+        r.world.round_sim.local_player = local_h;
+        r.world.registry.get(r.target)->group_id = 2;
+        r.world.registry.get(r.target)->health_max = 100;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(r.world.round_sim.impacts[0].effect_tag == 23);
+        CHECK(r.world.round_sim.impacts[0].present_effect);
+    }
+
+    // 3. SAME group and at or above half hp: the row is selected but NOT
+    //    presented. This is retail's squad declutter — a healthy team-mate shows
+    //    no impact effect at all.
+    {
+        Rig r;
+        Entity local;
+        local.kind = EntityKind::Organic;
+        local.item_type = 3;
+        local.position = {0.0f, 50.0f, 0.0f};
+        local.health = 100;
+        local.group_id = 4;
+        const EntityHandle local_h = r.world.registry.spawn(0, local);
+        r.world.cached.local_player = local_h;
+        r.world.round_sim.local_player = local_h;
+        Entity *t = r.world.registry.get(r.target);
+        t->group_id = 4;
+        t->health = 60;
+        t->health_max = 100; // 60 >= 100>>1 -> suppressed
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(r.world.round_sim.impacts[0].effect_tag == 23);
+        CHECK(!r.world.round_sim.impacts[0].present_effect);
+        CHECK(!r.world.round_sim.impacts[0].present_sound);
+    }
+
+    // 4. Same group but BELOW half hp: the gate's OR arm reopens it.
+    {
+        Rig r;
+        Entity local;
+        local.kind = EntityKind::Organic;
+        local.item_type = 3;
+        local.position = {0.0f, 50.0f, 0.0f};
+        local.health = 100;
+        local.group_id = 4;
+        const EntityHandle local_h = r.world.registry.spawn(0, local);
+        r.world.cached.local_player = local_h;
+        r.world.round_sim.local_player = local_h;
+        Entity *t = r.world.registry.get(r.target);
+        t->group_id = 4;
+        t->health = 40;
+        t->health_max = 100; // 40 < 100>>1 -> presented
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(r.world.round_sim.impacts[0].effect_tag == 23);
+        CHECK(r.world.round_sim.impacts[0].present_effect);
+    }
+
+    // 5. An already-dead victim presents NOTHING — neither leg, on either row.
+    {
+        Rig r;
+        r.world.cached.local_player = r.target;
+        // World::tick stamps round_sim.local_player from cached each frame
+        // (world.cpp); these cases drive RoundSim::tick directly, so stamp it.
+        r.world.round_sim.local_player = r.target;
+        r.world.registry.get(r.target)->flags |= kEntityFlagDead;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+        CHECK(!r.world.round_sim.impacts[0].present_effect);
+        CHECK(!r.world.round_sim.impacts[0].present_sound);
+    }
+}
+
 void test_exact_one_hop_vehicle_parent_damage_routing() {
     const auto run_direct_case = [](uint8_t child_type, uint32_t child_attrib,
                                     uint8_t parent_type, bool expect_parent) {
@@ -1490,8 +1622,9 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
             CHECK(r.world.registry.get(parent_h)->health == 75);
             CHECK(r.world.round_sim.hits[0].victim == parent_h);
             // Presentation still classifies the child geometry actually struck,
-            // not the vehicle that receives the routed damage.
-            CHECK(r.world.round_sim.impacts[0].effect_tag == 2);
+            // not the vehicle that receives the routed damage: the gunner is a
+            // non-local person, so the flesh row, not the vehicle's material.
+            CHECK(r.world.round_sim.impacts[0].effect_tag == 23);
         } else {
             CHECK(r.world.registry.get(r.target)->health == 75);
             CHECK(r.world.registry.get(parent_h)->health == 100);
@@ -1571,7 +1704,8 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
         CHECK(r.world.registry.get(vehicle_h)->health == 5000 - expected_damage);
         CHECK(r.world.registry.get(r.target)->health == 100);
         CHECK(r.world.round_sim.impacts.size() == 1);
-        CHECK(r.world.round_sim.impacts[0].effect_tag == 2);
+        // The struck geometry is the non-local occupant, so the flesh row.
+        CHECK(r.world.round_sim.impacts[0].effect_tag == 23);
     };
     // [orig: Entity_CountMountedEntities @ 0x435970] Occupants are counted by
     // the ATTACH parent, not by standing: candidate.mount_target == vehicle, or
@@ -1945,6 +2079,7 @@ int main() {
     test_person_walk_orders_local_player_by_its_server_handle();
     test_signed_armor_equality_and_damage_state_gates();
     test_signed_health_subtraction_wraps_at_entity_word();
+    test_person_impact_tag_splits_on_identity_and_squad_health();
     test_exact_one_hop_vehicle_parent_damage_routing();
     test_vehicle_occupant_reduction_count_cap_and_depth();
     test_retail_force_order_and_stock_gates();

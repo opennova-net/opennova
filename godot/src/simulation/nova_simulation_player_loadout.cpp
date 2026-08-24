@@ -9,8 +9,10 @@
 #include <mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
 #include <npwire/ingame_message_id.h>
 #include <simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
+#include <netsim/client_roster_tags.h> // the joiner's player walk of the tag pass
 #include <world/friendly_tags.h> // the D-HUD-20 tag gather
 
+#include <algorithm>
 #include <cstdio>
 
 #include <godot_cpp/classes/dir_access.hpp>
@@ -188,7 +190,7 @@ bool Simulation::local_player_toggle_mount() {
 		if (toggle_player->mounted)
 			return runtime_->queue_vehicle_detach(
 					toggle_player->mount_target.packed);
-		opennova::world::NearestSeatHit hit;
+		opennova::world::VehicleSeatSelection hit;
 		if (!opennova::world::find_mount_toggle_candidate(
 					*world_, *toggle_player, hit))
 			return false;
@@ -207,7 +209,7 @@ bool Simulation::local_player_toggle_mount() {
 	// [orig: Entity_AttachToUseGunSlot @0x546b80, reject
 	//  !is_in_session && Flags&0x100 && !EquippedSlot @0x546c07]
 	if (!listen_server_ && !local_weapon_.active) {
-		opennova::world::NearestSeatHit hit;
+		opennova::world::VehicleSeatSelection hit;
 		if (opennova::world::find_mount_toggle_candidate(
 					*world_, *toggle_player, hit) &&
 				hit.type == opennova::world::SeatType::Gunner)
@@ -280,7 +282,39 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 			world_->registry.get(world_->cached.local_player);
 	if (player == nullptr) return out;
 	std::vector<opennova::world::FriendlyTagSource> tags;
-	opennova::world::collect_friendly_tags(*world_, *player, tags);
+	// The pass-level facts (retail g_death_screen_active / g_GameType): the
+	// death screen bit is the client's local latch, the game type every role's
+	// view carries.
+	opennova::world::FriendlyTagPassContext ctx;
+	ctx.death_screen = local_death_screen_active();
+	ctx.game_type = runtime_ ? runtime_->game_type() : 0;
+	// The player walk's slot owner. On the authority the connection table IS
+	// the player-slot table: each link's owned entity, revive window, and
+	// medic-request latch (retail's PlayerSlot +0x24/+0x10/+0x2C).
+	const opennova::world::PlayerSlotLookup authority_slot_lookup =
+			[this](opennova::world::EntityHandle entity,
+					opennova::world::PlayerSlotFacts &facts) {
+				for (const opennova::np::NapiNPConnection &conn :
+						ctx_.np_protocol.connection_list) {
+					if (conn.link.owned_entity != entity) continue;
+					facts.revive_seconds = static_cast<uint8_t>(
+							std::min<uint32_t>(conn.link.downed_revive_seconds, 0xFFu));
+					facts.medic_request = conn.link.medic_request_active;
+					return true;
+				}
+				return false;
+			};
+	if (!is_joiner()) ctx.slot_lookup = &authority_slot_lookup;
+	opennova::world::collect_friendly_tags(*world_, *player, tags, ctx);
+	if (is_joiner() && runtime_) {
+		// A joiner's players are decoded rows, not World twins: the roster walk
+		// over ClientState supplies them (netsim/client_roster_tags.h).
+		const int32_t player_hp = world_->player_item_hp;
+		opennova::netsim::collect_roster_tags(runtime_->state(),
+				runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu,
+				runtime_->assigned_team(), ctx.death_screen, ctx.game_type, tags,
+				[player_hp](uint16_t) { return player_hp; });
+	}
 	for (const opennova::world::FriendlyTagSource &t : tags) {
 		Dictionary d;
 		d["position"] = Vector3(t.position.x, t.position.y, t.position.z);
@@ -291,6 +325,12 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 		d["entity_id"] = static_cast<int>(t.net_id);
 		d["health_ratio_fp16"] = t.health_ratio_fp16;
 		d["player"] = t.player;
+		d["medic"] = t.medic;
+		// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
+		d["dead"] = t.dead;
+		d["has_slot"] = t.has_slot;
+		d["revive_seconds"] = static_cast<int>(t.revive_seconds);
+		d["medic_request"] = t.medic_request;
 		out.push_back(d);
 	}
 	return out;

@@ -357,6 +357,16 @@ struct HudFriendlyTag {
 	bool medic = false;     // CharAttr class flag 8 [orig: charattr.def Medic]
 	bool speaking = false;  // entity == g_voicePlaybackEntity @ 0xC6EC38
 	bool player = false;    // slot-walk entry (empty callsign draws the bar leg)
+	// The DOWNED legs [orig: HUD_DrawEntityLabel — dead = `Flags & 2`
+	// @0x5a3c1c; slot present + slot+0x10 revive seconds + slot+0x2C medic
+	// request @0x5a3ddd..0x5a3df5]: the bad tier recolors light blue / gray,
+	// the request pulses toward white, and the seconds are appended to the
+	// text (`"%s: %ld"` @0x5a400e) or drawn bare a fontH above the tick /
+	// bar forms (`"%ld"` @0x5a41f0 / @0x5a4428).
+	bool dead = false;
+	bool has_slot = false;
+	uint8_t revive_seconds = 0;
+	bool medic_request = false;
 };
 
 struct HudMessageLine {
@@ -374,6 +384,20 @@ struct HudMessageLine {
 // strings (server name, mission title, game-type label) and joins each row's
 // name from the roster, exactly as it already does for the objectives header;
 // the compiler owns the witnessed layout, ordering and colors.
+struct HudEndRoundLine {
+	std::string text;
+	int y = 0; // design-space y, centred on x 512
+};
+struct HudEndRoundOverlayState {
+	bool shown = false;
+	// The overlay safe-area top/bottom in design px (dword_24C1900 /
+	// dword_24C1904, stamped by Renderer_SetDisplayModeWithFallback
+	// @0x587634/@0x58760b; 0 / 768 for the full frame).
+	int top = 0;
+	int bottom = 768;
+	std::vector<HudEndRoundLine> lines;
+};
+
 struct HudScoreboardState {
 	bool shown = false;
 	uint32_t game_type = 0;
@@ -515,6 +539,13 @@ struct HudFrameState {
 	HudVehiclePanelState vehicle_panel;
 	// The Tab board (hud/hud_scoreboard.h owns its policy).
 	HudScoreboardState scoreboard;
+	// THE END-OF-ROUND OVERLAY (net-re §5.68): the resolved Impact38 text
+	// ladder the presenter built from hud/end_round_overlay.h, drawn inside
+	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
+	// [orig: draw_endround_stats_overlay @0x5b7cd0 — HUD_DrawLabelBox
+	//  @0x5b7d3e, each line HUD_DrawTextCentered_HalfBright(Impact38, 512, y)
+	//  through sub_580B80 @0x580b80].
+	HudEndRoundOverlayState end_round;
 	std::vector<HudAttachLabel> attach_labels;
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
@@ -585,7 +616,12 @@ inline constexpr int kHudFontSlotHud = 0;       // the hudpos-named HUD font
 inline constexpr int kHudFontSlotLabel = 1;     // g_hudLabelFont (Arial normal)
 inline constexpr int kHudFontSlotLabelBold = 2; // the bold slot (fontObj @ 0xB4C394)
 inline constexpr int kHudFontSlotLabelLarge = 3; // g_hudLabelFontLarge (Impac22b)
-inline constexpr int kHudFontSlotCount = 4;
+inline constexpr int kHudFontSlotImpact38 = 4;   // g_hudLabelFontImpact38 (Impac38b)
+inline constexpr int kHudFontSlotCount = 5;
+// The device leg sizes its page-texture table by the count; a slot past it
+// writes Ref<> handles off the end of that table (the 2026-08-24 load crash).
+static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
+              "every font slot must index inside kHudFontSlotCount");
 
 // Deep in-process module: the whole witnessed element walk, stance cross-fade
 // state, the clip-indicator flash state, and the triggered-text message ring
@@ -606,7 +642,8 @@ public:
 	// large face. Null fonts fall back to the hudpos font at scale 1
 	// (layout-only embedders keep drawing).
 	void configure_label_fonts(const fnt_font_t *normal, const fnt_font_t *bold,
-			const fnt_font_t *large, float scale, float large_scale);
+			const fnt_font_t *large, float scale, float large_scale,
+			const fnt_font_t *impact38 = nullptr);
 
 	// Swap the layout WITHOUT resetting runtime state (stance fade, clip
 	// flash, the message ring) — the texture-table refresh path, e.g. the
@@ -702,6 +739,7 @@ private:
 	void element_message_log(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
+	void element_end_round_overlay(const HudFrameState &state, float w, float h);
 	void element_vehicle_panel(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
@@ -713,6 +751,7 @@ private:
 	GameFont label_font_;
 	GameFont label_font_bold_;
 	GameFont label_font_large_;
+	GameFont label_font_impact38_; // the Impac38b slot (end-round overlay)
 	float label_scale_ = 1.0f;
 	float label_large_scale_ = 1.0f;
 	HudDrawList draw_list_;

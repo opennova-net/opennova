@@ -2,10 +2,14 @@
 
 // Portable leaf raster for one retail static-shadow tile page. The Godot
 // adapter resolves selected-LOD ROBJ geometry into normalized page vertices;
-// this module owns the witnessed temporary-RT semantics: 2x coverage, z<=0.5
-// receiver admission, material alpha testing/blending, and a linear resolve
-// into the destination-resolution light-alpha carrier. It never changes RGB.
+// this module owns the witnessed temporary-RT semantics: the near-plane clip
+// (depth < 0, i.e. geometry lower than 0.1 u above the caster's ground plane,
+// never casts — buried skirts and foundations are cut away), 2x coverage,
+// z<=0.5 receiver admission, material alpha testing/blending, and a linear
+// resolve into the destination-resolution light-alpha carrier. It never
+// changes RGB.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F;
+// the ortho depth row setup_shadow_cascade_matrices_0 @0x58D5F8..0x58D60C;
 // PROJSHAD submits @0x60D960..0x60D97D; temp-blue composite
 // @0x60E0C6..0x60E19D]
 
@@ -114,7 +118,8 @@ struct TerrainStaticShadowRasterInput {
 
 // Atomically mutates only page.alpha. Invalid page storage, non-finite input,
 // or a referenced invalid alpha texture returns false without changing page.
-// Empty/degenerate/depth-rejected geometry is a valid no-op.
+// Empty/degenerate/depth-rejected geometry is a valid no-op; a triangle
+// crossing depth 0 is clipped to its part at or above the near plane.
 bool rasterize_terrain_static_shadow_alpha(
 		const TerrainStaticShadowRasterInput &input,
 		TerrainStaticShadowAlphaPage &page) noexcept;

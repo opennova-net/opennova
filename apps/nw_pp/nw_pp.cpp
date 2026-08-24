@@ -1384,9 +1384,11 @@ void print_tag_46(const std::vector<uint8_t> &body) {
 		return;
 	}
 	std::printf("        [0x46] slot=0x%02x bitmask=0x%04x entity=0x%04x team=%u "
-	            "name=\"%s\"%s%s\n",
+	            "downed=%u medicRequest=%u name=\"%s\"%s%s\n",
 	            ps.slot_id, ps.field_bitmask, unsigned(ps.entity_slot_id), ps.team,
-	            ps.name.c_str(), ps.queue_ack ? " +ack" : "",
+	            unsigned(ps.downed_state & 0x7Fu),
+	            unsigned((ps.downed_state >> 7) & 1u), ps.name.c_str(),
+	            ps.queue_ack ? " +ack" : "",
 	            clean ? "" : " INCOMPLETE");
 }
 
@@ -1646,6 +1648,120 @@ void print_tag_13(const std::vector<uint8_t> &body) {
 	}
 	std::printf("        [0x13] entity-death handle=%s killerSource=%d\n",
 	            handle_str(d.entity_handle).c_str(), int(d.killer_source));
+}
+
+void print_tag_1d(const std::vector<uint8_t> &body) {
+	EndRoundHeader header;
+	if (!decode_end_round_header(body.data(), body.size(), header)) {
+		std::printf("        [0x1D] end-round-header decode failed (need 7 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x1D] end-round-header winner=%d team_scores=(%d,%d) draw=%u board_index=%d\n",
+	            int(header.winner_team), int(header.team_score_0),
+	            int(header.team_score_1), unsigned(header.draw),
+	            int(header.player_index));
+}
+
+void print_tag_2f(const std::vector<uint8_t> &body) {
+	ObjectiveEntityState state;
+	size_t used = 0;
+	if (!decode_objective_entity_state(body.data(), body.size(), state, used)) {
+		std::printf("        [0x2F] objective-entity-state decode failed (need 19 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x2F] objective-entity-state handle=0x%04X flags=0x%02X world=(%.2f,%.2f,%.2f) attach=0x%04X ground=0x%04X\n",
+	            unsigned(state.entity_handle), unsigned(state.flags_byte),
+	            fp16(state.pos_x), fp16(state.pos_y), fp16(state.pos_z),
+	            unsigned(state.attach_handle), unsigned(state.ground_handle));
+}
+
+void print_tag_6c(const std::vector<uint8_t> &body) {
+	ZonePresenceCount presence;
+	size_t used = 0;
+	if (!decode_zone_presence_count(body.data(), body.size(), presence, used)) {
+		std::printf("        [0x6C] zone-presence-count decode failed (need 3 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x6C] zone-presence-count zone=0x%04X unique_presence=%u\n",
+	            unsigned(presence.zone_handle), unsigned(presence.count));
+}
+
+void print_tag_81(const std::vector<uint8_t> &body) {
+	ScoreDeltaSound score;
+	if (!decode_score_delta_sound(body.data(), body.size(), score)) {
+		std::printf("        [0x81] score-delta-sound decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x81] score-delta-sound score=%d\n", int(score.score));
+}
+
+void print_tag_2b_c2s(const std::vector<uint8_t> &body) {
+	EndRoundStatsRequest request;
+	if (!decode_end_round_stats_request(body.data(), body.size(), request)) {
+		std::printf("        [0x2B] end-round-stats-request decode failed (need 2 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x2B] end-round-stats-request offset=%u\n",
+	            unsigned(request.offset));
+}
+
+void print_tag_52(const std::vector<uint8_t> &body) {
+	DeathCameraTarget target;
+	size_t used = 0;
+	if (!decode_death_camera_target(
+			body.data(), body.size(), target, used)) {
+		std::printf("        [0x52] death-camera-target decode failed (need 12 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x52] death-camera-target fixed=(%d,%d,%d) world=(%.2f,%.2f,%.2f)\n",
+	            target.x, target.y, target.z,
+	            fp16(target.x), fp16(target.y), fp16(target.z));
+}
+
+void print_tag_54(const std::vector<uint8_t> &body) {
+	PlayerDownedState state;
+	size_t used = 0;
+	if (!decode_player_downed_state(
+			body.data(), body.size(), state, used)) {
+		std::printf("        [0x54] player-downed-state decode failed (need 3 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x54] player-downed-state handle=%s reviveSeconds=%u medicRequest=%u\n",
+	            handle_str(state.entity_handle).c_str(),
+	            unsigned(state.revive_seconds),
+	            state.medic_request_active ? 1u : 0u);
+}
+
+void print_tag_03_c2s(const std::vector<uint8_t> &body) {
+	AutoMedicPreference preference;
+	size_t used = 0;
+	if (!decode_auto_medic_preference(
+			body.data(), body.size(), preference, used)) {
+		std::printf("        [0x03 C2S] auto-medic-preference decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x03 C2S] auto-medic=%s\n",
+	            preference.enabled ? "enabled" : "manual");
+}
+
+void print_tag_2e_c2s(const std::vector<uint8_t> &body) {
+	MedicRequest request;
+	size_t used = 0;
+	if (!decode_medic_request(body.data(), body.size(), request, used)) {
+		std::printf("        [0x2E C2S] medic-request decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x2E C2S] medic-request entityIndex=%u\n",
+	            unsigned(request.entity_index));
 }
 
 // S2C 0x30 entity-checksum request -> reply C2S 0x20.
@@ -1908,6 +2024,12 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::MINIMAP_OVERLAY) print_tag_6b(payload);
 	else if (dir == 'S' && tag == s2c::WEAPON_RELOAD) print_tag_49(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_DEATH) print_tag_13(payload);
+	else if (dir == 'S' && tag == s2c::DEATH_CAMERA_TARGET) print_tag_52(payload);
+	else if (dir == 'S' && tag == s2c::PLAYER_DOWNED_STATE) print_tag_54(payload);
+	else if (dir == 'S' && tag == s2c::END_ROUND_HEADER) print_tag_1d(payload);
+	else if (dir == 'S' && tag == s2c::OBJECTIVE_ENTITY_STATE) print_tag_2f(payload);
+	else if (dir == 'S' && tag == s2c::ZONE_PRESENCE_COUNT) print_tag_6c(payload);
+	else if (dir == 'S' && tag == s2c::SCORE_DELTA_SOUND) print_tag_81(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_CHECKSUM_REQ) print_tag_30(payload);
 	else if (dir == 'S' && tag == s2c::LOADOUT_CRC_REQ) print_tag_31(payload);
 	else if (dir == 'S' && tag == s2c::INPUT_STATE_FLAGS) print_tag_42(payload);
@@ -1929,6 +2051,9 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::JOIN_PADDING_PROBE) print_tag_02_s2c(payload);
 	else if (dir == 'S' && tag == s2c::SPAWN_ACK_TIMESTAMP) print_tag_19(payload);
 	else if (dir == 'C' && tag == c2s::CHAT_MESSAGE) print_tag_0d_c2s(payload);
+	else if (dir == 'C' && tag == c2s::AUTO_MEDIC_PREFERENCE) print_tag_03_c2s(payload);
+	else if (dir == 'C' && tag == c2s::MEDIC_REQUEST) print_tag_2e_c2s(payload);
+	else if (dir == 'C' && tag == c2s::END_ROUND_STATS_REQUEST) print_tag_2b_c2s(payload);
 	else if (dir == 'C' && tag == c2s::ENTITY_INFO_QUERY) print_tag_0f_c2s(payload);
 	else if (dir == 'C' && tag == c2s::LOADOUT_SUBMIT) print_tag_2f_c2s(payload);
 	else if (dir == 'C' && tag == c2s::RTT_CONSUMED) print_tag_2c_c2s(payload);

@@ -8,19 +8,35 @@
 // post-round respawn hold [orig: the g_spawn_success_gate check @0x519af6].
 #include <npruntime/napi_np_connection.h>
 #include <npruntime/napi_np_server_ctx.h>
+#include <npruntime/server_message_dispatch.h>
 #include <npruntime/server_tick.h>
+#include <npruntime/end_round_protocol.h>
+
+#include <mission/event_runtime.h>
 
 #include <netsim/loopback_channel.h>
 
 #include <npwire/replication_model.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 
 #include <world/ai.h>
+#include <world/collision.h>
+#include <world/game_type.h>
 #include <world/player_spawn.h>
 #include <world/world.h>
+#include <world/zone_chain.h>
 
+#include <wac/compiler.h>
+#include <wac/wac_system.h>
+
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 #include <cstdio>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -58,6 +74,858 @@ void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer)
 	d.victim_handle = victim.packed;
 	d.killer_handle = killer.packed;
 	world.round_sim.deaths.push_back(d);
+}
+
+w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
+		const char *name) {
+	w::Entity e;
+	e.kind = w::EntityKind::Organic;
+	e.player_class = 8;
+	e.team = team;
+	e.health = 100;
+	e.alive = true;
+	e.flags = w::kEntityFlagPlayer;
+	e.engine_flags = w::kEntityFlagPlayer;
+	const w::EntityHandle handle = world.registry.spawn(0, e);
+	world.match.upsert_player({handle, slot, name});
+	return handle;
+}
+
+int32_t fixed(float value) {
+	return static_cast<int32_t>(value * 65536.0f);
+}
+
+w::CollisionModel contact_box(int32_t type) {
+	w::CollisionModel model;
+	auto plane = [&](int nx, int ny, int nz, float distance) {
+		w::CollisionPlane value;
+		value.nx = static_cast<int16_t>(nx);
+		value.ny = static_cast<int16_t>(ny);
+		value.nz = static_cast<int16_t>(nz);
+		value.dist = fixed(distance);
+		model.planes.push_back(value);
+	};
+	plane(16384, 0, 0, -2.0f);
+	plane(-16384, 0, 0, -2.0f);
+	plane(0, 16384, 0, -2.0f);
+	plane(0, -16384, 0, -2.0f);
+	plane(0, 0, 16384, -3.0f);
+	plane(0, 0, -16384, 0.0f);
+
+	w::CollisionVolume volume;
+	volume.type = type;
+	volume.min_x = volume.min_y = fixed(-2.0f);
+	volume.max_x = volume.max_y = fixed(2.0f);
+	volume.min_z = 0;
+	volume.max_z = fixed(3.0f);
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+
+	w::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	return model;
+}
+
+void install_collision_system(w::World &world, w::CollisionWorld &collision,
+		w::AiSystem &ai) {
+	world.collision = &collision;
+	world.ai = &ai;
+	ai.collision = &collision;
+	world.add_system(&ai);
+}
+
+w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
+		w::EntityHandle handle, float previous_x) {
+	w::Entity *entity = world.registry.get(handle);
+	if (entity == nullptr) return nullptr;
+	w::AiEntity *body = ai.at(ai.attach(handle));
+	if (body == nullptr) return nullptr;
+	body->inf.active = true;
+	body->net_is_remote_peer = true;
+	body->health = entity->health;
+	body->team = entity->team;
+	body->pos[0] = fixed(entity->position.x);
+	body->pos[1] = fixed(entity->position.y);
+	body->pos[2] = fixed(entity->position.z);
+	body->collide_state.prev_valid = true;
+	body->collide_state.prev_pos[0] = fixed(previous_x);
+	body->collide_state.prev_pos[1] = body->pos[1];
+	body->collide_state.prev_pos[2] = body->pos[2];
+	return body;
+}
+
+void move_remote_body(w::World &world, w::AiSystem &ai,
+		w::EntityHandle handle, const w::Vec3 &position) {
+	w::Entity *entity = world.registry.get(handle);
+	w::AiEntity *body = ai.for_handle(handle);
+	if (entity == nullptr || body == nullptr) return;
+	entity->position = position;
+	body->pos[0] = fixed(position.x);
+	body->pos[1] = fixed(position.y);
+	body->pos[2] = fixed(position.z);
+}
+
+void prime_collision_tables(w::World &world, w::CollisionWorld &collision) {
+	for (int i = 0; i < 17; ++i)
+		collision.build_tick_tables(world);
+}
+
+void ready_mp_connection(np::NapiNPConnection &conn, uint8_t slot) {
+	conn.reply.player_slot = slot;
+	conn.admission_stage = np::GameAdmissionStage::Complete;
+}
+
+bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header) {
+	bool saw_seed = false;
+	bool saw_header = false;
+	ns::Datagram datagram;
+	while (channel.client_recv(datagram)) {
+		if (datagram.tag == s2c::TICK_SEED)
+			saw_seed = datagram.body == std::vector<uint8_t>(4, 0);
+		// The 0x61 seed precedes 0x1D on the wire; a header before it is a
+		// failure, not a pass.
+		if (datagram.tag == s2c::END_ROUND_HEADER && saw_seed) {
+			saw_header = decode_end_round_header(
+					datagram.body.data(), datagram.body.size(), header);
+		}
+	}
+	return saw_seed && saw_header;
+}
+
+// The 0x2B service reads the host's frozen board stream through the dispatch
+// inputs, exactly as the owner pump threads it.
+np::ServerDispatchInputs board_inputs(const np::NapiNPServerCtx &ctx) {
+	np::ServerDispatchInputs inputs;
+	inputs.round_end_board_stream = &ctx.round_end_board_stream;
+	return inputs;
+}
+
+std::vector<ProtocolMessage> request_board_chunk(
+		np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection,
+		w::World &world, uint16_t offset) {
+	return np::dispatch_session_replies(
+			ctx.config, connection,
+			{make_protocol_message(c2s::END_ROUND_STATS_REQUEST,
+					encode_end_round_stats_request(offset))},
+			world.logic_tick, ctx.np_protocol.connection_list, &world,
+			board_inputs(ctx));
+}
+
+bool pull_round_board(np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection,
+		w::World &world, EndRoundStats &board, size_t &chunk_count) {
+	std::vector<uint8_t> bytes;
+	uint16_t offset = 0;
+	uint16_t total_size = 0;
+	chunk_count = 0;
+	for (;;) {
+		const std::vector<ProtocolMessage> replies =
+				request_board_chunk(ctx, connection, world, offset);
+		if (replies.size() != 1 || replies[0].tag != s2c::END_ROUND_STATS)
+			return false;
+
+		EndRoundStatsChunk chunk;
+		if (!decode_end_round_stats_chunk(
+					replies[0].payload.data(), replies[0].payload.size(), chunk) ||
+				chunk.chunk_offset != offset)
+			return false;
+		if (chunk_count == 0) total_size = chunk.total_size;
+		else if (chunk.total_size != total_size) return false;
+		bytes.insert(bytes.end(), chunk.chunk.begin(), chunk.chunk.end());
+		++chunk_count;
+		if (chunk.complete()) break;
+		if (chunk.chunk.empty() || bytes.size() > UINT16_MAX) return false;
+		offset = static_cast<uint16_t>(bytes.size());
+	}
+	return bytes.size() == total_size &&
+			decode_end_round_stats(bytes.data(), bytes.size(), board);
+}
+
+void test_tdm_round_wire_and_linger() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = 0x10000u;
+	rules.score_limit = 1;
+	rules.score_values.emplace();
+	(*rules.score_values)[3] = 10;
+	(*rules.score_values)[5] = -2;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	const w::EntityHandle red = match_player(world, 7, 2, "Red");
+	// Retail omits a configured scoreboard column when every player value is
+	// zero. Seed the otherwise-unimplemented stat producers so this fixture
+	// exercises all 14 TDM columns and crosses the 200-byte 0x56 boundary.
+	w::MatchStats &blue_stats = world.match.player(blue)->stats;
+	for (const size_t index : {2u, 4u, 6u, 9u, 10u, 15u, 16u, 18u, 19u, 20u, 28u})
+		blue_stats[index] = 1;
+
+	ns::LoopbackChannel blue_wire;
+	ns::LoopbackChannel red_wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &blue_wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 1, &red_wire, ns::TransportMode::Client, red, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 7);
+
+	// The zero-armed one-second service fires on the first frame, then every
+	// 62 ticks; a death routed between boundaries waits for the next pass.
+	np::Server_TickUpdate(ctx);
+	push_death(world, red, blue);
+	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
+	expect(!world.match.outcome().ended,
+			"TDM kill-limit win waits for the 1 Hz win-condition pass");
+	blue_wire.clear();
+	red_wire.clear();
+	// Before the round-end producer runs there is no board stream to cut from:
+	// a 0x2B request receives nothing.
+	expect(ctx.round_end_board_stream.empty() &&
+			request_board_chunk(ctx, ctx.np_protocol.connection_list[0],
+					world, 0).empty(),
+			"C2S 0x2B before the round-end announce receives no 0x56");
+	np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
+	expect(world.match.outcome().ended &&
+			world.match.outcome().winner_team == 1,
+			"TDM kill limit ends for the killer's team");
+	expect(ctx.round_end_announced && ctx.round_end_linger_ticks == 2790,
+			"TDM announces once and seeds the exact MP linger");
+	// The producer froze the stream once (stru_C947D8) before the 0x61/0x1D
+	// push; every 0x2B pull cuts from that same byte sequence.
+	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
+	const std::vector<uint8_t> frozen_board = encode_end_round_stats(
+			np::build_end_round_stats(world.match.result()));
+	expect(!ctx.round_end_board_stream.empty() &&
+			ctx.round_end_board_stream == frozen_board,
+			"the announce freezes the encoded board stream once");
+	{
+		const std::vector<ProtocolMessage> first = request_board_chunk(
+				ctx, ctx.np_protocol.connection_list[0], world, 0);
+		const std::vector<ProtocolMessage> second = request_board_chunk(
+				ctx, ctx.np_protocol.connection_list[0], world, 0);
+		expect(first.size() == 1 && second.size() == 1 &&
+				first[0].tag == s2c::END_ROUND_STATS &&
+				first[0].payload == second[0].payload,
+				"two offset-0 pulls return byte-identical 0x56 chunks");
+		EndRoundStatsChunk chunk;
+		expect(first.size() == 1 &&
+				decode_end_round_stats_chunk(first[0].payload.data(),
+						first[0].payload.size(), chunk) &&
+				chunk.total_size == frozen_board.size() &&
+				chunk.chunk.size() == 200 &&
+				std::equal(chunk.chunk.begin(), chunk.chunk.end(),
+						frozen_board.begin()),
+				"the offset-0 chunk is the frozen stream's first 200 bytes");
+	}
+
+	EndRoundHeader blue_header;
+	EndRoundHeader red_header;
+	expect(drain_round_header(blue_wire, blue_header),
+			"TDM blue peer receives 0x61 then decodable 0x1D");
+	expect(drain_round_header(red_wire, red_header),
+			"TDM red peer receives 0x61 then decodable 0x1D");
+	expect(blue_header.winner_team == 1 && blue_header.team_score_0 == 1 &&
+			blue_header.team_score_1 == 0 && blue_header.player_index == 0,
+			"TDM 0x1D carries team scores and recipient board index");
+	expect(red_header.player_index == 1,
+			"TDM 0x1D is recipient-specific");
+
+	EndRoundStats board;
+	size_t chunk_count = 0;
+	const bool decoded = pull_round_board(
+			ctx, ctx.np_protocol.connection_list[0], world, board, chunk_count);
+	expect(decoded && chunk_count == 2,
+			"C2S 0x2B pulls the 223-byte TDM board as 200-byte 0x56 chunks");
+	if (decoded) {
+		expect(board.players.size() == 2 && board.players[0].slot == 3,
+				"TDM board freezes point-sorted players");
+		expect(board.players[0].kills == 1 &&
+				board.players[0].deaths == 10 &&
+				board.players[0].score == 1,
+				"TDM board preserves primary/raw29/raw5 wire positions");
+		expect(board.team_fields.size() == 14 &&
+				board.team_fields[0] == std::pair<uint8_t, uint8_t>{19, 1} &&
+				board.team_fields[1] == std::pair<uint8_t, uint8_t>{3, 1} &&
+				board.team_fields[2] == std::pair<uint8_t, uint8_t>{2, 0} &&
+				board.team_fields.back() == std::pair<uint8_t, uint8_t>{21, 1},
+				"TDM board declares the retail FIELD schema in retail order");
+		expect(board.players[0].per_team.size() == 14 &&
+				board.players[0].per_team[0] == 10 &&
+				board.players[0].per_team[1] == 1,
+				"TDM player columns resolve raw points and enemy kills");
+		expect(board.team_rows.size() == 3 &&
+				board.team_rows[1].size() == 14 &&
+				board.team_rows[1][0] == 10 &&
+				board.team_rows[1][1] == 1,
+				"TDM trailing matrix carries neutral/team-1/team-2 score rows");
+	}
+	const std::vector<ProtocolMessage> invalid_offset_reply = request_board_chunk(
+			ctx, ctx.np_protocol.connection_list[0], world, UINT16_MAX);
+	expect(invalid_offset_reply.empty(),
+			"C2S 0x2B offset beyond the frozen board receives no 0x56 reply");
+
+	for (int i = 0; i < 2789; ++i) np::Server_TickUpdate(ctx);
+	expect(ctx.is_in_session == 1 && ctx.round_end_linger_ticks == 1,
+			"MP session remains live through linger tick 2789");
+	np::Server_TickUpdate(ctx);
+	expect(ctx.is_in_session == 0 && ctx.round_end_linger_ticks == 0,
+			"MP session closes at exactly 2790 post-announcement ticks");
+}
+
+void test_demolition_death_routes_score_and_round_wire() {
+	for (const uint32_t game_type : {
+			game_type::kSearchAndDestroy, game_type::kAttackDefend}) {
+		w::World world;
+		world.registry.configure_pool(0, 4);
+		world.registry.configure_pool(2, 4);
+		world.mp_session = true;
+		w::MatchRules rules;
+		rules.game_type = game_type;
+		rules.game_time_minutes = 1;
+		world.match.configure(rules);
+		const w::EntityHandle attacker = match_player(world, 3, 1, "Blue");
+
+		w::Entity objective;
+		objective.kind = w::EntityKind::Building;
+		objective.team = 2;
+		objective.health = 0;
+		objective.alive = true;
+		objective.has_item_def = true;
+		objective.item_attrib = w::kItemAttribObjectiveTarget;
+		const w::EntityHandle target = world.registry.spawn(2, objective);
+		expect(target.valid(), "demolition objective fixture spawns");
+
+		ns::LoopbackChannel wire;
+		np::NapiNPServerCtx ctx;
+		ctx.world = &world;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = game_type;
+		ctx.np_protocol.connection_list.push_back(
+				make_conn(1, 1, &wire, ns::TransportMode::Client,
+						attacker, true));
+		ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+
+		// Projectile and blast damage both stage this same transport-free death
+		// record. The host consumes it only after Match has frozen the authored
+		// objective census for the frame. [orig: Entity_ApplyWeaponDamage
+		// @0x4E6FB4; GameEvent_ProcessScoring case 11 @0x52F550;
+		// Server_CheckWinConditions demolition arm @0x51B18B]
+		np::Server_TickUpdate(ctx); // first-frame one-second service
+		push_death(world, target, attacker);
+		np::Server_TickUpdate(ctx);
+		const w::MatchPlayer *scorer = world.match.player(attacker);
+		expect(scorer != nullptr &&
+				scorer->stats[w::MatchStats::kTargetsDestroyed] == 1 &&
+				scorer->stats[w::MatchStats::kPoints] == 50 &&
+				world.match.team_stats(1)[w::MatchStats::kTargetsDestroyed] == 1,
+			"S&D/A&D death routing awards the exact target event to player and team");
+		const w::Entity *dead_target = world.registry.get(target);
+		expect(dead_target != nullptr && !dead_target->alive &&
+				(dead_target->flags & w::kEntityFlagDead) != 0,
+			"demolition target enters the shared authoritative dead state");
+
+		bool saw_death = false;
+		ns::Datagram datagram;
+		while (wire.client_recv(datagram)) {
+			if (datagram.tag != s2c::ENTITY_DEATH) continue;
+			EntityDeathRecord death;
+			size_t consumed = 0;
+			if (decode_entity_death(datagram.body.data(), datagram.body.size(),
+					death, consumed) && consumed == datagram.body.size() &&
+					death.entity_handle == target.packed &&
+					static_cast<uint16_t>(death.killer_source) == attacker.packed)
+				saw_death = true;
+		}
+		expect(saw_death,
+			"demolition target death fans the exact 0x13 target/killer handles");
+
+		for (int i = 0; i < 60; ++i) np::Server_TickUpdate(ctx);
+		expect(!world.match.outcome().ended,
+				"demolition win waits for the 1 Hz win-condition pass");
+		wire.clear();
+		np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
+		expect(world.match.outcome().ended &&
+				world.match.outcome().winner_team == 1,
+			"S&D/A&D complete authored target census ends for the attacker team");
+
+		EndRoundHeader header;
+		expect(drain_round_header(wire, header) &&
+				header.winner_team == 1 && header.team_score_0 == 1 &&
+				header.team_score_1 == 0,
+			"S&D/A&D target win reaches exact 0x61/0x1D round wire and scores");
+	}
+}
+
+void test_aas_round_wire() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+	const w::EntityHandle red = match_player(world, 4, 2, "Red");
+	w::Entity z1;
+	z1.kind = w::EntityKind::Item;
+	z1.team = 2;
+	z1.zone_number = 1;
+	w::Entity z2 = z1;
+	z2.zone_number = 2;
+	world.zone_chain.zones.push_back(world.registry.spawn(1, z1));
+	world.zone_chain.zones.push_back(world.registry.spawn(1, z2));
+
+	ns::LoopbackChannel wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kAdvanceAndSecure;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
+	// Every zone is already owned, so the first-frame service ends the round.
+	np::Server_TickUpdate(ctx);
+
+	EndRoundHeader header;
+	expect(drain_round_header(wire, header),
+			"A&S uses the shared 0x61/0x1D transition");
+	expect(header.winner_team == 2 && header.team_score_0 == 0 &&
+			header.team_score_1 == 2,
+			"A&S header preserves the winner and owned-zone scores");
+	expect(ctx.round_end_linger_ticks == 2790,
+			"automatic A&S outcome does not consume its announcement tick");
+}
+
+void test_coop_script_producers_share_round_wire() {
+	auto run_case = [](uint32_t game_type_code, bool use_wac) {
+		w::World world;
+		world.registry.configure_pool(0, 4);
+		world.mp_session = true;
+		w::MatchRules rules;
+		rules.game_type = game_type_code;
+		world.match.configure(rules);
+		const w::EntityHandle red = match_player(world, 4, 2, "Red");
+
+		opennova::wac::WacSystem wac_system;
+		opennova::mission::BmsEventSystem bms_system;
+		int producer_tick = 0;
+		if (use_wac) {
+			opennova::wac::CompileEnv env;
+			auto program = opennova::wac::compile_source(
+					"if never() then win(2) endif\n", env);
+			expect(program.ok(), "stock Co-op WAC win program compiles");
+			wac_system.set_program(std::move(program));
+			world.add_system(&wac_system);
+			producer_tick = opennova::wac::WacSystem::kTicksPerExecution;
+		} else {
+			opennova::bms::Event event{};
+			event.action_count = 1;
+			opennova::bms::Action action{};
+			action.action_type = opennova::bms::ActionType::RedWin;
+			bms_system.load({event}, {}, {action});
+			world.add_system(&bms_system);
+			producer_tick = 16;
+		}
+		world.load_systems();
+
+		ns::LoopbackChannel wire;
+		np::NapiNPServerCtx ctx;
+		ctx.world = &world;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = game_type_code;
+		ctx.np_protocol.connection_list.push_back(
+				make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
+		ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
+
+		for (int tick = 1; tick < producer_tick; ++tick)
+			np::Server_TickUpdate(ctx);
+		expect(!world.match.outcome().ended,
+				"Co-op does not end before its authored script action");
+		wire.clear();
+		np::Server_TickUpdate(ctx);
+		expect(world.match.outcome().ended &&
+				world.match.outcome().winner_team == 2,
+				"WAC/BMS action owns the Co-op result edge");
+
+		EndRoundHeader header;
+		expect(drain_round_header(wire, header) && header.winner_team == 2,
+				"scripted Co-op result reaches exact 0x61/0x1D round wire");
+		expect(ctx.round_end_linger_ticks == 2789,
+				"scripted Co-op outcome consumes its originating server tick");
+	};
+
+	// Stock Co-op is WAC-owned; Objective Co-op exercises the sibling BMS
+	// result action. Both front ends call the same retail round transaction.
+	// [orig: WacAction_Win @0x4ED4A0; EventAction_Dispatch RedWin
+	// @0x454495; Server_ProcessRoundEnd @0x5164F0]
+	run_case(game_type::kCoop, true);
+	run_case(game_type::kObjectiveCoop, false);
+}
+
+void test_aas_events_use_spawn_registry_index() {
+	w::World world;
+	w::CollisionWorld collision;
+	w::AiSystem ai;
+	install_collision_system(world, collision, ai);
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.registry.configure_pool(2, 4);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = 0x10010u;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	world.registry.get(blue)->player_class = 8;
+	world.registry.get(blue)->position = {100.0f, 0.0f, 0.0f};
+	world.registry.get(blue)->net_move_input |= w::Entity::kMoveOrderMoving;
+
+	// A sorted pool-2 spawn object precedes the three pool-1 capture zones. The
+	// target zone is therefore spawn-registry index 2 but zone-chain index 1.
+	w::Entity base_spawn;
+	base_spawn.kind = w::EntityKind::Building;
+	base_spawn.team = 1;
+	base_spawn.is_spawn_point = true;
+	base_spawn.alive = true;
+	world.registry.spawn(2, base_spawn);
+	auto spawn_zone = [&](uint8_t number, uint8_t team, float x) {
+		w::Entity zone;
+		zone.kind = w::EntityKind::Item;
+		zone.team = team;
+		zone.zone_number = number;
+		zone.zone_radius = 70;
+		zone.position = {x, 0.0f, 0.0f};
+		zone.yaw = 90;
+		zone.is_capture_trigger = true;
+		zone.is_spawn_point = true;
+		zone.alive = true;
+		return world.registry.spawn(1, zone);
+	};
+	spawn_zone(1, 1, -100.0f);
+	const w::EntityHandle target = spawn_zone(2, 0, 100.0f);
+	spawn_zone(3, 2, 300.0f);
+	w::zone_chain_build_from_mission(world, world.zone_chain);
+	w::zone_chain_latch_control(world, world.zone_chain);
+	const int32_t capture_model = collision.add_model(
+		contact_box(w::bvol_type::kChangeTeamCT));
+	collision.assign_entity(target, capture_model);
+	expect(attach_remote_body(world, ai, blue, 100.0f) != nullptr,
+			"A&S authority body fixture attaches");
+	prime_collision_tables(world, collision);
+
+	ns::LoopbackChannel wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	// The body already stands in the box, so the first-frame one-second
+	// service drains that contact and flips the numbered zone at once.
+	np::Server_TickUpdate(ctx);
+
+	bool saw_capture_event = false;
+	ns::Datagram datagram;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag != 0x1E || datagram.body.size() != 8) continue;
+		const uint8_t event = datagram.body[0];
+		if (event < 50 || event > 57) continue;
+		saw_capture_event = true;
+		expect(datagram.body[1] == 2,
+				"A&S 0x1E capture actor is the sorted SpawnZoneList index");
+	}
+	expect(world.registry.get(target)->team == 1 && saw_capture_event,
+			"A&S authority flips the target and emits its capture event family");
+}
+
+void test_ctf_pickup_and_capture_wire_transaction() {
+	w::World world;
+	w::CollisionWorld collision;
+	w::AiSystem ai;
+	install_collision_system(world, collision, ai);
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	w::Entity *blue_entity = world.registry.get(blue);
+	const w::Vec3 flag_position{10.75f, -3.25f, 3.0f};
+	const w::Vec3 bay_position{19.75f, -3.25f, 3.0f};
+	blue_entity->position = flag_position;
+	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+	const w::EntityHandle host = match_player(world, 1, 1, "Host");
+	world.registry.get(host)->position = {1000.0f, 1000.0f, 3.0f};
+
+	w::Entity red_flag;
+	red_flag.kind = w::EntityKind::Item;
+	red_flag.item_id = 4093; // Flag (Red) [orig: item-id branch @0x43C1B7]
+	red_flag.has_item_def = true;
+	red_flag.item_attrib = w::kItemAttribMoveCallback;
+	red_flag.position = flag_position;
+	red_flag.spawn_position = red_flag.position;
+	red_flag.yaw = 90;
+	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
+	w::Entity blue_bay;
+	blue_bay.kind = w::EntityKind::Item;
+	blue_bay.item_id = 4098; // Blue bay [orig: Entity_ProcessWaypointInteraction @0x4AD8D4]
+	blue_bay.has_item_def = true;
+	blue_bay.item_attrib = w::kItemAttribMoveCallback;
+	blue_bay.position = bay_position;
+	blue_bay.yaw = 90;
+	const w::EntityHandle bay = world.registry.spawn(1, blue_bay);
+	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
+	const int32_t waypoint_model = collision.add_model(contact_box(1));
+	collision.assign_entity(flag, waypoint_model);
+	collision.assign_entity(bay, waypoint_model);
+	expect(attach_remote_body(world, ai, blue, flag_position.x + 3.5f) != nullptr,
+			"CTF authority body fixture attaches");
+	prime_collision_tables(world, collision);
+
+	ns::LoopbackChannel wire;
+	ns::LoopbackChannel host_wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 2, &host_wire, ns::TransportMode::Loopback, host, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
+
+	np::Server_TickUpdate(ctx); // contact -> pickup
+	bool saw_pickup_event = false;
+	bool saw_pickup = false;
+	int pickup_event_order = -1;
+	int pickup_state_order = -1;
+	int order = 0;
+	ns::Datagram datagram;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag == s2c::GAME_EVENT &&
+				datagram.body == std::vector<uint8_t>{
+						0x14, static_cast<uint8_t>(blue.slot()),
+						0xFF, 0xFF, 10, 0, 0xFC, 0xFF}) {
+			saw_pickup_event = true;
+			pickup_event_order = order;
+		}
+		if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+			ObjectiveEntityState state;
+			size_t consumed = 0;
+			if (decode_objective_entity_state(
+					datagram.body.data(), datagram.body.size(), state, consumed) &&
+					consumed == datagram.body.size() && state.entity_handle == flag.packed &&
+					state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0) {
+				saw_pickup = true;
+				pickup_state_order = order;
+			}
+		}
+		++order;
+	}
+	expect(saw_pickup_event && saw_pickup && pickup_event_order >= 0 &&
+			pickup_state_order > pickup_event_order,
+			"CTF pickup fans exact event 20 before the 19-byte 0x2F carried state");
+	bool host_saw_pickup_event = false;
+	bool host_saw_pickup = false;
+	int host_pickup_event_order = -1;
+	int host_pickup_state_order = -1;
+	order = 0;
+	while (host_wire.client_recv(datagram)) {
+		if (datagram.tag == s2c::GAME_EVENT &&
+				datagram.body == std::vector<uint8_t>{
+						0x14, static_cast<uint8_t>(blue.slot()),
+						0xFF, 0xFF, 10, 0, 0xFC, 0xFF}) {
+			host_saw_pickup_event = true;
+			host_pickup_event_order = order;
+		}
+		if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+			ObjectiveEntityState state;
+			size_t consumed = 0;
+			if (decode_objective_entity_state(
+					datagram.body.data(), datagram.body.size(), state, consumed) &&
+					consumed == datagram.body.size() && state.entity_handle == flag.packed &&
+					state.attach_handle == blue.packed && (state.flags_byte & 1u) != 0) {
+				host_saw_pickup = true;
+				host_pickup_state_order = order;
+			}
+		}
+		++order;
+	}
+	expect(host_saw_pickup_event && host_saw_pickup &&
+			host_pickup_event_order >= 0 &&
+			host_pickup_state_order > host_pickup_event_order,
+			"CTF pickup mask 0x80 includes the host with event-before-state ordering");
+
+	move_remote_body(world, ai, blue, bay_position);
+	np::Server_TickUpdate(ctx); // carried flag contacts bay -> capture
+	bool saw_capture_event = false;
+	bool saw_remove = false;
+	bool saw_reset = false;
+	int capture_order = -1;
+	int remove_order = -1;
+	order = 0;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag == s2c::GAME_EVENT && datagram.body.size() == 8 &&
+				datagram.body[0] == 0x13 && datagram.body[1] == blue.slot()) {
+			saw_capture_event = true;
+			capture_order = order;
+		}
+		if (datagram.tag == s2c::ENTITY_REMOVE) {
+			EntityRemove removal;
+			size_t consumed = 0;
+			if (decode_entity_remove(datagram.body.data(), datagram.body.size(),
+					removal, consumed) && removal.entity_handle == flag.packed) {
+				saw_remove = true;
+				remove_order = order;
+			}
+		}
+		if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) saw_reset = true;
+		++order;
+	}
+	expect(saw_capture_event && saw_remove && !saw_reset &&
+			capture_order >= 0 && remove_order > capture_order,
+			"CTF capture fans event 19 then 0x12 removal, never a reset 0x2F");
+	bool host_saw_capture_event = false;
+	bool host_saw_remove = false;
+	int host_capture_order = -1;
+	int host_remove_order = -1;
+	order = 0;
+	while (host_wire.client_recv(datagram)) {
+		if (datagram.tag == s2c::GAME_EVENT && datagram.body.size() == 8 &&
+				datagram.body[0] == 0x13 && datagram.body[1] == blue.slot()) {
+			host_saw_capture_event = true;
+			host_capture_order = order;
+		}
+		if (datagram.tag == s2c::ENTITY_REMOVE) {
+			EntityRemove removal;
+			size_t consumed = 0;
+			if (decode_entity_remove(datagram.body.data(), datagram.body.size(),
+					removal, consumed) && removal.entity_handle == flag.packed) {
+				host_saw_remove = true;
+				host_remove_order = order;
+			}
+		}
+		++order;
+	}
+	expect(host_saw_capture_event && !host_saw_remove &&
+			host_capture_order >= 0 && host_remove_order < 0,
+			"CTF capture sends the 0x80 event to the host but its 0x90 removal only remotely");
+}
+
+void test_flag_timeout_wire_transaction() {
+	w::World world;
+	w::CollisionWorld collision;
+	w::AiSystem ai;
+	install_collision_system(world, collision, ai);
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kFlagBall;
+	rules.max_score = 99;
+	rules.flag_return_ticks = 5;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	w::Entity *blue_entity = world.registry.get(blue);
+	const w::Vec3 flag_position{30.0f, 40.0f, 2.0f};
+	blue_entity->position = {flag_position.x + 1.6f,
+			flag_position.y, flag_position.z};
+	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+	const w::EntityHandle host = match_player(world, 1, 1, "Host");
+	world.registry.get(host)->position = {1000.0f, 1000.0f, 2.0f};
+
+	w::Entity red_flag;
+	red_flag.kind = w::EntityKind::Item;
+	red_flag.item_id = 4093;
+	red_flag.has_item_def = true;
+	red_flag.item_attrib = w::kItemAttribMoveCallback;
+	red_flag.position = flag_position;
+	red_flag.spawn_position = {5.0f, 6.0f, 2.0f};
+	red_flag.yaw = 90;
+	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
+	expect(flag.valid(), "FlagBall timeout fixture spawns its red flag");
+	const int32_t waypoint_model = collision.add_model(contact_box(1));
+	collision.assign_entity(flag, waypoint_model);
+	expect(attach_remote_body(world, ai, blue, flag_position.x + 3.5f) != nullptr,
+			"FlagBall authority body fixture attaches");
+	prime_collision_tables(world, collision);
+
+	ns::LoopbackChannel remote_wire;
+	ns::LoopbackChannel host_wire;
+	np::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &remote_wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 2, &host_wire, ns::TransportMode::Loopback, host, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
+
+	np::Server_TickUpdate(ctx); // pickup arms the return state
+	remote_wire.clear();
+	host_wire.clear();
+	world.match.record_death(world, blue); // drop without waiting for combat routing
+	blue_entity = world.registry.get(blue);
+	blue_entity->alive = false;
+	blue_entity->flags |= w::kEntityFlagDead;
+	blue_entity->net_move_input = 0;
+	np::Server_TickUpdate(ctx); // route the drop
+	remote_wire.clear();
+	host_wire.clear();
+
+	for (int tick = 0; tick < 330; ++tick)
+		np::Server_TickUpdate(ctx);
+
+	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
+		bool saw_event = false;
+		bool saw_state = false;
+		int event_order = -1;
+		int state_order = -1;
+		int order = 0;
+		ns::Datagram datagram;
+		while (channel.client_recv(datagram)) {
+			if (datagram.tag == s2c::GAME_EVENT &&
+					datagram.body == std::vector<uint8_t>{
+							0x24, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0}) {
+				saw_event = true;
+				event_order = order;
+			}
+			if (datagram.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+				ObjectiveEntityState state;
+				size_t consumed = 0;
+				if (decode_objective_entity_state(
+						datagram.body.data(), datagram.body.size(), state, consumed) &&
+						consumed == datagram.body.size() &&
+						state.entity_handle == flag.packed &&
+						state.attach_handle == 0xFFFF &&
+						state.pos_x == 5 * 65536 && state.pos_y == 6 * 65536) {
+					saw_state = true;
+					state_order = order;
+				}
+			}
+			++order;
+		}
+		return saw_event && saw_state && event_order >= 0 && state_order > event_order;
+	};
+	expect(saw_exact_return(remote_wire),
+			"red-flag timeout fans event 36 before the exact home-state 0x2F");
+	expect(saw_exact_return(host_wire),
+			"flag-timeout mask 0x80 includes the host with event-before-state ordering");
 }
 
 } // namespace
@@ -145,7 +1013,7 @@ int main() {
 	push_death(world, green_person, player);
 	np::Server_TickUpdate(ctx);
 	expect(world.kill_stats.greenkills_by_player == 1, "green person kill -> greenkills");
-	expect(!world.round_end.ended, "kill tallies alone never end the round");
+	expect(!world.match.outcome().ended, "kill tallies alone never end the round");
 
 	push_death(world, blue_person, player);
 	push_death(world, red_person, player);
@@ -167,7 +1035,7 @@ int main() {
 	world.mission_attrib_flags = 0x40;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx); // past a 1 Hz check
-	expect(!world.round_end.ended, "death with SP-respawn never auto-loses");
+	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
 	for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx);
 	expect(world.registry.get(player)->alive, "the player respawned after the timer");
 
@@ -177,255 +1045,23 @@ int main() {
 	push_death(world, player, red_person);
 	loop.clear(); // capture the round-end WIRE pass on its ended-edge (section 6)
 	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx);
-	int saw61 = 0, saw1d = 0;
-	bool marker_precedes_header = false;
-	std::vector<uint8_t> header;
-	{
-		ns::Datagram dg;
-		while (loop.client_recv(dg)) {
-			if (dg.tag == 0x61 && dg.body.size() == 4 && dg.body[0] == 0 &&
-					dg.body[1] == 0 && dg.body[2] == 0 && dg.body[3] == 0) {
-				++saw61;
-				if (saw1d == 0) marker_precedes_header = true;
-			} else if (dg.tag == 0x1D && dg.body.size() == 7) {
-				++saw1d;
-				header = dg.body;
-			}
-		}
-	}
-	expect(world.round_end.ended, "dead player without SP-respawn -> round over");
-	expect(world.round_end.winner_team == 2, "auto-lose winner is team 2 (red)");
+	expect(world.match.outcome().ended, "dead player without SP-respawn -> round over");
+	expect(world.match.outcome().winner_team == 2, "auto-lose winner is team 2 (red)");
 	expect(world.effects.count("round_end") == 1, "one round_end host effect");
 	for (int i = 0; i < 700; ++i) np::Server_TickUpdate(ctx);
 	expect(!world.registry.get(player)->alive,
 	       "respawns hold once the round is over [orig: the gate check @0x519af6]");
 	world.process_round_end(1);
-	expect(world.round_end.winner_team == 2, "the latch ignores a second round end");
+	expect(world.match.outcome().winner_team == 2, "the latch ignores a second round end");
 	expect(world.effects.count("round_end") == 1, "no second round_end effect");
 
-	// --- 6. The round-end WIRE pass [orig: Server_ProcessRoundEnd @0x5164f0,
-	// the state-6 slot loop @0x516790..0x51685e], captured on the ended-edge
-	// raised in section 5 and driven through the real tick so the call-site
-	// wiring is covered too. Per active slot: S2C 0x61 (4 zero bytes) then
-	// S2C 0x1D (the 7-byte scoreboard header), then game state 11. ---
-	expect(world.round_end.draw,
-	       "both team scores 0 -> draw flag [orig: the equality @0x508f30, kong 213720]");
-	expect(saw61 == 1, "one 0x61 round-end marker, 4 zero bytes [orig: @0x516790]");
-	expect(saw1d == 1, "one 7-byte 0x1D scoreboard header [orig: @0x516839]");
-	expect(marker_precedes_header, "0x61 precedes 0x1D, retail's per-slot order");
-	// [u8 winner][s16 score0][s16 score1][u8 draw][s8 myEntryIndex]
-	// [orig: EndRoundScoreboard_SerializeHeader @0x505280 — the 7-byte arm, which
-	//  Co-op always takes because g_GameType 0x30020 has bit 0x10000 set
-	//  (AI_GetTaskTypeFromFlags @0x40DAE0: attrib 0x1000000 -> task 2), matching
-	//  the 00TRg retail baseline capture's S 0x1D len=7]
-	if (expect(header.size() == 7, "header is 7 bytes")) {
-		expect(header[0] == 2, "winner byte = the winning team (auto-lose = 2)");
-		expect(header[1] == 0 && header[2] == 0, "teamScore0 — UNPORTED source, ledger D2");
-		expect(header[3] == 0 && header[4] == 0, "teamScore1 — UNPORTED source, ledger D2");
-		expect(header[5] == 1, "draw flag = (score0 == score1)");
-		expect(static_cast<int8_t>(header[6]) == 0, "myEntryIndex = this slot's row");
-	}
-	expect(ctx.np_protocol.connection_list[0].burst.game_state == 11,
-	       "slot moved to game state 11 [orig: CNetPlayer_SetGameState @0x516846]");
-	// The 2790-tick linger is MP-ONLY: gated on is_in_session, which this SP
-	// fixture leaves 0 [orig: @0x5166c4].
-	expect(ctx.endround_linger_timer == 0,
-	       "SP arms no end-round linger [orig: the is_in_session gate @0x5166c4]");
-	// One-shot: later ticks never re-emit the block.
-	loop.clear();
-	np::Server_TickUpdate(ctx);
-	{
-		ns::Datagram dg;
-		int again = 0;
-		while (loop.client_recv(dg))
-			if (dg.tag == 0x61 || (dg.tag == 0x1D && dg.body.size() == 7)) ++again;
-		expect(again == 0, "the wire pass is one-shot on the ended edge");
-	}
-
-	// --- 7. Kill scoring + the change-gated S2C 0x81 score mirror.
-	// award [orig: GameEvent_ProcessScoring @0x52F550 case 3]; mirror
-	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0]. Fresh world so the
-	// round-over latch from section 5 does not gate the mirror.
-	{
-		w::World w3;
-		w3.registry.configure_pool(0, 16);
-		w::AiSystem ai3;
-		w3.ai = &ai3;
-		w3.score_rules.valid = true;   // Co-op row values, as score.ini ships them
-		w3.score_rules.enemy_kill = 5;
-		w3.score_rules.friendly_kill = 0;
-		w3.score_rules.suicide = 0;
-
-		w::PlayerSpawn ps3;
-		ps3.position = {0.0f, 0.0f, 10.0f};
-		ps3.team = 1;
-		ps3.net_id = 0xFFE0;
-		const w::EntityHandle shooter = w::spawn_player(w3, ps3);
-		w::Entity foe;
-		foe.team = 2;
-		foe.alive = true;
-		foe.net_id = 900;
-		const w::EntityHandle enemy = w3.registry.spawn_from(0, 0, foe);
-
-		ns::LoopbackChannel ch3;
-		np::NapiNPServerCtx c3;
-		c3.is_authority = 1;
-		c3.is_in_session = 1;
-		c3.world = &w3;
-		c3.np_protocol.connection_list.push_back(make_conn(
-				1, 1, &ch3, ns::TransportMode::Loopback, shooter, true));
-
-		np::Server_TickUpdate(c3);
-		ns::Datagram d3;
-		int saw81 = 0;
-		while (ch3.client_recv(d3))
-			if (d3.tag == 0x81) ++saw81;
-		expect(saw81 == 0, "no 0x81 until the score first changes [orig: the slot[83] gate]");
-
-		push_death(w3, enemy, shooter);
-		np::Server_TickUpdate(c3);
-		expect(c3.np_protocol.connection_list[0].score == 5,
-		       "enemy kill awards ENEMYKILL (score.ini Co-op = 5)");
-		int32_t body_score = -1;
-		while (ch3.client_recv(d3)) {
-			if (d3.tag != 0x81) continue;
-			++saw81;
-			if (d3.body.size() == 4)
-				body_score = static_cast<int32_t>(
-						uint32_t(d3.body[0]) | (uint32_t(d3.body[1]) << 8) |
-						(uint32_t(d3.body[2]) << 16) | (uint32_t(d3.body[3]) << 24));
-		}
-		expect(saw81 == 1, "one 0x81 on the score change");
-		expect(body_score == 5, "0x81 body is the ABSOLUTE score, not a delta");
-
-		np::Server_TickUpdate(c3);
-		int again81 = 0;
-		while (ch3.client_recv(d3))
-			if (d3.tag == 0x81) ++again81;
-		expect(again81 == 0, "the mirror is change-gated, not periodic");
-
-		w::Entity mate;
-		mate.team = 1;
-		mate.alive = true;
-		mate.net_id = 901;
-		const w::EntityHandle friendly = w3.registry.spawn_from(0, 1, mate);
-		push_death(w3, friendly, shooter);
-		np::Server_TickUpdate(c3);
-		expect(c3.np_protocol.connection_list[0].score == 5,
-		       "same-team kill takes the FRIENDLYKILL branch (Co-op 0)");
-
-		w::Entity foe2;
-		foe2.team = 2;
-		foe2.alive = true;
-		foe2.net_id = 902;
-		const w::EntityHandle enemy2 = w3.registry.spawn_from(0, 2, foe2);
-		push_death(w3, enemy2, enemy);
-		np::Server_TickUpdate(c3);
-		expect(c3.np_protocol.connection_list[0].score == 5,
-		       "a kill with no owning connection scores nobody");
-	}
-
-	// --- 8. Corpse removal announced as S2C 0x12
-	// [orig: Server_RemoveEntityAndNotify @0x50A270 — body [u16 handle], send_mask
-	// 0x90 = alive + NOT-HOST]. The sim destroys the row (infantry.cpp corpse
-	// despawn, retail Entity_Destroy @0x4b9f93) and records the handle; the tick
-	// announces it to remote peers only — the host's own loopback client shares the
-	// sim that already destroyed it.
-	{
-		w::World w4;
-		w4.registry.configure_pool(0, 16);
-		w::AiSystem ai4;
-		w4.ai = &ai4;
-		w::PlayerSpawn ps4;
-		ps4.position = {0.0f, 0.0f, 10.0f};
-		ps4.team = 1;
-		ps4.net_id = 0xFFD0;
-		const w::EntityHandle p4 = w::spawn_player(w4, ps4);
-
-		ns::LoopbackChannel remote, host_loop;
-		np::NapiNPServerCtx c4;
-		c4.is_authority = 1;
-		c4.is_in_session = 1;
-		c4.world = &w4;
-		c4.np_protocol.connection_list.push_back(make_conn(
-				1, 1, &remote, ns::TransportMode::Client, p4, true));
-		c4.np_protocol.connection_list.push_back(make_conn(
-				2, 1, &host_loop, ns::TransportMode::Loopback, p4, true));
-
-		const uint16_t corpse = 0x0026; // a pool-0 organic handle, as retail's are
-		w4.entity_removals.push_back(corpse);
-		np::Server_TickUpdate(c4);
-		expect(w4.entity_removals.empty(), "the drain clears the queue");
-
-		ns::Datagram d4;
-		int saw12 = 0;
-		std::vector<uint8_t> body12;
-		while (remote.client_recv(d4))
-			if (d4.tag == 0x12) { ++saw12; body12 = d4.body; }
-		expect(saw12 == 1, "one S2C 0x12 to the remote peer");
-		expect(body12.size() == 2, "0x12 body is [u16 handle]");
-		if (body12.size() == 2)
-			expect(uint16_t(body12[0] | (body12[1] << 8)) == corpse,
-			       "0x12 carries the packed handle, little-endian");
-
-		int host12 = 0;
-		while (host_loop.client_recv(d4))
-			if (d4.tag == 0x12) ++host12;
-		expect(host12 == 0,
-		       "the host loopback is NOT told [orig: send_mask 0x90 excludes the host]");
-
-		np::Server_TickUpdate(c4);
-		int again12 = 0;
-		while (remote.client_recv(d4))
-			if (d4.tag == 0x12) ++again12;
-		expect(again12 == 0, "a drained removal is announced exactly once");
-	}
-
-	// --- 9. S2C 0x13 field 2 is the victim's DEATH ANIM STATE, not a killer
-	// [orig: BuildDeathNotifyPayload @0x5036E0 -> dest[1] = *(WORD *)(entity + 704);
-	// the client stores it as deathAnimStateId @0x42ebdf]. Sending the killer handle
-	// here made a corpse pick an anim indexed by whoever shot it.
-	{
-		w::World w5;
-		w5.registry.configure_pool(0, 16);
-		w::AiSystem ai5;
-		w5.ai = &ai5;
-		w::PlayerSpawn ps5;
-		ps5.position = {0.0f, 0.0f, 10.0f};
-		ps5.team = 1;
-		ps5.net_id = 0xFFC0;
-		const w::EntityHandle killer5 = w::spawn_player(w5, ps5);
-		w::Entity foe5;
-		foe5.team = 2;
-		foe5.alive = true;
-		foe5.net_id = 700;
-		foe5.death_anim_state = 174; // a real death clip id, distinct from any slot
-		const w::EntityHandle victim5 = w5.registry.spawn_from(0, 3, foe5);
-
-		ns::LoopbackChannel ch5;
-		np::NapiNPServerCtx c5;
-		c5.is_authority = 1;
-		c5.is_in_session = 1;
-		c5.world = &w5;
-		c5.np_protocol.connection_list.push_back(make_conn(
-				1, 1, &ch5, ns::TransportMode::Client, killer5, true));
-
-		push_death(w5, victim5, killer5);
-		np::Server_TickUpdate(c5);
-		ns::Datagram d5;
-		std::vector<uint8_t> b13;
-		while (ch5.client_recv(d5))
-			if (d5.tag == 0x13 && d5.body.size() == 4) b13 = d5.body;
-		expect(b13.size() == 4, "a 4-byte 0x13 reached the peer");
-		if (b13.size() == 4) {
-			expect(uint16_t(b13[0] | (b13[1] << 8)) == victim5.packed,
-			       "0x13 field 1 is the VICTIM handle");
-			expect(uint16_t(b13[2] | (b13[3] << 8)) == 174,
-			       "0x13 field 2 is the victim's death anim state, NOT the killer");
-			expect(uint16_t(b13[2] | (b13[3] << 8)) != killer5.packed,
-			       "field 2 is not the killer handle");
-		}
-	}
+	test_tdm_round_wire_and_linger();
+	test_demolition_death_routes_score_and_round_wire();
+	test_aas_round_wire();
+	test_coop_script_producers_share_round_wire();
+	test_aas_events_use_spawn_registry_index();
+	test_ctf_pickup_and_capture_wire_transaction();
+	test_flag_timeout_wire_transaction();
 
 	if (failures == 0) std::printf("round end tests passed\n");
 	return failures ? 1 : 0;

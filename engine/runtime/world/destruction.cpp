@@ -160,7 +160,7 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
         d.killer = attacker;
         d.victim_handle = target.handle.packed;
         d.killer_handle = attacker.packed;
-        (void)ammo_index;
+        d.ammo_index = ammo_index;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -173,10 +173,14 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
                                 EntityHandle attacker, float distance, float blast_radius) {
     if ((target.engine_flags & kEntityFlagDead) != 0) return; // [orig: Flags & 2 @ 0x4e682e]
     const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
-    // In-session building gate (g_destroy_buildings) — SP offline skips it
-    // [orig: the is_in_session && type==Building && !g_destroy_buildings leg
-    // @ 0x4e6860]. Our SP listen-server runs offline semantics; the MP rules
-    // bit is a net seam (tracked §24).
+    // In-session building gate. `World::mp_session` is the retail session
+    // discriminator here: our socketless SP host still uses loopback transport
+    // but must retain offline damage semantics.
+    // [orig: g_napi_np_ctx.is_in_session && ItemType_Building &&
+    // !g_destroy_buildings @0x4E682E..0x4E6860]
+    if (world.mp_session && target.kind == EntityKind::Building &&
+        !world.destroy_buildings)
+        return;
     const Entity *owner = world.registry.get(attacker);
     // Same-team blast immunity when the def authors attrib 0x8000
     // [orig: @ 0x4e688d].
@@ -241,6 +245,7 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
                 d.killer = attacker;
                 d.victim_handle = target.handle.packed;
                 d.killer_handle = attacker.packed;
+                d.ammo_index = e.ammo_index;
                 world.round_sim.deaths.push_back(d);
             }
         }

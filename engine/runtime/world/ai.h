@@ -401,14 +401,15 @@ struct AiEntity {
 
     // --- network receive-apply: a remote peer's pose, read-applied on the host ---
     // The host stages a joiner's reported 0x0C pose into these engine-frame slots
-    // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. net_is_remote_peer
-    // is the entity+0x24-bit0 "network-snapped" flag: when set the host SNAPS the live pose
-    // to the report and the infantry motor SKIPS the entity (no re-simulation)
-    // [orig: Entity_UpdateInfantryAI @0x4b9a03]. net_smooth_target/heading/pitch are staged
+    // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. Retail's
+    // entity+0x24 bit 0 only selects the conditional hard snap at @0x4C207E; it
+    // is not an all-remote classifier. `net_is_remote_peer` is OpenNova's explicit
+    // snapshot-ownership fact: it skips locomotion but retains the authority org2
+    // animation/collision tail. net_smooth_target/heading/pitch are staged
     // for the CLIENT-side interpolation smoothing (motor fall-through @0x4b9a8c, is_authority==0)
     // — a deferred, client-only concern; the authority host never interpolates. NEVER set for
     // the host's own player (ADR-0012 amendment / §5.38).
-    bool    net_is_remote_peer = false;  // entity+0x24 bit0 (net-snap + motor-skip)
+    bool    net_is_remote_peer = false;
     int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world)
     int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; also mirrored to heading/+0x10)
     int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; also mirrored to pitch/+0x14)

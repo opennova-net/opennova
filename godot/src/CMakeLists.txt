@@ -90,7 +90,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_present_applier.cpp
     simulation/nova_present_applier_wire.cpp
     simulation/nova_present_stats.cpp
-    simulation/nova_mission_session_values.cpp
+    simulation/nova_inmatch_session_values.cpp
     simulation/nova_wire_present_pass.cpp
     simulation/nova_simulation.cpp
     simulation/nova_simulation_assets.cpp
@@ -100,6 +100,8 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation_occlusion.cpp
     simulation/nova_simulation_player.cpp
     simulation/nova_simulation_player_loadout.cpp
+    simulation/nova_simulation_deploy_screen.cpp
+    simulation/nova_simulation_end_round.cpp
     simulation/nova_simulation_player_view.cpp
     simulation/nova_simulation_player_weapon.cpp
     simulation/nova_simulation_present.cpp
@@ -116,6 +118,7 @@ add_library(${TARGET_NAME} SHARED
     util/engine_caches.cpp
     util/nova_data_format.cpp
     util/nova_paths.cpp
+    util/nova_process.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp

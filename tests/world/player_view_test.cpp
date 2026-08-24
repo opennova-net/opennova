@@ -135,6 +135,65 @@ void test_mode_arbiter() {
     v.debug_third_person_on_foot = false;
     player_view_tick(v, eye);
     CHECK(!v.third_person);
+    CHECK(v.camera_mode == 0);
+
+    // The full arbiter [orig: Render_ProcessMainSceneFrame @0x5ca1f4..0x5ca24b].
+    // Dead on foot -> the death camera (mode 4).
+    v.local_dead = true;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 4 && !v.third_person);
+    // g_rules_flags bit 0 keeps the seat-derived mode instead.
+    v.rules_no_death_cam = true;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 0);
+    v.mount.control_seat = true;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 1 && v.third_person);
+    v.mount.control_seat = false;
+    v.rules_no_death_cam = false;
+    // The death screen overrides the dead bit: sub-mode 1 -> the chase,
+    // 0 / 2 -> first person, anything else keeps the seat verdict.
+    v.death_screen_active = true;
+    v.death_screen_submode = 1;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 1);
+    v.death_screen_submode = 0;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 0);
+    v.death_screen_submode = 2;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 0);
+    v.death_screen_submode = 7;
+    v.mount.control_seat = true;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 1);
+    v.mount.control_seat = false;
+    v.death_screen_active = false;
+    // Alive again -> first person.
+    v.local_dead = false;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 0);
+    // The end-of-round gate on foot -> 4; in a seat it does not.
+    v.round_ended = true;
+    v.on_foot = true;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 4);
+    v.on_foot = false;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 0);
+    v.round_ended = false;
+    v.on_foot = true;
+    // The in-session force-first-person rule (bit 0x40) beats the seat chase.
+    v.mount.control_seat = true;
+    v.in_session = true;
+    v.rules_force_first_person = true;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 0 && !v.third_person);
+    v.rules_force_first_person = false;
+    player_view_tick(v, eye);
+    CHECK(v.camera_mode == 1);
+    v.mount.control_seat = false;
+    v.in_session = false;
 }
 
 void test_fov_policy() {

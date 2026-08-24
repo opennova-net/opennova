@@ -518,7 +518,7 @@ const ONE_TICK_DELTA := 0.02
 func _load_minimal_mission(world: GameWorld, root_dir: String = "",
 		mutator: Callable = Callable()) -> void:
 	if root_dir.is_empty():
-		root_dir = ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+		root_dir = ProjectSettings.globalize_path("res://../assets")
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	world.set_resource_root(root)
@@ -549,13 +549,28 @@ func _stage_impact_fixture(name: String) -> String:
 	var root_dir := _make_fixture_root(name)
 	for source_dir in [
 		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
-		ProjectSettings.globalize_path("res://../fixtures/minimal/resources"),
+		ProjectSettings.globalize_path("res://../assets"),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
 			assert_eq(DirAccess.copy_absolute(
 				source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
 	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
 	return root_dir
+
+
+# The staged harness item for KIND_BUILDING tests. The shipped assets/items.def
+# carries only what the minimal mission places or the engine spawns by fixed id,
+# so the staged root appends its own catalogue entry for the fixture model the
+# stagers copy in as GuardTwr1.3di. CRLF: retail's .def parser stops at a bare LF.
+const BUILDING_ITEM_DEF := "\r\nbegin \"Guard Tower\"\r\n  id 102001\r\n  type building\r\n  graphic GuardTwr1\r\n  sid guardtwr1\r\n  anim_def GuardTwr1\r\n  husk GuardTwr1X\r\n  hp 5000\r\nend\r\n"
+
+
+func _append_building_item(root_dir: String) -> void:
+	var f := FileAccess.open(root_dir.path_join("items.def"), FileAccess.READ_WRITE)
+	assert_not_null(f, "the staged root carries items.def to append to")
+	f.seek_end(0)
+	f.store_string(BUILDING_ITEM_DEF)
+	f.close()
 
 
 # Stage the minimal fixture plus the House.3di collision fixture as item
@@ -566,6 +581,7 @@ func _stage_building_fixture(name: String) -> String:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
 	return root_dir
 
 
@@ -574,6 +590,7 @@ func _stage_lit_building_fixture(name: String) -> String:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Shed.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
 	return root_dir
 
 
@@ -586,6 +603,7 @@ func _stage_building_terrain_fixture(name: String) -> String:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
 	return root_dir
 
 
@@ -607,7 +625,7 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 
 
 func test_tick_gates_the_runtime_on_its_transport() -> void:
-	# The game shell's tick must respect MissionSession state - the debug
+	# The game shell's tick must respect inmatch::Session state - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
 	# (before it, play()/pause() were inert in the game).
 	var world := _make_world()
@@ -917,7 +935,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 	DirAccess.make_dir_recursive_absolute(root_dir)
 	for source_dir in [
 		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
-		ProjectSettings.globalize_path("res://../fixtures/minimal/resources"),
+		ProjectSettings.globalize_path("res://../assets"),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
 			assert_eq(DirAccess.copy_absolute(
@@ -950,7 +968,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 
 func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> void:
 	var fixture_path := ProjectSettings.globalize_path(
-			"res://../fixtures/minimal/resources/mnml.bms")
+			"res://../assets/mnml.bms")
 	var full_bytes := FileAccess.get_file_as_bytes(fixture_path)
 	assert_gt(full_bytes.size(), 616)
 	var full_mission := MissionData.new()
@@ -1085,7 +1103,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	DirAccess.make_dir_recursive_absolute(root_dir)
 	for source_dir in [
 		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
-		ProjectSettings.globalize_path("res://../fixtures/minimal/resources"),
+		ProjectSettings.globalize_path("res://../assets"),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
 			assert_eq(DirAccess.copy_absolute(
@@ -1478,7 +1496,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	world.set_playable(false)
 
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
@@ -1536,7 +1554,7 @@ func _world_driven_weather_state_after(deltas: Array) -> Array:
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/minimal/resources")), OK)
+			"res://../assets")), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
@@ -1648,7 +1666,7 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_host(_lan_host_config("missing.bms", 0)),
@@ -1672,7 +1690,7 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_host(_lan_host_config("mnml.bms", 0)), OK)
@@ -1701,7 +1719,7 @@ func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless()
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 	watch_signals(world)
 	var failures: Array[String] = []
@@ -1735,7 +1753,7 @@ func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String):
@@ -1766,7 +1784,7 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
@@ -1794,7 +1812,7 @@ func test_freeing_world_during_joiner_preload_leaves_no_suspended_owner_method()
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_joiner(
@@ -1837,7 +1855,7 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
@@ -1892,7 +1910,7 @@ func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_joiner(_join_target(
@@ -1914,7 +1932,7 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
 	var bms_name := "timeline_env_fail_%d.bms" % Time.get_ticks_usec()
 	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path("res://../fixtures/minimal/resources/mnml.bms"),
+		ProjectSettings.globalize_path("res://../assets/mnml.bms"),
 		root_dir.path_join(bms_name)), OK)
 	_write_fixture_file(root_dir.path_join("mnml.env"), "")
 	_write_fixture_file(root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
@@ -1948,12 +1966,12 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
 	var bms_name := "timeline_terrain_fail_%d.bms" % Time.get_ticks_usec()
 	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path("res://../fixtures/minimal/resources/mnml.bms"),
+		ProjectSettings.globalize_path("res://../assets/mnml.bms"),
 		root_dir.path_join(bms_name)), OK)
 	# A REAL environment node parses the env stage now, so this root needs the
 	# valid fixture env; the empty terrain still fails the terrain stage.
 	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path("res://../fixtures/minimal/resources/mnml.env"),
+		ProjectSettings.globalize_path("res://../assets/mnml.env"),
 		root_dir.path_join("mnml.env")), OK)
 	_write_fixture_file(root_dir.path_join("mnml.trn"), "")
 	var root := ResourceRoot.new()
@@ -1986,7 +2004,7 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 	await get_tree().process_frame
 
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 	world.mission_file = "boot-option.bms"
@@ -2058,7 +2076,7 @@ func test_editor_run_rejects_non_top_level_or_non_bms_paths() -> void:
 
 func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 	var root_dir := _make_fixture_root("loose_first_til")
-	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var source_dir := ProjectSettings.globalize_path("res://../assets")
 	var archive_entries: Array = []
 	for file_name in DirAccess.get_files_at(source_dir):
 		archive_entries.append({
@@ -2097,7 +2115,7 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
 		"mission_til_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
-	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var source_dir := ProjectSettings.globalize_path("res://../assets")
 	for file_name in DirAccess.get_files_at(source_dir):
 		assert_eq(DirAccess.copy_absolute(
 			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
@@ -2159,7 +2177,7 @@ func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	add_child_autofree(world)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
@@ -2283,7 +2301,7 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	add_child_autofree(world)
 	await get_tree().process_frame
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
@@ -3283,7 +3301,7 @@ func _make_fixture_root(name: String) -> String:
 
 func _stage_minimal_fixture(name: String) -> String:
 	var root_dir := _make_fixture_root(name)
-	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	var source_dir := ProjectSettings.globalize_path("res://../assets")
 	for file_name in DirAccess.get_files_at(source_dir):
 		assert_eq(DirAccess.copy_absolute(
 			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)

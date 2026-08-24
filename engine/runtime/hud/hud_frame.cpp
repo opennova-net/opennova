@@ -58,7 +58,7 @@ void HudFrameCompiler::configure(const HudLayout &layout,
 
 void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
 		const fnt_font_t *bold, const fnt_font_t *large, float scale,
-		float large_scale) {
+		float large_scale, const fnt_font_t *impact38) {
 	// [orig: HUD_InitAllFonts @ 0x51ee20 stores each slot through the
 	// {font, scale_x, scale_y} slot writer @ 0x580453..0x580468]
 	label_font_.set_font(normal);
@@ -70,6 +70,9 @@ void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
 	label_font_large_.set_font(large);
 	label_font_large_.set_page_base(
 			static_cast<uint32_t>(kHudFontSlotLabelLarge * FNT_MAX_PAGES));
+	label_font_impact38_.set_font(impact38);
+	label_font_impact38_.set_page_base(
+			static_cast<uint32_t>(kHudFontSlotImpact38 * FNT_MAX_PAGES));
 	label_scale_ = scale > 0.0f ? scale : 1.0f;
 	label_large_scale_ = large_scale > 0.0f ? large_scale : 1.0f;
 }
@@ -377,6 +380,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	//  @0x50b281].
 	element_message_log(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
+	element_end_round_overlay(state, surface_w, surface_h);
 	return draw_list_;
 }
 
@@ -1153,6 +1157,22 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 											  : active_color(state))
 				: band == 1 ? layout_.tag_middle
 							: layout_.tag_bad;
+		// The bad tier's DOWNED legs: a dead entity with a slot still inside
+		// its revive window is light blue (table[3]), pulsing toward white
+		// while a medic request stands; dead without that is gray (table[8]);
+		// alive-but-bad keeps tagcolor_bad [orig: @0x5a3dc9..0x5a3e85 —
+		// `Flags & 2` -> slot && slot+0x10 ? (slot+0x2C ? pulse : light blue)
+		// : gray, else tagcolor_bad].
+		if (band == 2 && tag.dead) {
+			if (tag.has_slot && tag.revive_seconds != 0) {
+				rgb = tag.medic_request
+						? friendly_tag_revive_pulse(kFriendlyTagDownedLightBlue,
+								  state.ticks)
+						: kFriendlyTagDownedLightBlue;
+			} else {
+				rgb = kFriendlyTagDownedGray;
+			}
+		}
 		// The speaking pulse rides the voice output level [orig: @ 0x5a3e8f].
 		if (tag.speaking) {
 			rgb = friendly_tag_speaking_blend(rgb, state.speaking_level255);
@@ -1162,6 +1182,23 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				(static_cast<uint32_t>(friendly_tag_alpha(tag.dist_q16)) << 24) |
 				(rgb & 0xFFFFFFu);
 		const float top_y = tag.screen_y - font_h * 0.5f; // [orig: @ 0x5a4264]
+		// The revive count rides the label while the entity is dead with a
+		// slot inside its window [orig: the gate `dead && slot && slot+0x10`
+		// @0x5a3fdc..0x5a3ff8 (text), @0x5a41c0..0x5a41df (ticks),
+		// @0x5a4407..0x5a441b (bar)].
+		const bool show_count = tag.dead && tag.has_slot && tag.revive_seconds != 0;
+		// The tick and bar forms draw the bare count centered one fontH ABOVE
+		// the projected point in the tag color [orig: sprintf("%ld") @0x5a41f0 /
+		// @0x5a4428 -> HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
+		auto emit_bare_count = [&]() {
+			if (!show_count) return;
+			const std::string count = std::to_string(tag.revive_seconds);
+			const GameFontRun run = lf.layout(count.c_str(), tag.screen_x,
+					tag.screen_y - font_h, ls, ls, kFontAlignCenter,
+					half_bright_keep_alpha(argb));
+			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+					run.quads.end());
+		};
 
 		// A slot entry with an empty callsign draws the bar form
 		// [orig: the empty-name leg @ 0x5a4398 — y unadjusted, height fontH].
@@ -1175,6 +1212,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				bar.x1 = tag.screen_x;
 				bar.y1 = tag.screen_y + font_h;
 				draw_list_.lines.push_back(bar);
+				emit_bare_count();
 				continue;
 			}
 			// '^' + the compiled-in name table [orig: @ 0x5a4047..0x5a40cd].
@@ -1182,10 +1220,16 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 		}
 
 		if (friendly_tag_text_visible(state.friendly_tag_mode, tag.dist_q16)) {
+			// The text form appends the count to the name
+			// [orig: sprintf("%s: %ld", name, slot+0x10) @0x5a400e, else
+			//  sprintf("%s", name) @0x5a422e].
+			const std::string label = show_count
+					? resolved + ": " + std::to_string(tag.revive_seconds)
+					: resolved;
 			// Centered text at the projected point, half-bright with the
 			// distance alpha kept [orig: HUD_DrawTextHalfBrightF @ 0x5a4268 ->
 			// CGameFont_DrawText flags 1, the slot scales pushed @ 0x580720].
-			const GameFontRun run = lf.layout(resolved.c_str(), tag.screen_x,
+			const GameFontRun run = lf.layout(label.c_str(), tag.screen_x,
 					top_y, ls, ls, kFontAlignCenter,
 					half_bright_keep_alpha(argb));
 			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
@@ -1199,7 +1243,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				// then the two red bars, in the witnessed order.
 				int text_w = 0;
 				int text_h = 0;
-				lf.measure(resolved.c_str(), ls, ls, &text_w, &text_h);
+				lf.measure(label.c_str(), ls, ls, &text_w, &text_h);
 				const float x0 = tag.screen_x -
 						(static_cast<float>(text_w) * 0.5f + font_h) - 0.5f;
 				const float y0 = top_y - 0.5f;
@@ -1222,7 +1266,42 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				seg.y1 = tag.screen_y + half;
 				draw_list_.lines.push_back(seg);
 			}
+			emit_bare_count();
 		}
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
+		float w, float h) {
+	// [orig: draw_endround_stats_overlay @0x5b7cd0] The stdbox over the
+	// overlay safe area, then each resolved line centred on design x 512 in
+	// the Impact38 slot, half-bright like every HUD text
+	// [orig: HUD_DrawLabelBox(ctx, 8, top+8, 1015, bottom-8) @0x5b7d3e;
+	//  sub_580B80 -> Viewport_ScaleToVirtualCoords + HUD_DrawTextCentered_HalfBright].
+	const HudEndRoundOverlayState &er = state.end_round;
+	if (!er.shown) return;
+	emit_stdbox(sx(8.0f, w), sy(static_cast<float>(er.top + 8), h),
+			sx(1015.0f, w), sy(static_cast<float>(er.bottom - 8), h), w,
+			0xFFFFFFFFu, 0.0f);
+	// The Impact38 slot falls back to the large slot, then the bold label
+	// slot, then the hudpos font at scale 1 when the files are absent
+	// (layout-only embedders keep drawing, like the other label elements).
+	const bool have_impact = label_font_impact38_.font() != nullptr;
+	const bool have_large = label_font_large_.font() != nullptr;
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &lf = have_impact ? label_font_impact38_
+			: have_large ? label_font_large_
+			: have_bold ? label_font_bold_ : font_;
+	const float ls = (have_impact || have_large) ? label_large_scale_
+			: have_bold ? label_scale_ : 1.0f;
+	if (lf.font() == nullptr) return;
+	const uint32_t color = half_bright_keep_alpha(active_color(state));
+	for (const HudEndRoundLine &line : er.lines) {
+		if (line.text.empty()) continue;
+		const GameFontRun run = lf.layout(line.text.c_str(), sx(512.0f, w),
+				sy(static_cast<float>(line.y), h), ls, ls, kFontAlignCenter, color);
+		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
 	}
 	++draw_list_.elements_drawn;
 }

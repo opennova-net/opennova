@@ -265,8 +265,9 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 }
                 case bms::GroupTriggerType::GroupHoldingGroup:
                     // Any pool-0 member of group p1 carrying an object of
-                    // group p2 via the mounted_child link; the link's
-                    // producers ride the carry/CTF system port (§3b item 4).
+                    // group p2 via the mounted_child link. Match owns the
+                    // live flag writers; generic carryables retain their
+                    // vehicle-attachment owner (§3b item 4).
                     // [orig: @0x453778 -> TriggerGroup_AnyMemberHoldingItemGroup]
                     return cmds.group_holding_group(t.param1, t.param2);
                 default:
@@ -464,7 +465,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             w.subgoals.won |= bit;
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
                     ? w.subgoals.win_text_ids[a.param1] : 0;
-            const int32_t announce = w.round_end.ended ? 0 : 1;
+            const int32_t announce = w.match.outcome().ended ? 0 : 1;
             w.effects.push({"subgoal_won", a.param1, text_id, announce, 0, std::string()});
             break;
         }
@@ -478,7 +479,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             w.subgoals.lost |= (1u << a.param1);
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
                     ? w.subgoals.lose_text_ids[a.param1] : 0;
-            const int32_t announce = w.round_end.ended ? 0 : 1;
+            const int32_t announce = w.match.outcome().ended ? 0 : 1;
             w.effects.push({"subgoal_lost", a.param1, text_id, announce, 0, std::string()});
             break;
         }
@@ -599,9 +600,9 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     const uint32_t pre_bit = static_cast<uint32_t>(bms::EventFlags::PreMission);
     const uint32_t post_bit = static_cast<uint32_t>(bms::EventFlags::PostMission);
 
-    if (ctx.pre_mission) {
+    if (ctx.phase == opennova::world::TickPhase::PreMission) {
         // Pre-mission pass: every PreMission-flag entry, one whole-list sweep.
-        // The embedder contract is ONE pre_mission tick per mission start, before
+        // The embedder contract is ONE PreMission tick per mission start, before
         // the clock runs (Simulation delivers exactly one) — retail's pre
         // pass is a single call, never periodic (D-EVT-4).
         // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0; sole caller

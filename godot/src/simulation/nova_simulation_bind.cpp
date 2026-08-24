@@ -104,6 +104,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &Simulation::get_join_mission_file);
 	ClassDB::bind_method(D_METHOD("take_join_environment_update"),
 	                     &Simulation::take_join_environment_update);
+	ClassDB::bind_method(D_METHOD("take_score_feedback"), &Simulation::take_score_feedback);
 	ClassDB::bind_method(D_METHOD("get_join_mission_header"), &Simulation::get_join_mission_header);
 	ClassDB::bind_method(D_METHOD("get_join_terrain_til_state"),
 	                     &Simulation::get_join_terrain_til_state);
@@ -127,6 +128,23 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_deploy_spawn_zones);
 	ClassDB::bind_method(D_METHOD("send_deployment_pick", "param"),
 	                     &Simulation::send_deployment_pick);
+	ClassDB::bind_method(D_METHOD("get_deploy_list_rows", "default_key", "default_home", "zone_names"),
+	                     &Simulation::get_deploy_list_rows);
+	ClassDB::bind_method(D_METHOD("get_deploy_status"), &Simulation::get_deploy_status);
+	ClassDB::bind_method(D_METHOD("request_local_player_medic"),
+	                     &Simulation::request_local_player_medic);
+	ClassDB::bind_method(D_METHOD("local_medic_request_cooldown_ticks"),
+	                     &Simulation::local_medic_request_cooldown_ticks);
+	ClassDB::bind_method(D_METHOD("local_medic_request_serial"),
+	                     &Simulation::local_medic_request_serial);
+	ClassDB::bind_method(D_METHOD("set_server_text", "medic_request_format"),
+	                     &Simulation::set_server_text);
+	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
+	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
+	ClassDB::bind_method(D_METHOD("get_end_round_lines"), &Simulation::get_end_round_lines);
+	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width"),
+	                     &Simulation::get_end_round_columns);
+	ClassDB::bind_method(D_METHOD("get_end_round_rows"), &Simulation::get_end_round_rows);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &Simulation::get_join_assigned_team);
 	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),
@@ -312,6 +330,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::local_player_fp_weapon_hidden);
 	ClassDB::bind_method(D_METHOD("debug_crew_local_player", "vehicle_ssn"),
 	                     &Simulation::debug_crew_local_player);
+	ClassDB::bind_method(D_METHOD("debug_kill_player_entity", "handle"), &Simulation::debug_kill_player_entity);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &Simulation::debug_set_entity_position);
 	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &Simulation::get_world_entity_debug);
 	ClassDB::bind_method(D_METHOD("get_client_entity_debug", "handle"), &Simulation::get_client_entity_debug);

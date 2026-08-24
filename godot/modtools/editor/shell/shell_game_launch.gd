@@ -24,11 +24,17 @@ const TOOLTIP_MISSION_NO_RUNTIME := \
 const TOOLTIP_STOP_READY := "Stop the managed game (F8)."
 const TOOLTIP_STOPPED := "No managed game is running."
 const TOOLTIP_STOPPING := "The managed game is stopping."
+const TOOLTIP_RETAIL_READY := "Play in Retail (F7): pack the assets and prove them against retail."
+const TOOLTIP_RETAIL_NEEDS_DIR := \
+		"Play in Retail (F7): configure a retail install directory in Settings."
+const TOOLTIP_RETAIL_NEEDS_ASSETS := \
+		"Play in Retail (F7): pick a resource directory first (Settings)."
 
 
 var _button: Button
 var _mission_button: Button
 var _stop_button: Button
+var _retail_button: Button
 # func() -> String: the authoring/resource dir the editor has mounted ("" = none).
 var _resource_dir: Callable
 var _session := GameSession.new()
@@ -48,11 +54,17 @@ func setup(
 	kill_process: Callable = Callable(),
 	now_msec: Callable = Callable(),
 	mission_button: Button = null,
-	stop_button: Button = null
+	stop_button: Button = null,
+	retail_dir: Callable = Callable(),
+	pack_retail: Callable = Callable(),
+	retail_button: Button = null,
+	wait_for_exit: Callable = Callable(),
+	release_process: Callable = Callable()
 ) -> void:
 	_button = button
 	_mission_button = mission_button
 	_stop_button = stop_button
+	_retail_button = retail_button
 	_resource_dir = resource_dir
 	_session.setup(
 		resource_dir,
@@ -65,7 +77,11 @@ func setup(
 		show_status,
 		is_process_running,
 		kill_process,
-		now_msec)
+		now_msec,
+		retail_dir,
+		pack_retail,
+		wait_for_exit,
+		release_process)
 	if _button != null:
 		_button.icon = EditorIconLibrary.resolve(&"play_in_game")
 		if not _button.pressed.is_connected(_on_pressed):
@@ -74,6 +90,12 @@ func setup(
 		_mission_button.icon = EditorIconLibrary.resolve(&"mission")
 		if not _mission_button.pressed.is_connected(_on_mission_pressed):
 			_mission_button.pressed.connect(_on_mission_pressed)
+	if _retail_button != null:
+		# No retail-specific glyph exists; export reads as "pack it and ship it out", which is
+		# exactly what this does. The tooltip carries the meaning.
+		_retail_button.icon = EditorIconLibrary.resolve(&"action_export")
+		if not _retail_button.pressed.is_connected(run_retail):
+			_retail_button.pressed.connect(run_retail)
 	if _stop_button != null:
 		_stop_button.text = "■"
 		if not _stop_button.pressed.is_connected(_on_stop_pressed):
@@ -88,6 +110,7 @@ func available() -> bool:
 ## Re-gate the button (called by the shell whenever the resource root or the
 ## active workspace changes).
 func refresh() -> void:
+	_refresh_retail_button()
 	var has_runtime := available()
 	var has_dir := _resource_dir.is_valid() \
 			and not String(_resource_dir.call()).is_empty()
@@ -180,3 +203,31 @@ func _on_mission_pressed() -> void:
 
 func _on_stop_pressed() -> void:
 	stop()
+
+
+## Pack the mounted assets and launch retail on them — the asset oracle.
+## Disabled unless a retail install is configured; the session owns the rest.
+func run_retail() -> bool:
+	var started := _session.start_mode("retail")
+	# start_mode flips STOPPED -> RUNNING synchronously, between two polls, so poll()'s
+	# transition check never sees it: without this the Stop button stays disabled for the
+	# whole retail run.
+	refresh()
+	return started
+
+
+# Retail's gating is independent of the OpenNova runtime's: `available()` asks whether a
+# game binary sits beside the editor, which has nothing to do with whether retail can run.
+func _refresh_retail_button() -> void:
+	if _retail_button == null:
+		return
+	var has_assets := not String(_resource_dir.call()).strip_edges().is_empty() \
+			if _resource_dir.is_valid() else false
+	var has_retail := _session.retail_available()
+	_retail_button.disabled = not (has_assets and has_retail)
+	if not has_retail:
+		_retail_button.tooltip_text = TOOLTIP_RETAIL_NEEDS_DIR
+	elif not has_assets:
+		_retail_button.tooltip_text = TOOLTIP_RETAIL_NEEDS_ASSETS
+	else:
+		_retail_button.tooltip_text = TOOLTIP_RETAIL_READY

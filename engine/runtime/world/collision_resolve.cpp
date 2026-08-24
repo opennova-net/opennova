@@ -111,7 +111,7 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
 int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, ResolveState &state,
                                        int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                                        int32_t capsule_bottom, int32_t capsule_top,
-                                       int32_t heading, int32_t body_pitch, bool is_player,
+                                       int32_t heading, int32_t body_pitch, bool is_player_class,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
                                        uint32_t anim_state_flags, int16_t &health,
                                        EntityHandle *out_ground,
@@ -163,7 +163,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             // x2-for-both; the §22 per-tick -208 + `pos += vel` port restores
             // the witnessed split — a mismatched undo here leaks per gravity
             // tick through the skip band (the standing rise-and-snap sawtooth).
-            pos[2] -= is_player ? vel_z : 2 * vel_z;
+            pos[2] -= is_player_class ? vel_z : 2 * vel_z;
             vel_z = 0;
             return 0; // [orig: skip path returns 0 @ 0x4b2cec]
         }
@@ -297,8 +297,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // Mask bit 0x1 arms the inflated CL recontact test while the ladder latch
     // rides; retail recomputes the arg per query, so a mid-loop fresh entry
     // upgrades the remaining candidates. [orig: v137 + 2*v130 @ 0x4b2f7c/0x4b35af]
-    q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
-    q.query_is_player = is_player;
+    q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player_class ? 2 : 0));
+    q.query_is_player = is_player_class;
 
     int32_t total_force[3] = {0, 0, 0};
     LadderContact ladder;
@@ -335,16 +335,27 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 // Retail recomputes the mask argument at every query, so a fresh
                 // entry upgrades the remaining candidates to recontact mode.
                 // [orig: v137 + 2*v130 @ 0x4b2f7c / @ 0x4b35af]
-                q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
+                q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player_class ? 2 : 0));
                 ContactResult res;
                 const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
-                // The force fold PRECEDES the flag dispatch — a fresh CL entry
-                // below then zeroes the accumulated force, this candidate's
-                // included. Down-force suppression: a mostly-vertical negative
-                // force is dropped (standing pressure, not a wall).
-                // [orig: fold @ 0x4b3002-0x4b30af / @ 0x4b3603-0x4b36b9 before
-                //  the dispatch @ 0x4b30b7; the f[2]<0 gate @ 0x4b3010]
-                if (contact && !suppress_model_force) {
+                const Entity *target_entity = world.registry.get(ch);
+                const bool powerup = contact && target_entity != nullptr &&
+                    target_entity->has_item_def &&
+                    (target_entity->item_attrib & kItemAttribPowerup) != 0;
+                const bool move_callback = contact && target_entity != nullptr &&
+                    target_entity->has_item_def && !powerup &&
+                    (target_entity->item_attrib & kItemAttribMoveCallback) != 0;
+                if (pass == 0 && is_authority && move_callback)
+                    record_movement_callback_contact(source, ch);
+                // Powerup and MoveCB ItemDefs bypass the ordinary solid-force
+                // fold. MoveCB publishes above; the distinct Powerup callback
+                // remains D-COL-8. A fresh CL entry below zeroes accumulated
+                // ordinary force; mostly-vertical negative force is standing
+                // pressure and is dropped.
+                // [orig: attrib branches @0x4B2F90..0x4B2FF5; force fold
+                // @0x4B3002..0x4B30AF/@0x4B3603..0x4B36B9]
+                if (contact && !powerup && !move_callback &&
+                    !suppress_model_force) {
                     dbg_last_contact = ch; // debug-card tap
                     if (const Entity *ce = world.registry.get(ch))
                         dbg_last_contact_item = ce->item_id;
@@ -365,6 +376,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     // The contact-flag dispatch runs whether or not the query
                     // produced force — a pure ladder/zone touch still latches.
                     // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
+                    if (is_authority && (res.flags & kTouchChangeTeam) != 0)
+                        record_change_team_contact(source, ch);
                     if ((res.flags & 0x1u) != 0 && ladder.valid) {
                         if (ladder_io == nullptr) {
                             // Latch-only channel (replica rows / harness callers):
@@ -383,7 +396,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                             // player class bit or the AI climb order besides a
                             // previous latch. [orig: @ 0x4b3271 / @ 0x4b325d]
                             if ((cur_flags & kEntityFlagDead) == 0 &&
-                                (on_ladder || is_player || ladder_io->ai_wants_climb)) {
+                                (on_ladder || is_player_class || ladder_io->ai_wants_climb)) {
                                 const int32_t height_diff =
                                     ladder.anchor[2] - ladder_io->tick_start_z; // [orig: @ 0x4b327d]
                                 bool latched = false;
@@ -408,7 +421,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                     const bool player_gate =
                                         (height_diff < 0 || facing_err < 715827840) &&
                                         (height_diff > 0) == (view_pitch > 0);
-                                    if (!is_player || player_gate) {
+                                    if (!is_player_class || player_gate) {
                                         latched = true;
                                         // Snap onto the anchor column. Below the
                                         // anchor the stance-picked Z bump breaks
@@ -451,11 +464,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                     last_ladder_frame = ladder; // the persisting globals
                                     // The per-tick alignment chase.
                                     // [orig: @ 0x4b33a4-0x4b3495]
-                                    if (is_player) {
-                                        // Players ease: one sixteenth of the yaw
-                                        // error moves the view yaw AND the body
-                                        // heading; the local mouse accumulator
-                                        // inherits it through the embedder
+                                    if (is_player_class) {
+                                        // Every class-bit body eases (@ 0x4b33aa):
+                                        // one sixteenth of the yaw error moves
+                                        // the view yaw (+0x10) AND the body
+                                        // heading (+0x8C); only the LOCAL entity
+                                        // drags g_LocalPlayerLookYaw along
+                                        // (@ 0x4b33ca), which the embedder's
+                                        // mouse accumulator inherits through the
                                         // write-back. [orig: (delta+8)>>4
                                         // @ 0x4b33bc; g_LocalPlayerLookYaw @ 0x4b33d2]
                                         if (ladder_io->body_heading != nullptr) {
@@ -658,9 +674,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     // Leaving the ladder: latched at resolve start, nothing re-latched, a live
-    // player body — push 0.375u along +bodyHeading (over the lip on a natural
-    // top-out) and arm the local pitch restore. [orig: @ 0x4b3c5c-0x4b3cf9]
-    if (ladder_io != nullptr && was_on_ladder && !ladder_entity.valid() && is_player &&
+    // class-bit body — push 0.375u along +bodyHeading (over the lip on a natural
+    // top-out; @ 0x4b3c78) and, for the LOCAL entity only (@ 0x4b3cdc), arm the
+    // pitch restore. [orig: @ 0x4b3c5c-0x4b3cf9]
+    if (ladder_io != nullptr && was_on_ladder && !ladder_entity.valid() && is_player_class &&
         (ent == nullptr || ((ent->flags | ent->engine_flags) & kEntityFlagDead) == 0) &&
         ladder_io->body_heading != nullptr) {
         const double rad = static_cast<double>(*ladder_io->body_heading) *
@@ -750,7 +767,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                                         int32_t vel_xy[2], int32_t &vel_z,
                                         int32_t capsule_bottom, int32_t capsule_top,
-                                        bool is_player, uint32_t tick, int32_t anim_state_id,
+                                        bool is_player_class, uint32_t tick, int32_t anim_state_id,
                                         uint32_t anim_state_flags, const ReplicaPeer *peers,
                                         int32_t peer_count, uint16_t exclude_handle,
                                         uint32_t *entity_flags, EntityHandle *out_ground) {
@@ -794,7 +811,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const int32_t clearance = resolve_entity(
         world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
-        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player,
+        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
         /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
         health_dummy, out_ground);
     replica_peers_ = nullptr;
@@ -1018,6 +1035,24 @@ bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
     return false;
 }
 
+void CollisionWorld::record_change_team_contact(EntityHandle source,
+                                                 EntityHandle trigger) {
+    if (!source.valid() || !trigger.valid()) return;
+    for (const GameplayContact &contact : change_team_contacts_) {
+        if (contact.source == source && contact.target == trigger) return;
+    }
+    change_team_contacts_.push_back({source, trigger});
+}
+
+void CollisionWorld::record_movement_callback_contact(EntityHandle source,
+                                                       EntityHandle target) {
+    if (!source.valid() || !target.valid()) return;
+    for (const GameplayContact &contact : movement_callback_contacts_) {
+        if (contact.source == source && contact.target == target) return;
+    }
+    movement_callback_contacts_.push_back({source, target});
+}
+
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside
 // the resolver loop @ 0x4b30b7-0x4b351e]
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
@@ -1037,9 +1072,8 @@ void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &hea
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);
         if ((flags & 0x100u) != 0 && health > 0) health = static_cast<int16_t>(health - 50);
-        // CT/change-team touch (0x200) feeds the retail capture/team-change request
-        // callback (`Server_OnPlayerTouchCaptureZone @ 0x500ba0`). Ours still rides
-        // the zone system's independent proximity path (D-COL-6).
+        // CT/change-team touches are recorded above from pass 0 with both exact
+        // entity identities, then consumed by the capture transaction.
     }
     if ((flags & 0x4u) != 0) ent->flags |= kEntityFlagArmoryZone; // type 6 [orig: @ 0x4b34a0]
     if ((flags & 0x400u) != 0)

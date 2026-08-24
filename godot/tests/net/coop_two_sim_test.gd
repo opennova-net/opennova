@@ -32,6 +32,10 @@ const AI_TYPE := 0x14BF       # Generic Soldier (items.def id 105311, org1 Perso
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
 const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x40000)
+# Objective Co-op's no-pick primary. Retail indexes the authored 6094 rows by
+# player slot; it does not fall through to DM's 6002 family.
+# [orig: Server_PositionPlayerForSpawn @0x50D1A7..0x50D201]
+const OBJECTIVE_COOP_START_TYPE := 6094
 
 # S16 native seat tables: the Dictionary install seam is gone. Tests compose a
 # flat asset dir under the gitignored res://.godot (ResourceRoot rejects
@@ -173,18 +177,18 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 func _combat_mission() -> MissionData:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	# Two independent north-facing fire lanes. Spawn selection puts the host at
-	# x=20 first (farthest from the two organics), then the joiner at x=0
-	# (farthest from the already-spawned host). Both yaw-zero players therefore
+	# Two independent north-facing fire lanes. Objective Co-op indexes 6094
+	# starts by player slot, so the host takes x=20 and the joiner takes x=0.
+	# Both yaw-zero players therefore
 	# have a Generic Soldier down their own +mission-y lane (host at nine
-	# metres, joiner at eight); the unequal scores avoid the retail rand tie.
+	# metres, joiner at eight).
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(20, 9, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -192,15 +196,15 @@ func _combat_mission() -> MissionData:
 func _peer_duel_mission() -> MissionData:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	# The host first takes the marker farthest from the lone organic: (0, 8).
-	# Once the host is in the retail avoid set, the joiner takes (0, 0). Both
+	# Objective Co-op's slot-indexed start order puts the host at (0, 8) and the
+	# joiner at (0, 0). Both
 	# yaw-zero players face +mission-y, putting the host directly in the
 	# joiner's fire lane without a debug teleport or invented aim override.
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -219,13 +223,13 @@ func _vehicle_peer_mission() -> MissionData:
 	# local control-seat body following the final predicted carrier pose.
 	assert_false(md.add_entity(MissionData.KIND_ITEM, 105008,
 			Vector3(2, 0, 0), Vector3(13, 0, -17)).is_empty())
-	# Break the deploy-marker tie deliberately: the host takes (0, 8), then the
-	# joiner takes (0, 0), within the retail four-unit seat scan of the boat.
+	# Slot order puts the host at (0, 8), then the joiner at (0, 0), within the
+	# retail four-unit seat scan of the boat.
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -1463,6 +1467,140 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	host.free()
 
 
+# Kill the joiner's player entity on the AUTHORITY through the real death
+# transaction (route_round_deaths) and pump until the joiner's recipient-local
+# 0x0A tail reads dead.
+func _kill_joiner_from_host(host: Simulation, joiner: Simulation) -> bool:
+	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
+			"the host queued the joiner's death")
+	for _tick in range(120):
+		host.step()
+		joiner.step()
+		if joiner.is_local_player_dead():
+			return true
+		OS.delay_msec(2)
+	return joiner.is_local_player_dead()
+
+
+# The dead player's medic call: alive, the request is refused; dead, one
+# call queues the reliable C2S 0x2E (the serial advances) and arms the
+# 310-tick cooldown that refuses a second call until it runs out.
+# [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b;
+#  Player_UpdatePerFrame @0x4de73e]
+func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "MedicJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+	assert_false(joiner.is_local_player_dead(), "the joiner deploys alive")
+	assert_false(joiner.request_local_player_medic(),
+			"an alive player cannot call a medic")
+	# The 0x81 hit-confirm edge is consume-once: nothing landed, nothing plays.
+	assert_true(joiner.take_score_feedback().is_empty(),
+			"no score delta landed on the fresh joiner")
+	assert_eq(joiner.local_medic_request_serial(), 0)
+
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's rounds killed the joiner's entity")
+	if not joiner.is_local_player_dead():
+		joiner.free()
+		host.free()
+		return
+	joiner.step()
+	assert_true(joiner.request_local_player_medic(),
+			"a dead joiner queues the medic call")
+	assert_eq(joiner.local_medic_request_serial(), 1,
+			"one call queues one C2S 0x2E")
+	assert_eq(joiner.local_medic_request_cooldown_ticks(), 310,
+			"the send arms the 310-tick cooldown")
+	assert_false(joiner.request_local_player_medic(),
+			"the cooldown refuses a second call")
+	for _tick in range(20):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	assert_eq(joiner.local_medic_request_cooldown_ticks(), 290,
+			"the cooldown counts one per 62.5 Hz tick")
+	assert_eq(joiner.local_medic_request_serial(), 1,
+			"no second call rode the cooldown")
+	joiner.free()
+	host.free()
+
+
+# The camera arbiter enters the death lerp camera (mode 4) on the joiner's
+# death and leaves it when the deployment release brings the player back
+# alive [orig: Render_ProcessMainSceneFrame @0x5ca217..0x5ca24b -> 4;
+#  Camera_SetTrackedEntity @0x439257 computes the lerp; alive again -> 0].
+func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "CameraJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+			"alive on foot: first person")
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's death transaction killed the joiner")
+	if not joiner.is_local_player_dead():
+		joiner.free()
+		host.free()
+		return
+	joiner.step()
+	var view: Dictionary = joiner.get_local_player_view()
+	assert_eq(int(view.get("camera_mode", -1)), 4,
+			"the dead joiner's arbiter resolves the death lerp camera")
+	assert_true(bool(view.get("camera_pose_valid", false)),
+			"mode 4 composes a camera pose")
+	# The deployment release: pick the default spawn and pump until the host
+	# releases; the respawned player is alive again -> first person.
+	assert_true(joiner.is_join_deploy_pick_pending(),
+			"death re-arms the deploy pick")
+	# The host holds a fresh death's pick behind the +360/+364 penalty (three
+	# seconds after a death within 620 ticks of the deployment) and silently
+	# drops picks inside it, so re-click the default row like a player would.
+	var alive := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_local_player_dead() and not joiner.is_join_deploy_pick_pending():
+			alive = true
+			break
+		OS.delay_msec(1)
+	assert_true(alive, "the release brought the joiner back alive")
+	joiner.step()
+	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+			"alive again: the arbiter returns to first person")
+	joiner.free()
+	host.free()
+
+
 func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> void:
 	var mission := _vehicle_peer_mission()
 	var watercraft_db := _net_watercraft_item_db()
@@ -1672,14 +1810,14 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var host_weapon_before: Dictionary = host.get_local_player_weapon_state()
 	var host_fired_before := int(host_weapon_before.get("fired_serial", 0))
 	# The viewmodel clip channel is SEPARATE from the fire channel: the first-person
-	# parts are re-posed every tick from (anim_key, anim_variant, anim_age_ticks) and
+	# parts are re-posed every tick from (anim_key, anim_variant, anim_advance_ticks) and
 	# a play event bumps play_serial without necessarily bumping fired_serial
 	# [play write site: Simulation weapon_fsm_tick play_anim leg]. A remote shot
 	# that perturbs any of these makes the host's own gun re-scrub its clip.
 	var host_play_before := int(host_weapon_before.get("play_serial", 0))
 	var host_anim_key_before := String(host_weapon_before.get("anim_key", ""))
 	var host_anim_variant_before := int(host_weapon_before.get("anim_variant", 0))
-	var host_anim_age_before := int(host_weapon_before.get("anim_age_ticks", 0))
+	var host_anim_advance_before := int(host_weapon_before.get("anim_advance_ticks", 0))
 	var joiner_play_before := int(
 			joiner.get_local_player_weapon_state().get("play_serial", 0))
 	var joiner_wire_handle := joiner.get_joiner_self_handle()
@@ -1724,14 +1862,15 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 			"the joiner's shot does not re-key the host's viewmodel clip")
 	assert_eq(int(host_weapon_after.get("anim_variant", 0)), host_anim_variant_before,
 			"the joiner's shot does not consume a variant from the host's clip ring")
-	# anim_age_ticks is the playhead the first-person parts are posed at every tick.
-	# It must keep advancing monotonically with the host's own clock; a remote shot
-	# that re-stamps weapon_anim_tick_ drops it back toward zero (re-scrubbing the
-	# clip), and an unsigned wrap sends it huge (clamping a one-shot to its tail).
-	var host_anim_age_after := int(host_weapon_after.get("anim_age_ticks", 0))
-	assert_gte(host_anim_age_after, host_anim_age_before,
+	# anim_advance_ticks is the playhead the first-person parts are posed at every
+	# tick (the counter-gated channel position). It must keep advancing with the
+	# host's own pump; a remote shot that resets the advance count drops it back
+	# toward zero (re-scrubbing the clip), and an unsigned wrap sends it huge
+	# (clamping a one-shot to its tail).
+	var host_anim_advance_after := int(host_weapon_after.get("anim_advance_ticks", 0))
+	assert_gte(host_anim_advance_after, host_anim_advance_before,
 			"the host's viewmodel playhead never rewinds when a remote player fires")
-	assert_lt(host_anim_age_after - host_anim_age_before, 1000,
+	assert_lt(host_anim_advance_after - host_anim_advance_before, 1000,
 			"the host's viewmodel playhead advances by its own elapsed ticks, not a wrap")
 	assert_gt(int(joiner.get_local_player_weapon_state().get(
 			"play_serial", 0)), joiner_play_before,
@@ -2283,17 +2422,17 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_eq(host_mission.create_default(), OK)
 	assert_false(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	var joiner_mission := MissionData.new()
 	assert_eq(joiner_mission.create_default(), OK)
 	assert_false(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 12, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 
 	var host := Simulation.new()
@@ -2521,9 +2660,9 @@ func _subrate_walk_mission() -> MissionData:
 	for i in range(8):
 		assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -2649,9 +2788,9 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var gunner_ssn := int(gunner.get("bms_id", 0))
 	assert_gt(gunner_ssn, 0)
 	# Deploy markers away from the emplacement so neither player spawns into it.
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, 6002,
+	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(24, 0, 0), Vector3.ZERO).is_empty())
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.

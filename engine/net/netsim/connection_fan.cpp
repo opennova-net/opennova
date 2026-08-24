@@ -44,6 +44,10 @@ struct FrameHeaderState {
 	int16_t tail_health = 150;
 	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
 	// derived once before budgeting so the conditional header width and bytes agree.
+	uint8_t preround_delay_seconds = 0;
+	uint8_t respawn_delay_seconds = 0;
+	uint8_t downed_revive_seconds = 0;
+	uint8_t spawn_target_hold_seconds = 0;
 	FrameEnv env{};
 	FrameMountAmmo mount_ammo{};
 };
@@ -77,12 +81,20 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	case 0:
 		// Weapon/ammo/uniform block [orig: @0x4ff81b phase-0: preround timer + weapon slots 360/368/
 		// 364/356/460 + ammo + ZoneSlotChain_GetOwnedZoneMask]. Our host does not model the
-		// recipient's weapon-slot state yet (all-zero slots, golden co-op steady bytes); the uniform
+		// recipient's +356/+460 weapon-slot state yet; +360/+368/+364 are the live
+		// respawn/downed counters from its player slot. The uniform
 		// mask is the recipient's OWNED-ZONE mask from the zone chain (net-re §5.61) — the rep-state
 		// default 0x8 is the golden ASH_I5A steady value (zone 3 wholly owned), so a chain-less host
 		// still emits the witnessed byte. (Renamed from the FrameAimBlock misnomer to
 		// FrameWeaponBlock, grill 2026-07-01.)
 		fu.weapon.present = true;
+		// The global whole-second countdown is truncated directly to the wire
+		// byte; values above 255 wrap rather than clamp.
+		// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
+		fu.weapon.preround_timer = hdr.preround_delay_seconds;
+		fu.weapon.slot_state360 = hdr.respawn_delay_seconds;
+		fu.weapon.slot_state368 = hdr.downed_revive_seconds;
+		fu.weapon.slot_state364 = hdr.spawn_target_hold_seconds;
 		fu.weapon.uniform_team_mask = ctx.uniform_team_mask;
 		break;
 	case 1:
@@ -865,6 +877,11 @@ void drain_connection_c2s(world::World &world, Connection &conn) {
 		if (!decode_player_extended_uplink(dg.body.data() + consumed, dg.body.size() - consumed,
 		                                   up, body_consumed))
 			continue;
+		// The receive queue remains live during the countdown, but the player
+		// state callback does not apply its remote pose/state until the shared
+		// pre-round timer clears.
+		// [orig: NetPacket_SerializePlayerState @0x4C2010..0x4C2028]
+		if (world.preround_delay_seconds != 0) continue;
 
 		PlayerIntent intent;
 		intent.entity_handle = hdr.handle;
@@ -951,6 +968,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	// and quantizes only while writing the frame.
 	FrameHeaderState hs;
 	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
+	hs.preround_delay_seconds =
+			static_cast<uint8_t>(w.preround_delay_seconds);
 	const world::EnvNetworkState &env = w.network_env;
 	hs.env.present = true;
 	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16 >> 16);
@@ -968,6 +987,17 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
 	if (conn.owned_entity.valid()) {
 		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
+			// +360 and +368 are zero unless entity Flags bit1 is set; +364 is
+			// unconditional. All three dword stores cross this header as low bytes.
+			// [orig: NetPacket_WritePlayerState @0x4ff81b]
+			hs.respawn_delay_seconds = (own->flags & 2u) != 0
+					? static_cast<uint8_t>(conn.respawn_delay_seconds)
+					: uint8_t{0};
+			hs.downed_revive_seconds = (own->flags & 2u) != 0
+					? static_cast<uint8_t>(conn.downed_revive_seconds)
+					: uint8_t{0};
+			hs.spawn_target_hold_seconds =
+					static_cast<uint8_t>(conn.spawn_target_hold_seconds);
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
 			if (own->mounted && own->mount_target.valid()) {
 				hs.tail_mount_handle = own->mount_target.packed;

@@ -6,7 +6,7 @@ extends GutTest
 # repo fixtures, and the no-mission error paths of every mission tool (their
 # happy paths live in editor_mcp_mission_tools_test.gd on a real terrain).
 
-const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false

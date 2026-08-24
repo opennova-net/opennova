@@ -153,6 +153,7 @@ int main_impl() {
 	            "GameConfig defaults to retail's all-ten-classes mask")) return 1;
 	config.class_allow_mask = 0x0155u; // non-default pins config sourcing, not a hard-coded golden
 	config.game_type = 0x00010020u;
+	config.default_spawn_requires_no_team_zone = 1;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 	                        /*host_key=*/0, &loopback, config);
 	ctx.world = &world;
@@ -249,6 +250,10 @@ int main_impl() {
 						state.team_names == std::vector<std::string>{
 								"Weapons Cache", "Rebel Outpost"},
 				"0x0F carries MissionText-resolved location labels in spawn order")) {
+			return 1;
+		}
+		if (!expect(state.game_flags == 0x02,
+				"0x0F gameFlags bit1 advertises the target-less spawn restriction")) {
 			return 1;
 		}
 	}

@@ -58,14 +58,14 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 
 // §5.2a step 2 — [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]. Gated
-// is_authority && !spawn_success_gate. Walks connection_list; for each accepted-but-unspawned node
+// is_authority && !world.match.outcome().ended. Walks connection_list; for each accepted-but-unspawned node
 // (self_id_seen && phase < PlayerAdded) builds + registers its pool-0 player entity in `world`. The
 // host's own type-2 loopback is just another entry in this list. Returns the number spawned this pass.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world);
 
 // §5.2a step 2 (per player) — [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd
 // @0x51cbc0]. Build the spawn pose from the mission's promoted start markers (§5.2c,
-// world::select_player_spawn — never an NPC's spot) and register the pool-0 0x14B9 entity, stamping
+// world::resolve_player_spawn_pose — never an NPC's spot) and register the pool-0 0x14B9 entity, stamping
 // entity+0x78 = conn.connection_id. The type-2 loopback (the host's own client) -> world::spawn_player
 // (publishes World::cached.local_player); a type-1 remote joiner -> world::spawn_remote_player (the
 // host never republishes its local player). Binds the handle onto conn.link.owned_entity and advances

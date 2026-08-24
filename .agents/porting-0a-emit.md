@@ -59,7 +59,7 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | victim death cycle (tail health + dead bit) | DONE (D-NET-160; verify v34) | the 0x0A tail carries the recipient's LIVE health (`FrameHeaderState::tail_health` [orig: @0x4305df]); `route_round_deaths` sets the entity dead bit (flags\|=2 → record byte13 0x02 [orig: @0x4c1005]; the 1→0 edge = the client spawn hook [orig: @0x4c1109]), lifted by the deploy/respawn reset |
 | vehicle attach/detach (C2S 0x26/0x27) | DONE (D-NET-157; emplacements live-verified v33) | dispatch → `world::entity_process_vehicle_attach/_detach` [orig: @0x502390/@0x4FC980 → @0x435AA0/@0x4946D0]; the 0x0A mounted branch echoes bone byte0 + carrier + the tail mount handle |
 | **vehicle DRIVE (host motor off the driver's replicated input)** | DONE — ground family (D-NET-161; verify v35). The round-15 witness REFUTED the prior model: NO vehicle uplink exists (modes 3/4 return −1; the client serializes only g_local_player_entity @0x42c482; golden 344/344), the §5.13 flags&4 short form is the DEAD-pose (wreck) form, and vehicle +0x1CC is an effect-emitter handle, not a session grant | `world::tick_vehicle_motor` [orig: @0x48af00] per pool-1 traits entity in the AiSystem tick; items.def physics parse [orig: @0x49d870] -> `world::VehicleTraits`; `drain_connection_c2s` stays player-only (CORRECT). Deferred: air/helo family (Super Pumas parked), skid, vehicle collision, water, autopilot, engine states, wheel-contact pitch/roll |
-| **AS capture loop (slice 2: control/flips/0x6F/0x53/0x1E/0x40)** | DONE (D-NET-162; verify v35) | `world::zone_capture_tick` + the npruntime 1 Hz wire block; map colors + LFP capture; deferrals in the D-NET row (timed engine/0x6C, waves, catch-up, scoring) |
+| **AS capture loop (slice 2: contact/control/timed capture/0x6F/0x53/0x6C/0x1E/0x40/0x81)** | DONE (D-NET-162; exact CT producer 2026-08-23) | `CollisionWorld` publishes exact authored type-10 contacts from authority player-body resolves; `world::zone_capture_contact_tick` + `zone_capture_second_tick` own requests, active timed entries, conversion, scoring, takeover options, requester-local Points refresh, and host/client wire. Spawn waves/0x6E and proximity bits are also ported. Residual mandate: only the documented 0x40 overlay tails and unwitnessed 0x6F recipient filter remain |
 | body motor for net-snapped peers | DONE (D-NET-159; live: death anims seen by others in v33) | `AiSystem::remote_player_body_anim` runs the anim selection for wire-snapped peers on the authority (position stays wire-owned); hidden entities skip [orig: @0x4b411b] |
 | platform physics (host-side grounding) | not ported (D-NET-151 residual) | retail sets `Flags\|=0x100000` + `groundEntity` in the collision pass [orig: @0x4b3291]; our motor has no platform pass, so OUR OWN player never reports grounded and peer ground links mirror the owner's uplink |
 
@@ -150,14 +150,17 @@ target) in net-re D-NET-146.
   team 2 wholly owns zone 3) + 0x40/0x6F/0x53/0x6E; the pick = C2S 0x0E [i16 handle]
   (0xFFFE=frontier auto) gated on team + control≥1.0; placement = zone origin/6007
   scatter/per-team markers (Server_PositionPlayerForSpawn, ex-CMap misnomer); waves =
-  g_spawn_wave_list drip (host options, default off); the whole capture loop runs in the
+  g_spawn_wave_list drip (base default 0, numbered-zone default 10 seconds); the whole capture loop runs in the
   1 Hz Server_TickUpdate block (control delta formula pinned incl. the underdog catch-up).
   ASH_I5A authors zones 1(t1)/2×2(neutral)/3(t2) as type-1359 bunkers. PORTED slice 1:
   `world::ZoneChain` + zone fields + 0x0E handler (deploy at pick, dead-only, computed 0x1E
   ev-0x3A hint) + per-recipient uniform mask + PER-TEAM join markers (both AS teams
   previously spawned in team 1's base — 6003 first-family-wins). `zone_chain_test` pins the
-  ASH shape; 230/230 ctest; GDExtension rebuilt. Slice 2 = the capture loop emits
-  (0x6F/0x53/0x6C + 0x1E zone events + flips), waves, seat deploys.
+  ASH shape; 230/230 ctest; GDExtension rebuilt. Slice 2 now owns the contact/control/timed
+  capture transaction and its 0x6F/0x53/0x6C + 0x1E wire. Spawn-wave construction,
+  queue/reset/tick behavior, requester-specific 0x6E, and the shared immediate/timed
+  deployment transaction are ported. Requester-local 0x81 Points refresh is also ported.
+  Remaining riders are exact authored CT geometry, proximity bits, and seat deploys.
   **v31 LIVE (same day): FOUR FAILED riders → the next round is an IDA ALIGNMENT PASS over
   the v31 wire.** (1) Deploy screen still absent — ZERO C2S 0x0E all session (the picker
   never appeared client-side; slice-1 handler unexercised). The advertising gap, ranked
@@ -251,9 +254,11 @@ target) in net-re D-NET-146.
   same-day = **D-NET-160** (tail health was hardcoded 150 + no server-side dead bit; now
   live tail + `flags|=2` on death, lifted by the deploy reset → the wire 1→0 edge is the
   client spawn hook — death screen + redeploy through the dead-or-pending 0x0E gate).
-  Map icons/waypoints/LFP colors + LFP capture = **slice 2** (the 1 Hz capture block:
-  0x40 ×305-golden minimap colors, 0x6F ×268 control values, 0x53/0x6C, proximity, flips) —
-  the declared next big port. "No spare magazines": the wire grants are golden-equivalent
+  Map icons/waypoints/LFP colors + LFP capture = **slice 2** (now ported: independent
+  14-tick 0x40 plus per-contact/1 Hz capture, 0x6F, strict timed 0x53/0x6C, conversion,
+  scoring, flips, and requester-local 0x81 Points refresh). Residuals are exact CT
+  geometry, proximity bits, waves, and
+  documented overlay classifier tails. "No spare magazines": the wire grants are golden-equivalent
   (M4=10 clips etc.; jox01 126-weapon indices consistent with what the clients fired) and
   identical at join AND deploy — needs the CLIENT-side 0x5A apply witness (@0x4290E0: where
   ammoPrimary lands vs what the HUD mag counter reads) before touching anything.
@@ -277,9 +282,11 @@ target) in net-re D-NET-146.
   fight). PORTED: engine/formats/def physics block (scaled per @0x49d870), `world::VehicleTraits` +
   the resolve_item_traits stamp, `world::tick_vehicle_motor` (the ground-family authority
   core; buggy drives, helos = tracked deferral), `Entity::net_analog_*` through
-  PlayerIntent, the AiSystem vehicle pass. SLICE 2 (D-NET-162): `world::zone_capture_tick`
-  (secure latch + the @0x501120 delta formula + instant flips via neutral + enforcement) +
-  the npruntime 1 Hz block (0x6F change-gated + deploy refresh, 0x1E zone family, 0x53,
+  PlayerIntent, the AiSystem vehicle pass. SLICE 2 (D-NET-162):
+  `world::zone_capture_contact_tick` + `zone_capture_second_tick` (per-tick requests,
+  secure latch + the @0x501120 delta formula, instant flips via neutral, timed ACTIVE
+  entries, attrib2 conversion, and enforcement) + the npruntime block (0x6F change-gated
+  + deploy refresh, 0x1E zone family, timed-only 0x53, change-gated 0x6C,
   0x40 zone+vehicle overlay — `Entity_ClassifyForMinimap @0x50FA70` witnessed with the
   whole producer chain, §5.19). Tests: vehicle_motor_test (def-scaling + launch/clamp/
   reverse/turn-in-place/steer/coast/dead/selector pins), netsim_two_peer_fanout
@@ -302,11 +309,12 @@ FULL-AS-GAME gap list, in rough order:
      ADVERTISING (the 0x0F body @0x502D10 / the 0x0D spawn_flags 0x10 bit / the client
      deploy-list builder — see the round-13 v31 bullet). Then the deferred riders: waves,
      vehicle-seat deploys, 6007 scatter, the D-NET-150 spawn-menu re-stream.
-  2. **AS zone capture loop** — WITNESSED round 13 (§5.61: the 1 Hz block — proximity
+  2. **AS zone capture loop** — PORTED (§5.61: per-touch requests plus the 1 Hz block — proximity
      @0x5086A0, secure pass @0x519690 w/ 0x6F + 0x1E 0x3B/0x3C, timed engine @0x53B8F0 w/
      0x53×4 + 0x6C, control formula @0x501120, flip events 43/44/50-53/56/57, team
-     enforcement @0x519600); PORT = slice 2 (world-side control delta + flips + the four
-     emits; the chain/latch/registries landed with slice 1).
+     enforcement @0x519600, requester-local Points 0x81 @0x5086A0). Residual
+     verification: authored CT shape, waves/0x6E, and proximity bits; no
+     architectural slice remains to be introduced.
   3. **Scores** — 0x16 scoreboard refresh cadence (Server_BuildAndBroadcastScoreboard
      @0x50de00 trigger set) + the 0x52 kill-stat pairs + kill/death tallies.
   4. **Round end** — Server_CheckWinConditions @0x51ad40 (AS = zone-hold win) →

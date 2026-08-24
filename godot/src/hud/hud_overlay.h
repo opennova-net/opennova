@@ -103,6 +103,11 @@ public:
 	// precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, const Dictionary &p_strings,
 			Simulation *p_sim);
+	// The end-of-round overlay (net-re §5.68): the resolved Impact38 text
+	// ladder (hud/end_round_overlay.h lines the presenter formatted) and the
+	// overlay safe-area top/bottom in design px.
+	void set_end_round_overlay(bool p_shown, int p_top, int p_bottom,
+			const PackedStringArray &p_texts, const PackedInt32Array &p_ys);
 	// The mounted-vehicle panel: the rider's VEHICLE_HUD block (HudPos::get_vehicle_hud),
 	// the rider's stance (the panel rides the stance icon's HUDSTANCE offset), and
 	// the Simulation the hull band + seat rows are pulled from natively
@@ -133,7 +138,10 @@ public:
 	void set_attach_labels(const PackedVector2Array &p_screens,
 			const PackedStringArray &p_texts, const PackedByteArray &p_nearest);
 	// The projected friendly tags (D-HUD-20): parallel typed arrays; flags
-	// bit 0 = medic marker, bit 1 = speaking, bit 2 = player-slot entry.
+	// bit 0 = medic marker, bit 1 = speaking, bit 2 = player-slot entry,
+	// bit 3 = dead, bit 4 = has a connection slot, bit 5 = medic request
+	// standing, bits 8..15 = the slot's revive countdown in seconds
+	// (retail PlayerSlot +0x10 / +0x2C — the downed legs of the drawer).
 	void set_friendly_tags(const PackedVector2Array &p_screens,
 			const PackedInt32Array &p_dists_q16, const PackedStringArray &p_names,
 			const PackedInt32Array &p_entity_ids,
@@ -216,6 +224,8 @@ private:
 	bool label_font_bold_valid_ = false;
 	fnt_font_t label_font_large_ = {};
 	bool label_font_large_valid_ = false;
+	fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
+	bool label_font_impact38_valid_ = false;
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;

@@ -18,31 +18,6 @@
 
 namespace opennova::netsim {
 
-// ---- ClientState lookup -----------------------------------------------------
-
-ClientEntityState *ClientState::find(uint16_t handle) {
-	// `entities` is intentionally public decoded state. Callers may clear,
-	// reorder, append, or edit it directly, so a separate handle-to-index cache
-	// cannot remain valid without changing that API. Keep lookup derived from
-	// the authoritative vector.
-	for (ClientEntityState &entity : entities) {
-		if (entity.handle == handle) return &entity;
-	}
-	return nullptr;
-}
-
-ClientEntityState &ClientState::upsert(uint16_t handle) {
-	if (ClientEntityState *e = find(handle)) return *e;
-	ClientEntityState e;
-	e.handle = handle;
-	entities.push_back(e);
-	mark_topology_changed();
-	return entities.back();
-}
-
-void ClientState::clear_anim_pulses() {
-	for (ClientEntityState &e : entities) e.anim_state_pulse = -1;
-}
 
 // ---- ClientReplicaPipeline -----------------------------------------------
 
@@ -145,6 +120,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		apply_entity_death(death.entity_handle, death.killer_source);
 		break;
 	}
+	case s2c::DEATH_CAMERA_TARGET:
+		apply_death_camera_target(body);
+		break;
+	case s2c::PLAYER_DOWNED_STATE:
+		apply_player_downed_state(body);
+		break;
 	case s2c::KILL_SYNC: {
 		// The SECOND client death route — the destructible deathCallback's own
 		// authority resend rides this tag. Entity_KillBySlotId resolves the
@@ -183,6 +164,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::END_ROUND_HEADER:
+		apply_end_round_header(body);
+		break;
 	case s2c::END_ROUND_STATS: // §5.61 the chunked post-round stat board (0x56)
 		apply_end_round_stats_chunk(body);
 		break;
@@ -206,6 +190,15 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		break;
 	case s2c::ENTITY_REMOVE: // live packed-handle retirement (0x12)
 		apply_entity_remove(body);
+		break;
+	case s2c::OBJECTIVE_ENTITY_STATE: // flag/carryable pose + carry links (0x2F)
+		apply_objective_entity_state(body);
+		break;
+	case s2c::SPAWN_WAVE_STATUS:
+		apply_spawn_wave_status(body);
+		break;
+	case s2c::SCORE_DELTA_SOUND:
+		apply_score_delta_sound(body);
 		break;
 	default:
 		// Game-start scalars / world-state-load and other non-entity tags.
@@ -242,29 +235,6 @@ std::vector<EntityDeathRecord> ClientReplicaPipeline::drain_entity_deaths() {
 	std::vector<EntityDeathRecord> out;
 	out.swap(pending_entity_deaths_);
 	return out;
-}
-
-// Shared 0x13/0x26 fold: the retail handler gates (not the 0xFFFF sentinel,
-// pool nibble < 5, slot < that pool's capacity), the row Health zero, and the
-// once-surfaced record the embedding sim runs the class death callback from.
-// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 / Entity_KillBySlotId @0x42BCE0]
-void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
-		int16_t killer_source) {
-	const world::EntityHandle handle{handle_packed};
-	if (handle_packed == wire_handle::kInvalid ||
-			handle.pool() >= world::kEntityPoolCount ||
-			static_cast<std::size_t>(handle.slot()) >=
-					world::retail_pool_capacity(handle.pool()))
-		return;
-	if (ClientEntityState *row = state_.find(handle_packed)) {
-		row->health_word = 0;
-		row->health_known = true;
-		state_.mark_changed();
-	}
-	EntityDeathRecord death;
-	death.entity_handle = handle_packed;
-	death.killer_source = killer_source;
-	pending_entity_deaths_.push_back(death);
 }
 
 void ClientReplicaPipeline::pump(ISessionTransport &channel) {
@@ -2011,6 +1981,8 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		es.spawn_entity_flags = 0;
 		es.spawn_section_mask = 0;
 		es.spawn_ammo_count = rec.ammo_count;
+		es.spawn_bound_radius_q16 =
+				static_cast<int32_t>(rec.orientation_val);
 		es.spawn_ref_num = 0;
 		es.spawn_sub_type = 0;
 		es.spawn_revision = next_spawn_revision;
@@ -2033,9 +2005,32 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
 	state_.anchor_z = fu.anchor_z;
+	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
+	{
+		const bool bit = (fu.flags1 & 0x01u) != 0;
+		if (bit && !state_.death_screen_active) {
+			state_.death_screen_active = true;
+			state_.death_screen_submode = 0;
+			state_.enemy_tags_visible = true;
+		} else if (!bit && state_.death_screen_active) {
+			state_.death_screen_active = false;
+			state_.enemy_tags_visible = false;
+		}
+	}
 	if (fu.local_tail_present) {
 		state_.local_health = fu.health;
 		++state_.health_updates_applied;
+	}
+	if (fu.weapon.present) {
+		// Phase 0 is the sole retail mirror of g_preround_delay_timer.
+		// Retain it between phase cycles, exactly like the client global.
+		// [orig: NapiNPClientMsg_0x00A @0x430064]
+		state_.preround_delay_seconds = fu.weapon.preround_timer;
+		// The DEATH screen's three slot timers ride the same sub-block
+		// [orig: @0x430084 / @0x43009f / @0x4300c3].
+		state_.respawn_penalty_seconds = fu.weapon.slot_state360;
+		state_.local_revive_seconds = fu.weapon.slot_state368;
+		state_.spawn_hold_seconds = fu.weapon.slot_state364;
 	}
 	if (fu.objective.present) {
 		state_.objective_won = static_cast<uint32_t>(fu.objective.state[0]);

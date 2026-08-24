@@ -1,7 +1,7 @@
 #include "npruntime/server_spawn.h"
 
 #include <world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
-#include <world/spawn_select.h> // select_player_spawn (§5.2c) / world_has_spawn_zone (§5.61)
+#include <world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
 #include <world/world.h>        // World, registry, cached
 
 #include <npwire/game_type.h>
@@ -23,25 +23,51 @@ namespace {
 // the WAC/BMS find_by_net_id SSN space (authored mission entities own that space); tracking is by handle +
 // owner_connection_id. [orig: Server_PlayerAdd @0x51cbc0 / Entity_SpawnFromAnimSlotProperty @0x43c390]
 
-// [orig: Server_AssignPlayerTeam @0x4fe310; D-NET-113] The spawning player's team.
-// Witnessed branch order (Server_AssignPlayerTeam): (0) spectator (+100567 && is_in_session) -> 0;
-// (1) co-op gametype ((game_type & 0xFFFDFFFF) == 0x10020) or any non-MP session (!is_in_session)
-// -> 1; (2) DM/TDM -> requested team name / preference, then autobalance. We DROP branch (0) — no
-// spectator field exists in the reimpl yet — so SP / co-op LAN land on team 1 faithfully via branch
-// (1), and a real DM/TDM session autobalances to the least-populated side over the LIVE pool-0
-// players already added (2-team: (t1 > t2) + 1). The spectator branch, the requested-team-name
-// (g_team1/2_name) and team-preference legs, and 4-team placement are the follow-up MP path (the
-// join request carries no team/spectator field yet); they default into the autobalance below.
+// [orig: Server_AssignPlayerTeam @0x4FE310; D-NET-113] One assignment policy for every mode.
+// Retail's misleading g_team1_name/g_team2_name symbols are the live SidePasswordA/B strings
+// (apply_session_settings_to_globals @0x552043/@0x552054), not a second team-name domain.
+// The current join protocol carries no FID credential, so the submitted-password leg is empty;
+// closing password-protected admission remains D-NET-167. Spectator is the other structural
+// residual because NapiNPConnection has no spectator bit.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world) {
 	const uint32_t gt = config.game_type;
 	if (!is_in_session || opennova::game_type::is_waypoint_family(gt)) return 1;
-	uint32_t team1 = 0, team2 = 0;
+
+	// A freshly allocated solo player is already present in retail's fixed slot
+	// table, so the no-team-bit scan finds the same pointer and stores team 1.
+	// Do not autobalance DM/Flag Me into a fictitious team 2.
+	// [orig: Server_AssignPlayerTeam @0x4FE398..0x4FE400]
+	if (!opennova::game_type::is_team(gt)) return 1;
+
+	const uint8_t active_teams =
+			opennova::game_type::active_team_count(gt, config.num_teams);
+	const bool side_a_locked = !config.side_a_password.empty();
+	const bool side_b_locked = !config.side_b_password.empty();
+
+	// With the presently empty submitted FID, retail's two-team password leg
+	// rejects two protected sides or selects the one unprotected side.
+	// Four-team mode deliberately skips this branch.
+	// [orig: @0x4FE4AE..0x4FE519; D-NET-167]
+	if (active_teams == 2) {
+		if (side_a_locked && side_b_locked) return 0;
+		if (side_a_locked) return 2;
+		if (side_b_locked) return 1;
+	}
+
+	// jsp[60] is signed at the original call site: 0/1 request side A/B and
+	// 0xFF means automatic. A locked requested side falls through to balance.
+	// [orig: Server_PlayerAdd @0x51CF24; assignment @0x4FE51A..0x4FE587]
+	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
+		if (joining.char_vars.team_request == 0 && !side_a_locked) return 1;
+		if (joining.char_vars.team_request == 1 && !side_b_locked) return 2;
+	}
+
+	std::array<uint32_t, 4> counts{};
 	world.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
-		if (e.team == 1) ++team1;
-		else if (e.team == 2) ++team2;
+		if (e.team >= 1 && e.team <= 4) ++counts[e.team - 1];
 	});
 	// Reservations without an entity are already player-slot assignments for
 	// balancing. Spawned reservations are represented by the World walk above.
@@ -49,10 +75,35 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		if (&c == &joining || !c.assigned_team_valid ||
 		    c.link.owned_entity.valid())
 			continue;
-		if (c.assigned_team == 1) ++team1;
-		else if (c.assigned_team == 2) ++team2;
+		if (c.assigned_team >= 1 && c.assigned_team <= 4)
+			++counts[c.assigned_team - 1];
 	}
-	return static_cast<uint8_t>((team1 > team2) + 1);
+
+	if (active_teams == 2)
+		return static_cast<uint8_t>((counts[0] > counts[1]) + 1);
+
+	// Retail pairwise-sorts both the counts and their original indices. It then
+	// overwrites sorted count slots 0/1 with SidePasswordA/B-present booleans,
+	// but probes that array with the ORIGINAL indices. That mixed index space is
+	// a shipped defect: an unprotected empty lobby alternates 1,2,1,2; protected
+	// four-team configurations can select team 3. Preserve the instructions,
+	// rather than substituting an ideal least-populated-four policy.
+	// [orig: @0x4FE62C..0x4FE723]
+	std::array<uint8_t, 4> original_indices = {0, 1, 2, 3};
+	for (std::size_t i = 0; i < counts.size() - 1; ++i) {
+		for (std::size_t j = i + 1; j < counts.size(); ++j) {
+			if (counts[i] <= counts[j]) continue;
+			std::swap(counts[i], counts[j]);
+			std::swap(original_indices[i], original_indices[j]);
+		}
+	}
+	counts[0] = side_a_locked ? 1u : 0u;
+	counts[1] = side_b_locked ? 1u : 0u;
+	for (uint8_t original_index : original_indices) {
+		if (counts[original_index] == 0)
+			return static_cast<uint8_t>(original_index + 1);
+	}
+	return 0;
 }
 
 // Roster slots are stable identities. Retail walks the fixed player-slot table and installs the
@@ -121,6 +172,13 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
+	// reset_round_counters copies the configured StartDelay seconds into the
+	// one live pre-round timer. Keep the timer on World: it is the authority
+	// phase predicate and the source of the phase-0 0x0A projection, rather
+	// than a second connection-local countdown.
+	// [orig: reset_round_counters @0x516C50, store @0x516C8D]
+	if (ctx.world != nullptr)
+		ctx.world->preround_delay_seconds = ctx.config.start_delay;
 	// The stock round initializer clears the global S2C 0x79 countdown. Its next
 	// Server_TickUpdate boundary therefore emits immediately and reloads 0x136.
 	// [orig: Server_InitNewRoundState @0x51CA9E]
@@ -151,10 +209,14 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
 			conn, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	const world::SpawnPointResult sel =
-			world::select_player_spawn_for_team(world, spawn.team, ctx.config.game_type);
+			world::resolve_player_spawn_pose(
+					world, world::EntityHandle{}, world::EntityHandle{},
+					*player_slot, spawn.team, ctx.config.game_type);
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
+		spawn.pitch = sel.pitch;
+		spawn.roll = sel.roll;
 	} else {
 		// No start marker authored: spawn at the mission origin (terrain clamp grounds it). Never an
 		// NPC position. [orig: Entity_FindBestSpawnPoint @0x50ccc0 returns no marker -> caller fallback]
@@ -224,6 +286,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
+	conn.link.last_deploy_tick = world.logic_tick;
+	conn.link.last_deploy_tick_valid = true;
 	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 binds the newly allocated
 	// player row into the recipient slot used by Server_SendEntityStateToPlayer]
 
@@ -268,6 +332,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		conn.reply.player_name = resolved_name;
 		if (world::Entity *e = world.registry.get(h)) e->name = resolved_name;
 	}
+	world::MatchPlayerIdentity match_player;
+	match_player.entity = h;
+	match_player.slot = *player_slot;
+	match_player.name = resolved_name;
+	world.match.upsert_player(match_player);
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -282,13 +351,14 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
 // !g_spawn_success_gate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
-// pool-3 start markers are promoted. [D-NET-116] The reimpl maps g_spawn_success_gate -> spawn_success_gate
-// but has no dword_24D1DE0 equivalent — acceptable today because the only callers (tests + the future
-// host driver) wire ctx.world AFTER the world is loaded with its markers. A production driver that wires
-// ctx.world DURING load must add a load-complete gate here, else select_player_spawn finds no marker and
+// pool-3 start markers are promoted. [D-NET-116] The reimpl maps the retail
+// round-over gate to world::Match's sole outcome latch but has no dword_24D1DE0
+// equivalent — acceptable today because callers wire ctx.world AFTER the world
+// is loaded with its markers. A production driver that wires
+// ctx.world DURING load must add a load-complete gate here, else the spawn resolver finds no marker and
 // the idempotent origin fallback below latches the player at (0,0,0) permanently.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
-	if (!ctx.is_authority || ctx.spawn_success_gate != 0) return 0;
+	if (!ctx.is_authority || world.match.outcome().ended) return 0;
 	int spawned = 0;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		// Spawn an accepted-but-unspawned player: the host loopback (self_id_seen latched at
@@ -323,7 +393,9 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	const world::EntityHandle h = world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;
 
+	bool created_connection = false;
 	if (conn == nullptr) {
+		created_connection = true;
 		NapiNPConnection c;
 		c.peer = peer;
 		c.type = 1; // server-side view of a remote client
@@ -339,6 +411,14 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 		ctx.np_protocol.connection_list.push_back(c);
 		conn = &ctx.np_protocol.connection_list.back();
 	}
+	const std::optional<uint8_t> player_slot = Server_ReservePlayerSlot(
+			ctx.np_protocol.connection_list, *conn,
+			std::min<uint32_t>(ctx.config.max_players, 251u));
+	if (!player_slot.has_value()) {
+		world.registry.despawn(h);
+		if (created_connection) ctx.np_protocol.connection_list.pop_back();
+		return {};
+	}
 	conn->assigned_team = spawn.team;
 	conn->assigned_team_valid = true;
 	conn->link.owned_entity = h;
@@ -348,6 +428,13 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->link.mode = netsim::TransportMode::Client;
 	conn->phase = ConnectionPhase::PlayerAdded;
 	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
+	conn->reply.player_slot = *player_slot;
+	conn->reply.player_slot_reserved = false;
+	world::MatchPlayerIdentity match_player;
+	match_player.entity = h;
+	match_player.slot = *player_slot;
+	match_player.name = conn->player_name;
+	world.match.upsert_player(match_player);
 	return h;
 }
 

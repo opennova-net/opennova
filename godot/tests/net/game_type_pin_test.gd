@@ -11,6 +11,7 @@ extends GutTest
 func test_witnessed_code_words() -> void:
 	assert_eq(NetProtocol.GAME_TYPE_DEATHMATCH, 0x00000, "LTGT_DM")
 	assert_eq(NetProtocol.GAME_TYPE_KING_OF_THE_HILL, 0x00001, "LTGT_KOTH")
+	assert_eq(NetProtocol.GAME_TYPE_FLAG_ME, 0x00008, "LTGT_FM")
 	assert_eq(NetProtocol.GAME_TYPE_TEAM_DEATHMATCH, 0x10000, "LTGT_TDM")
 	assert_eq(NetProtocol.GAME_TYPE_TEAM_KING_OF_THE_HILL, 0x10001, "LTGT_TKOTH")
 	assert_eq(NetProtocol.GAME_TYPE_ATTACK_AND_DEFEND, 0x10002, "LTGT_AD")
@@ -31,6 +32,8 @@ func test_objective_bit_composition() -> void:
 
 
 func test_host_session_config_re_exports() -> void:
+	assert_eq(HostSessionConfig.GAME_TYPE_FLAG_ME, NetProtocol.GAME_TYPE_FLAG_ME,
+			"HostSessionConfig aliases the bound Flag Me word")
 	assert_eq(HostSessionConfig.GAME_TYPE_COOP, NetProtocol.GAME_TYPE_COOP,
 			"HostSessionConfig aliases the bound objective Co-op word")
 	assert_eq(HostSessionConfig.GAME_TYPE_TRAINING_COOP,

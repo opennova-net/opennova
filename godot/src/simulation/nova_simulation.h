@@ -42,7 +42,7 @@
 #include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
-#include <npruntime/mission_session.h>
+#include <inmatch/session.h>
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
 #include <world/collision.h>
@@ -76,7 +76,7 @@
 #include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
 #include <npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
-#include "simulation/nova_mission_session_values.h"
+#include "simulation/nova_inmatch_session_values.h"
 
 namespace opennova::hud {
 struct ScoreboardEntry; // hud/hud_scoreboard.h — the Tab-board drawer row
@@ -91,8 +91,8 @@ class ItemDatabase;
 class AvatarDatabase;
 class ResourceRoot;
 
-// The Godot adapter for one portable MissionSession tick target. It owns the
-// World and logic systems (WAC VM, BMS evaluator, AI); MissionSession owns
+// The Godot adapter for one portable in-match tick target. It owns the World
+// and logic systems (WAC VM, BMS evaluator, AI); inmatch::Session owns
 // lifecycle, input retention, fixed cadence, and terminal outcomes. One target
 // advance is the original's 62 Hz engine tick (current_tick in
 // Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of
@@ -109,7 +109,7 @@ class ResourceRoot;
 // EffectLog each tick. Runtime transport and fixture teardown use the same
 // play/pause/step/restart surface.
 class Simulation : public Node3D,
-                       private opennova::np::MissionTickTarget,
+                       private opennova::inmatch::TickTarget,
                        private opennova::world::ICollisionSectionMatrixProvider,
                        private opennova::world::IMountedPoseProvider {
 	GDCLASS(Simulation, Node3D)
@@ -394,20 +394,20 @@ private:
 	// Portable mission lifecycle and cadence. During one advance call the Godot
 	// adapter holds a single typed tick sink so presentation consumes every
 	// catch-up tick before the next simulation tick.
-	opennova::np::MissionSession mission_session_;
+	opennova::inmatch::Session session_;
 	Callable session_tick_sink_;
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
-	opennova::np::MissionSessionRole configured_session_role() const;
+	opennova::inmatch::Role configured_session_role() const;
 	bool begin_session_load();
 	void complete_session_load();
 	void fail_session_load(const char *p_message);
 	bool advance_world_tick();
 	void restore_world_baseline();
-	opennova::np::TickOutcome advance_mission_tick(
-			const opennova::np::TickInput &p_input) override;
-	bool reset_mission_to_baseline(opennova::np::SessionError &r_error) override;
+	opennova::inmatch::TickOutcome advance_mission_tick(
+			const opennova::inmatch::TickInput &p_input) override;
+	bool reset_mission_to_baseline(opennova::inmatch::SessionError &r_error) override;
 	void close_mission() override;
 	// The mission-lifetime collision graphic caches + the negative demand
 	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
@@ -502,7 +502,7 @@ private:
 	};
 	MissionBootDebug boot_debug_;
 	// Resource-install invariant only. Public lifecycle is
-	// mission_session_.state(); this prevents partially constructed worlds from
+	// session_.state(); this prevents partially constructed worlds from
 	// serving data while Loading/Failed transitions are in flight.
 	bool world_installed_ = false;
 	bool defer_session_load_completion_ = false;
@@ -657,6 +657,8 @@ private:
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
 	uint32_t joiner_environment_revision_seen_ = 0;
+	// The 0x81 score-feedback edge cursor (ClientScoreFeedback::updates).
+	uint32_t score_feedback_updates_seen_ = 0;
 	// Last authoritative S2C 0x5A grant installed into the local slot pool.
 	// Requests may rebuild optimistically, but only a newer host grant becomes
 	// the durable spawn/respawn kit.
@@ -865,6 +867,16 @@ private:
 	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
+	// The client medic-call cooldown (retail dword_B76804): 310 ticks from the
+	// send, one per tick, cleared on the local death edge.
+	int medic_request_cooldown_ticks_ = 0;
+	int medic_request_serial_ = 0;
+	bool local_dead_edge_seen_ = false;
+	void tick_local_medic_cooldown();
+	// The camera arbiter's inputs + the mode-4 entry (nova_simulation_player_view.cpp).
+	bool camera_local_dead_seen_ = false;
+	void feed_camera_arbiter_inputs(const opennova::world::Entity &e);
+	void enter_death_camera(const opennova::world::Entity &e);
 	// The FP viewmodel motion-lead tracker (per render frame) and the local
 	// entity's per-62.5Hz-tick movement delta it samples.
 	opennova::world::PlayerViewMotionLead fp_motion_lead_{};
@@ -1086,22 +1098,21 @@ public:
 	void build_demo_mission();
 	bool is_loaded() const;
 	int get_session_state() const {
-		return static_cast<int>(mission_session_.state());
+		return static_cast<int>(session_.state());
 	}
 	String get_session_error() const {
-		return String::utf8(mission_session_.last_error().message.c_str());
+		return String::utf8(session_.last_error().message.c_str());
 	}
 
 	// Transport.
 	bool is_playing() const {
-		return mission_session_.state() ==
-				opennova::np::MissionSessionState::Running;
+		return session_.state() == opennova::inmatch::State::Running;
 	}
 	// Advance exactly ONE 62 Hz logic tick — the original's engine tick. The per-system
 	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
 	// evaluator quarter-passes every 16th), exactly where the original keeps them. Returns
 	// false when the session cannot take a direct local/test tick. Banking wall
-	// clock and dispatching 0..N ticks per render frame belongs to MissionSession
+	// clock and dispatching 0..N ticks per render frame belongs to inmatch::Session
 	// (the Game_MainLoop @0x52b630 accumulator) — a render frame is NOT one tick.
 	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
 	bool step();
@@ -1155,6 +1166,10 @@ public:
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
+	// The client-local death screen latch (retail g_death_screen_active): the
+	// pass-level gate of the friendly-tags walks and the camera arbiter's
+	// sub-mode source. Fed by the local-player view (nova_simulation_player_view.cpp).
+	bool local_death_screen_active() const;
 	// True while a live net session owns this sim: the world tick is the ONLY
 	// pump for the session socket, so the Play/Step/Stop transport locks out
 	// (retail multiplayer has no pause; a stopped listen host reaps every
@@ -1240,6 +1255,12 @@ public:
 	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
 	// revision. Empty means no new authoritative sample.
 	Dictionary take_join_environment_update();
+	// The S2C 0x81 hit-confirm edge: {} unless a positive/negative score delta
+	// landed since the last take, else {score, delta, tone} with the tone name
+	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
+	// 2D interface sound behind the enable_slotmachine setting
+	// (retail: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0, see hud/score_fanfare.h).
+	Dictionary take_score_feedback();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
 	// bytes are exposed only in COMPLETE; the explicit state distinguishes a
@@ -1282,6 +1303,34 @@ public:
 	// spawn-zone registry index. Row 0 (the Default Spawn, param 0) is the shell's.
 	// [orig: UI_UpdateDeathScreenContent @0x5536a0]
 	TypedArray<Dictionary> get_deploy_spawn_zones();
+	// The compiled SPAWNPOINTS_LIST rows {text, value}: the engine builder's two
+	// witnessed loops (world/deploy_screen_feed.h) over the zone rows above, the
+	// team colour tag, the Menu default-row tokens and the embedder-resolved
+	// WPNames strings (name_key -> text). value 0 = default, index+1 = zone,
+	// -1 = occupant/blank (never a pick). (retail: UI_UpdateDeathScreenContent @0x5536a0, see world/deploy_screen_feed.h)
+	TypedArray<Dictionary> get_deploy_list_rows(const String &p_default_key,
+			const String &p_default_home, const Dictionary &p_zone_names);
+	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
+	// wave line, the psp/medic show gates, and the medic-call cooldown.
+	Dictionary get_deploy_status();
+	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
+	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
+	// (retail: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b, see docs/net/novaworld-net-re.md 0x2E)
+	bool request_local_player_medic();
+	int local_medic_request_cooldown_ticks() const;
+	int local_medic_request_serial() const;
+	// The rtxt "Server" table's STRSRV_MEDREQ format for the host's broadcast.
+	void set_server_text(const String &p_medic_request_format);
+	// The one role-agnostic read of the local player's dead bit.
+	bool local_player_dead() const;
+	// The end-of-round presentation feed (net-re §5.68; nova_simulation_end_round.cpp):
+	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
+	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
+	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
+	Dictionary get_end_round_state() const;
+	TypedArray<Dictionary> get_end_round_lines() const;
+	TypedArray<Dictionary> get_end_round_columns(int p_table_width) const;
+	TypedArray<Dictionary> get_end_round_rows() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an
@@ -1949,6 +1998,12 @@ public:
 	void set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid);
 	bool local_player_fp_weapon_hidden() const;
 	Error debug_crew_local_player(int p_vehicle_ssn);
+	// Authority test seam: queue a RoundDeath for the player entity at `handle`
+	// (killer = the local player) so the next host tick runs the witnessed
+	// death transaction (route_round_deaths: 0x13 fan, 0x52 camera, 0x54 medic
+	// state, the dead flag on the 0x0A record). Not the health setter above:
+	// remote players are not AI rows.
+	Error debug_kill_player_entity(int p_handle);
 	// Probe seam: teleport an AI entity (mission-space coords) through both
 	// position stores, for probes defeated by mission geography. Uses the same
 	// truthful Error contract as debug_set_entity_health.

@@ -164,6 +164,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 		const uint16_t freed_pool0_slot =
 				freed_pool0_entity ? static_cast<uint16_t>(owned_entity.slot()) : uint16_t{0};
 		if (ctx.world != nullptr && owned_entity.valid()) {
+			ctx.world->match.remove_player(*ctx.world, owned_entity);
 			world::entity_detach_from_vehicle(*ctx.world, owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
@@ -733,12 +734,15 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// into conn.reply. The one-shot world-stream/spawn burst is owned by
 	// Server_SendInitialGameStateToPlayer (tick_connections), NOT produced here. [orig: the 0x43 SESSION
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
+	ServerDispatchInputs dispatch_inputs;
+	dispatch_inputs.session_uptime_ms = ctx.np_protocol.host_run_duration_ms;
+	dispatch_inputs.mission_metadata_blob = &ctx.mission_metadata_blob;
+	dispatch_inputs.round_end_board_stream = &ctx.round_end_board_stream;
+	dispatch_inputs.medic_request_format = &ctx.server_text.medic_request_format;
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
 			                         ctx.np_protocol.connection_list, ctx.world,
-			                         ctx.np_protocol.session_seed_id,
-			                         ctx.np_protocol.host_run_duration_ms,
-			                         &ctx.mission_metadata_blob);
+			                         dispatch_inputs);
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
 		// The retail reject overlay is not modeled. Still release the pending node immediately:
 		// an out-of-order or malformed admission must not retain capacity or become an entity.

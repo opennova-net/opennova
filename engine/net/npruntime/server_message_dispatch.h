@@ -15,6 +15,7 @@
 // out of this light header.
 namespace opennova::world {
 class World;
+struct EntityHandle;
 }
 
 // P8 — the reactive in-match gameplay-message reply path, ported off the retired
@@ -52,6 +53,23 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world);
 
+// Project the world-owned wave list into the requester-specific S2C 0x6E
+// body. Public because both the reactive 0x0E queue-join reply and the 1 Hz
+// host producer must use the exact same writer.
+// [orig: NetPacket_WriteSpawnWaveStatus @0x507490]
+std::vector<uint8_t> build_spawn_wave_status_body(
+		const world::World &world, world::EntityHandle requester);
+
+// Execute the ONE deploy-release transaction shared by immediate C2S 0x0E
+// picks and SpawnWaveList_Tick releases. `target_zone` invalid selects the
+// team's marker chain. Returns the private 0x5A/0x61/frontier bundle for the
+// owning connection; callers decide whether it is returned reactively or
+// staged on a transport.
+// [orig: Server_ProcessPlayerDeath deploy leg @0x517740]
+std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
+		const GameConfig &config, NapiNPConnection &conn,
+		world::World &world, world::EntityHandle target_zone);
+
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into
 // `conn.reply`; gates the spawn-confirm replies on `conn.burst` (the faithful spawn authority). A
@@ -63,18 +81,38 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 // NapiNPServer_SendFiltered @0x4C87E0 walks the connection list doing one SendToConn per node];
 // each recipient's flush frames the body with its own sequencing.
 // [orig: per-message NapiNPServerMsg_0x0NN handlers reached from the 0x43 SESSION dispatch]
-// `session_seed` is the host's session_seed_id [orig: NapiNPProtocol +0x530], re-sent as the
-// deploy-release bundle's S2C 0x61 [orig: Server_SendRandomSeedToPlayer @0x5101a0 from the
-// Server_ProcessPlayerDeath deploy leg]. Defaulted for the World-less/unit callers.
+// The host-context values the reply handlers read beyond `config`: every
+// member is a read-only view onto the owning NapiNPServerCtx (the session
+// clock, the 0x64 mission blob, the frozen 0x56 board stream). A null pointer
+// means the host has nothing to serve for that leg.
+struct ServerDispatchInputs {
+	uint32_t session_uptime_ms = 0;
+	const MissionMetadataBlob *mission_metadata_blob = nullptr;
+	// stru_C947D8: the board frozen by the round-end producer; the 0x2B service
+	// cuts chunks from it and never rebuilds. [orig: NapiNPServerMsg_0x02B
+	// @0x514FE0 -> NetPacket_WriteReplayStreamChunk @0x506F60]
+	const std::vector<uint8_t> *round_end_board_stream = nullptr;
+	// GameText("Server", "STRSRV_MEDREQ"): the C2S 0x2E handler's chat format;
+	// null or empty is retail's null lookup and the whole handler no-ops.
+	// [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
+	const std::string *medic_request_format = nullptr;
+};
+
+// The 0x580 send set shared by the player-death 0x54 split and the C2S 0x2E
+// medic call: an in-match connection whose owned entity is alive, on
+// `team`, and carries the charattr Medic bit.
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 — mask 0x580 = active/alive +
+// same team + Medic]
+bool is_medic_recipient(const NapiNPConnection &candidate,
+		const world::World &world, uint8_t team);
+
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
-                                                      uint32_t session_seed = 0,
-                                                      uint32_t session_uptime_ms = 0,
-	                                                  const MissionMetadataBlob *mission_metadata_blob = nullptr);
+                                                      const ServerDispatchInputs &inputs = {});
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the
@@ -83,7 +121,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 // client NapiNPClientMsg_PlayerList @0x42FAE0]
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          const world::World *world);
+                                          world::World *world);
 
 // Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
 // connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16

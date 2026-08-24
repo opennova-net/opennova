@@ -76,13 +76,13 @@ opennova::bms::File make_demo_mission() {
 
 } // namespace
 
-Simulation::Simulation() : mission_session_(*this) {
+Simulation::Simulation() : session_(*this) {
 	reset_world();
 	set_process(false);
 }
 
 Simulation::~Simulation() {
-	(void)mission_session_.close();
+	(void)session_.close();
 	if (weapon_defs_loaded_) {
 		def_free_weapons(&weapon_defs_);
 		weapon_defs_loaded_ = false;
@@ -93,7 +93,7 @@ void Simulation::reset_world() {
 	joiner_bridge_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	local_weapon_.events.clear();
-	local_weapon_.anim_tick = 0;
+	local_weapon_.anim_advance_ticks = 0;
 	local_weapon_.round_sequence = 0;
 	local_weapon_.active = false;
 	local_weapon_.fire_held = false;
@@ -472,7 +472,8 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	}
 	// PreMission events settle initial scripted state before the clock starts (AI is skipped on
 	// the pre-mission pass). Snapshot AFTER it so Stop restores the true play-start state.
-	world_->run_logic_tick(/*is_authority=*/true, /*pre_mission=*/true);
+	world_->run_logic_tick(/*is_authority=*/true,
+			opennova::world::TickPhase::PreMission);
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
 	have_baseline_ = true;
@@ -758,7 +759,7 @@ bool Simulation::advance_world_tick() {
 	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates to every
 	// 62nd tick and the BMS evaluator quarter-passes every 16th, inside their systems —
 	// exactly where the original keeps those dividers. A render frame runs 0..N of these;
-	// the accumulator that decides N lives in MissionSession
+	// the accumulator that decides N lives in inmatch::Session
 	// [orig: Game_MainLoop @ 0x52b630].
 	//
 	// Listen-server frame order [orig: Game_ProcessMainFrame @ 0x5263f0]:
@@ -787,6 +788,7 @@ bool Simulation::advance_world_tick() {
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
+	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
 	resolve_new_infantry_adm_ids();
 	if (runtime_profiling_enabled_)
 		last_sim_tick_us_ = perf_now_us() - sim_start;
@@ -900,7 +902,8 @@ void Simulation::restore_world_baseline() {
 	}
 	if (collision_item_db_.is_valid())
 		resolve_collision_instances(collision_item_db_);
-	local_weapon_.anim_tick = world_->logic_tick;
+	// The FP channel position is a gated advance count, not a clock delta, so a
+	// restored world keeps the held clip pose with no epoch re-stamp.
 	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
@@ -1051,6 +1054,24 @@ void Simulation::set_mission_variable(int index, int value) {
 // the same stores the scripted SETHP path touches (registry + the motor copy)
 // [orig: the WAC SETHP op writes entity+286]. Lets in-game probes shorten a fight
 // without bypassing the damage/death chain under test.
+Error Simulation::debug_kill_player_entity(int p_handle) {
+	if (!world_ || joiner_) return ERR_UNAVAILABLE;
+	const opennova::world::EntityHandle victim{static_cast<uint16_t>(p_handle)};
+	const opennova::world::Entity *e = world_->registry.get(victim);
+	if (e == nullptr || (e->flags & opennova::world::kEntityFlagPlayer) == 0) return ERR_INVALID_PARAMETER;
+	// The damage path that produces a real RoundDeath has already driven the
+	// victim's Health to zero; mirror that so the recipient's 0x0A tail health
+	// (the joiner's death channel) reads the death too.
+	if (opennova::world::Entity *victim_row = world_->registry.get(victim)) victim_row->health = 0;
+	opennova::world::RoundDeath d;
+	d.victim = victim;
+	d.victim_handle = victim.packed;
+	d.killer = world_->cached.local_player;
+	d.killer_handle = world_->cached.local_player.valid() ? world_->cached.local_player.packed : 0xFFFFu;
+	world_->round_sim.deaths.push_back(d);
+	return OK;
+}
+
 Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 	if (!ai_ || !world_) return ERR_UNAVAILABLE;
 	AiEntity *e = ai_->at(p_index);
@@ -1324,8 +1345,8 @@ int Simulation::get_mission_variable(int index) const {
 Dictionary Simulation::get_round_outcome_debug() const {
 	Dictionary out;
 	if (!world_) return out;
-	out["ended"] = world_->round_end.ended;
-	out["winner_team"] = world_->round_end.winner_team;
+	out["ended"] = world_->match.outcome().ended;
+	out["winner_team"] = world_->match.outcome().winner_team;
 	out["bluekills"] = world_->kill_stats.bluekills_by_player;
 	out["greenkills"] = world_->kill_stats.greenkills_by_player;
 	out["enemy_kills"] = world_->kill_stats.enemy_kills_by_player;

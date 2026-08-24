@@ -285,8 +285,15 @@ private:
 	void apply_entity_death(uint16_t handle_packed, int16_t killer_source);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
+	// Small per-match state messages live together in client_replica_match.cpp;
+	// this remains one pipeline with no secondary client state or router.
+	void apply_death_camera_target(const std::vector<uint8_t> &body);
+	void apply_player_downed_state(const std::vector<uint8_t> &body);
+	void apply_spawn_wave_status(const std::vector<uint8_t> &body);
+	void apply_score_delta_sound(const std::vector<uint8_t> &body);
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
 	// ClientState::end_round and decodes when the board completes.
+	void apply_end_round_header(const std::vector<uint8_t> &body);
 	void apply_end_round_stats_chunk(const std::vector<uint8_t> &body);
 	void apply_frame_update(const std::vector<uint8_t> &body);
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
@@ -304,6 +311,7 @@ private:
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
+	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
 	void erase_entity_tree(uint16_t root_handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /
 	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +

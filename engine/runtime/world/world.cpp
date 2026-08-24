@@ -188,18 +188,6 @@ bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicl
     return false;
 }
 
-bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
-    switch (mode) {
-        case SeatSelectionMode::PassengerOnly:
-            return type == SeatType::Passenger;
-        case SeatSelectionMode::RejectController:
-            return type != SeatType::Controller;
-        case SeatSelectionMode::Any:
-        default:
-            return true;
-    }
-}
-
 static int16_t mounted_pose_yaw(const Entity &vehicle, const Seat &seat) {
     if (seat.attachment_frame)
         return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
@@ -932,6 +920,22 @@ bool EntityCommands::group_dead(int group) const {
 
 // --- mount / emplacement (AttachToEmplaced) ---
 
+// Seat-type filter for a selection mode. #564 retired the shared copy of this
+// predicate along with its own seat-selection path; find_best_seat below is the
+// child-emplacement scan [orig: Entity_FindBestSeatSlot @0x4351f0] and still
+// needs it, so it lives here as a file-local helper.
+static bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
+    switch (mode) {
+        case SeatSelectionMode::PassengerOnly:
+            return type == SeatType::Passenger;
+        case SeatSelectionMode::RejectController:
+            return type != SeatType::Controller;
+        case SeatSelectionMode::Any:
+        default:
+            return true;
+    }
+}
+
 int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant,
                                    SeatSelectionMode mode,
                                    EntityHandle *out_owner) const {
@@ -1002,57 +1006,10 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     EntityHandle th = resolve_ssn(target_ssn);
     Entity *occ = world_.registry.get(oh);
     Entity *tgt = world_.registry.get(th);
-    if (!occ || !tgt) return false;
-    if (occ->mounted) return false;       // [orig: entity->pad8[8] set -> return 0]
-    if (tgt->seats.empty()) return false; // [orig: no model+144 vehicle / no seats]
-    // The winning seat may live on a CHILD emplacement, not on the addressed vehicle
-    // [orig: Entity_FindBestSeatSlot @0x4351f0 writes *outEntity]. Re-point the mount
-    // at whoever owns it, or the index would address the wrong entity's seat vector.
-    EntityHandle seat_owner = th;
-    const int seat_idx = find_best_seat(*tgt, oh, mode, &seat_owner);
-    if (seat_idx < 0) return false;
-    if (seat_owner != th) {
-        Entity *child = world_.registry.get(seat_owner);
-        if (child == nullptr) return false;
-        th = seat_owner;
-        tgt = child;
-    }
-    if (seat_idx >= static_cast<int>(tgt->seats.size())) return false;
-    Seat &s = tgt->seats[seat_idx];
-    presnap_vehicle_attach_heading(world_, *occ, *tgt, s);
-    s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]
-    occ->mount_target = th;                                // [orig: occupant+364]
-    occ->mount_target_net_id = tgt->net_id;
-    occ->mount_target_bms_id = tgt->bms_id;
-    occ->mount_target_spawn_origin = tgt->spawn_origin;
-    occ->mount_seat = static_cast<int8_t>(seat_idx);       // [orig: occupant+360]
-    occ->mount_type = s.type;
-    occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
-    occ->mounted = true;
-    if (s.type == SeatType::Gunner) {
-        // UseGun clears the transient drowning/in-air pair but does not set the
-        // generic carried/vehicle flag. [orig: Entity_AttachToUseGunSlot
-        // @0x546c56-0x546c7c clears 0xA000]
-        occ->flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
-        occ->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
-    } else {
-        // Ordinary vehicle slots clear the pair and mark the occupant carried.
-        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775, the
-        // `& 0xFFFF5FBF | 0x40` form — the masks are static_asserted at the
-        // vehicle_attach.cpp twin]
-        occ->flags = (occ->flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
-                     kEntityFlagMounted;
-        occ->engine_flags =
-                (occ->engine_flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
-                kEntityFlagMounted;
-    }
-    occ->mounted_config_valid = tgt->emplaced_config_valid;
-    occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
-    if (s.type == SeatType::Gunner)
-        vehicle_bind_use_gun_slot(world_, *occ, *tgt);
-    pose_mounted_occupant(world_, *occ, *tgt, s);
-    vehicle_claim_primary_occupant(world_, *tgt, oh, s.type); // [orig: +368 claim @0x4946d0]
-    return true;
+    if (!occ || !tgt || occ->mounted) return false;
+    VehicleSeatSelection selection;
+    if (!find_best_vehicle_seat(world_, th, oh, selection, mode)) return false;
+    return attach_to_vehicle_seat(world_, oh, selection);
 }
 
 bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn,
@@ -1118,7 +1075,8 @@ bool EntityCommands::mount_best(uint16_t occupant_ssn) {
     double best_d2 = kMountRadius * kMountRadius + 1.0;
     world_.registry.for_each([&](const Entity &e) {
         if (e.handle == oh || e.seats.empty()) return;
-        if (find_best_seat(e, oh) < 0) return; // no free seat for this occupant
+        VehicleSeatSelection selection;
+        if (!find_best_vehicle_seat(world_, e.handle, oh, selection)) return;
         const double dx = e.position.x - p.x, dy = e.position.y - p.y, dz = e.position.z - p.z;
         const double d2 = dx * dx + dy * dy + dz * dz;
         if (d2 <= kMountRadius * kMountRadius && d2 < best_d2) { best_d2 = d2; best = e.handle; }
@@ -1129,42 +1087,7 @@ bool EntityCommands::mount_best(uint16_t occupant_ssn) {
 }
 
 bool EntityCommands::dismount(uint16_t occupant_ssn) {
-    // [orig: Entity_DetachFromVehicle @0x4355f0] free the seat + clear the occupant's mount ref.
-    Entity *occ = world_.registry.get(resolve_ssn(occupant_ssn));
-    if (!occ || !occ->mounted) return false;
-    const bool claim_capable_seat = occ->mount_type != SeatType::Passenger &&
-                                    occ->mount_type != SeatType::None;
-    const uint16_t target_net_id = occ->mount_target_net_id;
-    const int32_t target_bms_id = occ->mount_target_bms_id;
-    const uint32_t target_spawn_origin = occ->mount_target_spawn_origin;
-    const uint16_t target_wire_handle = occ->mount_target.packed;
-    const EntityHandle oh = occ->handle;
-    Entity *tgt = world_.registry.get(occ->mount_target);
-    if (tgt && occ->mount_seat >= 0 && occ->mount_seat < static_cast<int>(tgt->seats.size()))
-        tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
-    vehicle_release_use_gun_slot(*occ, tgt);
-    occ->mounted = false;
-    occ->flags &= ~kEntityFlagMounted;
-    occ->engine_flags &= ~kEntityFlagMounted;
-    occ->mount_target = EntityHandle{};
-    occ->mount_target_net_id = 0;
-    occ->mount_target_bms_id = 0;
-    occ->mount_target_spawn_origin = 0;
-    occ->mount_seat = -1;
-    occ->mount_type = SeatType::None;
-    occ->mount_bone = 0;
-    occ->mounted_config_valid = false;
-    occ->mounted_config = 0;
-    if (tgt != nullptr) {
-        vehicle_release_primary_occupant(world_, *tgt, oh); // [orig: +368 leg @0x4356e9]
-    } else if (claim_capable_seat) {
-        // The vehicle entity is already gone; its stored identity carries the stop so the
-        // host tears the presentation down (host cleanup — the claimant check is
-        // unavailable, and a spurious stop is idempotent downstream).
-        emit_vehicle_control_stopped(world_, target_net_id, target_bms_id,
-                                     target_spawn_origin, target_wire_handle);
-    }
-    return true;
+    return entity_detach_from_vehicle(world_, resolve_ssn(occupant_ssn));
 }
 
 uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {
@@ -1576,7 +1499,7 @@ void World::load_systems() {
     for (ISystem *s : systems_) s->on_load(*this);
 }
 
-void World::run_logic_tick(bool is_authority, bool pre_mission) {
+void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
     // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
     // script evaluators read it. Deferred: the mission sim has no local-player avatar
@@ -1585,7 +1508,9 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ctx.world = this;
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
-    ctx.pre_mission = pre_mission;
+    ctx.phase = phase;
+    const bool pre_mission = phase == TickPhase::PreMission;
+    const bool gameplay = phase == TickPhase::Gameplay;
     vehicle_authority = is_authority;
     // The pending fire-sound countdown, before this tick's spawns: retail
     // drains after the client network frame (whose receive seeds our embedder
@@ -1608,14 +1533,16 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // local player (the §5.38 entity==local-player branch) and leaves every other
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
-    for (ISystem *s : systems_) s->tick(*this, ctx);
-    pose_emplacement_attachments(*this);
+    if (phase != TickPhase::PreRound) {
+        for (ISystem *s : systems_) s->tick(*this, ctx);
+        pose_emplacement_attachments(*this);
+    }
     // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
     // prevents a newly converted charge from losing an arm-delay tick and lets
     // claymore shrapnel fly later in its detonation frame [orig:
     // Entity_UpdatePool1Slot @0x4b8dd0 -> Weapon_UpdateAllProjectiles @0x4ec020].
     // These presentation events describe only the current authoritative tick.
-    if (is_authority && !pre_mission) {
+    if (is_authority && gameplay) {
         throwables.events.clear();
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     }
@@ -1624,7 +1551,12 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // become a same-frame round.
     // [orig: Entity_UpdateAllEntities @0x52674b, then
     //  WeaponAction_ProcessAllEntities @0x526786]
-    if (!pre_mission && ai != nullptr)
+    // WeaponAction_ProcessAllEntities is after the timer-gated entity update
+    // and is itself ungated, so an already-queued action may advance during
+    // PreRound even though its spawned projectile cannot move until gameplay.
+    // PreMission remains outside the frame pump entirely.
+    // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
+    if (phase != TickPhase::PreMission && ai != nullptr)
         ai->pump_mounted_weapon_slots(*this, logic_tick);
     // Live rounds step on the host and on an explicitly configured MP
     // non-authority client. The latter is the retail tag-2 visual re-sim path;
@@ -1632,10 +1564,10 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // sites, so only the host can mutate gameplay state. Do not infer a client
     // role from is_authority=false alone -- tests and pre-mission callers use it too.
     // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
-    if (!pre_mission &&
+    if (gameplay &&
         (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
-    if (!pre_mission &&
+    if (gameplay &&
         (is_authority || (mp_session && !projectile_authority))) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
@@ -1668,7 +1600,7 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // is that client — the pure-client view is D-HUD-16). Position converts to
     // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
     // @0x4de5f7]
-    if (is_authority && !pre_mission && !waypoints.empty()) {
+    if (is_authority && gameplay && !waypoints.empty()) {
         if (const Entity *lp = registry.get(cached.local_player))
             waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
                                    static_cast<int32_t>(lp->position.y * 65536.0f));
@@ -1693,29 +1625,23 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     sound_emitters.prune(logic_tick);
 }
 
-// Structural translation of Server_ProcessRoundEnd @0x5164f0 at SP altitude.
+// Shared semantic half of Server_ProcessRoundEnd @0x5164f0. The authority
+// transport emits the per-recipient wire transaction from this frozen result.
 void World::process_round_end(int32_t winning_team) {
-    if (round_end.ended) return;          // the double-run guard [orig: @0x516502]
-    round_end.winner_team = winning_team; // [orig: g_round_winning_team @0x516528]
-    // Unmodeled MP score surfaces, in original order: the winner-team scoring pass
-    // (GameEvent_ProcessScoring @0x52f550 per winning-team member @0x516530), the
-    // end-of-round scoreboard block build (Server_BuildEndOfRoundScoreboard @0x508f30
-    // — round_end.winner_team stands for its winner dword @0x24c1970), and the
-    // top-scorer bonus on non-team draws. Net-track wire legs, per active slot in
-    // state 6: S2C 0x61 round-end marker (4 zero bytes) @0x516790, S2C 0x1D
+    if (!match.finish(winning_team, *this)) return; // double-run guard + frozen board [orig: @0x516502/@0x516528]
+    // Match::finish applies the winner marker and builds the immutable board in
+    // the original pre-send order [orig: GameEvent_ProcessScoring @0x52f550;
+    // Server_BuildEndOfRoundScoreboard @0x508f30]. The authority net tail sends,
+    // per active slot in state 6: S2C 0x61 round-end marker (4 zero bytes)
+    // @0x516790, S2C 0x1D
     // scoreboard header [u8 winner][s16 score0][s16 score1][u8 draw][s8 myEntryIndex]
     // (EndRoundScoreboard_SerializeHeader @0x505280) @0x516839, CNetPlayer_SetGameState(11)
     // @0x516846, slot state 6->7 @0x51685e; then the per-team round-win counters for
     // game types 0x10000/65537/65540 @0x5168a0 and the MP-only 2790-tick linger
     // @0x5166c4 (drained by Server_TickUpdate -> exit reason 3 / the client frame ->
     // reason 4; SP never drains it — the epilog owns the SP exit).
-    // The draw flag on the team arm is the plain score equality; Co-op's
-    // g_GameType 0x30020 has bit 0x10000 set, so it takes that arm
-    // [orig: Server_BuildEndOfRoundScoreboard @0x508f30 — `team_data_ptr =
-    //  g_scoreTeamScore0 == g_scoreTeamScore1`, kong 213720]. The scores
-    // themselves stay 0 until the D2 scoring pass lands (see RoundEndState).
-    round_end.draw = round_end.team_scores[0] == round_end.team_scores[1];
-    round_end.ended = true; // [orig: g_spawn_success_gate latch @0x5168e4]
+    // Match::finish sets the sole outcome latch before the network/presentation
+    // tails, matching retail's double-run guard without copying its global.
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
     // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390:
@@ -1769,8 +1695,14 @@ World::Snapshot World::snapshot() const {
     s.wac_values = wac_values;
     s.env = env;
     s.network_env = network_env;
+    s.match = match;
+    s.spawn_waves = spawn_waves;
+    s.zone_capture_state = zone_capture_state;
+    s.spawn_cycle_counter = spawn_cycle_counter;
     s.logic_tick = logic_tick;
+    s.preround_delay_seconds = preround_delay_seconds;
     s.prng16_state = prng16_state;
+    s.crt_rand_state = crt_rand.state;
     s.local_player = cached.local_player;
     return s;
 }
@@ -1781,8 +1713,14 @@ void World::restore(const Snapshot &s) {
     wac_values = s.wac_values;
     env = s.env;
     network_env = s.network_env;
+    match = s.match;
+    spawn_waves = s.spawn_waves;
+    zone_capture_state = s.zone_capture_state;
+    spawn_cycle_counter = s.spawn_cycle_counter;
     logic_tick = s.logic_tick;
+    preround_delay_seconds = s.preround_delay_seconds;
     prng16_state = s.prng16_state;
+    crt_rand.state = s.crt_rand_state;
     // Reset per-tick health/proximity counters, then restore only the stable
     // ownership identity captured with the registry. A post-snapshot player may
     // have reused a baseline actor's slot, while a listen baseline may already
@@ -1801,10 +1739,10 @@ void World::restore(const Snapshot &s) {
     destruction_rng.reset();
     scars.reset();
     destruction = DestructionEvents{};
-    // Round outcome + kill stats reset with the mission [orig: Game_StartMission —
-    // gate clear @0x524a1f + the scoreboard-block memset @0x5249df; the stat buckets
-    // clear in the round-start state init].
-    round_end = RoundEndState{};
+    // The baseline copy above restores the configured rules, roster, clock,
+    // stats, and outcome together. This matters for SP-as-listen-server: its
+    // host player and game type already exist when the play-start snapshot is
+    // sealed, and reset must not reconstruct them through another seam.
     kill_stats = MissionKillStats{};
     load_systems(); // systems re-init their per-mission state
     if (collision != nullptr) collision->refresh_after_registry_change(*this);

@@ -58,7 +58,7 @@
 #include "mission/nova_mission_data.h"
 #include "simulation/nova_present_applier.h"
 #include "simulation/nova_present_stats.h"
-#include "simulation/nova_mission_session_values.h"
+#include "simulation/nova_inmatch_session_values.h"
 #include "simulation/nova_wire_present_pass.h"
 #include "simulation/nova_simulation.h"
 #include "wac/nova_wac_program.h"
@@ -79,6 +79,7 @@
 #include "network/nova_net_protocol.h"
 #include "network/nova_net_session_policy.h"
 #include "util/nova_paths.h"
+#include "util/nova_process.h"
 #include "resource_index/nova_resource_index.h"
 #include "refs/nova_reference_index.h"
 #include "resource_index/nova_resource_root.h"
@@ -169,6 +170,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
 	GDREGISTER_CLASS(Paths);
+	GDREGISTER_CLASS(Process);
 	GDREGISTER_CLASS(ParticleCurveRef);
 	GDREGISTER_CLASS(ParticleEffect);
 	GDREGISTER_CLASS(ParticleTableHandles);

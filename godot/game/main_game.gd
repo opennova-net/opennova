@@ -49,7 +49,7 @@ const PICK_KEY := KEY_F6
 # mouse is released and player input idles. Retail's dead player has no gameplay
 # input anyway — the uplink is held by dword_81474C and the input legs gate on
 # g_spawn_success_gate — so this state is what makes the spawn list clickable.
-enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
+enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND }
 
 @onready var _world: GameWorld = $World
 @onready var _camera: FlyCamera = $Camera3D
@@ -86,6 +86,7 @@ var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
+var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
@@ -232,21 +233,10 @@ func _ready() -> void:
 	_armory_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
 	_armory_presenter.closed.connect(_on_resume)
-	# The joiner's deploy-map screen (death.mnu DEATH): opened when the join reaches
-	# the player-paced deployment pick, self-closing on the deployment release
-	# [orig: the 0x0A flags1 bit1 hold chain; net-re 5.61].
-	_deploy_presenter = DeployScreenPresenter.new()
-	_deploy_presenter.name = "DeployScreenPresenter"
-	add_child(_deploy_presenter)
-	_deploy_presenter.setup(_world, _hud if _hud != null else self)
-	# Same contract as the armory: the screen owns the cursor while it is up, so the
-	# shell must leave State.WORLD or LocalPlayerPresenter re-captures the mouse every
-	# frame and the spawn rows become unclickable.
-	_deploy_presenter.opened.connect(func() -> void: _state = State.DEPLOY)
-	_deploy_presenter.closed.connect(func() -> void:
-		if _state == State.DEPLOY:
-			_state = State.WORLD
-	)
+	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
+	_deploy_presenter = DeployScreenPresenter.install(self, _world,
+			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
+			_leave_screen.bind(State.DEPLOY))
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	_world.join_admission_ready.connect(_on_join_admission_ready)
 	_world.session_lost.connect(_on_session_lost)
@@ -254,6 +244,11 @@ func _ready() -> void:
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	# The MP end-of-round flow (net-re 5.68; sub_5C0060 @0x5c0072): STAT owns the cursor.
+	_end_round_presenter = EndRoundPresenter.install(self, _world,
+			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
+			_armory_presenter, func() -> void: _state = State.END_ROUND,
+			_leave_screen.bind(State.END_ROUND))
 	# Every net-session ENTRY (LAN browser/host, NovaWorld panel + env hooks)
 	# lives on the NetSessionController component; the shell keeps the state
 	# machine, the load pipeline, and the session-presentation states.
@@ -269,9 +264,8 @@ func _ready() -> void:
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
-	# Editor-managed runs pass an exact process-local directory. It wins over
-	# persisted settings but is never written back.
-	var dir := LaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
+	# Flag > persisted pick > the game bundled around a shipped exe (LaunchFlags).
+	var dir := LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir())
 	if dir.is_empty():
 		_request_resource_dir()
 		return
@@ -474,9 +468,7 @@ func _on_shell_mission_effects(effects: Array) -> void:
 func _begin_end_of_mission(winner: int) -> void:
 	if _round_ended:
 		return
-	# The end screen is the SP presentation; the MP post-round flow (scoreboard
-	# broadcast + the 2790-tick linger + round cycling) is the net track.
-	var sim = _world.get_sim() if _world != null else null
+	var sim = _world.get_sim() if _world != null else null  # MP: EndRoundPresenter (5.68)
 	if sim != null and bool(sim.get_round_outcome_debug().get("mp_session", false)):
 		return
 	_round_ended = true
@@ -571,7 +563,7 @@ func _can_summon_dir_picker() -> bool:
 # the shell holds no root) so boot continuations can gate on it.
 func _enter_menu(dir: String) -> bool:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := mount_boot_root(dir, LaunchFlags.loose_root_allowed())
+		var root := mount_boot_root(dir, LaunchFlags.boot_loose_allowed(dir))
 		if root == null:
 			_request_resource_dir()
 			return false
@@ -700,7 +692,7 @@ func _on_dir_selected(dir: String) -> void:
 ## the same ADR-0018 reason as mount_boot_root; returns false when the pick
 ## would not mount (the picker is re-raised).
 func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
-	var root := mount_boot_root(dir, LaunchFlags.loose_root_allowed())
+	var root := mount_boot_root(dir, LaunchFlags.boot_loose_allowed(dir))
 	if root == null:
 		_request_resource_dir()
 		return false
@@ -716,7 +708,8 @@ func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
 ## `--loose-root` flag, passed by every ONED-managed run) a directory holding
 ## none of the packed archives falls back to the editor's loose mount — the
 ## same data contract ONED authors against, so F5/F6 can play-test a loose
-## extract (ADR 0025). The no-archives fatal stays the standalone default
+## extract (ADR 0025) and the dev zip's bundled assets/ boots as the game it is
+## (LaunchFlags.boot_loose_allowed). The no-archives fatal stays the picked default
 ## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
 ## Warns and returns null on failure. Public and parameterized so the fallback
 ## contract is testable without process arguments (ADR 0018).
@@ -963,12 +956,17 @@ func _on_camera_escape() -> void:
 		else:
 			_on_end_screen_exit()
 		return
-	if _state == State.WORLD or _state == State.DEPLOY:
+	if _state in [State.WORLD, State.DEPLOY, State.END_ROUND]:
 		# ESC from the deploy screen still reaches the in-game menu (and therefore
 		# RETURN TO MENU): a joiner parked at the pick must be able to leave.
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
 		_on_resume()
+
+
+func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
+	if _state == from_state:
+		_state = State.WORLD
 
 
 func _pause() -> void:
@@ -987,6 +985,7 @@ func _on_resume() -> void:
 	# A joiner who paused from the deploy screen still owes its pick, so resume back
 	# into DEPLOY rather than handing the cursor back to the world.
 	_state = State.DEPLOY if (_deploy_presenter != null and _deploy_presenter.is_open()) \
+			else State.END_ROUND if (_end_round_presenter != null and _end_round_presenter.is_open()) \
 			else State.WORLD
 
 
@@ -1133,7 +1132,7 @@ func _process(delta: float) -> void:
 	_render_stats.sample(get_viewport(), stats_on)
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
-	if _state == State.PAUSED or _state == State.ARMORY or _state == State.DEPLOY \
+	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
 			or debug_overlay_open or _end_screen != null or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -1183,9 +1182,10 @@ func _process(delta: float) -> void:
 	# The shared HUD presenter rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe_skip_hud
-	if _hud_presenter != null and (_state == State.WORLD or _state == State.ARMORY \
-			or _state == State.DEPLOY) and not skip_hud:
+	if _hud_presenter != null and not skip_hud \
+			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
 		_hud_presenter.tick(is_gameplay_input_active())
+		_end_round_presenter.tick()  # the same HUD frame [orig: sub_5C0060]
 	if timing:
 		var probe_t4 := Time.get_ticks_usec()
 		if probe_enabled:

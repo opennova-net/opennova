@@ -1,5 +1,6 @@
 #include "npruntime/joiner_connection.h"
 
+#include <cstring>
 #include <mission/bms.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
@@ -14,6 +15,10 @@
 #include <limits>
 #include <string_view>
 #include <utility>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 // Verbatim port of novaworld::JoinerSession (the client mirror), with SCRK/seq/ack stored on the
 // type-2 NapiNPConnection conn_. The D.0 name-match in on_server_session is copied byte-for-byte.
@@ -670,6 +675,49 @@ void JoinerConnection::retain_terrain_load_page(
 	}
 }
 
+// The VarList walk retail runs over the reassembled server-info stream
+// [orig: parse_server_session_variables @0x520440 — per entry a NUL-terminated
+// key, a u32 length, the value bytes; EXP_FANFARE lands as the u16 at
+// g_sessionvar_exp_fanfare @0x520478].
+uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len) {
+	size_t pos = 0;
+	while (pos < len) {
+		const uint8_t *key = data + pos;
+		size_t key_len = 0;
+		while (pos + key_len < len && key[key_len] != 0) ++key_len;
+		if (pos + key_len >= len) break; // no terminator
+		pos += key_len + 1;
+		if (pos + 4 > len) break;
+		const uint32_t value_len = static_cast<uint32_t>(data[pos]) |
+				(static_cast<uint32_t>(data[pos + 1]) << 8) |
+				(static_cast<uint32_t>(data[pos + 2]) << 16) |
+				(static_cast<uint32_t>(data[pos + 3]) << 24);
+		pos += 4;
+		if (value_len > len - pos) break;
+		if (key_len == 11 && std::memcmp(key, "EXP_FANFARE", 11) == 0 && value_len >= 2)
+			return static_cast<uint16_t>(data[pos] | (data[pos + 1] << 8));
+		pos += value_len;
+	}
+	return 0;
+}
+
+void JoinerConnection::retain_server_info_chunk(const FileTransferChunk &chunk) {
+	const uint64_t chunk_end = uint64_t(chunk.chunk_offset) + chunk.chunk_size;
+	if (chunk.chunk_offset > chunk.total_size || chunk_end > chunk.total_size ||
+			chunk.total_size > (1u << 20))
+		return;
+	if (chunk.transfer_id != server_info_transfer_id_ || chunk.chunk_offset == 0) {
+		server_info_transfer_id_ = chunk.transfer_id;
+		server_info_bytes_.assign(chunk.total_size, 0);
+	}
+	if (server_info_bytes_.size() != chunk.total_size) return;
+	std::memcpy(server_info_bytes_.data() + chunk.chunk_offset, chunk.chunk_data,
+			chunk.chunk_size);
+	if (chunk.is_final())
+		exp_fanfare_ = session_vars_exp_fanfare(server_info_bytes_.data(),
+				server_info_bytes_.size());
+}
+
 void JoinerConnection::retain_mission_metadata_chunk(
 		const FileTransferChunk &chunk) {
 	constexpr uint32_t kMpAttributesOffset = 44;
@@ -924,7 +972,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// packet. This exchange runs before wire-header world construction; 0x48 echoes ServerAuth.MI.
 			out.outbound.push_back(frame_session({
 					make_protocol_message(c2s::GAME_START_ACK, std::vector<uint8_t>(4, 0)),
-					make_protocol_message(c2s::SET_PLAYER_VALUE, std::vector<uint8_t>(4, 0)),
+					make_protocol_message(
+							c2s::AUTO_MEDIC_PREFERENCE,
+							encode_auto_medic_preference(AutoMedicPreference{})),
 					make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
 					make_protocol_message(c2s::PING, {}),
 					make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0)),
@@ -935,6 +985,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			FileTransferChunk chunk;
 			if (decode_file_transfer_chunk(
 					m.payload.data(), m.payload.size(), chunk)) {
+				retain_server_info_chunk(chunk);
 				if (!chunk.is_final()) {
 					const uint32_t next_offset = static_cast<uint32_t>(
 							uint64_t(chunk.chunk_offset) + chunk.chunk_size);
@@ -994,6 +1045,33 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 									0x22, {0x00, 0xF7, 0x1C}),
 					}));
 					enter_initial_sync_tail();
+				}
+			}
+		} else if (m.tag == s2c::END_ROUND_HEADER) {
+			EndRoundHeader header;
+			if (decode_end_round_header(
+					m.payload.data(), m.payload.size(), header)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+				// A valid 0x1D immediately starts the requester-driven board stream
+				// at zero. [orig: NapiNPClientMsg_0x01D @0x430840 queues
+				// reliable C2S 0x2B {0}]
+				periodic_replies.push_back(make_protocol_message(
+						c2s::END_ROUND_STATS_REQUEST,
+						encode_end_round_stats_request(0)));
+			}
+		} else if (m.tag == s2c::END_ROUND_STATS) {
+			EndRoundStatsChunk chunk;
+			if (decode_end_round_stats_chunk(
+					m.payload.data(), m.payload.size(), chunk)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+				if (!chunk.complete()) {
+					const uint16_t next = static_cast<uint16_t>(
+							chunk.chunk_offset + chunk.chunk.size());
+					periodic_replies.push_back(make_protocol_message(
+							c2s::END_ROUND_STATS_REQUEST,
+							encode_end_round_stats_request(next)));
 				}
 			}
 		} else if (m.tag == s2c::BMS_HEADER) {
@@ -1539,6 +1617,29 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
+		} else if (m.tag == s2c::OBJECTIVE_ENTITY_STATE) {
+			ObjectiveEntityState state;
+			std::size_t consumed = 0;
+			if (decode_objective_entity_state(
+					m.payload.data(), m.payload.size(), state, consumed) &&
+					consumed == m.payload.size()) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::SPAWN_WAVE_STATUS) {
+			SpawnWaveStatus status;
+			if (decode_spawn_wave_status(
+					m.payload.data(), m.payload.size(), status)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::SCORE_DELTA_SOUND) {
+			ScoreDeltaSound score;
+			if (decode_score_delta_sound(
+					m.payload.data(), m.payload.size(), score)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
@@ -1558,6 +1659,24 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			std::size_t death_consumed = 0;
 			if (decode_entity_death(
 					m.payload.data(), m.payload.size(), death, death_consumed)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::DEATH_CAMERA_TARGET) {
+			DeathCameraTarget target;
+			std::size_t consumed = 0;
+			if (decode_death_camera_target(
+					m.payload.data(), m.payload.size(), target, consumed) &&
+					consumed == m.payload.size()) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::PLAYER_DOWNED_STATE) {
+			PlayerDownedState state;
+			std::size_t consumed = 0;
+			if (decode_player_downed_state(
+					m.payload.data(), m.payload.size(), state, consumed) &&
+					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
@@ -1617,6 +1736,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), window, consumed) &&
 			    consumed == m.payload.size())
 				out.zone_timer_updates.emplace_back(window);
+		} else if (m.tag == s2c::ZONE_PRESENCE_COUNT) {
+			ZonePresenceCount presence;
+			std::size_t consumed = 0;
+			if (decode_zone_presence_count(
+					m.payload.data(), m.payload.size(), presence, consumed) &&
+			    consumed == m.payload.size())
+				out.zone_timer_updates.emplace_back(presence);
 		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
 			// S2C 0x11 is the terminal pre-world admission marker. Its cumulative ACK is the safe
 			// point at which the binding may pause progress for synchronous mission loading. Hold

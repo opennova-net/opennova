@@ -30,6 +30,7 @@
 #include "host_test_setup.h"
 
 #include <netsim/connection.h>
+#include <netsim/client_replica_pipeline.h>
 #include <netsim/idatagram_socket.h>
 #include <netsim/loopback_channel.h>
 #include <netsim/session_transport.h>
@@ -78,6 +79,15 @@ bool expect(bool cond, const char *msg) {
 	if (cond) return true;
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
+}
+
+std::vector<uint8_t> encode_test_player_list(
+		std::initializer_list<PlayerListEntry> players) {
+	PlayerListFrame frame;
+	frame.players.assign(players.begin(), players.end());
+	frame.teams.resize(size_t(frame.team_count) + 1);
+	frame.in_game_count = static_cast<uint8_t>(frame.players.size());
+	return encode_player_list(frame);
 }
 
 std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
@@ -205,6 +215,14 @@ std::vector<uint8_t> zone_timer_window_body(
 			static_cast<uint8_t>(end_s),
 			static_cast<uint8_t>(end_s >> 8),
 			rate,
+	};
+}
+
+std::vector<uint8_t> zone_presence_body(uint16_t handle, uint8_t count) {
+	return {
+			static_cast<uint8_t>(handle),
+			static_cast<uint8_t>(handle >> 8),
+			count,
 	};
 }
 
@@ -384,6 +402,100 @@ bool run_tick_seed_anchors_the_client_clock() {
 			joiner.handle_datagram(disarm_dg.data(), disarm_dg.size());
 	return expect(disarm.tick_seed_set && disarm.tick_seed == 0u,
 			"the round-end disarm form is a witnessed seed of zero");
+}
+
+bool run_end_round_header_pulls_complete_board() {
+	const std::string client_scrk = "CLIENT-END-ROUND-SCRK";
+	const std::string server_scrk = "SERVER-END-ROUND-SCRK";
+	np::JoinerConnection joiner("RoundPull");
+	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	auto replica_owned = std::make_unique<ns::ClientReplicaPipeline>();
+	ns::ClientReplicaPipeline &replica = *replica_owned;
+
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.team_score_0 = 3;
+	header.team_score_1 = 8;
+	header.player_index = 4;
+	const std::vector<uint8_t> header_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header))});
+	const np::JoinerConnection::PollResult header_result =
+			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
+	if (!expect(header_result.queued_send_messages.size() == 1 &&
+			header_result.queued_send_messages[0].tag ==
+					c2s::END_ROUND_STATS_REQUEST &&
+			header_result.queued_send_messages[0].payload ==
+					std::vector<uint8_t>({0, 0}),
+			"S2C 0x1D immediately queues reliable C2S 0x2B offset zero")) {
+		return false;
+	}
+	for (const auto &message : header_result.inbound_reducer)
+		replica.apply(message.first, message.second);
+	if (!expect(replica.state().end_round.header_known &&
+			replica.state().end_round.header.player_index == 4,
+			"the canonical client reducer retains the recipient 0x1D header")) {
+		return false;
+	}
+
+	EndRoundStats board;
+	board.winner_team = 2;
+	board.team_score_0 = 3;
+	board.team_score_1 = 8;
+	for (uint8_t slot = 0; slot < 12; ++slot) {
+		EndRoundPlayerRow row;
+		row.slot = slot;
+		row.name = "RetailPeer" + std::to_string(slot);
+		row.team = static_cast<uint8_t>((slot & 1u) + 1u);
+		row.kills = slot;
+		board.players.push_back(std::move(row));
+	}
+	board.team_rows.resize(3);
+	const std::vector<uint8_t> board_wire = encode_end_round_stats(board);
+	if (!expect(board_wire.size() > 200 && board_wire.size() < 400,
+			"end-round pull fixture crosses exactly one 200-byte boundary")) {
+		return false;
+	}
+	const std::vector<uint8_t> first_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_STATS,
+					encode_end_round_stats_chunk(board_wire, 0))});
+	const np::JoinerConnection::PollResult first =
+			joiner.handle_datagram(first_datagram.data(), first_datagram.size());
+	if (!expect(first.queued_send_messages.size() == 1 &&
+			first.queued_send_messages[0].tag ==
+					c2s::END_ROUND_STATS_REQUEST &&
+			first.queued_send_messages[0].payload ==
+					std::vector<uint8_t>({200, 0}),
+			"incomplete S2C 0x56 requests the next running offset")) {
+		return false;
+	}
+	for (const auto &message : first.inbound_reducer)
+		replica.apply(message.first, message.second);
+	if (!expect(!replica.state().end_round.known,
+			"the first 200-byte chunk does not publish a partial board")) {
+		return false;
+	}
+
+	const std::vector<uint8_t> final_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_STATS,
+					encode_end_round_stats_chunk(board_wire, 200))});
+	const np::JoinerConnection::PollResult final =
+			joiner.handle_datagram(final_datagram.data(), final_datagram.size());
+	if (!expect(final.queued_send_messages.empty(),
+			"the completing S2C 0x56 queues no further pull")) {
+		return false;
+	}
+	for (const auto &message : final.inbound_reducer)
+		replica.apply(message.first, message.second);
+	return expect(replica.state().end_round.known &&
+			replica.state().end_round.board.players.size() == 12 &&
+			replica.state().end_round.board.players[11].name == "RetailPeer11",
+			"the requested chunks publish the complete retail board");
 }
 
 // Retail S2C 0x76 replaces the client-global class availability word. It is
@@ -769,7 +881,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(
-					0x16, encode_player_list({{0, 1}, {1, 2}}))});
+					0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
 	const np::JoinerConnection::PollResult player_list_result =
 			joiner.handle_datagram(
 					player_list_datagram.data(), player_list_datagram.size());
@@ -1185,7 +1297,7 @@ bool run_early_sync_tail_latch() {
 	}
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(0x16, encode_player_list({{0, 1}, {1, 2}}))});
+			{make_protocol_message(0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
 	const np::JoinerConnection::PollResult player_list_result = joiner.handle_datagram(
 			player_list_datagram.data(), player_list_datagram.size());
 	if (!expect(player_list_result.outbound.size() == 1 &&
@@ -1319,16 +1431,21 @@ bool run_client_reducer_preserves_packet_message_order() {
 	// 0x44 sub-header [u16 shooter][i16 netId][u8 subtype] — the 5-byte
 	// minimum the decoder accepts (§5.36).
 	const std::vector<uint8_t> entity_routed{0x02, 0x00, 0x05, 0x00, 0x01};
+	const std::vector<uint8_t> spawn_wave{
+			1, 0x01, 0x20, 0x03, 0x00, 1, 0x0A, 0x00, 0x01, 0x00};
+	const std::vector<uint8_t> score_feedback{5, 0, 0, 0};
 	SessionSequencing server_tx{1, 0};
 	const std::vector<uint8_t> datagram = frame_server_session(
 			server_tx, server_scrk, 1u, {
 					make_protocol_message(0x49, encode_weapon_reload(reload)),
 					make_protocol_message(0x0A, encode_frame_update(frame)),
-					make_protocol_message(0x16, encode_player_list({{3, 1}})),
+					make_protocol_message(0x16, encode_test_player_list({{3, 1}})),
 					make_protocol_message(
 							0x46, encode_player_sync(sync_rep, kPlayerSyncHasName)),
 					make_protocol_message(0x1E, game_event),
 					make_protocol_message(0x44, entity_routed),
+					make_protocol_message(0x6E, spawn_wave),
+					make_protocol_message(0x81, score_feedback),
 					make_protocol_message(0x40, {0}),
 					make_protocol_message(0x6B, {0}),
 			});
@@ -1336,8 +1453,8 @@ bool run_client_reducer_preserves_packet_message_order() {
 		return false;
 	const np::JoinerConnection::PollResult poll =
 			joiner.handle_datagram(datagram.data(), datagram.size());
-	const std::array<uint8_t, 8> expected{
-			{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x44, 0x40, 0x6B}};
+	const std::array<uint8_t, 10> expected{
+			{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x44, 0x6E, 0x81, 0x40, 0x6B}};
 	if (!expect(poll.inbound_reducer.size() == expected.size(),
 			"every validated reducer message enters the canonical stream"))
 		return false;
@@ -1347,7 +1464,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			return false;
 	}
 	return expect(poll.inbound_0a.size() == 1 &&
-				poll.inbound_gameplay.size() == 7,
+				poll.inbound_gameplay.size() == 9,
 			"legacy family vectors remain diagnostic views of the same packet");
 }
 
@@ -2570,6 +2687,194 @@ bool run_zone_timer_channels_share_one_retail_entry() {
 	                      !finished.entry.window_active &&
 	                      finished.has_value && finished.has_window,
 	              "zone channels: exact window completion condition deactivates DWORD 7");
+}
+
+bool run_zone_presence_updates_only_a_tracked_window() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	constexpr uint16_t kZone = 0x1003;
+
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW,
+			zone_timer_window_body(kZone, 0, 1, 0, 15, 1));
+	host_view.Client_ProcessNetworkFrame();
+	host_loop.host_send(
+			s2c::ZONE_PRESENCE_COUNT, zone_presence_body(kZone, 3));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.zone_states().at(kZone).has_presence &&
+	                    host_view.zone_states().at(kZone).presence_count == 3,
+	            "zone presence: 0x6C replaces the tracked active-window count"))
+		return false;
+
+	// The retail handler only changes dword_A85BA0 when the handle resolves to
+	// its currently tracked timed-capture entity. Unknown and malformed rows do
+	// not create timer entries. [orig: NapiNPClientMsg_0x06C @0x428FC0]
+	host_loop.host_send(
+			s2c::ZONE_PRESENCE_COUNT, zone_presence_body(0x1004, 9));
+	host_loop.host_send(s2c::ZONE_PRESENCE_COUNT, {0x03, 0x10});
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.zone_states().size() == 1 &&
+	                    host_view.zone_states().at(kZone).presence_count == 3,
+	            "zone presence: untracked/short 0x6C rows fail closed"))
+		return false;
+
+	// The tracked-window cluster image [orig: dword_A85B88..A85BA0]: the 0x53
+	// seeded progress = target = 62*start, limit = 62*end, rate = byte; the
+	// 0x6C on the tracked entity re-rated it to 3; the per-frame pump adds the
+	// rate and clamps progress <= target for a positive rate — so the count
+	// never moves it (the inert positive-rate clamp) — and the untracked 0x6C
+	// left the rate alone.
+	const np::ClientRuntime::TrackedCaptureWindow &w = host_view.tracked_capture_window();
+	if (!expect(w.tracked() && w.zone == kZone && w.rate == 3 && w.target == 0 &&
+	                    w.limit == 62 * 15 && w.progress == 0 && w.mode_a == 0 && w.mode_b == 1,
+	            "tracked window: the 0x53 seed + the 0x6C re-rate + the inert clamp"))
+		return false;
+	for (int i = 0; i < 10; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(w.progress == 0, "tracked window: a positive rate never passes the target"))
+		return false;
+	// A changed modeB on the same entity re-seeds progress at the new start;
+	// a start at or past the end then drops the cluster (rate 0, no entity)
+	// but the parked progress survives [orig: @0x428d09 / @0x428d40..0x428d60].
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kZone, 0, 2, 7, 7, 4));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(!w.tracked() && w.rate == 0 && w.limit == 0 && w.progress == 62 * 7,
+	            "tracked window: start >= end zeroes the cluster, progress survives"))
+		return false;
+	// With nothing tracked the next window is adopted WITHOUT a progress
+	// re-seed (the `!dword_A85B88` arm jumps past LABEL_35), and the same
+	// frame's pump clamps the stale 434 down to the new target under the
+	// positive rate [orig: @0x428c5b -> LABEL_36; the clamp @0x42c32f].
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kZone, 0, 2, 5, 6, 1));
+	host_view.Client_ProcessNetworkFrame();
+	return expect(w.tracked() && w.target == 310 && w.limit == 372 && w.progress == 310 &&
+	                      w.rate == 1,
+	              "tracked window: an adoption from nothing keeps the stale progress and the pump clamps it to the target");
+}
+
+// The client-side 1 Hz revive countdown: every 63rd client frame each active
+// roster slot with an entity and a nonzero window loses one second; the
+// medic-request latch survives [orig: Client_ProcessNetworkFrame
+// @0x42C27E..0x42C2DA -> PlayerSlot_SetDownedState @0x4348D0]. Both the
+// S2C 0x54 seed and the 0x46 bit-0x0008 seed feed the same slot bytes.
+bool run_roster_revive_countdown_ticks_once_per_63_frames() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+
+	PlayerReplicationState rep;
+	rep.player_slot = 3;
+	rep.player_name = "Downed";
+	rep.entity_handle = 0x0007;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasName));
+	PlayerDownedState downed;
+	downed.entity_handle = 0x0007;
+	downed.revive_seconds = 120;
+	downed.medic_request_active = true;
+	host_loop.host_send(s2c::PLAYER_DOWNED_STATE, encode_player_downed_state(downed));
+	host_view.Client_ProcessNetworkFrame();
+	const ns::ClientRosterSlot &slot = host_view.state().roster[3];
+	if (!expect(slot.bound && slot.entity_slot == 7 &&
+	                    slot.downed_revive_seconds == 120 && slot.medic_request_active,
+	            "revive countdown: the 0x54 seed lands on the slot the 0x46 bound"))
+		return false;
+	// Frames 2..62 leave the window alone; frame 63 is the first decrement.
+	for (int i = 0; i < 61; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 120,
+	            "revive countdown: 62 frames do not tick the window"))
+		return false;
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 119 && slot.medic_request_active,
+	            "revive countdown: the 63rd frame takes one second and keeps the request latch"))
+		return false;
+	for (int i = 0; i < 63; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 118,
+	            "revive countdown: the timer resets and fires again 63 frames later"))
+		return false;
+
+	// The 0x46 bit-0x0008 path seeds the same byte and counts down the same
+	// way [orig: NapiNPClientMsg_PlayerSync 0x0008 -> PlayerSlot_SetDownedState].
+	rep.downed_state = 0x05;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasDownedState));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 5 && !slot.medic_request_active,
+	            "revive countdown: the 0x46 bit-0x0008 field re-seeds the window"))
+		return false;
+	for (int i = 0; i < 62; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(slot.downed_revive_seconds == 4,
+	            "revive countdown: the 0x46 seed counts down on the same cadence"))
+		return false;
+	// A window at zero stays at zero (the > 0 gate @0x42C2B7).
+	rep.downed_state = 0x00;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasDownedState));
+	for (int i = 0; i < 130; ++i) host_view.Client_ProcessNetworkFrame();
+	return expect(slot.downed_revive_seconds == 0,
+	              "revive countdown: an exhausted window never wraps");
+}
+
+// The dead player's medic call: a deployed joiner queues one reliable C2S
+// 0x2E carrying its packed entity index; a HostClient view never sends
+// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b].
+bool run_medic_request_queues_one_reliable_0x2e() {
+	const std::string client_scrk = "CLIENT-MEDIC-SCRK";
+	const std::string server_scrk = "SERVER-MEDIC-SCRK";
+	np::ClientRuntime client("MedicJoiner", [] { return uint64_t{0x10203040}; });
+	if (!expect(!client.queue_medic_request(),
+	            "medic request: an unconnected joiner cannot queue"))
+		return false;
+	client.seed_session(
+			0x55667799u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0007, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_medic_request(),
+	            "medic request: a deployed joiner queues the call"))
+		return false;
+	const std::vector<std::vector<uint8_t>> frame =
+			client.Client_ProcessNetworkFrame(1);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(frame.size() == 1 &&
+			decode_client_session(frame[0], client_scrk, header, messages) &&
+			messages.size() == 2 && messages[0].tag == c2s::MEDIC_REQUEST &&
+			messages[0].payload == std::vector<uint8_t>({0x07, 0x00, 0x00, 0x00}),
+			"medic request: exact 4-B packed entity index on C2S 0x2E"))
+		return false;
+	if (!expect(client.retained_outbound_depth() == 1,
+	            "medic request: the call is reliable"))
+		return false;
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	return expect(!host_view.queue_medic_request(),
+	              "medic request: the host's own view never uplinks");
+}
+
+// The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
+// ladder reads [orig: parse_server_session_variables @0x520440 -> @0x520478].
+bool run_session_vars_exp_fanfare_walk() {
+	auto kv = [](std::vector<uint8_t> &out, const char *key, std::vector<uint8_t> value) {
+		for (const char *p = key; *p; ++p) out.push_back(uint8_t(*p));
+		out.push_back(0);
+		const uint32_t n = uint32_t(value.size());
+		out.push_back(uint8_t(n)); out.push_back(uint8_t(n >> 8));
+		out.push_back(uint8_t(n >> 16)); out.push_back(uint8_t(n >> 24));
+		out.insert(out.end(), value.begin(), value.end());
+	};
+	std::vector<uint8_t> body;
+	kv(body, "SERVERNAME", {'b', 'i', 'g', 'g', 'y', 0});
+	kv(body, "GAMETYPE", {0x20, 0x00, 0x03, 0x00});
+	kv(body, "EXP_FANFARE", {5, 20});
+	kv(body, "MISSIONFILENAME", {'x', 0});
+	if (!expect(np::session_vars_exp_fanfare(body.data(), body.size()) == 0x1405,
+	            "exp_fanfare: lo byte 5 / hi byte 20 land as the u16"))
+		return false;
+	std::vector<uint8_t> absent;
+	kv(absent, "SERVERNAME", {'b', 0});
+	if (!expect(np::session_vars_exp_fanfare(absent.data(), absent.size()) == 0,
+	            "exp_fanfare: an absent key reads 0"))
+		return false;
+	std::vector<uint8_t> truncated(body.begin(), body.begin() + 20);
+	return expect(np::session_vars_exp_fanfare(truncated.data(), truncated.size()) == 0,
+	              "exp_fanfare: a truncated stream fails closed");
 }
 
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
@@ -4767,6 +5072,10 @@ int main() {
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
+	                run_zone_presence_updates_only_a_tracked_window() &&
+	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
+	                run_medic_request_queues_one_reliable_0x2e() &&
+	                run_session_vars_exp_fanfare_walk() &&
 	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
 	                run_joiner_zone_timer_preserves_mixed_wire_order() &&
 	                run_host_as_client() &&
@@ -4790,6 +5099,7 @@ int main() {
 	                run_start_resets_reusable_runtime_state() &&
 	                run_joiner_correlates_handshake_echoes() &&
 	                run_tick_seed_anchors_the_client_clock() &&
+	                run_end_round_header_pulls_complete_board() &&
 	                run_class_allow_mask_follows_retail_host() &&
 	                run_team_latch_is_falsifiable() &&
 	                run_player_sync_ack_walks_inclusive_roster_capacity() &&

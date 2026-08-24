@@ -18,6 +18,9 @@ var mounted := false
 #  Render_ProcessMainSceneFrame @0x5ca1d2].
 var third_person := false
 var third_person_selected := true
+# The resolved mode word: 0 first person, 1 the chase, 4 the death lerp
+# camera (mode 3, the spectator camera, is unmodelled) [orig: g_camera_mode].
+var camera_mode := 0
 var camera_mounted := false
 var vehicle_attack_context := false
 var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, over the toggle's ease steps
@@ -77,6 +80,7 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	out.mounted = bool(d.get("mounted", false))
 	out.third_person = bool(d.get("third_person", false))
 	out.third_person_selected = bool(d.get("third_person_selected", true))
+	out.camera_mode = int(d.get("camera_mode", 0))
 	out.camera_mounted = bool(d.get("camera_mounted", false))
 	out.vehicle_attack_context = bool(d.get("vehicle_attack_context", false))
 	out.scope_fraction = float(d.get("scope_fraction", 0.0))

@@ -301,7 +301,7 @@ inline int32_t round_visible_item_id(const LiveRound &round) {
 }
 
 // A death the damage pass detected this tick — drained by the host session, which owns
-// the wire (S2C 0x13 / 0x1E / 0x26 staging) and the respawn queue [orig: the death
+// the wire (S2C 0x13 / 0x52 / 0x1E / 0x54 / 0x26 staging) and respawn state [orig: the death
 // handlers run inline in the entity update; our engine/runtime/world stays transport-free].
 struct RoundDeath {
     EntityHandle victim;
@@ -309,6 +309,14 @@ struct RoundDeath {
     uint16_t victim_handle = 0xFFFF;
     uint16_t killer_handle = 0xFFFF;
     uint8_t adm_index = 0;
+    // AmmoDef identity used by GameEvent_PlayerDeath's exact special-ammo
+    // classifier. -1 means the death has no ammo source.
+    int32_t ammo_index = -1;
+    // GameEvent_PlayerDeath's entity+44 cause bits. 0x100 is the same-bullet
+    // multi-kill family, 0x400 knife, and 0x800 critical/headshot. This is event
+    // state, deliberately distinct from Entity::flags (entity+36). The revive
+    // window is suppressed by either 0x400 or 0x800.
+    uint32_t event_flags = 0;
 };
 
 // A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host

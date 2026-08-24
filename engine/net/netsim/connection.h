@@ -118,6 +118,50 @@ struct Connection {
 	// a deploy from an alive-but-undeployed player (the dead-or-pending gate @0x519cc7).
 	// Death does NOT set it — the death screen is client-local (D-NET-156).
 	bool respawn_pending = false;
+
+	// Retail's post-death player-slot counters. Both are whole seconds and are
+	// decremented by the authority's 1 Hz player maintenance. +360 rejects every
+	// C2S 0x0E deployment pick; +364 rejects only picks that resolve to a real
+	// spawn target. The phase-0 S2C 0x0A header exposes their low bytes, with
+	// +360 suppressed unless the owned entity is dead.
+	// [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb;
+	// Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2;
+	// NetPacket_WritePlayerState @0x4ff81b]
+	uint32_t respawn_delay_seconds = 0;      // playerSlot+360
+	uint32_t spawn_target_hold_seconds = 0; // playerSlot+364
+	bool respawn_hold_armed = false;
+
+	// Retail's downed/medic player-slot state. +368 is the whole-second revive
+	// window (armed to 120 for a revivable player death and decremented at 1 Hz).
+	// +372 is the inverse OPTIONS_AUTOMEDIC preference: zero on the retail wire
+	// means automatic requests are enabled. The separate request latch supplies
+	// bit seven of both S2C 0x54 and player-sync field 0x0008.
+	// [orig: GameEvent_PlayerDeath @0x516DD0; NapiNPServerMsg_AutoMedicPreference
+	// @0x501BE0; NetPacket_SerializePlayerSync0x46 @0x505E80]
+	uint32_t downed_revive_seconds = 0; // playerSlot+368
+	bool auto_medic_enabled = true;     // inverse playerSlot+372
+	// playerSlot+89856. No host producer yet: the C2S medic-request message
+	// (Server_BroadcastMedicRequest @0x515390) is unported (D-NET-108), so the
+	// 0x54 / 0x46-0x0008 bit-7 encoders only ever fold in false.
+	bool medic_request_active = false;
+
+	// Number of 32-host-tick samples for which the player's eye
+	// (Position.Z + CameraOffset.Z) has remained strictly below the authored
+	// water plane. Sample 81 (4 * the fixed retail breath value 20 + 1) kills
+	// the player; GameEvent_PlayerDeath reads the still-live value to select
+	// drowned event 26. Dry/dead samples clear it.
+	// [orig: playerSlot+460 in Server_UpdateEntityIdleTimers @0x50D770;
+	// GameEvent_PlayerDeath @0x5172EC..0x51732A]
+	uint32_t underwater_breath_samples = 0;
+
+	// The authority tick of the last completed deployment. Validity is explicit
+	// because tick zero is a real stamp and unsigned subtraction preserves the
+	// original counter's wrap behavior. A death within 620 ticks forces the
+	// +360/+364 hold to three seconds even when the configured timeout is larger.
+	// [orig: playerSlot+96456 read @0x516edc; deployment stamp in the
+	// Server_ProcessPlayerDeath path @0x517740]
+	uint32_t last_deploy_tick = 0;
+	bool last_deploy_tick_valid = false;
 };
 
 } // namespace opennova::netsim

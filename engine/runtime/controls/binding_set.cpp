@@ -1,6 +1,57 @@
 #include "controls/binding_set.h"
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace opennova::controls {
+
+std::string format_display_string(const BindingRecord &rec, bool flagged) {
+  // [orig: KeyBinding_FormatDisplayString @0x496bd0]
+  std::string out;
+  const uint16_t keys[2] = {rec.primary, rec.secondary};
+  const uint16_t mods[2] = {rec.primary_mod, rec.secondary_mod};
+  // Arm 1: a keyed slot WITH a modifier — walk both slots [orig: @0x496c0e].
+  if ((keys[0] != 0 && mods[0] != 0) || (keys[1] != 0 && mods[1] != 0)) {
+    int printed = 0;
+    for (int slot = 0; slot < 2; ++slot) {
+      if (keys[slot] == 0) {
+        ++printed;
+        continue;
+      }
+      if (printed > 0) out += " or ";
+      if (mods[slot] == 17) out += "Ctrl - ";
+      if (mods[slot] == 16) out += "Shift - ";
+      out += key_name(keys[slot]);
+      ++printed;
+    }
+  }
+  // Arm 2: a keyed slot WITHOUT a modifier resets the buffer and prints the
+  // FIRST slot's key behind either slot's modifier [orig: @0x496cc7..0x496d6d].
+  if ((keys[0] != 0 && mods[0] == 0) || (keys[1] != 0 && mods[1] == 0)) {
+    out.clear();
+    if (mods[0] == 17 || mods[1] == 17) out += "Ctrl - ";
+    if (mods[0] == 18 || mods[1] == 18) out += "Alt - ";
+    if (mods[0] == 16 || mods[1] == 16) out += "Shift - ";
+    out += key_name(keys[0]);
+  }
+  // Arm 3: the mouse slot [orig: @0x496d6f..0x496e70]. Our record keeps no
+  // mouse modifier word (retail entry word 16); the button names ride the
+  // same "Keys" fallbacks.
+  if (rec.mouse_mask != 0) {
+    if (keys[0] != 0 || keys[1] != 0) out += " or ";
+    switch (rec.mouse_mask) {
+      case 1: out += "Mouse 1"; break;
+      case 2: out += "Mouse 2"; break;
+      case 16: out += "Mouse 3"; break;
+      case 1024: out += "Mouse Whl Up"; break;
+      case 2048: out += "Mouse Whl Dn"; break;
+      default: break;
+    }
+  }
+  if (flagged) out += " *"; // entry[1] & 0x200 [orig: @0x496e73]
+  return out;
+}
 
 namespace {
 

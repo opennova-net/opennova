@@ -1,16 +1,19 @@
 #include "threedi/threedi_panm_runtime.h"
 
+#include <io/crt_rand.h>
+
 #include <string.h>
 
-static uint32_t g_rand_state = 1; // MSVC CRT default seed
+// The renderer-side owner of the CRT recurrence (the simulation's owner is
+// World::crt_rand); both spell the same MSVC formula from io/crt_rand.h.
+static opennova::io::CrtRand g_wave_rand;
 
 uint16_t threedi_wave_rand15(void) {
-    g_rand_state = g_rand_state * 214013u + 2531011u;
-    return (uint16_t)((g_rand_state >> 16) & 0x7FFFu);
+    return (uint16_t)g_wave_rand.next();
 }
 
 void threedi_wave_srand(uint32_t seed) {
-    g_rand_state = seed;
+    g_wave_rand.seed(seed);
 }
 
 // Retail uses two-operand 32-bit IMUL and keeps the low dword, then performs

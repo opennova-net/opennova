@@ -16,11 +16,14 @@
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, simassets.
-  - `net/` — the wire/protocol stack and portable mission-session control
-    (ADRs 0009–0012, 0019, 0035; Model-B-only): novacrypto, napi, npwire,
-    novaworld, netsim, npruntime. `npruntime/mission_session.*` owns lifecycle,
-    role policy, fixed-tick banking, and input consumption over a
-    `MissionTickTarget`; Godot orders its own presentation/device pipeline.
+  - `net/` — the retail wire/protocol stack and portable in-match control
+    (ADRs 0009–0012, 0019, 0036; Model-B-only): novacrypto, napi, npwire,
+    novaworld, inmatch, plus internal netsim/npruntime implementation
+    directories. `inmatch/session.*` owns lifecycle, role policy, fixed-tick
+    banking, and input consumption over an `inmatch::TickTarget`; Godot orders
+    its own presentation/device pipeline. `world::Match` owns gameplay rules,
+    scoring, clocks, winner evaluation, and the frozen result. Wire code only
+    serializes that result.
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and each GROUP directory is the one public include dir, so
@@ -63,7 +66,7 @@
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
   pcapio, refs), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
-  napi, npwire, netsim, npruntime + novaworld session/gate), and
+  napi, npwire, inmatch, netsim, npruntime + novaworld session/gate), and
   `opennova_novaworld_service` (the service alone — the ONLY target linking
   `opennova_sqlite`; the Godot layer (`godot/src`) links `opennova_net`, never the
   service).

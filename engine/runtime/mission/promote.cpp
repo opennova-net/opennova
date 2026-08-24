@@ -131,6 +131,19 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // the 0x0D record's 0x2000/0x8000-gated u16 streams (golden ASH_I5A bunkers: 70).
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0; net-re §5.11]
     s.zone_radius = static_cast<uint16_t>(e.wp_distance & 0xFFFF);
+    // Three marker definitions replace entity+0 (the ordinary model bound)
+    // with the BMS waypoint-distance radius. Type 6006 is the KOTH gameplay
+    // source consumed by the 1 Hz proximity pass; 6005/2044 use the same field
+    // for waypoint/location presentation. Preserve the authored override here
+    // so later collision-model resolution cannot substitute the marker graphic's
+    // physical bound. [orig: Entity_SpawnFromBMSRecord
+    // @0x40F05A..0x40F173/@0x40F213..0x40F227]
+    if (kind == EntityKind::Marker &&
+        (e.type_id == 6005 || e.type_id == 6006 || e.type_id == 2044)) {
+        s.bound_radius = e.wp_distance != 0
+            ? static_cast<float>(e.wp_distance)
+            : 0.5f;
+    }
     return s;
 }
 

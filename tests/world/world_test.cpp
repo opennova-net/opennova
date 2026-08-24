@@ -1,12 +1,16 @@
 // engine/runtime/world substrate tests: addressable entities (faithful find_by_net_id),
 // shared var store, entity commands, tick cadence, snapshot/restore.
 #include <cstdio>
+#include <type_traits>
 #include <utility>
 
 #include "world/sound_emitter_mailbox.h"
 #include "world/world.h"
 
 using namespace opennova::world;
+
+static_assert(!std::is_copy_constructible_v<World>);
+static_assert(!std::is_move_constructible_v<World>);
 
 static int failures = 0;
 #define CHECK(c)                                                              \
@@ -231,6 +235,11 @@ int main() {
     w.network_env.overcast_blend_q16 = 0x00004000u;
     w.network_env.precipitation_kind = 0x89ABCDEFu;
     w.network_env.generation = 9;
+    MatchRules baseline_match_rules;
+    baseline_match_rules.game_type = 0x10020u;
+    baseline_match_rules.score_limit = 7;
+    w.match.configure(baseline_match_rules);
+    w.match.upsert_player({blast_victim, 7, "Baseline"});
     World::Snapshot snap = w.snapshot();
     const EntityHandle post_snapshot = w.registry.spawn(0, blast_target);
     CHECK(post_snapshot.valid());
@@ -272,6 +281,8 @@ int main() {
     w.cached.humans = 2;
     w.wac_values.accuracy_spread = 9;
     w.network_env = EnvNetworkState{};
+    w.match.remove_player(w, blast_victim);
+    w.process_round_end(2);
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
     CHECK(w.wac_values.accuracy_spread == 3);
@@ -285,6 +296,10 @@ int main() {
     CHECK(w.network_env.overcast_blend_q16 == 0x00004000u);
     CHECK(w.network_env.precipitation_kind == 0x89ABCDEFu);
     CHECK(w.network_env.generation == 9);
+    CHECK(w.match.rules().game_type == 0x10020u);
+    CHECK(w.match.rules().score_limit == 7);
+    CHECK(w.match.player(blast_victim) != nullptr);
+    CHECK(!w.match.outcome().ended);
     CHECK(w.round_sim.active_count == 0);
     CHECK(!w.round_sim.rounds[0].active);
     CHECK(w.round_sim.deaths.empty());
@@ -309,7 +324,7 @@ int main() {
     CHECK(w.registry.get(post_restore)->registry_spawn_id >
           post_snapshot_spawn_id);
     const int32_t restored_health = w.registry.get(blast_victim)->health;
-    w.run_logic_tick(true, false);
+    w.run_logic_tick(true);
     CHECK(w.registry.get(blast_victim)->health == restored_health);
 
     // A SCRIPTED group kill has to reach the wire. Retail never fans deaths from

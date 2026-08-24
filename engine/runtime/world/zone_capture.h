@@ -1,28 +1,29 @@
-// The Advance & Secure 1 Hz capture loop — slice 2 of the §5.61 witness: the
-// per-second secure/control pass, the instant numbered-zone flips, the flip/secure
-// event stream, and zone-team enforcement. All of it models the retail
+// The authoritative capture-zone transaction. A lightweight per-logic-tick
+// contact pass feeds one persistent request/active-capture state; the 1 Hz pass
+// performs secure/control updates, instant numbered flips, timed unnumbered
+// captures, zone-team enforcement, and produces the exact wire-facing events.
+// All of it models the retail
 // `Server_TickUpdate @0x51D7E0` g_periodic_second_timer block (@0x51DF50..0x51DF8C):
 // proximity -> secure pass (0x6F + 0x1E 0x3B/0x3C) -> team enforcement -> the
 // timed-capture engine's queue drain (instant numbered flips + GameEvent_FlagCapture).
 //
 // The world side PRODUCES events; the host (npruntime Server_TickUpdate) encodes them
-// onto the wire (0x6F / 0x53 / 0x1E / 0x40). [orig: Server_UpdateCaptureZoneProximity
+// onto the wire (0x6F / 0x50 / 0x53 / 0x6C / 0x1E). [orig: Server_UpdateCaptureZoneProximity
 // @0x5086A0; Server_UpdateCaptureZoneEntities @0x519690;
 // calculate_capture_zone_control_delta @0x501120; Server_UpdateCaptureZones @0x53B8F0;
-// GameEvent_FlagCapture @0x50F6F0; Server_EnforceZoneEntityTeams @0x519600]
-//
-// Tracked deferrals (D-NET-162): the timed-capture engine's ACTIVE entries
-// (un-numbered flag zones — ASH_I5A authors numbered bunkers only; 0x6C presence
-// counts ride those entries), the spawn-wave reset on flip, per-touch capture
-// requests through the physics pass (our request source is the same 1 Hz proximity
-// sample the drain consumes), the underdog catch-up term (needs the round clock —
-// unplumbed), the def+88&2 in-radius team conversion (attrib2 untracked on entities),
-// proximity scoring / 0x81 render-state sync, and the win-condition suppression's
-// round-end handoff (we only suppress events once one team owns every zone).
+// GameEvent_FlagCapture @0x50F6F0; Server_ChangeEntityTeam @0x518D70;
+// Server_EnforceZoneEntityTeams @0x519600]
+// Contact production deliberately lives beside the host movement snapshots: a
+// remote authority Player is net-snapped and does not traverse the local physics
+// resolver, but its retail MoveOrder moving bit still gates the same overlap.
+// This preserves the original collision semantics without a second remote-only
+// objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0,
+// capture callback callsite @0x4B2F90..0x4B2FD0]
 #ifndef OPENNOVA_WORLD_ZONE_CAPTURE_H
 #define OPENNOVA_WORLD_ZONE_CAPTURE_H
 
 #include <cstdint>
+#include <variant>
 #include <vector>
 
 #include "world/entity.h"
@@ -31,6 +32,34 @@
 namespace opennova::world {
 
 class World;
+
+// World-owned retail CaptureCtx state. Requests survive until the next 1 Hz
+// drain; active entries survive until completion, cancellation, or mission reset.
+// [orig: CaptureCtx_* @0x53B340..0x53B880]
+struct ZoneCaptureState {
+    struct Request {
+        EntityHandle zone;
+        uint8_t team = 0;
+        EntityHandle capturer;
+    };
+    struct Active {
+        EntityHandle zone;
+        uint8_t team = 0;
+        int32_t progress = 0;
+        int32_t limit = 0;
+        EntityHandle capturer;
+        std::vector<EntityHandle> presence;
+        uint8_t rate = 1;
+    };
+
+    std::vector<Request> requests;
+    std::vector<Active> active;
+
+    void clear() {
+        requests.clear();
+        active.clear();
+    }
+};
 
 // One pass's outputs, drained by the host's 1 Hz wire block.
 struct ZoneCaptureEvents {
@@ -53,6 +82,18 @@ struct ZoneCaptureEvents {
         uint8_t zone_team = 0;
         bool secured = false; // true = 0x3B, false = 0x3C
     };
+    // Immutable S2C 0x50 snapshot. A capture can transition owned -> neutral ->
+    // new owner in one drain, so looking the entity up after the transaction
+    // would collapse two distinct records into the final team. The identity
+    // pair is live only for Flags & 0x100 Players and zero for every objective.
+    // [orig: Server_ChangeEntityTeam @0x518D70;
+    // write_entity_handle_packet @0x506AD0]
+    struct TeamChange {
+        EntityHandle entity;
+        uint8_t team = 0;
+        uint16_t net_id = 0;
+        uint8_t anim_slot = 0;
+    };
     // A numbered-zone INSTANT flip [orig: the queue drain @0x53B8F0 — numbered zones
     // flip immediately: team change (via neutral when previously owned), control = 0,
     // GameEvent_FlagCapture]. frontier_changed selects the 0x1E pair: 50/51 when the
@@ -60,40 +101,98 @@ struct ZoneCaptureEvents {
     // banner keyed on the new owning team follows either way [orig: @0x50F6F0].
     struct Flip {
         EntityHandle zone;
+        // Exact Player whose eligible touch queued the capture. Stable pool
+        // order breaks ties between Players on the same uncontested team.
+        // [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 passes the Player to
+        // Server_UpdateCaptureZones @0x53B8F0 / GameEvent_FlagCapture @0x50F6F0]
+        EntityHandle capturer;
+        // Every living teammate in the numbered zone when it flips receives
+        // scorer event 24; this can include more Players than `capturer`.
+        // [orig: CaptureZone_CheckProximityScoring @0x500C50, call @0x53BC94]
+        std::vector<EntityHandle> scorers;
         uint8_t old_team = 0;
-        uint8_t new_team = 0;       // 0 = neutralized (was enemy-owned)
+        uint8_t new_team = 0;
         uint8_t capturer_team = 0;  // the team whose presence drove the flip
         bool frontier_changed = false;
         uint8_t capturer_frontier = 0; // FindFrontierZone AFTER the flip
         uint8_t loser_frontier = 0;
         bool suppressed = false; // match decided (one team owns every zone)
+        bool announce = false;   // ItemDefAttrib 0x40000 event gate
     };
-    std::vector<Control> control;
-    std::vector<Secure> secure_edges;
-    std::vector<Flip> flips;
+    // Exact S2C 0x53 body for a timed unnumbered capture. Retail emits one at
+    // start/restart and after every active 1 Hz advance, including completion.
+    // [orig: NetPacket_WriteZoneTimerWindow @0x506D00;
+    // Server_UpdateCaptureZones @0x53B8F0]
+    struct TimerWindow {
+        EntityHandle zone;
+        uint8_t current_team = 0;
+        uint8_t capturing_team = 0;
+        uint16_t progress = 0;
+        uint16_t limit = 0;
+        uint8_t rate = 1;
+    };
+    // Exact S2C 0x6C body. The original compares the raw unique-presence count
+    // with the stored rate, then clamps the advertised value to [1,32].
+    // [orig: CaptureCtx_UpdateActiveCaptureRate @0x53B600;
+    // NetPacket_WriteZonePresenceCount @0x506DE0]
+    struct Presence {
+        EntityHandle zone;
+        uint8_t count = 1;
+    };
+    // Timed-capture start/restart produces 0x1E event 41/42; completion produces
+    // 43/44. `capturer` is the pool-0 index source and remains the score actor.
+    // [orig: Server_SendWeaponFireEvent @0x50F630;
+    // GameEvent_FlagCapture @0x50F6F0]
+    struct TimedStart {
+        EntityHandle zone;
+        EntityHandle capturer;
+        uint8_t team = 0;
+    };
+    struct TimedCompletion {
+        EntityHandle zone;
+        EntityHandle capturer;
+        uint8_t new_team = 0;
+        bool announce = false; // ItemDefAttrib 0x40000 event gate
+    };
+    // A single sequence is load-bearing wire state. Retail sends directly from
+    // each mutation callsite; parallel per-kind buckets lose neutral/new pairs
+    // and reorder 0x50 relative to 0x53/0x1E.
+    using Event = std::variant<Control, Secure, TeamChange, Flip, TimerWindow,
+                               Presence, TimedStart, TimedCompletion>;
+    std::vector<Event> ordered;
 
     void clear() {
-        control.clear();
-        secure_edges.clear();
-        flips.clear();
+        ordered.clear();
     }
 };
 
-// The control-delta formula [orig: calculate_capture_zone_control_delta @0x501120]:
-// presence = friendlies - frontier-eligible enemies (in radius); teamSize = the
-// capturing side's playing count + (6 - total)/2 when total < 6, soft-capped
-// x -> cap + (x - cap)/2 at 20/40/60; speed = teamSize * base (capture-speed setting
-// 1 -> 24, 2 -> 48, else 12), divided by the zone-number share count; delta =
-// 65536 * presence / speed, minimum magnitude 1. The underdog catch-up term is
-// deferred (needs the round clock; D-NET-162). Exposed for the test pins.
-int32_t zone_capture_control_delta(int presence, int capturing_side_players,
-                                   int total_players, int speed_setting, int shared_n);
+struct ZoneCaptureDeltaInput {
+    int presence = 0;
+    int capturing_side_players = 0;
+    int total_players = 0;
+    int speed_setting = -1;
+    int shared_zone_entities = 1;
+    int capturing_side_zones = 0;
+    int opposing_side_zones = 0;
+    int numbered_spawn_zones = 0;
+    int32_t remaining_ticks = -1;
+    uint32_t game_time_minutes = 0;
+};
 
-// One 1 Hz capture pass over the chain. Reads/writes Entity::zone_control and zone
-// teams, rebuilds the chain masks on flips, enforces zone-numbered entity teams, and
-// fills `out`. No-op on an empty chain.
-void zone_capture_tick(World &world, ZoneChain &chain, ZoneCaptureEvents &out,
-                       int capture_speed_setting = -1);
+// The complete control-delta formula [orig:
+// calculate_capture_zone_control_delta @0x501120]: presence, player-count
+// shaping, the late-round ownership-leader acceleration, shared-zone division,
+// and minimum signed delta. Exposed as one input value for exact formula pins.
+int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input);
+
+// Per-logic-tick consumer of the collision world's exact type-10 Change Team
+// contacts. It updates active presence and queues one request per zone/team;
+// it performs no ownership transition itself.
+void zone_capture_contact_tick(World &world);
+
+// One 1 Hz capture transaction. Reads its configuration and persistent state
+// from World, emits all semantic wire events, and drains pending requests.
+void zone_capture_second_tick(World &world, ZoneCaptureEvents &out);
 
 } // namespace opennova::world
 

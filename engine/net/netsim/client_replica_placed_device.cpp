@@ -41,6 +41,10 @@ void ClientReplicaPipeline::apply_deployed_item(
 	uint16_t selected_type = spawn.item_id;
 	const ClientEntityState *owner = state_.find(spawn.owner_handle);
 	const ClientEntityState *viewer = state_.find(viewer_handle_);
+	const bool owner_team_known = owner != nullptr && owner->team_known;
+	const uint8_t owner_team = owner_team_known ? owner->team : uint8_t{0xFF};
+	const bool viewer_team_known = viewer != nullptr && viewer->team_known;
+	const uint8_t viewer_team = viewer_team_known ? viewer->team : uint8_t{0xFF};
 	ClientEntityState *existing = state_.find(spawn.slot_handle);
 	// The team-variant pick runs only on the FRESH-SPAWN leg (retail's
 	// found/update path never touches the item id) and only when BOTH
@@ -52,11 +56,10 @@ void ClientReplicaPipeline::apply_deployed_item(
 	//  update @0x546828..0x54697a leaves the type alone]
 	if (existing != nullptr) {
 		selected_type = existing->type_id;
-	} else if (owner != nullptr && viewer != nullptr &&
-			owner->team_known && viewer->team_known &&
+	} else if (owner_team_known && viewer_team_known &&
 			spawn.friendly_item_id != 0 && spawn.enemy_item_id != 0) {
 		const bool enemy = (mp_attributes_ & 0x8000u) != 0 ||
-				owner->team != viewer->team;
+				owner_team != viewer_team;
 		selected_type = enemy ? spawn.enemy_item_id
 				      : spawn.friendly_item_id;
 	}
@@ -116,8 +119,8 @@ void ClientReplicaPipeline::apply_deployed_item(
 	row.parent_handle = wire_handle::kInvalid;
 	row.target_handle = spawn.parent_handle;
 	row.parent_pose_valid = false;
-	if (owner != nullptr && owner->team_known) {
-		row.team = owner->team;
+	if (owner_team_known) {
+		row.team = owner_team;
 		row.team_known = true;
 	} else {
 		row.team = 0xFF;
@@ -148,6 +151,43 @@ void ClientReplicaPipeline::apply_entity_remove(
 		++state_.world_stream_revision;
 		state_.mark_changed();
 	}
+}
+
+// S2C 0x2F: retail accepts this state writer only for the three flag item ids,
+// replaces the entity's low flags byte and position, then applies the two
+// relationships as occupantEntity and groundEntity. Attachment itself is
+// projected by the native materializer; the canonical replica keeps the raw
+// packed handles so render-only embedders see the same state.
+// [orig: NapiNPClientMsg_0x02F @0x430E10]
+void ClientReplicaPipeline::apply_objective_entity_state(
+		const std::vector<uint8_t> &body) {
+	ObjectiveEntityState state;
+	size_t consumed = 0;
+	if (!decode_objective_entity_state(
+			body.data(), body.size(), state, consumed) ||
+			consumed != body.size()) {
+		++malformed_bodies_;
+		return;
+	}
+	ClientEntityState *row = state_.find(state.entity_handle);
+	if (row == nullptr || (row->type_id != 4091 && row->type_id != 4093 &&
+			row->type_id != 4095))
+		return;
+
+	row->x = state.pos_x;
+	row->y = state.pos_y;
+	row->z = state.pos_z;
+	row->state_flags = state.flags_byte;
+	row->state_flags_known = true;
+	row->spawn_entity_flags =
+			(row->spawn_entity_flags & 0xFFFFFF00u) | state.flags_byte;
+	row->rm_entity_flags =
+			(row->rm_entity_flags & 0xFFFFFF00u) | state.flags_byte;
+	row->parent_handle = state.attach_handle;
+	row->target_handle = state.ground_handle;
+	row->parent_pose_valid = false;
+	++state_.world_stream_revision;
+	state_.mark_topology_changed();
 }
 
 } // namespace opennova::netsim

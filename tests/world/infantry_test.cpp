@@ -76,7 +76,7 @@ struct Field {
     }
 };
 
-CollisionModel hurt_box_model() {
+CollisionModel hurt_box_model(int32_t volume_type = 18) {
     CollisionModel model;
     auto plane = [&](int nx, int ny, int nz, double distance) {
         CollisionPlane p;
@@ -94,7 +94,7 @@ CollisionModel hurt_box_model() {
     plane(0, 0, -16384, 0.0);
 
     CollisionVolume hurt;
-    hurt.type = 18;
+    hurt.type = volume_type;
     hurt.min_x = fx(-3.0);
     hurt.max_x = fx(3.0);
     hurt.min_y = fx(-3.0);
@@ -293,6 +293,7 @@ void test_hurt_volume_updates_registry_health() {
     infantry.position = {10.0f, 10.0f, 0.5f};
     infantry.health = 1;
     infantry.health_max = 1;
+    infantry.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle infantry_handle = world.registry.spawn(0, infantry);
 
     CollisionWorld collision;
@@ -326,6 +327,61 @@ void test_hurt_volume_updates_registry_health() {
     CHECK(observed != nullptr);
     CHECK(observed->health == 0);
     CHECK(!observed->alive);
+}
+
+void test_remote_player_body_publishes_exact_change_team_contact() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+
+    Entity trigger;
+    trigger.kind = EntityKind::Item;
+    trigger.position = {10.0f, 10.0f, 0.0f};
+    trigger.yaw = 90;
+    trigger.is_capture_trigger = true;
+    trigger.alive = true;
+    const EntityHandle trigger_handle = world.registry.spawn(1, trigger);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.position = {10.0f, 10.0f, 0.5f};
+    player.player_class = 5;
+    player.health = 100;
+    player.alive = true;
+    player.flags |= kEntityFlagPlayer; // the retail player classifier
+    const EntityHandle player_handle = world.registry.spawn(0, player);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(
+            hurt_box_model(bvol_type::kChangeTeamCT));
+    collision.assign_entity(trigger_handle, model_id);
+    world.collision = &collision;
+
+    AiSystem ai;
+    ai.collision = &collision;
+    TestSource source;
+    source.clips = {anim_state::kIdle};
+    ai.root_motion = &source;
+    AiEntity *body = ai.at(ai.attach(player_handle));
+    body->inf.active = true;
+    body->net_is_remote_peer = true;
+    body->health = 100;
+    body->pos[0] = fx(10.0);
+    body->pos[1] = fx(10.0);
+    body->pos[2] = fx(0.5);
+
+    // The seventeenth pool build publishes the source's candidate slice; tick
+    // 22 is the next full resolve after the retail 11-on/10-off idle throttle.
+    // The stationary wire peer reaches the ordinary authority collision tail;
+    // no MoveOrder bit is required. [orig: org2 call @0x4B7CF4; CT callback
+    // @0x4B31DD..0x4B3238]
+    run_ticks(ai, world, 0, 23);
+    const auto contacts = collision.take_change_team_contacts();
+    CHECK(contacts.size() == 1);
+    if (!contacts.empty()) {
+        CHECK(contacts[0].source == player_handle);
+        CHECK(contacts[0].target == trigger_handle);
+    }
 }
 
 // ---- D-COL-5: the climb motor over a CL slab --------------------------------
@@ -431,6 +487,10 @@ struct ClimbRig {
         body.position = {10.6f, 10.0f, 0.0f};
         body.health = 100;
         body.alive = true;
+        // The player rig carries the retail player classifier; the org1 rig is
+        // an NPC (the resolver keys its player legs on this bit, not on
+        // local ownership).
+        if (local_player) body.flags |= kEntityFlagPlayer;
         player_h = world.registry.spawn(0, body);
 
         collision.terrain = &flat.field;
@@ -760,6 +820,7 @@ void test_remote_player_body_anim() {
     seed.kind = EntityKind::Organic;
     seed.item_id = 0x14B9;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -862,6 +923,7 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -897,6 +959,7 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -942,6 +1005,7 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -996,6 +1060,7 @@ void test_remote_player_jump_hold_release_cooldown_matches_retail() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1039,6 +1104,7 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     Entity seed;
     seed.kind = EntityKind::Organic;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1093,6 +1159,7 @@ void test_local_player_uplink_carries_the_jump_bit() {
     seed.kind = EntityKind::Organic;
     seed.item_id = 0x14B9;
     seed.health = 100;
+    seed.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle h = w.registry.spawn(0, seed);
     Entity *ent = w.registry.get(h);
     CHECK(ent != nullptr);
@@ -1337,6 +1404,7 @@ void test_player_idle_skip_throttle_no_bounce() {
     player.position = {10.0f, 10.0f, 0.05f};
     player.health = 100;
     player.health_max = 100;
+    player.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle ph = world.registry.spawn(0, player);
 
     CollisionWorld collision;
@@ -1398,6 +1466,7 @@ void test_local_player_swims_on_the_plane() {
     player.position = {10.0f, 10.0f, 0.05f};
     player.health = 100;
     player.health_max = 100;
+    player.flags |= kEntityFlagPlayer; // the retail player classifier
     const EntityHandle ph = world.registry.spawn(0, player);
 
     CollisionWorld collision;
@@ -1503,10 +1572,14 @@ void test_local_player_swims_on_the_plane() {
     run_ticks(ai, world, 146, 150);
     CHECK(e->inf.anim_state == anim_state::kSwimIdle);
 
-    // Leaving the water: drop the plane under the bed -> the first tick at or
-    // above the plane clears the float + dive bits; the body falls to the bed
-    // (selection is skipped while airborne) and the land idle resumes on landing.
+    // Leaving the water: drop the plane under the bed (and stage the body just
+    // above the floor -- a >2u free fall outruns the witnessed 2u ground probe
+    // in this bare rig, the same trap the idle-throttle test documents) -> the
+    // first tick at or above the plane clears the float + dive bits, the short
+    // fall lands, and the land idle resumes.
     world.env.water_z = fx(-5.0);
+    e->pos[2] = fx(0.5);
+    ent->position.z = 0.5f;
     run_ticks(ai, world, 150, 151);
     CHECK((ent->flags & (kEntityFlagDrowning | 0x200000u)) == 0);
     run_ticks(ai, world, 151, 500);
@@ -2661,6 +2734,7 @@ void test_eye_offset_restamp() {
     w.registry.configure_pool(0, 4);
     Entity ent;
     ent.kind = EntityKind::Organic;
+    ent.flags |= kEntityFlagPlayer; // the retail player classifier
     w.registry.spawn(0, ent);
 
     run_ticks(ai, w, 0, 2);
@@ -3911,6 +3985,7 @@ int main() {
     test_local_player_uplink_carries_the_jump_bit();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
+    test_remote_player_body_publishes_exact_change_team_contact();
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();

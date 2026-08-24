@@ -4,6 +4,8 @@
 
 #include "npruntime/server_spawn.h" // Server_InitNewRoundState (§5.2a step 1)
 
+#include <world/world.h> // World::crt_rand — the session-seeded CRT stream
+
 namespace opennova::np {
 
 // [orig: CGameSession_SetConnectionMode @0x4c49f0] — stores the mode and decomposes it into the
@@ -46,6 +48,21 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	// [orig: Game_StartMission @0x526108 -> Nbstat_StartupInit @0x4FDE30;
 	// timer store @0x4FDE41]
 	ctx.scoreboard_broadcast_timer = 0;
+	ctx.round_end_announced = false;
+	ctx.round_end_linger_ticks = 0;
+	ctx.round_end_board_stream.clear();
+	// Retail seeds the process CRT stream from the clock once when the host
+	// allocates its player-slot table and immediately spends one draw on the
+	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned
+	// stream takes the session seed instead (a reproducible session, D-NET-115)
+	// and spends that same first draw so every later consumer sees retail's
+	// draw index. A context without a world keeps the CRT default state.
+	// [orig: Server_AllocatePlayerSlotTable @0x51C1A4..0x51C1BC — srand
+	// @0x51C1AA, rand @0x51C1AF]
+	if (ctx.world != nullptr) {
+		ctx.world->crt_rand.seed(startup.session_seed_id);
+		(void)ctx.world->crt_rand.next();
+	}
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.

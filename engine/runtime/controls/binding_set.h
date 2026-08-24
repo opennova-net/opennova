@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "controls/controls.h"
+#include <cstddef>
 
 namespace opennova::controls {
 
@@ -42,6 +43,22 @@ inline constexpr uint16_t kMouseWheelDown = 0x800;
 //  the capture's modifier write @ 0x55bb51; Input_QueueKeyEvent @ 0x760c10
 //  flag word — 0x800 Ctrl held, 0x200 Shift held, 0x100 extended,
 //  0x80 auto-repeat].
+// The in-game binding display formatter the death screen's "call a medic"
+// hint uses [orig: KeyBinding_FormatDisplayString @0x496bd0, called for the
+// MedicReq row's record @0x553f0b]. Distinct from the Options table's
+// KeyBinding_FormatBindingString (format_binding in controls.h): this one has
+// three arms in the witnessed order — (1) a slot with BOTH a key and a
+// modifier walks the two slots joining with " or " and prefixing "Ctrl - " /
+// "Shift - " per slot; (2) a slot with a key and NO modifier RESETS the
+// buffer and prints the first slot's key behind whichever modifier either
+// slot carries (Ctrl / Alt / Shift); (3) a mouse button appends "<mod>-" for
+// the mouse modifier, " or " when a keyboard slot exists, then "Mouse 1/2/3"
+// or "Mouse Whl Up/Dn"; finally " *" when the record's flag word carries
+// 0x200. The localized "Keys" table falls back to the marker-stripped names
+// key_name() already produces.
+struct BindingRecord;
+std::string format_display_string(const BindingRecord &rec, bool flagged = false);
+
 struct BindingRecord {
   uint16_t primary = 0;        // slot-1 VK scan (0 = unbound)
   uint16_t secondary = 0;      // slot-2 VK scan

@@ -68,6 +68,16 @@ int main() {
 	CHECK(game_rules::kDefaultTimeLimitMinutes == 10, "time-limit default");
 	CHECK(game_rules::kDefaultMaxTeamLives == 100, "team-lives default");
 	CHECK(game_rules::kDefaultScoreLimit == 50, "score default");
+	CHECK(game_rules::kDefaultMaxScore == 5, "flag-score default");
+	CHECK(game_rules::kDefaultKothDelta == 5, "KOTH decay default");
+	CHECK(game_rules::kDefaultFlagReturnTicks == 210, "flag-return default");
+	CHECK(game_rules::kDefaultCaptureDurationSeconds == 15,
+			"capture-duration default");
+	CHECK(game_rules::kDefaultCaptureSpeedSetting == 1,
+			"capture-speed default");
+	CHECK(game_rules::kDefaultSpawnRequiresNoTeamZone == 0,
+			"default-spawn restriction starts disabled");
+	CHECK(game_rules::kDefaultNumTeams == 2, "team-count default");
 	CHECK(game_rules::kMaxCallsignLength == 15, "callsign cap = Name[16]");
 	CHECK(np::kMaxPlayersCap == 65, "player cap [orig: the 1..65 clamp]");
 
@@ -98,6 +108,7 @@ int main() {
 			"objective co-op lists");
 	CHECK(game_type::host_filter_category(game_type::kObjectiveCoop) == 2 &&
 					game_type::host_filter_category(game_type::kAdvanceAndSecure) == 9 &&
+					game_type::host_filter_category(game_type::kFlagMe) == 12 &&
 					game_type::host_filter_category(game_type::kDeathmatch) == 11,
 			"the filter categories match the witnessed switch");
 	CHECK(std::string(game_type::host_abbreviation_key(
@@ -105,7 +116,11 @@ int main() {
 					std::string(game_type::host_abbreviation_key(
 							game_type::kSearchAndDestroy)) == "SD" &&
 					std::string(game_type::host_abbreviation_key(
-							game_type::kConquerAndControl)) == "CAC",
+							game_type::kConquerAndControl)) == "CAC" &&
+					std::string(game_type::host_abbreviation_key(
+							game_type::kFlagMe)) == "FM" &&
+					std::string(game_type::overlay_label_key(
+							game_type::kFlagMe)) == "STROVER29",
 			"the GateTypeAbbrev keys match the witnessed table");
 	CHECK(game_type::host_rotation_default(game_type::kCaptureTheFlag) &&
 					!game_type::host_rotation_default(game_type::kObjectiveCoop) &&

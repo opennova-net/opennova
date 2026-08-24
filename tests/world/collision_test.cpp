@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "terrain_query/height_field.h"
+#include "io/bam.h"
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/world.h"
@@ -543,6 +544,66 @@ void test_resolver_wall_pushout() {
 }
 
 // ---------------------------------------------------------------------------
+void test_resolver_move_callback_contact_replaces_solid_push() {
+    auto resolve_transition = [](Rig &rig, bool authority) {
+        Entity *soldier = rig.world.registry.get(rig.soldier);
+        rig.move_soldier(12.8, 10.0, 0.0);
+        int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
+                              0, fx(1.8), 0, 0, true, authority, 0, 43, 1u,
+                              health);
+        soldier->position.x = 11.6f;
+        rig.rebuild();
+        pos[0] = fx(11.6);
+        const int32_t before = pos[0];
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
+                              0, fx(1.8), 0, 0, true, authority, 1, 43, 1u,
+                              health);
+        return std::pair<int32_t, int32_t>{before, pos[0]};
+    };
+
+    // A successful first-pass collision against MoveCB invokes the waypoint
+    // callback instead of folding the model force. The authority publishes the
+    // exact source/target pair once even if the resolver is repeated.
+    // [orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5]
+    Rig callback(box_model(1, 0, 2.0, 2.0, 3.0));
+    Entity *target = callback.world.registry.get(callback.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribMoveCallback;
+    const auto callback_pos = resolve_transition(callback, true);
+    CHECK(callback_pos.second == callback_pos.first);
+    const auto callback_contacts =
+        callback.cw.take_movement_callback_contacts();
+    CHECK(callback_contacts.size() == 1);
+    if (!callback_contacts.empty()) {
+        CHECK(callback_contacts[0].source == callback.soldier);
+        CHECK(callback_contacts[0].target == callback.building);
+    }
+
+    // Powerup wins the retail attrib branch and suppresses both waypoint
+    // dispatch and solid force. A non-authority resolve likewise cannot author
+    // a gameplay contact.
+    Rig powerup(box_model(1, 0, 2.0, 2.0, 3.0));
+    target = powerup.world.registry.get(powerup.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribMoveCallback | kItemAttribPowerup;
+    const auto powerup_pos = resolve_transition(powerup, true);
+    CHECK(powerup_pos.second == powerup_pos.first);
+    CHECK(powerup.cw.take_movement_callback_contacts().empty());
+
+    Rig replica(box_model(1, 0, 2.0, 2.0, 3.0));
+    target = replica.world.registry.get(replica.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribMoveCallback;
+    const auto replica_pos = resolve_transition(replica, false);
+    CHECK(replica_pos.second == replica_pos.first);
+    CHECK(replica.cw.take_movement_callback_contacts().empty());
+}
+
+// ---------------------------------------------------------------------------
 void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -792,8 +853,8 @@ void test_named_gameplay_volume_dispatch() {
     CHECK((cd.flags & 0x20u) != 0);
     CHECK(cd.door_sections == 1u);
 
-    // CT is the non-solid change-team box signal. Its downstream request bridge is
-    // deliberately tracked separately as D-COL-6.
+    // CT is the non-solid change-team box signal. The movement resolver drains
+    // this exact flag into the gameplay contact stream below.
     ContactResult ct;
     CHECK(!run(10, 0, false, ct));
     CHECK((ct.flags & 0x200u) != 0);
@@ -869,6 +930,34 @@ void test_resolver_damage_grades_and_zones() {
                            0, 0, false, true, 0, 43, 0u, ahealth);
     Entity *sa = arig.world.registry.get(arig.soldier);
     CHECK((sa->flags & kEntityFlagArmoryZone) != 0);
+
+    // The authority publishes the exact source/trigger pair once per tick even
+    // when the non-solid CT query returns no push. A client-side resolve cannot
+    // author gameplay contact. [orig: CT dispatch/callback
+    // @0x4B31DD..0x4B3238]
+    Rig ct_rig(box_model(10, 0, 3.0, 3.0, 3.0));
+    ct_rig.move_soldier(10.0, 10.0, 0.5);
+    int32_t ct_pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
+    int32_t ct_vel[3] = {0, 0, 0};
+    int16_t ct_health = 100;
+    CollisionWorld::ResolveState ct_state;
+    ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, ct_state,
+                             ct_pos, ct_vel, ct_vel[2], 0, fx(1.8), 0, 0,
+                             true, true, 0, 43, 1u, ct_health);
+    ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, ct_state,
+                             ct_pos, ct_vel, ct_vel[2], 0, fx(1.8), 0, 0,
+                             true, true, 0, 43, 1u, ct_health);
+    const auto ct_contacts = ct_rig.cw.take_change_team_contacts();
+    CHECK(ct_contacts.size() == 1);
+    if (!ct_contacts.empty()) {
+        CHECK(ct_contacts[0].source == ct_rig.soldier);
+        CHECK(ct_contacts[0].target == ct_rig.building);
+    }
+    CollisionWorld::ResolveState client_state;
+    ct_rig.cw.resolve_entity(ct_rig.world, ct_rig.soldier, client_state,
+                             ct_pos, ct_vel, ct_vel[2], 0, fx(1.8), 0, 0,
+                             true, false, 0, 43, 1u, ct_health);
+    CHECK(ct_rig.cw.take_change_team_contacts().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1608,6 +1697,74 @@ void test_ladder_exit_push_and_pitch_restore() {
                           true, true, 50, 32, 0x1u, health, nullptr, &lio.io);
     CHECK(!lio.restore_active);
     CHECK(lio.view_pitch == 0x5000000);
+}
+
+// ---------------------------------------------------------------------------
+void test_ladder_class_bit_climber_remote_and_local() {
+    // The resolver's player predicate is the wire class bit for every physics
+    // leg; only the local side-writes test the local entity. A REMOTE class-bit
+    // climber (an authority resolving a joiner's body: is_local_player false,
+    // no view-yaw channel) still passes the entry gate, still eases its body
+    // heading toward the frame yaw, and still takes the exit push, but never
+    // arms the pitch restore. The LOCAL twin does all of that plus the view
+    // yaw ease and the restore. [orig: Flags & 0x100 @ 0x4b33aa / @ 0x4b3c78;
+    // g_local_player_entity @ 0x4b33ca / @ 0x4b3cdc]
+    auto climb = [](bool local, int32_t &heading_after, bool &restore_armed,
+                    int32_t &view_yaw_after, int32_t &exit_dx) {
+        Rig rig(ladder_slab());
+        rig.move_soldier(10.6, 10.0, 0.0);
+        int32_t pos[3] = {fx(10.6), fx(10.0), 0};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        LadderIo lio(0);
+        lio.io.is_local_player = local;
+        if (!local) lio.io.view_yaw = nullptr;
+        // Body heading 0x90000000: 22.5 deg past the frame yaw (0x80000000),
+        // so the chase has a visible (delta+8)>>4 step.
+        lio.body_heading = static_cast<int32_t>(0x90000000u);
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, /*is_player_class=*/true, true, 0, 32, 0x1u, health,
+                              nullptr, &lio.io);
+        Entity *s = rig.world.registry.get(rig.soldier);
+        CHECK((s->flags & kEntityFlagLadderContact) != 0);
+        heading_after = lio.body_heading;
+        view_yaw_after = lio.view_yaw;
+        // Teleport clear of the slab: the exit leg fires once.
+        pos[0] = fx(14.0);
+        pos[2] = 0;
+        s->position.x = 14.0f;
+        rig.rebuild();
+        const int32_t x_before = pos[0];
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, /*is_player_class=*/true, true, 1, 32, 0x1u, health,
+                              nullptr, &lio.io);
+        CHECK((s->flags & kEntityFlagLadderContact) == 0);
+        exit_dx = pos[0] - x_before;
+        restore_armed = lio.restore_active;
+    };
+    const int32_t step = opennova::io::bam_sar(
+        opennova::io::bam_add(opennova::io::bam_sub(static_cast<int32_t>(0x80000000u),
+                                static_cast<int32_t>(0x90000000u)),
+                    8),
+        4);
+    CHECK(step != 0);
+
+    int32_t remote_heading = 0, remote_view = 0, remote_dx = 0;
+    bool remote_restore = true;
+    climb(false, remote_heading, remote_restore, remote_view, remote_dx);
+    CHECK(remote_heading == opennova::io::bam_add(static_cast<int32_t>(0x90000000u), step));
+    CHECK(remote_view == static_cast<int32_t>(0x80000000u)); // no view channel: untouched
+    CHECK(remote_dx != 0);        // the exit push is a class-bit leg
+    CHECK(!remote_restore);       // the pitch restore is local-only
+
+    int32_t local_heading = 0, local_view = 0, local_dx = 0;
+    bool local_restore = false;
+    climb(true, local_heading, local_restore, local_view, local_dx);
+    CHECK(local_heading == remote_heading);
+    CHECK(local_view == opennova::io::bam_add(static_cast<int32_t>(0x80000000u), step));
+    CHECK(local_dx == remote_dx);
+    CHECK(local_restore);
 }
 
 // ---------------------------------------------------------------------------
@@ -4503,6 +4660,7 @@ int main() {
     test_ray_clip();
     test_ground_probe_roof();
     test_resolver_wall_pushout();
+    test_resolver_move_callback_contact_replaces_solid_push();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();
@@ -4520,6 +4678,7 @@ int main() {
     test_ladder_pitch_restore_from_below_snaps();
     test_ladder_recontact_inflated_and_relatch();
     test_ladder_exit_push_and_pitch_restore();
+    test_ladder_class_bit_climber_remote_and_local();
     test_replica_resolve_candidates_ground_and_peers();
     test_debug_seams();
     test_raycast_clear_los();

@@ -170,7 +170,7 @@ gameplay speed to the render frame rate (the shared per-tick infantry motor, `ti
 integrates a fixed displacement per tick, so locomotion/animation ran fast at high FPS and slow
 at low FPS).
 
-`MissionSession.advance(FrameInput)` now owns the original's accumulator: it banks `delta`,
+`inmatch::Session::advance(FrameInput)` now owns the original's accumulator: it banks `delta`,
 runs `floor(accum / (1/62.5))` single ticks (clamped to 31, the 500 ms cap), and
 the Godot presentation owner presents **once** after the batch — sim at a
 constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick
@@ -254,13 +254,11 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   family (6/9/12 — health thresholds, not unit counts), the holding pair
   (cat-1/cat-2 sub 11 over the carried-object link `mountedChild` entity
   +0x268), and the 42-45 chain/distance/LOS family (all raw-positive senses;
-  the authored negation bit does the flipping). **Residuals:** the
-  `mounted_child` PRODUCERS ride their owning-system ports — every witnessed
-  writer is the CTF/carryable pickup-drop-capture family
-  (`Entity_ProcessWaypointInteraction @0x4ad820`), the joiner-side net appliers
-  (msgs 0x0A/0x2F), or the savegame restore (§3b item 4) — so the holding
-  conditions are condition-complete but producer-less in our sim until the
-  carry system lands; the sub-45 facing cone reads entity yaw, exact only for
+  the authored negation bit does the flipping). The flag-family
+  `mounted_child` producers are now live through `world::Match`, including
+  pickup, death/drop, save, capture/reset/removal, and the S2C 0x2F/0x12
+  replica folds; ordinary non-flag carryables and savegame restore remain with
+  their owning systems. **Residual:** the sub-45 facing cone reads entity yaw, exact only for
   entities whose yaw our sim advances. (The
   acquisition/fire-time SEES+TARGETED quads LANDED 2026-07-16 with D-AI-3 —
   `AiSystem::apply_engage_relations`, live at the state-16/17 engage and

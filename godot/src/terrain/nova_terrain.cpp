@@ -434,12 +434,19 @@ void Terrain::render_frame() {
 	// The portable cache owns page identity/composition decisions; the device
 	// supplies the environment bytes that are actually baked into each page.
 	// Quantization inside the adapter prevents sub-byte weather drift from
-	// invalidating the whole working set.
+	// invalidating the whole working set. The page path consumes the RAW
+	// getter tuple: the static projector's (g2,g1,g0) reduction and the DOT3
+	// (g2,g0,g1) byte pack are both ports of retail's packing of that tuple
+	// (retail: Environment_GetLightDirectionFloat @0x57D870 read by the
+	// collector @0x60D2F5/0x60D2FF and the tile DOT3 pack @0x60E231..0x60E331;
+	// see docs/terrain/terrain-re.md) — never the Godot-axes vector
+	// get_light_direction() serves, which would swap x/z a second time.
 	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
 	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
 	if (cached_env_node && cached_env_node->is_loaded()) {
 		page_tile_tint = cached_env_node->get_tile_overlay_tint();
-		page_light_direction = cached_env_node->get_light_direction();
+		page_light_direction =
+				cached_env_node->get_light_direction_render_tuple();
 	}
 	static_shadow_rasterizer.begin_frame(page_light_direction);
 	tile_cache_device.begin_frame(draw_list.frame_id);

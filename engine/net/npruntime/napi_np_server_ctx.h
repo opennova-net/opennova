@@ -99,6 +99,12 @@ struct NapiNPProtocol {
 // [orig: g_napi_np_ctx @0xB5CBC8] NapiNPServerCtx (§6.3) — the game-level singleton, the full
 // in-match game-server state. CNapiNetwork-shaped header + game fields + np_protocol. Named
 // fields with cited offsets; idiomatic C++ types (no byte-exact padding — see fidelity decision).
+// The host-side rtxt "Server" strings (GameText section "Server"). Each is the
+// sprintf format the retail handler fills; empty means the string is absent.
+struct ServerTextTable {
+	std::string medic_request_format; // STRSRV_MEDREQ: "%s" = the requester's name
+};
+
 struct NapiNPServerCtx {
 	NetworkType transport_mode = NetworkType::Lan; // [orig +0x50]
 	SocketMode socket_state = SocketMode::Socketless; // [orig +0x54]
@@ -154,6 +160,13 @@ struct NapiNPServerCtx {
 	// resets it, so keep it as NapiNPServerCtx-lifetime state.
 	bool integrity_entity_family_next = false;
 
+	// The rtxt "Server" section strings the host formats into chat
+	// (`GameText_GetString("Server", key)`), loaded by the embedder from its
+	// gametext table through set_server_text(). An EMPTY string is the null
+	// lookup: the consumer no-ops exactly as retail does when the text is
+	// absent. [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
+	ServerTextTable server_text;
+
 	// Host CNetQuality scalar sent as S2C 0x79. Retail derives this byte as
 	// max(frame-rate pressure, mean ping, packet loss) over a five-sample window.
 	// A local healthy LAN resolves to 1; the host adapter may replace it when
@@ -165,6 +178,19 @@ struct NapiNPServerCtx {
 	// 0x136. This state must not be derived from World::logic_tick: round reset
 	// intentionally makes the next server boundary due immediately.
 	uint32_t network_quality_broadcast_countdown = 0;
+
+	// The authoritative end-round transaction. The domain Match freezes the
+	// result; these are only the once-only wire announcement and retail MP linger
+	// clock. [orig: Server_ProcessRoundEnd @0x5164F0; 2790 store @0x5166C4]
+	bool round_end_announced = false;
+	uint32_t round_end_linger_ticks = 0;
+	// The frozen end-of-round board stream (stru_C947D8): built once by the
+	// round-end producer before the per-slot 0x61/0x1D push, then only READ by
+	// the C2S 0x2B chunk service; empty until a round ends and cleared with the
+	// other round-end fields at session creation.
+	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590 from
+	// Server_ProcessRoundEnd @0x5164F0; NetPacket_WriteReplayStreamChunk @0x506F60]
+	std::vector<uint8_t> round_end_board_stream;
 
 	// Non-dedicated S2C 0x68 wraps its 50-row cursor against the live renderer
 	// viewport height. Zero means no renderer seam was installed and suppresses
@@ -178,15 +204,6 @@ struct NapiNPServerCtx {
 	// NetSystem (retired P8): the drain/emit primitives live in netsim/connection_fan.h.
 	world::World *world = nullptr;
 
-	// Dead host-side players awaiting their respawn release [orig: the death queue +
-	// respawn timers Server_ProcessPlayerDeath / GameEvent_PlayerDeath set (slot +360/+364,
-	// the 620-tick recent-spawn rule); a joiner's respawn instead rides its own deploy
-	// request]. Drained by Server_TickUpdate; §5.60.
-	struct PendingRespawn {
-		world::EntityHandle victim;
-		uint32_t due_tick = 0;
-	};
-	std::vector<PendingRespawn> respawn_queue;
 	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
 	// per-second stream (268 across a whole session): unchanged bodies are withheld and
 	// pending/dead (deploy-screen) recipients get the full set at 1 Hz instead
@@ -224,12 +241,10 @@ struct NapiNPServerCtx {
 	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
 	std::array<uint8_t, 180> mission_metadata_blob{};
 
-	// Spawn gate (§5.2). spawn_success_gate <- dword_24C1928 (drop the loading screen; cleared later by
-	// the per-frame 0x0A flags1 & 0x01, §5.2a step 4). The load-progress counter dword_A82370
-	// (g_loading_progress, walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land) is CLIENT state, not host
-	// bookkeeping — the host's spawn/load clock is the per-connection InitialStateBurst cursor
-	// (conn.burst). It was write-only here and is removed (D-NET-132).
-	uint32_t spawn_success_gate = 0;
+	// Retail's overloaded g_spawn_success_gate is deliberately not copied into
+	// this host context. Per-connection InitialStateBurst owns load progress;
+	// world::Match owns the round-over latch. The client retains the 0x1D header
+	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
 	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /
@@ -252,5 +267,11 @@ struct NapiNPServerCtx {
 	NapiNPServerCtx(NapiNPServerCtx &&) noexcept = default;
 	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept = default;
 };
+
+// Install the embedder's "Server" strings (the Godot shell reads its gametext
+// table; nw_server reads a loose gametext.bin beside the mission).
+inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
+	ctx.server_text = std::move(text);
+}
 
 } // namespace opennova::np

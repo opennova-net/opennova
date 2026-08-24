@@ -35,7 +35,7 @@ extends GutTest
 const TEST_ROOT := "local_player_presenter_test"
 var TICK := Simulation.tick_dt()
 
-const MINIMAL_FIXTURE_DIR := "res://../fixtures/minimal/resources"
+const MINIMAL_FIXTURE_DIR := "res://../assets"
 const DVXI5_FIXTURE_DIR := "res://../fixtures/godot/dvxi5"
 const WEAPON_DEF_FIXTURE := "res://../fixtures/def/weapon.def"
 const CHARMODEL_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
@@ -212,7 +212,7 @@ func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresent
 
 
 # One shell frame, in main_game's order: input sample -> world tick (the engine
-# MissionSession batch + the fixed-tick weapon consumer) -> presentation.
+# inmatch::Session batch + the fixed-tick weapon consumer) -> presentation.
 func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		ticks: int = 1, gameplay_active: bool = true) -> void:
 	for i in ticks:

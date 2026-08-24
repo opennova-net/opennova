@@ -137,10 +137,10 @@ func _make_session(
 			return {"path": "C:/assets/alpha.bms"},
 		func() -> PackedStringArray:
 			return unsaved_workspaces,
-		func(path: String, args: PackedStringArray) -> int:
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
 			var pid: int = int(next_pid[0])
 			next_pid[0] += 1
-			spawned.append({"path": path, "args": args, "pid": pid})
+			spawned.append({"path": path, "args": args, "pid": pid, "cwd": cwd})
 			alive[pid] = true
 			return pid,
 		func(path: String) -> bool:
@@ -255,7 +255,7 @@ func test_f5_warns_for_every_dirty_workspace_without_mutating_editor_state() -> 
 		func() -> PackedStringArray:
 			dirty_reads[0] += 1
 			return PackedStringArray(["Terrain", "Sounds", "Terrain", ""]),
-		func(path: String, args: PackedStringArray) -> int:
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
 			spawned.append({"path": path, "args": args})
 			return 4000,
 		func(_path: String) -> bool: return false,
@@ -442,3 +442,136 @@ func test_natural_exit_is_detected_and_runtime_tools_use_exact_identity() -> voi
 	session.poll()
 	assert_eq(session.get_state()["state"], "stopped")
 	assert_string_contains(String(statuses[-1]["text"]), "exited")
+
+
+# A session wired for RETAIL: a configured install, a packer that records its calls, and a
+# file_exists that answers for the retail exe as well as the mission.
+func _make_retail_session(
+	spawned: Array,
+	packs: Array,
+	retail_dir: String = "C:/retail",
+	pack_ok: bool = true
+) -> ShellGameSession:
+	var next_pid := [7000]
+	var session := Session.new()
+	session.setup(
+		func() -> String: return "C:/assets",
+		func() -> String: return "",
+		func() -> String: return "jo",
+		func() -> Dictionary: return {"path": "C:/assets/alpha.bms"},
+		func() -> PackedStringArray: return PackedStringArray(),
+		func(path: String, args: PackedStringArray, cwd: String) -> int:
+			var pid: int = int(next_pid[0])
+			next_pid[0] += 1
+			spawned.append({"path": path, "args": args, "pid": pid, "cwd": cwd})
+			return pid,
+		func(path: String) -> bool:
+			var lower := path.replace("\\", "/").to_lower()
+			return lower.ends_with("/alpha.bms") or lower.ends_with("/jointops.exe"),
+		func(_text: String, _duration: float, _kind: StringName) -> void: pass,
+		func(_pid: int) -> bool: return true,
+		func(_pid: int) -> int: return OK,
+		func() -> int: return 100,
+		func() -> String: return retail_dir,
+		func(out_dir: String, staged_from: String) -> Dictionary:
+			packs.append({"out_dir": out_dir, "retail_dir": staged_from})
+			if not pack_ok:
+				return {"ok": false, "error": "packing blew up"}
+			return {"ok": true, "exe": out_dir.path_join("Jointops.exe")})
+	return session
+
+
+func test_retail_packs_once_then_launches_the_packed_exe() -> void:
+	var spawned: Array = []
+	var packs: Array = []
+	var session := _make_retail_session(spawned, packs)
+
+	assert_true(session.start_mode("retail"), "retail starts when an install is configured")
+	assert_eq(packs.size(), 1, "the assets are packed exactly once per launch")
+	assert_eq(String(packs[0]["retail_dir"]), "C:/retail",
+			"the configured install is what gets staged")
+	assert_eq(spawned.size(), 1)
+	assert_true(String(spawned[0]["path"]).to_lower().ends_with("/jointops.exe"),
+			"retail launches the exe the pack step staged, not our runtime")
+	assert_eq(Array(spawned[0]["args"] as PackedStringArray), ["/w", "/d", "/FRISK"],
+			"retail gets retail's flags and none of ours")
+	# Retail opens its boot archives CWD-relative, so launching it from anywhere but the
+	# packed dir finds no archives and dies on the zero-archives gate with no /FRISK line
+	# to explain why. This is the assertion that catches that regression.
+	assert_eq(String(spawned[0]["cwd"]),
+			String(spawned[0]["path"]).get_base_dir(),
+			"retail launches with the packed dir as its working directory")
+	assert_eq(String(session.get_state()["mode"]), "retail")
+
+
+func test_retail_packs_into_the_editors_own_data_dir() -> void:
+	# The pack output is ours, so it goes in user://, never beside the mounted assets. The
+	# sibling-dir derivation this replaces broke the distributed exe: it littered whatever
+	# directory the assets sat in, and an existing unmarked sibling made the packer refuse.
+	var packs: Array = []
+	var session := _make_retail_session([], packs)
+
+	assert_true(session.start_mode("retail"))
+	var out_dir := String(packs[0]["out_dir"]).replace("\\", "/")
+	assert_eq(out_dir, ProjectSettings.globalize_path("user://packed").replace("\\", "/"),
+			"F7 packs into the editor's own data dir")
+	assert_false(out_dir.begins_with("C:/assets") or out_dir == "C:/packed",
+			"and never into or beside the mounted resource dir")
+
+
+func test_retail_carries_no_opennova_or_debug_arguments() -> void:
+	var spawned: Array = []
+	var session := _make_retail_session(spawned, [])
+	assert_true(session.start_mode("retail"))
+
+	var args := spawned[0]["args"] as PackedStringArray
+	for flag in ["--resource-dir", "--loose-root", "--loose-mission",
+			"--oned-run-id", "--oned-run-descriptor", "--oned-run-log", "--log-file"]:
+		assert_false(args.has(flag), "retail understands none of %s" % flag)
+	var state: Dictionary = session.get_state()
+	assert_eq(state["run_id"], "", "retail has no debug identity to stamp")
+	assert_eq(state["descriptor_path"], "")
+
+
+func test_retail_without_a_configured_install_is_unavailable_and_never_packs() -> void:
+	var spawned: Array = []
+	var packs: Array = []
+	var session := _make_retail_session(spawned, packs, "")
+
+	assert_false(session.retail_available(), "no install configured means not available")
+	assert_false(session.start_mode("retail"))
+	assert_eq(packs.size(), 0, "a rejected launch must not pack anything")
+	assert_eq(spawned.size(), 0)
+	assert_true(session.get_last_error().contains("retail install"),
+			"the error names the missing setting: %s" % session.get_last_error())
+
+
+func test_a_failed_pack_does_not_spawn() -> void:
+	var spawned: Array = []
+	var packs: Array = []
+	var session := _make_retail_session(spawned, packs, "C:/retail", false)
+
+	assert_false(session.start_mode("retail"))
+	assert_eq(packs.size(), 1, "the pack was attempted")
+	assert_eq(spawned.size(), 0, "but nothing launched")
+	assert_eq(session.get_last_error(), "packing blew up",
+			"the packer's own reason reaches the user")
+
+
+func test_capability_poll_never_packs() -> void:
+	# _build_request runs on every toolbar refresh to ask whether a mode is available.
+	# Packing there would rebuild an archive on UI events.
+	var packs: Array = []
+	var session := _make_retail_session([], packs)
+	for _i in range(5):
+		session.retail_available()
+		session.get_current_mission_unavailable_reason()
+	assert_eq(packs.size(), 0, "polling availability writes nothing")
+
+
+func test_sessions_without_retail_seams_cannot_start_retail() -> void:
+	var spawned: Array = []
+	var session := _make_session(spawned, [], {}, [], [100])
+	assert_false(session.retail_available())
+	assert_false(session.start_mode("retail"), "unconfigured sessions reject the mode")
+	assert_eq(spawned.size(), 0)
