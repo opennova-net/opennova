@@ -25,7 +25,7 @@ func _init(mcp_service: Node) -> void:
 
 func register_all(registry: McpToolRegistry) -> void:
 	registry.register(McpToolDef.make("pack_game",
-			"Pack the mounted asset root into a runnable game dir at out_dir: every packable file into a single resource.pff, with the .sbf music banks and earlyerr.txt copied loose beside it (both are read outside the archives). Authoring sources under src/, existing archives, and the retail runtime are skipped. The archive is named resource.pff because retail's boot table probes six fixed names and an arbitrary one never mounts. Returns what was archived, copied loose, and skipped.",
+			"Pack the mounted asset root into a runnable game dir at out_dir: every packable file (missions included) into a single localres.pff, with the .sbf music banks and earlyerr.txt copied loose beside it (both are read outside the archives). Authoring sources under src/, existing archives, and the retail runtime are skipped; subdirectories are not packed and are reported in skipped_dirs. The archive is named localres.pff because retail's boot table probes six fixed names (an arbitrary one never mounts) and its mission list is built from the localres/language volumes -- retail ships its own missions in localres.pff; one archived in resource.pff loads by name but never appears in any mission list. A previous pack's files in out_dir are removed first; a non-empty out_dir that is not a previous pack output is refused. Returns what was archived, copied loose, and skipped.",
 			{
 				"out_dir": { "type": "string", "description": "Absolute directory to write the game dir into." },
 			}, ["out_dir"]), Callable(self, "_tool_pack_game"))
@@ -52,4 +52,5 @@ func _pack(out_dir: String, ctx: McpToolContext) -> Variant:
 		"archived": out["archived"],
 		"loose": out["loose"],
 		"skipped": out["skipped"],
+		"skipped_dirs": out["skipped_dirs"],
 	}

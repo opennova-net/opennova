@@ -16,9 +16,22 @@ extends RefCounted
 ## already written down in three places. One archive needs no such knowledge and mounts
 ## identically.
 ##
-## The archive is named `resource.pff` because it must be one of the six the boot table probes;
-## an arbitrary name never mounts (D-VFS-2) and dies at the zero-archives gate with
-## ShowEarlyError(3).
+## The archive is named `localres.pff`, and the name is load-bearing twice over:
+##  - It must be one of the six the boot table probes; an arbitrary name never mounts (D-VFS-2)
+##    and dies at the zero-archives gate with ShowEarlyError(3). Any of the six satisfies that
+##    gate — it counts archives OPENED, not which slot they filled.
+##  - Retail builds its mission list from two scans: a loose `FindFirstFile *.bms` walk of the
+##    working directory, and a per-archive entry walk over the localres/language volumes
+##    [orig: MissionList_ScanAndBuildFromFiles @ 0x563170; Mission_BuildMapListFromPFF
+##    @ 0x562910]. `resource.pff` is in neither: a mission archived THERE mounts, resolves by
+##    name, and never appears in any mission list (witnessed 2026-08-23 — the menu was simply
+##    empty). Retail keeps its own missions where the scan looks: every one of stock JO's 116
+##    `.bms` lives in `localres.pff` (none in resource.pff), with the title `.bin`s in
+##    language.pff, resolved through the ordinary by-name front door. Naming our single archive
+##    `localres.pff` puts missions exactly where retail ships them, archived, with no loose
+##    special case to keep in step.
+## (The C++ minimal-install fixture writes a zero-entry `resource.pff` boot token beside a fully
+## LOOSE layout run under `/d`; there the loose walk lists the missions, so that name is fine.)
 
 ## Files that must stay LOOSE in the game dir rather than going into the archive.
 ##  - `.sbf` music banks stream by path and never resolve through the archives
@@ -27,20 +40,7 @@ extends RefCounted
 ##    [orig: Game_ShowEarlyError @ 0x4a68a0] — inside an archive it could never be read.
 const LOOSE_EXTENSIONS := [".sbf", ".txt"]
 
-## Missions must ALSO stay loose, and this one is not obvious from the mount rules.
-##
-## Retail builds its mission table from two scans: a loose `FindFirstFile *.bms` walk of the
-## working directory, and a per-archive entry walk that visits only the localres/language volume
-## PAIRS [orig: MissionList_ScanAndBuildFromFiles @ 0x563170; Mission_BuildMapListFromPFF
-## @ 0x562910]. `resource.pff` is in neither, so a mission archived there is mounted and
-## perfectly loadable BY NAME and still never appears in any mission list — the file resolves,
-## the menu is simply empty. Witnessed 2026-08-23: identical boots, the archived mission absent
-## from the boot scan, the loose one logged as `LOADED FILE: mnml.bms` + `mnml.bin`.
-##
-## The sibling `<stem>.bin` carries the mission's `[Info] TITLE` and BRIEFING and is looked up
-## alongside it, so it travels with the .bms. Every OTHER `.bin` — the boot string tables and the
-## music scripts — resolves from the archive normally and must stay there.
-const MISSION_EXTENSION := ".bms"
+const ARCHIVE_NAME := "localres.pff"
 
 ## Never packed and never copied: the retail runtime, its own writes, and any archive already
 ## present (packing an archive into an archive). The runtime binaries are staged separately from
@@ -51,19 +51,33 @@ const EXCLUDED_EXTENSIONS := [".pff", ".exe", ".dll", ".sav", ".log", ".ini", ".
 
 ## Subdirectories of the asset root that hold authoring sources, not game files. `src/` is
 ## `.blend`/`.ase` — retail resolves bare filenames at the root, so nothing there is loadable.
-## DirAccess.get_files_at does not descend, so this is belt-and-braces for a name that
-## arrives with a directory prefix.
+## Any OTHER subdirectory is reported in `skipped_dirs`: the packer walks the root only, and a
+## data directory that silently vanished from the pack is the bug that gets debugged in retail.
 const EXCLUDED_DIRS := ["src/"]
+
+## PFF entry names are 16 BYTES; a name that fits in 16 characters can still overflow in UTF-8.
+const PFF_NAME_BYTES := 16
+
+## Written into every packed dir. It makes the dir self-ignoring wherever it lands (the packed
+## dir is a sibling of whatever root is mounted, and that can be inside another repo), and it is
+## the marker that lets a repack wipe stale output: a non-empty dir WITHOUT it is somebody else's
+## and is never touched.
+const MARKER_NAME := ".gitignore"
+const MARKER_HEADER := "# OpenNova packed game dir -- regenerated on every pack; nothing here is a source."
+const MARKER_TEXT := MARKER_HEADER + "\n*\n"
 
 
 ## Pack `root`'s files into `out_dir` as a runnable game dir.
 ##
-## Returns { ok, archive, archived, loose, skipped, error } — `archived`/`loose` are name arrays
-## so a caller can report exactly what shipped.
+## Returns { ok, archive, archived, loose, skipped, skipped_dirs, error } — `archived`/`loose`
+## are name arrays so a caller can report exactly what shipped. A previous pack's output in
+## `out_dir` is removed first, so a renamed or deleted asset cannot survive as a stale loose
+## file that retail's `/d` lookup would prefer over the freshly archived one.
 static func pack(root: Object, out_dir: String) -> Dictionary:
 	var result := {
 		"ok": false, "archive": "", "archived": PackedStringArray(),
-		"loose": PackedStringArray(), "skipped": PackedStringArray(), "error": "",
+		"loose": PackedStringArray(), "skipped": PackedStringArray(),
+		"skipped_dirs": PackedStringArray(), "error": "",
 	}
 	if root == null:
 		result["error"] = "No resource root mounted."
@@ -72,11 +86,6 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 	var root_dir := String(root.get_root_dir())
 	if root_dir.is_empty():
 		result["error"] = "Mounted root has no directory."
-		return result
-
-	var err := DirAccess.make_dir_recursive_absolute(out_dir)
-	if err != OK and not DirAccess.dir_exists_absolute(out_dir):
-		result["error"] = "Cannot create output directory: %s" % out_dir
 		return result
 
 	# Walk the directory. Deliberately NOT ResourceRoot.list_files() or the ResourceIndex:
@@ -92,18 +101,25 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 		result["error"] = "Mounted root has no files: %s" % root_dir
 		return result
 
+	var skipped_dirs := PackedStringArray()
+	for dir_name in DirAccess.get_directories_at(root_dir):
+		var lower_dir := String(dir_name).to_lower() + "/"
+		if not _in_excluded_dir(lower_dir):
+			skipped_dirs.append(String(dir_name))
+	skipped_dirs.sort()
+	if not skipped_dirs.is_empty():
+		push_warning("Packer: subdirectories are not packed (root files only): %s"
+				% ", ".join(skipped_dirs))
+
+	var prepare_error := _prepare_out_dir(out_dir)
+	if not prepare_error.is_empty():
+		result["error"] = prepare_error
+		return result
+
 	var archive := PffDocument.new()
 	var archived := PackedStringArray()
 	var loose := PackedStringArray()
 	var skipped := PackedStringArray()
-
-	# The mission family: every <stem>.bms plus its sibling <stem>.bin.
-	var mission_family := {}
-	for name in names:
-		var lower_name := String(name).to_lower()
-		if lower_name.ends_with(MISSION_EXTENSION):
-			mission_family[lower_name] = true
-			mission_family["%s.bin" % lower_name.get_basename()] = true
 
 	for name in names:
 		var lower := String(name).to_lower()
@@ -116,26 +132,29 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 			skipped.append(name)
 			continue
 
-		if _has_extension(lower, LOOSE_EXTENSIONS) or mission_family.has(lower):
-			if _copy_file(src, out_dir.path_join(name.get_file())) == OK:
-				loose.append(name)
-			else:
-				skipped.append(name)
+		if _has_extension(lower, LOOSE_EXTENSIONS):
+			var copy_err := _copy_file(src, out_dir.path_join(name.get_file()))
+			if copy_err != OK:
+				result["error"] = "Copying %s into %s failed: %s" % [
+						name, out_dir, error_string(copy_err)]
+				return result
+			loose.append(name)
 			continue
 
 		# store_name is the BARE name: retail resolves archive entries by name, and PFF entry
 		# names cap at 16 bytes.
 		var store := String(name).get_file()
-		if store.length() > 16:
+		if store.to_utf8_buffer().size() > PFF_NAME_BYTES:
 			skipped.append(name)
-			push_warning("Packer: '%s' exceeds the 16-byte PFF entry name limit; not packed." % store)
+			push_warning("Packer: '%s' exceeds the %d-byte PFF entry name limit; not packed."
+					% [store, PFF_NAME_BYTES])
 			continue
 		if archive.add_file_from_disk(src, store, false) == OK:
 			archived.append(store)
 		else:
 			skipped.append(name)
 
-	var archive_path := out_dir.path_join("resource.pff")
+	var archive_path := out_dir.path_join(ARCHIVE_NAME)
 	var save_err := archive.save_as(archive_path)
 	if save_err != OK:
 		result["error"] = "Writing %s failed: %s" % [archive_path, archive.get_last_error()]
@@ -146,7 +165,43 @@ static func pack(root: Object, out_dir: String) -> Dictionary:
 	result["archived"] = archived
 	result["loose"] = loose
 	result["skipped"] = skipped
+	result["skipped_dirs"] = skipped_dirs
 	return result
+
+
+## Make `out_dir` an empty pack target: create it, or clear a previous pack's files out of it.
+## Returns an error message, or "" when the dir is ready (marker written).
+static func _prepare_out_dir(out_dir: String) -> String:
+	if DirAccess.dir_exists_absolute(out_dir):
+		var existing := DirAccess.get_files_at(out_dir)
+		if not existing.is_empty() and not _is_pack_output(out_dir):
+			return ("Refusing to pack into %s: it is not empty and was not written by a previous "
+					+ "pack (no %s marker). Point at an empty directory, or delete it first.") % [
+					out_dir, MARKER_NAME]
+		for file_name in existing:
+			var stale := out_dir.path_join(String(file_name))
+			var rm_err := DirAccess.remove_absolute(stale)
+			if rm_err != OK:
+				return "Removing stale %s failed: %s" % [stale, error_string(rm_err)]
+	else:
+		var err := DirAccess.make_dir_recursive_absolute(out_dir)
+		if err != OK and not DirAccess.dir_exists_absolute(out_dir):
+			return "Cannot create output directory: %s" % out_dir
+
+	var marker := FileAccess.open(out_dir.path_join(MARKER_NAME), FileAccess.WRITE)
+	if marker == null:
+		return "Cannot write %s into %s: %s" % [
+				MARKER_NAME, out_dir, error_string(FileAccess.get_open_error())]
+	marker.store_string(MARKER_TEXT)
+	marker.close()
+	return ""
+
+
+static func _is_pack_output(dir: String) -> bool:
+	var marker_path := dir.path_join(MARKER_NAME)
+	if not FileAccess.file_exists(marker_path):
+		return false
+	return FileAccess.get_file_as_string(marker_path).begins_with(MARKER_HEADER)
 
 
 static func _has_extension(lower_name: String, extensions: Array) -> bool:
@@ -171,8 +226,12 @@ static func _copy_file(src: String, dst: String) -> Error:
 	var out := FileAccess.open(dst, FileAccess.WRITE)
 	if out == null:
 		return FileAccess.get_open_error()
-	out.store_buffer(bytes)
+	# A short write (disk full, a file the runtime still holds open) must not report a copy.
+	var stored := out.store_buffer(bytes)
+	var write_err := out.get_error()
 	out.close()
+	if not stored or write_err != OK:
+		return write_err if write_err != OK else ERR_FILE_CANT_WRITE
 	return OK
 
 
@@ -184,7 +243,8 @@ static func _copy_file(src: String, dst: String) -> Error:
 const RETAIL_RUNTIME := [
 	{ "from": "Jointops.exe", "to": "Jointops.exe" },
 	{ "from": "binkw32_.dll", "to": "binkw32.dll", "fallback": "binkw32.dll" },
-	{ "from": "game.cfg", "to": "game.cfg" },
+	{ "from": "game.cfg", "to": "game.cfg",
+		"why": "retail's first launch with no game.cfg hangs in video enumeration before the menu; launch retail once from its install dir to create it" },
 ]
 
 
@@ -192,28 +252,38 @@ const RETAIL_RUNTIME := [
 ##
 ## Returns { ok, exe, packed_dir, archived, loose, error }. This is the seam
 ## ShellGameSession's RETAIL mode injects, so Play in Retail and the MCP tool cannot drift.
+## Every runtime file is required: a stage that silently came up short would launch a stale
+## exe, or reproduce the no-game.cfg hang, while reporting success.
 static func pack_for_retail(root: Object, out_dir: String, retail_dir: String) -> Dictionary:
-	var packed := pack(root, out_dir)
-	if not bool(packed.get("ok", false)):
-		return { "ok": false, "exe": "", "error": String(packed.get("error", "Packing failed.")) }
-
 	var clean_retail := retail_dir.strip_edges()
 	if clean_retail.is_empty() or not DirAccess.dir_exists_absolute(clean_retail):
 		return { "ok": false, "exe": "", "error": "Retail install directory not found: %s" % retail_dir }
 
+	# Resolve every runtime source BEFORE packing: a missing file fails fast instead of after
+	# a full archive write.
+	var sources: Array[Dictionary] = []
 	for entry in RETAIL_RUNTIME:
 		var src := clean_retail.path_join(String(entry["from"]))
 		if not FileAccess.file_exists(src) and entry.has("fallback"):
 			src = clean_retail.path_join(String(entry["fallback"]))
 		if not FileAccess.file_exists(src):
-			continue
-		_copy_file(src, out_dir.path_join(String(entry["to"])))
+			var why := String(entry.get("why", ""))
+			return { "ok": false, "exe": "",
+				"error": "No %s in %s — cannot stage retail.%s" % [
+						String(entry["from"]), clean_retail, (" " + why + ".") if not why.is_empty() else ""] }
+		sources.append({ "src": src, "dst": out_dir.path_join(String(entry["to"])) })
 
-	var exe := out_dir.path_join("Jointops.exe")
-	if not FileAccess.file_exists(exe):
-		return { "ok": false, "exe": "",
-			"error": "No Jointops.exe in %s — cannot launch retail." % clean_retail }
+	var packed := pack(root, out_dir)
+	if not bool(packed.get("ok", false)):
+		return { "ok": false, "exe": "", "error": String(packed.get("error", "Packing failed.")) }
 
-	packed["exe"] = exe
+	for item in sources:
+		var copy_err := _copy_file(String(item["src"]), String(item["dst"]))
+		if copy_err != OK:
+			return { "ok": false, "exe": "",
+				"error": "Staging %s into %s failed: %s" % [
+						String(item["src"]), out_dir, error_string(copy_err)] }
+
+	packed["exe"] = out_dir.path_join("Jointops.exe")
 	packed["packed_dir"] = out_dir
 	return packed

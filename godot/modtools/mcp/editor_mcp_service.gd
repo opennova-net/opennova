@@ -275,9 +275,3 @@ func _exit_tree() -> void:
 	stop()
 	if McpLogHub.instance == log_hub:
 		McpLogHub.instance = null
-
-
-## The configured retail install directory, or "" when unset. The packaging tools ask the
-## service rather than reading settings directly, so the retail dir has ONE reader.
-func get_retail_dir() -> String:
-	return OnedSettings.get_retail_dir()
