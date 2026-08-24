@@ -4,6 +4,7 @@
 #include "world/entity.h"
 #include "world/spawn_select.h"
 #include "world/world.h"
+#include "io/crt_rand.h"
 
 #include <cmath>
 #include <cstdio>
@@ -97,6 +98,61 @@ int main() {
         CHECK(approx(r.position.z, 3.0f));
         CHECK(r.yaw == 90);
         CHECK(w.spawn_cycle_counter == 1);
+    }
+
+    // --- The clamp-random arm draws one CRT value per candidate, in row
+    //     order, from the world's OWNED MSVC recurrence: srand(1) yields
+    //     41, 18467, 6334, 26500, 19169, 15724, 11478, 29358, 26962, 24464,
+    //     so the same session seed picks the same far marker.
+    // [orig: Entity_FindBestSpawnPoint @0x50CEA2..0x50CEB9; CRT rand @0x76B00A]
+    {
+        opennova::io::CrtRand r;
+        r.seed(1);
+        const uint32_t expected[10] = {41, 18467, 6334, 26500, 19169,
+                                       15724, 11478, 29358, 26962, 24464};
+        for (const uint32_t v : expected) CHECK(r.next() == v);
+
+        auto pick = [](uint32_t seed) {
+            auto w_storage = std::make_unique<World>();
+            World &w = *w_storage;
+            w.registry.configure_pool(0, 16);
+            w.registry.configure_pool(3, 16);
+            const EntityHandle self = spawn_body(w, {0.0f, 0.0f, 0.0f}, true);
+            // The only avoid body sits ~42425 u from both markers: nothing
+            // drops below the 0x7FFF-unit clamp, so the random arm replaces
+            // every score.
+            spawn_body(w, {30000.0f, 30000.0f, 0.0f}, true);
+            spawn_marker(w, 6002, {1.0f, 0.0f, 0.0f}, 11);
+            spawn_marker(w, 6002, {2.0f, 0.0f, 0.0f}, 22);
+            w.crt_rand.seed(seed);
+            const SpawnPointResult res = resolve_player_spawn_pose(
+                w, self, EntityHandle{}, 0, 0, 0x00000u);
+            CHECK(res.found);
+            // Exactly one draw per candidate row.
+            opennova::io::CrtRand twin;
+            twin.seed(seed);
+            twin.next();
+            twin.next();
+            CHECK(w.crt_rand.state == twin.state);
+            return res;
+        };
+        // Seed 1: 41 >> 8 = 0 then 18467 >> 8 = 72 -> the second marker wins.
+        const SpawnPointResult first = pick(1);
+        CHECK(first.yaw == 22);
+        const SpawnPointResult again = pick(1);
+        CHECK(again.yaw == first.yaw && approx(again.position.x, first.position.x));
+        // Seed 106: 1 then 0 -> the first marker wins.
+        CHECK(pick(106).yaw == 11);
+
+        // The owned state rides the world snapshot beside prng16_state.
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.crt_rand.seed(7);
+        const World::Snapshot snap = w.snapshot();
+        (void)w.crt_rand.next();
+        CHECK(w.crt_rand.state != 7);
+        w.restore(snap);
+        CHECK(w.crt_rand.state == 7);
     }
 
     // --- Excluding the body being positioned leaves no avoid rows, so the

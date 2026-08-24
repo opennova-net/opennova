@@ -6193,6 +6193,25 @@ apart); spread relies on multiple markers + the player avoid-set. `resolve_playe
 ports the player-bit set, self exclusion, parent transform before scoring, fixed/whole-unit clamp,
 random arm, and the original Knuth-gap strict-comparison sort. `[orig: Entity_FindBestSpawnPoint
 @0x50CCC0]`
+**The random arm's generator (refreshed 2026-08-24; class-C PERMANENT for the seed only).** The
+arm draws ONE CRT `rand()` per candidate row, in row order (`@0x50CEA2..0x50CEB9`). Retail's
+`rand()` is the process-wide MSVC CRT LCG (import `@0x76B00A`: `state = state × 214013 + 2531011`,
+result bits 16..30 — `srand(1)` yields 41, 18467, 6334, 26500, 19169, …), seeded ONCE from the clock
+in `Server_AllocatePlayerSlotTable` (`srand(_time64(0))` `@0x51C1AA`, then one immediate draw for the
+slot-table base offset `rand() % 25145` `@0x51C1AF`; the other `srand` sites are `@0x560128` /
+`@0x5CC234`) and never re-seeded by `Game_StartMission`. The same stream feeds the
+`GameEvent_PlayerDeath` 0x100-family roll (`@0x51718A`, one draw whose narrowed quotient always
+lands on event 32) and the other `rand` xrefs (`0x405149 0x405785 0x411EA9 0x411EBB 0x42A3D0
+0x44055F 0x4405E8 0x4C4D8C 0x4DBB9F 0x4DBC45 0x502A95 0x507EAE`). The port owns that recurrence
+(`io::CrtRand`, shared with the PANM waveform noise owner) on `World::crt_rand`: the spawn arm and
+the death roll draw from it in retail's order, `create_session` seeds it from the session seed and
+spends the slot-table draw, and the state rides the world snapshot. Divergence, deliberately
+permanent: retail's seed is wall-clock time — inherently irreproducible — where ours is the session
+seed, so the SEQUENCE is retail's recurrence but its starting point is a session value
+(`spawn_select_test` pins the MSVC vector, the per-row draw count and same-seed determinism;
+`npruntime_round_sim_test` pins the death roll's single draw). `[orig: CRT rand @0x76B00A;
+Server_AllocatePlayerSlotTable @0x51C1A4..0x51C1BC; Entity_FindBestSpawnPoint @0x50CEA2;
+GameEvent_PlayerDeath @0x51718A]`
 
 **D-NET-116** [behavior, DOCUMENTED] **The pending-spawn loop gates on the mission-load flag.**
 `CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0` runs only when `is_authority && !g_net_spawn_suspended &&

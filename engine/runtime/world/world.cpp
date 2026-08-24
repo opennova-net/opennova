@@ -1462,6 +1462,7 @@ World::Snapshot World::snapshot() const {
     s.logic_tick = logic_tick;
     s.preround_delay_seconds = preround_delay_seconds;
     s.prng16_state = prng16_state;
+    s.crt_rand_state = crt_rand.state;
     s.local_player = cached.local_player;
     return s;
 }
@@ -1479,6 +1480,7 @@ void World::restore(const Snapshot &s) {
     logic_tick = s.logic_tick;
     preround_delay_seconds = s.preround_delay_seconds;
     prng16_state = s.prng16_state;
+    crt_rand.state = s.crt_rand_state;
     // Reset per-tick health/proximity counters, then restore only the stable
     // ownership identity captured with the registry. A post-snapshot player may
     // have reused a baseline actor's slot, while a listen baseline may already
