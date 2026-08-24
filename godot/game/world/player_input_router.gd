@@ -21,6 +21,7 @@ var _input_source := Callable()
 var _fire_was_held := false
 var _reload_was_down := false
 var _scope_was_down := false
+var _medic_was_down := false
 var _look_delta := Vector2.ZERO
 var _frame_sequence := 0
 # The manual weapon-switch keys — the retail defaults from the shipped binding
@@ -130,10 +131,18 @@ func _sample_weapon_input(frame_input: MissionFrameInput,
 	if scope_down and not _scope_was_down and sim != null:
 		sim.request_local_player_scope_toggle()
 	_scope_was_down = scope_down
+	# The dead player's medic call: an action binding, so it samples whenever
+	# the router runs — the death screen holds the mouse free and retail's
+	# binding dispatch still fires it there; the sim's gates (dead + the
+	# 310-tick cooldown) make a stray press inert.
+	# [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
+	var medic_down := ControlsBindings.pressed("MedicReq")
+	var medic_edge := medic_down and not _medic_was_down
+	_medic_was_down = medic_down
 	# Latches update even with no sim (the deleted forwarders no-op'd downstream):
 	# a key held across a mission reload must not fire a spurious edge on the
 	# first frame the new sim appears.
-	frame_input.set_weapon_input(fire_held, fire_edge, reload_edge)
+	frame_input.set_weapon_input(fire_held, fire_edge, reload_edge, medic_edge)
 	_send_weapon_switch_input(captured)
 
 

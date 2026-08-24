@@ -25,6 +25,9 @@ public:
 	enum PressedAction {
 		PRESSED_FIRE = 1 << 0,
 		PRESSED_RELOAD = 1 << 1,
+		// The dead player's medic call edge (the MedicReq action row; retail
+		// Input_HandleActionBinding case 217 @0x49b4b4).
+		PRESSED_MEDIC_REQUEST = 1 << 2,
 	};
 
 private:
@@ -43,7 +46,7 @@ public:
 	void set_look_delta(const Vector2 &p_delta);
 	Vector2 get_look_delta() const;
 	void set_weapon_input(bool p_fire_held, bool p_fire_pressed,
-			bool p_reload_pressed);
+			bool p_reload_pressed, bool p_medic_pressed = false);
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
 

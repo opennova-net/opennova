@@ -9,6 +9,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <hud/feed_format.h>
+#include <hud/score_fanfare.h> // the 0x81 tone ladder
 #include <netsim/client_state.h>
 #include <world/entity.h>
 #include <world/lfp_feed.h>
@@ -117,6 +118,24 @@ int64_t Simulation::get_session_game_type() const {
 	// the HostClient view's own (retail g_GameType @0x24d2128); the AAS zone
 	// panel and the Tab board key their arms on it.
 	return runtime_ ? static_cast<int64_t>(runtime_->game_type()) : 0;
+}
+
+Dictionary Simulation::take_score_feedback() {
+	// Revision-edge over the replica fold's 0x81 landing: every role's view
+	// folds it (the host's own loopback included), so the edge is
+	// role-agnostic (retail: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 runs on
+	// every client, the listen host's own included).
+	Dictionary out;
+	if (!runtime_) return out;
+	const opennova::netsim::ClientState &cs = runtime_->state();
+	if (cs.score_feedback.updates == score_feedback_updates_seen_) return out;
+	score_feedback_updates_seen_ = cs.score_feedback.updates;
+	const opennova::hud::ScoreTone tone =
+			opennova::hud::score_delta_tone(cs.score_feedback.delta, cs.exp_fanfare);
+	out["score"] = cs.score_feedback.score;
+	out["delta"] = cs.score_feedback.delta;
+	out["tone"] = String(opennova::hud::score_tone_set_name(tone));
+	return out;
 }
 
 Array Simulation::drain_chat_lines() {

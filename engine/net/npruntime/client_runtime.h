@@ -170,6 +170,14 @@ public:
 	// remains unchanged until the host's S2C 0x49 echo appears in the reload drain.
 	bool queue_fired_round(const ClientFiredRound &round);
 	bool queue_reload_request(const WeaponReload &reload);
+	// The dead player's medic call: reliable C2S 0x2E carrying the local
+	// entity's packed index. The wire gates live here (in-session joiner
+	// with a self handle); the dead test and the 310-tick cooldown are the
+	// embedding sim's local-player facts [orig: Input_HandleActionBinding
+	// case 217 @0x49b4b4..0x49b51b — is_in_session, local entity, Flags & 2,
+	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
+	// (0x2E, param 0x136)].
+	bool queue_medic_request();
 	// Action 6 on a designated-G mounted EWeap selects the child's embedded
 	// MountSlot or its groundEntity vehicle slot. Authority confirms via the
 	// ordinary compact player echo; this only queues the reliable C2S 0x16.

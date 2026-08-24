@@ -670,6 +670,49 @@ void JoinerConnection::retain_terrain_load_page(
 	}
 }
 
+// The VarList walk retail runs over the reassembled server-info stream
+// [orig: parse_server_session_variables @0x520440 — per entry a NUL-terminated
+// key, a u32 length, the value bytes; EXP_FANFARE lands as the u16 at
+// g_sessionvar_exp_fanfare @0x520478].
+uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len) {
+	size_t pos = 0;
+	while (pos < len) {
+		const uint8_t *key = data + pos;
+		size_t key_len = 0;
+		while (pos + key_len < len && key[key_len] != 0) ++key_len;
+		if (pos + key_len >= len) break; // no terminator
+		pos += key_len + 1;
+		if (pos + 4 > len) break;
+		const uint32_t value_len = static_cast<uint32_t>(data[pos]) |
+				(static_cast<uint32_t>(data[pos + 1]) << 8) |
+				(static_cast<uint32_t>(data[pos + 2]) << 16) |
+				(static_cast<uint32_t>(data[pos + 3]) << 24);
+		pos += 4;
+		if (value_len > len - pos) break;
+		if (key_len == 11 && std::memcmp(key, "EXP_FANFARE", 11) == 0 && value_len >= 2)
+			return static_cast<uint16_t>(data[pos] | (data[pos + 1] << 8));
+		pos += value_len;
+	}
+	return 0;
+}
+
+void JoinerConnection::retain_server_info_chunk(const FileTransferChunk &chunk) {
+	const uint64_t chunk_end = uint64_t(chunk.chunk_offset) + chunk.chunk_size;
+	if (chunk.chunk_offset > chunk.total_size || chunk_end > chunk.total_size ||
+			chunk.total_size > (1u << 20))
+		return;
+	if (chunk.transfer_id != server_info_transfer_id_ || chunk.chunk_offset == 0) {
+		server_info_transfer_id_ = chunk.transfer_id;
+		server_info_bytes_.assign(chunk.total_size, 0);
+	}
+	if (server_info_bytes_.size() != chunk.total_size) return;
+	std::memcpy(server_info_bytes_.data() + chunk.chunk_offset, chunk.chunk_data,
+			chunk.chunk_size);
+	if (chunk.is_final())
+		exp_fanfare_ = session_vars_exp_fanfare(server_info_bytes_.data(),
+				server_info_bytes_.size());
+}
+
 void JoinerConnection::retain_mission_metadata_chunk(
 		const FileTransferChunk &chunk) {
 	constexpr uint32_t kMpAttributesOffset = 44;
@@ -937,6 +980,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			FileTransferChunk chunk;
 			if (decode_file_transfer_chunk(
 					m.payload.data(), m.payload.size(), chunk)) {
+				retain_server_info_chunk(chunk);
 				if (!chunk.is_final()) {
 					const uint32_t next_offset = static_cast<uint32_t>(
 							uint64_t(chunk.chunk_offset) + chunk.chunk_size);

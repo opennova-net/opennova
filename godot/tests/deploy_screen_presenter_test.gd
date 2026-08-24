@@ -192,6 +192,16 @@ func _make_presenter(sim: Simulation) -> DeployPresenter:
 	return presenter
 
 
+# The visible list row carrying a node PARAM (the sorted list's row order is
+# retail's text sort, so tests never assume fixed indices).
+func _row_index_for_param(presenter: DeployPresenter, param: int) -> int:
+	var rows: Array = presenter.get_spawn_rows()
+	for row in rows.size():
+		if int((rows[row] as Dictionary).get("param", -2)) == param:
+			return row
+	return -1
+
+
 # The presenter's row PARAM at a visible list row (the old ItemList metadata's
 # successor: the presenter row model carries the node parameter per row).
 func _row_param(presenter: DeployPresenter, row: int) -> int:
@@ -281,8 +291,12 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 			"the presenter row model aligns with the compiled list")
 	var zone_param := int((zone_rows[0] as Dictionary).get("param", 0))
 	assert_gt(zone_param, 0)
-	driver.select_row(list_id, 1, false)  # highlight only; picks ride user clicks
-	assert_eq(_row_param(presenter, 1), zone_param,
+	# The whole-list text sort orders "'A' zone" before "'D' Home Base": find
+	# the zone row by its param, never by a fixed index.
+	var zone_row := _row_index_for_param(presenter, zone_param)
+	assert_gte(zone_row, 0, "the zone row is in the compiled list")
+	driver.select_row(list_id, zone_row, false)  # highlight only; picks ride user clicks
+	assert_eq(_row_param(presenter, zone_row), zone_param,
 			"the zone row is selected by deploy param")
 
 	await get_tree().create_timer(DeployPresenter.REFRESH_INTERVAL_S + 0.05).timeout
@@ -302,6 +316,54 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 # [orig: DeathScreen_OnSpawnListSelect @0x553630 -> Input_QueueEvent(12, node) @0x55364d]
 # The tail is the REAL deployment release: the default-spawn pick rides C2S 0x0E to the
 # live host and the falling pending bit closes the screen through `closed`.
+# The populate's second loop lands wave occupants + a blank separator at node
+# -1; the select callback guards node != -1, so a click on such a row queues
+# NO C2S 0x0E — the pick stays owed. [orig: UI_UpdateDeathScreenContent
+#  @0x553c5f..0x553de3; DeathScreen_OnSpawnListSelect @0x55364d]
+func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open(), "the join deploy screen opens")
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	if driver == null:
+		return
+	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
+	# Every real row is a pick (0 default, index+1 zone) — the fixture's wave
+	# groups are empty, so no node -1 rows exist yet.
+	for row in presenter.get_spawn_rows():
+		assert_gte(int((row as Dictionary).get("param", -1)), 0,
+				"list rows without occupants are all picks")
+	# The engine builder's row model IS what a wave group would insert: a
+	# synthetic occupant row at the presenter seam proves the guard.
+	presenter._spawn_rows.append({"label": "Ace", "param": -1})
+	presenter._on_widget_value_changed("SPAWNPOINTS_LIST", "list",
+			presenter._spawn_rows.size() - 1, "")
+	for _i in range(40):
+		pair.host.step()
+		pair.joiner.step()
+		OS.delay_msec(2)
+	assert_true(pair.joiner.is_join_deploy_pick_pending(),
+			"a node -1 row never sends the deploy pick")
+	# The statics follow the witnessed gates: no penalty/wave line, no hold,
+	# no revive window -> STATIC_RESPAWN_MSG1 / PSPRESPAWN / MEDIC pair hidden,
+	# the list title shown.
+	var status: Dictionary = pair.joiner.get_deploy_status()
+	assert_eq(int(status.get("queued_kind", -1)), 0, "no penalty or wave line")
+	assert_false(bool(status.get("show_medic", true)),
+			"no revive window -> the medic pair stays hidden")
+	for control_name in ["STATIC_RESPAWN_MSG1", "STATIC_PSPRESPAWN_MSG1",
+			"STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG"]:
+		var id := driver.widget_id(control_name)
+		if id >= 0:
+			assert_false(driver.is_widget_shown(id), control_name + " hidden")
+	var title_id := driver.widget_id("STATIC_LIST_TITLE")
+	if title_id >= 0:
+		assert_true(driver.is_widget_shown(title_id), "the list title shows with the list")
+	assert_eq(driver.get_widget_items(list_id).size(), presenter.get_spawn_rows().size() - 1,
+			"the compiled list mirrors the real row model")
+
+
 func test_a_reopened_death_screen_repicks_and_the_release_closes_it() -> void:
 	var pair := _join_pair_with_pending_pick()
 	var presenter := _make_presenter(pair.joiner)
@@ -317,7 +379,9 @@ func test_a_reopened_death_screen_repicks_and_the_release_closes_it() -> void:
 
 	# Close and reopen WITHOUT a release: the once-configured menu and its
 	# selected row must come back (the death-edge reopen shape).
-	driver.select_row(list_id, 0, false)  # the player's pick, highlight only
+	var default_row := _row_index_for_param(presenter, 0)
+	assert_gte(default_row, 0, "the Default Spawn row is in the compiled list")
+	driver.select_row(list_id, default_row, false)  # the player's pick, highlight only
 	presenter.close()
 	assert_false(presenter.is_open())
 	assert_true(pair.joiner.is_join_deploy_pick_pending(),

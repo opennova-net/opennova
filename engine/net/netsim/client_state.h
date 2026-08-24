@@ -644,6 +644,10 @@ struct ClientSpawnWaveStatus {
 	bool known = false;
 	uint32_t updates = 0;
 	SpawnWaveStatus value;
+	// The zone whose member list names the local player (retail word_A85BC0:
+	// reset to -1 at every fold, set to the group's zone handle when a member
+	// equals the local handle @0x429a04..0x429a0b); 0xFFFF = none.
+	uint16_t self_zone_handle = 0xFFFF;
 };
 
 // Latest victim-local S2C 0x52 camera anchor. Retail stores the three fixed
@@ -677,6 +681,16 @@ struct ClientState {
 	// networking and maintenance remain live while nonzero.
 	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
 	std::uint8_t preround_delay_seconds = 0;
+	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
+	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
+	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f
+	// dword_A85B60 (slot+368, the local revive window — STROVER_MEDICTIMER /
+	// STROVER_CALLMEDIC), @0x4300c3 dword_A85B68 (slot+364, the spawn-target
+	// hold — STROVER_PSPRESPAWN); consumer UI_UpdateDeathScreenContent
+	// @0x5536a0]. Retained between phase cycles like the client globals.
+	std::uint8_t respawn_penalty_seconds = 0;
+	std::uint8_t local_revive_seconds = 0;
+	std::uint8_t spawn_hold_seconds = 0;
 	// Advances only when the complete seven-byte recipient-local 0x0A tail was
 	// decoded. frames_applied remains the lenient partial-presentation counter.
 	// Every compact entity record folded from an 0x0A. The replication heartbeat: it
@@ -703,6 +717,9 @@ struct ClientState {
 	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
 	ClientScoreFeedback score_feedback;
+	// The host VarList's EXP_FANFARE u16 (lo/hi thresholds of the 0x81 tone
+	// ladder, hud/score_fanfare.h) [orig: g_sessionvar_exp_fanfare @0x24d5a10].
+	uint16_t exp_fanfare = 0;
 	ClientSpawnWaveStatus spawn_waves;
 	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};

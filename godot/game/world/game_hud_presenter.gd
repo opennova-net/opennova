@@ -73,6 +73,12 @@ var _hud_color_was_down := false
 # level @0x55154d, saved @0x54c80d; the level drives
 # CRenderState_SetLayerVisibility @0x59B0F0]
 const HUD_DETAIL_CONFIG_KEY := "hud_detail"
+# The 0x81 hit-confirm tones ride the retail cfg key `enable_slotmachine`
+# (default 0 — Config_SetDefaults @0x54d165; parsed by atol @0x54fdfb); the
+# tone itself is the sim's decision (hud/score_fanfare.h), this only plays it.
+const ENABLE_SLOTMACHINE_CONFIG_KEY := "enable_slotmachine"
+var _enable_slotmachine: bool = int(ConfigStore.read(HUD_COLOR_CONFIG_PATH,
+		HUD_COLOR_SECTION, ENABLE_SLOTMACHINE_CONFIG_KEY, 0)) != 0
 const HUD_HIDDEN_CAPTURE_DETAIL_LEVEL := 3
 var _hud_detail_level: int = clampi(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
@@ -294,6 +300,14 @@ func _load_hud_text_tables(root: ResourceRoot) -> void:
 	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
 	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
 	Strings.register_table("gametext", _load_rtxt(root, "gametext.bin"))
+	# The host's medic-request broadcast prints the caller into the "Server"
+	# table's STRSRV_MEDREQ format [orig: Server_BroadcastMedicRequest
+	# @0x515390 -> GameText_GetString("Server", "STRSRV_MEDREQ")].
+	var sim = _world.get_sim() if _world != null else null
+	var gametext: RtxtStringFile = Strings.get_table("gametext")
+	if sim != null and gametext != null \
+			and gametext.has_string_in_section("Server", "STRSRV_MEDREQ"):
+		sim.set_server_text(gametext.get_string_in_section("Server", "STRSRV_MEDREQ"))
 	# The medmssn fallback fires only when the mission .bin does not EXIST — a
 	# present-but-unparseable file loads to nothing with no fallback.
 	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
@@ -534,6 +548,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
+	_flush_score_feedback()
 	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
 			hud_keys_chorded, gameplay_input_active)
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
@@ -1123,6 +1138,37 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 ## game's own text and never one we compose.
 ## [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
 ##  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddDebugMessage @0x4987F0]
+# The S2C 0x81 hit-confirm tone: one 2D interface play per positive score
+# delta that clears the EXP_FANFARE thresholds, behind enable_slotmachine
+# [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 -> Sound_PlayInterfaceTriggerSet
+#  @0x527be0 (ex "PlaySoundOnDedicatedServer") when g_EnableSlotMachine].
+func _flush_score_feedback() -> void:
+	if _world == null:
+		return
+	var sim: Simulation = _world.get_sim()
+	if sim == null:
+		return
+	var feedback: Dictionary = sim.take_score_feedback()
+	if feedback.is_empty():
+		return
+	var tone := String(feedback.get("tone", ""))
+	if tone.is_empty() or not _enable_slotmachine:
+		return
+	var audio = _world.get_mission_audio()
+	if audio != null:
+		audio.ui_soundset(tone)
+
+
+func set_enable_slotmachine(enabled: bool) -> void:
+	_enable_slotmachine = enabled
+	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+			ENABLE_SLOTMACHINE_CONFIG_KEY, 1 if enabled else 0)
+
+
+func is_slotmachine_enabled() -> bool:
+	return _enable_slotmachine
+
+
 func _flush_feed_events() -> void:
 	if _game_hud == null or _world == null:
 		return

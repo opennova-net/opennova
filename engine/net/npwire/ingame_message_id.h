@@ -127,6 +127,9 @@ inline constexpr uint8_t VEHICLE_DETACH_REQUEST = 0x27;     // u16 handle detach
 inline constexpr uint8_t LOADOUT_REQUEST = 0x28;            // §5.33 burst loadout request
 inline constexpr uint8_t TEAM_SPAWN_ACK = 0x29;             // §5.59 deploy/team ack (D-NET-148)
 inline constexpr uint8_t END_ROUND_STATS_REQUEST = 0x2B;    // §5.68 [u16 nextOffset] -> s2c::END_ROUND_STATS
+inline constexpr uint8_t MEDIC_REQUEST = 0x2E;              // [i32 entity index] the dead player's medic call
+                                                            // [orig: Input_HandleActionBinding case 217 @0x49b4b4;
+                                                            //  host Server_BroadcastMedicRequest @0x515390]
 inline constexpr uint8_t RTT_CONSUMED = 0x2C;               // §5.34 rtt sample
 inline constexpr uint8_t BURST_MEMBER_2D = 0x2D;            // §5.33 burst receiver
 inline constexpr uint8_t LOADOUT_SUBMIT = 0x2F;             // §5.56 team + class + weapon slot + ADM rows -> s2c::WEAPON_LOADOUT (D-NET-168)

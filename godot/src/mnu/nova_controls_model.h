@@ -61,6 +61,10 @@ public:
 	// The one gameplay-sampler entry point — samples Godot Input here at the
 	// device seam.
 	bool is_token_pressed(const String &p_token) const;
+	// The in-game display string of a token's binding — the death screen's
+	// "call a medic" hint formatter (engine controls format_display_string;
+	// retail KeyBinding_FormatDisplayString @0x496bd0). "" when unbound.
+	String display_text_for_token(const String &p_token) const;
 
 	// The capture button->mask translation (0 = unmappable). The witnessed
 	// mask values are the engine's kMouse* constants (controls/binding_set.h

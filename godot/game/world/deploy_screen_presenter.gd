@@ -14,10 +14,14 @@ extends Node
 ##  every 16 ticks); UI_UpdateDeathScreenContent @0x5536a0 (list populate:
 ##  row 0 "'<DEFAULT_SPAWN_KEY>' <HOME>" node 0, then per zone
 ##  "'<A+idx>' <WPNames/STRWPNAME%03d>" node idx+1, team color tags <c4040FF>/
-##  <cFF2020>); UI_RegisterDeathScreenCallbacks @0x554610 (SPAWNPOINTS_LIST
-##  select -> Input_QueueEvent(12, node) @0x55364d); update_death_screen_ui
-##  @0x553150 (map zoom fit from the zone AABB, SWAP_TEAMS/BUTTON_TEAMLIST only
-##  in the TDM family)]
+##  <cFF2020>, the whole-list text sort, then the per-zone wave occupant rows
+##  + blank separator with node -1 — the engine builder world/deploy_screen_feed
+##  owns both loops; the STATIC_RESPAWN_MSG1 penalty/wave line, the
+##  STATIC_PSPRESPAWN_MSG1 hold, the STATIC_MEDIC_MSG1/STATIC_CALLMEDIC_MSG
+##  revive-window pair); UI_RegisterDeathScreenCallbacks @0x554610 (SPAWNPOINTS_LIST
+##  select -> Input_QueueEvent(12, node) @0x55364d, guarded on node != -1);
+##  update_death_screen_ui @0x553150 (map zoom fit from the zone AABB,
+##  SWAP_TEAMS/BUTTON_TEAMLIST only in the TDM family)]
 ##
 ## The MAP window's terrain/zone/blip draw (the windowed map renderer
 ## MapOverlay_DrawView @0x5a58e0, sibling of HUD_DrawMapOverlay @0x5a5f40) is the tracked
@@ -96,7 +100,7 @@ func open() -> bool:
 		return false
 	if not _ensure_menu():
 		return false
-	_apply_static_visibility()
+	_hide_team_service_buttons()
 	_populate_spawn_list(sim)
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
@@ -184,8 +188,12 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 	if sim == null:
 		return
 	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
-	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick]
-	sim.send_deployment_pick(int((_spawn_rows[index] as Dictionary).get("param", 0)))
+	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick; the
+	#  occupant/blank rows carry node -1 and the callback guards node != -1]
+	var param := int((_spawn_rows[index] as Dictionary).get("param", 0))
+	if param == -1:
+		return
+	sim.send_deployment_pick(param)
 
 
 func _populate_spawn_list(sim: Simulation) -> void:
@@ -200,28 +208,29 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	var selected := _driver.selected_row(list_id)
 	if selected >= 0 and selected < _spawn_rows.size():
 		keep_param = int((_spawn_rows[selected] as Dictionary).get("param", -1))
-	# Team text color rode the row [orig: the "<c4040FF>" tag, or "<cFF2020>" only
-	# when Team == 2, in the list text @0x5536a0]. DROPPED for now: the compiled
-	# list has no per-row style channel — row coloring awaits the list row-style
-	# channel (P2 parity will judge).
+	# The compiled row set comes from the engine builder (world/deploy_screen_feed):
+	# the Default row, the secured team zones, the whole-list text sort, then
+	# each zone's wave occupants + blank separator at node -1. The row texts
+	# carry retail's team colour tag and the '<b><cFF4040>** name **' self
+	# marker; the compiled list renders the tags through its own markup.
+	# [orig: UI_UpdateDeathScreenContent @0x553aef..0x553de3]
 	_spawn_rows = []
 	var labels := PackedStringArray()
-	# Row 0: the default spawn [orig: "'<DEFAULT_SPAWN_KEY>' <HOME>", node 0].
-	var default_text := "'%s' %s" % [
-		_menu_text("DEFAULT_SPAWN_KEY", "D"),
-		_menu_text("HOME", "Home Base"),
-	]
-	labels.append(default_text)
-	_spawn_rows.append({"label": default_text, "param": 0})
-	# One lettered row per team-owned secured deploy zone (see Simulation.
-	# get_deploy_spawn_zones for the witnessed filter + letter/name keying).
+	var zone_names := {}
 	for value in sim.get_deploy_spawn_zones():
 		var zone := value as Dictionary
-		var zone_name := _game_text(
-				"WPNames", String(zone.get("name_key", "")), "Spawn Point")
-		var label := "'%s' %s" % [String(zone.get("letter", "")), zone_name]
+		var key := String(zone.get("name_key", ""))
+		zone_names[key] = _game_text("WPNames", key, "Spawn Point")
+	for value in sim.get_deploy_list_rows(_menu_text("DEFAULT_SPAWN_KEY", "D"),
+			_menu_text("HOME", "Home Base"), zone_names):
+		var row := value as Dictionary
+		# The compiled list has no inline markup channel yet (the row-style
+		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
+		# tags, the list shows them stripped. The sort already ran over the
+		# tagged text, so the row order is retail's.
+		var label := _strip_inline_tags(String(row.get("text", "")))
 		labels.append(label)
-		_spawn_rows.append({"label": label, "param": int(zone.get("param", 0))})
+		_spawn_rows.append({"label": label, "param": int(row.get("value", -1))})
 	# set_widget_items resets the selection to row 0; restore the previous pick by
 	# parameter without emitting (picks ride user clicks only, never the refill).
 	_driver.set_widget_items(list_id, labels)
@@ -230,19 +239,95 @@ func _populate_spawn_list(sim: Simulation) -> void:
 			if int((_spawn_rows[row] as Dictionary).get("param", -1)) == keep_param:
 				_driver.select_row(list_id, row, false)
 				break
+	_apply_statics(sim)
 
 
-# The join deploy screen has no medic/revive leg and no team-change service yet:
-# hide the medic statics (their witnessed show condition is the dead-with-revive
-# case) and the swap/team buttons (retail shows them only for the TDM family; the
-# team-change wire service is unmodeled). [orig: update_death_screen_ui @0x553150]
-func _apply_static_visibility() -> void:
-	for control_name in ["STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG",
-			"STATIC_PSPRESPAWN_MSG1", "SWAP_TEAMS", "BUTTON_TEAMLIST"]:
+# Retail's inline text markup (<cRRGGBB> colour, <b> bold) the compiled list
+# cannot draw yet — stripped for display only.
+static func _strip_inline_tags(text: String) -> String:
+	var out := ""
+	var i := 0
+	while i < text.length():
+		if text[i] == "<":
+			var close := text.find(">", i)
+			if close < 0:
+				return out + text.substr(i)
+			i = close + 1
+			continue
+		out += text[i]
+		i += 1
+	return out
+
+
+# The team-change service is unmodeled: hide the swap/team buttons (retail
+# shows them only for the TDM family). [orig: update_death_screen_ui @0x553150]
+func _hide_team_service_buttons() -> void:
+	for control_name in ["SWAP_TEAMS", "BUTTON_TEAMLIST"]:
 		# A -1 id means this screen simply does not author the control.
 		var id := _driver.widget_id(control_name)
 		if id >= 0:
 			_driver.set_widget_shown(id, false)
+
+
+# The witnessed STATIC show/text rules, refreshed with the list
+# [orig: UI_UpdateDeathScreenContent @0x5536a0]:
+#  * STATIC_RESPAWN_MSG1 (@0x5538e7..0x553a7b): hidden; the penalty timer
+#    "<STROVER_PENALTYTIMER>  <cFF4040><n>" wins; else the wave zone listing the
+#    local player — numbered "'<WPNames name>':  <cFF4040><n>", lettered
+#    "<letter>:  <cFF4040><n>";
+#  * STATIC_LIST_TITLE shown with the list (@0x553ab4);
+#  * STATIC_PSPRESPAWN_MSG1 (@0x553e10): "<STROVER_PSPRESPAWN>  <cFF4040><n>"
+#    while the spawn-target hold runs;
+#  * STATIC_MEDIC_MSG1 + STATIC_CALLMEDIC_MSG (@0x553e74..0x553f60): while the
+#    local revive window runs and the player is not in a seat —
+#    "<STROVER_MEDICTIMER>  <cFF4040><n>" and STROVER_CALLMEDIC formatted with
+#    the MedicReq binding's display string (KeyBinding_FormatDisplayString).
+func _apply_statics(sim: Simulation) -> void:
+	var status: Dictionary = sim.get_deploy_status()
+	var title_id := _driver.widget_id("STATIC_LIST_TITLE")
+	if title_id >= 0:
+		_driver.set_widget_shown(title_id, true)
+	var respawn_id := _driver.widget_id("STATIC_RESPAWN_MSG1")
+	if respawn_id >= 0:
+		var kind := int(status.get("queued_kind", 0))
+		_driver.set_widget_shown(respawn_id, kind != 0)
+		if kind == 1:
+			_driver.set_widget_text(respawn_id, "%s  <cFF4040>%d" % [
+					_game_text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
+					int(status.get("queued_seconds", 0))])
+		elif kind == 2:
+			var zone_index := int(status.get("queued_zone_index", 0))
+			if bool(status.get("queued_numbered", false)):
+				var name_key := "STRWPNAME%03d" % (zone_index + 1)
+				_driver.set_widget_text(respawn_id, "'%s':  <cFF4040>%d" % [
+						_game_text("WPNames", name_key, "Spawn Point"),
+						int(status.get("queued_seconds", 0))])
+			else:
+				_driver.set_widget_text(respawn_id, "%s:  <cFF4040>%d" % [
+						String.chr(65 + zone_index),
+						int(status.get("queued_seconds", 0))])
+	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
+	if psp_id >= 0:
+		var show_psp := bool(status.get("show_psp_respawn", false))
+		_driver.set_widget_shown(psp_id, show_psp)
+		if show_psp:
+			_driver.set_widget_text(psp_id, "%s  <cFF4040>%d" % [
+					_game_text("Overlays", "STROVER_PSPRESPAWN", "Spawn point available in"),
+					int(status.get("hold_seconds", 0))])
+	var medic_id := _driver.widget_id("STATIC_MEDIC_MSG1")
+	var call_id := _driver.widget_id("STATIC_CALLMEDIC_MSG")
+	if medic_id >= 0 and call_id >= 0:
+		var show_medic := bool(status.get("show_medic", false))
+		_driver.set_widget_shown(medic_id, show_medic)
+		_driver.set_widget_shown(call_id, show_medic)
+		if show_medic:
+			_driver.set_widget_text(medic_id, "%s  <cFF4040>%d" % [
+					_game_text("Overlays", "STROVER_MEDICTIMER", "Medic time remaining"),
+					int(status.get("revive_seconds", 0))])
+			var key_label: String = ControlsBindings.model().display_text_for_token("MedicReq")
+			var call_format := _game_text("Overlays", "STROVER_CALLMEDIC", "Press %s to call a medic")
+			_driver.set_widget_text(call_id,
+					call_format % key_label if call_format.contains("%s") else call_format)
 
 
 # Build the compiled menu surface the same way the armory presenter does: the

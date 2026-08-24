@@ -2777,6 +2777,71 @@ bool run_roster_revive_countdown_ticks_once_per_63_frames() {
 	              "revive countdown: an exhausted window never wraps");
 }
 
+// The dead player's medic call: a deployed joiner queues one reliable C2S
+// 0x2E carrying its packed entity index; a HostClient view never sends
+// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b].
+bool run_medic_request_queues_one_reliable_0x2e() {
+	const std::string client_scrk = "CLIENT-MEDIC-SCRK";
+	const std::string server_scrk = "SERVER-MEDIC-SCRK";
+	np::ClientRuntime client("MedicJoiner", [] { return uint64_t{0x10203040}; });
+	if (!expect(!client.queue_medic_request(),
+	            "medic request: an unconnected joiner cannot queue"))
+		return false;
+	client.seed_session(
+			0x55667799u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0007, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_medic_request(),
+	            "medic request: a deployed joiner queues the call"))
+		return false;
+	const std::vector<std::vector<uint8_t>> frame =
+			client.Client_ProcessNetworkFrame(1);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(frame.size() == 1 &&
+			decode_client_session(frame[0], client_scrk, header, messages) &&
+			messages.size() == 2 && messages[0].tag == c2s::MEDIC_REQUEST &&
+			messages[0].payload == std::vector<uint8_t>({0x07, 0x00, 0x00, 0x00}),
+			"medic request: exact 4-B packed entity index on C2S 0x2E"))
+		return false;
+	if (!expect(client.retained_outbound_depth() == 1,
+	            "medic request: the call is reliable"))
+		return false;
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	return expect(!host_view.queue_medic_request(),
+	              "medic request: the host's own view never uplinks");
+}
+
+// The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
+// ladder reads [orig: parse_server_session_variables @0x520440 -> @0x520478].
+bool run_session_vars_exp_fanfare_walk() {
+	auto kv = [](std::vector<uint8_t> &out, const char *key, std::vector<uint8_t> value) {
+		for (const char *p = key; *p; ++p) out.push_back(uint8_t(*p));
+		out.push_back(0);
+		const uint32_t n = uint32_t(value.size());
+		out.push_back(uint8_t(n)); out.push_back(uint8_t(n >> 8));
+		out.push_back(uint8_t(n >> 16)); out.push_back(uint8_t(n >> 24));
+		out.insert(out.end(), value.begin(), value.end());
+	};
+	std::vector<uint8_t> body;
+	kv(body, "SERVERNAME", {'b', 'i', 'g', 'g', 'y', 0});
+	kv(body, "GAMETYPE", {0x20, 0x00, 0x03, 0x00});
+	kv(body, "EXP_FANFARE", {5, 20});
+	kv(body, "MISSIONFILENAME", {'x', 0});
+	if (!expect(np::session_vars_exp_fanfare(body.data(), body.size()) == 0x1405,
+	            "exp_fanfare: lo byte 5 / hi byte 20 land as the u16"))
+		return false;
+	std::vector<uint8_t> absent;
+	kv(absent, "SERVERNAME", {'b', 0});
+	if (!expect(np::session_vars_exp_fanfare(absent.data(), absent.size()) == 0,
+	            "exp_fanfare: an absent key reads 0"))
+		return false;
+	std::vector<uint8_t> truncated(body.begin(), body.begin() + 20);
+	return expect(np::session_vars_exp_fanfare(truncated.data(), truncated.size()) == 0,
+	              "exp_fanfare: a truncated stream fails closed");
+}
+
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
 	ns::LoopbackChannel host_loop;
 	np::ClientRuntime host_view(host_loop);
@@ -4974,6 +5039,8 @@ int main() {
 	                run_zone_timer_channels_share_one_retail_entry() &&
 	                run_zone_presence_updates_only_a_tracked_window() &&
 	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
+	                run_medic_request_queues_one_reliable_0x2e() &&
+	                run_session_vars_exp_fanfare_walk() &&
 	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
 	                run_joiner_zone_timer_preserves_mixed_wire_order() &&
 	                run_host_as_client() &&
