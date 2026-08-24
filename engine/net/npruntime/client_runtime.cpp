@@ -326,6 +326,22 @@ bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
 	return true;
 }
 
+bool ClientRuntime::queue_medic_request() {
+	// The retail gate is is_in_session, not the deploy gate: a dead player is
+	// back in the deploy flow (Driving) and the call still ships. It rides the
+	// held one-shot queue that flushes at the next open send boundary rather
+	// than the deploy-gated gameplay queue [orig: QueueReliableMessage(0x2E)
+	// @0x49b50c, outside the 0x0C/0x2C deploy gate of Client_ProcessNetworkFrame].
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session() ||
+	    !joiner_->has_self_handle())
+		return false;
+	MedicRequest request;
+	request.entity_index = joiner_->self_handle();
+	pre_send_queue_.push_back(
+			make_protocol_message(c2s::MEDIC_REQUEST, encode_medic_request(request)));
+	return true;
+}
+
 bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
 	    !is_deployed() || !joiner_->has_self_handle())
@@ -628,8 +644,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// deployed gate on a fresh death frame before this same client frame reaches its send block.
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
 	}
-	if (role_ == Role::Joiner)
+	if (role_ == Role::Joiner) {
 		stage_reload_notifications_before_body_tick();
+		// The session var the 0x81 tone ladder reads, mirrored from the
+		// connection's server-info landing [orig: g_sessionvar_exp_fanfare].
+		view_.state().exp_fanfare = joiner_->exp_fanfare();
+	}
 
 	// The roster revive countdown precedes the zone-list advance in the frame
 	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA, then @0x42C2E1].

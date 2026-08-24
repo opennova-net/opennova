@@ -80,6 +80,16 @@ void ClientReplicaPipeline::apply_spawn_wave_status(
 		return;
 	}
 	state_.spawn_waves.known = true;
+	// word_A85BC0: -1 at every fold, then the zone handle of the group whose
+	// member list names the local player [orig: @0x4298f6 reset;
+	// @0x429a04..0x429a0b the match]. The viewer handle is the local one.
+	state_.spawn_waves.self_zone_handle = 0xFFFF;
+	for (const SpawnWaveGroup &group : status.groups) {
+		for (uint16_t member : group.members) {
+			if (member == viewer_handle_)
+				state_.spawn_waves.self_zone_handle = group.zone_handle;
+		}
+	}
 	state_.spawn_waves.value = std::move(status);
 	++state_.spawn_waves.updates;
 	state_.mark_changed();

@@ -366,19 +366,9 @@ void Simulation::tick_hud_map_death_gate() {
 	// respawn re-opens nothing — only the M key does (witness at
 	// hud::HudMapControl::on_local_player_dead).
 	if (hud_map_control_.mode == 0) return;
-	bool dead = false;
-	if (joiner_) {
-		// The recipient-specific 0x0A tail is the joiner's authoritative
-		// local health channel (the same read run_frame's death edge uses).
-		dead = runtime_ != nullptr && runtime_->state().local_health <= 0;
-	} else if (world_ && world_->cached.local_player.valid()) {
-		const opennova::world::Entity *e =
-				world_->registry.get(world_->cached.local_player);
-		dead = e != nullptr &&
-				((e->flags | e->engine_flags) &
-						opennova::world::kEntityFlagDead) != 0;
-	}
-	if (dead) hud_map_control_.on_local_player_dead();
+	// The joiner reads its recipient-specific 0x0A health tail, the authority
+	// its entity flags — the one local_player_dead() seam.
+	if (local_player_dead()) hud_map_control_.on_local_player_dead();
 }
 
 bool Simulation::get_hud_map_flip_180() const {

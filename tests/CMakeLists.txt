@@ -915,6 +915,13 @@ target_link_libraries(terrain_static_shadow_alpha_test PRIVATE opennova_runtime)
 target_include_directories(terrain_static_shadow_alpha_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_static_shadow_alpha COMMAND terrain_static_shadow_alpha_test)
 
+# The S2C 0x81 hit-confirm tone ladder (hud/score_fanfare.h).
+add_executable(score_fanfare_test hud/score_fanfare_test.cpp)
+target_link_libraries(score_fanfare_test PRIVATE opennova_runtime)
+target_include_directories(score_fanfare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(score_fanfare_test PRIVATE cxx_std_17)
+add_test(NAME score_fanfare COMMAND score_fanfare_test)
+
 add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -941,6 +948,14 @@ target_link_libraries(client_roster_tags_test PRIVATE opennova_net opennova_runt
 target_include_directories(client_roster_tags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(client_roster_tags_test PRIVATE cxx_std_17)
 add_test(NAME client_roster_tags COMMAND client_roster_tags_test)
+
+# The DEATH-screen facts of the replica fold: the 0x0A sub-block-0 slot timers
+# and the 0x6E self wave zone (client_replica_match.cpp).
+add_executable(client_replica_match_test netsim/client_replica_match_test.cpp)
+target_link_libraries(client_replica_match_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_replica_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(client_replica_match_test PRIVATE cxx_std_17)
+add_test(NAME client_replica_match COMMAND client_replica_match_test)
 
 add_executable(client_replica_endround_test netsim/client_replica_endround_test.cpp)
 target_link_libraries(client_replica_endround_test PRIVATE opennova_net opennova_runtime)
@@ -1431,6 +1446,14 @@ add_test(NAME weapon_inventory COMMAND weapon_inventory_test)
 # Local player view state (the ADS scope ease, the 3P anchor chase, the fov
 # policy) at the fixed 62.5 Hz tick — render-cadence invariance — plus the
 # input-dispatch gates in front of the FSM requests.
+# The DEATH deploy screen's content feed (D-HUD-19 residue b): row loops, sort,
+# occupant insertion quirk, status-line kinds, statics gates.
+add_executable(deploy_screen_feed_test world/deploy_screen_feed_test.cpp)
+target_link_libraries(deploy_screen_feed_test PRIVATE opennova_runtime)
+target_include_directories(deploy_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(deploy_screen_feed_test PRIVATE cxx_std_17)
+add_test(NAME deploy_screen_feed COMMAND deploy_screen_feed_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -250,6 +250,38 @@ bool test_binding_set_assignment() {
   return true;
 }
 
+// The in-game display formatter the death screen's "call a medic" hint uses
+// [orig: KeyBinding_FormatDisplayString @0x496bd0]: the three arms in their
+// witnessed order, the " or " joiner, the per-slot Ctrl/Shift prefixes, the
+// modifier-less reset, the mouse names, and the " *" flag suffix.
+bool test_format_display_string() {
+  BindingRecord rec;
+  rec.primary = 0x39;  // '9' — the MedicReq catalog default
+  CHECK(format_display_string(rec) == "9", "a bare key prints its name");
+  rec.primary_mod = 17;
+  CHECK(format_display_string(rec) == "Ctrl - 9",
+        "a modified slot walks arm 1 with the Ctrl prefix");
+  rec.secondary = 0x20;
+  CHECK(format_display_string(rec) == "Ctrl - 9",
+        "arm 2 resets the buffer for the modifier-less second slot and "
+        "prints the FIRST key behind either slot's modifier");
+  rec.primary_mod = 0;
+  rec.secondary_mod = 16;
+  CHECK(format_display_string(rec) == "Shift - 9",
+        "either slot's Shift lands in front of the first key");
+  rec.secondary = 0;
+  rec.secondary_mod = 0;
+  rec.mouse_mask = 2;
+  CHECK(format_display_string(rec) == "9 or Mouse 2",
+        "a mouse button joins a keyboard slot with ' or '");
+  rec.primary = 0;
+  CHECK(format_display_string(rec) == "Mouse 2", "mouse only");
+  rec.mouse_mask = 2048;
+  CHECK(format_display_string(rec, true) == "Mouse Whl Dn *",
+        "the 0x200 flag appends ' *'");
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -273,6 +305,7 @@ int main() {
   RUN_TEST(test_build_rows_keyboard);
   RUN_TEST(test_build_rows_other_devices);
   RUN_TEST(test_binding_set_assignment);
+  RUN_TEST(test_format_display_string);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

@@ -1467,6 +1467,79 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	host.free()
 
 
+# Kill the joiner's player entity on the AUTHORITY through the real death
+# transaction (route_round_deaths) and pump until the joiner's recipient-local
+# 0x0A tail reads dead.
+func _kill_joiner_from_host(host: Simulation, joiner: Simulation) -> bool:
+	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
+			"the host queued the joiner's death")
+	for _tick in range(120):
+		host.step()
+		joiner.step()
+		if joiner.is_local_player_dead():
+			return true
+		OS.delay_msec(2)
+	return joiner.is_local_player_dead()
+
+
+# The dead player's medic call: alive, the request is refused; dead, one
+# call queues the reliable C2S 0x2E (the serial advances) and arms the
+# 310-tick cooldown that refuses a second call until it runs out.
+# [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b;
+#  Player_UpdatePerFrame @0x4de73e]
+func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	host.configure_host_session({"gametype": 0x30020})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "MedicJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+	assert_false(joiner.is_local_player_dead(), "the joiner deploys alive")
+	assert_false(joiner.request_local_player_medic(),
+			"an alive player cannot call a medic")
+	# The 0x81 hit-confirm edge is consume-once: nothing landed, nothing plays.
+	assert_true(joiner.take_score_feedback().is_empty(),
+			"no score delta landed on the fresh joiner")
+	assert_eq(joiner.local_medic_request_serial(), 0)
+
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's rounds killed the joiner's entity")
+	if not joiner.is_local_player_dead():
+		joiner.free()
+		host.free()
+		return
+	joiner.step()
+	assert_true(joiner.request_local_player_medic(),
+			"a dead joiner queues the medic call")
+	assert_eq(joiner.local_medic_request_serial(), 1,
+			"one call queues one C2S 0x2E")
+	assert_eq(joiner.local_medic_request_cooldown_ticks(), 310,
+			"the send arms the 310-tick cooldown")
+	assert_false(joiner.request_local_player_medic(),
+			"the cooldown refuses a second call")
+	for _tick in range(20):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	assert_eq(joiner.local_medic_request_cooldown_ticks(), 290,
+			"the cooldown counts one per 62.5 Hz tick")
+	assert_eq(joiner.local_medic_request_serial(), 1,
+			"no second call rode the cooldown")
+	joiner.free()
+	host.free()
+
+
 func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> void:
 	var mission := _vehicle_peer_mission()
 	var watercraft_db := _net_watercraft_item_db()

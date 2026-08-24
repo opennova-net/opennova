@@ -130,6 +130,13 @@ opennova::inmatch::TickOutcome Simulation::advance_mission_tick(
 					MissionFrameInput::PRESSED_FIRE) != 0,
 			(p_input.player.pressed_action_bits &
 					MissionFrameInput::PRESSED_RELOAD) != 0);
+	// The medic-call edge is an action binding, not weapon state: it fires
+	// its request immediately like retail's binding dispatch (the gates and
+	// cooldown live in request_local_player_medic).
+	if ((p_input.player.pressed_action_bits &
+				MissionFrameInput::PRESSED_MEDIC_REQUEST) != 0) {
+		request_local_player_medic();
+	}
 
 	const int64_t sim_start = Time::get_singleton()->get_ticks_usec();
 	const bool did_tick = advance_world_tick();

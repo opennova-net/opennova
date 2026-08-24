@@ -57,6 +57,11 @@
 // I/O lives here — the owner pumps bytes.
 namespace opennova::np {
 
+// The server-info VarList walk for EXP_FANFARE (u16, 0 when absent)
+// [orig: parse_server_session_variables @0x520440, store @0x520478].
+uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len);
+
+
 enum class TerrainTilState : uint8_t {
 	Absent = 0,
 	Receiving = 1,
@@ -480,6 +485,14 @@ public:
 	// stage a stalled join is parked in). Not a wire surface.
 	const char *post_auth_stage_name() const;
 	bool in_match() const { return phase_ == Phase::InMatch; }
+	// The authenticated session (retail g_napi_np_ctx.is_in_session): Driving
+	// or InMatch — a dead player re-entering the deploy flow is still in it.
+	bool in_session() const { return phase_ == Phase::Driving || phase_ == Phase::InMatch; }
+	// The host VarList's EXP_FANFARE u16 (lo byte = the KILLTONE threshold, hi
+	// byte = the HEADSHOTTONE threshold) landed from the reassembled S2C 0x60
+	// server-info transfer [orig: parse_server_session_variables @0x520440,
+	// the store @0x520478 -> g_sessionvar_exp_fanfare @0x24d5a10]. 0 = unset.
+	uint16_t exp_fanfare() const { return exp_fanfare_; }
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
 	// The server-assigned team latched from the S2C 0x04 tail byte, and re-latched by the
@@ -564,6 +577,9 @@ private:
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
 	void retain_mission_metadata_chunk(const FileTransferChunk &chunk);
+	// Accumulate the S2C 0x60 server-info transfer and, at its final chunk,
+	// walk the `[key\0][u32 len][bytes]` VarList for EXP_FANFARE.
+	void retain_server_info_chunk(const FileTransferChunk &chunk);
 	void retain_terrain_load_page(const std::vector<uint8_t> &body);
 	void reset_terrain_load();
 	void invalidate_terrain_load();
@@ -661,6 +677,9 @@ private:
 	uint32_t mp_attributes_ = 0; // S2C 0x64 fixed session block, offset 44
 	uint32_t mission_metadata_transfer_id_ = 0;
 	uint32_t mission_metadata_total_size_ = 0;
+	uint32_t server_info_transfer_id_ = 0;
+	std::vector<uint8_t> server_info_bytes_;
+	uint16_t exp_fanfare_ = 0;
 	std::array<uint8_t, 4> mission_metadata_mp_bytes_{};
 	uint8_t mission_metadata_mp_byte_mask_ = 0;
 	std::string server_name_;   // authoritative S2C 0x7B field 3

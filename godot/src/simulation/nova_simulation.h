@@ -656,6 +656,8 @@ private:
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
 	uint32_t joiner_environment_revision_seen_ = 0;
+	// The 0x81 score-feedback edge cursor (ClientScoreFeedback::updates).
+	uint32_t score_feedback_updates_seen_ = 0;
 	// Last authoritative S2C 0x5A grant installed into the local slot pool.
 	// Requests may rebuild optimistically, but only a newer host grant becomes
 	// the durable spawn/respawn kit.
@@ -864,6 +866,12 @@ private:
 	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
+	// The client medic-call cooldown (retail dword_B76804): 310 ticks from the
+	// send, one per tick, cleared on the local death edge.
+	int medic_request_cooldown_ticks_ = 0;
+	int medic_request_serial_ = 0;
+	bool local_dead_edge_seen_ = false;
+	void tick_local_medic_cooldown();
 	// The FP viewmodel motion-lead tracker (per render frame) and the local
 	// entity's per-62.5Hz-tick movement delta it samples.
 	opennova::world::PlayerViewMotionLead fp_motion_lead_{};
@@ -1237,6 +1245,12 @@ public:
 	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
 	// revision. Empty means no new authoritative sample.
 	Dictionary take_join_environment_update();
+	// The S2C 0x81 hit-confirm edge: {} unless a positive/negative score delta
+	// landed since the last take, else {score, delta, tone} with the tone name
+	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
+	// 2D interface sound behind the enable_slotmachine setting
+	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0; hud/score_fanfare.h].
+	Dictionary take_score_feedback();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
 	// bytes are exposed only in COMPLETE; the explicit state distinguishes a
@@ -1279,6 +1293,26 @@ public:
 	// spawn-zone registry index. Row 0 (the Default Spawn, param 0) is the shell's.
 	// [orig: UI_UpdateDeathScreenContent @0x5536a0]
 	TypedArray<Dictionary> get_deploy_spawn_zones();
+	// The compiled SPAWNPOINTS_LIST rows {text, value}: the engine builder's two
+	// witnessed loops (world/deploy_screen_feed.h) over the zone rows above, the
+	// team colour tag, the Menu default-row tokens and the embedder-resolved
+	// WPNames strings (name_key -> text). value 0 = default, index+1 = zone,
+	// -1 = occupant/blank (never a pick). [orig: UI_UpdateDeathScreenContent @0x5536a0]
+	TypedArray<Dictionary> get_deploy_list_rows(const String &p_default_key,
+			const String &p_default_home, const Dictionary &p_zone_names);
+	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
+	// wave line, the psp/medic show gates, and the medic-call cooldown.
+	Dictionary get_deploy_status();
+	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
+	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
+	// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b]
+	bool request_local_player_medic();
+	int local_medic_request_cooldown_ticks() const;
+	int local_medic_request_serial() const;
+	// The rtxt "Server" table's STRSRV_MEDREQ format for the host's broadcast.
+	void set_server_text(const String &p_medic_request_format);
+	// The one role-agnostic read of the local player's dead bit.
+	bool local_player_dead() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an
@@ -1942,6 +1976,12 @@ public:
 	// ERR_UNAVAILABLE without a live sim, ERR_INVALID_PARAMETER for a missing
 	// AI index, and OK only after both authoritative mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
+	// Authority test seam: queue a RoundDeath for the player entity at `handle`
+	// (killer = the local player) so the next host tick runs the witnessed
+	// death transaction (route_round_deaths: 0x13 fan, 0x52 camera, 0x54 medic
+	// state, the dead flag on the 0x0A record). Not the health setter above:
+	// remote players are not AI rows.
+	Error debug_kill_player_entity(int p_handle);
 	// Probe seam: teleport an AI entity (mission-space coords) through both
 	// position stores, for probes defeated by mission geography. Uses the same
 	// truthful Error contract as debug_set_entity_health.

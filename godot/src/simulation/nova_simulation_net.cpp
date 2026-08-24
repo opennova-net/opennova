@@ -341,6 +341,7 @@ void Simulation::host_pump() {
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
+	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
 	// The host's measurable net leg for the F3 Stats board: the ClientState
 	// fold. The S2C serialize/emit half rides inside np::host_session_pump
 	// (fused with the logic tick) and stays inside the Sim step number until
@@ -544,7 +545,10 @@ void Simulation::joiner_pump() {
 	hooks.sync_mounted_input_heading =
 			[this] { sync_local_mounted_input_heading(); };
 	hooks.tick_view = [this] { tick_local_player_view(); };
-	hooks.tick_weapon = [this] { tick_local_player_weapon(); };
+	hooks.tick_weapon = [this] {
+		tick_local_player_weapon();
+		tick_local_medic_cooldown();
+	};
 	joiner_bridge_.pump(ctx, hooks);
 	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
 	// World's per-class ATTRIBUTES words follow it the same frame (retail: the
@@ -1312,11 +1316,16 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 	// def present, team match, SECURED (a numbered zone lists only at full control:
 	// the zone-timer EntryById[9] >= [10] gate), attrib 0x40000; letter = 'A' +
 	// registry index, name = WPNames/STRWPNAME%03d(index+1)]. The local BMS owns
-	// membership/letter identity; live S2C 0x6F/0x53 owns team + control.
+	// membership/letter identity; live S2C 0x6F/0x53 owns team + control. Every
+	// TEAM zone is emitted with its `secured` verdict: the second (occupant)
+	// loop of the populate has no secured gate, so the engine builder decides
+	// which rows list and where the occupants land.
 	TypedArray<Dictionary> rows;
 	if (!world_ || !joiner_ || !runtime_) return rows;
 	const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
 	const uint8_t team = runtime_->assigned_team();
+	const opennova::netsim::ClientState &cs = runtime_->state();
+	const uint16_t self_handle = runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu;
 	for (size_t i = 0; i < reg.entries.size(); ++i) {
 		const opennova::world::Entity *e = world_->registry.get(reg.entries[i]);
 		if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
@@ -1336,11 +1345,44 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 			}
 		}
 		if (effective_team != team) continue;
-		if (e->zone_number != 0 && effective_control < effective_limit) continue;
 		Dictionary row;
 		row["param"] = static_cast<int>(i) + 1;
 		row["letter"] = String::chr('A' + static_cast<int>(i));
 		row["name_key"] = vformat("STRWPNAME%03d", static_cast<int>(i) + 1);
+		row["secured"] = !(e->zone_number != 0 && effective_control < effective_limit);
+		// The 0x6E wave group on this zone: its countdown (entity+548) and the
+		// queued members, named through the roster the way retail reads the
+		// member entity's Name (the player entity's name IS the roster name)
+		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b].
+		int wave_countdown = 0;
+		Array occupants;
+		if (cs.spawn_waves.known) {
+			for (const opennova::SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
+				if (g.zone_handle != e->handle.packed) continue;
+				wave_countdown = g.wave_countdown;
+				for (uint16_t member : g.members) {
+					Dictionary o;
+					o["handle"] = static_cast<int>(member);
+					std::string name;
+					const opennova::world::EntityHandle mh{member};
+					for (const opennova::netsim::ClientRosterSlot &slot : cs.roster) {
+						if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) {
+							name = slot.name;
+							break;
+						}
+					}
+					if (name.empty()) {
+						if (const opennova::netsim::ClientEntityState *row_state = cs.find(member))
+							name = row_state->name;
+					}
+					o["name"] = String::utf8(name.c_str());
+					o["self"] = member == self_handle;
+					occupants.push_back(o);
+				}
+			}
+		}
+		row["wave_countdown"] = wave_countdown;
+		row["occupants"] = occupants;
 		rows.push_back(row);
 	}
 	return rows;

@@ -2046,6 +2046,11 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Retain it between phase cycles, exactly like the client global.
 		// [orig: NapiNPClientMsg_0x00A @0x430064]
 		state_.preround_delay_seconds = fu.weapon.preround_timer;
+		// The DEATH screen's three slot timers ride the same sub-block
+		// [orig: @0x430084 / @0x43009f / @0x4300c3].
+		state_.respawn_penalty_seconds = fu.weapon.slot_state360;
+		state_.local_revive_seconds = fu.weapon.slot_state368;
+		state_.spawn_hold_seconds = fu.weapon.slot_state364;
 	}
 	if (fu.objective.present) {
 		state_.objective_won = static_cast<uint32_t>(fu.objective.state[0]);

@@ -112,6 +112,15 @@ PackedInt32Array ControlsModel::godot_keys_for_token(const String &p_token) cons
 	return out;
 }
 
+String ControlsModel::display_text_for_token(const String &p_token) const {
+	const int index = bindings_.index_of_token(p_token.utf8().get_data());
+	const opennova::controls::BindingRecord *r = bindings_.record(index);
+	if (r == nullptr) {
+		return String();
+	}
+	return String::utf8(opennova::controls::format_display_string(*r).c_str());
+}
+
 bool ControlsModel::is_token_pressed(const String &p_token) const {
 	const int index = bindings_.index_of_token(p_token.utf8().get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
@@ -276,6 +285,8 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::godot_keys_for_token);
 	ClassDB::bind_method(D_METHOD("is_token_pressed", "token"),
 			&ControlsModel::is_token_pressed);
+	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
+			&ControlsModel::display_text_for_token);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);
