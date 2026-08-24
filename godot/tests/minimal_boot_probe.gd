@@ -44,8 +44,39 @@ func _run() -> void:
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			_fail("player never spawned (mission load stalled?)")
 			return
+	# The SP listen server auto-spawns through the retail marker chain keyed on the mission's own
+	# game-type word; a wrong word finds no start and parks the player at the origin
+	# (the post-#564 regression). Pin the spawn to the authored 6001 player start.
+	var sim = world.get_sim()
+	var spawn_pos: Vector3 = sim.get_local_player_position()
+	var mission := MissionData.new()
+	if mission.open_from_resource_root(world.get_resource_root(), bms) != OK:
+		_fail("could not re-open %s to read its player start" % bms)
+		return
+	# The word itself: the SP listen server seeds g_GameType from the mission's attrib mode (no
+	# multiplayer bit -> stock Co-op 0x10020), never the GameConfig default.
+	var expected_game_type := int(NetProtocol.game_type_for_mission_mode(int(mission.get_game_mode())))
+	var session_game_type := int(sim.get_session_game_type())
+	if session_game_type != expected_game_type:
+		_fail("session game type 0x%X, expected the mission-derived 0x%X" % [
+				session_game_type, expected_game_type])
+		return
+	var start_marker := Vector3.INF
+	for row in mission.get_all_entities():
+		if int(row.get("type_id", 0)) == 6001:
+			start_marker = MissionObjectPlacer.bms_to_godot_position(row.get("position", Vector3.ZERO))
+			break
+	if start_marker == Vector3.INF:
+		_fail("%s authors no 6001 player start" % bms)
+		return
+	var start_xz := Vector2(start_marker.x, start_marker.z)
+	var spawn_xz := Vector2(spawn_pos.x, spawn_pos.z)
+	if start_xz.distance_to(spawn_xz) > 1.0:
+		_fail("player spawned at %s, not the 6001 player start at %s" % [spawn_pos, start_marker])
+		return
 	var settle_start := Time.get_ticks_msec()
 	while float(Time.get_ticks_msec() - settle_start) / 1000.0 < SETTLE_MISSION_SECONDS:
 		await process_frame
-	print("PROBE PASS: %s booted from %s and ran %.1f s" % [bms, res_dir, SETTLE_MISSION_SECONDS])
+	print("PROBE PASS: %s booted from %s, spawned at %s (6001 start %s) and ran %.1f s" % [
+			bms, res_dir, spawn_pos, start_marker, SETTLE_MISSION_SECONDS])
 	quit(0)

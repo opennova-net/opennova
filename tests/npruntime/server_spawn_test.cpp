@@ -19,6 +19,7 @@
 #include <world/ai.h>
 #include <world/entity.h>
 #include <world/game_type.h>
+#include <npwire/game_type.h> // for_mission_mode: the SP/offline g_GameType seed
 #include <world/player_spawn.h> // kPlayerInfantryTypeId
 #include <world/spawn_select.h>
 #include <world/world.h>
@@ -427,6 +428,55 @@ int main() {
 				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
 			}
 		}
+	}
+
+	// The standalone SP host: a campaign mission authors ONLY the Co-op 6001 start (every
+	// retail 00TR*/CP* .bms), and retail's spawn chain reaches it only through the stock
+	// Co-op g_GameType word (0x10020) the mission's attrib mode implies — the word the SP
+	// bring-up must seed into GameConfig before the auto-spawn. A GameConfig left at the
+	// default 0 walks the DM 6095/6002 chain, finds nothing, and parks the host player at
+	// the origin (the post-#564 SP spawn regression). [orig: AI_GetTaskTypeFromFlags
+	// @0x40DAE0 -> Game_StartMission @0x524360; Server_PositionPlayerForSpawn @0x50CF60]
+	{
+		auto sp_spawn_position = [](uint32_t game_type, w::Vec3 &out) {
+			w::World sp_world;
+			w::AiSystem sp_ai;
+			sp_world.ai = &sp_ai;
+			sp_world.registry.configure_pool(0, 16);
+			sp_world.registry.configure_pool(3, 16);
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = 6001; // the Co-op fallback start, 00TRa's only player start
+			start.position = {297.81f, -409.12f, 27.14f};
+			start.yaw = 45;
+			sp_world.registry.spawn(3, start);
+
+			ns::LoopbackChannel sp_loop;
+			np::NapiNPServerCtx sp_ctx;
+			np::GameConfig sp_settings;
+			sp_settings.server_name = "SINGLEPLAYERGAME";
+			sp_settings.max_players = 1;
+			sp_settings.game_type = game_type;
+			np::test::bring_up_host(sp_ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+			                        /*host_key=*/0, &sp_loop, sp_settings);
+			sp_ctx.world = &sp_world;
+			np::Server_InitNewRoundState(sp_ctx);
+			if (np::Server_ProcessPendingPlayerSpawns(sp_ctx, sp_world) != 1) return false;
+			const w::Entity *sp_player = sp_world.registry.get(sp_world.cached.local_player);
+			if (sp_player == nullptr) return false;
+			out = sp_player->position;
+			return true;
+		};
+		w::Vec3 seeded{};
+		if (!expect(sp_spawn_position(opennova::game_type::for_mission_mode(0), seeded),
+		            "SP host spawns under the mission-derived stock Co-op word")) return 1;
+		if (!expect(seeded.x == 297.81f && seeded.y == -409.12f,
+		            "stock Co-op word (0x10020) reaches the 6001 start marker")) return 1;
+		w::Vec3 unseeded{};
+		if (!expect(sp_spawn_position(0, unseeded),
+		            "SP host still spawns under a default (0) game type")) return 1;
+		if (!expect(unseeded.x == 0.0f && unseeded.y == 0.0f,
+		            "the default 0 word walks the DM 6095/6002 chain past 6001 and lands at the origin")) return 1;
 	}
 
 	std::printf("OK\n");

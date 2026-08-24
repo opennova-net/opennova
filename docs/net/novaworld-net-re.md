@@ -1575,7 +1575,12 @@ pool-1-then-pool-2 numbered team entity, full parent-transformed poses, the shar
 and the picked-zone 6007 scatter. No cross-family safety net or legacy overload remains. The only
 placement input still unwitnessed is the runtime-set model-userpoint name; the port therefore takes
 the cited `+0x10000` no-userpoint arm. `spawn_select_test` pins every branch, including 00TRa's
-6001-only stock-Co-op shape.
+6001-only stock-Co-op shape. The chain is only as good as the `g_GameType` word it is handed: the
+standalone SP listen host (no host dialog) seeds its `GameConfig::game_type` from the mission's
+attrib mode (`Simulation::mission_game_type`, the `for_mission_mode` map) before the bring-up
+auto-spawn — a default 0 there walks the DM 6095/6002 chain past every campaign mission's 6001
+starts and parks the player at the origin (the post-#564 SP spawn regression, 2026-08-24;
+`npruntime_server_spawn` pins both words).
 
 ### 5.3 Tag direction asymmetry (durable warning)
 

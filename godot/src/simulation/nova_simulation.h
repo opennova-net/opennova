@@ -1347,9 +1347,16 @@ public:
 	// wired). Returns false if no mission is loaded or pool 0 is full. The player then runs
 	// the infantry motor from input (set_player_input), not AI think.
 	bool spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team);
+	// The session g_GameType word an SP/offline mission implies: the mission's attrib mode
+	// through the catalog's for_mission_mode map (no multiplayer bit -> stock Co-op 0x10020).
+	// The listen host seeds its GameConfig from it before the auto-spawn, the same word the
+	// LAN-host dialog derives on the GDScript side (HostSessionConfig.game_type_auto).
+	// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360, see
+	// docs/net/novaworld-net-re.md 5.2c)
+	uint32_t mission_game_type() const;
 	// Spawn the host's own player at the mission's player-START marker, selected the way the
 	// original engine does — by game type, FARTHEST from the enemy set — NOT at any NPC's
-	// position (net-re §5.2c). Single-player resolves the type-6002 start marker. Call AFTER a
+	// position (net-re §5.2c). A stock SP mission resolves the Co-op 6094 -> 6001 chain. Call AFTER a
 	// mission is loaded. Returns: 1 = spawned at a real start marker; 0 = no start marker, spawned
 	// at a safe fallback origin (never an NPC); -1 = failed (no mission / pool 0 full).
 	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
