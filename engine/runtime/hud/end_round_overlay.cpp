@@ -78,12 +78,18 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 			head.args.push_back(literal_arg(in.player_names[0]));
 			have = true;
 		}
-		// An empty selection (or an empty string) falls to STROVER1 with the
-		// "!Mission Completed" fallback; the presenter applies the same
-		// empty-string fold when the key resolves to "" [orig: LABEL_30 ->
-		// GameText_GetStringWithFallback("Overlays", "STROVER1", ...)].
+		// No selection falls straight to STROVER1 with the "!Mission
+		// Completed" fallback. A SELECTED key that resolves to an empty
+		// string re-looks-up Overlays/STROVER1 at draw time (the fold marker;
+		// the presenter applies it) — not the line's own fallback, which
+		// covers only a missing key. [orig: LABEL_30 @0x5b7e59 ->
+		// GameText_GetStringWithFallback("Overlays", "STROVER1",
+		// "!Mission Completed") @0x5b7e5b]
 		if (!have) head = key_line("STROVER1", 300, "!Mission Completed");
-		else head.fallback = "!Mission Completed";
+		else {
+			head.fallback = "!Mission Completed";
+			head.fold = EndRoundEmptyFold::kHeadlineStrover1;
+		}
 		out.push_back(head);
 	}
 
@@ -203,6 +209,12 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 			}
 		}
 		if (have) {
+			// A selected second line that resolves to an empty string draws
+			// nothing and leaves y at 350 — the presenter collapses it via the
+			// fold marker so the score lines start at 382, not 414.
+			// [orig: LABEL_144 @0x5b83e5 — draw @0x5b83fe and the y=382 store
+			//  @0x5b8406 run only when text_buf[0]]
+			line.fold = EndRoundEmptyFold::kCollapse;
 			out.push_back(line);
 			y = 382;
 		}

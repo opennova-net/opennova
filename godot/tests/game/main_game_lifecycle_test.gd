@@ -421,18 +421,17 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 	_write_pff(packed_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
 	_write_pff(packed_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
 	ResourceDirSettings.set_game("jo")
-	var shell = autofree(preload("res://game/main_game.gd").new())
 
-	assert_null(shell.mount_boot_root(loose_dir, false),
+	assert_null(BootRootMount.mount(loose_dir, false),
 			"without the flag a loose-only dir keeps retail's fatal mount error")
-	var fallback: ResourceRoot = shell.mount_boot_root(loose_dir, true)
+	var fallback: ResourceRoot = BootRootMount.mount(loose_dir, true)
 	assert_not_null(fallback, "--loose-root plays the loose authoring dir")
 	if fallback != null:
 		assert_false(fallback.is_runtime_mount(),
 				"the fallback is the editor's loose mount, not a packed install")
 		assert_eq(fallback.read_file("alpha.trn").get_string_from_utf8(), "loose trn")
 		fallback.clear()
-	var packed: ResourceRoot = shell.mount_boot_root(packed_dir, true)
+	var packed: ResourceRoot = BootRootMount.mount(packed_dir, true)
 	assert_not_null(packed)
 	if packed != null:
 		assert_true(packed.is_runtime_mount(),
