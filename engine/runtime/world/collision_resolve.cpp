@@ -111,7 +111,7 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
 int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, ResolveState &state,
                                        int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                                        int32_t capsule_bottom, int32_t capsule_top,
-                                       int32_t heading, int32_t body_pitch, bool is_player,
+                                       int32_t heading, int32_t body_pitch, bool is_player_class,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
                                        uint32_t anim_state_flags, int16_t &health,
                                        EntityHandle *out_ground,
@@ -162,7 +162,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             // x2-for-both; the §22 per-tick -208 + `pos += vel` port restores
             // the witnessed split — a mismatched undo here leaks per gravity
             // tick through the skip band (the standing rise-and-snap sawtooth).
-            pos[2] -= is_player ? vel_z : 2 * vel_z;
+            pos[2] -= is_player_class ? vel_z : 2 * vel_z;
             vel_z = 0;
             return 0; // [orig: skip path returns 0 @ 0x4b2cec]
         }
@@ -278,8 +278,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // Mask bit 0x1 arms the inflated CL recontact test while the ladder latch
     // rides; retail recomputes the arg per query, so a mid-loop fresh entry
     // upgrades the remaining candidates. [orig: v137 + 2*v130 @ 0x4b2f7c/0x4b35af]
-    q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
-    q.query_is_player = is_player;
+    q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player_class ? 2 : 0));
+    q.query_is_player = is_player_class;
 
     int32_t total_force[3] = {0, 0, 0};
     LadderContact ladder;
@@ -314,7 +314,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 // Retail recomputes the mask argument at every query, so a fresh
                 // entry upgrades the remaining candidates to recontact mode.
                 // [orig: v137 + 2*v130 @ 0x4b2f7c / @ 0x4b35af]
-                q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
+                q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player_class ? 2 : 0));
                 ContactResult res;
                 const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
                 const Entity *target_entity = world.registry.get(ch);
@@ -372,7 +372,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                             // player class bit or the AI climb order besides a
                             // previous latch. [orig: @ 0x4b3271 / @ 0x4b325d]
                             if ((cur_flags & kEntityFlagDead) == 0 &&
-                                (on_ladder || is_player || ladder_io->ai_wants_climb)) {
+                                (on_ladder || is_player_class || ladder_io->ai_wants_climb)) {
                                 const int32_t height_diff =
                                     ladder.anchor[2] - ladder_io->tick_start_z; // [orig: @ 0x4b327d]
                                 bool latched = false;
@@ -397,7 +397,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                     const bool player_gate =
                                         (height_diff < 0 || facing_err < 715827840) &&
                                         (height_diff > 0) == (view_pitch > 0);
-                                    if (!is_player || player_gate) {
+                                    if (!is_player_class || player_gate) {
                                         latched = true;
                                         // Snap onto the anchor column. Below the
                                         // anchor the stance-picked Z bump breaks
@@ -440,11 +440,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                     last_ladder_frame = ladder; // the persisting globals
                                     // The per-tick alignment chase.
                                     // [orig: @ 0x4b33a4-0x4b3495]
-                                    if (is_player) {
-                                        // Players ease: one sixteenth of the yaw
-                                        // error moves the view yaw AND the body
-                                        // heading; the local mouse accumulator
-                                        // inherits it through the embedder
+                                    if (is_player_class) {
+                                        // Every class-bit body eases (@ 0x4b33aa):
+                                        // one sixteenth of the yaw error moves
+                                        // the view yaw (+0x10) AND the body
+                                        // heading (+0x8C); only the LOCAL entity
+                                        // drags g_LocalPlayerLookYaw along
+                                        // (@ 0x4b33ca), which the embedder's
+                                        // mouse accumulator inherits through the
                                         // write-back. [orig: (delta+8)>>4
                                         // @ 0x4b33bc; g_LocalPlayerLookYaw @ 0x4b33d2]
                                         if (ladder_io->body_heading != nullptr) {
@@ -647,9 +650,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     // Leaving the ladder: latched at resolve start, nothing re-latched, a live
-    // player body — push 0.375u along +bodyHeading (over the lip on a natural
-    // top-out) and arm the local pitch restore. [orig: @ 0x4b3c5c-0x4b3cf9]
-    if (ladder_io != nullptr && was_on_ladder && !ladder_entity.valid() && is_player &&
+    // class-bit body — push 0.375u along +bodyHeading (over the lip on a natural
+    // top-out; @ 0x4b3c78) and, for the LOCAL entity only (@ 0x4b3cdc), arm the
+    // pitch restore. [orig: @ 0x4b3c5c-0x4b3cf9]
+    if (ladder_io != nullptr && was_on_ladder && !ladder_entity.valid() && is_player_class &&
         (ent == nullptr || ((ent->flags | ent->engine_flags) & kEntityFlagDead) == 0) &&
         ladder_io->body_heading != nullptr) {
         const double rad = static_cast<double>(*ladder_io->body_heading) *
@@ -739,7 +743,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                                         int32_t vel_xy[2], int32_t &vel_z,
                                         int32_t capsule_bottom, int32_t capsule_top,
-                                        bool is_player, uint32_t tick, int32_t anim_state_id,
+                                        bool is_player_class, uint32_t tick, int32_t anim_state_id,
                                         uint32_t anim_state_flags, const ReplicaPeer *peers,
                                         int32_t peer_count, uint16_t exclude_handle,
                                         uint32_t *entity_flags, EntityHandle *out_ground) {
@@ -783,7 +787,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const int32_t clearance = resolve_entity(
         world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
-        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player,
+        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
         /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
         health_dummy, out_ground);
     replica_peers_ = nullptr;
