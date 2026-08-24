@@ -164,9 +164,6 @@ enum class DeathMotionMode : uint8_t {
 inline constexpr uint32_t kItemAttribMoveCallback = 0x1u;
 inline constexpr uint32_t kItemAttribPowerup = 0x2u;
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
-// items.def PlayerControl — the occupant-input gate every player-driven mover
-// tests, and half of the first-person viewmodel suppression rule.
-// [orig: itemDef attrib bit 0x40]
 inline constexpr uint32_t kItemAttribPlayerControl = 0x40u;
 inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
