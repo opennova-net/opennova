@@ -4,6 +4,9 @@
 #include <world/entity.h>
 
 #include <utility>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace opennova::netsim {
 

@@ -15,6 +15,8 @@
 
 #include "world/ai.h"
 #include "world/world.h"
+#include <cstdint>
+#include <string>
 
 namespace opennova::world {
 

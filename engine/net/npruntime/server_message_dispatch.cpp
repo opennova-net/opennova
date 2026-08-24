@@ -38,6 +38,13 @@
 #include <iterator>
 #include <utility>
 #include <io/le.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace opennova::np {
 

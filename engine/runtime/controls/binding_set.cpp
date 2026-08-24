@@ -1,4 +1,8 @@
 #include "controls/binding_set.h"
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace opennova::controls {
 

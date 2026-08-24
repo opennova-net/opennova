@@ -5,6 +5,12 @@
 #include <npwire/ingame_message_id.h>
 
 #include <utility>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace opennova::np {
 

@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace opennova::np {
 namespace {

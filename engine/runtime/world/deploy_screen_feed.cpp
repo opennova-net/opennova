@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace opennova::world {
 
