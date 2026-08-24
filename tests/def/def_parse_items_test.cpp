@@ -301,7 +301,60 @@ static int test_weathervane_minai_default_aip(void) {
     return fails;
 }
 
+/* Retail stamps a physics-default block on every items.def `begin` BEFORE any
+   key is parsed, so an item that declares none of these keys runs on THESE
+   values, not on zero. The load-bearing one is spring_comp: DTruck1 declares
+   none, so retail gives it 20 -> suspension travel 13108, where a zeroed
+   record gives travel 0 and freezes every wheel oscillator for the whole run
+   (AI-PARITY-CONCEPT 6.15h).
+   [orig: ItemDef_AllocateWithDefaults @0x0049E3B0; the `begin` arm calls it
+    at ItemDef_ParseProperty @0x0049EB00] */
+static int test_item_def_allocator_defaults(void) {
+    static const char snippet[] =
+        "begin \"Declares Nothing\"\n"
+        "  id 900001\n"
+        "end\n"
+        "begin \"Overrides Some\"\n"
+        "  id 900002\n"
+        "  spring_comp 55\n"
+        "  mass 11\n"
+        "  flip 10\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
+                               &items) != 0 || items.count != 2) {
+        fprintf(stderr, "FAIL: allocator-defaults snippet did not parse\n");
+        return 1;
+    }
+    const DefItemDef *bare = &items.entries[0];
+    const DefItemDef *over = &items.entries[1];
+    int bad = 0;
+    /* The undeclared record carries retail defaults. */
+    if (bare->spring_comp != 20) { fprintf(stderr, "FAIL: default spring_comp %d != 20\n", bare->spring_comp); bad = 1; }
+    if (bare->climb_speed != 1) { fprintf(stderr, "FAIL: default climb_speed %d != 1\n", bare->climb_speed); bad = 1; }
+    if (bare->torque != 3) { fprintf(stderr, "FAIL: default torque %d != 3\n", bare->torque); bad = 1; }
+    if (bare->mass != 5) { fprintf(stderr, "FAIL: default mass %d != 5\n", bare->mass); bad = 1; }
+    if (bare->shock != 4) { fprintf(stderr, "FAIL: default shock %d != 4\n", bare->shock); bad = 1; }
+    if (bare->lean != 5 || bare->lean_velocity != 5) { fprintf(stderr, "FAIL: default lean pair\n"); bad = 1; }
+    if (bare->pitch != 1 || bare->pitch_velocity != 5) { fprintf(stderr, "FAIL: default pitch pair\n"); bad = 1; }
+    if (bare->flip != 45) { fprintf(stderr, "FAIL: default flip %d != 45\n", bare->flip); bad = 1; }
+    /* Retail sets spring/top_heavy to 0 explicitly - same observable as a
+       zeroed record, asserted so a later change cannot drift them silently. */
+    if (bare->spring != 0 || bare->top_heavy != 0) { fprintf(stderr, "FAIL: spring/top_heavy default\n"); bad = 1; }
+    /* An authored key still wins over the default... */
+    if (over->spring_comp != 55) { fprintf(stderr, "FAIL: authored spring_comp %d != 55\n", over->spring_comp); bad = 1; }
+    if (over->mass != 11) { fprintf(stderr, "FAIL: authored mass %d != 11\n", over->mass); bad = 1; }
+    if (over->flip != 10) { fprintf(stderr, "FAIL: authored flip %d != 10\n", over->flip); bad = 1; }
+    /* ...while its UNdeclared keys still carry the defaults (per-block reset). */
+    if (over->torque != 3 || over->shock != 4) { fprintf(stderr, "FAIL: per-block default reset\n"); bad = 1; }
+    def_free_items(&items);
+    return bad;
+}
 int main(void) {
+    if (test_item_def_allocator_defaults() != 0) {
+        return 1;
+    }
     if (test_light_transfer() != 0) {
         return 1;
     }
