@@ -46,11 +46,6 @@ the code harder to change without helping a retail peer.
 5. This is a full cutover. The old `npruntime/mission_session.*` files, types,
    target, tests, and Godot member are removed. There is no alias,
    compatibility include, deprecation period, or second lifecycle path.
-6. Earlier instructions are evidence, not permanent constraints. When an ADR,
-   plan, or repository mandate conflicts with the cleanest design that still
-   preserves witnessed behavior and wire bytes, amend or supersede it in the
-   same change rather than encoding the conflict into another layer.
-
 The concrete `World` also has stable mission-lifetime identity. It is neither
 copyable nor movable: `EntityCommands` binds the owning world, the default net
 sink points into it, and registered systems retain relationships to it.
