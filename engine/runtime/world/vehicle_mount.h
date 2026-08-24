@@ -165,6 +165,14 @@ void presnap_vehicle_attach_heading(World &world, Entity &occupant,
 void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
                            const Seat &seat);
 
+// A carrier-local point in world space through the carrier's FULL orientation
+// frame — the same Rz(heading)*Ry(-pitch)*Rx(roll) matrix every collision query
+// serves (collision_matrix_from_euler), so seats/exit goals and the collision
+// shell agree on one frame. Retail has exactly one entity orientation matrix
+// serving both. [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over the
+// entity matrix built by Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
+Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local);
+
 enum class SeatSelectionMode : uint8_t {
     Any = 0,
     PassengerOnly,     // command 123: only `sitex`

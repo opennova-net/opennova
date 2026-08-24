@@ -57,21 +57,16 @@ int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
     return static_cast<int32_t>(std::sqrt(dx * dx + dy * dy + dz * dz));
 }
 
-// The chosen seat's world position: seat_local rotated by the vehicle's mission
-// yaw, translated by its origin — the same provider-less frame
-// pose_mounted_occupant uses. This is the modeled seat APPROACH point.
+// The chosen seat's world position through the carrier's FULL orientation
+// frame — the same provider-less frame pose_mounted_occupant uses. This is the
+// modeled seat APPROACH point.
 // [orig: the seat-point builder @0x434df0 feeding rayEnd, frame per
 //  Entity_GetBoneTransformAndOrientation @0x4b0c50]
 void seat_world_position(const Entity &vehicle, const Seat &seat, int32_t out[3]) {
-    constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
-    const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
-    const double ca = std::cos(a), sa = std::sin(a);
-    const Vec3 &L = seat.seat_local;
-    out[0] = board_to_fixed(vehicle.position.x +
-                            static_cast<float>(L.x * ca - L.y * sa));
-    out[1] = board_to_fixed(vehicle.position.y +
-                            static_cast<float>(L.x * sa + L.y * ca));
-    out[2] = board_to_fixed(vehicle.position.z + L.z);
+    const Vec3 p = entity_local_point_world(vehicle, seat.seat_local);
+    out[0] = board_to_fixed(p.x);
+    out[1] = board_to_fixed(p.y);
+    out[2] = board_to_fixed(p.z);
 }
 
 // [orig: Entity_FindBestSeatSlot @0x4351f0 — the aiComp+148 admit term:

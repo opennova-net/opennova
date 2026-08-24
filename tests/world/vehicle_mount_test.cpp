@@ -517,7 +517,11 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         seat.type = SeatType::Passenger;
         seat.seat_local = {2.0f, 3.0f, 4.0f};
         seat.yaw_offset = 10;
-        const MountedPose expected = {{13.0f, 18.0f, 34.0f}, 100, 4, 5};
+        // The full-frame fallback (yaw 90, pitch 4, roll 5 over seat_local
+        // {2,3,4}): Rz(90-yaw)Ry(-pitch)Rx(roll) on the un-swizzled local —
+        // was {13, 18, 34} while the fallback was yaw-only (the pre-§6.13
+        // stand-in). [orig: @0x4b0c50 over @0x613f40]
+        const MountedPose expected = {{12.726887f, 17.658988f, 34.010455f}, 100, 4, 5};
 
         Entity occupant;
         pose_mounted_occupant(w, occupant, vehicle, seat);
@@ -1632,7 +1636,67 @@ void test_vehicle_hull_stops_at_building() {
 
 }
 
+// The seat/exit frame is the collision frame: entity_local_point_world must
+// (a) reduce to the proven 2D -yaw rotate for flat carriers, and (b) match an
+// independent double-precision Rz(heading)Ry(-pitch)Rx(roll) for rolled ones —
+// the frame the collision shell is posed with (target_view). A yaw-only seat
+// frame under a rolled carrier is the witnessed 00TRg dismount 4-pin
+// (AI-PARITY-CONCEPT §6.13). [orig: @0x4b0c50 over @0x613f40]
+void test_seat_frame_matches_collision_frame() {
+    Entity veh{};
+    veh.position = Vec3{100.0f, 200.0f, 30.0f};
+    const Vec3 L{1.05f, -3.60f, 2.54f}; // DTruck1 sitex00d seat_local
+
+    // (a) flat carrier: bit-compatible with the legacy 2D rotate.
+    for (float yaw : {0.0f, 37.0f, 145.0f, 270.0f}) {
+        veh.yaw = static_cast<int16_t>(yaw);
+        veh.pitch = 0;
+        veh.roll = 0;
+        const Vec3 got = entity_local_point_world(veh, L);
+        const double a = -static_cast<double>(veh.yaw) * 3.14159265358979323846 / 180.0;
+        const double ca = std::cos(a), sa = std::sin(a);
+        CHECK(std::fabs(got.x - (veh.position.x + (L.x * ca - L.y * sa))) < 1e-3);
+        CHECK(std::fabs(got.y - (veh.position.y + (L.x * sa + L.y * ca))) < 1e-3);
+        CHECK(std::fabs(got.z - (veh.position.z + L.z)) < 1e-3);
+    }
+
+    // (b) rolled/pitched carrier vs an independent double-precision euler
+    // composition of the SAME convention the collision matrix builder uses:
+    // Rz(heading) * Ry(-pitch) * Rx(roll) over the RAW model point (seat_local
+    // is pre-swizzled, raw = (L.y, -L.x, L.z)), heading = bam(90 - yaw).
+    veh.yaw = 20;
+    veh.pitch = -6;
+    veh.roll = 16;
+    const Vec3 got = entity_local_point_world(veh, L);
+    const double d2r = 3.14159265358979323846 / 180.0;
+    const double h = (90.0 - static_cast<double>(veh.yaw)) * d2r;
+    const double pt = -static_cast<double>(veh.pitch) * d2r;
+    const double rl = static_cast<double>(veh.roll) * d2r;
+    // raw model frame (un-swizzle), then Rx(roll)
+    double v0[3] = {L.y, -L.x, L.z};
+    double v1[3] = {v0[0], v0[1] * std::cos(rl) - v0[2] * std::sin(rl),
+                    v0[1] * std::sin(rl) + v0[2] * std::cos(rl)};
+    // Ry(pt) (the -pitch already folded into pt)
+    double v2[3] = {v1[0] * std::cos(pt) + v1[2] * std::sin(pt), v1[1],
+                    -v1[0] * std::sin(pt) + v1[2] * std::cos(pt)};
+    // Rz(h)
+    double v3[3] = {v2[0] * std::cos(h) - v2[1] * std::sin(h),
+                    v2[0] * std::sin(h) + v2[1] * std::cos(h), v2[2]};
+    CHECK(std::fabs(got.x - (veh.position.x + v3[0])) < 0.001);
+    CHECK(std::fabs(got.y - (veh.position.y + v3[1])) < 0.001);
+    CHECK(std::fabs(got.z - (veh.position.z + v3[2])) < 0.001);
+    // The property the 4-pin hinged on: a rolled carrier MOVES a laterally
+    // offset point's world z off the flat-frame value (pure roll 25 on a
+    // 1.5-u lateral offset shifts z by 1.5*sin(25) ~= 0.63).
+    veh.yaw = 0;
+    veh.pitch = 0;
+    veh.roll = 25;
+    const Vec3 lat = entity_local_point_world(veh, Vec3{1.5f, 0.0f, 0.0f});
+    CHECK(std::fabs(lat.z - veh.position.z) > 0.5);
+}
+
 int main() {
+    test_seat_frame_matches_collision_frame();
     test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();
     test_remote_player_control_seat_preserves_wire_look();

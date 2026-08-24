@@ -115,17 +115,11 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
 }
 
 // Local-point world position: the same local rotate the per-tick pose applies
-// (pose_mounted_occupant), our stand-in for the posed bone transform
+// (pose_mounted_occupant) through the carrier's FULL orientation frame, our
+// stand-in for the posed bone transform
 // [orig: build_bone_attachment_matrix @0x56c630 in the scan @0x435fe7].
 Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
-    constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
-    const double a = static_cast<double>(-veh.yaw) * kDeg2Rad;
-    const double ca = std::cos(a), sa = std::sin(a);
-    Vec3 p;
-    p.x = veh.position.x + static_cast<float>(local.x * ca - local.y * sa);
-    p.y = veh.position.y + static_cast<float>(local.x * sa + local.y * ca);
-    p.z = veh.position.z + local.z;
-    return p;
+    return entity_local_point_world(veh, local);
 }
 
 Vec3 seat_world_pos(const Entity &veh, const Seat &s) {
