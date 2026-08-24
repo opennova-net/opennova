@@ -1063,6 +1063,30 @@ int main() {
 	expect(world.kill_stats.greenkills_by_player == 1,
 	       "a green NON-person victim tallies nothing [orig: the def+92==3 gate]");
 
+	// --- 2b. The Show Score census: enemy-unit total at mission start counts
+	// non-player, team >= 2 entities with a non-zero items.def unit-class byte;
+	// the defined-subgoal count is the leading authored win-condition run.
+	// [orig: sub_509DC0 @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070] ---
+	{
+		w::Entity unit;
+		unit.net_id = 200;
+		unit.team = 3;
+		unit.kind = w::EntityKind::Item;
+		unit.item_unit_type = 9; // aircraft class folds into the one total
+		world.registry.spawn(0, unit);
+		if (w::Entity *rp = world.registry.get(red_person))
+			rp->item_unit_type = 1; // dead or alive: the census is start-time state
+		w::count_mission_units(world);
+		expect(world.kill_stats.enemy_unit_total == 2,
+		       "census counts team>=2 units with a unit-class byte only");
+		world.subgoals.win_text_ids[1] = 3;
+		world.subgoals.win_text_ids[2] = 7;
+		world.subgoals.win_text_ids[3] = 0; // terminator: slots past it ignored
+		world.subgoals.win_text_ids[4] = 5;
+		expect(w::count_defined_subgoals(world) == 2,
+		       "defined subgoals = the leading non-zero, non-0xFF run");
+	}
+
 	// --- 3. A kill by someone else lands in the by-others family. ---
 	push_death(world, green_person2, red_person);
 	np::Server_TickUpdate(ctx);

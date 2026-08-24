@@ -7,6 +7,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <hud/end_round_overlay.h>
+#include <hud/end_round_statistics.h>
 #include <npruntime/stat_screen_feed.h>
 
 #include <algorithm>
@@ -162,5 +163,43 @@ TypedArray<Dictionary> Simulation::get_end_round_rows() const {
 		d["selected"] = r.selected;
 		out.push_back(d);
 	}
+	return out;
+}
+
+
+Dictionary Simulation::get_end_round_statistics() const {
+	// The SP Show Score panel's counters — the 0xC846xx stat block
+	// (hud/end_round_statistics.h documents the rows). Host-world data only:
+	// the panel's toggle is settable only outside a session, and a joiner has
+	// no tally world. (retail: HUD_DrawEndRoundStatistics @0x5b7600 reads the
+	// block; the toggle gate @0x49bd29 — see net-re §5.68)
+	Dictionary out;
+	if (world_ == nullptr) return out;
+	const opennova::world::World &w = *world_;
+	opennova::hud::EndRoundStatisticsInput in;
+	int32_t won = 0;
+	for (uint32_t mask = w.subgoals.won; mask != 0; mask &= mask - 1) ++won;
+	in.subgoals_won = won; // (retail: 0xC846D0 — one per first SubGoalWon @0x4fd117)
+	in.subgoals_defined = opennova::world::count_defined_subgoals(w);
+	in.enemy_kills = w.kill_stats.enemy_kills_by_player +
+			w.kill_stats.enemy_kills_by_others; // the six buckets folded @0x5b771b
+	in.enemy_unit_total = w.kill_stats.enemy_unit_total;
+	in.team_unit_kills = w.kill_stats.bluekills_by_player +
+			w.kill_stats.team_kills_by_others; // @0x5b77bd
+	in.friendly_unit_kills = w.kill_stats.greenkills_by_player +
+			w.kill_stats.friendly_kills_by_others; // @0x5b783c
+	// The raised box: the between-rounds gate with a team-1 win
+	// (retail: g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b).
+	in.raised = w.match.outcome().ended && w.match.outcome().winner_team == 1;
+	out["raised"] = in.raised;
+	TypedArray<Dictionary> rows;
+	for (const opennova::hud::EndRoundStatisticsRow &row :
+			opennova::hud::end_round_statistics_rows(in)) {
+		Dictionary d;
+		d["label_key"] = String::utf8(row.label_key);
+		d["value"] = String::utf8(row.value.c_str());
+		rows.push_back(d);
+	}
+	out["rows"] = rows;
 	return out;
 }
