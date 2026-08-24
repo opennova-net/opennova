@@ -357,7 +357,7 @@ Minted-and-closed 2026-08-16: **env #37** -> `FIXED` — Water reflection-sample
 | D-COL-2 | Building destroyed/animated section skip not modeled — the itemDef+2192/2193 bone map + the `dword_A8A418` state table skip sections (gated !player); destroyed-wall pass-through rides the destruction system (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
 | D-COL-4 | Eye test point reuses the head column — retail's eye point is `pos + CameraOffset`, unmodeled until the camera entity fields land (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
 | D-COL-7 | Vertical ground probe = bilinear column height vs the `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect — equal for vertical rays on a heightfield; oblique rays use terrain_raycast_refined (full entry: world-wac-ai-re.md §15.5) | C | OPEN | PAR-WORLD |
-| D-COL-8 | Run-over kill / crush + walk-over-body sounds / non-flag attrib-1 waypoint branches + the attrib-2 collision callback / the CD 0x20 door-section vtbl callback / the blocked-push AI latch remain unported. The shared ItemDef branch order and exact attrib-1 flag-family contact producer are now ported; CD containment is detected but doors/lifts remain operationally inert (full entry: world-wac-ai-re.md §15.5) | A | OPEN (flag-family MoveCB leg closed by D-COL-12; listed residuals remain) | PAR-WORLD |
+| D-COL-8 | Run-over kill / crush + walk-over-body sounds / non-flag attrib-1 waypoint branches + the attrib-2 collision callback / the CD 0x20 door-section vtbl callback / the blocked-push AI latch remain unported. The shared ItemDef branch order and exact attrib-1 flag-family contact producer are now ported; CD containment is detected but doors/lifts remain operationally inert (full entry: world-wac-ai-re.md §15.5) | A | OPEN (flag-family MoveCB leg closed 2026-08-23, see the note below; listed residuals remain) | PAR-WORLD |
 | D-COL-10 | PANM rotation types 3/4 route through per-section matrices but `ObjectData::evaluate_panm` passes an identity `view_inverse` where retail derives the matrix from the current global inverse-view matrix — camera-facing/upright billboard parts can pose-mismatch (full entry: world-wac-ai-re.md §15.5) | A | OPEN | PAR-WORLD |
 | D-COL-11 | `LiveRound` has no BB/indoors state: retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`) — a shot inside an interior BB can falsely hit the heightfield; port after the probe radius/state lifetime is pinned (full entry: world-wac-ai-re.md §15.5) | B | OPEN | PAR-WORLD |
 
@@ -365,7 +365,27 @@ Closed 2026-08-15: **D-COL-5** -> `FIXED` — the ladder climb state machine is 
 
 Closed 2026-08-23: **D-COL-6** -> `FIXED` — capture requests now consume the movement resolver's exact authored type-10 Change Team Box contacts. `CollisionWorld::resolve_entity` publishes deduplicated authority source/trigger pairs from pass 0, snapshot-owned remote org2 bodies run that shared collision tail, and `zone_capture_contact_tick` drains the stream with the retail secured-zone/request gates; the former MoveOrder test and trigger-radius fallback are removed `[orig: Entity_ComputeBoneCollisionForce @0x4AE150 flag @0x4AEB7B; callback callsite @0x4B31DD..0x4B3238; Server_OnPlayerTouchCaptureZone @0x500BA0]` (full entry: world-wac-ai-re.md §15.5).
 
-Closed 2026-08-23: **D-COL-12** -> `FIXED` — flag pickup/save/capture no longer scans a gameplay sphere. Successful authority pass-0 contact with an ItemDef whose `MoveCB` bit is set and `Powerup` bit is clear publishes one exact source/target event; both callback classes bypass solid force, and `world::Match` consumes the event in resolver order while repeating retail's source MoveOrder/player/not-dead gates. CTF, FlagBall, Flag Me, and C&C reach the same handler and ordered 0x1E/0x2F/0x12 host transaction `[orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5; sole handler xref @0x4B2FF5; Entity_ProcessWaypointInteraction @0x4AD820]` (`collision`, `match`, `npruntime_round_end`).
+Closed 2026-08-23: **D-COL-8** flag-family MoveCB leg -> `FIXED` (the row stays OPEN for its listed residuals) — flag pickup/save/capture no longer scans a gameplay sphere. Successful authority pass-0 contact with an ItemDef whose `MoveCB` bit is set and `Powerup` bit is clear publishes one exact source/target event; both callback classes bypass solid force, and `world::Match` consumes the event in resolver order while repeating retail's source MoveOrder/player/not-dead gates. CTF, FlagBall, Flag Me, and C&C reach the same handler and ordered 0x1E/0x2F/0x12 host transaction `[orig: Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5; sole handler xref @0x4B2FF5; Entity_ProcessWaypointInteraction @0x4AD820]` (`collision`, `match`, `npruntime_round_end`).
+
+**D-AI-10 KOTH producer correction (2026-08-23):** the competitive-branch
+closure includes the authored hill data path, not only its decision logic.
+Mission promotion preserves type 6006's BMS `wp_distance` as the entity+0 Q16
+radius, the host carries that dword under pool-3 S2C 0x20 flag 0x02, and the
+joining client materializes it back into the shared entity model. Numbered
+capture-zone radius remains the distinct entity+350 u16 field. `[orig:
+Entity_SpawnFromBMSRecord @0x40F157..0x40F173;
+Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
+serialize_entity_pool_to_packet @0x503593..0x5035A9;
+NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
+
+**D-AI-10 co-op producer correction (2026-08-23):** both waypoint-family
+variants now have composed authority-to-wire proof. A real WAC `Win` execution
+ends stock Co-op and a real BMS `RedWin` event ends Objective Co-op; both enter
+the common end transaction from inside `Server_TickUpdate`, emit 0x61/0x1D,
+and consume the script-action tick from the linger. The former direct-latch
+host fixture is removed. `[orig: WacAction_Win @0x4ED4A0;
+EventAction_Dispatch RedWin @0x454495; Server_TickUpdate @0x51DA04;
+Server_ProcessRoundEnd @0x5164F0]`
 
 Closed 2026-08-15: **D-WPN-16** -> `FIXED` — every `instantkillzone` ammo keeps the immediate authority explosion path and Knife adds the effects-only ray with retail's strict terrain → water → PERSON-prox → buildings/items leg order and no bullet-sphere fallback; the PERSON leg's material 1 is the flesh row 23 `[orig: Weapon_RaycastAndSpawnImpact @0x4e8460; legs @0x4e86ad/@0x4e873f/@0x4e87cb; flesh remap @0x4e8880..0x4e8888]` (full entry: net-re §5.60).
 
@@ -527,26 +547,6 @@ CTF/S&D/A&D authored-objective bytes; row zero remains zero. The remaining host
 residuals are spectator/status-word production, not gameplay score authority.
 `[orig: Server_BuildAndBroadcastScoreboard @0x50D960;
 Game_CountAlivePlayersPerTeam @0x5001C0; sub_52C850 @0x52C850]`
-
-**D-AI-10 KOTH producer correction (2026-08-23):** the competitive-branch
-closure includes the authored hill data path, not only its decision logic.
-Mission promotion preserves type 6006's BMS `wp_distance` as the entity+0 Q16
-radius, the host carries that dword under pool-3 S2C 0x20 flag 0x02, and the
-joining client materializes it back into the shared entity model. Numbered
-capture-zone radius remains the distinct entity+350 u16 field. `[orig:
-Entity_SpawnFromBMSRecord @0x40F157..0x40F173;
-Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
-serialize_entity_pool_to_packet @0x503593..0x5035A9;
-NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
-
-**D-AI-10 co-op producer correction (2026-08-23):** both waypoint-family
-variants now have composed authority-to-wire proof. A real WAC `Win` execution
-ends stock Co-op and a real BMS `RedWin` event ends Objective Co-op; both enter
-the common end transaction from inside `Server_TickUpdate`, emit 0x61/0x1D,
-and consume the script-action tick from the linger. The former direct-latch
-host fixture is removed. `[orig: WacAction_Win @0x4ED4A0;
-EventAction_Dispatch RedWin @0x454495; Server_TickUpdate @0x51DA04;
-Server_ProcessRoundEnd @0x5164F0]`
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):

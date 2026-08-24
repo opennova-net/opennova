@@ -136,7 +136,7 @@ struct FrameOutcome {
 	}
 };
 
-	// The session's one real internal seam. Godot and the headless server both
+// The session's one real internal seam. Godot and the headless server both
 // provide an adapter; callers never see the former semantic callback lattice.
 class TickTarget {
 public:
