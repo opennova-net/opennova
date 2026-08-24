@@ -886,7 +886,7 @@ func _maybe_exit_round_cycle() -> void:
 		return
 	if bool(er.get("session_open", true)):
 		return
-	_abort_to_menu("round cycle", "the host's post-round linger expired (mission exit 3)")
+	_abort_to_menu("round cycle", "post-round linger expired (mission exit 3)")
 
 
 func _on_session_lost(reason: String) -> void:
