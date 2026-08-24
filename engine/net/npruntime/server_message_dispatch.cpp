@@ -1108,15 +1108,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			case c2s::AUTO_MEDIC_PREFERENCE: {
 				// One inverse checkbox dword copied to playerSlot+372: zero is
-				// automatic requests enabled, any nonzero value is manual.
-				// [orig: NapiNPServerMsg_SetPlayerValue @0x501BE0;
+				// automatic requests enabled, any nonzero value is manual. A body
+				// shorter than the dword stores 0 (automatic) rather than leaving
+				// the slot untouched; trailing bytes are ignored.
+				// [orig: NapiNPServerMsg_AutoMedicPreference @0x501BE0 (short
+				// body -> 0 @0x501C16, dword copy @0x501C1F);
 				// OPTIONS_AUTOMEDIC @0x5549E7/@0x554E40]
 				AutoMedicPreference preference;
 				size_t consumed = 0;
-				if (decode_auto_medic_preference(
+				conn.link.auto_medic_enabled = !decode_auto_medic_preference(
 						msg.payload.data(), msg.payload.size(),
-						preference, consumed) && consumed == msg.payload.size())
-					conn.link.auto_medic_enabled = preference.enabled;
+						preference, consumed) || preference.enabled;
 				break;
 			}
 			case c2s::CHARATTR_CRC_REPLY:

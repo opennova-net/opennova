@@ -977,7 +977,7 @@ int main() {
 	// NapiNPServer_SendFiltered @0x4C87E0]. The victim disables OPTIONS_AUTOMEDIC
 	// through C2S 0x03, so their death exercises the split branch: medics get state
 	// zero while the victim alone gets the live 120-second revive window [orig:
-	// NapiNPServerMsg_SetPlayerValue @0x501BE0; GameEvent_PlayerDeath @0x516DD0].
+	// NapiNPServerMsg_AutoMedicPreference @0x501BE0; GameEvent_PlayerDeath @0x516DD0].
 	world.registry.get(ha)->player_class = 7;
 	world.registry.get(hb)->player_class = 8;
 	world.registry.get(hc)->player_class = 7;
@@ -993,11 +993,25 @@ int main() {
 	client_b_view.apply(s2c::PLAYER_SYNC, victim_sync);
 	client_c_view.apply(s2c::PLAYER_SYNC, victim_sync);
 	{
+		// A short 0x03 body stores 0 = automatic rather than leaving the slot
+		// untouched [orig: NapiNPServerMsg_AutoMedicPreference @0x501C16].
+		roster[2].link.auto_medic_enabled = false;
+		std::vector<ProtocolMessage> short_pref{
+				make_protocol_message(0x03, {1, 0})};
+		np::dispatch_session_replies(
+				ctx.config, roster[2], short_pref, world.logic_tick,
+				roster, &world);
+		if (!expect(roster[2].link.auto_medic_enabled,
+		            "a short C2S 0x03 body selects automatic medic requests"))
+			return 1;
 		std::vector<ProtocolMessage> manual_medic{
 				make_protocol_message(0x03, {1, 0, 0, 0})};
 		np::dispatch_session_replies(
 				ctx.config, roster[2], manual_medic, world.logic_tick,
 				roster, &world);
+		if (!expect(!roster[2].link.auto_medic_enabled,
+		            "a nonzero C2S 0x03 dword selects manual medic requests"))
+			return 1;
 	}
 	auto advance_second_boundaries = [&](int count) {
 		int crossed = 0;

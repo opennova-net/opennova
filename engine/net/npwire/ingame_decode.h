@@ -1610,9 +1610,9 @@ bool decode_mounted_weapon_slot_selection(
 // profile dword at +1660; zero means the checkbox is enabled, nonzero means a
 // downed player must explicitly request a medic. The authority retains that
 // value at playerSlot+372 and tests only zero versus nonzero.
-// [orig: NetPacket_WriteSessionTick @0x42A400 (misnamed); producer
+// [orig: NetPacket_WriteAutoMedicPreference @0x42A400 (was NetPacket_WriteSessionTick; D-NET-216); producer
 // MultiPlayer_JoinSessionStateMachine @0x56A340; consumer
-// NapiNPServerMsg_SetPlayerValue @0x501BE0]
+// NapiNPServerMsg_AutoMedicPreference @0x501BE0]
 struct AutoMedicPreference {
 	bool enabled = true;
 };
@@ -1652,7 +1652,7 @@ bool decode_death_camera_target(const uint8_t *body, size_t len,
 // retained medic-request flag. The handler resolves entity -> roster slot and
 // splits the byte into playerSlot+16/+44.
 // [orig: NetPacket_WriteEntityHandleWithByte @0x507030;
-// NapiNPClientMsg_0x054 @0x429040 -> PlayerSlot_SetTypeAndSubtype @0x4348D0]
+// NapiNPClientMsg_0x054 @0x429040 -> PlayerSlot_SetDownedState @0x4348D0]
 struct PlayerDownedState {
 	uint16_t entity_handle = 0xFFFF;
 	uint8_t revive_seconds = 0;
