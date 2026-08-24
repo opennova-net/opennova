@@ -94,7 +94,9 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 	// The rtxt "Server" table's STRSRV_MEDREQ format the host's medic
 	// broadcast prints the caller's name into (Server_BroadcastMedicRequest
 	// @0x515390, Lane 1's handler reads NapiNPServerCtx::medic_request_format).
-	ctx_.medic_request_format = p_medic_request_format.utf8().get_data();
+	opennova::np::ServerTextTable text;
+	text.medic_request_format = p_medic_request_format.utf8().get_data();
+	opennova::np::set_server_text(ctx_, std::move(text));
 }
 
 Dictionary Simulation::get_deploy_status() {

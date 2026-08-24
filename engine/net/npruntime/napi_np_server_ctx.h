@@ -125,11 +125,6 @@ struct NapiNPServerCtx {
 	// (golden frame 160).
 	std::vector<std::pair<uint8_t, uint8_t>> weapon_restrictions;
 
-	// The rtxt "Server" table's STRSRV_MEDREQ format the medic-request
-	// broadcast (Server_BroadcastMedicRequest @0x515390, C2S 0x2E) prints the
-	// caller's name into; installed by the embedder from its gametext table.
-	std::string medic_request_format;
-
 	// [orig +0x1198..0x11A0] the SendFiltered send descriptor (preserved names). Present but the
 	// 2-peer MVP broadcasts the whole world (filter == 1); the per-connection cull is deferred.
 	uint32_t send_mask = 0;          // [orig +0x1198]

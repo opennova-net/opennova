@@ -352,8 +352,6 @@ std::vector<uint8_t> encode_loadout_submit(const LoadoutSubmit &submit);
 // place a client's clip refills. The entry-time 0x80 phase bit is transient (§5.58, D-NET-142).
 // [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
 std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
-// C2S 0x2E medic request — [i32 entityIndex] (4 B) [orig: @0x49b4e0..0x49b4f0].
-std::vector<uint8_t> encode_medic_request(const MedicRequest &request);
 
 // C2S 0x16 -- exact inverse of decode_mounted_weapon_slot_selection; retail's
 // NetPacket_WriteBoolAsInt16 emits canonical 0 or 1 in a two-byte body.

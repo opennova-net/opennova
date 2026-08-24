@@ -1583,14 +1583,6 @@ struct WeaponReload {
 	uint16_t entity_handle = 0;
 	uint16_t reload_param = 0;   // WeaponSlot_ReloadAmmo arg (reload slot / amount)
 };
-
-// C2S 0x2E — the dead player's medic call: one 32-bit packed entity index
-// (NetPacket_WriteEntityIndex32 of the local entity), 4 B. Sent from the
-// action binding while dead with the 310-tick client cooldown clear
-// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b].
-struct MedicRequest {
-	uint32_t entity_index = 0;
-};
 bool decode_weapon_reload(const uint8_t *body, size_t len,
                           WeaponReload &out, size_t &consumed);
 

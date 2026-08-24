@@ -913,13 +913,6 @@ std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
 	return out;
 }
 
-std::vector<uint8_t> encode_medic_request(const MedicRequest &request) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u32(request.entity_index);
-	return out;
-}
-
 std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 		const MountedWeaponSlotSelection &selection) {
 	std::vector<uint8_t> out;
