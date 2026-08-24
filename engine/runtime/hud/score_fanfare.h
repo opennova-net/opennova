@@ -14,9 +14,9 @@
 //  @0x54fdd8..0x54fdfb); the three names are rows 81..83 of the 84-row
 //  {char name[32]; int *handle} registry @0x82f590 DialogSystem_Init
 //  @0x527687 resolves through SoundBank_FindTriggerByName @0x75be90]
-// The EXP_FANFARE var itself is the host VarList KV (u16: lo byte = the kill
+// The EXP_FANFARE var itself is the server-info VarList KV (u16: lo byte = the kill
 // threshold, hi byte = the headshot threshold) the joiner lands with
-// parse_server_session_variables @0x520478; the host sources it from
+// parse_server_session_variables @0x520478; the authority sources it from
 // score.ini's EXP_FANFARE directive (word_24C1170).
 
 #include <cstdint>
