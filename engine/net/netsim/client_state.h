@@ -688,6 +688,16 @@ struct ClientState {
 	// STROVER_CALLMEDIC), @0x4300c3 dword_A85B68 (slot+364, the spawn-target
 	// hold — STROVER_PSPRESPAWN); consumer UI_UpdateDeathScreenContent
 	// @0x5536a0]. Retained between phase cycles like the client globals.
+	// The client-local death screen (retail g_death_screen_active): the 0x0A
+	// header's flags1 bit 0 EDGES — a rising edge opens it and zeroes the
+	// sub-mode / kill-cam target and arms the enemy-tag grant; a falling edge
+	// closes it and clears the grant [orig: NapiNPClientMsg_0x00A
+	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_enemyTagsVisible
+	// @0x42ffb2/@0x430025]. The sub-mode is written by the spectate actions
+	// (unported) and stays 0 here.
+	bool death_screen_active = false;
+	std::uint8_t death_screen_submode = 0;
+	bool enemy_tags_visible = false;
 	std::uint8_t respawn_penalty_seconds = 0;
 	std::uint8_t local_revive_seconds = 0;
 	std::uint8_t spawn_hold_seconds = 0;

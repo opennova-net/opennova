@@ -872,6 +872,10 @@ private:
 	int medic_request_serial_ = 0;
 	bool local_dead_edge_seen_ = false;
 	void tick_local_medic_cooldown();
+	// The camera arbiter's inputs + the mode-4 entry (nova_simulation_player_view.cpp).
+	bool camera_local_dead_seen_ = false;
+	void feed_camera_arbiter_inputs(const opennova::world::Entity &e);
+	void enter_death_camera(const opennova::world::Entity &e);
 	// The FP viewmodel motion-lead tracker (per render frame) and the local
 	// entity's per-62.5Hz-tick movement delta it samples.
 	opennova::world::PlayerViewMotionLead fp_motion_lead_{};

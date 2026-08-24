@@ -161,6 +161,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/fire_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/friendly_tags.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/deploy_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/death_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/lfp_feed.cpp           # the AAS zone status panel's zone rows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_panel_feed.cpp # the mounted-vehicle panel's seat rows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp  # the stng pursuit integrator (D-NET-64)

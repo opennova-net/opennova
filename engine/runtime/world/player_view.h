@@ -19,6 +19,8 @@
 
 #include <cstdint>
 
+#include "world/death_camera.h"
+
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
@@ -149,6 +151,29 @@ struct PlayerViewState {
     // [orig: g_camera_mode @ 0xA890C8].
     bool third_person_selected = true;
     bool third_person = false;
+    // THE RESOLVED MODE WORD itself (g_camera_mode): 0 first person, 1 the
+    // chase, 3 the spectator/overhead (unmodelled), 4 the death lerp camera.
+    int camera_mode = 0;
+    // The arbiter's remaining inputs [orig: Render_ProcessMainSceneFrame
+    // @0x5ca1f4..0x5ca24b]: the client-local death screen and its sub-mode
+    // (dword_A860F0: 0 / 1 / 2 = kill-cam; the sub-mode writers are the
+    // spectate actions, unported), the local dead bit (`Flags & 2`), the
+    // end-of-round gate (g_spawn_success_gate) with the on-foot test
+    // (parentEntity == 0), and the two g_rules_flags bits (bit 0 = no death
+    // camera, bit 0x40 = server force-first-person while in session — both
+    // admin `set` commands, no wire fold yet).
+    bool death_screen_active = false;
+    int death_screen_submode = 0;
+    bool local_dead = false;
+    bool round_ended = false;
+    bool on_foot = true;
+    bool in_session = false;
+    bool rules_no_death_cam = false;
+    bool rules_force_first_person = false;
+    // The mode-4 lerp camera (world/death_camera.h): computed on the
+    // transition into mode 4, viewed every frame against `view_tick`.
+    DeathCameraState death_cam;
+    uint32_t view_tick = 0;
     // The on-foot third person retail never resolves (stock 1.7.5.7 has no
     // on-foot chase, net-re §5.39): the debug affordance the onhook camera
     // patch provides, exposed on the debug menu and never on a gameplay key.
@@ -173,19 +198,27 @@ struct PlayerViewState {
 };
 
 // THE MODE ARBITER, run every tick ahead of the anchor chase (retail: every
-// rendered frame): desired = 0; the chase preference AND a control seat
-// (parentSlot 2 or 5 — `mount.control_seat`) -> 1; the mode is then applied
-// only when it changed, so the orbit/distance state carries across the flip
-// [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca1f4 -> the changed
-//  test @ 0x5ca258 -> Camera_SetTrackedEntity @ 0x5ca262]. Boarding and
+// rendered frame) [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca262]:
+//   desired = 0; the chase preference AND a control seat (parentSlot 2 or 5
+//   — `mount.control_seat`) -> 1 [@0x5ca1da..0x5ca1f2];
+//   death screen up: sub-mode 0 -> 0, 1 -> 1, 2 -> 0 (the kill-cam retarget
+//   lives in Camera_SetTrackedEntity), anything else keeps desired
+//   [@0x5ca1f4..0x5ca215];
+//   else the local dead bit (`Flags & 2`), or the end-of-round gate with the
+//   player on foot (parentEntity == 0) -> 4 unless g_rules_flags bit 0
+//   [@0x5ca217..0x5ca24b];
+//   else in session with g_rules_flags bit 0x40 -> 0 [@0x5ca22d..0x5ca23e].
+// The mode is then applied only when it changed, so the orbit/distance state
+// carries across the flip [the changed test @ 0x5ca258 -> Camera_SetTrackedEntity
+// @ 0x5ca262 — mode 4 computes the lerp camera there @0x439257]. Boarding and
 // dismounting never touch the camera — Entity_ProcessVehicleAttach @ 0x435aa0
 // only moves the seat plus the stance latches and the look yaw, and
 // Entity_DetachFromVehicle @ 0x4355f0 zeroes parentSlot @ 0x435921 — the next
 // frame's arbiter does the rest: a driver arrives in the chase, a gunner or
 // passenger stays first person, a dismount returns to first person. The debug
-// on-foot override ORs in. RESIDUAL: the death/spectator modes 3/4 and the
-// in-session server force-first-person rule (`g_rules_flags @ 0x24D1E34 &
-// 0x40` @ 0x5ca235 — no direct writer witnessed) are not modelled.
+// on-foot override ORs in. RESIDUAL: mode 3 (the spectator camera) and the
+// death-screen sub-mode writers (the spectate actions) are not modelled; the
+// two g_rules_flags bits are carried as inputs with no wire fold.
 void player_view_resolve_mode(PlayerViewState &v);
 
 // The view actions' preference writes: `view1st` (400) and `viewwithgun` (401)
@@ -419,6 +452,9 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 // water/terrain clearances and the slope raise, dropped r/2 on a watercraft,
 // and the final angles look at the point 6 u ahead of the carrier
 // (world/tp_camera_mount.h carries the constants).
+// Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO
+// poses lerped against `v.view_tick` (world/death_camera.h), converted
+// through world/angle.h; roll rides the same lerp.
 struct PlayerCameraPose {
     float eye[3] = {0.0f, 0.0f, 0.0f}; // mission units
     float yaw_deg = 0.0f;              // mission-euler view angles

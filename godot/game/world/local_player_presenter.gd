@@ -230,7 +230,14 @@ func _refresh_camera_mode() -> void:
 		_third_person = debug_third_person
 		return
 	var view: PlayerLocalView = _world.local_player_view()
-	_third_person = view != null and view.third_person
+	_third_person = view != null and _presents_third_person(view)
+
+
+# Every non-first-person mode presents the body and hides the FP arms — the
+# chase (1) and the death lerp camera (4) alike [orig: the FP viewmodel gate
+# g_camera_mode == 0 in Render_ProcessMainSceneFrame @0x40133e].
+static func _presents_third_person(view: PlayerLocalView) -> bool:
+	return view.third_person or view.camera_mode == 4
 
 
 # W4-2-style justified accessors: PlayerWeaponEffects resolves action userpoints
@@ -301,7 +308,7 @@ func after_world_tick() -> void:
 		set_debug_third_person(true)
 	_view = _world.local_player_view()
 	# The camera mode is the sim's resolved word (the arbiter ran this tick).
-	_third_person = _view != null and _view.third_person
+	_third_person = _view != null and _presents_third_person(_view)
 	_set_world_nvg_view(_view != null and _view.nvg_visible,
 			_view.nvg_gain if _view != null else 0)
 	# Place the camera/viewmodel root for THIS tick before consuming one-shot
@@ -329,7 +336,7 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 		_weapon_effects.consume(weapon_view, events)
 		return
 	_view = _world.local_player_view()
-	_third_person = _view != null and _view.third_person
+	_third_person = _view != null and _presents_third_person(_view)
 	_weapon_effects.set_weapon_view(weapon_view)
 	_update_player_camera()
 	_weapon_effects.consume(weapon_view, events)

@@ -2037,6 +2037,18 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
 	state_.anchor_z = fu.anchor_z;
+	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
+	{
+		const bool bit = (fu.flags1 & 0x01u) != 0;
+		if (bit && !state_.death_screen_active) {
+			state_.death_screen_active = true;
+			state_.death_screen_submode = 0;
+			state_.enemy_tags_visible = true;
+		} else if (!bit && state_.death_screen_active) {
+			state_.death_screen_active = false;
+			state_.enemy_tags_visible = false;
+		}
+	}
 	if (fu.local_tail_present) {
 		state_.local_health = fu.health;
 		++state_.health_updates_applied;

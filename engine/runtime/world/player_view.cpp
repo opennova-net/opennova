@@ -16,10 +16,27 @@
 namespace opennova::world {
 
 void player_view_resolve_mode(PlayerViewState &v) {
-    // [orig: @ 0x5ca1d8 desired = 0; @ 0x5ca1da the preference byte gate;
-    //  @ 0x5ca1e2..0x5ca1f2 parentSlot == 2 || parentSlot == 5 -> desired = 1]
-    const bool desired = v.third_person_selected && v.mount.control_seat;
-    v.third_person = desired || v.debug_third_person_on_foot;
+    // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca24b]
+    int desired = 0;
+    // @0x5ca1da the preference byte; @0x5ca1e2..0x5ca1f2 parentSlot 2 / 5.
+    if (v.third_person_selected && v.mount.control_seat) desired = 1;
+    if (v.death_screen_active) {
+        // @0x5ca1fd..0x5ca215: sub-mode 0 -> 0, 1 -> 1, 2 -> 0, else keep.
+        switch (v.death_screen_submode) {
+            case 0: desired = 0; break;
+            case 1: desired = 1; break;
+            case 2: desired = 0; break;
+            default: break;
+        }
+    } else if (v.local_dead || (v.round_ended && v.on_foot)) {
+        // @0x5ca217 Flags & 2; @0x5ca21d..0x5ca22b the spawn-success gate with
+        // parentEntity == 0; @0x5ca242 rules bit 0 keeps the seat mode.
+        if (!v.rules_no_death_cam) desired = 4;
+    } else if (v.in_session && v.rules_force_first_person) {
+        desired = 0; // @0x5ca22d..0x5ca23e
+    }
+    v.camera_mode = v.debug_third_person_on_foot && desired == 0 ? 1 : desired;
+    v.third_person = desired == 1 || v.debug_third_person_on_foot;
 }
 
 void player_view_set_third_person_selected(PlayerViewState &v, bool selected) {
@@ -465,6 +482,22 @@ void player_view_compose_camera(const PlayerViewState &v,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
                                 PlayerCameraPose &out) {
+    // Mode 4: the death lerp camera — the composed FROM/TO poses against the
+    // view tick, nothing of the FP/TP legs below [orig: the g_camera_mode == 4
+    // branch @0x4389eb..0x438b49 returns before the mode 0/1 composition].
+    if (v.camera_mode == 4 && v.death_cam.valid) {
+        DeathCameraPose pose;
+        death_camera_view(v.death_cam, v.view_tick, pose);
+        out.eye[0] = static_cast<float>(from_fixed(pose.pos[0]));
+        out.eye[1] = static_cast<float>(from_fixed(pose.pos[1]));
+        out.eye[2] = static_cast<float>(from_fixed(pose.pos[2]));
+        // atan2(y, x) BAM -> the mission view yaw (0 = +Y): 90 - deg.
+        out.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(pose.yaw_bam));
+        out.pitch_deg = static_cast<float>(static_cast<double>(pose.pitch_bam) * kDegreesPerBam);
+        out.roll_deg = static_cast<float>(static_cast<double>(pose.roll_bam) * kDegreesPerBam);
+        out.third_person = true;
+        return;
+    }
     // The eye anchor: the shell-fed head-bone eye floored kEyeMinAbovePosition
     // over Position, or the non-person +1.0 bump. The 0x2000-equivalent floor
     // is a DEFENSIVE stand-in on this leg: retail floors only the sample-less
