@@ -5,6 +5,7 @@
 #include <limits>
 #include <utility>
 
+#include "world/ai.h"
 #include "world/collision.h"
 #include "world/game_type.h"
 #include "world/world.h"
@@ -180,6 +181,16 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
             players[j] = std::move(insert);
         }
     }
+}
+
+// Either side of a kill carrying the targets-any-team flag (aiSlot[4] & 0x200)
+// exempts it from the team-kill arm.
+// [orig: GameEvent_PlayerDeath see-all gates @0x51709C..0x5170DA]
+bool ai_sees_all(const World &world, EntityHandle handle) {
+    if (world.ai == nullptr)
+        return false;
+    const AiEntity *ai = world.ai->for_handle(handle);
+    return ai != nullptr && ai->see_all;
 }
 
 } // namespace
@@ -714,9 +725,14 @@ void Match::record_death(World &world, EntityHandle victim_handle,
         // [orig: GameEvent_ProcessScoring @0x52FB80]
         add_event(*killer, MatchStats::kSuicides, score_value(4));
         add_team_event(killer_team, MatchStats::kSuicides, score_value(4));
-    } else if (killer_team != 0 && killer_team == victim_team) {
-        // team kill event 3 + table[76] (status value 2)
-        // [orig: GameEvent_ProcessScoring @0x52FBC7]
+    } else if (killer_team != 0 && killer_team == victim_team &&
+               !ai_sees_all(world, victim_handle) &&
+               !ai_sees_all(world, killer_handle)) {
+        // team kill event 3 + table[76] (status value 2). The see-all
+        // exemption is the caller's arm selection: either side's
+        // targets-any-team flag (aiSlot[4] & 0x200) routes the kill down the
+        // enemy arm instead. [orig: GameEvent_ProcessScoring @0x52FBC7;
+        // arm branch GameEvent_PlayerDeath @0x51709C..0x517113]
         add_event(*killer, MatchStats::kTeamKills, score_value(2));
         add_team_event(killer_team, MatchStats::kTeamKills, score_value(2));
     } else {
@@ -1356,6 +1372,10 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     }
 
     if (rules_.game_type == gt::kFlagBall) {
+        // The field-0xB limit scan over teams 1..4 has NO zero-guard on the
+        // limit — limit 0 instantly awards team 1 — then the clock-zero tail
+        // runs the strict-unique-max chain.
+        // [orig: Server_CheckWinConditions @0x51B21A..0x51B413]
         for (uint8_t team = 1; team <= 4; ++team) {
             if (teams_[team][MatchStats::kFlagCaptures] >=
                 static_cast<int32_t>(rules_.max_score))
@@ -1370,6 +1390,9 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     }
 
     if (rules_.game_type == gt::kFlagMe) {
+        // `if (!g_kill_limit) return;` guards the whole arm, then the per-slot
+        // field-0xB scan ends the round with no clock arm at all.
+        // [orig: Server_CheckWinConditions @0x51B422..0x51B47C]
         if (rules_.max_score == 0)
             return std::nullopt;
         for (const MatchPlayer &match_player : players_) {
@@ -1384,6 +1407,9 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     if ((rules_.game_type == gt::kAdvanceAndSecure ||
          rules_.game_type == gt::kConquerAndControl) &&
         remaining_ticks_ == 0) {
+        // At clock zero both A&S and C&C count the held zones per team
+        // (CTeamSlotManager_CountByTeam) and award the larger count, draw on a
+        // tie. [orig: Server_CheckWinConditions @0x51B49E..0x51B4E6]
         int32_t team1 = 0;
         int32_t team2 = 0;
         for (const EntityHandle handle : world.zone_chain.zones) {

@@ -34,10 +34,17 @@ bool Server_StageHostPunt(
 		NapiNPConnection &connection, uint32_t mismatch_type);
 
 // Re-roll one player's retained fire-freshness/tick anchor and return its
-// exact 4-byte S2C 0x61 body. Join, death, and deployment all call this one
+// exact 4-byte S2C 0x61 body. Join, revive, and deployment call this one
 // transaction so the connection field and wire value cannot diverge.
-// [orig: Server_SendRandomSeedToPlayer @0x5101A0]
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==1 arm]
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
+		NapiNPConnection &connection);
+
+// The disarm twin: zero the retained anchor and return the four-zero 0x61
+// body. Death and round-end call this arm; the zero seed freezes the
+// client's network-role tick until the next re-arm.
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
+std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 		NapiNPConnection &connection);
 
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine

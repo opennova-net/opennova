@@ -390,6 +390,13 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 			(scoreboard.team_mode ? 1u : 0u) |
 			(scoreboard.timed_score_mode ? 2u : 0u));
 	frame.team_count = scoreboard.team_count;
+	// The {computed score, row} pair list retail sorts before serializing.
+	// [orig: CPairList_AddEntry @0x50DA26]
+	struct ScoredPlayerListEntry {
+		int32_t score;
+		PlayerListEntry row;
+	};
+	std::vector<ScoredPlayerListEntry> rows;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
 		// Rows carry only IN-GAME players — a still-loading joiner (mid world-stream) is
@@ -402,21 +409,58 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		if (world != nullptr)
 			if (const world::Entity *e = world->registry.get(c.link.owned_entity)) team = e->team;
 		PlayerListEntry row;
+		int32_t computed_score = 0;
 		row.slot = c.reply.player_slot;
 		row.team = team;
 		if (world != nullptr) {
 			if (const world::MatchPlayer *player =
 					world->match.player(c.link.owned_entity)) {
-				row.score1 = static_cast<uint16_t>(
-						world->match.primary_score(*player));
-				row.score2 = static_cast<uint16_t>(
-						player->stats[world::MatchStats::kPoints]);
+				const int32_t mode_stat = world->match.primary_score(*player);
+				const int32_t points =
+						player->stats[world::MatchStats::kPoints];
+				row.score1 = static_cast<uint16_t>(mode_stat);
+				row.score2 = static_cast<uint16_t>(points);
+				// The pair-list sort key is the SIGNED computed score, taken
+				// before the u16 wire fold: team modes rank by the accumulated
+				// points, others by the mode stat.
+				// [orig: Player_ComputeScore @0x500A80, call @0x50DA10]
+				computed_score = scoreboard.team_mode ? points : mode_stat;
 			}
 		}
-		frame.players.push_back(row);
+		rows.push_back({computed_score, row});
 	}
-	std::sort(frame.players.begin(), frame.players.end(),
-	          [](const PlayerListEntry &a, const PlayerListEntry &b) { return a.slot < b.slot; });
+	// Retail scans the slots in numeric order, pairs each row with
+	// Player_ComputeScore's value, then shell-sorts the pair list by that value
+	// before serializing — the wire row order IS the board order, and the
+	// client never re-sorts (client_replica_scoreboard.cpp). Same Knuth-gap
+	// descending shell sort as the end-round twin (match.cpp
+	// sort_scoreboard_players).
+	// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 — Player_ComputeScore
+	//  @0x50DA10, CPairList_AddEntry @0x50DA26, CPairList_ShellSortByValue
+	//  @0x50DA42 / @0x526CF0]
+	std::sort(rows.begin(), rows.end(),
+	          [](const ScoredPlayerListEntry &a, const ScoredPlayerListEntry &b) {
+	              return a.row.slot < b.row.slot;
+	          });
+	{
+		const size_t count = rows.size();
+		size_t gap = 1;
+		while (gap <= count / 9)
+			gap = 3 * gap + 1;
+		for (; gap > 0; gap /= 3) {
+			for (size_t i = gap; i < count; ++i) {
+				ScoredPlayerListEntry insert = rows[i];
+				size_t j = i;
+				while (j >= gap && rows[j - gap].score < insert.score) {
+					rows[j] = rows[j - gap];
+					j -= gap;
+				}
+				rows[j] = insert;
+			}
+		}
+	}
+	for (const ScoredPlayerListEntry &entry : rows)
+		frame.players.push_back(entry.row);
 	if (frame.players.empty()) {
 		PlayerListEntry row;
 		row.slot = fallback.player_slot;
