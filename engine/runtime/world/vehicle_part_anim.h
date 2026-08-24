@@ -63,7 +63,8 @@ inline constexpr int32_t kRotorRateLow = 139809;  // 0x22221
 inline constexpr int32_t kRotorSpeedMax = 0x0CCCCCC0; // 214748352
 inline constexpr int32_t kRotorDecayGround = kRotorRateFull;
 inline constexpr int32_t kRotorDecayHelo = 46603; // 0xB60B
-inline constexpr int32_t kItemAttribPlayerControl = 0x40;
+// kItemAttribPlayerControl (items.def PlayerControl, 0x40) is declared once
+// for the whole kItemAttrib* family in world/entity.h, included above.
 
 // The profile type selects the machine: 2 (GROUND) / 1 (HELO); any other
 // type (3 organic, 0 unresolved) runs neither.

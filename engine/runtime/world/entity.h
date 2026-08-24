@@ -164,6 +164,7 @@ enum class DeathMotionMode : uint8_t {
 inline constexpr uint32_t kItemAttribMoveCallback = 0x1u;
 inline constexpr uint32_t kItemAttribPowerup = 0x2u;
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
+inline constexpr uint32_t kItemAttribPlayerControl = 0x40u;
 inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;

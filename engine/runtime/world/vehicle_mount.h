@@ -44,8 +44,48 @@ inline bool seat_type_blocks_weapon_channel(SeatType type) {
     }
 }
 
+// A pilot cannot fire. Retail's local fire gate rejects parentSlot 2
+// (Controller) and 5 (Driver) outright -- a GUNNER (3) still fires, which is why
+// this is a strictly narrower set than seat_type_blocks_weapon_channel's {2,3,5}
+// viewmodel test. Nothing about it is attrib-driven: the `PilotOnly` token in
+// items.def is a BHD-lineage leftover retail's parser does not even know
+// [orig: no 'PilotOnly' entry in the attrib chain, string pool 0x7c8390..].
+// [orig: Player_CanFireWeapon @0x5cf780 -- `if (parentEntity) { seat =
+//  parentSlot; if (seat == 2 || seat == 5) return 0; }`]
+inline bool mount_blocks_firing(const Entity &occupant) {
+    if (!occupant.mounted) return false;
+    return occupant.mount_type == SeatType::Controller ||
+           occupant.mount_type == SeatType::Driver;
+}
+
 inline bool mount_blocks_weapon_channel(const Entity &entity) {
     return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
+}
+
+// Does the seat the local player occupies SUPPRESS the first-person weapon?
+//
+// Retail draws the viewmodel only when the player is NOT in a vehicle, or the
+// parent slot is outside {2, 3, 5}, or the carrier is an emplaced weapon that is
+// not player-controlled. A helicopter pilot therefore has no weapon in hand at
+// all -- the retail Black Hawk cockpit shows a clear screen, while ours drew a
+// scoped rifle over the instrument panel.
+//
+// Our SeatType values ARE retail's slot numbers (Passenger 1, Controller 2,
+// Gunner 3, Driver 5), so the {2,3,5} test is exactly the existing
+// seat_type_blocks_weapon_channel gate; a Passenger keeps the weapon and can
+// still shoot out.
+// [orig: Player_RenderFirstPersonViewModel @0x4bd2a0 (kong 179894) —
+//  `!vehicle || parentSlot not in {2,3,5} || (attrib & 0x20 && !(attrib & 0x40))`
+//  guards the whole draw; attrib 0x20 = EWEAP, 0x40 = PLAYERCONTROL]
+inline bool mount_hides_fp_viewmodel(const Entity &occupant,
+                                     const Entity *carrier) {
+    if (!occupant.mounted || carrier == nullptr) return false;
+    if (!seat_type_blocks_weapon_channel(occupant.mount_type)) return false;
+    const bool eweap = (carrier->item_attrib & kItemAttribEweap) != 0u;
+    const bool player_control =
+            (carrier->item_attrib & kItemAttribPlayerControl) != 0u;
+    if (eweap && !player_control) return false; // a static gun keeps its weapon
+    return true;
 }
 
 inline bool mount_collapses_right_hand_row(const Entity &entity) {
@@ -124,6 +164,14 @@ void presnap_vehicle_attach_heading(World &world, Entity &occupant,
 // tick's per-frame seat follow. [orig: UseGun @0x5463d0; ordinary seats @0x4b0c50]
 void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
                            const Seat &seat);
+
+// A carrier-local point in world space through the carrier's FULL orientation
+// frame — the same Rz(heading)*Ry(-pitch)*Rx(roll) matrix every collision query
+// serves (collision_matrix_from_euler), so seats/exit goals and the collision
+// shell agree on one frame. Retail has exactly one entity orientation matrix
+// serving both. [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over the
+// entity matrix built by Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
+Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local);
 
 enum class SeatSelectionMode : uint8_t {
     Any = 0,
