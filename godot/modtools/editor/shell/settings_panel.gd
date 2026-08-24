@@ -49,6 +49,7 @@ var _settings_mcp_toggle: CheckBox
 var _settings_mcp_port_edit: LineEdit
 var _settings_mcp_status_label: Label
 var _settings_pff_tool_button: Button
+var _settings_export_game_button: Button
 
 # 3D-preview guide visibility, shared across guide-capable workspaces and pushed
 # to the active one. Loaded from / saved to the editor-state config.
@@ -88,7 +89,8 @@ func bind_nodes(
 	mcp_toggle: CheckBox, mcp_port_edit: LineEdit, mcp_status_label: Label,
 	pff_tool_button: Button,
 	retail_dir_edit: LineEdit = null,
-	browse_retail_dir_button: Button = null
+	browse_retail_dir_button: Button = null,
+	export_game_button: Button = null
 ) -> void:
 	_settings_resource_dir_edit = resource_dir_edit
 	_settings_browse_resource_dir_button = browse_button
@@ -105,6 +107,7 @@ func bind_nodes(
 	_settings_pff_tool_button = pff_tool_button
 	_settings_retail_dir_edit = retail_dir_edit
 	_settings_browse_retail_dir_button = browse_retail_dir_button
+	_settings_export_game_button = export_game_button
 
 
 func wire() -> void:
@@ -131,6 +134,8 @@ func wire() -> void:
 		_settings_axes_toggle.toggled.connect(_on_axes_toggled)
 	if _settings_pff_tool_button != null and not _settings_pff_tool_button.pressed.is_connected(_on_pff_tool_pressed):
 		_settings_pff_tool_button.pressed.connect(_on_pff_tool_pressed)
+	if _settings_export_game_button != null and not _settings_export_game_button.pressed.is_connected(_on_export_game_pressed):
+		_settings_export_game_button.pressed.connect(_on_export_game_pressed)
 	if _settings_mcp_toggle != null and not _settings_mcp_toggle.toggled.is_connected(_on_mcp_toggled):
 		_settings_mcp_toggle.toggled.connect(_on_mcp_toggled)
 	if _settings_mcp_port_edit != null and not _settings_mcp_port_edit.text_submitted.is_connected(_on_mcp_port_submitted):
@@ -151,6 +156,12 @@ func sync_popup_state() -> void:
 		_settings_grid_toggle.set_pressed_no_signal(_view_grid_visible)
 	if _settings_axes_toggle != null:
 		_settings_axes_toggle.set_pressed_no_signal(_view_axes_visible)
+	if _settings_export_game_button != null:
+		var no_root := _resource_library.get_root_dir().is_empty()
+		_settings_export_game_button.disabled = no_root
+		_settings_export_game_button.tooltip_text = \
+				"Export Game: pick a resource directory first (above)." if no_root else \
+				"Pack the mounted assets into a runnable game dir (the archive plus the loose music banks and error text)."
 	# The View section only applies to workspaces with a 3D guide overlay; hide it
 	# for the rest so the popup stays relevant to the active workspace.
 	if _settings_view_section != null:
@@ -201,6 +212,45 @@ func _on_pff_tool_pressed() -> void:
 	# then open the tool seeded at the configured resource directory.
 	_set_settings_visible.call(false)
 	_open_pff_tool.call(_preferred_resource_root_dir.call())
+
+
+# --- Export Game -------------------------------------------------------------------
+# Pack the mounted assets into a runnable game dir: localres.pff + the loose-by-contract
+# files, written into an EXISTING directory (only the game's own artifact names are
+# overwritten). This is how a modder's edits become the double-clickable game: export
+# into the dir opennova.exe sits in, and its boot default mounts them.
+
+func _on_export_game_pressed() -> void:
+	if _resource_library.get_root_dir().is_empty():
+		_show_status.call("Export Game: pick a resource directory first (Settings).", 5.0)
+		return
+	_set_settings_visible.call(false)
+	_open_dir_dialog.call("Export Game to directory",
+			func(dir_path: String) -> void: export_game_to(dir_path),
+			_default_export_game_dir())
+
+
+# A shipped layout puts the editor IN the game dir (opennova.exe beside us): default the
+# picker there, so Export Game lands where the runtime's boot default looks. Anywhere
+# else, start at the mounted assets like the other pickers.
+func _default_export_game_dir() -> String:
+	var exe_dir := OS.get_executable_path().get_base_dir()
+	if FileAccess.file_exists(exe_dir.path_join("opennova.exe")):
+		return exe_dir
+	return _preferred_resource_root_dir.call()
+
+
+## Public seam: the Export Game dialog's accept leg, and the programmatic entry tests use.
+func export_game_to(dir_path: String) -> void:
+	var out: Dictionary = EditorGamePacker.export_game(
+			_resource_library.get_resource_root(), dir_path)
+	if bool(out.get("ok", false)):
+		_show_status.call("Exported the game to %s (%d files archived; %s)." % [
+				dir_path,
+				(out["archived"] as PackedStringArray).size(),
+				", ".join(out["exported"] as PackedStringArray)], 6.0)
+	else:
+		_show_status.call(String(out.get("error", "Export Game failed.")), 8.0)
 
 
 # --- Resource directory ----------------------------------------------------------

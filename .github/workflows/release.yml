@@ -102,12 +102,14 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  # One zip: the editor and the game runtime side by side with the GDExtension
-  # DLL they share (the editor launches the runtime from its own directory).
+  # Tagged releases ship the GAME zip only: opennova.exe + the packed pffs,
+  # built by the exported editor's own --pack-game CLI, pre-configured to boot
+  # from its own directory. The dev build (game + editor + loose sources) comes
+  # from master CI runs, not releases.
   package-godot-windows:
     runs-on: windows-latest
     outputs:
-      artifact_id: ${{ steps.upload_windows.outputs.artifact-id }}
+      artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -140,11 +142,11 @@ jobs:
         shell: pwsh
         run: scripts/package_godot_windows.ps1
 
-      - name: Upload OpenNova Windows zip
-        id: upload_windows
+      - name: Upload OpenNova Windows game zip
+        id: upload_game
         uses: actions/upload-artifact@v7
         with:
-          path: dist/opennova-windows-v*.zip
+          path: dist/opennova-game-windows-v*.zip
           archive: false
           if-no-files-found: error
 
@@ -177,8 +179,15 @@ jobs:
           # (ci.yml's validate-deliverables download already does this; keep in sync.)
           skip-decompress: true
 
+      # Tagged releases carry the importer, the Blender addon, and the packed
+      # game only — no editor, no sources (those live in master CI dev builds).
       - name: Validate release deliverables
-        run: python scripts/validate_release_deliverables.py --release-version "$GITHUB_REF_NAME"
+        run: >-
+          python scripts/validate_release_deliverables.py
+          --release-version "$GITHUB_REF_NAME"
+          --only-id asset-importer
+          --only-id blender-ase-exporter
+          --only-id windows-game
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -42,7 +42,9 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 |---|---|---|
 | **`opennova-asset-importer-windows-v<version>.exe`** | Standalone Windows importer for converting models to `.blend`, `.ase`, and NovaLogic-compatible project files for tools like OED. | Run the exe directly, point it at your game directory, and select what to export. |
 | **`opennova-blender-ase-exporter-v<version>.zip`** | Blender 5.x ASE exporter addon with pre-built native libraries for Windows and Linux. | Install from Blender with `Edit > Preferences > Add-ons > Install`, then use `File > Export > Novalogic ASE (.ase)`. |
-| **`opennova-windows-v<version>.zip`** | The OpenNova Editor (ONED) for authoring terrain, object, mission, interface, audio, and environment mod data, together with the Godot-based game runtime it launches (F5/F6 run the game beside the editor; F7 runs retail on the packed assets). | Extract the zip, keeping the two exes side by side; run `opennova-modtools.exe` for the editor or `opennova.exe` for the game. |
+| **`opennova-game-windows-v<version>.zip`** | The OpenNova game, runnable as shipped: the zip root is a retail-style game dir (`localres.pff` beside `opennova.exe`), and the game boots from its own directory with zero setup. | Extract the zip anywhere, keeping its layout, and run `opennova.exe`. |
+
+Dev builds come from CI rather than releases: every pull request and master build produces **`opennova-windows-v<version>.zip`** — the game, the OpenNova Editor (ONED), and the game's loose sources under `assets/` in one folder. Both apps default-mount that tree, so the game plays exactly what the editor edits; F5/F6 test edits live, F7 proves them against retail, and Export Game (Settings) builds the packed release flavour.
 
 ## Asset Importer
 
@@ -274,7 +276,7 @@ Runs the GDScript suite under `godot/tests/` headless via GUT. Requires `GODOT_B
 
 ### Package Godot Exports
 
-Builds `dist/opennova-windows-v<version>.zip` (the editor and the game runtime side by side, with the GDExtension DLL they share) via headless Godot export. Windows-only; requires MSVC and CMake.
+Builds both Windows zips via headless Godot export: `dist/opennova-windows-v<version>.zip` (the dev build — both exes, the GDExtension DLL they share, and the tracked loose sources under `assets/`) and `dist/opennova-game-windows-v<version>.zip` (the tagged-release build — `opennova.exe` plus `localres.pff` packed from those sources by the exported editor's own `--pack-game` CLI). Windows-only; requires MSVC, CMake, and pulled LFS assets.
 
 ```powershell
 scripts/package_godot_windows.ps1

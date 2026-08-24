@@ -14,11 +14,28 @@ FIXTURE_SOURCES = {
     "asset-importer": "onimport-v0.1.5.exe",
     "blender-ase-exporter": "opennova_blender-v0.0.5.zip",
     "windows-apps": "opennova-windows-v0.0.10.zip",
+    "windows-game": "opennova-game-windows-v0.0.10.zip",
 }
 
-# What the one Windows zip carries: the editor, the game runtime it launches
-# from beside itself, and the GDExtension DLL both load.
-WINDOWS_APPS_ENTRIES = ["opennova-modtools.exe", "opennova.exe"]
+# The DEV zip: game + editor + the loose sources both apps default-mount — one
+# copy of the data, no packed archives. The GDExtension DLL rides per flavour.
+WINDOWS_APPS_ENTRIES = [
+    "opennova-modtools.exe",
+    "opennova.exe",
+    "assets/items.def",
+    "assets/mnml.bms",
+    "assets/mnml.cpt",
+]
+
+# The GAME zip (tagged releases): opennova.exe + the packed game it
+# default-mounts from its own directory, plus the loose-by-contract files.
+WINDOWS_GAME_ENTRIES = [
+    "opennova.exe",
+    "localres.pff",
+    "menumus.sbf",
+    "gamemus.sbf",
+    "earlyerr.txt",
+]
 
 
 def _load_validator():
@@ -63,6 +80,10 @@ def _write_deliverable_fixtures(dist: Path) -> None:
         dist / FIXTURE_SOURCES["windows-apps"],
         WINDOWS_APPS_ENTRIES + ["libopennova.windows.template_release.x86_64.dll"],
     )
+    _write_zip(
+        dist / FIXTURE_SOURCES["windows-game"],
+        WINDOWS_GAME_ENTRIES + ["libopennova.windows.template_release.x86_64.dll"],
+    )
 
 
 def _keep_deliverable_fixtures(dist: Path, deliverable_ids: set[str]) -> None:
@@ -91,6 +112,7 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
     assert public_names == [
         "opennova-asset-importer-windows-v0.0.10.exe",
         "opennova-blender-ase-exporter-v0.0.10.zip",
+        "opennova-game-windows-v0.0.10.zip",
         "opennova-windows-v0.0.10.zip",
     ]
     assert sorted(item.public_name for item in result.items) == public_names
@@ -101,8 +123,8 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
     assert "Install:" in text
     assert "Use:" in text
     assert "Blender" in text
-    # The one Windows zip's install hint tells the user the two exes belong together.
-    assert "side by side" in text
+    # The one Windows zip's install hint tells the user the layout is load-bearing.
+    assert "the root is the game dir" in text
 
 
 def test_release_validator_selects_manifest_deliverables_in_manifest_order(
@@ -230,6 +252,10 @@ def _write_debug_mode_windows_zip(dist: Path) -> None:
         dist / FIXTURE_SOURCES["windows-apps"],
         WINDOWS_APPS_ENTRIES + ["libopennova.windows.template_debug.x86_64.dll"],
     )
+    _write_zip(
+        dist / FIXTURE_SOURCES["windows-game"],
+        WINDOWS_GAME_ENTRIES + ["libopennova.windows.template_debug.x86_64.dll"],
+    )
 
 
 def test_release_validator_selects_the_gdextension_flavour(tmp_path: Path) -> None:
@@ -237,7 +263,7 @@ def test_release_validator_selects_the_gdextension_flavour(tmp_path: Path) -> No
     dist = tmp_path / "dist"
     stage = dist / "release-assets"
     body = tmp_path / "release-body.md"
-    godot_ids = ["windows-apps"]
+    godot_ids = ["windows-apps", "windows-game"]
     dist.mkdir()
     _write_deliverable_fixtures(dist)
     _keep_deliverable_fixtures(dist, set(godot_ids))
@@ -318,6 +344,51 @@ def test_release_validator_requires_both_exes_in_the_windows_zip(tmp_path: Path)
         )
 
 
+def test_release_validator_requires_the_packed_game_in_the_game_zip(tmp_path: Path) -> None:
+    # The game zip root is the game dir: without localres.pff a downloaded
+    # opennova.exe boots to the empty picker — the no-game download this exists to fix.
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    entries = [e for e in WINDOWS_GAME_ENTRIES if e != "localres.pff"]
+    _write_zip(
+        dist / FIXTURE_SOURCES["windows-game"],
+        entries + ["libopennova.windows.template_release.x86_64.dll"],
+    )
+
+    with pytest.raises(validator.DeliverableValidationError, match="localres.pff"):
+        validator.validate_release_deliverables(
+            repo_root=ROOT,
+            dist_dir=dist,
+            stage_dir=dist / "release-assets",
+            release_body=tmp_path / "release-body.md",
+            release_version="0.0.10",
+            deliverable_ids=["windows-game"],
+        )
+
+
+def test_release_validator_requires_the_loose_sources_in_the_dev_zip(tmp_path: Path) -> None:
+    # The dev zip's whole point is the editable loose tree beside the apps.
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    entries = [e for e in WINDOWS_APPS_ENTRIES if not e.startswith("assets/")]
+    _write_zip(
+        dist / FIXTURE_SOURCES["windows-apps"],
+        entries + ["libopennova.windows.template_release.x86_64.dll"],
+    )
+
+    with pytest.raises(validator.DeliverableValidationError, match="assets/items.def"):
+        validator.validate_release_deliverables(
+            repo_root=ROOT,
+            dist_dir=dist,
+            stage_dir=dist / "release-assets",
+            release_body=tmp_path / "release-body.md",
+            release_version="0.0.10",
+            deliverable_ids=["windows-apps"],
+        )
+
+
 def test_release_validator_cli_accepts_gdextension_target(tmp_path: Path) -> None:
     validator = _load_validator()
     dist = tmp_path / "dist"
@@ -342,11 +413,16 @@ def test_release_validator_cli_accepts_gdextension_target(tmp_path: Path) -> Non
             "template_debug",
             "--only-id",
             "windows-apps",
+            "--only-id",
+            "windows-game",
         ]
     )
 
     assert exit_code == 0
-    assert {path.name for path in stage.iterdir()} == {"opennova-windows-v0.0.0-ci.zip"}
+    assert {path.name for path in stage.iterdir()} == {
+        "opennova-windows-v0.0.0-ci.zip",
+        "opennova-game-windows-v0.0.0-ci.zip",
+    }
 
 
 def test_release_validator_rejects_missing_archive_entry(tmp_path: Path) -> None:
@@ -463,7 +539,10 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     assert "--release-version 0.0.0-ci" in validate_job
     assert "--only-id asset-importer" in validate_job
     assert "--only-id blender-ase-exporter" in validate_job
+    # Both flavours are validated on PRs AND master runs.
     assert validate_job.count("--only-id windows-apps") == 2
+    assert validate_job.count("--only-id windows-game") == 2
+    assert "game_artifact_id" in validate_job
     assert "--only-id modding-editor" not in validate_job
     assert "--only-id game-runtime" not in validate_job
     # PR packages are debug-mode exports (template_debug GDExtension inside);
@@ -474,16 +553,18 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
 
     assert "dist/onimport-v*.exe" in workflow
     assert "dist/opennova-windows-v*.zip" in workflow
+    assert "dist/opennova-game-windows-v*.zip" in workflow
     assert "dist/opennova-modtools-windows-v*.zip" not in workflow
     assert "dist/opennova-runtime-windows-v*.zip" not in workflow
     assert "dist/onimport.exe" not in workflow
     assert "dist/opennova-windows.zip" not in workflow
     assert "opennova_release_assets" not in workflow
 
-    # The PR comment links the one zip.
+    # The PR comment links both zips.
     links_job = _workflow_job(workflow, "pr-build-links")
     assert "needs: [package-godot-windows]" in links_job
     assert "opennova-windows.zip" in links_job
+    assert "opennova-game-windows.zip" in links_job
     assert "opennova-modtools-windows.zip" not in links_job
     assert "opennova-runtime-windows.zip" not in links_job
 
@@ -620,7 +701,7 @@ def test_godot_test_wrapper_allows_fixture_inner_classes() -> None:
     assert all("Inner Class" not in pattern for pattern in collection_patterns)
 
 
-def test_release_packages_editor_and_runtime_in_one_job() -> None:
+def test_release_ships_the_game_zip_only() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     package_jobs = [
         "package-addon",
@@ -649,23 +730,40 @@ def test_release_packages_editor_and_runtime_in_one_job() -> None:
     windows_job = _workflow_job(workflow, "package-godot-windows")
     assert "Cache Godot binary" in windows_job
     assert "Cache Godot export templates" in windows_job
-    assert "dist/opennova-windows-v*.zip" in windows_job
+    # Tagged releases ship the packed game only; the dev zip (game + editor +
+    # sources) comes from master CI builds.
+    assert "dist/opennova-game-windows-v*.zip" in windows_job
+    assert "dist/opennova-windows-v*.zip" not in windows_job
+    release_job = _workflow_job(workflow, "release")
+    assert "--only-id windows-game" in release_job
+    assert "--only-id windows-apps" not in release_job
+    assert "--only-id asset-importer" in release_job
+    assert "--only-id blender-ase-exporter" in release_job
 
 
-def test_godot_package_script_ships_both_apps_in_one_zip() -> None:
+def test_godot_package_script_builds_both_flavours() -> None:
     windows_shared = (ROOT / "scripts/package_godot_windows.ps1").read_text(encoding="utf-8")
 
-    # The per-app wrappers and the -Target switch are gone: one script, one zip.
+    # The per-app wrappers and the -Target switch are gone: one script, two zips.
     assert not (ROOT / "scripts/package_godot_editor_windows.ps1").exists()
     assert not (ROOT / "scripts/package_godot_runtime_windows.ps1").exists()
     assert "-Target" not in windows_shared
     assert 'opennova-windows-v$Version.zip' in windows_shared
+    assert 'opennova-game-windows-v$Version.zip' in windows_shared
     assert "opennova-modtools-windows" not in windows_shared
     assert "opennova-runtime-windows" not in windows_shared
-    # Both presets are exported and boot-smoked, and both exes land in the zip.
+    # Both presets are exported and boot-smoked.
     assert '-PresetName "OpenNova Mod Tools"' in windows_shared
     assert '-PresetName "OpenNova Runtime"' in windows_shared
-    assert "-ExePaths @($MODTOOLS_EXE, $RUNTIME_EXE)" in windows_shared
+    # The dev zip stages the TRACKED assets (never a wildcard copy — the working
+    # assets/ holds untracked retail binaries) with an LFS pointer guard; the
+    # game zip is packed by the exported editor's own CLI.
+    assert "git -C $ROOT ls-files -z assets" in windows_shared
+    assert "version https://git-lfs" in windows_shared
+    assert "Copy-GameSources" in windows_shared
+    assert "Invoke-PackGame" in windows_shared
+    assert "--pack-game" in windows_shared
+    assert "localres.pff" in windows_shared
     # -ExportMode release (default; the release workflow) exports with
     # --export-release and ships template_release; -ExportMode debug (PR CI)
     # exports with --export-debug and ships template_debug.
@@ -681,6 +779,7 @@ def test_readme_lists_public_asset_names_and_install_hints() -> None:
     for name in [
         "opennova-asset-importer-windows-v<version>.exe",
         "opennova-blender-ase-exporter-v<version>.zip",
+        "opennova-game-windows-v<version>.zip",
         "opennova-windows-v<version>.zip",
     ]:
         assert name in readme

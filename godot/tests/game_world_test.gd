@@ -558,6 +558,21 @@ func _stage_impact_fixture(name: String) -> String:
 	return root_dir
 
 
+# The staged harness item for KIND_BUILDING tests. The shipped assets/items.def
+# carries only what the minimal mission places or the engine spawns by fixed id,
+# so the staged root appends its own catalogue entry for the fixture model the
+# stagers copy in as GuardTwr1.3di. CRLF: retail's .def parser stops at a bare LF.
+const BUILDING_ITEM_DEF := "\r\nbegin \"Guard Tower\"\r\n  id 102001\r\n  type building\r\n  graphic GuardTwr1\r\n  sid guardtwr1\r\n  anim_def GuardTwr1\r\n  husk GuardTwr1X\r\n  hp 5000\r\nend\r\n"
+
+
+func _append_building_item(root_dir: String) -> void:
+	var f := FileAccess.open(root_dir.path_join("items.def"), FileAccess.READ_WRITE)
+	assert_not_null(f, "the staged root carries items.def to append to")
+	f.seek_end(0)
+	f.store_string(BUILDING_ITEM_DEF)
+	f.close()
+
+
 # Stage the minimal fixture plus the House.3di collision fixture as item
 # 102001's GuardTwr1 graphic, so authored KIND_BUILDING entities place a REAL
 # ObjectModel and enter the sim's real collision/occlusion world.
@@ -566,6 +581,7 @@ func _stage_building_fixture(name: String) -> String:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
 	return root_dir
 
 
@@ -574,6 +590,7 @@ func _stage_lit_building_fixture(name: String) -> String:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Shed.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
 	return root_dir
 
 
@@ -586,6 +603,7 @@ func _stage_building_terrain_fixture(name: String) -> String:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
 	return root_dir
 
 

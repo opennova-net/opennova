@@ -1,15 +1,24 @@
 # Build and export OpenNova Godot applications for Windows.
 #
-# Produces (version read from godot/project.godot) ONE zip:
-#   dist\opennova-windows-v<version>.zip
-#       opennova-modtools.exe   the OpenNova Editor (ONED)
-#       opennova.exe            the game runtime
-#       libopennova.windows.<flavour>.x86_64.dll   the GDExtension both load
+# Produces (version read from godot/project.godot) the workflow's TWO zips:
 #
-# One zip on purpose: the editor launches the runtime from its OWN directory
-# (ShellGameSession's PACKAGED_RUNTIME_CANDIDATES look for opennova.exe beside
-# opennova-modtools.exe for F5/F6), so two zips only ever paired a fresh editor
-# with a stale runtime and failed as an unexplained resource picker.
+#   dist\opennova-windows-v<version>.zip           the DEV build (PRs + non-tag)
+#       opennova.exe            the game; default-mounts the assets\ beside it (loose)
+#       opennova-modtools.exe   the OpenNova Editor (ONED); same default project
+#       libopennova.windows.<flavour>.x86_64.dll
+#       assets\                 the game's loose sources — ONE copy of the data:
+#                               the game plays exactly what the editor edits
+#
+#   dist\opennova-game-windows-v<version>.zip      the GAME build (tagged releases)
+#       opennova.exe            default-mounts its own dir, retail-style
+#       libopennova.windows.<flavour>.x86_64.dll
+#       localres.pff            the packed game, built by the exported editor's own
+#                               --pack-game CLI over the staged sources
+#       menumus.sbf gamemus.sbf earlyerr.txt       loose by contract
+#
+# Both are built on every run so pull-request CI exercises the pack CLI long
+# before a tag needs it. The dev zip keeps the editor beside the runtime because
+# the editor launches opennova.exe from its OWN directory (F5/F6).
 #
 # Requires:
 #   - MSVC toolchain + cmake (preinstalled on windows-latest)
@@ -175,6 +184,7 @@ New-Item -ItemType Directory -Force -Path $DIST | Out-Null
 $RUNTIME_EXE = "$DIST\opennova.exe"
 $MODTOOLS_EXE = "$DIST\opennova-modtools.exe"
 $APPS_ZIP = "$DIST\opennova-windows-v$Version.zip"
+$GAME_ZIP = "$DIST\opennova-game-windows-v$Version.zip"
 
 function Invoke-GodotExport {
     param([string]$PresetName, [string]$OutputPath)
@@ -274,48 +284,134 @@ Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
 Test-GodotAppBoot -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE
 
 # ---------------------------------------------------------------------------
-# 5. One zip: both exes side by side with the single DLL they share
+# 5. Stage the game sources: the TRACKED files of assets/ (never a wildcard copy
+#    — the working assets/ dir doubles as the retail validation game dir and
+#    holds untracked retail binaries that must never ship).
 # ---------------------------------------------------------------------------
-function New-GodotAppsZip {
-    param(
-        [string[]]$ExePaths,
-        [string]$ZipPath
-    )
+function Copy-GameSources {
+    param([string]$AssetsStageDir)
 
-    foreach ($exe in $ExePaths) {
-        if (-not (Test-Path $exe)) {
-            throw "Cannot package; exe is missing: $exe"
+    New-Item -ItemType Directory -Force -Path $AssetsStageDir | Out-Null
+    $tracked = & git -C $ROOT ls-files -z assets
+    if ($LASTEXITCODE -ne 0) { throw "git ls-files assets failed (exit $LASTEXITCODE)" }
+    $names = $tracked -split "`0" | Where-Object { $_ }
+    # Repo metadata rides the tree but is not game data.
+    $names = $names | Where-Object { (Split-Path $_ -Leaf) -notin @(".gitignore", "README.md") }
+    if ($names.Count -eq 0) { throw "No tracked asset files found under assets/" }
+
+    $lfsSentinel = [System.Text.Encoding]::ASCII.GetBytes("version https://git-lfs")
+    foreach ($name in $names) {
+        $src = Join-Path $ROOT ($name -replace "/", "\")
+        if (-not (Test-Path -LiteralPath $src)) { throw "Tracked asset missing from the working tree: $name" }
+        # git archive would emit LFS POINTERS for the binary majority of this tree;
+        # the working tree carries the smudged bytes, but only when LFS pulled — guard.
+        $head = [System.IO.File]::ReadAllBytes($src)
+        if ($head.Length -ge $lfsSentinel.Length) {
+            $prefix = $head[0..($lfsSentinel.Length - 1)]
+            if ([System.Linq.Enumerable]::SequenceEqual([byte[]]$prefix, $lfsSentinel)) {
+                throw "$name is an unpulled git-LFS pointer; run 'git lfs pull' first"
+            }
+        }
+        $rel = $name -replace "^assets/", "" -replace "/", "\"
+        $dst = Join-Path $AssetsStageDir $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+    }
+    Write-Host "    staged $($names.Count) tracked asset files"
+}
+
+# ---------------------------------------------------------------------------
+# 6. Pack the game with the exported editor's own packer: the shipped localres.pff
+#    is provably produced by the shipped opennova-modtools.exe (--pack-game runs
+#    EditorGamePacker.export_game headless and drops the archive + the
+#    loose-by-contract files into the game-zip stage).
+# ---------------------------------------------------------------------------
+function Invoke-PackGame {
+    param([string]$AssetsDir, [string]$GameDir)
+
+    Write-Host "=== Packing the game with the exported editor ==="
+    $dllBeside = Join-Path (Split-Path $MODTOOLS_EXE -Parent) (Split-Path $SHIPPED_DLL -Leaf)
+    if (-not (Test-Path $dllBeside)) {
+        Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
+    }
+    $stdoutLog = [System.IO.Path]::GetTempFileName()
+    $stderrLog = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process `
+            -FilePath $MODTOOLS_EXE `
+            -ArgumentList "--headless -- --pack-game `"$AssetsDir`" `"$GameDir`"" `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
+        $combined = "$(Get-Content $stdoutLog -Raw)`n$(Get-Content $stderrLog -Raw)"
+        Write-Host $combined.TrimEnd()
+        if ($proc.ExitCode -ne 0) {
+            throw "pack-game exited with code $($proc.ExitCode)"
         }
     }
-    if (-not (Test-Path $SHIPPED_DLL)) {
-        throw "Cannot package; shipped GDExtension DLL is missing: $SHIPPED_DLL"
+    finally {
+        Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
     }
+    if (-not (Test-Path (Join-Path $GameDir "localres.pff"))) {
+        throw "pack-game produced no localres.pff in $GameDir"
+    }
+}
 
-    $stageDir = Join-Path $DIST ".stage-opennova-windows"
+# ---------------------------------------------------------------------------
+# 7. The two zips. Dev: both exes + DLL + loose assets\ (one copy of the data;
+#    both apps default-mount it). Game: opennova.exe + DLL + the packed game,
+#    which default-mounts its own dir, retail-style.
+# ---------------------------------------------------------------------------
+function New-StageDir {
+    param([string]$Name)
+    $stageDir = Join-Path $DIST $Name
     if (Test-Path $stageDir) {
         Remove-Item -LiteralPath $stageDir -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+    return $stageDir
+}
 
-    foreach ($exe in $ExePaths) {
-        Copy-Item -LiteralPath $exe -Destination (Join-Path $stageDir (Split-Path $exe -Leaf)) -Force
-    }
-    Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $stageDir (Split-Path $SHIPPED_DLL -Leaf)) -Force
-
+function Compress-Stage {
+    param([string]$StageDir, [string]$ZipPath)
     Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
-    Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $ZipPath -Force
-    Remove-Item -LiteralPath $stageDir -Recurse -Force
-
+    Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -Force
     if (-not (Test-Path $ZipPath)) {
         throw "Packaging produced no zip at $ZipPath"
     }
 }
 
-Write-Host "=== Packaging $(Split-Path $APPS_ZIP -Leaf) ==="
-New-GodotAppsZip -ExePaths @($MODTOOLS_EXE, $RUNTIME_EXE) -ZipPath $APPS_ZIP
+foreach ($exe in @($MODTOOLS_EXE, $RUNTIME_EXE)) {
+    if (-not (Test-Path $exe)) { throw "Cannot package; exe is missing: $exe" }
+}
+if (-not (Test-Path $SHIPPED_DLL)) {
+    throw "Cannot package; shipped GDExtension DLL is missing: $SHIPPED_DLL"
+}
+$dllLeaf = Split-Path $SHIPPED_DLL -Leaf
+
+Write-Host "=== Packaging $(Split-Path $APPS_ZIP -Leaf) (dev build) ==="
+$devStage = New-StageDir -Name ".stage-opennova-windows"
+foreach ($exe in @($MODTOOLS_EXE, $RUNTIME_EXE)) {
+    Copy-Item -LiteralPath $exe -Destination (Join-Path $devStage (Split-Path $exe -Leaf)) -Force
+}
+Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $devStage $dllLeaf) -Force
+Copy-GameSources -AssetsStageDir (Join-Path $devStage "assets")
+Compress-Stage -StageDir $devStage -ZipPath $APPS_ZIP
+
+Write-Host "=== Packaging $(Split-Path $GAME_ZIP -Leaf) (tagged-release build) ==="
+$gameStage = New-StageDir -Name ".stage-opennova-game-windows"
+Copy-Item -LiteralPath $RUNTIME_EXE -Destination (Join-Path $gameStage "opennova.exe") -Force
+Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $gameStage $dllLeaf) -Force
+Invoke-PackGame -AssetsDir (Join-Path $devStage "assets") -GameDir $gameStage
+Compress-Stage -StageDir $gameStage -ZipPath $GAME_ZIP
+
+Remove-Item -LiteralPath $devStage -Recurse -Force
+Remove-Item -LiteralPath $gameStage -Recurse -Force
 
 # ---------------------------------------------------------------------------
-# 6. Done
+# 8. Done
 # ---------------------------------------------------------------------------
 Write-Host "=== Done ==="
-Get-Item -LiteralPath $APPS_ZIP | Select-Object Name, Length
+Get-Item -LiteralPath @($APPS_ZIP, $GAME_ZIP) | Select-Object Name, Length

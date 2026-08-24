@@ -26,25 +26,53 @@ required_entries = [
     "lib/linux-x64/libopennova.so",
 ]
 
-# One zip for both Godot apps. The editor launches the game runtime from its
-# OWN directory (F5/F6 look for opennova.exe beside opennova-modtools.exe), so
-# shipping them separately only ever paired a fresh editor with a stale runtime.
-# {gdextension_target} is the godot-cpp flavour both exes load: template_release
-# for release-mode exports (the default, what a release ships) and template_debug
-# for the debug-mode exports pull-request CI packages. The validator's
-# --gdextension-target selects it.
+# The workflow's two Windows zips. {gdextension_target} is the godot-cpp flavour
+# the exes load: template_release for release-mode exports (what a tagged release
+# ships) and template_debug for pull-request CI's debug-mode packages.
+#
+# The DEV build (PRs + master CI, never tagged releases): game + editor + the
+# loose assets/ sources. ONE copy of the data — both apps default-mount it, so
+# the game plays exactly what the editor edits, no packing in the loop. The
+# editor also launches opennova.exe from its OWN directory (F5/F6), which is why
+# the two exes travel together.
 [[deliverables]]
 id = "windows-apps"
 source = "opennova-windows-v{godot_version}.zip"
 public = "opennova-windows-{release_version}.zip"
 kind = "zip"
 platform = "Windows"
-title = "OpenNova Editor and Game Runtime"
-purpose = "The OpenNova Editor (ONED) for authoring NovaLogic terrain, environment, mission, and related mod data, together with the Godot-based game runtime it launches."
-install = "Extract the zip to a writable folder; keep the two exes side by side."
-use = "Run opennova-modtools.exe for the editor (F5/F6 run the game beside it, F7 runs retail) or opennova.exe for the game on its own."
+title = "OpenNova Dev Build (game, editor, sources)"
+purpose = "The OpenNova game and the OpenNova Editor (ONED) side by side, with the game's loose sources under assets/ — the editable dev build: the game plays the same tree the editor edits."
+install = "Extract the zip to a writable folder, keeping its layout."
+use = "Run opennova.exe to play the loose assets/, or opennova-modtools.exe to edit them (F5/F6 test your edits, F7 proves them against retail, Export Game builds the packed release flavour)."
 required_entries = [
     "opennova-modtools.exe",
     "opennova.exe",
     "libopennova.windows.{gdextension_target}.x86_64.dll",
+    "assets/items.def",
+    "assets/mnml.bms",
+    "assets/mnml.cpt",
+]
+
+# The GAME build (what tagged releases ship): opennova.exe + the packed game,
+# retail-style — localres.pff beside the exe (packed at package time by the
+# exported editor's own --pack-game CLI) plus the loose-by-contract files. The
+# runtime default-mounts its own directory, so it is pre-configured by layout.
+[[deliverables]]
+id = "windows-game"
+source = "opennova-game-windows-v{godot_version}.zip"
+public = "opennova-game-windows-{release_version}.zip"
+kind = "zip"
+platform = "Windows"
+title = "OpenNova Game"
+purpose = "The OpenNova game, runnable as shipped: opennova.exe boots the packed game beside it with zero setup."
+install = "Extract the zip anywhere, keeping its layout: the root is the game dir."
+use = "Run opennova.exe."
+required_entries = [
+    "opennova.exe",
+    "libopennova.windows.{gdextension_target}.x86_64.dll",
+    "localres.pff",
+    "menumus.sbf",
+    "gamemus.sbf",
+    "earlyerr.txt",
 ]

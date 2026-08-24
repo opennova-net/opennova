@@ -1,11 +1,18 @@
 class_name EditorGamePacker
 extends RefCounted
 
-## Packs a mounted asset root into a runnable game dir.
+## Turns a mounted asset root into a runnable game dir, in the workflow's two flavors.
+## Headless by design — the editor actions, the MCP tool, and the `--pack-game` CLI all
+## route through these seams, so none of them owns the rules.
 ##
-## This is the "ship it" half of authoring: the editor writes assets loose, and retail (or our
-## own runtime) needs them as a game dir it can mount. Headless by design — the Play-in-Retail
-## action and the MCP tool both call [method pack], so neither owns the rules.
+##  - [method stage_loose] is the DEV/retail-test flavor: every file loose plus the
+##    20-byte zero-entry `resource.pff` boot token, run under `/d`. Play in Retail (F7)
+##    stages this; it is also the layout the dev zip ships (without the token — our own
+##    runtime's bundled-assets default mounts the loose tree directly).
+##  - [method pack] + [method export_game] are the TAGGED-release flavor: everything
+##    archived into one `localres.pff` beside the loose-by-contract files. The release
+##    workflow builds shipped game zips with it via the CLI; Export Game (Settings) is
+##    the in-editor entry.
 ##
 ## Everything that can live in an archive goes into ONE archive. Retail's boot table probes six
 ## fixed names and mounts each into a secondary slot at its table index, so slot order IS lookup
@@ -204,6 +211,122 @@ static func _is_pack_output(dir: String) -> bool:
 	return FileAccess.get_file_as_string(marker_path).begins_with(MARKER_HEADER)
 
 
+## Stage `root`'s files LOOSE into `out_dir` plus the zero-entry `resource.pff` boot
+## token — the retail play-test layout. Retail's boot gate counts archives OPENED, not
+## entries, so the 20-byte token clears it (witnessed 2026-08-23,
+## docs/vfs/vfs-pff-mount-re.md), and under `/d` the loose `FindFirstFile *.bms` walk
+## lists the mission. Same marker/wipe/refuse discipline as [method pack] on its own
+## output dir; the 16-byte PFF name cap does not apply to loose files.
+static func stage_loose(root: Object, out_dir: String) -> Dictionary:
+	var result := {
+		"ok": false, "staged": PackedStringArray(), "skipped": PackedStringArray(),
+		"skipped_dirs": PackedStringArray(), "error": "",
+	}
+	if root == null:
+		result["error"] = "No resource root mounted."
+		return result
+	var root_dir := String(root.get_root_dir())
+	if root_dir.is_empty():
+		result["error"] = "Mounted root has no directory."
+		return result
+
+	var names := PackedStringArray()
+	for file_name in DirAccess.get_files_at(root_dir):
+		names.append(String(file_name))
+	names.sort()
+	if names.is_empty():
+		result["error"] = "Mounted root has no files: %s" % root_dir
+		return result
+
+	var skipped_dirs := PackedStringArray()
+	for dir_name in DirAccess.get_directories_at(root_dir):
+		var lower_dir := String(dir_name).to_lower() + "/"
+		if not _in_excluded_dir(lower_dir):
+			skipped_dirs.append(String(dir_name))
+	skipped_dirs.sort()
+	if not skipped_dirs.is_empty():
+		push_warning("Packer: subdirectories are not staged (root files only): %s"
+				% ", ".join(skipped_dirs))
+
+	var prepare_error := _prepare_out_dir(out_dir)
+	if not prepare_error.is_empty():
+		result["error"] = prepare_error
+		return result
+
+	var staged := PackedStringArray()
+	var skipped := PackedStringArray()
+	for name in names:
+		var lower := String(name).to_lower()
+		if _in_excluded_dir(lower) or _has_extension(lower, EXCLUDED_EXTENSIONS):
+			skipped.append(name)
+			continue
+		var src := root_dir.path_join(name)
+		if not FileAccess.file_exists(src):
+			skipped.append(name)
+			continue
+		var copy_err := _copy_file(src, out_dir.path_join(name.get_file()))
+		if copy_err != OK:
+			result["error"] = "Copying %s into %s failed: %s" % [
+					name, out_dir, error_string(copy_err)]
+			return result
+		staged.append(name)
+
+	var token := PffDocument.new()
+	var token_err := token.save_as(out_dir.path_join("resource.pff"))
+	if token_err != OK:
+		result["error"] = "Writing the resource.pff boot token failed: %s" % token.get_last_error()
+		return result
+
+	result["ok"] = true
+	result["staged"] = staged
+	result["skipped"] = skipped
+	result["skipped_dirs"] = skipped_dirs
+	return result
+
+
+## Pack `root` and drop the game's runtime artifacts into an EXISTING game dir — the archive
+## plus every loose-by-contract file — overwriting only those names.
+##
+## This is the "update the shipped game" seam: the dir legitimately holds things that are not
+## ours (opennova.exe, the editor, the DLL, a retail runtime), so unlike [method pack]'s own
+## output dirs it is never wiped and never refused. The pack itself runs in a private scratch
+## under user://, where pack()'s marker/wipe rules apply as usual.
+##
+## Consumers: the Export Game action in Settings, the headless `--pack-game` CLI (which CI
+## runs to build the shipped zip's game with this very packer), and nothing else.
+static func export_game(root: Object, game_dir: String) -> Dictionary:
+	var scratch := ProjectSettings.globalize_path("user://pack-export")
+	var packed := pack(root, scratch)
+	if not bool(packed.get("ok", false)):
+		return packed
+
+	if not DirAccess.dir_exists_absolute(game_dir):
+		var mk_err := DirAccess.make_dir_recursive_absolute(game_dir)
+		if mk_err != OK and not DirAccess.dir_exists_absolute(game_dir):
+			return { "ok": false, "error": "Cannot create game directory: %s" % game_dir }
+
+	var artifacts := PackedStringArray([String(packed["archive"]).get_file()])
+	for name in packed["loose"]:
+		artifacts.append(String(name).get_file())
+
+	var exported := PackedStringArray()
+	for artifact in artifacts:
+		var src := scratch.path_join(artifact)
+		if not FileAccess.file_exists(src):
+			continue
+		var copy_err := _copy_file(src, game_dir.path_join(artifact))
+		if copy_err != OK:
+			packed["ok"] = false
+			packed["error"] = "Copying %s into %s failed: %s" % [
+					artifact, game_dir, error_string(copy_err)]
+			return packed
+		exported.append(artifact)
+
+	packed["game_dir"] = game_dir
+	packed["exported"] = exported
+	return packed
+
+
 static func _has_extension(lower_name: String, extensions: Array) -> bool:
 	for ext in extensions:
 		if lower_name.ends_with(String(ext)):
@@ -248,10 +371,11 @@ const RETAIL_RUNTIME := [
 ]
 
 
-## Pack `root` into `out_dir` and stage the retail runtime beside it, ready to launch.
+## Stage `root` LOOSE (plus the boot token) into `out_dir` with the retail runtime beside
+## it, ready to launch `/w /d /FRISK`.
 ##
-## Returns { ok, exe, packed_dir, archived, loose, error }. This is the seam
-## ShellGameSession's RETAIL mode injects, so Play in Retail and the MCP tool cannot drift.
+## Returns { ok, exe, packed_dir, staged, skipped, error }. This is the seam
+## ShellGameSession's RETAIL mode injects, so Play in Retail cannot drift from the rules.
 ## Every runtime file is required: a stage that silently came up short would launch a stale
 ## exe, or reproduce the no-game.cfg hang, while reporting success.
 static func pack_for_retail(root: Object, out_dir: String, retail_dir: String) -> Dictionary:
@@ -273,9 +397,9 @@ static func pack_for_retail(root: Object, out_dir: String, retail_dir: String) -
 						String(entry["from"]), clean_retail, (" " + why + ".") if not why.is_empty() else ""] }
 		sources.append({ "src": src, "dst": out_dir.path_join(String(entry["to"])) })
 
-	var packed := pack(root, out_dir)
+	var packed := stage_loose(root, out_dir)
 	if not bool(packed.get("ok", false)):
-		return { "ok": false, "exe": "", "error": String(packed.get("error", "Packing failed.")) }
+		return { "ok": false, "exe": "", "error": String(packed.get("error", "Staging failed.")) }
 
 	for item in sources:
 		var copy_err := _copy_file(String(item["src"]), String(item["dst"]))

@@ -366,7 +366,7 @@ static func launch_plan(
 ) -> LaunchPlan:
 	if request.mode == Mode.RETAIL:
 		# Retail launches the exe the pack step staged, with retail's own flags: /w windowed,
-		# /d loose-first (the packed dir keeps the .sbf banks and earlyerr.txt loose), /FRISK to
+		# /d loose-first (the staged dir is all loose files plus the boot-token archive), /FRISK to
 		# log every resolved load. It understands none of runtime_flags' OpenNova arguments.
 		if request.exe_path.is_empty() or not bool(file_exists.call(request.exe_path)):
 			return null
@@ -575,7 +575,7 @@ func _spawn_request(request: GameRunRequest) -> bool:
 	var unsaved_note := _unsaved_note(request.unsaved_workspaces)
 	if request.mode == Mode.RETAIL:
 		if not unsaved_note.is_empty():
-			_show("Retail launched from the packed assets; %s" % unsaved_note, &"warn")
+			_show("Retail launched from the staged assets; %s" % unsaved_note, &"warn")
 		else:
 			_show("Retail launched from %s." % request.packed_dir, &"info")
 	elif request.mode == Mode.CURRENT_MISSION:

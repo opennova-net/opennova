@@ -72,6 +72,20 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _settings_mcp_port_edit: LineEdit = %SettingsMcpPortEdit
 @onready var _settings_mcp_status_label: Label = %SettingsMcpStatusLabel
 @onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
+
+
+# Export Game sits beside the PFF tool in the settings popover. Built in code (the
+# popover scene predates it): a sibling inserted right after the PFF tool button.
+func _make_export_game_button() -> Button:
+	if _settings_pff_tool_button == null:
+		return null
+	var button := Button.new()
+	button.name = "SettingsExportGameButton"
+	button.text = "Export Game…"
+	var parent := _settings_pff_tool_button.get_parent()
+	parent.add_child(button)
+	parent.move_child(button, _settings_pff_tool_button.get_index() + 1)
+	return button
 @onready var _asset_dock: Control = %AssetDock
 @onready var _right_split: SplitContainer = %RightSplit
 @onready var _browser_toggle_button: Button = %BrowserToggleButton
@@ -311,7 +325,8 @@ func _ready() -> void:
 		_settings_recent_option, _settings_expansion_row, _settings_view_section,
 		_settings_grid_toggle, _settings_axes_toggle, _settings_mcp_toggle,
 		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button,
-		_settings_retail_dir_edit, _settings_browse_retail_dir_button)
+		_settings_retail_dir_edit, _settings_browse_retail_dir_button,
+		_make_export_game_button())
 	_settings_panel.load_view_state()
 	_layout.setup(
 		self,

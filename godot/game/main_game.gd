@@ -263,9 +263,8 @@ func _ready() -> void:
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
-	# Editor-managed runs pass an exact process-local directory. It wins over
-	# persisted settings but is never written back.
-	var dir := LaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
+	# Flag > persisted pick > the game bundled around a shipped exe (LaunchFlags).
+	var dir := LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir())
 	if dir.is_empty():
 		_request_resource_dir()
 		return
@@ -565,7 +564,7 @@ func _can_summon_dir_picker() -> bool:
 # the shell holds no root) so boot continuations can gate on it.
 func _enter_menu(dir: String) -> bool:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := mount_boot_root(dir, LaunchFlags.loose_root_allowed())
+		var root := mount_boot_root(dir, LaunchFlags.boot_loose_allowed(dir))
 		if root == null:
 			_request_resource_dir()
 			return false
@@ -694,7 +693,7 @@ func _on_dir_selected(dir: String) -> void:
 ## the same ADR-0018 reason as mount_boot_root; returns false when the pick
 ## would not mount (the picker is re-raised).
 func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
-	var root := mount_boot_root(dir, LaunchFlags.loose_root_allowed())
+	var root := mount_boot_root(dir, LaunchFlags.boot_loose_allowed(dir))
 	if root == null:
 		_request_resource_dir()
 		return false
@@ -710,7 +709,8 @@ func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
 ## `--loose-root` flag, passed by every ONED-managed run) a directory holding
 ## none of the packed archives falls back to the editor's loose mount — the
 ## same data contract ONED authors against, so F5/F6 can play-test a loose
-## extract (ADR 0025). The no-archives fatal stays the standalone default
+## extract (ADR 0025) and the dev zip's bundled assets/ boots as the game it is
+## (LaunchFlags.boot_loose_allowed). The no-archives fatal stays the picked default
 ## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
 ## Warns and returns null on failure. Public and parameterized so the fallback
 ## contract is testable without process arguments (ADR 0018).

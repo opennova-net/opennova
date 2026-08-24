@@ -45,6 +45,14 @@ acceptance step, never a committed input.
 - ONED's Play in Retail (F7) packs this tree and stages the retail runtime
   into the **editor's own data dir** (`user://packed`) — never beside the
   assets, so a distributed editor works against any mounted directory.
+- **This tree also ships, in two flavors**: the dev zip (`opennova-windows`)
+  stages the tracked files here under `assets/` — both shipped apps
+  default-mount that loose tree, so the game plays exactly what the editor
+  edits, no packing in the loop. The tagged-release zip
+  (`opennova-game-windows`) carries the same game packed into `localres.pff`
+  beside `opennova.exe`, built by the editor's own
+  `opennova-modtools.exe --headless -- --pack-game <src> <game_dir>` (the
+  Export Game action in Settings is the same seam).
 
 ## The set (grounded in required-resources.md)
 

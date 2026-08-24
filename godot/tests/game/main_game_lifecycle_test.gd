@@ -440,6 +440,83 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 		packed.clear()
 
 
+func test_bundled_game_dir_is_the_exe_dir_only_when_it_carries_a_boot_archive() -> void:
+	# A shipped opennova.exe sits IN its game dir, retail-style. A dir with no
+	# boot-table archive (a dev run: the Godot binary's own dir) is not a game.
+	_temp_dir = OS.get_cache_dir().path_join(
+			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
+	assert_eq(LaunchFlags.bundled_game_dir(_temp_dir), "",
+			"no boot archive -> not a game dir")
+	assert_eq(LaunchFlags.bundled_game_dir(""), "",
+			"an empty probe dir is never a game dir")
+	_write_pff(_temp_dir.path_join("localres.pff"), [])
+	assert_eq(LaunchFlags.bundled_game_dir(_temp_dir), _temp_dir,
+			"any boot-table archive makes the exe dir the default game dir")
+
+
+func test_boot_defaults_to_the_bundled_game_dir_and_never_persists_it() -> void:
+	# The shipped-zip flow: no flag, nothing configured, the exe's own dir carries
+	# the packed game -> that is the boot dir. It is a per-boot default, not a
+	# pick: the settings key stays untouched, and a configured dir always wins.
+	_temp_dir = OS.get_cache_dir().path_join(
+			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
+	var game_dir := _temp_dir.path_join("game")
+	var configured_dir := _temp_dir.path_join("configured")
+	assert_eq(DirAccess.make_dir_recursive_absolute(game_dir), OK)
+	assert_eq(DirAccess.make_dir_recursive_absolute(configured_dir), OK)
+	_write_pff(game_dir.path_join("localres.pff"), [])
+	var saved_dir := ResourceDirSettings.get_resource_dir()
+	var saved_override: String = LaunchFlags.bundled_probe_override
+	ResourceDirSettings.set_resource_dir("")
+
+	LaunchFlags.bundled_probe_override = game_dir
+	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), game_dir,
+			"unconfigured boot resolves to the bundled game dir")
+	assert_eq(ResourceDirSettings.get_resource_dir(), "",
+			"the default is never written to the shared settings key")
+
+	ResourceDirSettings.set_resource_dir(configured_dir)
+	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), configured_dir,
+			"an explicit configured dir wins over the bundle")
+	ResourceDirSettings.set_resource_dir(saved_dir)
+	LaunchFlags.bundled_probe_override = saved_override
+
+
+func test_boot_falls_through_to_bundled_loose_assets_and_blesses_only_them() -> void:
+	# The dev-zip flow: no flag, nothing configured, no packed game beside the exe, but
+	# an assets/ sibling of loose sources -> that is the boot dir, and it (alone) may
+	# take the loose authoring mount without --loose-root. A picked or persisted loose
+	# dir keeps retail's no-archives fatal.
+	_temp_dir = OS.get_cache_dir().path_join(
+			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
+	var exe_dir := _temp_dir.path_join("exe")
+	var assets_dir := exe_dir.path_join("assets")
+	var picked_dir := _temp_dir.path_join("picked")
+	assert_eq(DirAccess.make_dir_recursive_absolute(assets_dir), OK)
+	assert_eq(DirAccess.make_dir_recursive_absolute(picked_dir), OK)
+	var saved_dir := ResourceDirSettings.get_resource_dir()
+	var saved_override: String = LaunchFlags.bundled_probe_override
+	ResourceDirSettings.set_resource_dir("")
+
+	LaunchFlags.bundled_probe_override = exe_dir
+	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), assets_dir,
+			"with no packed game beside the exe, the loose assets/ sibling is the boot dir")
+	assert_true(LaunchFlags.boot_loose_allowed(assets_dir),
+			"exactly that dir is blessed for the loose mount")
+	assert_false(LaunchFlags.boot_loose_allowed(picked_dir),
+			"any other dir keeps retail's no-archives fatal without --loose-root")
+	assert_eq(ResourceDirSettings.get_resource_dir(), "", "never persisted")
+
+	# The packed bundle outranks the loose sibling when both are present (tagged zip
+	# carrying stray sources still boots the packed game).
+	_write_pff(exe_dir.path_join("localres.pff"), [])
+	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), exe_dir,
+			"a boot archive beside the exe wins over the assets/ sibling")
+	ResourceDirSettings.set_resource_dir(saved_dir)
+	LaunchFlags.bundled_probe_override = saved_override
+
+
 func test_mission_return_restores_menu_frame_and_supports_another_load() -> void:
 	_shell = await _make_shell()
 	if _shell == null:

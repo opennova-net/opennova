@@ -131,10 +131,36 @@ func load_state() -> Dictionary:
 	# runtime); get_resource_dir() already drops stale/invalid paths.
 	_root_dir = OnedSettings.get_resource_dir()
 	if _root_dir.is_empty():
+		# A shipped editor defaults to the assets/ bundled beside its exe — the zip's
+		# game sources — so a fresh download opens ready to edit. Never persisted: an
+		# explicit Settings pick still owns the config, and dev runs (the Godot binary
+		# has no assets/ sibling) are unaffected.
+		_root_dir = bundled_assets_dir(_bundled_probe_dir())
+	if _root_dir.is_empty():
 		_resource_root.clear()
 	else:
 		_resource_root.set_root_dir(_root_dir)
 	return {"root_dir": _root_dir}
+
+
+## The game sources bundled beside a shipped editor: `<exe_dir>/assets` when it exists
+## and is a sane root, else "".
+static func bundled_assets_dir(exe_dir: String) -> String:
+	var dir := exe_dir.path_join("assets")
+	if DirAccess.dir_exists_absolute(dir) and ResourceDirSettings.is_valid_root(dir):
+		return dir
+	return ""
+
+
+## Tests substitute the directory probed for a bundled assets/ sibling; the real
+## editor probes its own exe's directory.
+var bundled_probe_override: String = ""
+
+
+func _bundled_probe_dir() -> String:
+	if not bundled_probe_override.is_empty():
+		return bundled_probe_override
+	return OS.get_executable_path().get_base_dir()
 
 
 func save_state() -> void:

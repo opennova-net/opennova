@@ -169,8 +169,12 @@ def count_engine_stdout_prints() -> int:
 GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
 # CLI drivers whose stdout IS the product; everything else in the shipping
 # godot layer routes through push_error/push_warning, print_verbose, or the
-# F3 debug system.
-GD_PRINT_ALLOWLIST = {"godot/modtools/tools/screenshot_capture.gd"}
+# F3 debug system. CLI tool drivers are the exception: their console output IS
+# the interface.
+GD_PRINT_ALLOWLIST = {
+    "godot/modtools/tools/screenshot_capture.gd",
+    "godot/modtools/tools/pack_game_cli.gd",
+}
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
     r"|UtilityFunctions::print_rich\s*\("

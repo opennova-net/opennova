@@ -25,32 +25,28 @@ func _init(mcp_service: Node) -> void:
 
 func register_all(registry: McpToolRegistry) -> void:
 	registry.register(McpToolDef.make("pack_game",
-			"Pack the mounted asset root into a runnable game dir at out_dir: every packable file (missions included) into a single localres.pff, with the .sbf music banks and earlyerr.txt copied loose beside it (both are read outside the archives). Authoring sources under src/, existing archives, and the retail runtime are skipped; subdirectories are not packed and are reported in skipped_dirs. The archive is named localres.pff because retail's boot table probes six fixed names (an arbitrary one never mounts) and its mission list is built from the localres/language volumes -- retail ships its own missions in localres.pff; one archived in resource.pff loads by name but never appears in any mission list. A previous pack's files in out_dir are removed first; a non-empty out_dir that is not a previous pack output is refused. Returns what was archived, copied loose, and skipped.",
+			"Build the SHIPPABLE packed game from the mounted asset root into game_dir (the tagged-release flavor; the dev loop plays the loose tree directly and needs no packing). Every packable file (missions included) is archived into a single localres.pff, with the .sbf music banks and earlyerr.txt written loose beside it (both are read outside the archives). The archive is named localres.pff because retail's boot table probes six fixed names and its mission list is built from the localres/language volumes -- a mission archived in resource.pff loads by name but never lists. game_dir may already hold exes or a runtime; only the game's own artifact names are overwritten. Same seam as the editor's Export Game action and the --pack-game CLI. Returns what was archived and which artifacts were written.",
 			{
-				"out_dir": { "type": "string", "description": "Absolute directory to write the game dir into." },
-			}, ["out_dir"]), Callable(self, "_tool_pack_game"))
+				"game_dir": { "type": "string", "description": "Absolute directory to write the packed game into (may be a populated game dir)." },
+			}, ["game_dir"]), Callable(self, "_tool_pack_game"))
 
 
 func _tool_pack_game(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var out_dir := String(args.get("out_dir", "")).strip_edges()
-	if out_dir.is_empty() or not out_dir.is_absolute_path():
-		return McpToolResult.error("out_dir must be an absolute directory path.")
-	return _pack(out_dir, ctx)
-
-
-func _pack(out_dir: String, ctx: McpToolContext) -> Variant:
+	var game_dir := String(args.get("game_dir", "")).strip_edges()
+	if game_dir.is_empty() or not game_dir.is_absolute_path():
+		return McpToolResult.error("game_dir must be an absolute directory path.")
 	var root: Variant = ctx.root()
 	if root == null:
 		return McpToolResult.error("No resource directory mounted — set one in the editor's Settings (gear) popup.")
-	ctx.status("Packing %s -> %s" % [String(root.get_root_dir()), out_dir])
-	var out: Dictionary = PackerScript.pack(root, out_dir)
+	ctx.status("Exporting packed game %s -> %s" % [String(root.get_root_dir()), game_dir])
+	var out: Dictionary = PackerScript.export_game(root, game_dir)
 	if not bool(out.get("ok", false)):
 		return McpToolResult.error(String(out.get("error", "Packing failed.")))
 	return {
-		"archive": out["archive"],
+		"game_dir": out["game_dir"],
+		"exported": out["exported"],
 		"archived_count": out["archived"].size(),
 		"archived": out["archived"],
-		"loose": out["loose"],
 		"skipped": out["skipped"],
 		"skipped_dirs": out["skipped_dirs"],
 	}

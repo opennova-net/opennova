@@ -510,16 +510,19 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  # One job, one zip: the editor (opennova-modtools.exe) and the game runtime
-  # (opennova.exe) ship side by side with the GDExtension DLL they share. The
-  # editor launches the runtime from its own directory (F5/F6), so two zips only
-  # ever paired a fresh editor with a stale runtime.
+  # One job, the workflow's two zips. The DEV zip (game + editor + loose assets/,
+  # one copy of the data) is what PRs and master builds hand out; the GAME zip
+  # (opennova.exe + the packed pffs, built by the exported editor's own
+  # --pack-game CLI) is what tagged releases ship — built here on every run so
+  # the pack path is exercised long before a tag needs it.
   package-godot-windows:
     runs-on: windows-latest
     needs: [build-gdextension-windows]
     outputs:
       artifact_url: ${{ steps.upload_windows.outputs.artifact-url }}
       artifact_id: ${{ steps.upload_windows.outputs.artifact-id }}
+      game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
+      game_artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -563,11 +566,19 @@ jobs:
         shell: pwsh
         run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
-      - name: Upload OpenNova Windows zip
+      - name: Upload OpenNova Windows dev zip
         id: upload_windows
         uses: actions/upload-artifact@v7
         with:
           path: dist/opennova-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload OpenNova Windows game zip
+        id: upload_game
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-game-windows-v*.zip
           archive: false
           if-no-files-found: error
 
@@ -603,7 +614,8 @@ jobs:
         with:
           path: dist
           artifact-ids: >-
-            ${{ needs.package-godot-windows.outputs.artifact_id }}
+            ${{ needs.package-godot-windows.outputs.artifact_id }},
+            ${{ needs.package-godot-windows.outputs.game_artifact_id }}
           merge-multiple: true
           skip-decompress: true
 
@@ -615,7 +627,8 @@ jobs:
           artifact-ids: >-
             ${{ needs.package-addon.outputs.artifact_id }},
             ${{ needs.package-importer.outputs.artifact_id }},
-            ${{ needs.package-godot-windows.outputs.artifact_id }}
+            ${{ needs.package-godot-windows.outputs.artifact_id }},
+            ${{ needs.package-godot-windows.outputs.game_artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -634,6 +647,7 @@ jobs:
           --release-version 0.0.0-ci
           --gdextension-target template_debug
           --only-id windows-apps
+          --only-id windows-game
 
       - name: Validate non-PR deliverables
         if: github.event_name != 'pull_request'
@@ -644,6 +658,7 @@ jobs:
           --only-id asset-importer
           --only-id blender-ase-exporter
           --only-id windows-apps
+          --only-id windows-game
 
   # Surface the Windows build on the PR as a single comment that updates in
   # place. Depends on the Windows package job (not the test jobs), so the link
@@ -661,6 +676,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           WINDOWS_URL: ${{ needs.package-godot-windows.outputs.artifact_url }}
+          GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -678,7 +694,8 @@ jobs:
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| OpenNova Editor + game runtime (opennova-modtools.exe, opennova.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
+              `| Dev build: game + editor + loose assets (opennova.exe, opennova-modtools.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
+              `| Game build: opennova.exe + packed pffs (the tagged-release flavour) | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');
