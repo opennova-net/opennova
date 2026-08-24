@@ -1364,6 +1364,13 @@ func apply_bulk_edit(kind: int, mutator: Callable) -> bool:
 		_brush_session.end_history_stroke(null)  # nothing changed: drop the pending stroke
 		return false
 	_brush_session.expand_history_rect(rect)
+	# Clamp BEFORE the "after" snapshot is taken, exactly as every interactive dab clamps its own
+	# rect before its stroke commits. The clamp mutates this same image in place, so clamping
+	# after end_history_stroke would leave the undo stack holding the unclamped heights: undo then
+	# redo would blit back a terrain that differs from what was displayed and carries the CDEP
+	# violations the clamp had just removed.
+	if kind == TerrainEditHistory.Kind.HEIGHTMAP and _data != null:
+		_data.cdep_clamp_blocks_in_rect(rect)
 	_brush_session.end_history_stroke(image)
 	_invalidate_after_bulk_edit(kind, rect)
 	return true
@@ -1407,14 +1414,12 @@ func _editable_image_for_kind(kind: int) -> Image:
 	return null
 
 
-# The same invalidation _apply_history_snapshot performs for each kind. Height also re-clamps
-# the CDEP blocks it touched, exactly as every brush dab does -- the export would otherwise
+# The same invalidation _apply_history_snapshot performs for each kind. The CDEP blocks are
+# already clamped by apply_bulk_edit, before the stroke committed -- the export would otherwise
 # carry violations for _auto_clamp_for_export_if_needed to silently fix later.
-func _invalidate_after_bulk_edit(kind: int, rect: Rect2i) -> void:
+func _invalidate_after_bulk_edit(kind: int, _rect: Rect2i) -> void:
 	match kind:
 		TerrainEditHistory.Kind.HEIGHTMAP:
-			if _data != null:
-				_data.cdep_clamp_blocks_in_rect(rect)
 			terrain_mesh.set_heightmap(_heightmap_image)
 			_height_revision += 1
 			_brush_ops._refresh_surface_input_heightfield()
@@ -1425,6 +1430,20 @@ func _invalidate_after_bulk_edit(kind: int, rect: Rect2i) -> void:
 			_brush_ops._refresh_surface_input_blend()
 		TerrainEditHistory.Kind.COLORMAP:
 			_colormap_tex.update(_colormap_image)
+	is_dirty = true
+	_mark_ui_state_changed()
+
+
+## Replace the colormap wholesale (a resize, an import) rather than editing it in place.
+##
+## Undo cannot span this: TerrainEditHistory stores sub-rects of ONE image, so every snapshot
+## taken against the old image would blit a stale patch into the corner of the new one. The
+## history is cleared with the swap, and the caller should say so.
+func replace_colormap_image(image: Image) -> void:
+	if image == null:
+		return
+	_document.set_colormap_image(_get_material(), image)
+	_brush_session.clear_history()
 	is_dirty = true
 	_mark_ui_state_changed()
 

@@ -1,26 +1,32 @@
 extends GutTest
 
 const TerrainEditorScript = preload("res://modtools/terrain/terrain_editor.gd")
-const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
+# The test WRITES the runtime config (ResourceDirSettings.set_resource_dir) and the editor
+# under test writes its own (OnedSettings). Both are snapshotted: an unisolated single-file
+# rerun that restored only one of them would leave the developer's real resource dir pointing
+# at a temp path this test then deletes.
+const CONFIG_PATHS: Array[String] = [OnedSettings.CONFIG_PATH, ResourceDirSettings.CONFIG_PATH]
 const TEST_ROOT := "opennova_state_test"
 
-var _saved_state_config := PackedByteArray()
-var _had_state_config := false
+var _saved_configs := {}
 
 
 func before_each() -> void:
-	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
+	_saved_configs.clear()
+	for path in CONFIG_PATHS:
+		if FileAccess.file_exists(path):
+			_saved_configs[path] = FileAccess.get_file_as_bytes(path)
 
 
 func after_each() -> void:
-	if _had_state_config:
-		var f := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
-		if f != null:
-			f.store_buffer(_saved_state_config)
-			f.close()
-	elif FileAccess.file_exists(STATE_CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	for path in CONFIG_PATHS:
+		if _saved_configs.has(path):
+			var f := FileAccess.open(path, FileAccess.WRITE)
+			if f != null:
+				f.store_buffer(_saved_configs[path])
+				f.close()
+		elif FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	_remove_dir_recursive(OS.get_cache_dir().path_join(TEST_ROOT))
 
 

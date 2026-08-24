@@ -138,7 +138,21 @@ static func rasterize(font: Font, px_size: int, flags: int) -> FntResource:
 static func _rasterize_glyph(ts: TextServer, rid: RID, size_i: int, size_v: Vector2i, code: int, ascent: float, line_h: int, tex_cache: Dictionary, flags: int) -> Dictionary:
 	var gi := ts.font_get_glyph_index(rid, size_i, code, 0)
 	if gi == 0:
-		return {}
+		# The face has no glyph for this codepoint. Returning nothing lands it a 0x0 rect, which
+		# retail draws as a -1 advance -- the next character backs up onto the previous one. Give
+		# it the blank cell a space gets instead, sized by the face's .notdef advance (glyph 0)
+		# or, when the face reports none, its space.
+		var fallback_w := int(ceil(ts.font_get_glyph_advance(rid, size_i, 0).x))
+		if fallback_w <= 0:
+			var space_gi := ts.font_get_glyph_index(rid, size_i, 0x20, 0)
+			if space_gi != 0:
+				fallback_w = int(ceil(ts.font_get_glyph_advance(rid, size_i, space_gi).x))
+		if fallback_w <= 0:
+			return {}
+		var blank_w := mini(fallback_w + 1, TEX)
+		var blank_cell := Image.create(blank_w, line_h, false, Image.FORMAT_RGBA8)
+		blank_cell.fill(Color(1.0, 1.0, 1.0, 0.0))
+		return {"img": blank_cell, "w": blank_w, "h": line_h}
 	# +1 because the font emits spacing 0 and retail subtracts one from every advance.
 	var cell_w := int(ceil(ts.font_get_glyph_advance(rid, size_i, gi).x)) + 1
 

@@ -36,11 +36,11 @@ func test_a_bulk_edit_changes_the_heightmap_and_bumps_the_revision() -> void:
 	await get_tree().process_frame
 	editor.new_terrain()
 	var rev: int = editor.get_height_revision()
-	var before: float = editor._heightmap_image.get_pixel(300, 300).r
+	var before: float = editor.get_data().get_heightmap_image().get_pixel(300, 300).r
 
 	assert_true(editor.apply_bulk_edit(Kind.HEIGHTMAP, _raise_block(Rect2i(280, 280, 40, 40), 5.0)),
 			"the edit reports applied")
-	assert_almost_eq(editor._heightmap_image.get_pixel(300, 300).r, before + 5.0, 0.001,
+	assert_almost_eq(editor.get_data().get_heightmap_image().get_pixel(300, 300).r, before + 5.0, 0.001,
 			"the pixel moved")
 	assert_gt(editor.get_height_revision(), rev, "a height change bumps the drift counter")
 	assert_true(editor.is_dirty, "and marks the project dirty")
@@ -52,19 +52,47 @@ func test_a_bulk_edit_is_one_undo_step() -> void:
 	var editor := _editor()
 	await get_tree().process_frame
 	editor.new_terrain()
-	var before: float = editor._heightmap_image.get_pixel(300, 300).r
+	var before: float = editor.get_data().get_heightmap_image().get_pixel(300, 300).r
 
 	editor.apply_bulk_edit(Kind.HEIGHTMAP, _raise_block(Rect2i(280, 280, 40, 40), 5.0))
 	assert_true(editor.can_undo(), "a bulk edit leaves an undo entry")
 
 	editor.undo()
-	assert_almost_eq(editor._heightmap_image.get_pixel(300, 300).r, before, 0.001,
+	assert_almost_eq(editor.get_data().get_heightmap_image().get_pixel(300, 300).r, before, 0.001,
 			"one undo restores the whole edit")
 	assert_true(editor.can_redo(), "and it can be redone")
 
 	editor.redo()
-	assert_almost_eq(editor._heightmap_image.get_pixel(300, 300).r, before + 5.0, 0.001,
+	assert_almost_eq(editor.get_data().get_heightmap_image().get_pixel(300, 300).r, before + 5.0, 0.001,
 			"redo puts it back")
+
+
+func test_redo_restores_the_clamped_heights_not_the_raw_edit() -> void:
+	# The CDEP clamp mutates the same image the undo snapshot is taken from. It has to run
+	# BEFORE the stroke commits (as every interactive dab does): clamping afterwards leaves
+	# the "after" snapshot holding the unclamped spike, so undo then redo brings the
+	# violations straight back onto a terrain that was displayed clamped.
+	var editor := _editor()
+	await get_tree().process_frame
+	editor.new_terrain()
+	var spike := func(image: Image) -> Rect2i:
+		var r := Rect2i(300, 300, 4, 4)
+		for z in range(r.position.y, r.end.y):
+			for x in range(r.position.x, r.end.x):
+				var c := image.get_pixel(x, z)
+				image.set_pixel(x, z, Color(c.r + 4000.0, c.g, c.b, c.a))
+		return r
+	assert_true(editor.apply_bulk_edit(Kind.HEIGHTMAP, spike), "the spike applies")
+	assert_eq(editor.get_data().cdep_count_violations(), 0,
+			"the edit is clamped before it commits, so what is displayed is CDEP-clean")
+	var clamped: float = editor.get_data().get_heightmap_image().get_pixel(301, 301).r
+
+	editor.undo()
+	editor.redo()
+	assert_eq(editor.get_data().cdep_count_violations(), 0,
+			"redo restores the clamped heights: the undo snapshot was taken after the clamp")
+	assert_almost_eq(editor.get_data().get_heightmap_image().get_pixel(301, 301).r, clamped, 0.001,
+			"and the redone pixel is the clamped one, not the raw spike")
 
 
 func test_an_edit_that_touches_nothing_leaves_no_undo_entry() -> void:
@@ -85,9 +113,10 @@ func test_the_mutator_sees_the_live_shared_buffer() -> void:
 	var editor := _editor()
 	await get_tree().process_frame
 	editor.new_terrain()
+	var before: float = editor.get_data().get_heightmap_image().get_pixel(300, 300).r
 	editor.apply_bulk_edit(Kind.HEIGHTMAP, _raise_block(Rect2i(280, 280, 40, 40), 7.0))
-	assert_eq(editor._data.get_heightmap_image(), editor._heightmap_image,
-			"the editor's image IS the data's image, not a copy")
+	assert_almost_eq(editor.get_data().get_heightmap_image().get_pixel(300, 300).r, before + 7.0, 0.001,
+			"an edit through the editor's seam is visible through the data side -- same buffer, not a copy")
 
 
 func test_colormap_edits_route_through_the_same_seam() -> void:
@@ -103,7 +132,7 @@ func test_colormap_edits_route_through_the_same_seam() -> void:
 	var rev: int = editor.get_height_revision()
 	assert_true(editor.apply_bulk_edit(Kind.COLORMAP, paint), "colour edits apply")
 	# The colormap is 8 bits per channel, so compare within a quantisation step.
-	var got: Color = editor._colormap_image.get_pixel(105, 105)
+	var got: Color = editor.get_data().get_colormap_image().get_pixel(105, 105)
 	assert_almost_eq(got.r, 0.2, 0.005, "red landed")
 	assert_almost_eq(got.g, 0.4, 0.005, "green landed")
 	assert_almost_eq(got.b, 0.1, 0.005, "blue landed")

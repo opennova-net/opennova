@@ -48,10 +48,10 @@ func register_all(registry: McpToolRegistry) -> void:
 				"height": { "type": "number", "description": "World height for target=height." },
 			}, ["target"]), Callable(self, "_tool_fill"))
 	registry.register(McpToolDef.make("terrain_export",
-			"Export the loaded terrain into out_dir in the retail JO flavour: the .trn, the baked .cpt polydata, and every texture slot that carries an image. Runs to completion before returning. Slots with no image are skipped, so check terrain_state's slots against what the .trn references first.",
+			"Export the loaded terrain into out_dir: the .trn, the baked .cpt polydata, and every texture slot that carries an image. Runs to completion before returning. Slots with no image are skipped, so check terrain_state's slots against what the .trn references first. flavor=dfx_jo (default) bakes the compressed depth JO/DFX read and clamps every block to their steepness limit first; flavor=bhd bakes the raw BHD depth with no such limit.",
 			{
 				"out_dir": { "type": "string", "description": "Absolute directory." },
-				"flavor": { "type": "string", "description": "dfx_jo (default) or the project flavour." },
+				"flavor": { "type": "string", "description": "dfx_jo (default) or bhd." },
 			}, ["out_dir"]), Callable(self, "_tool_export"))
 
 
@@ -165,14 +165,13 @@ func _tool_fill(args: Dictionary, ctx: McpToolContext) -> Variant:
 	# A colormap smaller than the source atlas cannot be quadrant-split into the four 512x512
 	# tiles retail expects, so a fill is also where an undersized one gets re-created at full
 	# resolution. Undo cannot span that (the history stores sub-rects of one image), so the
-	# resize is done first, outside the undoable step.
+	# swap goes through replace_colormap_image, which clears the history with it.
 	var resized := false
-	var current: Image = editor._colormap_image
+	var current: Image = editor.get_data().get_colormap_image() if editor.get_data() != null else null
 	if current == null or current.get_width() < TerrainData.ATLAS_SIZE:
 		var fresh := Image.create(TerrainData.ATLAS_SIZE, TerrainData.ATLAS_SIZE, false, Image.FORMAT_RGB8)
 		fresh.fill(col)
-		editor._document.set_colormap_image(editor._get_material(), fresh)
-		editor.is_dirty = true
+		editor.replace_colormap_image(fresh)
 		resized = true
 	else:
 		var ok2: bool = editor.apply_bulk_edit(TerrainEditHistory.Kind.COLORMAP,
@@ -184,6 +183,8 @@ func _tool_fill(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 	var state := _state_of(gate["ws"], editor, 17)
 	state["resized_colormap"] = resized
+	if resized:
+		state["note"] = "The colormap was re-created at full size; the undo history was cleared with it."
 	return state
 
 
@@ -196,7 +197,15 @@ func _tool_export(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if out_dir.is_empty() or not out_dir.is_absolute_path():
 		return McpToolResult.error("out_dir must be an absolute directory path.")
 	var flavor: int = editor.ExportFlavor.DFX_JO
-	ctx.status("Exporting terrain to %s" % out_dir)
+	var flavor_name := String(args.get("flavor", "dfx_jo")).strip_edges().to_lower()
+	match flavor_name:
+		"", "dfx_jo", "jo", "dfx":
+			flavor = editor.ExportFlavor.DFX_JO
+		"bhd":
+			flavor = editor.ExportFlavor.BHD
+		_:
+			return McpToolResult.error("flavor must be dfx_jo or bhd (got '%s')." % flavor_name)
+	ctx.status("Exporting terrain to %s (%s)" % [out_dir, flavor_name if not flavor_name.is_empty() else "dfx_jo"])
 	var err: int = editor.export_terrain(out_dir, flavor)
 	if err != OK:
 		return McpToolResult.error("Export failed: %s" % error_string(err))

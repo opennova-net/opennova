@@ -16,7 +16,8 @@ extends RefCounted
 ## silent track is what the boot pair actually needs — the script's `play` wants a real entry to
 ## address, and the minimal game ships no music.
 
-const SAMPLE_RATE := 22050
+const SAMPLE_RATE := 22050  # frames per second
+const CHANNELS := 2  # SBF audio is interleaved stereo int16
 
 
 var service: Node
@@ -33,11 +34,11 @@ func register_all(registry: McpToolRegistry) -> void:
 				"script_name": { "type": "string", "description": "Script chunk name. Default \"gamescript\"." },
 			}), Callable(self, "_tool_new"))
 	registry.register(McpToolDef.make("music_add_track",
-			"Add a track to the open bank. Give either seconds (synthesizes that many seconds of digital silence at 22050 Hz — what the boot pair needs, since the minimal game ships no music) or samples (explicit mono floats in -1..1). Returns the new track index for music_insert_play.",
+			"Add a track to the open bank. Give either seconds (synthesizes that many seconds of digital silence — what the boot pair needs, since the minimal game ships no music) or samples (explicit MONO floats in -1..1 at 22050 frames/s, widened to the stereo stream the bank stores). Returns the new track index for music_insert_play, plus the frame count and duration.",
 			{
 				"name": { "type": "string", "description": "Track name inside the bank." },
 				"seconds": { "type": "number", "description": "Length of silence to synthesize." },
-				"samples": { "type": "array", "items": { "type": "number" }, "description": "Explicit mono samples instead of silence." },
+				"samples": { "type": "array", "items": { "type": "number" }, "description": "Explicit mono samples (22050 frames/s) instead of silence; each is written to both channels." },
 			}, ["name"]), Callable(self, "_tool_add_track"))
 	registry.register(McpToolDef.make("music_add_section",
 			"Add a named section to the open script. Section 0 is the entry point the engine runs; extra sections are jump targets.",
@@ -107,15 +108,21 @@ func _tool_add_track(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if name.is_empty():
 		return McpToolResult.error("name is required.")
 
+	# The bank stores the float array as the raw int16 stream, and an SBF stream is interleaved
+	# STEREO -- L,R,L,R at SAMPLE_RATE frames per second (nova_sbf_audio_stream_playback). So a
+	# second is SAMPLE_RATE * CHANNELS values, and a caller's mono samples are widened to both
+	# channels here rather than being consumed as alternating L/R at double speed.
 	var samples := PackedFloat32Array()
 	if args.has("samples") and args["samples"] is Array:
 		for v in (args["samples"] as Array):
-			samples.append(clampf(float(v), -1.0, 1.0))
+			var s := clampf(float(v), -1.0, 1.0)
+			for _channel in range(CHANNELS):
+				samples.append(s)
 	elif args.has("seconds"):
 		var seconds := float(args["seconds"])
 		if seconds <= 0.0 or seconds > 600.0:
 			return McpToolResult.error("seconds must be between 0 and 600 (got %f)." % seconds)
-		samples.resize(int(round(seconds * SAMPLE_RATE)))  # zero-filled: digital silence
+		samples.resize(int(round(seconds * SAMPLE_RATE)) * CHANNELS)  # zero-filled: digital silence
 	else:
 		return McpToolResult.error("Give either seconds (synthesized silence) or samples.")
 	if samples.is_empty():
@@ -127,7 +134,9 @@ func _tool_add_track(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("Could not add the track: %s" % error_string(err))
 	var state := _state_of(gate["ws"], doc)
 	state["track"] = before
-	state["sample_count"] = samples.size()
+	var frames := samples.size() / CHANNELS
+	state["frames"] = frames
+	state["seconds"] = float(frames) / float(SAMPLE_RATE)
 	return state
 
 

@@ -296,11 +296,20 @@ func save_as_pair(sbf_path: String) -> int:
 		# produced no file is worse than refusing.
 		return ERR_UNAVAILABLE
 	var base := clean.get_file().get_basename()
+	# Adopt the new pair only once it is actually on disk: a failed save (a compile error, an
+	# unwritable dir) must leave the document pointing at the files that exist, not at a pair
+	# that was never written -- with the old path lost on top.
+	var previous_bank_path := bank_path
+	var previous_script_path := script_path
 	if bank_loaded():
 		bank_path = clean
 	if script_loaded():
 		script_path = dir.path_join("%s.bin" % base)
-	return save_to_disk()
+	var err := save_to_disk()
+	if err != OK:
+		bank_path = previous_bank_path
+		script_path = previous_script_path
+	return err
 
 
 func save_to_disk() -> int:
