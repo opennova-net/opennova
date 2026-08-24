@@ -9843,7 +9843,13 @@ array, or -1. `[orig: EndRoundScoreboard_SerializeHeader @0x505280]`
 **Port status (2026-08-22).** The complete transaction and producer schema are
 live. The authority freezes one `world::MatchResult`, pushes reliable S2C 0x61
 `[u32 0]` then the recipient-specific 7-byte S2C 0x1D header, enters game state
-11, and retains the board throughout the 2790-tick linger. The tick phase is
+11, and retains the board throughout the 2790-tick linger. Since 2026-08-24 the
+host also freezes the encoded STREAM once, in the round-end producer before the
+0x61/0x1D push (`NapiNPServerCtx::round_end_board_stream`, the `stru_C947D8`
+analogue `[orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]`); the
+C2S 0x2B service cuts chunks from that stream and never rebuilds it, so two pulls
+of the same offset are byte-identical, a pull before the announce receives
+nothing, and session creation clears it with the other round-end fields. The tick phase is
 also exact: an already-ended WAC/BMS co-op round consumes its announcement
 tick, while an automatic multiplayer result discovered by the later check starts
 draining next tick. `[orig: Server_TickUpdate @0x51D7E0 — linger drain

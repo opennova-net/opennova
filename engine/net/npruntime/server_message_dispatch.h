@@ -81,14 +81,26 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 // NapiNPServer_SendFiltered @0x4C87E0 walks the connection list doing one SendToConn per node];
 // each recipient's flush frames the body with its own sequencing.
 // [orig: per-message NapiNPServerMsg_0x0NN handlers reached from the 0x43 SESSION dispatch]
+// The host-context values the reply handlers read beyond `config`: every
+// member is a read-only view onto the owning NapiNPServerCtx (the session
+// clock, the 0x64 mission blob, the frozen 0x56 board stream). A null pointer
+// means the host has nothing to serve for that leg.
+struct ServerDispatchInputs {
+	uint32_t session_uptime_ms = 0;
+	const MissionMetadataBlob *mission_metadata_blob = nullptr;
+	// stru_C947D8: the board frozen by the round-end producer; the 0x2B service
+	// cuts chunks from it and never rebuilds. [orig: NapiNPServerMsg_0x02B
+	// @0x514FE0 -> NetPacket_WriteReplayStreamChunk @0x506F60]
+	const std::vector<uint8_t> *round_end_board_stream = nullptr;
+};
+
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
-                                                      uint32_t session_uptime_ms = 0,
-	                                                  const MissionMetadataBlob *mission_metadata_blob = nullptr);
+                                                      const ServerDispatchInputs &inputs = {});
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the

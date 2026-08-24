@@ -159,6 +159,13 @@ struct NapiNPServerCtx {
 	// clock. [orig: Server_ProcessRoundEnd @0x5164F0; 2790 store @0x5166C4]
 	bool round_end_announced = false;
 	uint32_t round_end_linger_ticks = 0;
+	// The frozen end-of-round board stream (stru_C947D8): built once by the
+	// round-end producer before the per-slot 0x61/0x1D push, then only READ by
+	// the C2S 0x2B chunk service; empty until a round ends and cleared with the
+	// other round-end fields at session creation.
+	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590 from
+	// Server_ProcessRoundEnd @0x5164F0; NetPacket_WriteReplayStreamChunk @0x506F60]
+	std::vector<uint8_t> round_end_board_stream;
 
 	// Non-dedicated S2C 0x68 wraps its 50-row cursor against the live renderer
 	// viewport height. Zero means no renderer seam was installed and suppresses
