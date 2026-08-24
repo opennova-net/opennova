@@ -933,7 +933,7 @@ std::vector<uint8_t> encode_auto_medic_preference(
 	std::vector<uint8_t> out;
 	Writer w{out};
 	// The profile stores the inverse checkbox value: zero means Auto Medic on.
-	// [orig: NetPacket_WriteSessionTick @0x42A400; OPTIONS_AUTOMEDIC
+	// [orig: NetPacket_WriteAutoMedicPreference @0x42A400; OPTIONS_AUTOMEDIC
 	// reads/writes @0x5549E7/@0x554E40]
 	w.u32(preference.enabled ? 0u : 1u);
 	return out;

@@ -118,7 +118,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'C', c2s::JOIN,                      "JOIN",                    MsgCoverage::PrinterOnly, "join request"},
 		{'C', c2s::JOIN_FORM_POST,            "join-form-post",          MsgCoverage::PrinterOnly, "§6.4 early-join side-password compare @0x512ED0"},
 		{'C', c2s::JOIN_PADDING_ECHO,         "join-padding-echo",       MsgCoverage::PrinterOnly, "§5.55 reply to S2C 0x02: position + N random filler bytes"},
-		{'C', c2s::AUTO_MEDIC_PREFERENCE,     "auto-medic-preference",   MsgCoverage::Decoded,     "decode_auto_medic_preference: [i32 disabled] -> playerSlot+372 @0x501BE0; source OPTIONS_AUTOMEDIC inverse @0x5549E7/@0x554E40"},
+		{'C', c2s::AUTO_MEDIC_PREFERENCE,     "auto-medic-preference",   MsgCoverage::Decoded,     "decode_auto_medic_preference: [i32 disabled] -> playerSlot+372 (NapiNPServerMsg_AutoMedicPreference @0x501BE0; short body stores 0 @0x501C16); source OPTIONS_AUTOMEDIC inverse @0x5549E7/@0x554E40"},
 		{'C', c2s::FIRED_ROUND,               "fired-round",             MsgCoverage::Decoded,     "§5.16 decode_client_fired_round"},
 		{'C', c2s::TIME_SYNC_REPLY,           "time-sync-reply",         MsgCoverage::PrinterOnly, "§5.34 reply to S2C 0x43"},
 		{'C', c2s::CHECKSUM_RESPONSE,         "checksum-response",       MsgCoverage::PrinterOnly, "client checksum response @0x513200"},

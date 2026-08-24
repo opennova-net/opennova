@@ -374,7 +374,7 @@ sweep; blank = not yet characterized.
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
 | 0x52 | 0x428A80 | `_0x052` | **DEATH-CAMERA TARGET (decoded + PORTED 2026-08-22)** — exact 12-B `[i32 x][i32 y][i32 z]`; short reads zero-fill in retail. `GameEvent_PlayerDeath @0x516DD0` targets the victim only (mask 0x20) with the killer entity's fixed XYZ when present, otherwise the victim's. The client stores the triple in `dword_A860E0/E4/E8`; `Camera_ComputeThirdPersonPositions @0x438B80` consumes it — **consumer PORTED 2026-08-24** (`world/death_camera.h`, the §5.39 mode-4 addendum): the arbiter's mode 4 computes the FROM/TO poses from the player and this anchor and the view lerps between them over 128 ticks. Retail capture confirms `0x13 → 0x52 → 0x1E` ordering (§5.60) |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
-| 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetDownedState @0x4348D0` (ex `PlayerSlot_SetTypeAndSubtype`) splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch); the window then counts down CLIENT-side at 1 Hz — `Client_ProcessNetworkFrame @0x42C27E..0x42C2DA`: `g_slotRefreshTimer @0xA85B80` +1 per frame, past 62 every active slot with an entity and `slot+16 > 0` gets `PlayerSlot_SetDownedState(slot+16 − 1, slot+44)`, timer reset (PORTED 2026-08-24 `ClientRuntime::tick_roster_revive_countdown`; consumer = the friendly tag's downed legs, hud-re.md D-HUD-20). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to alive same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
+| 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetDownedState @0x4348D0` (was `PlayerSlot_SetTypeAndSubtype`; D-NET-216) splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to alive same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
 | 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; stat.mnu remains presentation residue |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
@@ -433,7 +433,7 @@ This is what a reimplemented server must **handle**.
 | 0x00 | 0x512AA0 | **JOIN** — initial client→server packet (allocates session, returns session key) |
 | 0x01 | 0x512ED0 | likely FORM_POST; also compares side passwords during early join (§6.4) |
 | 0x02 | 0x512FD0 | likely GLB_JOIN |
-| 0x03 | 0x501BE0 | **AUTO-MEDIC PREFERENCE (decoded + PORTED 2026-08-22)** — exact `[i32 disabled]` copied to requester playerSlot+372: zero enables automatic requests, nonzero selects manual. Producer `NetPacket_WriteSessionTick @0x42A400` (misleading historical name) actually writes profile+1660; `OPTIONS_AUTOMEDIC` reads/writes its inverse at `0x5549E7/0x554E40` |
+| 0x03 | 0x501BE0 | **AUTO-MEDIC PREFERENCE (decoded + PORTED 2026-08-22)** — exact `[i32 disabled]` copied to requester playerSlot+372: zero enables automatic requests, nonzero selects manual. Producer `NetPacket_WriteAutoMedicPreference @0x42A400` (was `NetPacket_WriteSessionTick`; D-NET-216) writes profile+1660; the handler `NapiNPServerMsg_AutoMedicPreference` (was `_SetPlayerValue`) stores 0 = automatic for a body shorter than the dword `@0x501C16` (ported 2026-08-24); `OPTIONS_AUTOMEDIC` reads/writes its inverse at `0x5549E7/0x554E40` |
 | 0x04 | 0x5199D0 | |
 | 0x06 | 0x513310 | `_0x006_ClientFiredRound` |
 | 0x07 | 0x4FC970 | |
@@ -5893,6 +5893,9 @@ functions renamed up: `server_handle_entity_sync`→`Server_HandleEntitySync`,
 | `0x504820` | `serialize_projectile_to_packet` | `NetPacket_SerializeRoundEvent` | writes one §5.9.1 tag-2 ROUND-EVENT record (fire origin + direction) from a ring record; no projectile entity involved (D-NET-152) |
 | `0x42f270` | `NetPacket_DeserializeWeaponHit` | `NetPacket_DeserializeRoundEvent` | the same record's client read side — a round FIRED event the client re-simulates; nothing about it is a hit (D-NET-152) |
 | `0x4ec0d0` | `RoundData_ProcessHit` | `RoundData_SpawnRound` | SPAWNS the round from a fire request (projectile-pool entity, spread, velocity, tracer/guided/burst dispatch); no hit is processed at fire time (D-NET-152) |
+| `0x42a400` | `NetPacket_WriteSessionTick` | `NetPacket_WriteAutoMedicPreference` | the one C2S 0x03 body writer: copies `g_curPlayerProfile+1660` (the inverse `OPTIONS_AUTOMEDIC` checkbox) — no tick anywhere; its only caller is the join state machine `@0x56a6f3` (D-NET-216) |
+| `0x4348d0` | `PlayerSlot_SetTypeAndSubtype` | `PlayerSlot_SetDownedState` | stores the decoded S2C 0x54 pair: `+16` = revive seconds (`state & 0x7F`), `+44` = the medic-request latch (`state >> 7`), split at the caller `NapiNPClientMsg_0x054 @0x4290d3`; nothing about it is a type (D-NET-216) |
+| `0x501be0` | `NapiNPServerMsg_SetPlayerValue` | `NapiNPServerMsg_AutoMedicPreference` | the C2S 0x03 handler: `len >= 4 ? slot+372 = dword : slot+372 = 0` — the one "player value" it sets is the Auto-Medic preference the medic-request handler `@0x515390` reads (D-NET-216) |
 
 **Signature corrections — the wrong-prototype cascade (D-NET-110).** Many callees carried IDA-inferred
 prototypes with phantom params; their garbage flowed up as uninitialised `v*` args in
@@ -6008,6 +6011,18 @@ mode / target conn / target slot / target team); not a bug, an artifact of the c
   directly — a NET primary fire goes through the adm 'fire' action and re-enters this function in
   LOCAL mode before reaching the ring; the full pipeline is §5.16 / D-NET-152.)
   `[orig: Server_ClientFiredRound @0x50baa0]`
+- **D-NET-216** [naming, FIXED 2026-08-24] Three Auto-Medic misnomers, renamed together in the IDB, the
+  code cites, and this record. `NetPacket_WriteSessionTick @0x42a400` → **`NetPacket_WriteAutoMedicPreference`**:
+  the C2S 0x03 body writer copies `g_curPlayerProfile+1660` (the inverse `OPTIONS_AUTOMEDIC` checkbox) and
+  is called once, from the join state machine `@0x56a6f3`; no tick is involved.
+  `PlayerSlot_SetTypeAndSubtype @0x4348d0` → **`PlayerSlot_SetDownedState`**: it stores the S2C 0x54 pair
+  the caller splits `@0x4290d3` — `+16` = revive seconds (`state & 0x7F`), `+44` = the medic-request latch
+  (`state >> 7`). `NapiNPServerMsg_SetPlayerValue @0x501be0` → **`NapiNPServerMsg_AutoMedicPreference`**:
+  the C2S 0x03 handler stores the dword at `playerSlot+372` when at least four bytes arrived
+  (`@0x501c1f`) and stores 0 = automatic otherwise (`@0x501c16`) — the port's dispatch had left the slot
+  untouched on a short body and now stores automatic (`npruntime_round_sim_test`).
+  `[orig: NetPacket_WriteAutoMedicPreference @0x42a400; PlayerSlot_SetDownedState @0x4348d0;
+  NapiNPServerMsg_AutoMedicPreference @0x501be0]`
 - **D-NET-110** [signature, FIXED] **Wrong-prototype cascade across `Server_*`.** ~15 functions carried
   IDA-inferred prototypes (extra phantom params, dropped params, or a bogus `__stdcall`+WndProc/display
   prototype on a cdecl fn); the synthesized garbage surfaced as uninitialised `v*` call args in

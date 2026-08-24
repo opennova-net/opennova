@@ -1384,7 +1384,9 @@ bool decode_auto_medic_preference(
 		AutoMedicPreference &out, size_t &consumed) {
 	out = AutoMedicPreference{};
 	consumed = 0;
-	if (body == nullptr || len != 4) return false;
+	// The handler reads the first dword when at least four bytes arrived and
+	// ignores any tail. [orig: NapiNPServerMsg_AutoMedicPreference @0x501C12]
+	if (body == nullptr || len < 4) return false;
 	const uint32_t disabled = static_cast<uint32_t>(body[0]) |
 			(static_cast<uint32_t>(body[1]) << 8) |
 			(static_cast<uint32_t>(body[2]) << 16) |

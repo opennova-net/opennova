@@ -125,7 +125,7 @@ struct Connection {
 	// +372 is the inverse OPTIONS_AUTOMEDIC preference: zero on the retail wire
 	// means automatic requests are enabled. The separate request latch supplies
 	// bit seven of both S2C 0x54 and player-sync field 0x0008.
-	// [orig: GameEvent_PlayerDeath @0x516DD0; NapiNPServerMsg_SetPlayerValue
+	// [orig: GameEvent_PlayerDeath @0x516DD0; NapiNPServerMsg_AutoMedicPreference
 	// @0x501BE0; NetPacket_SerializePlayerSync0x46 @0x505E80]
 	uint32_t downed_revive_seconds = 0; // playerSlot+368
 	bool auto_medic_enabled = true;     // inverse playerSlot+372
