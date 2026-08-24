@@ -223,8 +223,15 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         const Entity *o =
                 world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
         if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
+        // The pool walk's live gate is an ITEM-TYPE test, not a radius test:
+        // retail reads entity+0x1C and skips the slot when it is zero.
+        // entity+0x1C is ItemTypeIndex, stamped at spawn as `defIndex`
+        // [orig: the gate @0x48bdd9 `*(_DWORD *)(base + 28) == 0`;
+        //  ItemTypeIndex written at Entity_SpawnFromBMSRecord @0x40E9F0].
+        // (The occupancy half of retail's walk is our null check above:
+        //  EntityRegistry::get returns nullptr for an unused slot.)
+        if (o->item_id == 0) continue;
         const int32_t ob = to_fixed(o->bound_radius);
-        if (ob <= 0) continue; // [orig: the pool-walk live gate @0x48bdd9]
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
         const int32_t dx = sx - to_fixed(o->position.x);
         if (iabs32(dx) > reach) continue;
