@@ -9980,8 +9980,17 @@ row colour team 1 `0xFF00BFFF` / team 2 `0xFFFF0000`, the local row selected; `s
 `npruntime/stat_screen_feed.{h,cpp}` (ctest `stat_screen_feed`), `HudFrameCompiler::
 element_end_round_overlay` + the Impac38b slot, `Simulation::get_end_round_state/lines/columns/rows`
 (one `ClientEndRoundStats` for both roles), `godot/game/world/end_round_presenter.gd` +
-`MainGame.State.END_ROUND`. Residues (D-HUD-25): the joiner's `g_round_time_remaining` fold,
-and the stat.mnu exit's round-cycle handoff. The non-team 0x1D form is PORTED 2026-08-24 (`npwire`
+`MainGame.State.END_ROUND`. Residue (D-HUD-25): the stat.mnu exit's round-cycle handoff.
+The joiner's `g_round_time_remaining` fold is PORTED 2026-08-24: the 0x0A sub-block-1
+`timer_seconds` folds into `ClientState::round_time_remaining_ticks` as 62 x the wire's
+whole seconds, negative = untimed -1 `[orig: NapiNPClientMsg_0x00A @0x430219..0x430235]`,
+and the host projects `Match::remaining_ticks()` as whole seconds (ticks / 62) only while
+no pre-round countdown runs and time remains, else -1 `[orig: NetPacket_WritePlayerState
+@0x4ffa81..0x4ffaca — the g_preround_delay_timer gate, the jle on
+g_round_time_remaining, the /62 magic-multiply, 0xFFFF otherwise]` (previously our fan
+hardcoded -1). `Simulation::get_end_round_state/lines` now read the folded ticks on a
+joiner and the Match clock on the authority — the game-time line and the timed/untimed
+STROVER arm picks work on every role (ctest `netsim_two_peer_fanout`). The non-team 0x1D form is PORTED 2026-08-24 (`npwire`
 `decode/encode_end_round_header(..., non_team_form)`, `build_end_round_header` filling board rows
 0..2; ctests `nw_ingame_encode`, `nw_message_coverage`, `npruntime_round_end` DM,
 `npruntime_client_runtime` named form).

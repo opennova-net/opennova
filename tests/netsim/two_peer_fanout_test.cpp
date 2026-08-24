@@ -508,6 +508,14 @@ bool run_0a_subblock_phase_cycle() {
 		if ((i & 3u) == 1) {
 			if (!expect(fu.timer.present && fu.timer.state1 == 13,
 			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
+			// A running pre-round countdown gates the clock to -1
+			// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca].
+			if (!expect(fu.timer.timer_seconds == -1,
+			            "phase 1 sends -1 while the pre-round countdown runs")) return false;
+			ns::ClientReplicaPipeline fold;
+			fold.apply(dg.tag, dg.body);
+			if (!expect(fold.state().round_time_remaining_ticks == -1,
+			            "client fold keeps the untimed -1")) return false;
 		} else if ((i & 3u) == 0) {
 			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
 			if (!expect(fu.weapon.preround_timer == 0x23,
@@ -544,6 +552,38 @@ bool run_0a_subblock_phase_cycle() {
 	}
 	// The connection's phase counter advanced once per send.
 	if (!expect(conns[0].s2c_phase == 16, "phase counter advanced once per send")) return false;
+
+	// With the pre-round countdown over and a configured game clock, phase 1
+	// projects whole seconds = ticks / 62 and the client fold restores ticks
+	// [orig: the /62 magic-multiply @0x4ffa97..0x4ffab3; the x62 restore
+	//  @0x430219..0x430235 — g_round_time_remaining].
+	world.preround_delay_seconds = 0;
+	{
+		opennova::world::MatchRules timed_rules;
+		timed_rules.game_time_minutes = 2; // 7440 ticks -> 120 s on the wire
+		world.match.configure(timed_rules);
+		nw::FrameUpdate timed_fu;
+		bool saw_timer = false;
+		for (int i = 0; i < 4 && !saw_timer; ++i) {
+			ns::test::emit_all(world, conns);
+			ns::Datagram dg;
+			if (!expect(ch.client_recv(dg), "timed 0x0A frame dequeued")) return false;
+			if (!nw::decode_frame_update(dg.body.data(), dg.body.size(),
+					ns::class_for_type_id, timed_fu))
+				return false;
+			if (!timed_fu.timer.present) continue;
+			saw_timer = true;
+			if (!expect(timed_fu.timer.timer_seconds == 120,
+			            "phase 1 projects the round clock as whole seconds")) return false;
+			ns::ClientReplicaPipeline fold;
+			fold.apply(dg.tag, dg.body);
+			if (!expect(fold.state().round_time_remaining_ticks == 62 * 120,
+			            "client fold restores 62 Hz ticks from the wire seconds"))
+				return false;
+		}
+		if (!expect(saw_timer, "a phase-1 frame arrived within one sub-block cycle"))
+			return false;
+	}
 
 	// The retail byte wraps naturally: 0xFF pre-increments to 0 and selects phase 0.
 	conns[0].s2c_phase = 0xFFu;
