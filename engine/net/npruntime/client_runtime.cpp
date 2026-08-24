@@ -153,14 +153,92 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 	entry.value_limit = 0;
 	entry.window_active = true;
 	entry.value_active = false;
+	adopt_tracked_window(window);
+}
+
+void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {
+	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0, the cluster arm
+	//  @0x428c39..0x428d60]
+	const int32_t scaled_start = timer_scale_62(static_cast<int32_t>(window.start_s));
+	const int32_t scaled_end = timer_scale_62(static_cast<int32_t>(window.end_s));
+	bool adopt = false;
+	bool reseed_progress = false;
+	if (tracked_window_.tracked() && tracked_window_.zone == window.zone_handle) {
+		// Same entity: a changed modeB re-seeds the progress (LABEL_35), the
+		// same modeB keeps it (LABEL_36).
+		adopt = true;
+		reseed_progress = tracked_window_.mode_b != window.mode_b;
+	} else if (!tracked_window_.tracked()) {
+		adopt = true; // nothing tracked: take it, progress untouched
+	} else {
+		// Another entity: adopted only when at least as near as the tracked one
+		// and within 20.0 u of the local player. The local position is the
+		// recipient's 0x0A anchor (retail reads g_local_player_entity->Position).
+		const netsim::ClientState &cs = view_.state();
+		auto dist_to = [&](uint16_t handle) -> double {
+			const netsim::ClientEntityState *row = cs.find(handle);
+			if (row == nullptr) return 1.0e18;
+			const double dx = std::fabs(static_cast<double>(cs.anchor_x) - row->x);
+			const double dy = std::fabs(static_cast<double>(cs.anchor_y) - row->y);
+			const double dz = std::fabs(static_cast<double>(cs.anchor_z) - row->z);
+			return std::sqrt(dx * dx + dy * dy + dz * dz);
+		};
+		const double old_dist = dist_to(tracked_window_.zone);
+		const double new_dist = dist_to(window.zone_handle);
+		if (old_dist >= new_dist && new_dist <= 1310720.0) {
+			adopt = true;
+			reseed_progress = true;
+		}
+	}
+	if (!adopt) return;
+	if (reseed_progress) tracked_window_.progress = scaled_start;
+	tracked_window_.rate = window.rate;
+	tracked_window_.zone = window.zone_handle;
+	tracked_window_.mode_a = window.mode_a;
+	tracked_window_.mode_b = window.mode_b;
+	tracked_window_.target = scaled_start;
+	tracked_window_.limit = scaled_end;
+	if (scaled_start >= scaled_end) {
+		// A start at or past the end drops the cluster (progress survives).
+		tracked_window_.rate = 0;
+		tracked_window_.zone = 0xFFFF;
+		tracked_window_.mode_a = 0;
+		tracked_window_.mode_b = 0;
+		tracked_window_.target = 0;
+		tracked_window_.limit = 0;
+	}
+}
+
+void ClientRuntime::advance_tracked_window() {
+	// [orig: Client_ProcessNetworkFrame @0x42c2eb..0x42c347]
+	TrackedCaptureWindow &w = tracked_window_;
+	if (w.limit == 0) return;
+	if (w.target == w.limit) {
+		w.zone = 0xFFFF;
+		w.target = 0;
+		w.limit = 0;
+		w.rate = 1;
+		w.progress = 0;
+		return;
+	}
+	w.progress = timer_add(w.progress, w.rate);
+	if (w.rate > 0) {
+		if (w.progress > w.target) w.progress = w.target;
+	} else if (w.rate < 0) {
+		if (w.progress < 0) w.progress = 0;
+	}
 }
 
 void ClientRuntime::apply_zone_presence_count(
 		const ZonePresenceCount &presence) {
+	// The tracked cluster's rate override: only when the handle IS the tracked
+	// entity [orig: NapiNPClientMsg_0x06C @0x428fc0, the compare @0x42902d].
+	if (tracked_window_.tracked() && tracked_window_.zone == presence.zone_handle)
+		tracked_window_.rate = presence.count;
 	const auto found = zone_states_.find(presence.zone_handle);
-	// Retail resolves the handle, then updates only when it is the currently
-	// selected timed-window entity. In the per-zone runtime image, a witnessed
-	// 0x53 is the corresponding selection prerequisite. [orig: @0x428FC0]
+	// The per-zone diagnostic image the tests read: retail resolves the
+	// handle, then updates only when it is the currently selected timed-window
+	// entity; a witnessed 0x53 is the selection prerequisite. [orig: @0x428FC0]
 	if (found == zone_states_.end() || !found->second.has_window) return;
 	found->second.has_presence = true;
 	found->second.presence_count = presence.count;
@@ -250,6 +328,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	pre_send_queue_.clear();
 	pending_reload_notifications_.clear();
 	zone_states_.clear();
+	tracked_window_ = TrackedCaptureWindow{};
 	authoritative_loadout_ = WeaponLoadout{};
 	authoritative_loadout_revision_ = 0;
 	deployed_ = false;
@@ -655,9 +734,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA, then @0x42C2E1].
 	tick_roster_revive_countdown();
 	// Retail advances this shared list once after the complete receive pump,
-	// including on the authority's HostClient loopback path.
-	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
+	// including on the authority's HostClient loopback path, then pumps the
+	// tracked-window cluster.
+	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6, then @0x42C2EB]
 	advance_zone_timers();
+	advance_tracked_window();
 	view_.tick_minimap_overlays();
 	const bool preround_active = view_.state().preround_delay_seconds != 0;
 	// Client_ProcessNetworkFrame and its maintenance continue, but the later

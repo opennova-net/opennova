@@ -2713,9 +2713,44 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 			s2c::ZONE_PRESENCE_COUNT, zone_presence_body(0x1004, 9));
 	host_loop.host_send(s2c::ZONE_PRESENCE_COUNT, {0x03, 0x10});
 	host_view.Client_ProcessNetworkFrame();
-	return expect(host_view.zone_states().size() == 1 &&
-	                      host_view.zone_states().at(kZone).presence_count == 3,
-	              "zone presence: untracked/short 0x6C rows fail closed");
+	if (!expect(host_view.zone_states().size() == 1 &&
+	                    host_view.zone_states().at(kZone).presence_count == 3,
+	            "zone presence: untracked/short 0x6C rows fail closed"))
+		return false;
+
+	// The tracked-window cluster image [orig: dword_A85B88..A85BA0]: the 0x53
+	// seeded progress = target = 62*start, limit = 62*end, rate = byte; the
+	// 0x6C on the tracked entity re-rated it to 3; the per-frame pump adds the
+	// rate and clamps progress <= target for a positive rate — so the count
+	// never moves it (the inert positive-rate clamp) — and the untracked 0x6C
+	// left the rate alone.
+	const np::ClientRuntime::TrackedCaptureWindow &w = host_view.tracked_capture_window();
+	if (!expect(w.tracked() && w.zone == kZone && w.rate == 3 && w.target == 0 &&
+	                    w.limit == 62 * 15 && w.progress == 0 && w.mode_a == 0 && w.mode_b == 1,
+	            "tracked window: the 0x53 seed + the 0x6C re-rate + the inert clamp"))
+		return false;
+	for (int i = 0; i < 10; ++i) host_view.Client_ProcessNetworkFrame();
+	if (!expect(w.progress == 0, "tracked window: a positive rate never passes the target"))
+		return false;
+	// A changed modeB on the same entity re-seeds progress at the new start;
+	// a start at or past the end then drops the cluster (rate 0, no entity)
+	// but the parked progress survives [orig: @0x428d09 / @0x428d40..0x428d60].
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kZone, 0, 2, 7, 7, 4));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(!w.tracked() && w.rate == 0 && w.limit == 0 && w.progress == 62 * 7,
+	            "tracked window: start >= end zeroes the cluster, progress survives"))
+		return false;
+	// With nothing tracked the next window is adopted WITHOUT a progress
+	// re-seed (the `!dword_A85B88` arm jumps past LABEL_35), and the same
+	// frame's pump clamps the stale 434 down to the new target under the
+	// positive rate [orig: @0x428c5b -> LABEL_36; the clamp @0x42c32f].
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kZone, 0, 2, 5, 6, 1));
+	host_view.Client_ProcessNetworkFrame();
+	return expect(w.tracked() && w.target == 310 && w.limit == 372 && w.progress == 310 &&
+	                      w.rate == 1,
+	              "tracked window: an adoption from nothing keeps the stale progress and the pump clamps it to the target");
 }
 
 // The client-side 1 Hz revive countdown: every 63rd client frame each active
