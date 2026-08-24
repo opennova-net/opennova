@@ -42,6 +42,10 @@
 #include <threedi/threedi_3di3.h>
 #include <simassets/adm_root_motion.h>
 #include <simassets/item_traits.h>
+#include <cpt/cpt_io.h>
+#include <trn/trn_io.h>
+#include <terrain_query/height_field.h>
+#include <sstream>
 
 #include <algorithm>
 #include <cmath>
@@ -81,6 +85,18 @@ double dist2d_units(const int32_t a[3], const int32_t b[3]) {
 	return std::sqrt(dx * dx + dy * dy);
 }
 
+// Resolve an AI handle to its AUTHORED mission id so an offline row can be scored
+// against the live probe, which keys on bms. Diagnostic only.
+int bms_of(const opennova::world::World &w_, opennova::world::EntityHandle h) {
+	const opennova::world::Entity *ent = w_.registry.get(h);
+	return ent != nullptr ? int(ent->bms_id) : -1;
+}
+
+int group_of(const opennova::world::World &w_, opennova::world::EntityHandle h) {
+	const opennova::world::Entity *ent = w_.registry.get(h);
+	return ent != nullptr ? int(ent->group_id) : -1;
+}
+
 // One world unit of net displacement: past ground-settle and pose jitter, well
 // under any real patrol leg.
 const double kMovedUnits = 1.0;
@@ -93,7 +109,12 @@ int main() {
 		std::printf("ai path conformance: SKIP (OPENNOVA_JO_DIR not set)\n");
 		return 0;
 	}
-	const std::string path = std::string(dir) + "/00TRg.bms";
+	// Diagnostic parameterisation only (no behaviour change): the 05TRcoop
+	// bunker-garrison pin (SSNs 233/1254/2393, divergence-ledger.md:364) needs
+	// the SAME full-tick harness pointed at a different authored mission.
+	const char *bms_env = std::getenv("OPENNOVA_AI_PATH_BMS");
+	const std::string bms_name = (bms_env != nullptr && *bms_env) ? bms_env : "00TRg.bms";
+	const std::string path = std::string(dir) + "/" + bms_name;
 	std::ifstream f(path, std::ios::binary);
 	if (!f) {
 		std::printf("ai path conformance: SKIP (no 00TRg.bms under OPENNOVA_JO_DIR)\n");
@@ -103,7 +124,7 @@ int main() {
 	                           std::istreambuf_iterator<char>());
 	bms::File m;
 	std::string error;
-	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error), "00TRg.bms parses")) {
+	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error), (bms_name + " parses").c_str())) {
 		std::fprintf(stderr, "  parse error: %s\n", error.c_str());
 		return 1;
 	}
@@ -218,6 +239,60 @@ int main() {
 				[](int32_t) -> uint8_t { return 0; });
 	}
 
+	// TERRAIN. Without it the ground solve NEVER RUNS: infantry.cpp:1626 and
+	// :1853 gate the ground RESAMPLE and the ground-SETTLE leg on
+	// `terrain != nullptr`, and vehicle_motor.cpp:679 hardcodes
+	// `m.grounded = true` with the comment "no terrain wired (unit worlds):
+	// drive on a flat plane". A terrain-less rig therefore walks every body
+	// with NO ground solve and drives every vehicle with PERMANENT contact, so
+	// it cannot reproduce any ground or contact defect by construction --
+	// reporting it as a positive control measures the harness, not the engine
+	// (concept 7.4c). That is exactly what happened on 2026-08-24: both the
+	// convoy pace loss and the 05TRcoop bunker-garrison pin were declared
+	// "does not reproduce headless, therefore the sim is exonerated" against
+	// this rig, which had no ground under either of them.
+	// Same pipeline the game uses, mirroring Simulation::set_terrain_height_field
+	// and godot::height_field_apply_trn (nova_terrain_data.cpp:388-402).
+	opennova::CptFile cpt;
+	opennova::TrnConfig trn;
+	std::vector<uint16_t> heightmap;
+	std::vector<int> sector_grid;
+	opennova::terrain::TerrainHeightField terrain_field;
+	{
+		const std::string tname = m.get_terrain();
+		std::vector<uint8_t> cpt_bytes, trn_bytes;
+		std::string terr_err;
+		if (!tname.empty() && index.read_file(tname + ".cpt", cpt_bytes) &&
+				index.read_file(tname + ".trn", trn_bytes) &&
+				opennova::load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, terr_err)) {
+			std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
+			std::istringstream ts(raw);
+			if (opennova::load_trn(ts, trn, terr_err) && !cpt.depth_buffer.empty()) {
+				heightmap = cpt.depth_buffer;
+				sector_grid.resize(256);
+				const int *grid = &trn.sector_grid[0][0];
+				for (int i = 0; i < 256; ++i) sector_grid[i] = grid[i];
+				terrain_field.heightmap = heightmap.data();
+				terrain_field.dim = static_cast<int>(
+						std::sqrt(static_cast<double>(heightmap.size())));
+				terrain_field.layout.sector_grid = sector_grid.data();
+				terrain_field.layout.origin_x = trn.origin_x;
+				terrain_field.layout.origin_y = trn.origin_y;
+				const opennova::TerrainQuadrantLocks src = trn.get_quadrant_locks();
+				for (int q = 0; q < static_cast<int>(src.size()); ++q)
+					terrain_field.locks.set(q, src[q].x != 0, src[q].y != 0);
+			}
+		}
+		if (terrain_field.valid()) {
+			world.terrain = &terrain_field;
+			ai.terrain = &terrain_field;
+			std::printf("terrain: %s loaded, dim %d\n", tname.c_str(), terrain_field.dim);
+		} else {
+			std::printf("terrain: NOT LOADED (ref=%s) - THE GROUND SOLVE WILL NOT RUN\n",
+					tname.c_str());
+		}
+	}
+
 	// COLLISION. Without this the rig walks every body and vehicle through empty
 	// space, which is why its "60 AI, 56 moved" reports looked healthy for an
 	// entire slice while the live game was pinning AI against a truck, and why
@@ -237,6 +312,7 @@ int main() {
 		const int attached =
 				simassets::resolve_collision_instances(world, items, collision_state, deps);
 		collision.set_section_matrix_provider(&collision_pose);
+		collision.terrain = terrain_field.valid() ? &terrain_field : nullptr;
 		world.collision = &collision;
 		ai.collision = &collision;
 		std::printf("collision: %d entities attached to a model\n", attached);
@@ -348,10 +424,65 @@ int main() {
 		}
 	}
 
+	if (std::getenv("NW_EVENT_DUMP") != nullptr) {
+		std::printf("--- events referencing RedirectGroupTo (action type 1) ---\n");
+		for (size_t ei = 0; ei < m.events.size(); ++ei) {
+			const bms::Event &ev = m.events[ei];
+			for (int k = 0; k < int(ev.action_count); ++k) {
+				const size_t ai_ = size_t(ev.action_index) + size_t(k);
+				if (ai_ >= m.actions.size()) continue;
+				const bms::Action &ac = m.actions[ai_];
+				if (int(ac.action_type) != 1 && int(ac.action_type) != 19 && int(ac.action_type) != 5) continue;
+				std::printf("  event %-3zu action type=%-3d sub=%-3d p1(group)=%-4d p2=%-4d  FIRED=%d\n",
+						ei, int(ac.action_type), ac.action_sub_type, ac.param1, ac.param2,
+						events.event_fired(ei) ? 1 : 0);
+			}
+		}
+		if (std::getenv("NW_EVENT_TRIGGERS") != nullptr) {
+			std::printf("--- trigger chains for the rider re-task events ---\n");
+			for (size_t ei = 0; ei < m.events.size(); ++ei) {
+				bool touches_rider = false;
+				for (int k = 0; k < int(m.events[ei].action_count); ++k) {
+					const size_t ax = size_t(m.events[ei].action_index) + size_t(k);
+					if (ax >= m.actions.size()) continue;
+					const int p1 = m.actions[ax].param1;
+					if (int(m.actions[ax].action_type) == 19 &&
+							(p1 == 807 || p1 == 809 || p1 == 810 || p1 == 812)) touches_rider = true;
+					if (int(m.actions[ax].action_type) == 5 && p1 == 2) touches_rider = true;
+				}
+				if (!touches_rider) continue;
+				const bms::Event &ev = m.events[ei];
+				std::printf("  event %-3zu FIRED=%d triggers=%d:\n", ei,
+						events.event_fired(ei) ? 1 : 0, int(ev.trigger_count));
+				for (int k = 0; k < int(ev.trigger_count); ++k) {
+					const size_t tx = size_t(ev.trigger_index) + size_t(k);
+					if (tx >= m.triggers.size()) continue;
+					const bms::Trigger &t = m.triggers[tx];
+					std::printf("      main=%-2d sub=%-3d p1=%-6d p2=%-6d p3=%-6d p4=%-6d neg=%d op=%s\n",
+							int(t.main_type), t.sub_type, t.param1, t.param2, t.param3, t.param4,
+							t.is_negated() ? 1 : 0, t.get_logic_operator().c_str());
+				}
+			}
+		}
+		if (std::getenv("NW_AREA_DUMP") != nullptr) {
+			std::printf("--- mission areas: bms area_triggers=%zu, world registry areas=%d ---\n",
+					m.area_triggers.size(), [&]{ int c = 0; while (world.registry.area(c) != nullptr) ++c; return c; }());
+			for (size_t bi = 0; bi < m.area_triggers.size(); ++bi) {
+				const bms::AreaTrigger &bb = m.area_triggers[bi];
+				std::printf("  idx %-3zu id=%-5d active=%d x[%8.1f..%8.1f] y[%8.1f..%8.1f]\n",
+						bi, bb.id, bb.is_active() ? 1 : 0,
+						bb.get_x_min(), bb.get_x_max(),
+						bb.get_y_min(), bb.get_y_max());
+			}
+		}
+		size_t nf = 0;
+		for (size_t ei = 0; ei < m.events.size(); ++ei) if (events.event_fired(ei)) ++nf;
+		std::printf("  events fired: %zu of %zu\n", nf, m.events.size());
+	}
 	const bool report = std::getenv("OPENNOVA_AI_PATH_REPORT") != nullptr;
 	if (report) {
-		std::printf("%-5s %-6s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %-6s %-7s %-4s %10s\n", "ai#",
-				"handle", "has", "cmd", "tgtSSN", "wpType", "wpChan", "wpNode",
+		std::printf("%-5s %-6s %-6s %-5s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %-6s %-7s %-4s %10s\n", "ai#",
+				"handle", "bms", "grp", "has", "cmd", "tgtSSN", "wpType", "wpChan", "wpNode",
 				"moveMd", "cmd37", "carr36", "mnt", "path_u");
 		std::printf("--------------------------------------------------------------------\n");
 	}
@@ -378,8 +509,8 @@ int main() {
 			const int grp = e->slot.f[35];
 			const int wpid = e->slot.f[37];
 			const int wpnum = e->slot.f[38];
-			std::printf("%-5d %-6u %-4d %-4d %-6d %-8d %-6d %-6d %-6d %-6d %-7d %-4d %10.2f\n", i,
-					unsigned(e->handle.packed), grp, wpid, wpnum,
+			std::printf("%-5d %-6u %-6d %-5d %-4d %-4d %-6d %-8d %-6d %-6d %-6d %-6d %-7d %-4d %10.2f\n", i,
+					unsigned(e->handle.packed), bms_of(world, e->handle), group_of(world, e->handle), grp, wpid, wpnum,
 					e->brain.f[w::AiBrain::kWpType],
 					e->brain.f[w::AiBrain::kWpChannel],
 					e->brain.f[w::AiBrain::kWpNode],
