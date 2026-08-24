@@ -276,14 +276,14 @@ HudLabelFontChoice hud_label_font_choice(int surface_w) {
 	// [orig: g_hudLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
 	const float large_scale = static_cast<float>(surface_w) / 800.0f;
 	if (surface_w > 800) {
-		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt",
+		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt", "Impac38b.fnt",
 				static_cast<float>(surface_w) / 1024.0f, large_scale, 2};
 	}
 	if (surface_w > 640) {
-		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt",
+		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt", "Impac38b.fnt",
 				static_cast<float>(surface_w) / 800.0f, large_scale, 1};
 	}
-	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt",
+	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt", "Impac38b.fnt",
 			static_cast<float>(surface_w) / 640.0f, large_scale, 0};
 }
 

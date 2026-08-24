@@ -915,6 +915,20 @@ target_link_libraries(terrain_static_shadow_alpha_test PRIVATE opennova_runtime)
 target_include_directories(terrain_static_shadow_alpha_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_static_shadow_alpha COMMAND terrain_static_shadow_alpha_test)
 
+# The end-of-round overlay ladder + column layout (hud/end_round_overlay.h).
+add_executable(end_round_overlay_test hud/end_round_overlay_test.cpp)
+target_link_libraries(end_round_overlay_test PRIVATE opennova_runtime)
+target_include_directories(end_round_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(end_round_overlay_test PRIVATE cxx_std_17)
+add_test(NAME end_round_overlay COMMAND end_round_overlay_test)
+
+# The stat.mnu RESULTLIST feed (hud/stat_screen_feed.h).
+add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
+target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
+target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(stat_screen_feed_test PRIVATE cxx_std_17)
+add_test(NAME stat_screen_feed COMMAND stat_screen_feed_test)
+
 # The S2C 0x81 hit-confirm tone ladder (hud/score_fanfare.h).
 add_executable(score_fanfare_test hud/score_fanfare_test.cpp)
 target_link_libraries(score_fanfare_test PRIVATE opennova_runtime)

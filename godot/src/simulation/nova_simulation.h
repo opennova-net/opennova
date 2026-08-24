@@ -1253,7 +1253,7 @@ public:
 	// landed since the last take, else {score, delta, tone} with the tone name
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
 	// 2D interface sound behind the enable_slotmachine setting
-	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0; hud/score_fanfare.h].
+	// (retail: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0, see hud/score_fanfare.h).
 	Dictionary take_score_feedback();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
@@ -1301,7 +1301,7 @@ public:
 	// witnessed loops (world/deploy_screen_feed.h) over the zone rows above, the
 	// team colour tag, the Menu default-row tokens and the embedder-resolved
 	// WPNames strings (name_key -> text). value 0 = default, index+1 = zone,
-	// -1 = occupant/blank (never a pick). [orig: UI_UpdateDeathScreenContent @0x5536a0]
+	// -1 = occupant/blank (never a pick). (retail: UI_UpdateDeathScreenContent @0x5536a0, see world/deploy_screen_feed.h)
 	TypedArray<Dictionary> get_deploy_list_rows(const String &p_default_key,
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
@@ -1309,7 +1309,7 @@ public:
 	Dictionary get_deploy_status();
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
-	// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b]
+	// (retail: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b, see docs/net/novaworld-net-re.md 0x2E)
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
@@ -1317,6 +1317,14 @@ public:
 	void set_server_text(const String &p_medic_request_format);
 	// The one role-agnostic read of the local player's dead bit.
 	bool local_player_dead() const;
+	// The end-of-round presentation feed (net-re §5.68; nova_simulation_end_round.cpp):
+	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
+	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
+	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
+	Dictionary get_end_round_state() const;
+	TypedArray<Dictionary> get_end_round_lines() const;
+	TypedArray<Dictionary> get_end_round_columns(int p_table_width) const;
+	TypedArray<Dictionary> get_end_round_rows() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an

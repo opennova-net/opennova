@@ -1353,7 +1353,7 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
-		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b].
+		// (retail: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h).
 		int wave_countdown = 0;
 		Array occupants;
 		if (cs.spawn_waves.known) {
