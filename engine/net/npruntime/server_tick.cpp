@@ -13,6 +13,7 @@
 #include <npwire/session_hello.h>
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
+#include <world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
 #include <world/geom.h>                // to_fixed
 #include <world/infantry.h>            // drown death animation selection
 #include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
@@ -106,8 +107,20 @@ PlayerDeathFeed classify_player_death(
 	}
 
 	const uint8_t killer_index = pool0_index_byte(death.killer_handle);
+	// The see-all exemption: a same-team kill routes to the team-kill arm only
+	// when NEITHER side's AI record carries the targets-any-team flag
+	// (aiSlot[4] & 0x200); either flag set falls through to the enemy-kill
+	// ladder with the victim/aux bytes filled and the weapon-stat accumulation.
+	// [orig: GameEvent_PlayerDeath — victim gate @0x51709C..0x5170B6, killer
+	//  twin @0x5170BE..0x5170DA, branch @0x5170F8..0x517113]
+	auto sees_all = [&world](world::EntityHandle handle) {
+		if (world.ai == nullptr) return false;
+		const world::AiEntity *ai = world.ai->for_handle(handle);
+		return ai != nullptr && ai->see_all;
+	};
 	if (victim_entity != nullptr && victim_entity->team != 0 &&
-			victim_entity->team == killer_entity->team) {
+			victim_entity->team == killer_entity->team &&
+			!sees_all(death.victim) && !sees_all(death.killer)) {
 		out.event_type = death_family_variant(world, 7);
 		out.attacker = killer_index;
 		out.victim = victim_index;
@@ -569,16 +582,18 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
 			}
 
-			// Retail re-anchors the victim immediately after 0x13 and before the
-			// camera/feed tail. The same roll becomes that slot's fire-freshness
-			// floor. [orig: GameEvent_PlayerDeath @0x516EF4 ->
-			// Server_SendRandomSeedToPlayer @0x5101A0]
+			// Retail DISARMS the victim immediately after 0x13 and before the
+			// camera/feed tail: the death sender passes enable=0, which zeroes the
+			// slot's seed/freshness stamp and ships the four-zero 0x61. The zero
+			// seed freezes the client's network-role tick until the deploy release
+			// re-arms it with a fresh roll. [orig: GameEvent_PlayerDeath @0x516EF4
+			// -> Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
 			if (victim_connection != nullptr &&
 					is_in_match(*victim_connection) &&
 					victim_connection->link.transport != nullptr) {
 				victim_connection->link.transport->host_send(
 						s2c::TICK_SEED,
-						Server_RerollPlayerTickSeed(*victim_connection));
+						Server_DisarmPlayerTickSeed(*victim_connection));
 			}
 
 			// Then target the victim with the fixed-point position used by the
@@ -767,7 +782,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 		// state. The client pulls 0x56 independently, so no board chunk is pushed.
 		// [orig: Server_ProcessRoundEnd @0x516790..0x51685E]
 		conn.link.transport->host_send(
-				s2c::TICK_SEED, std::vector<uint8_t>(4, 0));
+				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn));
 		conn.link.transport->host_send(
 				s2c::END_ROUND_HEADER,
 				encode_end_round_header(build_end_round_header(
@@ -1111,6 +1126,15 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 	body.reserve(4);
 	put_u32le(body, connection.tick_seed);
 	return body;
+}
+
+// The enable==0 arm: clear the slot's seed/freshness stamp and ship the
+// four-zero 0x61. [orig: Server_SendRandomSeedToPlayer @0x5101A0,
+// enable==0 arm @0x510237..0x510278]
+std::vector<uint8_t> Server_DisarmPlayerTickSeed(
+		NapiNPConnection &connection) {
+	connection.tick_seed = 0;
+	return std::vector<uint8_t>(4, 0);
 }
 
 bool Server_StageHostDisconnect(

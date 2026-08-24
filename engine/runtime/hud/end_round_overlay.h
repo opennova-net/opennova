@@ -34,6 +34,20 @@ struct EndRoundArg {
 	bool is_number = false;
 };
 
+// What the presenter does when this line's key resolves to an EMPTY string
+// (present-but-empty gametext; the fallback covers only a missing key):
+// the headline re-looks-up Overlays/STROVER1 with the "!Mission Completed"
+// fallback, and the second line is dropped with every later line moving up
+// 32 px (retail's y stays 350, so the score lines start at 382).
+// [orig: LABEL_30 @0x5b7e59 -> GameText_GetStringWithFallback @0x5b7e5b;
+//  LABEL_144 @0x5b83e5 — draw @0x5b83fe / y=382 store @0x5b8406 only when
+//  text_buf[0]]
+enum class EndRoundEmptyFold : uint8_t {
+	kNone = 0,
+	kHeadlineStrover1 = 1,
+	kCollapse = 2,
+};
+
 struct EndRoundLine {
 	// The line's format: a gametext key (Overlays section) with fallback, or
 	// a literal printf template when `key` is empty.
@@ -42,6 +56,7 @@ struct EndRoundLine {
 	std::string literal;
 	std::vector<EndRoundArg> args;
 	int y = 0; // design-space y (1024x768), x is always 512 centred
+	EndRoundEmptyFold fold = EndRoundEmptyFold::kNone;
 };
 
 struct EndRoundOverlayInput {

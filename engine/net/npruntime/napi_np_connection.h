@@ -334,13 +334,14 @@ struct NapiNPConnection {
 	uint32_t connection_id = 0;
 
 	// The PER-PLAYER tick seed shipped as S2C 0x61 and stamped into this player's slot as the
-	// fire-freshness floor. Retail re-rolls it as `((rand() & 0xFE) + 1) << 16` on join, death,
+	// fire-freshness floor. Retail re-rolls it as `((rand() & 0xFE) + 1) << 16` on join,
 	// revive and deploy release, so it is per-connection state, never a session constant — a
 	// shared constant would re-seed every client's clock to the same value on every deploy.
-	// The zero form is the witnessed round-end disarm.
+	// The zero form is the disarm: death and round-end pass enable=0, clearing this stamp and
+	// freezing that client's network-role tick until the next re-arm.
 	// [orig: Server_SendRandomSeedToPlayer @0x5101a0 — value @0x5101d4, slot stamp
-	//  playerCtx+0x178D8 / arm +0x178E0; senders @0x51a982 join, @0x516ef4 / @0x51796d death,
-	//  @0x517e47 revive; disarm @0x510237]
+	//  playerCtx+0x178D8 / arm +0x178E0; fresh-roll senders @0x51a982 / @0x51aa02 join,
+	//  @0x51796d deploy, @0x517e47 revive; disarm @0x516ef4 death, arm @0x510237]
 	uint32_t tick_seed = 0;
 
 	// [orig: NapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side

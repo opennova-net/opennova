@@ -1227,10 +1227,12 @@ int main() {
 		const uint32_t value = uint32_t(seed[0]) | (uint32_t(seed[1]) << 8) |
 		                       (uint32_t(seed[2]) << 16) |
 		                       (uint32_t(seed[3]) << 24);
-		if (!expect(value == roster[2].tick_seed &&
-		                    (value & 0xFF00FFFFu) == 0u &&
-		                    ((value >> 16) & 1u) == 1u,
-		            "0x61 carries the connection's re-rolled odd high-byte tick seed"))
+		// Death passes enable=0: the four-zero disarm that also clears the slot's
+		// retained stamp. The deploy release re-arms with the fresh roll.
+		// [orig: GameEvent_PlayerDeath @0x516EF4 ->
+		//  Server_SendRandomSeedToPlayer @0x5101A0 enable==0 arm @0x510237]
+		if (!expect(value == 0u && roster[2].tick_seed == 0u,
+		            "death 0x61 is the four-zero disarm and clears the stamp"))
 			return 1;
 	}
 	{
