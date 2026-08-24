@@ -4031,6 +4031,13 @@ Therefore residual (b) no longer applies to these retail game-mode producers.
 The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
 ordinary combat event producer not enumerated here.
 
+The hill hold itself is accumulated by the per-second team pass: a team with at
+least one alive holder in the volume gains one tick, an empty team loses
+`koth_delta` per second clamped at zero, and the same pass folds each in-game
+player's slot dword 23595 (the objective-ticks counter) into the team row's
++328 accumulator. `[orig: Game_AccumulateTeamScores @0x508DA0..0x508DC2,
+@0x508DDE..0x508E19; koth_delta = g_koth_delta @0x24D2148]`
+
 The co-op family is now composed through its authored result producers at the
 host boundary instead of being inferred from a direct latch test. Stock Co-op
 executes WAC `Win` on the VM's 62-tick cadence; Objective Co-op dispatches BMS

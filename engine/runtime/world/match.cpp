@@ -662,6 +662,9 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
     flag->flags &= ~kEntityFlagCarried;
     flag->position = carrier->position;
     flag->alive = true;
+    // The dropped-flag service re-arms the return window whenever the flag is
+    // not idle: 210 when the configured time is below 5, else the configured
+    // seconds. [orig: Entity_UpdateIdleCheck @0x408531..0x40853B]
     state->return_ticks = rules_.flag_return_ticks < 5
                               ? 210
                               : static_cast<int32_t>(rules_.flag_return_ticks);
@@ -942,6 +945,10 @@ void Match::update_objective_proximity(const World &world) {
                 continue;
             ++holders[entity->team];
         }
+        // Per team row, once a second: at least one alive holder in the
+        // volume gains one tick, an empty team loses min(hold, koth_delta).
+        // [orig: Game_AccumulateTeamScores @0x508DA0..0x508DC2 — holders test
+        // @0x508DA0, ++hold @0x508DAD, the clamped decrement @0x508DB2..0x508DC2]
         for (uint8_t team = 0; team < team_hold_ticks_.size(); ++team) {
             if (holders[team] > 0) {
                 if (team_hold_ticks_[team] < std::numeric_limits<int32_t>::max())
@@ -1004,6 +1011,13 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
             }
             if (!is_flag_bay(target->item_id))
                 continue;
+            // The bay matrix: the blue bay (4098) takes a carried red or
+            // neutral flag from team 1, or from ANY team when g_GameType == 8
+            // (Flag Me); the red bay (4100) takes blue/neutral from team 2;
+            // 4102 and 4103 take only the neutral flag from teams 4 and 3.
+            // [orig: Entity_ProcessWaypointInteraction — 4098 @0x4AD95E..0x4AD9A2
+            // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
+            // 4102 @0x4AD9E3, 4103 @0x4AD9D6; capture @0x4ADA19]
             const bool neutral = flag->item_id == kNeutralFlag;
             const bool accepted =
                 (target->item_id == kBlueBay &&
@@ -1025,13 +1039,36 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
         const bool own_flag =
             (carrier->team == 1 && target->item_id == kBlueFlag) ||
             (carrier->team == 2 && target->item_id == kRedFlag);
-        if (own_flag && state != nullptr && state->return_ticks > 0) {
-            record_flag_save(world, contact.source, contact.target);
+        if (own_flag) {
+            // An own flag is SAVED only when Entity_SyncPositionFromDefinition
+            // reports it displaced from its authored pose — a 2D distance or a
+            // height delta of at least 0x20000 (2 u); the return timer is not
+            // consulted, and an own flag at home does nothing (no pickup arm
+            // exists for it in any game type).
+            // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
+            // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
+            // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
+            // @0x43A9BE) -> Server_BroadcastEntityDeathEvent @0x4AD8D3]
+            if (state == nullptr)
+                continue;
+            const int64_t dx = int64_t{to_fixed(target->position.x)} -
+                               to_fixed(state->home.x);
+            const int64_t dy = int64_t{to_fixed(target->position.y)} -
+                               to_fixed(state->home.y);
+            const int64_t dz = int64_t{to_fixed(target->position.z)} -
+                               to_fixed(state->home.z);
+            const bool displaced =
+                static_cast<int64_t>(std::sqrt(static_cast<long double>(
+                    dx * dx + dy * dy))) >= 0x20000 ||
+                (dz < 0 ? -dz : dz) >= 0x20000;
+            if (displaced)
+                record_flag_save(world, contact.source, contact.target);
             continue;
         }
-        if (!own_flag || rules_.game_type == gt::kFlagBall ||
-            rules_.game_type == gt::kFlagMe)
-            record_flag_pickup(world, contact.source, contact.target);
+        // An enemy or neutral flag is picked up when the toucher carries
+        // nothing. [orig: LABEL_19 @0x4AD936 -> Entity_TryAttachToVehicle
+        // @0x4AD944, Server_DispatchScoringEvent @0x4AD94B, +0x124 = 0 @0x4AD955]
+        record_flag_pickup(world, contact.source, contact.target);
     }
 }
 
@@ -1235,6 +1272,11 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         std::array<int32_t, 5> objective_scores{};
         for (uint8_t team = 1; team <= 4; ++team)
             objective_scores[team] = team_objective_ticks(world, team);
+        // The clinch: each team's floor is score - koth_delta * remaining; the
+        // moment one floor exceeds every other team's score + remaining the
+        // round clock is zeroed. [orig: Server_CheckWinConditions
+        // @0x51B018..0x51B064 — g_koth_delta * remaining @0x51B018..0x51B024,
+        // the four floor comparisons @0x51B02C..0x51B062, clock = 0 @0x51B064]
         if (remaining_ticks_ > 0) {
             for (uint8_t team = 1; team <= 4; ++team) {
                 const int64_t floor = int64_t{objective_scores[team]} -
@@ -1256,15 +1298,21 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         if (remaining_ticks_ != 0)
             return std::nullopt;
         const int32_t winner = unique_best_team(team_hold_ticks_);
-        // Retail's final team-4 comparison jumps to LABEL_95, which is the
-        // team-1 round-end label. This defect is confined to the timeout/
-        // clinch resolution; reaching the hill limit above still awards team
-        // 4 normally. [orig: Server_CheckWinConditions
-        // @0x51B01A..0x51B040]
+        // At clock zero a strict four-way maximum decides, but retail's team-4
+        // branch pushes 1 (it jumps to the team-1 label), so team 4 can win
+        // only at the hill limit above. [orig: Server_CheckWinConditions
+        // clock-zero pushes @0x51B0A0 (2) / @0x51B0B0 (1) / @0x51B0C0 (3) /
+        // @0x51B0D0 (team 4 -> 1) / @0x51B0D4 (0)]
         return winner == 4 ? 1 : winner;
     }
 
     if (rules_.game_type == gt::kCaptureTheFlag) {
+        // Raw field 0xB against the two capture limits (dword_C8FF00 /
+        // dword_C8FEFC): t1 >= lim1 (lim1 != 0) -> 1; t2 >= lim2 (lim2 != 0)
+        // -> 2; at clock zero lim2 == 0 -> 2, lim1 == 0 -> 1, t2 > t1 -> 2,
+        // t1 > t2 -> 1, else 0. [orig: Server_CheckWinConditions
+        // @0x51B0DE..0x51B196 — @0x51B108 / @0x51B129 / @0x51B13A / @0x51B147 /
+        // @0x51B169 / @0x51B18B / @0x51B18F]
         const int32_t team1 = teams_[1][MatchStats::kFlagCaptures];
         const int32_t team2 = teams_[2][MatchStats::kFlagCaptures];
         const int32_t target1 = flag_capture_targets_[1];
@@ -1286,6 +1334,12 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
 
     if (rules_.game_type == gt::kSearchAndDestroy ||
         rules_.game_type == gt::kAttackDefend) {
+        // Raw field 0xD against the demolition limits (dword_C8FF04 /
+        // dword_C8FF08) with the same two award arms, but the clock-zero tail
+        // never compares counts: lim2 == 0 -> 2, lim1 == 0 -> 1, else 0 (both
+        // limits nonzero is always a draw). [orig: Server_CheckWinConditions
+        // @0x51B1A0..0x51B208 — @0x51B1C6 / @0x51B1E4 / @0x51B1F5 / @0x51B202 /
+        // @0x51B206]
         const int32_t team1 = teams_[1][MatchStats::kTargetsDestroyed];
         const int32_t team2 = teams_[2][MatchStats::kTargetsDestroyed];
         const int32_t target1 = demolition_targets_[1];
