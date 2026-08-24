@@ -144,9 +144,10 @@ the same install from 18 logged loads to 28, straight through `main.mnu`, the
 hardcoded fonts and the cursor. Retail's own `menu_style.mns` ships CRLF, and
 its file header documents a line-oriented parser with backslash continuations.
 
-The same rule was already known one format over: "a bare LF between blocks
-stopped retail's parser after block 0" (`apps/retail_minimal.py`, which
-preserves each `.def`'s existing line ending for exactly this reason).
+The same rule was already known one format over: a bare LF between blocks
+stopped retail's `.def` parser after block 0 (witnessed while trimming a
+retail install down to one mission, 2026-08; every `.def` there had to keep
+its original line ending for the parser to read past the first block).
 
 The writer-produced members of the set (`.trn` via `save_trn`, `.env` via
 `save_env`) emit CRLF from the engine libraries already. The hand-authored
