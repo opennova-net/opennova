@@ -368,6 +368,37 @@ public:
 	const std::string &expansion() const;
 	const std::string &last_error() const;
 
+	// The client's ONE tracked timed-capture window — the nearest-zone
+	// cluster dword_A85B88..A85BA0 the 0x53 handler seeds and the 0x6C handler
+	// re-rates. NO presentation consumer reads progress/target/limit in retail
+	// (an exhaustive immediate scan over 0x400000..0x7A0000 finds only the two
+	// handlers and the frame pump); the capture bar reads the 0x0A phase-0
+	// word_A85B7C instead. Kept as the exact retail image (net-re 0x6C).
+	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0 — same entity + same
+	//  modeB keeps progress, a different modeB re-seeds it @0x428d09..0x428d0c;
+	//  a different entity is adopted only when at least as near as the current
+	//  one and within 0x140000 = 20.0 u @0x428cf5; then rate = byte, entity,
+	//  modeA, modeB, target = 62*start, limit = 62*end, and start >= end zeroes
+	//  the whole cluster but progress @0x428d40..0x428d60;
+	//  NapiNPClientMsg_0x06C @0x428fc0 — rate = byte only when the handle is
+	//  the tracked entity @0x42902d..0x429038;
+	//  Client_ProcessNetworkFrame @0x42c2eb..0x42c347 — while limit != 0:
+	//  target == limit resets (entity/target/limit/progress = 0, rate = 1),
+	//  else progress += rate with the clamp progress <= target when rate > 0
+	//  and progress >= 0 when rate < 0 — so a positive 1..32 count never moves
+	//  a progress the 0x53 already parked at target]
+	struct TrackedCaptureWindow {
+		uint16_t zone = 0xFFFF; // dword_A85B88 (entity pointer; 0 = none)
+		int32_t mode_a = 0;     // dword_A85B8C
+		int32_t mode_b = 0;     // dword_A85B90
+		int32_t target = 0;     // dword_A85B94 (62 * start_s)
+		int32_t limit = 0;      // dword_A85B98 (62 * end_s)
+		int32_t progress = 0;   // dword_A85B9C
+		int32_t rate = 0;       // dword_A85BA0
+		bool tracked() const { return zone != 0xFFFF; }
+	};
+	const TrackedCaptureWindow &tracked_capture_window() const { return tracked_window_; }
+
 	struct ZoneState {
 		bool has_value = false;
 		ZoneTimerValue value;
@@ -440,6 +471,11 @@ private:
 	void apply_zone_timer_window(const ZoneTimerWindow &window);
 	void apply_zone_presence_count(const ZonePresenceCount &presence);
 	void advance_zone_timers();
+	// The tracked-window cluster's 0x53 adoption, 0x6C re-rate, and per-frame
+	// advance (TrackedCaptureWindow above).
+	void adopt_tracked_window(const ZoneTimerWindow &window);
+	void advance_tracked_window();
+	TrackedCaptureWindow tracked_window_;
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
 	// each active slot with an entity and a nonzero revive window loses one
 	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
