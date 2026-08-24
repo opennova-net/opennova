@@ -1,5 +1,6 @@
 #include <net/npwire/wire_capture.h>
 
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -44,22 +45,48 @@ struct DirState {
 	int pending_first_frame = 0;
 };
 
-// Per-session state keyed by the client-side UDP port (C2S src / S2C dst). Each
-// session carries its OWN SCRK pair + per-direction reassembly, so a capture with
-// N clients decodes correctly (a single global pair would clobber the prior
-// client's keys). When ports are unavailable (hexcap / crafted port-less caps)
-// every datagram keys to session 0 — the original single-session behavior.
+// Per-session state: its OWN SCRK pair + per-direction reassembly.
+//
+// IDENTITY (measured 2026-08-24, Kutu gateway capture): the client-side UDP port
+// is NOT a session identity in a server-side capture - 42 different clients'
+// ClientAuths arrived on one port (32768), so a port-keyed table overwrites the
+// stored SCRK on every join and all but the newest client then decrypts with the
+// wrong key. Nothing rejects that: parse_protocol_messages is deliberately
+// tolerant [orig: CNapiNPConnection_ParseMessages @0x625bc0], so wrong-key bytes
+// are emitted as well-formed-looking messages with arbitrary tags.
+//
+// The protocol packet header's session_id is readable WITHOUT the key (it sits
+// ahead of the SCRK-encrypted inner region) and carries the PEER's local key
+// [protocol_message.h: "the peer local_key stamped into the outbound header";
+// stamped at session/protocol_message.cpp: hdr.session_id = crypto.session_id]:
+//   S2C header session_id == that client's ClientAuth.ck
+//   C2S header session_id == that connection's ServerAuth.sk
+// Verified on the Kutu capture: all 28 distinct S2C session_ids seen on the
+// shared port are ClientAuth ck values (28/28, zero unmatched).
+//
+// So sessions are keyed by the auth-derived identity when it is known, and fall
+// back to the historical port key otherwise (hexcaps / port-less crafted caps /
+// traffic whose auth is not in the cut) - that path behaves exactly as before.
 struct Session {
 	std::string client_scrk, server_scrk;
 	DirState cstate, sstate;
+};
+
+// Identity space: auth-derived ids carry bit 32 so they can never collide with a
+// UDP port (< 65536) used by the fallback path.
+constexpr uint64_t kAuthIdBit = uint64_t(1) << 32;
+inline uint64_t auth_identity(uint32_t client_key) { return kAuthIdBit | client_key; }
+
+struct SessionTable {
+	std::unordered_map<uint64_t, Session> by_id;
+	std::unordered_map<uint32_t, uint64_t> id_by_server_key; // ServerAuth.sk -> identity
 };
 
 // Drive one datagram through the outer-decode pipeline, appending any completed
 // in-game messages to `out`. Shared by the live CaptureDecoder and the batch
 // function so both produce identical output. State lives in `sessions`, keyed as
 // above.
-void process_datagram(const CaptureDatagram &d,
-                      std::unordered_map<int, Session> &sessions,
+void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
                       CaptureDecodeResult &out);
 
 bool process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
@@ -127,8 +154,7 @@ CaptureDatagramClass classify_opcode(uint8_t opcode) {
 	}
 }
 
-void process_datagram(const CaptureDatagram &d,
-                      std::unordered_map<int, Session> &sessions,
+void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
                       CaptureDecodeResult &out) {
 	CapturedDatagramResult result;
 	result.frame_index = d.frame_index;
@@ -151,6 +177,24 @@ void process_datagram(const CaptureDatagram &d,
 	                       result.datagram_class == CaptureDatagramClass::ServerProtocol;
 	const bool have_ports = (d.src_port != 0 && d.dst_port != 0);
 	const int session_key = !have_ports ? 0 : (is_server ? d.dst_port : d.src_port);
+	// Resolve the identity of a protocol packet from its (pre-SCRK) header
+	// session_id; fall back to the port key when the peer's auth was not seen.
+	const auto protocol_identity = [&](bool server_to_client) -> uint64_t {
+		ProtocolPacketHeader hdr;
+		if (!parse_protocol_packet_header(body.data(), body.size(), hdr))
+			return uint64_t(session_key);
+		if (server_to_client) {
+			// session_id == the client's own key (ClientAuth.ck)
+			const uint64_t id = auth_identity(hdr.session_id);
+			if (sessions.by_id.count(id)) return id;
+		} else {
+			// session_id == the server's key for this connection (ServerAuth.sk)
+			const auto it = sessions.id_by_server_key.find(hdr.session_id);
+			if (it != sessions.id_by_server_key.end()) return it->second;
+		}
+		return uint64_t(session_key);
+	};
+
 	switch (op) {
 	case SESSION_OPCODE_CLIENT_HELLO: {
 		ClientHello hello;
@@ -160,7 +204,12 @@ void process_datagram(const CaptureDatagram &d,
 	case SESSION_OPCODE_CLIENT_AUTH: {
 		ClientAuth a;
 		result.decoded = parse_client_auth(body.data(), body.size(), a);
-		if (result.decoded) sessions[session_key].client_scrk = a.scrk;
+		if (result.decoded) {
+			// Bind by the client key when present; the port bucket keeps the
+			// historical behaviour for captures without one.
+			const uint64_t id = a.ck ? auth_identity(a.ck) : uint64_t(session_key);
+			sessions.by_id[id].client_scrk = a.scrk;
+		}
 		break;
 	}
 	case SESSION_OPCODE_SERVER_HELLO: {
@@ -171,19 +220,27 @@ void process_datagram(const CaptureDatagram &d,
 	case SESSION_OPCODE_SERVER_AUTH: {
 		ServerAuth a;
 		result.decoded = parse_server_auth(body.data(), body.size(), a);
-		if (result.decoded) sessions[session_key].server_scrk = a.scrk;
+		if (result.decoded) {
+			// ServerAuth echoes the client key and carries the server key, so
+			// this is where both directions' routing is bound.
+			const uint64_t id = a.ck ? auth_identity(a.ck) : uint64_t(session_key);
+			sessions.by_id[id].server_scrk = a.scrk;
+			if (a.sk) sessions.id_by_server_key[a.sk] = id;
+		}
 		break;
 	}
-	case SESSION_OPCODE_PROTOCOL_MESSAGE:
-		result.decoded = process(body, sessions[session_key].client_scrk, 'C',
-		                         sessions[session_key].cstate, d.frame_index,
-		                         session_key, out);
+	case SESSION_OPCODE_PROTOCOL_MESSAGE: {
+		Session &s = sessions.by_id[protocol_identity(false)];
+		result.decoded = process(body, s.client_scrk, 'C', s.cstate,
+		                         d.frame_index, session_key, out);
 		break;
-	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-		result.decoded = process(body, sessions[session_key].server_scrk, 'S',
-		                         sessions[session_key].sstate, d.frame_index,
-		                         session_key, out);
+	}
+	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE: {
+		Session &s = sessions.by_id[protocol_identity(true)];
+		result.decoded = process(body, s.server_scrk, 'S', s.sstate,
+		                         d.frame_index, session_key, out);
 		break;
+	}
 	default:
 		break;
 	}
@@ -193,7 +250,7 @@ void process_datagram(const CaptureDatagram &d,
 } // namespace
 
 struct CaptureDecoder::Impl {
-	std::unordered_map<int, Session> sessions;
+	SessionTable sessions;
 };
 
 CaptureDecoder::CaptureDecoder() : impl_(std::make_unique<Impl>()) {}
@@ -213,7 +270,7 @@ CaptureDecodeResult CaptureDecoder::push_detailed(const CaptureDatagram &datagra
 
 CaptureDecodeResult decode_capture(const std::vector<CaptureDatagram> &datagrams) {
 	CaptureDecodeResult out;
-	std::unordered_map<int, Session> sessions;
+	SessionTable sessions;
 	for (const auto &d : datagrams) process_datagram(d, sessions, out);
 	return out;
 }
