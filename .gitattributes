@@ -53,3 +53,6 @@ assets/**/*.env -text -eol filter= diff= merge=
 assets/**/*.wac -text -eol filter= diff= merge=
 assets/**/*.txt -text -eol filter= diff= merge=
 assets/**/*.md  text eol=lf filter= diff= merge=
+# The allowlist protecting the game dir is ours, not a game file: it must be a
+# real text blob on every checkout, LFS smudge or not (a pointer file ignores nothing).
+assets/**/.gitignore text eol=lf filter= diff= merge=
