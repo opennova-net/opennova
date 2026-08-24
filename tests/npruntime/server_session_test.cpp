@@ -102,8 +102,8 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 		rules.game_type = game_type;
 		rules.team_count = config.num_teams;
 		world.match.configure(rules);
-		world.match.upsert_player({blue, 0, "Blue", {}, {}});
-		world.match.upsert_player({red, 1, "Red", {}, {}});
+		world.match.upsert_player({blue, 0, "Blue", {}});
+		world.match.upsert_player({red, 1, "Red", {}});
 		const opennova::ProtocolMessage message =
 				opennova::np::build_player_list_message(config, roster, &world);
 		opennova::PlayerList decoded;
@@ -2047,7 +2047,7 @@ bool check_requester_score_delta_refresh() {
 	opennova::world::MatchRules rules;
 	rules.game_type = config.game_type;
 	world.match.configure(rules);
-	world.match.upsert_player({player, 0, "Points", {}, {}});
+	world.match.upsert_player({player, 0, "Points", {}});
 	world.match.player(player)->stats[opennova::world::MatchStats::kPoints] = -5;
 	ctx.world = &world;
 
@@ -3272,7 +3272,7 @@ bool check_timed_capture_host_wire_transaction() {
 		return handle;
 	};
 	const auto first = soldier(1);
-	world.match.upsert_player({first, 0, "Blue", {}, {}});
+	world.match.upsert_player({first, 0, "Blue", {}});
 
 	opennova::netsim::UdpSessionTransport transport(
 			opennova::netsim::UdpSessionTransport::Role::Host);

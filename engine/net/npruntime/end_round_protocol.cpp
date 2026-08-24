@@ -53,10 +53,13 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 	for (const world::MatchResultPlayer &player : result.players) {
 		EndRoundPlayerRow row;
 		row.slot = player.identity.slot;
-		// The producer first stores these in 32/16/16-byte fixed buffers.
-		// [orig: Server_BuildEndOfRoundScoreboard @0x508F30]
+		// The producer first stores these in 32/16/16-byte fixed buffers. The
+		// second string is ALWAYS g_empty_str (@0x5090E3); the third is the
+		// NovaWorld clan-list node tag when the slot's account netId finds one
+		// (CLinkedList_FindByTag @0x509100), else g_empty_str.
+		// [orig: Server_BuildEndOfRoundScoreboard @0x5090D3..@0x509116]
 		row.name = capped(player.identity.name, 31);
-		row.clan = capped(player.identity.clan, 15);
+		row.clan.clear();
 		row.tag = capped(player.identity.tag, 15);
 		row.team = player.team;
 		row.player_class = player.player_class;

@@ -9904,6 +9904,20 @@ the tag through an 8-byte one `@0x432120`. The server's source buffers are
 32/16/16 bytes, so its emitted name/clan/tag maxima are 31/15/15 characters;
 `playerClass` comes from the player entity at `+660`. `[orig:
 Server_BuildEndOfRoundScoreboard @0x508F30]`
+The producer's string SOURCES (grilled 2026-08-24): the first is the slot name
+(`slot+40`); the second is ALWAYS `g_empty_str` (`@0x5090E3`) — no retail host
+ever fills the "clan" column; the third is the NovaWorld clan-list node tag:
+`CLinkedList_FindByTag(&list @0x24E0E54, slot+100572)` (`@0x509100`, the key is
+the slot's account netId) yields a node whose `+81` tag is copied (`@0x50910C`),
+else `g_empty_str`. That list is filled only by `Server_PlayerAdd` for a join
+carrying a nonzero account netId at `join+0x1A4` (name `join+0x1A8`, tag
+`join+0x1E8`; node `+12` netId, `+16` name[65], `+81` tag[9] — `CLinkedList_FindOrCreateByNetId
+@0x52B540`), so a LAN join has no node and ships both strings empty. The port
+does exactly that: `MatchPlayerIdentity` carries no clan field, the encoder
+writes the empty second string, and `tag` stays empty until a NovaWorld-account
+join leg populates it (a separate slice, not a divergence). `[orig:
+Server_BuildEndOfRoundScoreboard @0x5090D3..@0x509116; Server_PlayerAdd
+clan-list leg @0x51CDF0..@0x51CE2E]`
 
 Those seven names describe the decoder/display record; the server producer's
 actual value sequence is `primaryScore, raw[29], raw[30], raw[5], raw[7],
