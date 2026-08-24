@@ -132,6 +132,13 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 	} else {
 		host_config.server_name = "SINGLEPLAYERGAME";
 		host_config.max_players = 1;
+		// SP has no host dialog: g_GameType is the mission's own mode word (no multiplayer
+		// bit -> stock Co-op 0x10020). The auto-spawn below resolves the retail marker chain
+		// by this word — left at the default 0 it walks the DM 6095/6002 chain, finds none
+		// of a campaign mission's 6001 starts, and parks the player at the origin.
+		// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
+		// see docs/net/novaworld-net-re.md 5.2c)
+		host_config.game_type = mission_game_type();
 	}
 	if (world_) {
 		world_->fat_bullets = host_config.fat_bullets;

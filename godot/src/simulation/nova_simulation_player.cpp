@@ -169,20 +169,26 @@ bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_t
 	return true;
 }
 
+uint32_t Simulation::mission_game_type() const {
+	// Derive the same g_GameType code word as the mission catalog. A mission
+	// with no multiplayer bit is stock Co-op (0x10020), which reaches 00TRa's
+	// exact 6001 fallback rather than requiring a cross-mode family scan.
+	// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
+	// see docs/net/novaworld-net-re.md 5.2c)
+	return opennova::game_type::for_mission_mode(
+			opennova::bms::selected_game_mode(
+					static_cast<opennova::bms::AttribFlags>(
+							world_ ? world_->mission_attrib_flags : 0u)));
+}
+
 int Simulation::spawn_local_player_at_start() {
 	if (!world_installed_ || !world_ || !world_->ai) return -1;
 	// P7: the npruntime listen server auto-spawns the host's own player at bring-up via the SAME
 	// retail spawn-pose operation (Server_BuildPlayerInfoAndAdd), so when a player already
 	// exists this is a no-op success (the player is at its start, input seeded by bringup_host_runtime).
 	if (has_local_player()) return 1;
-	// Derive the same g_GameType code word as the mission catalog. A mission
-	// with no multiplayer bit is stock Co-op (0x10020), which reaches 00TRa's
-	// exact 6001 fallback rather than requiring a cross-mode family scan.
 	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
-	const uint32_t game_type = opennova::game_type::for_mission_mode(
-			opennova::bms::selected_game_mode(
-					static_cast<opennova::bms::AttribFlags>(
-							world_->mission_attrib_flags)));
+	const uint32_t game_type = mission_game_type();
 	const opennova::world::SpawnPointResult sel =
 			opennova::world::resolve_player_spawn_pose(
 					*world_, opennova::world::EntityHandle{},
