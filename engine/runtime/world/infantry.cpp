@@ -1866,6 +1866,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 : 0u;
         const bool gravity_skip =
             (gravity_flags & (kEntityFlagLadderContact | kEntityFlagDrowning)) != 0;
+        // THE ORG1 EVEN-TICK GATE. Retail's NPC infantry runs its whole
+        // gravity + resolver + airborne/landing block on EVEN ticks only: the
+        // think stamps `outYaw.X = tickCounter & 1` (a SpecialVec3 field reused
+        // as a scratch int - a decompiler alias, not a vector) and the block is
+        // entered under `if (!outYaw.X)`.
+        // [orig: Entity_UpdateInfantryAI @0x4b9910 - stamp kong 155519-155523
+        //  `v489 = tickCounter; outYaw.X = v489 & 1;`, gate kong 155809
+        //  `if ( !outYaw.X )`, resolver call kong 155831]
+        // This is WHY the org1 integrate is `pos += 2 * vel` (kong 155830
+        // `entity->Position.Z += 2 * entity->slideDecay;`): the doubling
+        // compensates for running half as often. We carried the doubling but
+        // ran the block EVERY tick, so our NPCs took gravity at twice retail's
+        // rate and resolved twice as often - which changes the equilibrium
+        // standoff against an obstacle and the recovery rate from a contact
+        // (AI-PARITY-CONCEPT 6.15w).
+        // The org2 (local player) leg keeps its own cadence: it integrates
+        // `pos += vel` once per tick and is NOT gated here.
+        const bool org1_tick_gate_open =
+            inf.is_local_player || (logic_tick & 1u) == 0;
         if (inf.is_local_player) {
             if (!gravity_skip) {
                 inf.vel[2] -= kGravityStepPlayer;
@@ -1892,7 +1911,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.vel[2] = step;
             if (inf.vel[2] < -16384) inf.vel[2] = -16384;
             e.pos[2] += 2 * inf.vel[2];
-        } else {
+        } else if (org1_tick_gate_open) {
+            // [orig: kong 155814-155830 — the org1 gravity step and the
+            //  `Position.Z += 2 * slideDecay` integrate, both inside the
+            //  even-tick gate at kong 155809]
             if (!gravity_skip) inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += 2 * inf.vel[2];
@@ -1907,7 +1929,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         const int32_t pre_resolve_x = e.pos[0]; // debug-card tap
         const int32_t pre_resolve_y = e.pos[1];
         int32_t foot_clearance;
-        if (collision != nullptr && collision->instance_count() != 0) {
+        if (!org1_tick_gate_open) {
+            // ODD TICK for an NPC body: retail's whole gravity + resolver +
+            // airborne/landing block sits inside the even-tick gate, so no
+            // resolve happens and no edge is evaluated this tick. Report the
+            // clearance the cached ground implies so nothing downstream reads
+            // an uninitialised value; the edges below are skipped with it.
+            // [orig: the `if ( !outYaw.X )` gate at kong 155809 wraps the
+            //  integrate, the resolver call at 155831 and the edges after it]
+            foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
+        } else if (collision != nullptr && collision->instance_count() != 0) {
             // The climb-motor channels the resolver's CL legs read and write:
             // the entry gate, the per-tick alignment chase, and the exit push /
             // pitch restore (infantry_ladder.cpp). [orig: the resolver reads
@@ -1948,7 +1979,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             tick_entity != nullptr &&
             ((tick_entity->flags | tick_entity->engine_flags) &
              kEntityFlagLadderContact) != 0;
-        if (foot_clearance > kInfantryAirborneGap) {
+        // The airborne / landing edges are the tail of retail's even-tick
+        // block, so an odd NPC tick evaluates neither.
+        // [orig: inside `if ( !outYaw.X )` at kong 155809 — the >61440 airborne
+        //  arm at 155832-155834 and the landing arm after it]
+        if (!org1_tick_gate_open) {
+            // no edge this tick
+        } else if (foot_clearance > kInfantryAirborneGap) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
             // a dead player that was not already airborne stays that way. org1's
             // corresponding gate omits DEAD and sets airborne before its later

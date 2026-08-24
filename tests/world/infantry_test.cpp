@@ -705,9 +705,15 @@ void test_org1_bare_cl_facing_press_drift() {
     // store @ 0x4b3a62]
     CHECK(!rig.collision.resolver_applied_push);
     const int32_t x0 = m->pos[0];
-    run_ticks(rig.ai, rig.world, 1, 4);
+    // Ticks 1..6 so the window contains THREE EVEN ticks (2, 4, 6). This body
+    // is an NPC, and org1's resolver + press block runs on even ticks only
+    // [orig: gate kong 155809 under `outYaw.X = tickCounter & 1` kong
+    // 155519-155523], so a 1..4 window would deliver a single press where this
+    // case means to measure three. The press COUNT is what the bound below was
+    // calibrated on, so the window is widened rather than the bound relaxed.
+    run_ticks(rig.ai, rig.world, 1, 7);
     CHECK((pe->flags & kEntityFlagLadderContact) != 0);
-    // 3 ticks of resolver press (−0.0625) + org1 press (−0.03125) less the
+    // 3 presses of resolver (−0.0625) + org1 press (−0.03125) less the
     // anchor chase-back: comfortably past 0.22u; without the org1 press the
     // same window moves under 0.19u.
     CHECK(m->pos[0] < x0 - fx(0.22));
@@ -3271,16 +3277,31 @@ int main() {
         ai.at(1)->inf.is_local_player = true;
         ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
 
-        run_ticks(ai, w, 0, 1); // both stay airborne (100u up)
-        CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: one per-tick step
+        // ORG1 RUNS ITS PHYSICS ON EVEN TICKS ONLY, org2 every tick. The org1
+        // think stamps `outYaw.X = tickCounter & 1` and enters the whole
+        // gravity + integrate + resolver + edge block under `if (!outYaw.X)`;
+        // the `pos.z += 2 * slideDecay` doubling inside it exists BECAUSE the
+        // block runs half as often. The org2 player leg has no such gate and
+        // integrates `pos.z += vel` once per tick.
+        // [orig: stamp @0x4b9910 kong 155519-155523; gate kong 155809; gravity
+        //  step kong 155815; integrate kong 155830. The complementary half is
+        //  already ported: the org1 anim-event sound consumer runs on ODD ticks
+        //  [orig: @0x4bf144-0x4bf156], infantry.cpp emit_slot_sound.]
+        run_ticks(ai, w, 0, 1); // tick 0 EVEN: both fall (100u up, stay airborne)
+        CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: the even-tick step
         CHECK(ai.at(1)->inf.vel[2] == -208); // player: the org2 half-step, same tick
         const int32_t npc_z = ai.at(0)->pos[2];
         const int32_t ply_z = ai.at(1)->pos[2];
-        run_ticks(ai, w, 1, 2);
-        CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
+
+        run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 skips entirely, org2 does not
+        CHECK(ai.at(0)->inf.vel[2] == -416);  // NPC unchanged — no gravity this tick
+        CHECK(ai.at(0)->pos[2] == npc_z);     // NPC unchanged — no integrate either
         CHECK(ai.at(1)->inf.vel[2] == -2 * 208);
+        CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208)); // pos.z += vel (org2)
+
+        run_ticks(ai, w, 2, 3); // tick 2 EVEN: org1 accumulates and integrates
+        CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
         CHECK(ai.at(0)->pos[2] == npc_z + 2 * (-2 * 416)); // pos.z += 2*vel (org1)
-        CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208));     // pos.z += vel (org2)
     }
 
     // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
@@ -3362,9 +3383,13 @@ int main() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(50) + fx(1) + 0x8000; // positive foot gap, but <= 0xF000
 
-        run_ticks(ai, w, 1, 2);
+        // NOTE: an EVEN tick — org1's gravity/resolver/edge block runs on even
+        // ticks only [orig: gate kong 155809 under `outYaw.X = tickCounter & 1`
+        // kong 155519-155523]. This case is about the ground-settle policy, not
+        // the cadence, so it is phased onto a tick where the block executes.
+        run_ticks(ai, w, 0, 1);
 
-        // Per-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
+        // The even-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
         // foot clearance (<= 0xF000) is otherwise left alone — NOT snapped to the floor, NOT airborne.
         CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 2 * 416);
         CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
@@ -3387,7 +3412,11 @@ int main() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(50) + fx(1) - 0x1000; // foot penetrates the ground
 
-        run_ticks(ai, w, 1, 2);
+        // NOTE: an EVEN tick — org1's gravity/resolver/edge block runs on even
+        // ticks only [orig: gate kong 155809 under `outYaw.X = tickCounter & 1`
+        // kong 155519-155523]. This case is about the ground-settle policy, not
+        // the cadence, so it is phased onto a tick where the block executes.
+        run_ticks(ai, w, 0, 1);
 
         CHECK(e->pos[2] == fx(50) + fx(1)); // only negative/zero clearance lifts
     }

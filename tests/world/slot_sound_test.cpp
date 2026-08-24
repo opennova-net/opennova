@@ -270,9 +270,16 @@ void test_foot_obj_pick() {
         CHECK(std::string(evs[1].set_name) == "T_OBJ_R");
     }
 
-    // Staleness: tick 1's fallback (no collision world) cleared the link, so
-    // the next pair falls through to ground without any reseed.
-    rig.run(3, 4);
+    // Staleness: the fallback (no collision world) clears the link, so the next
+    // pair falls through to ground without any reseed. Ticks 2..3, because the
+    // two halves of org1's per-tick work sit on OPPOSITE tick parities: the
+    // resolve/fallback that CLEARS the link runs on even ticks
+    // [orig: gate kong 155809 under `outYaw.X = tickCounter & 1` kong
+    // 155519-155523] while the anim-event sound pass that READS it runs on odd
+    // [orig: @0x4bf144-0x4bf156]. Tick 2 clears, tick 3 reads the cleared link.
+    // (The old 3..4 window skipped the clearing tick entirely and only worked
+    // because we used to run the physics block every tick.)
+    rig.run(2, 4);
     evs = rig.take();
     CHECK(evs.size() == 2);
     if (evs.size() == 2) {
@@ -342,7 +349,12 @@ void test_landing_pair_alive_and_dead() {
     rig.e->pos[1] = fx(10.0);
     rig.e->pos[2] = fx(0.0); // feet at ground -> clearance <= 0 resolves the landing
     rig.e->inf.vel[2] = -1000;
-    rig.run(1, 2);
+    // An EVEN tick: the landing edge (and its sound) is part of org1's
+    // gravity/resolver/edge block, which runs on even ticks only
+    // [orig: gate kong 155809 under `outYaw.X = tickCounter & 1` kong
+    // 155519-155523]. The dead-body case below already used tick 2 and was
+    // unaffected, which is what pointed at the phase rather than the policy.
+    rig.run(2, 3);
     auto evs = rig.take();
     bool saw_land = false;
     for (const auto &ev : evs)
