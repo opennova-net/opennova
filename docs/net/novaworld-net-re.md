@@ -8011,7 +8011,10 @@ below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5
    4-byte S2C 0x81 on change (`@ 0x508790`); set bit 0..4 for pool-1 def-types
    4095/4091/4093/4097/4096 within 20.0 (a carried flag counts at the carrier's position);
    set bit `1 << zone.team` for pool-3 6006 radius zones and for frontier-active numbered
-   `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2). The existence of ANY such
+   `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2) — in TEAM modes only
+   (`g_GameType & 0x10000`, both legs gated `@0x508A6E` / `@0x508C07`); a non-team mode
+   sets bit 0 for a live player inside a 6006 volume (`@0x508ABB`) and no bit for a
+   numbered entity, while the inside/presence latch still fires. The existence of ANY such
    numbered entity globally supersedes every 6006 volume for presence; with neither family
    present `[23593..95]` do not decay. Otherwise the three counters chase zero outside/dead,
    `+23595` accumulates primary hill time inside, `+23593` resets at
