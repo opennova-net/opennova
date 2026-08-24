@@ -35,6 +35,15 @@ func is_open() -> bool:
 	return _open
 
 
+## The ShowScore toggle's respawn-init wrapper closes this window too
+## [orig: sub_4993C0 -> Game_InitRespawnState @0x49939a].
+func close(hud: HudOverlay) -> void:
+	_open = false
+	if _pushed and hud != null:
+		hud.set_message_log_shown(false)
+	_pushed = false
+
+
 func update(hud: HudOverlay, sim: Simulation, down: bool, chorded: bool,
 		active: bool) -> void:
 	if hud == null:

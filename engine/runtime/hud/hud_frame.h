@@ -398,6 +398,18 @@ struct HudEndRoundOverlayState {
 	std::vector<HudEndRoundLine> lines;
 };
 
+// The toggled SP "Show Score" statistics panel (hud/end_round_statistics.h
+// owns its policy and geometry). The shell resolves the title and the four
+// Epilog label strings and formats the values, because it owns the string
+// tables. [orig: HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC]
+struct HudEndRoundStatisticsState {
+	bool shown = false;
+	bool raised = false; // [orig: g_spawn_success_gate && winner == 1 @0x5b763b]
+	std::string title;   // gametext ("Score", "SCORE_TITLE")
+	std::array<std::string, 4> labels;
+	std::array<std::string, 4> values;
+};
+
 struct HudScoreboardState {
 	bool shown = false;
 	uint32_t game_type = 0;
@@ -546,6 +558,9 @@ struct HudFrameState {
 	//  @0x5b7d3e, each line HUD_DrawTextCentered_HalfBright(Impact38, 512, y)
 	//  through sub_580B80 @0x580b80].
 	HudEndRoundOverlayState end_round;
+	// The toggled SP "Show Score" statistics panel [orig: sub_5C0060 @0x5c0083
+	// draws HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC].
+	HudEndRoundStatisticsState end_round_statistics;
 	std::vector<HudAttachLabel> attach_labels;
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
@@ -740,6 +755,8 @@ private:
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);
+	void element_end_round_statistics(const HudFrameState &state, float w,
+			float h);
 	void element_vehicle_panel(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);

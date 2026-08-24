@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <hud/end_round_overlay.h>
+#include <hud/end_round_statistics.h>
 
 using namespace opennova::hud;
 
@@ -173,10 +174,47 @@ void test_column_layout() {
 			stat_field_string_index(40) == 0);
 }
 
+// The toggled SP Show Score panel's row composition and geometry
+// [orig: HUD_DrawEndRoundStatistics @0x5b7600].
+void test_statistics_panel() {
+	EndRoundStatisticsInput in;
+	in.subgoals_won = 2;
+	in.subgoals_defined = 5;
+	in.enemy_kills = 7;
+	in.enemy_unit_total = 40;
+	in.team_unit_kills = 1;
+	in.friendly_unit_kills = 0;
+	auto rows = end_round_statistics_rows(in);
+	CHECK(std::string(rows[0].label_key) == "STREPILOG_OBJECTIVEBONUS" &&
+			rows[0].value == "2/5");
+	CHECK(std::string(rows[1].label_key) == "STREPILOG_ENEMYUNITS" &&
+			rows[1].value == "7/40");
+	CHECK(std::string(rows[2].label_key) == "STREPILOG_TEAMUNITS" &&
+			rows[2].value == "1");
+	CHECK(std::string(rows[3].label_key) == "STREPILOG_FRIENDLYUNITS" &&
+			rows[3].value == "0");
+	// The enemy-kill clamp: negative floors at 0, overshoot caps at the total
+	// [orig: @0x5b7721..0x5b772b].
+	in.enemy_kills = -3;
+	CHECK(end_round_statistics_rows(in)[1].value == "0/40");
+	in.enemy_kills = 55;
+	CHECK(end_round_statistics_rows(in)[1].value == "40/40");
+	// The box: 280-top (raised 140 on the gated team-1 win), 340 tall,
+	// x 128..896, rows +48 stepping 48, label 200 / value 620
+	// [orig: @0x5b7626..0x5b7644, @0x5b7671, @0x5b7653].
+	CHECK(end_round_statistics_top(false) == 280);
+	CHECK(end_round_statistics_top(true) == 140);
+	CHECK(kEndRoundStatsBoxX1 == 128 && kEndRoundStatsBoxX2 == 896 &&
+			kEndRoundStatsBoxHeight == 340);
+	CHECK(kEndRoundStatsRowStart == 48 && kEndRoundStatsRowStep == 48);
+	CHECK(kEndRoundStatsLabelX == 200 && kEndRoundStatsValueX == 620);
+}
+
 } // namespace
 
 int main() {
 	test_team_mode_ladder();
+	test_statistics_panel();
 	test_objective_and_non_team();
 	test_column_layout();
 	if (failures != 0) {

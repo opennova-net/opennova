@@ -1550,4 +1550,36 @@ void World::restore(const Snapshot &s) {
     });
 }
 
+
+void count_mission_units(World &world) {
+    // Players (the +534 byte; our player_class != 0) count into the separate
+    // player bucket the panel never draws; everything else with team >= 2 and
+    // a non-zero items.def unit-class byte is one enemy unit. The original's
+    // vehicle(3/4)/aircraft(9)/infantry split is fold-consumed as the total.
+    // [orig: Score_ClassifyEntityForCounts @0x4fd070 — player @0x4fd074,
+    //  team gate @0x4fd08d, def+0x196 gate @0x4fd09f, total @0x4fd0a8;
+    //  driven over both pools by sub_509DC0 @0x509e13..0x509e4a]
+    int32_t total = 0;
+    world.registry.for_each([&](const Entity &e) {
+        if (e.player_class != 0) return;
+        if (e.team < 2) return;
+        if (e.item_unit_type == 0) return;
+        ++total;
+    });
+    world.kill_stats.enemy_unit_total = total;
+}
+
+int32_t count_defined_subgoals(const World &world) {
+    // The leading run of authored win conditions before the first 0 or 0xFF
+    // entry, at most eight. [orig: sub_509DC0 @0x509dc2..0x509dd1 scanning
+    //  the header win-condition ids; the count lands in dword_C8468C]
+    int32_t count = 0;
+    for (int slot = 1; slot <= 8; ++slot) {
+        const uint8_t id = world.subgoals.win_text_ids[slot];
+        if (id == 0 || id == 0xFF) break;
+        ++count;
+    }
+    return count;
+}
+
 } // namespace opennova::world

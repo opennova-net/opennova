@@ -271,7 +271,17 @@ struct MissionKillStats {
     int32_t team_kills_by_others = 0;     // [orig: 0xC846C0]
     int32_t friendly_kills_by_others = 0; // [orig: 0xC846C8]
     int32_t enemy_kills_by_others = 0;    // [orig: 0xC846A8/B0/B8 folded]
+    // The mission's enemy-unit total, counted ONCE at mission start over the
+    // entity pools: non-player entities with team >= 2 and a non-zero
+    // items.def unit-class byte (def+0x196). The original also splits the
+    // count per class (vehicle 3/4, aircraft 9, else infantry @0xC84694/9C/98)
+    // — the Show Score panel consumes only the total, so the split folds like
+    // the kill buckets above. [orig: 0xC84690 — Score_ClassifyEntityForCounts
+    // @0x4fd070 over both pools from sub_509DC0 @0x509dc0, called at
+    // Game_StartMission @0x525d5d]
+    int32_t enemy_unit_total = 0;
 };
+
 
 class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
                  // shared command layer can reach an entity's AI component in-engine)
@@ -627,6 +637,20 @@ public:
 private:
     std::vector<ISystem *> systems_;
 };
+
+// The mission-start unit scan feeding MissionKillStats::enemy_unit_total —
+// the Show Score panel's enemy-units denominator. Runs once at the
+// Game_StartMission-equivalent moment, after entity placement and the
+// item-traits sweep stamped Entity::item_unit_type.
+// [orig: sub_509DC0 @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
+//  called at Game_StartMission @0x525d5d]
+void count_mission_units(World &world);
+
+// The mission's defined-subgoal count: the leading run of authored win
+// conditions (slots 1..8) before the first 0 or 0xFF entry.
+// [orig: sub_509DC0 @0x509dc2..0x509dd1 scanning byte_A7628C — the header
+//  win-condition text ids; dword_C8468C]
+int32_t count_defined_subgoals(const World &world);
 
 } // namespace opennova::world
 

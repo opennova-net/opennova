@@ -19,6 +19,7 @@ const HudHiddenCaptureWitness := preload(
 const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presenter.gd")
 const VehiclePanelPresenterScript := preload("res://game/world/vehicle_panel_presenter.gd")
 const MessageLogPresenterScript := preload("res://game/world/message_log_presenter.gd")
+const EndRoundStatisticsPresenterScript := preload("res://game/world/end_round_statistics_presenter.gd")
 const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
@@ -33,6 +34,7 @@ var _game_hud = null        # HudOverlay, built on the first frame a mission has
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
+var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show Score (F5) panel lane
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
 var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
@@ -170,6 +172,7 @@ func teardown() -> void:
 	_scoreboard.reset()
 	_vehicle_panel.reset()
 	_message_log.reset()
+	_end_round_stats.reset()
 	_lfp_panel.reset()
 	_hud_pos = null
 	_pending_hud_messages.clear()
@@ -544,6 +547,15 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_score_fanfare.update(sim, _world)
 	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
 			hud_keys_chorded, gameplay_input_active)
+	# The ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
+	# its flip runs the respawn-init wrapper, closing the other overlay windows
+	# the shell owns [orig: sub_4993C0 -> Game_InitRespawnState] — the
+	# sim-owned toggles (map overlay, emote/radio menus) clear through the
+	# sim's own respawn init.
+	_end_round_stats.update(_game_hud, sim, ControlsBindings.pressed("ShowScore"),
+			hud_keys_chorded, gameplay_input_active,
+			not bool(sim.get_round_outcome_debug().get("mp_session", false)),
+			func() -> void: _message_log.close(_game_hud))
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
 	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
 	if timing:

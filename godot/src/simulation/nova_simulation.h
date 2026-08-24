@@ -1325,6 +1325,9 @@ public:
 	TypedArray<Dictionary> get_end_round_lines() const;
 	TypedArray<Dictionary> get_end_round_columns(int p_table_width) const;
 	TypedArray<Dictionary> get_end_round_rows() const;
+	// The SP Show Score statistics counters (hud/end_round_statistics.h):
+	// the 0xC846xx block the toggled panel draws. Empty when no host world.
+	Dictionary get_end_round_statistics() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an
