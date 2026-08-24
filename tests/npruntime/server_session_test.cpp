@@ -2079,12 +2079,17 @@ bool check_requester_score_delta_refresh() {
 		return false;
 
 	world.match.player(player)->stats[opennova::world::MatchStats::kPoints] = 17;
+	// The refresh rides the one-second proximity pass, not every frame.
+	for (int i = 0; i < 60; ++i) opennova::np::Server_TickUpdate(ctx);
+	if (!expect(drain_scores().empty(),
+	            "a changed Points value waits for the next 1 Hz proximity pass"))
+		return false;
 	opennova::np::Server_TickUpdate(ctx);
 	scores = drain_scores();
 	return expect(scores.size() == 1 && scores[0].reliable &&
 	                      scores[0].body ==
 	                              std::vector<uint8_t>({0x11, 0x00, 0x00, 0x00}),
-	              "later Points change refreshes requester immediately");
+	              "the next one-second pass refreshes the requester");
 }
 
 bool check_listen_host_receives_targeted_maintenance() {
@@ -2590,8 +2595,11 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	// Pin the same recipient predicate and the no-wave `[u8 0]` body.
 	opennova::world::Entity *dead_player = world.registry.get(player);
 	dead_player->health = 0;
-	world.logic_tick = 2293;
-	opennova::np::Server_TickUpdate(ctx); // -> 2294, 37 seconds / 1 Hz boundary
+	// Advance to the next one-second service boundary (the shared countdown,
+	// not a frame-count phase); the intervening frames carry no 0x6E.
+	do {
+		opennova::np::Server_TickUpdate(ctx);
+	} while (!world.match.periodic_second());
 	const std::vector<Emitted> death_screen = drain();
 	const Emitted *wave_status = find(death_screen, opennova::s2c::SPAWN_WAVE_STATUS);
 	return expect(wave_status != nullptr &&
@@ -2694,8 +2702,9 @@ bool check_spawn_wave_queue_and_release_wire() {
 	            "duplicate wave pick waits without duplicate row or deployment"))
 		return false;
 
-	world.logic_tick = 61;
-	opennova::np::Server_TickUpdate(ctx);
+	do {
+		opennova::np::Server_TickUpdate(ctx);
+	} while (!world.match.periodic_second());
 	if (!expect(world.registry.get(first)->health == 100 &&
 	                    !ctx.np_protocol.connection_list[0].link.respawn_pending &&
 	                    world.registry.get(second)->health == 0 &&
@@ -3293,6 +3302,9 @@ bool check_timed_capture_host_wire_transaction() {
 		return records.size();
 	};
 
+	// Consume the first-frame service so every 62-tick window below ends on
+	// its one-second boundary, after the contact stream has been drained.
+	opennova::np::Server_TickUpdate(ctx);
 	const auto started = tick_second();
 	const auto start_50 = bodies(started, opennova::s2c::TEAM_ASSIGN);
 	const auto start_53 = bodies(started, opennova::s2c::ZONE_TIMER_WINDOW);
@@ -3566,23 +3578,25 @@ bool check_preround_delay_phase_boundary() {
 	            "round init seeds StartDelay as whole seconds"))
 		return false;
 
+	opennova::np::Server_TickUpdate(ctx);
+	if (!expect(world.logic_tick == 1 && world.preround_delay_seconds == 1 &&
+	                    counter.ticks == 0,
+	            "the zero-armed one-second service fires on the first frame and "
+	            "decrements StartDelay once"))
+		return false;
 	for (int i = 0; i < 61; ++i) opennova::np::Server_TickUpdate(ctx);
-	if (!expect(world.logic_tick == 61 && world.preround_delay_seconds == 2 &&
+	if (!expect(world.logic_tick == 62 && world.preround_delay_seconds == 1 &&
 	                    counter.ticks == 0,
 	            "pre-round advances the frame clock without running gameplay"))
 		return false;
 	opennova::np::Server_TickUpdate(ctx);
-	if (!expect(world.preround_delay_seconds == 1 && counter.ticks == 0,
-	            "first 62-tick boundary decrements StartDelay once"))
-		return false;
-	for (int i = 0; i < 62; ++i) opennova::np::Server_TickUpdate(ctx);
-	if (!expect(world.logic_tick == 124 && world.preround_delay_seconds == 0 &&
+	if (!expect(world.logic_tick == 63 && world.preround_delay_seconds == 0 &&
 	                    counter.ticks == 0 &&
 	                    world.match.remaining_ticks() == initial_round_ticks,
 	            "transition frame freezes systems and the round clock"))
 		return false;
 	opennova::np::Server_TickUpdate(ctx);
-	return expect(world.logic_tick == 125 && counter.ticks == 1 &&
+	return expect(world.logic_tick == 64 && counter.ticks == 1 &&
 	                      world.match.remaining_ticks() == initial_round_ticks - 1,
 	              "gameplay resumes on the frame after countdown expiry");
 }

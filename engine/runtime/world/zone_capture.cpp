@@ -401,6 +401,14 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
                            request.team != active.team;
                 });
         if (opposing != state.requests.end()) {
+            // Retail's restart leg flips the team, zeroes progress, reloads the
+            // limit and emits 0x53, but neither consumes the request nor updates
+            // the retained capturer. The drain below then sees the same request:
+            // an uncontested one restarts AGAIN (capturer updated, second 0x53 +
+            // the start event); a contested one is dropped, leaving the old
+            // capturer credited on completion. Both are witnessed quirks.
+            // [orig: Server_UpdateCaptureZones @0x53B9E3..0x53BA36 (restart);
+            // drain restart @0x53BC38..0x53BC0D; contested drop @0x53BC1D]
             active.team = opposing->team;
             active.progress = 0;
             active.limit = rules.capture_duration_seconds;

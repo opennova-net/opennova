@@ -1003,7 +1003,7 @@ int main() {
 		int crossed = 0;
 		while (crossed < count) {
 			np::Server_TickUpdate(ctx);
-			if (world.logic_tick % 62u == 0) ++crossed;
+			if (world.match.periodic_second()) ++crossed;
 		}
 	};
 

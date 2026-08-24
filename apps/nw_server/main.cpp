@@ -56,6 +56,29 @@ uint16_t env_port(const char *name, uint16_t fallback) {
 	return fallback;
 }
 
+// Every g_GameType code word Game_StartMission can produce; anything else is
+// a typo, not a mode. [orig: Game_StartMission @0x524360 type switch]
+bool is_retail_game_type_word(uint32_t value) {
+	switch (value) {
+	case opennova::game_type::kDeathmatch:
+	case opennova::game_type::kKingOfTheHill:
+	case opennova::game_type::kFlagMe:
+	case opennova::game_type::kTeamDeathmatch:
+	case opennova::game_type::kTeamKingOfTheHill:
+	case opennova::game_type::kAttackDefend:
+	case opennova::game_type::kCaptureTheFlag:
+	case opennova::game_type::kFlagBall:
+	case opennova::game_type::kAdvanceAndSecure:
+	case opennova::game_type::kCoop:
+	case opennova::game_type::kObjectiveCoop:
+	case opennova::game_type::kConquerAndControl:
+	case opennova::game_type::kSearchAndDestroy:
+		return true;
+	default:
+		return false;
+	}
+}
+
 bool apply_env_u32(const char *name, uint32_t &value) {
 	const char *text = std::getenv(name);
 	if (text == nullptr || *text == '\0') return true;
@@ -267,6 +290,12 @@ int main() {
 	// Game_StartMission @0x524360]
 	if (!apply_env_u32("NW_GAME_TYPE", host_cfg.config.game_type))
 		return 2;
+	if (!is_retail_game_type_word(host_cfg.config.game_type)) {
+		std::fprintf(stderr,
+				"nw-server: NW_GAME_TYPE 0x%X is not a retail g_GameType code\n",
+				host_cfg.config.game_type);
+		return 2;
+	}
 	uint32_t configured_teams = host_cfg.config.num_teams;
 	if (!apply_env_u32("NW_NUM_TEAMS", configured_teams))
 		return 2;

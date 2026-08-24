@@ -129,7 +129,10 @@ struct Connection {
 	// @0x501BE0; NetPacket_SerializePlayerSync0x46 @0x505E80]
 	uint32_t downed_revive_seconds = 0; // playerSlot+368
 	bool auto_medic_enabled = true;     // inverse playerSlot+372
-	bool medic_request_active = false;  // playerSlot+89856
+	// playerSlot+89856. No host producer yet: the C2S medic-request message
+	// (Server_BroadcastMedicRequest @0x515390) is unported (D-NET-108), so the
+	// 0x54 / 0x46-0x0008 bit-7 encoders only ever fold in false.
+	bool medic_request_active = false;
 
 	// Number of 32-host-tick samples for which the player's eye
 	// (Position.Z + CameraOffset.Z) has remained strictly below the authored

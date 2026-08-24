@@ -1157,7 +1157,7 @@ void test_end_result_is_frozen_in_retail_board_order() {
     CHECK(match_score_field_value(tdm.players[0].stats, 3, kTdm) == 1);
 
     // The board is immutable once the round-end latch fires.
-    world->match.remove_player(blue);
+    world->match.remove_player(*world, blue);
     world->process_round_end(2);
     CHECK(world->match.result().players.size() == 2);
     CHECK(world->match.result().winner_team == 1);

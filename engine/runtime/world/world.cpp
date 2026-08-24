@@ -1457,6 +1457,7 @@ World::Snapshot World::snapshot() const {
     s.network_env = network_env;
     s.match = match;
     s.spawn_waves = spawn_waves;
+    s.zone_capture_state = zone_capture_state;
     s.spawn_cycle_counter = spawn_cycle_counter;
     s.logic_tick = logic_tick;
     s.preround_delay_seconds = preround_delay_seconds;
@@ -1473,6 +1474,7 @@ void World::restore(const Snapshot &s) {
     network_env = s.network_env;
     match = s.match;
     spawn_waves = s.spawn_waves;
+    zone_capture_state = s.zone_capture_state;
     spawn_cycle_counter = s.spawn_cycle_counter;
     logic_tick = s.logic_tick;
     preround_delay_seconds = s.preround_delay_seconds;

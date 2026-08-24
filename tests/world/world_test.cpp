@@ -281,7 +281,7 @@ int main() {
     w.cached.humans = 2;
     w.wac_values.accuracy_spread = 9;
     w.network_env = EnvNetworkState{};
-    w.match.remove_player(blast_victim);
+    w.match.remove_player(w, blast_victim);
     w.process_round_end(2);
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);

@@ -348,6 +348,7 @@ void Match::configure(const MatchRules &rules) {
     teams_ = {};
     team_hold_ticks_ = {};
     periodic_second_timer_ = 0;
+    periodic_second_fired_ = false;
     outcome_ = {};
     result_ = {};
     objective_census_ready_ = false;
@@ -389,7 +390,8 @@ void Match::upsert_player(const MatchPlayerIdentity &identity) {
     players_.push_back(MatchPlayer{identity, {}, 0});
 }
 
-void Match::remove_player(EntityHandle entity) {
+void Match::remove_player(World &world, EntityHandle entity) {
+    drop_carried_object(world, entity);
     players_.erase(
         std::remove_if(players_.begin(), players_.end(),
                        [&](const MatchPlayer &p) { return p.identity.entity == entity; }),
@@ -1034,24 +1036,27 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
 }
 
 void Match::advance_tick(World &world, TickPhase phase) {
-    if (outcome_.ended)
-        return;
-    ensure_objective_census(world);
     // The shared periodic service starts armed at zero, executes immediately,
     // then reloads 62 and decrements-before-testing on later simulation ticks.
-    // KOTH accumulation and dropped-flag return callbacks both ride it.
+    // It is the ONE one-second countdown: KOTH accumulation, dropped-flag
+    // return callbacks, and every host-side 1 Hz leg read this frame's verdict
+    // through periodic_second(). The countdown keeps running after the round
+    // ends because the host's linger-phase legs still ride it.
     // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
     // Server_UpdateCaptureZoneProximity @0x5086A0; flag callback @0x408430]
     if (periodic_second_timer_ > 0)
         --periodic_second_timer_;
-    const bool periodic_second = periodic_second_timer_ == 0;
-    if (periodic_second) {
+    periodic_second_fired_ = periodic_second_timer_ == 0;
+    if (periodic_second_fired_)
         periodic_second_timer_ = 62;
+    if (outcome_.ended)
+        return;
+    ensure_objective_census(world);
+    if (periodic_second_fired_)
         update_objective_proximity(world);
-    }
     if (phase != TickPhase::Gameplay)
         return;
-    update_flag_objectives(world, periodic_second);
+    update_flag_objectives(world, periodic_second_fired_);
     if (remaining_ticks_ > 0)
         --remaining_ticks_;
 }
