@@ -12,7 +12,7 @@
 namespace opennova::world {
 
 // Pool-3 marker def type the BMS PARTICLE_EFFECT action (27) selects.
-// [orig: sub_4540E0 @0x4540e0 -- `result[20] == 6088`]
+// [orig: EventAction_SpawnParticleEffect (ex sub_4540E0) @0x4540e0 -- `result[20] == 6088`]
 inline constexpr int32_t kParticleEffectMarkerTypeId = 6088;
 
 class World;
@@ -145,12 +145,12 @@ public:
     bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
 
     // WAC `ssnrelease` -- the release half of the AI boarding order.
-    // [orig: sub_4F7420 @0x4f7420]
+    // [orig: WacCmd_SsnRelease @0x4f7420]
     bool release_boarding_command(uint16_t occupant_ssn);
 
     // BMS action 27 (PARTICLE_EFFECT): spawn the authored marker emitters whose
     // wp_number matches `wp_number`. Returns how many fired.
-    // [orig: EventAction_Dispatch case 0x1B @0x4542e0 -> sub_4540E0]
+    // [orig: EventAction_Dispatch case 0x1B @0x4542e0 -> EventAction_SpawnParticleEffect]
     int spawn_marker_particle_effects(int32_t wp_number);
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
     // carries ONLY the occupant SSN; the original finds the vehicle via the occupant model's +144

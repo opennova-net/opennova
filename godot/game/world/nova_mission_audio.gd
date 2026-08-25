@@ -372,7 +372,7 @@ func fire_soundset(name: String, world_pos: Vector3, source_bms_id: int = 0) -> 
 ## A non-positional interface one-shot: the engine's zero-position play used by
 ## the weapon-switch/equip deny click — a 24-byte emitter with header 0x10000,
 ## zeroed position, and the interface volume option, routed straight into the
-## trigger-set player [orig: PlaySoundOnDedicatedServer @ 0x527be0 ->
+## trigger-set player [orig: Sound_PlayInterfaceTriggerSet @ 0x527be0 ->
 ## SoundBank_PlayTriggerEntries @ 0x75ccd0]. The set NAME comes from the
 ## mission-load resolver walking the 36-B {name[32], slot*} table @ 0x82F590
 ## across every loaded bank (DialogSystem_Init @ 0x527687/@ 0x5276e6, two

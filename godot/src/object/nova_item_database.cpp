@@ -163,6 +163,7 @@ ItemDatabase::Item ItemDatabase::item_from_entry(const ::DefItemDef &entry) {
 	item.move_function = String(entry.move_function);
 	item.render_function = String(entry.render_function);
 	item.disk_function = String(entry.disk_function);
+	item.default_aip = String(entry.default_aip);
 	item.hp = entry.hp;
 	item.shadow_texture = String(entry.shadow_texture);
 	item.shadow_width = entry.shadow_width;
@@ -345,6 +346,11 @@ String ItemDatabase::get_anim_def(int id) const {
 String ItemDatabase::get_ai_function(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.ai_function;
+}
+
+String ItemDatabase::get_default_aip(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.default_aip;
 }
 
 String ItemDatabase::get_move_function(int id) const {

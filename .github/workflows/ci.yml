@@ -80,6 +80,10 @@ jobs:
           python scripts/lint/maturity_lint.py --enforce
           python scripts/lint/link_graph_check.py --enforce
           python scripts/lint/include_graph_check.py --enforce
+          # Orphan engine headers (the post-merge tidy rounds' recurring
+          # finding): a header included only by its test must carry the
+          # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
+          python scripts/lint/orphan_header_check.py --enforce
           python scripts/lint/ledger_check.py --check
           # Host-terminology gate (CONTEXT.md Host / Joiner): "host" means
           # the game/server host and nothing else. Any uncovered use fails;

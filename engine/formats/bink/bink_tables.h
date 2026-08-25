@@ -4,12 +4,15 @@
 
 namespace opennova::bink::detail {
 
-// Codec constants extracted from the original retail Bink 1.5u decoder
-// (SHA-256 D118512FF119B85E4BA98D8623FF2CC91D426CF4975838F056A7CD87F9979AF9):
-// tree lengths @ 0x3004AC48, tree codes @ 0x3004AD50,
-// coefficient scan @ 0x3004AE60, spatial scans @ 0x3004AEA8,
-// intra quantizers @ 0x3004B2C0, inter quantizers @ 0x3004D300.
-// They are bitstream constants, kept private to the decoder.
+// Codec constants read out of the original retail decoder, binkw32.dll 1.5u
+// (SHA-256 D118512FF119B85E4BA98D8623FF2CC91D426CF4975838F056A7CD87F9979AF9;
+// a separate image from Jointops.exe, imagebase 0x30000000):
+// [orig: tree lengths @ 0x3004AC48, binkw32.dll], [orig: tree codes
+// @ 0x3004AD50, binkw32.dll], [orig: coefficient scan @ 0x3004AE60,
+// binkw32.dll], [orig: spatial scans dword_3004AEA8 @ 0x3004AEA8,
+// binkw32.dll], [orig: intra quantizers dword_3004B2C0 @ 0x3004B2C0,
+// binkw32.dll], [orig: inter quantizers dword_3004D300 @ 0x3004D300,
+// binkw32.dll]. They are bitstream constants, kept private to the decoder.
 
 inline constexpr uint8_t kCoefficientScan[64] = {
 	0x00, 0x01, 0x08, 0x09, 0x02, 0x03, 0x0a, 0x0b,

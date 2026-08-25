@@ -8,9 +8,9 @@
 namespace opennova::menu {
 
 int table_cell_compare_text(const std::string &a, const std::string &b) {
-	// Case-insensitive, matching retail's stricmp arm. A missing cell compares
-	// as the empty string rather than being skipped [orig: the g_empty_str
-	// substitution @0x63EB1E].
+	// Case-insensitive, matching retail's stricmp arm @0x63EAF2. A missing cell
+	// compares as the empty string rather than being skipped [orig: the
+	// g_empty_str substitution @0x63EAD8 / @0x63EAEB].
 	const size_t n = a.size() < b.size() ? a.size() : b.size();
 	for (size_t i = 0; i < n; ++i) {
 		const unsigned char ca =
@@ -36,7 +36,7 @@ const std::string &cell_at(const std::vector<std::string> &row, int index) {
 int table_compare_rows(const std::vector<std::string> &row_a,
 		const std::vector<std::string> &row_b,
 		const std::vector<TableSortColumn> &order) {
-	// Retail clamps the walk at twenty columns [orig: @0x63EA0E].
+	// Retail clamps the walk at twenty columns [orig: @0x63E9D4].
 	const size_t limit = order.size() < static_cast<size_t>(kMaxSortColumns)
 			? order.size()
 			: static_cast<size_t>(kMaxSortColumns);

@@ -168,7 +168,7 @@ struct ItemAvailabilityEntry {
 };
 
 // Typed view of a 32-byte group record. The field WIDTHS are witnessed
-// ([orig: Med_WriteBmsFile @ 0x44f920]) but their in-engine MEANING is still
+// ([orig: dfx2med.exe Med_WriteBmsFile @0x44f920]) but their in-engine MEANING is still
 // ungrilled (TODO.md "Group record semantics"), so the names stay offset
 // placeholders: field0 = 2-bit flags, field8 = the one free int,
 // field12 = writer-confirmed constant 10.

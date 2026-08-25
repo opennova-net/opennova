@@ -62,7 +62,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_body_arbitration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_pipeline.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_match.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_death.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_roster_tags.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/stat_screen_feed.cpp

@@ -278,8 +278,11 @@ bool run_aip_parse() {
 		return false;
 
 	// The HELO (type 1) flight set: flight keys land in the helo_* rows
-	// (+200..+244), the SHARED keys (view/radar) still apply, and the GROUND
-	// rows stay untouched. [orig: the type-1 branch of AIProfile_ParseProperty]
+	// (+200..+236) in retail's PARSED forms — km/h speeds as 16.16 units per
+	// tick (atof * 1000 * 4.444444444444444e-06 * 65536 = x65536/225, chopped),
+	// climbs atof * 0.016 * 65536, altitudes atol<<16, min_agl atof*65536 — the
+	// SHARED keys (view/radar) still apply, and the GROUND rows stay untouched.
+	// [orig: the type-1 arms of AIProfile_ParseProperty @0x45f684..0x45f9eb]
 	const std::string helo =
 			"type HELO\n"
 			"patrol_speed 30\n"
@@ -298,8 +301,8 @@ bool run_aip_parse() {
 	const opennova::aip::Profile hp =
 			opennova::aip::parse_profile(hb.data(), hb.size());
 	if (!expect(hp.type == 1, "aip: type HELO")) return false;
-	if (!expect(hp.helo_patrol_speed == 30 && hp.helo_combat_speed == 45,
-			"aip: helo speeds land in the helo rows"))
+	if (!expect(hp.helo_patrol_speed == 8738 && hp.helo_combat_speed == 13107,
+			"aip: helo speeds 30/45 km/h -> 8738/13107 (x65536/225, chop)"))
 		return false;
 	if (!expect(hp.patrol_speed == -1 && hp.combat_speed == -1,
 			"aip: the GROUND speed rows stay untouched for a helo"))
@@ -308,9 +311,9 @@ bool run_aip_parse() {
 					hp.helo_combat_altitude == (60 << 16),
 			"aip: altitudes atol<<16"))
 		return false;
-	if (!expect(hp.helo_patrol_climb == 8 && hp.helo_combat_climb == 12 &&
-					hp.min_speed == 10,
-			"aip: climb/min_speed raw"))
+	if (!expect(hp.helo_patrol_climb == 8388 && hp.helo_combat_climb == 12582 &&
+					hp.min_speed == 2912,
+			"aip: climbs 8/12 -> 8388/12582 (x0.016x65536), min_speed 10 km/h -> 2912"))
 		return false;
 	if (!expect(hp.turn_rate_bam_tick == 11930464 * 45 / 62,
 			"aip: turn_rate BAM/tick formula"))
@@ -358,6 +361,55 @@ bool run_aip_resolve() {
 			"resolve: truck2 keeps unauthored patrol");
 }
 
+// The resolve loads the FALLBACK profiles too: a placed item with no
+// ai_textfile takes its class row's default ("helo1" for the helicopter
+// family, the def's default_aip then "helo1" for the vehicle family), so the
+// promote's brain seed finds a row for a bare-placed vehicle exactly as
+// retail's AI init does [orig: Entity_InitHelicopterAIFromDef @0x4683C0
+// @0x4684c9; Entity_InitVehicleAIFromDef @0x4686C0 @0x4687c1/@0x4687d3].
+bool run_aip_fallback() {
+	bms::File mission{};
+	auto item = [](int32_t type_id) {
+		bms::Entity e{};
+		e.type = bms::ItemType::Item;
+		e.type_id = type_id;
+		std::memset(e.name2, 0, sizeof(e.name2));
+		return e;
+	};
+	mission.items.push_back(item(2010)); // helicopter class, nameless
+	mission.items.push_back(item(1237)); // vehicle class, def default_aip
+	mission.items.push_back(item(9));    // no AI class row
+	bms::Entity soldier{};
+	soldier.type = bms::ItemType::Organic;
+	std::memset(soldier.name2, 0, sizeof(soldier.name2));
+	mission.organics.push_back(soldier); // nameless organic: no fallback
+
+	std::map<std::string, std::string> files;
+	files["helo1.aip"] = "type HELO\npatrol_speed 30\n";
+	files["d_5ton.aip"] = "type GROUND\ncombat_speed 4\n";
+	const ms::BootFileSource src = source_over(&files);
+	const auto defaults = [](int32_t type_id) {
+		ms::PromoteOptions::AiProfileDefaults d;
+		if (type_id == 2010) { d.known = true; d.helicopter_init = true; }
+		if (type_id == 1237) { d.known = true; d.default_aip = "D_5ton"; }
+		return d;
+	};
+	const std::vector<ms::PromoteOptions::AiProfileRow> rows =
+			ms::resolve_ai_profiles(src, mission, defaults);
+	if (!expect(rows.size() == 2, "fallback: helo1 + d_5ton rows, nothing else"))
+		return false;
+	if (!expect(rows[0].profile == "helo1" && rows[0].data.type == 1,
+				"fallback: the helicopter row is helo1, type HELO"))
+		return false;
+	if (!expect(rows[1].profile == "d_5ton" && rows[1].data.combat_speed == 4,
+				"fallback: the vehicle row is the def's default_aip"))
+		return false;
+	// Without an embedder answer nothing is loaded for nameless records.
+	const std::vector<ms::PromoteOptions::AiProfileRow> bare =
+			ms::resolve_ai_profiles(src, mission);
+	return expect(bare.empty(), "fallback: no class answer -> no fallback rows");
+}
+
 } // namespace
 
 int main() {
@@ -369,6 +421,7 @@ int main() {
 	ok &= run_text_fallback();
 	ok &= run_aip_parse();
 	ok &= run_aip_resolve();
+	ok &= run_aip_fallback();
 	if (!ok) return 1;
 	std::printf("runtime_boot_test: OK\n");
 	return 0;

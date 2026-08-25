@@ -256,18 +256,18 @@ nationality-alignment accessor.
 
 - `[orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0]` `(teamIndex)` — fills
   the `NATIONALITY` list of screen `PLAYER_INFO`. Iterates nationalities via
-  `[orig: sub_579f10 @ 0x579f10]` (name key by index; null terminates).
+  `[orig: CAvatarDefs_GetNationalityNameKey @ 0x579f10]` (name key by index; null terminates).
   **Team filter via alignment:** `[orig: MinimapSlot_GetFieldByIndex @ 0x579e70]`
   returns the nationality alignment, and a row shows only when
   `(alignment != 0) == (teamIndex != 0)` — good→team 0, evil→team 1
   (D-PLAYERINFO-5). Display string =
   `TextResource_GetStringWithFallback(resource, "Avatars", nameKey)` — the names
   in the `.def` are **keys into the `"Avatars"` RTXT string table**. Availability
-  via `[orig: sub_579ea0 @ 0x579ea0]`; unavailable rows are greyed. Selection
+  via `[orig: CAvatarDefs_IsNationalityAvailable @ 0x579ea0]`; unavailable rows are greyed. Selection
   persists in `byte_2551131[…]`.
 - `[orig: PlayerInfo_PopulateDivisionList @ 0x55da50]` `(nationality, teamIndex)`
-  — 16 division slots via `[orig: sub_579fb0 @ 0x579fb0]` (name by nat+div),
-  availability `[orig: sub_579ed0 @ 0x579ed0]`; same `"Avatars"` string-table
+  — 16 division slots via `[orig: CAvatarDefs_GetDivisionNameKey @ 0x579fb0]` (name by nat+div),
+  availability `[orig: CAvatarDefs_IsDivisionAvailable @ 0x579ed0]`; same `"Avatars"` string-table
   display; selection `byte_2551132[…]`.
 - `[orig: populate_avatar_combo_list @ 0x560210]` — fills `COMBO_LIST`.
   Enumerates combos for the selected (nat, div) via
@@ -341,10 +341,10 @@ render static at rest. (`HwmCube.dds` reflection map: not yet applied — minor.
 
 The four populate functions above are driven by a per-screen init plus per-control
 change handlers, all registered under the `"PLAYER_INFO"` category. Controls are
-located by name through `[orig: sub_63AE80 @ 0x63ae80]` (find-widget:
-`sub_63AE80(scene, "PLAYER_INFO", "<CONTROL>")`, scene `= dword_2551100`); combo
-set-selected-index is `[orig: sub_645240 @ 0x645240]`, read-selected-value is
-`[orig: sub_644660 @ 0x644660]`.
+located by name through `[orig: UI_FindScreenControl @ 0x63ae80]` (find-widget:
+`UI_FindScreenControl(scene, "PLAYER_INFO", "<CONTROL>") @ 0x63ae80`, scene `= dword_2551100`); combo
+set-selected-index is `[orig: UIList_SelectByValue @ 0x645240]`, read-selected-value is
+`[orig: UIList_GetSelectedValue @ 0x644660]`.
 
 **Selection state** lives in a per-slot/per-team block of globals (NOT the
 profile), keyed `[67596*g_curProfileSlot + 32774*team]` (`g_curProfileSlot @
@@ -372,7 +372,7 @@ g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
   `g_charSelCombo` → PLAYERNAME edit ← `profile+4` (vtable+76 = SetText) →
   `populate_player_voice_combo(...)` → `populate_weapon_slot_lists()`.
 - `[orig: PlayerInfo_RegisterAllControls @ 0x561470]` — registers 28 PLAYER_INFO
-  controls, each `[orig: sub_63C060 @ 0x63c060](category, name, handler, …)`. Change
+  controls, each `[orig: CUIScene_RegisterControlCallback @ 0x63c060](category, name, handler, …)`. Change
   handlers route the selection-change notification (`0x5000001`, selected value in
   `eventData+16`):
   - `[orig: PlayerInfo_HandleNationalitySelect @ 0x560600]` — store
@@ -404,7 +404,7 @@ plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout
 `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]` — on the click notification
 `0x3000001`, the voice index is the profile override `*(g_curPlayerProfile + team +
 1532)` when non-zero, else derived from the selected combo's avatar voice
-(`[orig: sub_57AE60 @ 0x57ae60](g_avatarDefs, g_charSelCombo[…])`); then
+(`[orig: Avatars_ResolveSelectionIndex (ex sub_57AE60) @ 0x57ae60](g_avatarDefs, g_charSelCombo[…])`); then
 `sprintf("VOICE_%d", idx)` → `[orig: SoundBank_FindTriggerAndPlay @ 0x75d010](key,
 params, &g_MenuSoundBank)` (params `[0]=0x10000, [2]=255`). The `menu.lwf` bank is
 loaded by the screen init.
@@ -416,7 +416,7 @@ profile-persistence work in D-PLAYERINFO-9.
 
 ### ACCEPT / commit + persistence (D-PLAYERINFO-9)
 `[orig: save_player_info_from_dialog @ 0x55ee10]` reads each control back (combo
-value via `sub_644660`, checkbox via `[orig: sub_64ACB0 @ 0x64acb0]`):
+value via `UIList_GetSelectedValue @ 0x644660`, checkbox via `[orig: sub_64ACB0 @ 0x64acb0]`):
 PLAYERCLASS → `g_charSelClass` for **both** teams (`side = 0, 32774`); NATIONALITY/
 DIVISION/COMBO_LIST → their `g_charSel*`; OPTIONS_AUTORELOAD → `profile+1524`;
 OPTIONS_AUTOMEDIC → `profile+1660 = (state == 0)` (inverted); PLAYERNAME →
@@ -598,7 +598,7 @@ stable.
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |
 | D-PLAYERINFO-5 | nationality list filtered by `alignment` vs `teamIndex` (good→0, evil→1) | the menu population is team-aware; the reimpl port must reproduce the filter and order. |
 | D-PLAYERINFO-6 | `nationality`/`division` id token: `if (*idStr > '9') ++idStr;` then `atol` | a single leading non-digit character is skipped before parsing the numeric id. The reimpl parser must mirror this lenient id read. |
-| D-PLAYERINFO-7 | screen = init (`PlayerInfo_InitProfileSelector @ 0x5611b0`) → `PlayerInfo_PopulateAllControls(team)` + 28 per-control handlers registered via `sub_63C060`; the nat→div→combo cascade (`@ 0x560600`/`@ 0x560690`, notify `0x5000001`) repopulates dependents and **resets the division on a nationality change** | the reimpl port reproduces the populate order and the cascade: selecting a nationality resets the division selection and refills division+combo; selecting a division refills combo. |
+| D-PLAYERINFO-7 | screen = init (`PlayerInfo_InitProfileSelector @ 0x5611b0`) → `PlayerInfo_PopulateAllControls(team)` + 28 per-control handlers registered via `CUIScene_RegisterControlCallback @ 0x63c060`; the nat→div→combo cascade (`@ 0x560600`/`@ 0x560690`, notify `0x5000001`) repopulates dependents and **resets the division on a nationality change** | the reimpl port reproduces the populate order and the cascade: selecting a nationality resets the division selection and refills division+combo; selecting a division refills combo. |
 | D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | **implemented**: `player_info_menu_companion._selected_class_mask` (5..9→1/2/4/8/16) + team mask `2-(team!=0)` gate the weapon slot lists; repopulate on class/team change. |
 | D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Recorded, bounded divergence: retail writes only the selected side's avatar bytes; the port rewrites both sides from memory, normalizing a stale other side to the retail default. Remaining: serialize newly edited kit tuples and the `player.sav`-level option fields. |
 | D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's voice; PLAYERVOICE list = DEFAULT_VOICE + per-character `CHARVOICE_%d` | **implemented**: the named button requests the selected avatar fallback as `VOICE_%d` through `menu.lwf`, and the avatar-derived list remains populated by `PlayerInfoMenuCompanion`; `test_voice_preview_requests_selected_avatar_voice` pins the public request. Persisted profile overrides ride D-PLAYERINFO-9. |
@@ -663,7 +663,7 @@ Names already curated (used as-is): `PlayerInfo_PopulateAllControls @ 0x5606f0`,
 `update_player_info_weight_and_weapon_icons @ 0x55f480`.
 
 Still proposed (NOT applied — generic UI framework / struct declarations, propose
-first): rename `sub_63AE80 → UIScene_FindWidgetByName`, `sub_645240 →
+first): the IDB names landed as `UI_FindScreenControl @ 0x63ae80`, `UIList_SelectByValue @ 0x645240`, `UIList_GetSelectedValue @ 0x644660`, `CUIScene_RegisterControlCallback @ 0x63c060` (the proposals were `sub_63AE80 → UIScene_FindWidgetByName`, `sub_645240 →
 CListWnd_SetSelectedIndex`, `sub_644660 → CListWnd_GetSelectedValue`, `sub_63C060 →
 UI_RegisterScreenControlCallback`; declare the weapon-table struct `@ 0x2540D08`
 (192 B) and the player-profile struct (15488 B, fields `+4/+1524/+1532/+1660`).
@@ -683,7 +683,7 @@ Per the project shared-IDB policy these were left as proposals, not written.
 - **Rename auto-named functions (anchored via the `"Avatars.def"` string + the
   witnessed dispatch):** `sub_579F40 → CAvatarDefs_SetNationality`,
   `sub_579FF0 → CAvatarDefs_SetDivision`, `sub_579E10 → CAvatarDefs_AllocCombo`,
-  `sub_579F10 → CAvatarDefs_GetNationalityNameKey`,
+  `sub_579F10 → CAvatarDefs_GetNationalityNameKey` (applied 2026-08-25),
   `sub_579EA0 → CAvatarDefs_IsNationalityAvailable`,
   `sub_579FB0 → CAvatarDefs_GetDivisionNameKey`,
   `sub_579ED0 → CAvatarDefs_IsDivisionAvailable`,

@@ -76,7 +76,7 @@ struct NapiNPProtocol {
 	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. NapiNPConnection_Create
 	// @0x62acb0 stamps each new connection's dcb (connection_id, +0x18) from ++protocol[947] (wrapping
 	// 0 -> 1). On a LAN listen host the host ASSIGNS this dcb, ships it in the 0x82 ServerAuth MI TLV
-	// [orig: NapiNPConnection_SendSessionInit @0x620ef0], and stamps it into the joiner's 0x0C
+	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0], and stamps it into the joiner's 0x0C
 	// ownerConnectionId so the client's Player_FindLocalPlayerEntity @0x4e0090 numeric self-match
 	// (entity+0x78 == NapiNP_GetLocalConnectionId @0x4c6d40) succeeds.
 	uint32_t next_connection_id = 1;
@@ -188,8 +188,9 @@ struct NapiNPServerCtx {
 	// round-end producer before the per-slot 0x61/0x1D push, then only READ by
 	// the C2S 0x2B chunk service; empty until a round ends and cleared with the
 	// other round-end fields at session creation.
-	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590 from
-	// Server_ProcessRoundEnd @0x5164F0; NetPacket_WriteReplayStreamChunk @0x506F60]
+	// [orig: Server_ProcessRoundEnd @0x5164F0 (the
+	// Server_BuildEndOfRoundScoreboard(1, winTeam) call @0x516590);
+	// NetPacket_WriteReplayStreamChunk @0x506F60]
 	std::vector<uint8_t> round_end_board_stream;
 
 	// Non-dedicated S2C 0x68 wraps its 50-row cursor against the live renderer

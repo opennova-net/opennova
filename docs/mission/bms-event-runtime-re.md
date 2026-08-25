@@ -786,7 +786,7 @@ display as raw values and round-trip.
 | 24 | ChangeSteamAction | `Entity_FindByDCBAndSetFlag(p1)` | ENTITY | TEAM {0,1,2} | — | — |
 | 25 | SingleChangeGroup | `Entity_SetNetIdByParentRef(p1,p2)` | ENTITY | GROUP | — | — |
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
-| 27 | ParticleEffectAction | `sub_4540E0(p1)` | id | — | — | — |
+| 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | id | — | — | — |
 | 28 | (special) | `EventAction_HandleSpecialTypes(block)` | — | — | — | — (editor marks 28/29 unused) |
 | 30 | GroupOpenDoorAction | `Entity_KillDestructiblesByTeam(p1)` (dmg-transition 7) | GROUP/team | — | — | — |
 | 31 | GroupCloseDoorAction | `Entity_KillDestructiblesByOwner(p1)` | owner ref | — | — | — |

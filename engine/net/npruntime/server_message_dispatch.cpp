@@ -250,7 +250,7 @@ bool is_default_ash_session_config(const GameConfig &cfg) {
 // §5.1 reply bodies — handshake + server-info + mission-metadata (relocated from game_session.cpp).
 // ---------------------------------------------------------------------------
 
-// tag=0x02 server push. [orig: NapiNPClientMsg_0x002 @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
+// tag=0x02 server push. [orig: NapiNPClientMsg_HandleJoinResponse @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
 std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 	std::vector<uint8_t> payload(512, 0);
 	write_u32_le(payload, 0, now_tick);
@@ -364,7 +364,7 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // §5.1 reply bodies — roster / loadout / spawn-confirm (relocated from the retired reply builders).
 // ---------------------------------------------------------------------------
 
-// tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_0x016 @0x42FAE0] Enumerates the LIVE player roster — the
+// tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_PlayerList @0x42FAE0] Enumerates the LIVE player roster — the
 // host loopback (slot 0) + each spawned joiner (slot 1+) — so a joining client sees ITS OWN slot and can
 // bind its local player (golden: 0x16 grows 31 B [host only] -> 39 B [host + joiner] right before the
 // joiner deploys). `roster` is the connection_list; `fallback` covers the World-less/test path (no bound
@@ -776,7 +776,7 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t player_slot, uint8_t sl
 // S2C 0x75 is the requesting player's live slot state, not a fixed
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
 // 1 is playerSlot+416 (team), written straight into the retail client's
-// byte_A85B48 loadout selector. [orig: sub_510890 @0x510890;
+// byte_A85B48 loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0]
 std::vector<uint8_t> build_tag75_player_state(
 		const NapiNPConnection &conn, const world::World *world) {
@@ -1187,7 +1187,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 
 		switch (msg.tag) {
-			case c2s::JOIN: // JOIN ack [orig: NapiNPServerMsg_0x000 @0x512AA0]
+			case c2s::JOIN: // JOIN ack [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0]
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				break;
 			case c2s::AUTO_MEDIC_PREFERENCE: {
@@ -1370,7 +1370,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// any other id selects one AnimDef row. An explicit profile is
 				// essential: an unknown corpus or uncovered individual row is
 				// silence, never an invented CRC-zero source.
-				// [orig: NapiNPServerMsg_0x020 @0x501F70]
+				// [orig: Server_ValidateWeaponCRC @0x501F70]
 				if (integrity_profile == nullptr) break;
 				const uint8_t id = msg.payload.empty() ? 0 : msg.payload[0];
 				const uint32_t received = read_u32_le_lenient(msg.payload, 1);
@@ -1413,7 +1413,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					return {};
 				break;
 			}
-			case c2s::JOIN_FORM_POST: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_0x001 @0x512ED0]
+			case c2s::JOIN_FORM_POST: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0]
 				// Golden round-trip (f131-134): C 0x01 -> S 0x02 push -> C 0x02 -> S post-handshake
 				// burst. The retail client's join-FSM verification (state 6->7, 0x424740) needs this
 				// SEQUENCED exchange — a collapsed all-at-once burst leaves it stuck at "Verifying".
@@ -1811,9 +1811,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// this requester only; the stream is built once by the round-end
 				// producer and this handler never rebuilds it. The request is
 				// exactly one u16 offset and every response carries at most 200
-				// stream bytes. [orig: NapiNPServerMsg_0x02B @0x514FE0 ->
+				// stream bytes. [orig: NapiNPServerMsg_HandleReplayDataRequest @0x514FE0 ->
 				// NetPacket_WriteReplayStreamChunk @0x506F60; producer
-				// Server_BuildEndOfRoundScoreboard @0x516590]
+				// Server_BuildEndOfRoundScoreboard @0x508F30 (the call @0x516590
+				// in Server_ProcessRoundEnd @0x5164F0)]
 				if (inputs.round_end_board_stream == nullptr ||
 						inputs.round_end_board_stream->empty())
 					break;
@@ -1824,7 +1825,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						*inputs.round_end_board_stream, request.offset);
 				// NetPacket_WriteReplayStreamChunk returns zero for an offset
 				// beyond the stream and its caller sends only for len > 0.
-				// [orig: NapiNPServerMsg_0x02B @0x514FE0]
+				// [orig: NapiNPServerMsg_HandleReplayDataRequest @0x514FE0]
 				if (!chunk.empty())
 					replies.push_back(make_protocol_message(
 							s2c::END_ROUND_STATS, std::move(chunk)));
@@ -1845,7 +1846,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				break;
 			}
-			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
+			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 				st.mission_status_received = true;
 				break;
 			case c2s::FIRED_ROUND: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
@@ -2134,7 +2135,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// serializes it, then uses send_mask 0x20 with the requester's player slot.
 				// Count admitted player records only; pending handshake nodes are not in
 				// byte_A7628C, and a Goodbye node has already left that registry.
-				// [orig: NapiNPServerMsg_0x02D @0x502430 -> sub_4FC990 ->
+				// [orig: NapiNPServerMsg_0x02D @0x502430 -> Server_BuildAndSerializeSessionStatus @0x4FC990 ->
 				// Server_BuildStatusReport @0x530A60]
 				uint32_t active_players = 0;
 				for (const NapiNPConnection &candidate : roster) {
@@ -2158,7 +2159,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// authority-gated, and is SKIPPED while g_net_spawn_suspended or
 				// g_spawn_success_gate (round over) is set — our reachable analog of the
 				// latter is world->match.outcome().ended.
-				// DIVERGENCE (D-NET-176): retail walks the pool's fixed entry count. Our
+				// Documented delta (D-NET-176, FIXED — entry (b) of its ledger row): retail
+				// walks the pool's fixed entry count. Our
 				// pool-0 capacity is an OpenNova sizing choice (1024 by default), so the
 				// walk stops at the highest OCCUPIED slot: a slot above that high-water
 				// mark was never streamed to any client, so listing it is a no-op that
@@ -2196,7 +2198,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// entity, and only in-world players appear (the idle host is
 				// absent from the LAN samples). The server-side selection
 				// beyond that is a residual witness — the builder inside
-				// [orig: NapiNPServerMsg_0x023 @0x514D50] is undecompiled;
+				// [orig: NapiNPServerMsg_0x023_WeaponOverlayBroadcast @0x514D50] is undecompiled;
 				// list every admitted player with a bound entity.
 				std::size_t consumed = 0;
 				if (!decode_burst_visible_request(

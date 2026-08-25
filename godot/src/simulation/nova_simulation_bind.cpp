@@ -1,6 +1,8 @@
 // Simulation — ClassDB registration.
 #include "simulation/nova_simulation_internal.h"
 
+#include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
+
 #include <threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 
 using namespace novasim;
@@ -131,6 +133,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_deploy_list_rows", "default_key", "default_home", "zone_names"),
 	                     &Simulation::get_deploy_list_rows);
 	ClassDB::bind_method(D_METHOD("get_deploy_status"), &Simulation::get_deploy_status);
+	ClassDB::bind_method(D_METHOD("get_deploy_status_text", "gametext"),
+	                     &Simulation::get_deploy_status_text);
 	ClassDB::bind_method(D_METHOD("request_local_player_medic"),
 	                     &Simulation::request_local_player_medic);
 	ClassDB::bind_method(D_METHOD("local_medic_request_cooldown_ticks"),
@@ -142,9 +146,16 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
 	ClassDB::bind_method(D_METHOD("get_end_round_lines"), &Simulation::get_end_round_lines);
-	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width"),
+	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
+	                     &Simulation::get_end_round_overlay);
+	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),
 	                     &Simulation::get_end_round_columns);
-	ClassDB::bind_method(D_METHOD("get_end_round_rows"), &Simulation::get_end_round_rows);
+	ClassDB::bind_method(D_METHOD("get_end_round_rows", "tab"), &Simulation::get_end_round_rows,
+	                     DEFVAL(0));
+	ClassDB::bind_static_method("Simulation", D_METHOD("end_round_stat_screen_delay_msec"),
+	                            &Simulation::end_round_stat_screen_delay_msec);
+	ClassDB::bind_static_method("Simulation", D_METHOD("strip_inline_tags", "text"),
+	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
 	                     &Simulation::get_end_round_statistics);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),

@@ -79,15 +79,26 @@ std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
 // counters therefore retain their retail indices rather than being repacked
 // into a second schema. Only witnessed gameplay fields are named here; the full
 // 42-word record remains available for scoreboard serialization.
-// [orig: CPlayerStats_RecordEvent @0x52C8E0; CRenderState_GetFieldByIndex
-// @0x52D7D0 returns field[index+1]; sub_52C850 @0x52C850]
+// [orig: CPlayerStats_RecordEvent @0x52C8E0 — event N in 1..27 increments
+// field[N+1] (@0x52c900..0x52caf5), 28 adds to field[29], 29..32 add to
+// field[30..33]; CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)
+// @0x52D7D0 returns field[index+1]; ScoreRules_GetPrimaryScoreField (ex
+// sub_52C850) @0x52C850]
+// Field 11 is the FLAGSAVE counter: GameEvent_ProcessScoring @0x52F550 case 8
+// (@0x52f8d1: ++slot dword 29 = field 11 @0x52f8d7, points += scoringTable[83]
+// = score.ini VAR slot 9 "FLAGSAVE" in the shipped name table off_830348),
+// dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8 @0x517b03)
+// from the flag-return interaction in Entity_ProcessWaypointInteraction
+// @0x4AD820 (@0x4ad8dc / @0x4ad921). The 0x56 row's sixth i16 reads it as
+// CPlayerStats_GetFieldPlusOne(stats, 0xA) @0x50918a. Retail's "ASSISTS" is
+// score.ini slot 27 (scoringTable[101]) and has no counter in this record —
+// the former kAssists alias of index 11 was the decoder's column-name guess.
 struct MatchStats {
     static constexpr size_t kFieldCount = 42;
     static constexpr size_t kTeamKills = 4;
     static constexpr size_t kEnemyKills = 5;
     static constexpr size_t kSuicides = 6;
     static constexpr size_t kDeaths = 7;
-    static constexpr size_t kAssists = 11;
     static constexpr size_t kFlagSaves = 11;
     static constexpr size_t kFlagCaptures = 12;
     static constexpr size_t kFlagPickups = 13;
@@ -136,7 +147,7 @@ struct MatchPlayer {
     MatchPlayerIdentity identity;
     MatchStats stats;
     // Player-slot +23595, maintained by the retail capture-proximity pass and
-    // supplied as sub_52C850's external score for KOTH/TKOTH.
+    // supplied as ScoreRules_GetPrimaryScoreField's external score for KOTH/TKOTH.
     int32_t objective_ticks = 0;
     // Player-slot +89868: bit 0 is the neutral-objective/hill bit; bits 1..4
     // identify team-owned objectives. The kill scorer consumes this byte

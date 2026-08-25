@@ -387,7 +387,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             cmds.apply_ai_command(static_cast<uint16_t>(a.param1), a.action_sub_type, a.param2, a.param3, a.param4);
             break;
         case bms::ActionType::ParticleEffectAction:
-            // [orig: case 0x1B @0x4542e0 -> sub_4540E0] param1 selects the authored
+            // [orig: case 0x1B @0x4542e0 -> EventAction_SpawnParticleEffect (ex sub_4540E0)] param1 selects the authored
             // 6088 markers by WP_NUMBER (not team -- see the command's comment).
             cmds.spawn_marker_particle_effects(a.param1);
             break;
@@ -434,7 +434,8 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
             break;
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
-        // @0x45447b/0x454495/0x4544af -> Server_ProcessRoundEnd(1/2/0); the call
+        // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
+        // @0x4544af); the call
         // sites gate on g_spawn_success_gate — process_round_end's own latch covers
         // that]. The "win" effect stays as the presentation signal.
         case bms::ActionType::BlueWin:
@@ -628,7 +629,7 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
         // Quarter-cycle piggyback, once per full cycle (64 ticks): the player-
         // AWOL counter the PlayerAwol trigger reads — increments while the local
         // player sits outside every active zone, resets otherwise (D-EVT-2).
-        // [orig: quarter pass @0x454d50 cursor==0 -> Entity_UpdateStuckCounter
+        // [orig: quarter pass @0x454d50 cursor==0 -> Entity_UpdatePlayerAwolCounter
         //  @0x439dc0 -> Entity_IsLocalPlayerOutOfBounds @0x439d40; dword_A89160]
         if (w.commands.local_player_out_of_bounds()) ++awol_64tick_count_;
         else awol_64tick_count_ = 0;

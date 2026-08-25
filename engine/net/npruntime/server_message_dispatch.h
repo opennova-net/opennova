@@ -39,7 +39,7 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 
 // Build the session-owned S2C 0x64 raw content. The two random regions and
 // nonzero session id are minted once by create_session; callers then retain the
-// returned block for every chunk request. [orig: sub_51E880 @0x51E880 +
+// returned block for every chunk request. [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
 MissionMetadataBlob build_mission_metadata_blob(
 		const GameConfig &config, bool is_mp_session_peer);
@@ -89,7 +89,7 @@ struct ServerDispatchInputs {
 	uint32_t session_uptime_ms = 0;
 	const MissionMetadataBlob *mission_metadata_blob = nullptr;
 	// stru_C947D8: the board frozen by the round-end producer; the 0x2B service
-	// cuts chunks from it and never rebuilds. [orig: NapiNPServerMsg_0x02B
+	// cuts chunks from it and never rebuilds. [orig: NapiNPServerMsg_HandleReplayDataRequest
 	// @0x514FE0 -> NetPacket_WriteReplayStreamChunk @0x506F60]
 	const std::vector<uint8_t> *round_end_board_stream = nullptr;
 	// GameText("Server", "STRSRV_MEDREQ"): the C2S 0x2E handler's chat format;

@@ -505,7 +505,7 @@ bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
 }
 
 // S2C 0x7E: two mission-briefing C strings, with no count or trailing fields.
-// [orig: NapiNPClientMsg_0x07E @0x425E20]
+// [orig: NapiNPClientMsg_ServerConfigStrings @0x425E20]
 bool decode_server_config_strings(const uint8_t *body, size_t len,
                                   ServerConfigStrings &out) {
 	out = ServerConfigStrings{};
@@ -1234,7 +1234,7 @@ bool decode_burst_player_sync_request(const uint8_t *body, size_t len,
 	return consumed == 3;
 }
 
-// C2S 0x23 visible-players request (empty body). [orig: NapiNPServerMsg_0x023 @ 0x514D50]
+// C2S 0x23 visible-players request (empty body). [orig: NapiNPServerMsg_0x023_WeaponOverlayBroadcast @ 0x514D50]
 bool decode_burst_visible_request(const uint8_t * /*body*/, size_t len, size_t &consumed) {
 	consumed = 0;
 	return len == 0;
@@ -1354,7 +1354,7 @@ bool decode_minimap_overlay_batch(const uint8_t *body, size_t len,
 }
 
 // S2C 0x49 weapon-reload notification — [u16 handle][u16 reloadParam] (4 B).
-// [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (IDA-misnamed; reloads ammo)]
+// [orig: NapiNPClientMsg_WeaponReload_0x049 @ 0x42C0A0 (IDA-misnamed; reloads ammo)]
 bool decode_weapon_reload(const uint8_t *body, size_t len,
                           WeaponReload &out, size_t &consumed) {
 	consumed = 0;
@@ -1489,7 +1489,7 @@ bool decode_input_state_flags(const uint8_t *body, size_t len,
 }
 
 // S2C 0x79 host network-quality scalar — [u8] (1 B).
-// [orig: Server_TickUpdate @0x51E1B2..0x51E202 / NapiNPClientMsg_0x079 @0x429B00]
+// [orig: Server_TickUpdate @0x51E1B2..0x51E202 / NapiNPClientMsg_NetworkQuality @0x429B00]
 bool decode_network_quality(const uint8_t *body, size_t len,
                             uint8_t &out_quality, size_t &consumed) {
 	consumed = 0;

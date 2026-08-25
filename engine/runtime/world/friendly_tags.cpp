@@ -1,4 +1,5 @@
 #include "world/friendly_tags.h"
+#include "world/friendly_tag_gates.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -47,28 +48,21 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
     out.push_back(src);
 }
 
-// The drawer's entry bails, shared by both walks: never the local player,
-// never a CARRIED entity (Flags & 1 — hidden while attached), and only with
-// a resolved item def [orig: @0x5a39df entity == playerEntity; @0x5a39eb
-// Flags & 1; @0x5a39fb itemDef == NULL]. Dead entities are NOT bailed: the
-// bad tier's downed legs are how a fallen teammate keeps its label.
+// The drawer's entry bails and the pass gates are the shared predicates in
+// world/friendly_tag_gates.h (the joiner's roster walk applies the same
+// ones): never the local player, never a CARRIED entity, only with a
+// resolved item def [orig: @0x5a39df / @0x5a39eb / @0x5a39fb]; team 0 / the
+// local team / the death screen, then `g_GameType || death screen`
+// [orig: @0x5a44c7..0x5a44f8, @0x5a4552..0x5a457d].
 bool entry_bails(const Entity &e, const Entity &local) {
-    if (e.handle == local.handle) return true;
-    if ((e.flags & kEntityFlagCarried) != 0) return true;
-    if (!e.has_item_def) return true;
-    return false;
+    return friendly_tag_entry_bails(e.handle == local.handle, e.flags,
+                                    e.has_item_def);
 }
 
-// Team gate: neutral or the local team, or anyone while the death screen is
-// up; then the mode gate `g_GameType || death screen`. The enemy magenta leg
-// is server-granted spectator state (g_enemyTagsVisible), unported
-// [orig: pool-0 @0x5a44c7..0x5a44f8; players @0x5a4552..0x5a457d;
-//  the @0x5a3c7d enemy bail].
 bool pass_gates(uint8_t team, const Entity &local,
                 const FriendlyTagPassContext &ctx) {
-    if (team != 0 && team != local.team && !ctx.death_screen) return false;
-    if (ctx.game_type == 0 && !ctx.death_screen) return false;
-    return true;
+    return friendly_tag_pass_gates(team, local.team, ctx.death_screen,
+                                   ctx.game_type);
 }
 
 } // namespace

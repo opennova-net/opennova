@@ -91,16 +91,17 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world) {
         // at moveMode 3 with targetDist == arrivalRadius == 10.0u, which resolves
         // to no motion; our think contract encodes that outcome as the move_mode 0
         // the caller's per-think reset already left in place.
-        // [orig: the ==126 leg @0x4b9910 — moveMode=3, dist=radius=0xA0000]
+        // [orig: the ==126 leg @0x4baabd..0x4baacf — moveMode=3, dist=radius=0xA0000]
         return;
     }
 
     if (command == 127) {
         // FOLLOW THE LOCAL PLAYER. Arrive at 4.0u; when the AI's combat focus IS
         // the player (a guard order), the ring widens to max(slot[16], 4.0u);
-        // inside the ring the move clears. [orig: the ==127 leg @0x4b9910 —
-        // target = g_local_player position, radius 0x40000, focus compare
-        // aiComp[3] == g_local_player, radius max(aiComp[16], 0x40000)]
+        // inside the ring the move clears. [orig: the ==127 leg @0x4baad4.. —
+        // target = g_local_player position @0x4baae5, radius 0x40000
+        // @0x4bab60, focus compare aiComp[3] == g_local_player, radius
+        // max(aiComp[16], 0x40000) @0x4bab77..0x4bab83]
         const Entity *player = world.registry.get(world.cached.local_player);
         if (player == nullptr) return;
         int32_t tgt[3] = {board_to_fixed(player->position.x),
@@ -133,8 +134,9 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     // Retail caches the raw entity pointer in aiComp+144 and rescans pools 0..3
     // by net id (+124) when the cache goes stale; our registry find performs the
     // same scan and the cache keeps the handle (+1 so 0 stays "none").
-    // [orig: the board-leg pool scans @0x4b9910; stale test aiComp[36]->+124 !=
-    //  aiComp[38]]
+    // [orig: the board-leg pool scans @0x4bee93..0x4beec6 (authority gate
+    //  @0x4bee93, cmd 123/124/125 @0x4beea5..0x4beeaf, aiComp[38] vs entity+0x7C
+    //  @0x4beeba); stale test aiComp[36]->+124 != aiComp[38]]
     const uint16_t target_ssn = static_cast<uint16_t>(slot.f[38] & 0xFFFF);
     const EntityHandle th = world.registry.find_by_net_id(target_ssn);
     Entity *target = world.registry.get(th);
@@ -153,16 +155,19 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     if (self == nullptr) return;
     if (self->mounted) {
         // Seated. The 64-tick better-seat re-upgrade stays a D-INF-2 residual.
-        // [orig: the (tick & 0x3F) == 0 upgrade block @0x4b9910 head —
-        //  Entity_FindBestSeatSlot -> re-attach when the best slot differs]
+        // [orig: the (tickKey & 0x3F) == 0 upgrade block @0x4ba9d8..0x4baa41 —
+        //  mounted (+0x16C) @0x4ba9e1, Entity_FindBestSeatSlot @0x4ba9fb,
+        //  Entity_GetBoneSlotType != +0x168 @0x4baa1d, Entity_RequestVehicleAttach
+        //  @0x4baa2c when the best slot differs]
         return;
     }
 
     // Walk goal: the filtered best seat's approach point when one resolves (the
     // modeled @0x434df0), else the target origin. Arrive at 2.0u for a seat
-    // point [orig: 0x20000 @0x4b9910]; the no-seat fallback stands off at 4.0u —
+    // point [orig: 0x20000 @0x4bb32e]; the no-seat fallback stands off at 4.0u —
     // a stand-in for retail's bound-radius + 1.0u (entity+0 is unmodeled here).
-    // [orig: radius = *v156 + 0x10000 on the no-seat path]
+    // [orig: the ring pick @0x4bb325..0x4bb34a: +0x369 clear -> 0x20000, set ->
+    //  target->+0 (bound radius) + 0x10000]
     int32_t goal[3];
     int32_t radius = 0x20000;
     const int seat_idx =
@@ -209,7 +214,8 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
         inf.move_target[2] = goal[2];
         // The board walk is a final approach — retail raises the one-shot flag
         // so the shared gait select takes the slow-in ramp.
-        // [orig: waypointLooping = 1 on the board walk @0x4b9910 LABEL_308]
+        // [orig: waypointLooping = 1 on the board walk @0x4b9910 (the common
+        //  move tail @0x4bbe11 every command leg jumps to)]
         inf.at_final_oneshot = true;
         inf.target_heading = board_bearing_to(goal[0] - e.pos[0], goal[1] - e.pos[1]);
         inf.board_progress_pos[0] = e.pos[0];
@@ -222,24 +228,25 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     // ARRIVED -> board. A full or filtered-out vehicle leaves the soldier
     // standing at the goal (no seat -> no attach). The modeled admit gate is
     // "the target owns seats"; the per-command seat filter reruns inside
-    // mount_boarding_command. [orig: LABEL_363 @0x4b9910 — !parentEntity &&
-    //  radius < 0x640000 && itemDef attrib & 0x60 ->
-    //  Entity_FindBestSeatSlot @0x4351f0 -> Entity_RequestVehicleAttach
-    //  @0x4364a0]
+    // mount_boarding_command. [orig: the arrived gate @0x4bbda6..0x4bbe07 —
+    //  !parentEntity (+0x16C) @0x4bbda6, radius < 0x640000 @0x4bbdaf, itemDef
+    //  attrib & 0x60 @0x4bbdc4 -> Entity_FindBestSeatSlot @0x4351f0 (call
+    //  @0x4bbdd4) -> Entity_RequestVehicleAttach @0x4364a0 (call @0x4bbdf2)]
     // THE PLAYERCONTROL ADMIT GATE. Retail only reaches its board/attach path
     // when the TARGET's itemDef carries attrib bit 0x40 (items.def PlayerControl):
     //
     //     type = v158->itemDef->type;
-    //     if (type != ItemType_Vehicle && type != ItemType_Powerup) goto LABEL_308;
+    //     if (type != ItemType_Vehicle && type != ItemType_Powerup) goto the move tail;
     //     if ((v158->itemDef->attrib & 0x40) != 0) {
     //         CanEnterVehicle = Entity_CanEnterVehicle(entity, v158);
     //         ...
     //     }
-    //     LABEL_308: walk toward the target (moveMode 3)
+    //     the move tail @0x4bbe11: walk toward the target (moveMode 3)
     //
     // so a target WITHOUT the bit is still walked to and simply never boarded.
     // [orig: Entity_UpdateInfantryAI @0x4b9910 — the attrib test guarding the
-    //  Entity_CanEnterVehicle @0x435480 consult, and the LABEL_308 fall-through.]
+    //  Entity_CanEnterVehicle @0x435480 consult, and the fall-through to the
+    //  move tail @0x4bbe11.]
     //
     // The type test is NOT reproduced because it cannot discriminate here: the
     // engine stores powerup and object as the SAME value 6
@@ -262,7 +269,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     // CONSULT, not the attach itself:
     //
     //     if ((v158->itemDef->attrib & 0x40) != 0) { CanEnterVehicle = ...; }
-    //     LABEL_308: walk toward the target
+    //     the move tail @0x4bbe11: walk toward the target
     //
     // Gating the MOUNT on it was an over-application of the witness, and the wire
     // refutes it: retail emplaces SEVEN AI at ~100% of their rows, and three of

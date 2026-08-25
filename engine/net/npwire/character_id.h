@@ -16,7 +16,7 @@
 // PlayerProfile_InitDefaults @0x54BB40; serialized by
 // CNapiServerInfo_SerializeToSession @0x4C3650]. The companion avatar byte is
 // the selected combo's head voice unless the profile carries an explicit
-// override (sub_57AE60 @0x57AE60).
+// override (Avatars_ResolveSelectionIndex (ex sub_57AE60) @0x57AE60).
 
 #include <cstdint>
 

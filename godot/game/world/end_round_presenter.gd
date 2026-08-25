@@ -8,15 +8,20 @@ extends Node
 ## has reassembled, stat.mnu's STAT screen opens ONCE with its RESULTLIST
 ## table filled, the RADIO_TAB_* trio hidden for non-team modes, and the tab
 ## filter + the HIDDEN_BACK / CONFIRM_* exits wired.
+## The ladder's key selection, the empty-resolve folds, the printf forms, the
+## column headers, the tab filter and the 6 s delay are the engine's
+## (hud/end_round_overlay.h, npruntime/stat_screen_feed.h through the
+## Simulation feeds); this node owns only the device work: the HUD element,
+## the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
-##  g_spawn_success_gate && is_in_session from sub_5C0060 @0x5c0072): first pass
+##  g_spawn_success_gate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Server_ResetBalanceCounters + Game_InitRespawnState +
 ##  Overlay_ComputeStatFieldColumnLayout(40, 984) + byte_28E561C; every pass
-##  sub_54E650 (the UI scene teardown) then draw_endround_stats_overlay
+##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then draw_endround_stats_overlay
 ##  @0x5b7cd0; g_scoreboardDirty && now - dword_A81B2C >= 6000 ms ->
 ##  UI_OpenMenuScreen("stat.mnu", "STAT") once (byte_28E561D); the STAT show
-##  callback sub_562840 (populate + tab visibility); stat_filter_tab_handler
-##  @0x562140; both once-only bytes cleared by sub_5B71B0 at Game_StartMission
+##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); stat_filter_tab_handler
+##  @0x562140; both once-only bytes cleared by Game_InitMissionRoundState (ex sub_5B71B0) at Game_StartMission
 ##  @0x525903]
 
 const MENU_FILE := "stat.mnu"
@@ -24,15 +29,12 @@ const MENU_SCREEN := "STAT"
 const STYLESHEET_FILE := "menu_style.mns"
 const RESULT_LIST := "RESULTLIST"
 const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
-# The stat-screen delay: 6000 ms after the announcement [orig: 0x1770 @0x5b8615].
-const STAT_SCREEN_DELAY_MSEC := 6000
-# The overlay safe area retail stamps at display-mode set (dword_24C1900/04);
-# the full design frame here.
-const OVERLAY_TOP := 0
-const OVERLAY_BOTTOM := 768
 # The RESULTLIST's authored width (jo_stat.mnu: the STATS window spans 20..770)
-# when the compiled frame has not laid the table out yet.
+# when the compiled frame has not laid the table out yet — a device fallback
+# for a frame that has not measured its widget.
 const RESULT_LIST_DEFAULT_WIDTH := 750
+# The stat.mnu tab radios, in the engine's tab order (0 all, 1 team 2, 2 team 1).
+const TAB_WIDGETS: Array[String] = ["RADIO_TAB_OVERALL", "RADIO_TAB_REDTEAM", "RADIO_TAB_BLUETEAM"]
 
 signal opened
 signal closed
@@ -50,7 +52,7 @@ var _header_seen := false
 var _header_edge_msec := 0
 var _stat_opened := false
 var _overlay_shown := false
-var _last_game_type := 0
+var _team_mode := false
 
 
 func setup(world: GameWorld, ui_parent: Node, hud_presenter: GameHudPresenter) -> void:
@@ -61,7 +63,7 @@ func setup(world: GameWorld, ui_parent: Node, hud_presenter: GameHudPresenter) -
 
 
 ## The shell seam: the announcement edge closes the deploy/armory screens (the
-## UI scene teardown every transition pass runs [orig: sub_54E650 @0x5b8674]);
+## UI scene teardown every transition pass runs [orig: UI_TeardownScene @0x5b8674]);
 ## `opened`/`closed` report the STAT screen's cursor ownership through the two
 ## callables (the overlay phase is not a UI state: the world keeps the cursor).
 func connect_shell(deploy_presenter: DeployScreenPresenter, armory_presenter,
@@ -84,7 +86,7 @@ static func install(parent: Node, world: GameWorld, ui_parent: Node,
 	return presenter
 
 
-# The UI scene teardown at the announcement [orig: sub_54E650 @0x5b8674].
+# The UI scene teardown at the announcement [orig: UI_TeardownScene @0x5b8674].
 func _tear_down_screens() -> void:
 	if _deploy_presenter != null and _deploy_presenter.is_open():
 		_deploy_presenter.close()
@@ -94,6 +96,10 @@ func _tear_down_screens() -> void:
 
 func _hud() -> HudOverlay:
 	return _hud_presenter.get_game_hud() if _hud_presenter != null else null
+
+
+func _gametext() -> RtxtStringFile:
+	return Strings.get_table("gametext")
 
 
 func is_open() -> bool:
@@ -108,7 +114,7 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## Mission (re)start clears the once-only latches [orig: sub_5B71B0 @0x525903].
+## Mission (re)start clears the once-only latches [orig: Game_InitMissionRoundState @0x525903].
 func reset() -> void:
 	_header_seen = false
 	_stat_opened = false
@@ -135,7 +141,7 @@ func tick() -> void:
 		_header_seen = true
 		_header_edge_msec = Time.get_ticks_msec()
 		_stat_opened = false
-		_last_game_type = int(state.get("game_type", 0))
+		_team_mode = bool(state.get("team_mode", false))
 	if not _stat_opened:
 		# Only the PRE-STAT phase tears the deploy/armory scene down (every
 		# pass) and draws the overlay; once the STAT phase latches, retail's
@@ -143,12 +149,13 @@ func tick() -> void:
 		# — and after the player closes stat.mnu NOTHING from this path
 		# redraws until the host's round cycle exits the mission.
 		# [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — the locret
-		#  @0x5b864a once byte_28E561D is set; sub_54E650 @0x5b8674 pre-STAT
+		#  @0x5b864a once byte_28E561D is set; UI_TeardownScene @0x5b8674 pre-STAT
 		#  and once more on the open pass @0x5b862a]
 		_tear_down_screens()
 		_apply_overlay(sim)
 		if bool(state.get("board_known", false)) \
-				and Time.get_ticks_msec() - _header_edge_msec >= STAT_SCREEN_DELAY_MSEC:
+				and Time.get_ticks_msec() - _header_edge_msec \
+						>= Simulation.end_round_stat_screen_delay_msec():
 			_tear_down_screens()
 			_open_stat_screen(sim)
 	elif is_open():
@@ -160,84 +167,27 @@ func _process(_delta: float) -> void:
 		_driver.tick(Time.get_ticks_msec())
 
 
-# The overlay ladder: resolve every line's key through the gametext Overlays
-# table (empty resolves fall to the fallback like GameText_GetStringWithFallback),
-# format the printf arguments, and hand the text + y pairs to the HUD element.
+# The resolved overlay ladder (the engine's end_round_overlay_resolve over the
+# gametext Overlays table) handed to the HUD element as text + y pairs.
 func _apply_overlay(sim: Simulation) -> void:
 	var hud := _hud()
 	if hud == null:
 		return
-	var texts := PackedStringArray()
-	var ys := PackedInt32Array()
-	var y_shift := 0
-	for value in sim.get_end_round_lines():
-		var line := value as Dictionary
-		var key := String(line.get("key", ""))
-		var fold := int(line.get("fold", 0))
-		# The empty-resolve folds (a key PRESENT in gametext with an empty
-		# value; a missing key still takes the fallback): the headline
-		# re-looks-up Overlays/STROVER1 with the "!Mission Completed"
-		# fallback, the second line draws nothing and the ladder below it
-		# moves up 32 px so the score lines start at 382.
-		# [orig: LABEL_30 @0x5b7e59 -> @0x5b7e5b; LABEL_144 @0x5b83e5]
-		var fmt: String
-		if fold != 0 and _key_present_but_empty(key):
-			if fold == 1:
-				fmt = _resolve("STROVER1", "!Mission Completed", "")
-			else:
-				y_shift = 32
-				continue
-		else:
-			fmt = _resolve(key, String(line.get("fallback", "")),
-					String(line.get("literal", "")))
-		var args: Array = []
-		for raw in line.get("args", []):
-			var a := raw as Dictionary
-			if bool(a.get("is_number", false)):
-				args.append(int(a.get("number", 0)))
-			else:
-				args.append(_resolve(String(a.get("key", "")), String(a.get("fallback", "")),
-						String(a.get("literal", ""))))
-		var text := fmt
-		if not args.is_empty():
-			# Retail's printf: %s / %ld / %d / %02d.
-			var g := fmt.replace("%ld", "%d")
-			text = g % args if g.count("%") == args.size() else fmt
-		texts.append(text)
-		ys.append(int(line.get("y", 0)) - y_shift)
-	hud.set_end_round_overlay(true, OVERLAY_TOP, OVERLAY_BOTTOM, texts, ys)
+	var overlay: Dictionary = sim.get_end_round_overlay(_gametext())
+	hud.set_end_round_overlay(true, int(overlay.get("top", 0)), int(overlay.get("bottom", 0)),
+			PackedStringArray(overlay.get("texts", PackedStringArray())),
+			PackedInt32Array(overlay.get("ys", PackedInt32Array())))
 	_overlay_shown = true
 
 
 func _hide_overlay() -> void:
 	var hud := _hud()
 	if hud != null and _overlay_shown:
-		hud.set_end_round_overlay(false, OVERLAY_TOP, OVERLAY_BOTTOM,
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		var overlay: Dictionary = sim.get_end_round_overlay(null) if sim != null else {}
+		hud.set_end_round_overlay(false, int(overlay.get("top", 0)), int(overlay.get("bottom", 0)),
 				PackedStringArray(), PackedInt32Array())
 	_overlay_shown = false
-
-
-# True only for a key that EXISTS in the Overlays table with an empty value —
-# the case retail's composed text_buf ends up empty, distinct from a missing
-# key (which GameText_GetStringWithFallback folds to the fallback).
-func _key_present_but_empty(key: String) -> bool:
-	if key.is_empty():
-		return false
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	return t != null and t.has_string_in_section("Overlays", key) \
-			and t.get_string_in_section("Overlays", key).is_empty()
-
-
-func _resolve(key: String, fallback: String, literal: String) -> String:
-	if key.is_empty():
-		return literal
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	if t != null and t.has_string_in_section("Overlays", key):
-		var s := t.get_string_in_section("Overlays", key)
-		if not s.is_empty():
-			return s
-	# The "!..." fallback marker is stripped like every other fallback string.
-	return fallback.trim_prefix("!")
 
 
 func _open_stat_screen(sim: Simulation) -> void:
@@ -252,37 +202,38 @@ func _open_stat_screen(sim: Simulation) -> void:
 	opened.emit()
 
 
-# The STAT show callback [orig: sub_562840]: populate the RESULTLIST, then
-# hide the three tab radios for non-team modes (team modes select OVERALL).
+# The STAT show callback [orig: StatScreen_ShowCallback @0x562840 (ex
+# sub_562840)]: fill the RESULTLIST, then hide the three tab radios for
+# non-team modes (team modes select OVERALL). The team-mode arm is the sim
+# state's `team_mode` (world/game_type.h).
 func _populate(sim: Simulation) -> void:
 	var list_id := _driver.widget_id(RESULT_LIST)
 	if list_id < 0:
 		return
+	for tab in TAB_WIDGETS:
+		var id := _driver.widget_id(tab)
+		if id >= 0:
+			_driver.set_widget_shown(id, _team_mode)
+	if _team_mode:
+		var overall := _driver.widget_id(TAB_WIDGETS[0])
+		if overall >= 0:
+			_driver.set_widget_checked(overall, true)
+	_fill_table(sim, list_id, 0)
+
+
+# One table fill: the resolved header row, then the rows the engine's tab
+# filter admits (0 all, 1 team 2, 2 team 1), the local player's row selected.
+func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
 	var rect := _driver.widget_frame_rect(list_id)
 	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
 	_driver.table_clear_rows(list_id)
-	var team_mode := (_last_game_type & 0x10000) != 0
-	for tab in ["RADIO_TAB_OVERALL", "RADIO_TAB_REDTEAM", "RADIO_TAB_BLUETEAM"]:
-		var id := _driver.widget_id(tab)
-		if id >= 0:
-			_driver.set_widget_shown(id, team_mode)
-	if team_mode:
-		var overall := _driver.widget_id("RADIO_TAB_OVERALL")
-		if overall >= 0:
-			_driver.set_widget_checked(overall, true)
-	# The header row: NAME (the rtxt "NAME" lookup or "!Name"), "Squad", then
-	# the field labels through the Overlays table.
 	var headers := PackedStringArray()
-	for value in sim.get_end_round_columns(table_width):
-		var col := value as Dictionary
-		var key := String(col.get("header_key", ""))
-		var fallback := String(col.get("header_fallback", ""))
-		headers.append(_resolve(key, fallback, String(col.get("literal", ""))) \
-				if not key.is_empty() else fallback.trim_prefix("!"))
+	for value in sim.get_end_round_columns(table_width, _gametext()):
+		headers.append(String((value as Dictionary).get("header", "")))
 	_driver.table_add_row(list_id, headers)
 	var row_index := 1
 	var selected_row := -1
-	for value in sim.get_end_round_rows():
+	for value in sim.get_end_round_rows(tab):
 		var row := value as Dictionary
 		var cells := PackedStringArray([String(row.get("name", "")), String(row.get("squad", "-"))])
 		cells.append_array(PackedStringArray(row.get("cells", PackedStringArray())))
@@ -326,49 +277,17 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 			or widget_name.nocasecmp_to("CONFIRM_EXIT") == 0):
 		close()
 		return
-	# The tab filter [orig: stat_filter_tab_handler @0x562140]: tab 0 shows
-	# every row, tab 1 only team 2, tab 2 only team 1 — applied by re-filling
-	# the table with the filtered rows (the compiled table has no per-row hide).
+	# The tab radios map onto the engine's tab index [orig:
+	# stat_filter_tab_handler @0x562140]; the filter itself is the sim feed's.
 	if kind == "radio" and widget_name.begins_with("RADIO_TAB_"):
 		var tab := 0
-		if widget_name.nocasecmp_to("RADIO_TAB_REDTEAM") == 0:
-			tab = 1
-		elif widget_name.nocasecmp_to("RADIO_TAB_BLUETEAM") == 0:
-			tab = 2
-		_apply_tab_filter(tab)
-
-
-func _apply_tab_filter(tab: int) -> void:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null or _driver == null:
-		return
-	var list_id := _driver.widget_id(RESULT_LIST)
-	if list_id < 0:
-		return
-	var rect := _driver.widget_frame_rect(list_id)
-	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
-	_driver.table_clear_rows(list_id)
-	var headers := PackedStringArray()
-	for value in sim.get_end_round_columns(table_width):
-		var col := value as Dictionary
-		var key := String(col.get("header_key", ""))
-		headers.append(_resolve(key, String(col.get("header_fallback", "")),
-				String(col.get("literal", ""))) if not key.is_empty()
-				else String(col.get("header_fallback", "")).trim_prefix("!"))
-	_driver.table_add_row(list_id, headers)
-	for value in sim.get_end_round_rows():
-		var row := value as Dictionary
-		var team := int(row.get("team", 0))
-		var visible := true
-		if tab == 1:
-			visible = team == 2
-		elif tab == 2:
-			visible = team == 1
-		if not visible:
-			continue
-		var cells := PackedStringArray([String(row.get("name", "")), String(row.get("squad", "-"))])
-		cells.append_array(PackedStringArray(row.get("cells", PackedStringArray())))
-		_driver.table_add_row(list_id, cells)
+		for i in TAB_WIDGETS.size():
+			if widget_name.nocasecmp_to(TAB_WIDGETS[i]) == 0:
+				tab = i
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		var list_id := _driver.widget_id(RESULT_LIST) if _driver != null else -1
+		if sim != null and list_id >= 0:
+			_fill_table(sim, list_id, tab)
 
 
 func _ensure_menu() -> bool:

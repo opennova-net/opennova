@@ -102,6 +102,13 @@ void test_walk_and_gates() {
 	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags);
 	for (const world::FriendlyTagSource &t : tags)
 		if (t.name == "Ace") CHECK(t.health_ratio_fp16 == 0x10000);
+	// A row whose type has NO def takes the drawer's entry bail — the shared
+	// predicate of world/friendly_tag_gates.h [orig: itemDef == NULL
+	// @0x5a39fb]; the roster copy had dropped it.
+	tags.clear();
+	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags,
+			[](uint16_t) { return 0; });
+	CHECK(tags.empty());
 }
 
 } // namespace

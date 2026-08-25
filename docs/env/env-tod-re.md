@@ -215,7 +215,7 @@ are the same mechanism; the full curve is in §Iris auto-exposure below.
   `lightning_rgb` into the additive slots — sky >>8, fog/skyfog >>9, ground >>10):
   timer A at ticks 10/6/4/2 → flash 200/255/200/255, at 0 → flash 0 + thunder; timer B at
   31/28/26/24/23/22/20 → 200/150/200/150/100/50/0, at 0 → second thunder. **Thunder wiring
-  (C6)**: epoch 0 calls `sub_527B90 → SoundBank_PlayTriggerEntries @ 0x75ccd0` on the bank
+  (C6)**: epoch 0 calls `Sound_PlayTriggerSetScaled (ex sub_527B90) → SoundBank_PlayTriggerEntries @ 0x75ccd0` on the bank
   at `dword_24E0914` — sequencer A fires trigger id **0** (param 0x10000, @ 0x57ecfb),
   sequencer B trigger id **0x80** (param 0xA0000, @ 0x57edc4), gated on
   `g_napi_np_ctx.is_mp_session_peer`. **Starters**: the net text command **`SETFLASH1 [n]`**

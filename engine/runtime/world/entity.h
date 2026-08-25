@@ -634,7 +634,7 @@ struct Entity {
     // start/stop sounds) key off it, not off any-control-seat occupancy.
     // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8/@0x49495e;
     //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
-    //  spawner gate @0x48faad in entity_update_damage_accumulator_and_shadow @0x48fa70]
+    //  spawner gate @0x48faad in Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70]
     EntityHandle primary_occupant;
     // Target-side mounted skeletal/clip configuration: items.def phrase_set at
     // itemDef+0x86C. Explicit validity keeps absent metadata distinct from the

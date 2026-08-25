@@ -373,7 +373,7 @@ func get_setup_error() -> int:
 
 # World position of the entity addressed by a runtime SSN (WAC/BMS addressing),
 # or null when no live registry entity carries that net id.
-# [orig: WacScript_SpawnSoundAtEntity @ 0x4f23a0].
+# [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0].
 func entity_position_for_ssn(ssn: int) -> Variant:
 	if _sim == null or ssn <= 0:
 		return null

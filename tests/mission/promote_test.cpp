@@ -3,6 +3,7 @@
 // data (entities patrol their authored routes). See engine/runtime/mission/promote.cpp.
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 
@@ -57,6 +58,34 @@ __declspec(noinline)
 #elif defined(__GNUC__)
 __attribute__((noinline))
 #endif
+// Every pool loop hands Entity_SpawnFromBMSRecord `Pool_GetEntry(pool, i)` for
+// record i, so a record's pool slot IS its index within its pool section and a
+// record never slides into an earlier hole [orig: Mission_LoadBMSFile @0x40F4E0
+//  — pool 1 @0x40f9bb..0x40f9c6, pool 0 @0x40fb0d..0x40fb19]. (Promote resets
+// the pools first, so the overwrite arm of spawn_at is not stageable here; the
+// discriminating case arrives with the spawn FILTER — world-wac-ai-re §31.4.)
+static void test_bms_record_index_is_pool_slot() {
+    bms::File m{};
+    m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
+    m.items[0].id = 21;
+    m.items.push_back(item(/*type_id=*/164, 30 << 16, 20 << 16, 3 << 16));
+    m.items[1].id = 22;
+    m.organics.push_back(organic(1 << 16, 1 << 16, 0, 1, 0, 0));
+    m.organics[0].id = 31;
+
+    auto w = std::make_unique<World>();
+    auto ai = std::make_unique<AiSystem>();
+    const mission::PromoteResult r = mission::promote_mission(m, *w, *ai, {});
+    CHECK(r.spawned == 3);
+    CHECK(r.dropped == 0);
+    const EntityHandle h21 = w->registry.find_by_net_id(21);
+    const EntityHandle h22 = w->registry.find_by_net_id(22);
+    const EntityHandle h31 = w->registry.find_by_net_id(31);
+    CHECK(h21.valid() && h21.pool() == 1 && h21.slot() == 0);
+    CHECK(h22.valid() && h22.pool() == 1 && h22.slot() == 1);
+    CHECK(h31.valid() && h31.pool() == 0 && h31.slot() == 0);
+}
+
 static void test_emplacement_attachments() {
     bms::File cm{};
     cm.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
@@ -394,6 +423,73 @@ static void test_friendly_tag_names_and_gather() {
     }
     ctx.slot_lookup = nullptr;
     unnamed->flags &= ~kEntityFlagPlayer;
+}
+
+// A placed vehicle with no ai_textfile still gets a profile: retail's AI init
+// falls back to the def's default_aip (vehicle family) or "helo1" (both
+// families' last arm), so a bare-placed Blackhawk's brain is type HELO and its
+// rotor twin runs [orig: Entity_InitHelicopterAIFromDef @0x4683C0 the helo1
+// arm @0x4684c9; Entity_InitVehicleAIFromDef @0x4686C0 the def+0x8B8 arm
+// @0x4687c1 then helo1 @0x4687d3; Entity_UpdateHeloRotorSpin @0x48FA70 gates on
+// profile+0x10 == 1 @0x48fa98].
+static void test_nameless_vehicle_takes_the_retail_default_profile() {
+    int failures = 0;
+    static constexpr int32_t kHeloType = 2010;  // Dblkhwk1, ai_function chel
+    static constexpr int32_t kTruckType = 1237; // a cveh row whose def authors default_aip
+    static constexpr int32_t kBoatType = 1500;  // a cbot row with no default_aip
+    static constexpr int32_t kCrateType = 9;    // no AI class row at all
+
+    mission::PromoteOptions opts;
+    opts.ai_profile_defaults = [](int32_t type_id) {
+        mission::PromoteOptions::AiProfileDefaults d;
+        if (type_id == kHeloType) {
+            d.known = true; d.helicopter_init = true; d.default_aip = "H_Ignored";
+        } else if (type_id == kTruckType) {
+            d.known = true; d.default_aip = "D_5ton";
+        } else if (type_id == kBoatType) {
+            d.known = true;
+        }
+        return d;
+    };
+    const auto entity = [](int32_t type_id, const char *name2) {
+        bms::Entity e{};
+        e.type = bms::ItemType::Item;
+        e.type_id = type_id;
+        if (name2 != nullptr) std::memcpy(e.name2, name2, std::strlen(name2));
+        return e;
+    };
+    // The name resolution, arm by arm.
+    CHECK(mission::ai_profile_name_for(entity(kHeloType, nullptr), true, opts.ai_profile_defaults) == "helo1");
+    CHECK(mission::ai_profile_name_for(entity(kTruckType, nullptr), true, opts.ai_profile_defaults) == "d_5ton");
+    CHECK(mission::ai_profile_name_for(entity(kBoatType, nullptr), true, opts.ai_profile_defaults) == "helo1");
+    CHECK(mission::ai_profile_name_for(entity(kCrateType, nullptr), true, opts.ai_profile_defaults).empty());
+    CHECK(mission::ai_profile_name_for(entity(kHeloType, "H_BHawk "), true, opts.ai_profile_defaults) == "h_bhawk");
+    // Only a placed ITEM takes the fallback; an organic with no name keeps none.
+    CHECK(mission::ai_profile_name_for(entity(kHeloType, nullptr), false, opts.ai_profile_defaults).empty());
+    // No embedder answer (tests, no item db): the ai_textfile alone, as before.
+    CHECK(mission::ai_profile_name_for(entity(kHeloType, nullptr), true, {}).empty());
+
+    // The promote seeds the brain from the fallback row.
+    bms::File m{};
+    m.items.push_back(entity(kHeloType, nullptr));
+    mission::ItemSeatSpec spec;
+    spec.type_id = kHeloType;
+    Seat ctrl;
+    ctrl.type = SeatType::Controller;
+    spec.seats.push_back(ctrl);
+    opts.item_seat_specs.push_back(spec);
+    mission::PromoteOptions::AiProfileRow helo1;
+    helo1.profile = "helo1";
+    helo1.data.type = 1;
+    opts.ai_profiles.push_back(helo1);
+    World world;
+    AiSystem ai;
+    ai.is_authority = true;
+    const mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
+    CHECK(r.brains == 1);
+    CHECK(ai.count() == 1);
+    CHECK(ai.at(0) != nullptr && ai.at(0)->profile.type == 1);
+    if (failures) std::exit(1);
 }
 
 int main() {
@@ -893,9 +989,11 @@ int main() {
 
     // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
     test_emplacement_attachments();
+    test_bms_record_index_is_pool_slot();
     test_friendly_tag_names_and_gather();
     test_emplacement_parent_death_cascades();
     test_unresolved_emplacement_preserves_streamed_pose();
+    test_nameless_vehicle_takes_the_retail_default_profile();
 
     // ---- organics are routed through the INFANTRY motor with seeded slots ----
     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI @0x4b9910;

@@ -159,9 +159,20 @@ void test_game_event_classification() {
     CHECK(game_event_strcnd_key(19) == nullptr);   // team/gametype-keyed at runtime
 }
 
+// The inline-markup stripper [orig: Chat_StripHtmlTags @0x4983f0]: every
+// '<'..'>' span dropped, an unterminated '<' tail dropped with it.
+void test_strip_inline_tags() {
+    CHECK(strip_inline_tags("<c4040FF>'A' Base<b>x") == "'A' Basex");
+    CHECK(strip_inline_tags("plain") == "plain");
+    CHECK(strip_inline_tags("a<b>b") == "ab");
+    CHECK(strip_inline_tags("tail<cFF") == "tail");
+    CHECK(strip_inline_tags("") == "");
+}
+
 } // namespace
 
 int main() {
+    test_strip_inline_tags();
     test_suppression_set();
     test_verbose_gate();
     test_own_other_colors();

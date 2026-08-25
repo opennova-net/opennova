@@ -235,7 +235,7 @@ func _refresh_camera_mode() -> void:
 
 # Every non-first-person mode presents the body and hides the FP arms — the
 # chase (1) and the death lerp camera (4) alike [orig: the FP viewmodel gate
-# g_camera_mode == 0 in Render_ProcessMainSceneFrame @0x40133e].
+# g_camera_mode == 0 in Entity_ComputeActionTransform @0x40133e].
 static func _presents_third_person(view: PlayerLocalView) -> bool:
 	return view.third_person or view.camera_mode == 4
 
@@ -274,6 +274,11 @@ func weapon_effects() -> PlayerWeaponEffects:
 ## and sweep the placement tunables through it).
 func viewmodel_rig() -> PlayerViewmodelRig:
 	return _viewmodel_rig
+
+
+## The world this presenter was set up on (null before setup).
+func world() -> GameWorld:
+	return _world
 
 
 func before_world_tick(delta: float, capture_mouse: bool = false,

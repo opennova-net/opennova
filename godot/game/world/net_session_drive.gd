@@ -124,7 +124,7 @@ func _clear_pending_session() -> void:
 # combo's head voice unless the profile has an explicit override.
 # [orig: PlayerProfile_InitDefaults @0x54BB40,
 #  lookup_entity_slot_and_pack_entry @0x57AD40,
-#  sub_57AE60 @0x57AE60, CNapiServerInfo_SerializeToSession @0x4C3650]
+#  Avatars_ResolveSelectionIndex (ex sub_57AE60) @0x57AE60, CNapiServerInfo_SerializeToSession @0x4C3650]
 static func _join_character_selection(
 		db: AvatarDatabase, nat_index: int, div_index: int,
 		combo_index: int, expected_alignment: int) -> Dictionary:

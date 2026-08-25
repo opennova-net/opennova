@@ -438,14 +438,14 @@ struct PlayerListRow {
 	// is clear [orig: @0x42fbfb]) — which a latency number never would be.
 	uint16_t status_flags = 0;
 	// The MODE's primary stat, filled by the server's game-type switch
-	// [orig: sub_52C850 @0x52C850 — DM/TDM stats[5] enemy kills; A&S/TacOps
+	// [orig: ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850 — DM/TDM stats[5] enemy kills; A&S/TacOps
 	// stats[39] zone takeovers; KOTH a seconds value the client renders mm:ss
 	// under the timed-scores flag]. The ONLY row score the Tab list draws
 	// [orig: the sole score read @0x423E76 in HUD_DrawKillList @0x423A30].
 	uint16_t score1 = 0;
 	// stats[29], the accumulated point/EXP total — NOT deaths (the decode-era
 	// guess, refuted 2026-08-06; deaths is stats[7] and is absent from 0x16)
-	// [orig: encoder @0x50D960 via CRenderState_GetFieldByIndex(stats, 0x1C);
+	// [orig: encoder @0x50D960 via CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)(stats, 0x1C);
 	// sole writer CPlayerStats_RecordEvent case 28 @0x52C8E0]. The retail
 	// CLIENT never reads it; the server sorts team-mode rows by it
 	// [orig: Player_ComputeScore @0x500A80].
@@ -570,7 +570,7 @@ bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
 
 // S2C 0x7E mission/server briefing strings: exactly two NUL-terminated raw
 // cp1252 strings. Presentation interprets the embedded retail markup; the wire
-// layer preserves it opaquely. [orig: NapiNPClientMsg_0x07E @0x425E20;
+// layer preserves it opaquely. [orig: NapiNPClientMsg_ServerConfigStrings @0x425E20;
 // NetPacket_WriteBriefingText @0x506620]
 struct ServerConfigStrings {
 	std::string briefing3;
@@ -1351,7 +1351,7 @@ bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &
 // CRenderState field 0x1C (the direct array word at index 29), not the
 // game-type-specific primary score shown in the first scoreboard column.
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
-//        CRenderState_GetFieldByIndex @0x52D7D0;
+//        CPlayerStats_GetFieldPlusOne @0x52D7D0;
 //        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
 struct ScoreDeltaSound {
 	int32_t score = 0;
@@ -1462,7 +1462,7 @@ bool decode_burst_player_sync_request(const uint8_t *body, size_t len,
                                       BurstPlayerSyncRequest &out, size_t &consumed);
 
 // C2S 0x23 — visible-players request, EMPTY body (0 B). Server replies S2C 0x4C
-// with a visible-players snapshot. [orig: NapiNPServerMsg_0x023 @ 0x514D50]
+// with a visible-players snapshot. [orig: NapiNPServerMsg_0x023_WeaponOverlayBroadcast @ 0x514D50]
 bool decode_burst_visible_request(const uint8_t *body, size_t len, size_t &consumed);
 
 // C2S 0x32 — EMPTY-SLOT SWEEP REQUEST. The client queues it inside its S2C 0x0F
@@ -1576,8 +1576,8 @@ bool decode_minimap_overlay_batch(const uint8_t *body, size_t len,
 // S2C 0x49 — weapon-reload notification. `[u16 entityHandle][u16 reloadParam]`
 // (4 B). The handler resolves the entity and calls WeaponSlot_ReloadAmmo(entity,
 // reloadParam); a vehicle entity instead arms an 80-tick timer. NOTE the IDB
-// name `handle_camera_sync_packet_0x049` is WRONG — there is no camera code, it
-// reloads ammo. [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (IDA-misnamed)
+// name `NapiNPClientMsg_WeaponReload_0x049 (ex handle_camera_sync_packet_0x049)` is WRONG — there is no camera code, it
+// reloads ammo. [orig: NapiNPClientMsg_WeaponReload_0x049 @ 0x42C0A0 (IDA-misnamed)
 //  → WeaponSlot_ReloadAmmo @ 0x541720]
 struct WeaponReload {
 	uint16_t entity_handle = 0;
@@ -1697,7 +1697,7 @@ bool decode_input_state_flags(const uint8_t *body, size_t len,
 // S2C 0x79 — host network-quality scalar `[u8]` (1 B). The client stores it
 // into CNetStats.host_quality (+0x0C), then S2C 0x7D makes the client report
 // that value plus three adjacent metrics in C2S 0x50.
-// [orig: Server_TickUpdate @0x51E1B2..0x51E202 / NapiNPClientMsg_0x079 @0x429B00]
+// [orig: Server_TickUpdate @0x51E1B2..0x51E202 / NapiNPClientMsg_NetworkQuality @0x429B00]
 bool decode_network_quality(const uint8_t *body, size_t len,
                             uint8_t &out_quality, size_t &consumed);
 
@@ -1930,7 +1930,7 @@ bool decode_zone_presence_count(const uint8_t *body, size_t len,
 // shifted << 16 into 16.16 world space). No position block on the wire when
 // flag != 1. Gated is_mp_session_peer. The IDB name "GotoTeleport" was a
 // misnomer. [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0 →
-//  SoundProfile_FindLoadedByName @ 0x5274F0 / Entity_PlaySound3D_FullVolume @ 0x528E20]
+//  SoundBank_FindSetByNameAnyBank @ 0x5274F0 / Entity_PlaySound3D_FullVolume @ 0x528E20]
 struct PlaySoundCommand {
 	uint8_t     flag = 0;      // 0 = flat play, 1 = positioned 3D
 	std::string sound_name;    // sound-profile name (cstr)

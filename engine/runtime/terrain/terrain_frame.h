@@ -10,8 +10,8 @@
 // and the LOD-family resolve. The embedder keeps only device work: building
 // GPU meshes from the same CPT tiles at load time and writing the draw list onto
 // its instance pool.
-// [orig: Terrain_CollectVisibleSectors @ 0x5C9120 — the 512-unit sector
-//  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0;
+// [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe) — the 512-unit sector
+//  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe);
 //  render_terrain_sector_batch @ 0x6096f0 — the per-batch family select]
 
 #include <terrain/foliage_detail_collector.h>

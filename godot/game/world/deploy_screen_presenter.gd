@@ -43,8 +43,6 @@ const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
 # Deliberate correction: the old godot-side 0.25 approximated the tick rate.
 static var REFRESH_INTERVAL_S: float = 16.0 * Simulation.tick_dt()
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
-# The zone letters run 'A' + list index [orig: spawn_slot_index + 65 @0x553a5b].
-const ZONE_LETTER_BASE := 65
 
 signal opened
 signal closed
@@ -280,20 +278,10 @@ func _populate_spawn_list(sim: Simulation) -> void:
 
 
 # Retail's inline text markup (<cRRGGBB> colour, <b> bold) the compiled list
-# cannot draw yet — stripped for display only.
+# cannot draw yet — stripped for display only, with retail's own stripper
+# (the engine's hud::strip_inline_tags [orig: Chat_StripHtmlTags @0x4983f0]).
 static func _strip_inline_tags(text: String) -> String:
-	var out := ""
-	var i := 0
-	while i < text.length():
-		if text[i] == "<":
-			var close := text.find(">", i)
-			if close < 0:
-				return out + text.substr(i)
-			i = close + 1
-			continue
-		out += text[i]
-		i += 1
-	return out
+	return Simulation.strip_inline_tags(text)
 
 
 # The team-change service is unmodeled: hide the swap/team buttons (retail
@@ -328,21 +316,11 @@ func _apply_statics(sim: Simulation) -> void:
 	if respawn_id >= 0:
 		var kind := int(status.get("queued_kind", 0))
 		_driver.set_widget_shown(respawn_id, kind != 0)
-		if kind == 1:
-			_driver.set_widget_text(respawn_id, "%s  <cFF4040>%d" % [
-					_game_text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
-					int(status.get("queued_seconds", 0))])
-		elif kind == 2:
-			var zone_index := int(status.get("queued_zone_index", 0))
-			if bool(status.get("queued_numbered", false)):
-				var name_key := "STRWPNAME%03d" % (zone_index + 1)
-				_driver.set_widget_text(respawn_id, "'%s':  <cFF4040>%d" % [
-						_game_text("WPNames", name_key, "Spawn Point"),
-						int(status.get("queued_seconds", 0))])
-			else:
-				_driver.set_widget_text(respawn_id, "%s:  <cFF4040>%d" % [
-						String.chr(ZONE_LETTER_BASE + zone_index),
-						int(status.get("queued_seconds", 0))])
+		if kind != 0:
+			# The three sprintf arms are the engine's deploy_status_text
+			# (world/deploy_screen_feed.h), resolved through gametext by the sim.
+			_driver.set_widget_text(respawn_id,
+					sim.get_deploy_status_text(Strings.get_table("gametext")))
 	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
 	if psp_id >= 0:
 		var show_psp := bool(status.get("show_psp_respawn", false))

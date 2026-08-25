@@ -1,4 +1,4 @@
-// The DEATH-screen facts the replica fold carries (client_replica_match.cpp):
+// The DEATH-screen facts the replica fold carries (client_replica_death.cpp):
 //   * the three phase-0 0x0A sub-block-0 whole-second timers beside the
 //     pre-round timer [orig: NapiNPClientMsg_0x00A @0x430084 / @0x43009f /
 //     @0x4300c3], retained across a non-phase-0 frame like the client globals;
@@ -114,6 +114,6 @@ int main() {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;
 	}
-	std::printf("client_replica_match_test OK\n");
+	std::printf("client_replica_death_test OK\n");
 	return 0;
 }

@@ -127,9 +127,28 @@ void test_statics() {
 	CHECK(!deploy_statics_visibility(in).medic);
 }
 
+// The STATIC_RESPAWN_MSG1 text arms [orig: @0x5538e7..0x553a7b].
+void test_status_text() {
+	DeployStatusLine line;
+	CHECK(deploy_status_text(line, "Respawn penalty", "") == "");
+	line.kind = DeployStatusLine::Kind::Penalty;
+	line.seconds = 7;
+	CHECK(deploy_status_text(line, "Respawn penalty", "") == "Respawn penalty  <cFF4040>7");
+	line.kind = DeployStatusLine::Kind::Wave;
+	line.seconds = 12;
+	line.numbered = true;
+	line.zone_index = 4;
+	CHECK(deploy_status_text(line, "", "Alpha") == "'Alpha':  <cFF4040>12");
+	line.numbered = false;
+	line.zone_index = 2;
+	line.seconds = 30;
+	CHECK(deploy_status_text(line, "", "") == "C:  <cFF4040>30");
+}
+
 } // namespace
 
 int main() {
+	test_status_text();
 	test_rows_sort_and_occupants();
 	test_unsecured_zone_occupants_land_after_row_zero();
 	test_status_line();

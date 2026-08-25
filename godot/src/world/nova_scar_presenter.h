@@ -20,7 +20,7 @@
 // (shaders/scar_quad_hole.gdshader: the same plus the GREATER/128 alpha test,
 // z-write, cull none). The ONLY device folds are the view-space pull that
 // replaces the D3D depth bias and the winding the sim packer applies with the
-// coordinate fold (retail: the scar batch drawer Terrain_RenderFoliageBatches
+// coordinate fold (retail: the scar batch drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches)
 // @0x5ccd10 — the IDB's kong misnomer, Scar_DrawBatches proposed — under
 // Scar_RenderAllCaches @0x5CDF70; the strip table Scar_LoadTextures @0x5CC2E0).
 

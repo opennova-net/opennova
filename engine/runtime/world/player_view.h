@@ -50,7 +50,7 @@ constexpr int32_t kNvgGainMax = 4;
 constexpr float kTpAnchorEase = 0.25f;
 // The first-person eye pull-back along the full view rotation: -0x3000 on the
 // view-frame FORWARD axis [orig: Math_FixedPointTransformPoint22 of
-// (-0x3000, 0, 0) added onto g_view_pos @ 0x438001..0x438031].
+// (-0x3000, 0, 0) added onto g_view_pos_x/y @ 0x438001..0x438031].
 constexpr float kFpEyePullback = 0.1875f;
 // The CameraOffset floor and the non-person eye bump.
 // [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
@@ -258,7 +258,7 @@ float player_view_scope_fraction(const PlayerViewState &v);
 // @ 0x4df4f9]) and returns true when the SETTLED-at-scope auto-unscope must
 // fire: movement while fully sighted on a Scoped (flags 1) weapon routes
 // through the normal scope toggle [orig: g_weaponScopeActive && Def->Flags & 1
-// -> Player_ToggleWeaponScope @ 0x4df4c9..0x4df4ec] — the caller runs its
+// -> Player_ToggleWeaponScope, the call @ 0x4df4ec from the gate @ 0x4df4c9] — the caller runs its
 // standard disengage, and the toggle's own ForceScoped pin applies there.
 // The mid-ease reversal and the auto-re-raise legs (@ 0x4df548 / @ 0x4df5ae /
 // @ 0x4df607) are witnessed-deferred: they keep g_scopeEngaged latched while

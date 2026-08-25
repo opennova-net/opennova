@@ -292,7 +292,7 @@ private:
 	void apply_entity_death(uint16_t handle_packed, int16_t killer_source);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
-	// Small per-match state messages live together in client_replica_match.cpp;
+	// The death-screen folds live together in client_replica_death.cpp;
 	// this remains one pipeline with no secondary client state or router.
 	void apply_death_camera_target(const std::vector<uint8_t> &body);
 	void apply_player_downed_state(const std::vector<uint8_t> &body);

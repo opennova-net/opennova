@@ -21,10 +21,10 @@ delivery path:
   client count and transport differ. The host's own player is a **server-side entity** built by
   `[orig: Server_BuildPlayerInfoAndAdd @ 0x51d560]`, not a wire-received one (§5.2a).
 - The host emits each S2C as a **wire byte message** — `[orig: NapiNPServer_SendFiltered @ 0x4C87E0]`
-  → `[orig: NapiNPServer_SendToConn @ 0x4c4f20]` → `[orig: NapiNPConnection_QueueMessage @ 0x628640]`
+  → `[orig: NapiNPServer_SendToConn @ 0x4c4f20]` → `[orig: CNapiNPConnection_QueueMessage @ 0x628640]`
   — never by pointer to the client handler. The receive side `[orig: NapiNPProtocol_PumpRecvQueues @
   0x6266a0]` drains a **byte circular-buffer FIFO**, dispatches by opcode, then
-  `[orig: NapiNPConnection_ParseMessages @ 0x625bc0]` runs the msg_id dispatch — the **identical byte
+  `[orig: CNapiNPConnection_ParseMessages @ 0x625bc0]` runs the msg_id dispatch — the **identical byte
   path** for socket and in-process. Mode 1 only skips `sendto`/`recvfrom`; it loops the serialized
   datagram back into the same recv FIFO in-process.
 

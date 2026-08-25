@@ -264,7 +264,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// profile ids, playerClass <- g_charClassTeam1/2 (clamped [5,9] at session start).
 		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_avatarTeam1/2 + g_charClassTeam1/2
 		// <- apply_session_settings_to_globals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
-		// via sub_57AE60); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
+		// via Avatars_ResolveSelectionIndex (ex sub_57AE60)); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];

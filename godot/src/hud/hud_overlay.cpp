@@ -1,5 +1,6 @@
 #include "hud_overlay.h"
 
+#include "friendly_tag_flags.h"
 #include "nova_hud_pos.h"
 #include "resource_index/nova_resource_root.h"
 #include "simulation/nova_simulation.h"
@@ -1035,13 +1036,14 @@ void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
 		if (i < p_health_ratios_fp16.size())
 			tag.health_ratio_fp16 = p_health_ratios_fp16[i];
 		const int32_t flags = i < p_flags.size() ? p_flags[i] : 0;
-		tag.medic = (flags & 1) != 0;
-		tag.speaking = (flags & 2) != 0;
-		tag.player = (flags & 4) != 0;
-		tag.dead = (flags & 8) != 0;
-		tag.has_slot = (flags & 16) != 0;
-		tag.medic_request = (flags & 32) != 0;
-		tag.revive_seconds = static_cast<uint8_t>((flags >> 8) & 0xFF);
+		tag.medic = (flags & friendly_tag_flags::kMedic) != 0;
+		tag.speaking = (flags & friendly_tag_flags::kSpeaking) != 0;
+		tag.player = (flags & friendly_tag_flags::kPlayer) != 0;
+		tag.dead = (flags & friendly_tag_flags::kDead) != 0;
+		tag.has_slot = (flags & friendly_tag_flags::kHasSlot) != 0;
+		tag.medic_request = (flags & friendly_tag_flags::kMedicRequest) != 0;
+		tag.revive_seconds = static_cast<uint8_t>(
+				(flags >> friendly_tag_flags::kReviveShift) & friendly_tag_flags::kReviveMax);
 		state_.friendly_tags.push_back(tag);
 	}
 	queue_redraw();

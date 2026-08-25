@@ -72,7 +72,7 @@ public:
     // Player-AWOL 64-tick quanta: incremented once per full quarter cycle while
     // the local player sits outside every active zone, reset otherwise; the
     // PlayerAwol trigger compares it against the authored threshold.
-    // [orig: counter dword_A89160, updated by Entity_UpdateStuckCounter
+    // [orig: counter dword_A89160, updated by Entity_UpdatePlayerAwolCounter
     // @0x439dc0 from the quarter pass @0x454d50 when the cursor is 0] (D-EVT-2)
     int32_t awol_count() const { return awol_64tick_count_; }
 

@@ -4,10 +4,10 @@
 // hud/end_round_statistics.h; the shell resolves the title and Epilog labels
 // and formats the values because it owns the string tables.
 // [orig: HUD_DrawEndRoundStatistics @0x5b7600, called from the frame drawer
-//  sub_5C0060 @0x5c0092 while the dword_24C18AC toggle is set — the label box
+//  HUD_DrawOverlayPanels @0x5c0092 while the dword_24C18AC toggle is set — the label box
 //  HUD_DrawLabelBox(ctx, 128, top, 896, top + 340, SCORE_TITLE, -1) @0x5b7671,
-//  labels left at x 200 via sub_580B40 -> HUD_DrawTextLeft_HalfBright, values
-//  right-aligned at x 620 via sub_580BC0 -> HUD_DrawTextRightAligned_HalfBright,
+//  labels left at x 200 via HUD_DrawTextLeftScaled (ex sub_580B40) -> HUD_DrawTextLeft_HalfBright, values
+//  right-aligned at x 620 via HUD_DrawTextRightAlignedScaled (ex sub_580BC0) -> HUD_DrawTextRightAligned_HalfBright,
 //  all in g_hudLabelFontLarge.]
 
 #include <hud/hud_frame.h>

@@ -50,7 +50,7 @@ var _class_allow_mask := WeaponDatabase.CLASS_ALLOW_ALL
 # the WEAPON on-show handler @0x567370]. SP leaves this false.
 var _class_selection_enabled := false
 # The current kit's canonical parent weapon.def ids; each slot reselects its row
-# [orig: g_armoryLoadoutBufferByClass -> select-by-adm-index sub_645240 in
+# [orig: g_armoryLoadoutBufferByClass -> select-by-adm-index UIList_SelectByValue @0x645240 in
 # populate_ammo_type_combo_boxes @0x564930]. Per-class buffer MEMORY stays deferred.
 var _current_primary := ""
 var _current_secondary := ""
@@ -300,7 +300,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 		dicts.append(pair[1])
 	_slot_rows[control] = dicts
 	_set_combo_items(combo, rows)
-	# Each slot re-selects its row from the canonical parent tuples [orig: sub_645240
+	# Each slot re-selects its row from the canonical parent tuples [orig: UIList_SelectByValue @0x645240
 	# select-by-adm-index in @0x564930]; the per-class buffer MEMORY stays deferred.
 	var current := ""
 	match control:

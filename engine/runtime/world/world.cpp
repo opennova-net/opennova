@@ -1030,13 +1030,13 @@ bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t targ
 }
 
 // WAC `ssnrelease` -- the RELEASE half of the AI boarding order, and the reason a
-// transported squad ever gets out again. [orig: sub_4F7420 @0x4f7420]
+// transported squad ever gets out again. [orig: WacCmd_SsnRelease @0x4f7420]
 //
 //   if ( !v3 || !v3->ItemTypeIndex || !v3->parentEntity ) return 0;
 //   Entity_DetachFromVehicleIfServer(v3);
 //   if ( v3->aiRuntime ) { aiRuntime[37] = 0; aiRuntime[35] = 0; }
 //
-// It is the exact twin of the `ssn2ssn` setter (sub_4F7330 @0x4f7330, which arms
+// It is the exact twin of the `ssn2ssn` setter (WacCmd_SsnToSsn @0x4f7330, which arms
 // aiRuntime[37]=125 + [38]=target + [36]=carrier and zeroes thinkCooldown). Retail
 // has NO arrival-driven unload anywhere -- all 20 Entity_DetachFromVehicleIfServer
 // call sites are death/damage, a waypoint redirect, destroy, or spawn reset -- so
@@ -1214,7 +1214,7 @@ bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, in
 }
 
 // BMS action 27, PARTICLE_EFFECT [orig: EventAction_Dispatch case 0x1B @0x4542e0 ->
-// sub_4540E0 @0x4540e0]. Retail walks POOL 3, matches `def type == 6088` and
+// EventAction_SpawnParticleEffect (ex sub_4540E0) @0x4540e0]. Retail walks POOL 3, matches `def type == 6088` and
 // `entity[167] == param1`, and spawns one emitter per match at the entity's position,
 // caching the handle at entity[115].
 //
@@ -1432,7 +1432,7 @@ void EnvNetworkState::command_overcast(int32_t authored_percent, int32_t seconds
 }
 
 void EnvNetworkState::command_quake(int32_t authored_duration) noexcept {
-    // [orig: sub_4ED4C0 — Env_QuakeTicks = 6 * value]
+    // [orig: WacCmd_Quake (ex sub_4ED4C0) — Env_QuakeTicks = 6 * value]
     quake_ticks = authored_duration <= 0
             ? 0u
             : static_cast<uint32_t>(static_cast<uint64_t>(authored_duration) * 6u);
@@ -1759,7 +1759,7 @@ void count_mission_units(World &world) {
     // vehicle(3/4)/aircraft(9)/infantry split is fold-consumed as the total.
     // [orig: Score_ClassifyEntityForCounts @0x4fd070 — player @0x4fd074,
     //  team gate @0x4fd08d, def+0x196 gate @0x4fd09f, total @0x4fd0a8;
-    //  driven over both pools by sub_509DC0 @0x509e13..0x509e4a]
+    //  driven over both pools by Score_CountMissionSubgoalsAndUnits @0x509e13..0x509e4a]
     int32_t total = 0;
     world.registry.for_each([&](const Entity &e) {
         if (e.player_class != 0) return;
@@ -1772,7 +1772,7 @@ void count_mission_units(World &world) {
 
 int32_t count_defined_subgoals(const World &world) {
     // The leading run of authored win conditions before the first 0 or 0xFF
-    // entry, at most eight. [orig: sub_509DC0 @0x509dc2..0x509dd1 scanning
+    // entry, at most eight. [orig: Score_CountMissionSubgoalsAndUnits @0x509dc2..0x509dd1 scanning
     //  the header win-condition ids; the count lands in dword_C8468C]
     int32_t count = 0;
     for (int slot = 1; slot <= 8; ++slot) {

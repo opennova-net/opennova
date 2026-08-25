@@ -1187,7 +1187,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// Despite the historical catalog name, byte 1 is the live player-slot
 			// team. Retail overwrites the same byte_A85B48 latch installed by
 			// 0x04, and its subsequent 0x2F copies this value verbatim.
-			// [orig: sub_510890 @0x510890 writes playerSlot+416;
+			// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 writes playerSlot+416;
 			// NapiNPClientMsg_SetSpectatorMode @0x425A32]
 			if (m.payload.size() >= 2) assigned_team_ = m.payload[1];
 		} else if (m.tag == s2c::TEAM_ASSIGN) {

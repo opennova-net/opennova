@@ -6,15 +6,47 @@
 // (npruntime/stat_screen_feed.h).
 #include "simulation/nova_simulation_internal.h"
 
+#include "rtxt/rtxt_string_file.h"
+
 #include <hud/end_round_overlay.h>
 #include <hud/end_round_statistics.h>
+#include <hud/feed_format.h>
 #include <npruntime/stat_screen_feed.h>
+#include <world/game_type.h>
 
 #include <algorithm>
+#include <functional>
+#include <string>
 
 using namespace godot;
 
 namespace {
+
+// GameText_GetString over the Overlays section: present -> true + value (may
+// be empty), missing -> false. A null table resolves nothing.
+opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gametext) {
+	return [gametext](const std::string &key, std::string &value) {
+		if (gametext.is_null()) return false;
+		const String k = String::utf8(key.c_str());
+		if (!gametext->has_string_in_section("Overlays", StringName(k))) return false;
+		value = gametext->get_string_in_section("Overlays", StringName(k)).utf8().get_data();
+		return true;
+	};
+}
+
+// The stat.mnu column header: a keyed header resolves like the ladder
+// (present + non-empty, else the "!..." fallback stripped); the key-less NAME
+// / Squad columns show their fallback stripped.
+String resolve_column_header(const opennova::hud::EndRoundTextLookup &lookup,
+		const opennova::np::StatScreenColumn &c) {
+	std::string text = c.header_fallback;
+	if (!c.header_key.empty()) {
+		std::string value;
+		if (lookup(c.header_key, value) && !value.empty()) return String::utf8(value.c_str());
+	}
+	if (!text.empty() && text[0] == '!') text.erase(0, 1);
+	return String::utf8(text.c_str());
+}
 
 Dictionary arg_to_dict(const opennova::hud::EndRoundArg &a) {
 	Dictionary d;
@@ -55,6 +87,10 @@ Dictionary Simulation::get_end_round_state() const {
 	out["round_ticks"] = std::max(0, remaining);
 	out["death_screen"] = local_death_screen_active();
 	out["local_team"] = static_cast<int>(runtime_->assigned_team());
+	// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
+	// 0x10000 bit, world/game_type.h; the show callback's witness is
+	// stat_screen_feed.h's).
+	out["team_mode"] = opennova::game_type::is_team(runtime_->game_type());
 	// The round-cycle handoff's session half: the host's post-round linger
 	// expiry closes the session (retail: Server_TickUpdate's drain sets
 	// g_mission_exit_reason = 3 @0x51db63 — the map cycle); a joiner's session
@@ -65,15 +101,10 @@ Dictionary Simulation::get_end_round_state() const {
 	return out;
 }
 
-TypedArray<Dictionary> Simulation::get_end_round_lines() const {
-	// The overlay text ladder (retail: draw_endround_stats_overlay @0x5b7cd0, see hud/end_round_overlay.h):
-	// {key, fallback, literal, args[{key, fallback, literal, number,
-	// is_number}], y} per line; the presenter resolves Overlays/<key>.
-	TypedArray<Dictionary> out;
-	if (!runtime_) return out;
-	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
-	if (!er.header_known) return out;
+opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const {
 	opennova::hud::EndRoundOverlayInput in;
+	if (!runtime_) return in;
+	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
 	in.game_type = runtime_->game_type();
 	in.draw = er.header.draw != 0;
 	in.winner_team = er.header.winner_team;
@@ -94,7 +125,19 @@ TypedArray<Dictionary> Simulation::get_end_round_lines() const {
 	in.round_time_remaining_ticks = std::max(0, joiner_
 			? runtime_->state().round_time_remaining_ticks
 			: (world_ ? world_->match.remaining_ticks() : -1));
-	for (const opennova::hud::EndRoundLine &line : opennova::hud::end_round_overlay_lines(in)) {
+	return in;
+}
+
+TypedArray<Dictionary> Simulation::get_end_round_lines() const {
+	// The overlay text ladder (retail: draw_endround_stats_overlay @0x5b7cd0, see hud/end_round_overlay.h):
+	// {key, fallback, literal, args[{key, fallback, literal, number,
+	// is_number}], y, fold} per line — the unresolved form, for inspection;
+	// get_end_round_overlay is the resolved feed the presenter draws.
+	TypedArray<Dictionary> out;
+	if (!runtime_) return out;
+	if (!runtime_->state().end_round.header_known) return out;
+	for (const opennova::hud::EndRoundLine &line :
+			opennova::hud::end_round_overlay_lines(end_round_overlay_input())) {
 		Dictionary d;
 		d["key"] = String::utf8(line.key.c_str());
 		d["fallback"] = String::utf8(line.fallback.c_str());
@@ -103,23 +146,58 @@ TypedArray<Dictionary> Simulation::get_end_round_lines() const {
 		for (const opennova::hud::EndRoundArg &a : line.args) args.push_back(arg_to_dict(a));
 		d["args"] = args;
 		d["y"] = line.y;
-		// The empty-resolve fold the presenter applies (see
-		// hud::EndRoundEmptyFold): 1 = headline STROVER1 re-lookup,
-		// 2 = collapse the line and shift the ladder below it up 32 px.
+		// The empty-resolve fold (hud::EndRoundEmptyFold): 1 = headline
+		// STROVER1 re-lookup, 2 = collapse the line and shift the ladder
+		// below it up 32 px.
 		d["fold"] = static_cast<int>(line.fold);
 		out.push_back(d);
 	}
 	return out;
 }
 
-TypedArray<Dictionary> Simulation::get_end_round_columns(int p_table_width) const {
+Dictionary Simulation::get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const {
+	// The resolved ladder: keys through the gametext Overlays table, the
+	// empty-resolve folds and the printf forms applied by the engine
+	// (hud::end_round_overlay_resolve), plus the design-space safe area.
+	Dictionary out;
+	PackedStringArray texts;
+	PackedInt32Array ys;
+	if (runtime_ && runtime_->state().end_round.header_known) {
+		const std::vector<opennova::hud::EndRoundResolvedLine> lines =
+				opennova::hud::end_round_overlay_resolve(
+						opennova::hud::end_round_overlay_lines(end_round_overlay_input()),
+						overlays_lookup(p_gametext));
+		for (const opennova::hud::EndRoundResolvedLine &l : lines) {
+			texts.push_back(String::utf8(l.text.c_str()));
+			ys.push_back(l.y);
+		}
+	}
+	out["texts"] = texts;
+	out["ys"] = ys;
+	out["top"] = opennova::hud::kEndRoundOverlayTop;
+	out["bottom"] = opennova::hud::kEndRoundOverlayBottom;
+	return out;
+}
+
+int Simulation::end_round_stat_screen_delay_msec() {
+	return opennova::hud::kEndRoundStatScreenDelayMsec;
+}
+
+String Simulation::strip_inline_tags(const String &p_text) {
+	return String::utf8(opennova::hud::strip_inline_tags(p_text.utf8().get_data()).c_str());
+}
+
+TypedArray<Dictionary> Simulation::get_end_round_columns(int p_table_width,
+		const Ref<RtxtStringFile> &p_gametext) const {
 	TypedArray<Dictionary> out;
 	if (!runtime_) return out;
 	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
 	if (!er.known) return out;
+	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
 	for (const opennova::np::StatScreenColumn &c :
 			opennova::np::stat_screen_columns(er.board, false, p_table_width)) {
 		Dictionary d;
+		d["header"] = resolve_column_header(lookup, c);
 		d["header_key"] = String::utf8(c.header_key.c_str());
 		d["header_fallback"] = String::utf8(c.header_fallback.c_str());
 		d["literal"] = String::utf8(c.literal.c_str());
@@ -130,7 +208,7 @@ TypedArray<Dictionary> Simulation::get_end_round_columns(int p_table_width) cons
 	return out;
 }
 
-TypedArray<Dictionary> Simulation::get_end_round_rows() const {
+TypedArray<Dictionary> Simulation::get_end_round_rows(int p_tab) const {
 	// The PLAYER SLOT table retail walks is the roster every role's view
 	// folds from 0x46 (name / clan / team). The local row comes from the 0x1D
 	// header's board index, resolved to a connection slot below.
@@ -165,6 +243,9 @@ TypedArray<Dictionary> Simulation::get_end_round_rows() const {
 	}
 	for (const opennova::np::StatScreenRow &r :
 			opennova::np::stat_screen_rows(cs.end_round.board, players, false, local_slot)) {
+		// The tab filter (the engine's stat_screen_row_visible; its witness is
+		// stat_screen_feed.h's).
+		if (!opennova::np::stat_screen_row_visible(p_tab, r.team)) continue;
 		Dictionary d;
 		d["slot"] = static_cast<int>(r.slot);
 		d["team"] = static_cast<int>(r.team);

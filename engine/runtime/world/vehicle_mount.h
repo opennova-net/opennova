@@ -74,7 +74,7 @@ inline bool mount_blocks_weapon_channel(const Entity &entity) {
 // Gunner 3, Driver 5), so the {2,3,5} test is exactly the existing
 // seat_type_blocks_weapon_channel gate; a Passenger keeps the weapon and can
 // still shoot out.
-// [orig: Player_RenderFirstPersonViewModel @0x4bd2a0 (kong 179894) —
+// [orig: Player_RenderFirstPersonViewModel @0x4DED60, the gate @0x4DED80..0x4DEDA1 —
 //  `!vehicle || parentSlot not in {2,3,5} || (attrib & 0x20 && !(attrib & 0x40))`
 //  guards the whole draw; attrib 0x20 = EWEAP, 0x40 = PLAYERCONTROL]
 inline bool mount_hides_fp_viewmodel(const Entity &occupant,
@@ -101,7 +101,7 @@ inline bool mount_collapses_right_hand_row(const Entity &entity) {
 // Host-facing lifecycle for effects that exist only while a vehicle has its single
 // tracked primary occupant (the +368 claimant). Payload fields are the target vehicle's
 // net_id, bms_id, spawn_origin, and packed runtime wire handle.
-// [orig: occupied spawn in entity_update_damage_accumulator_and_shadow @0x48fa70 gate
+// [orig: occupied spawn in Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70 gate
 // @0x48faad (attrib&0x40 && occupantEntity(+368)); release in Entity_DetachFromVehicle
 // @0x4355f0 stop leg @0x4356e9..0x435759 — runs ONLY when the detacher IS the claimant.]
 void emit_vehicle_control_started(World &world, const Entity &vehicle);
@@ -161,7 +161,7 @@ void presnap_vehicle_attach_heading(World &world, Entity &occupant,
 // seat-bone frame; otherwise the portable fallback is vehicle.position +
 // rotate(seat.seat_local, -vehicle.yaw), with Gunner yaw at vehicle.yaw-yaw_offset
 // and other seats at vehicle.yaw+yaw_offset. Shared by every attach path and the AI
-// tick's per-frame seat follow. [orig: UseGun @0x5463d0; ordinary seats @0x4b0c50]
+// tick's per-frame seat follow. [orig: the UseGun attach Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
 void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
                            const Seat &seat);
 

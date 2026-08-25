@@ -23,7 +23,7 @@ namespace {
 // The phase pair is the LITERAL 1/256 * 3.1 (Jointops.exe bytes @0x7C6950 =
 // 0.00390625f, @0x7C9BD0 = 3.1 double) -- not pi/256; corrected 2026-08-23.
 // The org2 (player) arm reads the NEGATED amplitude dbl_7C9BC8 = -1224.0 and
-// subtracts it (kong 149040-149047), so both motors bob in the same phase.
+// subtracts it, so both motors bob in the same phase.
 constexpr int32_t kWaterFloatHysteresis = 0xA000;
 constexpr int32_t kWaterFloatSink = 1225;
 constexpr double kWaterBobAmplitude = 1224.0;
@@ -109,7 +109,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
 // the surface line, the velocity triplet drags, and a look-pitch term lets a
 // moving swimmer dive and surface. The local player alone rides the surface
 // bob; a remote row on the authority gets the flat base.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b8020-0x4b8373; kong 149010-149165]
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b8020-0x4b8373]
 void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity,
                                   int32_t capsule_bottom, bool is_authority,
                                   uint32_t logic_tick) {

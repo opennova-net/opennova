@@ -204,12 +204,12 @@ int32_t team_fallback_marker(uint8_t team) {
 SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
                               uint8_t player_slot, uint8_t team,
                               uint32_t game_type_value) {
-    // CRenderState_GetFieldByIndex(team, 6) returns team field 7: the Deaths
+    // CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)(team, 6) returns team field 7: the Deaths
     // counter (the accessor returns field[index+1]; event case 6 records a
     // death). The initial-start markers therefore serve until the team's first
     // death, after which the respawn chain takes over.
     // [orig: Server_PositionPlayerForSpawn @0x50D1DB;
-    // CRenderState_GetFieldByIndex @0x52D7D0]
+    // CPlayerStats_GetFieldPlusOne @0x52D7D0]
     const bool primary_allowed =
         world.match.team_stats(team)[MatchStats::kDeaths] == 0;
     if (game_type::is_waypoint_family(game_type_value)) {

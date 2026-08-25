@@ -179,6 +179,27 @@ std::string feed_camp_key(uint8_t event_type, uint8_t team) {
 	return std::string();
 }
 
+std::string strip_inline_tags(const std::string &text) {
+    // [orig: Chat_StripHtmlTags @0x4983f0]: on '<' (0x3C) skip to the next
+    // '>' (0x3E) and drop the span; an unterminated tag runs to the end and
+    // is dropped with it; every other byte copies through.
+    std::string out;
+    out.reserve(text.size());
+    size_t i = 0;
+    while (i < text.size()) {
+        const char ch = text[i];
+        if (ch == '<') {
+            const size_t close = text.find('>', i + 1);
+            if (close == std::string::npos) break;
+            i = close + 1;
+            continue;
+        }
+        out += ch;
+        ++i;
+    }
+    return out;
+}
+
 std::string feed_camp_wpname_key(uint8_t level_index) {
 	// [orig: sprintf(key, "STRWPNAME%03d", v141 + 1) @0x4272EC/@0x4273F1].
 	char key[16];

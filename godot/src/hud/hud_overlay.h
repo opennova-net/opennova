@@ -141,11 +141,12 @@ public:
 			const PackedByteArray &p_done);
 	void set_attach_labels(const PackedVector2Array &p_screens,
 			const PackedStringArray &p_texts, const PackedByteArray &p_nearest);
-	// The projected friendly tags (D-HUD-20): parallel typed arrays; flags
-	// bit 0 = medic marker, bit 1 = speaking, bit 2 = player-slot entry,
-	// bit 3 = dead, bit 4 = has a connection slot, bit 5 = medic request
-	// standing, bits 8..15 = the slot's revive countdown in seconds
-	// (retail PlayerSlot +0x10 / +0x2C — the downed legs of the drawer).
+	// The projected friendly tags (D-HUD-20): parallel typed arrays; the
+	// flags word's layout is hud/friendly_tag_flags.h (medic, speaking,
+	// player-slot entry, dead, has a connection slot, medic request standing,
+	// bits 8..15 = the slot's revive countdown in seconds — retail PlayerSlot
+	// +0x10 / +0x2C, the downed legs of the drawer), packed by the Simulation's
+	// get_friendly_tags feed.
 	void set_friendly_tags(const PackedVector2Array &p_screens,
 			const PackedInt32Array &p_dists_q16, const PackedStringArray &p_names,
 			const PackedInt32Array &p_entity_ids,

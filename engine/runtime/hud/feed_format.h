@@ -120,4 +120,11 @@ std::string feed_camp_key(uint8_t event_type, uint8_t team);
 //  the LFP cases 50-53/58, which use the raw index].
 std::string feed_camp_wpname_key(uint8_t level_index);
 
+// Strip retail's inline text markup (`<cRRGGBB>` colour, `<b>` bold — every
+// `<...>` run) from a string: the byte walk that drops each '<'..'>' span and
+// keeps an unterminated '<' tail as-is [orig: Chat_StripHtmlTags @0x4983f0 —
+// the chat senders sanitize with it; a compiled list that cannot draw the
+// markup shows the same stripped text].
+std::string strip_inline_tags(const std::string &text);
+
 } // namespace opennova::hud

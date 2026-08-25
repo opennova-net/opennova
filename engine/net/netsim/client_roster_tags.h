@@ -19,16 +19,19 @@
 
 namespace opennova::netsim {
 
-// The def hit-point lookup for a decoded row's type, the joiner's
-// Entity_GetMaxHealthWithDifficulty stand-in. 0 = no def, which the drawer
-// treats as max 1 [orig: `if (!max) max = 1` @0x5a3b95].
+// The def hit-point lookup for a decoded row's type, the joiner's item-table
+// stand-in for entity->itemDef + Entity_GetMaxHealthWithDifficulty. 0 = NO
+// DEF for that type, which takes the drawer's entry bail [orig: itemDef ==
+// NULL @0x5a39fb]; a null callback resolves every row (max 1, the
+// `if (!max) max = 1` fold @0x5a3b95).
 using RosterTagMaxHealth = std::function<int32_t(uint16_t type_id)>;
 
 // Walk the bound roster slots with an entity (slot+0x0D active, slot+0x24
 // entity) and emit one tag source per player that passes the pass gates and
-// the drawer's entry bails: not self [orig: @0x5a39df], not CARRIED
-// (state_flags & 1 @0x5a39eb), team 0 / local team / death screen
-// [orig: @0x5a4552..0x5a456b], `g_GameType || death screen`
+// the drawer's entry bails (world/friendly_tag_gates.h, shared with the
+// authority walk): not self [orig: @0x5a39df], not CARRIED (state_flags & 1
+// @0x5a39eb), a resolved def [orig: @0x5a39fb], team 0 / local team / death
+// screen [orig: @0x5a4552..0x5a456b], `g_GameType || death screen`
 // [orig: @0x5a456d..0x5a457d]. Each source carries the slot's revive
 // countdown and medic-request latch (slot+0x10 / slot+0x2C) and the row's
 // dead bit (state_flags & 2 — the `Flags & 2` latch @0x5a3c1c).

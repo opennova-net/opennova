@@ -82,7 +82,7 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 		// Completed" fallback. A SELECTED key that resolves to an empty
 		// string re-looks-up Overlays/STROVER1 at draw time (the fold marker;
 		// the presenter applies it) — not the line's own fallback, which
-		// covers only a missing key. [orig: LABEL_30 @0x5b7e59 ->
+		// covers only a missing key. [orig: the empty-headline test @0x5b7e59 ->
 		// GameText_GetStringWithFallback("Overlays", "STROVER1",
 		// "!Mission Completed") @0x5b7e5b]
 		if (!have) head = key_line("STROVER1", 300, "!Mission Completed");
@@ -212,7 +212,7 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 			// A selected second line that resolves to an empty string draws
 			// nothing and leaves y at 350 — the presenter collapses it via the
 			// fold marker so the score lines start at 382, not 414.
-			// [orig: LABEL_144 @0x5b83e5 — draw @0x5b83fe and the y=382 store
+			// [orig: the empty-second-line test @0x5b83e5 — draw @0x5b83fe and the y=382 store
 			//  @0x5b8406 run only when text_buf[0]]
 			line.fold = EndRoundEmptyFold::kCollapse;
 			out.push_back(line);
@@ -256,6 +256,112 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 		time.args.push_back(number_arg(t / 62 / 60));
 		time.args.push_back(number_arg(t / 62 % 60));
 		out.push_back(time);
+	}
+	return out;
+}
+
+namespace {
+
+// GameText_GetStringWithFallback's shape: the key resolves when present and
+// non-empty, else the fallback with its leading "!" marker stripped; an
+// empty key is a literal.
+std::string resolve_text(const EndRoundTextLookup &lookup, const std::string &key,
+		const std::string &fallback, const std::string &literal) {
+	if (key.empty()) return literal;
+	std::string value;
+	if (lookup && lookup(key, value) && !value.empty()) return value;
+	if (!fallback.empty() && fallback[0] == '!') return fallback.substr(1);
+	return fallback;
+}
+
+bool key_present_but_empty(const EndRoundTextLookup &lookup, const std::string &key) {
+	if (key.empty() || !lookup) return false;
+	std::string value;
+	return lookup(key, value) && value.empty();
+}
+
+struct ResolvedArg {
+	std::string text;
+	int32_t number = 0;
+	bool is_number = false;
+};
+
+// The ladder's sprintf forms: %s, %d / %i, %ld, %02d. The arm's argument list
+// always matches its format in retail; an unmatched spec is left in place.
+std::string sprintf_ladder(const std::string &fmt, const std::vector<ResolvedArg> &args) {
+	std::string out;
+	size_t next = 0;
+	for (size_t i = 0; i < fmt.size(); ++i) {
+		if (fmt[i] != '%') {
+			out += fmt[i];
+			continue;
+		}
+		size_t j = i + 1;
+		if (j < fmt.size() && fmt[j] == '%') {
+			out += '%';
+			i = j;
+			continue;
+		}
+		std::string spec = "%";
+		while (j < fmt.size() && fmt[j] >= '0' && fmt[j] <= '9') spec += fmt[j++];
+		while (j < fmt.size() && fmt[j] == 'l') ++j;
+		if (j >= fmt.size() || next >= args.size()) {
+			out += fmt.substr(i);
+			break;
+		}
+		const char conv = fmt[j];
+		const ResolvedArg &a = args[next];
+		if (conv == 's') {
+			out += a.text;
+			++next;
+		} else if (conv == 'd' || conv == 'i') {
+			char buf[32];
+			std::snprintf(buf, sizeof buf, (spec + "d").c_str(),
+					static_cast<int>(a.is_number ? a.number : 0));
+			out += buf;
+			++next;
+		} else {
+			out += fmt.substr(i, j - i + 1);
+		}
+		i = j;
+	}
+	return out;
+}
+
+} // namespace
+
+std::vector<EndRoundResolvedLine> end_round_overlay_resolve(
+		const std::vector<EndRoundLine> &lines, const EndRoundTextLookup &lookup) {
+	std::vector<EndRoundResolvedLine> out;
+	int y_shift = 0;
+	for (const EndRoundLine &line : lines) {
+		std::string fmt;
+		if (line.fold != EndRoundEmptyFold::kNone && key_present_but_empty(lookup, line.key)) {
+			if (line.fold == EndRoundEmptyFold::kHeadlineStrover1) {
+				fmt = resolve_text(lookup, "STROVER1", "!Mission Completed", "");
+			} else {
+				// The second line draws nothing and every later line moves
+				// up 32 px (retail's y stays 350, so the score lines start
+				// at 382) [orig: LABEL_144 @0x5b83e5].
+				y_shift = 32;
+				continue;
+			}
+		} else {
+			fmt = resolve_text(lookup, line.key, line.fallback, line.literal);
+		}
+		std::vector<ResolvedArg> args;
+		args.reserve(line.args.size());
+		for (const EndRoundArg &a : line.args) {
+			ResolvedArg r;
+			r.is_number = a.is_number;
+			r.number = a.number;
+			if (!a.is_number) r.text = resolve_text(lookup, a.key, a.fallback, a.literal);
+			args.push_back(std::move(r));
+		}
+		EndRoundResolvedLine resolved;
+		resolved.text = args.empty() ? fmt : sprintf_ladder(fmt, args);
+		resolved.y = line.y - y_shift;
+		out.push_back(std::move(resolved));
 	}
 	return out;
 }

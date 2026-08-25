@@ -50,12 +50,17 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 // [orig: Entity_InitVehicleAIFromDef seeds brain[50]/brain[49]
 //  @0x4688D3/@0x4688C7].
 
-// The mission's distinct ai_textfile profile set, lowercase, in entity order
-// (first occurrence wins), and each profile's parsed .aip row. Files that
-// parse no witnessed field contribute no row, exactly like the speeds-only
-// resolver this extends.
+// The mission's distinct profile-name set, lowercase, in entity order (first
+// occurrence wins), and each profile's parsed .aip row. Each entity's name is
+// resolved the way retail's AI init does (ai_profile_name_for: the ai_textfile,
+// else — for a placed item whose class the embedder knows — the def's
+// default_aip or "helo1"), so a nameless vehicle's fallback profile is loaded
+// too. Files that parse no witnessed field contribute no row, exactly like
+// the speeds-only resolver this extends.
 std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
-		const BootFileSource &files, const bms::File &mission);
+		const BootFileSource &files, const bms::File &mission,
+		const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &
+				ai_profile_defaults = {});
 
 // What the embedder supplied, gating which steps run. The flags mirror the
 // nullable inputs of the shell's setup(): a missing resource root skips every

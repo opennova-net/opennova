@@ -52,7 +52,7 @@ constexpr bool is_player_spawn_marker_type(int32_t item_id) {
 // set used by non-Co-op marker scoring. The mission-global cycle advances at
 // the same non-Co-op/scatter sites as retail.
 // [orig: Server_PositionPlayerForSpawn @0x50CF60;
-// Entity_FindBestSpawnPoint @0x50CCC0; CRenderState_GetFieldByIndex
+// Entity_FindBestSpawnPoint @0x50CCC0; CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)
 // @0x52D7D0 field 6]
 SpawnPointResult resolve_player_spawn_pose(
     World &world, EntityHandle spawning_player, EntityHandle target,

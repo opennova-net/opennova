@@ -56,7 +56,9 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 }
 
 std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
-		const BootFileSource &files, const bms::File &mission) {
+		const BootFileSource &files, const bms::File &mission,
+		const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &
+				ai_profile_defaults) {
 	std::vector<PromoteOptions::AiProfileRow> rows;
 	if (!files.valid()) return rows;
 	auto have = [&rows](const std::string &profile) {
@@ -67,14 +69,17 @@ std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
 	// The same entity walk order as the shell resolver it replaces (markers,
 	// items, buildings, organics) — first occurrence wins the dedup, so the
 	// order is semantic.
-	const std::vector<bms::Entity> *groups[] = {
-			&mission.markers, &mission.items, &mission.buildings,
-			&mission.organics};
-	for (const std::vector<bms::Entity> *group : groups) {
-		for (const bms::Entity &entity : *group) {
-			// ai_textfile, lowercase; first occurrence wins.
-			const std::string profile =
-					ascii_lower(entity.name2, sizeof(entity.name2));
+	struct Group { const std::vector<bms::Entity> *entities; bool placed_item; };
+	const Group groups[] = {
+			{&mission.markers, false}, {&mission.items, true},
+			{&mission.buildings, false}, {&mission.organics, false}};
+	for (const Group &group : groups) {
+		for (const bms::Entity &entity : *group.entities) {
+			// The name retail's AI init would load for this record: the
+			// ai_textfile, else (a placed vehicle item) the def's default_aip
+			// or "helo1" — lowercase; first occurrence wins.
+			const std::string profile = ai_profile_name_for(
+					entity, group.placed_item, ai_profile_defaults);
 			if (profile.empty() || have(profile)) continue;
 			const std::string file_name = profile + ".aip";
 			if (!files.has_file(file_name)) continue;

@@ -29,7 +29,7 @@
 // is Server_SendInitialGameStateToPlayer over conn.burst. The F3 dcb-timing fix and the D.0 name-match
 // are ported VERBATIM. Wire bytes stay byte-exact.
 //
-// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00; NapiNPConnection_ParseMessages @0x625BC0;
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00; CNapiNPConnection_ParseMessages @0x625BC0;
 //  accept loop apps/novaworld_server/nw_udp_listener.cpp run_loop]
 namespace opennova::np {
 
@@ -113,7 +113,7 @@ void configure_session_runtime(NapiNPServerCtx &ctx);
 
 // Decode + dispatch one raw inbound datagram from `peer` (the bytes off the socket, envelope+NWU
 // still on). `now_tick` feeds the game-session tag clock. Returns the outbound datagrams to ship
-// back + events to react to. [orig: NapiNPConnection_ParseMessages @0x625BC0 / the accept switch]
+// back + events to react to. [orig: CNapiNPConnection_ParseMessages @0x625BC0 / the accept switch]
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     const uint8_t *raw, std::size_t len, uint32_t now_tick = 0,
                                     bool defer_in_match_replies = false);

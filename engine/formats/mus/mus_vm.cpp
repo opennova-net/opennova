@@ -329,7 +329,7 @@ static void op_empty(MusVM *vm) {
 /* Witnessed: Jointops.exe!VmOp_Nop @ 0x672780. */
 static void op_nop(MusVM *vm) { (void)vm; }
 
-/* [orig: AudioVM_Op_IncGlobal/DecGlobal @ 0x672AE0/0x672AF0] inc/dec a single
+/* [orig: AudioVM_Op_IncGlobal @ 0x672AE0, AudioVM_Op_DecGlobal @ 0x672AF0] inc/dec a single
    BYTE at globals[off] (NOT a full int32). D-MUS-5: unlike pop_g, the original
    does NOT raise the globals-dirty signal (dword_3246B28) and fires no embedder
    notification here, so we deliberately omit notify_var_changed to match. */

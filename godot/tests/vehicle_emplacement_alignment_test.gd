@@ -384,25 +384,43 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	assert_eq(int(carrier_model.get_ctrl_values().get("HELO_ROTOR", 0)), 0,
 			"an uncrewed Blackhawk's rotor rests at zero")
 
-	assert_true(rt.get_sim().local_player_toggle_mount(),
+	# The mount command seats the player through the best-seat pick, which
+	# prefers the ctrlx/drvrx control seat [orig: Entity_FindBestSeatSlot
+	# @0x4351f0 — ctrlx/drvrx 0x2000 below sitex 0x200000, lowest wins
+	# @0x4353ee..0x43540e]; the USE toggle's nearest-seat scan can land on a
+	# passenger bench, and a passenger never claims the engine-start latch
+	# (+0x170 — retail: Entity_AttachToVehicleSlot @0x4946d0 claims it for
+	# ctrlx/drvrx only), so the rotor would rest in retail too.
+	assert_eq(rt.get_sim().debug_crew_local_player(int(placed.get("bms_id", 0))), OK,
 			"the local player takes the Blackhawk's control seat")
 	rt.play()
 	for _tick in range(62):
 		var input := MissionFrameInput.new()
 		input.delta_seconds = Simulation.tick_dt()
 		assert_true(rt.advance_session_frame(input).did_tick())
+	var card: Dictionary = rt.get_sim().get_entity_debug(0)
+	assert_eq(int(card.get("item_id", 0)), CARRIER_TYPE_ID,
+			"AI card 0 is the Blackhawk's brain")
+	assert_eq(int(card.get("profile_type", 0)), 1,
+			"a bare-placed Blackhawk still takes the type-HELO helo1 profile")
+	assert_true(bool(card.get("primary_occupant", false)),
+			"the pilot claimed the engine-start latch")
 	var ctrls: Dictionary = carrier_model.get_ctrl_values()
 	assert_true(ctrls.has("HELO_ROTOR"),
 			"the crewed carrier owns the HELO_ROTOR register")
-	if int(ctrls.get("HELO_ROTOR", 0)) == 0:
-		# The rotor machine runs at the tail of every vehicle mover, and the
-		# listen host has no aircraft mover yet (aircraft_client_tick is the
-		# net-predicted client leg; the host-side helicopter motor is the
-		# world-wac-ai-re §14 residual), so a host-crewed Blackhawk never
-		# reaches vehicle_part_anim_tick. The register plumbing below is what
-		# this witness pins once that mover lands.
-		pending("host-side aircraft mover unported: the crewed Blackhawk's rotor register has no tick to advance it")
-		return
+	# The listen host runs the shared aircraft mover for a player-crewed
+	# helicopter (ai_system.cpp: the direct-air-mover leg's PLAYER pilot arm ->
+	# aircraft_client_tick, whose tail is vehicle_part_anim_tick), so a crewed
+	# Blackhawk's rotor register MUST advance here. A zero is a regression,
+	# never a pending: [orig: Entity_UpdateAircraftPhysics @0x490310 -> the
+	# HELO rotor twin Entity_UpdateHeloRotorSpin @0x48FA70 at its tail
+	# @0x4905A6]. The twin runs only for a brain whose profile is type HELO
+	# (the `profile+0x10 == 1` gate @0x48fa98), and this Blackhawk authors no
+	# ai_textfile — retail's helicopter init falls back to "helo1.aip"
+	# [orig: Entity_InitHelicopterAIFromDef @0x4683C0, the helo1 arm
+	# @0x4684c9], which the boot resolver + promote reproduce, so the register
+	# spins without an authored profile exactly as a bare-placed retail
+	# Blackhawk's does.
 	assert_gt(int(ctrls.get("HELO_ROTOR", 0)), 0,
 			"the rotor angle's high word advanced while crewed")
 	assert_eq(int(ctrls.get("HELO_TAILROTOR", -1)), int(ctrls.get("HELO_ROTOR", 0)),

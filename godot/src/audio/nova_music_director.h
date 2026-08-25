@@ -6,7 +6,7 @@
 // by the play / playw opcodes.
 //
 // Witnessed wire-level paths (engine/formats/mus): Jointops.exe!AudioVM_LoadScriptFile @
-// 0x00672D20 (script load), Jointops.exe!VmOp_Play @ 0x672CB0 + VmOp_PlayWait @
+// 0x00672D20 (script load), Jointops.exe!AudioVM_Op_Play @ 0x672CB0 + AudioVM_Op_PlayWait @
 // 0x672C90 (sound triggers), Jointops.exe!Intrinsic_GSV / GSDV (volume).
 
 #include <godot_cpp/classes/audio_stream_player.hpp>

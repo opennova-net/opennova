@@ -87,6 +87,48 @@ func get_run_session() -> GameRunSession:
 	return _session
 
 
+## Replace the managed run session (tests inject a stub); its status and
+## state signals are rewired to the app.
+func attach_run_session(session: GameRunSession) -> void:
+	if _session != null and _session != session:
+		if _session.status_changed.is_connected(_on_status_changed):
+			_session.status_changed.disconnect(_on_status_changed)
+		if _session.state_changed.is_connected(_on_session_state_changed):
+			_session.state_changed.disconnect(_on_session_state_changed)
+	_session = session
+	if _session != null:
+		if not _session.status_changed.is_connected(_on_status_changed):
+			_session.status_changed.connect(_on_status_changed)
+		if not _session.state_changed.is_connected(_on_session_state_changed):
+			_session.state_changed.connect(_on_session_state_changed)
+	_refresh_actions()
+
+
+## The F8 action: stop the managed process (a no-op status when nothing runs).
+func stop_game() -> void:
+	_stop_game()
+
+
+## Persist the four fields to the ONED config (the close/run path).
+func commit_settings() -> void:
+	_commit_settings()
+
+
+## True when the resource directory field holds an explicit user value rather
+## than the displayed packaged-assets fallback.
+func should_persist_resource_dir() -> bool:
+	return _should_persist_resource_dir()
+
+
+## Show `path` as the implicit packaged-assets fallback: displayed, never
+## persisted until the user types over it.
+func set_implicit_resource_dir(path: String) -> void:
+	resource_dir_edit.text = path
+	_resource_dir_is_implicit = true
+	_implicit_resource_dir = path
+	_refresh_actions()
+
+
 static func bundled_assets_dir(executable_dir: String) -> String:
 	var candidate := executable_dir.path_join("assets").simplify_path()
 	return candidate if ResourceDirSettings.is_valid_root(candidate) else ""

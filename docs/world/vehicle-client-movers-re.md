@@ -3453,7 +3453,7 @@ accumulator, no separate tail-rotor state.
   calls NEITHER rotor machine — its only part register is the wheel phase
   `+0x2B8 += cmd << 13` `@0x48E9F0`, so a boat never draws the rotor PRNG
   word. HELO (1) =
-  `entity_update_damage_accumulator_and_shadow @0x48FA70` (a misnomer;
+  `Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48FA70` (a misnomer;
   proposed `Entity_UpdateHeloRotorSpin`), called from `Entity_UpdateAircraftPhysics
   @0x4905a6`. Rate seeding (both): `attrib & 0x40` (PlayerControl) with an
   occupant → 186413; a non-0x40 item → `PRNG_Next16() % 100` (> 66 → 139809,
@@ -3746,9 +3746,9 @@ the tank/bike seeds `@0x4698a0`/`@0x468a50`, the `+0x2ED` producers
 `@0x475de0`/`@0x479600`/`@0x47c1c0`, `Entity_RespawnVehicle @0x45ff40` (the
 spawn values), `Entity_ClearSuspensionState @0x4592b0` (the field set),
 `ItemDef_ParsePhysicsProperty @0x49d870` (the four keys), `Entity_UpdatePartSpinAccumulator
-@0x4928b0` (the profile-type gate), the HELO twin `@0x48fa70`,
+@0x4928b0` (the profile-type gate), the HELO twin `Entity_UpdateHeloRotorSpin @0x48fa70`,
 `Entity_CacheVehicleHUDStats @0x4929b0` (46 = 47), `Entity_UpdateVehiclePhysics
-@0x48af00` (the wheel phase). Proposed, not applied: `@0x48fa70` →
+@0x48af00` (the wheel phase). Proposed, not applied: `Entity_UpdateHeloRotorSpin @0x48fa70` →
 `Entity_UpdateHeloRotorSpin`; `dword_81518C` → `g_wheelSlipLockQ16`. Saved.
 
 `0x47EF10` defined + named `Entity_ProcessAircraftContactPhysics` (a misdecoded

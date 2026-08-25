@@ -287,7 +287,7 @@ struct RoundEndState {
     // objective Co-op — the `(fieldId & 0xFFFDFFFF) == 0x10020` arm, which is
     // exactly game_type::is_waypoint_family) retail reads dword field 29 of the
     // two per-team stats objects `dword_C87CA8` / `dword_C87DFC`
-    // [orig: Server_BuildEndOfRoundScoreboard @0x508f30 -> sub_52C850 @0x52c850];
+    // [orig: Server_BuildEndOfRoundScoreboard @0x508f30 -> ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52c850];
     // the draw flag is the plain equality, taken on the team arm because
     // Co-op's g_GameType 0x30020 has bit 0x10000 set
     // [orig: @0x508f30 draw leg, kong 213715-213730].
@@ -329,7 +329,7 @@ struct MissionKillStats {
     // count per class (vehicle 3/4, aircraft 9, else infantry @0xC84694/9C/98)
     // — the Show Score panel consumes only the total, so the split folds like
     // the kill buckets above. [orig: 0xC84690 — Score_ClassifyEntityForCounts
-    // @0x4fd070 over both pools from sub_509DC0 @0x509dc0, called at
+    // @0x4fd070 over both pools from Score_CountMissionSubgoalsAndUnits @0x509dc0, called at
     // Game_StartMission @0x525d5d]
     int32_t enemy_unit_total = 0;
 };
@@ -367,7 +367,7 @@ public:
                                // this world, so the AI-change command family can reach brains.
     // Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
-    // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter sub_613130 in
+    // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
     // Game_StartMission @ 0x524360]. AI recoil/engagement, throwable bounce
     // spin, and server control challenges all consume this owner in their
     // actual call order.
@@ -728,13 +728,13 @@ private:
 // the Show Score panel's enemy-units denominator. Runs once at the
 // Game_StartMission-equivalent moment, after entity placement and the
 // item-traits sweep stamped Entity::item_unit_type.
-// [orig: sub_509DC0 @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
+// [orig: Score_CountMissionSubgoalsAndUnits (ex sub_509DC0) @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
 //  called at Game_StartMission @0x525d5d]
 void count_mission_units(World &world);
 
 // The mission's defined-subgoal count: the leading run of authored win
 // conditions (slots 1..8) before the first 0 or 0xFF entry.
-// [orig: sub_509DC0 @0x509dc2..0x509dd1 scanning byte_A7628C — the header
+// [orig: Score_CountMissionSubgoalsAndUnits @0x509dc2..0x509dd1 scanning byte_A7628C — the header
 //  win-condition text ids; dword_C8468C]
 int32_t count_defined_subgoals(const World &world);
 

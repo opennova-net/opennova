@@ -492,7 +492,7 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     // Entity_ValidateWeaponTarget @0x53a400 runs Entity_ComputeWeaponFireOrigin
     // on the TARGET; our entities carry no muzzle bones, so the raw position
     // stands in — the same D-AI-6 seam as the LOS endpoints], plus the caller's
-    // aim offset rotated by the shooter yaw [orig: sub_6158F0 @0x456C59 —
+    // aim offset rotated by the shooter yaw [orig: Math_RotateOffsetByEulerFixedPoint (ex sub_6158F0) @0x456C59 —
     // R_yaw(entity+0x10) * (distance, 0, 0) added to the target position and
     // restored after the solve].
     if (target == nullptr) return false;

@@ -1024,8 +1024,9 @@ public:
     // commit via the flag-table arbitration; then the SWIM override (36-40 from the
     // float latch in entity_flags, bypassing the arbitration). Callers gate it to
     // every 4th tick.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; swim @0x4b73c0-0x4b7410
-    //  (kong 148422-148452); 4th-tick gate @0x4b70ce]
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; swim @0x4b73c0-0x4b7452
+    //  (the 8-case jumptable @0x4b7411: 0 -> 37, 1/2 -> 38, 3..5 -> 40, 6/7 -> 39,
+    //  default 36 @0x4b7448); 4th-tick gate @0x4b70ce]
     void player_body_select(AiEntity &e, uint32_t entity_flags);
     // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated

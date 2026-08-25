@@ -142,7 +142,7 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 // The one player/session teardown path shared by keyed goodbye, receive timeout, owner eviction, and
 // same-address replacement. The original runs Server_HandlePlayerDisconnect before destroying the
 // NapiNPConnection node; a bare list erase leaks the entity and roster identity.
-// [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> NapiNPConnection_Destroy @0x62A4B0]
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> CNapiNPConnection_Destroy @0x62A4B0]
 bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	auto &list = ctx.np_protocol.connection_list;
 	auto it = list.end();
@@ -210,7 +210,7 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 
 // Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
 // connection_id). Used for a fresh join AND to re-send on a retransmitted 0x42 (the original
-// re-sends the cached packet via NapiNPConnection_SendSessionInit @0x620ef0 rather than re-minting).
+// re-sends the cached packet via CNapiNPConnection_SendSessionInit @0x620ef0 rather than re-minting).
 std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const ClientAuth &auth,
                                                const PeerAddr &peer, const NapiNPConnection &conn) {
 	const std::string nwuid =
@@ -221,7 +221,7 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, conn.server_sk, conn.server_scrk,
 	                                     ctx.server_key_mint.novaworld_name,
 	                                     ctx.server_key_mint.novaworld_web_url, nwuid, include_cu);
-	// [orig: 0x82 MI TLV = conn->connection_id @ NapiNPConnection_SendSessionInit 0x620ef0] — the
+	// [orig: 0x82 MI TLV = conn->connection_id @ CNapiNPConnection_SendSessionInit 0x620ef0] — the
 	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
 	reply.mi = conn.connection_id;
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
@@ -494,7 +494,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// the joiner already latched from the first 0x82, so every later S2C 0x83 would fail to
 		// decrypt and the join would silently stall. [orig: conn_state == 1 &&
 		// session_keys.client_id == CI && session_keys.remote_key == CK ->
-		// NapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
+		// CNapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
 		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
 			existing->receive_inactive_ms = 0;
 			out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, *existing));
@@ -508,7 +508,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			return;
 		}
 		// A different client (CI/CK) reusing an already-joined addr: drop the stale node and recreate
-		// fresh below. [orig: NapiNPConnection_Destroy then NapiNPConnection_Create]
+		// fresh below. [orig: CNapiNPConnection_Destroy then CNapiNPConnection_Create]
 		if (teardown_connection(ctx, peer)) {
 			// The socket owner must release the old UdpSessionTransport/announce latch before the
 			// replacement reaches world streaming. The new node is created below, so this event is
@@ -595,7 +595,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// The environment tags were parsed and validated before allocation. Stored/display-only
 		// fields (VERSIONSTRING/DB/COUNTRYCODE/TZB...) have no retained runtime consumer yet.
 	}
-	// [orig: NapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
+	// [orig: CNapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
 	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
 	// client) and advertises it in ServerAuth.MI. It becomes spawn-eligible only after the final
 	// admission 0x02; the bundled client later echoes it in 0x48. On NovaWorld the gate-assigned id

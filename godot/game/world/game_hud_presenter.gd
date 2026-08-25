@@ -670,7 +670,8 @@ func _apply_friendly_tags() -> void:
 				names.append(String(tag.get("name", "")))
 				ids.append(int(tag.get("entity_id", 0)))
 				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
-				flags.append(FriendlyTagFlags.pack(tag))
+				# The flag word is packed by the sim feed (hud/friendly_tag_flags.h).
+				flags.append(int(tag.get("flags", 0)))
 	var fog_q16 := 0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null

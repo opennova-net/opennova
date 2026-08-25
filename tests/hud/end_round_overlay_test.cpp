@@ -210,9 +210,97 @@ void test_statistics_panel() {
 	CHECK(kEndRoundStatsLabelX == 200 && kEndRoundStatsValueX == 620);
 }
 
+// The resolver: keys through the Overlays table, the "!..." fallbacks, the
+// present-but-empty folds (headline -> STROVER1, second line -> collapse and
+// the 32 px shift) and retail's sprintf forms.
+void test_resolve() {
+	std::vector<EndRoundLine> lines;
+	EndRoundLine a;
+	a.key = "STROVER33";
+	a.fallback = "!Winner";
+	a.y = 300;
+	a.fold = EndRoundEmptyFold::kHeadlineStrover1;
+	lines.push_back(a);
+	EndRoundLine b;
+	b.key = "STROVER106";
+	b.fallback = "!Second %s";
+	b.y = 350;
+	b.fold = EndRoundEmptyFold::kCollapse;
+	EndRoundArg red;
+	red.key = "STROVER_REDTEAM";
+	red.fallback = "!Red";
+	b.args.push_back(red);
+	lines.push_back(b);
+	EndRoundLine c;
+	c.literal = "%s : %ld";
+	c.y = 414;
+	EndRoundArg blue;
+	blue.key = "STROVER_BLUETEAM";
+	blue.fallback = "!Joint Ops Team";
+	c.args.push_back(blue);
+	EndRoundArg twelve;
+	twelve.is_number = true;
+	twelve.number = 12;
+	c.args.push_back(twelve);
+	lines.push_back(c);
+	EndRoundLine d;
+	d.literal = "%s : %d:%02d:%02d";
+	d.y = 478;
+	EndRoundArg gt;
+	gt.key = "STROVER_GAMETIME";
+	gt.fallback = "!Game Time";
+	d.args.push_back(gt);
+	for (int n : {0, 1, 5}) {
+		EndRoundArg num;
+		num.is_number = true;
+		num.number = n;
+		d.args.push_back(num);
+	}
+	lines.push_back(d);
+
+	// Table 1: the headline resolves, STROVER106 is MISSING (fallback), the
+	// BLUETEAM key is present but EMPTY (an argument takes its fallback).
+	auto table1 = [](const std::string &key, std::string &value) {
+		if (key == "STROVER33") { value = "Red Wins"; return true; }
+		if (key == "STROVER_REDTEAM") { value = "Red"; return true; }
+		if (key == "STROVER_BLUETEAM") { value = ""; return true; }
+		return false;
+	};
+	std::vector<EndRoundResolvedLine> r = end_round_overlay_resolve(lines, table1);
+	CHECK(r.size() == 4);
+	CHECK(r[0].text == "Red Wins" && r[0].y == 300);
+	CHECK(r[1].text == "Second Red" && r[1].y == 350);
+	CHECK(r[2].text == "Joint Ops Team : 12" && r[2].y == 414);
+	CHECK(r[3].text == "Game Time : 0:01:05" && r[3].y == 478);
+
+	// Table 2: both fold keys present-but-empty: the headline re-looks-up
+	// STROVER1, the second line collapses and everything below moves up 32.
+	auto table2 = [](const std::string &key, std::string &value) {
+		if (key == "STROVER33" || key == "STROVER106") { value = ""; return true; }
+		if (key == "STROVER1") { value = "Done"; return true; }
+		return false;
+	};
+	r = end_round_overlay_resolve(lines, table2);
+	CHECK(r.size() == 3);
+	CHECK(r[0].text == "Done" && r[0].y == 300);
+	CHECK(r[1].text == "Joint Ops Team : 12" && r[1].y == 382);
+	CHECK(r[2].y == 446);
+
+	// Table 3: the headline fold with STROVER1 missing takes its own fallback.
+	auto table3 = [](const std::string &key, std::string &value) {
+		if (key == "STROVER33") { value = ""; return true; }
+		return false;
+	};
+	r = end_round_overlay_resolve(lines, table3);
+	CHECK(r.size() == 4 && r[0].text == "Mission Completed");
+	CHECK(kEndRoundStatScreenDelayMsec == 6000);
+	CHECK(kEndRoundOverlayTop == 0 && kEndRoundOverlayBottom == 768);
+}
+
 } // namespace
 
 int main() {
+	test_resolve();
 	test_team_mode_ladder();
 	test_statistics_panel();
 	test_objective_and_non_team();

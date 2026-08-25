@@ -276,6 +276,7 @@ opennova::mission::PromoteOptions Simulation::promote_options() const {
 	opennova::mission::PromoteOptions opts;
 	opts.item_seat_specs = item_seat_specs_;
 	opts.ai_profiles = ai_profiles_;
+	opts.ai_profile_defaults = ai_profile_defaults_;
 	// Authored display names from the installed mission text's [PeopleNames]
 	// STRNAME%03i entries (the boot installs the table before load_mission
 	// runs). Promote applies the retail 15-char copy at its cited port site.
@@ -476,7 +477,7 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 			opennova::world::TickPhase::PreMission);
 	// The Show Score panel's mission-start unit census, after entity placement
 	// and the item-traits sweep stamped Entity::item_unit_type.
-	// (retail: Game_StartMission @0x525d5d -> sub_509DC0)
+	// (retail: Game_StartMission @0x525d5d -> Score_CountMissionSubgoalsAndUnits @0x509dc0)
 	opennova::world::count_mission_units(*world_);
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
@@ -587,9 +588,33 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		// The native .aip resolve (runtime_boot). Assigning an empty row set
 		// clears the retained table, exactly like the shell resolver's empty
 		// dictionary did through set_ai_profile_speeds.
+		// The AI-class answer per items.def type id: which init family the
+		// class row runs and the def's default_aip (retail: the AI class table
+		// @0x813280 — 'chel'/'cpln' -> Entity_InitHelicopterAIFromDef @0x4683C0,
+		// 'cveh'/'cbot'/'ctrn' -> Entity_InitVehicleAIFromDef @0x4686C0; the
+		// name arms are cited in mission/promote.h). Unknown classes get no
+		// fallback, as retail's other rows run no vehicle AI init.
+		ai_profile_defaults_ = {};
+		if (p_item_db.is_valid()) {
+			const Ref<ItemDatabase> db = p_item_db;
+			ai_profile_defaults_ = [db](int32_t type_id) {
+				ms::PromoteOptions::AiProfileDefaults d;
+				const int item_id = static_cast<int>(type_id) +
+						static_cast<int>(opennova::mission::kItemIdOffset);
+				if (!db->has_item(item_id)) return d;
+				const String cls = db->get_ai_function(item_id).to_lower();
+				d.helicopter_init = cls == "chel" || cls == "cpln";
+				d.known = d.helicopter_init || cls == "cveh" || cls == "cbot" ||
+						cls == "ctrn";
+				d.default_aip = std::string(
+						db->get_default_aip(item_id).utf8().get_data());
+				return d;
+			};
+		}
 		ai_profiles_ = p_mission.is_valid()
 				? ms::resolve_ai_profiles(
-						  files, p_mission->native_document().bms_file())
+						  files, p_mission->native_document().bms_file(),
+						  ai_profile_defaults_)
 				: std::vector<ms::PromoteOptions::AiProfileRow>{};
 		boot_debug_.aip_rows = ai_profiles_;
 	};

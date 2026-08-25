@@ -556,9 +556,9 @@ struct HudFrameState {
 	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
 	// [orig: draw_endround_stats_overlay @0x5b7cd0 — HUD_DrawLabelBox
 	//  @0x5b7d3e, each line HUD_DrawTextCentered_HalfBright(Impact38, 512, y)
-	//  through sub_580B80 @0x580b80].
+	//  through HUD_DrawTextCenteredScaled (ex sub_580B80) @0x580b80].
 	HudEndRoundOverlayState end_round;
-	// The toggled SP "Show Score" statistics panel [orig: sub_5C0060 @0x5c0083
+	// The toggled SP "Show Score" statistics panel [orig: HUD_DrawOverlayPanels @0x5c0083
 	// draws HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC].
 	HudEndRoundStatisticsState end_round_statistics;
 	std::vector<HudAttachLabel> attach_labels;
