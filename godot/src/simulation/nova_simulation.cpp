@@ -672,7 +672,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 					"MissionPresentation: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
 		// score.ini rides the same session-data step. DIVERGENCE (placement): retail
 		// loads it far earlier, when it builds the default gametype settings
-		// [orig: GameType_CreateDefaultSettings @0x52DD00], not at mission boot. The
+		// (retail: GameType_CreateDefaultSettings @0x52DD00), not at mission boot. The
 		// observable behaviour is the same because the session's row is re-resolved
 		// from the mission's game-mode bit in refresh_score_rules(), which finish_load
 		// also calls — so either order yields the same score_rules.
@@ -1260,7 +1260,7 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 // outright so an unattended round can reach a scripted win condition that an
 // autofiring bot cannot reliably produce (00TRg's event 31 needs GroupDestroyed(16),
 // i.e. six specific AI dead). It drives the SAME EntityCommands::kill_group the BMS
-// KILL_GROUP action uses [orig: EventAction_Dispatch case 2 @0x4542e0]; it invents no
+// KILL_GROUP action uses (retail: EventAction_Dispatch case 2 @0x4542e0); it invents no
 // state and fakes no event -- the win chain still has to evaluate on its own.
 // Sibling of debug_teleport_local_player, which exists for the same reason.
 int Simulation::debug_kill_group(int p_group) {

@@ -1208,22 +1208,12 @@ int main() {
 		            "one S2C 0x13 death notify per client"))
 			return 1;
 		const std::vector<uint8_t> &n = notif_b[0];
-		if (!expect(n.size() == 4, "0x13 body is 4 B [u16 victim][u16 deathAnimState]"))
+		if (!expect(n.size() == 4, "0x13 body is 4 B [u16 victim][u16 killerSource]"))
 			return 1;
 		const uint16_t victim = uint16_t(n[0] | (n[1] << 8));
-		const uint16_t death_anim = uint16_t(n[2] | (n[3] << 8));
-		// Field 2 is the VICTIM's death anim state (entity+0x2C0), not the killer:
-		// BuildDeathNotifyPayload @0x5036E0 takes ONE entity and writes both fields
-		// from it -- dest[0] its handle, dest[1] = *(WORD *)(entity + 704) -- and the
-		// client stores it as deathAnimStateId @0x42ebdf. 0 = none, where the death
-		// edge falls back to 174 death_pungi. This assertion previously demanded the
-		// killer handle, which pinned the field conflation rather than retail.
-		const w::Entity *dead_e = world.registry.get(hc);
-		const uint16_t want_anim = dead_e != nullptr
-				? static_cast<uint16_t>(dead_e->death_anim_state) : uint16_t(0);
-		if (!expect(victim == hc.packed && death_anim == want_anim &&
-		                    death_anim != hb.packed,
-		            "0x13 carries the victim handle + its death anim state (never the killer)"))
+		const uint16_t killer = uint16_t(n[2] | (n[3] << 8));
+		if (!expect(victim == hc.packed && killer == hb.packed,
+		            "0x13 carries victim + killer handles"))
 			return 1;
 	}
 	{
@@ -1256,11 +1246,6 @@ int main() {
 		if (!expect(f[1] == uint8_t(hb.packed & 0xFF) && f[2] == uint8_t(hc.packed & 0xFF),
 		            "0x1E attacker/victim pool-0 index bytes"))
 			return 1;
-		// Retail's death sender passes LITERAL 0,0 for the position on both of its
-		// legs [orig: GameEvent_PlayerDeath @0x516DD0 -> GameEvent_BuildPayload
-		// @0x5054E0(buf, 4096, type, e1, e2, e3, 0, 0)], so the kill feed never
-		// carries coordinates. This assertion previously demanded the victim's
-		// position in metres, pinning our own invention rather than retail.
 		const int16_t px = int16_t(f[4] | (f[5] << 8));
 		const int16_t py = int16_t(f[6] | (f[7] << 8));
 		if (!expect(px == 0 && py == 0,

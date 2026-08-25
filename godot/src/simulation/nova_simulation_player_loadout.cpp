@@ -817,7 +817,7 @@ TypedArray<Dictionary> Simulation::get_local_player_loadout() const {
 
 // score.ini -> this session's scoring awards (world::score_rules).
 // Retail overlays the file onto 12 hardcoded 452-byte gametype rows
-// [orig: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0];
+// (retail: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0);
 // the defaults are not ported, so an absent file leaves the rules !valid (every award
 // a no-op) rather than guessing values.
 Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
@@ -828,7 +828,7 @@ Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
 	const String file_name = p_name.get_file();
 	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
 	// LOOSE-FIRST on purpose: retail gates the load on File_IsSingleFile("score.ini")
-	// [orig: @0x436ED0], which is a FindFirstFileA check on disk — score.ini is a loose
+	// (retail: @0x436ED0), which is a FindFirstFileA check on disk — score.ini is a loose
 	// file next to the executable, not an archive member (unlike weapon.def/ammo.def,
 	// which live in localres.pff). An archive-preferring lookup finds nothing here.
 	const PackedByteArray bytes =
@@ -848,7 +848,7 @@ Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
 // Resolve the session's score row from the mission's game-mode bit. Called from BOTH
 // load sites so either order works: the config landing after the mission, or before it.
 // The mode bit -> g_GameType code word is the already-ported ladder
-// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360].
+// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360).
 void Simulation::refresh_score_rules() {
 	if (!world_) return;
 	if (!score_config_loaded_) {

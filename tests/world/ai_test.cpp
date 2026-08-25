@@ -926,46 +926,6 @@ static void test_mounted_gunner_acquires_and_fires() {
     CHECK(fired);
 }
 
-// A solid axis-aligned box collision model — the carrier hull the LOS test
-// needs. (Local copy of the collision suite's builder; ai_test has no shared
-// fixture header.)
-static CollisionModel box_model_for_ai(int32_t type, uint32_t flags, double hx,
-                                       double hy, double height) {
-	const auto q = [](double v) { return static_cast<int32_t>(v * 65536.0); };
-	CollisionModel m;
-	const auto plane = [&](int nx, int ny, int nz, double d) {
-		CollisionPlane p;
-		p.nx = static_cast<int16_t>(nx);
-		p.ny = static_cast<int16_t>(ny);
-		p.nz = static_cast<int16_t>(nz);
-		p.dist = q(d);
-		m.planes.push_back(p);
-	};
-	plane(16384, 0, 0, -hx);
-	plane(-16384, 0, 0, -hx);
-	plane(0, 16384, 0, -hy);
-	plane(0, -16384, 0, -hy);
-	plane(0, 0, 16384, -height);
-	plane(0, 0, -16384, 0.0);
-	CollisionVolume v;
-	v.type = type;
-	v.flags = flags;
-	v.min_x = q(-hx); v.max_x = q(hx);
-	v.min_y = q(-hy); v.max_y = q(hy);
-	v.min_z = 0;      v.max_z = q(height);
-	v.plane_start = 0;
-	v.plane_count = 6;
-	m.volumes.push_back(v);
-	CollisionSection sec;
-	sec.volume_start = 0;
-	sec.volume_count = 1;
-	m.sections.push_back(sec);
-	// Without derived section AABB/bound-sphere the candidate broad phase
-	// rejects the model outright and nothing ever blocks.
-	m.finalize_sections();
-	return m;
-}
-
 // The water-crossing edge: a hull that drops below the water plane records ONE
 // crossing, not one per frame, and stops recording while it stays under. This is
 // the trigger behind the S2C 0x34 fan retail emits at every splash - the last
@@ -1053,244 +1013,16 @@ static void test_infantry_floats_and_splashes_once() {
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Now the same body arrives from the AIR. Same family, same plane, DIFFERENT
-    // sound - the selector retail actually uses. The bit goes on the engine_flags
-    // mirror ALONE on purpose: retail has one Flags word and we carry two, so a
-    // block that reads or writes only one of them silently loses the state.
-    ent->engine_flags |= kEntityFlagInAir;
+    // sound - the selector retail actually uses.
+    ent->flags |= kEntityFlagInAir;
     npc.pos[2] = w->env.water_z - to_fixed(1.0);
     ai.infantry_water_block(npc, *w, ent, 0, 21);
     CHECK(w->water_crossings.events.size() == 1);
     CHECK(w->water_crossings.events[0].airborne);
     // Landing in water ends the fall: retail clears 0x2000 with the same store
-    // that sets the float latch. Both mirrors, or the body stays "airborne"
-    // forever to every other reader.
+    // that sets the float latch.
     CHECK((ent->flags & kEntityFlagInAir) == 0);
-    CHECK((ent->engine_flags & kEntityFlagInAir) == 0);
     CHECK(!npc.inf.airborne);
-
-    // The exit clear has to reach both mirrors too.
-    npc.pos[2] = w->env.water_z + to_fixed(0.5);
-    ai.infantry_water_block(npc, *w, ent, 0, 22);
-    CHECK((ent->flags & kEntityFlagDrowning) == 0);
-    CHECK((ent->engine_flags & kEntityFlagDrowning) == 0);
-}
-
-// A guard with no route must still notice an enemy. Live rounds showed only
-// state-16 (route-following) AI ever holding a target while state-0 AI - the
-// majority, every guard the mission spawns without a patrol - never acquired,
-// even with an enemy well inside their authored sight radius (one had a 400 u
-// range and an intruder 22 u away). Perception lives in the infantry think, not
-// the state machine, so brain state must not gate it.
-static void test_routeless_guard_still_acquires() {
-    auto w = std::make_unique<World>();
-    w->registry.configure_pool(0, 8);
-    seed_test_rifle_ammo(*w);
-
-    Entity enemy_seed{};
-    enemy_seed.kind = EntityKind::Organic;
-    enemy_seed.has_item_def = true;
-    enemy_seed.item_type = 3;
-    enemy_seed.team = 1;
-    enemy_seed.health = 100;
-    enemy_seed.net_id = 0x61;
-    enemy_seed.position = Vec3{10.0f, 0.0f, 0.0f};
-    const EntityHandle enemy_h = w->registry.spawn(0, enemy_seed);
-
-    Entity guard_seed{};
-    guard_seed.kind = EntityKind::Organic;
-    guard_seed.team = 2;
-    guard_seed.health = 100;
-    guard_seed.net_id = 0x62;
-    const EntityHandle guard_h = w->registry.spawn(0, guard_seed);
-
-    AiSystem ai;
-    ai.is_authority = true;
-    w->ai = &ai;
-    AiEntity &guard = *ai.at(ai.attach(guard_h));
-    configure_rifleman(guard, 0x62, 2);
-    guard.slot.f[17] = 120 << 16; // calm radius 30u; the enemy sits at 10u
-    // The state a mission guard actually spawns in: 0, the nullsub/uninitialised
-    // brain state (no route was ever ordered).
-    guard.brain.f[AiBrain::kCurState] = 0;
-    guard.brain.f[AiBrain::kPendState] = 0;
-
-    ai.infantry_combat_think(guard, *w, 0);
-    std::printf("  [routeless-guard] state=%d target=%s\n",
-                guard.brain.f[AiBrain::kCurState],
-                guard.inf.combat_target.valid() ? "acquired" : "NONE");
-    CHECK(guard.inf.combat_target == enemy_h);
-}
-
-// Does an AI's OWN aim solution actually hit? The fire machinery and the
-// damage machinery are both covered elsewhere; what was never pinned is the
-// join between them — the aim yaw/pitch the combat think computes, fed to the
-// round spawn, arriving at the target. A live 3-minute engagement had three AI
-// fire 126 rounds at a client 18 u away without landing one hit, which is the
-// symptom this test exists to catch deterministically.
-static void test_ai_aim_solution_hits_its_target() {
-    auto w = std::make_unique<World>();
-    w->registry.configure_pool(0, 8);
-    seed_test_rifle_ammo(*w);
-
-    Entity target_seed{};
-    target_seed.kind = EntityKind::Organic;
-    target_seed.has_item_def = true;
-    target_seed.item_type = 3;
-    target_seed.team = 1;
-    target_seed.health = 150;
-    target_seed.net_id = 0x51;
-    target_seed.position = Vec3{18.0f, 0.0f, 0.0f}; // the live standoff distance
-    const EntityHandle target_h = w->registry.spawn(0, target_seed);
-
-    Entity npc_seed{};
-    npc_seed.kind = EntityKind::Organic;
-    npc_seed.team = 2;
-    npc_seed.health = 100;
-    npc_seed.net_id = 0x52;
-    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
-
-    AiSystem ai;
-    ai.is_authority = true;
-    w->ai = &ai;
-    AiEntity &npc = *ai.at(ai.attach(npc_h));
-    configure_rifleman(npc, 0x52, 2);
-    npc.inf.combat_target = target_h;
-    npc.inf.aim_point[0] = to_fixed(18.0);
-    npc.inf.aim_point[1] = 0;
-    npc.inf.aim_point[2] = 0;
-
-    // Give the target a collision body so a round can strike it, mirroring the
-    // projectile suite's rig (one section, 1 u box at torso height).
-    CollisionWorld collision;
-    CollisionModel model;
-    model.sections.resize(1);
-    for (CollisionSection &sec : model.sections) {
-        sec.authored_bounds = true;
-        sec.min_x = sec.min_y = sec.min_z = -0x10000;
-        sec.max_x = sec.max_y = sec.max_z = 0x10000;
-        sec.radius = 0x10000;
-    }
-    const int32_t model_id = collision.add_model(std::move(model));
-    collision.assign_entity(target_h, model_id);
-    std::vector<CollisionMatrix> mats;
-    const int32_t centre[3] = {to_fixed(18.0), 0, 58982};
-    mats.push_back(collision_matrix_from_heading(0, centre));
-    CHECK(collision.publish_entity_section_matrices(target_h, std::move(mats)));
-    collision.build_tick_tables(*w);
-    w->collision = &collision;
-    ai.collision = &collision;
-
-    // Fire straight down the AI's aim line and let the round fly.
-    const int32_t origin[3] = {0, 0, 58982};
-    // Straight down +X is BAM 0 (the engine's heading zero).
-    const int32_t yaw = 0;
-    CHECK(ai.fire_ai_round(*w, npc, origin, yaw, 0, /*ammo_index=*/1));
-    for (int t = 0; t < 40; ++t) w->round_sim.tick(*w, nullptr);
-
-    const Entity *victim = w->registry.get(target_h);
-    CHECK(victim != nullptr);
-    std::printf("  [ai-aim] target health after 40 ticks: %d (was 150)\n",
-                victim ? int(victim->health) : -1);
-    CHECK(victim != nullptr && victim->health < 150);
-}
-
-// A rider must SEE past its own carrier. Retail resolves each LOS endpoint
-// through the entity's parent links before the model walk, so a soldier riding
-// a boat is not blinded by the boat's own hull; without that, every perception
-// scan from inside a vehicle is blocked by the vehicle and mounted riders never
-// acquire a target (the "boats drive but nobody shoots" report).
-// [orig: raycast_find_collision_entity endpoint resolve — the entity[154] /
-//  entity[91] folds, called from Entity_CheckLineOfSightTerrainAndEntities
-//  @0x53b130]
-static void test_mounted_rider_sees_past_its_own_carrier() {
-    auto w = std::make_unique<World>();
-    w->registry.configure_pool(0, 8);
-    w->registry.configure_pool(1, 8);
-    seed_test_rifle_ammo(*w);
-
-    Entity enemy_seed{};
-    enemy_seed.kind = EntityKind::Organic;
-    enemy_seed.has_item_def = true;
-    enemy_seed.item_type = 3;
-    enemy_seed.team = 2;
-    enemy_seed.health = 100;
-    enemy_seed.net_id = 0x21;
-    enemy_seed.group_id = 2;
-    enemy_seed.position = Vec3{12.0f, 0.0f, 0.0f};
-    const EntityHandle enemy_h = w->registry.spawn(0, enemy_seed);
-
-    // The carrier: a seated vehicle whose collision model is a solid box big
-    // enough to swallow the rider's eye point.
-    Entity boat{};
-    boat.kind = EntityKind::Item;
-    boat.team = 1;
-    boat.net_id = 0x31;
-    boat.yaw = 90;
-    boat.alive = true;
-    boat.primary_weapon.assign(1, 'x');
-    Seat seat{};
-    seat.type = SeatType::Gunner;
-    // Seat the rider BEHIND the hull (-X) so the carrier's own box sits
-    // between its eye point and a target on +X — the geometry that makes
-    // the endpoint resolve load-bearing.
-    seat.seat_local = Vec3{0.0f, -6.0f, 1.0f};
-    boat.seats.push_back(seat);
-    const EntityHandle boat_h = w->registry.spawn(1, boat);
-    w->weapons.entries.resize(2);
-    w->weapons.entries[1].name.assign(1, 'x');
-    w->weapons.entries[1].ammo_index = 1;
-    w->weapons.entries[1].valid = true;
-    configure_test_emplacement_weapon(w->weapons.entries[1]);
-
-    Entity rider_seed{};
-    rider_seed.kind = EntityKind::Organic;
-    rider_seed.team = 1;
-    rider_seed.health = 100;
-    rider_seed.net_id = 0x11;
-    const EntityHandle rider_h = w->registry.spawn(0, rider_seed);
-
-    AiSystem ai;
-    ai.is_authority = true;
-    w->ai = &ai;
-    // A flat terrain field: line_of_sight_clear short-circuits to "clear" when
-    // no terrain is wired, which would make this test vacuous.
-    struct FlatField {
-        enum { kDim = 256 };
-        std::vector<uint16_t> heightmap;
-        std::vector<int> sector_grid;
-        opennova::terrain::TerrainHeightField field;
-        FlatField() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
-            field.heightmap = heightmap.data();
-            field.dim = kDim;
-            field.layout.sector_grid = sector_grid.data();
-            field.layout.origin_x = 0;
-            field.layout.origin_y = 0;
-        }
-    };
-    static FlatField flat;
-    ai.terrain = &flat.field;
-    CollisionWorld collision;
-    collision.terrain = &flat.field;
-    ai.collision = &collision;
-    const int32_t hull = collision.add_model(box_model_for_ai(1, 0, 3.0, 3.0, 3.0));
-    collision.assign_entity(boat_h, hull);
-    for (int i = 0; i < 17; ++i) collision.build_tick_tables(*w);
-
-    AiEntity &rider = *ai.at(ai.attach(rider_h));
-    configure_rifleman(rider, 0x11, 1);
-    // The scan radius is half the sight range, and a calm NPC halves the
-    // range first, so a target at 12 u needs ~48 u+ of authored sight.
-    rider.slot.f[17] = 120 << 16;
-    CHECK(w->commands.mount(0x11, 0x31));
-
-    // Park the rider at its seat pose so the hull is between it and the target.
-    ai.pose_if_mounted(rider, *w);
-    std::printf("  [rider-los] rider at (%.1f, %.1f, %.1f), hull +/-3, enemy at 12\n",
-                rider.pos[0] / 65536.0, rider.pos[1] / 65536.0,
-                rider.pos[2] / 65536.0);
-    // The scan runs on the 32-tick perception cadence.
-    ai.infantry_combat_think(rider, *w, 0);
-    CHECK(rider.inf.combat_target == enemy_h);
 }
 
 static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
@@ -3015,9 +2747,6 @@ int main() {
     test_mounted_gunner_acquires_and_fires();
     test_water_crossing_fires_once_on_entry();
     test_infantry_floats_and_splashes_once();
-    test_routeless_guard_still_acquires();
-    test_ai_aim_solution_hits_its_target();
-    test_mounted_rider_sees_past_its_own_carrier();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();

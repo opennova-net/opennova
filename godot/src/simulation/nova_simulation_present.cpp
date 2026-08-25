@@ -997,9 +997,9 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	// AI DECISION STATE, named to match the retail probe (onhook ai_probe.c) so
 	// the two recordings join field-for-field. Retail reads these straight off
 	// the entity and its AiSlot; these are our equivalents:
-	//   parent  = the carrier we are mounted to   [orig: entity->parentEntity +364]
-	//   ground  = what we are standing on         [orig: entity->groundEntity +0x28]
-	//   s35/37/38 = has-route / command / node    [orig: AiSlot +140/+148/+152]
+	//   parent  = the carrier we are mounted to   (retail: entity->parentEntity +364)
+	//   ground  = what we are standing on         (retail: entity->groundEntity +0x28)
+	//   s35/37/38 = has-route / command / node    (retail: AiSlot +140/+148/+152)
 	// Without them a retail-vs-OpenNova diff can see THAT a body is stuck but not
 	// what order it believes it is under, which is the question that matters.
 	out["parent"] = -1;

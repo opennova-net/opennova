@@ -2467,7 +2467,7 @@ public:
 	// Parse score.ini and install this session's scoring awards (world::World::score_rules).
 	// Retail builds 12 x 452-byte gametype rows with hardcoded defaults and then OVERLAYS
 	// the file onto them, writing the file out when it is absent
-	// [orig: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0].
+	// (retail: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0).
 	// DECLARED GAP: the built-in defaults are NOT ported, so a missing score.ini leaves
 	// score_rules !valid (every award a no-op) where retail would still score from its
 	// defaults. The shipped file is the retail-parity path.

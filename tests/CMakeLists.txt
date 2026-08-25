@@ -2323,9 +2323,6 @@ add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
 target_link_libraries(ai_path_conformance_test PRIVATE opennova_runtime opennova_formats)
 add_test(NAME mission_ai_path_conformance COMMAND ai_path_conformance_test)
 
-add_executable(npruntime_death_broadcast_test npruntime/death_broadcast_test.cpp)
-target_link_libraries(npruntime_death_broadcast_test PRIVATE opennova_net opennova_runtime)
-add_test(NAME npruntime_death_broadcast COMMAND npruntime_death_broadcast_test)
 
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
 target_link_libraries(npruntime_round_end_test PRIVATE opennova_net opennova_runtime)

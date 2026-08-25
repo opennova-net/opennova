@@ -398,7 +398,7 @@ void Simulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) 
 // the whole cockpit-view bug at flight speed; the delta carries no travel, so
 // re-anchoring it to the live position reproduces retail's Position +
 // CameraOffset without importing the lag.
-// [orig: the mounted local eye leg @0x4b6908 stores head - Position from a
+// (retail: the mounted local eye leg @0x4b6908 stores head - Position from a
 //  skeleton posed in the SAME tick]
 void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot,
 		bool p_valid) {
@@ -515,7 +515,7 @@ Dictionary Simulation::get_local_player_view() const {
 				// Re-anchoring the stored OFFSET to the live position removes
 				// that: a seated pilot's offset barely changes between frames
 				// while his position moves a whole unit per tick.
-				// [orig: the MOUNTED local eye leg @0x4b6908 (selector
+				// (retail: the MOUNTED local eye leg @0x4b6908 (selector
 				//  @0x4b66d0, unfloored) stores head-Position into +0x6C/+0x70/
 				//  +0x74; Camera_ComputeThirdPersonView @0x437fa5..0x437fb7 adds
 				//  the triple to the tracked entity's position]

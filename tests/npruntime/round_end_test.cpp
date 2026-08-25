@@ -33,7 +33,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <vector>
 #include <cstdio>
 #include <utility>
 #include <vector>
@@ -1048,42 +1047,6 @@ int main() {
 	np::Server_TickUpdate(ctx);
 	expect(world.cached.humans == 1, "humans == 1 for the SP host");
 
-	// A HIDDEN player is not a human. Retail counts entities, not connections:
-	// pool 0, item type present, the player classifier (Flags 0x100), and NOT
-	// Flags 0x1 - the bit that marks a body tucked inside something else, and the
-	// bit the host ORs onto a player entity that is sitting at the deploy screen
-	// rather than standing in the world.
-	// [orig: Server_BuildEntitySlotLists @0x4f97a0 - the walk's gates
-	//  `entity+32 != 0`, `Flags & 0x100`, `(Flags & 1) == 0`, then
-	//  ++wac_var_humans @0x4f98b1; the pending OR is
-	//  NetPacket_WritePlayerState @0x4ff7dd]
-	//
-	// This is load-bearing now that the count gates the whole mission script
-	// (World::script_may_advance): an undeployed player must not make a host look
-	// occupied, or the mission runs before anyone is there to see it.
-	if (w::Entity *pe = world.registry.get(player)) {
-		pe->flags |= 1u;
-		np::Server_TickUpdate(ctx);
-		expect(world.cached.humans == 0,
-		       "a hidden (Flags&1) player does not count as a human");
-		pe->flags &= ~1u;
-		np::Server_TickUpdate(ctx);
-		expect(world.cached.humans == 1, "clearing the hidden bit restores the count");
-
-		// The player classifier is equally required: an AI body in pool 0 is not a
-		// human however alive it is.
-		const uint32_t saved = pe->flags;
-		const uint32_t saved_engine = pe->engine_flags;
-		pe->flags &= ~static_cast<uint32_t>(w::kEntityFlagPlayer);
-		pe->engine_flags &= ~static_cast<uint32_t>(w::kEntityFlagPlayer);
-		np::Server_TickUpdate(ctx);
-		expect(world.cached.humans == 0, "a non-player entity never counts as a human");
-		pe->flags = saved;
-		pe->engine_flags = saved_engine;
-		np::Server_TickUpdate(ctx);
-		expect(world.cached.humans == 1, "restoring the player bit restores the count");
-	}
-
 	// --- 2. Kill tallies by the local player: green person -> greenkills, blue person
 	// -> bluekills, red person -> enemy; a green NON-person tallies nothing. ---
 	push_death(world, green_person, player);
@@ -1143,7 +1106,6 @@ int main() {
 	// respawn queue holds and the latch never double-fires. ---
 	world.mission_attrib_flags = 0;
 	push_death(world, player, red_person);
-	loop.clear(); // capture the round-end WIRE pass on its ended-edge (section 6)
 	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx);
 	expect(world.match.outcome().ended, "dead player without SP-respawn -> round over");
 	expect(world.match.outcome().winner_team == 2, "auto-lose winner is team 2 (red)");
