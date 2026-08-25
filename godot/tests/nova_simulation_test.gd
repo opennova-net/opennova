@@ -908,7 +908,12 @@ end
 	sim.enable_listen_server(true)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
-	sim.step()
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries instead of a single step.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	var verdict := _present_field_for_origin(
 			sim, MissionData.KIND_ORGANIC, int(npc["index"]),
 			Simulation.PF_RIGHT_HAND_COLLAPSED)
@@ -1630,6 +1635,12 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	sim.resolve_item_traits(item_db)
 	assert_gte(sim.resolve_collision_instances(item_db), 2,
 			"precondition: both enemies use authored posed COBJ collision")
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries instead of a single step.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	var reference_card: Dictionary = sim.get_entity_debug(0)
 	var rotated_card: Dictionary = sim.get_entity_debug(1)
 	assert_true(bool(reference_card.get("mounted", false)))
@@ -1798,7 +1809,12 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 
 	# Advance one authoritative frame so the mounted seat frame, collision pose,
 	# and listen-server client snapshot all describe the same clip phase.
-	sim.step()
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries instead of a single step.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	var enemy_idx := _first_organic_ai_index(sim)
 	assert_gte(enemy_idx, 0)
 	var card := sim.get_entity_debug(enemy_idx)
@@ -2420,6 +2436,12 @@ end
 	sim.set_sound_profiles(FileAccess.get_file_as_bytes(sndprof_path))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
 	sim.resolve_item_traits(item_db)
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries instead of a single step.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	var started: Dictionary = {}
 	for effect_v in sim.drain_effects():
 		var effect: Dictionary = effect_v
@@ -2428,7 +2450,6 @@ end
 			break
 	assert_false(started.is_empty(),
 			"command-125 controller mount emits the occupied-item lifecycle edge")
-	sim.step()
 	var expected_vehicle_handle := -1
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
@@ -2460,12 +2481,19 @@ end
 	assert_false(bool(idle.get("source_only", true)))
 	assert_eq(int(idle.get("slot", -1)), 0)
 	assert_eq(String(idle.get("set", "")), "V_TRUCK_ILP")
-	assert_eq(Vector3(idle.get("pos", Vector3.INF)), Vector3(10, 0, 0))
+	assert_lt(Vector3(idle.get("pos", Vector3.INF)).distance_to(Vector3(10, 0, 0)), 0.001,
+			"the emitter tracks the carrier across the boarding ticks")
 	assert_eq(int(started.get("wire_handle", -1)), expected_vehicle_handle,
 			"binding names the packed identity used by dynamic presentation")
 	assert_eq(int(started.get("d", -1)), expected_vehicle_handle,
 			"the generic effect payload retains the same packed identity")
-	var soldier_idx := _first_organic_ai_index(sim)
+	# Both command-125 boarders walk in and claim their seat on the staggered
+	# infantry think, so which of the two reaches the controller seat first is
+	# decided by the witnessed stagger rather than by authored order (the
+	# promote-time mount shortcut that fixed the order is gone). Identify the
+	# crew by the seat each holds; every seat expectation below is unchanged.
+	# [orig: tickCounter = current_tick + 36 * entity[31]]
+	var soldier_idx := _organic_ai_index_with_mount_type(sim, 2)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
 	# The mounted origin is the model's authored ctrlx13 point through the
@@ -2669,6 +2697,12 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries before reading the mounted state.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	var labels: Array = sim.get_attach_labels()
 	assert_eq(labels.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
@@ -2702,6 +2736,15 @@ end
 
 # Drivable items (control-seat specs) attach AI brains at promote since the vehicle
 # pass, so organics no longer sit at AI index 0 — resolve the first pool-0 row.
+func _organic_ai_index_with_mount_type(sim: Simulation, mount_type: int) -> int:
+	for i in 64:
+		var d: Dictionary = sim.get_entity_debug(i)
+		if d.is_empty():
+			break
+		if int(d.get("pool", -1)) == 0 and int(d.get("mount_type", -1)) == mount_type:
+			return i
+	return -1
+
 func _first_organic_ai_index(sim: Simulation) -> int:
 	for i in 64:
 		var d: Dictionary = sim.get_entity_debug(i)
@@ -2732,6 +2775,12 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded rotated command-125 mount")
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries before reading the mounted state.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
@@ -3588,6 +3637,12 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
+	# Command-125 boarders spawn ON FOOT and attach through the infantry
+	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
+	# so drive a few 16-tick boundaries before reading the mounted state.
+	# Co-located with the carrier, the first think boards.
+	for _board_tick in range(48):
+		sim.step()
 	# The mounted anim state (67 = anim_emplaced) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
 	var card: Dictionary = sim.get_entity_debug(0)
