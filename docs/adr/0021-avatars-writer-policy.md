@@ -1,7 +1,7 @@
 # ADR 0021 - Avatars.def writer policy
 
-Status: accepted. Gates the `Avatars.def` save path (`libs/avatars` writer +
-the planned `AvatarDatabase.save_to_path` / ONED Avatars workspace).
+Status: accepted as the `Avatars.def` writer policy. [ADR 0037](0037-oned-runs-game-data.md)
+supersedes the former ONED authoring-product requirement and workspace.
 Witnessed behavior is in [docs/playerinfo/avatars-re.md](../playerinfo/avatars-re.md);
 addresses are Jointops.exe retail (imagebase 0x400000).
 
@@ -15,17 +15,18 @@ file ([orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]) and denormalizes the
 resolved data into runtime structs, discarding the authored part references and
 all formatting. The `libs/def` family it sits beside is likewise parse-only.
 
-The OpenNova editor must *author and save* `Avatars.def` (a maintainer
-decision). That forces a writer where the original has none, and raises the
-round-trip question: what does "faithful" mean for a writer the original never
-had, over a format whose retail bytes are full of comment art?
+The former ONED avatar-authoring surface had to *author and save*
+`Avatars.def` (a maintainer decision). That forced a writer where the original
+had none, and raised the round-trip question: what does "faithful" mean for a
+writer the original never had, over a format whose retail bytes are full of
+comment art?
 
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md) forbids carrying raw
 original bytes through a writer to manufacture a parity match. So byte-exact
 reproduction of the hand-authored retail file — which would require preserving
 its comments and exact whitespace verbatim — is off the table by policy, and is
-also not meaningful for an editor that normalizes layout as the artist adds and
-removes entries.
+also not meaningful for an authoring tool that normalizes layout as the artist
+adds and removes entries.
 
 ## Decision
 
@@ -59,8 +60,8 @@ fields) proves the writer does not depend on parsed input.
 
 ## Consequences
 
-- **Editor saves are clean and stable**: re-saving an unchanged avatar set is a
-  no-op at the byte level; diffs reflect only real edits.
+- **Canonical saves are clean and stable**: re-saving an unchanged avatar set
+  is a no-op at the byte level; diffs reflect only real edits.
 - **First save of a retail file reformats it** (comments dropped, layout
   canonicalized). This is expected for an authoring tool and is the
   ADR-0003-compliant alternative to raw passthrough. Teams that want to keep the

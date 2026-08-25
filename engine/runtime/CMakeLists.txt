@@ -90,20 +90,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/seat_spec_extract.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_collision_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_model_cache.cpp
-    # terrain — the byte-identical TrnGen bake port + editor kernels
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/brush.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/builder.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/build_quadtree.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/cdep_constraint.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/cpt_export.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/depthmap.cpp
+    # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/mesh_simp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_mesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
@@ -112,7 +103,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
     # the retail segment raycast (format-free), plus the placed-tile surface
     # resolvers (surface_tiles.cpp — the one TU with .til format access,
@@ -203,23 +193,13 @@ set_target_properties(opennova_runtime PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# The terrain bake + height-query TUs keep their FP environment: no FMA
-# contraction, matching the original x87 bake precision. Scoped per-source so
-# the rest of the runtime group keeps the default codegen.
+# Terrain math keeps a stable FP environment with no FMA contraction. Scoped
+# per-source so the rest of the runtime group keeps the default codegen.
 set(_opennova_terrain_fp_sources
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/brush.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/builder.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/build_quadtree.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/cdep_constraint.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/cpt_export.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/depthmap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/mesh_simp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_mesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
@@ -228,7 +208,6 @@ set(_opennova_terrain_fp_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp
 )

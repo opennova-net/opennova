@@ -160,14 +160,14 @@ bool ResourceRoot::is_valid_root(const String &path) {
 }
 
 Error ResourceRoot::set_root_dir(const String &path) {
-	// Editor / authoring: loose files only, never the PFF archives. Loose files aren't SCR-wrapped,
+	// Loose-source mount: never open PFF archives. Loose files aren't SCR-wrapped,
 	// so the JO default (version-detect) is correct here.
 	expansion_ = String();
 	mount_kind_ = MountKind::None;
 	const Error err = mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
 			opennova::VfsArchiveDiscovery::ScanAll);
 	if (err == OK) {
-		mount_kind_ = MountKind::EditorLoose;
+		mount_kind_ = MountKind::Loose;
 	}
 	return err;
 }
@@ -206,8 +206,7 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 Error ResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
 		const String &game_code, opennova::VfsArchiveDiscovery discovery) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
-	// new (or re-scanned) resource directory is read fresh. scan_root() in the editor
-	// routes through here too, so a rescan picks up on-disk edits. The epoch bump tells
+	// a new or re-scanned resource directory is read fresh. The epoch bump tells
 	// GDScript-side cache holders (placer, veg assets) the same thing.
 	opennova::clear_texture_resolver_caches();
 	opennova::bump_cache_epoch();

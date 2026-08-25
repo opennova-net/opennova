@@ -1,11 +1,9 @@
 # opennova_base — the engine base services (vfs, resource_index, gameprofile,
-# pcapio, refs), one STATIC group target (Shape A). The header-only leaves
-# (base/io, base/oned_edit) keep their own INTERFACE targets in their
-# subdirectories.
+# pcapio), one STATIC group target (Shape A). The header-only base/io leaf
+# keeps its own INTERFACE target in its subdirectory.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
-# consumes pff/scr/bfc1 and refs consumes env/cbin/def/avatars/threedi/
-# mission_format/mnu, so this group PUBLIC-links opennova_formats.
+# consumes pff/scr/bfc1, so this group PUBLIC-links opennova_formats.
 
 add_library(opennova_base STATIC
     # gameprofile — game identity + required-resource tables
@@ -13,16 +11,6 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.c
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
-    # refs — cross-resource reference extraction + the whole-root RefGraph
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_env.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_cbin.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_def.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_avatar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_threedi.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_mission.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_mnu.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/ref_graph.cpp
     # resource_index — the mounted resource directory index
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_index.cpp
     # vfs — the engine-faithful PFF+loose+expansion mount stack

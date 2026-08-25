@@ -16,7 +16,7 @@ type vocabulary `[orig: CUIElement_ParseXMLDefinition @
 | `<ACTION type="screen">NAME</ACTION>` | Show screen `NAME` in this menu (pushes the back stack). |
 | `<ACTION type="screen" file="sp.mnu">NAME</ACTION>` | Cross-menu jump: the shell opens `sp.mnu` at screen `NAME`. |
 | `<ACTION type="window" state="SHOW\|HIDE\|ENABLE\|DISABLE">NAME</ACTION>` | Change the named Window's shown or enabled state. The separate `TOGGLE` flag inverts that property. |
-| `<ACTION type="url" EXTERNAL_BROWSER>www…</ACTION>` | Ask the shell to open a URL; Interactive preview consumes it without side effects. |
+| `<ACTION type="url" EXTERNAL_BROWSER>www…</ACTION>` | Ask the shell to open a URL. |
 | `<ACTION type="form_post" source="…" field="…" target_form="…">…</ACTION>` | Submit authored form data. `TEST="LT\|LE\|EQ\|GE\|GT"` carries its comparison mode. |
 | `<ACTION type="tab">NAME</ACTION>` | Select a named focus target on the retail form/tab event. This is not the visibility-based Tab convention below. |
 | `<ACTION type="pop_screen">` | Back (pop the screen stack; at the root the shell decides). |
@@ -33,11 +33,8 @@ its sibling panels and showing its own. There is no "tab" widget type.
 Runtime path: `MenuDriver` widget activation → `MenuDriver.dispatch_action_row` routes
 menu-owned Actions directly and hands browser/form/application Actions to their
 shell. Same-file `screen` navigates in place; `file` jumps emit `menu_requested`
-for the Menu Shell to open. Interactive preview consumes shell-side effects.
-
-**Authoring:** add a widget, then add an Action in the inspector (type + target). It
-serializes straight back to `<ACTION>`. Use the Menus workspace **Interactive**
-toggle to click through tabs/screens in the preview without leaving the editor.
+for the Menu Shell to open. ONED has no menu preview or authoring surface (ADR
+0037); format-specific tools edit and serialize these `<ACTION>` rows directly.
 
 ## What populates a list box
 
@@ -47,7 +44,7 @@ A `<WINDOW type="list">` has two possible content sources:
    builder seeds these. Most shipped lists ship empty.
 2. **Shell-populated by control NAME.** The `.mnu` only declares the empty list
    (name, position, row height, scrollbar); the game fills it at runtime. The Menu
-   Host finds the list by a well-known name and calls `set_items(...)`. Selection
+  Shell finds the list by a well-known name and calls `set_items(...)`. Selection
    relays back through the menu's `widget_value_changed` signal.
 
 So the file describes the *shape* of the list; the game decides its *contents*. The

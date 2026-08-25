@@ -3,6 +3,8 @@
 - **Status**: accepted (2026-08-09; maintainer directive)
 - **Amended**: ADR 0035 replaces the transitional frame-hook registration
   described below with a typed native session and direct Godot frame pipeline.
+- **Updated**: [ADR 0037](0037-oned-runs-game-data.md) narrows ONED from an
+  authoring front-end to run controls; Godot remains first-class.
 - **Owners**: runtime architecture
 - **Supersedes/updates**: amends ADR 0028 and ADR 0033's POSTURE — the
   "adapter" framing and the shell-neutral pretense — without touching their

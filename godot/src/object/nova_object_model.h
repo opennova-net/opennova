@@ -184,16 +184,9 @@ private:
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
 	bool env_has_generation_ = false;
-	bool last_light_push_valid_ = false;
-	int last_light_count_ = 0;
-	Vector3 last_light_position_;
-	Color last_light_color_ = Color(1, 1, 1, 1);
-	float last_light_intensity_ = 0.0f;
 	// The last applied point-light selection (FNV over count + packed
 	// vectors); 0 = never applied.
 	uint64_t last_point_light_selection_hash_ = 0;
-	float last_light_atten_start_ = 0.0f;
-	float last_light_atten_end_ = 0.0f;
 	// Dense part-index -> Node3D array + the PANM revision this model last
 	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
 	// it directly).
@@ -317,14 +310,12 @@ private:
 	int wpn_prev_variant_ = 0;
 
 	// Per-frame work skips.
-	bool has_lights_ = false;
 	bool has_live_panm_ = false;
 	Vector<bool> material_needs_eval_;
 	PackedInt32Array dynamic_material_slots_;
 	int64_t last_env_gen_ = -1;
 	Ref<EnvLightValues> last_env_values_;
 	Ref<EnvLightValues> last_section_env_values_;
-	bool model_light_preview_enabled_ = false;
 
 	// --- core (nova_object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
@@ -389,7 +380,6 @@ private:
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
 	void apply_environment_to_materials();
-	void apply_lights();
 
 	// --- retained-scene construction (nova_object_model_scene.cpp) ---
 	void rebuild_scene();
@@ -430,7 +420,6 @@ public:
 	bool get_mirror_reflected() const { return mirror_reflected_; }
 	void set_native_frame(bool p_native) { native_frame_ = p_native; }
 	bool get_native_frame() const { return native_frame_; }
-	void set_model_light_preview_enabled(bool p_enabled);
 	void set_shadow_caster_enabled(bool p_enabled);
 	bool is_shadow_caster_enabled() const;
 	void set_static_shadow_caster_enabled(bool p_enabled);

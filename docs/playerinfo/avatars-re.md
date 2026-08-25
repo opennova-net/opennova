@@ -7,14 +7,13 @@ composed into `combo` entries under a `nationality → division` tree) and the
 `Jointops.exe.kong.i64`, imagebase `0x400000`). All addresses below are that
 binary's.
 
-**Status: implemented and IDA-grilled for the parser/data model/editor bridge
+**Status: implemented and IDA-grilled for the parser/data model/runtime bridge
 (2026-06-16); the full `PLAYER_INFO` screen runtime orchestration was grilled
 (read-only) on 2026-06-23 and the runtime `player.mnu` host landed the same
 day; packed-identity player composition, per-part `TEX_CAMO`, networking,
 avatar/class persistence, and head-sex sound-profile selection landed
 2026-08-15.** `engine/formats/avatars`,
-`AvatarDatabase`, and the ONED Avatars workspace
-implement the witnessed loader semantics below; the in-game menu population is
+and `AvatarDatabase` implement the witnessed loader semantics below; the in-game menu population is
 live as `PlayerInfoMenuCompanion` (godot/game/player_info_menu_companion.gd) — the
 nat→div→combo cascade, team filter, RTXT display resolve, and 3D preview
 (D-PLAYERINFO-7 FIXED), the voice preview (D-PLAYERINFO-10 FIXED 2026-07-22),
@@ -29,8 +28,8 @@ remaining `player.sav`-level options.
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | `Avatars.def` grammar + parser | **matching** | full decompile of `CAvatarDefs_ParseConfigLine @ 0x57a3f0`; implementation re-verified on 2026-06-16 for part cap, duplicate slots, byte truncation, parse-time combo resolution, and required/optional combo refs |
-| Avatar object layout (combo / nationality / division / part structs) | **matching** | allocators decompiled (`@ 0x579f40` / `@ 0x579ff0` / `@ 0x579e10`); `engine/formats/avatars` keeps writer reference names but stores parse-time denormalized part snapshots for runtime/editor consumers |
-| `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; ONED editor exposes the same tree, alignment, and resolved-combo data but does not implement the in-game menu UI |
+| Avatar object layout (combo / nationality / division / part structs) | **matching** | allocators decompiled (`@ 0x579f40` / `@ 0x579ff0` / `@ 0x579e10`); `engine/formats/avatars` keeps writer reference names but stores parse-time denormalized part snapshots for runtime/tool consumers |
+| `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; `PlayerInfoMenuCompanion` hosts the same tree, alignment, and resolved-combo data in the in-game menu |
 | combo → spawned-player / first-person model binding | **matching (ported 2026-08-15; review-hardened same day)** | packed id resolver `lookup_entity_slot_and_pack_entry @ 0x57AD40` / decoder `MinimapSlot_FindByPackedId @0x57a270`; world head/body camo+submit sites `@0x5C7FEC/@0x5C800F` (blip +4 head, +0 body); first-person arms = the CharacterEntity's arms model (blip +8) `@0x4df05f/@0x4deff4`, submitted after `Avatar_SetArmsCamoCtrl @0x4DF008/@0x4DF070` — the ONLY arms source (weapon.def `gfx1a`/`gfx1b` are parsed-and-discarded tokens, `WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 → loc_545098`); no resolved arms → no arms submit `@0x4df064/@0x4df06b`. `MissionObjectPlacer` builds the selected body+head, `simassets::fp_viewmodel_spec` takes the character arms; the local player's id is read back from the authority's stamp (`Simulation.get_local_player_character_id`, entity+0x15C / the joiner's 0x0C record). `player_visual_resolver_test` + `game_world_test` pin the composition, the raw part-local controls, and the no-arms case. Residual: an id the registry cannot resolve draws the item model (retail's client 0x0C fold re-stamps it to the first combo of the team side `@0x42eae4..0x42eb03` — rides D-NET-137's registry validation). |
 | combo head sex → player sound profile | **matching (ported 2026-08-15)** | `AvatarDatabase::character_sex_rows` projects file-order packed character ids and the parse-time combo head's sex into `Simulation::set_character_avatar_database`; the reset-stable native `CharacterTraitsTable` lets player `Entity_GetProfileSlotSound @0x52831c` select items.def def+2152 for female characters. Unknown ids and NPCs stay on primary so a packed-id collision cannot rewrite authored AI sound. `avatars_data_test` and ctest `slot_sound` pin the boundary (D-SND-12 fixed). |
 | second `AvatarDefs_Init` path (`@ 0x53d281`/`@ 0x53d2b4`) | **unwitnessed** | flagged follow-up; different buffer sizes, also parses `Avatars.def` |

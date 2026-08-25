@@ -5,6 +5,8 @@
   `FrameDriver`; ADR 0036 (2026-08-22) cuts its lifecycle owner over to
   `inmatch::Session` plus the first-class `GameFramePipeline`.
   The R2 draw-list and R3/R4 dispositions below remain in force.
+- **Updated**: [ADR 0037](0037-oned-runs-game-data.md) retires ONED authoring
+  surfaces; the engine-loop and runtime-device decisions remain in force.
 - **Owners**: runtime architecture
 - **Supersedes/updates**: **replaces ADR 0031 and ADR 0032 in full as the
   standing architecture contract — there is ONE seam (the device boundary)

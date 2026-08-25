@@ -4,9 +4,7 @@ extends RefCounted
 ## The MCP server's log surface: a ring buffer of structured entries that the
 ## get_logs tool pages with cursors. Two feeds:
 ##
-##  - In-process notes: server request log, script ctx.log output, and editor
-##    status-bar messages (EditorWorkstation.show_status_message mirrors here
-##    via the static note_status, a no-op when no server is running).
+##  - In-process notes: server request log and script ctx.log output.
 ##  - Engine lines tailed from Godot's rotated log file (user://logs/godot.log,
 ##    on by default on desktop). GDScript cannot hook push_error in-process,
 ##    so the file tail is how agents see engine errors, script errors, and
@@ -31,13 +29,6 @@ func _init() -> void:
 	if FileAccess.file_exists(global):
 		_engine_log_path = global
 		_engine_pos = _file_length(global)
-
-
-## Mirror seam for EditorWorkstation.show_status_message; safe to call when no
-## MCP service is running.
-static func note_status(text: String) -> void:
-	if instance != null:
-		instance.note("status", "info", text)
 
 
 func note_server(text: String) -> void:

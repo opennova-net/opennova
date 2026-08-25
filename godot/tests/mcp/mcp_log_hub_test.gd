@@ -80,16 +80,6 @@ func test_sources_filter() -> void:
 	assert_eq(String(page["entries"][0]["text"]), "from status")
 
 
-func test_note_status_static_seam() -> void:
-	McpLogHub.note_status("ignored — no instance")
-	McpLogHub.instance = hub
-	McpLogHub.note_status("mirrored")
-	var page := hub.get_entries()
-	assert_eq(page["entries"].size(), 1)
-	assert_eq(String(page["entries"][0]["source"]), "status")
-	assert_eq(String(page["entries"][0]["text"]), "mirrored")
-
-
 func test_engine_ingest_classifies_and_merges() -> void:
 	_write_fake_log("")
 	hub.set_engine_log_path(ProjectSettings.globalize_path(FAKE_LOG))

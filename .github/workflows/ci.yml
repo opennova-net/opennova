@@ -510,9 +510,9 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  # One job, the workflow's two zips. The DEV zip (game + editor + loose assets/,
+  # One job, the workflow's two zips. The DEV zip (game + ONED + loose assets/,
   # one copy of the data) is what PRs and master builds hand out; the GAME zip
-  # (opennova.exe + the packed pffs, built by the exported editor's own
+  # (opennova.exe + the packed pffs, built by ONED's
   # --pack-game CLI) is what tagged releases ship — built here on every run so
   # the pack path is exercised long before a tag needs it.
   package-godot-windows:
@@ -560,7 +560,7 @@ jobs:
           path: godot/bin
 
       # PRs export in debug mode (debug export template + the template_debug DLL,
-      # the flavour every editor session runs); master/manual runs export in
+      # the development flavour); master/manual runs export in
       # release mode like the release workflow.
       - name: Package Godot Windows apps
         shell: pwsh
@@ -690,11 +690,11 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows debug-mode build for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})): debug export template plus the template_debug GDExtension, the flavour every editor session runs. Release-mode builds come from the release workflow.`,
+              `Windows debug-mode build for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})): debug export template plus the template_debug GDExtension. Release-mode builds come from the release workflow.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| Dev build: game + editor + loose assets (opennova.exe, opennova-modtools.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
+              `| Dev build: game + ONED + loose assets (opennova.exe, opennova-modtools.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
               `| Game build: opennova.exe + packed pffs (the tagged-release flavour) | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',

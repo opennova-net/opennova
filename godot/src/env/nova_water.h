@@ -85,10 +85,6 @@ public:
 	void set_water_alpha(float p_value) { water_alpha_ = p_value; }
 	float get_water_alpha() const { return water_alpha_; }
 
-	// When set (not NaN), the world drives water height directly and the
-	// env/terrain fallback is ignored — the terrain editor authors height
-	// through its document.
-	void set_height_override(float p_value);
 	// The mission/BMS rung in world units; NAN means absent. Zero is
 	// meaningful and still beats TRN and ENV.
 	void set_mission_water_height_override(float p_value);
@@ -152,10 +148,9 @@ private:
 	Ref<TerrainData> terrain_data_;
 	float water_height_ = 0.0f;
 	float water_alpha_ = 0.6f;
-	float height_override_ = NAN;
 	float mission_water_height_override_ = NAN;
-	// The world retains this node across unload/reload; unhosted authoring
-	// previews do not opt in, so a standalone water node starts enabled.
+	// The world retains this node across unload/reload, while a standalone
+	// water node starts enabled.
 	bool world_rendering_enabled_ = true;
 	float terrain_water_height_ = 0.0f;
 

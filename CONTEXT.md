@@ -15,9 +15,9 @@ with retail is *the reimpl*. Godot is never "the engine".
 _Avoid_: libs (the pre-2026-08 path), core, framework
 
 **The Godot layer (first-class, ADR 0034)**:
-`godot/src/` (pure C++ GDExtension bindings) plus `godot/game/` (the shared
-game-level GDScript runtime) — the layer that wires Godot nodes to engine
-facts. Both shells consume it; it depends on neither.
+`godot/src/` (pure C++ GDExtension bindings) plus `godot/game/` (the game-level
+GDScript runtime) — the layer that wires Godot nodes to engine facts. The game
+shell consumes it; ONED uses the process and packaging bindings it needs.
 _Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
 engine's), glue, bindings (only half of it)
 
@@ -34,7 +34,7 @@ _Avoid_: game logic, GameWorld (that is the scene, below)
 
 ## Menu UI (MNU)
 
-The vocabulary for NovaLogic's `.mnu` menu system and OpenNova's runtime + editor support for it.
+The vocabulary for NovaLogic's `.mnu` menu system and OpenNova's runtime support for it.
 
 **Menu**:
 A single `.mnu` document: one screen or a set of related screens authored together (e.g. main, options, loadout).
@@ -71,21 +71,6 @@ _Avoid_: action (reserve that strictly for the `<ACTION>` element)
 The runtime front-end that loads a menu set, drives a live interactive menu, plays its audio, and supplies Commands by control name. The menu counterpart to the world runtime.
 _Avoid_: menu host (retired 2026-07), menu manager, controller
 
-**Menus workspace**:
-The OpenNova Editor (ONED) surface for authoring `.mnu` files (WYSIWYG canvas + tree + inspector).
-_Avoid_: menu editor (ambiguous with the runtime menu)
-
-**Edit mode**:
-The flag that makes a live menu inert and click-through so the editor can reuse the exact runtime node as a WYSIWYG preview. Off = fully interactive runtime.
-_Avoid_: preview mode, design mode
-
-**Interactive preview**:
-An Edit-mode menu the Menus workspace can put into a "play" state: navigators
-wire up so clicking a Tab runs its Window and Screen Actions, while external
-effects (Commands plus URL, cross-menu, and shell-owned Actions) are sandboxed to
-no-ops. Lets an author preview tab/screen flow without leaving the editor.
-_Avoid_: play mode, runtime (it is still a preview)
-
 **Tab**:
 A Window shown or hidden by a sibling button's `window` Action (e.g. the Options panels). Not a widget type, just an authored convention: one button per panel, each `<ACTION type="window">` hiding the siblings and showing its own.
 _Avoid_: page, panel (when you mean the toggling mechanism)
@@ -98,8 +83,7 @@ historically; they are now distinct.
 **GameWorld**:
 The runtime world-sim scene (`godot/game/world/game_world.tscn`): terrain,
 environment, mission runtime, and audio under one embeddable root. The standalone
-game is the sole live mission runtime; ONED authoring previews do not run gameplay
-(ADR 0025). Formerly named `NovaWorld`.
+game is the sole live mission runtime (ADR 0025). Formerly named `NovaWorld`.
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
 **NovaWorld**:
@@ -125,10 +109,10 @@ _Avoid_: "our own protocol", custom packet format
 The authoritative side of an in-match session (the **host**) versus a remote peer that
 came in through the join handshake (a **joiner**). Under the listen server the host runs
 a local client too; "client" survives in wire-protocol prose (retail message names).
-This is the ONLY meaning of "host" in this codebase. UI attach-points are **Mounts**,
-presentation owners are **Presenters**, application front-ends are **Shells**, the
-application embedding a portable lib is its **embedder**, and our engine contrasted
-with retail is **the reimpl** — never "the host". Enforced by `scripts/lint/host_lint.py`
+This is the ONLY meaning of "host" in this codebase. UI attachment points are
+containers, presentation owners are **Presenters**, application front-ends are
+**Shells**, the application embedding a portable lib is its **embedder**, and our
+engine contrasted with retail is **the reimpl** — never "the host". Enforced by `scripts/lint/host_lint.py`
 (code suffixes; Markdown gets a non-failing advisory and `.agents/**` is exempt).
 _Avoid_: master/slave, owner (when you mean the host); host for anything that is not
 the authoritative session side
@@ -269,11 +253,24 @@ _Avoid_: numbered hurt volume, damage tier 16/17/18
 
 ## Products & modes
 
-**Product**:
-A shipped executable. There are exactly two: **`opennova.exe`** (the game) and
-**`opennova-modtools.exe`** (ONED). Everything else that builds from this repo is a tool
-or a service, not a product (ADR 0015).
-_Avoid_: app (ambiguous), the runtime (as a product name)
+**Godot product**:
+One of the two OpenNova applications built with Godot: the game and ONED. The
+separately distributed OpenNova Launcher, backend services, and development tools
+are outside this taxonomy (ADR 0015).
+_Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
+(as a product name)
+
+**ONED**:
+The developer-facing Godot product for selecting a game-data tree, running it in
+OpenNova or staged retail, and stopping the one game process it started. ONED does
+not author game data (ADR 0037).
+_Avoid_: launcher, editor, OpenNova Editor, modtools (as a product name)
+
+**OpenNova Launcher**:
+The separately distributed Windows tray product that directs a stock NovaLogic
+installation to OpenNova's NovaWorld service. It is the only product called
+Launcher.
+_Avoid_: ONED launcher, launcher (when referring to ONED)
 
 **Serve mode**:
 `opennova.exe` hosting a match without being a player: the server-options menu path,
@@ -291,9 +288,8 @@ _Avoid_: game (when you mean the identity, not the running program)
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
 banks, HUD layout, defs, default world files...). The witnessed enumeration is
-`docs/required-resources.md` (landed at ENG-6); the engine manifest derived from it is what
-boot validation and ONED diagnostics consume, and it defines what a person starts with to
-make a new game.
+`docs/required-resources.md` (landed at ENG-6); the engine manifest derived from it drives
+boot validation and defines the minimum game-data tree.
 _Avoid_: core assets, base game files
 
 **Promote**:
@@ -304,27 +300,11 @@ normalization, fixture curation, code relocation) should be phrased as *migrate*
 *normalize*, *whitelist*, and *move* respectively.
 _Avoid_: promote (for anything but the mission→world spawn)
 
-## Editor & Runtime
-
-**Mount**:
-A Control the shell hands a workspace or widget to build UI into
-(`build_inspector(mount)`, `mount_viewport(mount)`, `InspectorMount`, `DetailDockMount`).
-_Avoid_: host, slot, container (for the attach-point)
-
-**ONED**:
-The OpenNova Editor (`godot/modtools/`): the authoring application, thirteen workspaces over
-one code-first framework. "ONED" or "the editor" in prose.
-_Avoid_: terrain editor, modtools (as a name)
-
-**Workspace**:
-One asset-domain authoring surface inside ONED (Terrain, Object, Avatars, Mission, Fonts, Credits,
-Strings, Menus, HUD, Music, Particles, Sound, Environment). A workspace declares itself as a typed
-registry row and exposes capability hooks; the shell never switches on its type.
-_Avoid_: tab, tool, mode
+## Runtime presentation
 
 **HUD**:
-The in-game heads-up display, laid out by `hudpos.def`; also the read-only ONED workspace
-that previews that layout. RE record: `docs/interface/hud-re.md`.
+The in-game heads-up display, laid out by `hudpos.def`. RE record:
+`docs/interface/hud-re.md`.
 _Avoid_: overlay (that is the debug overlay), UI (too broad)
 
 **Spinmap**:
@@ -340,6 +320,6 @@ _Avoid_: showhud (that cycles the FP-weapon view flags, not the detail level)
 
 **Present pass**:
 The per-frame apply step that projects simulation state onto scene nodes
-(the native `PresentApplier`). It runs once in the standalone game runtime; F6 tests the
-current saved loose mission through that same game path (ADRs 0006 and 0025).
+(the native `PresentApplier`). It runs once in the standalone game runtime (ADRs
+0006 and 0025).
 _Avoid_: render pass, sync pass

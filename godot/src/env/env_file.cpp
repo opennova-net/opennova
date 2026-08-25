@@ -202,8 +202,8 @@ IMPL_SET_GET(iris_percent, set_iris_percent, get_iris_percent, float, float)
 IMPL_SET_GET(iris_center, set_iris_center, get_iris_center, float, float)
 IMPL_SET_GET(sky_speed, set_sky_speed, get_sky_speed, float, float)
 IMPL_SET_GET(sky_height, set_sky_height, get_sky_height, float, float)
-// The sky-map setters re-resolve the cached textures so the live sky (and any
-// editor preview) tracks the edit; load_bytes/load are otherwise the only
+// The sky-map setters re-resolve the cached textures so a live consumer tracks
+// the edit; load_bytes/load are otherwise the only
 // resolution points. Diff-guarded: undo snapshot replays with an unchanged
 // name must not hit the disk.
 void EnvFile::set_sky_map1(const String &p_value) {

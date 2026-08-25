@@ -87,7 +87,6 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: FoliageDispatcher
-var _tile_overlay: TerrainTileOverlay
 var _sun_shadow: SunShadow
 var _slot_shadow: SlotShadow
 var _terrain_data: TerrainData
@@ -268,7 +267,6 @@ func _ready() -> void:
 			# The applier reads the native detail-cell handoff and the composed
 			# surface textures through this wired owner (never a parent probe).
 			_dispatcher.set_terrain(_terrain)
-		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as TerrainTileOverlay
 	_sun_shadow = SunShadow.new()
 	_sun_shadow.name = "SunShadow"
 	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
@@ -366,7 +364,7 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 
 
 ## Load the exact saved, top-level loose BMS from the selected resource root.
-## This is ONED's standalone F6 path: it deliberately differs from load_mission(),
+## This tooling/test seam deliberately differs from load_mission(),
 ## whose retail contract remains archive-only even when the session has /d.
 ## Only the BMS itself is forced to disk; terrain, environment, objects and
 ## sidecars continue through the mounted runtime root and its normal /d policy.
@@ -430,7 +428,7 @@ func is_net_session() -> bool:
 
 
 ## Load an in-memory mission through the shared world pipeline. This is retained
-## as a focused engine-test/tool seam; normal game and ONED launches always use
+## as a focused engine-test/tool seam; normal game launches always use
 ## a saved .bms through load_mission() or load_loose_mission().
 func load_mission_data(mission: MissionData, bms_name: String, dir: String = "") -> int:
 	if mission == null or not mission.is_loaded():
@@ -582,7 +580,7 @@ func _mount_runtime_root(dir: String) -> ResourceRoot:
 
 
 # Populate the world with the mission's placed objects under a MissionObjects node.
-# Shares the shell-agnostic placer with the editor Mission workspace.
+# Uses the same shell-agnostic placer as every other mission load path.
 func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null) -> void:
 	if _resource_root == null or mission == null:
 		return
@@ -1009,10 +1007,7 @@ func _load_terrain(trn_path: String) -> bool:
 	var data := TerrainData.new()
 	if data.load_from_resource_root(_resource_root, trn_path) != OK:
 		return false
-	var tile_info := _mission_tile_info
-	if tile_info == null and _tile_overlay != null:
-		tile_info = _tile_overlay.tile_info
-	_terrain.tile_info_override = tile_info
+	_terrain.tile_info_override = _mission_tile_info
 	_terrain_data = data
 	_terrain.terrain_data = data
 	if _slot_shadow != null:
@@ -1066,13 +1061,6 @@ func _configure_foliage() -> void:
 					String(diagnostic.get('graphic', '')),
 				]
 			)
-	if _tile_overlay != null:
-		# Terrain composites the tile overlay into its own material; the scene
-		# TileOverlay node is only the authoring fallback selected before build.
-		_tile_overlay.clear()
-		_tile_overlay.visible = false
-
-
 func get_terrain_data() -> TerrainData:
 	return _terrain_data
 

@@ -166,7 +166,6 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	# Release native texture owners before RenderingServer teardown; keeping the
 	# resource locals alive until process exit makes Godot report false leaks.
 	dispatcher.set_terrain(null)
-	dispatcher.clear_surface_input_overrides()
 	dispatcher.reset()
 	terrain.set_terrain_data(null)
 	viewport.free()

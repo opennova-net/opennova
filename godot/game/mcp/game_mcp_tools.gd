@@ -3,7 +3,7 @@ extends RefCounted
 
 ## Curated runtime tool handlers. The adapter fronts MainGame through narrow public
 ## methods; this module never reaches into its scene or the simulation's
-## private state. ONED registers the same definitions with proxy handlers.
+## private state.
 
 const INTERNAL_SHUTDOWN_ACTION := "_oned_shutdown_runtime_debug"
 

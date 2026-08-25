@@ -196,15 +196,12 @@ func test_screen_action_same_file_navigates_and_pushes_stack() -> void:
 	assert_true(driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": ""}),
 			"empty-file screen action handled")
 	assert_eq(driver.get_current_screen(), "SUB", "navigated to SUB")
-	assert_eq(driver.get_nav_stack_depth(), 1, "forward move pushed MAIN")
 	assert_true(driver.pop_screen(), "pop returns")
 	assert_eq(driver.get_current_screen(), "MAIN", "pop returned to MAIN")
-	assert_eq(driver.get_nav_stack_depth(), 0, "stack emptied")
 	# Shipped same-file jumps spell their own filename, case-insensitively.
 	assert_true(driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": "MENU.MNU"}),
 			"own-filename screen action handled")
 	assert_eq(driver.get_current_screen(), "SUB", "case-insensitive same-file jump navigated")
-	assert_eq(driver.get_nav_stack_depth(), 1, "same-file jump pushed the stack")
 
 
 func test_pop_past_root_emits_quit_requested() -> void:

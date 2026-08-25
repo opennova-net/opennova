@@ -18,8 +18,9 @@
 
 namespace godot {
 
-// Editable single-archive PFF tool, exposed to the OpenNova Editor. Wraps the engine/formats/pff reader +
-// streaming writer + the payload decode layer + the game-profile table. A "game" choice drives
+// Godot PFF document binding used by ONED's hidden pack command and format tests.
+// Wraps the engine/formats/pff reader + streaming writer + the payload decode
+// layer + the game-profile table. A "game" choice drives
 // both the container key (for encrypting added files) and the payload codec (for decoding on
 // extract). Read-only resolution still belongs to ResourceRoot; this class is the authoring
 // surface. The model holds the directory plus pending add/delete ops, never the whole archive in
@@ -60,7 +61,7 @@ private:
 	// recent extract batch / extract_to_status call. Lets the UI warn "N saved as raw".
 	mutable int last_undecoded_count_ = 0;
 
-	// Background Save-As job (mirrors TerrainBuildJob). The worker thread is the ONLY reader of
+	// Background Save-As job. The worker thread is the ONLY reader of
 	// source_ while a save runs; the UI disables all other ops, so there is no concurrent access.
 	struct SaveState {
 		bool running = false;

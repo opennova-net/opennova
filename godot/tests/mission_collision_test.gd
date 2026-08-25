@@ -117,15 +117,3 @@ func test_skinned_person_reports_face_and_sphere_collision_without_volumes() -> 
 	assert_true(data.is_skinned(0), "CharModel is the skeletal collision fixture")
 	assert_eq(data.get_collision_volumes().size(), 0, "CharModel has no BVOL collision")
 	assert_true(data.has_collision(), "CharModel still reports its CFAC/COBJ collision")
-
-
-func test_placer_collision_shapes_for_loads_and_caches() -> void:
-	# Integration: the placer resolves a model through a resource root and builds its
-	# pick shapes (the same shapes the controller attaches to bodies), cached per graphic.
-	var root := ResourceRoot.new()
-	root.set_root_dir(ProjectSettings.globalize_path(FIXTURE_DIR))
-	var placer := MissionObjectPlacer.create(root, null)
-	var shapes: Array = placer.collision_shapes_for("Shed")
-	assert_gt(shapes.size(), 0, "Shed resolves to convex collision shapes")
-	assert_true(shapes[0] is ConvexPolygonShape3D, "and they are convex hulls")
-	assert_eq(placer.collision_shapes_for("Shed").size(), shapes.size(), "result is cached (same size on re-call)")

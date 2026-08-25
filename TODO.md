@@ -1,30 +1,9 @@
 # TODO
 
-Everything here is work that is **not** a parity divergence: editor UX, code
+Everything here is work that is **not** a parity divergence: ONED and OpenNova Launcher UX, code
 hardening, and project health. Divergences from the original engine belong in
 [docs/divergence-ledger.md](docs/divergence-ledger.md) instead, and
 [docs/current-state.md](docs/current-state.md) explains which is which.
-
-## General Mission
-
-- [ ] Zones are awkward to create
-- [ ] AI class and AI script: should be a selection, not a free input, if we can pull the options from a loadable resource (def, etc)
-- [ ] Group record semantics: the field WIDTHS are grilled (`bms.h`,
-      `[orig: Med_WriteBmsFile @ 0x44f920]` — @0 a 2-bit flags, @8 the only free int,
-      @12 the literal 10) and the editor clamps to that shape, but the two flag bits and
-      the free int still lack semantic MEANING — grill what the engine reads them for
-      and label the UI accordingly
-- [ ] Too much useless text noise in Mission tab
-- [ ] Briefing needs to be a larger textbox. Also confirm whether it can be a string (rtxt) and integrate nicely if so
-- [ ] "Music track" being a number is no good. Better integration (the music workspace
-      and `NovaMusicService` exist now to feed a named picker)
-
-## BMS Scripting
-
-- [ ] "PlayWavList" needs deeper editor integration: the dialog/wav id param is a raw
-      number, and the runtime resolution chain through the co-named `.DBF` is in
-      (`nova_mission_audio.gd`), so a dialog-name picker with preview is feasible now
-- [ ] MisvarChange/Set etc need better editor integration
 
 ## Cleanup & verification backlog
 
@@ -68,15 +47,12 @@ hardening, and project health. Divergences from the original engine belong in
       witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
       divergence
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface) and cpt (a real migration, tracked as its own row below)
-- [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Converge `engine/formats/cpt`'s bit codec on `io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;
       waves 1-4 landed as #310-#375): perf-span unify, sim debug-snapshot
-      narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
-      the avatar/object preview de-fork + shared MCP arg helper, push-downs —
-      opportunistic
+      narrowing (debug half only), and remaining runtime push-downs — opportunistic
 - [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
       rattrib/pattrib magic values — #365 landed the net-message-id and
       witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
@@ -89,11 +65,10 @@ hardening, and project health. Divergences from the original engine belong in
       return-to-menu rather than a pause-style stop; expensive views are physically
       reset when F3 closes. Review and either ratify the new behavior in
       `godot/src/debug/pages/README.md` or change it.
-- [ ] Managed-game shutdown: editor close/F8 always ends in `OS.kill`
-      (TerminateProcess) because the graceful-quit path requires the debug identity
-      that non-debug runs never get; and `user://oned-run-*.log` files accumulate
-      unbounded. Give the managed child a graceful-quit path (or a bounded grace
-      window) and prune or rotate the logs.
+- [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
+      Add a bounded graceful-quit window before the current forced termination,
+      and keep the process-handle lifecycle reliable so a stopped retail child
+      releases the staged files before the next pack.
 
 ## Project health follow-ups
 
@@ -104,7 +79,7 @@ hardening, and project health. Divergences from the original engine belong in
       premise is historical; commands remain current)
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, Python, and Godot gates.
 - [ ] Full Linux core tests: add an Ubuntu leg for the complete native/Python suite after triaging any platform-only failures. Acceptance: the full CTest and Python suites run on Linux for every PR without relying on the net-only or packaging jobs.
-- [ ] Incremental conventional linting: establish project-owned editor/format settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
+- [ ] Incremental conventional linting: establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 - [ ] Two ctests are `DISABLED TRUE` in `tests/CMakeLists.txt` with reasons recorded but no owner: `parametric_parity` (long byte-identical CPT fixture run, disabled pending CI stability/perf cost) and `particle_smoke_all_fixtures` (waiting on the full 77-file corpus being mirrored into `fixtures/particle/`). Acceptance: each is either re-enabled or converted into an env-gated test alongside the rest of the asset-gated set (`docs/asset-gated-tests.md`).
 - [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
       --server` and a packaging boot-smoke leg — tracked future work, never

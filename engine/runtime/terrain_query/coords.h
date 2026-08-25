@@ -2,25 +2,20 @@
 
 // Terrain world -> source/atlas coordinate transforms.
 //
-// One implementation, shared by the runtime height/foliage samplers and the
-// editor brush/eyedropper paths. The two callers differ only in three lookup
-// guards (not in the data or the core math), expressed here as explicit options
-// so the divergence is auditable rather than forked:
+// One implementation, shared by runtime height/foliage sampling and the
+// bounds-checked terrain raycast. The two callers differ only in three lookup
+// guards, expressed here as explicit options:
 //
 //   * resolve_world_sample (runtime, jodemo.exe Terrain_SampleHeightBilinear
 //     @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0): wraps the grid index
 //     with & 0xF, uses the raw sector id, and does not clamp the local offset.
-//   * EditorTerrainMesh.world_to_source_coords (editor): rejects cells outside
-//     the authored rows/cols, clamps the sector id to [0,4], and clamps the
-//     local offset to [0, 512 - 0.001].
+//   * The bounds-checked raycast path rejects cells outside the configured
+//     rows/cols, clamps the sector id to [0,4], and clamps the local offset to
+//     [0, 512 - 0.001].
 //
-// GDScript computes the editor path in 64-bit double then stores a float32
-// Vector2; the runtime path is float throughout. The kernel is therefore
-// templated on the precision so each caller keeps its native rounding:
-// instantiate <double> for the editor, <float> for the runtime.
+// The kernel is templated so each caller keeps its required precision.
 //
-// Godot-agnostic: raw int grid pointer + scalars only. The GDExtension wrapper
-// (TerrainData) converts to/from Vector2 / Rect2i at the boundary.
+// Godot-agnostic: raw int grid pointer + scalars only.
 
 #include <cmath>
 #include <cstdint>
@@ -38,7 +33,7 @@ constexpr int COORDS_SECTOR_ID_MAX = 4;
 // The 16x16 sector grid plus its placement. `sector_grid` points at
 // COORDS_SECTOR_GRID_DIM^2 ints, row-major (index = row * 16 + col), holding the
 // per-cell sector id (0 = empty, 1..4 = quadrant). `sector_count`/`sector_rows`
-// are the authored extent used only by the editor bounds-reject guard.
+// are the configured extent used by the bounds-reject guard.
 struct SectorLayout {
 	const int *sector_grid = nullptr;
 	int origin_x = 0;
@@ -47,12 +42,11 @@ struct SectorLayout {
 	int sector_rows = 0;
 };
 
-// The three editor-vs-runtime guard differences. coords_runtime_options() and
-// coords_editor_options() are the only two combinations used in production.
+// The three bounds-checked-vs-runtime guard differences.
 struct CoordsOptions {
-	bool bounds_reject = false;  // editor: reject out-of-extent; runtime: & 0xF wrap
-	bool clamp_sector_id = false; // editor: clampi(id, 0, 4); runtime: raw
-	bool clamp_local = false;    // editor: clampf(local, 0, 512 - 0.001); runtime: raw
+	bool bounds_reject = false;  // reject out-of-extent, or use runtime & 0xF wrap
+	bool clamp_sector_id = false; // clamp to [0,4], or keep the runtime raw id
+	bool clamp_local = false;    // clamp to [0, 512 - 0.001], or keep runtime raw offset
 };
 
 inline CoordsOptions coords_runtime_options() {
@@ -78,8 +72,7 @@ inline int coords_clampi(int v, int lo, int hi) {
 }
 
 // Quadrant offsets: ids 3,4 sit in the right half (+512 X); ids 2,4 in the
-// bottom half (+512 Z). Mirrors EditorTerrainMesh._sector_source_offset and the
-// quadrant_x/quadrant_z branches of resolve_world_sample.
+// bottom half (+512 Z).
 inline int coords_quadrant_offset_x(int sector_id) {
 	return (sector_id == 3 || sector_id == 4) ? COORDS_SECTOR_SIZE : 0;
 }
@@ -105,7 +98,7 @@ inline int coords_quadrant_offset_z(int sector_id) {
 // TerrainHeightField is a by-value POD that lands in some very deep stack frames, so
 // 2 bytes fits the padding it already had where 32 overflowed tests/world/infantry_test.
 //
-// [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/terrain_mesh.cpp: picks the
+// [orig: sub_402D20 @0x402D20: picks the
 //  entry with (tile_x >= 0x200) + 2 * (tile_y >= 0x200), then sets mask 511 / offset
 //  (tile_xy & 0x200) on a locked axis and taps (offset + (abs & mask)) & 0x3FF.]
 struct CoordsQuadrantLocks {
@@ -170,9 +163,8 @@ inline CoordsTaps coords_taps_for_sector(const CoordsQuadrantLocks &locks, int s
 	                                coords_quadrant_offset_z(sector_id), dim);
 }
 
-// Sector id at an explicit grid cell using the editor's guards: reject (return
-// 0) outside the authored rows/cols, otherwise clamp to [0,4].
-// Mirrors EditorTerrainMesh.get_sector_cell_value.
+// Sector id at an explicit grid cell: reject (return 0) outside the configured
+// rows/cols, otherwise clamp to [0,4].
 inline int coords_sector_id_at_cell(const SectorLayout &layout, int row, int col) {
 	if (!layout.sector_grid || row < 0 || row >= layout.sector_rows ||
 	    col < 0 || col >= layout.sector_count) {
@@ -279,7 +271,6 @@ struct CellCoordsResult {
 
 // Source coords for an explicitly chosen cell, with the local offset left
 // UNCLAMPED (the caller owns the cell choice and may sample outside it).
-// Mirrors EditorTerrainMesh.world_to_cell_source_coords.
 template <typename Real>
 CellCoordsResult<Real> coords_world_to_cell_source(const SectorLayout &layout, Real world_x, Real world_z,
                                                    int row, int col) {
@@ -306,7 +297,6 @@ struct CoordsRect {
 
 // Atlas (quadrant) rect for a cell: a 512x512 window into the 1024 atlas at the
 // cell's quadrant offset, or a zero rect for an empty/out-of-extent cell.
-// Mirrors EditorTerrainMesh.get_cell_atlas_rect.
 inline CoordsRect coords_cell_atlas_rect(const SectorLayout &layout, int row, int col) {
 	const int sector_id = coords_sector_id_at_cell(layout, row, col);
 	if (sector_id <= 0) {

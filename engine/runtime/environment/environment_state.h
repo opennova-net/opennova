@@ -1,4 +1,4 @@
-// The runtime/editor TOD environment state owner — the state half of the
+// The runtime TOD environment state owner — the state half of the
 // witnessed environment cluster, ported verbatim from nova_environment.gd
 // (2026-08-09 de-scripting). Engine equivalents (docs/env/env-tod-re.md):
 // - [orig: Environment_UpdateWeatherTick @ 0x57e9b0] advances time per tick.
@@ -12,8 +12,7 @@
 // tick, the S2C 0x0A phase-2 network overrides, the NVG hemisphere rewrite,
 // the env #27 smoothed scalar currents, and the change-gated env generation
 // every lit consumer keys on. The shell node owns only device work: shader
-// global pushes, EnvLightState publication, texture handles, the day_speed
-// authoring scrub knob.
+// global pushes, EnvLightState publication, and texture handles.
 #pragma once
 
 #include <env/env.h>
@@ -69,8 +68,7 @@ struct SceneFogValues {
 	int type = 0;
 };
 
-// The env-derived terrain lighting + fog uniforms (terrain.gdshader /
-// terrain_editor.gdshader share them via terrain_lighting.gdshaderinc):
+// The env-derived terrain lighting + fog uniforms used by terrain.gdshader:
 // c1 <- the light block, c0 <- the sky block — the witnessed terrain PS
 // constants (fill/ground does not reach the terrain surface)
 // [orig: terrain_setup_lighting_and_shader @ 0x604420;
@@ -197,8 +195,8 @@ public:
 	// Without this split the mission clock's per-tick TOD writes alternate RAW
 	// keyframe colors against the weather's modulated writeback — the whole
 	// scene then strobes between the two at the tick/frame beat (the
-	// 2026-07-13 "black flicker" regression). Standalone owners (the editor
-	// env preview without a weather node) keep the direct writes.
+	// 2026-07-13 "black flicker" regression). Standalone owners without a
+	// weather node keep the direct writes.
 	void set_weather_driven(bool driven) { weather_driven_ = driven; }
 	bool is_weather_driven() const { return weather_driven_; }
 

@@ -1,34 +1,12 @@
 extends GutTest
 
 
-func test_surface_inputs_are_registered_for_runtime_and_oned() -> void:
+func test_surface_inputs_are_registered_for_runtime() -> void:
 	assert_true(ClassDB.class_exists("TerrainSurfaceInputs"),
-		"Runtime terrain preprocessing must be available to ONED through a registered shared object.")
+		"Runtime terrain preprocessing must be available through a registered object.")
 
 
-func test_cpu_source_image_replacements_invalidate_live_terrain_inputs() -> void:
-	var data := TerrainData.new()
-	var changed_count := [0]
-	data.terrain_changed.connect(func() -> void: changed_count[0] += 1)
-	var revisions := [data.get_change_revision()]
-
-	data.set_heightmap_image(_solid_height_image(4, 2.0))
-	revisions.push_back(data.get_change_revision())
-	data.set_colormap_image(_solid_image(Color8(90, 110, 70, 255), 4))
-	revisions.push_back(data.get_change_revision())
-	data.set_blendmap_image(_solid_image(Color8(128, 64, 64, 200), 4))
-	revisions.push_back(data.get_change_revision())
-
-	assert_eq(changed_count[0], 3,
-		"Every CPU source replacement must invalidate derived inputs and resident tile pages.")
-	assert_gt(revisions[1], revisions[0])
-	assert_gt(revisions[2], revisions[1])
-	assert_gt(revisions[3], revisions[2])
-	assert_ne(revisions[3], 0,
-		"zero remains the never-observed sentinel across terrain revision wrap")
-
-
-func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
+func test_full_rebuild_produces_retail_surface_inputs() -> void:
 	var data := _make_surface_data()
 	var inputs := TerrainSurfaceInputs.new()
 
@@ -36,7 +14,7 @@ func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	assert_true(inputs.has_normalized_blend())
 	assert_true(inputs.has_detail_coefficient())
 	assert_true(inputs.has_detail2())
-	assert_true(inputs.has_heightfield_normal())
+	assert_false(inputs.has_heightfield_normal())
 	for layer in 3:
 		assert_true(inputs.has_paired_detail(layer))
 
@@ -52,14 +30,14 @@ func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	assert_same(material.get_shader_parameter("u_detail_c1"), inputs.get_detail_c1_texture())
 	assert_same(material.get_shader_parameter("u_colormap"), inputs.get_colormap_texture())
 	assert_same(material.get_shader_parameter("u_detail2"), inputs.get_detail2_texture())
-	assert_same(material.get_shader_parameter("u_heightfield_normal"), inputs.get_heightfield_normal_texture())
+	assert_null(material.get_shader_parameter("u_heightfield_normal"))
 	assert_true(bool(material.get_shader_parameter("u_has_detail2")))
-	assert_true(bool(material.get_shader_parameter("u_has_heightfield_normal")))
+	assert_false(bool(material.get_shader_parameter("u_has_heightfield_normal")))
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 73.0)
 	assert_eq(float(material.get_shader_parameter("u_detail2_density")), 9.0)
 
 
-func test_diagnostics_report_live_texture_dimensions_mips_and_densities() -> void:
+func test_diagnostics_report_texture_dimensions_mips_and_densities() -> void:
 	var inputs := TerrainSurfaceInputs.new()
 	assert_true(inputs.rebuild(_make_surface_data()))
 
@@ -77,9 +55,10 @@ func test_diagnostics_report_live_texture_dimensions_mips_and_densities() -> voi
 			"%s reports base plus every lower mip level." % name)
 
 	var heightfield := textures["heightfield_normal"] as Dictionary
-	assert_eq(heightfield["size"], Vector2i(4, 4))
+	assert_false(bool(heightfield["available"]))
+	assert_eq(heightfield["size"], Vector2i.ZERO)
 	assert_eq(int(heightfield["mipmap_count"]), 0)
-	assert_eq(int(heightfield["level_count"]), 1)
+	assert_eq(int(heightfield["level_count"]), 0)
 
 
 func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
@@ -87,25 +66,12 @@ func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
 	var inputs := TerrainSurfaceInputs.new()
 	assert_true(inputs.rebuild(data))
 
-	var first_height: Texture2D = inputs.get_heightfield_normal_texture()
 	var first_blend: Texture2D = inputs.get_normalized_blend_texture()
 	var first_coefficient: Texture2D = inputs.get_detail_coefficient_texture()
 	var first_c1: Texture2D = inputs.get_paired_detail_texture(0)
-	var first_height_bytes := first_height.get_image().get_data()
-
-	# Mutate the same live FORMAT_RF image ONED brushes own. A height-only refresh
-	# must consume get_depth_raw16(), replace only the normal texture, and leave
-	# normalized blend/coefficient/paired-mip allocations untouched.
-	data.get_heightmap_image().set_pixel(1, 0, Color(16.0, 0.0, 0.0, 1.0))
-	assert_true(inputs.rebuild_heightfield())
-	assert_ne(inputs.get_heightfield_normal_texture().get_image().get_data(), first_height_bytes,
-		"Height normal refresh must observe the live edited height image.")
-	assert_same(inputs.get_normalized_blend_texture(), first_blend)
-	assert_same(inputs.get_detail_coefficient_texture(), first_coefficient)
-	assert_same(inputs.get_paired_detail_texture(0), first_c1)
 
 	var replacement_blend := _solid_image(Color8(32, 128, 96, 255), 4)
-	data.set_blendmap_image(replacement_blend)
+	data.set_detailblendmap(ImageTexture.create_from_image(replacement_blend))
 	assert_true(inputs.rebuild_blend())
 	assert_ne(inputs.get_normalized_blend_texture(), first_blend)
 	assert_same(inputs.get_detail_coefficient_texture(), first_coefficient)
@@ -197,9 +163,7 @@ func _make_surface_data() -> TerrainData:
 	data.set_detailmapdist2(_solid_texture(Color8(100, 100, 100, 255), 4))
 	data.set_detail_density2(9)
 	var blend := _solid_image(Color8(128, 64, 64, 200), 4)
-	data.set_blendmap_image(blend)
 	data.set_detailblendmap(ImageTexture.create_from_image(blend))
-	data.set_heightmap_image(_solid_height_image(4, 2.0))
 	data.set_detail_density(73)
 	return data
 
@@ -212,14 +176,6 @@ func _solid_image(color: Color, side: int) -> Image:
 
 func _solid_texture(color: Color, side: int) -> Texture2D:
 	return ImageTexture.create_from_image(_solid_image(color, side))
-
-
-func _solid_height_image(side: int, height: float) -> Image:
-	var bytes := PackedByteArray()
-	bytes.resize(side * side * 4)
-	for index in side * side:
-		bytes.encode_float(index * 4, height)
-	return Image.create_from_data(side, side, false, Image.FORMAT_RF, bytes)
 
 
 func _surface_shader() -> Shader:

@@ -85,13 +85,6 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	assert_eq(int(foliage_map.get_index(
 		DETAIL_WITNESS_MIRRORED_MAP.x, DETAIL_WITNESS_MIRRORED_MAP.y)), 255,
 		"The detail witness's mirrored coordinate should remain negative.")
-	assert_eq(foliage_map.get_detail_map_position_world(
-		DETAIL_WITNESS_WORLD.x, DETAIL_WITNESS_WORLD.y),
-		DETAIL_WITNESS_FLAT_MAP,
-		"Runtime preview and authoring tools must resolve the same flat detail pixel.")
-	assert_eq(foliage_map.get_detail_sample_resolution(), 256,
-		"Dvxi5's 256-wide map should expose the retail detail sample resolution.")
-
 	assert_eq(int(data.get_foliage_index_world(
 		ROUTED_WITNESS_WORLD.x, ROUTED_WITNESS_WORLD.y)), FOLIAGE_MATCH,
 		"MODEL sampling must use the routed authored-map coordinate.")

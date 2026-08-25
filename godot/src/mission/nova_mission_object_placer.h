@@ -4,7 +4,6 @@
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/templates/vector.hpp>
@@ -24,11 +23,10 @@ namespace godot {
 
 class MissionData;
 
-// Shell-agnostic placement of a mission's entities into a 3D scene — the
-// one genuinely shared piece between the runtime world and the editor
-// Mission workspace. Given a parsed MissionData, a resource root, and an
-// item database, it resolves each placed entity to its visual model and
-// instances it under a "MissionObjects" container.
+// Placement of a mission's entities into the runtime 3D scene. Given a parsed
+// MissionData, a resource root, and an item database, it resolves each placed
+// entity to its visual model and instances it under a "MissionObjects"
+// container.
 //
 // Batching strategy (hybrid): static models merge into one
 // MultiMeshInstance3D per (graphic, submesh) — real maps place hundreds of
@@ -38,12 +36,10 @@ class MissionData;
 // occlusion masks), and live-PANM graphics (the original re-poses those from
 // the global clock every rendered frame) each get an individual ObjectModel.
 // The witnessed eligibility policy is engine-side
-// (mission/placement_traits.h); static batches reuse the full object-editor
-// fidelity path by harvesting a throwaway template model's rest-pose meshes
-// and materials. Ported from mission_object_placer.gd (2026-08-10
-// de-scripting, reshaped per the improve-not-mirror directive: typed
-// internal records, native collision-hull points, and stage timings
-// returned in the stats instead of the GDScript timeline seam).
+// (mission/placement_traits.h); static batches harvest a throwaway template
+// model's rest-pose meshes and materials. Ported from
+// mission_object_placer.gd (2026-08-10 de-scripting), with typed internal
+// records and stage timings returned in the stats.
 class MissionObjectPlacer : public RefCounted {
 	GDCLASS(MissionObjectPlacer, RefCounted)
 
@@ -92,8 +88,6 @@ public:
 	// Set once by the owner; every model built here holds the same record,
 	// and update_environment() restamps the harvested static-batch materials.
 	void set_environment_state(const Ref<EnvLightState> &p_state);
-	void set_edit_mode(bool p_edit_mode) { edit_mode_ = p_edit_mode; }
-	bool get_edit_mode() const { return edit_mode_; }
 
 	// The items database (items.def), loaded on demand from the resource
 	// root; null if items.def cannot be resolved.
@@ -127,10 +121,6 @@ public:
 	// batches + per-stage "spans" usec timings).
 	Dictionary place(const Ref<MissionData> &p_mission, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
-	// Render one freshly-added entity into an existing container without
-	// rebuilding the whole world (editor authoring; always records picks).
-	Dictionary place_single(const Ref<MissionData> &p_mission,
-			Node3D *p_container, int p_kind, int p_index);
 
 	// Build ONE animated ObjectModel for an item type, in rest pose, for an
 	// owner-managed entity with no BMS placement (the local-player avatar).
@@ -159,10 +149,6 @@ public:
 	void set_placed_entity_records(const Array &p_records) {
 		placed_entity_records_ = p_records;
 	}
-	Array get_pickable_records() const { return pickable_records_; }
-	void set_pickable_records(const Array &p_records) {
-		pickable_records_ = p_records;
-	}
 	Array get_static_user_point_sources();
 	Array get_static_item_effect_sources();
 	Vector<StaticTerrainShadowSource> get_static_terrain_shadow_sources();
@@ -174,12 +160,6 @@ public:
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 	Ref<SkeletalAnim> skeletal_anim_for(int p_item_id,
 			const String &p_graphic);
-	Vector3 ground_anchor_godot(const String &p_graphic);
-	Vector3 ground_anchor_bms(const String &p_graphic);
-	Array collision_shapes_for(const String &p_graphic);
-	StaticBody3D *add_pick_collider(Node3D *p_container, int p_kind,
-			int p_index, const String &p_graphic,
-			const Transform3D &p_entity_xform);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
 	Variant get_static_instance_transform(int p_bms_id) const;
@@ -224,10 +204,6 @@ public:
 	// that own render geometry only).
 	bool register_static_batches(const String &p_graphic,
 			const Array &p_batches);
-	// Cache-inject the model-local ground anchor for a graphic (the
-	// authoring-bake seam without a resolvable model).
-	void register_ground_anchor(const String &p_graphic,
-			const Vector3 &p_anchor);
 	// Pre-fill the per-item occlusion verdict (isolates the PANM routing
 	// rule from a fixture's independent portal payload).
 	void register_occlusion_verdict(int p_item_id, bool p_has_occlusion);
@@ -268,14 +244,6 @@ private:
 	void _add_individual_static_shadow_siblings(ObjectModel *p_model,
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);
-	void _record_static_batch(const String &p_graphic, const Array &p_refs,
-			const Ref<MultiMesh> &p_mm, MultiMeshInstance3D *p_mmi,
-			const Transform3D &p_offset, const Ref<Mesh> &p_mesh,
-			const Ref<MultiMesh> &p_shadow_mm = Ref<MultiMesh>(),
-			const Array &p_shadow_slots = Array());
-	Vector3 _ground_anchor_for(const String &p_graphic,
-			const Ref<ObjectData> &p_data);
-	AABB _visual_model_aabb(const Ref<ObjectData> &p_data);
 	Node3D *_ensure_container(Node3D *p_parent);
 	void _record_static_user_point_group(const String &p_graphic,
 			const Array &p_transforms);
@@ -294,10 +262,8 @@ private:
 	Ref<AvatarDatabase> avatar_db_;
 	Ref<PanmClock> panm_clock_;
 	Ref<EnvLightState> env_state_;
-	bool edit_mode_ = false;
 
 	Array placed_entity_records_;
-	Array pickable_records_;
 	Array static_user_point_sources_;
 	Array static_item_effect_sources_;
 	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
@@ -319,8 +285,6 @@ private:
 	Vector<Ref<Material>> batch_materials_;
 	int64_t last_batch_env_gen_ = -1;
 	Ref<EnvLightValues> last_batch_env_values_;
-	HashMap<String, Vector3> anchor_cache_;
-	HashMap<String, Array> collision_shapes_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
 

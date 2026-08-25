@@ -2,7 +2,7 @@ extends GutTest
 
 # Smoke test for the AvatarDatabase GDExtension binding over the committed
 # retail Avatars.def fixture (fixtures/avatars/Avatars.def). Mirrors the
-# engine/formats/avatars ctests one layer up, and exercises the editor bridge
+# engine/formats/avatars ctests one layer up, and exercises the model bridge
 # (get_model/set_model) and the save path.
 const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
 
@@ -110,13 +110,13 @@ func test_model_roundtrip_and_save() -> void:
 	var parts := db.get_part_count()
 	var nats := db.get_nationality_count()
 
-	# get_model -> set_model preserves the model (the editor authoring bridge).
+	# get_model -> set_model preserves the model (the format mutation bridge).
 	var db2 := AvatarDatabase.new()
 	db2.set_model(db.get_model())
 	assert_eq(db2.get_part_count(), parts, "set_model preserves part count")
 	assert_eq(db2.get_nationality_count(), nats, "set_model preserves nationality count")
 
-	# save_to_path -> reload preserves the model (the editor save path).
+	# save_to_path -> reload preserves the model.
 	var out_abs := ProjectSettings.globalize_path("user://avatars_save_test.def")
 	assert_eq(db.save_to_path(out_abs), OK, "save_to_path")
 	var db3 := AvatarDatabase.new()

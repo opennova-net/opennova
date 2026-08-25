@@ -55,27 +55,6 @@ func _camera_xform() -> Transform3D:
 	return Transform3D(Basis(), Vector3(0.0, 10.0, 0.0))
 
 
-func test_detail_authoring_brush_wraps_effective_resolution() -> void:
-	var foliage_map := TerrainFoliageMap.new()
-	foliage_map.set_size(300, 300)
-	assert_eq(foliage_map.get_detail_sample_resolution(), 256)
-	assert_true(foliage_map.paint_detail_circle_wrap(
-		255, 255, 2, 1.0, 1.0, 19))
-	for point in [
-		Vector2i(255, 255),
-		Vector2i(0, 255),
-		Vector2i(1, 255),
-		Vector2i(255, 0),
-		Vector2i(255, 1),
-	]:
-		assert_eq(int(foliage_map.get_index(point.x, point.y)), 19,
-			"DETAIL brush coverage must stay continuous across the wrap seam.")
-	assert_eq(int(foliage_map.get_index(256, 255)), 0,
-		"Unused non-power-of-two stride columns must remain untouched.")
-	assert_eq(int(foliage_map.get_index(255, 256)), 0,
-		"Unused non-power-of-two stride rows must remain untouched.")
-
-
 func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
 	_dispatcher.detail_foliage_sampler = Callable(self, "_sample_detail_only")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_model_only")
@@ -147,51 +126,6 @@ func test_detail_preview_uses_foliage_map() -> void:
 				"foliage waits for the alpha-aware retail tile-cache compositor")
 	assert_true(found_draw)
 
-func test_editor_surface_input_overrides_reach_detail_materials() -> void:
-	var image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 1.0, 1.0))
-	var heightfield_normal := ImageTexture.create_from_image(image)
-	var tile_overlay := ImageTexture.create_from_image(image)
-	var tint := Vector3(0.25, 0.5, 0.75)
-
-	_dispatcher.set_surface_input_overrides(heightfield_normal, tile_overlay, tint)
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
-
-	var found_draw := false
-	for child in _dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
-			continue
-		var material := child.material_override as ShaderMaterial
-		assert_not_null(material)
-		if material == null:
-			continue
-		found_draw = true
-		assert_same(material.get_shader_parameter("u_heightfield_normal"), heightfield_normal)
-		assert_true(bool(material.get_shader_parameter("u_has_heightfield_normal")))
-		assert_same(material.get_shader_parameter("u_tile_overlay"), tile_overlay)
-		assert_true(bool(material.get_shader_parameter("u_has_tile_overlay")))
-		assert_eq(material.get_shader_parameter("u_tile_overlay_tint"), tint)
-	assert_true(found_draw)
-
-	var diagnostics := _dispatcher.get_frame_stats()
-	assert_true(bool(diagnostics.surface_input_overrides))
-	assert_true(bool(diagnostics.surface_override_has_heightfield_normal))
-	assert_true(bool(diagnostics.surface_override_has_tile_overlay))
-
-	_dispatcher.clear_surface_input_overrides()
-	_dispatcher.render_preview(_camera_xform())
-	var cleared := _dispatcher.get_frame_stats()
-	assert_false(bool(cleared.surface_input_overrides))
-	for child in _dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
-			continue
-		var material := child.material_override as ShaderMaterial
-		assert_false(bool(material.get_shader_parameter("u_has_heightfield_normal")))
-		assert_false(bool(material.get_shader_parameter("u_has_tile_overlay")))
-
-
-
 func test_aerial_preview_rejects_detail_cells_beyond_retail_3d_distance() -> void:
 	var aerial_camera := Transform3D(Basis(), Vector3(0.0, 747.0, 0.0))
 	_dispatcher.render_preview(aerial_camera)
@@ -199,9 +133,9 @@ func test_aerial_preview_rejects_detail_cells_beyond_retail_3d_distance() -> voi
 	var stats := _dispatcher.get_frame_stats()
 
 	assert_eq(int(stats.detail_cells), 0,
-		"ONED preview collection must include camera altitude like the runtime terrain collector.")
+		"Preview collection must include camera altitude like the runtime terrain collector.")
 	assert_eq(int(stats.runtime_detail_intents), 0,
-		"An aerial Mission camera must not expand ground foliage as near detail.")
+		"An aerial camera must not expand ground foliage as near detail.")
 	assert_eq(_dispatcher.get_total_instances(), 0)
 
 

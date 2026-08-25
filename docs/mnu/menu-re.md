@@ -120,8 +120,8 @@ in-game ESC menu (and under `letterbox.tga` on the options screen); fixed.
 
 When NEITHER the stencil nor the brush texture resolves, the original draws nothing:
 every draw in `CUIElement_DrawFrame` is guarded by a successful texture load
-(`sub_654370 >= 0`). The reimpl matches this at runtime (no panel); the editor keeps a
-faint placeholder so an author can still see the framed region. The old opaque dark
+(`sub_654370 >= 0`). The reimpl matches this at runtime (no panel). The former
+ONED placeholder was removed with menu authoring. The old opaque dark
 ColorRect fallback (the "big black box" on the in-game ESC menu when `BORDER2.tga`/
 `BOXTILE.tga` were absent) is retired.
 
@@ -158,7 +158,7 @@ parent chain (`CWnd_AccumulateAncestorOffset @ 0x6465e0`).
 
 Reimpl: the menu-root CanvasItem is given an 800x600 box and a non-uniform
 `scale = (screenW/800, screenH/600)`, position 0 — authored coords stay in 800x600 design
-space (`nova_menu_shell.gd::_recompute_fit`, `mnu_canvas.gd::_recompute_fit`). The old reimpl
+space (`nova_menu_shell.gd::_recompute_fit`). The old reimpl
 used a hardcoded 640x480 board with uniform letterbox + centering, which overhung and
 mis-centered the 800x600 `jo_game.mnu` (the badly-placed ESC menu) and letterboxed every
 menu. `D-MNU-4`: the original truncates each scaled quad to int per element; the reimpl
@@ -724,9 +724,9 @@ fonts copy all eight values `[orig: CWnd_GetFontAndColors @ 0x646a70]`.
 `draw_text_with_cursor @ 0x6533b0` selects the pair for the active state, but
 the common `font_cache_draw_text_scaled @ 0x653170` path consumes only the
 foreground member and never reads the paired background. Shipped JO menus
-normally author black BG values. The reimplementation therefore preserves and
-editor-exposes every BG field (including a color picker) but intentionally does
-not paint a text background.
+normally author black BG values. The reimplementation therefore preserves every
+BG field for lossless round-tripping but intentionally does not paint a text
+background.
 
 ## Spinlist arrows `[orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0]`
 
@@ -1058,16 +1058,16 @@ buffer to `parse_key_value_buffer @ 0x639870`; menu XML expansion later uses
 `NapiXML_ExpandVariablesInText @ 0x63a000`. This resolves the previously
 unwitnessed loader chain.
 
-The editor model remains lossless (ADR 0014): typed node fields exactly
+The lossless document model remains (ADR 0014): typed node fields exactly
 partition the file bytes, so an untouched parse -> serialize is byte-identical
 and an edited value changes only its own line. Runtime flattening is a separate
-retail evaluator because the original can reject syntax that the editor must
-still open for repair.
+retail evaluator because malformed source may still need inspection or repair
+outside ONED.
 
 Observed runtime rules:
 
 - names are case-insensitive and a duplicate silently replaces the earlier
-  value; duplicate diagnostics are an editor enhancement;
+  value; duplicate diagnostics are a tooling enhancement;
 - an unknown `%VAR%` remains literal;
 - `#if` tests only the first non-whitespace value character: `0` is false and
   every other character is true, so `0foo` is false while `1foo` and `2` are
@@ -1080,7 +1080,7 @@ Observed runtime rules:
 - doubled backslashes stay doubled: the scan advances across both bytes at
   `0x639c0e..0x639c17`, then copies the original source span.
 
-Disposition: **D-MNS-1** and **D-MNS-2** match retail (the editor keeps their
+Disposition: **D-MNS-1** and **D-MNS-2** match retail (the lossless model keeps their
 useful diagnostics); **D-MNS-3** and **D-MNS-4** are fixed by routing runtime
 consumers through the retail evaluator. The lossless document intentionally
 stays permissive so malformed files remain repairable.
@@ -1199,8 +1199,8 @@ widget-scale threshold, the first-visible-line window that advances nothing whil
 skipping, the `0x40000` bottom clip, the caret quirks) and the line-based scroll model
 (`font_cache_count_wrapped_lines @ 0x653b90`, `CMEditWnd_UpdateScrollRange @ 0x661180`,
 `widget[978]`) — ported as `emit_multiline_edit`/`emit_wrapped_text` +
-`multiline_line_counts`, pinned by `test_multiline_wrap`. With this the game shell,
-the armory/deploy presenters, and the ONED Menus preview all cut over to the ONE
+`multiline_line_counts`, pinned by `test_multiline_wrap`. With this, the game shell
+and the armory/deploy presenters cut over to the one
 compiled path (`MenuFrame` + `MenuDriver`); the MnuMenu Control tree and its widget
 classes are DELETED. RADIOEDIT (unauthored in shipped JO menus) and the compiled-path
 follow-ups stay under D-MNU-13.
@@ -1560,7 +1560,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CStaticWnd_DrawLabel @ 0x656fb0` + `draw_text_with_cursor @ 0x6533b0` + `font_cache_draw_text_scaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
 | `CEditWnd_Render @ 0x6619e0` (focus state-2, blink, password, scroll window `update_edit_scroll_range @ 0x661790`) | the compiler's edit leg + `MenuWidgetState.focused/caret` |
 | `CRadioWnd_Render @ 0x656e20` / `CCheckWnd_Render @ 0x64ae20` + `CCheckWnd_DrawLabel @ 0x64aa20` | checked-state forcing + label placement in the compiler |
-| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless editor model (ADR 0014) |
+| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless document model (ADR 0014) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `engine/formats/mnu/src/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `engine/formats/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
 | `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/src/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
@@ -1581,7 +1581,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `mnu::parse_window`'s LIST_BOX + `MenuFrameCompiler::combo_popup_rect` (authored combo-relative POSITION; `SB_EDGE_PAD` narrows content only, not scrollbar geometry) (D-MNU-7) |
 | `CUIElement_DrawFrame @ 0x64a210` + `init_border_materials @ 0x646f70` | `MenuFrameCompiler::emit_frame` — 8 border quads + tiled fill; retail-neutral 0x7F modulate-2x becomes effective white for Godot ordinary multiply; draws nothing when textures are absent; no monogram |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> the compiler's draw walk gates `emit_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
-| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `nova_menu_shell.gd` / `mnu_canvas.gd` |
+| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `nova_menu_shell.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
 | `CUIElement_ParseXMLDefinition @ 0x648120` + `CUIElement_DrawTextureNative @ 0x647e40` -> `CTextureManager_DrawScaledRect @ 0x654e60` | `MenuFrameCompiler::emit_state_texture` — IMAGE stretched into the solved rect, with authored `MAP_STATE`/`HEIGHT` retained as the cropped atlas source band |
 | `CUIElement_DrawStretchedTexture @ 0x647d40` | the compiler's stretched-quad emit (texture into the solved rect); per-element int truncation of scaled coordinates is compiled (closes D-MNU-4's divergence) |

@@ -5,10 +5,9 @@
 :root {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
-  /* ONED "tactical tool" palette — RGB channels so Tailwind alpha modifiers
-     (e.g. bg-accent/22, border-border/50) keep working. Single source of truth;
-     edit this block to re-skin the whole site. Values lifted from
-     godot/modtools/terrain/ui/theme/editor_theme.tres. */
+  /* OpenNova's tactical palette — RGB channels so Tailwind alpha modifiers
+     (e.g. bg-accent/22, border-border/50) keep working. Edit this block to
+     re-skin the whole site. */
   --surface: 22 24 32; /* #161820 darkest: app bg, inputs, pressed, tab bg */
   --panel: 29 32 36; /* #1D2024 card / panel background */
   --raised: 35 39 56; /* #232738 normal control fill / subtle border */

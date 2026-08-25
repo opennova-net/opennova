@@ -75,15 +75,14 @@ face therefore means baking each glyph's advance into its cell, not its ink box:
 - One cell height for the whole font (ascent + descent), which is what keeps baselines aligned;
   retail's shipped faces are uniform this way.
 
-`godot/modtools/fonts/fnt_rasterizer.gd` implements this and `godot/tests/fnt_rasterizer_metrics_test.gd`
-pins it. Like `fnt_pack_shelf`, this is authoring policy chosen to satisfy the witnessed reader,
-not witnessed engine behavior.
+The retired ONED font rasterizer implemented and tested this policy. That
+authoring surface was removed by ADR 0037; the policy remains useful for any
+future format-specific font tool. Like `fnt_pack_shelf`, it satisfies the
+witnessed reader but is not witnessed engine behavior.
 
 ## Cross-references
 
 - Reimpl: `engine/formats/fnt` (`fnt.h`/`fnt.c`), `godot/src/fnt/nova_fnt_resource`,
-  `godot/src/util/nova_cp1252.h`,
-  `godot/modtools/fonts/` (the editor workspace), `fnt_rasterizer.gd` (the
-  reimpl shelf packer / TextServer rasterization, ENG-4's `engine/formats/fnt` consumer).
-- The FNT shelf-packer + TextServer rasterization stay Godot-side (ENG-4); this record
-  covers the format + load contract.
+  and `godot/src/util/nova_cp1252.h`.
+- The FNT shelf packer remains in `engine/formats/fnt`; this record covers the
+  format and load contract. ONED has no font-authoring consumer.

@@ -1,11 +1,20 @@
-# Two shipped products; the server is a mode of the game, not a product
+# Two Godot products; the server is a mode of the game, not a product
 
-OpenNova ships exactly two executables per platform:
+> **Updated by [ADR 0037](0037-oned-runs-game-data.md).** The two-Godot-product
+> decision and serve-mode rule remain. ONED now runs game data and no longer
+> produces or edits it.
+
+OpenNova's shared Godot project exports exactly two applications per platform:
 
 - **`opennova.exe`** — the game. Pointed at a game directory (PFF-packed
   resources, exactly like a retail install), it boots the game from that data.
-- **`opennova-modtools.exe`** — the OpenNova Editor (ONED). It produces the
-  data the game runs.
+- **`opennova-modtools.exe`** — ONED. It selects loose or packed game data,
+  runs OpenNova against it, stages and runs retail for comparison, and stops
+  the game process it started.
+
+The separately published **OpenNova Launcher** is outside this Godot-export
+taxonomy. It is the Windows tray product that redirects a stock NovaLogic
+installation to OpenNova's NovaWorld service.
 
 There is no third "server" product. Hosting a dedicated game is a **serve
 mode** of `opennova.exe`: the same binary, launched into hosting (the
@@ -21,11 +30,12 @@ binary with a different icon; both are debt.
 
 ## Decisions worth recording
 
-- **Product taxonomy.** Two products, split by Godot export feature tags
+- **Godot-product taxonomy.** Two Godot products, split by export feature tags
   (`modtools` / `runtime_game`), each with a per-product main scene override
-  in `project.godot` and a packaging boot smoke. Anything else that builds
-  from this repo (the importer, `apps/nw_server`, `apps/nw_pp`, DCC plugins,
-  the NovaWorld service) is a tool or a service, not a shipped game product.
+  in `project.godot` and a packaging boot smoke. OpenNova Launcher is published
+  separately and is not a third Godot product. Anything else that builds from
+  this repo (the importer, `apps/nw_server`, `apps/nw_pp`, DCC plugins, the
+  NovaWorld service) is a tool or a service, not a Godot product.
 - **Serve mode.** `opennova.exe` gains a serve entry (flag + the
   server-options menu path) that drives the existing host session bring-up —
   the ADR 0013 helper, the 62 Hz pump, the one seam. No new protocol code, no
@@ -42,12 +52,9 @@ binary with a different icon; both are debt.
   or config read is equally easy. The existing per-title data
   (`libs/gameprofile` table, `backend/seed/0001_games.sql`, gate strings in
   `libs/novaworld`) stays as-is — fragmented but recorded.
-- **The editor stays detachable.** A long-term goal (GOALS.md) is exporting
-  a game from ONED, possibly with editing tools available in the exported
-  game. That is not a deliverable of any current program; it is an
-  architecture constraint recorded in
-  [ADR 0016](0016-engine-editor-boundary.md): nothing the engine or game
-  ships may depend on the editor layer.
+- **ONED stays detachable.** Nothing the engine or game ships may depend on
+  ONED. [ADR 0016](0016-engine-editor-boundary.md) records the one-way boundary;
+  ADR 0037 retires that decision's former authoring consequences.
 
 ## Implementation note — network environment sourcing (2026-08-04)
 

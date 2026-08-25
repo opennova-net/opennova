@@ -247,8 +247,8 @@ func after_each() -> void:
 
 func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	# A loose-only directory (no packed archives) fails the runtime mount when no
-	# --loose-root flag sanctions the editor fallback. The boot continuations
-	# (NW_SP_MISSION here, --loose-mission in an editor-managed run) must gate on
+	# --loose-root flag sanctions the loose fallback. The boot continuations
+	# (NW_SP_MISSION here, --loose-mission in a managed run) must gate on
 	# that failure instead of starting a world load with no mounted root.
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
@@ -371,8 +371,8 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 
 func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 	# The picker's accept leg (apply_picked_resource_dir, the ADR-0018 seam
-	# behind _on_dir_selected): an editor-managed run must never write its
-	# picker escape into the SHARED editor+game resource_dir key, an unmanaged
+	# behind _on_dir_selected): a process-local launch must never write its
+	# picker escape into the game's resource_dir preference, an unmanaged
 	# first-launch pick must, and an unmountable pick changes nothing.
 	_shell = await _make_shell()
 	if _shell == null:
@@ -385,9 +385,9 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir)
 
 	assert_true(_shell.apply_picked_resource_dir(picked_dir, true),
-			"an editor-managed pick mounts and enters the menu")
+			"a process-local pick mounts and enters the menu")
 	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
-			"an editor-managed pick never writes the shared editor+game key")
+			"a process-local pick never writes the game's persisted key")
 	assert_false(_shell.apply_picked_resource_dir(
 			_temp_dir.path_join("does-not-exist"), false),
 			"an unmountable pick is refused")
@@ -400,7 +400,7 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 
 
 func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
-	# The ONED play-test contract (ADR 0025): with --loose-root, a directory
+	# The ONED run contract: with --loose-root, a directory
 	# holding none of the packed archives mounts as the loose file set being
 	# authored; without it, retail's no-archives fatal stands. Parameterized
 	# entry so the contract is testable without process arguments (ADR 0018).
@@ -428,7 +428,7 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 	assert_not_null(fallback, "--loose-root plays the loose authoring dir")
 	if fallback != null:
 		assert_false(fallback.is_runtime_mount(),
-				"the fallback is the editor's loose mount, not a packed install")
+				"the fallback is a loose mount, not a packed install")
 		assert_eq(fallback.read_file("alpha.trn").get_string_from_utf8(), "loose trn")
 		fallback.clear()
 	var packed: ResourceRoot = BootRootMount.mount(packed_dir, true)

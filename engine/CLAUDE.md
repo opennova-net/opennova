@@ -6,10 +6,10 @@
 - Four groups (ADR 0028) — the directories and, since ADR 0029, the CMake build targets
   too; still never namespaces or include-path segments:
   - `base/` — shared substrate and repo plumbing: io, vfs, resource_index, gameprofile,
-    pcapio, oned_edit, refs.
+    pcapio.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
     runtime-fused: ADR 0030): adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt, cbin,
-    threedi, tdp, ase, bad, def, dep, avatars, mission, trn, tpj, tpm, cpt, til,
+    threedi, tdp, ase, bad, def, avatars, mission, trn, cpt, til,
     foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, particle (.ptl),
     wac (front end; compiler/VM stay runtime), oed.
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
@@ -65,14 +65,14 @@
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones — `opennova_formats`
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
-  pcapio, refs), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
+  pcapio), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
   napi, npwire, inmatch, netsim, npruntime + novaworld session/gate), and
   `opennova_novaworld_service` (the service alone — the ONLY target linking
   `opennova_sqlite`; the Godot layer (`godot/src`) links `opennova_net`, never the
   service).
-  `opennova_io`/`opennova_oned_edit` stay header-only INTERFACE. PUBLIC chain: formats
-  links io, base links formats (base deliberately sits ABOVE formats — vfs and refs
-  PARSE formats: pff/scr/bfc1, env/cbin/def/avatars/threedi/mnu/mission_format),
+  `opennova_io` stays header-only INTERFACE. PUBLIC chain: formats
+  links io, base links formats (base deliberately sits ABOVE formats because vfs
+  parses pff/scr/bfc1),
   runtime links base, net links runtime, the service links net. The ADR 0024 family
   groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
   (`scripts/lint/include_graph_check.py` — for net/wac/mission/world the
@@ -112,9 +112,8 @@
   at the port site: `[orig: Name @ 0xADDR]`. Engine-wide conventions: docs/engine-primer.md.
 - Parity writers are built from scratch. Never smuggle raw input bytes through a writer to
   turn a parity test green (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
-  The full writer-parity gate — writer from scratch + roundtrip test + retail-corpus byte
-  sweep where a corpus exists + a ledgered D-entry when output legitimately differs — is
-  recorded in docs/oned/workspace-maturity-program.md (F4).
+  The full writer-parity gate is writer from scratch + roundtrip test + retail-corpus
+  byte sweep where a corpus exists + a ledgered D-entry when output legitimately differs.
 - The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`, `engine/net/netsim`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires
@@ -125,7 +124,7 @@
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS
-  the model every consumer walks — the Godot document edits it in place, `tdp_from_3di`
+  the model every consumer walks — format tools consume it directly, `tdp_from_3di`
   generates `.3dp` from it, and the Python FFI mirrors its packed layout. There is no
   intermediate model representation, and the GP-era (GPM/GPS/GPP) reader/writer is gone —
   the format knowledge lives in docs/threedi/3di-gp-format-re.md. Shared derivations are

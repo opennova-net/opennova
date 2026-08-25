@@ -9,11 +9,10 @@ extends RefCounted
 #     part_index:int, object_index:int }
 # Each volume is the convex region carved by its bounding planes, clamped to its
 # AABB. We hand the resulting hull points to ConvexPolygonShape3D (Godot computes
-# the hull). Shared by the Object Editor validation overlay and the mission
-# workspace picking bodies so both see identical geometry.
+# the hull). Mission collision and its validation tests share this one geometry
+# path.
 #
-# Reference via preload(), not class_name, so it resolves without an editor
-# re-import (same convention as nova_mission_object_placer.cpp / veg_assets.gd).
+# Reference via preload(), not class_name, to keep the global class table small.
 
 
 # Collidable-type abbreviations (from the reference exporter's map_collidable_type).

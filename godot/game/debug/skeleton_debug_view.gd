@@ -12,8 +12,8 @@ extends Node3D
 
 const MissionOverlayUtil := preload("res://game/mission/mission_overlay_util.gd")
 
-# Bone segment colour, and the per-joint axis-cross palette (X=red, Y=green, Z=blue), matching
-# the editor gizmo convention (transform_gizmo_3d.gd).
+# Bone segment colour and the conventional per-joint axis-cross palette
+# (X=red, Y=green, Z=blue).
 const COL_BONE := Color(0.30, 1.0, 0.50)
 const COL_AXIS_X := Color(0.95, 0.26, 0.24)
 const COL_AXIS_Y := Color(0.36, 0.86, 0.30)

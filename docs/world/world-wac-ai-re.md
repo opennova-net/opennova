@@ -735,7 +735,8 @@ brain `AIEvent {6, level}`; both halves PORTED 2026-08-15, semantics in the bms 
 model part-anim channels (slot = channel − 1); any other value is a no-op. The animation content is the
 model's PANM. Do NOT wire ANIMNUM to `off_8135F0` — that is the separate infantry full-body table
 (§3.4, AI-state-driven via `Script_ForceAnimation @ 0x4f2610` / `Entity_UpdateInfantryAI @ 0x4b9910`).
-ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name-picker was removed).
+The former ONED Object workspace exposed ANIMNUM as a plain "Part #" raw int;
+ADR 0037 removed that UI. The runtime contract remains the raw integer channel.
 
 ### 8.4 PLAYPARTANIM contract (case 0x22, exact rate formula)
 - Stores per-channel **direction** (`play_type` ∈ {−1,0,+1}) at `comp+436+4·slot` and a **rate** at
@@ -769,7 +770,7 @@ ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name
   unconditionally. This is the missing second stage behind the earlier, incorrect conclusion that
   PLAYPARTANIM never reaches a named register.
 - Port contract (`ObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → part
-  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the preview
+  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the retained
   integrator uses the same truncated rate, fixed 16 ms ticks, wrapping ADD/SUB, and strict
   overshoot rules as the authority runtime. Ordinary values occupy `0..0x10000`, but wrapped signed
   dwords are preserved rather than normalized. Velocity starts from the CURRENT value. Channel 1 targets
@@ -893,9 +894,10 @@ Yaw (UP) and roll (RIGHT) terms matched, so yaw-only tests pass and hide it. If 
 C++ basis from explicit double-precision rotation matrices (or Quaternion) and add a C++/GDScript
 parity test over a (pitch, yaw, roll) grid BEFORE wiring callers.
 
-Also noted: the editor's ground sampling (`sample_world_height`) reads the live editable FORMAT_RF
-Image while the runtime samples `cpt.depth_buffer` via the portable `TerrainHeightField` — two data
-sources; unifying needs a shared sampler (open).
+Historical note: the former editor's `sample_world_height` read a live
+FORMAT_RF image while runtime samples `cpt.depth_buffer` through
+`TerrainHeightField`. ADR 0037 removed the editor consumer, so this is no
+longer an open product divergence.
 
 ### 10.2 Ground sampling chain — `Entity_CalcAverageGroundHeight @ 0x457230` (CONFIRMED EXACT)
 5-tap weighted ground height, `(entity, sampleRadius)`:
@@ -2588,8 +2590,8 @@ retains the item database and placer caches, and both RoundSim and F3 request an
 idempotent collision attach when a player or scripted organic appears later.
 Packed pool handles can be reused, so registry entities carry a binding-only
 monotonic spawn identity; collision instances, skeletal sources, and negative
-resolution attempts all validate that identity before reuse. Editor snapshot
-restore preserves the live identity high-water mark. Thus a failed lookup for
+resolution attempts all validate that identity before reuse. State restoration
+preserves the live identity high-water mark. Thus a failed lookup for
 one slot occupant cannot suppress or inherit the model/husk/pose of the next
 occupant.
 

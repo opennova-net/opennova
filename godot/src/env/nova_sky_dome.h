@@ -46,8 +46,7 @@ public:
 
 	void build();
 	bool is_built() const { return built_; }
-	// The below-rim clear mirror (the ONED preview calls this after
-	// discrete scrubs).
+	// The below-rim clear mirror used by the runtime environment pass.
 	void sync_frame_clear_color();
 	Ref<ShaderMaterial> get_sky_material() const { return sky_material_; }
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance_; }

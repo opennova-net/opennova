@@ -1,12 +1,12 @@
-# ONED object naming convention (reference)
+# NovaLogic ASE/OED object naming convention (reference)
 
 An object's 3DI role is encoded in its **scene-object name**. The importer assigns these
 names (`apps/importer/scene_builder/`), the exporter classifies by them
 (`blender/ase_exporter.py`), and the authoritative parser is `classify_name()` in
 `engine/formats/oed/convert_internal.cpp` (a port of `[orig: ConvertToInternal @ 0x4268B3]`).
 Keep names exactly as below. **Indices are two-digit and 1-based** in the name (`01` is the
-first), stored 0-based internally. The artist-facing source is
-`godot/modtools/object/README.md`.
+first), stored 0-based internally. This file is the artist-facing source; ONED is
+run-only and has no Object workspace.
 
 ## Role → name table
 

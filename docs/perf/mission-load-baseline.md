@@ -1,7 +1,12 @@
 # Mission-load performance baseline (2026-06-11)
 
+> Historical measurement record. The editor scene, Mission workspace, and
+> dedicated load probe used here were removed by
+> [ADR 0037](../adr/0037-oned-runs-game-data.md). Reproducing these measurements
+> now requires a new runtime- or tool-specific harness.
+
 The recorded numbers behind the 2026-06 editor perf push-down decisions.
-PR #97 instrumented both products with `PerfTimeline`; this is the first
+PR #97 instrumented both Godot products with `PerfTimeline`; this is the first
 captured baseline, taken to decide which push-down the next perf slice
 should be (the placement-plan and pick-collider candidates were *contingent
 on these numbers*).
@@ -113,18 +118,10 @@ animation set per mission open). If a future slice wants it, the lead is
 sharing parsed clip/skeleton data across `.adm` sets, not more caching at
 the placer layer.
 
-## Reproduction
+## Reproduction status
 
-```text
-# Committed probe (the capture above): instantiates the real editor main
-# scene, mounts JO_ASSETS_DIR, opens each mission through
-# open_in_workspace("mission", path), dumps PerfTimeline spans.
-JO_ASSETS_DIR=<retail loose extract> \
-Godot_v4.6.1-stable_win64_console.exe --headless --path godot \
-    --script res://tests/mission_load_perf_probe.gd
-```
-
-Record the second run of a session (OS-warm); override the mission list
-with JO_PROBE_MISSIONS=a.bms,b.bms when needed. The same data is visible
-interactively in the debug overlay's Perf tab after any mission load,
-in either host.
+The committed probe and its editor host no longer exist. Preserve the original
+protocol when building a replacement harness: use the real mission-load path,
+record the second OS-warm run, and keep the three-mission corpus above so new
+numbers remain comparable. The historical `JO_PROBE_MISSIONS` override is not
+part of ONED's contract.

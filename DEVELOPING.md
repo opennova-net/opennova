@@ -1,7 +1,7 @@
 # Developing OpenNova
 
 How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
-Godot editor/game, and the NovaWorld servers, including how to test the servers
+game and ONED, and the NovaWorld servers, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
 For the asset pipeline and packaging (Blender addon, standalone importer, Godot
@@ -68,8 +68,8 @@ scripts/build_godot.sh Release    # Release   -> plain /O2, no symbols
 ```
 
 All three flavors produce the same `template_debug`-named artifact, the one loaded by
-the Godot editor and by standalone game runs launched from ONED (F5/F6); they differ
-only in compiler flags. Build `DebugFull` when you need to step through native code;
+the Godot editor and source/debug runs of the game or ONED; they differ only
+in compiler flags. Build `DebugFull` when you need to step through native code;
 expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
 against it. The `template_release` DLL that a release export loads is not produced by
 this script at all: build it with `scripts/package_godot_windows.ps1`
@@ -85,7 +85,7 @@ deferred. A stale DLL shows up as GDScript "class not found" errors for classes 
 (The README documents a `cmake -S godot/src -B build-godot ...` equivalent; the script
 is the canonical path.)
 
-## Run the Godot editor and game
+## Run the game and ONED
 
 ```bash
 $GODOT_BIN --path godot
@@ -98,7 +98,16 @@ $GODOT_BIN --headless --path godot --import
 ```
 
 The import can crash on a cold cache; just run it again (CI retries it). The project's
-main scene is the runtime game; the OpenNova Editor (ONED) workspaces open from there.
+main scene is the runtime game. To run ONED from source, pass its feature-override
+scene explicitly:
+
+```bash
+$GODOT_BIN --path godot res://modtools/oned_main.tscn
+```
+
+ONED provides Settings, Run OpenNova, Stage & Run Retail,
+and Stop. It has no asset-authoring workspaces; see
+[`godot/modtools/README.md`](godot/modtools/README.md).
 
 ## Run the NovaWorld servers locally
 

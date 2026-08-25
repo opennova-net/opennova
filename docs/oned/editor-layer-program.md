@@ -1,11 +1,11 @@
-# ONED editor-layer improvement program
+# Historical ONED authoring-layer improvement program
 
-> **Superseded.** This program is COMPLETE (2026-07-04, landed via the PR #180
-> lineage) and this doc is a historical record. The active program is the
-> [maturity program](../maturity-program.md); its editor track detail is
-> [workspace-maturity-program.md](workspace-maturity-program.md).
+> **Historical.** This program completed in 2026 and no longer describes a
+> shipped product. [ADR 0037](../adr/0037-oned-runs-game-data.md) removed ONED
+> authoring, workspaces, projects/imports, and MCP in a hard cut. The material
+> below remains only as implementation history.
 
-Status doc for the editor-layer refactor program (started 2026-07-01 on
+Status doc for the former authoring-layer refactor program (started 2026-07-01 on
 `oned-editor-layer`, A1–A7 merged to master; **resumed 2026-07-04 on
 `oned-editor-layer-b`** for A8 + B1–B12, landing as one trunk PR with
 independently-green slice commits). Workstream A realigns the architecture

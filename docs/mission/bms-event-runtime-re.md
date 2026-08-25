@@ -178,7 +178,8 @@ interpolation (faithful to §1.6). `MissionPresentation.tick()` survives as the
 deterministic primitive for F3/MCP Step and focused fixtures, but delegates to
 the same session state machine. `MainGame` → `GameWorld` → `GameFramePipeline` is
 the sole live real-time route. ADR 0025 retired the old ONED embedded preview;
-F5/F6 launch the standalone game from saved loose assets. The portable `engine/runtime/world` per-tick
+ONED's Run OpenNova loose action launches the standalone game against the
+selected loose assets. The portable `engine/runtime/world` per-tick
 motors are unchanged — they were already correct per tick; only the driving tick **cadence** was
 wrong. Pinned by `mission_presentation_test.gd`
 (`test_session_frame_*`, `test_distance_per_real_second_is_frame_rate_independent`).
@@ -201,8 +202,7 @@ unloaded sim reported a tick it never ran; the merged path returns the honest `s
 result. Cadence parity among session consumers is now structural (one
 path) rather than asserted, so the standalone game and
 direct test/tooling fixtures cannot select divergent step implementations.
-`mission_controller_test.gd`'s obsolete tick-mode assert is gone and its
-`loco_scale` assert stands.
+Direct fixtures continue to pin the surviving `loco_scale` behavior.
 
 Naming: `step()` survives over `advance_frame()` because a render frame runs 0..N ticks (§2a)
 — "frame" in our vocabulary is the render frame, not the engine tick. The

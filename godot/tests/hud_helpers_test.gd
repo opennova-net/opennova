@@ -2,7 +2,7 @@ extends GutTest
 
 # Pure-logic pins for the native HUD view math (the HudPos statics over
 # engine/runtime/hud hud_math.h — the single source the HudOverlay compiler
-# draws with), the kept ONED HudText helper, and the PlayerHudWeaponDef record.
+# draws with), and the PlayerHudWeaponDef record.
 # Rendering is validated on the compiled draw list in hud_overlay_test.gd.
 
 
@@ -44,20 +44,6 @@ func test_scale_rect_scales_both_corners() -> void:
 			Rect2(4, 1478, 278, 36))
 
 
-func test_half_bright() -> void:
-	# The native op is the BYTE-EXACT witnessed form ((color >> 1) & 0x7F7F7F):
-	# a 255 channel halves to 127, not the float 0.5 the old shell approximation
-	# produced.
-	assert_eq(HudText.half_bright(Color(1, 1, 1, 1)),
-			Color(127 / 255.0, 127 / 255.0, 127 / 255.0, 1.0))
-	# Alpha is forced opaque regardless of input.
-	var hb := HudText.half_bright(Color(0.8, 0.4, 0.2, 0.25))
-	assert_almost_eq(hb.r, 102 / 255.0, 0.001)  # u8(204) >> 1
-	assert_almost_eq(hb.g, 51 / 255.0, 0.001)   # u8(102) >> 1
-	assert_almost_eq(hb.b, 25 / 255.0, 0.001)   # u8(51) >> 1
-	assert_eq(hb.a, 1.0, "Half-bright forces opaque alpha.")
-
-
 func test_health_thresholds() -> void:
 	# Witnessed 16.16 thresholds (hud/hud_math.h): 0xC000 good, 0x6FFF mid —
 	# 0 good / 1 mid / 2 bad through the bound band.
@@ -65,16 +51,6 @@ func test_health_thresholds() -> void:
 	assert_eq(HudPos.health_color_band(0.75), 1)
 	assert_eq(HudPos.health_color_band(0.4375), 1)
 	assert_eq(HudPos.health_color_band(0.4374), 2)
-
-
-func test_hud_text_draw_null_safe() -> void:
-	# The kept ONED preview helper guards null inputs.
-	HudText.draw_text(null, null, Vector2.ZERO, Vector2.ONE, "x", Color.WHITE)
-	assert_true(true, "Null-guarded draw helper returned without error.")
-
-
-func test_load_font_null_safe() -> void:
-	assert_null(HudText.load_font(null, "anything.fnt"), "Null root returns null font.")
 
 
 func test_crosshair_spread_px() -> void:

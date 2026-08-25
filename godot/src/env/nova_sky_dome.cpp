@@ -83,8 +83,8 @@ MissionEnvironment *SkyDome::_env_node() {
 			return env;
 		}
 	}
-	// Lazy (re-)resolution: ONED workspace scenes create the environment
-	// after this node, and relative sibling paths resolve off-tree too.
+	// Lazy (re-)resolution supports owners that create the environment after
+	// this node; relative sibling paths also resolve off-tree.
 	if (environment_path_.is_empty() ||
 			(!is_inside_tree() && environment_path_.is_absolute())) {
 		return nullptr;
@@ -166,8 +166,8 @@ void SkyDome::advance_frame(double p_delta) {
 	if (!built_ || sky_material_.is_null()) {
 		return;
 	}
-	// Camera3D.current changes when ONED switches workspace cameras while the
-	// old camera can remain alive. Re-resolve that transition instead of
+	// Camera3D.current can change while the old camera remains alive. Re-resolve
+	// that transition instead of
 	// continuing to follow a stale, still-in-tree camera.
 	Camera3D *cam = Object::cast_to<Camera3D>(
 			ObjectDB::get_instance(cached_cam_id_));
@@ -284,8 +284,7 @@ void SkyDome::_update_cloud_textures(MissionEnvironment *p_env) {
 }
 
 // The faithful sky dome is open below its rim. Retail clears that region to
-// the horizon-blended skyfog block; editor shells provide the BG_COLOR
-// resource.
+// the horizon-blended skyfog block; the shell provides the BG_COLOR resource.
 void SkyDome::sync_frame_clear_color() {
 	if (frame_clear_environment_.is_null()) {
 		return;

@@ -17,7 +17,7 @@ export type ToolOs = 'windows' | 'macos' | 'any';
 
 /** A single downloadable deliverable from a GitHub Release. */
 export interface ToolAsset {
-  /** Human product name, e.g. "OpenNova Editor (ONED)". */
+  /** Human product name, e.g. "OpenNova Game". */
   product: string;
   os: ToolOs;
   /** Broad grouping used for ordering: apps first, then tools/plugins. */

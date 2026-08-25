@@ -1,5 +1,10 @@
 # OpenNova maturity program
 
+> **Historical program.** The program closed on 2026-07-12. Any remaining
+> ONED workspace roadmap or editor-backlog language below was retired by
+> [ADR 0037](adr/0037-oned-runs-game-data.md); ONED is now run-only. The
+> landed-slices and C-ABI logs remain append-only records.
+
 Before further reimplementation: rearchitect where it pays, refactor the
 rest, and institutionalize the codebase design. Started 2026-07-04, after
 the editor-layer program (docs/oned/editor-layer-program.md, complete) and
@@ -18,8 +23,8 @@ Two things hold at every commit of this program:
 
 The architecture constraint the whole program serves: **ONED is a detachable
 layer over public engine APIs, and the engine never depends on the editor**
-(ADR 0016). Products: exactly two shipped exes; the server is a serve MODE
-of the game (ADR 0015).
+(ADR 0016). Godot products: exactly two exported exes; the server is a serve
+MODE of the game (ADR 0015). OpenNova Launcher is outside that taxonomy.
 
 ## Status
 
@@ -30,7 +35,7 @@ of the game (ADR 0015).
 | Final wave reached | 2 — portability + standards adoption. At close: ENG-2/3/4 done (#206, #209, trunk 2), ENG-5 sweeps #1 (boundary) + #2 (close-out) run, ENG-6 done (R8 + the trunk-2 manifest); LIBS-2/3 done (ADR 0024); STD-3 flip done (boundary), STD-2 seeds converted 7/8 (the tail; the object-material-defs contract deferred with cause); ONED-W1 six slices landed (the tail), ONED-MUS-D design landed (acceptance = the open maintainer gate); the full REN track closed. Not executed: ONED-RSP, ONED-TST refits, the ONED-W1 remainder — dispositioned below |
 | Boundary gates (Wave 1→2) | full ctest: 246/248 green; the two reds are pre-existing, tracked, and not Wave-1 regressions — `npruntime_golden_gameplay` (D-NET-159 wire adjudication, asset-gated so CI never sees it) and `opennova_python_pytest` (diagnosed at this boundary: the two DCC-parity tests build a zero-write request the jobs validation rejects, then their in-parent `import bpy` poisons the 13 spawn-context worker tests — all 13 pass in isolation). *(Both since closed — golden_gameplay green since #417, pytest green; their TODO.md rows were pruned on completion per the completed-entries convention)*. FULL GUT attested in the boundary PR |
 | Freeze | **LIFTED at close (2026-07-12)** — new reimplementation work no longer waits on foundation phases. What survives is the standing rule set, not the gate: ADRs 0015–0018 (products/serve mode, engine–editor boundary, typed records, public-API testability), 0019–0021, [0022](adr/0022-divergence-burn-down.md) (the PAR zero-OPEN target — burn-down continues as standing policy), [0023](adr/0023-render-visual-parity.md) (the REN rules), [0024](adr/0024-lib-family-topology.md) (family topology), and every instrument in the enforcement table (all hard-fail-forever by design) |
-| Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) — survives the program as the editor's standing roadmap; its phases execute as ordinary slices under the standing ADRs, RE gates unchanged |
+| Detail docs | Historical ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md), retired by ADR 0037 |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down, [0024](adr/0024-lib-family-topology.md) lib family topology + consumption models; boundary ADRs (npwire, world seam, responsive shell) minted in their tracks at decision time |
 
 ## Close-out (2026-07-12)
@@ -47,7 +52,8 @@ property. Wave-2 exit-gate accounting, honestly:
   `libs_uncited_src_files` fell 88 → 60 across the program;
   `test_private_pokes` rose 1319 → 1384 via maintainer-ratified bumps (AVA's
   two pre-ratchet white-box files, probe diagnostics, the particle tests —
-  each logged in the slice table). The claw-back remains ONED-TST's charter.
+  each logged in the slice table). ADR 0037 later retired ONED-TST with the
+  authoring suite.
 - **responsiveness landed + one re-baseline** — not executed; dispositioned
   below.
 - **music design accepted** — the design landed (track doc §The MUS-D
@@ -59,11 +65,7 @@ Dispositions — every item not executed, and where it lives now:
 
 | Item | Disposition |
 |---|---|
-| ONED-RSP (responsive shell) | ONED track doc backlog. RSP-1 policy ADR first whenever picked up; the two-floor conflict and raw-px persistence stay recorded there |
-| ONED-MUS-D → MUS-I | the design landed (track doc §The MUS-D design), **at the maintainer gate**; MUS-I per its 8-slice plan after acceptance |
-| ONED-TST | rides the hard private-pokes ratchet + the track doc's refit list; needs no wave gate |
-| ONED-W1 remainder (OBJ-1/3/4, MNU-1, SND-1; F3 wirings CRE-2/FNT-3/STR-3/SND-3/OBJ-5/MNU-3/MUS-G) | ONED track doc backlog — ordinary slices under the standing ADRs |
-| ONED-W2/W3, REF-1..4, REQ | ONED track doc backlog; the RE gates (R1–R7) unchanged — UI never ahead of the witness. R5 re-opened at CRE-1: the credits cadence constants (60 fps rate convert, 50 px fade zone) are uncited pending a grill |
+| ONED-RSP, MUS-I, ONED-TST, ONED-W1/W2/W3, REF, REQ | Retired by ADR 0037's run-only hard cut; the track document remains historical evidence |
 | STD-2 remainder | the object-material-defs contract deferred with cause (native-owned in both directions; the 980-line materials inspector has no dedicated test bar — a conversion needs its own slice with tests first); everything else converts adopt-on-touch under the standing diff-scoped dict-contract lint |
 | ENG-5 sweep-#2 tracked rows | ordinary port slices (libs/hud, libs/audio curves, libs/env TOD clock, the player_view fold, the part-anim integrator, the armory helpers); the sweep itself remains a standing instrument, run ad hoc |
 | PROD-1 serve mode, PROD-2 taxonomy, PROD-3 release dry run | tracked future work; ADR 0015 remains the decision of record — PROD-1 now rides TODO.md § Project health follow-ups (serve mode); PROD-2/3 partially overlap the release-gate-parity and macOS rows there |
@@ -74,15 +76,15 @@ What the program leaves behind, permanent: the enforcement table below
 (goldens, ratchets, lints, link-graph, ledger check, ABI guard — all
 hard-fail forever); ADRs 0015–0024; `libs/npwire` + the terrain_query seam +
 the family groups; the witnessed render/lighting/env/terrain-query cores;
-twelve workspaces on the R/W/E/G bar with two recorded exemplars (terrain =
-E/G, environment = runtime-node reuse); the divergence-ledger discipline;
+the historical twelve-workspace R/W/E/G record; the divergence-ledger discipline;
 and this dashboard as the program's record.
 
 Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| Play-in-Retail process seam (2026-08-24) | #565 | **`adapter_cpp_orig_cites_device` baseline 195 → 196** — one `(retail: PFF_OpenAllArchives @0x4a4310, see docs/vfs/vfs-pff-mount-re.md)` note in `godot/src/util/nova_process.h`: the working-directory contract of the retail spawn seam exists because retail opens its boot archives CWD-relative through a raw `_lopen`; the note documents why the binding must set the child's CWD rather than inherit the editor's. A documented device fold over the VFS record's witness, banked per the counter's contract. Same slice: **`adapter_cpp_orig_cites_pushdown` baseline 371 → 370** — master already counts 370 (a push-down landed there without banking the decrease); banked here per the counter's contract, log row on the offending slice's behalf. Same slice: `dict_contract_allowlist` +`editor_game_packer.gd\|static func pack(`, +`static func pack_for_retail(`, +`static func stage_loose(`, +`static func export_game(` — the packer's results are a transport edge throughout: the `pack_game` MCP tool's JSON payload verbatim, the `--pack-game` CLI's printed summary, and the session's injected `pack_retail` Callable seam, which by design carries no class dependency on the packer (ADR 0025's one-managed-child session stays UI/packer-neutral). |
+| ONED run-only hard cut (2026-08-24) | (this PR) | Retired the workspace/editor implementation and banked the resulting ratchet reductions: **`engine_uncited_src_files` 49 → 43**, **`has_method_guards` 1 → 0**, **`oversize_gd_files` 6 → 1**, **`test_private_pokes` 1260 → 109**, and **`adapter_cpp_orig_cites_pushdown` 370 → 369**. Removed the `dep`, `oned_edit`, and `refs` citation allowlists and every deleted editor dictionary exception, including `editor_game_packer.gd\|static func pack_for_retail(`. The retained packer exceptions moved to `game_packer.gd`; its transport-edge `static func stage_retail(` and the process-session snapshot `game_run_session.gd\|func get_state()` are explicitly allowlisted. |
+| Play-in-Retail process seam (2026-08-24) | #565 | **`adapter_cpp_orig_cites_device` baseline 195 → 196** — one `(retail: PFF_OpenAllArchives @0x4a4310, see docs/vfs/vfs-pff-mount-re.md)` note in `godot/src/util/nova_process.h`: the working-directory contract of the retail spawn seam exists because retail opens its boot archives CWD-relative through a raw `_lopen`; the note documents why the binding must set the child's CWD rather than inherit ONED's. A documented device fold over the VFS record's witness, banked per the counter's contract. Same slice: **`adapter_cpp_orig_cites_pushdown` baseline 371 → 370** — master already counts 370 (a push-down landed there without banking the decrease); banked here per the counter's contract, log row on the offending slice's behalf. Same slice: `dict_contract_allowlist` +`editor_game_packer.gd\|static func pack(`, +`static func pack_for_retail(`, +`static func stage_loose(`, +`static func export_game(` — the packer's results are a transport edge throughout: the `pack_game` MCP tool's JSON payload verbatim, the `--pack-game` CLI's printed summary, and the session's injected `pack_retail` Callable seam, which by design carries no class dependency on the packer (ADR 0025's one-managed-child session stays UI/packer-neutral). |
 | Wire-up of the staged modules (2026-08-21) | (this PR) | **`adapter_cpp_orig_cites_device` baseline 173 → 187** — the device legs this PR adds carry their seam contracts as `(retail: Name @0xADDR, see docs/...)` notes in `godot/src`: the terrain light pool (`nova_light_scene`/`nova_terrain`: the rows texture, the clamp/bilinear/no-mip texture state `@0x5a98eb..0x5a98f4`, the pre-fog sum), the scar presenter (`nova_scar_presenter`/`nova_simulation_scars`: the view-space pull in place of a z-bias the retail drawer lacks, the section-mask owner gate, the axis swap), the mounted-camera carrier feed (`nova_simulation_player_view`: the yaw-only `carrier_forward`), the round-effect liveness row, and the HUD device legs (`hud_overlay`/`nova_simulation_hud_feeds`: the vehicle panel's whole-panel gate on the loaded interface texture `@0x5a5038`, the chat wrap width from the authored HUDCHATTEXT pair as retail's `g_hudChatBoxCoords` rows, the zone panel's blink on the 62 Hz HUD tick, the v4 minimap snapshot's medic column). Each is a documented device fold over a record-owned witness, which is what the non-zero floor exists for; banked per the counter's contract (181 after the first four legs, 186 once the HUD device half merged, 187 with the review's own-zone tile note — `lfp_dlf.tga` `@0x59e11a`). |
 | Static terrain-shadow light feed + near clip (2026-08-22) | (this PR) | **`adapter_cpp_orig_cites_device` baseline 194 → 195** — one `(retail: ...)` seam note in `godot/src/terrain/nova_terrain.cpp`: the page path consumes the RAW `Environment_GetLightDirectionFloat @0x57D870` tuple (the collector reads `@0x60D2F5/0x60D2FF`, the tile DOT3 pack `@0x60E231..0x60E331`), never the Godot-axes vector — the note documents why the 2026-08-20 getter change must not reach this consumer. |
 | Entity ground-shadow extent bounds (2026-08-22) | #558 | **`adapter_cpp_orig_cites_device` baseline 187 → 194** — the seven `(retail: ...)` seam notes the drape's patch + depth-clip port adds in `godot/src/env/nova_slot_shadow.{h,cpp}`: the terrain height probe the anchor march reads (`Terrain_GetHeightAtPosition @0x606720`), the generated `shadowztex` texture (`shadow_system_init_resources @0x5d6260..0x5d62d7`), the two-radius source — the model sphere for the capture extent and depth clip vs the entity bound for the lod and light query — with the render-bounds fallback (`Entity_InitFromModel @0x40dc30`, `RenderSlot_AllocSlot @0x5d5773`, `RenderSlot_RenderEntityAndChildren @0x5d7835`, twice: the candidate build and the `CasterInfo` field), the per-bound-slot dominant-light pick the blob leg now shares (`RenderSlot_UpdateEntityLight @0x5d6a30`), the stored slot direction the grazing rescale and the depth clip read (`@0x5d6d5c`, `RenderSlot_DrawSilhouetteDrape @0x5d5d66`), and the capture half-extent's gpm[5] source. Each is a documented device fold over render-lighting-re.md's witness. |
@@ -117,7 +119,7 @@ Landed slices (hash per slice, newest first):
 | Quality W3-3 threedi read/write split | (this PR) | **`libs_uncited_src_files` baseline 57 → 58, and the reason is worth reading.** Splitting `threedi_3di3.cpp` (which carries no `[orig:]` citation) into a read TU and a write TU turns ONE uncited file into TWO. Citation coverage does not change — the same uncited code is in the same library — but the counter counts FILES, so a motion-only split moves it. `libs/threedi` is built from the format records in `docs/threedi/`, not from decompiled functions: 11 of its 13 sources carry no citation, which is why it is not allowlisted like `pcapio` either (two files DO cite, so the library is not uniformly inapplicable). **Also recorded here as a correction:** the W3-1 mission split's file-header boilerplate contained the literal token `[orig]` in the sentence "the [orig] citations moved with the code they annotate". That made the counter read `mission_capi.cpp` and `mission_names.cpp` — which carry no real citation — as cited, so W3-1 passed this gate on comment text rather than substance. The boilerplate is fixed here for threedi and in a follow-up for mission (which will move the baseline again, honestly). A ratchet that can be satisfied by a comment is not a ratchet |
 | Quality W2-8 pcapio | (this PR) | **Citation-allowlist addition, NOT a baseline bump:** `libs/pcapio` joins `citation_allowlist_libs` so `libs_uncited_src_files` stays 57. The pcap/pcapng reader parses a PUBLIC format (its header cites pcap-savefile(5) and the pcapng block spec), so it is infrastructure like io/vfs/resource_index, not a reimplementation of witnessed engine behavior — an `[orig:]` citation is inapplicable by construction. Also: `PcapWriter` deleted (229 lines, zero references repo-wide) |
 | Quality W1-3 libs log sink | (this PR) | **New ratchet counter `libs_stdout_prints`, baseline 0.** `io/log.h` is the one diagnostic channel for `libs/`: libraries call `io::logf` and stay silent unless the host installs a sink (`novaworld_server` and `nw_server` install stderr/stdout sinks; `NW_LOG_DEBUG=1` opts into kDebug). All 57 console writes across 7 libs routed; `rdta.cpp`'s unconditional cwd `stripify_call_0.log` writer deleted (with its always-0 call counter and `OED_STRIPIFY_LOG_PATH`), `OED_STRIPIFY_SEED_DIAG` now defaults OFF. FILE*-parameter writers (tdp/mus/adm) are deliberately outside the counter |
-| Quality W1-2 print-zero | (this PR) | **Two new ratchet counters, baseline 0**: `gd_prints_outside_debug` (raw print family in godot/{engine,game,modtools}; sanctioned channels = push_error/push_warning, print_verbose, the F3 system; screenshot_capture allowlisted as a CLI driver) and `cpp_binding_console_writes` (UtilityFunctions::print/printerr, print_line, WARN/ERR_PRINT in godot/engine). The sweep that zeroed them: ~40 binding `printerr` → `push_warning` (these legs report via their return contract; GUT counts engine errors as failures, and the negative-path tests drive them), skeletal-anim `WARN_PRINT` → `push_warning`, the joiner freeze-tripwire `print_line` → `print_verbose` (its OPENNOVA_NET_DIAGNOSTICS gate retained), PerfTimeline + GameWorld warm-pass summaries → verbose channel, the NOVA_INF_DEBUG diagnosis leftover deleted, the overlay's duplicate pose print and the MCP banner print dropped. Channel policy recorded in godot/src/CLAUDE.md |
+| Quality W1-2 print-zero | (this PR) | **Two new ratchet counters, baseline 0**: `gd_prints_outside_debug` (raw print family in godot/{engine,game,modtools}; sanctioned channels = push_error/push_warning, print_verbose, the F3 system; the hidden `pack_game_cli.gd` release CLI is allowlisted because stdout/stderr is its interface) and `cpp_binding_console_writes` (UtilityFunctions::print/printerr, print_line, WARN/ERR_PRINT in godot/engine). The sweep that zeroed them: ~40 binding `printerr` → `push_warning` (these legs report via their return contract; GUT counts engine errors as failures, and the negative-path tests drive them), skeletal-anim `WARN_PRINT` → `push_warning`, the joiner freeze-tripwire `print_line` → `print_verbose` (its OPENNOVA_NET_DIAGNOSTICS gate retained), PerfTimeline + GameWorld warm-pass summaries → verbose channel, the NOVA_INF_DEBUG diagnosis leftover deleted, the overlay's duplicate pose print and the MCP banner print dropped. Channel policy recorded in godot/src/CLAUDE.md |
 | Host-punt handling (PR #300) | (this PR) | `test_private_pokes` 1376 → **1378** (+2, maintainer-ratified 2026-07-26). `godot/tests/net/host_punt_surfacing_test.gd` installs a runtime double into a REAL `GameWorld` (`_runtime` / `_loaded`, two lines in one helper) to pin the D-NET-177 contract that a host's close surfaces exactly once and never re-opens the deploy screen — GameWorld exposes no public runtime-injection seam, and `game_world_test.gd` already drives the identical one. The round's other five pokes were removed instead: the shell case now reads `find_children(…, "DeployScreenPresenter")`, `get_node("World")` and `is_gameplay_input_active()` rather than `_deploy_presenter` / `_world` / `_state` |
 | Gates repair after the #232 merge | (rides PR #236) | master merged #232 (the loading screen) with a red STD-1 ratchet: `test_private_pokes` rose 1384 → **1393** (+9, all `loading_screen_test.gd` `screen._in_session`/`_title`/`_mission_name`/`_custom_text`/`_game_type_text`/`_texture` state reads — logged here per the ratchet policy; baseline bumped via `--write-baseline`, MAINTAINER RATIFIES ON MERGE). Every open PR is red on this gate until this lands. The ledger scoreboard was already regenerated by #232 itself |
 | Wave-2 tail + GOV-4 close-out (PR #236) | (this PR) | the closing train, ground in parallel agent slices and consolidated green: **STD-2** 7/8 seeded contracts → typed records (DocumentTabRow, TileGizmoState, ReferenceServices deduped, ReferenceEdge, FocusPayload + EditorNavLocation, MissionParamSpec/SlotSpec, McpToolDef; net −9 class-level Dictionary signatures, 3 transport edges precisely allowlisted); **ONED-W1 ×6** — TER-1 (at bar, the E/G exemplar; F3 staging note via the new `get_game_launch_note` hook + typed GameLaunchNote), ENV-1 (at bar; save-into-launch-dir is the staging; popup note routing), CRE-1 (scrub transport; cadence UNCITED → R5 re-opened), FNT-1 + STR-1 (EngineTextPreview adopted — the game's draw path replaces the Label truth-claims), STR-2 (encoding pinned; **D-FNT-4 minted** — cp1252 specials fall to the system-font fallback where retail draws `glyph = byte−32`); **MUS-D** design landed at the maintainer gate; **ENG-5 sweep #2** on the conformance checklist; this close-out. Gates: canary 719/720 (the documented intra-file flake, isolation-green ×2 + master-green), mission_inspector 125/500, every touched suite re-verified on the consolidated tree, ratchets +0, dict-contract 0, ledger synced, link-graph 0 forbidden |
@@ -146,7 +148,7 @@ Landed slices (hash per slice, newest first):
 | PAR burn-down (trunk train) | 8778a0b4 … 2ed9a4fb | eight rows closed: D-EVT-2/-4 + cats 5/6 + D-EVT-5 mint, D-PLAYERINFO-2, D-NET-20, env #21, env #19 (tint consumers; dead-bake correction), D-VFS-2 (fixed boot table + the editor-index decision), D-CTRL-2 (witnessed visibility flags), D-INF-4 (witnessed direction-table generator); PAR-R7 VFS/PFF audit landed (D-VFS-1..9) |
 | ENG-6 R8 boot-resource research | 1139190e | docs/required-resources.md (fatal set, ordered boot sequence, D-BOOT catalog); the Wave-2 manifest leg stays open |
 | ONED F5 mission_controller decomposition | 9c4a1ea3 | 4,033 → 1,646-line composer + seven `_ops` sections; weakref `_c` leak fix (65e9e33d); the master-red `nova_mission_data_test` literal repaired (7055d0d5) |
-| ONED F2 EngineTextPreview + F3 See-in-game | ba467137 + a68e271f | the game-seam text preview widget; the `/d` loose-override launcher with typed LaunchPlan |
+| ONED F2 EngineTextPreview + F3 See-in-game | ba467137 + a68e271f | the game-seam text preview widget; the `/d` loose-override runner with typed LaunchPlan |
 | ADR-0016 packaging repair | 0836edc2 | AvatarPreview moved to the shared engine layer — the runtime package excluded `modtools/*`, master's boot smoke was red since #194 |
 | ONED F4 writer-parity convention | 29b5ded8 | the four-part W gate recorded in the track doc; libs/CLAUDE.md points at it; binds hudpos (HUD-1) and avatars (AVT-1) forward |
 | PAR-0 ledger train | 4948c540 | divergence-ledger.md + ADR 0022 + dashboard wiring; stable D-catalogs minted in the four prose-only records (97f64a97) |
@@ -372,41 +374,12 @@ conversions.
   `fetch-depth: 0`). The ledger scoreboard check joined the gate set
   (generated block, ratchet-class noise-free).
 
-### ONED — editor maturity
+### ONED — run only
 
-The detail doc is [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md)
-(PR #184, rewritten in place as this track). Its R/W/E/G bar, foundation
-phases F1–F5, per-workspace phases, and RE ledger stand; this program adds:
-
-- **ONED-A** (M) the avatars merge train — DONE (18791098): the twelfth
-  workspace (Avatars) merged from `playerinfo-runtime` across the #180 shell
-  decomposition and Wave 0 — editor + engine `nova_avatar_database` +
-  fixtures + five test files + RE doc; the branch's ADR renumbered
-  0013 → 0021 (it collided with master's consolidated-net-core 0013) with a
-  repo-wide reference sweep; the eleven→twelve sweep done (CONTEXT.md,
-  modtools README table, screenshot driver, the track doc's matrix row).
-- **ONED-F** = the track doc's F1–F5 (F5, the 4,033-line mission_controller
-  decomposition, before any MIS phase).
-- **ONED-W1/W2/W3** = the track doc's waves (W2's RE-gated bring-ups are
-  the first phases the freeze releases).
-- **ONED-TST** (M/L) public-seam test refits for the private-poking top
-  offenders (ADR 0018's categories; the canary handled with care; identical
-  assert counts prove refactor-only; the long tail rides the ratchet).
-- **ONED-RSP** (M/L) responsiveness: policy ADR (scale model, ONE window
-  floor — today there are two conflicting ones, ratio-based split
-  persistence with a versioned migration, `custom_minimum_size` audit) →
-  implementation → exactly one visual re-baseline slice.
-- **ONED-MUS-D → ONED-MUS-I** (M then L) the music redesign: a bounded
-  design spike with signed constraints (document/VM layer untouched; its 46
-  tests stay green unmodified; shell left-lane conformance; no modal
-  map/section canvas swap; honest navigation over the flat state machine;
-  Live/Bank resolution; responsive-first), a maintainer gate, then
-  implementation in shippable slices.
-- **ONED-REF** (M) reference-extractor gaps: weapon.def, Avatars.def
-  (post-A), .wac; .trn/.sbf/.lwf/strings as sources — via the documented
-  refs.cpp plug-in point.
-- **ONED-REQ** (S/M) required-resources conveniences over the ENG-6
-  manifest: missing-required diagnostics; the "new game" scaffold seed.
+[ADR 0037](adr/0037-oned-runs-game-data.md) supersedes the former editor
+maturity track. ONED now owns settings and one managed game-run session; project,
+workspace, import-database, reference-graph, and asset-authoring work is not on
+the active roadmap. The old workspace program remains only as historical context.
 
 ### PROD — products and serve mode
 
@@ -416,9 +389,9 @@ phases F1–F5, per-workspace phases, and RE ledger stand; this program adds:
   bring-up (ADR 0013 helper, 62 Hz pump). No new seam, no new protocol.
   The packaging boot smoke gains a `--headless --server` leg.
 - **PROD-2** (S) taxonomy conformance: export-presets audit (exactly two
-  products), validate_release_deliverables expectations, the
+  Godot products), validate_release_deliverables expectations, the
   title-identity fragmentation note recorded as future work.
-- **PROD-3** (S/M) program-end release dry run: package both exes, all
+- **PROD-3** (S/M) program-end release dry run: package both Godot exes, all
   smokes, tier-2 retail-join attestation on the runtime build.
 
 ### PAR — parity burn-down (divergence ledger)
@@ -614,7 +587,7 @@ parsing (the descriptor table stays canonical).
 
 DFX2 / any title split (cheap later; no new hardcoded title identity
 meanwhile); title-identity consolidation (note-only); NovaWorld
-service/backend/web/launcher feature work; the music document/VM layer;
+service/backend/web/OpenNova Launcher feature work; the music document/VM layer;
 a netsim/npruntime merger (ADR 0013 already consolidated); physical family
 merges unless LIBS-2's ADR chooses one; GOALS.md's Game workspace and
 export-a-game (this program builds their base); expanding the C ABI to net

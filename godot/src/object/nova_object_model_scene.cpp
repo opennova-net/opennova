@@ -34,14 +34,12 @@ void ObjectModel::rebuild_scene() {
 	material_defs_.clear();
 	body_pose_dirty_ = true;
 	bounds_dirty_ = true;
-	has_lights_ = false;
 	has_live_panm_ = false;
 	material_needs_eval_.clear();
 	dynamic_material_slots_ = PackedInt32Array();
 	last_env_gen_ = -1;
 	last_env_values_.unref();
 	last_section_env_values_.unref();
-	last_light_push_valid_ = false;
 	robj_dense_ = Array();
 	panm_applied_revision_ = 0;
 	if (object_data_.is_null() || !object_data_->has_document()) {
@@ -113,7 +111,6 @@ void ObjectModel::rebuild_scene() {
 	}
 
 	classify_materials();
-	has_lights_ = object_data_->get_light_count() > 0;
 	apply_runtime_state(0.0);
 	refresh_render_order();
 }

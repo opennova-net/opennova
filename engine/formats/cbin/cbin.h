@@ -131,7 +131,7 @@ bool encode_file(const Credits& credits, const std::string& path, std::string& e
 // The display view: the Color/Justify CONTROL entries collapsed into effective
 // per-item state, so every consumer of the credits sees stamped items instead
 // of re-deriving the control-code state machine. Semantics carried over from
-// the ONED .kda editor (no [orig] witnesses yet — the retail read path is the
+// the former ONED .kda editor (no [orig] witnesses yet — the retail read path is the
 // cbin-re.md PAR-R5 gap); the seeds and emission quirks below are the observed
 // stock-file conventions the editor round-trips against.
 

@@ -17,7 +17,7 @@ FIXTURE_SOURCES = {
     "windows-game": "opennova-game-windows-v0.0.10.zip",
 }
 
-# The DEV zip: game + editor + the loose sources both apps default-mount — one
+# The DEV zip: game + ONED + loose sources — one
 # copy of the data, no packed archives. The GDExtension DLL rides per flavour.
 WINDOWS_APPS_ENTRIES = [
     "opennova-modtools.exe",
@@ -323,7 +323,7 @@ def test_release_validator_selects_the_gdextension_flavour(tmp_path: Path) -> No
 
 
 def test_release_validator_requires_both_exes_in_the_windows_zip(tmp_path: Path) -> None:
-    # The editor launches opennova.exe from beside itself; a zip with only one of
+    # ONED runs opennova.exe from beside itself; a zip with only one of
     # the two is the version-skew failure the single zip exists to prevent.
     validator = _load_validator()
     dist = tmp_path / "dist"
@@ -496,8 +496,8 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     deferred_pr_jobs = ["package-addon", "package-importer"]
 
     assert "validate-deliverables:" in workflow
-    # One Windows package job: the editor and the runtime ship in ONE zip (the
-    # editor launches opennova.exe from beside itself), so the per-app jobs and
+    # One Windows package job: ONED and the runtime ship in ONE zip (ONED runs
+    # opennova.exe from beside itself), so the per-app jobs and
     # their wrapper scripts are gone.
     assert "package-godot-windows:" in workflow
     assert "package-godot-windows-editor:" not in workflow
@@ -730,7 +730,7 @@ def test_release_ships_the_game_zip_only() -> None:
     windows_job = _workflow_job(workflow, "package-godot-windows")
     assert "Cache Godot binary" in windows_job
     assert "Cache Godot export templates" in windows_job
-    # Tagged releases ship the packed game only; the dev zip (game + editor +
+    # Tagged releases ship the packed game only; the dev zip (game + ONED +
     # sources) comes from master CI builds.
     assert "dist/opennova-game-windows-v*.zip" in windows_job
     assert "dist/opennova-windows-v*.zip" not in windows_job
@@ -757,7 +757,7 @@ def test_godot_package_script_builds_both_flavours() -> None:
     assert '-PresetName "OpenNova Runtime"' in windows_shared
     # The dev zip stages the TRACKED assets (never a wildcard copy — the working
     # assets/ holds untracked retail binaries) with an LFS pointer guard; the
-    # game zip is packed by the exported editor's own CLI.
+    # game zip is packed by ONED's hidden CLI.
     assert "git -C $ROOT ls-files -z assets" in windows_shared
     assert "version https://git-lfs" in windows_shared
     assert "Copy-GameSources" in windows_shared
