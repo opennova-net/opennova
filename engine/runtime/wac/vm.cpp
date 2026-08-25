@@ -184,7 +184,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
     if (ieq(n, "meride")) {
         // The local player rides SSN A(0) — the mount-chain membership test.
-        // [orig: Entity_IsInLocalPlayerMountChain @0x4F1260 — the mount or its
+        // [orig: Entity_IsLocalPlayerStandingOnSsn (ex Entity_IsInLocalPlayerMountChain) @0x4F1260 — the mount or its
         // +40 child == the resolved entity. NB: the schema's @0x4F1260 and the
         // BMS predicate cites (sub 38 @0x4f10d0 / sub 39 @0x4f1260) disagree on
         // which address is seated-vs-standing; the SEMANTICS used here is the
@@ -364,7 +364,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
 
     // ssnrelease(ssn) -- detach a transported AI and CLEAR its boarding order.
-    // [orig: sub_4F7420 @0x4f7420, the WAC command table's 0x4f7420 row]
+    // [orig: WacCmd_SsnRelease (ex sub_4F7420) @0x4f7420, the WAC command table's 0x4f7420 row]
     // Previously fell through to the default effect push, i.e. the mission script
     // said "everybody out" and nothing happened: the occupant stayed mounted at
     // command 125 for the rest of the mission.

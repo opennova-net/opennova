@@ -97,6 +97,31 @@ DeployStatusLine build_deploy_status(const DeployStatusInput &in) {
     return out;
 }
 
+std::string deploy_status_text(const DeployStatusLine &line,
+                               const std::string &penalty_label,
+                               const std::string &zone_name) {
+    char buf[256];
+    switch (line.kind) {
+    case DeployStatusLine::Kind::Penalty:
+        // [orig: sprintf("%s  <cFF4040>%i", STROVER_PENALTYTIMER, penalty)]
+        std::snprintf(buf, sizeof buf, "%s  <cFF4040>%i", penalty_label.c_str(), line.seconds);
+        return buf;
+    case DeployStatusLine::Kind::Wave:
+        if (line.numbered) {
+            // [orig: sprintf("'%s':  <cFF4040>%d", WPNames name, countdown)]
+            std::snprintf(buf, sizeof buf, "'%s':  <cFF4040>%d", zone_name.c_str(), line.seconds);
+        } else {
+            // [orig: sprintf("%c:  <cFF4040>%d", 'A' + index, countdown) @0x553a5b]
+            std::snprintf(buf, sizeof buf, "%c:  <cFF4040>%d",
+                          static_cast<char>('A' + line.zone_index), line.seconds);
+        }
+        return buf;
+    case DeployStatusLine::Kind::None:
+    default:
+        return "";
+    }
+}
+
 DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in) {
     DeployStaticsVisibility v;
     // [orig: dword_A85B68 @0x553e2a; dword_A85B60 && !entity+0x1E0 @0x553eb8..0x553ecc]

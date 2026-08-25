@@ -610,7 +610,7 @@ void Terrain::_bind_light_textures() {
 	// The two procedural textures, built once per process like the corona
 	// texture (retail: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
 	// 64x64 and "texlightspot1d" 64x8, both without mips, and the 0x600 shader
-	// they bind addresses CLAMP — sub_680720(this, clamp=1, 0, 0, 0)
+	// they bind addresses CLAMP — CGfxTexture_SetSamplerAddressing (ex sub_680720)(this, clamp=1, 0, 0, 0)
 	// @0x5a98eb..0x5a98f4; the shader samplers carry the matching
 	// filter_linear, repeat_disable hints).
 	const int size = LightScene::terrain_light_texture_size();

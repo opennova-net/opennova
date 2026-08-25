@@ -9,6 +9,8 @@
 #include <npruntime/napi_np_server_ctx.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
+#include "rtxt/rtxt_string_file.h"
+
 #include <world/deploy_screen_feed.h>
 #include <world/spawn_select.h>
 
@@ -155,6 +157,35 @@ Dictionary Simulation::get_deploy_status() {
 	out["medic_cooldown_ticks"] = medic_request_cooldown_ticks_;
 	out["medic_request_serial"] = medic_request_serial_;
 	return out;
+}
+
+String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext) {
+	// The STATIC_RESPAWN_MSG1 text: the engine's three sprintf arms over the
+	// status line get_deploy_status computes, with the gametext strings
+	// resolved here (GameText_GetString("Overlays", "STROVER_PENALTYTIMER") /
+	// ("WPNames", "STRWPNAME%03d") @0x5536a0, their shipped fallbacks).
+	const Dictionary status = get_deploy_status();
+	opennova::world::DeployStatusLine line;
+	line.kind = static_cast<opennova::world::DeployStatusLine::Kind>(
+			static_cast<int>(status.get("queued_kind", 0)));
+	line.seconds = static_cast<int>(status.get("queued_seconds", 0));
+	line.numbered = static_cast<bool>(status.get("queued_numbered", false));
+	line.zone_index = static_cast<int>(status.get("queued_zone_index", -1));
+	auto game_text = [&p_gametext](const char *section, const String &key, const char *fallback) {
+		if (!p_gametext.is_null() && p_gametext->has_string_in_section(section, StringName(key)))
+			return p_gametext->get_string_in_section(section, StringName(key));
+		return String(fallback);
+	};
+	const String penalty_label = game_text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty");
+	String zone_name;
+	if (line.kind == opennova::world::DeployStatusLine::Kind::Wave && line.numbered) {
+		// "STRWPNAME%03d" over index + 1 (the key form deploy_screen_feed.h witnesses).
+		zone_name = game_text("WPNames",
+				String("STRWPNAME") + String::num_int64(line.zone_index + 1).pad_zeros(3),
+				"Spawn Point");
+	}
+	return String::utf8(opennova::world::deploy_status_text(line,
+			penalty_label.utf8().get_data(), zone_name.utf8().get_data()).c_str());
 }
 
 TypedArray<Dictionary> Simulation::get_deploy_list_rows(const String &p_default_key,

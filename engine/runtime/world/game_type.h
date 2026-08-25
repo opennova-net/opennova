@@ -6,7 +6,7 @@
 // witnessed bits below. Gameplay can therefore share the exact wire values
 // without depending on the network or mission adapters.
 // [orig: g_GameType @0x24D2128; Server_CheckWinConditions @0x51AD40;
-// sub_52C850 @0x52C850]
+// ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850]
 namespace opennova::game_type {
 
 inline constexpr uint32_t kDeathmatch = 0x00000u;

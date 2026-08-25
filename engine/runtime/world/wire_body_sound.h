@@ -1,5 +1,5 @@
 // The wire-fed remote body's footstep/foley consume — the presentation-side
-// sibling of AiSystem::infantry_anim_sound_pass (world/infantry.cpp). A wire
+// sibling of AiSystem::infantry_anim_sound_pass (world/infantry_sound.cpp). A wire
 // row has no AiEntity, so its identity arrives as the items.def type id and
 // the packed avatar character id, and its profile resolves through
 // world.organic_sound_profiles (audio/footstep_slot.h organic_slot_set).

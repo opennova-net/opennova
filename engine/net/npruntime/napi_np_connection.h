@@ -173,7 +173,7 @@ struct CharacterJoinVars {
 // {nat=7,div=0,combo=1,evil}=0x8207, class 8 (rifleman) on both sides, the two
 // selected heads' voice/avatar bytes 1/10, and no side request (TR 0xFF).
 // [orig: PlayerProfile_InitDefaults @0x54bbe0..0x54bc24 -> lookup_entity_slot_and_pack_entry
-//  @0x57ad40; the avatar byte via sub_57AE60 @0x57ae60; wire: retail join f=199140 (the
+//  @0x57ad40; the avatar byte via Avatars_ResolveSelectionIndex (ex sub_57AE60) @0x57ae60; wire: retail join f=199140 (the
 //  captured VCB=4 is a saved profile override, not the fresh default)]
 inline CharacterJoinVars retail_fresh_profile_character_vars() {
 	CharacterJoinVars vars;
@@ -331,7 +331,7 @@ struct SessionReplyState {
 struct NapiNPConnection {
 	// The slot's SCORE and the cached copy the S2C 0x81 change gate compares against.
 	// Retail keeps both on the per-slot stats object: the score is field id 28
-	// (== 0x1C, what CRenderState_GetFieldByIndex(playerSlotPtr + 18, 0x1C) reads);
+	// (== 0x1C, what CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)(playerSlotPtr + 18, 0x1C) reads);
 	// the cached mirror is slot[83] [orig: Server_UpdateCaptureZoneProximity @0x5086A0].
 	// Both start at 0, matching a fresh slot: retail sends nothing until the score
 	// first CHANGES, so an untouched slot is silent rather than sending a zero.
@@ -352,7 +352,7 @@ struct NapiNPConnection {
 	//  @0x51796d deploy, @0x517e47 revive; disarm @0x516ef4 death, arm @0x510237]
 	uint32_t tick_seed = 0;
 
-	// [orig: NapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side
+	// [orig: CNapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side
 	// connection (the host's view of a client), 2 = client-side connection (a client's view of
 	// the host, incl. the host's own local loopback client).
 	uint8_t type = 1;

@@ -49,6 +49,11 @@ enum class BinkStatus {
 	unsupported,
 };
 
+// The retail YUV -> RGB conversion of one pixel (binkw32.dll's YUV_init
+// tables + BINKSURFACE32 blit; the law is documented at the definition).
+// Exposed so the conversion is pinnable without a decoded stream.
+void yuv_to_rgb(uint8_t y, uint8_t u, uint8_t v, uint8_t &r, uint8_t &g, uint8_t &b);
+
 // Portable BIKi video-only decoder. This deliberately exposes no container,
 // bundle, YUV-plane, or transform machinery: those are one implementation
 // detail behind the sequential movie interface used by the engine adapter.

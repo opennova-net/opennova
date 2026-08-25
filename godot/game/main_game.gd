@@ -240,7 +240,7 @@ func _ready() -> void:
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
-	# The MP end-of-round flow (net-re 5.68; sub_5C0060 @0x5c0072): STAT owns the cursor.
+	# The MP end-of-round flow (net-re 5.68; HUD_DrawOverlayPanels @0x5c0072): STAT owns the cursor.
 	_end_round_presenter = EndRoundPresenter.install(self, _world,
 			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
 			_armory_presenter, func() -> void: _state = State.END_ROUND,
@@ -1171,7 +1171,7 @@ func _process(delta: float) -> void:
 	if _hud_presenter != null and not skip_hud \
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
 		_hud_presenter.tick(is_gameplay_input_active())
-		_end_round_presenter.tick()  # the same HUD frame [orig: sub_5C0060]
+		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	_maybe_exit_round_cycle()
 	if timing:
 		var probe_t4 := Time.get_ticks_usec()

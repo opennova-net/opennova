@@ -26,7 +26,7 @@
 // file, which is why the 0 -> 2 remap is unobservable.
 //
 // Individual values are read as `row + 300 + 4 * entryIndex`
-// [orig: sub_52D430 @ 0x52D430], and `row + 24` holds the block's team count
+// [orig: ScoreConfig_GetRowEntry (ex sub_52D430) @ 0x52D430], and `row + 24` holds the block's team count
 // (`g_scoreTeamCount` @0x52D300). Consumers of the parsed model live in
 // runtime/net (the scoring dispatch [orig: GameEvent_ProcessScoring @ 0x52F550]
 // and the change-gated S2C 0x81 score mirror
@@ -90,7 +90,7 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
 bool write(const File &file, std::vector<uint8_t> &out, std::string &error);
 
 // Value lookups by NAME (see the coverage gap in the file header — the
-// name -> entryIndex ordering behind `sub_52D430`'s `300 + 4*i` is unwitnessed,
+// name -> entryIndex ordering behind `ScoreConfig_GetRowEntry`'s `300 + 4*i` is unwitnessed,
 // so name lookup is the only sound access path today).
 const GameTypeBlock *block_at(const File &file, int row);
 int32_t var_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);

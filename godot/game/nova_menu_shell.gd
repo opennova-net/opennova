@@ -419,7 +419,7 @@ func _on_screen_changed(screen_name: String) -> void:
 #
 # The "OK" control (named ACCEPT in JO) is overloaded: it launches on a play screen
 # but is a plain confirm on Options/loadout/etc. The original engine dispatches it
-# per-screen (sub_63C060 registers callbacks keyed by screen+control), so the same
+# per-screen (CUIScene_RegisterControlCallback @0x63c060 registers callbacks keyed by screen+control), so the same
 # ACCEPT means different things on different screens. We can't hardcode JO's screen
 # names (this shell is game-agnostic), so we scope by the screen's ROLE inferred from
 # its content: a mission list -> launch screen (ACCEPT/START_GAME launch the mission);

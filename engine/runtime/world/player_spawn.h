@@ -55,7 +55,7 @@ struct PlayerSpawn {
     // GamePlayerEntity.animSlot (entity+0x374): the character-model/avatar selector — the joiner's
     // per-side VCA/VCB 0x42 join var picked by ASSIGNED team, or the host's own avatar (retail
     // default 1 when the profile carries none). 0 = "tag absent" (retail sends the raw 0).
-    // [orig: Server_PlayerAdd @0x51cbc0 (@0x51d0b1); sub_57AE60 default-return 1; D-NET-146]
+    // [orig: Server_PlayerAdd @0x51cbc0 (@0x51d0b1); Avatars_ResolveSelectionIndex (ex sub_57AE60) default-return 1; D-NET-146]
     uint8_t anim_slot = 0;
     // The wire NetId (entity+0x15C): the minimap/character-slot id picked per assigned team from
     // the joiner's CI0/CI1 join vars (low u16). 0 = unassigned -> the encoder's D-NET-137 shim.

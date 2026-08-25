@@ -447,11 +447,11 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
 
 // Engine CS template, witnessed in IDA: CNapiGameSession_InitNPConnection writes
 // two IDENTICAL 15-entry [field_index]=timeout_ms blocks (dir1 @ proto+3652,
-// dir0 @ proto+3712); NapiNPConnection_Create copies them into the connection and
+// dir0 @ proto+3712); CNapiNPConnection_Create copies them into the connection and
 // SendSessionInit emits cs_dirN[i].timeout_ms verbatim. Both directions are
 // identical — there is NO client/server difference at index 12. index13 is the
 // runtime MTU (dword_25509F0, clamp 100..0x10000, default 1300).
-// [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / NapiNPConnection_Create @ 0x62acb0 / NapiNPConnection_SendSessionInit @ 0x620ef0]
+// [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / CNapiNPConnection_Create @ 0x62acb0 / CNapiNPConnection_SendSessionInit @ 0x620ef0]
 // (Prior values were onnet-derived guesses, wrong at idx 4/8/9/10/12/13 —
 //  docs/net/novaworld-net-re.md D-NET-1.)
 static std::vector<CsField> engine_cs_fields() {
@@ -551,7 +551,7 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg) {
 	append_string_field(buf, "NA", msg.na);
 	// RIP/RPN gated on non-zero, mirroring SIP/SPN: SendSessionInit emits RIP
 	// only when peer_addr!=0 and RPN only when peer_port!=0.
-	// [orig: NapiNPConnection_SendSessionInit @ 0x620ef0 (@ 0x62121e / 0x621242)]
+	// [orig: CNapiNPConnection_SendSessionInit @ 0x620ef0 (@ 0x62121e / 0x621242)]
 	if (msg.rip) append_u32_field(buf, "RIP", msg.rip);
 	if (msg.rpn) append_u32_field(buf, "RPN", msg.rpn);
 	return buf;

@@ -59,8 +59,8 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
    through ItemDef_AllocateWithDefaults, which zeroes the record and then stamps
    this physics block BEFORE any key is parsed, so an item that declares none of
    these keys still runs on these values — not on zero.
-   [orig: ItemDef_AllocateWithDefaults @0x0049E3B0 (kong 129729-129757); the
-    `begin` arm calls it at ItemDef_ParseProperty @0x0049EB00 (kong 130323)]
+   [orig: ItemDef_AllocateWithDefaults @0x49E3B0; the
+    `begin` arm calls it at ItemDef_ParseProperty @0x49EB00]
 
    Why this matters (AI-PARITY-CONCEPT §6.15h): DTruck1 (id 101294) declares NO
    spring_comp, so retail runs it at springComp 20 -> suspension travel 13108,
@@ -69,7 +69,7 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
 
    EXCEPTION, stated rather than guessed: retail also defaults `unk591` to 5,
    but the key that writes unk591 is an unresolved indirect string in the
-   decompilation (`off_7C7D78` @ kong 129483), so its identity with our `bob`
+   decompilation (`off_7C7D78`), so its identity with our `bob`
    field is NOT witnessed for defaulting purposes and `bob` is deliberately
    left at 0. Retail's tireSlip = 5 and handBrake = 1 have no field in our
    record at all. Both are named divergences, not oversights. */
@@ -115,7 +115,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             if (lower_starts_with(lower, ll, "begin", 5)) {
                 memset(&current, 0, sizeof(current));
                 apply_item_def_defaults(&current); /* [orig: the begin arm calls
-                    ItemDef_AllocateWithDefaults @0x0049EB00, kong 130323] */
+                    ItemDef_AllocateWithDefaults @0x49E3B0 from ItemDef_ParseProperty @0x49EB00] */
                 raw_cap = 0;
                 emplacement_attachments_cap = 0;
                 extract_quoted(trimmed, tlen, current.display_name, sizeof(current.display_name));

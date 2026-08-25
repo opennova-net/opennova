@@ -72,7 +72,7 @@ TechniqueClass technique_class_for_submit(uint32_t stack_default_flags,
 // alpha-tested ones; within, front-to-back in 256-unit depth slabs, effects
 // grouped within a slab, 16-unit fine depth within an effect. `view_depth`
 // is the render object's origin depth along the camera-forward plane
-// [orig: g_BatchSortDepthPlane @ 0x2721A08..38]; `effect_index` is the
+// [orig: g_BatchSortDepthPlaneX @ 0x2721A08, the plane's floats run to 0x2721A38]; `effect_index` is the
 // effect's registry index [orig: the /1004 magic divide @ 0x5d924c].
 // Bits 15..31 are zero here - the original ORs in residual stack garbage
 // (constant within a call; D-RORD-6, never reproduced).

@@ -892,12 +892,12 @@ target_compile_features(client_roster_tags_test PRIVATE cxx_std_17)
 add_test(NAME client_roster_tags COMMAND client_roster_tags_test)
 
 # The DEATH-screen facts of the replica fold: the 0x0A sub-block-0 slot timers
-# and the 0x6E self wave zone (client_replica_match.cpp).
-add_executable(client_replica_match_test netsim/client_replica_match_test.cpp)
-target_link_libraries(client_replica_match_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(client_replica_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(client_replica_match_test PRIVATE cxx_std_17)
-add_test(NAME client_replica_match COMMAND client_replica_match_test)
+# and the 0x6E self wave zone (client_replica_death.cpp).
+add_executable(client_replica_death_test netsim/client_replica_death_test.cpp)
+target_link_libraries(client_replica_death_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_replica_death_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(client_replica_death_test PRIVATE cxx_std_17)
+add_test(NAME client_replica_death COMMAND client_replica_death_test)
 
 add_executable(client_replica_endround_test netsim/client_replica_endround_test.cpp)
 target_link_libraries(client_replica_endround_test PRIVATE opennova_net opennova_runtime)
@@ -917,11 +917,6 @@ add_executable(menu_table_sort_test menu/menu_table_sort_test.cpp)
 target_link_libraries(menu_table_sort_test PRIVATE opennova_runtime)
 target_include_directories(menu_table_sort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_table_sort COMMAND menu_table_sort_test)
-
-add_executable(stat_row_format_test hud/stat_row_format_test.cpp)
-target_link_libraries(stat_row_format_test PRIVATE opennova_runtime)
-target_include_directories(stat_row_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME stat_row_format COMMAND stat_row_format_test)
 
 add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
 target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)

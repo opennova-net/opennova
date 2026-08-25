@@ -25,6 +25,41 @@ static_assert(World::kMissionAttribSinglePlayerRespawn ==
 static_assert(World::kMissionAttribEnableNVG ==
               static_cast<uint32_t>(bms::AttribFlags::EnableNVG));
 
+std::string ai_profile_name_for(
+        const bms::Entity &e, bool placed_item,
+        const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &defaults) {
+    const auto lower = [](char c) {
+        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+    };
+    // name2 is the raw 8-byte BMS field — an 8-char name carries no terminator;
+    // the shell resolver this mirrors trimmed and lowercased it.
+    std::string name;
+    for (size_t i = 0; i < sizeof(e.name2) && e.name2[i] != '\0'; ++i)
+        name.push_back(lower(e.name2[i]));
+    const auto is_ws = [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+    };
+    size_t begin = 0;
+    while (begin < name.size() && is_ws(name[begin])) ++begin;
+    size_t end = name.size();
+    while (end > begin && is_ws(name[end - 1])) --end;
+    name = name.substr(begin, end - begin);
+    // The authored ai_textfile wins in every retail arm [orig: the +0x9C
+    // non-empty tests @0x461f2b / @0x4684a4 / @0x4687a3].
+    if (!name.empty() || !placed_item || !defaults) return name;
+    const PromoteOptions::AiProfileDefaults d = defaults(e.type_id);
+    if (!d.known) return name;
+    // The vehicle family consults the def's own default_aip (+0x8B8) before
+    // the helo1 default [orig: Entity_InitVehicleAIFromDef @0x4687b5..0x4687d1];
+    // the helicopter family goes straight to helo1 [orig: @0x461f50 / @0x4684c9].
+    if (!d.helicopter_init && !d.default_aip.empty()) {
+        std::string def_name;
+        for (char c : d.default_aip) def_name.push_back(lower(c));
+        return def_name;
+    }
+    return "helo1";
+}
+
 namespace {
 
 // degrees -> 32-bit binary angle (the entity-heading unit, entity+16). [orig: AI_HandleCommand
@@ -213,20 +248,16 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     //  default_speed stand-in (the rest of the profile parse remains D-AI-11 h).
     b.f[AiBrain::kSpeedA] = opts.default_speed;
     b.f[AiBrain::kSpeedB] = opts.default_speed;
-    // name2 is the raw 8-byte BMS field — an 8-char name carries no terminator.
-    size_t n2len = 0;
-    while (n2len < sizeof(e.name2) && e.name2[n2len] != '\0') ++n2len;
-    if (n2len > 0) {
-        const auto lower = [](char c) {
-            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
-        };
+    // The profile name retail's AI init would load: the ai_textfile, else (a
+    // placed vehicle item) the def's default_aip or "helo1" — the same
+    // resolution the boot resolver used to load the rows, so a nameless
+    // Blackhawk finds its helo1 row here [orig: Entity_InitHelicopterAIFromDef
+    // @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0 name arms].
+    const std::string want =
+            ai_profile_name_for(e, kind == EntityKind::Item, opts.ai_profile_defaults);
+    if (!want.empty()) {
         for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
-            if (ps.profile.size() != n2len) continue;
-            bool match = true;
-            for (size_t i = 0; i < n2len; ++i) {
-                if (lower(ps.profile[i]) != lower(e.name2[i])) { match = false; break; }
-            }
-            if (!match) continue;
+            if (ps.profile != want) continue;
             if (ps.data.combat_speed >= 0)
                 b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
                         (static_cast<int64_t>(ps.data.combat_speed) << 16) / 225);
@@ -570,7 +601,19 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
                 if (authored.size() > 15) authored.resize(15);
                 seed.display_name = std::move(authored);
             }
-            EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);
+            // Pool slot = the record's index within its pool section, not the
+            // first free slot: every pool loop hands Entity_SpawnFromBMSRecord
+            // `Pool_GetEntry(pool, i)` for record i, so a record that fails to
+            // spawn leaves a HOLE and a later record never slides down into
+            // it. A live occupant is overwritten exactly as the fixed pool
+            // entry would be. [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1
+            // @0x40f9bb..0x40f9c6, pool 2 @0x40fa28..0x40fa34, pool 3
+            // @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19; the per-pool
+            // Pool_SetUsed @0x40f9db/@0x40fa4a/@0x40faba/@0x40fb34]
+            const EntityHandle want = EntityHandle::make(
+                    pool_for_kind(kind), static_cast<int>(idx - 1));
+            if (world.registry.get(want) != nullptr) world.registry.despawn(want);
+            EntityHandle h = world.registry.spawn_at(want, seed);
             if (!h.valid()) { ++r.dropped; continue; }
             ++r.spawned;
             if (kind == EntityKind::Item) promoted_item_handles.push_back(h);

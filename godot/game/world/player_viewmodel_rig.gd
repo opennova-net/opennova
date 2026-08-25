@@ -122,6 +122,21 @@ func viewmodel() -> Node3D:
 	return _viewmodel
 
 
+## The gameplay camera the rig was set up with (probes read the FP placement
+## relative to it).
+func camera() -> Camera3D:
+	return _camera
+
+
+## The FP render pass's viewport and camera (null until the pass is built).
+func vm_viewport() -> SubViewport:
+	return _vm_viewport
+
+
+func vm_camera() -> Camera3D:
+	return _vm_camera
+
+
 ## The viewmodel branch of the presenter's model lifetime: (re)build the FP model
 ## when missing, apply its weapon.def view record, and re-collect the parts.
 func ensure_viewmodel() -> void:

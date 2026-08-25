@@ -60,8 +60,8 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
         // `ground <= start` (the previous reading) left a submerged body with
         // its ground pinned a full drop-length beneath it every tick — it then
         // fell forever instead of being lifted back onto the surface.
-        // [orig: Terrain_RaycastHeightmapLoRes @0x4245e6 — the vertical-ray
-        //  branch writes hitPoint[2] = Terrain_SampleHeightBilinear before any
+        // [orig: Terrain_RaycastHeightmapLoRes @0x60CB80 — the vertical-ray
+        //  branch writes hitPoint[2] = Terrain_SampleHeightBilinear (the calls @0x60CC02/@0x60CDDE) before any
         //  comparison; the callers pass rayEnd as hitPoint
         //  @0x413785/Terrain_RaycastHeightmapHiRes_0]
         ray.end[2] = ground;

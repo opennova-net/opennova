@@ -2178,8 +2178,10 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // Without this upkeep a player-piloted aircraft deadlocks: the override
     // zeroes the cyclic because the engine reads off, and nothing ever turns the
     // engine on. It was recorded as the deferred "authority engine-flag upkeep".
-    // [orig: LABEL_328 @0x491C7x — `if (brain[137]) Flags |= 0x80 else &= ~0x80`,
-    //  reached only when is_authority; LABEL_305 is the client override]
+    // [orig: Entity_UpdateAircraftPhysics @0x490310 — the brain[137] (+0x224)
+    //  test @0x491dfd, `Flags |= 0x80` @0x491e05 / `&= ~0x80` @0x491e11, reached
+    //  only when is_authority; the client engine-off override is the other arm
+    //  (its `&= ~0x80` @0x491c6d precedes the is_authority test @0x491c88)]
     const bool motor_is_authority = world.ai != nullptr && world.ai->is_authority;
     if (motor_is_authority) {
         const int32_t climb =

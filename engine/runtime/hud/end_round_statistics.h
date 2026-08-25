@@ -17,7 +17,7 @@ namespace opennova::hud {
 // exclusively (the respawn-init wrapper clears every overlay toggle, then
 // restores this one), and clears with the respawn init.
 // [orig: HUD_DrawEndRoundStatistics @0x5b7600, called from the frame drawer
-//  sub_5C0060 @0x5c0092 while dword_24C18AC is set; the toggle is
+//  HUD_DrawOverlayPanels @0x5c0092 while dword_24C18AC is set; the toggle is
 //  Input_HandleActionBinding jumptable case 422 @0x49bd29 (gated
 //  !is_in_session) -> sub_4993C0(&toggle) = Game_InitRespawnState keeping
 //  *ptr @0x4993c0..0x4993db; cleared by Game_InitRespawnState @0x499381 and
@@ -28,7 +28,7 @@ namespace opennova::hud {
 // Retail also sprintf's a SECOND value per row (the subgoal bonus score, the
 // damage-received sum, and the two by-others point sums) into the same stack
 // buffer WITHOUT a draw call between format and the next row — dead stores,
-// witnessed at @0x5b76ea/@0x5b77a0/@0x5b7823/@0x5b78a6 (no sub_580B40/BC0
+// witnessed at @0x5b76ea/@0x5b77a0/@0x5b7823/@0x5b78a6 (no HUD_DrawTextLeftScaled (ex sub_580B40)/BC0
 // between them and the next label). They are not modeled.
 
 // The label box, design space (x1, y1, x2, y2 like every HUD_DrawLabelBox
@@ -43,8 +43,8 @@ inline constexpr int kEndRoundStatsTopRaised = 140;
 // Rows start 48 below the panel top and step 48 [orig: @0x5b7653/@0x5b7712].
 inline constexpr int kEndRoundStatsRowStart = 48;
 inline constexpr int kEndRoundStatsRowStep = 48;
-// Labels left-aligned at x 200 (sub_580B40 -> HUD_DrawTextLeft_HalfBright),
-// values RIGHT-aligned at x 620 (sub_580BC0 ->
+// Labels left-aligned at x 200 (HUD_DrawTextLeftScaled -> HUD_DrawTextLeft_HalfBright),
+// values RIGHT-aligned at x 620 (HUD_DrawTextRightAlignedScaled (ex sub_580BC0) ->
 // HUD_DrawTextRightAligned_HalfBright) [orig: @0x5b76ad/@0x5b76d7].
 inline constexpr int kEndRoundStatsLabelX = 200;
 inline constexpr int kEndRoundStatsValueX = 620;

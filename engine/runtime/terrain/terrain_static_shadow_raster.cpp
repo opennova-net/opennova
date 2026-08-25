@@ -1,7 +1,7 @@
 #include <terrain/terrain_static_shadow_raster.h>
 
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F:
-// TileBakeDot3LightPassAlt @0x60D794, black PROJSHAD geometry
+// the alt DOT3 light pass apply @0x60D794, black PROJSHAD geometry
 // @0x60D960..0x60D97D; PolyTrn_RenderTile @0x60E0C6..0x60E19D:
 // 2x temp MINFILTER=LINEAR, PSDepthAlpha temp-blue -> destination alpha]
 

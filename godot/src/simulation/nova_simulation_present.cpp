@@ -943,11 +943,20 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	if (const opennova::world::Entity *ve = world_->registry.get(e->handle)) {
 		out["rotor_speed"] = ve->veh.part_spin.speed;
 		out["rotor_phase"] = ve->veh.part_spin.angle;
+		// The rotor machine's three gates, so a still rotor names its cause: the
+		// seeded rate, the brain's profile type (the HELO twin runs only for
+		// type 1 — retail: Entity_UpdateHeloRotorSpin @0x48FA70, the
+		// `profile+0x10 == 1` test @0x48fa98) and the engine-running claimant
+		// latch (+0x170; world::Entity::primary_occupant).
+		out["rotor_rate"] = ve->veh.part_spin.rate;
+		out["profile_type"] = e->profile.type;
+		out["primary_occupant"] = ve->primary_occupant.valid();
 		// The mover family, so a rotor check can tell "no helicopter here" from
 		// "the helicopter's blades are not turning".
 		const opennova::world::VehicleTraits *vt =
 				world_->vehicle_traits.get(ve->item_id);
 		out["veh_family"] = vt != nullptr ? int(vt->family) : -1;
+		out["player_control"] = vt != nullptr && vt->player_control;
 		// Flight-command chain, so a "the helicopter will not move" report can
 		// name WHICH link is dead: the pilot's packed MoveOrder, the staged
 		// cyclic pair, and the altitude target.

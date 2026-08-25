@@ -12,7 +12,10 @@ namespace {
 // The g_GameType code words the ladder tests, named here so the switch reads
 // like the original. These mirror engine/net/npwire/game_type.h, which the
 // formats layer may not include (ADR 0030: formats depends only on base/io and
-// other formats libs).
+// other formats libs). [orig: load_scoring_table_for_game_type @0x52D300 —
+// the 0x10000 test @0x52d324 and the (g & 0xFFFDFFFF) == 0x10020 &&
+// (g & 0x20000) family test @0x52d345; the same ladder is repeated in
+// GameEvent_ProcessScoring @0x52f56c/@0x52f58c and sub_52D430 @0x52d45a/@0x52d47b]
 constexpr uint32_t kTeamDeathmatch = 0x10000;
 constexpr uint32_t kWaypointFamilyMask = 0xFFFDFFFFu;
 constexpr uint32_t kWaypointFamilyValue = 0x10020u;
@@ -114,20 +117,20 @@ int row_for_game_type(uint32_t game_type) {
 			(game_type & kObjectiveBit) != 0) {
 		index = 2; // objective Co-op
 	} else {
-		switch (game_type) {
-		case 65537: index = 3; break;
-		case 1: index = 4; break;
-		case 589826: index = 5; break;
-		case 65538: index = 6; break;
-		case 65540: index = 7; break;
-		case 65544: index = 8; break;
-		case 8: index = 12; break;
-		case 65552: index = 9; break;
-		default: index = (game_type != 327696) ? 0 : 0xA; break;
+		switch (game_type) {        // [orig: the switch arms @0x52d353..0x52d3b1]
+		case 65537: index = 3; break;   // @0x52d353 TKOTH
+		case 1: index = 4; break;       // @0x52d35f KOTH
+		case 589826: index = 5; break;  // @0x52d36d S&D
+		case 65538: index = 6; break;   // @0x52d37b A&D
+		case 65540: index = 7; break;   // @0x52d389 CTF
+		case 65544: index = 8; break;   // @0x52d397 FlagBall
+		case 8: index = 12; break;      // @0x52d3a3 Flag Me (fails the <= 11 gate)
+		case 65552: index = 9; break;   // @0x52d3b1 A&S
+		default: index = (game_type != 327696) ? 0 : 0xA; break; // C&C -> 0xA
 		}
 	}
-	if (index > 11) return -1;      // [orig: the `score_type_index <= 11` gate]
-	if (index == 0) index = 2;      // [orig: `if (!score_type_index) score_type_index = 2`]
+	if (index > 11) return -1;      // [orig: the `score_type_index <= 11` gate @0x52d3db]
+	if (index == 0) index = 2;      // [orig: `if (!score_type_index) score_type_index = 2` @0x52d3df]
 	return index;
 }
 

@@ -64,6 +64,11 @@ private:
 		String move_function;
 		String render_function;
 		String disk_function;
+		// items.def default_aip (itemDef+0x8B8): the vehicle AI init's profile
+		// name when the placed record's ai_textfile is empty (retail:
+		// Entity_InitVehicleAIFromDef @0x4686C0, the def+0x8B8 arm @0x4687c1;
+		// see docs/world/world-wac-ai-re.md §23).
+		String default_aip;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
 		// Authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
 		// (retail ItemDef+0xA0 / +0x11C..+0x128; consumed by the render-slot
@@ -262,6 +267,8 @@ public:
 	// items.def *_function class tags (raw); empty if the item declares none. The
 	// net layer turns these into a wire dispatch class.
 	String get_ai_function(int id) const;
+	// items.def default_aip (+0x8B8); empty when unauthored or unknown id.
+	String get_default_aip(int id) const;
 	String get_move_function(int id) const;
 	String get_render_function(int id) const;
 	String get_disk_function(int id) const;

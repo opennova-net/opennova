@@ -26,12 +26,17 @@
 
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
+#include <hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
 #include <hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
 #include <hud/hud_minimap.h>
 #include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <terrain_query/height_field.h>
 #include <terrain_query/surface_type_map.h>
 #include <wac/wac_system.h>
+
+namespace godot {
+class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
+}
 
 #include "wac/nova_wac_program.h"
 #include <def/def.h> // the retained weapon.def parse (S6b)
@@ -1023,6 +1028,11 @@ private:
 	// The two witnessed .aip profile speeds per ai_textfile, fed to
 	// PromoteOptions before promotion (see promote.h AiProfileRow).
 	std::vector<opennova::mission::PromoteOptions::AiProfileRow> ai_profiles_;
+	// The per-type-id AI-class answer the profile resolve and the promote share
+	// (retail: the AI class table @0x813280 — chel/cpln rows run the helicopter
+	// init, cveh/cbot/ctrn the vehicle init; see mission/promote.h).
+	std::function<opennova::mission::PromoteOptions::AiProfileDefaults(int32_t)>
+			ai_profile_defaults_;
 	// The shared install tail (both install orders): sort for the per-frame
 	// binary search, stamp turret clamps, refresh live pool-1 rows, and re-sync
 	// the header-only materializer image.
@@ -1313,6 +1323,10 @@ public:
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
 	// wave line, the psp/medic show gates, and the medic-call cooldown.
 	Dictionary get_deploy_status();
+	// The STATIC_RESPAWN_MSG1 text of the current status line, resolved
+	// through the gametext table (the engine's deploy_status_text); "" when
+	// the static is hidden.
+	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
 	// (retail: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b, see docs/net/novaworld-net-re.md 0x2E)
@@ -1329,8 +1343,24 @@ public:
 	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
 	Dictionary get_end_round_state() const;
 	TypedArray<Dictionary> get_end_round_lines() const;
-	TypedArray<Dictionary> get_end_round_columns(int p_table_width) const;
-	TypedArray<Dictionary> get_end_round_rows() const;
+	// The ladder's input from this role's view (C++ only, not bound): the
+	// shared producer of get_end_round_lines / get_end_round_overlay.
+	opennova::hud::EndRoundOverlayInput end_round_overlay_input() const;
+	// The overlay ladder resolved through the gametext Overlays table (the
+	// folds + printf forms are the engine's end_round_overlay_resolve):
+	// {texts, ys, top, bottom} ready for HudOverlay::set_end_round_overlay.
+	Dictionary get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const;
+	// The RESULTLIST columns with their header text resolved through the
+	// gametext Overlays table (null gametext = the "!..." fallbacks).
+	TypedArray<Dictionary> get_end_round_columns(int p_table_width,
+			const Ref<RtxtStringFile> &p_gametext) const;
+	// The rows, filtered by stat.mnu's tab (0 all, 1 team 2, 2 team 1 — the
+	// engine's stat_screen_row_visible).
+	TypedArray<Dictionary> get_end_round_rows(int p_tab) const;
+	// hud::kEndRoundStatScreenDelayMsec — the 6 s stat.mnu delay.
+	static int end_round_stat_screen_delay_msec();
+	// hud::strip_inline_tags — retail's `<...>` markup stripper.
+	static String strip_inline_tags(const String &p_text);
 	// The SP Show Score statistics counters (hud/end_round_statistics.h):
 	// the 0xC846xx block the toggled panel draws. Empty when no host world.
 	Dictionary get_end_round_statistics() const;

@@ -148,12 +148,41 @@ int main() {
 			"decoded RGBA geometry is wrong");
 	failures += !expect(frame.rgba.size() == 8 * 8 * 4,
 			"decoded RGBA storage is wrong");
+	// Full-scale luma (Y 235, the clamp row's 219) lands on 254 under retail's
+	// truncating 38154/32768 ramp (binkw32 YUV_init @ 0x30019F00), not 255.
 	for (size_t pixel = 0; pixel < 64; ++pixel) {
 		const uint8_t *rgba = frame.rgba.data() + pixel * 4;
-		if (rgba[0] != 255 || rgba[1] != 255 || rgba[2] != 255 || rgba[3] != 255) {
+		if (rgba[0] != 254 || rgba[1] != 254 || rgba[2] != 254 || rgba[3] != 255) {
 			++failures;
-			std::cerr << "FAIL: fill frame pixel " << pixel << " is not white\n";
+			std::cerr << "FAIL: fill frame pixel " << pixel << " is not retail white (254)\n";
 			break;
+		}
+	}
+	// The witnessed YUV -> RGB law (bink.cpp yuv_to_rgb): truncating
+	// fixed-point ramps, per-channel clamp. Values computed from the retail
+	// table formulas by hand.
+	{
+		struct Pin { uint8_t y, u, v, r, g, b; };
+		const Pin pins[] = {
+			{16, 128, 128, 0, 0, 0},       // black
+			{235, 128, 128, 254, 254, 254}, // retail white
+			{128, 128, 128, 130, 130, 130}, // mid grey: 112 * 38154 / 32768 = 130
+			{128, 90, 240, 255, 53, 54},    // R clamps, G 130 - 91 + 14, B 130 - 76
+			{60, 200, 50, 0, 86, 196},
+			{0, 0, 0, 0, 154, 0},           // YUV zero is not black
+			{255, 255, 255, 255, 102, 255},
+			{100, 128, 140, 116, 88, 97},
+			{200, 64, 64, 112, 255, 85},
+		};
+		for (const Pin &p : pins) {
+			uint8_t r = 0, g = 0, b = 0;
+			opennova::bink::yuv_to_rgb(p.y, p.u, p.v, r, g, b);
+			if (r != p.r || g != p.g || b != p.b) {
+				++failures;
+				std::cerr << "FAIL: yuv_to_rgb(" << int(p.y) << "," << int(p.u) << "," << int(p.v)
+						  << ") = " << int(r) << "," << int(g) << "," << int(b) << " expected "
+						  << int(p.r) << "," << int(p.g) << "," << int(p.b) << "\n";
+			}
 		}
 	}
 	failures += !expect(movie->decode_next() == opennova::bink::BinkStatus::end_of_stream,

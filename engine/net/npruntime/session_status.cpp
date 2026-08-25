@@ -18,7 +18,7 @@ namespace gtype = opennova::game_type;
 namespace {
 
 // [orig: ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport @0x530A60
-// -> SessionStatus_SerializeToBuffer @0x5310C0]
+// -> Server_BuildAndSerializeSessionStatus @0x4FC990 -> SessionStatus_SerializeToBuffer @0x5310C0 (ex serialize_terrain_tile_texture)]
 constexpr std::array<const char *, 38> kScoreVarNames = {
 	"FIRE", "HIT", "FRIENDLYKILL", "ENEMYKILL", "SUICIDE",
 	"DEATH", "MEDICHEAL", "MEDICSAVE", "RESPAWN", "FLAGSAVE",

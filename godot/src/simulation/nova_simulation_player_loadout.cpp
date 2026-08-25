@@ -12,6 +12,8 @@
 #include <netsim/client_roster_tags.h> // the joiner's player walk of the tag pass
 #include <world/friendly_tags.h> // the D-HUD-20 tag gather
 
+#include "hud/friendly_tag_flags.h" // the HudOverlay flag word the feed packs
+
 #include <algorithm>
 #include <cstdio>
 
@@ -331,6 +333,11 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 		d["has_slot"] = t.has_slot;
 		d["revive_seconds"] = static_cast<int>(t.revive_seconds);
 		d["medic_request"] = t.medic_request;
+		// The HudOverlay flag word (hud/friendly_tag_flags.h), packed here so
+		// the presenter forwards one int per tag; the speaking pulse is the
+		// overlay's own env feed, not a sim fact.
+		d["flags"] = friendly_tag_flags::pack(t.medic, false, t.player, t.dead,
+				t.has_slot, t.medic_request, t.revive_seconds);
 		out.push_back(d);
 	}
 	return out;

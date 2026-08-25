@@ -1005,7 +1005,31 @@ void test_flag_timeout_wire_transaction() {
 
 } // namespace
 
+// The 0x56 row's sixth i16 is stats field 11, the FLAGSAVE counter
+// [orig: CRenderState_GetFieldByIndex(stats, 0xA) @0x50918a -> the seventh
+// sub_455540 word @0x509509; field 11 = GameEvent_ProcessScoring case 8
+// @0x52f8d7 = score.ini VAR slot 9 "FLAGSAVE"]. The decoder's "flags" name
+// is that field; nothing in the record is an assist count.
+void test_end_round_row_flags_word_is_field_11() {
+	w::MatchResult result;
+	result.ready = true;
+	result.game_type = opennova::game_type::kCaptureTheFlag;
+	result.score_fields = w::default_match_score_fields(result.game_type);
+	w::MatchResultPlayer p;
+	p.identity.slot = 3;
+	p.identity.name = "Blue";
+	p.team = 1;
+	p.stats[w::MatchStats::kFlagSaves] = 7;
+	p.stats[w::MatchStats::kDeaths] = 2;
+	result.players.push_back(p);
+	const EndRoundStats board = np::build_end_round_stats(result);
+	expect(board.players.size() == 1 && board.players[0].slot == 3 &&
+			board.players[0].flags == 7 && board.players[0].captures == 2,
+			"0x56 row: the sixth word carries field 11 (FLAGSAVE), the fifth field 7 (deaths)");
+}
+
 int main() {
+	test_end_round_row_flags_word_is_field_11();
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;

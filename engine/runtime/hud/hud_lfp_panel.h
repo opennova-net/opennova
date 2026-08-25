@@ -87,7 +87,7 @@ inline constexpr int kLfpRowDy = 12;   // the STATUS TEXT's +12 over its group's
 
 // The group's status text ("!Under Attack!!" / "!Ready for Takeover!") sits
 // 4 px left of the group's first marker, on the group's row cursor
-// [orig: `esi - 4` @0x5a2601; drawn right-aligned via sub_580BC0 @0x5a2652 /
+// [orig: `esi - 4` @0x5a2601; drawn right-aligned via HUD_DrawTextRightAlignedScaled (ex sub_580BC0) @0x5a2652 /
 //  @0x5a262b / @0x5a281a / @0x5a27f3].
 inline constexpr int kLfpStatusTextDx = -4;
 

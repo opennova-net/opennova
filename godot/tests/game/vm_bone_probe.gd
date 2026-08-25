@@ -34,16 +34,16 @@ func _ready() -> void:
 		push_error("[vmbone] " + String(session.error))
 		get_tree().quit(1)
 		return
-	var world: Node = session.get("world")
-	var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	var world := session.get("world") as GameWorld
+	var presenters := get_tree().root.find_children("*", "LocalPlayerPresenter", true, false)
+	var presenter: LocalPlayerPresenter = presenters[0] if not presenters.is_empty() else null
 	if presenter == null or world == null:
 		push_error("[vmbone] presenter/world missing")
 		get_tree().quit(1)
 		return
 	await _settle(30)
-	if world.has_method("set_local_player_weapon_by_name"):
-		world.call("set_local_player_weapon_by_name", weapon)
-		presenter.viewmodel_rig().refresh_viewmodel()
+	world.set_local_player_weapon_by_name(weapon)
+	presenter.viewmodel_rig().refresh_viewmodel()
 	# Let the rebuild + a few idle ticks run.
 	for _i in 120:
 		await get_tree().process_frame
@@ -68,22 +68,22 @@ func _fmt_v(v: Vector3) -> String:
 	return "%.5f %.5f %.5f" % [v.x, v.y, v.z]
 
 
-func _dump(presenter: Node) -> void:
-	var rig = presenter.viewmodel_rig()
-	var cam: Camera3D = rig.get("_camera")
+func _dump(presenter: LocalPlayerPresenter) -> void:
+	var rig := presenter.viewmodel_rig()
+	var cam: Camera3D = rig.camera()
 	var vm: Node3D = rig.viewmodel()
 	print("[vmbone] POS_UNITS=", rig.PLAYER_VIEWMODEL_POS_UNITS, " TPOS_UNITS=", rig.PLAYER_VIEWMODEL_TPOS_UNITS,
 			" ROT_BIAS=", rig.PLAYER_VIEWMODEL_ROT_BIAS_DEF, " ROT=", rig.PLAYER_VIEWMODEL_ROT,
 			" RENDERFOV=", rig.PLAYER_VIEWMODEL_RENDERFOV_H_DEG)
-	var def = presenter.get("_world").local_player_viewmodel_def() if presenter.get("_world") != null else null
+	var def = presenter.world().local_player_viewmodel_def() if presenter.world() != null else null
 	if def != null:
 		print("[vmbone] def: pos=", def.pos_units, " tpos=", def.tpos_units, " rot=", def.rot_bias_deg, " fov=", def.renderfov_h_deg)
 	if cam != null:
 		print("[vmbone] camera: ", _fmt_t(cam.global_transform), " fov=", cam.fov,
 				" keep_aspect=", cam.keep_aspect, " near=", cam.near,
 				" viewport=", cam.get_viewport().get_visible_rect().size)
-	var pvp: SubViewport = rig.get("_vm_viewport")
-	var pcam: Camera3D = rig.get("_vm_camera")
+	var pvp: SubViewport = rig.vm_viewport()
+	var pcam: Camera3D = rig.vm_camera()
 	if pvp != null and pcam != null:
 		var container := pvp.get_parent() as SubViewportContainer
 		print("[vmbone] vm pass: viewport size=", pvp.size, " cam fov=", pcam.fov,
@@ -108,7 +108,7 @@ func _dump(presenter: Node) -> void:
 			print("[vmbone]   no Skeleton3D")
 			continue
 		print("[vmbone]   skeleton transform (rel vm)=", _fmt_t(vm.global_transform.affine_inverse() * skel.global_transform), " bones=", skel.get_bone_count())
-		var sa = part.get("_skeletal")
+		var sa: SkeletalAnim = part.get_skeletal_anim()
 		var idle0: Array = []
 		var reset0: Array = []
 		if sa != null:
@@ -124,8 +124,6 @@ func _dump(presenter: Node) -> void:
 			if i < reset0.size():
 				line += "\n[vmbone]              reset0: %s" % _fmt_t(reset0[i])
 			print(line)
-		var aabb: AABB = part.get_aabb() if part.has_method("get_aabb") else AABB()
-		print("[vmbone]   aabb(rel part)=", aabb)
 		break  # the gun part carries the shared rig; the arms repeat it
 
 
@@ -138,8 +136,8 @@ func _dump(presenter: Node) -> void:
 const SWEEP_KEYS: Array[String] = ["anim_wpn_idle", "anim_wpn_reload"]
 
 
-func _sweep_dump(presenter: Node) -> void:
-	var rig = presenter.viewmodel_rig()
+func _sweep_dump(presenter: LocalPlayerPresenter) -> void:
+	var rig := presenter.viewmodel_rig()
 	for part in rig.vm_parts():
 		if not is_instance_valid(part):
 			continue
@@ -167,16 +165,6 @@ func _sweep_dump(presenter: Node) -> void:
 						print("[vmsweep] part=%s key=%s variant=%d frame=%d bone=%d name=%s origin=(%.5f, %.5f, %.5f)" % [
 								part.name, key, variant, f, i, skel.get_bone_name(i),
 								g.origin.x, g.origin.y, g.origin.z])
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
 
 
 func _settle(n: int) -> void:

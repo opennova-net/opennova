@@ -8,7 +8,7 @@
 // [orig: Scar_RenderAllCaches @0x5CDF70 (from Terrain_CollectVisibleEntities
 //  @0x5c91b7: the shared ring first, then every live entity ring) ->
 //  Scar_RenderCache @0x5CD830; the 32 per-texture CDynList24 batches at
-//  0x2BDF848; the drawer Terrain_RenderFoliageBatches @0x5CCD10 (the kong
+//  0x2BDF848; the drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches) @0x5CCD10 (the kong
 //  IDB name, a misnomer; proposed Scar_DrawBatches) after the lit sector
 //  entities]
 
@@ -86,7 +86,7 @@ void compile_scar_draws(const opennova::world::ScarCache &cache,
 // The device state a strip's GfxShader mode word selects
 // (world::scar_texture_strip_mode_word), decoded from the witnessed layout
 // [orig: CGfxShader_ApplyPass @0x683190 — `combined = modeWord | passFlags`,
-//  the drawer passes 0x10000000 (LIGHTING off @ sub_6808A0): bit 0x40000 ->
+//  the drawer passes 0x10000000 (LIGHTING off @ CGfxShader_ApplyPassRenderStates (ex sub_6808A0)): bit 0x40000 ->
 //  ALPHATESTENABLE, 0x20000 -> FOGENABLE, 0x100000 -> z-write OFF, 0x400000 ->
 //  CULLMODE NONE (else CCW); decode_blend_mode_to_d3d_states @0x680F00 —
 //  bits 0-3, nibble 1 = SRCALPHA/INVSRCALPHA; decode_mode_alpha_stage

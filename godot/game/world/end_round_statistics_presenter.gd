@@ -8,7 +8,7 @@ extends RefCounted
 ## respawn-init wrapper, which clears every other overlay toggle and keeps
 ## this one, and the respawn init clears the flag itself.
 ## [orig: HUD_DrawEndRoundStatistics @0x5b7600, drawn from the frame drawer
-##  sub_5C0060 @0x5c0092 while dword_24C18AC; the toggle is
+##  HUD_DrawOverlayPanels @0x5c0092 while dword_24C18AC; the toggle is
 ##  Input_HandleActionBinding case 422 @0x49bd29 (gated !is_in_session) ->
 ##  sub_4993C0(&toggle) = Game_InitRespawnState keeping *ptr; cleared by
 ##  Game_InitRespawnState @0x499381. Controls catalog row 99 "ShowScore"

@@ -157,7 +157,7 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 	scene.mipchain = build_mipchain(cpt.depth_buffer, hm_size);
 
 	// The 1024 -> leaf subdivision the traversal walks
-	// [orig: Terrain_TraverseQuadTreeNode @ 0x5C89C0].
+	// [orig: Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe)].
 	struct Builder {
 		std::vector<QuadNode> &nodes;
 		const std::map<TileKey, int> &lut;
@@ -262,7 +262,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 
 	// The 512-world-unit sector window around the camera, routed through the
 	// .trn sector grid before the shared quadtree walk
-	// [orig: Terrain_CollectVisibleSectors @ 0x5C9120].
+	// [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe)].
 	const int cam_sx = static_cast<int>(view.cam_x) >> 9;
 	const int cam_sz = static_cast<int>(view.cam_z) >> 9;
 	const int mask_x = scene.wrap_x ? 0 : -16;

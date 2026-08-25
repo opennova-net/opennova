@@ -93,6 +93,16 @@ struct DeployStatusInput {
 
 DeployStatusLine build_deploy_status(const DeployStatusInput &in);
 
+// The STATIC_RESPAWN_MSG1 text for a status line — the three sprintf arms
+// [orig: @0x5538e7..0x553a7b: penalty "%s  <cFF4040>%i" over the
+// Overlays/STROVER_PENALTYTIMER label; numbered wave "'%s':  <cFF4040>%d" over
+// the WPNames name; lettered wave "%c:  <cFF4040>%d" with 'A' + index
+// @0x553a5b]. `penalty_label` and `zone_name` are the embedder-resolved
+// strings (with their fallbacks already applied); "" for Kind::None.
+std::string deploy_status_text(const DeployStatusLine &line,
+                               const std::string &penalty_label,
+                               const std::string &zone_name);
+
 // The other three statics [orig: @0x553e10..0x553f60]: STATIC_PSPRESPAWN_MSG1
 // shows while the spawn-target hold (dword_A85B68, slot+364) is nonzero;
 // STATIC_MEDIC_MSG1 + STATIC_CALLMEDIC_MSG show while the local revive

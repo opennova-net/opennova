@@ -103,7 +103,7 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 	// [orig: @0x498673..0x4986c5]. The wrapper measures the FONT OBJECT, not
 	// the HUD slot with its scale pair: sub_580980 dereferences *fontPtr
 	// @0x58098a and measures through CGameFont_GetTextExtent @0x5809ad /
-	// sub_674DC0 @0x5809db with no slot scale, against a width authored in
+	// CGameFont_GetCharExtent (ex sub_674DC0) @0x5809db with no slot scale, against a width authored in
 	// design units — so the measure here is scale 1, never label_scale_. The
 	// wrapper walks the FULL message (the 119-char cap is per copied segment
 	// @0x498781, and on the raw ring @0x498621).
@@ -379,7 +379,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	//  then HUD_DrawClassRosterOverlay @0x50b23d and HUD_DrawPlayerScoreList
 	//  @0x50b281].
 	// The stats panel precedes the message log in the frame drawer
-	// [orig: sub_5C0060 @0x5c0083 (stats) then @0x5c009a (message log)].
+	// [orig: HUD_DrawOverlayPanels @0x5c0083 (stats) then @0x5c009a (message log)].
 	element_end_round_statistics(state, surface_w, surface_h);
 	element_message_log(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
@@ -1281,7 +1281,7 @@ void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
 	// overlay safe area, then each resolved line centred on design x 512 in
 	// the Impact38 slot, half-bright like every HUD text
 	// [orig: HUD_DrawLabelBox(ctx, 8, top+8, 1015, bottom-8) @0x5b7d3e;
-	//  sub_580B80 -> Viewport_ScaleToVirtualCoords + HUD_DrawTextCentered_HalfBright].
+	//  HUD_DrawTextCenteredScaled (ex sub_580B80) -> Viewport_ScaleToVirtualCoords + HUD_DrawTextCentered_HalfBright].
 	const HudEndRoundOverlayState &er = state.end_round;
 	if (!er.shown) return;
 	emit_stdbox(sx(8.0f, w), sy(static_cast<float>(er.top + 8), h),
@@ -1338,8 +1338,9 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 	// text [orig: HUD_DisplayTriggeredText @0x51f190 posts @0x51f216 into the
 	// same sink]. Drawn by the second HUD_DrawConsoleMessages loop
 	// [orig: @0x59ad30; the system walk @0x59ae5e..0x59aebf]. (The FIRST loop
-	// is the player-chat ring at HUDCHATTEXT — its feeder is the unported
-	// S2C 0x14 channel, D-HUD-6/D-NET-215.) Witnessed properties:
+	// is the player-chat ring at HUDCHATTEXT — fed by the S2C 0x14 channel,
+	// ported with the chat ring in #555; D-HUD-6/D-NET-215 are FIXED.)
+	// Witnessed properties:
 	//   * only THREE ring rows are walked per channel, and the walk DESCENDS
 	//     from the top slot to slot 0 (msgEntry -= 0x80 down to the base
 	//     [orig: @0x59aebf..0x59aecb]); with the sink putting the NEWEST line
@@ -1444,7 +1445,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 //
 // What binds where, and the one recorded divergence (D-HUD-24):
 //  - The BORDER PIECES bind border x boxtile — one combined material
-//    [orig: sub_676EA0(BoxTexA, BoxTexB, 0x651, 2) -> style+0x30 @0x56af3c,
+//    [orig: CGfxTexture_Create (ex sub_676EA0)(BoxTexA, BoxTexB, 0x651, 2) -> style+0x30 @0x56af3c,
 //    applied for the piece pass @0x56b902]. Stage 1 is MODULATE(CURRENT,
 //    TEXTURE1) with a SCREEN-ANCHORED UV1 = (screen_px + 0.5)/boxtile_dim
 //    [orig: draw_textured_quad_0 @0x56b3e0 — the dest-derived second UV pair
@@ -1604,7 +1605,7 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 
 	// Every string on the board rides the BOLD label font at the slot scale
 	// [orig: g_hudLabelFontBold at every draw site — the title @0x51f13a, the
-	// header rungs, the rank/rows/footer sub_5D3F30 calls]; layout-only
+	// header rungs, the rank/rows/footer HUD_DrawTextAligned (ex sub_5D3F30) calls]; layout-only
 	// embedders fall back to the hudpos font.
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;

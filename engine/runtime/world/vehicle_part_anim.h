@@ -23,7 +23,7 @@
 //
 // NAMED RESIDUAL (presentation, no D-row): the HELO machine's engine-start
 // sound and the rotor-downwash leg that follow its spin arithmetic inside
-// @0x48FA70 — device work for the shell's audio/particle presenters.
+// Entity_UpdateHeloRotorSpin @0x48FA70 — device work for the shell's audio/particle presenters.
 
 #include <cstdint>
 

@@ -11,8 +11,17 @@
 namespace opennova::bink {
 namespace {
 
-// [orig: BinkVideo_DecodeFrame @ 0x3001F260 and
-// BinkVideo_DecodePlane @ 0x3001D2C0 in the retail Bink 1.5u decoder.]
+// The original is RAD's binkw32.dll 1.5u (the DLL Jointops.exe imports; a
+// separate image from Jointops.exe, imagebase 0x30000000 -- every address in
+// this file is that image's unless it says otherwise):
+// [orig: BinkVideo_DecodeFrame @ 0x3001F260, binkw32.dll] the per-frame
+// entry BinkDoFrame reaches, and [orig: BinkVideo_DecodePlane @ 0x3001D2C0,
+// binkw32.dll] the per-plane bundle/block decoder every routine in the
+// anonymous namespace below is a structural translation of (the bundle
+// readers, block decoders and residue walk are its inlined legs; the IDCT is
+// its callee sub_3001F3E0). The BIKi bitstream layout is the decoder's
+// contract with the shipped .bik files, so the file is the witness of the
+// bit-level shapes below.
 constexpr uint32_t kBikiMagic = 0x694b4942U;
 constexpr uint32_t kHeaderSize = 44;
 constexpr uint32_t kMaximumDimension = 16384;
@@ -285,6 +294,10 @@ int32_t wrap_subtract(int32_t first, int32_t second) {
 			static_cast<uint32_t>(second));
 }
 
+// The 8-point integer DCT butterfly the plane decoder calls per block
+// [orig: sub_3001F3E0 @ 0x3001F3E0, binkw32.dll -- the 0xB50 / 0xEC8 / 0x8A9
+// (2896 / 3784 / 2217) multipliers at its imul sites, the -5352 pair being the
+// negated 0x14E8 term].
 int32_t multiply_shift_11(int32_t first, int32_t second) {
 	const uint32_t product = static_cast<uint32_t>(first) *
 			static_cast<uint32_t>(second);
@@ -1155,6 +1168,10 @@ void scale_block(const std::array<uint8_t, 64> &source,
 
 }  // namespace
 
+// [orig: BinkVideo_DecodePlane @ 0x3001D2C0, binkw32.dll -- the per-plane
+// bundle refill + block walk; the bundle callbacks it installs are its
+// sub_3001C300 / sub_3001C5E0 pointers, the tree reads its sub_3001C030 /
+// sub_3001C0A0 callees.]
 bool BinkMovie::Impl::decode_plane(BitReader &bits, unsigned plane_index) {
 	Plane &plane = current[plane_index];
 	const Plane &reference = previous[plane_index];
@@ -1393,6 +1410,9 @@ bool BinkMovie::Impl::decode_plane(BitReader &bits, unsigned plane_index) {
 	return bits.align32();
 }
 
+// One video packet: the 32-bit prefix, then the Y, V, U planes in that
+// order [orig: BinkVideo_DecodeFrame @ 0x3001F260, binkw32.dll -- the three
+// BinkVideo_DecodePlane calls].
 bool BinkMovie::Impl::decode_packet(const std::vector<uint8_t> &packet) {
 	BitReader bits(packet);
 	if (!bits.skip(32)) {
@@ -1408,6 +1428,16 @@ bool BinkMovie::Impl::decode_packet(const std::vector<uint8_t> &packet) {
 }
 
 void BinkMovie::Impl::convert_to_rgba() {
+	// The colour conversion is binkw32's own, not the decoder's caller: the
+	// game hands BinkCopyToBufferRect a BINKSURFACE32 target (the D3D
+	// X8R8G8B8 texture the slot creates) and the DLL converts. Byte order is
+	// the one device fold -- retail packs (R<<16)|(G<<8)|B into the X8R8G8B8
+	// dword; the frame here is top-down RGBA8 with an opaque alpha.
+	// [orig: BinkVideoSlot_RenderFrameToTexture @0x567540 (Jointops.exe) --
+	//  BinkCopyToBufferRect(..., flags | 0x80000000 BINKCOPYALL) @0x5675b2,
+	//  the slot's surface code from the D3DFMT -> BINKSURFACE table
+	//  @0x5679be..0x567a2b, D3DFMT_X8R8G8B8 (22) -> BINKSURFACE32 (3) being
+	//  the first CheckDeviceFormat hit @0x567a61]
 	const Plane &luma = current[0];
 	const Plane &chroma_u = current[1];
 	const Plane &chroma_v = current[2];
@@ -1417,15 +1447,39 @@ void BinkMovie::Impl::convert_to_rgba() {
 		const uint8_t *u_row = chroma_u.pixels.data() + static_cast<size_t>(y >> 1) * chroma_u.stride;
 		const uint8_t *v_row = chroma_v.pixels.data() + static_cast<size_t>(y >> 1) * chroma_v.stride;
 		for (uint32_t x = 0; x < info.width; ++x) {
-			const int c = static_cast<int>(luma_row[x]) - 16;
-			const int d = static_cast<int>(u_row[x >> 1]) - 128;
-			const int e = static_cast<int>(v_row[x >> 1]) - 128;
-			destination[x * 4 + 0] = clamp_byte((298 * c + 409 * e + 128) >> 8);
-			destination[x * 4 + 1] = clamp_byte((298 * c - 100 * d - 208 * e + 128) >> 8);
-			destination[x * 4 + 2] = clamp_byte((298 * c + 516 * d + 128) >> 8);
+			yuv_to_rgb(luma_row[x], u_row[x >> 1], v_row[x >> 1],
+					destination[x * 4 + 0], destination[x * 4 + 1], destination[x * 4 + 2]);
 			destination[x * 4 + 3] = 255;
 		}
 	}
+}
+
+// The retail YUV -> RGB law, witnessed in binkw32.dll 1.5u [orig: YUV_init
+// @ 0x30019F00, binkw32.dll -- BinkCopyToBufferRect @ 0x30013220 calls it with
+// the surface code (the call @ 0x30013365) before the blit]:
+//   * the luma row dword_30059178[Y] = trunc(clamp(Y - 16, 0, 219) * 38154
+//     / 32768) (the `imul 950Ah; cdq; and edx,7FFFh; add; sar 15` truncating
+//     divide) -- the MMX blits fold the same law as (Y - 16 sat) << 2, pmulhw
+//     19077 (= 38154 / 2, qword_30055040) with the 16 in qword_30055038;
+//   * the four chroma rows, each a linear ramp in the same truncating
+//     fixed point: R += (V - 128) * 52299 / 32768 (dword_300632A8),
+//     G += -(V - 128) * 26639 / 32768 (dword_30062AA8)
+//        + -(U - 128) * 12837 / 32768 (dword_30062EA8),
+//     B += (U - 128) * 66101 / 32768 (dword_300626A8);
+//   * every channel clamps to 0..255 through the per-luma clamp rows
+//     dword_30059998[Y] the BINKSURFACE32 blit indexes (YUV_blit_32bpp ->
+//     the dword_30064700 table, sub_30029270 @ 0x30029270 scalar; the MMX
+//     twins clamp with the 0x7F00 paddsw/psubusw pair).
+// Not BT.601's 298/409/100/208/516 set with round-half-up: the retail ramps
+// are 38154/52299/26639/12837/66101 over 32768 and truncate, so a mid-grey
+// (128, 128, 128) lands on 130, not 131.
+void yuv_to_rgb(uint8_t y, uint8_t u, uint8_t v, uint8_t &r, uint8_t &g, uint8_t &b) {
+	const int32_t luma = std::clamp(static_cast<int32_t>(y) - 16, 0, 219) * 38154 / 32768;
+	const int32_t du = static_cast<int32_t>(u) - 128;
+	const int32_t dv = static_cast<int32_t>(v) - 128;
+	r = clamp_byte(luma + dv * 52299 / 32768);
+	g = clamp_byte(luma + (-dv * 26639) / 32768 + (-du * 12837) / 32768);
+	b = clamp_byte(luma + du * 66101 / 32768);
 }
 
 std::unique_ptr<BinkMovie> BinkMovie::open(BinkSource source, std::string *error) {

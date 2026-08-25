@@ -832,7 +832,8 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 // @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md)) and the arms
 // model in first person. `fallback` = no combo resolved: with an EMPTY registry
 // retail draws the entity's own item model @0x5c8039 (blip handles 0), which is
-// what this returns. Divergence, tracked in avatars-re D-PLAYERINFO-1: with a
+// what this returns. The remaining delta, recorded under avatars-re
+// D-PLAYERINFO-1 (FIXED; the row keeps this note): with a
 // populated registry retail's client 0x0C fold re-stamps an UNKNOWN id to the
 // first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
 // @0x42eb03 -> lookup_entity_slot_and_pack_entry side = team != 1) — the

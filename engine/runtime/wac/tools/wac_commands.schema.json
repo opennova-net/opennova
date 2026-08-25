@@ -51,7 +51,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ECEF0",
-   "handler_name": "loc_4ECEF0"
+   "handler_name": "WacCmd_Elapse"
   },
   {
    "index": 1,
@@ -70,7 +70,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ED2E0",
-   "handler_name": "0x4ED2E0"
+   "handler_name": "WacCmd_Never"
   },
   {
    "index": 2,
@@ -89,7 +89,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ECF90",
-   "handler_name": "0x4ECF90"
+   "handler_name": "WacCmd_Previous"
   },
   {
    "index": 3,
@@ -110,7 +110,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ECF20",
-   "handler_name": "0x4ECF20"
+   "handler_name": "WacCmd_Chain"
   },
   {
    "index": 4,
@@ -131,7 +131,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED010",
-   "handler_name": "0x4ED010"
+   "handler_name": "WacCmd_Past"
   },
   {
    "index": 5,
@@ -152,7 +152,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED030",
-   "handler_name": "0x4ED030"
+   "handler_name": "WacCmd_Before"
   },
   {
    "index": 6,
@@ -173,7 +173,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ECFF0",
-   "handler_name": "0x4ECFF0"
+   "handler_name": "WacCmd_OnTick"
   },
   {
    "index": 7,
@@ -194,7 +194,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED1A0",
-   "handler_name": "0x4ED1A0"
+   "handler_name": "WacCmd_GroupDead"
   },
   {
    "index": 8,
@@ -215,7 +215,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED1C0",
-   "handler_name": "0x4ED1C0"
+   "handler_name": "WacCmd_GroupAlive"
   },
   {
    "index": 9,
@@ -236,7 +236,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F70A0",
-   "handler_name": "sub_4F70A0"
+   "handler_name": "WacCmd_DoorOpen"
   },
   {
    "index": 10,
@@ -257,7 +257,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1BF0",
-   "handler_name": "0x4F1BF0"
+   "handler_name": "WacCmd_SsnCritical"
   },
   {
    "index": 11,
@@ -278,7 +278,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1A70",
-   "handler_name": "0x4F1A70"
+   "handler_name": "WacCmd_SsnExists"
   },
   {
    "index": 12,
@@ -299,7 +299,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1AC0",
-   "handler_name": "0x4F1AC0"
+   "handler_name": "WacCmd_SsnDead"
   },
   {
    "index": 13,
@@ -320,7 +320,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1B20",
-   "handler_name": "0x4F1B20"
+   "handler_name": "WacCmd_SsnAlive"
   },
   {
    "index": 14,
@@ -341,7 +341,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1B80",
-   "handler_name": "0x4F1B80"
+   "handler_name": "WacCmd_SsnWounded"
   },
   {
    "index": 15,
@@ -362,7 +362,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F7000",
-   "handler_name": "0x4F7000"
+   "handler_name": "WacCmd_SsnRide"
   },
   {
    "index": 16,
@@ -384,7 +384,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F19A0",
-   "handler_name": "Entity_IsInVehicleChain"
+   "handler_name": "Entity_IsOnTopOfChain"
   },
   {
    "index": 17,
@@ -430,7 +430,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4F15E0",
-   "handler_name": "Entity_DrawConnectionLine"
+   "handler_name": "Entity_CheckLineOfSightInRange"
   },
   {
    "index": 19,
@@ -475,7 +475,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F1020",
-   "handler_name": "0x4F1020"
+   "handler_name": "WacCmd_SsnArea"
   },
   {
    "index": 21,
@@ -497,7 +497,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F0F60",
-   "handler_name": "0x4F0F60"
+   "handler_name": "WacCmd_SsnArea3D"
   },
   {
    "index": 22,
@@ -519,7 +519,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F0E90",
-   "handler_name": "0x4F0E90"
+   "handler_name": "WacCmd_SsnLoc"
   },
   {
    "index": 23,
@@ -564,7 +564,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED300",
-   "handler_name": "0x4ED300"
+   "handler_name": "WacCmd_Reset"
   },
   {
    "index": 25,
@@ -585,7 +585,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1F40",
-   "handler_name": "sub_4F1F40"
+   "handler_name": "WacCmd_GroupKill"
   },
   {
    "index": 26,
@@ -606,7 +606,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1F80",
-   "handler_name": "sub_4F1F80"
+   "handler_name": "WacCmd_GroupRemove"
   },
   {
    "index": 27,
@@ -629,7 +629,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4F7BE0",
-   "handler_name": "0x4F7BE0"
+   "handler_name": "WacCmd_GroupSetAccuracy"
   },
   {
    "index": 28,
@@ -672,7 +672,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDC90",
-   "handler_name": "0x4EDC90"
+   "handler_name": "WacCmd_Kill"
   },
   {
    "index": 30,
@@ -693,7 +693,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDCA0",
-   "handler_name": "0x4EDCA0"
+   "handler_name": "WacCmd_Remove"
   },
   {
    "index": 31,
@@ -715,7 +715,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EE170",
-   "handler_name": "0x4EE170"
+   "handler_name": "WacCmd_Teleport"
   },
   {
    "index": 32,
@@ -909,7 +909,7 @@
    "argc": 1,
    "call_conv": 5,
    "handler_ea": "0x4ED610",
-   "handler_name": "0x4ED610"
+   "handler_name": "Wac_PlayScriptedVoiceWave"
   },
   {
    "index": 41,
@@ -930,7 +930,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F7750",
-   "handler_name": "0x4F7750"
+   "handler_name": "WacCmd_HideSsn"
   },
   {
    "index": 42,
@@ -951,7 +951,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F77B0",
-   "handler_name": "0x4F77B0"
+   "handler_name": "WacCmd_UnhideSsn"
   },
   {
    "index": 43,
@@ -972,7 +972,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F7690",
-   "handler_name": "0x4F7690"
+   "handler_name": "WacCmd_DisableSsn"
   },
   {
    "index": 44,
@@ -993,7 +993,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F76F0",
-   "handler_name": "0x4F76F0"
+   "handler_name": "WacCmd_EnableSsn"
   },
   {
    "index": 45,
@@ -1014,7 +1014,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F7810",
-   "handler_name": "0x4F7810"
+   "handler_name": "WacCmd_HoldSsn"
   },
   {
    "index": 46,
@@ -1035,7 +1035,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F7870",
-   "handler_name": "0x4F7870"
+   "handler_name": "WacCmd_UnholdSsn"
   },
   {
    "index": 47,
@@ -1058,7 +1058,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4F2070",
-   "handler_name": "0x4F2070"
+   "handler_name": "WacCmd_SetAccuracy"
   },
   {
    "index": 48,
@@ -1080,7 +1080,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F1CE0",
-   "handler_name": "0x4F1CE0"
+   "handler_name": "WacCmd_SsnToWp"
   },
   {
    "index": 49,
@@ -1122,7 +1122,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1EE0",
-   "handler_name": "0x4F1EE0"
+   "handler_name": "WacCmd_RemoveSsn"
   },
   {
    "index": 51,
@@ -1144,7 +1144,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7E00",
-   "handler_name": "0x4F7E00"
+   "handler_name": "WacCmd_TeleSsn"
   },
   {
    "index": 52,
@@ -1167,7 +1167,7 @@
    "argc": 3,
    "call_conv": 10,
    "handler_ea": "0x4F78D0",
-   "handler_name": "sub_4F78D0"
+   "handler_name": "WacCmd_SsnWave"
   },
   {
    "index": 53,
@@ -1189,7 +1189,7 @@
    "argc": 2,
    "call_conv": 9,
    "handler_ea": "0x4F79B0",
-   "handler_name": "0x4F79B0"
+   "handler_name": "WacCmd_SsnRadio"
   },
   {
    "index": 54,
@@ -1211,7 +1211,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F1DD0",
-   "handler_name": "0x4F1DD0"
+   "handler_name": "WacCmd_SoundSetToSsn"
   },
   {
    "index": 55,
@@ -1233,7 +1233,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7630",
-   "handler_name": "0x4F7630"
+   "handler_name": "WacCmd_SsnAnim"
   },
   {
    "index": 56,
@@ -1255,7 +1255,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F2010",
-   "handler_name": "0x4F2010"
+   "handler_name": "WacCmd_SsnMin"
   },
   {
    "index": 57,
@@ -1277,7 +1277,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F2210",
-   "handler_name": "0x4F2210"
+   "handler_name": "WacCmd_SsnMax"
   },
   {
    "index": 58,
@@ -1299,7 +1299,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F2270",
-   "handler_name": "0x4F2270"
+   "handler_name": "WacCmd_SsnAtt"
   },
   {
    "index": 59,
@@ -1321,7 +1321,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7A80",
-   "handler_name": "0x4F7A80"
+   "handler_name": "WacCmd_SsnSpawn"
   },
   {
    "index": 60,
@@ -1343,7 +1343,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F2100",
-   "handler_name": "0x4F2100"
+   "handler_name": "WacCmd_SsnHp"
   },
   {
    "index": 61,
@@ -1365,7 +1365,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F2170",
-   "handler_name": "0x4F2170"
+   "handler_name": "WacCmd_SsnAddHp"
   },
   {
    "index": 62,
@@ -1387,7 +1387,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7330",
-   "handler_name": "0x4F7330"
+   "handler_name": "WacCmd_SsnToSsn"
   },
   {
    "index": 63,
@@ -1408,7 +1408,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F7420",
-   "handler_name": "0x4F7420"
+   "handler_name": "WacCmd_SsnRelease"
   },
   {
    "index": 64,
@@ -1430,7 +1430,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F1C60",
-   "handler_name": "0x4F1C60"
+   "handler_name": "WacCmd_SsnFace"
   },
   {
    "index": 65,
@@ -1452,7 +1452,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F72B0",
-   "handler_name": "0x4F72B0"
+   "handler_name": "WacCmd_SsnTurn"
   },
   {
    "index": 66,
@@ -1474,7 +1474,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F71C0",
-   "handler_name": "0x4F71C0"
+   "handler_name": "WacCmd_SsnGuard"
   },
   {
    "index": 67,
@@ -1496,7 +1496,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7230",
-   "handler_name": "0x4F7230"
+   "handler_name": "WacCmd_SsnName"
   },
   {
    "index": 68,
@@ -1583,7 +1583,7 @@
    "argc": 2,
    "call_conv": 6,
    "handler_ea": "0x4ED520",
-   "handler_name": "sub_4ED520"
+   "handler_name": "WacCmd_Set"
   },
   {
    "index": 72,
@@ -1605,7 +1605,7 @@
    "argc": 2,
    "call_conv": 6,
    "handler_ea": "0x4ED530",
-   "handler_name": "sub_4ED530"
+   "handler_name": "WacCmd_Add"
   },
   {
    "index": 73,
@@ -1627,7 +1627,7 @@
    "argc": 2,
    "call_conv": 6,
    "handler_ea": "0x4ED540",
-   "handler_name": "sub_4ED540"
+   "handler_name": "WacCmd_Sub"
   },
   {
    "index": 74,
@@ -1669,7 +1669,7 @@
    "argc": 1,
    "call_conv": 5,
    "handler_ea": "0x4ED560",
-   "handler_name": "sub_4ED560"
+   "handler_name": "WacCmd_Dec"
   },
   {
    "index": 76,
@@ -1690,7 +1690,7 @@
    "argc": 1,
    "call_conv": 5,
    "handler_ea": "0x4ED580",
-   "handler_name": "sub_4ED580"
+   "handler_name": "WacCmd_Store"
   },
   {
    "index": 77,
@@ -1711,7 +1711,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED570",
-   "handler_name": "sub_4ED570"
+   "handler_name": "WacCmd_Load"
   },
   {
    "index": 78,
@@ -1732,7 +1732,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDC70",
-   "handler_name": "0x4EDC70"
+   "handler_name": "WacCmd_Tod"
   },
   {
    "index": 79,
@@ -1753,7 +1753,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EE190",
-   "handler_name": "0x4EE190"
+   "handler_name": "WacCmd_TargetFx"
   },
   {
    "index": 80,
@@ -1797,7 +1797,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7FD0",
-   "handler_name": "WacScript_PlaySoundAtEmitter"
+   "handler_name": "WacScript_SpawnEffectAtTargetMarker"
   },
   {
    "index": 82,
@@ -1841,7 +1841,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F7F60",
-   "handler_name": "sub_4F7F60"
+   "handler_name": "WacCmd_SoundToTarget"
   },
   {
    "index": 84,
@@ -1860,7 +1860,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ED500",
-   "handler_name": "sub_4ED500"
+   "handler_name": "Env_TriggerLightningFlashA"
   },
   {
    "index": 85,
@@ -1879,7 +1879,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ED510",
-   "handler_name": "TextResource_GetStringOrDefault"
+   "handler_name": "Env_TriggerLightningFlashB"
   },
   {
    "index": 86,
@@ -1900,7 +1900,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED4C0",
-   "handler_name": "sub_4ED4C0"
+   "handler_name": "WacCmd_Quake"
   },
   {
    "index": 87,
@@ -1921,7 +1921,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED4A0",
-   "handler_name": "0x4ED4A0"
+   "handler_name": "WacAction_Win"
   },
   {
    "index": 88,
@@ -1942,7 +1942,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED3F0",
-   "handler_name": "0x4ED3F0"
+   "handler_name": "WacAction_Lose"
   },
   {
    "index": 89,
@@ -1984,7 +1984,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDEB0",
-   "handler_name": "sub_4EDEB0"
+   "handler_name": "WacCmd_SkySpeed"
   },
   {
    "index": 91,
@@ -2005,7 +2005,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDEC0",
-   "handler_name": "sub_4EDEC0"
+   "handler_name": "WacCmd_SkyHeight"
   },
   {
    "index": 92,
@@ -2026,7 +2026,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDED0",
-   "handler_name": "sub_4EDED0"
+   "handler_name": "WacCmd_FogType"
   },
   {
    "index": 93,
@@ -2047,7 +2047,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EE100",
-   "handler_name": "0x4EE100"
+   "handler_name": "WacCmd_FogDist"
   },
   {
    "index": 94,
@@ -2069,7 +2069,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EE0A0",
-   "handler_name": "0x4EE0A0"
+   "handler_name": "WacCmd_MoveFog"
   },
   {
    "index": 95,
@@ -2091,7 +2091,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EDF60",
-   "handler_name": "0x4EDF60"
+   "handler_name": "WacCmd_Rain"
   },
   {
    "index": 96,
@@ -2113,7 +2113,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EDFD0",
-   "handler_name": "0x4EDFD0"
+   "handler_name": "WacCmd_Snow"
   },
   {
    "index": 97,
@@ -2135,7 +2135,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EE040",
-   "handler_name": "0x4EE040"
+   "handler_name": "WacCmd_Overcast"
   },
   {
    "index": 98,
@@ -2154,7 +2154,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4F6DE0",
-   "handler_name": "0x4F6DE0"
+   "handler_name": "WacCmd_Help"
   },
   {
    "index": 99,
@@ -2197,7 +2197,7 @@
    "argc": 1,
    "call_conv": 5,
    "handler_ea": "0x4EDBE0",
-   "handler_name": "0x4EDBE0"
+   "handler_name": "Wac_ConsolDebugMessage"
   },
   {
    "index": 101,
@@ -2219,7 +2219,7 @@
    "argc": 2,
    "call_conv": 6,
    "handler_ea": "0x4EDC00",
-   "handler_name": "sub_4EDC00"
+   "handler_name": "WacCmd_ConsolNumber"
   },
   {
    "index": 102,
@@ -2242,7 +2242,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4ED590",
-   "handler_name": "0x4ED590"
+   "handler_name": "WacCmd_Sound"
   },
   {
    "index": 103,
@@ -2284,7 +2284,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F22D0",
-   "handler_name": "0x4F22D0"
+   "handler_name": "WacCmd_Tele"
   },
   {
    "index": 105,
@@ -2324,7 +2324,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDEA0",
-   "handler_name": "sub_4EDEA0"
+   "handler_name": "WacCmd_Fov"
   },
   {
    "index": 107,
@@ -2345,7 +2345,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED070",
-   "handler_name": "0x4ED070"
+   "handler_name": "WacCmd_SquadEvent"
   },
   {
    "index": 108,
@@ -2366,7 +2366,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED280",
-   "handler_name": "0x4ED280"
+   "handler_name": "WacCmd_Random"
   },
   {
    "index": 109,
@@ -2385,7 +2385,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ED050",
-   "handler_name": "0x4ED050"
+   "handler_name": "WacCmd_Outside"
   },
   {
    "index": 110,
@@ -2406,7 +2406,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED190",
-   "handler_name": "0x4ED190"
+   "handler_name": "WacCmd_Location"
   },
   {
    "index": 111,
@@ -2427,7 +2427,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED0C0",
-   "handler_name": "0x4ED0C0"
+   "handler_name": "WacCmd_Area"
   },
   {
    "index": 112,
@@ -2448,7 +2448,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED120",
-   "handler_name": "0x4ED120"
+   "handler_name": "WacCmd_Area3D"
   },
   {
    "index": 113,
@@ -2467,7 +2467,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ED380",
-   "handler_name": "0x4ED380"
+   "handler_name": "WacCmd_WaveReady"
   },
   {
    "index": 114,
@@ -2488,7 +2488,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED360",
-   "handler_name": "0x4ED360"
+   "handler_name": "WacCmd_WeaponFired"
   },
   {
    "index": 115,
@@ -2509,7 +2509,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED1E0",
-   "handler_name": "0x4ED1E0"
+   "handler_name": "WacCmd_Event"
   },
   {
    "index": 116,
@@ -2530,7 +2530,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1260",
-   "handler_name": "Entity_IsInLocalPlayerMountChain"
+   "handler_name": "Entity_IsLocalPlayerStandingOnSsn"
   },
   {
    "index": 117,
@@ -2551,7 +2551,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F10D0",
-   "handler_name": "Entity_IsOccupantOfLocalVehicle"
+   "handler_name": "Entity_IsLocalPlayerSeatedOnSsn"
   },
   {
    "index": 118,
@@ -2572,7 +2572,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F1150",
-   "handler_name": "Entity_IsInVehicleWithLocalPlayer"
+   "handler_name": "Entity_IsLocalPlayerDrivingSsn"
   },
   {
    "index": 119,
@@ -2593,7 +2593,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F11E0",
-   "handler_name": "Entity_IsLocalPlayerVehicleDriver"
+   "handler_name": "Entity_IsLocalPlayerOnGunOfSsn"
   },
   {
    "index": 120,
@@ -2635,7 +2635,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EE3E0",
-   "handler_name": "sub_4EE3E0"
+   "handler_name": "WacCmd_FxRain"
   },
   {
    "index": 122,
@@ -2679,7 +2679,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED5D0",
-   "handler_name": "0x4ED5D0"
+   "handler_name": "WacCmd_Face"
   },
   {
    "index": 124,
@@ -2700,7 +2700,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED5B0",
-   "handler_name": "0x4ED5B0"
+   "handler_name": "WacCmd_Anim"
   },
   {
    "index": 125,
@@ -2722,7 +2722,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EDF10",
-   "handler_name": "0x4EDF10"
+   "handler_name": "WacCmd_SunFade"
   },
   {
    "index": 126,
@@ -2745,7 +2745,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDD30",
-   "handler_name": "0x4EDD30"
+   "handler_name": "WacCmd_Gain"
   },
   {
    "index": 127,
@@ -2764,7 +2764,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4ED390",
-   "handler_name": "sub_4ED390"
+   "handler_name": "WacCmd_SquadClear"
   },
   {
    "index": 128,
@@ -2786,7 +2786,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4EE140",
-   "handler_name": "0x4EE140"
+   "handler_name": "WacCmd_BlockFire"
   },
   {
    "index": 129,
@@ -2807,7 +2807,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EDCB0",
-   "handler_name": "sub_4EDCB0"
+   "handler_name": "WacCmd_ColorFade"
   },
   {
    "index": 130,
@@ -2830,7 +2830,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDCD0",
-   "handler_name": "0x4EDCD0"
+   "handler_name": "WacCmd_Sun"
   },
   {
    "index": 131,
@@ -2853,7 +2853,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDD00",
-   "handler_name": "0x4EDD00"
+   "handler_name": "WacCmd_Sky"
   },
   {
    "index": 132,
@@ -2876,7 +2876,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDD60",
-   "handler_name": "0x4EDD60"
+   "handler_name": "WacCmd_Ground"
   },
   {
    "index": 133,
@@ -2899,7 +2899,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDDF0",
-   "handler_name": "0x4EDDF0"
+   "handler_name": "WacCmd_Floor"
   },
   {
    "index": 134,
@@ -2922,7 +2922,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDDC0",
-   "handler_name": "0x4EDDC0"
+   "handler_name": "WacCmd_Ceiling"
   },
   {
    "index": 135,
@@ -2945,7 +2945,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDD90",
-   "handler_name": "0x4EDD90"
+   "handler_name": "WacCmd_Cloud"
   },
   {
    "index": 136,
@@ -2968,7 +2968,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDE40",
-   "handler_name": "0x4EDE40"
+   "handler_name": "WacCmd_FogColor"
   },
   {
    "index": 137,
@@ -2991,7 +2991,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDE40",
-   "handler_name": "0x4EDE40"
+   "handler_name": "WacCmd_FogColor"
   },
   {
    "index": 138,
@@ -3014,7 +3014,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDE70",
-   "handler_name": "0x4EDE70"
+   "handler_name": "WacCmd_SkyFogColor"
   },
   {
    "index": 139,
@@ -3037,7 +3037,7 @@
    "argc": 3,
    "call_conv": 3,
    "handler_ea": "0x4EDE70",
-   "handler_name": "0x4EDE70"
+   "handler_name": "WacCmd_SkyFogColor"
   },
   {
    "index": 140,
@@ -3061,7 +3061,7 @@
    "argc": 4,
    "call_conv": 4,
    "handler_ea": "0x4EDE70",
-   "handler_name": "0x4EDE70"
+   "handler_name": "WacCmd_SkyFogColor"
   },
   {
    "index": 141,
@@ -3083,7 +3083,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4ED220",
-   "handler_name": "0x4ED220"
+   "handler_name": "WacCmd_Eq"
   },
   {
    "index": 142,
@@ -3105,7 +3105,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4ED230",
-   "handler_name": "0x4ED230"
+   "handler_name": "WacCmd_Ne"
   },
   {
    "index": 143,
@@ -3127,7 +3127,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4ED240",
-   "handler_name": "0x4ED240"
+   "handler_name": "WacCmd_Lt"
   },
   {
    "index": 144,
@@ -3149,7 +3149,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4ED250",
-   "handler_name": "0x4ED250"
+   "handler_name": "WacCmd_Gt"
   },
   {
    "index": 145,
@@ -3171,7 +3171,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4ED260",
-   "handler_name": "0x4ED260"
+   "handler_name": "WacCmd_Le"
   },
   {
    "index": 146,
@@ -3193,7 +3193,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4ED270",
-   "handler_name": "0x4ED270"
+   "handler_name": "WacCmd_Ge"
   },
   {
    "index": 147,
@@ -3214,7 +3214,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED200",
-   "handler_name": "0x4ED200"
+   "handler_name": "WacCmd_True"
   },
   {
    "index": 148,
@@ -3235,7 +3235,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4ED210",
-   "handler_name": "0x4ED210"
+   "handler_name": "WacCmd_False"
   },
   {
    "index": 149,
@@ -3256,7 +3256,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F0E10",
-   "handler_name": "0x4F0E10"
+   "handler_name": "WacCmd_OnPlayerTick"
   },
   {
    "index": 150,
@@ -3298,7 +3298,7 @@
    "argc": 1,
    "call_conv": 5,
    "handler_ea": "0x4ED610",
-   "handler_name": "0x4ED610"
+   "handler_name": "Wac_PlayScriptedVoiceWave"
   },
   {
    "index": 152,
@@ -3319,7 +3319,7 @@
    "argc": 1,
    "call_conv": 5,
    "handler_ea": "0x4EDBE0",
-   "handler_name": "0x4EDBE0"
+   "handler_name": "Wac_ConsolDebugMessage"
   },
   {
    "index": 153,
@@ -3338,7 +3338,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4F0AF0",
-   "handler_name": "0x4F0AF0"
+   "handler_name": "WacCmd_PlayerIsGold"
   },
   {
    "index": 154,
@@ -3360,7 +3360,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F2690",
-   "handler_name": "0x4F2690"
+   "handler_name": "WacCmd_AddExp"
   },
   {
    "index": 155,
@@ -3381,7 +3381,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4EE4B0",
-   "handler_name": "0x4EE4B0"
+   "handler_name": "WacCmd_IsPspAllTeam"
   },
   {
    "index": 156,
@@ -3402,7 +3402,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F2710",
-   "handler_name": "0x4F2710"
+   "handler_name": "WacCmd_DropFlare"
   },
   {
    "index": 157,
@@ -3447,7 +3447,7 @@
    "argc": 2,
    "call_conv": 2,
    "handler_ea": "0x4F23A0",
-   "handler_name": "WacScript_SpawnSoundAtEntity"
+   "handler_name": "WacScript_SpawnEffectAtSsnEntity"
   },
   {
    "index": 159,
@@ -3468,7 +3468,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F0B60",
-   "handler_name": "0x4F0B60"
+   "handler_name": "WacCmd_PlayerIsKills"
   },
   {
    "index": 160,
@@ -3487,7 +3487,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4F0DA0",
-   "handler_name": "0x4F0DA0"
+   "handler_name": "WacCmd_PlayerPunt"
   },
   {
    "index": 161,
@@ -3506,7 +3506,7 @@
    "argc": 0,
    "call_conv": 0,
    "handler_ea": "0x4F0D30",
-   "handler_name": "0x4F0D30"
+   "handler_name": "WacCmd_PlayerKillPunt"
   },
   {
    "index": 162,
@@ -3527,7 +3527,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F0BD0",
-   "handler_name": "0x4F0BD0"
+   "handler_name": "WacCmd_PlayerIsVar"
   },
   {
    "index": 163,
@@ -3548,7 +3548,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F0CB0",
-   "handler_name": "0x4F0CB0"
+   "handler_name": "WacCmd_PlayerSetVar"
   },
   {
    "index": 164,
@@ -3569,7 +3569,7 @@
    "argc": 1,
    "call_conv": 1,
    "handler_ea": "0x4F0C50",
-   "handler_name": "0x4F0C50"
+   "handler_name": "WacCmd_PlayerIsTeam"
   }
  ]
 }

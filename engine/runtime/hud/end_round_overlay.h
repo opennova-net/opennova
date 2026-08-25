@@ -9,10 +9,10 @@
 // table, so each line carries its KEY + fallback and the printf-style
 // arguments, and the presenter resolves them.
 // [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (called every HUD frame
-//  while g_spawn_success_gate && is_in_session from sub_5C0060 @0x5c0072):
+//  while g_spawn_success_gate && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
 //  first pass Server_ResetBalanceCounters + Game_InitRespawnState +
 //  Overlay_ComputeStatFieldColumnLayout(40, 984) + byte_28E561C = 1; every
-//  pass sub_54E650 (the UI scene teardown) then draw_endround_stats_overlay
+//  pass UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then draw_endround_stats_overlay
 //  @0x5b7cd0; once g_scoreboardDirty && now - t0 >= 6000 ms ->
 //  UI_OpenMenuScreen("stat.mnu", "STAT") once (byte_28E561D)]
 
@@ -39,8 +39,9 @@ struct EndRoundArg {
 // the headline re-looks-up Overlays/STROVER1 with the "!Mission Completed"
 // fallback, and the second line is dropped with every later line moving up
 // 32 px (retail's y stays 350, so the score lines start at 382).
-// [orig: LABEL_30 @0x5b7e59 -> GameText_GetStringWithFallback @0x5b7e5b;
-//  LABEL_144 @0x5b83e5 — draw @0x5b83fe / y=382 store @0x5b8406 only when
+// [orig: draw_endround_stats_overlay @0x5B7CD0 — the empty-headline test
+//  @0x5b7e59 -> GameText_GetStringWithFallback @0x5b7e5b; the empty-second-line
+//  test @0x5b83e5 — draw @0x5b83fe / y=382 store @0x5b8406 only when
 //  text_buf[0]]
 enum class EndRoundEmptyFold : uint8_t {
 	kNone = 0,
@@ -120,5 +121,37 @@ EndRoundColumnLayout end_round_column_layout(
 // The STAT field-id -> STROVER string index map [orig: dword_83C840 — the
 // (strIndex, fieldId) pairs, identity except 30 -> 33, 31 -> 27, 32 -> 34].
 int stat_field_string_index(int field_id);
+
+// The stat-screen delay after the announcement, milliseconds: stat.mnu opens
+// once the board has reassembled AND this much wall time has passed
+// [orig: 0x1770 @0x5b8615 in UI_ProcessEndRoundScreenTransition @0x5b8600].
+inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
+
+// The overlay's design-space safe area: the full 1024x768 frame's top and
+// bottom rows [orig: dword_24C1900 / dword_24C1904, stamped at display-mode
+// set @0x587634 / @0x58760b — 0 / 768 for the full frame].
+inline constexpr int kEndRoundOverlayTop = 0;
+inline constexpr int kEndRoundOverlayBottom = 768;
+
+// The gametext Overlays-table lookup the resolver reads through: true when
+// `key` EXISTS in the table (its value may be empty — that is the fold case),
+// false when the key is missing (the fallback case).
+using EndRoundTextLookup =
+		std::function<bool(const std::string &key, std::string &value)>;
+
+struct EndRoundResolvedLine {
+	std::string text;
+	int y = 0;
+};
+
+// Resolve the ladder: every line's key through the Overlays table (a missing
+// key takes the "!..." fallback with its marker stripped, a present-but-empty
+// key takes the line's EndRoundEmptyFold), then the printf arguments in
+// retail's sprintf forms (%s, %d, %ld, %02d) [orig: draw_endround_stats_overlay
+// @0x5b7cd0 — GameText_GetStringWithFallback per line/argument, the sprintf
+// per arm; LABEL_30 @0x5b7e59 -> the STROVER1 re-lookup @0x5b7e5b; LABEL_144
+// @0x5b83e5 — the second line draws nothing and the score lines start at 382].
+std::vector<EndRoundResolvedLine> end_round_overlay_resolve(
+		const std::vector<EndRoundLine> &lines, const EndRoundTextLookup &lookup);
 
 } // namespace opennova::hud

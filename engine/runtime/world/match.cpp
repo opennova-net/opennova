@@ -16,16 +16,30 @@ namespace {
 namespace gt = opennova::game_type;
 
 constexpr int32_t kTicksPerMinute = 60 * 62;
-constexpr int32_t kBlueFlag = 4091;
-constexpr int32_t kRedFlag = 4093;
-constexpr int32_t kNeutralFlag = 4095;
-constexpr int32_t kTeam4Objective = 4096;
-constexpr int32_t kTeam3Objective = 4097;
-constexpr int32_t kBlueBay = 4098;
-constexpr int32_t kRedBay = 4100;
-constexpr int32_t kTeam4Bay = 4102;
-constexpr int32_t kTeam3Bay = 4103;
-constexpr int32_t kHill = 6006;
+// The objective item ids retail compares the item def's +0x50 type id against.
+// Flags: GameEvent_ProcessScoring @0x52F550 routes a capture by the flag's id
+// (4091 -> the blue team block @0x52f7e1, 4093 -> red @0x52f7ef, 4095 -> the
+// scorer's own team @0x52f7fd) and tests a killed carrier's held flag against
+// the same three @0x530262..0x530275; Server_UpdateCaptureZoneProximity
+// @0x5086A0 admits them @0x508834..0x508847. Team-owned objectives 4096/4097
+// join that admit set @0x508849/@0x508850. Bays: the deploy pick
+// SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180 pairs team 1 -> 4098
+// @0x4dd1fa, team 2 -> 4100 @0x4dd1ec, team 3 -> 4103 @0x4dd208, team 4 ->
+// 4102 @0x4dd216, and Entity_ProcessWaypointInteraction @0x4AD820's id switch
+// (jumptable @0x4ad89a) carries the bay cases (4100 @0x4ad9a4, 4103 @0x4ad9d4,
+// 4102 @0x4ad9e1). The hill: the proximity pass's pool-3 scan @0x5089e8,
+// Entity_SpawnFromBMSRecord @0x40E9F0 @0x40f157, find_max_proximity_coverage
+// @0x5BF4D0 @0x5bf511.
+constexpr int32_t kBlueFlag = 4091;       // [orig: @0x52f7e1 / @0x50883b]
+constexpr int32_t kRedFlag = 4093;        // [orig: @0x52f7ef / @0x508842]
+constexpr int32_t kNeutralFlag = 4095;    // [orig: @0x52f7fd / @0x508834]
+constexpr int32_t kTeam4Objective = 4096; // [orig: @0x508850 (0x1000)]
+constexpr int32_t kTeam3Objective = 4097; // [orig: @0x508849 (0x1001)]
+constexpr int32_t kBlueBay = 4098;        // [orig: @0x4dd1fa (0x1002, team 1)]
+constexpr int32_t kRedBay = 4100;         // [orig: @0x4dd1ec (0x1004, team 2)]
+constexpr int32_t kTeam4Bay = 4102;       // [orig: @0x4dd216 (0x1006, team 4)]
+constexpr int32_t kTeam3Bay = 4103;       // [orig: @0x4dd208 (0x1007, team 3)]
+constexpr int32_t kHill = 6006;           // [orig: @0x5089e8 (0x1776)]
 
 bool is_flag(int32_t item_id) {
     return item_id == kBlueFlag || item_id == kRedFlag || item_id == kNeutralFlag;
@@ -36,6 +50,9 @@ bool is_flag_bay(int32_t item_id) {
            item_id == kTeam4Bay || item_id == kTeam3Bay;
 }
 
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 — the per-id bit OR into
+//  slot+0x15F0C @0x50893d..0x50899b: 4095 -> 1 @0x508944, 4091 -> 2 @0x508957,
+//  4093 -> 4 @0x50896a, 4097 -> 8 @0x50897d, 4096 -> 0x10 @0x508994]
 uint8_t objective_proximity_bit(int32_t item_id) {
     switch (item_id) {
     case kNeutralFlag:
@@ -370,7 +387,7 @@ void Match::configure(const MatchRules &rules) {
     // Game_StartMission starts at -1 and seeds GameTime only for a network
     // session outside the Co-op waypoint family, and only when nonzero.
     // [orig: g_round_time_remaining=-1 @0x524A89; seed
-    // 3720*g_respawn_time @0x524F66; decrement @0x5266D6]
+    // 3720*g_respawn_time @0x525242..0x525251; decrement @0x5266D6]
     if (rules.game_time_minutes != 0 && !is_waypoint_family(rules.game_type)) {
         const uint64_t ticks = uint64_t(rules.game_time_minutes) * kTicksPerMinute;
         remaining_ticks_ = ticks > uint64_t(std::numeric_limits<int32_t>::max())
@@ -579,6 +596,12 @@ void Match::record_flag_save(World &world, EntityHandle player_handle,
         return;
     return_flag_home(world, flag_handle, MatchGameplayEventKind::FlagSave,
                      player_handle);
+    // [orig: GameEvent_ProcessScoring @0x52F550 case 8 @0x52f8d1..0x52f992 —
+    //  ++stats[11] (slot dword 29) @0x52f8d7, points += scoringTable[83]
+    //  (score.ini FLAGSAVE, VAR slot 9) @0x52f8ec, the team mirror
+    //  ++team[28] (= team field 11) @0x52f988 with the same award @0x52f98c;
+    //  dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8
+    //  @0x517b03) from Entity_ProcessWaypointInteraction @0x4AD820]
     add_event(*scorer, MatchStats::kFlagSaves, score_value(9));
     add_team_event(entity->team, MatchStats::kFlagSaves, score_value(9));
 }
@@ -1121,7 +1144,7 @@ std::vector<MatchGameplayEvent> Match::drain_gameplay_events() {
 }
 
 int32_t Match::primary_score(const MatchStats &stats, int32_t objective_ticks) const {
-    // [orig: sub_52C850 @0x52C850]
+    // [orig: ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850]
     if (is_waypoint_family(rules_.game_type))
         return stats[MatchStats::kPoints];
     if (rules_.game_type == gt::kAdvanceAndSecure ||

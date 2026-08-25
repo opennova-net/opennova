@@ -119,6 +119,27 @@ struct PromoteOptions {
     };
     std::vector<AiProfileRow> ai_profiles;
 
+    // Retail resolves a placed vehicle's profile NAME in three arms, and every
+    // arm ends in a profile — a nameless vehicle never runs without one:
+    //   * the helicopter AI-init family takes the record's ai_textfile, else
+    //     "helo1" [orig: Entity_InitHelicopterAI @0x461F00 — the +0x9C test
+    //      @0x461f2b, sprintf("%s.aip") @0x461f35, the "helo1.aip" arm @0x461f50;
+    //      Entity_InitHelicopterAIFromDef @0x4683C0, the same pair @0x4684a4/
+    //      @0x4684c9];
+    //   * the vehicle AI-init family takes the ai_textfile, else the item def's
+    //     own default_aip (+0x8B8), else "helo1" [orig: Entity_InitVehicleAIFromDef
+    //      @0x4686C0 — @0x4687a3 record name, @0x4687c1 def+0x8B8, @0x4687d3 "helo1",
+    //      then Path_ReplaceOrAppendExtension(".aip") @0x4687f4].
+    // The embedder answers per items.def type id which arm the item's AI class
+    // row runs and what its default_aip says; absent (tests, no item db) the
+    // resolution is the ai_textfile alone, as before.
+    struct AiProfileDefaults {
+        bool known = false;          // the item db knew the type id
+        bool helicopter_init = false; // the AI class row is the helicopter init family
+        std::string default_aip;     // items.def default_aip (+0x8B8), may be empty
+    };
+    std::function<AiProfileDefaults(int32_t type_id)> ai_profile_defaults;
+
     // The record's name_index -> mission-RTXT [PeopleNames] STRNAME%03i display
     // name (empty = no entry; index 0 never resolves). The embedder builds this
     // from the same mission text table the boot installs; the promote truncates
@@ -134,6 +155,17 @@ struct PromoteOptions {
             world::kRetailPoolCapacity[2], world::kRetailPoolCapacity[3],
             world::kRetailPoolCapacity[4]};
 };
+
+// The profile NAME retail's AI init loads for a record (lowercase, no
+// extension): the ai_textfile when authored; else, for a placed item whose AI
+// class row the embedder knows (`placed_item` + a `known` answer), the
+// helicopter family's "helo1" or the vehicle family's def default_aip then
+// "helo1"; else empty (no profile row). Shared by the boot resolver (which
+// loads the files) and the promote (which seeds the brain), so both agree on
+// the fallback [orig: PromoteOptions::ai_profile_defaults' witness map].
+std::string ai_profile_name_for(
+        const bms::Entity &e, bool placed_item,
+        const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &defaults);
 
 struct PromoteResult {
     int spawned = 0;      // entities placed into the actor/static pools

@@ -444,7 +444,7 @@ func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 # "DRY_CLAYSATCH" trigger set as a non-positional interface one-shot. The deny
 # legs tail-call the interface play with the mission-load-resolved handle at
 # dword_24E08C4 [orig: Player_SwitchToWeaponByHandle @ 0x4e0344 /
-# Player_EquipWeaponByEntity @ 0x4e037e -> PlaySoundOnDedicatedServer
+# Player_EquipWeaponByEntity @ 0x4e037e -> Sound_PlayInterfaceTriggerSet
 # @ 0x527be0]; the name->slot row lives in the @ 0x82F590 resolver table
 # (DialogSystem_Init @ 0x527687). game.lwf ships the set. The play's
 # is_mp_session_peer gate (@ 0x527be5) is the is_client bit — TRUE in SP

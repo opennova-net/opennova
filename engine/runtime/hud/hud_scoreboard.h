@@ -16,7 +16,7 @@ namespace opennova::hud {
 // the drawer puts box corners and text through the same integer scaler every
 // other hudpos coordinate uses [orig: Viewport_ScaleToVirtualCoords @0x5d2b20;
 // the text path @0x5d3f30/@0x5d3ec0], which is `hud::scale_axis` here. All of
-// the board's text rides g_hudLabelFontBold [orig: every sub_5D3F30 /
+// the board's text rides g_hudLabelFontBold [orig: every HUD_DrawTextAligned (ex sub_5D3F30) /
 // HUD_DrawTextAtVirtualPos site in the drawer passes @0xB4C394].
 
 // The panel rect, as CORNERS (not extents)

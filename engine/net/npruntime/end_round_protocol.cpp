@@ -75,7 +75,7 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 		row.assists = wire_i16(player.stats[30]);
 		row.score = wire_i16(player.stats[world::MatchStats::kEnemyKills]);
 		row.captures = wire_i16(player.stats[world::MatchStats::kDeaths]);
-		row.flags = wire_i16(player.stats[world::MatchStats::kAssists]);
+		row.flags = wire_i16(player.stats[world::MatchStats::kFlagSaves]); // raw11 = FLAGSAVE
 		row.special = scoreboard_ratio(player.stats);
 		row.per_team.reserve(active_fields.size());
 		for (const size_t index : active_fields) {
@@ -112,7 +112,7 @@ EndRoundHeader build_end_round_header(const world::MatchResult &result,
 		// The non-team form serializes the top three rows of the frozen
 		// (points-descending) board: the 32-byte entry name and the
 		// game-type primary score the board builder selected into
-		// entry+0x40 (the sub_52C850(g_GameType, ...) store @0x509152).
+		// entry+0x40 (the ScoreRules_GetPrimaryScoreField (ex sub_52C850)(g_GameType, ...) store @0x509152).
 		// [orig: EndRoundScoreboard_SerializeHeader @0x5052bf..0x505381,
 		// reading entry+4 / entry+0x40 of rows 0..2 @0x24C1A94]
 		for (size_t i = 0; i < 3 && i < result.players.size(); ++i) {

@@ -85,10 +85,9 @@ func test_visible_actions_expose_only_f5_f7_and_f8() -> void:
 func test_stop_failure_keeps_the_actionable_session_error() -> void:
 	var app := _app()
 	var session := StopFailureSession.new()
-	session.status_changed.connect(app._on_status_changed)
-	app._session = session
+	app.attach_run_session(session)
 
-	app._stop_game()
+	app.stop_game()
 
 	assert_eq(session.stop_calls, 1)
 	assert_eq(
@@ -107,7 +106,7 @@ func test_resource_and_profile_fields_persist_without_a_project_file() -> void:
 
 	resource.text = root
 	assert_true(ResourceDirSettings.is_valid_root(root), "the explicit test directory is valid")
-	assert_true(app._should_persist_resource_dir(), "the typed directory replaces the fallback")
+	assert_true(app.should_persist_resource_dir(), "the typed directory replaces the fallback")
 	resource.focus_exited.emit()
 	game.text = "JODEMO"
 	game.focus_exited.emit()
@@ -127,12 +126,9 @@ func test_implicit_bundled_assets_default_is_never_persisted() -> void:
 			"res://../.godot-target-fixtures/oned_bundled_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)
 	var app := _app()
-	var resource := app.get_node("%ResourceDirEdit") as LineEdit
-	resource.text = root
-	app._resource_dir_is_implicit = true
-	app._implicit_resource_dir = root
+	app.set_implicit_resource_dir(root)
 
-	app._commit_settings()
+	app.commit_settings()
 
 	assert_eq(OnedSettings.get_resource_dir(), "",
 			"displaying the packaged fallback does not turn it into an explicit setting")
@@ -159,7 +155,7 @@ func test_temporarily_unavailable_explicit_path_is_not_erased_on_close() -> void
 	assert_true(open_button.disabled)
 	assert_true(retail_button.disabled)
 
-	app._commit_settings()
+	app.commit_settings()
 
 	assert_eq(String(ConfigStore.read(
 			OnedSettings.CONFIG_PATH,
@@ -177,7 +173,7 @@ func test_temporarily_unavailable_retail_path_remains_visible_and_saved() -> voi
 
 	assert_eq(retail.text, unavailable,
 			"an unavailable install stays visible so it can recover when remounted")
-	app._commit_settings()
+	app.commit_settings()
 	assert_eq(OnedSettings.get_retail_dir(), unavailable)
 
 

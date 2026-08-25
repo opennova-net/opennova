@@ -12,16 +12,28 @@ namespace opennova::menu {
 // dual-array quicksort that keeps a companion array in step
 // [orig: quicksort_dual_array @0x651AB0].
 //
+// STAGED, NOT WIRED (2026-08-25 tidy): nothing sorts a table through this
+// yet. The live owner is the menu draw-list compiler's table widget
+// (menu/menu_frame_table.cpp) — the post-round STAT screen's clickable
+// column headers are the first consumer, and its feed
+// (npruntime/stat_screen_feed.cpp) delivers rows unsorted today. The
+// comparator's NULL-cell pre-arms (@0x63ea5d..0x63eaad: a column in compare
+// mode 2 whose row-a cell is NULL falls through to the compare; otherwise a
+// NULL cell on exactly one side returns the direction word, and NULL on both
+// falls through to the next column) are not modeled — our cells are strings,
+// never NULL.
+//
 // This is what makes the post-round STAT screen's columns clickable: the table
 // carries an ORDERED LIST of sort columns and walks them until one produces a
 // difference, so a tie on kills falls through to the next column rather than
 // settling arbitrarily.
 
-// Retail walks at most twenty sort columns [orig: the >= 20 clamp @0x63EA0E].
+// Retail walks at most twenty sort columns [orig: the >= 20 clamp @0x63E9D4,
+// and a -1 column id ends the walk @0x63EA1D].
 inline constexpr int kMaxSortColumns = 20;
 
 // A column can compare as TEXT or as a NUMBER [orig: the `[28] == 1` test
-// @0x63EA84].
+// @0x63EABD].
 enum class TableSortKind { Text, Numeric };
 
 // One entry in the sort order.
@@ -32,8 +44,9 @@ struct TableSortColumn {
 	bool ascending = true;
 };
 
-// The direction multiplier [orig: 2 * (flag != 0) - 1 @0x63EA36], applied as
-// `direction * (a - b)` [orig: the `return outLine * num_diff` @0x63EAF6].
+// The direction multiplier [orig: 2 * (flag != 0) - 1 @0x63EA51], applied as
+// `direction * (a - b)` [orig: the `return outLine * num_diff` @0x63EC1C for
+// numbers and `direction * stricmp` @0x63EB0C for text].
 //
 // WORK THE SIGNS THROUGH BEFORE RENAMING THIS. A SET flag gives +1, so
 // `+1 * (a - b)` is negative when a < b — a sorts first, i.e. ASCENDING. A
@@ -47,7 +60,9 @@ inline int table_sort_direction(bool ascending) {
 
 // NUMERIC PARSING HAS A WITNESSED SENTINEL. A cell that does not begin with a
 // digit — or with a minus followed by a digit — does NOT sort as zero: it
-// parses as INT_MAX [orig: the 0x7FFFFFFF arms @0x63EAB2 / @0x63EAD8].
+// parses as INT_MAX [orig: the 0x7FFFFFFF arms @0x63EB78 / @0x63EBE3; the
+// digit test is strchr("0123456789", c[0]) or c[0] == '-' && digit(c[1])
+// @0x63EB4E..0x63EB74].
 //
 // That is deliberate and load-bearing: it sinks blank and non-numeric cells to
 // the BOTTOM of an ascending numeric sort instead of clustering them at the

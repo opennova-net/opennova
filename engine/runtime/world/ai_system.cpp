@@ -1028,13 +1028,13 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     int32_t center;
     if (sample_radius) {
         int32_t maxHeight = 0;                                       // [orig: maxHeight = 0]
-        const int32_t north = sample(pos[0], pos[1] + sample_radius); // sub_4142C0(e,0,+r)
+        const int32_t north = sample(pos[0], pos[1] + sample_radius); // Entity_RaycastGroundHeight(e,0,+r) @0x4142c0
         if (north > 0) maxHeight = north;                           // [orig: if(north>0) max=north]
-        const int32_t south = sample(pos[0], pos[1] - sample_radius); // sub_4142C0(e,0,-r)
+        const int32_t south = sample(pos[0], pos[1] - sample_radius); // Entity_RaycastGroundHeight(e,0,-r)
         if (south > maxHeight) maxHeight = south;
         const int32_t east = sample(pos[0] + sample_radius, pos[1]);  // sub_414320(e,+r,0)
         if (east > maxHeight) maxHeight = east;
-        const int32_t west = sample(pos[0] - sample_radius, pos[1]);  // sub_4142C0(e,-r,0)
+        const int32_t west = sample(pos[0] - sample_radius, pos[1]);  // Entity_RaycastGroundHeight(e,-r,0)
         if (west > maxHeight) maxHeight = west;
         center = sample(pos[0], pos[1]);                             // sub_414320(e,0,0)
         if (center > maxHeight) maxHeight = center;

@@ -32,9 +32,9 @@ typedef enum MusOpcode {
     MUS_OP_TABLEXEC = 0x35,  /* on-switch dispatch */
     MUS_OP_ENTER    = 0x38,  /* frame setup, does NOT move the IP
                                 [orig: AudioVM_Op_Enter @ 0x672C20] */
-    MUS_OP_SETSTATE = 0x3B,  /* section transition [orig: VmOp_SetState @ 0x672C70] */
-    MUS_OP_PLAYW    = 0x3D,  /* play-and-wait [orig: VmOp_PlayWait @ 0x672C90] */
-    MUS_OP_PLAY     = 0x3E,  /* play [orig: VmOp_Play @ 0x672CB0] */
+    MUS_OP_SETSTATE = 0x3B,  /* section transition [orig: AudioVM_Op_SetState @ 0x672C70] */
+    MUS_OP_PLAYW    = 0x3D,  /* play-and-wait [orig: AudioVM_Op_PlayWait @ 0x672C90] */
+    MUS_OP_PLAY     = 0x3E,  /* play [orig: AudioVM_Op_Play @ 0x672CB0] */
     MUS_OP_DONE     = 0x3F   /* section terminator */
 } MusOpcode;
 
@@ -237,12 +237,12 @@ typedef enum MusVMState {
    side-effects (Phase A revisions, see spec §"engine/formats/mus C API"). */
 typedef struct MusVMHooks {
     void *user;
-    /* Witnessed: Jointops.exe!VmOp_Play @ 0x672CB0 (0x3E, 1B index)
-       and       Jointops.exe!VmOp_PlayWait @ 0x672C90 (0x3D, 2B index).
+    /* Witnessed: Jointops.exe!AudioVM_Op_Play @ 0x672CB0 (0x3E, 1B index)
+       and       Jointops.exe!AudioVM_Op_PlayWait @ 0x672C90 (0x3D, 2B index).
        wait=1 for playw (0x3D), 0 for play (0x3E). */
     void (*on_play_sound)     (void *user, uint32_t sbf_entry_index, int wait);
     /* Fired when execution enters a section (via setstate or
-       mus_vm_jump_to_section). Witnessed: Jointops.exe!VmOp_SetState @ 0x672C70. */
+       mus_vm_jump_to_section). Witnessed: Jointops.exe!AudioVM_Op_SetState @ 0x672C70. */
     void (*on_section_entered)(void *user, const char *section_name);
     /* Fired by pop_g (0x08), GSV, GSDV intrinsics whenever a global var slot
        is written. var_index is the byte offset / 4 (Var00..Var15 fit indices

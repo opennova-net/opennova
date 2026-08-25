@@ -94,7 +94,7 @@ inline constexpr uint32_t kAmmoFlagClaymore = 0x20000u;
 inline constexpr uint32_t kAmmoFlagNoOItems = 0x80000u;
 inline constexpr uint32_t kAmmoFlagNoMItems = 0x100000u;
 inline constexpr uint32_t kAmmoFlagNoDItems = 0x200000u;
-// [orig: the flag OR-bit table @0x813500 — ClipWater @0x8135b0, ClipWaterFx @0x8135b8]
+// [orig: the flag OR-bit table off_813500 @0x813500 — the ClipWater entry @0x8135b0, the ClipWaterFx entry @0x8135b8]
 inline constexpr uint32_t kAmmoFlagClipWater = 0x1000000u;
 inline constexpr uint32_t kAmmoFlagDesignateTarget = 0x2000000u;
 inline constexpr uint32_t kAmmoFlagIgnorFoilage = 0x4000000u; // sic — the witnessed token spelling
@@ -108,7 +108,7 @@ struct AmmoTableEntry {
     std::string name;               // record +144 [orig: AmmoDef_AllocateSlot copy]
     uint32_t flags = 0;             // +0 `flag` OR-bits [orig: name/bit table @0x813500]
     int32_t velocity = 0;           // +4, units/s (integer)
-    int32_t max_age_ticks = 0;      // +8, 62 Hz ticks [orig: sub_40A0F0 = (62*fp16+0x8000)>>16]
+    int32_t max_age_ticks = 0;      // +8, 62 Hz ticks [orig: AmmoDef_ParseSecondsToTicks (ex sub_40A0F0) = (62*fp16+0x8000)>>16]
     int32_t arm_age_ticks = 0;      // +12 — a hit before arming swaps in notarmmed_ammo
     float spread_error = 0.0f;      // +24 ballistic dispersion (16.16 -> float)
     int32_t spread_error_fp16 = 0;  // +24 exact source value; spread uses this carrier

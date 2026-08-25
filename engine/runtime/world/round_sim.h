@@ -330,8 +330,9 @@ struct RoundDeath {
 // @ 0x4E8460 is a separate Knife-only
 // instant-kill-zone leaf (flags&0x400, kztype==1) whose ray extent is
 // AmmoDef.kz_maxradius; it is not the bullet path. Terrain hits sample the charmap
-// surface + 4 [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]; only the placed-tile
-// `.TIL` override remap remains open (D-SND-15, net-re §5.60).
+// surface + 4 [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]; the placed-tile
+// `.TIL` override remap is ported too (D-SND-15 FIXED 2026-08-12: the surface
+// sampler walks the mission `.til` array, net-re §5.60).
 struct RoundImpact {
     Vec3 position;
     Vec3 direction;         // normalized flight direction (the witnessed descriptor dir)

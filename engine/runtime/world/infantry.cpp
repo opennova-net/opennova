@@ -840,7 +840,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
     // only every-tick leg). [orig: test tickCounter,1 @0x4b6de4]
     if (org2 && (logic_tick & 1u) != 0) return;
 
-    // Probe ground at an offset of the entity. [orig: sub_4142C0 @0x4142c0 — heightmap
+    // Probe ground at an offset of the entity. [orig: Entity_RaycastGroundHeight (ex sub_4142C0) @0x4142c0 — heightmap
     // raycast at (x+dx, y+dy) in a [z+0x4000, z+0x4000-0x20000] window; we sample the
     // height field at the offset position (same surface for terrain)]
     auto probe = [&](int32_t dx, int32_t dy) -> int32_t {
@@ -996,7 +996,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     InfantryState &inf = e.inf;
-    // Per-entity stagger key. [orig: tickCounter = current_tick + 36 * entity[31]]
+    // Per-entity stagger key. [orig: Entity_UpdateInfantryAI @0x4b9910 head
+    //  @0x4b9948..0x4b9953 — tickKey = current_tick + 36 * entity+0x7C (the net
+    //  id), strength-reduced as lea [eax+eax*8] then lea [tick+edx*4]]
     const uint32_t key = logic_tick + 36u * static_cast<uint32_t>(e.net_id);
     // Tick-start pose Z: the resolver's ladder entry gate measures the CL anchor
     // against the pose at the motor head, not the integrated one.

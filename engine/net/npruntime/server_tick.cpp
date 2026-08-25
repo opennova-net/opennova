@@ -79,7 +79,8 @@ constexpr uint32_t kBreathSampleLimit = 4u * kRetailBreathSeconds;
 // 0..127 word and then divided by 21845, so this producer always emits 32 even
 // though the client retains strings for 33/34.
 // [orig: GameEvent_PlayerDeath @0x516DD0, classifier @0x5170E0..0x51724A;
-// GameEvent_BuildPayload call @0x51737B]
+// the GameEvent_BuildPayload call @0x517362 (0x51737b is the payload-length
+// store that follows it)]
 PlayerDeathFeed classify_player_death(
 		world::World &world, const world::RoundDeath &death,
 		const world::Entity *victim_entity,
@@ -570,7 +571,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				body1e.push_back(feed.aux);
 				// Every PlayerDeath call passes literal zero/zero; positions belong
 				// to other 0x1E producers, not this feed family.
-				// [orig: GameEvent_BuildPayload call @0x51737B]
+				// [orig: GameEvent_PlayerDeath @0x516DD0 (the GameEvent_BuildPayload
+				//  call @0x517362; 0x51737b is the payload-length store)]
 				put_u16le(body1e, 0);
 				put_u16le(body1e, 0);
 			}
@@ -739,7 +741,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 
 // The server win-condition check, on the original's 1 Hz periodic cadence [orig:
 // Server_CheckWinConditions @0x51ad40, called from the periodic-second block in
-// Server_TickUpdate @0x51df5a]. The round-over latch no-ops it [orig: @0x51ad4a].
+// Server_TickUpdate @0x51D7E0 (the call @0x51df5a)]. The round-over latch no-ops
+// it [orig: @0x51ad4a].
 // SP carries exactly ONE auto condition: the local player is DEAD and the mission
 // does not allow SP-respawn (attrib 0x40) -> Server_ProcessRoundEnd(2) — every other
 // SP outcome comes from the WAC win/lose handlers or the BMS Blue/Red/GreenWin
@@ -771,7 +774,8 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	const world::MatchResult &result = world.match.result();
 	// The board stream is frozen ONCE here, before the per-slot push; the C2S
 	// 0x2B service only cuts chunks from it.
-	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
+	// [orig: Server_ProcessRoundEnd @0x5164F0 (the
+	// Server_BuildEndOfRoundScoreboard(1, winTeam) call @0x516590)]
 	ctx.round_end_board_stream =
 			encode_end_round_stats(build_end_round_stats(result));
 	// The header form is session state: the in-session non-team (DM/KOTH
@@ -1267,7 +1271,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// by the check below do not. Keep the phase fact even though our countdown
 	// mutation is grouped at the tail of this function.
 	// [orig: Server_TickUpdate @0x51D7E0: linger drain @0x51DA04 precedes
-	// Server_CheckWinConditions @0x51DF5A]
+	// the Server_CheckWinConditions call @0x51DF5A]
 	const bool round_ended_at_retail_linger_phase =
 			world.match.outcome().ended;
 
@@ -1298,8 +1302,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	if (periodic_second) emit_requester_score_refreshes(ctx, world);
 
 	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in
-	// Server_TickUpdate — reload 62 @0x51db93 — calls Server_CheckWinConditions
-	// @0x51df5a once per second].
+	// Server_TickUpdate @0x51D7E0 — reload 62 @0x51db93 — calls
+	// Server_CheckWinConditions @0x51AD40 (the call @0x51df5a) once per second].
 	if (periodic_second) check_win_conditions(ctx, world);
 	tick_respawn_holds(ctx, world);
 	announce_round_end(ctx, world);

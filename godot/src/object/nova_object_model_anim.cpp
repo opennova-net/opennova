@@ -65,7 +65,7 @@ Vector3 ObjectModel::get_muzzle_world_position() const {
 // The def names the muzzle: items.def launchups_closeattack authors the launch
 // userpoint (JO NPC riflemen: mflash01), pushed here by the placer. Resolve it
 // case-insensitively against the model's userpoint table — retail's by-name
-// lookup [orig: modelgpm_FindUserpointByName @ 0x5b2170 via sub_545940]. The
+// lookup [orig: modelgpm_FindUserpointByName @ 0x5b2170 via Entity_ResolveBoneUserpoints (ex sub_545940)]. The
 // rig is index-driven, so the userpoint's subobject row IS the bone index; no
 // authored name (or no match) means no AI muzzle.
 void ObjectModel::set_muzzle_point_name(const String &p_name) {

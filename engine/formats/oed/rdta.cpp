@@ -880,12 +880,12 @@ bool build_render_geometry_skinned(const LodHeader &lod,
         (flags & MATERIAL_FLAG_BLENDING) != 0;
   }
 
-  // Skinned-extended layout selection [orig: WriteRDTA_Skinned @ 0x45d7cc]:
+  // Skinned-extended layout selection [orig: WriteRDTA_Skinned @ 0x45d7cc (ModSuperOed.exe)]:
   // (ComputeVertexFormatFlags_Skinned & 0x14) != 0 selects
   // WriteVertices_SkinnedExtended [orig @ 0x4581a0] (weights/indices AND
   // tangent/bitangent, stride 80, flags 0x55), else WriteVertices_SkinnedBasic
   // [orig @ 0x457f20] (stride 56, flags 0x41). The flag word
-  // [orig: ComputeVertexFormatFlags @ 0x457a10, skinned |0x40 @ 0x457ab0] ORs
+  // [orig: ComputeVertexFormatFlags @ 0x457a10, skinned |0x40 @ 0x457ab0 (ModSuperOed.exe)] ORs
   // in 0x14 iff ANY material slot's info word has the TANGENT bit (0x8000 --
   // the vertex shader reads the TANGENT semantic). The bit is read from the
   // D-RMAT-4-corrected descriptor rows, not ModSuperOed's authored

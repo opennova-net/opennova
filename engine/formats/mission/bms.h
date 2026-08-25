@@ -196,7 +196,7 @@ inline WaypointFlags operator|(WaypointFlags a, WaypointFlags b) {
 // these three as author checkboxes; shipped JO missions also use internal bits 0x10/0x20, which are
 // preserved by editor-facing edits but not exposed as checkboxes. Bit 0x08 remains unsupported by the
 // shipped corpus and parser.
-// [orig: Med_EventDialogPopulate @0x411690 -> CheckDlgButton(4203/4212/4213, flags bit0/1/2);
+// [orig: dfx2med.exe Med_EventDialogPopulate @0x411690 -> CheckDlgButton(4203/4212/4213, flags bit0/1/2);
 //        Med_EventDialogCommit @0x4118d0 -> IsDlgButtonChecked sets bits 0/1/2 only, leaves the rest]
 enum class EventFlags : uint32_t {
     None = 0,

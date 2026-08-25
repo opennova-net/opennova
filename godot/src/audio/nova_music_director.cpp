@@ -1,9 +1,9 @@
 // MusicDirector. Embeds a engine/formats/mus VM and forwards hook callbacks to
 // godot::Object signals. Witnessed wire-level paths in engine/formats/mus:
 //   Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20   -> mus_vm_load_script
-//   Jointops.exe!VmOp_Play @ 0x672CB0 / VmOp_PlayWait @ 0x672C90
+//   Jointops.exe!AudioVM_Op_Play @ 0x672CB0 / AudioVM_Op_PlayWait @ 0x672C90
 //                                                  -> _on_play_sound
-//   Jointops.exe!VmOp_SetState @ 0x672C70              -> _on_section_entered
+//   Jointops.exe!AudioVM_Op_SetState @ 0x672C70              -> _on_section_entered
 //   Jointops.exe!Intrinsic_GSV @ 0x6720E0 / GSDV @ 0x672120
 //                                                  -> _on_volume_changed
 //   Jointops.exe!Intrinsic_GEcho @ 0x6720C0            -> _on_echo

@@ -332,7 +332,7 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 		WeaponInventory *inventory, const WeaponSwitchOutcome &out) {
 	switch (out.kind) {
 		case WeaponSwitchOutcome::kDeny: {
-			// [orig: PlaySoundOnDedicatedServer(dword_24E08C4) @ 0x4e0354]
+			// [orig: Sound_PlayInterfaceTriggerSet(dword_24E08C4) @ 0x4e0354]
 			WeaponPresentationEvent event;
 			event.tick = world.logic_tick;
 			event.world_position = local_player_mission_position(world);

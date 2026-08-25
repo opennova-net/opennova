@@ -82,7 +82,7 @@ typedef struct DefAmmoDef {
     int recoil[3];           /* bytes +227..229 */
     /* Authoritative round-sim fields (docs/net/novaworld-net-re.md §5.60). */
     unsigned int flags;      /* +0, DEF_AMMO_FLAG_* OR-mask */
-    int max_age_ticks;       /* +8: 'max_age' seconds -> 62 Hz ticks [orig: sub_40A0F0 @0x40a0f0] */
+    int max_age_ticks;       /* +8: 'max_age' seconds -> 62 Hz ticks [orig: AmmoDef_ParseSecondsToTicks (ex sub_40A0F0) @0x40a0f0] */
     int arm_age_ticks;       /* +12: 'arm_age' — a hit before arming spawns notarmmed_ammo */
     int error_fp16;          /* +24: ballistic dispersion, 16.16 */
     int drag_fp16;           /* +28: drag, 16.16 */
@@ -144,7 +144,7 @@ typedef struct DefAmmoDef {
     /* The impact flash light, 'light_impact <radius> <r> <g> <b> <seconds>' —
      * a fading pool light at the impact point (appended; FFI mirror stability).
      * [orig: AmmoDef_ParseProperty @0x40af79 -> +132 radius ParseFixedPoint16,
-     * +128 ((r<<8)+g)<<8 + b, +136 seconds -> 62 Hz ticks (sub_40A0F0), 0 -> 10
+     * +128 ((r<<8)+g)<<8 + b, +136 seconds -> 62 Hz ticks (AmmoDef_ParseSecondsToTicks), 0 -> 10
      * @0x40b005; consumer AmmoDef_ProcessImpactEffect @0x40a280 ->
      * LightPool_SpawnGlowEffect(pos + radius/2 up, radius, color, mode 2,
      * ticks)]. */
@@ -670,7 +670,7 @@ typedef struct DefItemDef {
        riflemen author mflash01). Only the closeattack slot is surfaced, like
        ammo_closeattack above; the rocket/marker3 siblings share the block.
        [orig: ItemDef_ParseProperty launchups_* stores @ def+0x5EB/+0x5FB;
-       resolve sub_545940 -> modelgpm_FindUserpointByName @ 0x5b2170] */
+       resolve Entity_ResolveBoneUserpoints (ex sub_545940) -> modelgpm_FindUserpointByName @ 0x5b2170] */
     char launchups_closeattack[32];
     /* items.def 'clipsize', plain atol — the respawn magazine reseed source (word
        entity+0x35C = itemDef+0x894). [orig: ItemDef_ParseProperty @ 0x49fa1c ->
