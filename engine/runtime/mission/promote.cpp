@@ -6,6 +6,7 @@
 #include "world/world.h"
 
 #include <algorithm>
+#include <limits>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -195,9 +196,13 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // is the .aip / item def rather than the mission record; seeding them from the BMS
     // entity is a pre-existing adaptation kept as-is, with only the SCALE corrected.
     ae.profile.range_primary =
-            static_cast<int16_t>(std::clamp<int32_t>(e.max_engagement_distance, -32768, 32767));
+            static_cast<int16_t>(std::clamp<int32_t>(e.max_engagement_distance,
+                                    std::numeric_limits<int16_t>::min(),
+                                    std::numeric_limits<int16_t>::max()));
     ae.profile.range_secondary =
-            static_cast<int16_t>(std::clamp<int32_t>(e.min_engagement_distance, -32768, 32767));
+            static_cast<int16_t>(std::clamp<int32_t>(e.min_engagement_distance,
+                                    std::numeric_limits<int16_t>::min(),
+                                    std::numeric_limits<int16_t>::max()));
 
     // Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
     // The .aip profile seeds them when the embedder supplied the entity's profile
