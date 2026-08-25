@@ -1473,13 +1473,26 @@ void BinkMovie::Impl::convert_to_rgba() {
 // Not BT.601's 298/409/100/208/516 set with round-half-up: the retail ramps
 // are 38154/52299/26639/12837/66101 over 32768 and truncate, so a mid-grey
 // (128, 128, 128) lands on 130, not 131.
+// The ramp constants, named for the tables they fill (binkw32.dll data):
+constexpr int32_t kYuvFixedOne = 32768;   // the `sar 15` fixed-point denominator
+constexpr int32_t kYuvLumaBias = 16;      // qword_30055038
+constexpr int32_t kYuvLumaRange = 219;    // the clamp before the luma ramp
+constexpr int32_t kYuvLumaScale = 38154;  // dword_30059178 ramp (pmulhw 19077 x 2)
+constexpr int32_t kYuvChromaBias = 128;
+constexpr int32_t kYuvVToR = 52299;       // dword_300632A8
+constexpr int32_t kYuvVToG = 26639;       // dword_30062AA8 (subtracted)
+constexpr int32_t kYuvUToG = 12837;       // dword_30062EA8 (subtracted)
+constexpr int32_t kYuvUToB = 66101;       // dword_300626A8
+
 void yuv_to_rgb(uint8_t y, uint8_t u, uint8_t v, uint8_t &r, uint8_t &g, uint8_t &b) {
-	const int32_t luma = std::clamp(static_cast<int32_t>(y) - 16, 0, 219) * 38154 / 32768;
-	const int32_t du = static_cast<int32_t>(u) - 128;
-	const int32_t dv = static_cast<int32_t>(v) - 128;
-	r = clamp_byte(luma + dv * 52299 / 32768);
-	g = clamp_byte(luma + (-dv * 26639) / 32768 + (-du * 12837) / 32768);
-	b = clamp_byte(luma + du * 66101 / 32768);
+	const int32_t luma =
+			std::clamp(static_cast<int32_t>(y) - kYuvLumaBias, 0, kYuvLumaRange) *
+			kYuvLumaScale / kYuvFixedOne;
+	const int32_t du = static_cast<int32_t>(u) - kYuvChromaBias;
+	const int32_t dv = static_cast<int32_t>(v) - kYuvChromaBias;
+	r = clamp_byte(luma + dv * kYuvVToR / kYuvFixedOne);
+	g = clamp_byte(luma + (-dv * kYuvVToG) / kYuvFixedOne + (-du * kYuvUToG) / kYuvFixedOne);
+	b = clamp_byte(luma + du * kYuvUToB / kYuvFixedOne);
 }
 
 std::unique_ptr<BinkMovie> BinkMovie::open(BinkSource source, std::string *error) {
