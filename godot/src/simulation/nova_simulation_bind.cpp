@@ -324,6 +324,14 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &Simulation::get_fired_events_snapshot);
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &Simulation::get_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &Simulation::debug_set_entity_health);
+	ClassDB::bind_method(D_METHOD("debug_crew_vehicle", "occupant_ssn", "vehicle_ssn"),
+	                     &Simulation::debug_crew_vehicle);
+	ClassDB::bind_method(D_METHOD("set_local_player_eye_offset", "offset", "valid"),
+	                     &Simulation::set_local_player_eye_offset);
+	ClassDB::bind_method(D_METHOD("local_player_fp_weapon_hidden"),
+	                     &Simulation::local_player_fp_weapon_hidden);
+	ClassDB::bind_method(D_METHOD("debug_crew_local_player", "vehicle_ssn"),
+	                     &Simulation::debug_crew_local_player);
 	ClassDB::bind_method(D_METHOD("debug_kill_player_entity", "handle"), &Simulation::debug_kill_player_entity);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &Simulation::debug_set_entity_position);
 	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &Simulation::get_world_entity_debug);
@@ -331,6 +339,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &Simulation::debug_set_world_entity_position);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_weapon_ammo", "net_id", "clip", "reserve"),
 	                     &Simulation::debug_set_world_entity_weapon_ammo);
+	ClassDB::bind_method(D_METHOD("debug_kill_group", "group"), &Simulation::debug_kill_group);
 	ClassDB::bind_method(D_METHOD("debug_teleport_local_player", "mission_pos", "yaw_deg", "pitch_deg"),
 	                     &Simulation::debug_teleport_local_player);
 	ClassDB::bind_method(D_METHOD("set_ai_muzzle_world", "net_id", "godot_pos"), &Simulation::set_ai_muzzle_world);
@@ -551,6 +560,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &Simulation::load_weapon_table, DEFVAL(String("weapon.def")));
+	ClassDB::bind_method(D_METHOD("load_score_config", "resource_root", "name"),
+	                     &Simulation::load_score_config, DEFVAL(String("score.ini")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
 	                     &Simulation::load_ammo_table, DEFVAL(String("ammo.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &Simulation::get_infantry_clip_count);

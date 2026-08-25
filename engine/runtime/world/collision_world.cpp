@@ -272,7 +272,19 @@ CollisionWorld::take_movement_callback_contacts() {
 }
 
 void CollisionWorld::build_initial_tables(World &world) {
-    build_tables(world, false);
+    // Mission load builds the FULL proximity state, candidate slices included —
+    // retail's load path calls the slice builder directly, so the first logic
+    // tick already grounds spawned entities on building floors instead of
+    // letting them fall through during a sliceless boot window. The 17-tick
+    // cadence governs steady-state REBUILDS only.
+    // [orig: Game_TryLoadSavedGame -> Entity_BuildProximityListsFromPools
+    //  @0x4b8eb0 (the builder resets g_ProxSliceRefreshCounter itself); the
+    //  spawn/teleport paths (Entity_SpawnFromAnimSlotProperty,
+    //  Entity_TeleportTeamToSpawn, EventAction_TeleportEntityToSpawn,
+    //  HeliLift_SpawnPickup) also call it directly]
+    slice_refresh_counter_ = 16; // force the cadence gate — retail's direct
+                                 // builder call bypasses the @0x4c240f gate
+    build_tables(world, true);
 }
 
 void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {

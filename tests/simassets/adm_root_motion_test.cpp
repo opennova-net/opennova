@@ -61,6 +61,18 @@ int main() {
     TEST_EXPECT(reset_len > 0);
     // Fallback: a state id far past the authored table still resolves (RESET).
     TEST_EXPECT(source.clip_length_ticks(0, 199, 0) == reset_len);
+    // Availability is AUTHORSHIP, not resolvability [orig: animMap[id] !=
+    // animMap[0]; the NULL-slot fill at AnimMap_RegisterEntity @0x40bb60].
+    // soldier.adm authors anim_stop (with RESET's own .bad -- still its own
+    // node per AnimMap_RegisterBoneNode @0x40c2d0) but not anim_idle_3;
+    // US01.adm authors neither. The unauthored states still PLAY (RESET).
+    TEST_EXPECT(source.has_clip(0, opennova::world::anim_state::kStop));
+    TEST_EXPECT(!source.has_clip(0, opennova::world::anim_state::kIdle3));
+    TEST_EXPECT(!source.has_clip(0, 199));
+    TEST_EXPECT(!source.has_clip(1, opennova::world::anim_state::kStop));
+    TEST_EXPECT(source.has_clip(1, opennova::world::anim_state::kEmplaced));
+    TEST_EXPECT(!source.has_clip(7, opennova::world::anim_state::kReset));
+    TEST_EXPECT(source.clip_length_ticks(0, opennova::world::anim_state::kIdle3, 0) == reset_len);
     // An unregistered set has nothing.
     TEST_EXPECT(source.clip_length_ticks(7, 0, 0) == -1);
 

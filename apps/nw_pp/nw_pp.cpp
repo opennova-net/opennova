@@ -846,12 +846,34 @@ void print_tag_7e(const std::vector<uint8_t> &body) {
 	std::printf("            second=\"%s\"\n", briefing_sample(strings.briefing2).c_str());
 }
 
-void print_player_compact_record(const PlayerCompactRecord &r) {
+// A compact record's position is the frame anchor plus the decompressed offset —
+// but ONLY when the record carries no carrier: a mounted/standing-on record is
+// CARRIER-local instead (D-NET-151), and this printer has no carrier pose, so it
+// says so rather than printing a wrong world position. Having the absolute
+// figure here keeps track comparisons (retail vs our host) out of fragile
+// external decompression.
+// `fu` is null for standalone client records, which carry no frame anchor.
+std::string abs_pos_str(const FrameUpdate *fu, uint16_t cx, uint16_t cy, uint16_t cz,
+                        uint16_t carrier_handle) {
+	char buf[96];
+	if (fu == nullptr) return "";
+	if (carrier_handle != wire_handle::kInvalid) {
+		std::snprintf(buf, sizeof buf, " world=(carrier-local)");
+		return buf;
+	}
+	const double x = (double(fu->anchor_x) + network_decompress_fixedpoint(cx)) / 65536.0;
+	const double y = (double(fu->anchor_y) + network_decompress_fixedpoint(cy)) / 65536.0;
+	const double z = (double(fu->anchor_z) + network_decompress_fixedpoint(cz)) / 65536.0;
+	std::snprintf(buf, sizeof buf, " world=(%.1f, %.1f, %.1f)", x, y, z);
+	return buf;
+}
+
+void print_player_compact_record(const FrameUpdate *fu, const PlayerCompactRecord &r) {
 	// carrier != none => pos is CARRIER-LOCAL compressed + yaw is carrier-relative
 	// (mount if bone/seat set, else the standing-on ground entity; D-NET-151).
 	std::printf("            player: vehBone=%u seat=%u carrier=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
-	            "input=%u state=0x%02x animState=%u animRatio=%u animDef=%u health=0x%02x\n",
+	            "input=%u state=0x%02x animState=%u animRatio=%u animDef=%u health=0x%02x%s\n",
 	            unsigned(r.vehicle_bone), unsigned(r.seat_type),
 	            handle_str(r.carrier_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
@@ -859,15 +881,20 @@ void print_player_compact_record(const PlayerCompactRecord &r) {
 	            unsigned(r.yaw_byte), unsigned(r.pitch_byte),
 	            unsigned(r.move_input_byte), unsigned(r.state_flags),
 	            unsigned(r.anim_state_id), unsigned(r.anim_channel_ratio),
-	            unsigned(r.anim_def_index), unsigned(r.health_class_byte));
+	            unsigned(r.anim_def_index), unsigned(r.health_class_byte),
+	            abs_pos_str(fu, r.pos_x_compressed, r.pos_y_compressed,
+	                        r.pos_z_compressed, r.carrier_handle).c_str());
 }
 
-void print_vehicle_compact_record(const VehicleCompactRecord &r) {
-	std::printf("            vehicle: parent=%s pos=(0x%04x,0x%04x,0x%04x) "
+void print_vehicle_compact_record(const FrameUpdate *fu, const VehicleCompactRecord &r) {
+	std::printf("            vehicle: parent=%s pos=(0x%04x,0x%04x,0x%04x)%s "
 	            "eulerZ=%d flags=0x%02x %s",
 	            handle_str(r.parent_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
-	            unsigned(r.pos_z_compressed), int(r.euler_z),
+	            unsigned(r.pos_z_compressed),
+	            abs_pos_str(fu, r.pos_x_compressed, r.pos_y_compressed,
+	                        r.pos_z_compressed, r.parent_slot_handle).c_str(),
+	            int(r.euler_z),
 	            unsigned(r.flags_byte), r.is_dead_pose ? "DEAD-POSE" : "live");
 	if (r.is_dead_pose) {
 		std::printf(" euler=(x=%d y=%d)\n", int(r.euler_x), int(r.euler_y));
@@ -879,17 +906,19 @@ void print_vehicle_compact_record(const VehicleCompactRecord &r) {
 	}
 }
 
-void print_infantry_compact_record(const InfantryCompactRecord &r) {
+void print_infantry_compact_record(const FrameUpdate *fu, const InfantryCompactRecord &r) {
 	std::printf("            infantry: seatBone=%u vehHdl=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x flags=0x%02x "
-	            "pitch=0x%02x aimYaw=0x%02x anim=0x%02x\n",
+	            "pitch=0x%02x aimYaw=0x%02x anim=0x%02x%s\n",
 	            unsigned(r.seat_bone_idx),
 	            handle_str(r.vehicle_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.flags_byte),
 	            unsigned(r.pitch_byte), unsigned(r.aim_yaw_byte),
-	            unsigned(r.anim_byte));
+	            unsigned(r.anim_byte),
+	            abs_pos_str(fu, r.pos_x_compressed, r.pos_y_compressed,
+	                        r.pos_z_compressed, r.vehicle_slot_handle).c_str());
 }
 
 void print_player_extended_uplink(const PlayerExtendedUplink &r) {
@@ -958,7 +987,7 @@ void print_tag_0c_c2s(const std::vector<uint8_t> &body) {
 		PlayerCompactRecord r;
 		size_t used = 0;
 		if (decode_player_compact_record(rest, rest_len, r, used)) {
-			print_player_compact_record(r);
+			print_player_compact_record(nullptr, r);
 		} else {
 			std::printf("            compact decode failed (consumed=%zu of %zu): %s\n",
 			            used, rest_len,
@@ -1099,9 +1128,9 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            handle_str(r.handle).c_str(), type_str(r.type_id).c_str(),
 		            class_name(r.cls));
 		switch (r.cls) {
-			case EntityClass::Player:   print_player_compact_record(r.player); break;
-			case EntityClass::Vehicle:  print_vehicle_compact_record(r.vehicle); break;
-			case EntityClass::Infantry: print_infantry_compact_record(r.infantry); break;
+			case EntityClass::Player:   print_player_compact_record(&fu, r.player); break;
+			case EntityClass::Vehicle:  print_vehicle_compact_record(&fu, r.vehicle); break;
+			case EntityClass::Infantry: print_infantry_compact_record(&fu, r.infantry); break;
 			default: break;
 		}
 	}

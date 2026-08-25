@@ -815,6 +815,52 @@ TypedArray<Dictionary> Simulation::get_local_player_loadout() const {
 	return out;
 }
 
+// score.ini -> this session's scoring awards (world::score_rules).
+// Retail overlays the file onto 12 hardcoded 452-byte gametype rows
+// (retail: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0);
+// the defaults are not ported, so an absent file leaves the rules !valid (every award
+// a no-op) rather than guessing values.
+Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
+                                    const String &p_name) {
+	if (!world_) return ERR_UNCONFIGURED;
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
+		return ERR_INVALID_PARAMETER;
+	const String file_name = p_name.get_file();
+	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
+	// LOOSE-FIRST on purpose: retail gates the load on File_IsSingleFile("score.ini")
+	// (retail: @0x436ED0), which is a FindFirstFileA check on disk — score.ini is a loose
+	// file next to the executable, not an archive member (unlike weapon.def/ammo.def,
+	// which live in localres.pff). An archive-preferring lookup finds nothing here.
+	const PackedByteArray bytes =
+			p_resource_root->read_file(file_name, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
+	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
+
+	opennova::score::File parsed;
+	std::string error;
+	if (!opennova::score::parse(bytes.ptr(), static_cast<size_t>(bytes.size()), parsed, error))
+		return ERR_PARSE_ERROR;
+	score_config_ = std::move(parsed);
+	score_config_loaded_ = true;
+	refresh_score_rules();
+	return OK;
+}
+
+// Resolve the session's score row from the mission's game-mode bit. Called from BOTH
+// load sites so either order works: the config landing after the mission, or before it.
+// The mode bit -> g_GameType code word is the already-ported ladder
+// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360).
+void Simulation::refresh_score_rules() {
+	if (!world_) return;
+	if (!score_config_loaded_) {
+		world_->score_rules = opennova::world::ScoreRules{};
+		return;
+	}
+	const uint32_t mode = opennova::bms::selected_game_mode(
+			static_cast<opennova::bms::AttribFlags>(world_->mission_attrib_flags));
+	world_->score_rules = opennova::np::build_score_rules(
+			score_config_, opennova::game_type::for_mission_mode(mode));
+}
+
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
 // parses literally "weapon.def" through WeaponDefs_LoadFile right after AnimDef_InitAll wipes
 // the AdmDef table [orig: @0x5254b3/@0x5254bd]); build_weapon_table ports the witnessed

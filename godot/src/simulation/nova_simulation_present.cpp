@@ -841,6 +841,11 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["team"] = ent ? static_cast<int>(ent->team) : -1;
 	out["pool"] = ent ? ent->handle.pool() : -1;
 	out["engine_flags"] = ent ? static_cast<int64_t>(ent->engine_flags) : 0;
+	// The BMS/gameplay flags word is a SEPARATE store from engine_flags, and the
+	// motor's suppression gates read the union (ladder zeroes the horizontal root
+	// pair, drowning the vertical) — a card exposing only engine_flags cannot
+	// explain a body that animates without translating.
+	out["bms_flags"] = ent ? static_cast<int64_t>(ent->flags) : 0;
 	out["waypoint_id"] = ent ? static_cast<int>(ent->waypoint_id) : 0;
 	out["wp_number"] = ent ? ent->wp_number : 0;
 	out["health"] = ent ? ent->health : 0;
@@ -921,17 +926,101 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["state"] = state;
 	out["state_name"] = ai_state_name(state);
 	out["pending_state"] = e->brain.f[AiBrain::kPendState];
-	out["alert"] = e->brain.f[AiBrain::kAlert];
+	// The BRAIN kAlert register is NOT what the think tests. Every alert gate in
+	// infantry.cpp reads slot.bytes()[AiSlot::kAlertByte] (slot byte 136), which
+	// is also what the retail probe reads (AiSlot dword 34). Emitting the brain
+	// register here made our side read 0 in every sample and produced a false
+	// "we never raise alert" divergence -- the fourth false friend in this
+	// effort, and the first one on our own side.
+	out["alert"] = e->slot.bytes()[opennova::world::AiSlot::kAlertByte];
+	out["alert_brain"] = e->brain.f[AiBrain::kAlert];
 	out["wp_channel"] = e->brain.f[AiBrain::kWpChannel];
 	out["wp_node"] = e->brain.f[AiBrain::kWpNode];
 	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
+	// Rotor spin, so a live round can show the blades actually turning rather
+	// than only the code that says they should.
+	if (const opennova::world::Entity *ve = world_->registry.get(e->handle)) {
+		out["rotor_speed"] = ve->veh.part_spin.speed;
+		out["rotor_phase"] = ve->veh.part_spin.angle;
+		// The mover family, so a rotor check can tell "no helicopter here" from
+		// "the helicopter's blades are not turning".
+		const opennova::world::VehicleTraits *vt =
+				world_->vehicle_traits.get(ve->item_id);
+		out["veh_family"] = vt != nullptr ? int(vt->family) : -1;
+		// Flight-command chain, so a "the helicopter will not move" report can
+		// name WHICH link is dead: the pilot's packed MoveOrder, the staged
+		// cyclic pair, and the altitude target.
+		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT 6.12g):
+		// the integrated speed vs the command names which stage loses the pace.
+		out["vp"] = ve->pitch;
+		out["vr"] = ve->roll;
+		out["mspd"] = ve->veh.speed;
+		{
+			Array wc;
+			for (int wi = 0; wi < 4; ++wi) wc.append(ve->veh.wheel_comp[wi]);
+			out["wc"] = wc;
+		}
+		{
+			Array pd; // per-pad contact depths (diagnostic, §6.15 flap hunt)
+			for (int wi = 0; wi < 4; ++wi) pd.append(ve->veh.dbg_pad_depth[wi]);
+			out["pd"] = pd;
+		}
+		out["macc"] = ve->veh.speed_accel;
+		out["mgnd"] = ve->veh.grounded;
+		out["cmd_fwd"] = ve->veh.cmd_speed;
+		out["cmd_lat"] = ve->veh.cmd_lateral_speed;
+		out["alt_tgt"] = ve->veh.net_alt_target;
+		out["engine_on"] = ve->veh.net_engine_on;
+		int pilot_move = -1;
+		for (const opennova::world::Seat &st : ve->seats) {
+			if (!st.occupant.valid()) continue;
+			const opennova::world::Entity *oc = world_->registry.get(st.occupant);
+			if (oc != nullptr && oc->player_class != 0)
+				pilot_move = static_cast<int>(oc->net_move_input);
+		}
+		out["pilot_move"] = pilot_move;
+	}
 	out["infantry"] = e->inf.active;
 	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
 	out["adm_name"] = e->inf.active
 			? String::utf8(infantry_anim_.adm_name(e->inf.adm_id).c_str())
 			: String();
 	out["infantry_move_mode"] = e->inf.move_mode;
+	// The frozen-clump instrument: this tick's integrated root step vs the
+	// collision resolver's horizontal correction (16.16 fixed).
+	out["root_dx"] = e->inf.dbg_root_dx;
+	out["root_dy"] = e->inf.dbg_root_dy;
+	out["res_dx"] = e->inf.dbg_res_dx;
+	out["res_dy"] = e->inf.dbg_res_dy;
+	out["contact_item"] = e->inf.dbg_contact_item;
+	// AI DECISION STATE, named to match the retail probe (onhook ai_probe.c) so
+	// the two recordings join field-for-field. Retail reads these straight off
+	// the entity and its AiSlot; these are our equivalents:
+	//   parent  = the carrier we are mounted to   (retail: entity->parentEntity +364)
+	//   ground  = what we are standing on         (retail: entity->groundEntity +0x28)
+	//   s35/37/38 = has-route / command / node    (retail: AiSlot +140/+148/+152)
+	// Without them a retail-vs-OpenNova diff can see THAT a body is stuck but not
+	// what order it believes it is under, which is the question that matters.
+	out["parent"] = -1;
+	out["ground"] = -1;
+	if (const opennova::world::Entity *pe =
+				ent && ent->mounted ? world_->registry.get(ent->mount_target) : nullptr)
+		out["parent"] = static_cast<int>(pe->bms_id);
+	if (const opennova::world::Entity *ge =
+				ent ? world_->registry.get(ent->ground_target) : nullptr)
+		out["ground"] = static_cast<int>(ge->bms_id);
+	out["s35"] = e->slot.f[35];
+	out["s37"] = e->slot.f[37];
+	out["s38"] = e->slot.f[38];
+	out["fires_aimed"] = e->inf.dbg_fires_aimed;
+	out["fires_body"] = e->inf.dbg_fires_body;
+	// The fall-through instrument: the sim's own ground value under this body
+	// and whether it is airborne (a body whose ground sits far below it every
+	// tick falls forever).
+	out["ground_cache"] = e->inf.ground_cache;
+	out["ground_valid"] = e->inf.ground_cache_valid;
+	out["airborne"] = e->inf.airborne;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
 	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the

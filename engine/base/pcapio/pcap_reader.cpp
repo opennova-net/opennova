@@ -1,5 +1,7 @@
 #include <pcapio/pcap_reader.h>
 
+#include <pcapio/pcap_writer.h>
+
 #include <fstream>
 #include <functional>
 
@@ -106,15 +108,6 @@ void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
 	d.ts_nanos = ts_nanos;
 	d.payload.assign(pkt + payload_off, pkt + payload_off + payload_len);
 	emit(d);
-}
-
-uint16_t ipv4_checksum(const uint8_t *hdr, size_t len) {
-	uint32_t sum = 0;
-	for (size_t i = 0; i + 1 < len; i += 2)
-		sum += (uint32_t(hdr[i]) << 8) | hdr[i + 1];
-	if (len & 1) sum += uint32_t(hdr[len - 1]) << 8;
-	while (sum >> 16) sum = (sum & 0xFFFFu) + (sum >> 16);
-	return uint16_t(~sum & 0xFFFFu);
 }
 
 // pcapng if_tsresol byte -> nanoseconds-per-tick multiplier. MSB clear: 10^-byte
@@ -345,63 +338,17 @@ bool stream_pcap_udp_file(const std::string &path,
 }
 
 std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams) {
+	// Whole-session-in-memory form of the streaming writer, for the tiny inline
+	// captures tests craft. Both share one framing implementation
+	// (pcap_writer.cpp) so a change to the record layout cannot drift between
+	// what we write live and what tests assert against.
 	std::vector<uint8_t> buf;
-	auto put32 = [&](uint32_t v) {
-		buf.push_back(uint8_t(v));
-		buf.push_back(uint8_t(v >> 8));
-		buf.push_back(uint8_t(v >> 16));
-		buf.push_back(uint8_t(v >> 24));
-	};
-	auto put16 = [&](uint16_t v) {
-		buf.push_back(uint8_t(v));
-		buf.push_back(uint8_t(v >> 8));
-	};
-	auto put16_be = [&](uint16_t v) {
-		buf.push_back(uint8_t(v >> 8));
-		buf.push_back(uint8_t(v));
-	};
-
-	// Global header (little-endian), DLT_RAW so each record is a bare IPv4 frame.
-	put32(PCAP_MAGIC_LE);
-	put16(2); // version_major
-	put16(4); // version_minor
-	put32(0); // thiszone
-	put32(0); // sigfigs
-	put32(65535); // snaplen
-	put32(LINKTYPE_RAW);
-
+	append_pcap_global_header(buf);
+	constexpr uint32_t kLoopback = 0x7F000001u; // 127.0.0.1, both ends
 	for (const auto &d : dgrams) {
-		const size_t plen = d.payload.size();
-		if (plen > 0xFFFFu - 28u) continue;
-		const uint16_t total_len = uint16_t(20 + 8 + plen);
-
-		uint8_t ip[20]{};
-		ip[0] = 0x45; // ver 4, IHL 5
-		ip[1] = 0;    // tos
-		ip[2] = uint8_t(total_len >> 8);
-		ip[3] = uint8_t(total_len);
-		ip[4] = 0; ip[5] = 0; // id
-		ip[6] = 0x40; ip[7] = 0; // flags = DF
-		ip[8] = 64;   // ttl
-		ip[9] = 17;   // UDP
-		ip[10] = 0; ip[11] = 0; // checksum placeholder
-		ip[12] = 127; ip[13] = 0; ip[14] = 0; ip[15] = 1; // src 127.0.0.1
-		ip[16] = 127; ip[17] = 0; ip[18] = 0; ip[19] = 1; // dst 127.0.0.1
-		const uint16_t cksum = ipv4_checksum(ip, 20);
-		ip[10] = uint8_t(cksum >> 8);
-		ip[11] = uint8_t(cksum);
-
-		const uint32_t incl = uint32_t(total_len);
-		put32(uint32_t(d.ts_nanos / 1000000000ull));        // ts_sec
-		put32(uint32_t((d.ts_nanos % 1000000000ull) / 1000)); // ts_usec
-		put32(incl); // incl_len
-		put32(incl); // orig_len
-		buf.insert(buf.end(), ip, ip + 20);
-		put16_be(uint16_t(d.srcport));
-		put16_be(uint16_t(d.dstport));
-		put16_be(uint16_t(8 + plen)); // udp length
-		put16_be(0);                  // udp checksum (0 = legal over IPv4)
-		buf.insert(buf.end(), d.payload.begin(), d.payload.end());
+		append_pcap_udp_record(buf, kLoopback, uint16_t(d.srcport), kLoopback,
+				uint16_t(d.dstport), d.payload.data(), d.payload.size(),
+				d.ts_nanos);
 	}
 	return buf;
 }

@@ -699,6 +699,11 @@ struct ProjectileHit {
 // ----------------------------------------------------------------------------
 class CollisionWorld {
 public:
+    // Debug-card tap: the last resolve_entity's strongest-contact source (the
+    // candidate whose model produced push-out force) — the frozen-clump
+    // instrument. Reset at each resolve; single-threaded like the resolver.
+    EntityHandle dbg_last_contact{};
+    int32_t dbg_last_contact_item = 0;
     // Opt-in, per-tick projectile-trace profile: the probe/F3 attribution
     // surface for sustained-fire cost. Times are microseconds; *_survivors
     // count geometric broad-phase passes and *_faces count CFAC face-set sizes
@@ -965,6 +970,11 @@ public:
     // anchor snap, the per-tick alignment chase, and the exit push / pitch
     // restore. Without it only the raw latch/bookkeeping runs (replica rows,
     // harness callers).
+    // eye_offset (optional, xyz 16.16) is the entity's CameraOffset: the second
+    // capsule test point is pos + CameraOffset [orig: @0x4b2ee0-0x4b2ef8]. When
+    // absent the resolver derives the org1 producer's value from the capsule,
+    // max(top - bottom, 0x9000) with lean at rest [orig: Entity_UpdateInfantryAI
+    // @0x4b9910, kong 155492-155521] -- harness rows and the replica seam.
     int32_t resolve_entity(World &world, EntityHandle source, ResolveState &state,
                            int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                            int32_t capsule_bottom, int32_t capsule_top,
@@ -972,7 +982,8 @@ public:
                            bool is_authority, uint32_t tick, int32_t anim_state_id,
                            uint32_t anim_state_flags, int16_t &health,
                            EntityHandle *out_ground = nullptr,
-                           const LadderResolveIO *ladder_io = nullptr);
+                           const LadderResolveIO *ladder_io = nullptr,
+                           const int32_t *eye_offset = nullptr);
 
     // The REPLICA seam (net-re §5.38e, D-NET-196): the same resolver for a
     // decoded remote row that has NO world entity — retail runs remote

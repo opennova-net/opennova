@@ -6,6 +6,7 @@
 #include "world/world.h"
 
 #include <algorithm>
+#include <limits>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -70,35 +71,6 @@ void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
     entity.seats = spec->seats;
     for (Seat &seat : entity.seats) {
         seat.occupant = EntityHandle{};
-    }
-}
-
-bool within_mount_radius(const Entity &occupant, const Entity &target, float radius) {
-    const float dx = occupant.position.x - target.position.x;
-    const float dy = occupant.position.y - target.position.y;
-    const float dz = occupant.position.z - target.position.z;
-    return dx * dx + dy * dy + dz * dz <= radius * radius;
-}
-
-struct PendingCommandMount {
-    uint16_t occupant_ssn = 0;
-    uint16_t target_ssn = 0;
-    uint8_t command_id = 0;
-    EntityHandle occupant_handle;
-};
-
-void apply_command_mounts(const std::vector<PendingCommandMount> &pending, World &world,
-                          AiSystem &ai, const PromoteOptions &opts) {
-    for (const PendingCommandMount &p : pending) {
-        Entity *occupant = world.registry.get(p.occupant_handle);
-        Entity *target = world.registry.get(world.registry.find_by_net_id(p.target_ssn));
-        if (occupant == nullptr || target == nullptr) continue;
-        if (!within_mount_radius(*occupant, *target, opts.command_mount_radius)) continue;
-        if (!world.commands.mount_boarding_command(p.occupant_ssn, p.target_ssn, p.command_id))
-            continue;
-        if (AiEntity *ae = ai.for_handle(p.occupant_handle)) {
-            ai.pose_if_mounted(*ae, world);
-        }
     }
 }
 
@@ -204,8 +176,33 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // Profile (movement-relevant subset) from the mission AI fields.
     ae.profile.flags96 = 0;   // not combat-capable / can-fire here (the weapon phase sets these)
     ae.profile.flags100 = 0;  // no use-fallback / ignore-stealth
-    ae.profile.range_primary = static_cast<int16_t>(e.max_engagement_distance >> 16);
-    ae.profile.range_secondary = static_cast<int16_t>(e.min_engagement_distance >> 16);
+    // Engage ranges are WORLD UNITS on both sides of the compare, so the BMS value
+    // goes in UNSCALED. The BMS fields are plain units, not 16.16 -- the SLOT seeds
+    // further down shift the SAME two fields UP to 16.16
+    // [orig: slot+60 max / +64 min engagement (<<16); see s.f[15]/s.f[16] below], and
+    // AiProfile::range_primary/secondary are documented "+78/+70 max engage range
+    // (world units, signed i16)". The consumer agrees: ai_score_target gates
+    // `distance > range` against dist3d_units, which is the 16.16 distance shifted
+    // DOWN to units [orig: AI_FindBestTargetB @0x4671e8].
+    //
+    // This previously shifted DOWN (>> 16), uncited. Every 00TRg soldier authors
+    // 10..500 here, so it produced 0 for all of them -- and a 0 range makes
+    // ai_score_target reject EVERY candidate at any nonzero distance (0 is not
+    // "unlimited"), so those AI could never acquire a target, never alert, and never
+    // leave their idle pose.
+    //
+    // UNWITNESSED, declared: whether the BMS record is the right SOURCE for these two
+    // profile slots at all. +78/+70 live in the AI PROFILE struct, whose retail source
+    // is the .aip / item def rather than the mission record; seeding them from the BMS
+    // entity is a pre-existing adaptation kept as-is, with only the SCALE corrected.
+    ae.profile.range_primary =
+            static_cast<int16_t>(std::clamp<int32_t>(e.max_engagement_distance,
+                                    std::numeric_limits<int16_t>::min(),
+                                    std::numeric_limits<int16_t>::max()));
+    ae.profile.range_secondary =
+            static_cast<int16_t>(std::clamp<int32_t>(e.min_engagement_distance,
+                                    std::numeric_limits<int16_t>::min(),
+                                    std::numeric_limits<int16_t>::max()));
 
     // Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
     // The .aip profile seeds them when the embedder supplied the entity's profile
@@ -536,7 +533,11 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // EntityPool_FindByNetId @0x4f0a20 matches its low 16 bits over pools 0..3] — so the
     // seed copies e.id verbatim (no load-time assignment). Spawn order mirrors the file
     // order in Mission_LoadBMSFile @0x40f4e0: items -> buildings -> markers -> organics.
-    std::vector<PendingCommandMount> command_mounts;
+    // Command 123/124/125 boarders spawn ON FOOT and walk in through the infantry
+    // think's board leg (infantry_board.cpp), exactly like retail — spawn stores
+    // only the order (slot+148/+152 via init_infantry).
+    // [orig: Entity_SpawnFromBMSRecord @0x40e9f0 stores the order; the walk/attach
+    //  is Entity_UpdateInfantryAI @0x4b9910]
     // A pool-1 item gets an AI brain when its type authors a CONTROL seat (ctrlx/drvrx
     // userpoints = a drivable vehicle) — the stand-in for the def AIData attrib gate
     // until the item-def AI classes are plumbed to promote (D-AI-11). A pure-gunner
@@ -592,15 +593,6 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
                 ae.relmat_id = seed.net_id; // provisional relation-matrix id (net layer = later)
                 ae.health = 100;
                 ++r.brains;
-            }
-            if (kind == EntityKind::Organic && e.waypoint_id >= 123 && e.waypoint_id <= 125 &&
-                e.wp_number > 0 && e.wp_number <= 0xFFFF) {
-                command_mounts.push_back(PendingCommandMount{
-                    static_cast<uint16_t>(e.id),
-                    static_cast<uint16_t>(e.wp_number),
-                    static_cast<uint8_t>(e.waypoint_id),
-                    h,
-                });
             }
         }
     };
@@ -694,7 +686,6 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);
     promote_vec(m.markers, EntityKind::Marker, /*ai_capable=*/false);
     promote_vec(m.organics, EntityKind::Organic, /*ai_capable=*/true);
-    apply_command_mounts(command_mounts, world, ai, opts);
 
     return r;
 }

@@ -115,7 +115,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
                                        uint32_t anim_state_flags, int16_t &health,
                                        EntityHandle *out_ground,
-                                       const LadderResolveIO *ladder_io) {
+                                       const LadderResolveIO *ladder_io,
+                                          const int32_t *eye_offset) {
     // [orig: movement collision resolver @ 0x4b2bd0]
     // heading/body_pitch feed the on-ladder 2-point capsule's body-axis sincos
     // chain — which retail multiplies by a constant-zero length (see the capsule
@@ -209,9 +210,16 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 
     // Capsule test points. [orig: the not-on-ladder branch @ 0x4b2edb-0x4b2f2a —
     // 3 points: head (z + collisionRadius - halfRadius + 0.0625), eye (pos +
-    // CameraOffset -> our head stand-in), feet; radii {collisionRadius, 0.3125,
-    // outerRadius}. CameraOffset is not modeled: the eye point reuses the head
-    // column (D-COL-4).]
+    // CameraOffset, all three axes @ 0x4b2ee0-0x4b2ef8), feet; radii
+    // {collisionRadius, 0.3125, outerRadius}.] The eye is the entity's +0x74
+    // CameraOffset, produced by the think before it calls the resolver (org1
+    // @0x4b9910 kong 155519-155521, resolver calls at 155739/155831). With it
+    // missing the point sat at the head column, ~0.9 u lower than retail's, and
+    // a body walking along a truck bed into the cab met the cab's BACK face as
+    // the least-penetration plane (pushed back, pinned on the bed for good)
+    // where retail's higher point meets the TOP face and the body rides up
+    // onto the roof and off the front -- the 00TRg wave-3 convoy pin, probe
+    // diff 2026-08-23 (AI-PARITY-CONCEPT 6.11). D-COL-4.
     const int32_t half_radius = capsule_bottom >> 4;
     int32_t collision_radius =
         (capsule_bottom >> 4) + abs32(capsule_top - capsule_bottom) / 2;
@@ -244,8 +252,19 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         radii[2] = 25088;
         num_points = 2;
     } else {
+        // The org1 CameraOffset when the caller carries none: h = max(top -
+        // bottom, 0x9000), Z = h*cos(lean), lateral = (3*(h*sin(lean))>>2)
+        // rotated by Yaw -- lean at rest here, so X = Y = 0.
+        // [orig: @0x4b9910 kong 155492-155521]
+        int32_t eye[3] = {0, 0, capsule_top - capsule_bottom};
+        if (eye[2] < 0x9000) eye[2] = 0x9000;
+        if (eye_offset != nullptr) {
+            eye[0] = eye_offset[0];
+            eye[1] = eye_offset[1];
+            eye[2] = eye_offset[2];
+        }
         points[0] = {pos[0], pos[1], pos[2] + head_lift, 0};
-        points[1] = {pos[0], pos[1], pos[2] + head_lift, 0}; // eye stand-in (D-COL-4)
+        points[1] = {pos[0] + eye[0], pos[1] + eye[1], pos[2] + eye[2], 0}; // [orig: @ 0x4b2ee0-0x4b2ef8]
         points[2] = {pos[0], pos[1], pos[2], 0};
         radii[0] = collision_radius;
         radii[1] = 20480;
@@ -290,6 +309,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
     auto it = candidates_.find(source.packed);
+    dbg_last_contact = EntityHandle{};
+    dbg_last_contact_item = 0;
     if (it != candidates_.end()) {
         const CandidateSlice slice = it->second;
         CollisionTargetView view;
@@ -335,6 +356,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 // @0x4B3002..0x4B30AF/@0x4B3603..0x4B36B9]
                 if (contact && !powerup && !move_callback &&
                     !suppress_model_force) {
+                    dbg_last_contact = ch; // debug-card tap
+                    if (const Entity *ce = world.registry.get(ch))
+                        dbg_last_contact_item = ce->item_id;
                     int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
                     if (f[2] < 0) {
                         if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {

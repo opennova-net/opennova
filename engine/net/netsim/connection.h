@@ -88,6 +88,17 @@ struct Connection {
 	std::array<uint8_t, 512> s2c_entity_heading{};
 	std::array<uint8_t, 512> s2c_entity_speed{};
 
+	// The client's 4 requested-interest pairs from its C2S 0x0C extended uplink
+	// (handle u16, score u16 zero-extended). The 0x0A priority build walks them:
+	// a row named by a live slot takes that score as a FLOOR on its computed
+	// priority and passes the 1124-tile distance gate regardless of range — the
+	// client's way of holding its ridden vehicle / watched target in its stream.
+	// [orig: the 0x0C read-apply stores at playerState+94346 (handles) /
+	//  +94356 (scores) @0x4c09c0; the walk + floor in
+	//  Server_BuildEntityPriorityList @0x50e590]
+	std::array<uint16_t, 4> tracked_handle{{0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF}};
+	std::array<int32_t, 4> tracked_score{{0, 0, 0, 0}};
+
 	// Per-connection round-event watermark: the newest world.rounds sequence already swept
 	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after
 	// each Server_BuildRoundEventListForPlayer @0x4ffee0 sweep; its non-zero gate skips the walk

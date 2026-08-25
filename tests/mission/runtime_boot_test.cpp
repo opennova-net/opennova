@@ -273,8 +273,54 @@ bool run_aip_parse() {
 	std::vector<uint8_t> ob(organic.begin(), organic.end());
 	const opennova::aip::Profile org =
 			opennova::aip::parse_profile(ob.data(), ob.size());
-	return expect(org.type == 3 && org.patrol_speed == -1,
-			"aip: ORGANIC keys ignored");
+	if (!expect(org.type == 3 && org.patrol_speed == -1,
+			"aip: ORGANIC keys ignored"))
+		return false;
+
+	// The HELO (type 1) flight set: flight keys land in the helo_* rows
+	// (+200..+244), the SHARED keys (view/radar) still apply, and the GROUND
+	// rows stay untouched. [orig: the type-1 branch of AIProfile_ParseProperty]
+	const std::string helo =
+			"type HELO\n"
+			"patrol_speed 30\n"
+			"patrol_altitude 40\n"
+			"patrol_climb 8\n"
+			"combat_speed 45\n"
+			"combat_altitude 60\n"
+			"combat_climb 12\n"
+			"turn_rate 45\n"
+			"accel_time 3\n"
+			"use_waypoint_z 1\n"
+			"min_agl 15\n"
+			"min_speed 10\n"
+			"view_dist 400\n";
+	std::vector<uint8_t> hb(helo.begin(), helo.end());
+	const opennova::aip::Profile hp =
+			opennova::aip::parse_profile(hb.data(), hb.size());
+	if (!expect(hp.type == 1, "aip: type HELO")) return false;
+	if (!expect(hp.helo_patrol_speed == 30 && hp.helo_combat_speed == 45,
+			"aip: helo speeds land in the helo rows"))
+		return false;
+	if (!expect(hp.patrol_speed == -1 && hp.combat_speed == -1,
+			"aip: the GROUND speed rows stay untouched for a helo"))
+		return false;
+	if (!expect(hp.helo_patrol_altitude == (40 << 16) &&
+					hp.helo_combat_altitude == (60 << 16),
+			"aip: altitudes atol<<16"))
+		return false;
+	if (!expect(hp.helo_patrol_climb == 8 && hp.helo_combat_climb == 12 &&
+					hp.min_speed == 10,
+			"aip: climb/min_speed raw"))
+		return false;
+	if (!expect(hp.turn_rate_bam_tick == 11930464 * 45 / 62,
+			"aip: turn_rate BAM/tick formula"))
+		return false;
+	if (!expect(hp.accel_ticks == 62 * 3, "aip: accel_time 62x")) return false;
+	if (!expect(hp.use_waypoint_z == 1 && hp.min_agl == (15 << 16),
+			"aip: use_waypoint_z + min_agl"))
+		return false;
+	return expect(hp.view_dist == (400 << 16),
+			"aip: shared keys apply to HELO profiles too");
 }
 
 // The mission-profile resolve: entity-walk order (markers first), first

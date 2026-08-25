@@ -29,8 +29,11 @@ static bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team, uint8_
     e.team = team;
     e.waypoint_id = wp_id;
     e.wp_number = wp_num;
-    e.min_engagement_distance = 50 << 16;
-    e.max_engagement_distance = 500 << 16;
+    // PLAIN WORLD UNITS, not 16.16 -- shipped missions author small integers here
+    // (00TRg's soldiers carry 10..500). The slot seed shifts these UP to 16.16
+    // [orig: slot+60/+64 engagement (<<16)], and the AI profile takes them unscaled.
+    e.min_engagement_distance = 50;
+    e.max_engagement_distance = 500;
     return e;
 }
 
@@ -496,6 +499,15 @@ int main() {
 
     // organic 0 is in GROUND_FOLLOWWP with its route + spawn transform.
     AiEntity *e0 = ai.at(0);
+    // Engage-range UNITS, both conventions pinned together so they cannot drift apart
+    // again: the AI PROFILE takes the BMS value unscaled (world units, i16), while the
+    // SLOT copy is the same value shifted to 16.16. A previous uncited `>> 16` on the
+    // profile side zeroed both ranges for every shipped mission, and ai_score_target
+    // rejects every candidate when the range is 0.
+    CHECK(e0->profile.range_primary == 500);
+    CHECK(e0->profile.range_secondary == 50);
+    CHECK(e0->slot.f[15] == (500 << 16));
+    CHECK(e0->slot.f[16] == (50 << 16));
     CHECK(e0 != nullptr);
     CHECK(e0->brain.f[AiBrain::kCurState] == 16); // GROUND_FOLLOWWP (patrol_on_spawn)
     CHECK(e0->brain.f[AiBrain::kWpType] == 1);
@@ -653,11 +665,25 @@ int main() {
     // IDA proof: Entity_SpawnFromBMSRecord @0x40F02F copies record byte 0x4F to slot+148
     // and record dword 0x30 to slot+152; Entity_UpdateInfantryAI @0x4B9910 resolves
     // slot+152 against entity+124 and then uses Entity_FindBestSeatSlot @0x4351F0.
+    // Boarders spawn ON FOOT and attach through the infantry think's board leg
+    // (infantry_board.cpp) — there is no load-time mount shortcut, matching retail.
+    // Drive the think for a few 16-tick boundaries to let the order land.
+    auto run_ai = [](AiSystem &a, World &aw, int n) {
+        TickContext c;
+        c.world = &aw;
+        c.is_authority = true;
+        for (int t = 0; t < n; ++t) {
+            c.logic_tick = static_cast<uint32_t>(t);
+            a.tick(aw, c);
+        }
+    };
     {
         bms::File cm{};
         cm.items.push_back(item(/*type_id=*/1294, 10 << 16, 0, 0));
         cm.items[0].id = 11;
-        cm.organics.push_back(organic(11 << 16, 0, 0, 1, /*wp_id=*/125, /*wp_num=*/11));
+        // Authored AT the seat point (seat_local {1,2,3} off the vehicle at x=10):
+        // arrival is immediate, the first think boards.
+        cm.organics.push_back(organic(11 << 16, 2 << 16, 3 << 16, 1, /*wp_id=*/125, /*wp_num=*/11));
         cm.organics[0].id = 1;
 
         mission::PromoteOptions co{};
@@ -679,7 +705,9 @@ int main() {
         Entity *occ = cw.registry.get(oh);
         CHECK(veh != nullptr);
         CHECK(occ != nullptr);
-        CHECK(veh->seats.size() == 1);
+        CHECK(occ != nullptr && !occ->mounted); // promote stores the ORDER only
+        run_ai(cai, cw, 46);
+        CHECK(veh != nullptr && veh->seats.size() == 1);
         CHECK(occ->mounted);
         CHECK(occ->mount_target == vh);
         CHECK(veh->seats[0].occupant == oh);
@@ -714,10 +742,13 @@ int main() {
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(veh != nullptr);
         CHECK(occ != nullptr);
-        CHECK(!occ->mounted);
-        CHECK(!veh->seats.empty());
-        CHECK(!veh->seats[0].occupant.valid());
-        CHECK(cai.at(0)->pos[0] == 0);
+        run_ai(cai, cw, 46); // 100u away, no gait clips: the order engages, no attach
+        CHECK(occ != nullptr && !occ->mounted);
+        CHECK(veh != nullptr && !veh->seats.empty());
+        CHECK(veh != nullptr && !veh->seats[0].occupant.valid());
+        CHECK(cai.at(0)->inf.move_mode == 3);       // the board walk is ORDERED
+        CHECK(cai.at(0)->inf.at_final_oneshot);     // final-approach gait flag
+        CHECK(cai.at(0)->pos[0] == 0);              // but no clips -> no displacement
     }
 
     {
@@ -750,9 +781,10 @@ int main() {
         Entity *o1 = cw.registry.get(cw.registry.find_by_net_id(2));
         CHECK(veh != nullptr);
         CHECK(o0 != nullptr && o1 != nullptr);
-        CHECK(veh->seats.size() == 2);
-        CHECK(o0->mounted);
-        CHECK(o1->mounted);
+        run_ai(cai, cw, 46);
+        CHECK(veh != nullptr && veh->seats.size() == 2);
+        CHECK(o0 != nullptr && o0->mounted);
+        CHECK(o1 != nullptr && o1->mounted);
         CHECK(veh->seats[0].occupant.valid());
         CHECK(veh->seats[1].occupant.valid());
         CHECK(veh->seats[0].occupant != veh->seats[1].occupant);
@@ -763,7 +795,9 @@ int main() {
         bms::File cm{};
         cm.items.push_back(item(/*type_id=*/1294, 10 << 16, 0, 0));
         cm.items[0].id = 11;
-        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/123, /*wp_num=*/11));
+        // Authored at the PASSENGER seat point (x=14): 123 must ignore the nearer
+        // driver seat and take sitex.
+        cm.organics.push_back(organic(14 << 16, 0, 0, 1, /*wp_id=*/123, /*wp_num=*/11));
         cm.organics[0].id = 1;
 
         mission::PromoteOptions co{};
@@ -782,19 +816,22 @@ int main() {
         World cw;
         AiSystem cai;
         mission::promote_mission(cm, cw, cai, co);
+        run_ai(cai, cw, 46);
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr);
-        CHECK(occ->mounted);
-        CHECK(occ->mount_type == SeatType::Passenger);
-        CHECK(occ->position.x == 14.f);
+        CHECK(occ != nullptr && occ->mounted);
+        CHECK(occ != nullptr && occ->mount_type == SeatType::Passenger);
+        CHECK(occ != nullptr && occ->position.x == 14.f);
     }
 
     {
         bms::File cm{};
         cm.items.push_back(item(/*type_id=*/1294, 10 << 16, 0, 0));
         cm.items[0].id = 11;
-        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/124, /*wp_num=*/11));
+        // Authored at the DRIVER seat point (x=15): 124 rejects ctrlx but keeps
+        // drvrx eligible.
+        cm.organics.push_back(organic(15 << 16, 0, 0, 1, /*wp_id=*/124, /*wp_num=*/11));
         cm.organics[0].id = 1;
 
         mission::PromoteOptions co{};
@@ -813,12 +850,13 @@ int main() {
         World cw;
         AiSystem cai;
         mission::promote_mission(cm, cw, cai, co);
+        run_ai(cai, cw, 46);
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr);
-        CHECK(occ->mounted);
-        CHECK(occ->mount_type == SeatType::Driver);
-        CHECK(occ->position.x == 15.f);
+        CHECK(occ != nullptr && occ->mounted);
+        CHECK(occ != nullptr && occ->mount_type == SeatType::Driver);
+        CHECK(occ != nullptr && occ->position.x == 15.f);
     }
 
     {
@@ -844,12 +882,13 @@ int main() {
         World cw;
         AiSystem cai;
         mission::promote_mission(cm, cw, cai, co);
+        run_ai(cai, cw, 46); // driver seat point 1u away: inside the 2u arrival ring
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr);
-        CHECK(occ->mounted);
-        CHECK(occ->mount_type == SeatType::Driver);
-        CHECK(occ->position.x == 11.f);
+        CHECK(occ != nullptr && occ->mounted);
+        CHECK(occ != nullptr && occ->mount_type == SeatType::Driver);
+        CHECK(occ != nullptr && occ->position.x == 11.f);
     }
 
     // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
@@ -914,6 +953,103 @@ int main() {
         CHECK(held);                         // honored marker 1's movetimer hold
         CHECK(!ai.relmat_calls.empty());     // arrival recorded the relation-matrix marks
         ai.root_motion = nullptr;
+    }
+
+    // ---- end-to-end: a command-123 boarder WALKS to the seat point and attaches ----
+    // The whole chain on anim root motion: promote stores the order, the think
+    // resolves the SSN and orders the walk, the motor covers ~20u, arrival runs
+    // the filtered attach. [orig: Entity_UpdateInfantryAI @0x4b9910 board leg ->
+    // Entity_FindBestSeatSlot @0x4351f0 -> Entity_RequestVehicleAttach @0x4364a0]
+    {
+        bms::File cm{};
+        cm.items.push_back(item(/*type_id=*/1294, 30 << 16, 0, 0));
+        cm.items[0].id = 11;
+        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/123, /*wp_num=*/11));
+        cm.organics[0].id = 1;
+
+        mission::PromoteOptions co{};
+        mission::ItemSeatSpec seats{};
+        seats.type_id = 1294;
+        Seat s{};
+        s.type = SeatType::Passenger;
+        s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        seats.seats.push_back(s);
+        co.item_seat_specs.push_back(seats);
+
+        World cw;
+        AiSystem cai;
+        mission::promote_mission(cm, cw, cai, co);
+        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+        CHECK(occ != nullptr && !occ->mounted); // spawns ON FOOT — no load-time shortcut
+
+        TestSource src(0x4000); // 0.25u/tick forward
+        cai.root_motion = &src;
+        TickContext c;
+        c.world = &cw;
+        c.is_authority = true;
+        bool walked = false;
+        for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
+            c.logic_tick = static_cast<uint32_t>(t);
+            cai.tick(cw, c);
+            if (cai.at(0)->inf.anim_state == anim_state::kWalkForward) walked = true;
+        }
+        CHECK(walked);                                    // covered the ground on foot
+        CHECK(occ != nullptr && occ->mounted);            // arrived and attached
+        CHECK(occ != nullptr && occ->mount_type == SeatType::Passenger);
+        CHECK(occ != nullptr && occ->position.x == 32.f); // posed at the seat point
+        cai.root_motion = nullptr;
+    }
+
+    // ---- the blocked latch: a hull-stalled boarder still attaches ----
+    // Interior seat points (helo cabins) leave the walker pressed against the
+    // hull outside the 2u seat ring. Retail arms pad_368[1] from the collision
+    // push and widens the ring to bound+1u; our latch arms on a stalled think.
+    // Model the hull stall by cutting root motion once the walker is inside the
+    // widened ring but outside the seat ring. [orig: @0x4b9910 push block +
+    // the board leg's `pad_368[1] ? *target + 0x10000 : 0x20000` ring pick]
+    {
+        bms::File cm{};
+        cm.items.push_back(item(/*type_id=*/1294, 30 << 16, 0, 0));
+        cm.items[0].id = 11;
+        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/125, /*wp_num=*/11));
+        cm.organics[0].id = 1;
+
+        mission::PromoteOptions co{};
+        mission::ItemSeatSpec seats{};
+        seats.type_id = 1294;
+        Seat s{};
+        s.type = SeatType::Passenger;
+        s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        seats.seats.push_back(s);
+        co.item_seat_specs.push_back(seats);
+
+        World cw;
+        AiSystem cai;
+        mission::promote_mission(cm, cw, cai, co);
+        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+        CHECK(occ != nullptr && !occ->mounted);
+
+        TestSource walk_src(0x4000);
+        TestSource hull_src(0);     // "pressed against the hull": clips, no motion
+        cai.root_motion = &walk_src;
+        TickContext c;
+        c.world = &cw;
+        c.is_authority = true;
+        bool cut = false;
+        for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
+            // Cut displacement once inside the widened 4u ring but still outside
+            // the 2u seat ring (seat at x=32 -> cut past x=29).
+            if (!cut && cai.at(0)->pos[0] > (29 << 16)) {
+                cai.root_motion = &hull_src;
+                cut = true;
+            }
+            c.logic_tick = static_cast<uint32_t>(t);
+            cai.tick(cw, c);
+        }
+        CHECK(cut);                              // the stall actually happened
+        CHECK(occ != nullptr && occ->mounted);   // the latch widened the ring and boarded
+        CHECK(occ != nullptr && occ->mount_type == SeatType::Passenger);
+        cai.root_motion = nullptr;
     }
 
     if (failures == 0) std::printf("promote: all tests passed\n");

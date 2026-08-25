@@ -535,6 +535,11 @@ typedef struct DefItemDef {
     char husk[128];
     int hp;              /* ItemDef+0x17C signed i16 healthMax, sign-extended in this ABI */
     char sound_profile[128];
+    /* The AI profile name. Authoring it also RAISES the AIData attrib bit --
+       retail ORs 0x100000 in the same parse arm, so an item with default_aip is
+       an AI item whether or not it lists AIData [orig: ItemDef_ParseProperty
+       @0x49eb00 -- the strcpy into itemDef+0x8B8 then `attrib |= 0x100000`]. */
+    char default_aip[128];
     /* The female-variant profile name; tracks sound_profile until authored
        explicitly (both resolve to "default" when empty) [orig:
        "sound_profileFemale" @ 0x49fb76 -> def+0x26C; the runtime selects it
@@ -587,6 +592,12 @@ typedef struct DefItemDef {
        bow-lift / porpoise machine; lean/lean_velocity = the planing roll-lean
        machine @0x45AEA0; flip = the ground movers' tip threshold (*0.01). */
     int mass;
+    /* Raw authored ints retail keeps verbatim [orig: ItemDef_ParsePhysicsProperty
+       @0x49d870 -- `itemDefs[].weathervane = atol(v)` / `.minAI = atol(v)`].
+       weathervane is the tail-alignment strength; minAI is the occupant count
+       retail compares against Entity_CountMountedEntities. */
+    int weathervane;
+    int min_ai;
     int lean;
     int lean_velocity;
     int pitch;

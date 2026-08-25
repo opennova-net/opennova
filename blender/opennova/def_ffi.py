@@ -166,6 +166,9 @@ class DefItemDef(ctypes.Structure):
         ("husk", ctypes.c_char * 128),
         ("hp", ctypes.c_int),
         ("sound_profile", ctypes.c_char * 128),
+        # Authoring this also raises the AIData attrib bit [orig:
+        # ItemDef_ParseProperty @0x49eb00].
+        ("default_aip", ctypes.c_char * 128),
         ("sound_profile_female", ctypes.c_char * 128),
         ("soundloops", (ctypes.c_char * 128) * 7),
         ("nightshot", ctypes.c_char * 128),
@@ -200,6 +203,10 @@ class DefItemDef(ctypes.Structure):
         # Platform-solve tuning block (mirror def.h: mass + lean/lean_velocity/
         # pitch/pitch_velocity/bob/flip, raw tokens).
         ("mass", ctypes.c_int),
+        # Raw authored ints retail keeps verbatim [orig:
+        # ItemDef_ParsePhysicsProperty @0x49d870].
+        ("weathervane", ctypes.c_int),
+        ("min_ai", ctypes.c_int),
         ("lean", ctypes.c_int),
         ("lean_velocity", ctypes.c_int),
         ("pitch", ctypes.c_int),

@@ -205,6 +205,14 @@ add_test(NAME menu_lwf COMMAND menu_lwf_test)
 
 # DBF dialog-bank tests: byte-exact round-trip + dlg-id -> def-id mapping over a
 # real JO fixture (fixtures/dbf/00TRg.DBF).
+# score — score.ini scoring config: parse, canonical write, and the witnessed
+# row-index ladder. Committed fixture is AUTHORED (fixtures/score/score_sample.ini),
+# not retail data; OPENNOVA_SCORE_INI adds a skip-and-pass retail sweep.
+add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
+target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME score_roundtrip COMMAND score_roundtrip_test)
+
 add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)
 target_link_libraries(dbf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -905,6 +913,26 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
+add_executable(menu_table_sort_test menu/menu_table_sort_test.cpp)
+target_link_libraries(menu_table_sort_test PRIVATE opennova_runtime)
+target_include_directories(menu_table_sort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_table_sort COMMAND menu_table_sort_test)
+
+add_executable(stat_row_format_test hud/stat_row_format_test.cpp)
+target_link_libraries(stat_row_format_test PRIVATE opennova_runtime)
+target_include_directories(stat_row_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME stat_row_format COMMAND stat_row_format_test)
+
+add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
+target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
+target_include_directories(group_render_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME group_render_gate COMMAND group_render_gate_test)
+
+add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
+target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)
+target_include_directories(vehicle_collision_damage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME vehicle_collision_damage COMMAND vehicle_collision_damage_test)
+
 # The menu backdrop movie policy (engine/runtime/menu/menu_video): the
 # witnessed three-slot table, the STARTUP/strips draw gate, and the
 # expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
@@ -1250,6 +1278,31 @@ target_link_libraries(collision_test PRIVATE opennova_runtime)
 target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
 add_test(NAME collision COMMAND collision_test)
+
+# Asset-gated (OPENNOVA_JO_DIR): the 05TRcoop bunker walk-in repro — the real
+# Cbunker2 collision at the mission pose, a capsule walking the authored
+# route into it. Diagnostic/report-only while the frozen-clump divergence is
+# open; skip-as-pass without a JO install.
+# Asset-gated (OPENNOVA_JO_DIR): mission-script report — which authored BMS
+# events fire in a headless run and what the unfired ones would have done.
+# Diagnostic; never fails on unfired events.
+add_executable(mission_script_report_test mission/mission_script_report_test.cpp)
+target_link_libraries(mission_script_report_test PRIVATE opennova_runtime)
+target_include_directories(mission_script_report_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_script_report_test PRIVATE cxx_std_17)
+add_test(NAME mission_script_report COMMAND mission_script_report_test)
+
+add_executable(bunker_walkin_test world/bunker_walkin_test.cpp)
+target_link_libraries(bunker_walkin_test PRIVATE opennova_runtime)
+target_include_directories(bunker_walkin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(bunker_walkin_test PRIVATE cxx_std_17)
+add_test(NAME bunker_walkin COMMAND bunker_walkin_test)
+
+add_executable(truck_dismount_test world/truck_dismount_test.cpp)
+target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
+target_include_directories(truck_dismount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(truck_dismount_test PRIVATE cxx_std_17)
+add_test(NAME truck_dismount COMMAND truck_dismount_test)
 
 # Authoritative projectile consequences through RoundSim's CollisionWorld seam:
 # pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
@@ -1922,6 +1975,11 @@ target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common opennova_b
 target_include_directories(nw_pcap_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pcap_stream COMMAND nw_pcap_stream_test)
 
+add_executable(nw_pcap_writer_test novaworld/nw_pcap_writer_test.cpp)
+target_link_libraries(nw_pcap_writer_test PRIVATE opennova_app_common opennova_base)
+target_include_directories(nw_pcap_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_pcap_writer COMMAND nw_pcap_writer_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.
@@ -2257,6 +2315,15 @@ add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
 # bluekills/greenkills source, the humans count, the SP auto-lose condition
 # [orig: Server_CheckWinConditions @0x51ad40], the round-end latch + host effect
 # [orig: Server_ProcessRoundEnd @0x5164f0], and the post-round respawn hold.
+add_executable(coop_convoy_test mission/coop_convoy_test.cpp)
+target_link_libraries(coop_convoy_test PRIVATE opennova_runtime opennova_formats)
+add_test(NAME mission_coop_convoy COMMAND coop_convoy_test)
+
+add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
+target_link_libraries(ai_path_conformance_test PRIVATE opennova_runtime opennova_formats)
+add_test(NAME mission_ai_path_conformance COMMAND ai_path_conformance_test)
+
+
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
 target_link_libraries(npruntime_round_end_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_round_end COMMAND npruntime_round_end_test)

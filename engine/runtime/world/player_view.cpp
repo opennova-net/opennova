@@ -481,6 +481,7 @@ void player_view_compose_camera(const PlayerViewState &v,
                                 float aim_yaw_deg, float aim_pitch_deg,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
+                                bool carrier_view, float carrier_roll_deg,
                                 PlayerCameraPose &out) {
     // Mode 4: the death lerp camera — the composed FROM/TO poses against the
     // view tick, nothing of the FP/TP legs below [orig: the g_camera_mode == 4
@@ -543,6 +544,26 @@ void player_view_compose_camera(const PlayerViewState &v,
                     anchor[i] + (fwd[i] + left[i] + up[i]) * kTpPivotNudge;
             out.eye[i] = pivot - fwd[i] * back;
         }
+        return;
+    }
+    if (carrier_view) {
+        // Mounted in a carrier: retail reads the entity rotation triple
+        // (yaw/pitch/roll at +16/+20/+24), hands the position to the carrier's
+        // own view transform, and jumps to the tail. That jump is the point —
+        // it skips the whole person leg, so NONE of the doubled recoil, the
+        // torso+lean roll, or the eye pull-back applies while seated, and the
+        // eye takes no floor either.
+        //
+        // Composing the person leg here froze the standing terrain torso-roll
+        // (16.9 degrees on the spawn hillside) into the cockpit view for the
+        // entire flight, tilting the horizon and skewing the instrument panel.
+        // [orig: Camera_ComputeThirdPersonView carrier branch @0x437c5d..
+        //  0x437cc2 — gated on carrier def +0x1C0 && +0x174, then goto the tail
+        //  past the person leg at 0x437f9c]
+        out.yaw_deg = aim_yaw_deg;
+        out.pitch_deg = aim_pitch_deg;
+        out.roll_deg = carrier_roll_deg;
+        for (int i = 0; i < 3; ++i) out.eye[i] = anchor_eye[i];
         return;
     }
     // [orig: mode 0, the on-foot person leg @ 0x437f9c..0x438031 — pitch adds

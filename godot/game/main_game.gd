@@ -91,6 +91,8 @@ var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
+const NovaAiProbeScript := preload("res://game/debug/nova_ai_probe.gd")
+var _ai_probe := NovaAiProbeScript.new()
 var _world_load_pending := false
 # End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
 # Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
@@ -1157,6 +1159,7 @@ func _process(delta: float) -> void:
 		_world.tick(_camera.global_position, _camera.global_transform,
 				delta, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
+	_ai_probe.tick(_world, delta) # env-gated self-test sim-truth dump; inert without NW_AI_PROBE
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):

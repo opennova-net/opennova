@@ -993,6 +993,81 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
 
 } // namespace
 
+// A helicopter does not leave the instant its first passenger climbs in. While a
+// seat is still free and someone is walking over to take it, the hull holds:
+// heading pinned to its own, both command words zeroed, powered bit dropped.
+// The rotor is gated on the OCCUPANT rather than on power, so the blades keep
+// turning through the wait -- engine running, going nowhere.
+// [orig: the wait-for-boarders block of Entity_ProcessAirVehiclePhysics,
+//  kong line 94590]
+static void test_helo_waits_for_its_boarders() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    w.registry.configure_pool(1, 4);
+    AiSystem ai;
+    ai.is_authority = true;
+    w.ai = &ai;
+
+    Entity helo{};
+    helo.net_id = 420;
+    helo.alive = true;
+    helo.health = 100;
+    helo.has_item_def = true;
+    Seat ctrl; ctrl.type = SeatType::Controller;
+    Seat pax;  pax.type  = SeatType::Passenger;
+    helo.seats.push_back(ctrl);
+    helo.seats.push_back(pax);
+    const EntityHandle hh = w.registry.spawn(1, helo);
+    ai.attach(hh);
+
+    // A body on foot, running the BOARD order at this helo.
+    Entity walker{};
+    walker.net_id = 900;
+    walker.alive = true;
+    walker.health = 100;
+    walker.has_item_def = true;
+    walker.kind = EntityKind::Organic;
+    const EntityHandle wh = w.registry.spawn(0, walker);
+    AiEntity &wb = *ai.at(ai.attach(wh));
+    wb.brain.f[37] = 125;   // "Goto SSN and board"
+    wb.brain.f[38] = 420;   // ...this helo
+
+    Entity *hv = w.registry.get(hh);
+    CHECK(ai.vehicle_waits_for_boarders(w, *hv));
+
+    // Seat him: nobody is walking any more, so the hold releases.
+    Entity *we = w.registry.get(wh);
+    we->mounted = true;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    we->mounted = false;
+    CHECK(ai.vehicle_waits_for_boarders(w, *hv));
+
+    // A body boarding a DIFFERENT hull never holds this one.
+    wb.brain.f[38] = 421;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    wb.brain.f[38] = 420;
+
+    // Neither does one that is not running the board order at all.
+    wb.brain.f[37] = 16;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    wb.brain.f[37] = 125;
+
+    // Dead or hidden bodies are skipped -- retail's (Flags & 3) == 0 gate.
+    we->flags |= 2u;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    we->flags &= ~2u;
+    we->flags |= 1u;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    we->flags &= ~1u;
+    CHECK(ai.vehicle_waits_for_boarders(w, *hv));
+
+    // With every seat taken there is nothing left to wait for, however many
+    // bodies are still walking -- retail asks Entity_CanEnterVehicle first.
+    hv->seats[0].occupant = wh;
+    hv->seats[1].occupant = wh;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+}
+
 int main() {
     test_def_physics_scaling();
     test_def_decel_default();
@@ -1022,6 +1097,7 @@ int main() {
     test_hull_collision_clears_motion_lanes_and_forces_full_idle();
     test_claimant_detach_at_water_plane_clears_without_stop_oneshot();
     test_vehicle_sound_extreme_ints_are_saturating();
+    test_helo_waits_for_its_boarders();
     if (failures == 0) std::printf("vehicle_motor_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

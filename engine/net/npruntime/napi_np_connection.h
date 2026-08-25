@@ -329,6 +329,14 @@ struct SessionReplyState {
 // This unifies the two per-peer representations the old code split apart: HostSessionAccept's
 // PeerState (handshake/SCRK/seq) and netsim::Connection (transport + owned_entity + send_mask).
 struct NapiNPConnection {
+	// The slot's SCORE and the cached copy the S2C 0x81 change gate compares against.
+	// Retail keeps both on the per-slot stats object: the score is field id 28
+	// (== 0x1C, what CRenderState_GetFieldByIndex(playerSlotPtr + 18, 0x1C) reads);
+	// the cached mirror is slot[83] [orig: Server_UpdateCaptureZoneProximity @0x5086A0].
+	// Both start at 0, matching a fresh slot: retail sends nothing until the score
+	// first CHANGES, so an untouched slot is silent rather than sending a zero.
+	int32_t score = 0;
+	int32_t score_wire_mirror = 0;
 	// [orig +0x18] ConnectionId / dcb — the join-order id a player record is matched by [orig:
 	// NapiNP_GetLocalConnectionId @0x4c6d40; Player_FindLocalPlayerEntity @0x4e0090 numeric match].
 	uint32_t connection_id = 0;

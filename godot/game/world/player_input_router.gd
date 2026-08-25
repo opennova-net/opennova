@@ -19,10 +19,12 @@ var _world: GameWorld = null
 var _presenter: LocalPlayerPresenter = null
 var _input_source := Callable()
 var _fire_was_held := false
+var _autofire_env := OS.get_environment("NW_LAN_AUTOFIRE")
 var _reload_was_down := false
 var _scope_was_down := false
 var _medic_was_down := false
 var _look_delta := Vector2.ZERO
+var _elapsed := 0.0
 var _frame_sequence := 0
 # The manual weapon-switch keys — the retail defaults from the shipped binding
 # catalog: rows 28-36 Knife '1' / Secondary '2' / Primary '3' / Flashbang '4' /
@@ -87,6 +89,31 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 	# so a player who opened the armory while running would keep running under it.
 	var state := _read_input_state() if gameplay_input_active else {}
 	var sim = _sim()
+	# Test automation (net-capture branch): NW_FLY_HOLD holds a movement key so an
+	# unattended session can fly a helicopter the player has been seated in.
+	# Value is a direction word: f/b/l/r. Inert without the env var.
+	var fly_hold := OS.get_environment("NW_FLY_HOLD")
+	# NW_FLY_HOLD2 + NW_FLY_HOLD_AT switch to a second direction word after N
+	# seconds, so one unattended run can climb and then come back down -- the
+	# only way to exercise the landing legs without a human at the stick.
+	var hold_at := float(OS.get_environment("NW_FLY_HOLD_AT"))
+	if hold_at > 0.0 and _elapsed >= hold_at:
+		var second := OS.get_environment("NW_FLY_HOLD2")
+		if not second.is_empty():
+			fly_hold = second
+	_elapsed += delta
+	if not fly_hold.is_empty():
+		# u/d ride the LEAN keys: retail packs lean_left/lean_right as MoveOrder
+		# bits 0x40/0x80, and the aircraft mover reads those same two bits as
+		# descend/ascend - the collective is the lean pair, overloaded.
+		state = {
+			"forward": fly_hold.contains("f"),
+			"back": fly_hold.contains("b"),
+			"left": fly_hold.contains("l"),
+			"right": fly_hold.contains("r"),
+			"lean_left": fly_hold.contains("d"),
+			"lean_right": fly_hold.contains("u"),
+		}
 	frame_input.set_movement(
 			_bool(state, "forward"),
 			_bool(state, "back"),
@@ -96,15 +123,35 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 			_bool(state, "lean_right"),
 			_bool(state, "jump"))
 	frame_input.look_delta = _look_delta if gameplay_input_active else Vector2.ZERO
+	# NW_FLY_TURN=<mouse counts per second> feeds a steady yaw so an unattended
+	# session can fly a circuit. The pilot's steer target IS the look heading, so
+	# turning the look turns the aircraft - no separate steer channel exists.
+	var fly_turn := float(OS.get_environment("NW_FLY_TURN"))
+	if fly_turn != 0.0:
+		frame_input.look_delta = Vector2(fly_turn * delta, 0.0)
 	_look_delta = Vector2.ZERO
 	if sim != null:
 		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
 		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
 		# computed sim-side in the original @0x4b6bb3 — in the port, the render skeleton is
 		# the sample source (D-INF-18)].
+		# Feed the head RELATIVE TO THE AVATAR ROOT. The render skeleton is a
+		# frame behind the sim, so an absolute head point carries a frame of
+		# travel with it - invisible on foot, but 5-10 u in a helicopter, which
+		# put the cockpit camera behind the aircraft. A body-relative delta
+		# carries none and the sim re-anchors it to the live position.
 		var head: Vector3 = _presenter.avatar_head_world()
+		var root: Vector3 = _presenter.avatar_root_world()
 		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
+		# ...and the SAME sample as a body-relative delta. The render skeleton is
+		# a frame behind the sim, so an absolute head carries a frame of travel:
+		# invisible on foot, 5-10 u in a helicopter, which put the cockpit camera
+		# behind the aircraft. The delta carries none, and the sim re-anchors it
+		# to the live position for the seated eye.
+		var delta_ok := head != Vector3.INF and root != Vector3.INF
+		sim.set_local_player_eye_offset(head - root if delta_ok else Vector3.ZERO,
+				delta_ok)
 	_sample_weapon_input(frame_input, gameplay_input_active)
 	_sample_hud_input(gameplay_input_active)
 	return frame_input
@@ -122,6 +169,12 @@ func _sample_weapon_input(frame_input: MissionFrameInput,
 	var captured := gameplay_input_active \
 			and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	# Test automation (net-capture branch): NW_LAN_AUTOFIRE holds the trigger in
+	# bursts so an unattended self-test session exercises the fire -> damage ->
+	# death -> S2C 0x13/0x1E chain. This mission's combat is player-driven, so a
+	# passive bot joiner can never reach that path. Inert without the env var.
+	if not _autofire_env.is_empty():
+		fire_held = int(Time.get_ticks_msec() / 400) % 3 != 0
 	var fire_edge := fire_held and not _fire_was_held
 	_fire_was_held = fire_held
 	var reload_down := captured and ControlsBindings.pressed("magazine")

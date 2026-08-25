@@ -138,8 +138,21 @@ int AdmRootMotion::register_adm(const opennova::ResourceIndex *index,
 	return adm_id;
 }
 
+// The retail availability test is `animMap[id] != animMap[0]`: at
+// AnimMap_RegisterEntity @0x40bb60 every slot the .adm left NULL is filled
+// with slot 0's node, and AnimMap_RegisterBoneNode @0x40c2d0 stores a fresh
+// per-registration wrapper (AnimMap_FindOrLoadBoneFile @0x40c030 allocates one
+// even on a name hit), so the pointer compare is exactly "was this slot
+// authored", independent of which .bad it names. Playback of an unauthored
+// state still binds RESET's ring (resolve_track) -- that is the same fill rule
+// seen from the play side. Reporting resolvability here instead made every
+// `animMap[x] != animMap[0]` port in the think read true: Eindo_R.adm has no
+// anim_stop, retail forces its 147 to 43 (@0x4b9910 post-pass), we kept 147.
 bool AdmRootMotion::has_clip(int adm_id, int state_id) const {
-	return resolve_track(adm_id, state_id) != nullptr;
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) return false;
+	const auto &tracks = sets_[adm_id].tracks;
+	auto it = tracks.find(state_id);
+	return it != tracks.end() && !it->second.empty();
 }
 
 const AdmRootMotion::Track *AdmRootMotion::resolve_track(int adm_id,

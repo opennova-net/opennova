@@ -405,6 +405,9 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	// The score row keys off the mission's game-mode bit, so re-resolve it now that
+	// the flags are known (the config may have loaded before OR after this).
+	refresh_score_rules();
 	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
 	// (witness at hud::HudMapControl::set_mission_map_zoom — the
 	// Player_InitPlayer derivation off the BMS header float).
@@ -667,6 +670,15 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		if (load_weapon_table(p_resource_root, "weapon.def") != OK)
 			UtilityFunctions::push_warning(
 					"MissionPresentation: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
+		// score.ini rides the same session-data step. DIVERGENCE (placement): retail
+		// loads it far earlier, when it builds the default gametype settings
+		// (retail: GameType_CreateDefaultSettings @0x52DD00), not at mission boot. The
+		// observable behaviour is the same because the session's row is re-resolved
+		// from the mission's game-mode bit in refresh_score_rules(), which finish_load
+		// also calls — so either order yields the same score_rules.
+		if (load_score_config(p_resource_root, "score.ini") != OK)
+			UtilityFunctions::push_warning(
+					"MissionPresentation: score.ini not loaded — kill scoring inert (no 0x81)");
 	};
 	steps.load_ammo_table = [&] {
 		if (load_ammo_table(p_resource_root, "ammo.def") == OK) return true;
@@ -1076,6 +1088,47 @@ Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 	return OK;
 }
 
+// Debug: seat an AI body in a vehicle's control seat, by authored SSN. The
+// rotor only spins for a control-seat claimant, so a screenshot of turning
+// blades needs a pilot in the chair; 05TRcoop parks its five helicopters empty
+// until the (player-gated) script sends a crew.
+// Debug: seat the LOCAL PLAYER in a vehicle's control seat, by the vehicle's
+// authored SSN. Mounting by SSN is not enough for the player, whose entity is
+// spawned at deploy and carries no authored id, so this resolves it from the
+// world's cached local-player handle.
+// Is the local player in a seat that suppresses the first-person weapon? A
+// helicopter pilot has no weapon in hand in retail; a passenger keeps his.
+// (retail: Player_RenderFirstPersonViewModel — see
+//  world::mount_hides_fp_viewmodel for the witnessed condition)
+bool Simulation::local_player_fp_weapon_hidden() const {
+	if (!world_) return false;
+	const opennova::world::Entity *lp =
+			world_->registry.get(world_->cached.local_player);
+	if (lp == nullptr || !lp->mounted) return false;
+	const opennova::world::Entity *carrier =
+			world_->registry.get(lp->mount_target);
+	return opennova::world::mount_hides_fp_viewmodel(*lp, carrier);
+}
+
+Error Simulation::debug_crew_local_player(int p_vehicle_ssn) {
+	if (!world_) return ERR_UNAVAILABLE;
+	const opennova::world::Entity *lp =
+			world_->registry.get(world_->cached.local_player);
+	if (lp == nullptr) return ERR_UNAVAILABLE;
+	return world_->commands.mount(static_cast<uint16_t>(lp->net_id),
+	                              static_cast<uint16_t>(p_vehicle_ssn))
+			? OK
+			: ERR_INVALID_PARAMETER;
+}
+
+Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
+	if (!world_) return ERR_UNAVAILABLE;
+	return world_->commands.mount(static_cast<uint16_t>(p_occupant_ssn),
+	                              static_cast<uint16_t>(p_vehicle_ssn))
+			? OK
+			: ERR_INVALID_PARAMETER;
+}
+
 // The D-AI-6 muzzle seam: the present layer pushes each posed model's gun-flash
 // userpoint world position back to the sim once per frame; the AI fire pass spawns
 // rounds from it while fresh. Godot (x, up, z) -> mission (x, -gz, gy) in 16.16
@@ -1180,6 +1233,8 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
 	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
 	out["yaw"] = static_cast<int>(ent->yaw);
+	out["pitch"] = static_cast<int>(ent->pitch);
+	out["roll"] = static_cast<int>(ent->roll);
 	out["primary_weapon_clip"] = ent->primary_weapon_slot.clip;
 	out["primary_weapon_reserve"] = ent->primary_weapon_slot.reserve;
 	out["seat_count"] = static_cast<int>(ent->seats.size());
@@ -1201,6 +1256,18 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 // as the F3 Player-tab dump records them) — entity + AI-motor stores written
 // together so the next motor tick continues from the pose instead of
 // snapping back.
+// TEST SCAFFOLDING, host-authority only. Kills every member of a BMS command group
+// outright so an unattended round can reach a scripted win condition that an
+// autofiring bot cannot reliably produce (00TRg's event 31 needs GroupDestroyed(16),
+// i.e. six specific AI dead). It drives the SAME EntityCommands::kill_group the BMS
+// KILL_GROUP action uses (retail: EventAction_Dispatch case 2 @0x4542e0); it invents no
+// state and fakes no event -- the win chain still has to evaluate on its own.
+// Sibling of debug_teleport_local_player, which exists for the same reason.
+int Simulation::debug_kill_group(int p_group) {
+	if (!world_) return -1;
+	return world_->commands.kill_group(p_group);
+}
+
 Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
                                                   float p_yaw_deg, float p_pitch_deg) {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) {

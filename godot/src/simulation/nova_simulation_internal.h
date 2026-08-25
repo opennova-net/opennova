@@ -36,6 +36,8 @@
 #include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
 #include <npruntime/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
 #include <npruntime/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
+#include <npruntime/score_rules_build.h> // build_score_rules (score.ini -> world.score_rules)
+#include <npwire/game_type.h>              // game_type::for_mission_mode
 
 #include <def/def.h> // def_parse_weapons_memory / def_free_weapons
 

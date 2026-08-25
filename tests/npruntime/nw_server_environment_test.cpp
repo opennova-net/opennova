@@ -93,6 +93,11 @@ nw::FrameUpdate emit_phase2(w::World &world) {
 
 void test_resource_values_reach_the_real_wire_projection() {
 	w::World world;
+    // A mission only advances while a human is in the world - retail holds the
+    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
+    // so they stand a player up; the empty-server hold has its own test.
+	world.cached.humans = 1;
 	opennova::bms::Header header{};
 	header.start_time = 0x0A80; // 10.5 hours in the BMS Q8.8 clock
 	header.minutes_per_day = 123;
@@ -124,6 +129,7 @@ void test_resource_values_reach_the_real_wire_projection() {
 
 void test_bms_fog_override_precedes_the_environment_resource() {
 	w::World world;
+	world.cached.humans = 1;
 	opennova::bms::Header header{};
 	header.attrib_flags = opennova::bms::AttribFlags::FogDistanceOverrideEnable;
 	header.fog_override = 811;
@@ -137,6 +143,7 @@ void test_bms_fog_override_precedes_the_environment_resource() {
 
 void test_headless_startup_prewarms_255_environment_ticks() {
 	w::World world;
+	world.cached.humans = 1;
 	opennova::bms::Header header{};
 	header.start_time = 0x0540;
 	header.minutes_per_day = 60;
@@ -168,6 +175,7 @@ void test_wac_layers_execute_in_retail_order() {
 	root.write("sample.wac", "if never then set(v1,3) endif\n");
 
 	w::World world;
+	world.cached.humans = 1;
 	wc::WacSystem wac;
 	std::string error;
 	CHECK(server::load_wac_program(
@@ -188,6 +196,7 @@ void test_complete_startup_executes_wac_before_255_weather_ticks() {
 			"if never then quake(50) endif\n");
 
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 733 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -223,6 +232,7 @@ void test_complete_startup_executes_wac_before_255_weather_ticks() {
 void test_absent_wac_is_valid_bms_only_startup() {
 	TempResourceRoot root;
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.tod_fixed24 = 200;
 	base.tod_advance_per_tick = 3;
@@ -246,6 +256,7 @@ void test_invalid_wac_fails_before_system_or_environment_startup() {
 	TempResourceRoot root;
 	root.write("server.wac", "if never then bogus_command_xyz(1) endif\n");
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.tod_fixed24 = 321;
 	base.tod_advance_per_tick = 9;

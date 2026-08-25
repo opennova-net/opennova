@@ -98,6 +98,8 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/rtxt/rtxt.cpp
     # sbf — sound banks
     ${CMAKE_CURRENT_SOURCE_DIR}/sbf/sbf.cpp
+    # score — score.ini scoring config (ordered GAMETYPE rows: FIELD/VAR values)
+    ${CMAKE_CURRENT_SOURCE_DIR}/score/score.cpp
     # scr — obfuscated text container
     ${CMAKE_CURRENT_SOURCE_DIR}/scr/scr.cpp
     # sph — the /PROFILE server-log FOURCC chunk container (payload records:

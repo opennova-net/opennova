@@ -295,6 +295,18 @@ struct InfantryState {
     int32_t move_target[3] = {};
     bool at_final_oneshot = false;
 
+    // Board-approach blocked latch. Retail arms entity pad_368[1] from the
+    // collision push-response (displacement >= 768/tick presses the walker
+    // against a hull) and the board leg widens its arrival ring while latched;
+    // our motor exposes no push signal, so the latch arms on a stalled think
+    // (per-think displacement under half the walk step while a board walk is
+    // ordered) — a stand-in cited on D-INF-2.
+    // [orig: pad_368[1] set @0x4b9910 push block; ring pick `pad_368[1] ?
+    //  bound+1u : 0x20000` in the board leg]
+    bool board_blocked = false;
+    bool board_progress_valid = false;
+    int32_t board_progress_pos[2] = {};
+
     int anim_state = anim_state::kIdle;   // entity[175]
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
@@ -566,6 +578,24 @@ struct InfantryState {
     int32_t leg_yaw[2] = {};              // 0 = right chain, 1 = left chain
     int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160
+
+    // Debug-card taps (not engine state): this tick's integrated root step and
+    // the collision resolver's horizontal correction — the frozen-clump
+    // instrument (a soldier whose root step is nonzero while root+resolve nets
+    // zero is being cancelled by push-out).
+    int32_t dbg_root_dx = 0, dbg_root_dy = 0;
+    int32_t dbg_res_dx = 0, dbg_res_dy = 0;
+    int32_t dbg_contact_item = 0; // last resolve's contact source item type
+    // Fire-aim instrument: how many rounds this body fired with a valid aim
+    // solution vs falling back to the body heading (a live engagement showed
+    // ~half of all AI shots leaving 180 deg off the target).
+    // Once an aim solution has been computed, the heading PERSISTS - retail
+    // keeps it in the entity's aimHeading field and fires along the posed
+    // weapon bone that follows it, so a tick without a fresh solution still
+    // shoots at the target rather than wherever the body happens to face.
+    bool aim_established = false;
+    int32_t dbg_fires_aimed = 0;
+    int32_t dbg_fires_body = 0;
 
     // Local-player stance input. NPC org1 selection does not consume this field.
     // [orig: entity+0x12C prone bit 0x100, crouch bit 0x200; player body @0x4b40e0]

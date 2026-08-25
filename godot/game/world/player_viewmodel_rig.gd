@@ -285,8 +285,20 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# The showhud bit-0 gate ANDs into the retail submission decision [orig:
 	# Player_RenderFirstPersonViewModel @0x4DEDEA — test g_FpWeaponViewFlags, 1
 	# before the FP pass].
+	# The SEAT gate, evaluated here because retail evaluates it inside the draw:
+	# a pilot/driver/gunner carries no first-person weapon at all, so a
+	# helicopter cockpit shows a clear screen instead of a rifle over the panel.
+	# A PASSENGER keeps his and can still shoot out. Per-frame is what makes
+	# MOUNTING take effect - the HUD-init path only ran on the showhud key.
+	# [orig: Player_RenderFirstPersonViewModel guards the whole draw on
+	#  `!vehicle || parentSlot not in {2,3,5} || (attrib & EWEAP && !PLAYERCONTROL)`;
+	#  the condition itself is world::mount_hides_fp_viewmodel]
+	var seat_hides_weapon := false
+	var vm_sim: Simulation = _world.get_sim() if _world != null else null
+	if vm_sim != null:
+		seat_hides_weapon = vm_sim.local_player_fp_weapon_hidden()
 	var retail_submit := not third_person and not carded and not binoculars \
-			and _fp_gun_visible
+			and _fp_gun_visible and not seat_hides_weapon
 	# The debug override intentionally extends retail's submission scope, but a
 	# model made visible by that probe still needs a coherent CTRL snapshot.
 	var submit_viewmodel := retail_submit or force_visible

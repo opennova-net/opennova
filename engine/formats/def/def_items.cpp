@@ -55,12 +55,46 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
         safe_copy(slot->secondary_effect, sizeof(slot->secondary_effect), tok[2].s, tok[2].len);
 }
 
+/* Retail's per-block ItemDef defaults. Every items.def `begin` allocates a slot
+   through ItemDef_AllocateWithDefaults, which zeroes the record and then stamps
+   this physics block BEFORE any key is parsed, so an item that declares none of
+   these keys still runs on these values — not on zero.
+   [orig: ItemDef_AllocateWithDefaults @0x0049E3B0 (kong 129729-129757); the
+    `begin` arm calls it at ItemDef_ParseProperty @0x0049EB00 (kong 130323)]
+
+   Why this matters (AI-PARITY-CONCEPT §6.15h): DTruck1 (id 101294) declares NO
+   spring_comp, so retail runs it at springComp 20 -> suspension travel 13108,
+   while our zeroed record gave travel 0, which pinned every wheel oscillator's
+   amplitude to 0 and froze the compressions for the whole run.
+
+   EXCEPTION, stated rather than guessed: retail also defaults `unk591` to 5,
+   but the key that writes unk591 is an unresolved indirect string in the
+   decompilation (`off_7C7D78` @ kong 129483), so its identity with our `bob`
+   field is NOT witnessed for defaulting purposes and `bob` is deliberately
+   left at 0. Retail's tireSlip = 5 and handBrake = 1 have no field in our
+   record at all. Both are named divergences, not oversights. */
+static void apply_item_def_defaults(DefItemDef *d) {
+    d->climb_speed = 1;    /* [orig: @0x0049E3B0 climbSpeed] */
+    d->torque = 3;         /* [orig: torque] */
+    d->mass = 5;           /* [orig: mass] */
+    d->shock = 4;          /* [orig: shock] */
+    d->spring = 0;         /* [orig: spring — explicit in retail, kept explicit here] */
+    d->spring_comp = 20;   /* [orig: springComp — the freeze root, §6.15h] */
+    d->top_heavy = 0;      /* [orig: topHeavy — explicit in retail] */
+    d->lean = 5;           /* [orig: lean] */
+    d->lean_velocity = 5;  /* [orig: leanVelocity] */
+    d->pitch = 1;          /* [orig: pitch] */
+    d->pitch_velocity = 5; /* [orig: pitchVelocity] */
+    d->flip = 45;          /* [orig: flip] */
+}
+
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
    zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser. */
 static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) {
     size_t entries_cap = 0;
     DefItemDef current;
     memset(&current, 0, sizeof(current));
+    apply_item_def_defaults(&current);
     int in_block = 0;
     size_t raw_cap = 0;
     size_t emplacement_attachments_cap = 0;
@@ -80,6 +114,8 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         if (!in_block) {
             if (lower_starts_with(lower, ll, "begin", 5)) {
                 memset(&current, 0, sizeof(current));
+                apply_item_def_defaults(&current); /* [orig: the begin arm calls
+                    ItemDef_AllocateWithDefaults @0x0049EB00, kong 130323] */
                 raw_cap = 0;
                 emplacement_attachments_cap = 0;
                 extract_quoted(trimmed, tlen, current.display_name, sizeof(current.display_name));
@@ -91,6 +127,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         if (ll == 3 && memcmp(lower, "end", 3) == 0) {
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
+            apply_item_def_defaults(&current);
             raw_cap = 0;
             emplacement_attachments_cap = 0;
             in_block = 0;
@@ -142,6 +179,16 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                                   sizeof(current.sound_profile_female));
             }
             consume_value_str(trimmed, tlen, 13, current.sound_profile, sizeof(current.sound_profile));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "default_aip", 11)) {
+            /* Authoring the profile also RAISES AIData: retail ORs 0x100000 in
+               the same arm, so an item carrying default_aip is an AI item
+               whether or not its attrib line lists AIData.
+               [orig: ItemDef_ParseProperty @0x49eb00 -- the strcpy into
+                itemDef+0x8B8 followed by `attrib |= 0x100000`] */
+            consume_value_str(trimmed, tlen, 11, current.default_aip,
+                              sizeof(current.default_aip));
+            current.attrib |= DEF_ITEM_ATTRIB_AIDATA;
             parsed = 1;
         /* [orig: ItemDef_ParseProperty @ 0x49eb00 -- "soundloop_" prefix @ 0x49fec4,
            nightshot/duskshot/dawnshot @ 0x49fdee; the 7-slot range matches the
@@ -337,6 +384,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "mass", 4)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
             current.mass = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weathervane", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.weathervane = parse_int_n(v, vl); /* raw [orig: @0x49d8f2] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "minai", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.min_ai = parse_int_n(v, vl); /* raw [orig: @0x49d95e] */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "lean", 4)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);

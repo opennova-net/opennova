@@ -262,6 +262,26 @@ static void stage_player_vehicle_input(Entity &veh, Entity &occ,
     }
 }
 
+// The occupant whose input this machine should consume. Retail's gate is
+// `(occ->Flags & 0x100) && (occ == g_local_player_entity || is_authority)` — the
+// AUTHORITY runs the input block for ANY player occupant, not only its own local
+// player. That distinction is invisible on a listen host flying its own
+// aircraft, and decisive when a JOINER is the pilot: the host owns the mover, so
+// insisting on the host's local player left a remote pilot commanding nothing.
+// [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the ground twin is
+//  Entity_UpdateVehiclePhysics @0x48b0ff]
+static Entity *resolve_piloting_player(World &world, Entity &veh,
+                                       const VehicleTraits &traits) {
+    if (!traits.player_control) return nullptr;
+    Entity *occ = resolve_vehicle_controller(world, veh);
+    if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0 ||
+        !occ->alive || occ->health <= 0)
+        return nullptr;
+    const bool is_authority = world.ai != nullptr && world.ai->is_authority;
+    if (!is_authority && occ->handle != world.cached.local_player) return nullptr;
+    return occ;
+}
+
 static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
                                                 const VehicleTraits &traits) {
     if (!traits.player_control || !world.cached.local_player.valid()) return nullptr;
@@ -413,7 +433,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // +25/tick jump-latch ramp is input-side; the flip simply does not
         // exist there) [orig: cbik speed servo @0x4853ac..0x4853eb].
         int32_t cmd = m.cmd_speed;
-        if (traits.family != VehicleFamily::Bike &&
+if (traits.family != VehicleFamily::Bike &&
             traits.family != VehicleFamily::Tank &&
             !m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
             if (m.speed < 0) {
@@ -530,12 +550,31 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                 m.vel_y = detail::q16_mul_rhu(m.speed, fwd_q16[1]);
                 m.slide_z = detail::q16_mul_rhu(m.speed, fwd_q16[2]);
             } else {
-                const int32_t c = cos22_of_bam(m.yaw_bam) >> 6; // 2^22 -> 16.16 unit
-                const int32_t s = sin22_of_bam(m.yaw_bam) >> 6;
-                m.vel_x = static_cast<int32_t>((static_cast<int64_t>(m.speed) * c + 0x8000) >> 16);
-                m.vel_y = static_cast<int32_t>((static_cast<int64_t>(m.speed) * s + 0x8000) >> 16);
-                m.slide_z = 0; // level dir frame — the slope vertical term rides the clamp
-                               // below (pitch/roll contact solve deferred, D-NET-161)
+                // The GROUND core's own grounded build is the SAME full-basis
+                // form: dir rows from the euler matrix, and slideDecay REPLACED
+                // by speed*fwd.z while the crash latch is clear. The former
+                // yaw-only leg with slide_z = 0 was the D-NET-161 stand-in; it
+                // left LEVEL velocity at every contact loss, so a crest sent the
+                // hull sailing horizontally while the road dropped -- 27% of the
+                // 00TRg convoy's drive read airborne and the witnessed coast
+                // brake ate the route pace (AI-PARITY-CONCEPT 6.12g/h; the
+                // 13-pin's root). Retail's frozen ballistic velocity follows the
+                // slope and re-contacts at once.
+                // [orig: Entity_UpdateVehiclePhysics @0x48AF00 grounded build,
+                //  kong 116425-116490 -- Math_BuildFixedPointMatrixFromEuler-
+                //  Angles rows 0/2, velocity = speed*row products @116804-116831,
+                //  slideDecay = v139 (= speed*fwd.z) @116470 gated on the
+                //  aimHeading crash byte == 0]
+                const VehicleEulerBasis gb = vehicle_euler_basis(
+                        m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+                const int32_t gfwd[3] = {
+                    static_cast<int32_t>(gb.fwd[0] * 65536.0),
+                    static_cast<int32_t>(gb.fwd[1] * 65536.0),
+                    static_cast<int32_t>(gb.fwd[2] * 65536.0)};
+                m.vel_x = detail::q16_mul_rhu(m.speed, gfwd[0]);
+                m.vel_y = detail::q16_mul_rhu(m.speed, gfwd[1]);
+                if (m.crashed == 0) // [orig: the aimHeading-byte gate @116468]
+                    m.slide_z = detail::q16_mul_rhu(m.speed, gfwd[2]);
             }
         }
         if (traits.family == VehicleFamily::Bike) {
@@ -1942,18 +1981,31 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
         if ((move_order & 0x40u) != 0) m.net_alt_target -= 0x4000;
         if ((move_order & 0x80u) != 0) m.net_alt_target += 0x4000;
         int32_t climb = m.net_alt_target - ground;
-        if (climb > 0x1000000) { // the 256 u ceiling
-            climb = 0x1000000;
-            m.net_alt_target = ground + climb;
+        // The ceiling is ABSOLUTE, not above-ground: retail tests
+        // `ground + climb > 0x1000000` and parks the target AT 0x1000000, so a
+        // helicopter over a 100 u ridge may only climb 156 u, not another 256.
+        // [orig: Entity_UpdateAircraftPhysics @0x4912a0 — the LABEL_175 clamp
+        //  pair, `v78 + [548] > 0x1000000 -> [548] = 0x1000000 - v78,
+        //  [524] = 0x1000000` with v78 the average ground height]
+        if (ground + climb > 0x1000000) {
+            climb = 0x1000000 - ground;
+            m.net_alt_target = 0x1000000;
         }
         if (climb < 0) {
-            // Landed: the engine-off reset — commands zero, steer holds the
-            // hull's own heading, the target parks below ground level.
-            m.net_alt_target = ground - 0x4000;
-            m.cmd_speed = 0;
-            m.cmd_lateral_speed = 0;
-            m.steer_target_bam = m.yaw_bam;
-            return;
+            // The companion clamp, and ALL it does: a target below the ground
+            // floors AT the ground. It is a floor, not a shutdown -- retail
+            // neither zeroes the commands here nor abandons the rest of the
+            // input staging, which is why a pilot can still slide along at
+            // hover height with the collective held down.
+            //
+            // We used to fold retail's separate engine-off landed reset into
+            // this arm (parking the target at ground - 0x4000, zeroing both
+            // commands, pinning the steer, and returning early). That reset is
+            // a DIFFERENT branch on a different gate, and the rotor start-up
+            // hold now covers the case that folding was standing in for.
+            // [orig: LABEL_175 @0x4912xx -- `if ([548] < 0) { [548] = 0;
+            //  [524] = v78; }` with v78 the average ground height]
+            m.net_alt_target = ground;
         }
     }
     (void)pz;
@@ -1970,7 +2022,20 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
 
 void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
-    if (!m.net_predicted) return;
+    // Authority AI flight: chel_ai_drive staged this tick's commands; run the
+    // same servos/integration the predicted path uses, skipping the client
+    // interp/mirror blocks. Retail is ONE function for both.
+    // [orig: Entity_UpdateAircraftPhysics @0x490310]
+    const bool ai_drive = m.ai_drive;
+    m.ai_drive = false;
+    // Retail runs this mover for every aircraft row unconditionally - the class
+    // table dispatches it and the occupant-input block gates itself. Our
+    // net_predicted/ai_drive pair is a reimpl guard, so a PLAYER-piloted row has
+    // to be admitted explicitly or the pilot commands nothing.
+    // [orig: the class-table dispatch -> Entity_UpdateAircraftPhysics @0x490310]
+    const bool player_piloted =
+            resolve_piloting_player(world, veh, traits) != nullptr;
+    if (!m.net_predicted && !ai_drive && !player_piloted) return;
     if (!m.yaw_seeded) {
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;
@@ -1998,7 +2063,14 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
     // snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
     // {8,10,15,20,25,32}, yaw (d+10)/20 over 20 ticks, Z stepped like X/Y.
-    if (m.net_interp_progress == 0) {
+    // The authority AI leg skips it: no wire targets exist on the host row.
+    // The interp block consumes RECEIVED state, so it belongs only to rows the
+    // wire drives. Before player pilots reached this function, `!ai_drive`
+    // implied net_predicted by construction; admitting them broke that
+    // invariant and snapped a locally-piloted hull to the never-received
+    // smooth target at the world origin. Gate it explicitly.
+    // [orig: @0x49095E..0x490C98 is the CLIENT interp leg]
+    if (m.net_predicted && !ai_drive && m.net_interp_progress == 0) {
         const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
         const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
         const int64_t dz = int64_t(m.net_smooth_target[2]) - pz;
@@ -2049,7 +2121,7 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
                     io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         }
     }
-    {
+    if (!ai_drive) {
         const int16_t progress = m.net_interp_progress;
         if (progress < 20)
             m.yaw_bam = io::bam_add(m.yaw_bam, m.net_smooth_heading);
@@ -2075,21 +2147,45 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // lateral [orig: the occupantEntity == g_local_player_entity leg —
     // `([2C4]+[220])>>1 -> [220]; ([2C8]+[21C])>>1 -> [21C]`
     // @0x491546..0x491568; the input block is stage_air_vehicle_input above].
-    if (Entity *local_pilot =
-                resolve_local_vehicle_controller(world, veh, traits)) {
+    if (ai_drive) {
+        // Commands already staged by AiSystem::chel_ai_drive — the AI leg fills
+        // the same registers the pilot input block does. [orig: one function]
+    } else if (Entity *local_pilot =
+                       resolve_piloting_player(world, veh, traits)) {
         stage_air_vehicle_input(veh, *local_pilot, traits, ground, pz);
-        m.cmd_speed = io::bam_sar(
-                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
-        m.cmd_lateral_speed = io::bam_sar(
-                io::bam_add(m.cmd_lateral_speed, m.net_recv_lat), 1);
-    } else {
+        // The blend reconciles the pilot's staged command against what the
+        // SERVER echoed back, so it only means anything on a row the wire
+        // drives. An authority-owned hull receives nothing, and blending
+        // against a zero mirror halves the pilot's command every tick.
+        if (m.net_predicted) {
+            m.cmd_speed = io::bam_sar(
+                    io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+            m.cmd_lateral_speed = io::bam_sar(
+                    io::bam_add(m.cmd_lateral_speed, m.net_recv_lat), 1);
+        }
+    } else if (m.net_predicted) {
         m.cmd_speed = m.net_recv_speed;
         m.cmd_lateral_speed = m.net_recv_lat;
         m.steer_target_bam = m.net_recv_steer_bam;
     }
 
-    // ---- 2a. Client engine-off override [orig: LABEL_305 @0x491C95..0x491CC2].
-    if (!m.net_engine_on) {
+    // ---- 2a. Engine flag. Retail splits this by role: the AUTHORITY DERIVES the
+    // flag from the climb-above-ground register every tick, and only a CLIENT
+    // runs the engine-off override (`if (!is_authority) goto LABEL_305`). We
+    // fold [548] into the absolute target, so the climb is
+    // (net_alt_target - ground) and the derivation is the same test against it.
+    //
+    // Without this upkeep a player-piloted aircraft deadlocks: the override
+    // zeroes the cyclic because the engine reads off, and nothing ever turns the
+    // engine on. It was recorded as the deferred "authority engine-flag upkeep".
+    // [orig: LABEL_328 @0x491C7x — `if (brain[137]) Flags |= 0x80 else &= ~0x80`,
+    //  reached only when is_authority; LABEL_305 is the client override]
+    const bool motor_is_authority = world.ai != nullptr && world.ai->is_authority;
+    if (motor_is_authority) {
+        const int32_t climb =
+                ground != INT32_MIN ? io::bam_sub(m.net_alt_target, ground) : 0;
+        m.net_engine_on = climb != 0;
+    } else if (!m.net_engine_on) {
         if (ground != INT32_MIN) m.net_alt_target = ground - 0x2000;
         m.cmd_speed = 0;
         m.cmd_lateral_speed = 0;
@@ -2351,6 +2447,24 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     veh.position.z = static_cast<float>(from_fixed(pz));
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    // ...and the attitude with it. In the original these ARE the entity's own
+    // Pitch/Roll -- the integration above writes entity+0x14/+0x18 directly, so
+    // there is no separate motor copy to publish. Our split kept
+    // air_pitch_bam/air_roll_bam private and only ever mirrored them from the
+    // GROUND conform, which left the whole aerodynamic bank computed and then
+    // discarded on the host: a helicopter turned and slid sideways with the
+    // hull dead level, and the mounted camera (which reads entity roll) stayed
+    // level with it.
+    //
+    // Republishing the value the contact solve wrote is harmless on the ground
+    // and matches retail, whose common tail integrates unconditionally too with
+    // the next tick's conform overwriting.
+    // [orig: Entity_UpdateAircraftPhysics common tail @0x49237E --
+    //  `entity+20 += entity+168; entity+24 += entity+172`]
+    veh.pitch = static_cast<int16_t>(std::lround(
+            static_cast<double>(m.air_pitch_bam) * kDegreesPerBam));
+    veh.roll = static_cast<int16_t>(std::lround(
+            static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
     // The part-animation accumulators — the air mover's tail call [orig:
     // Entity_UpdatePartSpinAccumulator @0x4928B0 from the CHel/cpln callback].
     vehicle_part_anim_tick(world, veh, traits);

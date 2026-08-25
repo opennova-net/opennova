@@ -138,11 +138,12 @@ def test_item_air_family_params_present_in_both_mirrors():
     speedpitch trio).
     """
     expected_run = ["slip_slope", "climb_speed", "turn_roll", "speed_pitch", "turn_rate"]
-    # The suspension spring block inserted 2026-08-21 between flip and the
-    # burn thresholds (def.h spring/spring_comp/shock/top_heavy; raw tokens).
-    platform_run = ["torque", "mass", "lean", "lean_velocity", "pitch",
-                    "pitch_velocity", "bob", "flip", "spring", "spring_comp",
-                    "shock", "top_heavy", "critical_hp"]
+    # Both 2026-08-21/22 insertions, in def.h field order: weathervane/min_ai
+    # between mass and lean [orig: ItemDef_ParsePhysicsProperty @0x49d870], and
+    # the suspension spring block between flip and the burn thresholds.
+    platform_run = ["torque", "mass", "weathervane", "min_ai", "lean",
+                    "lean_velocity", "pitch", "pitch_velocity", "bob", "flip",
+                    "spring", "spring_comp", "shock", "top_heavy", "critical_hp"]
     # The AI engage-cap pair inserted 2026-08-13 (def+0x178/+0x17A radarsig/heatsig).
     sig_run = ["critical_hp", "critical_drain", "radar_sig", "heat_sig", "unit_type"]
     blender = _load_blender_def_ffi()
@@ -159,6 +160,15 @@ def test_item_air_family_params_present_in_both_mirrors():
         for field in ("radar_sig", "heat_sig", "spring", "spring_comp", "shock",
                       "top_heavy"):
             assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
+        for field in ("weathervane", "min_ai"):
+            assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
+        # default_aip sits between the two sound-profile names. Pinned on its own
+        # because a missed 128-byte string is the single largest stride error a
+        # mirror can carry.
+        assert getattr(item_cls, "default_aip").size == 128
+        start = names.index("sound_profile")
+        assert names[start:start + 3] == ["sound_profile", "default_aip",
+                                          "sound_profile_female"]
 
 
 def _skip_without_native():

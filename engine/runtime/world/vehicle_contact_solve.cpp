@@ -466,6 +466,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // ride the deferred latch machine.
     const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * 65536.0);
     const int32_t fwd_z16 = static_cast<int32_t>(basis.fwd[2] * 65536.0);
+    for (int k = 0; k < 4; ++k) m.dbg_pad_depth[k] = d[k]; // diagnostic tap ("pd")
     const bool pair_contact =
             (d[0] != 0 && d[3] != 0) || (d[1] != 0 && d[2] != 0) ||
             (d[0] != 0 && d[2] != 0) || (d[1] != 0 && d[3] != 0);

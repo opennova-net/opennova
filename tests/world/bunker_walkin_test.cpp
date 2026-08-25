@@ -1,0 +1,395 @@
+// Asset-gated offline repro of the 05TRcoop frozen-patrol bunker pin:
+// the mission routes a patrol group INSIDE "Concrete Bunker 2" (item 1359,
+// graphic Cbunker2, instance at (159.9, 319.7)), and on a live host the
+// clumped soldiers press against its collision forever — the resolver's
+// correction cancels the walk (root step ~0.09u/tick, correction its
+// negative; probe instrument 2026-08-20). Retail soldiers enter the bunker.
+//
+// This harness loads the REAL Cbunker2 collision through the real pipeline
+// (ResourceIndex -> SimModelCache -> collision_model_from_3di), places it at
+// the mission pose, and walks a capsule from the live pin position toward the
+// authored node, resolving each step. It reports the volume inventory and
+// whether the capsule reaches the interior. Diagnostic/report-only while the
+// divergence is open; flip the verdict to an assert once the walk-in works.
+// Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
+#include "mission/bms.h"
+#include "mission/promote.h"
+
+#include "def/def.h"
+#include "resource_index/resource_index.h"
+#include "simassets/collision_resolve.h"
+#include "simassets/model_builders.h"
+#include "simassets/sim_model_cache.h"
+#include "world/ai.h"
+#include "world/angle.h"
+#include "world/collision.h"
+#include "world/collision_detail.h"
+#include "world/world.h"
+
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+using namespace opennova;
+namespace w = opennova::world;
+
+int32_t fx(double v) { return static_cast<int32_t>(v * 65536.0); }
+
+} // namespace
+
+int main() {
+	const char *dir = std::getenv("OPENNOVA_JO_DIR");
+	if (dir == nullptr || *dir == '\0') {
+		std::printf("bunker walk-in: SKIP (OPENNOVA_JO_DIR not set)\n");
+		return 0;
+	}
+
+	// The real model, through the real pipeline.
+	opennova::ResourceIndex index;
+	if (!index.scan(dir)) {
+		std::printf("bunker walk-in: SKIP (resource index scan failed)\n");
+		return 0;
+	}
+	simassets::SimModelCache cache;
+	cache.set_index(&index);
+	const Threedi3di3 *m3 = cache.model_for("Cbunker2");
+	if (m3 == nullptr || m3->collision == nullptr) {
+		std::printf("bunker walk-in: SKIP (Cbunker2.3di not found/parsed)\n");
+		return 0;
+	}
+	w::CollisionModel model;
+	if (!simassets::collision_model_from_3di(m3->collision, model,
+	                                         simassets::model_has_collision(*m3))) {
+		std::fprintf(stderr, "FAIL: Cbunker2 collision did not convert\n");
+		return 1;
+	}
+
+	// Volume inventory: what the resolver walks (type counts + z spans per
+	// section) — the entrance question is whether a gap exists at floor level.
+	std::printf("Cbunker2: %zu sections, %zu volumes\n", model.sections.size(),
+	            model.volumes.size());
+	for (size_t si = 0; si < model.sections.size(); ++si) {
+		const w::CollisionSection &sec = model.sections[si];
+		std::printf("  section %zu: volumes=%d z=[%.2f..%.2f] x=[%.2f..%.2f] "
+		            "y=[%.2f..%.2f]\n",
+		            si, sec.volume_count, sec.min_z / 65536.0, sec.max_z / 65536.0,
+		            sec.min_x / 65536.0, sec.max_x / 65536.0, sec.min_y / 65536.0,
+		            sec.max_y / 65536.0);
+		for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
+			const w::CollisionVolume &vol = model.volumes[sec.volume_start + vi];
+			std::printf("    vol %d: type=%d planes=%d\n", vi, vol.type,
+			            vol.plane_count);
+		}
+	}
+
+	// The mission pose for the east-base instance (SSN-less static): promote
+	// 05TRcoop and find item 1359 with x > 0.
+	const std::string path = std::string(dir) + "/05TRcoop.bms";
+	std::ifstream f(path, std::ios::binary);
+	if (!f) {
+		std::printf("bunker walk-in: SKIP (no 05TRcoop.bms)\n");
+		return 0;
+	}
+	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+	                           std::istreambuf_iterator<char>());
+	bms::File m;
+	std::string error;
+	if (!bms::parse(bytes.data(), bytes.size(), m, error)) {
+		std::fprintf(stderr, "FAIL: 05TRcoop parse: %s\n", error.c_str());
+		return 1;
+	}
+	w::World world;
+	w::AiSystem ai;
+	world.ai = &ai;
+	mission::promote_mission(m, world, ai, {});
+
+	w::EntityHandle bunker{};
+	world.registry.for_each([&](const w::Entity &e) {
+		if (e.item_id == 1359 && e.position.x > 0.0f) bunker = e.handle;
+	});
+	w::Entity *be = world.registry.get(bunker);
+	if (be == nullptr) {
+		std::fprintf(stderr, "FAIL: east-base Cbunker2 instance not promoted\n");
+		return 1;
+	}
+	std::printf("bunker instance: pos=(%.1f, %.1f, %.1f) yaw=%d\n",
+	            be->position.x, be->position.y, be->position.z, int(be->yaw));
+
+	// Collision world: the bunker plus EVERY static within 40u — the live
+	// candidate slice's neighborhood (towers etc.), each through the same
+	// pipeline. Graphic names come from items.def (read through the index).
+	w::CollisionWorld cw;
+	const int32_t mid = cw.add_model(std::move(model));
+	cw.assign_entity(bunker, mid, be->registry_spawn_id);
+
+	DefItemsFile items{};
+	{
+		std::vector<uint8_t> ib;
+		if (index.read_file("items.def", ib) &&
+		    def_parse_items_memory(ib.data(), ib.size(), &items) == 0) {
+			const float bx = be->position.x, by = be->position.y;
+			int attached = 0;
+			world.registry.for_each([&](const w::Entity &e) {
+				if (e.handle == bunker || e.handle.pool() == 0) return;
+				const float dx = e.position.x - bx, dy = e.position.y - by;
+				if (dx * dx + dy * dy > 40.0f * 40.0f) return;
+				const DefItemDef *def = simassets::find_item_def(
+						simassets::visual_item_id_for_runtime_type(e.item_id, items) != 0
+								? items : items,
+						simassets::visual_item_id_for_runtime_type(e.item_id, items));
+				if (def == nullptr || def->graphic[0] == '\0') return;
+				const Threedi3di3 *nm = cache.model_for(def->graphic);
+				if (nm == nullptr || nm->collision == nullptr) return;
+				w::CollisionModel cm;
+				if (!simassets::collision_model_from_3di(
+				            nm->collision, cm, simassets::model_has_collision(*nm)))
+					return;
+				const int32_t nid = cw.add_model(std::move(cm));
+				cw.assign_entity(e.handle, nid, e.registry_spawn_id);
+				++attached;
+				std::printf("  neighbor: item %d '%s' at (%.1f, %.1f) graphic %s\n",
+				            e.item_id, def->graphic, e.position.x, e.position.y,
+				            def->graphic);
+			});
+			std::printf("neighbor statics attached: %d\n", attached);
+		} else {
+			std::printf("  (items.def unavailable — bunker-only scene)\n");
+		}
+	}
+
+	w::Entity s;
+	s.kind = w::EntityKind::Organic;
+	s.net_id = 70001;
+	s.alive = true;
+	// Endpoints are env-overridable so any live pin can be replayed without a
+	// rebuild: NW_WALK_FROM_X/Y[/Z] and NW_WALK_TO_X/Y (mission coordinates).
+	const auto envf = [](const char *k, double dflt) {
+		const char *v = std::getenv(k);
+		return (v != nullptr && v[0] != 0) ? std::atof(v) : dflt;
+	};
+	const double from_x = envf("NW_WALK_FROM_X", 159.7);
+	const double from_y = envf("NW_WALK_FROM_Y", 323.8);
+	const double from_z = envf("NW_WALK_FROM_Z", 35.1);
+	s.position = {static_cast<float>(from_x), static_cast<float>(from_y),
+	              static_cast<float>(from_z)};
+	const w::EntityHandle soldier = world.registry.spawn(0, s);
+	for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+
+	// Walk toward the authored node (the bunker interior) at the live root
+	// step (~0.09u/tick), resolving every step like the infantry tick.
+	const double nx = envf("NW_WALK_TO_X", 159.8), ny = envf("NW_WALK_TO_Y", 319.7);
+	int32_t pos[3] = {fx(from_x), fx(from_y), fx(from_z)};
+	int32_t vel[3] = {0, 0, 0};
+	int16_t health = 100;
+	w::CollisionWorld::ResolveState state;
+	double closest = 1e9;
+	for (int t = 0; t < 1200; ++t) {
+		const double px = pos[0] / 65536.0, py = pos[1] / 65536.0;
+		const double dx = nx - px, dy = ny - py;
+		const double d = std::sqrt(dx * dx + dy * dy);
+		closest = std::min(closest, d);
+		if (d < 0.5) break;
+		pos[0] += fx(0.09 * dx / d);
+		pos[1] += fx(0.09 * dy / d);
+		cw.resolve_entity(world, soldier, state, pos, vel, vel[2], 0, fx(1.8), 0,
+		                  0, /*is_player=*/false, /*is_authority=*/true, t,
+		                  /*anim=*/149, 0u, health);
+		if (w::Entity *se = world.registry.get(soldier)) {
+			se->position = {static_cast<float>(pos[0] / 65536.0),
+			                static_cast<float>(pos[1] / 65536.0),
+			                static_cast<float>(pos[2] / 65536.0)};
+		}
+		if ((t % 16) == 0) cw.build_tick_tables(world);
+		if ((t % 200) == 0)
+			std::printf("  t=%d pos=(%.2f, %.2f, %.2f) dist=%.2f contactItem=%d\n",
+			            t, pos[0] / 65536.0, pos[1] / 65536.0, pos[2] / 65536.0, d,
+			            cw.dbg_last_contact_item);
+	}
+	// ---- Column dump: which type-1 volumes contain the spawn column's local
+	// XY, and where do their tops sit in WORLD z? (Yaw-only rotation leaves z
+	// untouched, so world top = bunker z + local max_z.) Uses the exact
+	// target_view matrix path (bam heading from mission yaw).
+	{
+		const Threedi3di3 *bm = cache.model_for("Cbunker2");
+		w::CollisionModel cm;
+		simassets::collision_model_from_3di(bm->collision, cm,
+		                                    simassets::model_has_collision(*bm));
+		int32_t bp[3] = {fx(be->position.x), fx(be->position.y),
+		                 fx(be->position.z)};
+		const int32_t heading = w::bam_heading_from_mission_yaw_deg(
+				static_cast<double>(be->yaw));
+		const w::CollisionMatrix mat =
+				w::collision_matrix_from_heading(heading, bp);
+		w::CollisionMatrix inv;
+		mat.invert_into(inv);
+		// Column to inspect: NW_COL_X/Y (defaults to the historical spawn probe).
+		const char *cx = std::getenv("NW_COL_X"), *cy = std::getenv("NW_COL_Y");
+		const double colx = (cx && cx[0]) ? std::atof(cx) : 155.3;
+		const double coly = (cy && cy[0]) ? std::atof(cy) : 318.2;
+		const int32_t col[3] = {fx(colx), fx(coly), fx(35.1)};
+		std::printf("column (%.1f, %.1f):\n", colx, coly);
+		int32_t local[3];
+		w::detail::transform_translate_then_rotate(inv.m, col, local);
+		std::printf("spawn column local=(%.2f, %.2f, %.2f)\n", local[0] / 65536.0,
+		            local[1] / 65536.0, local[2] / 65536.0);
+		for (size_t si = 0; si < cm.sections.size(); ++si) {
+			const w::CollisionSection &sec = cm.sections[si];
+			for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
+				const w::CollisionVolume &vol = cm.volumes[sec.volume_start + vi];
+				if (local[0] < vol.min_x || local[0] > vol.max_x ||
+				    local[1] < vol.min_y || local[1] > vol.max_y)
+					continue;
+				std::printf("  s%zu v%d type=%d localZ=[%.2f..%.2f] "
+				            "worldZ=[%.2f..%.2f]\n",
+				            si, vi, vol.type, vol.min_z / 65536.0,
+				            vol.max_z / 65536.0,
+				            be->position.z + vol.min_z / 65536.0,
+				            be->position.z + vol.max_z / 65536.0);
+			}
+		}
+	}
+
+	// ---- Raw BVOL dump at the column: does the RAW 3DI carry a volume whose
+	// top sits at local ~-7.66 (world 35.1) that the conversion drops?
+	{
+		const int32_t lx = fx(4.64), ly = fx(1.46); // the column, model-local
+		std::printf("raw BVOLs containing the column XY (of %zu total):\n",
+		            m3->collision->volume_count);
+		for (size_t i = 0; i < m3->collision->volume_count; ++i) {
+			const ThreediBoundingVolume &v = m3->collision->volumes[i];
+			if (lx < v.min_x_fp16 || lx > v.max_x_fp16 || ly < v.min_y_fp16 ||
+			    ly > v.max_y_fp16)
+				continue;
+			std::printf("  raw[%zu] type=%d flags=0x%x localZ=[%.2f..%.2f] "
+			            "planes=%d\n",
+			            i, v.collidable_type, unsigned(v.flags),
+			            v.min_z_fp16 / 65536.0, v.max_z_fp16 / 65536.0,
+			            v.plane_count);
+		}
+	}
+
+	// ---- Direct ground-probe check: from just above retail's interior spawn
+	// point, does raycast_ground find the bunker's floor slab (retail z 35.1)?
+	{
+		w::Entity rp_seed;
+		rp_seed.kind = w::EntityKind::Organic;
+		rp_seed.net_id = 72001;
+		rp_seed.alive = true;
+		rp_seed.position = {155.3f, 318.2f, 36.0f};
+		const w::EntityHandle rp = world.registry.spawn(0, rp_seed);
+		for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+		const int32_t probe_pos[3] = {fx(155.3), fx(318.2), fx(36.0)};
+		w::EntityHandle hit;
+		const int32_t g = cw.raycast_ground(world, rp, probe_pos, 0, 0, 0,
+		                                    fx(4.0), &hit);
+		std::printf("ground probe at (155.3, 318.2, 36.0): ground=%.2f hit=%u "
+		            "(expect ~35.1 on the slab)\n",
+		            g / 65536.0, unsigned(hit.packed));
+	}
+
+	// ---- Yaw-convention sweep: at which collision yaw is retail's interior
+	// spawn point (155.3, 318.2, 35.1) FREE SPACE? The mission authors placed
+	// soldiers there; if only a different yaw frees it, the static-collision
+	// heading conversion is the divergence (render uses its own basis, so a
+	// flipped collision rotation is visually invisible).
+	for (const int16_t try_yaw : {int16_t(-90), int16_t(90), int16_t(0),
+	                              int16_t(180)}) {
+		w::Entity *bmut = world.registry.get(bunker);
+		const int16_t saved_yaw = bmut->yaw;
+		bmut->yaw = try_yaw;
+		w::CollisionWorld cwy;
+		{
+			const Threedi3di3 *bm = cache.model_for("Cbunker2");
+			w::CollisionModel cm;
+			simassets::collision_model_from_3di(bm->collision, cm,
+			                                    simassets::model_has_collision(*bm));
+			cwy.assign_entity(bunker, cwy.add_model(std::move(cm)),
+			                  bmut->registry_spawn_id);
+		}
+		w::Entity probe_seed;
+		probe_seed.kind = w::EntityKind::Organic;
+		probe_seed.net_id = 71000 + try_yaw;
+		probe_seed.alive = true;
+		probe_seed.position = {155.3f, 318.2f, 35.1f};
+		const w::EntityHandle probe = world.registry.spawn(0, probe_seed);
+		for (int i = 0; i < 17; ++i) cwy.build_tick_tables(world);
+		int32_t ppos[3] = {fx(155.3), fx(318.2), fx(35.1)};
+		int32_t pvel[3] = {0, 0, 0};
+		int16_t phealth = 100;
+		w::CollisionWorld::ResolveState pstate;
+		for (int t = 0; t < 30; ++t)
+			cwy.resolve_entity(world, probe, pstate, ppos, pvel, pvel[2], 0,
+			                   fx(1.8), 0, 0, false, true, t, 149, 0u, phealth);
+		std::printf("  yaw %d: probe moved to (%.2f, %.2f, %.2f) drift=%.2f "
+		            "contactItem=%d\n",
+		            int(try_yaw), ppos[0] / 65536.0, ppos[1] / 65536.0,
+		            ppos[2] / 65536.0,
+		            std::sqrt(std::pow(ppos[0] / 65536.0 - 155.3, 2) +
+		                      std::pow(ppos[1] / 65536.0 - 318.2, 2)),
+		            cwy.dbg_last_contact_item);
+		bmut->yaw = saved_yaw;
+	}
+
+	// ---- Spawn-settle probe: drop a capsule at retail's spawn point INSIDE
+	// the bunker (slot 1: 155.3, 318.2, z 35.1 on the floor slab) with the
+	// infantry gravity step, resolving each tick. Case A mirrors the live
+	// boot: the first 16 logic ticks run WITHOUT candidate slices (the
+	// documented cadence), so the resolver sees terrain only. Case B has
+	// slices from tick 0. Retail keeps the soldier ON the slab (z 35.1).
+	for (int with_slices = 0; with_slices <= 1; ++with_slices) {
+		w::Entity d;
+		d.kind = w::EntityKind::Organic;
+		d.net_id = 70002 + with_slices;
+		d.alive = true;
+		d.position = {155.3f, 318.2f, 35.1f};
+		const w::EntityHandle drop = world.registry.spawn(0, d);
+		w::CollisionWorld cw2;
+		// Re-register the scene in a fresh collision world so the slice
+		// cadence restarts (17 builds arm the slices).
+		{
+			const Threedi3di3 *bm = cache.model_for("Cbunker2");
+			w::CollisionModel cm;
+			simassets::collision_model_from_3di(bm->collision, cm,
+			                                    simassets::model_has_collision(*bm));
+			cw2.assign_entity(bunker, cw2.add_model(std::move(cm)),
+			                  be->registry_spawn_id);
+		}
+		const int prebuilds = with_slices ? 17 : 1;
+		for (int i = 0; i < prebuilds; ++i) cw2.build_tick_tables(world);
+		int32_t dpos[3] = {fx(155.3), fx(318.2), fx(35.1)};
+		int32_t dvel[3] = {0, 0, 0};
+		int16_t dhealth = 100;
+		w::CollisionWorld::ResolveState dstate;
+		for (int t = 0; t < 120; ++t) {
+			dvel[2] -= 416; // kGravityStep
+			if (dvel[2] < -33280) dvel[2] = -33280;
+			dpos[2] += 2 * dvel[2];
+			const int32_t fc = cw2.resolve_entity(
+					world, drop, dstate, dpos, dvel, dvel[2], 0, fx(1.8), 0, 0,
+					false, true, t, 149, 0u, dhealth);
+			if (fc <= 0) { dpos[2] -= fc; dvel[2] = 0; }
+			cw2.build_tick_tables(world);
+			if (t == 15 || t == 60 || t == 119)
+				std::printf("  settle[%s] t=%d pos=(%.2f, %.2f, %.2f)\n",
+				            with_slices ? "slices@0" : "sliceless16", t,
+				            dpos[0] / 65536.0, dpos[1] / 65536.0,
+				            dpos[2] / 65536.0);
+		}
+	}
+
+	std::printf("closest approach to the node: %.2f u\n", closest);
+	if (closest < 0.5) {
+		std::printf("bunker walk-in: the capsule reached the interior node\n");
+	} else {
+		std::printf("bunker walk-in: PINNED outside (closest %.2f u) — the live "
+		            "divergence reproduces offline\n",
+		            closest);
+	}
+	return 0;
+}

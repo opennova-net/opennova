@@ -643,13 +643,27 @@ bool EntityCommands::group_holding_group(int holder_group, int held_group) const
 bool EntityCommands::ssn_on_chain_of(uint16_t ssn, uint16_t target_ssn) const {
     // [orig: Entity_IsOnTopOfChain @0x4f19a0 — both resolved + ItemTypeIndex
     // gates; A's groundEntity(+0x28) chain, up to 3 hops, == B]
+    // Retail's +0x28 is ONE carrier link that covers standing-on, seated-in,
+    // and emplacement-child-of alike (a seated gunner's +0x28 is his seat
+    // entity, the seat's +0x28 its hull). Our model splits those into
+    // mount_target / emplacement_parent / ground_target, so the hop re-folds
+    // them — without the fold, "the player rides the Stryker" (the 05TRcoop
+    // convoy root trigger, Single/sub42 p1=10000) never evaluated true for a
+    // seated player and the chain stayed dead.
+    const auto carrier_of = [this](const Entity &e) -> const Entity * {
+        if (e.mounted && e.mount_target.valid())
+            return world_.registry.get(e.mount_target);
+        if (e.emplacement_parent.valid())
+            return world_.registry.get(e.emplacement_parent);
+        return world_.registry.get(e.ground_target);
+    };
     const Entity *a = world_.registry.get(resolve_ssn(ssn));
     const Entity *b_probe = world_.registry.get(resolve_ssn(target_ssn));
     if (!a || !b_probe || a->item_id == 0 || b_probe->item_id == 0) return false;
-    const Entity *hop = world_.registry.get(a->ground_target);
+    const Entity *hop = carrier_of(*a);
     for (int i = 0; i < 3 && hop != nullptr; ++i) {
         if (hop == b_probe) return true;
-        hop = world_.registry.get(hop->ground_target);
+        hop = carrier_of(*hop);
     }
     return false;
 }
@@ -779,13 +793,45 @@ bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
     return adiff <= 0x15555540; // 30.0000 deg in BAM32
 }
 
+// A scripted group kill has to reach the WIRE, not just zero the health. Retail
+// never fans deaths from the damage pass: every motor's per-entity update carries
+// the edge `Health <= 0 && (Flags & 2) == 0` and calls Entity_CheckAndProcessDeath
+// there, so ANY writer of zero health — a bullet, or this action — is noticed and
+// notified. The killer rides on the VICTIM (entity+704, read by
+// BuildDeathNotifyPayload), which is why retail's own baseline capture shows its
+// scripted kills as `killerSource=0`: the script never stamps that field. Ours
+// leaves the killer handle unset for the same reason, and the burst matches.
+//
+// SHAPE NOTE: raising the death here rather than from a health<=0 sweep in the
+// motor is narrower than the original — a future health-zeroing path would have
+// to remember to do the same. Converging on the sweep is worth doing when the
+// death path is next opened up; it needs the killer moved onto the entity first.
+// [orig: the edge @0x4bfxxx (org1) / @0x4b73xx (org2) -> Entity_CheckAndProcessDeath
+//  @0x51b550 -> BuildDeathNotifyPayload @0x5036e0, send_mask 0x90]
+static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
+    RoundDeath d;
+    d.victim = h;
+    d.victim_handle = h.packed;
+    // killer_handle stays at its default: retail's unstamped entity+704.
+    d.killer_handle = 0;
+    world.round_sim.deaths.push_back(d);
+    e.alive = false;
+    e.health = 0;
+}
+
 int EntityCommands::kill_group(int group) {
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
     int n = 0;
     for (EntityHandle h : members) {
         Entity *e = world_.registry.get(h);
-        if (e) { e->alive = false; e->health = 0; ++n; }
+        if (!e) continue;
+        // Only the LIVING cross the edge — retail's `(Flags & 2) == 0` half. A
+        // group killed twice must not notify twice.
+        if (e->health > 0 && (e->flags & kEntityFlagDead) == 0)
+            raise_scripted_death(world_, *e, h);
+        else { e->alive = false; e->health = 0; }
+        ++n;
     }
     return n;
 }
@@ -808,7 +854,18 @@ int EntityCommands::set_group_hp(int group, int32_t hp) {
     int n = 0;
     for (EntityHandle h : members) {
         Entity *e = world_.registry.get(h);
-        if (e) { e->health = hp; e->alive = hp > 0; ++n; }
+        if (!e) continue;
+        // Setting a group to zero health is a kill by another name, and retail's
+        // motor edge cannot tell the two apart — it only sees the zero. Same
+        // notify, same unstamped killer.
+        if (hp <= 0 && e->health > 0 && (e->flags & kEntityFlagDead) == 0) {
+            raise_scripted_death(world_, *e, h);
+            ++n;
+            continue;
+        }
+        e->health = hp;
+        e->alive = hp > 0;
+        ++n;
     }
     return n;
 }
@@ -862,6 +919,85 @@ bool EntityCommands::group_dead(int group) const {
 
 // --- mount / emplacement (AttachToEmplaced) ---
 
+// Seat-type filter for a selection mode. #564 retired the shared copy of this
+// predicate along with its own seat-selection path; find_best_seat below is the
+// child-emplacement scan [orig: Entity_FindBestSeatSlot @0x4351f0] and still
+// needs it, so it lives here as a file-local helper.
+static bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
+    switch (mode) {
+        case SeatSelectionMode::PassengerOnly:
+            return type == SeatType::Passenger;
+        case SeatSelectionMode::RejectController:
+            return type != SeatType::Controller;
+        case SeatSelectionMode::Any:
+        default:
+            return true;
+    }
+}
+
+int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant,
+                                   SeatSelectionMode mode,
+                                   EntityHandle *out_owner) const {
+    // [orig: Entity_FindBestSeatSlot @0x4351f0] lowest weight wins; skip None/taken
+    // seats. The original walks the vehicle AND ITS CHILDREN ("Searches through bone
+    // slots of a vehicle entity and its children"): childCount/childArray come off the
+    // carrier, index -1 is the carrier itself and 0..n-1 are its children, and two
+    // rules apply only to children — `ctrlx`/`drvrx` are SKIPPED on a child
+    // (`if (entityPtr != vehicleEntity) goto ...`), and a child `sitex` is weighted
+    // 0x2000000 instead of 0x200000, i.e. worst of all.
+    //
+    // This retires the "child-entity traversal is deferred" residual. It is the
+    // PRECONDITION for the emplaced body state: 00TRg's vehicles carry NO Gunner seat
+    // of their own (1302/1303/1305 are [pass N, ctrl 1, GUN 0] with attach 1/3/1) —
+    // every gun position is an addeweap CHILD (1892/1902/1988/1991/1993, GUN 1 each).
+    // Scanning only the parent could never reach one, so anim 67 kEmplaced sat at 0.0%
+    // against retail's 21.3%. With children in scope the Gunner weight (0x20000) beats
+    // the parent's passenger seats (0x200000) 16:1, which is how retail fills its guns.
+    int best = -1;
+    int32_t best_weight = 65536000; // [orig: bestWeight init sentinel]
+    if (out_owner != nullptr) *out_owner = target.handle;
+
+    auto scan = [&](const Entity &owner, bool is_child) {
+        for (int i = 0; i < static_cast<int>(owner.seats.size()); ++i) {
+            const Seat &s = owner.seats[i];
+            if (s.type == SeatType::None) continue;           // [orig: boneIdx != 0]
+            // A child's control/driver bones are not seats of this vehicle.
+            // [orig: the `entityPtr != vehicleEntity` skips on ctrlx and drvrx]
+            if (is_child && (s.type == SeatType::Controller || s.type == SeatType::Driver))
+                continue;
+            if (!seat_allowed_for_mode(s.type, mode)) continue;
+            if (s.occupant.valid() && s.occupant != occupant) // [orig: owner==0xFFFF || owner==self]
+                continue;
+            int32_t w;
+            switch (s.type) {
+                case SeatType::Controller:
+                case SeatType::Driver:    w = 0x2000;   break; // [orig: case 2/5]
+                case SeatType::Passenger:
+                    w = is_child ? 0x2000000 : 0x200000;       // [orig: case 1 + the child bump]
+                    break;
+                case SeatType::Gunner:
+                default:                  w = 0x20000;  break; // [orig: default (UseGun)]
+            }
+            if (w < best_weight) {
+                best = i;
+                best_weight = w;
+                if (out_owner != nullptr) *out_owner = owner.handle;
+            }
+        }
+    };
+
+    scan(target, /*is_child=*/false);
+    // The children. Retail keeps an explicit child array on the carrier; our link is
+    // the child's own emplacement_parent stamped at promote, so the walk is a registry
+    // scan rather than an array index. Declared divergence: same set, different
+    // traversal. [orig: childArray = carrier->pad_1ba[2], childCount = pad_1ba[6]]
+    world_.registry.for_each([&](const Entity &e) {
+        if (e.emplacement_parent != target.handle) return;
+        scan(e, /*is_child=*/true);
+    });
+    return best;
+}
+
 bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelectionMode mode) {
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] resolve both; reject already-mounted /
     // seatless; pick the best seat; write both sides; pose now.
@@ -891,6 +1027,40 @@ bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t targ
             return false;
     }
     return mount(occupant_ssn, target_ssn, mode);
+}
+
+// WAC `ssnrelease` -- the RELEASE half of the AI boarding order, and the reason a
+// transported squad ever gets out again. [orig: sub_4F7420 @0x4f7420]
+//
+//   if ( !v3 || !v3->ItemTypeIndex || !v3->parentEntity ) return 0;
+//   Entity_DetachFromVehicleIfServer(v3);
+//   if ( v3->aiRuntime ) { aiRuntime[37] = 0; aiRuntime[35] = 0; }
+//
+// It is the exact twin of the `ssn2ssn` setter (sub_4F7330 @0x4f7330, which arms
+// aiRuntime[37]=125 + [38]=target + [36]=carrier and zeroes thinkCooldown). Retail
+// has NO arrival-driven unload anywhere -- all 20 Entity_DetachFromVehicleIfServer
+// call sites are death/damage, a waypoint redirect, destroy, or spawn reset -- so
+// THIS script command is how a mission disembarks a transported AI. Without it the
+// occupant rides to the destination and then sits at command 125 forever, which is
+// exactly what our 00TRg probe showed: 12 permanently-mounted AI, every one at
+// wp=125, seven of them having driven ~700 u and then stopped dead.
+//
+// Clearing [35] (the has-route flag) as well as [37] is witnessed and load-bearing:
+// leaving the route flag set would keep the stale board route live after the detach.
+bool EntityCommands::release_boarding_command(uint16_t occupant_ssn) {
+    const EntityHandle oh = resolve_ssn(occupant_ssn);
+    Entity *occ = world_.registry.get(oh);
+    // [orig: the !ItemTypeIndex and !parentEntity rejects] -- a release only applies
+    // to a real item entity that is actually riding something.
+    if (!occ || occ->item_type == 0 || !occ->mounted) return false;
+    dismount(occupant_ssn); // [orig: Entity_DetachFromVehicleIfServer]
+    if (world_.ai) {
+        if (AiEntity *ae = world_.ai->for_handle(oh)) {
+            ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
+            ae->slot.f[35] = 0; // [orig: aiRuntime[35] = 0 — clear the has-route flag]
+        }
+    }
+    return true;
 }
 
 bool EntityCommands::mount_best(uint16_t occupant_ssn) {
@@ -1041,6 +1211,37 @@ bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, in
     queue_alert_brain_event(*world_.ai, *ae, sub_type);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
+}
+
+// BMS action 27, PARTICLE_EFFECT [orig: EventAction_Dispatch case 0x1B @0x4542e0 ->
+// sub_4540E0 @0x4540e0]. Retail walks POOL 3, matches `def type == 6088` and
+// `entity[167] == param1`, and spawns one emitter per match at the entity's position,
+// caching the handle at entity[115].
+//
+// entity[167] is the WP_NUMBER, not a team: the kong banner guesses "team", but
+// 00TRg's four 6088 markers all have NO team byte (0) while their wp_numbers are
+// 1/2/3/4 -- exactly the four params its events 12-15 pass. Matching on team would
+// fire nothing.
+//
+// UNPORTED, declared: the emitter descriptor itself (effect_desc[0..13], the rope-trail
+// style, the Entity_ClearOwnerSessionIfMatches owner callback) and the entity[115]
+// handle cache. We raise one shell effect per match carrying the marker's position and
+// leave the emitter style to the presenter; nothing here invents a particle type.
+int EntityCommands::spawn_marker_particle_effects(int32_t wp_number) {
+    int fired = 0;
+    const size_t capacity = world_.registry.pool_capacity(3);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const Entity *e = world_.registry.get(EntityHandle::make(3, static_cast<int>(slot)));
+        if (e == nullptr) continue;
+        if (e->item_id != kParticleEffectMarkerTypeId) continue; // def type 6088
+        if (e->wp_number != wp_number) continue;
+        world_.effects.push({"particle_effect", static_cast<int32_t>(to_fixed(e->position.x)),
+                             static_cast<int32_t>(to_fixed(e->position.y)),
+                             static_cast<int32_t>(to_fixed(e->position.z)), wp_number,
+                             std::string()});
+        ++fired;
+    }
+    return fired;
 }
 
 int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4) {

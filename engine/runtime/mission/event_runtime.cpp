@@ -386,6 +386,11 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::ChangeSingleAI:
             cmds.apply_ai_command(static_cast<uint16_t>(a.param1), a.action_sub_type, a.param2, a.param3, a.param4);
             break;
+        case bms::ActionType::ParticleEffectAction:
+            // [orig: case 0x1B @0x4542e0 -> sub_4540E0] param1 selects the authored
+            // 6088 markers by WP_NUMBER (not team -- see the command's comment).
+            cmds.spawn_marker_particle_effects(a.param1);
+            break;
         case bms::ActionType::ChangeGroupAI:
             cmds.apply_group_ai_command(a.param1, a.action_sub_type, a.param2, a.param3, a.param4);
             break;
@@ -606,6 +611,13 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
             if ((static_cast<uint32_t>(se.event.flags) & pre_bit) != 0) update_entry(w, se);
         return;
     }
+    // An empty host does not advance the mission. Retail wraps the WAC tick, the
+    // idle sweep and this pump in one condition whose live half is
+    // `wac_var_humans || !wac_var_ticks` — see World::script_may_advance. The
+    // pre-mission pass above is deliberately OUTSIDE it, matching retail, where
+    // that pass runs from Game_StartMission rather than the server tick.
+    if (!w.script_may_advance()) return;
+
     // Normal events (neither flag): every 16th tick process ONE QUARTER of the
     // list, round-robin — each entry is evaluated once per 64 ticks, which is why
     // the timers decrement in 64-unit quanta. [orig: Server_TickUpdate @0x51d7e0

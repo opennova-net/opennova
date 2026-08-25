@@ -65,6 +65,11 @@ nw::FrameUpdate emit_phase2(w::World &world) {
 
 void test_scripted_sky_speed_survives_external_refresh() {
 	w::World world;
+    // A mission only advances while a human is in the world - retail holds the
+    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
+    // so they stand a player up; the empty-server hold has its own test.
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 733 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -89,6 +94,7 @@ void test_scripted_sky_speed_survives_external_refresh() {
 
 void test_movefog_publishes_retail_target_and_duration_step() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 800 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -113,6 +119,7 @@ void test_movefog_publishes_retail_target_and_duration_step() {
 
 void test_movefog_uses_live_external_fog_current() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 800 << 16;
 	base.fog_current_q16 = 600 << 16;
@@ -137,6 +144,7 @@ void test_movefog_uses_live_external_fog_current() {
 
 void test_rain_advances_on_the_explicit_weather_tick() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 500 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -161,6 +169,7 @@ void test_rain_advances_on_the_explicit_weather_tick() {
 
 void test_snow_kind_survives_external_refresh() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 500 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -184,6 +193,7 @@ void test_snow_kind_survives_external_refresh() {
 
 void test_overcast_advances_on_the_explicit_weather_tick() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 500 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -206,6 +216,7 @@ void test_overcast_advances_on_the_explicit_weather_tick() {
 
 void test_quake_uses_retail_six_tick_units_and_countdown() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 500 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -227,6 +238,7 @@ void test_quake_uses_retail_six_tick_units_and_countdown() {
 
 void test_tod_uses_retail_minute_to_fixed24_multiply() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 500 << 16;
 	base.fog_current_q16 = base.fog_target_q16;
@@ -250,6 +262,7 @@ void test_tod_uses_retail_minute_to_fixed24_multiply() {
 
 void test_eager_wac_initializer_and_255_tick_boundary() {
 	w::World world;
+	world.cached.humans = 1;
 	w::EnvNetworkSample base;
 	base.fog_target_q16 = 800 << 16;
 	base.fog_current_q16 = 600 << 16;

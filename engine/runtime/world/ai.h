@@ -868,7 +868,9 @@ public:
     // snap the entity's pos[2] to ground + ground_stand_offset. SET (not max) because our lean
     // waypoint mover (update_waypoint_movement) leaves kWorkPosZ stale, so a max would strand a
     // floating spawn. No-op when `terrain` is null or the column has no terrain coverage.
-    void apply_ground_clamp(AiEntity &e);
+    // `world` enables the MODEL-AWARE tap rays (a brain on a building deck
+    // grounds on the deck); null keeps the terrain-only average.
+    void apply_ground_clamp(AiEntity &e, World *world = nullptr);
 
     // Seat-follow phase for a LIVE mounted occupant. Infantry callers keep running
     // death, perception, combat, and animation around it and suppress only ordinary
@@ -923,6 +925,22 @@ public:
     // (AI_CheckVehicleStuckState @0x465290).
     void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits, VehicleDriveCmd &out);
+
+    // The CHel AI flight drive: stage this tick's flight commands (fwd/lat
+    // cyclic, steer heading, target altitude, engine flag) into the aircraft
+    // motor's registers and raise VehicleMotorState::ai_drive. Retail computes
+    // this INSIDE the aircraft physics; the split to the decision layer
+    // mirrors vehicle_ai_drive. Body in ai_waypoints.cpp.
+    // [orig: the AI leg of Entity_UpdateAircraftPhysics @0x490310 — parked
+    //  state-14 block, the crewed 14->7 transition, waypoint target + turn
+    //  budget, cyclic (132*sin/cos)>>22 with the near-ground 1/8 damp,
+    //  collective from the altitude error, the AGL floor avgGround + bound/4]
+    // True while a live, unmounted body is still walking over to board this
+    // vehicle and a seat remains free — the hold behind the witnessed
+    // wait-for-boarders gate. Body and witness in ai_waypoints.cpp.
+    bool vehicle_waits_for_boarders(World &world, const Entity &veh);
+    void chel_ai_drive(World &world, Entity &veh, const Entity *controller,
+                       const VehicleTraits &traits);
 
     // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
     // and wrapping SUB for every other nonzero direction. Clamp/stop only on
@@ -988,9 +1006,16 @@ public:
     // The 16-tick navigation think: waypoint channel walk (arrival, relmat marks, marker
     // wait + facing, one-shot end), commands 123..127. Writes inf.move_* + target_heading.
     void infantry_think(AiEntity &e, World &world);
+    // The reserved-command legs of the think (slot+148 = 123..127): the
+    // Goto-SSN-and-board family with per-command seat filters, the goto-group
+    // hold, and follow-local-player. Bodies in infantry_board.cpp.
+    // [orig: Entity_UpdateInfantryAI @0x4b9910 command dispatch;
+    //  Entity_FindBestSeatSlot @0x4351f0; Entity_RequestVehicleAttach @0x4364a0]
+    void infantry_command_think(AiEntity &e, World &world);
+    void infantry_board_think(AiEntity &e, World &world, int32_t command);
     // Map the movement order to an anim state (walk/run/jog/turn/stop/wounded + availability
     // fallbacks) and commit it under the lock/emote rules.
-    void infantry_select(AiEntity &e);
+    void infantry_select(AiEntity &e, const Entity *self);
     // The witnessed org2 PLAYER-BODY selection, shared by the local player and the
     // authority-side remote-player path (the original runs ONE function for both):
     // moving base 1/11/19 + direction offset; idle 48 / 45 (46 idle_mortar for

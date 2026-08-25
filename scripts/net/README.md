@@ -2,8 +2,30 @@
 
 Tooling so an agent can capture and decode real wire traffic for the four
 retail-interop scenarios (`.agents/interop.md` packet-diff matrix), then diff
-against a golden. The repo only *reads* pcaps; live capture here uses an external
-Npcap + dumpcap install.
+against a golden. Live capture here uses an external Npcap + dumpcap install.
+
+## Two ways to record OUR side
+
+`dumpcap` (this directory) records what reached the NIC, for any endpoint,
+without touching the client. It is the instrument for anything involving the
+network stack — fragmentation, retransmits, real timing — and it is what the
+parity matrix and `diff_vs_golden.ps1` are built around.
+
+**Self-capture** records from inside the client instead: set
+`NW_CAPTURE_WRITE=<path.pcap>` before launching, and `UdpPump` appends every
+datagram it sends or receives to a pcap in the same legacy/DLT_RAW shape the
+retail-side hook writes. That symmetry is the point — a session recorded from
+our client and one recorded from the original game decode through the same
+`nw_pp` pipeline and compare per (direction, wire tag).
+
+Reach for self-capture when you want the client's own view with no Npcap
+install, no loopback adapter, and no interface guessing — including on a machine
+where dumpcap is unavailable. Its limits are inherent, not incidental: it sees
+only what this process moved (never a third party's traffic), it records the
+payload the application handled rather than the frame that left the machine, and
+its IP headers are synthesized, so checksums and fragmentation carry no
+information. When the question is "which messages flow", it answers directly;
+when the question is about the stack, use dumpcap.
 
 All output goes to `<repo>\.scratch\` (gitignored). Never commit raw captures,
 `.sph` logs, account names, local install paths, or machine IPs.

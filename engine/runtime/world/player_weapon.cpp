@@ -5,6 +5,8 @@
 // records the embedder's net layer routes.
 #include "world/player_weapon.h"
 
+#include "world/vehicle_mount.h"
+
 #include "world/ai.h"
 #include "world/infantry.h"
 #include "world/round_sim.h"
@@ -678,7 +680,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// FSM actually pumped.
 	const bool borrowed_usegun_slot = w.usegun_slot_active;
 	WeaponFsmInputs in;
-	const bool accept_weapon_input = player_alive && !usegun_switch_pending;
+	// The pilot's trigger is dead: retail's fire gate rejects a Controller or
+	// Driver seat before any slot work [orig: Player_CanFireWeapon @0x5cf780].
+	// A gunner seat is deliberately NOT in this set.
+	const bool accept_weapon_input = player_alive && !usegun_switch_pending &&
+			!(player != nullptr && mount_blocks_firing(*player));
 	in.fire_held = accept_weapon_input && w.fire_held;
 	in.fire_pressed = accept_weapon_input && w.fire_pressed;
 	// PowerThrow: the press never fires — it starts the windup; the release

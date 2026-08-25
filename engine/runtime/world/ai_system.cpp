@@ -450,7 +450,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                      vehicle_family_uses_direct_air_mover(vt->family));
             if (locomotion_enabled && !motor_driven) {
                 apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
-                apply_ground_clamp(e); // vertical: snap pos[2] onto the terrain (no-op if unwired)
+                apply_ground_clamp(e, &world); // vertical: snap pos[2] onto ground (no-op if unwired)
             }
         }
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
@@ -471,17 +471,12 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != 1) return;
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            // Ground/water rows are selector-gated. Direct CHel/cpln rows are
+            // admitted regardless of the selector — they branch to the shared
+            // aircraft mover below, never through tick_vehicle_motor.
             if (traits == nullptr) return;
-            // Direct CHel/cpln rows own a different callback (the helo mover
-            // @0x48FA70's caller is the unported residual); they ride the
-            // pass for its tail only, below — never through tick_vehicle_motor
-            // even if an authored def sets physics.
-            if (vehicle_family_uses_direct_air_mover(traits->family)) {
-                vehicle_pass_handles_.push_back(e.handle);
-                return;
-            }
-            // This is the selector-gated ground-family authority port.
-            if (traits->physics == 0) return;
+            if (traits->physics == 0 &&
+                !vehicle_family_uses_direct_air_mover(traits->family)) return;
             vehicle_pass_handles_.push_back(e.handle);
         });
         for (const EntityHandle h : vehicle_pass_handles_) {
@@ -489,19 +484,64 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
-            if (vehicle_family_uses_direct_air_mover(traits->family)) {
-                // The helo mover itself is the unported residual; retail runs
-                // the part-animation accumulator from EVERY mover's tail, the
-                // helo mover included, so a host-crewed helicopter's rotor
-                // turns here at the point that tail would run
-                // [orig: the HELO twin @0x48FA70 called from the aircraft
-                //  mover's tail @0x4905A6].
-                vehicle_part_anim_tick(world, *veh, *traits);
-                continue;
-            }
             // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
             // stamps every mover carries; rider deltas read (current - saved)].
             stamp_saved_live_pose(*veh);
+            // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
+            // class table routes them to the shared aircraft mover, whose AI
+            // brain leg and physics live in one function. A live PLAYER pilot
+            // drives through the predicted path instead. [orig: the class table
+            // dispatch -> Entity_UpdateAircraftPhysics @0x490310, never the
+            // ground core @0x48af00]
+            if (vehicle_family_uses_direct_air_mover(traits->family)) {
+                if (!veh->veh.net_predicted) {
+                    Entity *actrl = resolve_vehicle_controller(world, *veh);
+                    const bool actrl_alive = actrl != nullptr && actrl->alive &&
+                                             actrl->health > 0;
+                    const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
+                                         actrl->player_class != 0;
+                    if (aplayer) {
+                        // A PLAYER pilot still runs the shared mover: retail has
+                        // ONE aircraft function, and its occupant-input block
+                        // (our stage_air_vehicle_input) stages the same
+                        // fwd/lat/steer/altitude registers the AI leg fills.
+                        // Skipping the mover here left a player in the pilot
+                        // seat with no physics at all - the aircraft simply did
+                        // not respond.
+                        // [orig: Entity_UpdateAircraftPhysics @0x490310 — the
+                        //  input gate is `(occ->Flags & 0x100) && (occ ==
+                        //  g_local_player_entity || is_authority)`, not a
+                        //  separate mover]
+                        aircraft_client_tick(world, *veh, *traits);
+                    } else {
+                        chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
+                                      *traits);
+                        aircraft_client_tick(world, *veh, *traits);
+                    }
+                }
+                else {
+                    // A predicted row skips the mover, so the mover's tail call
+                    // never runs for it. Retail's client has no such skip — it
+                    // runs the aircraft function (and therefore the tail) for
+                    // every vehicle it is not driving, seeding the drive
+                    // command from the wire — so advancing the accumulator here
+                    // restores that, it does not add a new one.
+                    // [orig: the HELO twin @0x48FA70 called from the aircraft
+                    //  mover's tail @0x4905A6; the not-driven client leg is
+                    //  @0x48B7F0]
+                    vehicle_part_anim_tick(world, *veh, *traits);
+                }
+                if (AiEntity *ve = for_handle(h)) {
+                    ve->pos[0] = to_fixed(veh->position.x);
+                    ve->pos[1] = to_fixed(veh->position.y);
+                    ve->pos[2] = to_fixed(veh->position.z);
+                    ve->heading = veh->veh.yaw_seeded
+                            ? veh->veh.yaw_bam
+                            : bam_heading_from_mission_yaw_deg(
+                                      static_cast<double>(veh->yaw));
+                }
+                continue;
+            }
             // Stage the drive input class the motor will consume: a live PLAYER controller
             // keeps the occupant leg; an AI controller (or none) routes through the brain
             // (state stamps + the witnessed steer/speed leg). [orig: the occupant class
@@ -1015,12 +1055,45 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
 
 // Drive the vertical off the terrain sampler. See the header. Snap model for the un-reversed
 // vertical driver: SET kWorkPosZ + the entity's pos[2] to ground + ground_stand_offset.
-void AiSystem::apply_ground_clamp(AiEntity &e) {
+void AiSystem::apply_ground_clamp(AiEntity &e, World *world) {
     if (terrain == nullptr) return;
     GroundClearance clearance = ground_clearance;
     clearance.has_physics = e.has_physics;                    // [orig: entity+368 gate]
     clearance.use_dead = (e.health <= 0);                     // [orig: health<=0 dead path]
-    const int32_t ground = calc_average_ground_height(*terrain, e.pos, 0x50000, clearance);
+    constexpr int32_t kSampleRadius = 0x50000;
+    int32_t ground;
+    if (world != nullptr && collision != nullptr && collision->instance_count() != 0) {
+        // The witnessed 5-tap average with MODEL-AWARE rays: each tap is the
+        // ray from the tap column + 1.0u lift, 48u drop, clipped by terrain and
+        // by candidate models, so a brain standing on a building deck grounds
+        // on the deck. Weights/order/clamps are the same as the terrain-only
+        // path below (they are the same function in retail).
+        // [orig: Entity_CalcAverageGroundHeight @0x457230 — the four
+        //  Entity_RaycastGroundHeight(AndObject)(entity, dx, dy, 0x10000,
+        //  0x300000) taps + the doubled centre/max fold]
+        const auto tap = [&](int32_t dx, int32_t dy) {
+            return collision->raycast_ground(*world, e.handle, e.pos, dx, dy,
+                                             0x10000, 0x300000, nullptr);
+        };
+        int32_t max_h = 0;                       // [orig: maxHeight = 0]
+        const int32_t north = tap(0, kSampleRadius);
+        if (north > 0) max_h = north;            // [orig: if (north > 0) max = north]
+        const int32_t south = tap(0, -kSampleRadius);
+        if (south > max_h) max_h = south;
+        const int32_t east = tap(kSampleRadius, 0);
+        if (east > max_h) max_h = east;
+        const int32_t west = tap(-kSampleRadius, 0);
+        if (west > max_h) max_h = west;
+        const int32_t centre = tap(0, 0);
+        if (centre > max_h) max_h = centre;
+        ground = (north + south + east + west + 2 * (centre + 2 * max_h)) / 10;
+        if (ground < centre) ground = centre;    // [orig: clamp >= centre]
+        if (clearance.has_physics && terrain->has_water && terrain->water_y > ground)
+            ground = terrain->water_y;           // [orig: the occupant water clamp]
+        ground += clearance.use_dead ? clearance.dead_offset : clearance.alive_offset;
+    } else {
+        ground = calc_average_ground_height(*terrain, e.pos, kSampleRadius, clearance);
+    }
     if (ground == INT32_MIN) return;                          // no terrain coverage -> leave Z
     const int32_t z = ground + ground_stand_offset;           // [orig: brain[131] = ground + 0x50000]
     e.brain.f[AiBrain::kWorkPosZ] = z;                        // mover output field stays faithful

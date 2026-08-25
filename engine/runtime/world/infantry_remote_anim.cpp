@@ -1,0 +1,220 @@
+// The remote-player body animation leg of the infantry motor, split out of
+// infantry.cpp to keep that TU under the 2500-line size ratchet. Behaviour is
+// unchanged: the body moves verbatim and the five helpers it shares with
+// infantry.cpp are declared in infantry_internal.h.
+// Witness record: docs/world/world-wac-ai-re.md.
+
+#include <algorithm>
+#include <cmath>
+
+#include <io/bam.h>
+#include <terrain_query/height_field.h>
+
+#include "world/ai.h"
+#include "world/angle.h"
+#include "world/infantry_internal.h"
+#include "world/infantry_ladder.h"
+#include "world/vehicle_attach.h"
+#include "world/world.h"
+
+namespace opennova::world {
+
+void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick) {
+    InfantryState &inf = e.inf;
+    if (!inf.active) return;
+    Entity *ent = world.registry.get(e.handle);
+    if (ent == nullptr) return;
+
+    // A hard-snap/frozen entity skips the whole body motor — the retail head
+    // bails on Flags bit0 before any anim work, which is why a deploy-pending
+    // (hidden) player's channel is
+    // FROZEN on the wire (golden pre-deploy ratio constant at 40; ours swept to 255 in
+    // v32 until this gate). [orig: Entity_UpdateInfantryPlayerBody @0x4b411b-0x4b4127
+    // `mov edx,[esi+24h]; test dl,1; jnz return`]
+    if ((ent->flags & 1u) != 0) return;
+
+    // The motor's registry hydration is skipped for wire-snapped peers (tick_infantry
+    // returns before it); sync the health copy the selection/lean gates read.
+    e.health = ent->health;
+    int death_transition = -1;
+    RootMotionFrame collision_frame;
+    bool have_collision_frame = false;
+
+    if (ent->health <= 0) {
+        // Death edge — one-shot to the death pose, same policy as the motor's death edge
+        // (generic torso-forward bullet death, else the 173 fire fallback; the +0x2C0
+        // deferred deathAnim / 175 falling-death variant selection is the combat pass).
+        // [orig: the @0x4b40e0 death leg; digest: death 175 / deathAnim]
+        // Relationship teardown is independent of animation state. A peer can
+        // already be in a death-class clip when a late/replayed state restores a
+        // mount, and that must not leave the seat claim or compact carrier alive.
+        // [orig: infantry death detach @0x4b9c57..0x4b9c60]
+        if (ent->mounted) entity_detach_from_vehicle(world, e.handle);
+        if (infantry_anim_flags(inf.anim_state) != 0x82u) {
+            const int death = anim_state::kDeathBulletBase + 4;
+            const int target =
+                (root_motion != nullptr && root_motion->has_clip(inf.adm_id, death))
+                    ? death
+                    : anim_state::kDeathFire;
+            death_transition = target;
+        }
+    } else {
+        // The replicated JUMP key (MoveOrder bit 5): the retail host derives the
+        // jump launch + anims for a remote player inside the same authority-run
+        // jump block the local body uses — cooldown clamp [0,32], >1 counts
+        // down, parked at 1 while the key is held, release -> 0, launch only
+        // from 0 [orig: maintenance @0x4b7de0-0x4b7e15, park @0x4b7e7a-0x4b7e82,
+        // gate @0x4b7e8c-0x4b7eb5, anim 30 + pending 31 + reload 32
+        // @0x4b7ef2-0x4b7f06]. A wire-snapped peer's MOTION is uplink-owned, so
+        // only the anim/latch leg runs here. The C2S pose apply reconstructs the
+        // terrain-backed airborne/landing state that this gate consumes; where
+        // terrain is unavailable, the countdown window remains the conservative
+        // animation-only fallback (tracked in the D-NET-159/196 record).
+        const bool jump_key =
+            (ent->net_move_input & Entity::kMoveOrderJump) != 0;
+        // Stance-change (0x1D) and the extended movement uplink (0x0C) can arrive in
+        // the same network pump.  The jump block is per-tick and reads the CURRENT
+        // MoveOrder prone bit; the fourth-tick locomotion selector below is not an
+        // eligibility cache. [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181;
+        // prone gate @0x4b7e99]
+        const bool replicated_prone = (ent->net_stance_bits & 0x1u) != 0;
+        const bool jump_state_blocked = player_jump_world_state_blocked(inf, ent);
+        if (inf.jump_cooldown < 0) inf.jump_cooldown = 0;
+        if (inf.jump_cooldown > 32) inf.jump_cooldown = 32;
+        if (inf.jump_cooldown > 1) {
+            --inf.jump_cooldown;
+        } else if (inf.jump_cooldown == 1 && !jump_key) {
+            inf.jump_cooldown = 0;
+        }
+        if (inf.jump_cooldown == 0 && jump_key && !replicated_prone &&
+            !jump_state_blocked) {
+            inf.jump_cooldown = 32;
+            // Only latch the synthesized vertical state when the authority has
+            // terrain and can therefore observe its landing on a later uplink.
+            // Terrain-free harnesses retain the documented cooldown-only residual.
+            if (world.terrain != nullptr && world.terrain->valid()) {
+                inf.airborne = true;
+                ent->flags |= kEntityFlagInAir;
+                ent->engine_flags |= kEntityFlagInAir;
+            }
+            // STRAIGHT stamps, same as the local block — no availability
+            // check in the witnessed org2 jump stamps [orig: @0x4b7ef2/@0x4b7efc].
+            inf.begin_body_transition(anim_state::kJumpStart);
+            inf.anim_pending = anim_state::kJumpLoop;
+        }
+        const bool jump_episode =
+            (inf.anim_state == anim_state::kJumpStart ||
+             inf.anim_state == anim_state::kJumpLoop) &&
+            inf.jump_cooldown > 1;
+        if ((logic_tick & 3u) == 0 && !jump_episode) {
+            // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the
+            // REPLICATED MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving,
+            // bits 6-7 = lean [orig: @0x4b4153/@0x4b415c]) + the stance bits
+            // (MoveOrder bits 8-9, fed by C2S 0x1D [orig: @0x4b4165-0x4b4181;
+            // prone suppressed by Flags & 0x10A000 — swim/parachute unmodeled]),
+            // then run the SAME witnessed selection the local player runs (one
+            // function in the original; it skips while airborne @0x4b70b8 — the
+            // jump-episode window above is the wire-snapped analog).
+            inf.player_moving = (ent->net_move_input & 0x08u) != 0;
+            inf.player_move_dir_index = ent->net_move_input & 0x07u;
+            inf.lean_left = (ent->net_move_input & 0x40u) != 0;
+            inf.lean_right = (ent->net_move_input & 0x80u) != 0;
+            inf.stance = (ent->net_stance_bits & 0x1u) != 0
+                             ? InfantryState::Stance::kProne
+                             : ((ent->net_stance_bits & 0x2u) != 0
+                                    ? InfantryState::Stance::kCrouch
+                                    : InfantryState::Stance::kStand);
+            player_body_select(e, ent->flags | ent->engine_flags);
+        }
+    }
+    // The lean angle runs on the authority for every player body (the wire echoes the
+    // lean BITS, each end integrates the angle), and the torso roll rides the same
+    // body pass. [orig: @0x4b5c97 / @0x4b7dbf / @0x4b5cff]
+    infantry_lean_tick(e, ent != nullptr ? (ent->flags | ent->engine_flags) : 0u);
+    infantry_torso_roll_tick(e);
+
+    // The upper-body weapon channel runs for a WIRE PEER exactly as it does for the
+    // local player. The original has no ownership test on it: the only locality check
+    // in the whole region guards the refresh of Flags bits 2-4 from the local
+    // g_weaponScopeActive / g_binocularsRaised / NVG globals, and a non-local entity
+    // jumps straight past it into the hold-kind ladder [orig: @0x4b5d77
+    // `cmp g_local_player_entity, esi ; jnz short loc_4B5DAD`]. For a peer those same
+    // three bits arrive over the wire instead — the host has already replaced them
+    // from the sender's C2S 0x0C state byte (mask 0x1C) — so the selection reads the
+    // peer's OWN entity for both of its inputs: bit 0x10 scoped [orig: test @0x4b5deb]
+    // and the equipped ADM index at +0x2B0 [orig: read @0x4b5dba]. Without this a
+    // remote player holds a rifle pose whatever it carries, and never adopts the
+    // scoped stance the wire is already reporting.
+    inf.scope_raised = (ent->flags & kEntityFlagScopeRaised) != 0;
+    inf.binoculars_raised = (ent->flags & kEntityFlagBinoculars) != 0;
+    infantry_weapon_channel(e, world, logic_tick);
+
+    // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
+    // .adm loop rate when the embedder has anim data; without it the phase self-advances on a
+    // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
+    // anim data rate). Root translation remains wire-owned; the frame's capsule
+    // feeds the shared collision tail below.
+    if (root_motion != nullptr) {
+        if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
+        have_collision_frame =
+                advance_primary_channel(inf, *root_motion, collision_frame);
+        if (have_collision_frame) {
+            inf.prev_capsule_bottom = collision_frame.capsule_bottom;
+            // The remote-player eye-offset restamp: retail runs the same body
+            // updater for net-snapped peers, and the +0x74 store persists while
+            // the pose work is inert — the org2 non-local formula, lean at rest.
+            // [orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]
+            const int32_t extent = collision_frame.capsule_top -
+                                   collision_frame.capsule_bottom;
+            int32_t eye_z = std::min(extent, 0xD000);
+            if (eye_z < 0x2000) eye_z = 0x2000;
+            inf.eye_offset_z = eye_z;
+        }
+        // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
+        if (death_transition >= 0) {
+            inf.begin_body_transition(death_transition);
+        } else if (inf.anim_pending != 0) {
+            const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state, 0);
+            if (len >= 0 && inf.clip_phase >= len) {
+                const int next = inf.anim_pending;
+                inf.anim_pending = 0; // consumed; the insert may re-arm it
+                begin_body_transition_with_insert(inf, next, root_motion);
+            }
+        }
+    } else {
+        advance_primary_channel_fallback(inf);
+        if (death_transition >= 0)
+            inf.begin_body_transition(death_transition);
+    }
+
+    // Snapshot ownership suppresses locomotion, not the retail collision tail.
+    // Resolve the current pose with the anim capsule and zero movement channels;
+    // mounted bodies retain the resolver's ordinary force-suppression rule.
+    // [orig: org2 resolver call @0x4B7CE0..0x4B7CF4; CT callback gate
+    // @0x4B31DD..0x4B3238]
+    if (collision != nullptr && collision->instance_count() != 0) {
+        int32_t contact_vel[2] = {0, 0}, contact_vel_z = 0;
+        const int32_t tick_start_z = e.pos[2];
+        const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
+        collision->resolve_entity(
+                world, e.handle, e.collide_state, e.pos, contact_vel,
+                contact_vel_z,
+                have_collision_frame ? collision_frame.capsule_bottom : 0,
+                have_collision_frame ? collision_frame.capsule_top : 0,
+                e.heading, e.pitch, ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0,
+                is_authority, logic_tick, inf.anim_state,
+                infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
+        ent->health = e.health;
+        ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
+        ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
+        ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
+    }
+
+    // Present-pass clip for the host's own third-person view of this peer.
+    if (ent->alive && ent->health > 0)
+        ent->body_anim_slot = body_anim_slot_from_state(inf.anim_state);
+
+    mirror_wire_anim(e, world);
+}
+
+} // namespace opennova::world

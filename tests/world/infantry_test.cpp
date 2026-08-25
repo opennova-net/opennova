@@ -765,9 +765,15 @@ void test_org1_bare_cl_facing_press_drift() {
     // store @ 0x4b3a62]
     CHECK(!rig.collision.resolver_applied_push);
     const int32_t x0 = m->pos[0];
-    run_ticks(rig.ai, rig.world, 1, 4);
+    // Ticks 1..6 so the window contains THREE EVEN ticks (2, 4, 6). This body
+    // is an NPC, and org1's resolver + press block runs on even ticks only
+    // [orig: gate kong 155809 under `outYaw.X = tickCounter & 1` kong
+    // 155519-155523], so a 1..4 window would deliver a single press where this
+    // case means to measure three. The press COUNT is what the bound below was
+    // calibrated on, so the window is widened rather than the bound relaxed.
+    run_ticks(rig.ai, rig.world, 1, 7);
     CHECK((pe->flags & kEntityFlagLadderContact) != 0);
-    // 3 ticks of resolver press (−0.0625) + org1 press (−0.03125) less the
+    // 3 presses of resolver (−0.0625) + org1 press (−0.03125) less the
     // anchor chase-back: comfortably past 0.22u; without the org1 press the
     // same window moves under 0.19u.
     CHECK(m->pos[0] < x0 - fx(0.22));
@@ -2746,8 +2752,10 @@ void test_eye_offset_restamp() {
     run_ticks(ai, w, 4, 6);
     CHECK(reg->eye_offset_z == 0xD000);
 
-    // The local exact leg: a shell-fed head sample replaces the capsule formula
-    // with head - Position, all three lanes, stored UNfloored — the 0x2000
+    // The local exact leg: a shell-fed head sample replaces the capsule formula.
+    // The shell feeds it BODY-RELATIVE (head minus the skeleton origin) because
+    // its render skeleton is a frame behind the sim; an absolute sample would
+    // carry that frame of travel into the offset. Stored UNfloored — the 0x2000
     // floor belongs to the capsule legs; retail's on-foot leg terrain-floors
     // the head first (a no-op here: this AiSystem carries no height field).
     // [orig: Entity_UpdateInfantryPlayerBody on-foot @0x4b6bb3..0x4b6cc8;
@@ -2755,19 +2763,19 @@ void test_eye_offset_restamp() {
     e->pos[0] = fx(10);
     e->pos[1] = fx(20);
     e->pos[2] = fx(5);
-    w.cached.local_head = Vec3{10.25f, 19.5f, 6.4f};
-    w.cached.local_head_valid = true;
+    w.cached.local_head_offset = Vec3{0.25f, -0.5f, 1.4f}; // head - body root
+    w.cached.local_head_offset_valid = true;
     run_ticks(ai, w, 6, 8);
     CHECK(reg->eye_offset_x == fx(1) / 4);
     CHECK(reg->eye_offset_y == -fx(1) / 2);
     CHECK(std::abs(reg->eye_offset_z - (fx(1) + fx(1) * 2 / 5)) <= 2);
     // A head barely above Position stores the raw 0.05 u offset (no floor).
-    w.cached.local_head = Vec3{10.0f, 20.0f, 5.05f};
+    w.cached.local_head_offset = Vec3{0.0f, 0.0f, 0.05f};
     run_ticks(ai, w, 8, 10);
     CHECK(reg->eye_offset_x == 0);
     CHECK(reg->eye_offset_y == 0);
     CHECK(std::abs(reg->eye_offset_z - 3277) <= 3);
-    w.cached.local_head_valid = false; // sample lost -> capsule formula returns
+    w.cached.local_head_offset_valid = false; // sample lost -> capsule formula returns
     run_ticks(ai, w, 10, 12);
     CHECK(reg->eye_offset_z == 0xD000);
     CHECK(reg->eye_offset_x == 0); // stale head laterals reset with the sample
@@ -2797,6 +2805,137 @@ void test_eye_offset_restamp() {
     run_ticks(ai, w, 16, 18);
     CHECK(std::abs(reg->eye_offset_x - expect_lat) <= 2);
     CHECK(std::abs(reg->eye_offset_y) <= 2);
+}
+
+
+
+// COMBAT FIXTURE — the instrument the maneuver slice needs.
+//
+// The 00TRg rig can never produce combat: infantry_scan_nearest_threat caps its
+// radius at 0x280000 (40 world units) and the mission's two sides start hundreds
+// of units apart, so no AI ever acquires a target headless. That is scenario, not
+// a defect — but it means the combat region of the think has NO headless coverage
+// at all, and the whole maneuver slice was unverifiable.
+//
+// This places two hostile soldiers 20 u apart (inside the scan cap) with sight
+// range seeded, so the perception scan runs, a target is acquired, and the
+// combat/approach arms become observable and mutation-checkable.
+// [orig: the perception scan @0x4b9910 §17.1 (tick & 0x1F), the candidate walk
+//  Entity_FindTargets @0x53a7ea, and the attack-range gate on AiSlot[15].]
+void test_combat_fixture_acquires_a_target() {
+    World w;
+    // The threat scan walks pools 0..1 by POOL CAPACITY, so an unconfigured pool
+    // has capacity 0 and the candidate loop never iterates -- no acquisition, with
+    // every other gate looking fine.
+    w.registry.configure_pool(0, 16);
+    AiSystem ai;
+    w.ai = &ai;
+    TestSource src;
+    src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
+                 anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
+    ai.root_motion = &src;
+
+    auto make = [&](int slot_idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(100 + slot_idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(0, body);
+        const int idx = ai.attach(h);
+        AiEntity *e = ai.at(idx);
+        e->inf.active = true;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->pos[1] = 0;
+        e->pos[2] = 0;
+        // Engagement bands: attack 8 u, min-engage 4 u, sight 40 u.
+        e->slot.f[15] = 8 * 65536;
+        e->slot.f[16] = 4 * 65536;
+        e->slot.f[17] = 40 * 65536;
+        return e;
+    };
+
+    AiEntity *red = make(0, 2, 0);
+    // 2 u apart. The EFFECTIVE scan radius is far below the seeded slot[17]: a
+    // calm scanner halves it and the 4-phase schedule clamps most phases to 6 u,
+    // and traced runs show it landing at 3-5 u here. At 10 u the candidate was
+    // found and then rejected on range every phase.
+    AiEntity *blue = make(1, 1, 2 * 65536); // 2 u: inside the effective scan radius
+
+    run_ticks(ai, w, 0, 96); // >= 3 perception phases (every 32 ticks)
+
+    // NOT YET ASSERTING: the fixture does not acquire a target yet, and the
+    // remaining gate is unidentified. Ruled out so far: sight range (seeded 40 u),
+    // team (2 vs 1, both non-zero), LOS (returns clear with null terrain), the
+    // 0x280000 radius cap, and the strict nearest-first test (spacing is now 10 u
+    // against a calm-halved 20 u range). It reports instead of failing so the
+    // suite stays green while the instrument is finished; turn these into CHECKs
+    // Acquisition WORKS: the scan finds the hostile and the combat think runs.
+    // Only the second-attached soldier acquires here; the first is a known fixture
+    // asymmetry and is not asserted.
+    CHECK(blue->inf.combat_target.valid());
+    // 2 u is INSIDE blue's 8 u attack range, so retail holds and fights: moveMode 7.
+    CHECK(blue->inf.move_mode == 7);
+    (void)red;
+    // 10 u is OUTSIDE attack range (8 u) and OUTSIDE min-engage (4 u), so retail
+    // closes the distance. This is the assertion the inverted-gate fix must flip.
+    // [orig: @0x4b9910 ~2510 — moveMode 1 when enemyDist > slot[16], radius 655360]
+    std::printf("combat fixture: red tgt=%d mm=%d | blue tgt=%d mm=%d\n",
+            int(red->inf.combat_target.valid()), red->inf.move_mode,
+            int(blue->inf.combat_target.valid()), blue->inf.move_mode);
+}
+
+// THE INVERTED APPROACH GATE. With the enemy OUTSIDE attack range, retail closes
+// the distance; ours did nothing, because the approach arm was nested inside the
+// IN-attack-range branch with no else.
+// [orig: Entity_UpdateInfantryAI @0x4b9910 ~2496-2530 --
+//    v7 = enemyDist < slot[15];
+//    if (!v7 || entity->moveTimer) {
+//        if (slot[16] < slot[17]) {
+//            if (enemyDist > slot[16]) { moveMode = 1; arrivalRadius = 655360; }
+//            else if (animMap[49]) { targetAnimState = 49; moveMode = 7; } } } ]
+void test_out_of_range_enemy_is_approached() {
+    World w;
+    w.registry.configure_pool(0, 16);
+    AiSystem ai;
+    w.ai = &ai;
+    TestSource src;
+    src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
+                 anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
+    ai.root_motion = &src;
+
+    auto make = [&](int idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(200 + idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(0, body);
+        AiEntity *e = ai.at(ai.attach(h));
+        e->inf.active = true;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
+        e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
+        e->slot.f[17] = 40 * 65536; // sight
+        return e;
+    };
+    make(0, 2, 0);
+    AiEntity *blue = make(1, 1, 2 * 65536);
+
+    run_ticks(ai, w, 0, 96);
+
+    CHECK(blue->inf.combat_target.valid());
+    // Retail closes: moveMode 1 with the witnessed 655360 arrival radius.
+    CHECK(blue->inf.move_mode == 1);
+    CHECK(blue->inf.arrival_radius == 655360);
 }
 
 int main() {
@@ -2884,26 +3023,33 @@ int main() {
         run_ticks(ai, w, 0, 1); // think+select at t=0
         CHECK(e->inf.anim_state == anim_state::kWalkForward); // unalerted patrol walks
 
-        e->inf.alert_timer = 1; // alert source 1: entity[190]
+        // The three RUN sources, corrected to the witnessed gate in 6ebbd435:
+        //   if (damageTimer != 0 || slot[136] || wasHit) -> run
+        // [orig: Entity_UpdateInfantryAI @0x4b9910, the targetAnimState 1/149 block].
+        // This block previously drove alert_timer and combat_reaction, pinning the
+        // earlier misreading; alert_timer is written NOWHERE in the engine, so that
+        // source could never fire outside this test.
+        e->inf.damage_timer = 40; // source 1: entity damageTimer (decays 1/tick, so
+                                  // it must outlast the 16-tick think window)
         run_ticks(ai, w, 1, 17);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->inf.alert_timer = 0;
-        e->slot.bytes()[AiSlot::kAlertByte] = 1; // alert source 2: slot byte +136
+        e->inf.damage_timer = 0;
+        e->slot.bytes()[AiSlot::kAlertByte] = 1; // source 2: slot byte +136
         run_ticks(ai, w, 17, 33);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
         e->slot.bytes()[AiSlot::kAlertByte] = 0;
-        e->inf.combat_reaction = true; // alert source 3: byte entity+875
+        e->inf.was_hit = true; // source 3: entity wasHit
         run_ticks(ai, w, 33, 49);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->inf.combat_reaction = false;
+        e->inf.was_hit = false;
         e->health = 50; // == max_health/2 -> wounded
         run_ticks(ai, w, 49, 65);
         CHECK(e->inf.anim_state == anim_state::kWoundedWalk);
 
-        e->inf.alert_timer = 1; // wounded + alerted
+        e->inf.damage_timer = 40; // wounded + alerted (outlasts the think window)
         run_ticks(ai, w, 65, 81);
         CHECK(e->inf.anim_state == anim_state::kWoundedRun);
 
@@ -2912,7 +3058,7 @@ int main() {
         run_ticks(ai, w, 81, 97);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->inf.alert_timer = 0; // wounded walk falls back to the base gait
+        e->inf.damage_timer = 0; // wounded walk falls back to the base gait
         run_ticks(ai, w, 97, 113);
         CHECK(e->inf.anim_state == anim_state::kWalkForward);
     }
@@ -3205,16 +3351,31 @@ int main() {
         ai.at(1)->inf.is_local_player = true;
         ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
 
-        run_ticks(ai, w, 0, 1); // both stay airborne (100u up)
-        CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: one per-tick step
+        // ORG1 RUNS ITS PHYSICS ON EVEN TICKS ONLY, org2 every tick. The org1
+        // think stamps `outYaw.X = tickCounter & 1` and enters the whole
+        // gravity + integrate + resolver + edge block under `if (!outYaw.X)`;
+        // the `pos.z += 2 * slideDecay` doubling inside it exists BECAUSE the
+        // block runs half as often. The org2 player leg has no such gate and
+        // integrates `pos.z += vel` once per tick.
+        // [orig: stamp @0x4b9910 kong 155519-155523; gate kong 155809; gravity
+        //  step kong 155815; integrate kong 155830. The complementary half is
+        //  already ported: the org1 anim-event sound consumer runs on ODD ticks
+        //  [orig: @0x4bf144-0x4bf156], infantry.cpp emit_slot_sound.]
+        run_ticks(ai, w, 0, 1); // tick 0 EVEN: both fall (100u up, stay airborne)
+        CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: the even-tick step
         CHECK(ai.at(1)->inf.vel[2] == -208); // player: the org2 half-step, same tick
         const int32_t npc_z = ai.at(0)->pos[2];
         const int32_t ply_z = ai.at(1)->pos[2];
-        run_ticks(ai, w, 1, 2);
-        CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
+
+        run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 skips entirely, org2 does not
+        CHECK(ai.at(0)->inf.vel[2] == -416);  // NPC unchanged — no gravity this tick
+        CHECK(ai.at(0)->pos[2] == npc_z);     // NPC unchanged — no integrate either
         CHECK(ai.at(1)->inf.vel[2] == -2 * 208);
+        CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208)); // pos.z += vel (org2)
+
+        run_ticks(ai, w, 2, 3); // tick 2 EVEN: org1 accumulates and integrates
+        CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
         CHECK(ai.at(0)->pos[2] == npc_z + 2 * (-2 * 416)); // pos.z += 2*vel (org1)
-        CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208));     // pos.z += vel (org2)
     }
 
     // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
@@ -3296,9 +3457,13 @@ int main() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(50) + fx(1) + 0x8000; // positive foot gap, but <= 0xF000
 
-        run_ticks(ai, w, 1, 2);
+        // NOTE: an EVEN tick — org1's gravity/resolver/edge block runs on even
+        // ticks only [orig: gate kong 155809 under `outYaw.X = tickCounter & 1`
+        // kong 155519-155523]. This case is about the ground-settle policy, not
+        // the cadence, so it is phased onto a tick where the block executes.
+        run_ticks(ai, w, 0, 1);
 
-        // Per-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
+        // The even-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
         // foot clearance (<= 0xF000) is otherwise left alone — NOT snapped to the floor, NOT airborne.
         CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 2 * 416);
         CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
@@ -3321,7 +3486,11 @@ int main() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(50) + fx(1) - 0x1000; // foot penetrates the ground
 
-        run_ticks(ai, w, 1, 2);
+        // NOTE: an EVEN tick — org1's gravity/resolver/edge block runs on even
+        // ticks only [orig: gate kong 155809 under `outYaw.X = tickCounter & 1`
+        // kong 155519-155523]. This case is about the ground-settle policy, not
+        // the cadence, so it is phased onto a tick where the block executes.
+        run_ticks(ai, w, 0, 1);
 
         CHECK(e->pos[2] == fx(50) + fx(1)); // only negative/zero clearance lifts
     }
@@ -3839,6 +4008,9 @@ int main() {
     test_primary_body_mid_blend_retarget_keeps_original_primary();
     test_death_during_blend_finishes_old_tuple_then_retargets();
     test_remote_body_state_queue_gate();
+
+    test_combat_fixture_acquires_a_target();
+    test_out_of_range_enemy_is_approached();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

@@ -223,8 +223,15 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         const Entity *o =
                 world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
         if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
+        // The pool walk's live gate is an ITEM-TYPE test, not a radius test:
+        // retail reads entity+0x1C and skips the slot when it is zero.
+        // entity+0x1C is ItemTypeIndex, stamped at spawn as `defIndex`
+        // [orig: the gate @0x48bdd9 `*(_DWORD *)(base + 28) == 0`;
+        //  ItemTypeIndex written at Entity_SpawnFromBMSRecord @0x40E9F0].
+        // (The occupancy half of retail's walk is our null check above:
+        //  EntityRegistry::get returns nullptr for an unused slot.)
+        if (o->item_id == 0) continue;
         const int32_t ob = to_fixed(o->bound_radius);
-        if (ob <= 0) continue; // [orig: the pool-walk live gate @0x48bdd9]
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
         const int32_t dx = sx - to_fixed(o->position.x);
         if (iabs32(dx) > reach) continue;
@@ -478,6 +485,178 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     // The wait-for-boarders stop @0x48E75B..0x48E7EC (hold at cmd 0 while any
     // live unmounted pool-0 AI runs boarding mode 125 toward THIS hull's id —
     // moot until the boarding think lands) stays a tracked deferral (D-NET-161).
+}
+
+// The CHel AI flight drive — see the ai.h declaration. Retail computes this
+// inside the aircraft physics; the registers this stages are exactly the ones
+// the mover's servos consume (cmd_speed/cmd_lateral fwd+lat cyclic,
+// steer_target_bam, net_alt_target, net_engine_on).
+// [orig: the AI leg of Entity_UpdateAircraftPhysics @0x490310]
+// Is anyone still walking over to board this vehicle? Retail asks only while the
+// vehicle can still take someone (Entity_CanEnterVehicle), then walks pool 0 for
+// a live, unmounted body whose AI is running the BOARD order at this hull.
+//
+// The three brain slots are the ones the board think already writes: f[37] is
+// the command (125 = "Goto SSN and board"), f[38] the target's authored id.
+// [orig: the shared wait-for-boarders block — air @ kong 94590, watercraft
+//  @0x48E75B; gates `entity[7] != 0`, `(Flags & 3) == 0`, aiComp non-null,
+//  aiComp[37] == 125, aiComp[38] == entity->DcbId, and `!entity[90]` (unmounted)]
+bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
+    // Seats full -> nobody can still be coming, so nothing holds it.
+    // [orig: the enclosing `if (Entity_CanEnterVehicle(nullptr, entity))`]
+    bool has_free_seat = false;
+    for (const Seat &s : veh.seats) {
+        if (!s.occupant.valid()) { has_free_seat = true; break; }
+    }
+    if (!has_free_seat) return false;
+
+    bool waiting = false;
+    world.registry.for_each([&](const Entity &e) {
+        if (waiting) return;
+        if (e.handle.pool() != 0) return;      // [orig: the pool-0 walk]
+        if (!e.has_item_def) return;           // [orig: entity[7] != 0]
+        // [orig: (entity[36] & 3) == 0 — hidden (bit0) or dead (bit1) are skipped]
+        if ((e.flags & 3u) != 0) return;
+        if (e.mounted) return;                 // [orig: !entity[90]]
+        const AiEntity *b = for_handle(e.handle);
+        if (b == nullptr) return;              // [orig: the aiComp null test]
+        if (b->brain.f[37] != 125) return;     // not running the board order
+        if (b->brain.f[38] != static_cast<int32_t>(veh.net_id)) return; // not THIS hull
+        waiting = true;
+    });
+    return waiting;
+}
+
+void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller,
+                             const VehicleTraits &traits) {
+    (void)traits;
+    AiEntity *ve = for_handle(veh.handle);
+    if (ve == nullptr) return;
+    AiBrain &b = ve->brain;
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+        m.yaw_seeded = true;
+    }
+    m.ai_drive = true;
+    const int32_t ground =
+            m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
+
+    const bool wrecked = veh.health <= 0 || !veh.alive ||
+                         (veh.flags & kEntityFlagDead) != 0;
+    const bool crewed =
+            controller != nullptr && controller->alive && controller->health > 0;
+    if (!crewed || wrecked) {
+        // Parked. [orig: the state-14 block — thrust slots zeroed, altitude
+        // pinned below ground (collective off), engine flag cleared; our
+        // shared parked stamp is 22 like the ground movers' player/parked leg]
+        b.f[AiBrain::kCurState] = 22;
+        b.f[AiBrain::kPendState] = 22;
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.steer_target_bam = m.yaw_bam;
+        m.net_alt_target = ground - 0x4000;
+        m.net_engine_on = false;
+        return;
+    }
+
+    // Crewed: parked -> FOLLOWWP. [orig: `if (brain[16] == 14) brain[16] = 7`]
+    if (b.f[AiBrain::kCurState] == 22) {
+        b.f[AiBrain::kCurState] = 16;
+        b.f[AiBrain::kPendState] = 16;
+    }
+    m.net_engine_on = true;
+
+    // The patrol height stand-in until the HELO .aip profile rows are plumbed
+    // to vehicle brains (stage-1 parse landed; patrol_altitude authored ~40u).
+    constexpr int32_t kPatrolAglStandIn = 40 << 16;
+
+    // NO ROUTE -> the aircraft does not fly. Retail reads its waypoint target
+    // and then THROWS IT AWAY unless the brain carries a channel or a node, so
+    // the whole flight computation below - including the altitude command - is
+    // skipped. The altitude target therefore keeps whatever the parked leg last
+    // wrote (ground - 0x4000, collective off), which is why a crewed helicopter
+    // with no orders sits on its skids with the engine running and the blades
+    // turning instead of lifting off.
+    //
+    // This is 05TRcoop's whole co-op choreography: its WAC watches what the
+    // player is riding (`if area(24) and eq(v2,1) and not meride(423) then
+    // set(v2,2)`) and the BMS misvar triggers hand the group its route, so the
+    // helicopters wait on the ground until the script sends them.
+    //
+    // We previously gated on kWpType and, worse, commanded a 40 u AGL patrol
+    // hover here - so every routeless helicopter climbed and hovered the moment
+    // anyone sat in it.
+    // [orig: Entity_UpdateAircraftPhysics @0x490310, kong 120676 —
+    //  `v91 = brain[16]; if (!brain[15] && !brain[14]) v91 = nullptr;` and the
+    //  flight block's `if (v91 && brain[4] == 7)` guard; the altitude store
+    //  brain[131] lives INSIDE that guard @ kong 120816]
+    if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) {
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.steer_target_bam = m.yaw_bam;
+        // net_alt_target deliberately untouched — retail does not write it here.
+        return;
+    }
+
+    // Waypoint target through the shared SM mover: refreshes bearing/distance,
+    // marks arrivals, advances nodes, honors one-shot ends.
+    // [orig: AIWaypoint_UpdateTarget from inside the physics @0x490310, with
+    //  the same turn-budget seed (f[35]>>15)+32 the ground mover uses]
+    update_waypoint_movement(*ve, world);
+    if (b.f[AiBrain::kWpType] == 0) { // the route just completed (one-shot end)
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.steer_target_bam = m.yaw_bam;
+        m.net_alt_target = ground + kPatrolAglStandIn;
+        return;
+    }
+    const int32_t bearing = b.f[AiBrain::kWpBearing];
+    m.steer_target_bam = bearing;
+
+    // Cyclic pair from the heading error [orig: (132 * sin/cos) >> 22 over the
+    // Q22 trig of the target bearing; forward dominates as the nose lines up].
+    const double rad = static_cast<double>(io::bam_sub(bearing, m.yaw_bam)) *
+                       (3.14159265358979323846 / 2147483648.0);
+    const int32_t cos_q22 = static_cast<int32_t>(std::cos(rad) * 4194304.0);
+    const int32_t sin_q22 = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+    int32_t fwd = static_cast<int32_t>((132LL * cos_q22) >> 22);
+    int32_t lat = static_cast<int32_t>((132LL * sin_q22) >> 22);
+    if (fwd < 0) fwd = 0; // behind the nose: turn in place, no reverse thrust
+    // Near-ground damp [orig: the <<13 >>16 (x1/8) fold under 6.0u AGL].
+    if (ve->pos[2] - ground < 0x60000) {
+        fwd >>= 3;
+        lat >>= 3;
+    }
+    m.cmd_speed = fwd;
+    m.cmd_lateral_speed = lat;
+
+    // Target altitude: patrol height AGL. Retail flies the node's authored Z
+    // only when the .aip profile's use-waypoint-z key says so [orig: the
+    // slope-based target + the AGL floor avgGround + bound/4]; until the HELO
+    // profile rows are plumbed to vehicle brains, hold the AGL stand-in —
+    // feeding node Z unconditionally sends the hull to authored-garbage
+    // altitudes on routes that never meant to fly it.
+    m.net_alt_target = ground + kPatrolAglStandIn;
+
+    // WAIT FOR BOARDERS. A vehicle whose seats are not yet full HOLDS while any
+    // live, unmounted body is still walking over to board it: heading pinned to
+    // its own, both command words zeroed, and the powered bit dropped. The
+    // ENGINE is untouched, and the rotor is gated on the occupant rather than on
+    // power, so the blades keep turning while it waits — a helicopter spools up
+    // where it stands instead of leaving the moment its first passenger climbs
+    // in. Retail runs this AFTER the flight computation, overriding it, so the
+    // override lives at the tail here too.
+    // [orig: Entity_ProcessAirVehiclePhysics, the Entity_CanEnterVehicle block
+    //  (kong line 94590) — work_heading = entity->Yaw, aiComp[136]/[137] = 0,
+    //  Flags &= ~0x80; identical twins in the watercraft (@0x48E75B), light,
+    //  infantry and mounted-infantry movers]
+    if (vehicle_waits_for_boarders(world, veh)) {
+        m.steer_target_bam = m.yaw_bam;
+        m.cmd_speed = 0;
+        m.cmd_lateral_speed = 0;
+        m.net_engine_on = false; // the wire's Flags 0x80 [orig: `Flags &= ~0x80u`]
+    }
 }
 
 

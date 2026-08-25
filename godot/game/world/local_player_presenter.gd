@@ -497,6 +497,21 @@ func _eye_position(pos: Vector3) -> Vector3:
 
 ## The posed head-bone eye (Vector3.INF = no skeleton): the input router feeds
 ## it to the sim for the 3P anchor chase [orig: the chase target @0x437b70].
+## The avatar root the head bone is measured against. Pairing the two lets the
+## sim store a BODY-RELATIVE eye delta, which carries no frame of travel.
+func avatar_root_world() -> Vector3:
+	if _avatar == null or not is_instance_valid(_avatar):
+		return Vector3.INF
+	var skel := _find_skeleton(_avatar)
+	if skel == null:
+		return Vector3.INF
+	# The SKELETON's own origin - the exact frame avatar_head_world() expresses the
+	# bone in, so head-minus-root is a pure body-relative delta. The avatar node's
+	# transform is not it: for the first-person local player that node sits at the
+	# world origin, which turned the delta into an absolute point again.
+	return skel.global_transform.origin
+
+
 func avatar_head_world() -> Vector3:
 	if _avatar == null or not is_instance_valid(_avatar):
 		return Vector3.INF
