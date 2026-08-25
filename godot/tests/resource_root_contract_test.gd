@@ -172,7 +172,7 @@ func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archi
 	assert_false(resources.has_file(
 		"nested/mixedcase.dat",
 		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
-	), "Editor roots keep the legacy flat-name contract for every policy value.")
+	), "Loose roots keep the flat-name contract for every policy value.")
 	assert_true(resources.read_file(
 		"nested/mixedcase.dat",
 		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST

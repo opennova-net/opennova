@@ -6,9 +6,6 @@ namespace opennova::env {
 
 float resolve_water_height(const WaterHeightRungs &rungs,
 		const EnvironmentState *env, float current) {
-	if (rungs.has_authoring_override) {
-		return rungs.authoring_override;
-	}
 	if (rungs.has_mission_override) {
 		return rungs.mission_override;
 	}

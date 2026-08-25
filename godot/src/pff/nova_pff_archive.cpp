@@ -571,7 +571,7 @@ Error PffDocument::save_as(const String &out_path) {
 }
 
 // ---------------------------------------------------------------------------
-// Async Save (background thread; mirrors TerrainBuildJob)
+// Async Save (background thread)
 // ---------------------------------------------------------------------------
 
 void PffDocument::join_save_thread() {

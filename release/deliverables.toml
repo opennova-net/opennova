@@ -30,21 +30,20 @@ required_entries = [
 # the exes load: template_release for release-mode exports (what a tagged release
 # ships) and template_debug for pull-request CI's debug-mode packages.
 #
-# The DEV build (PRs + master CI, never tagged releases): game + editor + the
-# loose assets/ sources. ONE copy of the data — both apps default-mount it, so
-# the game plays exactly what the editor edits, no packing in the loop. The
-# editor also launches opennova.exe from its OWN directory (F5/F6), which is why
-# the two exes travel together.
+# The DEV build (PRs + master CI, never tagged releases): game + ONED +
+# the loose assets/ sources. ONE copy of the data, with no packing in the loop.
+# ONED runs the sibling opennova.exe against that tree, so the two exes
+# travel together.
 [[deliverables]]
 id = "windows-apps"
 source = "opennova-windows-v{godot_version}.zip"
 public = "opennova-windows-{release_version}.zip"
 kind = "zip"
 platform = "Windows"
-title = "OpenNova Dev Build (game, editor, sources)"
-purpose = "The OpenNova game and the OpenNova Editor (ONED) side by side, with the game's loose sources under assets/ — the editable dev build: the game plays the same tree the editor edits."
+title = "OpenNova Dev Build (game, ONED, sources)"
+purpose = "The OpenNova game and ONED side by side, with the game's tracked loose sources under assets/."
 install = "Extract the zip to a writable folder, keeping its layout."
-use = "Run opennova.exe to play the loose assets/, or opennova-modtools.exe to edit them (F5/F6 test your edits, F7 proves them against retail, Export Game builds the packed release flavour)."
+use = "Run opennova.exe directly, or use opennova-modtools.exe to select loose sources or a packed game, run OpenNova, stage and run a configured retail install, and stop the managed child."
 required_entries = [
     "opennova-modtools.exe",
     "opennova.exe",
@@ -55,8 +54,8 @@ required_entries = [
 ]
 
 # The GAME build (what tagged releases ship): opennova.exe + the packed game,
-# retail-style — localres.pff beside the exe (packed at package time by the
-# exported editor's own --pack-game CLI) plus the loose-by-contract files. The
+# retail-style — localres.pff beside the exe (packed at package time by
+# ONED's hidden --pack-game CLI) plus the loose-by-contract files. The
 # runtime default-mounts its own directory, so it is pre-configured by layout.
 [[deliverables]]
 id = "windows-game"

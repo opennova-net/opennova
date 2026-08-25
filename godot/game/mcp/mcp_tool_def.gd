@@ -4,8 +4,7 @@ extends RefCounted
 ## Schema of its arguments, and the run policy (FIFO serialization, watchdog
 ## budget). Typed record per ADR 0017 — it replaces the {name, description,
 ## input_schema, serial?, timeout_ms?} def Dictionaries, and its one make()
-## factory replaces the four identical _def helpers the editor tool catalogs
-## carried. The tools/list wire payload is produced by to_list_entry(); the
+## factory keeps tool declarations compact. The tools/list wire payload is produced by to_list_entry(); the
 ## args a handler receives stay a Dictionary because they ARE the wire.
 
 const DEFAULT_TIMEOUT_MS := 60000
@@ -18,7 +17,7 @@ var input_schema: Dictionary = { "type": "object" }
 ## Optional display title for tools/list; "" = omitted from the wire.
 var title := ""
 ## True (default): runs through the server's serialized FIFO queue — anything
-## that touches editor state. Read-only monitors (get_logs) opt out.
+## that mutates live game state. Read-only monitors (get_logs) opt out.
 var serial := true
 ## call_tool watchdog budget for this tool.
 var timeout_ms := DEFAULT_TIMEOUT_MS

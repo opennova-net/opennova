@@ -888,15 +888,46 @@ int test_end_round_wire_roundtrip() {
 	header.team_score_1 = 17;
 	header.draw = 1;
 	header.player_index = -1;
-	const std::vector<uint8_t> header_wire = encode_end_round_header(header);
+	const std::vector<uint8_t> header_wire =
+			encode_end_round_header(header, /*non_team_form=*/false);
 	EXPECT(header_wire == std::vector<uint8_t>({
 			0x02, 0xFD, 0xFF, 0x11, 0x00, 0x01, 0xFF}));
 	EndRoundHeader decoded_header;
 	EXPECT(decode_end_round_header(
-			header_wire.data(), header_wire.size(), decoded_header));
+			header_wire.data(), header_wire.size(), /*non_team_form=*/false,
+			decoded_header));
 	EXPECT(decoded_header.winner_team == 2 && decoded_header.team_score_0 == -3);
 	EXPECT(decoded_header.team_score_1 == 17 && decoded_header.draw == 1);
 	EXPECT(decoded_header.player_index == -1);
+
+	// The in-session non-team (DM/KOTH) form: three top-row name C-strings +
+	// three i16 primary scores in place of the winner/team-score words.
+	// [orig: EndRoundScoreboard_SerializeHeader @0x5052bf..0x505381]
+	EndRoundHeader named;
+	named.player_names[0] = "Ace";
+	named.player_names[1] = "Bee";
+	named.player_scores[0] = 9;
+	named.player_scores[1] = -1;
+	named.draw = 0;
+	named.player_index = 2;
+	const std::vector<uint8_t> named_wire =
+			encode_end_round_header(named, /*non_team_form=*/true);
+	EXPECT(named_wire == std::vector<uint8_t>({
+			'A', 'c', 'e', 0x00, 'B', 'e', 'e', 0x00, 0x00,
+			0x09, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+			0x00, 0x02}));
+	EndRoundHeader named_decoded;
+	EXPECT(decode_end_round_header(
+			named_wire.data(), named_wire.size(), /*non_team_form=*/true,
+			named_decoded));
+	EXPECT(named_decoded.player_names[0] == "Ace" &&
+			named_decoded.player_names[1] == "Bee" &&
+			named_decoded.player_names[2].empty());
+	EXPECT(named_decoded.player_scores[0] == 9 &&
+			named_decoded.player_scores[1] == -1 &&
+			named_decoded.player_scores[2] == 0);
+	EXPECT(named_decoded.winner_team == 0 && named_decoded.team_score_0 == 0);
+	EXPECT(named_decoded.draw == 0 && named_decoded.player_index == 2);
 
 	EndRoundStats board;
 	board.winner_team = 2;

@@ -13,7 +13,8 @@
 > witnessed. Their event/resolution pipelines and generic transient presentation are routed;
 > the impact-tag selection path closed under D-WPN-15, and the Knife-only
 > instant-kill-zone presenter closed under D-WPN-16 on 2026-08-15.
-> This format and witness record is the durable reference.
+> ADR 0037 later removed the ONED authoring workspace; the format/runtime
+> results and this witness record remain the durable reference.
 
 Consolidated 2026-06-10 from the scratch notes `ptl_format.md`, `ida_particle_witness.md`,
 `particle_visual_parity.md`, and `ptl_corpus_catalog.md` (RE passes 2026-04-27/28).
@@ -22,7 +23,7 @@ Binary: `Jointops.exe` (retail JO:CA), imagebase `0x400000`; all addresses absol
 image. Reimpl: `engine/formats/particle` (the portable model / parser / writer / tables) +
 `engine/runtime/particle` (the emitter/effect-scene simulator; ADR 0030 split, shared
 `particle/` include prefix with disjoint header sets), `godot/src/particle`
-(GDExtension wrappers), `godot/modtools/particle` (ONED workspace).
+(GDExtension wrappers). The former ONED particle workspace was removed by ADR 0037.
 
 ---
 
@@ -257,7 +258,7 @@ is corpus-derived (`boatwake.ptl:40-45`) and round-trip verified.
   difference is a mod-syntax superset (D-PTL-20).
 - **Flip-frame bounds**: retail carries the authored `flip_frames` count into its frame registrar
   without the reimpl's normalization. The reimpl forces non-positive counts to `1` and caps larger
-  counts at `256` across parse, bake, preview, and runtime seams to bound allocation/work
+  counts at `256` across parse, bake, atlas, and runtime seams to bound allocation/work
   (D-PTL-19). The shipped corpus does not approach the cap.
 - **`gN_colorM` dispatch bug** `[orig: CParticleDef_ParseProperties @ 0x5ea320]`: the engine's
   outer dispatcher remaps `g2_color1`, `g3_color1`, `g3_color2`, `g4_color1`, `g4_color2` into
@@ -479,7 +480,7 @@ damping, force vec); our struct does not mirror byte layout.
 | `CParticleManager_TransformToViewSpace` | `0x5ecc50` (0x31c) | projects each child emitter's bbox to view space via camera basis at this+664/+696/+700/+704, builds sort entries, calls `RecursiveSortAndRender` | the adapter derives value-owned emitter bounds for diagnostics and ordering input |
 | `CParticleManager_RecursiveSortAndRender` | `0x5ec980` (0x188) | recursively separates non-overlapping emitter sets using alternating axes (`axisMask` cycles 1→2→4→1); an irreducibly overlapping leaf is sent to `RenderBatch` | the reimpl does not reproduce the recursive leaf partition: it places all selected emitters in one shared depth list (D-PTL-21). Spatially disjoint quads cannot affect one another visually, but exact retail tie/partition order remains an open algorithmic-parity gap |
 | `CParticleManager_RenderBatch` | `0x5e9890` | builds one shared `{depth, emitter_id, particle}` list for every emitter in an overlapping leaf, globally sorts it back-to-front (`@ 0x5e9b63`), then dispatches adjacent emitter-id runs. Overlapping emitters therefore CAN interleave particle-by-particle; emitter contiguity is not guaranteed | `ParticleFrameCompiler` globally sorts all visible particles back-to-front with deterministic emitter/particle source-index ties, then forms adjacent render-state runs. This reproduces the required cross-emitter interleaving and prevents reimpl material sorting from undoing it; only the broader recursive batch partition differs (D-PTL-21) |
-| `CParticleManager_BuildTextureAtlases` | `0x5e8db0` (0x44d) | bakes textures into a shared atlas; the per-graphic array at graphic+724 holds per-frame texture-ENTRY pointers, and the entry's rect floats sit behind its material ptr — `{+0 page/material ptr, +4 u_min, +8 v_min, +12 u_max, +16 v_max, +20 inset = 2.5/side}` (the allocator's success writes `@ 0x5e2d00..0x5e2d3b`; an earlier note here had v_min/v_max swapped); collection takes only probe-sized entries (+288 > 0), placement order is a stable width-descending bubble sort, pages are typed by their first entry (types 0–2 → 1024², 3–7 → 256² `@ 0x5e8f1e`; pages 1/2 shared, others exact `@ 0x5e2bef`), type-1 rows get alpha cleared at blit `@ 0x5e9116`, and the skyline placer (`CParticleAtlas_TryPlaceEntry @ 0x5e2be0`, ex kong `CEffectChannel_TryAssignSlot`) carries a persistent scan minimum and rewrites covered columns to `skyline[best]+height` — it can LOWER taller columns and overlap earlier rects; page finalize (`CParticleTexture_InitTextureAndChannels @ 0x5e8210`) converts type-3/6 pages via `Texture_GenerateNormalMapFromHeight(…, 0.125, 0)` and type-7 via `(…, 0.03125, forceBlue=1)` (the generator's real 5th arg), encoding `(n+1)×127.5` | `renderer::ParticleAtlasBuilder`: shared mission/preview catalog, exact frame registration, type page families, stable width-descending placement, witnessed skyline allocator, exact rects and 2.5-pixel inset, type-1 alpha clear, and whole-page type-3/6/7 normal preprocessing. Every flipbook frame is an independently packed registered entry/rect; frames are not assumed to be horizontal cells. Raw RGBA pages cross one narrow Godot-upload seam |
+| `CParticleManager_BuildTextureAtlases` | `0x5e8db0` (0x44d) | bakes textures into a shared atlas; the per-graphic array at graphic+724 holds per-frame texture-ENTRY pointers, and the entry's rect floats sit behind its material ptr — `{+0 page/material ptr, +4 u_min, +8 v_min, +12 u_max, +16 v_max, +20 inset = 2.5/side}` (the allocator's success writes `@ 0x5e2d00..0x5e2d3b`; an earlier note here had v_min/v_max swapped); collection takes only probe-sized entries (+288 > 0), placement order is a stable width-descending bubble sort, pages are typed by their first entry (types 0–2 → 1024², 3–7 → 256² `@ 0x5e8f1e`; pages 1/2 shared, others exact `@ 0x5e2bef`), type-1 rows get alpha cleared at blit `@ 0x5e9116`, and the skyline placer (`CParticleAtlas_TryPlaceEntry @ 0x5e2be0`, ex kong `CEffectChannel_TryAssignSlot`) carries a persistent scan minimum and rewrites covered columns to `skyline[best]+height` — it can LOWER taller columns and overlap earlier rects; page finalize (`CParticleTexture_InitTextureAndChannels @ 0x5e8210`) converts type-3/6 pages via `Texture_GenerateNormalMapFromHeight(…, 0.125, 0)` and type-7 via `(…, 0.03125, forceBlue=1)` (the generator's real 5th arg), encoding `(n+1)×127.5` | `renderer::ParticleAtlasBuilder`: shared runtime catalog, exact frame registration, type page families, stable width-descending placement, witnessed skyline allocator, exact rects and 2.5-pixel inset, type-1 alpha clear, and whole-page type-3/6/7 normal preprocessing. Every flipbook frame is an independently packed registered entry/rect; frames are not assumed to be horizontal cells. Raw RGBA pages cross one narrow Godot-upload seam |
 
 ### Godot wrapper correspondence
 
@@ -489,15 +490,15 @@ damping, force vec); our struct does not mirror byte layout.
 | `nova_particle_def.{h,cpp}` | `CParticleEffectDef` (§2.1) | ~80 fields via inspector groups; `flags`/`move` stored as both raw string and u32 bitfield (engine has both) |
 | `nova_particle_graphic_layer.{h,cpp}` | per-graphic 788 B block (§2.2) | inspector enum exposes the 8 blend modes |
 | `nova_particle_curve_ref.{h,cpp}` | curve reference | name + `reverse` (bit 0x02) + `inverse` (bit 0x01) |
-| `nova_particle_table.{h,cpp}` | tabledef LUT | 32×8 logical curve; `sample(t)` linearly interpolates for editor visualization only |
+| `nova_particle_table.{h,cpp}` | tabledef LUT | 32×8 logical curve; `sample(t)` provides diagnostic interpolation only |
 | `nova_effect_scene.{h,cpp}` | `CEffectWorld` value ownership | Resource adapter over the portable catalog/group/emitter scene; the 62.5 Hz mission tick is the only runtime simulation owner |
 | `nova_particle_renderer.{h,cpp}` + `nova_particle_compositor.{h,cpp}` | `CParticleManager` compile/upload/draw seam | one Node facade publishes immutable draw list generations to one POST_TRANSPARENT RD compositor, with persistent growable buffers and renderer-owned value diagnostics |
 | `ptl_resource_format.{h,cpp}` | (no engine analogue) | Godot ResourceFormat loader/saver for `.ptl`, round-trips |
 
-These rows map responsibilities; they are not a blanket parity verdict. The ONED workspace
-(`godot/modtools/particle/`) mounts the blueprint screen (node graph + live preview) over these
-wrappers. Behavior-level matches and remaining gaps are recorded in the witness matrices,
-§8, and D-PTL catalog below.
+These rows map responsibilities; they are not a blanket parity verdict. The
+retired ONED workspace once mounted a blueprint graph and live preview over
+these wrappers. Behavior-level matches and remaining gaps are recorded in the
+witness matrices, §8, and D-PTL catalog below.
 
 ### Runtime load & spawn chain (game integration, witnessed 2026-07-10)
 
@@ -649,7 +650,7 @@ type-1 atlas alpha clear (§4 atlas row, `@ 0x5e9116`) zeroes the fragment alpha
 layer's DIFFUSE alpha (the authored alpha curve) never affects its on-screen result**;
 additive fades ride the color curves. Premult keeps its authored texture alpha, so
 DIFFUSE alpha there attenuates only the destination. The port's RD pipelines and the
-scene-preview shaders carry these exact pairs (fixed 2026-07-15 from a `SRCALPHA/ONE` +
+runtime RD pipelines carry these exact pairs (fixed 2026-07-15 from a `SRCALPHA/ONE` +
 shader-side alpha approximation).
 
 **Confirmed not used**: `D3DTOP_BUMPENVMAP` (22) and `D3DTOP_BUMPENVMAPLUMINANCE` (23) appear
@@ -740,8 +741,8 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
   additive, source-over, premultiplied, DOT3 bump, destination modulation, exact 2x
   destination modulation, DOT3 bump-add, and captured-scene distortion. Blend factors are
   pipeline state rather than approximated in a Godot material. A blank or unresolved runtime
-  graphic stays invisible-but-simulating like retail; only ONED opts into the diagnostic
-  soft-circle fallback `[orig: ParseBlendMode @ 0x5e29f0]`.
+  graphic stays invisible-but-simulating like retail. The former ONED soft-circle fallback
+  was preview-only and is no longer product behavior `[orig: ParseBlendMode @ 0x5e29f0]`.
 - **Per-material retail fog** - Blend/Bump/Distort converge on the live scene fog color;
   Additive/Premult/Bumpadd converge on black, Mod on white, and Mod2x on gray 127.
   Type 0 uses eye depth with `exp(-depth * ln(64) / end)`; types 1-3 use radial
@@ -758,8 +759,8 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
   no interpolation), the SCALE curve lerps between adjacent bytes with the phase fraction
   and normalizes at `/128` (byte 128 = 1.0) `[orig: the flag-0x10 blocks in both render
   paths]`. `bake_particle_def_curves` is wired into the Godot wrapper's `_refresh_emitter`
-  (fixed a latent bug where editor-preview spawn flags silently stayed 0 because nothing
-  invoked the bake); the renderer samples the baked LUTs directly.
+  (fixed a latent wrapper bug where spawn flags silently stayed 0 before the bake was
+  invoked); the renderer samples the baked LUTs directly.
 - **The draw-size model** (re-witnessed 2026-07-12) — per-particle base size =
   `graphic.scale ± scale_adj` seeded once at spawn; quad half-extent =
   `0.5 × size × scale-LUT multiplier`; no lifetime ramp `[orig: SpawnParticle @ 0x5e7862;
@@ -802,7 +803,7 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
 - **Bounded reimpl pools**: the Godot wrapper defaults an emitter to 256 particles, honors
   authored `emit_maxoverride`, and caps either path at 4096; the retail corpus maximum override
   is 400. The native scheduler also rejects non-finite timing and bounds burst work (D-PTL-12).
-- Finite preview emitters do not auto-repeat after all particles expire; FOREVEREMIT keeps the
+- Finite emitters do not auto-repeat after all particles expire; FOREVEREMIT keeps the
   emitter eligible for continuous spawning. Loose-texture lookup routes through the shared
   texture path resolver (PFF lookup intentionally out of scope).
 
@@ -810,7 +811,7 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
 
 - **Flip-frame count** (D-PTL-19): the reimpl normalizes to `[1,256]`; retail has no witnessed
   equivalent normalization/cap. This prevents hostile counts from driving unbounded frame-name,
-  atlas, and preview work.
+  frame-name and atlas work.
 - **Curve-ref modifier syntax** (D-PTL-20): the reimpl composes both trailing modifiers; retail
   consumes one. Shipped content uses no combined modifier.
 - **Sort partition** (D-PTL-21): the reimpl globally depth-sorts all selected particles instead of
@@ -1041,7 +1042,7 @@ witnessed behavior gap stay in §8.
 | D-PTL-16 | Casing-point recoil and ballistic-impact groups were suppressed as a guard against per-emitter Node/material/atlas/upload churn; direct muzzle rows were temporarily name/point classified and guarded, violating retail's generic unsuppressed direct leg | **FIXED 2026-07-14** — every authored direct row and every resolved impact row now enters the same value-owned EffectScene as a generic `Always` transient. One shared atlas and ordered persistent-buffer compositor absorb the churn without changing weapon/FSM timing or creating vehicle render Nodes. [orig: WeaponAction_Recoil @ 0x542dd0; Projectile_SpawnImpactEffect @ 0x4e9b80] |
 | D-PTL-17 | The PlayerControl occupancy effect (`particlefx` on an occupied vehicle) runs class-wide in the port: every `attrib & 0x40` item starts its slot-A effect on the +368 claim and stops on the claimant's departure. Retail reaches the spawner ONLY through the `CHel`/`cpln` class updater — the shipped ctank/cbike/cveh `Effect_heloHeat1`/`Effect_whiteExhaust` authors are dead data in JO retail (§4 occupancy row) | **PERMANENT (intentional, small)** — presenting authored-but-unreachable retail data on ground vehicles is the point of the port's generic routing; the claimant protocol, start/stop edges, and per-vehicle single-claim semantics are the witnessed ones. Revisit only if a retail-parity scene comparison needs helicopter-only behavior. [orig: the class fn table @ 0x82ac00; entity_update_damage_accumulator_and_shadow @ 0x48fa70] |
 | D-PTL-18 | The witnessed skyline placer rewrites covered columns to `skyline[best]+height`, which can LOWER a taller column and let a later rect overlap an earlier one; its 2.5-pixel inset is uncapped and inverts the UV window on rects ≤ 5 px | **PERMANENT (bounded, original-garbage class)** — the port keeps the witnessed allocator verbatim but treats its result as a proposal: an occupied-rect intersection guard retries the next page and covered columns restore via `max()`, and the inset caps at half the rect extent. Reproducing the overlap would manufacture heap-layout-dependent garbage (ADR 0022). [orig: CParticleAtlas_TryPlaceEntry @ 0x5e2be0, ex kong `CEffectChannel_TryAssignSlot`] |
-| D-PTL-19 | Flipbook frame count: retail carries the authored count into frame registration with no witnessed reimpl-style normalization; the port forces non-positive values to 1 and caps counts at 256 | **PERMANENT (bounded safety)** — bounds parse/bake/atlas/preview work and avoids hostile or nonsensical counts. Shipped content is below the cap. [orig: CParticleDef_ReloadGraphicFrameTextures @ 0x5e4bb0] |
+| D-PTL-19 | Flipbook frame count: retail carries the authored count into frame registration with no witnessed reimpl-style normalization; the port forces non-positive values to 1 and caps counts at 256 | **PERMANENT (bounded safety)** — bounds parse/bake/frame-name/atlas work and avoids hostile or nonsensical counts. Shipped content is below the cap. [orig: CParticleDef_ReloadGraphicFrameTextures @ 0x5e4bb0] |
 | D-PTL-20 | Curve-ref modifier syntax: retail consumes one trailing `reverse` OR `inverse` token; the port consumes all trailing modifier tokens and composes both in either order | **PERMANENT (bounded compatibility superset)** — shipped content uses at most one modifier; combined modifiers remain useful and deterministic for mods. [orig: CParticleDef_ParseProperties @ 0x5ea320] |
 | D-PTL-21 | Cross-emitter sorting: retail recursively partitions non-overlapping emitter AABBs, then globally particle-sorts each overlapping leaf; the reimpl globally particle-sorts the whole selected domain | **OPEN (exact algorithmic parity)** — overlapping emitter particles now interleave correctly and spatially disjoint differences are normally invisible, but exact retail leaf/tie order is not claimed. [orig: CParticleManager_RecursiveSortAndRender @ 0x5ec980; CParticleManager_RenderBatch @ 0x5e9890] |
 | D-PTL-22 | Section tags and known property keys were compared case-sensitively by the port even though the retail parser family uses `_stricmp` throughout | **FIXED 2026-07-16** — all four tags and effect/particle/graphic/table/edit-handle keys fold ASCII case; unknown keys retain authored spelling. Mixed-case regression in `particle_lenient_lines`; no shipped corpus trigger. |
@@ -1150,12 +1151,12 @@ last §8 case-semantics thread):
   `ParticleFile::find_effect`/`find_particle` → `nocasecmp_to`. Pinned by
   `pdef_reference_resolution_is_case_insensitive_contract` (effect-scene
   contract ctest) and the minimal-effect `find_particle` fold check.
-- Same session, the ONED preview emitter's flipbook resolution aligned with the
-  witnessed registrar: the pre-witness interim probes (literal-base first, then
-  `<stem>_NN` with the authored case/extension, then a trailing-letter variant
-  strip) are deleted — `NovaParticleEmitter` now derives frame names through
-  the shared `retail_particle_frame_name` (D-PTL-14's exact routine), so the
-  editor preview resolves exactly what the game runtime resolves.
+- Same session, the former ONED preview emitter's flipbook resolution was aligned
+  with the witnessed registrar: the pre-witness interim probes (literal-base
+  first, then `<stem>_NN` with the authored case/extension, then a trailing-letter
+  variant strip) were deleted in favor of the shared
+  `retail_particle_frame_name` routine. ADR 0037 subsequently removed the preview;
+  the runtime registrar remains authoritative.
 - Same session, the resolve SEMANTICS: the EFFDEF vtable+8 resolve
   (`CEffectBank_ResolveAllEntries @ 0x5e4920`, slot `@ 0x7dca2c`) is
   **all-or-nothing** — the first missing PARDEF (or a failing PARDEF

@@ -474,6 +474,10 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	// the pre-mission pass). Snapshot AFTER it so Stop restores the true play-start state.
 	world_->run_logic_tick(/*is_authority=*/true,
 			opennova::world::TickPhase::PreMission);
+	// The Show Score panel's mission-start unit census, after entity placement
+	// and the item-traits sweep stamped Entity::item_unit_type.
+	// (retail: Game_StartMission @0x525d5d -> sub_509DC0)
+	opennova::world::count_mission_units(*world_);
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
 	have_baseline_ = true;

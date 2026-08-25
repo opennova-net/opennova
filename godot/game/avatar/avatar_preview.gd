@@ -3,13 +3,10 @@ extends Control
 
 
 
-# 3D preview for an Avatars.def character combo: composes the resolved third-person
-# head + body .3di models into one scene under a shared environment, framed as a
-# standing character by a fly camera with the editor grid + axis gizmo. Retail combo
-# arms graphics use a larger rig than this preview skeleton and must never be overlaid.
-# Forked from
-# object_preview.gd — it reuses the same SubViewport scaffold, guide gizmos, and
-# bounds framing.
+# Runtime PLAYER_INFO portrait for an Avatars.def character combo. It composes
+# the resolved third-person head + body .3di models under a shared environment
+# and holds a front-facing camera pose across combo changes. Retail combo arms
+# graphics use a larger rig than this portrait skeleton and must never be overlaid.
 #
 # Each composed third-person part shares one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip),
 # matching the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0].
@@ -22,11 +19,7 @@ const FlyCameraScript = preload("res://game/fly_camera.gd")
 # The standing character uses only the compatible third-person slots. `resolve_combo()`
 # also returns `arms`, but retail arm graphics reference bones outside this preview rig.
 const THIRD_PERSON_SLOTS := ["head", "body"]
-# The old 1.5x object-preview distance cropped head and feet once the malformed
-# first-person arms stopped inflating the bounds. Leave a full-character margin.
-const EDITOR_DISTANCE_SCALE := 2.7
-
-# Menu-preview tuning (set_menu_preview): a front portrait of a standing soldier for
+# Portrait tuning: a front portrait of a standing soldier for
 # the player.mnu PLAYER_PREVIEW pane. Camera yaw 0 puts the orbit camera on +Z and the
 # .3di parts import +Z-forward (see MissionObjectPlacer.bms_to_godot_basis), so the
 # character faces the viewer with no model rotation. The distance scale fits a ~1.8 m
@@ -36,7 +29,7 @@ const MENU_DISTANCE_SCALE := 2.7
 const MENU_PITCH := -0.06
 
 # The menu's anamorphic design space (nova_menu_shell.gd scales the whole menu tree from this
-# to the window). In menu mode the SubViewport is rendered at the on-screen pixel size
+# to the window). The SubViewport is rendered at the on-screen pixel size
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 
@@ -52,21 +45,11 @@ var _viewport_container: SubViewportContainer
 var _status_label: Label
 var _viewport: SubViewport
 var _root: Node3D
-var _guide_root: Node3D
 var _environment: MissionEnvironment
 var _camera: FlyCamera
-var _grid_material: StandardMaterial3D
-var _axis_material: StandardMaterial3D
-var _grid_visible := true
-var _axes_visible := true
-var _has_framed := false
-# Static menu mode (runtime PLAYER_INFO): grid/axes hidden, camera locked, a fixed
-# front-facing pose framed once and held across combo changes. Off by default so the
-# ONED Avatars workspace keeps its interactive fly camera + grid.
-var _menu_preview := false
 var _menu_pose_set := false
 # Menu-portrait animation state (see _process). The part models hang off a spin node so the
-# model rotates without moving the camera or grid; the camera only zooms.
+# model rotates without moving the camera; the camera only zooms.
 var _model_root: Node3D
 var _hovered := false
 var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
@@ -87,11 +70,9 @@ var _missing_parts := PackedStringArray()
 
 
 func _ready() -> void:
-	# The ONED workspace preview owns its mouse (orbit / pan / fly); the menu
-	# portrait must be transparent to it -- the frame pump owns hover and every
+	# The portrait is transparent to mouse input -- the frame pump owns hover and every
 	# click, including the dropdown rows retail authors over the preview rect.
-	mouse_filter = (Control.MOUSE_FILTER_IGNORE if _menu_preview
-			else Control.MOUSE_FILTER_STOP)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clip_contents = true
 	_build_viewport()
 
@@ -107,49 +88,13 @@ func get_resource_root():
 	return _resource_root
 
 
-# Switch to the static menu portrait used by the runtime PLAYER_INFO screen: hide the
-# grid + axis gizmo, lock the camera (no orbit / pan / fly), stop the SubViewport from
-# eating clicks so the PLAYER_PREVIEW button keeps them, and frame a fixed front pose
-# that stays put across combo selections. Idempotent; safe to call before or after the
-# first combo loads (the framing applies on the next non-empty load_combo()).
-func set_menu_preview(enabled: bool) -> void:
-	_menu_preview = enabled
-	if not enabled:
-		return
-	set_grid_visible(false)
-	set_axes_visible(false)
-	if _camera != null:
-		_camera.set_gameplay_locked(true)
-	# Mouse-transparent as a whole (this Control AND the SubViewportContainer):
-	# the PLAYER_INFO combos drop their LIST_BOX rows over this very rect, and
-	# _ready() would otherwise re-arm the workspace STOP filter after the
-	# companion mounted the preview.
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if _viewport_container != null:
-		_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if _viewport != null:
-		_viewport.gui_disable_input = true
-		_viewport.msaa_3d = Viewport.MSAA_4X  # edges stay clean at the higher render res
-	# Render the 3D at true on-screen resolution. This subtree is scaled anamorphically by
-	# the menu (nova_menu_shell.gd::_recompute_fit), so a design-size SubViewport gets upscaled
-	# and blurred; sizing it to on-screen px keeps it sharp and undistorted. Recompute on
-	# window resize too. No-op in the ONED workspace (no parent scale, s == 1).
-	if is_inside_tree() and get_viewport() != null \
-			and not get_viewport().size_changed.is_connected(_apply_menu_viewport_resolution):
-		get_viewport().size_changed.connect(_apply_menu_viewport_resolution)
-	_apply_menu_viewport_resolution()
-	# Re-pose now if a combo is already loaded; otherwise the next load_combo() frames it.
-	_menu_pose_set = false
-	_refresh_preview_guides()
-
-
 # Size the SubViewport to the true on-screen pixel footprint of this pane. The menu scales
 # this control by s = window / 800x600; counter-scaling the container by 1/s while sizing it
 # to base*s makes SubViewportContainer.stretch render the viewport at base*s (on-screen px)
 # yet still visually fill the design-space rect. Guarded so a zero/!inside-tree size is a
-# no-op; only runs in menu mode.
+# no-op.
 func _apply_menu_viewport_resolution() -> void:
-	if not _menu_preview or _viewport_container == null or not is_inside_tree():
+	if _viewport_container == null or not is_inside_tree():
 		return
 	var vp := get_viewport()
 	if vp == null:
@@ -167,8 +112,8 @@ func _apply_menu_viewport_resolution() -> void:
 
 func _notification(what: int) -> void:
 	# The pane's design-space size is fixed, so its own RESIZED fires only when layout first
-	# assigns it -- the moment to (re)apply the on-screen render resolution in menu mode.
-	if what == NOTIFICATION_RESIZED and _menu_preview:
+	# assigns it -- the moment to (re)apply the on-screen render resolution.
+	if what == NOTIFICATION_RESIZED:
 		_apply_menu_viewport_resolution()
 
 
@@ -176,7 +121,7 @@ func _build_viewport() -> void:
 	_viewport_container = SubViewportContainer.new()
 	_viewport_container.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_viewport_container.stretch = true
-	_viewport_container.mouse_filter = Control.MOUSE_FILTER_STOP
+	_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_viewport_container)
 
 	_status_label = Label.new()
@@ -192,7 +137,9 @@ func _build_viewport() -> void:
 	_viewport = SubViewport.new()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_viewport.transparent_bg = false
-	_viewport.handle_input_locally = true
+	_viewport.handle_input_locally = false
+	_viewport.gui_disable_input = true
+	_viewport.msaa_3d = Viewport.MSAA_4X
 	_viewport_container.add_child(_viewport)
 
 	_root = Node3D.new()
@@ -202,12 +149,8 @@ func _build_viewport() -> void:
 	_environment.name = "AvatarPreviewEnvironment"
 	_root.add_child(_environment)
 
-	_guide_root = Node3D.new()
-	_guide_root.name = "AvatarPreviewGuides"
-	_root.add_child(_guide_root)
-
 	# Part models hang off this spin node so the menu portrait can rotate the model while
-	# the camera and grid stay put. Identity (no rotation) in the ONED workspace.
+	# the camera stays put.
 	_model_root = Node3D.new()
 	_model_root.name = "AvatarModelRoot"
 	_root.add_child(_model_root)
@@ -219,19 +162,12 @@ func _build_viewport() -> void:
 	_camera.far = 500.0
 	_camera.look_at_from_position(Vector3(0.0, 1.5, 6.0), Vector3.ZERO)
 	_root.add_child(_camera)
-
-	_grid_material = StandardMaterial3D.new()
-	_grid_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_grid_material.vertex_color_use_as_albedo = true
-	_grid_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-
-	_axis_material = StandardMaterial3D.new()
-	_axis_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_axis_material.vertex_color_use_as_albedo = true
-	_axis_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-
-	_add_axis_gizmo()
-	_refresh_preview_guides()
+	_camera.set_gameplay_locked(true)
+	if get_viewport() != null \
+			and not get_viewport().size_changed.is_connected(_apply_menu_viewport_resolution):
+		get_viewport().size_changed.connect(_apply_menu_viewport_resolution)
+	_apply_menu_viewport_resolution()
+	_refresh_portrait()
 
 
 # --- Combo composition --------------------------------------------------------
@@ -251,7 +187,7 @@ func load_combo(combo: Dictionary) -> void:
 		var graphic := String(part_dict.get("graphic", "")).strip_edges()
 		_load_part(slot, graphic, part_dict.get("camo", []))
 	_refresh_status_label()
-	_refresh_preview_guides()
+	_refresh_portrait()
 
 
 # Build the shared skeletal idle once from the two raw .bad files the original binds
@@ -326,7 +262,6 @@ func clear() -> void:
 			_model_root.remove_child(model)
 			model.queue_free()
 	_part_models.clear()
-	_has_framed = false
 	_missing_parts = PackedStringArray()
 	_refresh_status_label()
 
@@ -339,40 +274,6 @@ func _refresh_status_label() -> void:
 		return
 	_status_label.text = "Missing: %s" % "; ".join(_missing_parts)
 	_status_label.visible = true
-
-
-func get_editor_camera() -> Camera3D:
-	return _camera
-
-
-# --- View guides (grid + axis gizmo) ------------------------------------------
-
-func is_grid_visible() -> bool:
-	return _grid_visible
-
-
-func set_grid_visible(value: bool) -> void:
-	_grid_visible = value
-	_apply_guide_visibility()
-
-
-func is_axes_visible() -> bool:
-	return _axes_visible
-
-
-func set_axes_visible(value: bool) -> void:
-	_axes_visible = value
-	_apply_guide_visibility()
-
-
-func _apply_guide_visibility() -> void:
-	if _guide_root == null:
-		return
-	for child in _guide_root.get_children():
-		if child.name == "AvatarGrid":
-			child.visible = _grid_visible
-		elif child.name == "AvatarAxisGizmo":
-			child.visible = _axes_visible
 
 
 func _composed_bounds() -> AABB:
@@ -389,126 +290,13 @@ func _composed_bounds() -> AABB:
 	return bounds
 
 
-func _refresh_preview_guides() -> void:
+func _refresh_portrait() -> void:
 	var bounds := _composed_bounds()
-	var empty := bounds.size == Vector3.ZERO
-	if empty:
-		bounds = AABB(Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0))
-	_refresh_grid(bounds)
-	if _menu_preview:
-		# Fixed front portrait: frame once on the first real character, then hold the
-		# pose so the camera never jumps as the player cycles combos. Skip the empty
-		# fallback so the pose locks to an actual soldier's bounds.
-		if not _menu_pose_set and not empty:
-			_frame_menu_pose(bounds)
-			_menu_pose_set = true
-	else:
-		_frame_bounds(bounds)
-
-
-func _refresh_grid(bounds: AABB) -> void:
-	if _guide_root == null:
-		return
-	for child in _guide_root.get_children():
-		if child.name == "AvatarGrid":
-			_guide_root.remove_child(child)
-			child.free()
-	_add_grid(bounds)
-
-
-func _add_grid(bounds: AABB) -> void:
-	var vertices := PackedVector3Array()
-	var colors := PackedColorArray()
-	var min_x := bounds.position.x
-	var max_x := bounds.end.x
-	var min_z := bounds.position.z
-	var max_z := bounds.end.z
-	var half: float = maxf(1.0, maxf(maxf(absf(min_x), absf(max_x)), maxf(absf(min_z), absf(max_z))))
-	var step: float = _grid_step_for_extent(half)
-	var limit: float = ceilf(half / step + 1.0) * step
-	var line_count := int(roundf(limit / step))
-
-	for i in range(-line_count, line_count + 1):
-		var p := float(i) * step
-		var axis_x := is_zero_approx(p)
-		_push_grid_line(vertices, colors, Vector3(p, 0.0, -limit), Vector3(p, 0.0, limit), axis_x)
-		_push_grid_line(vertices, colors, Vector3(-limit, 0.0, p), Vector3(limit, 0.0, p), axis_x)
-
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_COLOR] = colors
-	var grid_mesh := ArrayMesh.new()
-	grid_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
-	var grid := MeshInstance3D.new()
-	grid.name = "AvatarGrid"
-	grid.mesh = grid_mesh
-	grid.material_override = _grid_material
-	grid.visible = _grid_visible
-	_guide_root.add_child(grid)
-
-
-func _push_grid_line(vertices: PackedVector3Array, colors: PackedColorArray, a: Vector3, b: Vector3, axis: bool) -> void:
-	var color := Color(0.80, 0.86, 0.90, 0.72) if axis else Color(0.38, 0.43, 0.48, 0.34)
-	vertices.push_back(a)
-	vertices.push_back(b)
-	colors.push_back(color)
-	colors.push_back(color)
-
-
-func _grid_step_for_extent(half_extent: float) -> float:
-	if half_extent <= 4.0:
-		return 0.5
-	if half_extent <= 16.0:
-		return 1.0
-	if half_extent <= 64.0:
-		return 4.0
-	return 16.0
-
-
-func _add_axis_gizmo() -> void:
-	if _guide_root == null:
-		return
-	var vertices := PackedVector3Array([
-		Vector3.ZERO, Vector3(1.25, 0.0, 0.0),
-		Vector3.ZERO, Vector3(0.0, 1.25, 0.0),
-		Vector3.ZERO, Vector3(0.0, 0.0, 1.25),
-	])
-	var colors := PackedColorArray([
-		Color(0.95, 0.24, 0.22, 0.95), Color(0.95, 0.24, 0.22, 0.95),
-		Color(0.32, 0.86, 0.38, 0.95), Color(0.32, 0.86, 0.38, 0.95),
-		Color(0.25, 0.52, 0.95, 0.95), Color(0.25, 0.52, 0.95, 0.95),
-	])
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_COLOR] = colors
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
-	var axis := MeshInstance3D.new()
-	axis.name = "AvatarAxisGizmo"
-	axis.mesh = mesh
-	axis.material_override = _axis_material
-	axis.visible = _axes_visible
-	_guide_root.add_child(axis)
-
-
-func _frame_bounds(bounds: AABB) -> void:
-	if _camera == null:
-		return
-	var center := bounds.get_center()
-	var radius := bounds.size.length() * 0.5
-	if radius < 1.0:
-		radius = 1.0
-	_camera.near = clampf(radius * 0.001, 0.02, 5.0)
-	_camera.far = maxf(radius * 12.0, 50.0)
-	_camera.fly_speed = clampf(radius * 2.5, 1.0, 250.0)
-	_camera.zoom_speed = clampf(radius * 0.18, 0.05, 20.0)
-	_camera.pan_sensitivity = clampf(radius * 0.01, 0.01, 1.0)
-	if not _has_framed:
-		_camera.frame_bounds_custom(center, radius, EDITOR_DISTANCE_SCALE,
-				maxf(radius * 8.0, 6.0), 2.8, -0.18)
-		_has_framed = true
+	# Frame once on the first real character, then hold the pose so the camera
+	# never jumps as the player cycles combos.
+	if not _menu_pose_set and bounds.size != Vector3.ZERO:
+		_frame_menu_pose(bounds)
+		_menu_pose_set = true
 
 
 # Front-facing menu portrait: yaw 0 sits the camera on +Z looking down -Z, and the .3di
@@ -546,11 +334,11 @@ func set_hovered(value: bool) -> void:
 	_hovered = value
 
 
-# Per-frame menu portrait animation [orig: update_player_preview_animation @ 0x55dba0]:
+# Per-frame PLAYER_INFO portrait animation [orig: update_player_preview_animation @ 0x55dba0]:
 # a damped zoom toward the hover target, a continuous idle rotation, and a sinusoidal sway
-# that fades in on hover. No-op outside menu mode (the ONED workspace drives its own camera).
+# that fades in on hover.
 func _process(delta: float) -> void:
-	if not _menu_preview or not _menu_framed:
+	if not _menu_framed:
 		return
 	# Hover by mouse-position-over-this-pane, not the PLAYER_PREVIEW widget's mouse_entered
 	# signal: the menu's anamorphic scaling + the IGNORE mouse filters (which let the button

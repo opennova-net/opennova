@@ -57,7 +57,7 @@ public:
 	void set_wind_strength_pct(float pct);
 	float wind_strength_pct() const;
 
-	// The autonomous render-delta accumulator (standalone/editor previews).
+	// The autonomous render-delta accumulator for standalone owners.
 	// No-ops while world-tick-driven; zero-quantum frames still run a
 	// zero-tick publish so scrubs land.
 	void process_delta(EnvironmentState *env, double delta);
@@ -144,7 +144,7 @@ public:
 
 	// The marched iris-exposure samples (D-RLIT-2): the in-world shell stamps
 	// per-sample classification codes each frame; empty keeps the outdoor
-	// fallback sample (editor previews with no world)
+	// fallback sample when no world supplies classification codes
 	// [orig: compute_ambient_light_along_direction @ 0x5c7a00].
 	void set_iris_samples(const int32_t *samples, int count);
 	void clear_iris_samples() { iris_samples_.clear(); }

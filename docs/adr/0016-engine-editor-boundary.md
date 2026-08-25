@@ -1,5 +1,9 @@
 # The editor is a detachable layer over public engine APIs; engine behavior does not live in GDScript
 
+> **Authoring role superseded by [ADR 0037](0037-oned-runs-game-data.md).**
+> ONED no longer has editor surfaces. The one-way dependency and engine-owned
+> behavior rules remain; the body below is the historical rationale.
+
 ONED is a view and data editor over the engine. If the editor shows anything
 the game would not show — a height the engine didn't sample, a color the
 engine didn't derive, a layout the engine wouldn't produce — the editor is

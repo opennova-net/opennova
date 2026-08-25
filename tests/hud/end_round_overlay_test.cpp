@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <hud/end_round_overlay.h>
+#include <hud/end_round_statistics.h>
 
 using namespace opennova::hud;
 
@@ -95,6 +96,52 @@ void test_objective_and_non_team() {
 	lines = end_round_overlay_lines(dm);
 	CHECK(lines[0].key == "STROVER35" && lines[1].key == "STROVER116" &&
 			lines[1].args.size() == 2);
+	// The third name row: all three decoded header rows render.
+	dm.player_scores[1] = 4;
+	dm.player_names[2] = "Cid";
+	dm.player_scores[2] = -1;
+	lines = end_round_overlay_lines(dm);
+	CHECK(lines[4].args[0].literal == "Cid" && lines[4].args[1].number == -1 &&
+			lines[4].y == 494);
+	CHECK(lines[5].y == 558); // game time follows the third row + 24
+
+	// KOTH (0x1): the named winner arm STROVER103 (timed) / STROVER104, the
+	// draw STROVER117, the two-name tie STROVER118.
+	EndRoundOverlayInput koth;
+	koth.game_type = 0x1;
+	koth.player_names[0] = "Ace";
+	koth.player_scores[0] = 9;
+	koth.player_names[1] = "Bee";
+	koth.player_scores[1] = 4;
+	koth.round_time_remaining_ticks = 62;
+	lines = end_round_overlay_lines(koth);
+	CHECK(lines[0].key == "STROVER_PLAYERWIN" && lines[0].args[0].literal == "Ace");
+	CHECK(lines[1].key == "STROVER103" && lines[1].args[0].literal == "Ace");
+	koth.round_time_remaining_ticks = 0;
+	CHECK(end_round_overlay_lines(koth)[1].key == "STROVER104");
+	koth.draw = true;
+	CHECK(end_round_overlay_lines(koth)[1].key == "STROVER117");
+	koth.draw = false;
+	koth.player_scores[1] = 9; // the KOTH two-name tie
+	lines = end_round_overlay_lines(koth);
+	CHECK(lines[0].key == "STROVER35" && lines[1].key == "STROVER118" &&
+			lines[1].args.size() == 2 && lines[1].args[1].literal == "Bee");
+
+	// The KOTH family's non-team variant 0x8: STROVER109/110/119/120.
+	EndRoundOverlayInput koth8;
+	koth8.game_type = 0x8;
+	koth8.player_names[0] = "Ace";
+	koth8.player_scores[0] = 9;
+	koth8.round_time_remaining_ticks = 62;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER109");
+	koth8.round_time_remaining_ticks = 0;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER110");
+	koth8.draw = true;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER119");
+	koth8.draw = false;
+	koth8.player_names[1] = "Bee";
+	koth8.player_scores[1] = 9;
+	CHECK(end_round_overlay_lines(koth8)[1].key == "STROVER120");
 }
 
 void test_column_layout() {
@@ -127,10 +174,47 @@ void test_column_layout() {
 			stat_field_string_index(40) == 0);
 }
 
+// The toggled SP Show Score panel's row composition and geometry
+// [orig: HUD_DrawEndRoundStatistics @0x5b7600].
+void test_statistics_panel() {
+	EndRoundStatisticsInput in;
+	in.subgoals_won = 2;
+	in.subgoals_defined = 5;
+	in.enemy_kills = 7;
+	in.enemy_unit_total = 40;
+	in.team_unit_kills = 1;
+	in.friendly_unit_kills = 0;
+	auto rows = end_round_statistics_rows(in);
+	CHECK(std::string(rows[0].label_key) == "STREPILOG_OBJECTIVEBONUS" &&
+			rows[0].value == "2/5");
+	CHECK(std::string(rows[1].label_key) == "STREPILOG_ENEMYUNITS" &&
+			rows[1].value == "7/40");
+	CHECK(std::string(rows[2].label_key) == "STREPILOG_TEAMUNITS" &&
+			rows[2].value == "1");
+	CHECK(std::string(rows[3].label_key) == "STREPILOG_FRIENDLYUNITS" &&
+			rows[3].value == "0");
+	// The enemy-kill clamp: negative floors at 0, overshoot caps at the total
+	// [orig: @0x5b7721..0x5b772b].
+	in.enemy_kills = -3;
+	CHECK(end_round_statistics_rows(in)[1].value == "0/40");
+	in.enemy_kills = 55;
+	CHECK(end_round_statistics_rows(in)[1].value == "40/40");
+	// The box: 280-top (raised 140 on the gated team-1 win), 340 tall,
+	// x 128..896, rows +48 stepping 48, label 200 / value 620
+	// [orig: @0x5b7626..0x5b7644, @0x5b7671, @0x5b7653].
+	CHECK(end_round_statistics_top(false) == 280);
+	CHECK(end_round_statistics_top(true) == 140);
+	CHECK(kEndRoundStatsBoxX1 == 128 && kEndRoundStatsBoxX2 == 896 &&
+			kEndRoundStatsBoxHeight == 340);
+	CHECK(kEndRoundStatsRowStart == 48 && kEndRoundStatsRowStep == 48);
+	CHECK(kEndRoundStatsLabelX == 200 && kEndRoundStatsValueX == 620);
+}
+
 } // namespace
 
 int main() {
 	test_team_mode_ladder();
+	test_statistics_panel();
 	test_objective_and_non_team();
 	test_column_layout();
 	if (failures != 0) {

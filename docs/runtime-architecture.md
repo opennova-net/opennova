@@ -155,8 +155,8 @@ the local-player view placement are all explicitly invoked by
 `ObjectModel`, and `GameWorld` no longer run independent process loops. The
 per-model advance is one static driver over a shared awake set
 (`ObjectModel::advance_awake_frame`, per-frame-guarded); the menu shell and
-ONED drive that same static advance from their one process loop for portrait/
-preview models outside a live mission.
+its portrait models drive that same static advance from the game process loop
+outside a live mission. ONED has no preview-model loop (ADR 0037).
 
 D-RORD-8 (fixed 2026-08-12): the one-frame visibility lag was the CAMERA, not
 the occlusion-after-present order. The local-player camera/viewmodel placement

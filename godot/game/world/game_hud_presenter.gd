@@ -19,6 +19,8 @@ const HudHiddenCaptureWitness := preload(
 const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presenter.gd")
 const VehiclePanelPresenterScript := preload("res://game/world/vehicle_panel_presenter.gd")
 const MessageLogPresenterScript := preload("res://game/world/message_log_presenter.gd")
+const EndRoundStatisticsPresenterScript := preload("res://game/world/end_round_statistics_presenter.gd")
+const HudTextTables := preload("res://game/world/hud_text_tables.gd")
 const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
@@ -33,6 +35,7 @@ var _game_hud = null        # HudOverlay, built on the first frame a mission has
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
+var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show Score (F5) panel lane
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
 var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
@@ -170,6 +173,7 @@ func teardown() -> void:
 	_scoreboard.reset()
 	_vehicle_panel.reset()
 	_message_log.reset()
+	_end_round_stats.reset()
 	_lfp_panel.reset()
 	_hud_pos = null
 	_pending_hud_messages.clear()
@@ -262,7 +266,7 @@ func _ensure_game_hud() -> void:
 		_map_grid_origin_present = false
 		_game_hud.set_minimap_grid_origin(Vector2.ZERO, false)
 	_view_effects.set_resource_root(root)
-	_load_hud_text_tables(root)
+	HudTextTables.register(root, _world)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
 	var t: RtxtStringFile = Strings.get_table("gametext")
@@ -286,48 +290,6 @@ func _ensure_game_hud() -> void:
 # back to medmssn.bin) for WAC/BMS triggered text.
 # [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
 #  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
-func _load_hud_text_tables(root: ResourceRoot) -> void:
-	if root == null:
-		return
-	# Refresh this global registry from the current world's root every build.
-	# Otherwise a second runtime or direct-mount test can silently reuse the first root's
-	# strings. The gametext table IS gametext.bin [orig: Game_InitSubsystems
-	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
-	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
-	Strings.register_table("gametext", _load_rtxt(root, "gametext.bin"))
-	# The host's medic broadcast format [orig: Server_BroadcastMedicRequest @0x515390].
-	var sim = _world.get_sim() if _world != null else null
-	var gametext: RtxtStringFile = Strings.get_table("gametext")
-	if sim != null and gametext != null \
-			and gametext.has_string_in_section("Server", "STRSRV_MEDREQ"):
-		sim.set_server_text(gametext.get_string_in_section("Server", "STRSRV_MEDREQ"))
-	# The medmssn fallback fires only when the mission .bin does not EXIST — a
-	# present-but-unparseable file loads to nothing with no fallback.
-	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
-	# the filename; the load result is stored either way]
-	var mission_table: RtxtStringFile = null
-	var mission_bin := ""
-	if _world != null:
-		var base: String = String(_world.get_loaded_mission_file()).get_basename()
-		if not base.is_empty():
-			mission_bin = base + ".bin"
-	if not mission_bin.is_empty() and root.has_file(mission_bin):
-		mission_table = _load_rtxt(root, mission_bin)
-	else:
-		mission_table = _load_rtxt(root, "medmssn.bin")
-	Strings.register_table("mission", mission_table)
-
-
-func _load_rtxt(root: ResourceRoot, name: String) -> RtxtStringFile:
-	var bytes := root.read_file(name)
-	if bytes.is_empty():
-		return null
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return null
-	return table
-
-
 ## Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
 ## original rebuilding its HUD info struct each frame. Call once per frame while the
 ## player is in-world (the shells gate on their own state).
@@ -544,6 +506,15 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_score_fanfare.update(sim, _world)
 	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
 			hud_keys_chorded, gameplay_input_active)
+	# The ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
+	# its flip runs the respawn-init wrapper, closing the other overlay windows
+	# the shell owns [orig: sub_4993C0 -> Game_InitRespawnState] — the
+	# sim-owned toggles (map overlay, emote/radio menus) clear through the
+	# sim's own respawn init.
+	_end_round_stats.update(_game_hud, sim, ControlsBindings.pressed("ShowScore"),
+			hud_keys_chorded, gameplay_input_active,
+			not bool(sim.get_round_outcome_debug().get("mp_session", false)),
+			func() -> void: _message_log.close(_game_hud))
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
 	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
 	if timing:

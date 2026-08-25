@@ -9,7 +9,7 @@ instrument wins and this page is stale.
 
 | Period | What it was | State |
 |---|---|---|
-| through 2026-07-12 | **The maturity program** — the pre-reimplementation rearchitecture: seven tracks, five waves, the boundary-conformance checklist, the enforcement ratchets | **CLOSED** 2026-07-12, freeze lifted ([maturity-program.md](maturity-program.md)). The standing rules (ADRs 0015–0018, 0022–0024, plus 0028's engine/shell split since 2026-08) and the enforcement instruments survive it |
+| through 2026-07-12 | **The maturity program** — the pre-reimplementation rearchitecture: seven tracks, five waves, the boundary-conformance checklist, the enforcement ratchets | **CLOSED** 2026-07-12, freeze lifted ([maturity-program.md](maturity-program.md)). The standing rules (ADRs 0015–0018, 0022–0024, 0028's engine/shell split, and 0037's ONED hard cut) and the enforcement instruments survive it |
 | since 2026-07-12 | **Retail-fidelity slices** — one system at a time, witnessed in IDA and ported | **current**. There is no separate program doc: the [divergence ledger](divergence-ledger.md) *is* the plan, and each slice's witness lands in its RE record |
 
 The distinction matters for scoping a task. The maturity program was
@@ -92,13 +92,14 @@ Each domain's next step is named in its own record, not centrally:
 | Terrain / foliage / tiles | ledger § Terrain, Foliage, Tiles | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
 | Environment | ledger § Environment | [env/env-tod-re.md](env/env-tod-re.md), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md) |
-| Editor depth (ONED workspaces) | TODO.md (editor UX rows) + the workspace matrix | [oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) — the editor's standing roadmap (survived the umbrella close) |
 
-Work that is **not** a parity divergence — editor UX, project health, code
+Work that is **not** a parity divergence — ONED and OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans: `plan/`
 (the NovaWorld-integration era), `engine/net/npruntime/ROADMAP.md`,
-[oned/editor-layer-program.md](oned/editor-layer-program.md), and
+[oned/editor-layer-program.md](oned/editor-layer-program.md),
+[oned/editor-runtime-parity.md](oned/editor-runtime-parity.md),
+[oned/workspace-maturity-program.md](oned/workspace-maturity-program.md), and
 [maturity-program.md](maturity-program.md)'s historical body (its two log
 appendices stay live).
 

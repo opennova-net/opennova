@@ -1,7 +1,11 @@
-# Editor–runtime parity: the shared-node patterns
+# Historical ONED authoring/runtime parity: the shared-node patterns
 
-How the OpenNova Editor (ONED) reuses game rendering and data systems for
-authoring previews without becoming a second gameplay runtime. These patterns were
+> **Historical.** [ADR 0037](../adr/0037-oned-runs-game-data.md) removed ONED's
+> authoring and preview surfaces. The patterns below document the retired
+> editor implementation; they are not current architecture guidance.
+
+How ONED's former authoring surfaces reused game rendering and data systems for
+previews without becoming a second gameplay runtime. These patterns were
 confirmed by an architecture survey of the editor/engine split (2026-06-10) and
 updated when embedded mission play was removed (2026-07-29). The template for
 new authoring surfaces is: **reuse the runtime node, public engine function, or

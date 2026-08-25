@@ -1,0 +1,183 @@
+[gd_scene load_steps=2 format=3 uid="uid://dpwqeba4itvkv"]
+
+[ext_resource type="Script" path="res://modtools/oned_app.gd" id="1_app"]
+
+[node name="OnedMain" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_app")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.055, 0.065, 0.082, 1)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(700, 0)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="Content" type="VBoxContainer" parent="Center/Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "ONED"
+
+[node name="Subtitle" type="Label" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.69, 0.76, 1)
+text = "Choose loose sources or a packed game and run it."
+
+[node name="DataHeading" type="Label" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Game data"
+
+[node name="ResourceRow" type="HBoxContainer" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ResourceDirEdit" type="LineEdit" parent="Center/Panel/Margin/Content/ResourceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Loose sources or packed game directory"
+clear_button_enabled = true
+
+[node name="BrowseResourceButton" type="Button" parent="Center/Panel/Margin/Content/ResourceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Browse…"
+
+[node name="RecentDirsOption" type="OptionButton" parent="Center/Panel/Margin/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+fit_to_longest_item = false
+
+[node name="ProfileRow" type="HBoxContainer" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="GameLabel" type="Label" parent="Center/Panel/Margin/Content/ProfileRow"]
+layout_mode = 2
+text = "Game"
+
+[node name="GameCodeEdit" type="LineEdit" parent="Center/Panel/Margin/Content/ProfileRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+placeholder_text = "jo"
+
+[node name="ExpansionLabel" type="Label" parent="Center/Panel/Margin/Content/ProfileRow"]
+layout_mode = 2
+text = "Expansion"
+
+[node name="ExpansionEdit" type="LineEdit" parent="Center/Panel/Margin/Content/ProfileRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Optional"
+
+[node name="RetailHeading" type="Label" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Retail install"
+
+[node name="RetailRow" type="HBoxContainer" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="RetailDirEdit" type="LineEdit" parent="Center/Panel/Margin/Content/RetailRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Joint Operations install directory"
+clear_button_enabled = true
+
+[node name="BrowseRetailButton" type="Button" parent="Center/Panel/Margin/Content/RetailRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Browse…"
+
+[node name="Rule" type="HSeparator" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+
+[node name="Actions" type="HBoxContainer" parent="Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="RunOpenNovaButton" type="Button" parent="Center/Panel/Margin/Content/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(190, 42)
+layout_mode = 2
+text = "Run OpenNova  F5"
+
+[node name="RunRetailButton" type="Button" parent="Center/Panel/Margin/Content/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(190, 42)
+layout_mode = 2
+text = "Stage & Run Retail  F7"
+
+[node name="ActionSpacer" type="Control" parent="Center/Panel/Margin/Content/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StopButton" type="Button" parent="Center/Panel/Margin/Content/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(110, 42)
+layout_mode = 2
+text = "Stop  F8"
+
+[node name="StatusLabel" type="Label" parent="Center/Panel/Margin/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.75, 0.8, 1)
+text = "Ready."
+autowrap_mode = 2
+
+[node name="ResourceDirDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Choose game-data directory"
+initial_position = 2
+size = Vector2i(760, 520)
+file_mode = 2
+access = 2
+
+[node name="RetailDirDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "Choose retail install directory"
+initial_position = 2
+size = Vector2i(760, 520)
+file_mode = 2
+access = 2

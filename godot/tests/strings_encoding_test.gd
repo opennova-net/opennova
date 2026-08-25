@@ -10,7 +10,7 @@ extends GutTest
 #     -> Godot String (Unicode)
 #     -> FntResource.to_font_file() FontFile (the runtime's .fnt view;
 #        glyph slots keyed at their decoded cp1252 codepoints)
-#     -> the engine draw (HudText.draw_text / menus / credits).
+#     -> the runtime HUD, menu, and credits draws.
 #
 # cp1252 zones pinned here:
 #   0x20..0x7E  ASCII        — identity through every stage.

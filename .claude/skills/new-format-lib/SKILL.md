@@ -100,7 +100,7 @@ Run loop:
     BUILD_GODOT=0 bash scripts/build.sh          # configure + build + full ctest
     ctest --test-dir build -C Release -R <name>  # then iterate on just yours
 
-## 5. Optional: engine binding and editor surface
+## 5. Optional: engine binding
 
 - Binding: `godot/src/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
   `godot/src/register_types.cpp` (`godot/src` already links the group —
@@ -108,8 +108,8 @@ Run loop:
   any open editor (no hot-reload). Add a GDScript smoke test
   `godot/tests/<name>_data_test.gd` using the fixture-skip pattern; run it via
   the `gut` skill.
-- ONED workspace/inspector: follow "Add a workspace" in
-  `godot/modtools/README.md`.
+- ONED is run-only. Format libraries do not add a workspace, inspector,
+  project surface, or import flow; see ADR 0037.
 
 ## 6. Extracting an existing parser out of runtime/ (the ADR 0030 recipe)
 

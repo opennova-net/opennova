@@ -5,7 +5,7 @@ Status: accepted (roadmap + architecture; no leg implemented in this ADR)
 ## Context
 
 Real NovaWorld is still live, and the retail game already switches between it and OpenNova through
-the launcher's hosts redirect (see `launcher/`). We want **our Godot client** to do the same — point
+OpenNova Launcher's hosts redirect (see `launcher/`). We want **our Godot client** to do the same — point
 at OpenNova *or* `gs.novaworld.net` — and, over time, implement the full client flow: browse, account
 login, host, join.
 

@@ -192,5 +192,5 @@ func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:
 	assert_true(
 		detail.contains("if (u_has_tile_cache && u_instance_tile_cache_ready)") and
 			detail.contains("if (u_has_colormap)"),
-		"Missing runtime pages and ONED preview must retain the analytic terrain-surface fallback."
+		"Missing runtime pages must retain the analytic terrain-surface fallback."
 	)

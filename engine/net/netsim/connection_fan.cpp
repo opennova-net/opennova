@@ -45,6 +45,9 @@ struct FrameHeaderState {
 	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
 	// derived once before budgeting so the conditional header width and bytes agree.
 	uint8_t preround_delay_seconds = 0;
+	// The authority's round clock in 62 Hz ticks (-1 = untimed), for the
+	// phase-1 timer projection [orig: g_round_time_remaining read @0x4ffa8d].
+	int32_t round_time_remaining_ticks = -1;
 	uint8_t respawn_delay_seconds = 0;
 	uint8_t downed_revive_seconds = 0;
 	uint8_t spawn_target_hold_seconds = 0;
@@ -111,7 +114,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.timer.state1 = 13;        // dword_C6EAE4 = fall-damage tolerance (0 => constant fall dmg)
 		fu.timer.state2 = 62;        // g_serverFps (cosmetic netgraph)
 		fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
-		fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
+		// The round clock's wire projection: whole seconds (ticks / 62) only
+		// while no pre-round countdown runs and time remains; else -1.
+		// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca —
+		//  g_preround_delay_timer gate, jle on g_round_time_remaining,
+		//  the /62 magic-multiply, 0xFFFF otherwise]
+		fu.timer.timer_seconds =
+				(hdr.preround_delay_seconds == 0 &&
+						hdr.round_time_remaining_ticks > 0)
+				? static_cast<int16_t>(static_cast<uint16_t>(
+						  hdr.round_time_remaining_ticks / 62))
+				: int16_t{-1};
 		break;
 	case 2:
 		// Retail-native World state is quantized only at this wire boundary.
@@ -970,6 +983,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
+	hs.round_time_remaining_ticks = w.match.remaining_ticks();
 	const world::EnvNetworkState &env = w.network_env;
 	hs.env.present = true;
 	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16 >> 16);

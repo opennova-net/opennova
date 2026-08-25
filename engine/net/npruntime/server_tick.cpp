@@ -774,6 +774,14 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
 	ctx.round_end_board_stream =
 			encode_end_round_stats(build_end_round_stats(result));
+	// The header form is session state: the in-session non-team (DM/KOTH
+	// family) header carries the top three frozen-board names/scores instead
+	// of the winner/team-score words. world.mp_session is our SP-as-listen-
+	// server stand-in for the retail is_in_session (ctx.is_in_session is
+	// always 1 here — the in-process loopback IS a session).
+	// [orig: EndRoundScoreboard_SerializeHeader form pick @0x5052a6]
+	const bool non_team_header =
+			world.mp_session && (result.game_type & 0x10000u) == 0;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
 		// The zero 0x61 precedes each recipient-specific 0x1D header, then the
@@ -785,8 +793,10 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn));
 		conn.link.transport->host_send(
 				s2c::END_ROUND_HEADER,
-				encode_end_round_header(build_end_round_header(
-						result, conn.reply.player_slot)));
+				encode_end_round_header(
+						build_end_round_header(result, conn.reply.player_slot,
+								non_team_header),
+						non_team_header));
 		conn.burst.game_state = 11;
 	}
 	ctx.round_end_announced = true;

@@ -316,7 +316,8 @@ std::vector<uint8_t> encode_player_list(const PlayerListFrame &frame);
 // header, then serves the frozen board through C2S 0x2B / S2C 0x56 chunks of at
 // most 200 bytes. [orig: EndRoundScoreboard_SerializeHeader @0x505280;
 // NapiNPServerMsg_0x02B @0x514FE0; NetPacket_WriteReplayStreamChunk @0x506F60]
-std::vector<uint8_t> encode_end_round_header(const EndRoundHeader &header);
+std::vector<uint8_t> encode_end_round_header(const EndRoundHeader &header,
+		bool non_team_form);
 std::vector<uint8_t> encode_end_round_stats(const EndRoundStats &stats);
 std::vector<uint8_t> encode_end_round_stats_chunk(
 		const std::vector<uint8_t> &board, uint16_t offset);

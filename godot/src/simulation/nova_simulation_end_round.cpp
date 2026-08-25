@@ -7,6 +7,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <hud/end_round_overlay.h>
+#include <hud/end_round_statistics.h>
 #include <npruntime/stat_screen_feed.h>
 
 #include <algorithm>
@@ -45,13 +46,22 @@ Dictionary Simulation::get_end_round_state() const {
 	out["team_scores"] = scores;
 	out["draw"] = er.header.draw != 0;
 	out["my_index"] = static_cast<int>(er.header.player_index);
-	// The authority keeps its own round clock; the joiner's copy of
-	// g_round_time_remaining (the 0x0A sub-block-1 timer) is not folded yet.
-	int32_t remaining = 0;
-	if (world_ && !joiner_) remaining = world_->match.remaining_ticks();
+	// The authority reads its own Match clock; a joiner reads the folded
+	// 0x0A sub-block-1 copy. (retail: g_round_time_remaining @0x24C1958,
+	// the joiner store @0x430219..0x430235)
+	const int32_t remaining = joiner_
+			? runtime_->state().round_time_remaining_ticks
+			: (world_ ? world_->match.remaining_ticks() : -1);
 	out["round_ticks"] = std::max(0, remaining);
 	out["death_screen"] = local_death_screen_active();
 	out["local_team"] = static_cast<int>(runtime_->assigned_team());
+	// The round-cycle handoff's session half: the host's post-round linger
+	// expiry closes the session (retail: Server_TickUpdate's drain sets
+	// g_mission_exit_reason = 3 @0x51db63 — the map cycle); a joiner's session
+	// dies with the host's exit.
+	out["session_open"] = joiner_
+			? !(runtime_ && runtime_->session_lost())
+			: ctx_.is_in_session != 0;
 	return out;
 }
 
@@ -71,10 +81,19 @@ TypedArray<Dictionary> Simulation::get_end_round_lines() const {
 	in.death_screen = local_death_screen_active();
 	in.team_scores[0] = er.header.team_score_0;
 	in.team_scores[1] = er.header.team_score_1;
-	// The non-team 0x1D form (three named players + scores) is not decoded
-	// yet (net-re §5.68 residue): the names stay empty and the ladder takes
-	// its name-less arms.
-	if (world_ && !joiner_) in.round_time_remaining_ticks = std::max(0, world_->match.remaining_ticks());
+	// The non-team 0x1D form's three named players + primary scores; empty
+	// names take the ladder's name-less arms. (retail: the 0x1D commit
+	// @0x430a70..0x430abb into byte_24C1A98/B7C/C60 + dword_24C1AD4/BB8/C9C)
+	for (int i = 0; i < 3; ++i) {
+		in.player_names[i] = er.header.player_names[i];
+		in.player_scores[i] = er.header.player_scores[i];
+	}
+	// Authority: the Match clock; joiner: the folded 0x0A sub-block-1 copy
+	// (retail: g_round_time_remaining @0x24C1958 — the game-time line and the
+	// timed/untimed arm picks read it on every role).
+	in.round_time_remaining_ticks = std::max(0, joiner_
+			? runtime_->state().round_time_remaining_ticks
+			: (world_ ? world_->match.remaining_ticks() : -1));
 	for (const opennova::hud::EndRoundLine &line : opennova::hud::end_round_overlay_lines(in)) {
 		Dictionary d;
 		d["key"] = String::utf8(line.key.c_str());
@@ -158,5 +177,43 @@ TypedArray<Dictionary> Simulation::get_end_round_rows() const {
 		d["selected"] = r.selected;
 		out.push_back(d);
 	}
+	return out;
+}
+
+
+Dictionary Simulation::get_end_round_statistics() const {
+	// The SP Show Score panel's counters — the 0xC846xx stat block
+	// (hud/end_round_statistics.h documents the rows). Host-world data only:
+	// the panel's toggle is settable only outside a session, and a joiner has
+	// no tally world. (retail: HUD_DrawEndRoundStatistics @0x5b7600 reads the
+	// block; the toggle gate @0x49bd29 — see net-re §5.68)
+	Dictionary out;
+	if (world_ == nullptr) return out;
+	const opennova::world::World &w = *world_;
+	opennova::hud::EndRoundStatisticsInput in;
+	int32_t won = 0;
+	for (uint32_t mask = w.subgoals.won; mask != 0; mask &= mask - 1) ++won;
+	in.subgoals_won = won; // (retail: 0xC846D0 — one per first SubGoalWon @0x4fd117)
+	in.subgoals_defined = opennova::world::count_defined_subgoals(w);
+	in.enemy_kills = w.kill_stats.enemy_kills_by_player +
+			w.kill_stats.enemy_kills_by_others; // the six buckets folded @0x5b771b
+	in.enemy_unit_total = w.kill_stats.enemy_unit_total;
+	in.team_unit_kills = w.kill_stats.bluekills_by_player +
+			w.kill_stats.team_kills_by_others; // @0x5b77bd
+	in.friendly_unit_kills = w.kill_stats.greenkills_by_player +
+			w.kill_stats.friendly_kills_by_others; // @0x5b783c
+	// The raised box: the between-rounds gate with a team-1 win
+	// (retail: g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b).
+	in.raised = w.match.outcome().ended && w.match.outcome().winner_team == 1;
+	out["raised"] = in.raised;
+	TypedArray<Dictionary> rows;
+	for (const opennova::hud::EndRoundStatisticsRow &row :
+			opennova::hud::end_round_statistics_rows(in)) {
+		Dictionary d;
+		d["label_key"] = String::utf8(row.label_key);
+		d["value"] = String::utf8(row.value.c_str());
+		rows.push_back(d);
+	}
+	out["rows"] = rows;
 	return out;
 }

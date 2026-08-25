@@ -46,14 +46,6 @@ void MissionEnvironment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "time_of_day",
 						 PROPERTY_HINT_RANGE, "0,2359,1"),
 			"set_time_of_day", "get_time_of_day");
-	ClassDB::bind_method(D_METHOD("set_day_speed", "value"),
-			&MissionEnvironment::set_day_speed);
-	ClassDB::bind_method(D_METHOD("get_day_speed"),
-			&MissionEnvironment::get_day_speed);
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_speed",
-						 PROPERTY_HINT_RANGE, "0,200,1"),
-			"set_day_speed", "get_day_speed");
-
 	ClassDB::bind_method(D_METHOD("is_loaded"), &MissionEnvironment::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_light_state"),
 			&MissionEnvironment::get_light_state);
@@ -275,13 +267,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sky_map2_tex"),
 			&MissionEnvironment::get_sky_map2_tex);
 
-	// The externally-callable render-frame drive (the _process body): a
-	// GDExtension virtual override is invisible to has_method and cannot be
-	// called from GDScript, and binding the `_process` name would displace
-	// the engine's virtual hook — so the test harness drives frames here.
-	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
-			&MissionEnvironment::advance_frame);
-
 	ADD_SIGNAL(MethodInfo("env_generation_changed"));
 	ADD_SIGNAL(MethodInfo("underwater_overlay_changed"));
 
@@ -363,8 +348,6 @@ void MissionEnvironment::_on_environment_changed() {
 }
 
 void MissionEnvironment::_ready() {
-	set_process_priority(-20);
-	set_process(true);
 	_ensure_loaded();
 	_attach_config();
 	if (is_loaded()) {
@@ -376,36 +359,6 @@ void MissionEnvironment::_ready() {
 	} else {
 		write_shader_globals();
 	}
-}
-
-void MissionEnvironment::_process(double p_delta) {
-	advance_frame(p_delta);
-}
-
-void MissionEnvironment::advance_frame(double p_delta) {
-	// day_speed is an OpenNova AUTHORING knob (HHMM units/second, default off)
-	// for scrubbing previews — shell plumbing, not the witnessed day advance.
-	// Retail's witnessed day advance is the engine mission clock
-	// (env/tod_clock.h carries the cites); the world composer drives that
-	// path through advance_mission_clock, separately from this preview
-	// knob.
-	if (!is_loaded()) {
-		return;
-	}
-	if (day_speed_ <= 0.0f) {
-		return;
-	}
-	double tod = state_.time_of_day() +
-			p_delta * static_cast<double>(day_speed_);
-	while (tod >= 2400.0) {
-		tod -= 2400.0;
-	}
-	while (tod < 0.0) {
-		tod += 2400.0;
-	}
-	set_time_of_day(tod);
-	state_.update_tod();
-	_after_tod_update();
 }
 
 // --- device tails -----------------------------------------------------------

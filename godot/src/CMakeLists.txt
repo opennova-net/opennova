@@ -28,16 +28,12 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_surface_inputs.cpp
     terrain/nova_terrain_static_shadow_rasterizer.cpp
     terrain/nova_terrain_tile_cache_device.cpp
-    terrain/nova_terrain_build_job.cpp
     terrain/nova_terrain_data.cpp
-    terrain/nova_terrain_builder.cpp
     terrain/nova_terrain_foliage_def.cpp
     terrain/nova_terrain_foliage_map.cpp
-    terrain/nova_terrain_surface_map.cpp
     terrain/nova_foliage_dispatcher.cpp
     terrain/nova_terrain_tile_entry.cpp
     terrain/nova_terrain_tile_info.cpp
-    terrain/nova_terrain_tile_overlay.cpp
     cbin/cbin_credits_resource.cpp
     cbin/nova_credits_player.cpp
     env/nova_env_keyframe.cpp
@@ -121,11 +117,8 @@ add_library(${TARGET_NAME} SHARED
     util/nova_process.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
-    resource_index/nova_resource_index.cpp
-    refs/nova_reference_index.cpp
     resource_index/nova_resource_root.cpp
     pff/nova_pff_archive.cpp
-    editor/nova_edit_history.cpp
     fnt/nova_fnt_resource.cpp
     audio/nova_sbf_bank.cpp
     audio/nova_sbf_audio_stream.cpp
@@ -153,21 +146,10 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp
     opennova_runtime
     opennova_net
-    opennova_oned_edit
 )
 
 if(WIN32)
     target_link_libraries(${TARGET_NAME} PRIVATE iphlpapi)
-endif()
-
-# The bake worker thread in nova_terrain_build_job.cpp installs
-# _set_se_translator so Windows SEH (access violations, div/0, etc.) surfaces
-# as std::runtime_error instead of crashing with "Unknown build failure".
-# That requires /EHa — only scope it to this TU so the rest of the extension
-# keeps the default exception model.
-if(MSVC)
-    set_source_files_properties(terrain/nova_terrain_build_job.cpp
-        PROPERTIES COMPILE_OPTIONS "/EHa")
 endif()
 
 get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)

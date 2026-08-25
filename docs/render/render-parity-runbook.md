@@ -85,7 +85,7 @@ scope** and restart the client:
 claude mcp add onhook --scope user -- <abs path>/opennova-int/onhook/onhook-mcp.exe
 ```
 
-Never put that path in the tracked `.mcp.json`. Confirm with `claude mcp list`
+Never add a repo-level `.mcp.json` for that machine-local path. Confirm with `claude mcp list`
 that it reports Connected with its tools loaded, not just Connected -- a tool
 fetch failure there means the capture tools are unavailable no matter how the
 handshake looks.
@@ -222,7 +222,7 @@ capture-mode mismatch, or any drift from the requested integer minute.
 
 | Variable | Requirement |
 |---|---|
-| `GODOT_BIN` | A Godot 4.6.1 binary capable of windowed rendering. This is the shell launcher; the probe does not read it. |
+| `GODOT_BIN` | A Godot 4.6.1 binary capable of windowed rendering. This is the Godot executable; the probe does not read it. |
 | `NOVA_RENDER_FIXTURE_ID` | **Required.** One exact `id` from the catalog. |
 | `NOVA_MISSION_RESOURCE_DIR` | **Required for reproducible evidence.** A loose-mission root containing the catalog mission as a loose `.bms`. The probe has a persisted-setting fallback for interactive convenience; evidence runs set it explicitly. |
 | `NOVA_RUNTIME_RESOURCE_DIR` | **Required.** A valid packed runtime resource root. |

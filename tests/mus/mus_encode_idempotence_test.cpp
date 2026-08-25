@@ -1,10 +1,10 @@
-/* Write-path parity invariant for the structured music editor.
+/* Write-path parity invariant for canonical MUS re-encoding.
 
-   This pins what is actually achievable when the editor saves an edited
-   script, and documents what is NOT.
+   This pins what is actually achievable when a format tool rewrites a script,
+   and documents what is NOT.
 
    NOT achievable: byte-identity to the ORIGINAL shipped .bin. The shipped
-   SCR0/MU01 files carry editor-only debug info the runtime decode path does
+   SCR0/MU01 files carry debug info the runtime decode path does
    not capture and mus_encode_file does not reproduce -- the section-name
    blob, the 256-byte source path, the string section, and aux tables A/B
    (MusChunkHeader fields debug_info_offset / string_section_offset /
@@ -12,17 +12,13 @@
    smaller, canonical form (e.g. jo_gamemus 2521 -> ~1121 bytes), first
    diverging around offset 20 (the chunk-table / debug-info region). A gate
    worded "recompile == original file bytes" would therefore FAIL and
-   permanently disable the write path -- do not word it that way.
+   reject every valid rewrite -- do not word it that way.
 
    ACHIEVABLE: the re-encoded canonical form is a byte-stable FIXED POINT.
    Define canonical(b) = encode(compile(decompile(open(b)))). Then
    canonical(original) == canonical(canonical(original)) byte-for-byte. This
-   is the invariant the structured-edit write path stands on: any edit is a
-   text transform over decompiled text, recompiled and re-encoded, so a no-op
-   edit must reproduce the canonical bytes exactly. The existing Save path
-   (MusicEditorDocument.save_to_disk -> compile-on-dirty -> _compiled_file_bytes)
-   already writes this canonical form for any edit today, so this is a
-   pre-existing behaviour, not new to the structured editor.
+   is the writer invariant: a no-op decompile/compile/encode cycle must
+   reproduce the canonical bytes exactly.
 
    The decompiler emitter must never change (its golden text round-trip is
    byte-exact); this test exercises the compile+encode side only. */

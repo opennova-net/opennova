@@ -965,26 +965,6 @@ func test_scrub_no_ops_without_skeletal_or_clip() -> void:
 	assert_eq(model.get_animation_time(), 0.0, "no active clip -> scrub is a no-op")
 
 
-func test_object_preview_arms_overlay() -> void:
-	# Public-API check for the arms overlay (object_preview.load_arms/clear_arms). No .adm is needed
-	# -- with none loaded the arms render static at rest, a valid loaded state. Uses the committed
-	# CharModel fixture mounted as a resource root.
-	var preview := ObjectPreview.new()
-	add_child_autofree(preview)
-	var root := ResourceRoot.new()
-	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/threedi/3di3"))
-	# Failure path: no resource root -> false + error, no arms model.
-	assert_false(preview.load_arms("CharModel.3di", null), "load_arms with null root fails")
-	assert_ne(preview.get_arms_error(), "", "arms error reported on failure")
-	assert_false(preview.has_arms(), "no arms model after a failed load")
-	# Success path: a second model node is created.
-	assert_true(preview.load_arms("CharModel.3di", root), "load_arms: %s" % preview.get_arms_error())
-	assert_true(preview.has_arms(), "arms model exists after load")
-	# Clear removes it.
-	preview.clear_arms()
-	assert_false(preview.has_arms(), "arms model removed after clear")
-
-
 func test_multi_clip_adm_rows_register_variants() -> void:
 	# Multi-clip .adm rows: every quoted token registers a VARIANT of the same key in
 	# file order — the original's per-slot circular ring; the CURSOR lives with the

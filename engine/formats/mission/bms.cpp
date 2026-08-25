@@ -1329,7 +1329,7 @@ namespace {
 
 // Byte compare a vector of trivially-copyable records. Every fixed BMS record is value-initialized
 // on construction (padding included) and mutators only touch named fields, so this is exact. Copies
-// (EditHistory undo/baseline snapshots) preserve padding only for TRIVIAL types -- a non-trivial
+// Copies preserve padding only for TRIVIAL types -- a non-trivial
 // (e.g. NSDMI'd) record may be copied member-wise, leaving padding indeterminate -- which the
 // static_asserts below enforce.
 template <typename T>

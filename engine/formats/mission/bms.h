@@ -880,7 +880,7 @@ bool is_bms(const uint8_t* data, size_t size);
 // value-initialized at every construction site (zeroing every byte, padding included), and carry
 // no implicit tail padding (Entity ends in the explicit mis_pad_), so the byte-wise compare is
 // exact and platform-deterministic -- and because the types are trivial, snapshots/copies
-// (EditHistory) preserve all bytes, padding included. WaypointRecord (inner vectors) compares
+// preserve all bytes, padding included. WaypointRecord (inner vectors) compares
 // field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
 // The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
 // mis_height_lock): they never reach .bms bytes, but they do change write_mis_text output, so a

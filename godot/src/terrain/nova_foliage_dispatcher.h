@@ -53,9 +53,8 @@ public:
   void configure_slots(const Array &p_defs, const Array &p_meshes,
                        const Array &p_fd_textures);
 
-  // The owning Terrain (the game runtime wires it at world load;
-  // ONED's preview never has one). Supplies the native detail-cell handoff
-  // and the composed surface textures.
+  // The owning Terrain, wired by the game at world load. Supplies the native
+  // detail-cell handoff and composed surface textures when available.
   void set_terrain(Terrain *p_terrain);
 
   // Runtime fast path. Height, authored foliage-map, and terrain-atlas
@@ -68,12 +67,12 @@ public:
   void set_tile_info(const Ref<TerrainTileInfo> &p_info);
   Ref<TerrainTileInfo> get_tile_info() const;
 
-  // Editor atlas/colormap source. Editor height and palette sampling remains
-  // live through the Callables below.
+  // Optional atlas/colormap source for callers without an owning Terrain.
+  // Height and palette sampling can remain live through the Callables below.
   void set_colormap_source(const Ref<TerrainData> &p_data);
   Ref<TerrainData> get_colormap_source() const;
 
-  // Editor samplers: (world_x, world_z) -> height / foliage palette index.
+  // Optional samplers: (world_x, world_z) -> height / foliage palette index.
   // Detail uses retail's flat wrapped map lookup; foliage_sampler retains the
   // sector-routed MODEL lookup and is the compatibility fallback for detail.
   void set_height_sampler(const Callable &p_sampler);
@@ -84,27 +83,18 @@ public:
   Callable get_foliage_sampler() const;
 
   // Anchors for the distant silhouette/depth-mask tier: crouched/prone
-  // infantry standing on terrain, supplied per frame by the binding (the sim's
-  // stance query in the game; none in the editor preview)
+  // infantry standing on terrain, supplied per frame by the binding from the
+  // simulation's stance query. Callers without entity data leave this empty.
   // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);
   PackedVector3Array get_silhouette_anchors() const;
-
-  // ONED's foliage dispatcher is parented to TerrainFoliagePreview rather than
-  // Terrain. Supply the editor's shared derived surface inputs explicitly
-  // so detail foliage uses the same height normal and mission-tile composite.
-  // An explicit override may contain null textures to intentionally clear them.
-  void set_surface_input_overrides(
-      const Ref<Texture2D> &p_heightfield_normal,
-      const Ref<Texture2D> &p_tile_overlay, const Vector3 &p_tile_overlay_tint);
-  void clear_surface_input_overrides();
 
   // Runtime frame. Reads exact detail patch keys/distances from the wired
   // Terrain::get_foliage_detail_patches_native().
   void render_frame(const Transform3D &p_camera_xform);
 
-  // Editor frame. Builds a deterministic 16-unit preview cell set whose live
-  // terrain centers are at most 42 units in 3D from the supplied camera.
+  // Standalone frame. Builds a deterministic 16-unit preview cell set whose
+  // sampled terrain centers are at most 42 units in 3D from the camera.
   void render_preview(const Transform3D &p_camera_xform);
 
   void reset();
@@ -207,11 +197,6 @@ private:
   Callable detail_foliage_sampler_;
   Callable foliage_sampler_;
   PackedVector3Array silhouette_anchors_;
-  bool surface_input_overrides_ = false;
-  Ref<Texture2D> override_heightfield_normal_;
-  Ref<Texture2D> override_tile_overlay_;
-  Vector3 override_tile_overlay_tint_ =
-      Vector3(1.0f, 1.0f, 1.0f);
 
   Ref<Shader> detail_high_shader_;
   Ref<Shader> detail_low_shader_;

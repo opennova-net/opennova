@@ -11,10 +11,9 @@ namespace godot {
 class TerrainData;
 class TerrainTileInfo;
 
-// Owns the allocation-heavy, retail-faithful textures consumed by both the
-// runtime and ONED terrain shaders. Callers refresh only the input family that
-// changed at an editor transaction boundary, then apply the cached inputs to
-// any compatible ShaderMaterial.
+// Owns the allocation-heavy, retail-faithful textures consumed by runtime
+// terrain shaders. Callers rebuild them when terrain inputs change, then apply
+// the cached inputs to any compatible ShaderMaterial.
 class TerrainSurfaceInputs : public RefCounted {
 	GDCLASS(TerrainSurfaceInputs, RefCounted)
 

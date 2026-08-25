@@ -439,17 +439,17 @@ int main() {
 	// @0x40DAE0 -> Game_StartMission @0x524360; Server_PositionPlayerForSpawn @0x50CF60]
 	{
 		auto sp_spawn_position = [](uint32_t game_type, w::Vec3 &out) {
-			w::World sp_world;
-			w::AiSystem sp_ai;
-			sp_world.ai = &sp_ai;
-			sp_world.registry.configure_pool(0, 16);
-			sp_world.registry.configure_pool(3, 16);
+			auto sp_world = std::make_unique<w::World>();
+			auto sp_ai = std::make_unique<w::AiSystem>();
+			sp_world->ai = sp_ai.get();
+			sp_world->registry.configure_pool(0, 16);
+			sp_world->registry.configure_pool(3, 16);
 			w::Entity start;
 			start.kind = w::EntityKind::Marker;
 			start.item_id = 6001; // the Co-op fallback start, 00TRa's only player start
 			start.position = {297.81f, -409.12f, 27.14f};
 			start.yaw = 45;
-			sp_world.registry.spawn(3, start);
+			sp_world->registry.spawn(3, start);
 
 			ns::LoopbackChannel sp_loop;
 			np::NapiNPServerCtx sp_ctx;
@@ -459,10 +459,10 @@ int main() {
 			sp_settings.game_type = game_type;
 			np::test::bring_up_host(sp_ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 			                        /*host_key=*/0, &sp_loop, sp_settings);
-			sp_ctx.world = &sp_world;
+			sp_ctx.world = sp_world.get();
 			np::Server_InitNewRoundState(sp_ctx);
-			if (np::Server_ProcessPendingPlayerSpawns(sp_ctx, sp_world) != 1) return false;
-			const w::Entity *sp_player = sp_world.registry.get(sp_world.cached.local_player);
+			if (np::Server_ProcessPendingPlayerSpawns(sp_ctx, *sp_world) != 1) return false;
+			const w::Entity *sp_player = sp_world->registry.get(sp_world->cached.local_player);
 			if (sp_player == nullptr) return false;
 			out = sp_player->position;
 			return true;

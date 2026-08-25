@@ -10,6 +10,12 @@ for the GAME runtime by [ADR 0033](0033-engine-owned-loops-device-shells.md)
 language. Directories, the `opennova` namespace, and include paths stand as
 written.
 
+[ADR 0037](0037-oned-runs-game-data.md) later removed ONED authoring and the
+`oned_edit` substrate, reference graph, and Godot-side reference/resource-index
+bindings in a hard cut. The authoring-language statement above and corresponding
+historical body text no longer describe the product; `refs` in the inventory below
+records the tree at decision time.
+
 ## Context
 
 ADR 0016 fixed the layering in words: the portable, Godot-free C++ core "is the

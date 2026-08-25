@@ -40,7 +40,7 @@ func has_tool(name: String) -> bool:
 
 
 ## Whether a tool must run through the server's serialized FIFO queue (true
-## for anything that touches editor state) or may run immediately alongside a
+## for anything that touches live game state) or may run immediately alongside a
 ## queued job (read-only monitors like get_logs opt out with serial = false).
 func is_serial(name: String) -> bool:
 	if not _tools.has(name):

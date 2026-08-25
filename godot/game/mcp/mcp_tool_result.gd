@@ -50,7 +50,7 @@ static func error(message: String, details: Variant = null) -> McpToolResult:
 
 
 ## Rehydrate a tools/call result received from another MCP endpoint. The
-## editor's game-session proxy uses this to forward text, image, error and
+## clients use this to receive text, image, error and
 ## structured blocks without decoding/re-encoding them or flattening the
 ## child's result into JSON text.
 static func from_payload(payload: Variant) -> McpToolResult:

@@ -120,6 +120,10 @@ public:
 	void push_chat_line(const String &p_text, int64_t p_argb);
 	// The Recent Messages (J) window: the OldMessages toggle and its stdbox
 	// title (gametext Overlays/STROVER43, resolved by the shell).
+	// The SP Show Score statistics panel (hud/end_round_statistics.h).
+	void set_end_round_statistics(bool p_shown, bool p_raised,
+			const String &p_title, const PackedStringArray &p_labels,
+			const PackedStringArray &p_values);
 	void set_message_log_shown(bool p_shown);
 	void set_message_log_title(const String &p_title);
 	// The AAS zone status panel: shown, the session game type (the conquest

@@ -103,8 +103,8 @@ jobs:
           if-no-files-found: error
 
   # Tagged releases ship the GAME zip only: opennova.exe + the packed pffs,
-  # built by the exported editor's own --pack-game CLI, pre-configured to boot
-  # from its own directory. The dev build (game + editor + loose sources) comes
+  # built by ONED's hidden --pack-game CLI, pre-configured to boot from its own
+  # directory. The dev build (game + ONED + loose sources) comes
   # from master CI runs, not releases.
   package-godot-windows:
     runs-on: windows-latest
@@ -180,7 +180,7 @@ jobs:
           skip-decompress: true
 
       # Tagged releases carry the importer, the Blender addon, and the packed
-      # game only — no editor, no sources (those live in master CI dev builds).
+      # game only — no ONED, no sources (those live in master CI dev builds).
       - name: Validate release deliverables
         run: >-
           python scripts/validate_release_deliverables.py

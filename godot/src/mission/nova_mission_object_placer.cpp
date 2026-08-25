@@ -1,12 +1,8 @@
 #include "mission/nova_mission_object_placer.h"
 
-#include <godot_cpp/classes/collision_shape3d.hpp>
-#include <godot_cpp/classes/convex_polygon_shape3d.hpp>
-#include <godot_cpp/classes/geometry3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
-#include <godot_cpp/variant/typed_array.hpp>
 
 #include <simassets/model_builders.h>
 
@@ -22,62 +18,6 @@ constexpr const char *kContainerName = "MissionObjects";
 uint64_t entity_identity_key(int p_kind, int p_index) noexcept {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(p_kind)) << 32) |
 			static_cast<uint32_t>(p_index);
-}
-
-// Convex hull points (Godot model-local) for one parsed collision volume:
-// the volume's bounding planes form a closed convex polytope, so the hull is
-// exactly their half-space intersection (never clamped to the AABB — that
-// would flatten carved/oriented hulls into axis-aligned boxes). A volume
-// with too few or degenerate planes falls back to its AABB corners so it is
-// never silently lost. (The BVOL family semantics are witnessed in
-// docs/world/world-wac-ai-re.md §15.4; the display-side helpers stay in
-// collision_hull.gd.)
-PackedVector3Array hull_points_for_volume(const Dictionary &p_volume) {
-	TypedArray<Plane> planes;
-	const Array raw_planes = p_volume.get("planes", Array());
-	for (int i = 0; i < raw_planes.size(); ++i) {
-		if (raw_planes[i].get_type() == Variant::PLANE) {
-			planes.push_back(raw_planes[i]);
-		}
-	}
-	PackedVector3Array pts;
-	if (planes.size() >= 4) {
-		pts = Geometry3D::get_singleton()->compute_convex_mesh_points(planes);
-	}
-	if (pts.size() < 4) {
-		const Vector3 vmin = p_volume.get("min", Vector3());
-		const Vector3 vmax = p_volume.get("max", Vector3());
-		if (vmin != vmax) {
-			pts.clear();
-			for (const double x : { vmin.x, vmax.x }) {
-				for (const double y : { vmin.y, vmax.y }) {
-					for (const double z : { vmin.z, vmax.z }) {
-						pts.push_back(Vector3(x, y, z));
-					}
-				}
-			}
-		}
-	}
-	return pts;
-}
-
-Array collision_shapes_for_volumes(const Array &p_volumes) {
-	Array shapes;
-	for (int i = 0; i < p_volumes.size(); ++i) {
-		if (p_volumes[i].get_type() != Variant::DICTIONARY) {
-			continue;
-		}
-		const PackedVector3Array pts =
-				hull_points_for_volume(p_volumes[i]);
-		if (pts.size() < 4) {
-			continue;
-		}
-		Ref<ConvexPolygonShape3D> shape;
-		shape.instantiate();
-		shape->set_points(pts);
-		shapes.push_back(shape);
-	}
-	return shapes;
 }
 
 } // namespace
@@ -117,12 +57,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::set_panm_clock);
 	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
 			&MissionObjectPlacer::set_environment_state);
-	ClassDB::bind_method(D_METHOD("set_edit_mode", "edit_mode"),
-			&MissionObjectPlacer::set_edit_mode);
-	ClassDB::bind_method(D_METHOD("get_edit_mode"),
-			&MissionObjectPlacer::get_edit_mode);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "edit_mode"), "set_edit_mode",
-			"get_edit_mode");
 	ClassDB::bind_method(D_METHOD("get_item_db"),
 			&MissionObjectPlacer::get_item_db);
 
@@ -149,9 +83,6 @@ void MissionObjectPlacer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("place", "mission", "parent", "options"),
 			&MissionObjectPlacer::place, DEFVAL(Dictionary()));
-	ClassDB::bind_method(
-			D_METHOD("place_single", "mission", "container", "kind", "index"),
-			&MissionObjectPlacer::place_single);
 	ClassDB::bind_method(D_METHOD("build_animated_model", "item_id", "parent"),
 			&MissionObjectPlacer::build_animated_model);
 	ClassDB::bind_method(
@@ -179,12 +110,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::set_placed_entity_records);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_entity_records"),
 			"set_placed_entity_records", "get_placed_entity_records");
-	ClassDB::bind_method(D_METHOD("get_pickable_records"),
-			&MissionObjectPlacer::get_pickable_records);
-	ClassDB::bind_method(D_METHOD("set_pickable_records", "records"),
-			&MissionObjectPlacer::set_pickable_records);
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "pickable_records"),
-			"set_pickable_records", "get_pickable_records");
 	ClassDB::bind_method(D_METHOD("get_static_user_point_sources"),
 			&MissionObjectPlacer::get_static_user_point_sources);
 	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
@@ -201,16 +126,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::object_data_for);
 	ClassDB::bind_method(D_METHOD("skeletal_anim_for", "item_id", "graphic"),
 			&MissionObjectPlacer::skeletal_anim_for);
-	ClassDB::bind_method(D_METHOD("ground_anchor_godot", "graphic"),
-			&MissionObjectPlacer::ground_anchor_godot);
-	ClassDB::bind_method(D_METHOD("ground_anchor_bms", "graphic"),
-			&MissionObjectPlacer::ground_anchor_bms);
-	ClassDB::bind_method(D_METHOD("collision_shapes_for", "graphic"),
-			&MissionObjectPlacer::collision_shapes_for);
-	ClassDB::bind_method(
-			D_METHOD("add_pick_collider", "container", "kind", "index",
-					"graphic", "entity_xform"),
-			&MissionObjectPlacer::add_pick_collider);
 
 	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_transform);
@@ -252,9 +167,6 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("register_static_batches", "graphic", "batches"),
 			&MissionObjectPlacer::register_static_batches);
-	ClassDB::bind_method(
-			D_METHOD("register_ground_anchor", "graphic", "anchor"),
-			&MissionObjectPlacer::register_ground_anchor);
 	ClassDB::bind_method(
 			D_METHOD("register_occlusion_verdict", "item_id", "has_occlusion"),
 			&MissionObjectPlacer::register_occlusion_verdict);
@@ -338,8 +250,6 @@ void MissionObjectPlacer::_check_epoch() {
 	batch_materials_.clear();
 	last_batch_env_gen_ = -1;
 	last_batch_env_values_.unref();
-	anchor_cache_.clear();
-	collision_shapes_cache_.clear();
 	occlusion_cache_.clear();
 	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
 		static_terrain_shadow_sources_.write[i].object_data.unref();
@@ -453,7 +363,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["markers"] = 0;
 	stats["graphics"] = 0;
 	stats["batches"] = 0;
-	pickable_records_ = Array();
 	destruction_batches_.clear();
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
@@ -507,7 +416,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		Vector<uint32_t> entity_attribs;
 		Vector<uint32_t> attrib2_values;
 		Array effect_sources;
-		Array edit_refs;
 	};
 	const auto static_group_key = [](const String &p_graphic,
 			bool p_mirror_reflected) -> String {
@@ -583,12 +491,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		source["item_id"] = item_id;
 		source["world_transform"] = xform;
 		group->effect_sources.push_back(source);
-		if (edit_mode_) {
-			Dictionary ref;
-			ref["kind"] = kind;
-			ref["index"] = int(entity.get("index", -1));
-			group->edit_refs.push_back(ref);
-		}
 	}
 	stats["markers"] = markers;
 	spans["bucket_entities"] = clock->get_ticks_usec() - stage_begin;
@@ -601,7 +503,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	int graphics = 0;
 	int batch_count = 0;
 	Vector<String> resolved_graphics;
-	Vector<String> resolved_group_keys;
 	for (const String &group_key : static_order) {
 		if (progress.is_valid()) {
 			progress.call();
@@ -654,7 +555,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			unresolved += instance_count;
 			continue;
 		}
-		resolved_group_keys.push_back(group_key);
 		if (!resolved_graphics.has(graphic)) {
 			resolved_graphics.push_back(graphic);
 			++graphics;
@@ -755,15 +655,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				container->add_child(shadow_mmi);
 				destruction_batches_[group_key].push_back(shadow_mm);
 			}
-			if (edit_mode_) {
-				Array shadow_slot_array;
-				for (const bool slot : group.shadow_slots) {
-					shadow_slot_array.push_back(slot);
-				}
-				_record_static_batch(graphic, group.edit_refs, mm, mmi,
-						batch.offset, batch.mesh, shadow_mm,
-						shadow_slot_array);
-			}
 		}
 		batched += instance_count;
 		placed += instance_count;
@@ -791,26 +682,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	// before its first iris tick).
 	last_batch_env_values_.unref();
 	update_environment();
-
-	// One pick collider per static entity (not per submesh): collision is
-	// whole-model; pick bodies are addressed by name ("Pick_<kind>_<index>"),
-	// never by child order.
-	if (edit_mode_) {
-		for (const String &group_key : resolved_group_keys) {
-			const StaticGroup &group = static_groups[group_key];
-			const String graphic = group.graphic;
-			for (int i = 0; i < group.xforms.size(); ++i) {
-				Dictionary ref;
-				if (i < group.edit_refs.size()) {
-					ref = group.edit_refs[i];
-				}
-				add_pick_collider(container, int(ref.get("kind", -1)),
-						int(ref.get("index", -1)), graphic, group.xforms[i]);
-			}
-		}
-		spans["pick_colliders"] = clock->get_ticks_usec() - stage_begin;
-		stage_begin = clock->get_ticks_usec();
-	}
 
 	// Animated: an individual ObjectModel per entity.
 	int animated_count = 0;
@@ -886,18 +757,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				int(a.get("team", 0)),
 				uint32_t(a.get("ai_flags", 0)), item_id, graphic,
 				a.get("xform", Transform3D()), data);
-		if (edit_mode_) {
-			Dictionary pick;
-			pick["kind"] = ref["kind"];
-			pick["index"] = ref["index"];
-			pick["graphic"] = graphic;
-			pick["node"] = model;
-			pick["offset"] = Transform3D();
-			pick["animated"] = true;
-			pickable_records_.push_back(pick);
-			add_pick_collider(container, int(ref["kind"]), int(ref["index"]),
-					graphic, a.get("xform", Transform3D()));
-		}
 		++animated_count;
 		++placed;
 	}
@@ -911,175 +770,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["batches"] = batch_count;
 	stats["spans"] = spans;
 	return stats;
-}
-
-Dictionary MissionObjectPlacer::place_single(const Ref<MissionData> &p_mission,
-		Node3D *p_container, int p_kind, int p_index) {
-	_check_epoch();
-	Dictionary delta;
-	delta["placed"] = 0;
-	delta["batched"] = 0;
-	delta["animated"] = 0;
-	delta["batches"] = 0;
-	delta["unresolved"] = 0;
-	if (p_mission.is_null() || p_container == nullptr ||
-			resource_root_.is_null()) {
-		return delta;
-	}
-	_ensure_item_db();
-	const Dictionary entity = p_mission->get_entity(p_kind, p_index);
-	if (entity.is_empty()) {
-		return delta;
-	}
-	const int item_id = int(entity.get("item_id", 0));
-	const String graphic = _graphic_for(item_id);
-	if (graphic.is_empty()) {
-		delta["unresolved"] = 1;
-		return delta;
-	}
-	const Transform3D xform = entity_transform(
-			entity.get("position", Vector3()),
-			entity.get("rotation_deg", Vector3()));
-
-	if (_needs_individual_node(item_id) || _graphic_needs_live_panm(graphic)) {
-		const Ref<ObjectData> data = _load_object_data(graphic);
-		if (data.is_null()) {
-			delta["unresolved"] = 1;
-			return delta;
-		}
-		ObjectModel *model = memnew(ObjectModel);
-		model->set_panm_clock(panm_clock_);
-		model->set_name(vformat("Anim_%s_k%d_i%d", graphic, p_kind, p_index));
-		model->set_mirror_reflected(_placement_is_mirror_reflected(
-				uint32_t(entity.get("ai_flags", 0)), item_id));
-		model->set_transform(xform);
-		p_container->add_child(model);
-		if (env_state_.is_valid()) {
-			model->set_environment_state(env_state_);
-		}
-		_configure_item_shadow(model, item_id);
-		_configure_item_lighting(model, item_id);
-		_apply_skeletal_anim(model, item_id, data->get_bone_origins(),
-				data->get_bone_parents());
-		model->set_object_data(data);
-		if (item_casts_static_terrain_shadow(p_kind,
-					uint32_t(entity.get("ai_flags", 0)),
-					item_db_->get_attrib(item_id),
-					item_db_->get_attrib2(item_id))) {
-			_add_individual_static_shadow_siblings(model, graphic,
-					Transform3D(), vformat("k%d_i%d", p_kind, p_index));
-		}
-		Dictionary ref;
-		ref["kind"] = p_kind;
-		ref["index"] = p_index;
-		ref["bms_id"] = int(entity.get("bms_id", 0));
-		ref["group"] = int(entity.get("group", -1));
-		ref["team"] = int(entity.get("team", -1));
-		ref["position"] = entity.get("position", Vector3());
-		ref["item_id"] = item_id;
-		ref["graphic"] = graphic;
-		ref["attrib2"] = int64_t(item_db_->get_attrib2(item_id));
-		model->set_meta("entity_ref", ref);
-		Dictionary record;
-		record["model"] = model;
-		record["ref"] = ref;
-		placed_entity_records_.push_back(record);
-		_record_static_terrain_shadow_source(p_kind, p_index,
-				int(entity.get("bms_id", 0)),
-				int(entity.get("team", 0)),
-				uint32_t(entity.get("ai_flags", 0)), item_id, graphic,
-				xform, data);
-		Dictionary pick;
-		pick["kind"] = p_kind;
-		pick["index"] = p_index;
-		pick["graphic"] = graphic;
-		pick["node"] = model;
-		pick["offset"] = Transform3D();
-		pick["animated"] = true;
-		pickable_records_.push_back(pick);
-		add_pick_collider(p_container, p_kind, p_index, graphic, xform);
-		delta["placed"] = 1;
-		delta["animated"] = 1;
-		return delta;
-	}
-
-	const Vector<StaticBatch> batches =
-			_get_static_batches(graphic, p_container);
-	if (batches.is_empty()) {
-		delta["unresolved"] = 1;
-		return delta;
-	}
-	// A first-seen graphic just harvested fresh materials mid-load; align
-	// them with the live env like place() does.
-	last_batch_env_values_.unref();
-	update_environment();
-	Array refs;
-	{
-		Dictionary ref;
-		ref["kind"] = p_kind;
-		ref["index"] = p_index;
-		refs.push_back(ref);
-	}
-	const bool casts_static_shadow = item_casts_static_terrain_shadow(p_kind,
-			uint32_t(entity.get("ai_flags", 0)), item_db_->get_attrib(item_id),
-			item_db_->get_attrib2(item_id));
-	const bool single_mirror_reflected = _placement_is_mirror_reflected(
-			uint32_t(entity.get("ai_flags", 0)), item_id);
-	const uint32_t single_world_layer = single_mirror_reflected
-			? uint32_t(Water::VISUAL_LAYER_WORLD)
-			: uint32_t(Water::VISUAL_LAYER_WORLD_NO_MIRROR);
-	int batch_count = 0;
-	for (const StaticBatch &batch : batches) {
-		Ref<MultiMesh> mm;
-		mm.instantiate();
-		mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-		mm->set_mesh(batch.mesh);
-		mm->set_instance_count(1);
-		mm->set_instance_transform(0, xform * batch.offset);
-		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
-		mmi->set_multimesh(mm);
-		if (casts_static_shadow) {
-			mmi->set_layer_mask(single_world_layer |
-					Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
-			mmi->set_cast_shadows_setting(
-					GeometryInstance3D::SHADOW_CASTING_SETTING_ON);
-		} else {
-			mmi->set_layer_mask(single_world_layer);
-			mmi->set_cast_shadows_setting(
-					GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		}
-		if (batch.material.is_valid()) {
-			mmi->set_material_override(batch.material);
-		}
-		mmi->set_name(vformat("Place_%s_k%d_i%d_s%d", graphic, p_kind,
-				p_index, batch.submesh));
-		mmi->set_meta("static_shadow_bms_ids",
-				Array::make(int(entity.get("bms_id", 0))));
-		mmi->set_meta("static_shadow_item_ids", Array::make(item_id));
-		mmi->set_meta("static_shadow_attrib2",
-				Array::make(int64_t(item_db_->get_attrib2(item_id))));
-		mmi->set_meta("static_shadow_slots", Array::make(casts_static_shadow));
-		mmi->set_meta("static_shadow_graphic", graphic);
-		p_container->add_child(mmi);
-		++batch_count;
-		_record_static_batch(graphic, refs, mm, mmi, batch.offset, batch.mesh);
-	}
-	add_pick_collider(p_container, p_kind, p_index, graphic, xform);
-	_append_static_user_point_source(graphic, xform);
-	_append_static_item_effect_source(p_kind, item_id, graphic, xform);
-	Ref<ObjectData> shadow_data;
-	if (const Ref<ObjectData> *resolved = object_data_cache_.getptr(graphic)) {
-		shadow_data = *resolved;
-	}
-	_record_static_terrain_shadow_source(p_kind, p_index,
-			int(entity.get("bms_id", 0)),
-			int(entity.get("team", 0)),
-			uint32_t(entity.get("ai_flags", 0)), item_id, graphic, xform,
-			shadow_data);
-	delta["placed"] = 1;
-	delta["batched"] = 1;
-	delta["batches"] = batch_count;
-	return delta;
 }
 
 // --- owner-managed model builds ---------------------------------------------
@@ -1621,39 +1311,6 @@ void MissionObjectPlacer::_add_individual_static_shadow_siblings(
 	}
 }
 
-// One pickable record per entity slot in a freshly-built static batch: slot
-// `i` is consistent across every submesh batch of the same graphic, so
-// moving entity i rewrites instance i in every batch sharing its graphic;
-// mesh_aabb (under the instance transform) gives the editor a tight pick
-// volume without per-instance physics bodies.
-void MissionObjectPlacer::_record_static_batch(const String &p_graphic,
-		const Array &p_refs, const Ref<MultiMesh> &p_mm,
-		MultiMeshInstance3D *p_mmi, const Transform3D &p_offset,
-		const Ref<Mesh> &p_mesh, const Ref<MultiMesh> &p_shadow_mm,
-		const Array &p_shadow_slots) {
-	const AABB mesh_aabb = p_mesh.is_valid() ? p_mesh->get_aabb() : AABB();
-	for (int i = 0; i < p_mm->get_instance_count(); ++i) {
-		Dictionary ref;
-		if (i < p_refs.size()) {
-			ref = p_refs[i];
-		}
-		Dictionary pick;
-		pick["kind"] = int(ref.get("kind", -1));
-		pick["index"] = int(ref.get("index", -1));
-		pick["graphic"] = p_graphic;
-		pick["slot"] = i;
-		pick["mm"] = p_mm;
-		pick["mmi"] = p_mmi;
-		pick["shadow_mm"] = p_shadow_mm;
-		pick["casts_static_shadow"] = i < p_shadow_slots.size() &&
-				bool(p_shadow_slots[i]);
-		pick["offset"] = p_offset;
-		pick["mesh_aabb"] = mesh_aabb;
-		pick["animated"] = false;
-		pickable_records_.push_back(pick);
-	}
-}
-
 // --- read-back seams ---------------------------------------------------------
 
 // Snapshot of successfully rendered static user-point sources for a world
@@ -1756,7 +1413,7 @@ MissionObjectPlacer::get_static_terrain_shadow_sources() {
 
 	// `register_static_instance` is the deterministic construction seam for
 	// already-resolved renderers and asset-free tests. Merge any record not
-	// already published by place()/place_single() as a building-policy source;
+	// already published by place() as a building-policy source;
 	// casts=false maps to the same authored NoShadow veto the collector owns.
 	for (const KeyValue<int64_t, DestructionInstance> &kv :
 			destruction_instances_) {
@@ -1902,125 +1559,6 @@ Ref<SkeletalAnim> MissionObjectPlacer::skeletal_anim_for(int p_item_id,
 			: anim_def + String(".adm");
 	return _skeletal_from_adm(adm_name, data->get_bone_origins(),
 			data->get_bone_parents());
-}
-
-// The Godot model-local ground reference point for `graphic`: the "ground"
-// userpoint if present, else part-0 center. Not applied at render — the
-// editor subtracts it (in BMS axes) from a terrain-drop position, mirroring
-// the engine's author-time bake (witness: placement_traits.h ledger).
-Vector3 MissionObjectPlacer::_ground_anchor_for(const String &p_graphic,
-		const Ref<ObjectData> &p_data) {
-	const Vector3 *cached = anchor_cache_.getptr(p_graphic);
-	if (cached != nullptr) {
-		return *cached;
-	}
-	Vector3 anchor;
-	if (p_data.is_valid()) {
-		anchor = p_data->get_ground_anchor(RENDER_LOD);
-	}
-	anchor_cache_[p_graphic] = anchor;
-	return anchor;
-}
-
-Vector3 MissionObjectPlacer::ground_anchor_godot(const String &p_graphic) {
-	_check_epoch();
-	return _ground_anchor_for(p_graphic, _load_object_data(p_graphic));
-}
-
-// The (x, y, z) -> (x, -z, y) axis map is linear, so it is valid on offset
-// vectors like the anchor, not just points.
-Vector3 MissionObjectPlacer::ground_anchor_bms(const String &p_graphic) {
-	return godot_to_bms_position(ground_anchor_godot(p_graphic));
-}
-
-// Convex collision hulls in model-local space for the editor's pickable
-// physics bodies — the SAME path the Object Editor overlay validates. Models
-// with no collision volumes fall back to a single box hull from the visual
-// model AABB so every placed entity stays pickable.
-Array MissionObjectPlacer::collision_shapes_for(const String &p_graphic) {
-	_check_epoch();
-	const Array *cached = collision_shapes_cache_.getptr(p_graphic);
-	if (cached != nullptr) {
-		return *cached;
-	}
-	Array shapes;
-	const Ref<ObjectData> data = _load_object_data(p_graphic);
-	if (data.is_valid()) {
-		shapes = collision_shapes_for_volumes(data->get_collision_volumes());
-	}
-	if (shapes.is_empty()) {
-		const AABB aabb = _visual_model_aabb(data);
-		if (aabb.size != Vector3()) {
-			PackedVector3Array pts;
-			for (const double x : { aabb.position.x, aabb.get_end().x }) {
-				for (const double y : { aabb.position.y, aabb.get_end().y }) {
-					for (const double z :
-							{ aabb.position.z, aabb.get_end().z }) {
-						pts.push_back(Vector3(x, y, z));
-					}
-				}
-			}
-			Ref<ConvexPolygonShape3D> box;
-			box.instantiate();
-			box->set_points(pts);
-			shapes.push_back(box);
-		}
-	}
-	collision_shapes_cache_[p_graphic] = shapes;
-	return shapes;
-}
-
-// One StaticBody3D pick collider for entity (kind,index) with an
-// "entity_ref" meta the editor reads back from intersect_ray; freed
-// automatically when the container is cleared/re-baked.
-StaticBody3D *MissionObjectPlacer::add_pick_collider(Node3D *p_container,
-		int p_kind, int p_index, const String &p_graphic,
-		const Transform3D &p_entity_xform) {
-	const Array shapes = collision_shapes_for(p_graphic);
-	if (shapes.is_empty()) {
-		return nullptr;
-	}
-	StaticBody3D *body = memnew(StaticBody3D);
-	body->set_name(vformat("Pick_%d_%d", p_kind, p_index));
-	Dictionary ref;
-	ref["kind"] = p_kind;
-	ref["index"] = p_index;
-	body->set_meta("entity_ref", ref);
-	body->set_transform(p_entity_xform);
-	for (int i = 0; i < shapes.size(); ++i) {
-		CollisionShape3D *cs = memnew(CollisionShape3D);
-		cs->set_shape(shapes[i]);
-		body->add_child(cs);
-	}
-	p_container->add_child(body);
-	return body;
-}
-
-// Merged AABB of the render submeshes (model-local) — the collision fallback
-// for models with no collision volumes.
-AABB MissionObjectPlacer::_visual_model_aabb(const Ref<ObjectData> &p_data) {
-	if (p_data.is_null()) {
-		return AABB();
-	}
-	AABB aabb;
-	bool first = true;
-	const Array submeshes = p_data->build_lod_submeshes(RENDER_LOD);
-	for (int i = 0; i < submeshes.size(); ++i) {
-		const Dictionary entry = submeshes[i];
-		const Ref<Mesh> mesh = entry.get("mesh", Variant());
-		if (mesh.is_null()) {
-			continue;
-		}
-		AABB m = mesh->get_aabb();
-		m.position += Vector3(entry.get("abs", Vector3()));
-		if (first) {
-			aabb = m;
-			first = false;
-		} else {
-			aabb = aabb.merge(m);
-		}
-	}
-	return aabb;
 }
 
 Node3D *MissionObjectPlacer::_ensure_container(Node3D *p_parent) {
@@ -2365,12 +1903,6 @@ bool MissionObjectPlacer::register_static_batches(const String &p_graphic,
 	}
 	static_batch_cache_[p_graphic] = retained;
 	return true;
-}
-
-void MissionObjectPlacer::register_ground_anchor(const String &p_graphic,
-		const Vector3 &p_anchor) {
-	_check_epoch();
-	anchor_cache_[p_graphic] = p_anchor;
 }
 
 void MissionObjectPlacer::register_occlusion_verdict(int p_item_id,

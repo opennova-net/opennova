@@ -1,7 +1,7 @@
 // The CBIN display view: Color/Justify controls collapse into stamped items
 // (credits_display_items) and re-emit by diff (credits_entries_from_display).
-// Semantics carried over from the ONED .kda editor; the fixture leg proves the
-// view round-trips a real credits file SEMANTICALLY (the re-emission
+// The fixture leg proves the display view round-trips a real credits file
+// SEMANTICALLY (the re-emission
 // canonicalizes redundant control runs, so byte identity is cbin_roundtrip's
 // job, not this test's).
 #include <cstdint>

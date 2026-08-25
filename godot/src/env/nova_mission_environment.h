@@ -14,17 +14,16 @@
 
 namespace godot {
 
-// The runtime/editor TOD environment owner — the ADR 0033 device leg over the
+// The runtime TOD environment owner — the ADR 0033 device leg over the
 // engine's env::EnvironmentState (engine/runtime/environment), which owns the
 // witnessed state: the mission TOD clock, the keyframe-TARGET vs smoothed-
 // CURRENT split, network phase-2 overrides, the NVG rewrite, and the
 // change-gated env generation. This node keeps only device work: the .env
 // document property + reload signal, the ten opennova_* global shader
 // parameter pushes, the terrain ShaderMaterial uniform pushes, the sky-map
-// texture handles, the EnvLightState publication + env_generation_changed
-// signal, and the day_speed authoring scrub knob (OpenNova preview plumbing,
-// not the witnessed day advance). Ported from nova_environment.gd (2026-08-09
-// de-scripting); RE record: docs/env/env-tod-re.md.
+// texture handles, and the EnvLightState publication + env_generation_changed
+// signal. Ported from nova_environment.gd (2026-08-09 de-scripting); RE record:
+// docs/env/env-tod-re.md.
 class MissionEnvironment : public Node {
 	GDCLASS(MissionEnvironment, Node)
 
@@ -36,13 +35,10 @@ public:
 
 	void set_time_of_day(double p_value);
 	double get_time_of_day() const { return state_.time_of_day(); }
-	void set_day_speed(float p_value) { day_speed_ = p_value; }
-	float get_day_speed() const { return day_speed_; }
-
 	bool is_loaded() const;
 
-	// The typed light channel every lit consumer holds (models, the placer's
-	// static batches, the ONED world previews): every generation bump
+	// The typed light channel every lit consumer holds (models and the placer's
+	// static batches): every generation bump
 	// publishes the current world values into it. Consumers hold THIS record
 	// — never this node — and its `changed` signal is what wakes a parked
 	// model for exactly one restamp frame.
@@ -140,8 +136,8 @@ public:
 	Vector3 get_terrain_lighting_attenuation() const;
 	Vector3 get_tile_overlay_tint() const;
 	// Push the env-derived terrain lighting + fog uniforms onto a terrain
-	// ShaderMaterial. terrain.gdshader (runtime) and terrain_editor.gdshader
-	// (editor preview) share these uniforms via terrain_lighting.gdshaderinc.
+	// ShaderMaterial. The terrain shaders share these uniforms via
+	// terrain_lighting.gdshaderinc.
 	// Callers may override individual values afterwards (the runtime layers
 	// weather-smoothed colors + the tile-overlay tint on top).
 	void apply_terrain_uniforms(const Ref<ShaderMaterial> &p_material);
@@ -209,13 +205,7 @@ public:
 	// per-frame write while present).
 	void write_shader_globals();
 
-	// One render-frame advance (the _process body: the day_speed preview
-	// scrub) — the externally-callable drive the test harness uses; the
-	// engine's virtual delegates here.
-	void advance_frame(double p_delta);
-
 	void _ready() override;
-	void _process(double p_delta) override;
 
 protected:
 	static void _bind_methods();
@@ -237,7 +227,6 @@ private:
 	int64_t last_published_generation_ = 0;
 	bool underwater_view_ = false;
 	bool underwater_overlay_view_ = false;
-	float day_speed_ = 0.0f;
 };
 
 } // namespace godot

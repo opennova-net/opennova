@@ -142,10 +142,9 @@ func test_clear_removes_part_models() -> void:
 	assert_eq(_preview.get_part_model_count(), 0, "clear removes all part models")
 
 
-# --- Menu portrait mode (runtime PLAYER_INFO) ---------------------------------
-# set_menu_preview turns the interactive editor preview into the static player.mnu
-# portrait: grid/axes hidden, camera locked, clicks passed through to the
-# PLAYER_PREVIEW button, character facing the viewer, pose held across selections.
+# --- Runtime PLAYER_INFO portrait ---------------------------------------------
+# The camera is locked, clicks pass through to the PLAYER_PREVIEW button, the
+# character faces the viewer, and its pose is held across selections.
 
 # A standing-soldier AABB (feet at y=0, ~1.8 m tall) for the framing assertions,
 # since the fixtures dir has no .3di to compose real bounds from.
@@ -153,50 +152,16 @@ func _soldier_bounds() -> AABB:
 	return AABB(Vector3(-0.4, 0.0, -0.4), Vector3(0.8, 1.8, 0.8))
 
 
-func test_editor_preview_uses_full_character_distance_margin() -> void:
-	var bounds := _soldier_bounds()
-	_preview._has_framed = false
-	_preview._frame_bounds(bounds)
-	var radius := maxf(bounds.size.length() * 0.5, 1.0)
-	var distance: float = (_preview.get_editor_camera().global_position - bounds.get_center()).length()
-	assert_gte(distance, radius * 2.5,
-			"editor framing preserves the full-character distance margin")
-
-
-func test_menu_preview_keeps_incompatible_arm_rig_excluded() -> void:
-	var root = _model_fixture_root()
-	assert_not_null(root, "committed model fixture mounts")
-	if root == null:
-		return
-	_preview.set_menu_preview(true)
-	_preview.set_resource_root(root)
-	_preview.load_combo(_three_slot_fixture_combo())
-	var has_arms := is_instance_valid(_preview.get_part_model("arms"))
-	var count: int = int(_preview.get_part_model_count())
-	_preview.clear()
-	await get_tree().process_frame
-	assert_false(has_arms, "the menu does not overlay the incompatible arms rig")
-	assert_eq(count, 2, "the menu composes only the third-person character")
-
-
-func test_menu_preview_hides_grid_and_axes() -> void:
-	_preview.set_menu_preview(true)
-	assert_false(_preview.is_grid_visible(), "grid hidden in menu mode")
-	assert_false(_preview.is_axes_visible(), "axis gizmo hidden in menu mode")
-
-
-func test_menu_preview_locks_camera_and_passes_clicks_through() -> void:
-	_preview.set_menu_preview(true)
-	var cam = _preview.get_editor_camera()
+func test_runtime_portrait_locks_camera_and_passes_clicks_through() -> void:
+	var cam = _preview._camera
 	assert_true(cam.get("_gameplay_locked"), "camera locked (no orbit/pan/fly) in menu mode")
 	assert_eq(_preview._viewport_container.mouse_filter, Control.MOUSE_FILTER_IGNORE,
 		"the SubViewport container does not eat clicks, so the button keeps them")
 	assert_true(_preview._viewport.gui_disable_input, "SubViewport GUI input disabled")
 
 
-func test_menu_preview_frames_a_front_facing_pose() -> void:
-	_preview.set_menu_preview(true)
-	var cam = _preview.get_editor_camera()
+func test_runtime_portrait_frames_a_front_facing_pose() -> void:
+	var cam = _preview._camera
 	var bounds := _soldier_bounds()
 	_preview._frame_menu_pose(bounds)
 	var center := bounds.get_center()
@@ -207,24 +172,22 @@ func test_menu_preview_frames_a_front_facing_pose() -> void:
 	assert_lt(forward.z, 0.0, "camera looks back toward the figure (-Z)")
 
 
-func test_menu_preview_pose_holds_across_selection_refresh() -> void:
-	_preview.set_menu_preview(true)
-	var cam = _preview.get_editor_camera()
+func test_runtime_portrait_pose_holds_across_selection_refresh() -> void:
+	var cam = _preview._camera
 	_preview._frame_menu_pose(_soldier_bounds())
 	_preview._menu_pose_set = true
 	var before: Transform3D = cam.global_transform
-	# A combo change re-runs the guide refresh; the camera must not jump.
-	_preview._refresh_preview_guides()
+	# A combo change re-runs the portrait refresh; the camera must not jump.
+	_preview._refresh_portrait()
 	assert_eq(cam.global_transform, before, "camera pose unchanged when the selection changes")
 
 
-func test_menu_preview_renders_at_onscreen_resolution() -> void:
+func test_runtime_portrait_renders_at_onscreen_resolution() -> void:
 	# The menu scales this subtree by s = window / 800x600. In menu mode the container is
 	# sized to base*s (true on-screen px) and counter-scaled by 1/s, so SubViewportContainer
 	# stretch renders the SubViewport at on-screen resolution instead of the 212x241 design
 	# size that the menu would otherwise upscale into a blur.
 	_preview.size = Vector2(212, 241)
-	_preview.set_menu_preview(true)
 	var win: Vector2 = _preview.get_viewport().get_visible_rect().size
 	var sx := win.x / 800.0
 	var sy := win.y / 600.0
@@ -236,11 +199,10 @@ func test_menu_preview_renders_at_onscreen_resolution() -> void:
 	assert_true(c.stretch, "stretch stays on so the SubViewport renders at the container size")
 
 
-func test_menu_preview_idle_spins_and_holds_the_camera() -> void:
+func test_runtime_portrait_idle_spins_and_holds_the_camera() -> void:
 	# At rest the model rotates continuously (idle spin) while the camera holds its front pose.
-	_preview.set_menu_preview(true)
 	_preview._frame_menu_pose(_soldier_bounds())
-	var cam = _preview.get_editor_camera()
+	var cam = _preview._camera
 	var before_angle: float = _preview._model_root.rotation.y
 	var rest_dist: float = (cam.global_position - _preview._menu_center).length()
 	for i in range(5):
@@ -251,11 +213,10 @@ func test_menu_preview_idle_spins_and_holds_the_camera() -> void:
 	assert_gt(cam.global_position.z, _preview._menu_center.z, "camera stays in front (+Z)")
 
 
-func test_menu_preview_hover_zooms_in_and_out() -> void:
+func test_runtime_portrait_hover_zooms_in_and_out() -> void:
 	# Mouseover ramps the zoom blend toward 1 and pulls the camera closer; un-hover relaxes it.
-	_preview.set_menu_preview(true)
 	_preview._frame_menu_pose(_soldier_bounds())
-	var cam = _preview.get_editor_camera()
+	var cam = _preview._camera
 	var rest_dist: float = (cam.global_position - _preview._menu_center).length()
 	_preview.set_hovered(true)
 	for i in range(30):
@@ -302,7 +263,7 @@ func test_preview_skeletal_builds_when_bad_assets_resolve() -> void:
 	assert_eq(_preview._ensure_preview_skeletal(), sk, "the skeletal idle is cached (built once)")
 
 
-func test_menu_preview_binds_idle_on_skinned_parts_with_real_assets() -> void:
+func test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets() -> void:
 	# On a machine with the retail PFFs (OPENNOVA_JO_DIR), the menu portrait binds the skeletal
 	# idle onto the skinned head/body parts. Gated: pends when the real assets aren't reachable
 	# (the live visual verify covers the on-screen result).
@@ -314,7 +275,6 @@ func test_menu_preview_binds_idle_on_skinned_parts_with_real_assets() -> void:
 	if combo.is_empty():
 		pending("Avatars.def fixture missing or has no combos")
 		return
-	_preview.set_menu_preview(true)
 	_preview.set_resource_root(root)
 	_preview.load_combo(combo)
 	await get_tree().process_frame

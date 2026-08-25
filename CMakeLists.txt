@@ -6,8 +6,8 @@ project(opennova LANGUAGES C CXX)
 add_subdirectory(third_party/sqlite)
 add_subdirectory(third_party/bcrypt)
 
-# The engine (Shape A): five STATIC group targets + two header-only INTERFACE
-# targets. See engine/CMakeLists.txt for the group map and the PUBLIC link
+# The engine (Shape A): five STATIC group targets + one header-only INTERFACE
+# target. See engine/CMakeLists.txt for the group map and the PUBLIC link
 # chain (formats -> io; base -> formats; runtime -> base; net -> runtime;
 # novaworld_service -> net + sqlite).
 add_subdirectory(engine)

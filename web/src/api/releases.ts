@@ -1,10 +1,9 @@
 import axios from 'axios';
 import type { ToolAsset, ToolOs, ToolRelease } from '../types/downloads';
 
-// Tool deliverables (editor, runtime, importer, exporters) publish as GitHub Release
-// assets on this repo — not to S3 (only the launcher rides S3, see api/downloads.ts).
-// We list releases and pick the latest tool tag, skipping launcher releases whose tags
-// are prefixed "launcher-" (so GitHub's /releases/latest can't accidentally surface one).
+// Game and tool deliverables publish as GitHub Release assets on this repo, not
+// to S3 (only OpenNova Launcher rides S3, see api/downloads.ts). We skip its
+// "launcher-" tags so GitHub's /releases/latest cannot surface the wrong product.
 const RELEASES_URL =
   'https://api.github.com/repos/opennova-net/opennova/releases?per_page=30';
 
@@ -29,10 +28,7 @@ interface GithubRelease {
  */
 function classifyAsset(name: string): Omit<ToolAsset, 'filename' | 'sizeBytes' | 'sizeHuman' | 'downloadUrl'> | null {
   const rules: Array<{ re: RegExp; meta: Omit<ToolAsset, 'filename' | 'sizeBytes' | 'sizeHuman' | 'downloadUrl'> }> = [
-    { re: /^opennova-modding-editor-windows-/, meta: { product: 'OpenNova Editor (ONED)', os: 'windows', kind: 'app' } },
-    { re: /^opennova-modding-editor-macos-/, meta: { product: 'OpenNova Editor (ONED)', os: 'macos', kind: 'app' } },
-    { re: /^opennova-game-runtime-windows-/, meta: { product: 'Game Runtime', os: 'windows', kind: 'app' } },
-    { re: /^opennova-game-runtime-macos-/, meta: { product: 'Game Runtime', os: 'macos', kind: 'app' } },
+    { re: /^opennova-game-windows-/, meta: { product: 'OpenNova Game', os: 'windows', kind: 'app' } },
     { re: /^opennova-asset-importer-windows-/, meta: { product: 'Asset Importer', os: 'windows', kind: 'tool' } },
     { re: /^opennova-blender-ase-exporter-/, meta: { product: 'Blender ASE Exporter', os: 'any', kind: 'plugin' } },
   ];

@@ -1,7 +1,7 @@
 # OpenNova — agent notes
 
 Open-source (MIT) reimplementation of NovaLogic's game engine, plus the toolchain for
-extracting, converting, and authoring its asset data. Joint Operations (JO) is the first
+extracting, converting, validating, and shipping its asset data. Joint Operations (JO) is the first
 game being brought up. Repo layout, downloads, and end-user build docs live in
 [README.md](README.md); the vision is [GOALS.md](GOALS.md). This file covers what is
 easier to relay than to rediscover.
@@ -12,8 +12,8 @@ easier to relay than to rediscover.
   `opennova`, unchanged). Four groups — the directories and, since ADR 0029, the CMake
   build targets too (five STATIC group targets: `opennova_base`, `opennova_formats`,
   `opennova_runtime`, `opennova_net`, plus the separate `opennova_novaworld_service`;
-  header-only `opennova_io`/`opennova_oned_edit`; no per-lib targets):
-  `base/` (io, vfs, resource_index, gameprofile, pcapio, oned_edit, refs),
+  header-only `opennova_io`; no per-lib targets):
+  `base/` (io, vfs, resource_index, gameprofile, pcapio),
   `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
@@ -24,9 +24,10 @@ easier to relay than to rediscover.
   See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
-  `game/` (the game shell PLUS the game-level GDScript runtime both
-  front-ends compose — world, debug, mission, object, terrain, ui, ...),
-  `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces),
+  `game/` (the game shell plus its game-level GDScript runtime — world,
+  debug, mission, object, terrain, ui, ...),
+  `modtools/` (ONED: settings, loose OpenNova run,
+  staged retail run, Stop, and the hidden release pack command),
   `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
@@ -109,8 +110,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   the concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame. A `godot/` line earns its place only as that device
-  work (node writes, GPU dispatch, input sampling, audio players), a thin typed seam,
-  or ONED authoring surface. Nova formats never touch Godot's resource system:
+  work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
+  Nova formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
@@ -133,8 +134,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`
   (code suffixes only — Markdown gets a non-failing added-lines advisory and `.agents/**`
   is exempt, so vocabulary in docs is honor-system).
-- Editor UI copy is artist-facing: "draw distance", "blend layer" — not "CDEP",
-  "LOD bitstream", "mip slot".
+- ONED is run-only (ADR 0037). Do not add authoring workspaces, project/import
+  state, preview runtimes, an asset database, or embedded MCP.
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
   don't bundle pre-JO Delta Force titles; say pre-1.0/experimental, never
   "production-ready"; no em dashes.
@@ -167,7 +168,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   (pre-reimplementation rearchitecture), CLOSED 2026-07-12 with the freeze lifted:
   the dashboard, close-out dispositions, and the permanent enforcement instruments
   live there. ADRs 0015–0018 and 0022–0024 carry the standing rules every slice
-  still builds under (two products/serve mode, engine/editor boundary, typed
+  still builds under (two products/serve mode, engine layering, typed
   records, public-API testability, divergence burn-down, render parity, family
   topology).
 - [.agents/README.md](.agents/README.md) — agent runbooks for networking work:
@@ -181,8 +182,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   it plus the ADRs before touching `mission_presentation.gd`,
   `game_frame_pipeline.gd`, the native present appliers
   (`godot/src/simulation/nova_present_applier*.cpp`), or `Simulation`.
-- [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
-  with one README per workspace.
+- [godot/modtools/README.md](godot/modtools/README.md) — ONED,
+  retail staging, and hidden release pack command.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,

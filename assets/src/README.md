@@ -7,8 +7,9 @@ Kept out of the flat game dir on purpose: under `/d` retail resolves bare
 filenames at `assets/`, so every file there is one retail may attempt to load.
 Nothing here is loadable by the game — it is the source we author from.
 
-Pipeline: Blender (`.blend`) → `blender/ase_exporter.py` → `.ase` → ONED's
-Object workspace (LODs + materials) → `.3di` written to `assets/`.
+Pipeline: Blender (`.blend`) → `blender/ase_exporter.py` → `.ase` → a
+format-specific compiler over `engine/formats/oed` (LODs + materials) → `.3di`
+written to `assets/`. ONED is run-only and does not compile objects.
 
 Texture names must stay ≤ 11 characters before the extension: the ASE exporter
 caps the emitted filename at 15 including `.TGA`. And the compiled set must

@@ -38,7 +38,7 @@ extends GutTest
 #   @ 0x67715d is the non-modulate2x fallback, no reimpl analog]. The re-dump
 #   moved ONLY the frame-clear token (14) of the 27 env-cell rows:
 #   new = min(2*old, 255) per channel.
-#   #22-#24 CLOSED 2026-07-05 (the ENG-2 weather-core port): the wa/wb/we
+#   #22-#24 CLOSED 2026-07-05 (the ENG-2 weather-core port): the wa/wb
 #   sway states and wc/long_* keys were re-dumped under fresh witnesses -
 #   the PRNG signed carry [orig: Environment_UpdateWeatherTick
 #   @ 0x57e9fc..0x57ea16; seed @ Environment_SnapStateToTargets @ 0x57d1e0],
@@ -55,7 +55,7 @@ extends GutTest
 #   @ 0x57d1e0] - 0x12345633 was a transcription error shared with the WAC RNG
 #   (same constant @ 0x4f966b, engine/runtime/wac fixed in the same commit). The
 #   sway-bearing keys re-dumped under that witness: wa/k004..k256, wb/k016..k096,
-#   wc/long_k01/k09/k12, we/k008..k064 (the sway token only; wa/k001 is
+#   wc/long_k01/k09/k12 (the sway token only; wa/k001 is
 #   seed-invariant - both seeds share low-12 bits at tick 1). Every level-only
 #   (wc/*_seq), color, float, and non-weather key was UNCHANGED.
 #   #26 CLOSED 2026-07-06 (the ENG-2 sky binding slice): sky/k001 + sky/k064
@@ -75,7 +75,7 @@ extends GutTest
 #   water/uv_state [orig: render_water_surface @ 0x5c3348..0x5c33db];
 #   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
 #   the invented waves - the pinned tail is now the u_water_uv Vector4. Every
-#   other water key (mesh, override ladder, snap, per-cell lit colors) stayed
+#   other water key (mesh, mission-height ladder, snap, per-cell lit colors) stayed
 #   byte-identical; the ladder REORDER (#28, terrain-over-env) has no asset-
 #   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
 #   Celestial leg 2026-07-06 (env #14 CLOSED, #32 minted-and-closed, #33
@@ -94,8 +94,8 @@ extends GutTest
 #   @ 0x57ef97..0x57f03c] with the modulator chasing the outdoor iris gain
 #   over 62 ticks [orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas
 #   @ 0x57d940; curve terrain_sector_compute_lighting @ 0x5c7550]. Exactly
-#   the 8 weather checkpoint rows re-dumped under that witness (wa/k016,
-#   wa/k064, wa/k256, wb/k016..k096, we/k016, we/k032 - the smoothed colors
+#   the weather checkpoint rows re-dumped under that witness (wa/k016,
+#   wa/k064, wa/k256, wb/k016..k096 - the smoothed colors
 #   now carry the exposure; hand-check: wb/k064 0x31*61/64 = 0x2E); every
 #   float, sky, water, celestial, and level-only key UNCHANGED.
 #   D-RLIT-1 world-driven-sky closure 2026-07-21: skyfog plus the six dome
@@ -136,7 +136,7 @@ extends GutTest
 #   celestial/glow, celestial/occlusion); the terrain ray march itself needs
 #   a loaded terrain (the no-terrain path = unobstructed is the pinned case).
 # - Water terrain-fallback height rung: needs a loaded TerrainData
-#   (asset). The env-driven and override rungs ARE pinned.
+#   (asset). The env-driven and mission-override rungs ARE pinned.
 # - Weather internal state (PRNG word, sway rings, fade timers) is
 #   private; pinned only through public getters and the colors written back
 #   to MissionEnvironment (ADR 0018 — no private pokes; ratchet stays flat).
@@ -246,10 +246,6 @@ const EXPECTED_BYTES := {
 	"wc/long_k12": "3E47 0D 00 00 14212C 273748 1C2238 2B2D40 14212C 273748 1C2238",
 	"wc/long_seq": "C8 C8 C8 96 96 C8 C8 96 64 32 32 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
 	"wc/short_seq": "00 00 00 00 00 C8 C8 C8 C8 FF FF C8 C8 FF FF 00",
-	"we/k008": "14B3 08 00 00 212B2D 5D5D5C 56669E 3E414B 212B2D 5D5D5C 56669E",
-	"we/k016": "56E5 10 00 00 1F292C 565655 4E5E90 3B3E48 1F292C 565655 4E5E90",
-	"we/k032": "6404 20 00 00 1C272C 293139 42507C 373A46 1C272C 293139 42507C",
-	"we/k064": "7CDE 40 00 00 17242D 23313F 2A3252 303243 17242D 23313F 2A3252",
 }
 
 const EXPECTED_FLOATS := {
@@ -305,13 +301,9 @@ const EXPECTED_FLOATS := {
 	"sky/k001": [0.124992847, -0.062492847, 0.062495232, -0.031247616],
 	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
 	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
-	"water/override": [42.500000000, 7.000000000],
+	"water/mission_override": [42.500000000, 7.000000000],
 	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
 	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
-	"we/k008": [1751.612903226],
-	"we/k016": [1803.225806452],
-	"we/k032": [1906.451612903],
-	"we/k064": [2112.903225806],
 }
 
 
@@ -479,7 +471,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 		# no-water sentinel: surface enable/disable has focused Water
 		# coverage, while this grid intentionally samples the lit-water color.
 		if not water.is_water_active():
-			water.set_height_override(7.0)
+			water.set_mission_water_height_override(7.0)
 
 		var water_height_view := cfg.get_water_height() if cfg.has_water_height() else -1.0
 		floats["c%d/consts" % cfg_index] = [
@@ -523,7 +515,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 		var water_uv: Vector4 = water.get_water_material().get_shader_parameter("u_water_uv")
 		# Restore the environment-resolved height before recording that
 		# separate precedence vector (cfg0 returns to the zero sentinel).
-		water.set_height_override(NAN)
+		water.set_mission_water_height_override(NAN)
 		floats["c%d/water_params" % cfg_index] = [
 			water.water_height,
 			water_uv.x, water_uv.y, water_uv.z, water_uv.w,
@@ -592,24 +584,6 @@ func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
 		if after == 1 or after == 9 or after == 12:
 			bytes["wc/long_k%02d" % after] = _weather_checkpoint(weather_d, env_d)
 	bytes["wc/long_seq"] = " ".join(long_seq)
-
-	# WE — day-advance chase: day_speed drives the TOD forward every tick
-	# (env first, weather second — the process-priority order), so the
-	# smoothers chase a moving keyframe-interpolated target across the sunset
-	# switch. Start 1700, day_speed 400 => ~+6.45 HHMM units per tick.
-	var env_e := _add_env_node(_make_cfg(0), "EnvWE")
-	env_e.time_of_day = 1700.0
-	env_e.day_speed = 400.0
-	var weather_e := _add_weather_node("EnvWE", "WeatherE")
-	ticks_done = 0
-	for checkpoint in [8, 16, 32, 64]:
-		for _i in checkpoint - ticks_done:
-			env_e.advance_frame(TICK)
-			weather_e.advance_frame(TICK)
-		ticks_done = checkpoint
-		bytes["we/k%03d" % checkpoint] = _weather_checkpoint(weather_e, env_e)
-		floats["we/k%03d" % checkpoint] = [env_e.time_of_day]
-
 
 func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 	var cam := _add_camera(Vector3(512.0, 64.0, -256.0))
@@ -704,14 +678,14 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
 	var pre_surfaces: int = (water.get_mesh_instance().mesh as ArrayMesh).get_surface_count()
 
-	# Height ladder, override rung: world-driven height wins; clearing (NAN)
-	# hands control back (terrain_environment_preview_test.gd precedent).
+	# Height ladder, mission/BMS rung: world-driven height wins; clearing (NAN)
+	# hands control back to the terrain/environment sources.
 	# (Still no camera here — same order as before the strip port.)
-	water.set_height_override(42.5)
+	water.set_mission_water_height_override(42.5)
 	var override_height: float = water.water_height
-	water.set_height_override(NAN)
+	water.set_mission_water_height_override(NAN)
 	water.water_height = 7.0
-	floats["water/override"] = [override_height, water.water_height]
+	floats["water/mission_override"] = [override_height, water.water_height]
 
 	# Camera 20 units above the 7.0 plane, default orientation (the old
 	# fixture's y = 7.0 sat exactly ON the plane — a grazing edge case for the

@@ -1,13 +1,8 @@
 class_name UiBox
 extends RefCounted
-# Lives in engine/ui (not modtools): shell-neutral by contract, so both the
-# game's debug overlay and editor inspectors can use it.
-# The margin + scroll + VBox column every inspector pane starts from. Extracted
-# from the ~95%-identical copies in InspectorForms and MnuUiHelpers (which now
-# delegate here); the only divergence was the box's node name, kept as a
-# parameter because canvas code addresses it by path. Row builders deliberately
-# stay per-domain: object's are read-only inspection rows, mnu's editable form
-# rows — different semantics, not duplicates.
+# Shared layout helper for runtime debug and tooling panels. It creates the
+# standard margin + scroll + VBox column while leaving row semantics to callers.
+# The optional node name supports code that addresses the box by path.
 
 const PANEL_MARGIN := 10
 

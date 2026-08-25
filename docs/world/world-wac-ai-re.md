@@ -735,7 +735,8 @@ brain `AIEvent {6, level}`; both halves PORTED 2026-08-15, semantics in the bms 
 model part-anim channels (slot = channel − 1); any other value is a no-op. The animation content is the
 model's PANM. Do NOT wire ANIMNUM to `off_8135F0` — that is the separate infantry full-body table
 (§3.4, AI-state-driven via `Script_ForceAnimation @ 0x4f2610` / `Entity_UpdateInfantryAI @ 0x4b9910`).
-ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name-picker was removed).
+The former ONED Object workspace exposed ANIMNUM as a plain "Part #" raw int;
+ADR 0037 removed that UI. The runtime contract remains the raw integer channel.
 
 ### 8.4 PLAYPARTANIM contract (case 0x22, exact rate formula)
 - Stores per-channel **direction** (`play_type` ∈ {−1,0,+1}) at `comp+436+4·slot` and a **rate** at
@@ -769,7 +770,7 @@ ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name
   unconditionally. This is the missing second stage behind the earlier, incorrect conclusion that
   PLAYPARTANIM never reaches a named register.
 - Port contract (`ObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → part
-  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the preview
+  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the retained
   integrator uses the same truncated rate, fixed 16 ms ticks, wrapping ADD/SUB, and strict
   overshoot rules as the authority runtime. Ordinary values occupy `0..0x10000`, but wrapped signed
   dwords are preserved rather than normalized. Velocity starts from the CURRENT value. Channel 1 targets
@@ -893,9 +894,10 @@ Yaw (UP) and roll (RIGHT) terms matched, so yaw-only tests pass and hide it. If 
 C++ basis from explicit double-precision rotation matrices (or Quaternion) and add a C++/GDScript
 parity test over a (pitch, yaw, roll) grid BEFORE wiring callers.
 
-Also noted: the editor's ground sampling (`sample_world_height`) reads the live editable FORMAT_RF
-Image while the runtime samples `cpt.depth_buffer` via the portable `TerrainHeightField` — two data
-sources; unifying needs a shared sampler (open).
+Historical note: the former editor's `sample_world_height` read a live
+FORMAT_RF image while runtime samples `cpt.depth_buffer` through
+`TerrainHeightField`. ADR 0037 removed the editor consumer, so this is no
+longer an open product divergence.
 
 ### 10.2 Ground sampling chain — `Entity_CalcAverageGroundHeight @ 0x457230` (CONFIRMED EXACT)
 5-tap weighted ground height, `(entity, sampleRadius)`:
@@ -2588,8 +2590,8 @@ retains the item database and placer caches, and both RoundSim and F3 request an
 idempotent collision attach when a player or scripted organic appears later.
 Packed pool handles can be reused, so registry entities carry a binding-only
 monotonic spawn identity; collision instances, skeletal sources, and negative
-resolution attempts all validate that identity before reuse. Editor snapshot
-restore preserves the live identity high-water mark. Thus a failed lookup for
+resolution attempts all validate that identity before reuse. State restoration
+preserves the live identity high-water mark. Thus a failed lookup for
 one slot occupant cannot suppress or inherit the model/husk/pose of the next
 occupant.
 
@@ -6918,3 +6920,116 @@ ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
 - **D-WPN-33** [FIXED 2026-07-27 — ported: fire row, both paths; the recoil row remains] Fire particles spawned at the shooter's EYE instead of the muzzle, on two independent paths. REMOTE: the wire fire position genuinely IS the eye — retail sends `Position + CameraOffset` `[orig: Entity_CalcWeaponFirePosition @ 0x4dc750]` — but retail does not spawn an ammo-def effect there for an adm-indexed round. `NetPacket_DeserializeRoundEvent @ 0x42f270` has TWO mutually exclusive arms, bit 0 tested first `@ 0x42f521`: set -> the ammo-def arm (`ammoDef+64` sound `@ 0x42f5dc`, `ammoDef+68` effect `@ 0x42f6c2`) at the wire position; bit 0 clear with bit 1 set `@ 0x42f6ce` -> the adm arm, which spawns NO ammo-def leg and calls `ActionSlot_ExecuteAction` on the WIRE-ADDRESSED def (`AdmDef_GetEntryByIndex @ 0x42f6d9`, NOT the observed shooter's equipped def) at four sites in two sub-paths chosen by `entity+0x168`: `@ 0x42f777`/`@ 0x42f785` and `@ 0x42f98f`/`@ 0x42f9d0`; `RoundData_SpawnRound` still runs `@ 0x42fa6c`. We admitted `flags & 0x03` identically and ran the ammo legs on both. LOCAL 3P: `_action_particle_world_position` resolved against `_vm_parts`, the FIRST-person viewmodel — re-pinned to the camera every frame and merely HIDDEN in third person, never detached — with a deepest fallback that was literally the eye position; retail requires `g_camera_mode == 0` for the first-person leg `[orig: gate @ 0x540e8c..0x540eca]` and otherwise resolves the same authored userpoint name against gfx3, falling back to the ENTITY ORIGIN `[orig: loc_401867 @ 0x401867..0x401887]`. PORTED 2026-07-27: `FireEvent`/`RoundSpawnParams` carry the wire flags byte and the addressed ADM index; presentation exposes the arm plus the FIRE row's sound/effect/userpoint; `FirePresentPass` swaps in that row on the adm arm and re-anchors to `WirePresentPass.muzzle_world_for()`; the local 3P path resolves against the gfx3 world gun. No new parsing was needed — the row index is identity: retail's per-def action array is 12 pointer slots at `def+676` in the order of `g_weaponActionTable @ 0x830B90` `[orig: base/stride @ 0x54203d/@ 0x542231, bound @ 0x542239]`, so `def+684` IS slot 2 and our `weapon_action::kFire` is the same ordinal. Scoped so a ZERO flags byte (host/AI-originated fire, which retail presents inline at the shooter `[orig: WeaponSlot_FireAndSpawnEffects @ 0x53f440]`) keeps the ammo-def legs untouched. RESIDUAL: `actions[3]` (recoil) is NOT ported — retail runs it beside fire with its own action context and userpoint byte, but only `actions[2]` carries the muzzle flash (the sole row that can reach the muzzle-glow leg, gated on the context being 2 `[orig: @ 0x40205e/@ 0x402080, stamped @ 0x42f8a0]`) and the recoil row's presentation legs are not witnessed well enough to port without inventing them. MUZZLE-ANCHOR AUTHORITY DECIDED (2026-08-08, closing the S12a shadow seam): the rendered held-weapon node's own userpoint (`WirePresentPass.muzzle_world_for`) is the PERMANENT anchor — it is the direct analog of retail's spawn at its rendered model's userpoint, it covers entity-less wire shooters the sim cannot pose, and the weapon node's transform already comes from the native attach walk (one impl). The S12a sim-posed re-derivation (`resolve_held_weapon_muzzle`), the event's shadow `muzzle` field, and the `muzzle_ab` counters are deleted; the anchor fallback chain stays the provider's body origin (retail's entity-origin fallback `@ 0x401867..0x401887`).
 - **D-WPN-34** [FIXED 2026-07-31 (`def_parse_ammo`, `def_parse_weapons`, `npruntime_weapon_table`, `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, Godot simulation/HUD regressions)] Spawn-time weapon spread and physical recoil were absent/approximate: ERROR/theta and ammo recoil values lost their exact integer carriers; `Weapon_CalcRandomSpreadOffset @0x4e4120` was unported; ordinary rounds omitted the player/rules/UseSpreadTwo gates and the intentionally asymmetric `pitchBlend>>8` versus HUD `>>7`; the shotgun path reused the claymore rectangular fan instead of `Weapon_SpawnProjectileBurstWithSpread @0x4ebbb0`; the per-shot impulse and both infantry-body accumulators had no writer/decay path. The 2026-07-31 grill recovered the exact stance/vertical selectors, uint32 hash, x87-precision constants/distributions (including the shotgun radial fan), special-ammo ordering, post-spawn recoil impulse, movement-weight producer with the exact shared `Player_CanFireWeapon` gates, signed decay/drift, and local/remote/AI body-pass order `[orig: RoundData_SpawnRound @ 0x4ec0d0; Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`. OpenNova now retains the exact DEF integers and applies that path to local authority/SP, C2S authority, own-fire prediction, and decoded tag-2 visual rounds; the ring remains pre-spread. The world-side below-water eye-height projection remains D-INF-18, and whole-process recoil-yaw PRNG call-history identity is isolated as D-WPN-35; neither changes spread/hash, accumulator, impulse, or HUD math.
 - **D-WPN-32** [OPEN — row history de-tabled 2026-08-06; the ledger row now carries the open scope only] No entity in the port renders a THIRD-PERSON held weapon — not remote players, not AI, and not the local player's own body. The body `.adm` clip names encode gait+weapon so the pose reads roughly right, which is why this went unnoticed, but every soldier's hands are empty. Retail draws it as draw 5 of `BoneCallback_org0_World @ 0x4e3940`: model = the WeaponDef's `tpModel` (+0x170 = weapon.def `gfx3`) read `@ 0x4e3cd3`, drawn **RIGID** — one matrix `qmemcpy`'d into EVERY bone slot `@ 0x4e3d71` — so it carries no clip, no skeleton and no pose of its own. The placement matrix is bone slot 16's posed matrix applied to that bone's own PIVOT plus a fixed nudge: the model bone-def table is `*(modelDef+56)` with row stride 64 and the pivot float3 at row `+0x24`, so the original's `modelDef+0x424` IS row 16's pivot, and the sight/muzzle triples fall out of the same arithmetic (`0x3E4` = row 15, `0x3A4` = row 14), 1:1 with bone matrix slots `+1024`/`+960`/`+896` `[orig: base load @ 0x4b2186; row walk @ 0x4b201e..0x4b2036; stride @ 0x4b2145]`. Its ORIENTATION is neither bone 16's rotation nor any of the nine aim-overlay classes — the head class carries full-aim pitch and the arm class the 3/4-blended yaw, so reusing either aims the gun visibly off-axis; the original instead writes a triple onto the ENTITY and builds a transform from it (`Roll = savedRoll + lean` `@ 0x4b1bdc`, `Yaw = aimYaw` `@ 0x4b1bf2`, `Pitch = savedPitch + pitchKickAccum + 2*pitchBlend` `@ 0x4b1bf5`, then `Math_BuildFixedPointToFloatMatrix4x4` `@ 0x4b1bf8`), dropping the head-look term outside an aim state `@ 0x4b1dd9..0x4b1dfa`. Visibility is one predicate — the weapon is drawn iff the soldier may FIRE it `[orig: Entity_CanFireWeapon @ 0x4dcb10]`, whose LOCAL branch additionally requires the weapon to author a FIRST-person model, so a `gfx3`-without-`gfx1` weapon is visible to every observer and invisible on your own body (retail asymmetry, cited at the port site). **INCREMENTS 1-2 LANDED 2026-07-26/27 — the local player's own avatar, then every REMOTE player.** Increment 1: `anim::compute_held_weapon_attach_angles` (both on-foot branches, pinned by `aim_overlay_test::test_held_weapon_attach_basis` against the arm/head classes), `Simulation::local_held_weapon_visible` (the local gate incl. the dead, empty-pool, no-`gfx1` and seat legs), `PlayerViewmodelDef.gfx3` + `PlayerAimOverlay.weapon_attach_angles/weapon_visible`, and `LocalPlayerPresenter._update_held_weapon` building the model through `MissionObjectPlacer.build_model_from_graphic` as a SIBLING of the avatar (`ObjectModel.rebuild()` frees all children, so a child would vanish on every body rebuild). **Increment 2** extends it to every remote player, live-confirmed as the gap after increment 1 (the maintainer, joined to a stock retail host: "none of them are holding their weapon. Empty hands"). `world::WeaponTableEntry` gained `third_person_model` (`gfx3`) so a held weapon resolves through THE SAME table the wire's ADM index refers to — routing it through `WeaponDatabase` instead would have coupled two independent `weapon.def` parses whose index bases differ (0-based file order vs this table's 1-based null-row-0), an untested assumption behind a runtime index. Four snapshot fields (`PF_HELD_WEAPON_ADM` + the attach euler) are written by one shared helper from both the host and joiner legs, with the DRAW GATE FOLDED INTO THE ADM FIELD: a hidden or unarmed body reports 0, which is simultaneously our table's null row and the original's own `if (entity->equippedAdmIndex)` precondition, so the zero-filled default is correct by construction and there is no sentinel to invert. The REMOTE branch of the gate reduces to two terms — alive, and `MountMode::OnFoot` — because that mount mode is exactly the complement of retail's `{2,3,5}` hide set (a PASSENGER maps to OnFoot and keeps its weapon), and because the remote branch never consults an `EquippedSlot`, so a peer whose slot we do not model still passes as retail intends. `wire_present_pass` owns a weapon node per wire handle beside `_nodes`, and the placement math is now shared with the local path through `PresentHeldWeapon` rather than duplicated. RESIDUAL: AI/NPCs still render no held weapon — placed `.bms` soldiers never receive an equipped ADM index at all and its source in the original is UNWITNESSED, so increment 3 is blocked on that research rather than on effort. Also unported from the same callback: the NVG and BINOCULAR item-model draws (`Flags & 4` / `animStateFlags & 0x40 && Flags & 8`, draws 3 and 4), the death-pose weapon branch `@ 0x4b21b0`, the projected-size cull `@ 0x4b3d4b`, and the mount-branch correlation for the attach basis (the original copies the body or arm matrix per branch `@ 0x4b193e`/`0x4b19cf`/`0x4b1ab2`/`0x4b1b35`/`0x4b1b94`; the draw gate hides control/gunner/driver seats anyway, leaving only the passenger seat exposed). **INCREMENT 3 LANDED 2026-07-27 — the SECOND attach frame**, after the weapon was reported "rotated, often near-vertical". The entity-frame half was verified matching and needed no constant moved: (a) the out-matrix 3×3 is the attachment matrix verbatim — only the translation row is overwritten before the copy `@ 0x4b22cf..0x4b22f8` — and the draw site adds nothing `@ 0x4e3d71/0x4e3d99`; (b) the attach builder `Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200` is the same one that places an ordinary world object `@ 0x4e2912`, so a `gfx3` is posed exactly like a placed `.3di`; conjugating its Z→X→Y row-vector composition (quantized trig stores −sin θ) through the render↔Godot X↔Z relabel and the loader's X-negation gives `swap ∘ Mᵀ ∘ flipX`, which is `bms_to_godot_basis` term for term, trailing `Ry(+90°)` included — pinned by `present_held_weapon_test.gd::test_bms_basis_matches_the_original_placement_matrix` over five triples including two with pitch, yaw AND roll non-zero (the earlier live sample had roll = 0 and could not have caught an axis or ordering swap); (c) the authored model frame is muzzle `+Z` / up `+Y`, from `M4_3RD`'s `MFLASH01` `(+0.003, +0.089, +0.781)` and `scope` `(−0.002, +0.194, +0.141)` userpoints with identity node transforms throughout, closing the "which end is the muzzle" and "which way is up" questions the AABB could not. **The actual defect was a MISSING BRANCH.** Retail has TWO attach frames and picks on one bit: `g_animStateFlagsTable[entity+0x2C8] & 0x80` `[orig: gate @ 0x4b21b6, branch @ 0x4b220f]` selects `Ry_e · Rz_e · boneMatrix[16]` — the HAND frame — instead of the entity triple. A first re-measurement called that branch death-only; **that was wrong**, and the error was assuming `+0x2C8` holds a `wpn_*` id (rows 240–251, all flag `0x0`). Its writer `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b5dad..0x4b5ea9]` stores `AdmDefs[+0x2B0].kind + 0x31`, a HOLD state in the 43–66 band, where 0x80 is set for 50 `knife`, 52 `grenade`, 54 `designator`, 62/63 the melee attacks, 64 `binoculars` and 65/66 BOTH reloads. The asset side corroborates exactly: of 41 distinct `gfx3`, 33 are `+Z`-long and the 8 `+Y`-long ones (`M9K_3rd`, `mach_3rd`, `Flsh_3RD`, `Frag_3RD`, `smok_3RD`, `medp_3rd`, `stch_3rd`, `det_3rd`) are precisely the kinds that stamp a 0x80 row — authored blade-up because retail poses them at the hand. Under the entity frame `elev(B·+Y) = 90 − pitch`, so they drew at +72.05° at the measured live triple and at exactly 90° when level: the reported symptom, reproduced numerically. PORTED: `PF_HELD_WEAPON_HAND_FRAME` written by the one shared helper from both legs (the joiner's hold state hoisted OUT of the channel-visibility gate — the pose is gated, the FRAME is not), `PlayerAimOverlay.weapon_hand_frame`, and `PresentHeldWeapon.hand_frame_basis`. Both constants are used with their authored signs, which is derived and not chosen: `Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0` is fed `sin = −sin θ` (making each block a rotation by −θ) and the conjugation through the loader's X-negation flips the sign back — two inversions. Pinned by `test_hand_frame_constants_match_the_original_composition`, which re-derives the calibration from the builder's ELEMENT PLACEMENT rather than from the constants' signs. Also fixed: the nudge was rotated by bone 16's own posed basis and added to a WORLD position, so at rest it picked up that bone's large rest rotation (`BN17 R Hand`'s rest basis is nowhere near identity); it now rides the bone's MODEL→WORLD rotation (`pose · rest⁻¹`, in world), matching `nudge · M16_rotation` `@ 0x4b2186..0x4b220b`. Recorded while here: ADM index 1 IS `WPN_KNIFE` — `AnimDef_InitAll @ 0x5435c0` consumes slot 0 with a reserved `"null"` def before any `weapon.def` row parses and `AdmDef_GetEntryByIndex @ 0x53fc80` applies no bias, so the wire index is 1-based over file order, validating `world::WeaponTable`'s null-row-0 layout and confirming `WeaponDatabase`'s 0-based enumeration (which also drops rows, exposing 72 of 94) must never back a runtime ADM index. STILL OPEN: the mounted-branch correlation, the NVG/binocular draws, AI bodies, and the death family's own use of the same 0x80 branch
+
+
+## 31. The AI convoy movement chain, audited end to end (2026-08-24)
+
+Written while chasing an open behavioural divergence on mission `00TRg`: a
+scripted five-vehicle convoy where our followers fall progressively behind
+retail's. The divergence is NOT resolved by this record. What the record
+carries is the audit itself, because eleven separate checks against the
+decompilation all came back matching, and knowing which links are already
+witnessed is worth as much as the fix.
+
+### 31.1 The measurement that started it
+
+Path travelled between two mission events (channel-3 entry to the scripted
+redirect), our host against a retail AI-probe capture of the same mission.
+Path length is a geometric integral, so neither probe's sampling cadence
+enters the number.
+
+| convoy slot | bms | item | accel/decel | retail | ours | delta |
+|---|---|---|---|---|---|---|
+| 0 (lead) | 59 | 1302 | 80/160 | 726.1 | 726.1 | -0.00% |
+| 1 | 58 | 1294 | 40/80 | 710.9 | 704.9 | -0.85% |
+| 2 | 63 | 1294 | 40/80 | 707.0 | 687.9 | -2.71% |
+| 3 | 1664 | 1420 | 40/80 | 713.5 | 686.3 | -3.81% |
+| 4 (tail) | 62 | 1305 | 80/160 | 716.4 | 680.6 | -5.00% |
+
+Both engines enter channel 3 at the same points, so the divergence accrues
+during the drive. The error is monotonic with position in the convoy and the
+lead is exact. Vehicle physics does NOT predict it: bms 62 carries the same
+high acceleration as the lead and has the worst shortfall, while bms 58 and
+63 are the SAME item with identical accel, decel and top speed in adjacent
+slots and differ threefold. Retail's own shortfall is not monotonic (its 1664
+and 62 travel further than its 63), so retail's convoy recovers where ours
+degrades.
+
+### 31.2 The chain, and the verdict on each link
+
+The mechanism is the pool-1 avoid brake compounding down the chain: the
+braking pairs are exactly the convoy order (62<-1664, 1664<-63, 63<-58,
+58<-59) and **the lead brakes zero times**. Effective brakes per vehicle
+(0/267/412/549/709) rise in the same order as the shortfall.
+
+Every link from nav node to wheel was then witnessed:
+
+| link | original | verdict |
+|---|---|---|
+| Waypoint target resolve | `AIWaypoint_UpdateTarget @0x457380` | matching (two deviations declared at the site) |
+| Distance + bearing | same function | matching, including the `5*(...)>>16` term and the `atan2 * 683565275.5764316` bearing |
+| Node advance + arrival halve | `AI_UpdateWaypointMovement @0x457BD0` | matching register for register, both halve branches, write order |
+| Commanded-speed cap | `@0x48bc23-0x48bc48` | matching |
+| Pool-1 avoid brake, factor | `@0x48bf17-0x48bf26` | matching; measured f in [0.251, 0.748], mean 0.4989 against the witnessed [0.25, 0.75] |
+| Avoid brake, trigger geometry | `@0x48bdf2..0x48bf0f` | matching: reach, doubled z, directional footprints, the ~30 degree dead-ahead test |
+| Bound-radius derivation | `Entity_InitFromModel @0x40dc30` | matching, including the `max` against the husk radius and the `+0x1000` pad |
+| Speed approach + recovery | `@0x48AF00` interior | matching: `cos^2(Pitch)` target, `(target - speed + 16) >> 5`, the `deceleration >> 1` clamp, the `<48` stop snap and the zero-delta snap |
+| itemDef accel/decel parse | `@0x49da84` | matching; verified at runtime that the parsed values reach the loaded traits |
+| Heading fed to the brake | `entity+0x10` | matching; our mirror is that field and is seeded for ground vehicles |
+| Per-entity tick order | `Entity_DispatchPhysics_cveh @0x48efc0 -> @0x48af00` | matching: one interleaved pass, brake before the speed approach in both |
+| Pool-1 iteration direction | `Entity_UpdateAllEntities @0x4C2100` | matching: ascending slot on both sides |
+
+### 31.3 One defect, found and closed
+
+The brake's pool-walk gate skipped a neighbour whose bound radius was <= 0,
+cited to `@0x48bdd9`. Retail's gate there reads **`entity+0x1C`, which is
+`ItemTypeIndex`** (offset derived by walking `GamePlayerEntity` and validated
+against four known anchors on the way: Yaw `0x10`, itemDef `0x20`, Flags
+`0x24`, groundEntity `0x28`), stamped at spawn as `defIndex`
+`[orig: Entity_SpawnFromBMSRecord @0x40E9F0]`. The occupancy half of retail's
+walk is already covered by our registry returning null for an unused slot, so
+the radius test was an additional gate with no counterpart in the original.
+
+Measured before changing anything: over 400,000 gate evaluations on this
+mission the radius test skipped nothing and never disagreed with the
+item-type test, so the fix is a no-op here and the rig's output is
+byte-identical across it. Ported regardless: an unwitnessed gate is a defect
+even when it is inert, and the next mission need not be so forgiving.
+
+### 31.4 One divergence, real but inert here
+
+Retail assigns pool-1 slot `j` = the BMS record index directly
+(`Pool_GetEntry(1, j)`) and `Entity_SpawnFromBMSRecord` can early-return on
+its team filter **while still consuming the slot**, so retail's pool carries
+holes and `used` counts records rather than live entities. Our registry
+compacts to the first free slot.
+
+This is inert for the movement chain: compaction is monotonic, so relative
+update order is preserved, and the brake's per-neighbour multiply is
+commutative within a tick. It is live for anything that keys on the slot
+INDEX rather than on order.
+
+### 31.5 What this leaves
+
+Every consumer of the nav channel is witnessed faithful, so if the outcome
+differs, what differs is what they consume. The remaining unaudited surface is
+the `NavChannel`/`NavEntry` data itself: node positions, the per-channel count
+and loop flag, and in particular the arrival threshold `node->f[0]`, which
+becomes `aiState[23]` and gates BOTH the node advance and the arrival halve. A
+wrong threshold has exactly this bug's signature, because it is compared
+against a per-entity distance and therefore fires at a different moment for
+each vehicle depending on where that vehicle is.
+
+### 31.6 Method notes worth keeping
+
+- **Check which FUNCTION you are reading, not just which field.** The speed
+  approach exists in both `@0x46E100` and inside `@0x48AF00` with the same
+  shape. An audit was once run against the wrong one; the verdict happened to
+  survive re-checking, but only by luck, and the correct function carried a
+  `deceleration >> 1` clamp the other did not.
+- **A control is only a control if it exercises the subsystem under test.**
+  The lead vehicle was used as a same-motor control before anyone checked its
+  item id; it is a different vehicle with double the acceleration. The usable
+  control is the two vehicles that share item 1294.
+- **Put a positive control on a counter before believing a zero.** A bare
+  "0 disagreements" is indistinguishable from "the probe never ran".

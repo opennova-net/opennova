@@ -150,55 +150,7 @@ func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
 			"gameplay does not duplicate EffectWorld LGHT through preview uniforms")
 	model.advance_runtime_frame(0.0)
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
-			"runtime frames keep the editor-only local route disabled")
-
-
-func test_explicit_editor_preview_can_show_model_authored_lght() -> void:
-	var model := ObjectModel.new()
-	add_child_autofree(model)
-	model.set_process(false)
-	model.position = Vector3(11.0, 13.0, 17.0)
-	model.set_model_light_preview_enabled(true)
-	var data := _object_data(ARMRY_3DI)
-	for light_index in range(data.get_light_count()):
-		assert_true(data.set_light_field(light_index, "subobject", -1))
-		assert_true(data.set_light_field(light_index, "position", Vector3(4.0, 5.0, 6.0)))
-	model.set_object_data(data)
-	var materials: Array = model.get_surface_materials()
-	if materials.is_empty():
-		pass_test("fixture built no surface materials under this renderer")
-		return
-	var material := materials[0] as ShaderMaterial
-	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 1,
-			"the opt-in object-editor preview can inspect authored LGHT")
-	var lights: Array = data.evaluate_lights(0, {})
-	var dominant: Dictionary = {}
-	var best_intensity := -1.0
-	for raw_light in lights:
-		var light: Dictionary = raw_light
-		var intensity := float(light.get("intensity", 1.0))
-		if intensity > best_intensity:
-			best_intensity = intensity
-			dominant = light
-	var model_position: Vector3 = dominant.get("position", Vector3.ZERO)
-	var subobject := int(dominant.get("subobject", -1))
-	var expected_world := model.global_transform * model_position
-	var part_nodes: Dictionary = model.get_render_part_nodes()
-	if subobject >= 0 and part_nodes.has(subobject):
-		var rest := Transform3D.IDENTITY
-		for raw_submesh in data.build_lod_submeshes(model.get_active_lod()):
-			var submesh: Dictionary = raw_submesh
-			if int(submesh.get("robj_index", -1)) == subobject:
-				rest.origin = submesh.get("abs", Vector3.ZERO)
-				break
-		var part := part_nodes[subobject] as Node3D
-		expected_world = part.global_transform * (rest.affine_inverse() * model_position)
-	assert_eq(material.get_shader_parameter("u_local_light_position"), expected_world,
-			"preview maps model-space LGHT through its attached part's live transform once")
-	material.set_shader_parameter("u_local_light_count", 99)
-	model.advance_runtime_frame(0.0)
-	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 99,
-			"an identical preview evaluation pushes nothing")
+			"runtime frames keep the local duplicate-light route disabled")
 
 
 func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:

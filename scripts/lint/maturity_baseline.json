@@ -1,45 +1,34 @@
 {
   "citation_allowlist_engine": [
     "bfc1",
-    "dep",
     "gameprofile",
     "io",
-    "oned_edit",
     "pcapio",
-    "refs",
     "resource_index",
     "scr",
     "vfs"
   ],
   "counters": {
     "adapter_cpp_orig_cites_device": 196,
-    "adapter_cpp_orig_cites_pushdown": 370,
+    "adapter_cpp_orig_cites_pushdown": 369,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
-    "engine_uncited_src_files": 49,
+    "engine_uncited_src_files": 43,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 1,
+    "has_method_guards": 0,
     "oversize_cpp_files": 1,
-    "oversize_gd_files": 6,
-    "test_private_pokes": 1260
+    "oversize_gd_files": 1,
+    "test_private_pokes": 109
   },
   "dict_contract_allowlist": [
-    "link_payload.gd|func to_drag_data()",
-    "link_payload.gd|func from_drag_data(",
     "player_profile.gd|static func load_character_profile(",
     "armory_menu_companion.gd|func selected_weapon(",
-    "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",
     "mcp_tool_def.gd|func to_list_entry()",
     "waypoint_hud_entry.gd|func to_info_dict()",
     "host_session_config.gd|func to_session_options()",
     "occlusion_frame_pass.gd|func occlusion_hidden_ids()",
     "occlusion_frame_pass.gd|func present_visibility()",
-    "selection_ops.gd|func get_selection_summary()",
-    "selection_ops.gd|func get_selected_entity()",
-    "selection_ops.gd|func get_group(",
-    "scripting_ops.gd|func get_selected_event_chain()",
-    "scripting_ops.gd|func get_logic_summary()",
     "item_seat_specs.gd|static func command_rule(",
     "item_seat_specs.gd|static func predict_best_seat(",
     "effect_world.gd|func get_debug_draw_list_report()",
@@ -49,9 +38,10 @@
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
     "debug_entity_picker.gd|static func pick_at_crosshair(",
-    "editor_game_packer.gd|static func pack(",
-    "editor_game_packer.gd|static func pack_for_retail(",
-    "editor_game_packer.gd|static func stage_loose(",
-    "editor_game_packer.gd|static func export_game("
+    "game_packer.gd|static func pack(",
+    "game_packer.gd|static func stage_loose(",
+    "game_packer.gd|static func export_game(",
+    "game_packer.gd|static func stage_retail(",
+    "game_run_session.gd|func get_state()"
   ]
 }

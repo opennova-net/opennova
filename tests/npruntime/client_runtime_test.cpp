@@ -408,11 +408,15 @@ bool run_end_round_header_pulls_complete_board() {
 	const std::string client_scrk = "CLIENT-END-ROUND-SCRK";
 	const std::string server_scrk = "SERVER-END-ROUND-SCRK";
 	np::JoinerConnection joiner("RoundPull");
+	// A team game type: the 0x1D form is the session-state pick, so the
+	// joiner must know g_GameType before the header arrives.
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
-			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0x10000u);
 	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
 	auto replica_owned = std::make_unique<ns::ClientReplicaPipeline>();
 	ns::ClientReplicaPipeline &replica = *replica_owned;
+	replica.set_game_type(0x10000u);
+	replica.set_mp_session(true);
 
 	EndRoundHeader header;
 	header.winner_team = 2;
@@ -422,7 +426,7 @@ bool run_end_round_header_pulls_complete_board() {
 	const std::vector<uint8_t> header_datagram = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_HEADER,
-					encode_end_round_header(header))});
+					encode_end_round_header(header, /*non_team_form=*/false))});
 	const np::JoinerConnection::PollResult header_result =
 			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
 	if (!expect(header_result.queued_send_messages.size() == 1 &&
@@ -496,6 +500,54 @@ bool run_end_round_header_pulls_complete_board() {
 			replica.state().end_round.board.players.size() == 12 &&
 			replica.state().end_round.board.players[11].name == "RetailPeer11",
 			"the requested chunks publish the complete retail board");
+}
+
+// The DM/KOTH-family 0x1D: a non-team session decodes the named form (three
+// top-row names + i16 primary scores) with the same 0x2B kick and reducer
+// retention. [orig: NapiNPClientMsg_0x01D form pick @0x43086c..0x430883,
+// named parse @0x430889..0x4309af]
+bool run_end_round_named_header_kicks_and_folds() {
+	const std::string client_scrk = "CLIENT-END-ROUND-DM-SCRK";
+	const std::string server_scrk = "SERVER-END-ROUND-DM-SCRK";
+	np::JoinerConnection joiner("RoundPullDM");
+	joiner.seed_in_match(0x10203041u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, /*game_type=*/0u);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	ns::ClientReplicaPipeline replica;
+	replica.set_game_type(0u);
+	replica.set_mp_session(true);
+
+	EndRoundHeader header;
+	header.player_names[0] = "Ace";
+	header.player_names[1] = "Bee";
+	header.player_scores[0] = 12;
+	header.player_scores[1] = -3;
+	header.player_index = 1;
+	const std::vector<uint8_t> header_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/true))});
+	const np::JoinerConnection::PollResult header_result =
+			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
+	if (!expect(header_result.queued_send_messages.size() == 1 &&
+			header_result.queued_send_messages[0].tag ==
+					c2s::END_ROUND_STATS_REQUEST &&
+			header_result.queued_send_messages[0].payload ==
+					std::vector<uint8_t>({0, 0}),
+			"the named 0x1D form still queues the C2S 0x2B offset-zero kick")) {
+		return false;
+	}
+	for (const auto &message : header_result.inbound_reducer)
+		replica.apply(message.first, message.second);
+	const ns::ClientEndRoundStats &er = replica.state().end_round;
+	return expect(er.header_known &&
+			er.header.player_names[0] == "Ace" &&
+			er.header.player_names[1] == "Bee" &&
+			er.header.player_names[2].empty() &&
+			er.header.player_scores[0] == 12 &&
+			er.header.player_scores[1] == -3 &&
+			er.header.player_index == 1,
+			"the reducer retains the named header's rows and index");
 }
 
 // Retail S2C 0x76 replaces the client-global class availability word. It is
@@ -5100,6 +5152,7 @@ int main() {
 	                run_joiner_correlates_handshake_echoes() &&
 	                run_tick_seed_anchors_the_client_clock() &&
 	                run_end_round_header_pulls_complete_board() &&
+	                run_end_round_named_header_kicks_and_folds() &&
 	                run_class_allow_mask_follows_retail_host() &&
 	                run_team_latch_is_falsifiable() &&
 	                run_player_sync_ack_walks_inclusive_roster_capacity() &&

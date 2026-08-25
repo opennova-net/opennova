@@ -31,7 +31,7 @@ public:
 private:
 	enum class MountKind {
 		None,
-		EditorLoose,
+		Loose,
 		Runtime,
 	};
 
@@ -73,8 +73,7 @@ private:
 
 	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
 	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
-	// `discovery` splits the two products: the runtime mounts the witnessed retail boot table,
-	// the editor's browse index scans every archive (D-VFS-2's recorded decision).
+	// `discovery` selects the witnessed retail boot table or an explicit archive scan.
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
 	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
 
@@ -86,8 +85,8 @@ protected:
 public:
 	static bool is_valid_root(const String &path);
 
-	// Editor / authoring mount: loose files only, PFF archives ignored. This is the path the
-	// editor and the test fixtures use, so authoring always targets loose files.
+	// Loose-source mount: PFF archives are ignored. The ONED fallback and
+	// format/runtime fixtures use this path over an unpacked game-data tree.
 	Error set_root_dir(const String &path);
 	// Runtime mount: the PFF archives are the packed game data. At least one fixed-table archive
 	// must open; a loose-only directory is not a viable install, including under `/d`. `expansion`
@@ -103,11 +102,11 @@ public:
 	                    bool allow_loose_override = false, const String &game_code = "jo");
 	// Global cache epoch (see util/engine_caches.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
-	// self-clear when it moved. bump_cache_epoch() lets the editor force-invalidate after
-	// editing files on disk without remounting.
+	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an
+	// invalidation after files change on disk without remounting.
 	static int64_t cache_epoch();
 	static void bump_cache_epoch();
-	// The expansion this root ACTUALLY mounted ("" for base game, editor/loose mounts, and
+	// The expansion this root ACTUALLY mounted ("" for base game, loose mounts, and
 	// after mount_runtime's silent base fallback for an expansion that is not installed).
 	// Feeds the expansion bank slots and the M<exp>/G<exp> music forms
 	// [orig: Expansion_LoadAssets @ 0x4a4730]. Never reports the requested name back: a
@@ -115,7 +114,7 @@ public:
 	// host's authoritative expansion, D-NET-178) needs this to be evidence, not an echo.
 	String get_expansion() const;
 	// True only while a successful mount_runtime() mount is live: this root's data is the
-	// packed game install. Editor mounts (set_root_dir), never-mounted roots, clear(), and
+	// packed game install. Loose mounts (set_root_dir), never-mounted roots, clear(), and
 	// every failed mount report false. A caller re-mounting a root it did not create (the LAN
 	// joiner switching an injected runtime root to the host's expansion, D-NET-178) reads this
 	// to pick the right entry point: re-mounting a runtime root through set_root_dir would
@@ -136,8 +135,8 @@ public:
 	// mount — ".ptg" when `fgn2.bin` is present, else ".ptu" (engine/base
 	// ResourceIndex::particle_extension owns the witness).
 	String particle_extension() const;
-	// Runtime roots honor the retail per-call source policy. Editor roots deliberately
-	// retain their legacy loose-only flat lookup for every policy value.
+	// Runtime roots honor the retail per-call source policy. Loose roots resolve
+	// only flat loose files for every policy value.
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	PackedByteArray read_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	Ref<Texture2D> load_texture(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
@@ -155,9 +154,8 @@ public:
 	PackedStringArray list_missing_boot_resources() const;
 	String boot_resource_failure_text(const String &name) const;
 
-	// C++ siblings only (not bound): direct read access to the underlying index
-	// so ReferenceIndex can list entries with their size/mtime stamps
-	// without Variant-boxing the whole listing through GDScript dictionaries.
+	// C++ siblings only (not bound): direct access to the mounted index without
+	// Variant-boxing its rows through GDScript dictionaries.
 	const opennova::ResourceIndex &native_index() const { return index_; }
 };
 

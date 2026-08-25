@@ -191,8 +191,8 @@ func test_zero_time_uses_retail_wrapping_add_sub() -> void:
 
 
 func test_restart_seeds_start_then_plays() -> void:
-	# restart_part_anim is the editor-preview variant: it seeds the channel at its rest start so a
-	# preview shows the full motion regardless of where the part currently sits.
+	# restart_part_anim is the tool/test variant: it seeds the channel at its rest
+	# start so the full motion plays regardless of where the part currently sits.
 	var m := _runtime_model()
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 40000)   # part sitting partway through
 	m.restart_part_anim(1, 1, 1.0)    # forward restart -> seed 0

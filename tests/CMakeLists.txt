@@ -173,11 +173,6 @@ target_link_libraries(mission_c_abi_test PRIVATE opennova_formats)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
 
-add_executable(mission_schema_test mission/mission_schema_test.cpp)
-target_link_libraries(mission_schema_test PRIVATE opennova_formats)
-target_include_directories(mission_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME mission_schema COMMAND mission_schema_test)
-
 # Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
 # Gated on OPENNOVA_MISSION_CORPUS (copyrighted assets, not committed); skips + passes when unset.
 add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
@@ -407,24 +402,6 @@ target_include_directories(mus_authored_behavioral_test PRIVATE ${CMAKE_CURRENT_
 target_compile_features(mus_authored_behavioral_test PRIVATE cxx_std_17)
 add_test(NAME mus_authored_behavioral COMMAND mus_authored_behavioral_test)
 
-add_executable(mus_ast_test mus/mus_ast_test.cpp)
-target_link_libraries(mus_ast_test PRIVATE opennova_formats)
-target_include_directories(mus_ast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(mus_ast_test PRIVATE cxx_std_17)
-target_compile_definitions(mus_ast_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-add_test(NAME mus_ast COMMAND mus_ast_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-add_executable(mus_expr_tree_test mus/mus_expr_tree_test.cpp)
-target_link_libraries(mus_expr_tree_test PRIVATE opennova_formats)
-target_include_directories(mus_expr_tree_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(mus_expr_tree_test PRIVATE cxx_std_17)
-target_compile_definitions(mus_expr_tree_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-add_test(NAME mus_expr_tree COMMAND mus_expr_tree_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 add_executable(mus_vm_test mus/mus_vm_test.cpp)
 target_link_libraries(mus_vm_test PRIVATE opennova_formats)
 target_include_directories(mus_vm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -438,48 +415,15 @@ target_link_libraries(mus_vm_fixes_test PRIVATE opennova_formats)
 target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
 
-add_executable(mus_model_test mus/mus_model_test.cpp)
-target_link_libraries(mus_model_test PRIVATE opennova_formats)
-target_include_directories(mus_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(mus_model_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-add_test(NAME mus_model COMMAND mus_model_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 # Write-path parity: the canonical re-encoded form is a byte-stable fixed point
-# (byte-identity to the ORIGINAL .bin is impossible -- editor debug info is not
-# reproduced). Gates the structured-edit write path; see the test file header.
+# (byte-identity to the ORIGINAL .bin is impossible because debug info is not
+# reproduced). See the test file header.
 add_executable(mus_encode_idempotence_test mus/mus_encode_idempotence_test.cpp)
 target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_formats)
 target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_encode_idempotence_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
 add_test(NAME mus_encode_idempotence COMMAND mus_encode_idempotence_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# Structured play-edit parity: splicing a play into a section's decompiled text
-# adds exactly one model play with unchanged edges, and a no-op insert/remove is
-# byte-identical. Guards the editor's drag-to-add-play write path.
-add_executable(mus_structured_play_edit_test mus/mus_structured_play_edit_test.cpp)
-target_link_libraries(mus_structured_play_edit_test PRIVATE opennova_formats)
-target_include_directories(mus_structured_play_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(mus_structured_play_edit_test PRIVATE cxx_std_17)
-target_compile_definitions(mus_structured_play_edit_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-add_test(NAME mus_structured_play_edit COMMAND mus_structured_play_edit_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# Structured statement + section edit parity (Phase 2 authoring): top-level
-# statements are located by line span (mus_ast_emit_text_spans, the same emit the
-# editor's get_annotated_decompile bridge uses) then spliced/deleted/replaced/
-# reordered; section rename is bytecode-identical, referenced-delete is refused.
-add_executable(mus_structured_section_edit_test mus/mus_structured_section_edit_test.cpp)
-target_link_libraries(mus_structured_section_edit_test PRIVATE opennova_formats)
-target_include_directories(mus_structured_section_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(mus_structured_section_edit_test PRIVATE cxx_std_17)
-target_compile_definitions(mus_structured_section_edit_test PRIVATE
-    MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-add_test(NAME mus_structured_section_edit COMMAND mus_structured_section_edit_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)
@@ -781,21 +725,11 @@ target_link_libraries(foliage_map_test PRIVATE opennova_formats)
 target_include_directories(foliage_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME foliage_map COMMAND foliage_map_test)
 
-add_executable(foliage_map_remap_indices_test foliage/foliage_map_remap_indices_test.cpp)
-target_link_libraries(foliage_map_remap_indices_test PRIVATE opennova_formats)
-target_include_directories(foliage_map_remap_indices_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME foliage_map_remap_indices COMMAND foliage_map_remap_indices_test)
-
 add_executable(foliage_runtime_vectors_test foliage/foliage_runtime_vectors_test.cpp)
 target_link_libraries(foliage_runtime_vectors_test PRIVATE opennova_formats)
 target_include_directories(foliage_runtime_vectors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(foliage_runtime_vectors_test PRIVATE cxx_std_17)
 add_test(NAME foliage_runtime_vectors COMMAND foliage_runtime_vectors_test)
-
-add_executable(tpj_roundtrip_test tpj/tpj_roundtrip_test.cpp)
-target_link_libraries(tpj_roundtrip_test PRIVATE opennova_formats)
-target_include_directories(tpj_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tpj_roundtrip COMMAND tpj_roundtrip_test)
 
 add_executable(trn_roundtrip_test trn/trn_roundtrip_test.cpp)
 target_link_libraries(trn_roundtrip_test PRIVATE opennova_formats)
@@ -853,20 +787,6 @@ add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_jo_install COMMAND jo_env_sweep_test)
-
-# Terrain build foundation + parity tests ported from the canonical terrain reference.
-#   parametric_parity — byte-identical CPT output across Sample/Gradient/Checker64/Perlin fixtures
-#   crypto_roundtrip   — rotate_encrypt/decrypt round-trip
-#   depthmap_smooth    — 8-bit -> 16-bit smoothing formula parity
-#   tpm1_roundtrip     — .tml MeshData read/write
-#   cdep_read          — CDEP header parity against a known Dvxi5.cpt capture
-#   cdep_roundtrip     — CDEP encode/decode round-trip independent of the bake
-foreach(name parametric_parity depthmap_smooth)
-    add_executable(${name}_test terrain/${name}_test.cpp)
-    target_link_libraries(${name}_test PRIVATE opennova_runtime)
-    target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    add_test(NAME ${name} COMMAND ${name}_test)
-endforeach()
 
 add_executable(terrain_lighting_test terrain/terrain_lighting_test.cpp)
 target_link_libraries(terrain_lighting_test PRIVATE opennova_runtime)
@@ -1022,11 +942,7 @@ target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_video COMMAND menu_video_test)
 
 
-# parametric_parity is a long byte-identical fixture parity run and remains
-# disabled until its CI stability/performance cost is addressed.
-set_tests_properties(parametric_parity PROPERTIES DISABLED TRUE)
-
-foreach(name crypto_roundtrip cdep_read cdep_roundtrip tpm1_roundtrip)
+foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
     add_executable(${name}_test terrain/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_formats)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1041,32 +957,10 @@ target_include_directories(trn_config_roundtrip_test PRIVATE
 )
 add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 
-# DVD4 parity test: drives opennova::build_terrain() on the captured BHD-era heightmap.
-# Regression test for the LoadSectionDedup crash that hit older terrains where
-# the root merge ingests face indices past level.vertex_count.
-add_executable(dvd4_parity_test terrain/dvd4_parity_test.cpp)
-target_link_libraries(dvd4_parity_test PRIVATE opennova_runtime)
-target_include_directories(dvd4_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME dvd4_parity COMMAND dvd4_parity_test)
-
-# CDEP overflow guard: bake must clamp rather than silently corrupt the .cpt
-# when a 256-pixel block exceeds the 4-bit bits_per_delta field's 15-bit limit.
-add_executable(cdep_overflow_guard_test terrain/cdep_overflow_guard_test.cpp)
-target_link_libraries(cdep_overflow_guard_test PRIVATE opennova_runtime opennova_formats)
-target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
-
-# CDEP per-block range constraint: the editor-side raw16 clamp/count kernel,
-# ported from terrain_editor_cdep_constraint.gd into engine/runtime/terrain.
-add_executable(cdep_constraint_test terrain/cdep_constraint_test.cpp)
-target_link_libraries(cdep_constraint_test PRIVATE opennova_runtime)
-target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
-
 # Terrain world->source coordinate transform kernel (engine/runtime/terrain/coords).
 # Characterizes the runtime resolve_world_sample formula plus the editor-mode
 # guard divergences (bounds-reject, id-clamp, local-clamp) ported from
-# EditorTerrainMesh.world_to_source_coords / world_to_cell_source_coords.
+# Shared runtime and bounds-checked terrain coordinate transforms.
 add_executable(coords_test terrain/coords_test.cpp)
 target_link_libraries(coords_test PRIVATE opennova_runtime)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1090,32 +984,6 @@ add_executable(terrain_raycast_test terrain/terrain_raycast_test.cpp)
 target_link_libraries(terrain_raycast_test PRIVATE opennova_runtime)
 target_include_directories(terrain_raycast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_raycast COMMAND terrain_raycast_test)
-
-# Height brush kernels (engine/runtime/terrain/brush): raise/lower, smooth (two-pass),
-# flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
-add_executable(brush_height_test terrain/brush_height_test.cpp)
-target_link_libraries(brush_height_test PRIVATE opennova_runtime)
-target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME brush_height COMMAND brush_height_test)
-
-# Colour/blend brush kernels (engine/runtime/terrain/brush) on RGBA8 buffers. Byte-parity
-# critical: pins Godot's FORMAT_RGBA8 quantization + the blend/lerp/clone math.
-add_executable(brush_color_test terrain/brush_color_test.cpp)
-target_link_libraries(brush_color_test PRIVATE opennova_runtime)
-target_include_directories(brush_color_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME brush_color COMMAND brush_color_test)
-
-# Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
-# CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.
-add_executable(dvxi5_repro_test terrain/dvxi5_repro_test.cpp)
-target_link_libraries(dvxi5_repro_test PRIVATE opennova_runtime)
-target_include_directories(dvxi5_repro_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-if(MSVC)
-    # /EHa so the SEH translator in main() can convert access violations
-    # into std::runtime_error instead of bypassing C++ catch blocks.
-    target_compile_options(dvxi5_repro_test PRIVATE /EHa)
-endif()
-add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
 
 # Particle (.ptl) tests. Format half (engine/formats/ptl: model/parser/writer/
 # tables) links opennova_formats; sim half (engine/runtime/particle: emitter +
@@ -1213,12 +1081,6 @@ target_link_libraries(mns_document_test PRIVATE opennova_formats)
 target_include_directories(mns_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_document COMMAND mns_document_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# Shared editor undo/redo core (header-only opennova::edit::EditHistory)
-add_executable(oned_edit_edit_history_test oned_edit/edit_history_test.cpp)
-target_link_libraries(oned_edit_edit_history_test PRIVATE opennova_oned_edit)
-target_include_directories(oned_edit_edit_history_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME edit_history COMMAND oned_edit_edit_history_test)
 
 # World runtime substrate: addressable entities (faithful find_by_net_id), shared
 # var store, entity-command primitives, the logic-tick clock, snapshot/restore.
@@ -1725,33 +1587,6 @@ target_link_libraries(mount_test PRIVATE opennova_runtime)
 target_include_directories(mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mount_test PRIVATE cxx_std_17)
 add_test(NAME mission_mount COMMAND mount_test)
-
-# Cross-resource reference extraction: env/credits/items.def extractors, the
-# extension+magic dispatch, edge dedup, and fail-soft on malformed input.
-add_executable(refs_extract_test refs/refs_extract_test.cpp)
-target_link_libraries(refs_extract_test PRIVATE opennova_base opennova_formats)
-target_include_directories(refs_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(refs_extract_test PRIVATE cxx_std_17)
-add_test(NAME refs_extract COMMAND refs_extract_test)
-
-# refs: .3di material-texture, .bms header/item, and .mnu menu-asset extractors
-# against the committed retail fixtures (self-consistent vs each format's own
-# parser).
-foreach(test threedi mission mnu)
-    add_executable(refs_${test}_test refs/refs_${test}_test.cpp)
-    target_link_libraries(refs_${test}_test PRIVATE opennova_base opennova_formats)
-    target_include_directories(refs_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_features(refs_${test}_test PRIVATE cxx_std_17)
-    add_test(NAME refs_${test} COMMAND refs_${test}_test)
-endforeach()
-
-# refs: the whole-root RefGraph (referrers inverse, (size,mtime) memo, fail-soft
-# errors, broken-reference validation) over an in-memory file map.
-add_executable(ref_graph_test refs/ref_graph_test.cpp)
-target_link_libraries(ref_graph_test PRIVATE opennova_base opennova_formats)
-target_include_directories(ref_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(ref_graph_test PRIVATE cxx_std_17)
-add_test(NAME ref_graph COMMAND ref_graph_test)
 
 # ----------------------------------------------------------------------------
 # Net stack tests (relanded from PR #37)

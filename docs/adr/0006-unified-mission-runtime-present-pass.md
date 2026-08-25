@@ -32,7 +32,7 @@ claimed in a comment to be "the one path both go through" while the editor bypas
 
 ## Decision
 
-One runtime, one present pass, one present index — both products go through them.
+One runtime, one present pass, one present index — both Godot products go through them.
 
 - **`mission_runtime.gd`** (Node) owns `{ Simulation, MissionPresentPass, MissionEntityRegistry }`
   and single-sources the per-tick order: **advance logic → present → drain effects**. The game drives

@@ -11,17 +11,17 @@ extends RefCounted
 ##                 SCR decode key. Defaults to "jo" when absent.
 ##   --resource-dir <absolute path>
 ##                 use this resource directory for this process without changing
-##                 the persisted editor/game preference.
+##                 the runtime's persisted preference.
 ##   --loose-mission <name.bms>
 ##                 boot the exact top-level loose BMS from --resource-dir.
-##   --loose-root  editor-managed runs: when the directory holds none of the
-##                 packed game archives, mount it as loose files (the editor's
-##                 own mount) instead of failing the boot. Ordinary standalone
+##   --loose-root  ONED/dev runs: when the directory holds none of the
+##                 packed game archives, mount it as loose files instead of
+##                 failing the boot. Ordinary standalone
 ##                 launches omit it, keeping retail's no-archives fatal error
 ##                 (ADR 0025).
 ##   --oned-run-id / --oned-run-descriptor
-##                 opaque editor-run identity consumed by the optional runtime
-##                 control service. Ordinary standalone launches omit both;
+##                 opaque identity consumed by the optional runtime control
+##                 service. Ordinary launches omit both;
 ##                 GameMcpService owns their parsing and validation.
 ##
 ## Flags are scanned from both the engine args and the user args (anything after
@@ -35,7 +35,7 @@ static func _all_args() -> PackedStringArray:
 	return args
 
 
-## Return the token following `flag`, or "" when absent/empty. The editor puts
+## Return the token following `flag`, or "" when absent/empty. Godot commands put
 ## custom options behind Godot's `--` separator, but _all_args deliberately
 ## scans both arrays so packaged and source launches share one parser.
 static func _value_after(flag: String) -> String:
@@ -56,7 +56,7 @@ static func loose_override_enabled() -> bool:
 
 
 ## The expansion requested via `/exp <name>`, or "" when none was given. Falls
-## back to the persisted editor setting only when no flag is present, so a launch
+## back to the persisted runtime setting only when no flag is present, so a launch
 ## flag always wins over stale config.
 static func expansion(fallback: String = "") -> String:
 	var value := _value_after("/exp")
@@ -77,7 +77,7 @@ static func game(fallback: String = "jo") -> String:
 	return fb if not fb.is_empty() else "jo"
 
 
-## The exact resource directory supplied by an editor-managed run. This is a
+## The exact process-local resource directory supplied on the command line. This is a
 ## process-local override: callers must not persist it.
 static func resource_dir(fallback: String = "") -> String:
 	var value := _value_after("--resource-dir")
@@ -93,11 +93,11 @@ const BUNDLED_BOOT_ARCHIVES := ["localres.pff", "resource.pff", "language.pff"]
 static var bundled_probe_override: String = ""
 
 
-## The boot resource dir, in priority order: the editor-managed --resource-dir flag,
+## The boot resource dir, in priority order: the --resource-dir flag,
 ## the persisted pick, then the game bundled around a shipped exe — the exe's own
 ## directory when it carries a boot archive (the tagged release zip, retail-style), else
 ## the loose assets/ beside it (the dev zip, where the game plays the same tree the
-## editor edits). The bundled defaults are per-boot and never persisted (an explicit
+## ONED exposes). The bundled defaults are per-boot and never persisted (an explicit
 ## pick still writes the settings key through the picker's own path), and dev runs from
 ## the Godot editor are unchanged: its binary's dir carries neither. "" means ask.
 static func boot_resource_dir(persisted: String) -> String:
@@ -109,8 +109,8 @@ static func boot_resource_dir(persisted: String) -> String:
 	return dir
 
 
-## Whether `dir` may fall back to the loose authoring mount when it holds no packed
-## archives: the ONED-managed --loose-root flag (ADR 0025), or the bundled loose
+## Whether `dir` may fall back to a loose mount when it holds no packed
+## archives: the explicit --loose-root flag (ADR 0025), or the bundled loose
 ## assets/ default itself — the dev zip ships sources only, and blessing exactly that
 ## directory keeps a picked or persisted loose dir on retail's no-archives fatal.
 static func boot_loose_allowed(dir: String) -> bool:
@@ -149,9 +149,8 @@ static func loose_mission() -> String:
 	return _value_after("--loose-mission")
 
 
-## True when `--loose-root` was passed: this editor-managed run may play a
-## directory with no packed archives (a loose authoring root) through the
-## editor's loose mount instead of retail's fatal no-archives error.
+## True when `--loose-root` was passed: this run may play a directory with no
+## packed archives through the loose mount instead of retail's fatal no-archives error.
 static func loose_root_allowed() -> bool:
 	for arg in _all_args():
 		if arg.to_lower() == "--loose-root":

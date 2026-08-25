@@ -1,6 +1,6 @@
 ---
 name: blender-object
-description: Drives a running Blender (via the blender MCP server) to create a custom NovaLogic object model — built procedurally or from a generator — names every object and material to ONED's convention so the round trip is lossless, then exports it to ASE with the bundled opennova add-on. Use when asked to create, author, or model a custom object / 3di in Blender, generate a game model, or export Blender geometry to .ase.
+description: Drives a running Blender (via the blender MCP server) to create a custom NovaLogic object model — built procedurally or from a generator — names every object and material to the ASE/OED convention so the round trip is lossless, then exports it to ASE with the bundled opennova add-on. Use when asked to create, author, or model a custom object / 3di in Blender, generate a game model, or export Blender geometry to .ase.
 ---
 
 # Author a NovaLogic object in Blender and export to ASE
@@ -86,7 +86,7 @@ library: `search_sketchfab_models` + `download_sketchfab_model`, or
 treat the result as the render mesh for §3. (Generators need their backend configured; if
 unavailable, build procedurally.)
 
-## 3. Conform names to the ONED convention (the load-bearing step)
+## 3. Conform names to the ASE/OED convention (the load-bearing step)
 
 Read [NAMING.md](NAMING.md), then for each part: create a `PN##` empty, rename the render
 mesh `## Mesh0` and parent it under that empty, and assign a `Material_<i>_<shader>`
@@ -347,8 +347,9 @@ written file and confirm:
 
 A `WROTE … <bytes>` line with a non-trivial size from §5 is the first signal.
 
-Hand-off (out of scope for this skill): the `.ase` is mesh source — compile it to a
-runtime `.3di` by binding it in ONED's **Object** workspace LODs flow (`godot/modtools/object/`).
+Hand-off (out of scope for this skill): the `.ase` is mesh source. Compile it to a
+runtime `.3di` through a format-specific tool over `engine/formats/oed`; ONED is
+run-only and does not own an object-compilation flow.
 
 ## Done
 

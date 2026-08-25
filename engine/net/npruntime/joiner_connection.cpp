@@ -1049,8 +1049,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			}
 		} else if (m.tag == s2c::END_ROUND_HEADER) {
 			EndRoundHeader header;
+			// A joiner is in-session by definition, so the header form is
+			// the game-type bit alone. [orig: NapiNPClientMsg_0x01D form
+			// pick @0x43086c..0x430883]
 			if (decode_end_round_header(
-					m.payload.data(), m.payload.size(), header)) {
+					m.payload.data(), m.payload.size(),
+					(game_type_ & 0x10000u) == 0, header)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				// A valid 0x1D immediately starts the requester-driven board stream

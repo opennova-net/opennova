@@ -3,6 +3,9 @@
 - **Status**: accepted (2026-08-08; the format-placement inventory round,
   maintainer-approved)
 - **Owners**: engine layout
+- **Updated**: [ADR 0037](0037-oned-runs-game-data.md) removes the editor-only
+  DEP and TPM codecs with the legacy terrain bake. References below record the
+  format inventory at decision time.
 - **Supersedes/updates**: nothing becomes false. Completes ADR 0024 decision 1,
   which affirms one-lib-per-format but never defines which parsers count as
   "a format"; ADR 0024's header gains a cross-reference here.

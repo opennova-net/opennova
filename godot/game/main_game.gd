@@ -323,7 +323,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if not key.pressed or key.echo:
 		return
-	# F11 fullscreen — the core-engine window concept (WindowState), shared with ONED.
+	# F11 fullscreen uses the shared runtime window policy.
 	if WindowState.is_toggle_event(event):
 		WindowState.toggle_fullscreen(get_window())
 		get_viewport().set_input_as_handled()
@@ -685,19 +685,19 @@ func _on_dir_selected(dir: String) -> void:
 	apply_picked_resource_dir(dir, not LaunchFlags.resource_dir().is_empty())
 
 
-## The picker's accept leg. `editor_managed` is resolved from --resource-dir at
-## the signal callback above: an editor-managed run's directory is process-local,
-## so persisting a picker escape would overwrite the SHARED editor+game key and
-## repoint ONED's authoring root at whatever was picked here. Parameterized for
+## The picker's accept leg. `process_local` is resolved from --resource-dir at
+## the signal callback above: an ONED-selected directory is process-local,
+## so persisting a picker escape would overwrite the game's saved preference.
+## Parameterized for
 ## the same ADR-0018 reason as BootRootMount.mount; returns false when the pick
 ## would not mount (the picker is re-raised).
-func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
+func apply_picked_resource_dir(dir: String, process_local: bool) -> bool:
 	var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
 	if root == null:
 		_request_resource_dir()
 		return false
 	_root = root
-	if not editor_managed:
+	if not process_local:
 		ResourceDirSettings.set_resource_dir(dir)
 	_enter_menu(dir)
 	return true
@@ -705,10 +705,10 @@ func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
 
 ## Mount `dir` as this shell's resource root: packed PFFs, `/exp` expansion,
 ## `/d` loose override, and `/game` SCR policy. With `allow_loose_root` (the
-## `--loose-root` flag, passed by every ONED-managed run) a directory holding
-## none of the packed archives falls back to the editor's loose mount — the
-## same data contract ONED authors against, so F5/F6 can play-test a loose
-## extract (ADR 0025) and the dev zip's bundled assets/ boots as the game it is
+## `--loose-root` flag, passed by ONED-managed runs) a directory holding
+## none of the packed archives falls back to a loose mount — the same data
+## contract used by the packed game, so ONED can run a loose extract
+## and the dev zip's bundled assets/ boots as the game it is
 ## (LaunchFlags.boot_loose_allowed). The no-archives fatal stays the picked default
 ## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
 ## Warns and returns null on failure. Public and parameterized so the fallback
@@ -734,7 +734,7 @@ func _on_start_requested(bms_name: String) -> void:
 		Callable(_world, "load_mission").bind(bms_name))
 
 
-## Public F6 entry: boot the exact saved loose mission through the same loading
+## Boot an exact loose mission through the same loading
 ## presentation and GameWorld lifecycle as menu play.
 func start_loose_mission(bms_name: String) -> void:
 	start_world_load(
@@ -742,7 +742,7 @@ func start_loose_mission(bms_name: String) -> void:
 		Callable(_world, "load_loose_mission").bind(bms_name))
 
 
-## Graceful cross-process stop seam used by an editor-managed runtime peer.
+## Graceful runtime stop seam used by the shell and optional control service.
 func request_quit() -> void:
 	if _quit_requested:
 		return
@@ -869,6 +869,32 @@ func _on_join_deploy_pick_required() -> void:
 ##  Input_QueueEvent(3) @ 0x4c67a4, whose action sets g_mission_exit_reason = 1 and drops
 ##  the connection (Input_HandleActionBinding case 3 @ 0x49af2c) — reason 1 is the same
 ##  teardown + "MainMenu" push every abort leg takes @ 0x568654]
+## The host's round cycle: the 2790-tick post-round linger expiry EXITS THE
+## MISSION into the map cycle — retail's server sets exit reason 3 and reloads
+## the next rotation entry; the rotation itself is not modeled, so the shell
+## returns to the menu through the same teardown every mission exit takes. A
+## joiner's session dies with the host's exit and lands here too (its
+## net-session drive may also route the loss through _on_session_lost first —
+## whichever fires first tears down, the other sees MENU).
+## [orig: Server_TickUpdate linger drain @0x51da04..; g_mission_exit_reason = 3
+##  @0x51db63; every exit reason lands on the same teardown + nav push
+##  @0x568654. SP mission end runs the epilog flow instead.]
+func _maybe_exit_round_cycle() -> void:
+	if _state == State.MENU or _world_load_pending or _world == null:
+		return
+	var sim: Simulation = _world.get_sim()
+	if sim == null:
+		return
+	if not bool(sim.get_round_outcome_debug().get("mp_session", false)):
+		return
+	var er: Dictionary = sim.get_end_round_state()
+	if not bool(er.get("header_known", false)):
+		return
+	if bool(er.get("session_open", true)):
+		return
+	_abort_to_menu("round cycle", "post-round linger expired (mission exit 3)")
+
+
 func _on_session_lost(reason: String) -> void:
 	# Already back in the menu with nothing loading: the teardown ran (this is the
 	# double-notification guard, not a state test the loss depends on). A loss during
@@ -1154,6 +1180,7 @@ func _process(delta: float) -> void:
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: sub_5C0060]
+	_maybe_exit_round_cycle()
 	if timing:
 		var probe_t4 := Time.get_ticks_usec()
 		if probe_enabled:

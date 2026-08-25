@@ -145,6 +145,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width"),
 	                     &Simulation::get_end_round_columns);
 	ClassDB::bind_method(D_METHOD("get_end_round_rows"), &Simulation::get_end_round_rows);
+	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
+	                     &Simulation::get_end_round_statistics);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &Simulation::get_join_assigned_team);
 	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),

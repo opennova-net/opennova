@@ -192,6 +192,9 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_vehicle_panel);
 	ClassDB::bind_method(D_METHOD("push_chat_line", "text", "argb"),
 			&HudOverlay::push_chat_line);
+	ClassDB::bind_method(D_METHOD("set_end_round_statistics", "shown", "raised",
+			"title", "labels", "values"),
+			&HudOverlay::set_end_round_statistics);
 	ClassDB::bind_method(D_METHOD("set_message_log_shown", "shown"),
 			&HudOverlay::set_message_log_shown);
 	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
@@ -854,6 +857,24 @@ void HudOverlay::set_end_round_overlay(bool p_shown, int p_top, int p_bottom,
 		line.text = p_texts[i].utf8().get_data();
 		line.y = p_ys[i];
 		er.lines.push_back(line);
+	}
+	queue_redraw();
+}
+
+void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
+		const String &p_title, const PackedStringArray &p_labels,
+		const PackedStringArray &p_values) {
+	// The SP Show Score panel (hud/end_round_statistics.h). The shell resolves
+	// the title/labels and formats the values; the compiler owns the layout.
+	opennova::hud::HudEndRoundStatisticsState &st = state_.end_round_statistics;
+	st.shown = p_shown;
+	st.raised = p_raised;
+	st.title = p_title.utf8().get_data();
+	for (int64_t i = 0; i < 4; ++i) {
+		st.labels[i] = i < p_labels.size()
+				? std::string(p_labels[i].utf8().get_data()) : std::string();
+		st.values[i] = i < p_values.size()
+				? std::string(p_values[i].utf8().get_data()) : std::string();
 	}
 	queue_redraw();
 }

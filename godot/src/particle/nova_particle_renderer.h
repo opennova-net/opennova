@@ -47,8 +47,7 @@ public:
 
 	// The witnessed flipbook frame-name derivation (renderer
 	// retail_particle_frame_name [orig: CParticleDef_ReloadGraphicFrameTextures
-	// @ 0x5e4bb0, D-PTL-14]) — static so editor previews resolve exactly what
-	// the runtime resolves instead of re-minting the rule.
+	// @ 0x5e4bb0, D-PTL-14]) — static so every caller uses the runtime rule.
 	static String retail_frame_name(const String &p_authored, int p_frame_count,
 			int p_frame);
 

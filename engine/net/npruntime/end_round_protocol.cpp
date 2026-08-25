@@ -102,12 +102,24 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 }
 
 EndRoundHeader build_end_round_header(const world::MatchResult &result,
-		uint8_t recipient_slot) {
+		uint8_t recipient_slot, bool non_team_form) {
 	EndRoundHeader out;
 	out.winner_team = static_cast<int8_t>(result.winner_team);
 	out.team_score_0 = wire_i16(result.team_scores[0]);
 	out.team_score_1 = wire_i16(result.team_scores[1]);
 	out.draw = result.draw ? 1u : 0u;
+	if (non_team_form) {
+		// The non-team form serializes the top three rows of the frozen
+		// (points-descending) board: the 32-byte entry name and the
+		// game-type primary score the board builder selected into
+		// entry+0x40 (the sub_52C850(g_GameType, ...) store @0x509152).
+		// [orig: EndRoundScoreboard_SerializeHeader @0x5052bf..0x505381,
+		// reading entry+4 / entry+0x40 of rows 0..2 @0x24C1A94]
+		for (size_t i = 0; i < 3 && i < result.players.size(); ++i) {
+			out.player_names[i] = capped(result.players[i].identity.name, 31);
+			out.player_scores[i] = wire_i16(result.players[i].primary_score);
+		}
+	}
 	for (size_t i = 0; i < result.players.size(); ++i) {
 		if (result.players[i].identity.slot != recipient_slot) continue;
 		out.player_index = i <= size_t(std::numeric_limits<int8_t>::max())

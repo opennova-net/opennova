@@ -14,7 +14,7 @@ tracked **D-VFS** catalog below. IDB write-back applied in the same session
 
 Write side: the runtime never writes PFFs — the 0x768200–0x768b97 cluster is
 mount/lookup/read/close only; every `_lcreat/_lwrite` caller is a loose-file
-writer. [ADR 0008](../adr/0008-pff-writer-policy.md) (our editor-side writer)
+writer. [ADR 0008](../adr/0008-pff-writer-policy.md) (our packaging/tooling-side writer)
 stands confirmed.
 
 ## Verdict table
@@ -108,7 +108,7 @@ stands confirmed.
    the global cache epoch are invalidated BEFORE the new mount populates
    anything. `mount_runtime` reports the mount kind through
    `ResourceRoot::is_runtime_mount()`, so callers can tell a runtime mount
-   (the only kind that layers expansions) from an editor `set_root_dir` one.
+   (the only kind that layers expansions) from a plain-directory mount.
    Pinned by `resource_root_contract_test.gd`
    (`test_runtime_remount_in_place_switches_expansion`,
    `test_is_runtime_mount_discriminates_runtime_from_editor_mounts`) and the
@@ -137,15 +137,15 @@ paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
 | D-VFS-1 | A | FIXED (2026-07-17) | `VfsLookupPolicy` now separates the session default from `ForceLooseFirst` and `ForceArchiveOnly` per query; `ResourceIndex` and runtime-mounted `ResourceRoot` carry it without mutating the session, and the texture cache keys policy + normalized qualified texture query. Implemented consumers force mission `.til`, MNU/loading/end-screen UI art loose-first and local/network BMS validation + reads archive-only. `test_per_call_resolution_policy` pins packed and `/d` behavior; `resource_root_contract_test` pins has/read parity and policy-separated texture caching; `game_world_test` discriminates loose/archive BMS + TIL conflicts, and `loading_screen_test` the loose/archive image conflict. Savegame, `gt.ssc`, and minimap consumers remain unimplemented rather than incorrectly session-bound [orig: @ 0x4395a2, 0x60a74e, 0x4cdcf4, 0x6541ba, 0x59b13a, 0x40d43c] |
-| D-VFS-2 | A | FIXED (2026-07-05) | Fixed 6-slot archive name table ported: `Vfs::mount_game` defaults to `VfsArchiveDiscovery::RetailTable` (language/localres/resource.pff probed by name, slot order = precedence, extra .pff never mounts; pinned by `test_mount_game_retail_table`) [orig: @ 0x829f90 + @ 0x4a4310]. **Recorded decision**: the editor's browse index (`ResourceIndex::scan` → `ResourceRoot::set_root_dir`) AND the C ABI (`opennova_vfs_mount_game`, the importer/Python `AssetResolver`) deliberately keep `ScanAll` — authoring/extraction tools must index arbitrary archives; ONLY the game runtime (`mount_runtime`) passes `RetailTable` |
-| D-VFS-3 | A | FIXED (2026-07-17) | Retail-policy lookups now pass the full relative query: a component-wise, ASCII-case-insensitive loose walk reaches subdirectories, while archive matching retains the full spelling and therefore never aliases a flat basename. Runtime `ResourceRoot` forwards that query; editor `set_root_dir` deliberately retains its legacy flat authoring contract. Pinned by `test_path_qualified_lookup_is_verbatim` and `test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive` [orig: dead basename-strip setter @ 0x75a590] |
+| D-VFS-2 | A | FIXED (2026-07-05) | Fixed 6-slot archive name table ported: `Vfs::mount_game` defaults to `VfsArchiveDiscovery::RetailTable` (language/localres/resource.pff probed by name, slot order = precedence, extra .pff never mounts; pinned by `test_mount_game_retail_table`) [orig: @ 0x829f90 + @ 0x4a4310]. **Recorded decision**: the C ABI (`opennova_vfs_mount_game`) and importer/Python `AssetResolver` deliberately keep `ScanAll` because extraction tools must index arbitrary archives; only the game runtime (`mount_runtime`) passes `RetailTable` |
+| D-VFS-3 | A | FIXED (2026-07-17) | Retail-policy lookups now pass the full relative query: a component-wise, ASCII-case-insensitive loose walk reaches subdirectories, while archive matching retains the full spelling and therefore never aliases a flat basename. Runtime `ResourceRoot` forwards that query; plain-directory consumers keep their flat lookup contract. Pinned by `test_path_qualified_lookup_is_verbatim` and `test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive` [orig: dead basename-strip setter @ 0x75a590] |
 | D-VFS-5 | B | NEEDS-RE | Encrypted-entry (bit0) streaming: retail decrypts ONLY whole-file reads; streaming + partial reads return ciphertext; ours always decrypts — needs the corpus check (does any retail JO pff carry bit0, ever streamed?) |
 | D-VFS-7 | A | FIXED (2026-07-17) | Retail archive lookup now has a dedicated query key: at most 31 bytes, ASCII-uppercase, compared exactly against the entry name uppercased at mount. No trimming occurs—the apparent trim starts on the NUL and is dead—so stored/query trailing spaces remain significant; overlength queries cannot match the format's ≤16-byte entry names. `test_archive_names_keep_trailing_spaces` pins the distinction [orig: `PFF_FindEntry @ 0x7685d0`; `PFF_CompareSearchNameToEntry @ 0x768240`] |
 | D-VFS-10 | C | PERMANENT (2026-07-17) | The retail loose path is built from an unchecked query; the reimpl rejects rooted/drive-qualified/ADS/`..` queries and canonicalizes every component so symlinks cannot escape a mounted search root. This is a ratified mount-sandbox boundary: legitimate relative, case-insensitive in-root queries retain retail behavior, while exposing arbitrary host files through an asset name would be wrong. Pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] |
-| D-VFS-11 | C | PERMANENT (2026-07-30) | Editor-managed play-testing boots a loose-only directory past retail's zero-archives fatal: under `--loose-root` (every ONED F5/F6 launch passes it) `BootRootMount.mount` (the shell boot-mount helper) falls back to the editor's loose mount when no boot-table archive opens; unflagged standalone launches keep the witnessed fatal ("No game data archives could be opened"). Ratified by ADR 0025; pinned by `test_mount_boot_root_falls_back_to_the_loose_authoring_mount` [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44 in Game_InitSubsystems @ 0x4a6cd0] |
+| D-VFS-11 | C | PERMANENT (2026-07-30) | ONED's Run OpenNova loose action boots a loose-only directory past retail's zero-archives fatal: under `--loose-root`, `BootRootMount.mount` (the shell boot-mount helper) falls back to the selected loose directory when no boot-table archive opens; unflagged standalone launches keep the witnessed fatal ("No game data archives could be opened"). Ratified by ADR 0037; pinned by the boot-root loose-fallback test [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44 in Game_InitSubsystems @ 0x4a6cd0] |
 
 **Ratified permanent decisions** (in the ledger's register):
-D-VFS-4 (raw runtime reads now probe live while editor listings and decoded
+D-VFS-4 (raw runtime reads now probe live while indexed listings and decoded
 caches remain epoch snapshots — reimpl cache),
 D-VFS-6 (retail's zero container validation + two write-after-free bugs —
 reproducing manufactures garbage, ADR 0003 class), D-VFS-8 (retail's
@@ -153,7 +153,7 @@ reproducing manufactures garbage, ADR 0003 class), D-VFS-8 (retail's
 capacity supersets), D-VFS-9 (`<exp>L.pff` as our persistent primary vs
 retail's secondary slot 0 — identical effective precedence, model note),
 D-VFS-10 (mounted-root containment — reimpl safety boundary), and D-VFS-11
-(the editor-managed `--loose-root` boot fallback — ADR 0025 tooling boundary).
+(the ONED-managed `--loose-root` boot fallback — ADR 0037 tooling boundary).
 
 ## Not witnessed
 

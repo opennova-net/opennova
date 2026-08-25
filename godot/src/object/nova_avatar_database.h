@@ -18,7 +18,7 @@ class ResourceRoot;
 
 // GDExtension wrapper over engine/formats/avatars (Avatars.def parse + write). Surfaces the
 // player-character model -- head/body/arms parts composed into combos under a
-// nationality -> division tree -- to the editor (authoring + save) and the
+// nationality -> division tree -- to format tooling (mutation + save) and the
 // runtime PLAYER_INFO menu (read + resolve). Witnessed format/behavior:
 // docs/playerinfo/avatars-re.md. The combo -> 3D-model load is the open
 // D-PLAYERINFO-1 seam; resolve_combo() stops at the resolved part graphic names.
@@ -139,8 +139,7 @@ public:
 	// mounted resource root (VFS/PFF). Both emit "changed".
 	Error load(const String &path);
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
-	// Serialize the current model from scratch (docs/adr/0021) to path. The editor
-	// save path.
+	// Serialize the current model from scratch (docs/adr/0021) to path.
 	Error save_to_path(const String &path);
 	// Reset to an empty model (the "New" document case). Emits "changed".
 	void create_empty();
@@ -189,7 +188,7 @@ public:
 	// matching resolve_character_id's registry walk.
 	std::vector<CharacterSexRow> character_sex_rows() const;
 
-	// Whole-model bridge for the editor: read the full nested model, edit it in
+	// Whole-model bridge for tools: read the full nested model, edit it in
 	// GDScript, set it back, then save_to_path(). set_model() emits "changed".
 	Dictionary get_model() const;
 	void set_model(const Dictionary &model);

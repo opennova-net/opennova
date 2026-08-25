@@ -19,8 +19,6 @@ water_path = NodePath("../Water")
 
 [node name="FoliageDispatcher" type="FoliageDispatcher" parent="Terrain"]
 
-[node name="TileOverlay" type="TerrainTileOverlay" parent="Terrain"]
-
 [node name="MissionEnvironment" type="MissionEnvironment" parent="."]
 process_priority = -20
 

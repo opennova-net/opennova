@@ -1,103 +1,89 @@
 ---
 name: oned-run
-description: Launches this repo's Godot project — the ONED editor or the game runtime — with the native extension and game assets correctly set up, and watches its output. Use when asked to run, launch, demo, screenshot, or visually verify the editor/runtime, when the generic run/verify skills need this project's launch procedure, or when the editor seems to be running stale native code.
+description: Runs this repo's ONED utility or OpenNova game runtime with the native extension and loose game data correctly set up, then watches and stops the process. Use when asked to run, launch, demo, or visually verify ONED/the runtime, or when either appears to load stale native code.
 ---
 
 # Run ONED / the OpenNova runtime
 
-The Godot project is `godot/` (Godot 4.6.1). The DEFAULT main scene is the
-GAME runtime, `res://game/main_game.tscn` (project.godot run/main_scene); the
-ONED editor scene `res://modtools/editor/editor_main.tscn` — the EditorApp
-root hosting all thirteen workspaces — is only the `.modtools` feature-tag
-override (the packaged editor exe). To run ONED from source, pass the editor
-scene path EXPLICITLY. All commands are Git Bash, from the repo root.
+The Godot project is `godot/` (Godot 4.6.1). Its default main scene is the
+game runtime, `res://game/main_game.tscn`. The ONED scene
+`res://modtools/oned_main.tscn` is the `modtools` feature override for
+the packaged `opennova-modtools.exe`; pass that scene explicitly when running
+ONED from source. ONED is run-only (ADR 0037): Settings, Run OpenNova,
+Stage & Run Retail, and Stop. It has no workspaces or MCP server.
+
+All commands below are Git Bash from the repository root.
 
 ## 1. Find the Godot binary
 
-Use `GODOT_BIN` if set; otherwise the main checkout's `.godot-bin/` (worktrees
-do NOT have their own copy):
+Use `GODOT_BIN` if set; otherwise use the main checkout's `.godot-bin/`
+(linked worktrees do not have their own copy):
 
-    main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
-    export GODOT_BIN="$main/.godot-bin/Godot_v4.6.1-stable_win64_console.exe"
+```bash
+main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+export GODOT_BIN="$main/.godot-bin/Godot_v4.6.1-stable_win64_console.exe"
+```
 
-Prefer the `_console.exe` build so stdout reaches the terminal. If neither
-exists, ask the user — do not download one.
+Prefer the console build so stdout reaches the terminal. If neither exists,
+ask the user; do not download one.
 
-## 2. Preflight the GDExtension (most failures start here)
+## 2. Preflight the GDExtension
 
-- Fresh worktree: `git submodule update --init --recursive` (third_party/ ships
-  empty), then `bash scripts/build_godot.sh` — `godot/bin/` contains only
-  `opennova.gdextension` until you build, and nothing Godot-side works without
-  the DLL. The editor and any `--path godot` run load `template_debug`.
-- Stale code: if behavior doesn't reflect new `godot/src/` C++, compare the
-  timestamp of `godot/bin/libopennova.windows.template_debug.x86_64.dll`
-  against the source change, rebuild, and FULLY restart Godot — GDExtension
-  registration does not hot-reload, and a running editor holds the DLL lock.
-- (`build/Debug/opennova.dll` shadowing is a PYTHON-FFI trap — `pyopennova/_native.py`
-  searches Debug first; the editor never loads it. Relevant here only if a helper
-  script drives pytest/onimport beside the editor.)
-- Failure signature of a stale/missing DLL: parse errors naming `Nova*`
-  classes, or `Ignoring script ... does not extend GutTest` in test runs.
-- Fresh worktree or a branch switch that adds resources: run once
-  `"$GODOT_BIN" --headless --path godot --import`
+- Fresh worktree: initialize submodules, then run
+  `bash scripts/build_godot.sh`. Nothing Godot-side works without the DLL.
+- If `godot/src/` behavior looks stale, rebuild and fully stop every running
+  Godot/ONED process. GDExtension registration does not hot-reload, and a live
+  process can hold the DLL lock.
+- After a fresh checkout or resource-heavy branch switch, run
+  `"$GODOT_BIN" --headless --path godot --import` once.
+- A stale or missing DLL usually appears as parse errors naming `Nova*`
+  classes or silently dropped GUT scripts.
 
-## 3. Assets
+## 3. Game data
 
-ONED and the runtime share one external "resource root" persisted in
-`user://terrain_editor_state.cfg` (see
-`godot/game/resource_index/resource_dir_settings.gd`) — an interactive launch
-on a machine that has used ONED before usually just works. Env vars are for
-automation only:
+ONED persists its selected loose or packed game-data directory in `user://oned.cfg`. A
+packaged dev build with no explicit choice defaults to the `assets/` directory
+beside its executable. Running retail also needs a user-selected JO install
+containing `Jointops.exe`, Bink, and `game.cfg`.
 
-- `NOVA_RESOURCE_DIR` — screenshot driver's asset dir (falls back to the
-  persisted root). See `scripts/capture_screenshots.sh` header for contents.
-- `JO_ASSETS_DIR` — retail loose-asset dir for the headless perf probes.
-- `NW_RESOURCE_DIR` — the retail install a `NW_SP_MISSION=<bms>` boot mounts
-  (the standalone-game recipe below).
-- `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` — pins the local player at boot for
-  pose-matched retail side-by-sides.
+Probe environment variables remain machine-specific:
 
-These point at copyrighted retail assets and are machine-specific: if unset and
-needed, ask the user for the path; never guess or commit one.
+- `JO_ASSETS_DIR` is the retail loose-asset directory for headless perf probes.
+- `NW_RESOURCE_DIR` is the retail install mounted by a standalone mission probe.
+- `NW_SP_MISSION=<bms>` selects that probe's mission.
+- `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` pins its player pose.
 
-## 4. Launch — pick the mode
+These may point at copyrighted retail assets. If a required value is unset,
+ask the user; never guess or commit a local path.
 
-- Interactive / visual check (needs a real window): prefer the MCP godot
-  server — `mcp__godot__run_project` with the absolute path to `godot/`
-  (no `scene` = the GAME; pass `res://modtools/editor/editor_main.tscn` for
-  ONED), then poll `mcp__godot__get_debug_output`, and finish with
-  `mcp__godot__stop_project`. Raw fallback (run in background):
-  `"$GODOT_BIN" --path godot [scene]` — again, no scene launches the GAME.
-- Game-under-ONED (the managed F5/F6 child, ADR 0025): when ONED is running
-  with its MCP server, drive the game through the repo's own `oned` server
-  instead — `run_game(op="start", mode="game"|"mission")` mirrors F5/F6,
-  `game_state`/`game_debug`/`game_screenshot` observe and mutate the live
-  runtime, `run_game(op="stop")` mirrors F8. The child mounts the editor's
-  resource dir (`--resource-dir` + `--loose-root`: a loose authoring dir with
-  no PFFs plays as-is).
-- Headless scripted observation: the probe pattern — `SceneTree` scripts named
-  `*_probe.gd` under `godot/tests/` (not collected by GUT), e.g.
+## 4. Launch the requested product
+
+- Game from source, windowed:
+  `"$GODOT_BIN" --path godot`
+- ONED from source, windowed:
+  `"$GODOT_BIN" --path godot res://modtools/oned_main.tscn`
+- Packaged dev build: run `opennova-modtools.exe`, select the loose source
+  tree in Settings, then use Run OpenNova, Stage & Run Retail, or Stop.
+  ONED owns one child; starting another mode replaces it.
+- Headless pack smoke:
+  `opennova-modtools.exe --headless -- --pack-game <src_dir> <game_dir>`.
+  Success requires exit 0 and `localres.pff` in the destination.
+- Headless observation: run an existing `*_probe.gd` SceneTree script under
+  `godot/tests/`, for example
   `"$GODOT_BIN" --headless --path godot -s res://tests/runtime_scene_probe.gd`.
-  For a new one-off check, copy an existing probe's shape.
-- Standalone game against retail data: `NW_SP_MISSION=<bms>` +
-  `NW_RESOURCE_DIR=<retail install>` boots straight into the mission with that
-  install mounted; add `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` to pin the local
-  player for retail side-by-sides. The headless-game exemplar is
-  `godot/tests/ladder_climb_probe.gd`.
-- README screenshots: `bash scripts/capture_screenshots.sh` (desktop session,
-  NOT headless; validates every PNG was rewritten).
-- `mcp__godot__launch_editor` only when you need the Godot editor UI itself
-  (scene/inspector authoring) — it is not how you run ONED.
-- Anything needing CLI flags (`--headless`, `--import`, `-s`, GUT) → raw
-  `$GODOT_BIN`, since `run_project` only takes a project path and scene.
+- Standalone game against retail data: set `NW_RESOURCE_DIR` and
+  `NW_SP_MISSION`; use `godot/tests/ladder_climb_probe.gd` as the exemplar.
+
+There is no ONED MCP automation path. Drive runtime behavior through the
+standalone game/probe interfaces, and use raw `$GODOT_BIN` for CLI flags such
+as `--headless`, `--import`, `-s`, and GUT.
 
 ## 5. Observe and finish
 
-Watch stdout / `get_debug_output` for `SCRIPT ERROR`, `ERROR:`, and
-GDExtension load complaints (go back to step 2 if seen). Done = launched
-cleanly, the target behavior was observed and described (including any
-errors), and the process is stopped (`stop_project` or kill the backgrounded
-PID) — never leave a headless Godot running.
+Watch output for `SCRIPT ERROR`, `ERROR:`, and GDExtension load complaints.
+Done means the target launched cleanly, the requested behavior was observed,
+and every process was stopped. Never leave a headless Godot or an ONED-managed
+game running.
 
-Read `godot/modtools/README.md` for the workspace map when deciding where to
-look for a feature.
+Read `godot/modtools/README.md` for ONED, retail-stage, and release-pack
+contracts.

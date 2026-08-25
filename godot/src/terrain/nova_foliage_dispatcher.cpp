@@ -138,12 +138,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_silhouette_anchors);
   ClassDB::bind_method(D_METHOD("get_silhouette_anchors"),
                        &FoliageDispatcher::get_silhouette_anchors);
-  ClassDB::bind_method(
-      D_METHOD("set_surface_input_overrides", "heightfield_normal",
-               "tile_overlay", "tile_overlay_tint"),
-      &FoliageDispatcher::set_surface_input_overrides);
-  ClassDB::bind_method(D_METHOD("clear_surface_input_overrides"),
-                       &FoliageDispatcher::clear_surface_input_overrides);
   ClassDB::bind_method(D_METHOD("render_frame", "camera_xform"),
                        &FoliageDispatcher::render_frame);
   ClassDB::bind_method(D_METHOD("render_preview", "camera_xform"),
@@ -382,28 +376,6 @@ PackedVector3Array FoliageDispatcher::get_silhouette_anchors() const {
   return silhouette_anchors_;
 }
 
-void FoliageDispatcher::set_surface_input_overrides(
-    const Ref<Texture2D> &p_heightfield_normal,
-    const Ref<Texture2D> &p_tile_overlay,
-    const Vector3 &p_tile_overlay_tint) {
-  surface_input_overrides_ = true;
-  override_heightfield_normal_ = p_heightfield_normal;
-  override_tile_overlay_ = p_tile_overlay;
-  override_tile_overlay_tint_ =
-      finite_vector(p_tile_overlay_tint)
-          ? p_tile_overlay_tint
-          : Vector3(1.0f, 1.0f, 1.0f);
-  _update_materials();
-}
-
-void FoliageDispatcher::clear_surface_input_overrides() {
-  surface_input_overrides_ = false;
-  override_heightfield_normal_.unref();
-  override_tile_overlay_.unref();
-  override_tile_overlay_tint_ = Vector3(1.0f, 1.0f, 1.0f);
-  _update_materials();
-}
-
 bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
   if (p_image.is_null() || p_image->get_format() != Image::FORMAT_RGBA8) {
     return false;
@@ -582,11 +554,7 @@ void FoliageDispatcher::_update_materials() {
   Ref<Texture2D> tile_overlay;
   Ref<Texture2DArray> tile_cache;
   Vector3 tile_overlay_tint(1.0f, 1.0f, 1.0f);
-  if (surface_input_overrides_) {
-    heightfield_normal = override_heightfield_normal_;
-    tile_overlay = override_tile_overlay_;
-    tile_overlay_tint = override_tile_overlay_tint_;
-  } else if (terrain_ != nullptr) {
+  if (terrain_ != nullptr) {
     heightfield_normal = terrain_->get_heightfield_normal_texture();
     tile_overlay = terrain_->get_tile_overlay_texture();
     tile_overlay_tint = terrain_->get_tile_overlay_tint();
@@ -746,12 +714,6 @@ Dictionary FoliageDispatcher::get_frame_stats() const {
   result["native_detail_source"] = frame_stats_.native_detail_source;
   result["preview_detail_source"] = frame_stats_.preview_detail_source;
   result["path_blocker_available"] = frame_stats_.path_blocker_available;
-  result["surface_input_overrides"] = surface_input_overrides_;
-  result["surface_override_has_heightfield_normal"] =
-      override_heightfield_normal_.is_valid();
-  result["surface_override_has_tile_overlay"] =
-      override_tile_overlay_.is_valid();
-  result["surface_override_tile_tint"] = override_tile_overlay_tint_;
   result["authored_slots"] = authored_slot_count_;
   result["enabled_slots"] = enabled_slot_count_;
   result["disabled_slots"] = disabled_slot_count_;
@@ -1004,9 +966,7 @@ uint32_t FoliageDispatcher::_mask_for_palette_index(int p_index) const {
 
 Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,
                                            float p_world_z) const {
-  const bool runtime_mapping = terrain_data_.is_valid();
-  Ref<TerrainData> source =
-      runtime_mapping ? terrain_data_ : colormap_source_;
+  Ref<TerrainData> source = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
   if (source.is_null()) {
     return Vector2();
   }
@@ -1015,11 +975,8 @@ Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,
       colormap->get_height() <= 0) {
     return Vector2();
   }
-  const Vector2 atlas = runtime_mapping
-                            ? source->world_to_runtime_source_coords(p_world_x,
-                                                                      p_world_z)
-                            : source->world_to_source_coords(p_world_x,
-                                                             p_world_z);
+  const Vector2 atlas = source->world_to_runtime_source_coords(p_world_x,
+                                                                p_world_z);
   if (atlas.x < 0.0f || atlas.y < 0.0f) {
     return Vector2();
   }
@@ -1177,7 +1134,7 @@ void FoliageDispatcher::_apply_draw_list(
           StringName("u_instance_tile_cache_layer"), 0.0f);
       draw->set_instance_shader_parameter(
           StringName("u_instance_tile_cache_origin_span"), Vector4());
-      if (!surface_input_overrides_ && terrain_ != nullptr) {
+      if (terrain_ != nullptr) {
         const Vector2 center = foliage_detail_cell_center(command.cell_key);
         const std::optional<opennova::TerrainTilePageBinding> page =
             terrain_->get_tile_cache_binding_for_world_point_native(

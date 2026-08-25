@@ -1,9 +1,8 @@
 extends GutTest
 
-# Recently used resource directories, recorded in the shared editor/runtime config
-# by OnedSettings (the editor's own config; the runtime keeps its own). Mirrors terrain_editor_state_test.gd: snapshot and
-# restore ONED's config around each test, and use temp dirs under
-# OS.get_cache_dir() (outside the user-data dir, so is_valid_root accepts them).
+# Recently used resource directories live in ONED's own config; the game runtime
+# keeps separate state. Snapshot and restore ONED's config around each test, and use temp
+# directories outside user:// so resource-root validation accepts them.
 
 const STATE_CONFIG_PATH := OnedSettings.CONFIG_PATH
 const TEST_ROOT := "opennova_recent_dirs_test"

@@ -399,7 +399,7 @@ func _reconcile_join_expansion() -> bool:
 	if action == NetSessionPolicy.ACTION_KEEP:
 		return true
 	# Only a runtime mount layers expansion archives at all. A loose authoring root
-	# (an editor-managed --loose-root run mounts the loose authoring tree, ADR 0025;
+	# (an ONED-managed --loose-root run mounts the loose game-data tree;
 	# tests hand fixtures over) has no expansion
 	# to switch AND reports an empty installed set by construction, so it can neither honour
 	# the host's expansion nor prove it missing — every decision below is meaningless there.
