@@ -31,7 +31,7 @@ void append_pcap_global_header(std::vector<uint8_t> &out);
 
 // One DLT_RAW record: the pcap record header, then a synthetic IPv4 header
 // (with a real header checksum) and UDP header wrapping `payload`. IPs are
-// host-order (0x7F000001 == 127.0.0.1). A payload too large for a single
+// native byte order (0x7F000001 == 127.0.0.1). A payload too large for a single
 // unfragmented IPv4 datagram is dropped rather than truncated, so a reader
 // never sees a half record.
 void append_pcap_udp_record(std::vector<uint8_t> &out, uint32_t src_ip,
