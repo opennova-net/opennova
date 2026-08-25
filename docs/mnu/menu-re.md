@@ -581,6 +581,44 @@ FFmpeg dependency are gone. This first slice covers the shipped video-only
 `main.bik`, `header.bik`, and `footer.bik`; Bink audio and the separate
 blocking intro path remain deferred.
 
+**The decoder's witness** (2026-08-25, `binkw32.dll` 1.5u — a separate image
+from `Jointops.exe`, imagebase `0x30000000`, listing `binkw32_1_5u.asm`; every
+address in this paragraph is that image's unless marked). The per-frame entry
+is `BinkVideo_DecodeFrame @ 0x3001F260` (reached from `BinkDoFrame`), which
+decodes the Y, V, U planes through `BinkVideo_DecodePlane @ 0x3001D2C0`; the
+bundle readers, block decoders and residue walk in `engine/formats/bink/
+bink.cpp` are that function's inlined legs (its bundle callbacks are the
+`sub_3001C300` / `sub_3001C5E0` pointers, the tree reads `sub_3001C030` /
+`sub_3001C0A0`), and the IDCT is its callee `sub_3001F3E0 @ 0x3001F3E0` (the
+`0xB50` / `0xEC8` / `0x8A9` multipliers at its imul sites). The bitstream
+tables are the data at `0x3004AC48` (tree lengths), `0x3004AD50` (tree codes),
+`0x3004AE60` (coefficient scan), `0x3004AEA8` (spatial scans), `0x3004B2C0` /
+`0x3004D300` (intra / inter quantizers). **Colour conversion is the DLL's, not
+the game's**: `BinkVideoSlot_RenderFrameToTexture @ 0x567540` (Jointops.exe)
+calls `BinkCopyToBufferRect(handle, bits, pitch, h, 0, 0, flags | 0x80000000
+BINKCOPYALL) @ 0x5675b2` with the slot's surface code from the D3DFMT →
+BINKSURFACE table `@ 0x5679be..0x567a2b` (`D3DFMT_X8R8G8B8` (22) →
+`BINKSURFACE32` (3), the first `CheckDeviceFormat` hit `@ 0x567a61`; the 565 /
+555 / A8R8G8B8 / 4444 / 1555 rows follow). Inside the DLL
+`BinkCopyToBufferRect @ 0x30013220` calls `YUV_init(surface & 0xF) @
+0x30019F00` (the call `@ 0x30013365`) and dispatches the `YUV_blit_32bpp` table
+`dword_30064700` (`sub_30029270 @ 0x30029270` scalar, MMX twins). `YUV_init`
+builds the law the port's `yuv_to_rgb` reproduces: luma `dword_30059178[Y] =
+trunc(clamp(Y − 16, 0, 219) · 38154 / 32768)` (`imul 950Ah; cdq; and edx,
+7FFFh; add; sar 15` — a truncating divide; the MMX blits fold it as `(Y − 16
+sat) << 2`, `pmulhw 19077` (= 38154 / 2, `qword_30055040`) with the 16 in
+`qword_30055038`), and four chroma ramps in the same fixed point: `R += (V −
+128) · 52299 / 32768` (`dword_300632A8`), `G += −(V − 128) · 26639 / 32768`
+(`dword_30062AA8`) `+ −(U − 128) · 12837 / 32768` (`dword_30062EA8`), `B += (U
+− 128) · 66101 / 32768` (`dword_300626A8`), every channel clamped 0..255
+through the per-luma clamp rows `dword_30059998[Y]` (the MMX twins clamp with
+the `0x7F00` paddsw/psubusw pair). Consequences the port now carries: full-scale
+luma 235 lands on **254**, mid-grey (128, 128, 128) on 130, and the ramps are
+NOT BT.601's 298/409/100/208/516 with round-half-up (the previous
+implementation, replaced 2026-08-25; `bink` ctest pins nine (Y, U, V) triples).
+Byte order is the one device fold: retail packs `(R<<16)|(G<<8)|B` into the
+X8R8G8B8 dword, the port's frame is top-down RGBA8 with an opaque alpha.
+
 ## The custom-draw appearance hook (event 1) `[orig: CUIElement_DispatchCustomDrawEvent @ 0x647f10]` (grilled 2026-08-10)
 
 The 4th appearance pass builds `{widget, name, device L,T,R,B}` (ancestor
@@ -929,7 +967,7 @@ name via `KeyHelp_GetStringWithFallback("Text", "<KEY>", "!<Name>")` — `0` Nul
 `10` System, `11` Debug, `12` teammatemenu, `13` Spectator.
 
 **Population.** `UI_PopulateControlMappingList @ 0x55c0c0` finds the widget by name
-(`sub_63ae80(…, "CONTROL_MAPPING")`), clears it (`CTableWnd_RemoveRow(-1) @ 0x641a40`), and for the
+(`UI_FindScreenControl(…, "CONTROL_MAPPING") @ 0x63ae80`), clears it (`CTableWnd_RemoveRow(-1) @ 0x641a40`), and for the
 active device `dword_25db7d8` (`0` keyboard / `1` mouse / `2` joystick) inserts a row per entry
 (`table_insert_row @ 0x641c30`) and sets the cells (`@ 0x63edf0`). Each device has its own runtime
 binding array (kb `dword_25c7724` / mouse `byte_25c784c` / joy `byte_25c7740`).
@@ -1780,7 +1818,7 @@ serves player.mnu's PLAYER_INFO): filter = def valid && class mask && team mask
 (`populate_ammo_type_combo_boxes @ 0x564930`), resolves each parent name to its
 catalog index `@ 0x564A00..0x564A06`, routes it by the parent's category
 (`ACCESSORY` case 0 `@ 0x564B47`), selects that visible row by adm index via
-`sub_645240 @ 0x564B26..0x564B33`, and fills the ammo/type combos from it. It
+`UIList_SelectByValue @ 0x645240 (the calls @ 0x564B26..0x564B33)`, and fills the ammo/type combos from it. It
 does not reconstruct the selection from the expanded runtime weapon-slot table,
 then `update_weapon_weight_display @ 0x565640` renders STATIC_TOTAL_WEIGHT as
 `sprintf "%s %.1f %s (%s)"` = TOTAL_WEIGHT / `calculate_equipped_weapons_weight
