@@ -13,9 +13,8 @@ compile — the ADR 0033 R2 home of every element previously ported in
 the `HudPos`/`HudOverlay` GDExtension bindings (`godot/src/hud/` — the overlay
 keeps texture upload and draw-list rasterization only); the shell-side
 `godot/game/world/hud_sights_card.gd` (per-row blend child controls) fed with
-the overlay by `godot/game/world/game_hud_presenter.gd`; and the ONED preview
-workspace (`godot/modtools/hud/`, over the same `HudPos` statics plus the kept
-`godot/game/ui/hud_text.gd` FontFile preview helper). The 2026-06-22 session witnessed the
+the overlay by `godot/game/world/game_hud_presenter.gd`. The former ONED HUD
+preview was removed by ADR 0037. The 2026-06-22 session witnessed the
 core pipeline read-only; the 2026-07-09 session witnessed the weapon-coupled
 elements and ported them (the weapon FSM of net-re §5.62 supplies the live
 clip/reserve/ADS state); the 2026-07-11 re-grill (the extraction-train slice
@@ -54,7 +53,7 @@ end).
 | Virtual coordinate space (1024×768) | ported (`engine/runtime/hud/hud_math` — the virtual-coords scale) | `[orig: Viewport_ScaleToVirtualCoords @0x5d2b20]` exact formula; `hud_helpers_test.gd` |
 | Health bar | ported (`HudFrameCompiler::element_health` + `hud_math::health_color_band_fp16`) | `[orig: HUD_DrawHealthBar @0x5a2e50]` rect/fill/threshold-color; `hud_helpers_test.gd` thresholds |
 | Stance indicator + cross-fade (IDB-misnamed "compass") | ported (`HudFrameCompiler::element_stance` — frame draw, offsets, fade pair, prev/current state) | `[orig: HUD_DrawStanceIndicator @0x599f10]` full witness incl. fade pair + per-frame offsets; `hud_helpers_test.gd` fade curve |
-| HUD text + half-bright | ported (`engine/runtime/hud/game_font` — the CGameFont text engine; `godot/game/ui/hud_text.gd` survives as the ONED FontFile preview helper) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
+| HUD text + half-bright | ported (`engine/runtime/hud/game_font` — the CGameFont text engine) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
 | Ammo count + weapon name text | **ported** (`HudFrameCompiler::element_weapon_cluster` + `hud_math::format_ammo`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
 | Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`HudFrameCompiler::element_clip_indicator`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
 | Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
@@ -351,7 +350,7 @@ across `hud_stance.gd`/`hud_fade.gd`/`game_hud.gd`, deleted at the cutover).
   `[orig: @0x675566..0x675587]`; neither → `x` (left). (The 2026-07-09
   "the caller measures and subtracts" wording was wrong about the mechanism;
   the drawn result — right anchor = right edge, center anchor = midpoint —
-  is what `hud_text.gd` implements, unchanged.)
+  is what `engine/runtime/hud/game_font` implements.)
 - **Half-bright** = `(color >> 1) & 0x7F7F7F | 0xFF000000` — halve each RGB
   channel, force opaque alpha. All three alignment paths half-bright.
 - Fonts are `font_hi` / `font_lo` named in `hudpos.def` (`.fnt` bitmap fonts).

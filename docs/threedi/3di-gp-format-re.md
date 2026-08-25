@@ -355,9 +355,9 @@ D-3DI-2/D-WPN-28 in the divergence ledger.
 OED export now preserves the loader's structural rule for every style
 `> 0x70`: even a raw PANM style 114 reference is collected into CTRL and its
 local index is serialized before retail remaps it. `oed_export_3di_test` pins
-that behavior. The current editor generator catalog still does not offer PANM
-114–117 as authoring choices, so this is load/runtime/export fidelity, not a
-claim of retail OED UI parity for those unused PANM styles.
+that behavior. ONED no longer offers model authoring under ADR 0037, so this is
+load/runtime/export fidelity, not a claim of retail OED UI parity for those
+unused PANM styles.
 
 ---
 
@@ -650,7 +650,7 @@ fixture with extra_polys surfaces.
   (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). Every first-person
   arms model referenced by `Avatars.def` is 0x55; a 0x41 arms model renders as
   garbage in retail's first-person pass (observed live, 2026-08-17) while the
-  same model is fine in the world skinned pass. The ONED converter implements
+  same model is fine in the world skinned pass. The OED conversion path implements
   the witnessed rule over the D-RMAT-4-corrected descriptor rows
   (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`).
   Residual: the static path keys on `NORMAL_A|NORMAL_B` of the authored rows —

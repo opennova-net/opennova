@@ -8,15 +8,11 @@
 #include "terrain/nova_terrain_data.h"
 #include "terrain/nova_terrain.h"
 #include "terrain/nova_terrain_surface_inputs.h"
-#include "terrain/nova_terrain_builder.h"
-#include "terrain/nova_terrain_build_job.h"
 #include "terrain/nova_terrain_foliage_def.h"
 #include "terrain/nova_terrain_foliage_map.h"
-#include "terrain/nova_terrain_surface_map.h"
 #include "terrain/nova_foliage_dispatcher.h"
 #include "terrain/nova_terrain_tile_entry.h"
 #include "terrain/nova_terrain_tile_info.h"
-#include "terrain/nova_terrain_tile_overlay.h"
 #include "env/nova_env_keyframe.h"
 #include "env/env_file.h"
 #include "env/nova_color_smoother.h"
@@ -70,7 +66,6 @@
 #include "cbin/cbin_credits_resource.h"
 #include "cbin/nova_credits_player.h"
 #include "fnt/nova_fnt_resource.h"
-#include "editor/nova_edit_history.h"
 #include "rtxt/rtxt_string_file.h"
 #include "network/nova_world_client.h"
 #include "network/nova_world_host.h"
@@ -80,8 +75,6 @@
 #include "network/nova_net_session_policy.h"
 #include "util/nova_paths.h"
 #include "util/nova_process.h"
-#include "resource_index/nova_resource_index.h"
-#include "refs/nova_reference_index.h"
 #include "resource_index/nova_resource_root.h"
 #include "audio/nova_sbf_bank.h"
 #include "audio/nova_sbf_audio_stream.h"
@@ -106,15 +99,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TerrainData);
 	GDREGISTER_CLASS(Terrain);
 	GDREGISTER_CLASS(TerrainSurfaceInputs);
-	GDREGISTER_CLASS(TerrainBuilder);
-	GDREGISTER_CLASS(TerrainBuildJob);
 	GDREGISTER_CLASS(TerrainFoliageDef);
 	GDREGISTER_CLASS(TerrainFoliageMap);
-	GDREGISTER_CLASS(TerrainSurfaceMap);
 	GDREGISTER_CLASS(FoliageDispatcher);
 	GDREGISTER_CLASS(TerrainTileEntry);
 	GDREGISTER_CLASS(TerrainTileInfo);
-	GDREGISTER_CLASS(TerrainTileOverlay);
 	GDREGISTER_CLASS(EnvKeyframe);
 	GDREGISTER_CLASS(EnvFile);
 	GDREGISTER_CLASS(ColorSmoother);
@@ -154,7 +143,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WirePresentStats);
 	GDREGISTER_CLASS(WirePresentPass);
 	GDREGISTER_CLASS(Simulation);
-	GDREGISTER_CLASS(EditHistory);
 	GDREGISTER_CLASS(WacProgram);
 	GDREGISTER_CLASS(LwfData);
 	GDREGISTER_CLASS(WavLoader);
@@ -183,8 +171,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(ScarPresenter);
-	GDREGISTER_CLASS(ResourceIndex);
-	GDREGISTER_CLASS(ReferenceIndex);
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(SbfAudioStream);
 	GDREGISTER_CLASS(SbfAudioStreamPlayback);

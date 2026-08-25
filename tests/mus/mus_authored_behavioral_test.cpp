@@ -1,10 +1,8 @@
-/* Behavioral proof for EDITOR-AUTHORED programs.
+/* Behavioral proof for programs compiled from canonical MUS source text.
 
-   The visual editor only ever emits bytecode by compiling canonical .mus TEXT
-   (the exact forms mus_stmt_text.gd / the forms produce) through mus_compile.
-   The golden round-trip (mus_roundtrip_test) proves the compiler reproduces
-   DECOMPILED stock text; this proves the compiler's output for FRESHLY AUTHORED
-   constructs (play, if/else, on-switch + default, enter-transition, assign,
+   The golden round-trip (mus_roundtrip_test) proves that mus_compile reproduces
+   decompiled stock text. This test proves the compiler's output for newly
+   written constructs (play, if/else, on-switch + default, enter-transition, assign,
    inc/dec, method/volume) runs with the expected observable behavior on the VM
    (which the Tier-4 Unicorn differential proved == the original Jointops
    handlers). The companion mus_diff_jointops.py (local RE tooling; see docs/audio/mus-sbf-re.md) runs the SAME
@@ -45,9 +43,9 @@ static void hk_vol(void *u, int32_t left, int32_t /*right*/) {
     t->last_vol_left = left;
 }
 
-/* Compile authored TEXT, seed one var (idx<0 to skip), run `ticks` VM ticks,
+/* Compile source text, seed one var (idx<0 to skip), run `ticks` VM ticks,
    capture the observable event stream. Returns false if the text fails to
-   compile -- which would itself be an editor-can't-author-this bug. */
+   compile, which is itself a compiler regression. */
 static bool run_authored(const char *src, int var_idx, int32_t var_val,
                          int ticks, Trace *out) {
     MusScript script;
@@ -76,7 +74,7 @@ static bool run_authored(const char *src, int var_idx, int32_t var_val,
     return true;
 }
 
-/* --- if/else: the dominant conditional-play case authored by the if form --- */
+/* --- if/else: the dominant conditional-play source form --- */
 static const char *IF_SRC =
     "script t\n"
     "section Begin\n"
@@ -110,7 +108,7 @@ static void test_if_else_branch(void) {
     CHECK(!t.plays.empty() && t.plays[0] == 5, "Var01==0 takes the else-branch (play 5)");
 }
 
-/* --- on (selector) play t0 t1 t2 : the tablexec switch the on form authors --- */
+/* --- on (selector) play t0 t1 t2: the tablexec switch source form --- */
 static const char *SWITCH_SRC =
     "script t\n"
     "section Begin\n"
@@ -161,7 +159,7 @@ static void test_enter_transition_sequence(void) {
     CHECK(run_authored(TRANSITION_SRC, -1, 0, 8, &t), "transition-program compiles");
     CHECK(!t.error, "transition-program runs without VM error");
     // Begin->Loop->(done loops back to Begin), so plays cycle 1,2,1,2,...; assert
-    // the first two reflect the authored order.
+    // the first two reflect the source order.
     CHECK(t.plays.size() >= 2 && t.plays[0] == 1 && t.plays[1] == 2,
           "Begin plays 1, enters Loop, Loop plays 2");
     CHECK(t.section_count >= 1, "entering Loop fired on_section_entered");

@@ -259,14 +259,6 @@ struct MissionLogicSummary {
 	size_t diagnostic_count = 0;
 };
 
-// One row of an enum choice list (value + display name), produced by the *_types() reflectors below.
-// The reflectors probe the existing name-mapping switches in mission.cpp so a new enum value added to
-// bms.h shows up in the editor's dropdowns for free; entries the switch does not name are omitted.
-struct MissionEnumEntry {
-	int value = 0;
-	std::string name;
-};
-
 class MissionDocument {
 public:
 	MissionDocument();
@@ -389,23 +381,6 @@ public:
 	bool add_event(const MissionEventRecord &record, MissionEventRecord *out = nullptr);
 	bool remove_event(size_t index);
 	MissionLogicSummary logic_summary() const;
-
-	// Enum choice lists for the editor's type dropdowns, reflected from the name-mapping switches so they
-	// track bms.h. trigger_sub_types / action_sub_types are composite (the sub-type set depends on the
-	// main / action type), matching the engine's nested switch. event_flag_bits lists the EventFlags bits.
-	std::vector<MissionEnumEntry> trigger_main_types() const;
-	std::vector<MissionEnumEntry> trigger_sub_types(int main_type) const;
-	std::vector<MissionEnumEntry> action_types() const;
-	std::vector<MissionEnumEntry> action_sub_types(int action_type) const;
-	std::vector<MissionEnumEntry> event_flag_bits() const;
-	// Bitmask of every editor-exposed event flag (OR of the event_flag_bits values). The editor rebuilds
-	// an event's flags from these checkboxes only, so set_event must preserve the complementary (unmodeled
-	// / engine-internal) bits rather than clobber them. See MissionData::set_event.
-	int event_flag_mask() const;
-	// Per-entity AI attribute flags (bmsi_attributes), surfaced as inspector checkboxes. Lists only labeled
-	// author-facing bits; confirmed-but-unlabeled bits such as EngineRunning remain valid through the raw flag
-	// value but are not exposed as checkboxes.
-	std::vector<MissionEnumEntry> ai_attribute_flag_bits() const;
 
 	const bms::File &bms_file() const;
 	bms::File &bms_file();

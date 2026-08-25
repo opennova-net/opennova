@@ -4,7 +4,7 @@ Structure-mapping record for the original engine's **CBIN** obfuscated-text
 container (the format behind the credits `.kda`) — its 20-byte header, counted
 string table, and ROL32/XOR cipher. The reimplementation surface is `engine/formats/cbin`
 (`Header` / `encode_buffer` / `decode_buffer`, plus the Color/Justify display-view
-collapse/re-emit `credits_display_items` / `credits_entries_from_display` — editor-carried
+collapse/re-emit `credits_display_items` / `credits_entries_from_display` — tool-carried
 semantics with no `[orig]` witnesses yet, part of the PAR-R5 read-path gap) and the Godot
 credits player (`godot/src/cbin`). Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). This file is the committed home for the `D-CBIN`
@@ -76,8 +76,8 @@ D-CBIN-1's markup grill.
 
 ## Cross-references
 
-- Reimpl: `engine/formats/cbin` (`cbin.h`/`cbin.cpp`), `engine/base/refs/src/refs_cbin.cpp`,
-  `godot/src/cbin` (credits resource + player), the ONED credits editor.
+- Reimpl: `engine/formats/cbin` (`cbin.h`/`cbin.cpp`) and `godot/src/cbin`
+  (credits resource + player). ONED has no credits editor.
 - The one tracked credits divergence: `D-MNU-6` ([mnu/menu-re.md](../mnu/menu-re.md)).
 
 ## Ledger de-table transplants (2026-08-06)

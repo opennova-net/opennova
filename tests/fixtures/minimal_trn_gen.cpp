@@ -1,11 +1,9 @@
 // Generator + guard for the minimal map's .trn terrain config (mnml.trn). The
-// config ties the terrain set together: it names the .cpt polydata (produced by
-// the packaging step's build_terrain run) plus the source art the packaging
-// step authors (colormap/detailmaps/tilestrip TGAs, charmap/foliagemap PCX).
-// Authored from scratch by engine/formats/trn save_trn (no retail asset), modeled on
-// fixtures/godot/dvxi5/Dvxi5.trn for a small flat map. The heavy .cpt/tiles are
-// generate-at-package (not committed); this config IS committed + round-trip
-// guarded. See assets/README.md.
+// config ties the terrain set together: it names the committed .cpt polydata
+// and terrain art bundled by the minimal package (colormap/detailmap/tilestrip
+// TGAs and charmap/foliagemap PCXs). Generated from scratch with
+// engine/formats/trn save_trn (no retail asset), it models a small flat map
+// after fixtures/godot/dvxi5/Dvxi5.trn and is guarded by a round-trip check.
 //
 // Emit with OPENNOVA_WRITE_MINIMAL_FIXTURES=1; else guard the config loads and
 // carries the expected references.
@@ -32,13 +30,13 @@ int fail = 0;
 
 std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
-// The minimal flat map's terrain config. Names mirror the packaging step's
-// output prefix (mnml) so the .cpt build output and the authored art line up.
+// The minimal flat map's terrain config. Its mnml prefix matches the committed
+// polydata and terrain art bundled by minimal_pff_package.
 TrnConfig build_config() {
 	TrnConfig c;
 	c.name = "mnml";
-	c.polydata = "mnml.cpt";       // build_terrain output (generate-at-package)
-	c.colormap = "mnml_c.tga";     // authored source art (packaging step)
+	c.polydata = "mnml.cpt";       // committed baked polydata
+	c.colormap = "mnml_c.tga";     // committed terrain art
 	c.detailmap = "mnml_dm.tga";
 	c.detailmap_c1 = "mnml_dc1.tga";
 	c.detailmap_c2 = "mnml_dc2.tga";
@@ -60,8 +58,7 @@ TrnConfig build_config() {
 	c.water_height = 0;
 	// The 2x2 quadrant block at rows/cols 3-4, addressing the four quadrants of the
 	// 1024x1024 heightmap atlas (COORDS_ATLAS_SIZE). Byte-identical to the grid in
-	// fixtures/godot/dvxi5/Dvxi5.trn and to ONED's DEFAULT_SECTOR_PATTERN
-	// (godot/modtools/terrain/terrain_editor.gd), which is the retail-shaped layout.
+	// fixtures/godot/dvxi5/Dvxi5.trn, preserving its retail-shaped layout.
 	c.sector_grid[3][3] = 1;
 	c.sector_grid[3][4] = 3;
 	c.sector_grid[4][3] = 2;

@@ -5,9 +5,9 @@ GDExtension classes binding `engine/` to Godot. Register new classes in
 `register_types.cpp`. ADR 0035 supersedes ADR 0033's callback-bus design: a
 line here earns its place only as a device leg (marshalling, nodes, servers,
 input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
-Godot's `GameFramePipeline`, a Resource-shaped ONED document surface, or a
-documented seam bridge — format/runtime logic and every witnessed behavior
-belong in `engine/`. Nova formats never touch Godot's resource system
+Godot's `GameFramePipeline`, or a documented seam bridge — format/runtime logic
+and every witnessed behavior belong in `engine/`. Nova formats never touch
+Godot's resource system
 (documents self-read/write via `load_from_path`/`save_to_path`). The
 two `adapter_cpp_orig_cites_*` ratchets are the transition gauge, split by
 population (2026-08-11): `_pushdown` (simulation/, object/, mission/) is
@@ -34,8 +34,8 @@ The game-level GDScript runtime (world, debug, mission, object, terrain,
 ui, avatar, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
 there that is really engine behavior is the C++ rewrite queue.
 
-Placement rule: no GDScript here, ever. Scripts go to `godot/game/` (game
-level) or `godot/modtools/` (editor-only).
+Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`;
+ONED scripts go to `godot/modtools/`.
 
 Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,
 `cpp_binding_console_writes`): a failure the caller already receives through the
@@ -45,7 +45,7 @@ invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
 F3 overlay/stats system, and `engine/` diagnostics ride the `io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping
-code; CLI tool drivers (screenshot_capture) are the allowlisted exception.
+code.
 
 Gotchas:
 

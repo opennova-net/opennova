@@ -1,12 +1,9 @@
 # opennova_formats — every NovaLogic format parser/writer (one directory per
 # format, ADR 0024), built as one STATIC group target (Shape A).
 #
-# GUARDRAIL (non-negotiable): the mission FORMAT half — .mis/.bms parse+write,
-# schema, authoring, the C ABI — belongs to THIS group. Without that
-# assignment there is no acyclic 4-group partition: base/refs -> the mission
-# format while runtime/simassets -> base/resource_index would cycle base and
-# runtime. Since ADR 0030 the directory matches the fold
-# (engine/formats/mission); the runtime half stays engine/runtime/mission.
+# The mission FORMAT half — .mis/.bms parse+write, document edits, and the C
+# ABI — belongs to this group. Event evaluation, promotion, and boot stay in
+# engine/runtime/mission.
 
 add_library(opennova_formats STATIC
     # adm — .adm animation definition map (anim slots -> .bad clip variant rings)
@@ -41,8 +38,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_items.cpp    # ITEMS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_scan.cpp     # the shared .def text scanner
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_weapons.cpp  # WEAPONS.DEF
-    # dep — the raw 1024x1024 u16 depth-buffer bake intermediate (Output.dep)
-    ${CMAKE_CURRENT_SOURCE_DIR}/dep/dep.cpp
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp
@@ -55,12 +50,11 @@ add_library(opennova_formats STATIC
     # lwf — sound profiles (+ the .wav payload decode the profiles reference)
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/lwf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/wav_pcm.cpp
-    # mission — .bms/.mis missions: document model, schema reflection,
-    # authoring edits, and the flat C ABI. Standalone (no world/runtime
-    # dependency); the runtime half — event runtime, promotion, boot — lives
-    # in engine/runtime/mission, both exposing <mission/...> with disjoint
-    # header sets (the ADR 0029 acyclicity fold; directory home since
-    # ADR 0030).
+    # mission — .bms/.mis missions: document model, parsers/writers, edit
+    # helpers, and the flat C ABI. Standalone (no world/runtime dependency);
+    # the runtime half — event runtime, promotion, boot — lives in
+    # engine/runtime/mission, both exposing <mission/...> with disjoint header
+    # sets (the ADR 0029 acyclicity fold; directory home since ADR 0030).
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/authoring.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission.cpp          # MissionDocument — the document and its edit operations
@@ -68,8 +62,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_names.cpp    # BMS event-logic enum display names
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_records.cpp  # bms:: structs <-> typed editor records
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_schema.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_records.cpp  # bms:: structs <-> typed mission records
     # mns — menu stylesheet
     ${CMAKE_CURRENT_SOURCE_DIR}/mns/mns.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mns/mns_document.cpp
@@ -82,8 +75,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_decompile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_vm.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_model.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_ast.cpp
     # oed — the OED project/convert/export pipeline
     ${CMAKE_CURRENT_SOURCE_DIR}/oed/oed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/oed/convert_internal.cpp
@@ -131,12 +122,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_foliage_blocker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_overlay_bake.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_tsd.cpp
-    # tpj — terrain project
-    ${CMAKE_CURRENT_SOURCE_DIR}/tpj/tpj_io.cpp
-    # tpm — TPM1 terrain tile mesh (.tml/.tms; magic-shaped name, precedent
-    # bfc1). packing.{h,cpp} are the on-disk index codecs, src-private.
-    ${CMAKE_CURRENT_SOURCE_DIR}/tpm/mesh_data.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/tpm/packing.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_io.cpp
     # wac — the WAC scripting language front end: lexer, parser/AST, the command

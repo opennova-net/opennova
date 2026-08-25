@@ -19,7 +19,7 @@ class ResourceRoot;
 
 // GDExtension wrapper over opennova::lwf (engine/formats/lwf). Parses a NovaLogic .lwf
 // sound-profile and exposes its Sound Set -> Layer -> Member hierarchy as an
-// editable Godot Array-of-Dictionary tree for the ONED sound workspace.
+// editable Godot Array-of-Dictionary tree for format tooling.
 //
 // Save fidelity: the original bytes are retained; an open->save with NO edits
 // writes them verbatim (byte-exact). Once edited, save re-normalizes the tree

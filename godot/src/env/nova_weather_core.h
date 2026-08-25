@@ -65,7 +65,7 @@ public:
 	void trigger_lightning_short();
 	void trigger_lightning_long();
 
-	// The outdoor iris exposure sample (no-world editor-preview fallback for
+	// The outdoor iris exposure sample (no-world fallback for
 	// the marched form below) — env::WeatherCore::set_exposure_from_outdoor_iris.
 	void set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center);
 

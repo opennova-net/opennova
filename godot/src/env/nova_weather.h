@@ -40,7 +40,7 @@ public:
 
 	// The marched iris-exposure samples (D-RLIT-2): the in-world shell stamps
 	// three per-sample classification codes each frame; empty keeps the
-	// outdoor fallback sample (editor previews with no world).
+	// outdoor fallback sample when no world supplies classification codes.
 	void set_iris_samples(const PackedInt32Array &p_samples);
 	PackedInt32Array get_iris_samples() const;
 

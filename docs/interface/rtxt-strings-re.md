@@ -4,8 +4,8 @@ Reverse-engineering record for NovaLogic's RTXT string-table format and the
 TextResource runtime that consumes it, grilled against retail
 `Jointops.exe` (Joint Operations: Combined Arms, kong IDB) on 2026-06-09.
 Reimplementation: `engine/formats/rtxt` (format), `godot/src/rtxt` (RtxtStringFile
-resource), `godot/game/strings/nova_strings.gd` (runtime model),
-`godot/modtools/strings` (ONED workspace).
+resource), and `godot/game/strings/nova_strings.gd` (runtime model). The former
+ONED Strings workspace was removed by ADR 0037.
 
 Ground truth: all 98 RTXT-magic `.bin` files in the retail install
 (language.pff) sweep clean through the invariants and byte-roundtrip below
@@ -113,7 +113,7 @@ accents). `engine/formats/rtxt` treats text as raw bytes (no transcoding);
 `RtxtStringFile` decodes UTF-8 when the bytes are valid UTF-8, cp1252
 otherwise, and re-encodes edited strings to cp1252 whenever every character
 fits — pinned losslessly on retail data by
-`godot/tests/strings_editor_test.gd::test_retail_fixture_cp1252_survives_string_roundtrip`.
+`tests/rtxt/real_parity_test.cpp`, including the cp1252 `00tra.bin` fixture.
 
 ## Divergences (D-RTXT-N)
 
@@ -136,14 +136,13 @@ byte-for-byte, and the lookup/marker semantics mirror the witnessed functions.
 The remaining deliberate differences are D-RTXT-4 (strictness) and the
 unconsumed `packed_xy` field (no witnessed reader; preserved opaquely).
 
-Leads deferred to the menu/mission workspaces: the `CUIStringTable` per-file
-cache (menu workspace), per-mission `<mission>.bin` + `medmssn.bin` loading and
-WAC `Triggered Text` wiring (mission runtime), expansion override loading from
-`Expansion_LoadAssets`.
+Remaining integration leads are the `CUIStringTable` per-file cache,
+per-mission `<mission>.bin` + `medmssn.bin` loading and WAC `Triggered Text`
+wiring, and expansion override loading from `Expansion_LoadAssets`.
 
 ## Test inventory
 
 - `tests/rtxt/{roundtrip,byte_equal,lookup,strip_hotkey,empty,section_lookup}_test.cpp` — unit behaviour
 - `tests/rtxt/real_parity_test.cpp` — committed retail fixtures: raw-byte format invariants + byte roundtrip
 - `tests/rtxt/jo_install_sweep_test.cpp` — full-install sweep (`OPENNOVA_JO_DIR`)
-- `godot/tests/strings_editor_test.gd`, `strings_workspace_test.gd`, `nova_strings_test.gd` — editor model, shell seams, runtime registry
+- `godot/tests/nova_strings_test.gd` — runtime registry integration

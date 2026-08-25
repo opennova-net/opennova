@@ -1,13 +1,9 @@
 class_name ConfigStore
 extends RefCounted
 
-## The one load-modify-save helper behind every user:// ConfigFile store
-## (resource dir, MCP, NovaWorld client, player profile). Each caller keeps its
-## own path/section/keys and domain rules; this owns only the disk protocol —
-## a read never fails (missing file = defaults), a write always preserves the
-## other sections of a SHARED file (resource_dir_settings and mcp_settings
-## each own a file: ONED user://oned.cfg, the runtime user://opennova.cfg,
-## and the agent servers user://mcp.cfg).
+## The load-modify-save helper behind the small user:// ConfigFile stores used
+## by ONED, the game runtime, and the NovaWorld client. Each caller owns its path,
+## section, keys, and domain rules; this class owns only the disk protocol.
 
 
 ## The stored value, or `default` when the file or key is absent.

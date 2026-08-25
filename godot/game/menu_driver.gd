@@ -43,8 +43,6 @@ var _text: RtxtStringFile
 var _menu_file := ""
 var _music_director: MusicDirector = null
 var _music_var_index := 0
-var _edit_mode := false          # authoring preview: no audio/cursor/director
-var _interactive_preview := false # ONED play mode: quit/url/cross-file inert
 
 var _current_screen := ""
 var _nav_stack: PackedStringArray = []
@@ -90,14 +88,6 @@ func set_music_director(director: MusicDirector) -> void:
 
 func set_music_var_index(index: int) -> void:
 	_music_var_index = index
-
-
-func set_edit_mode(enabled: bool) -> void:
-	_edit_mode = enabled
-
-
-func set_interactive_preview(enabled: bool) -> void:
-	_interactive_preview = enabled
 
 
 func get_frame() -> MenuFrame:
@@ -208,27 +198,8 @@ func pop_screen() -> bool:
 		var prev := _nav_stack[_nav_stack.size() - 1]
 		_nav_stack.resize(_nav_stack.size() - 1)
 		return show_screen(prev)
-	if not _interactive_preview:
-		quit_requested.emit()
+	quit_requested.emit()
 	return false
-
-
-## Screen switch without signals/music (the property-setter semantics the
-## ONED canvas uses for author-mode screen selection).
-func set_current_screen(name: String) -> bool:
-	if _doc == null or not _screen_ids.has(name.to_upper()):
-		return false
-	close_active_combo_popup()
-	_set_current_screen_internal(name)
-	return true
-
-
-func clear_navigation_stack() -> void:
-	_nav_stack = []
-
-
-func get_nav_stack_depth() -> int:
-	return _nav_stack.size()
 
 
 func _set_current_screen_internal(name: String) -> void:
@@ -247,7 +218,7 @@ func _on_screen_shown() -> void:
 	if screen_id >= 0 and _doc.get_screen_has_music_var(screen_id):
 		music_var = _doc.get_screen_music_var(screen_id)
 	music_changed.emit(music_var)
-	if not _edit_mode and _music_director != null:
+	if _music_director != null:
 		_music_director.set_var(_music_var_index, music_var)
 
 
@@ -288,8 +259,7 @@ func _seed_marquee_widgets() -> void:
 			continue
 		var credits := CbinCreditsResource.from_cbin_bytes(bytes)
 		if credits != null:
-			_credits.mount(_frame, int(id), widget_frame_rect(int(id)),
-					credits, not _edit_mode)
+			_credits.mount(_frame, int(id), widget_frame_rect(int(id)), credits, true)
 			continue
 		var text := bytes.get_string_from_ascii()
 		var index := _frame_index(int(id))
@@ -749,9 +719,6 @@ func _apply_cursor(texture: Texture2D) -> void:
 	# The retail cursor rides the claim as the OS custom cursor — the ONE
 	# live cursor (both drawn showed the compiled one trailing by a pump
 	# frame; emit_cursor stays for surfaces without an OS cursor).
-	# Suppressed while authoring so ONED keeps the editor cursor.
-	if _edit_mode:
-		return
 	Input.set_custom_mouse_cursor(texture, Input.CURSOR_ARROW)
 
 
@@ -978,7 +945,7 @@ func _emit_edit_changed(id: int) -> void:
 ## input handled). Order matches the Control tree: focused edit first, then
 ## the virtual-key hotkey scan, then the character scan.
 func handle_key_input(event: InputEventKey) -> bool:
-	if _edit_mode or event.is_echo() or not event.is_pressed():
+	if event.is_echo() or not event.is_pressed():
 		return false
 	if _frame == null or not _frame.is_configured():
 		return false
@@ -1092,21 +1059,17 @@ func dispatch_action_row(action: Dictionary) -> bool:
 			var file := String(action.get("file", ""))
 			if file.is_empty() or file.nocasecmp_to(_menu_file) == 0:
 				return navigate_to_screen(target)
-			if _interactive_preview:
-				return true
 			menu_requested.emit(file, target)
 			return true
 		"pop", "pop_screen":
 			pop_screen()
 			return true
 		"quit", "quit_game":
-			if not _interactive_preview:
-				quit_requested.emit()
+			quit_requested.emit()
 			return true
 		"url":
-			if not _interactive_preview:
-				url_requested.emit(target)
-				shell_action_requested.emit(type, action)
+			url_requested.emit(target)
+			shell_action_requested.emit(type, action)
 			return true
 		"tab":
 			# TAB selects the named focus target; the compiled path focuses
@@ -1121,8 +1084,7 @@ func dispatch_action_row(action: Dictionary) -> bool:
 			return true
 		_:
 			if SHELL_ACTION_TYPES.has(type):
-				if not _interactive_preview:
-					shell_action_requested.emit(type, action)
+				shell_action_requested.emit(type, action)
 				return true
 	return false
 
@@ -1169,11 +1131,10 @@ func _play_widget_sound_state(id: int, state_token: String) -> void:
 		return
 
 
-## Direct play seam (voice preview etc.); emits sound_requested always, plays
-## unless authoring.
+## Direct play seam (voice preview etc.); emits sound_requested always.
 func play_widget_sound(trigger: String, file: String) -> void:
 	sound_requested.emit(file, trigger)
-	if _edit_mode or _audio == null:
+	if _audio == null:
 		return
 	_audio.play_widget_sound(trigger, file)
 

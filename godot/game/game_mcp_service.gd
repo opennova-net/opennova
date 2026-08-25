@@ -1,10 +1,10 @@
 class_name GameMcpService
 extends Node
 
-## Ephemeral runtime MCP service for an editor-managed game process. A normal
+## Ephemeral runtime MCP service for an explicitly debug-launched game process. A normal
 ## standalone game never starts it: both an opaque run id and an explicit
 ## descriptor path must be present. The descriptor is the one-way readiness
-## handshake ONED watches before connecting its stable MCP proxy.
+## handshake a trusted loopback client can watch before connecting.
 
 const RUN_ID_ARG := "--oned-run-id"
 const DESCRIPTOR_ARG := "--oned-run-descriptor"
@@ -69,7 +69,7 @@ func setup_from_metadata(adapter: GameMcpAdapter, metadata: Dictionary) -> Error
 	server.server_name = "opennova-game"
 	server.server_title = "OpenNova Game Runtime"
 	server.instructions = (
-			"Inspect and control the editor-launched real game. For visual parity, "
+			"Inspect and control the debug-launched real game. For visual parity, "
 			+ "wait until MainGame.is_world_loading() is false and a gameplay camera "
 			+ "is current, inspect game_render_diagnostics, then use "
 			+ "game_capture_bundle for a lossless PNG and correlated JSON sidecar.")
@@ -96,7 +96,7 @@ func is_running() -> bool:
 	return server != null and server.is_running()
 
 
-## Reserved editor-to-child control: retire only the ephemeral debug listener.
+## Reserved client-to-child control: retire only the ephemeral debug listener.
 ## The MainGame node and game process continue running untouched.
 func request_endpoint_shutdown() -> void:
 	if _shutdown_requested:

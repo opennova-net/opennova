@@ -1,13 +1,11 @@
 #include "mission/mission.h"
 
-// MissionDocument: the editable in-memory mission and every operation the editor
-// performs on it. The .mis text form, the enum name tables, the typed-record
-// conversions and the flat C ABI each live in their own TU beside this one
-// (quality campaign W3-1); this file is the document itself.
+// MissionDocument: the in-memory mission and its mutation operations. The .mis
+// text form, typed-record conversions, and flat C ABI each live in their own TU
+// beside this one (quality campaign W3-1); this file is the document itself.
 
 #include "mission_detail.h"
 #include "mission_mis.h"
-#include "mission_names.h"
 #include "mission_records.h"
 
 #include <algorithm>
@@ -1322,100 +1320,6 @@ MissionLogicSummary MissionDocument::logic_summary() const {
 		}
 	}
 	return out;
-}
-
-namespace {
-
-// True when a name-mapping switch named the probed value (anything other than the "Unknown(N)" fallback
-// from unknown_label). The reflectors below keep only named values, so the dropdowns track bms.h.
-bool is_named_enum_value(const std::string &name) {
-	return name.rfind("Unknown(", 0) != 0;
-}
-
-} // namespace
-
-std::vector<MissionEnumEntry> MissionDocument::trigger_main_types() const {
-	std::vector<MissionEnumEntry> out;
-	for (int value = 0; value <= 15; ++value) {
-		std::string name = trigger_main_type_name(value);
-		if (is_named_enum_value(name)) {
-			out.push_back({value, name});
-		}
-	}
-	return out;
-}
-
-std::vector<MissionEnumEntry> MissionDocument::trigger_sub_types(int main_type) const {
-	std::vector<MissionEnumEntry> out;
-	// Sub-type values are non-contiguous (e.g. SingleTriggerType jumps 17 -> 42); probe wide and keep
-	// the named ones so the editor lists exactly the engine's accepted sub-types for this main type.
-	for (int value = 0; value <= 63; ++value) {
-		std::string name = trigger_sub_type_name(main_type, value);
-		if (is_named_enum_value(name)) {
-			out.push_back({value, name});
-		}
-	}
-	return out;
-}
-
-std::vector<MissionEnumEntry> MissionDocument::action_types() const {
-	std::vector<MissionEnumEntry> out;
-	for (int value = 0; value <= 63; ++value) {
-		std::string name = action_type_name(value);
-		if (is_named_enum_value(name)) {
-			out.push_back({value, name});
-		}
-	}
-	return out;
-}
-
-std::vector<MissionEnumEntry> MissionDocument::action_sub_types(int action_type) const {
-	std::vector<MissionEnumEntry> out;
-	for (int value = 0; value <= 63; ++value) {
-		std::string name = action_sub_type_name(action_type, value);
-		if (is_named_enum_value(name)) {
-			out.push_back({value, name});
-		}
-	}
-	return out;
-}
-
-std::vector<MissionEnumEntry> MissionDocument::event_flag_bits() const {
-	// The three author-facing event flags, matching the DFX2 editor's checkboxes exactly. Shipped missions
-	// also use internal bits 0x10/0x20; set_event preserves those while editing only the checkbox mask.
-	// [orig: Med_EventDialogPopulate @0x411690 (CheckDlgButton 4203/4212/4213),
-	// Med_EventDialogCommit @0x4118d0 (sets bits 0/1/2 only). dfx2med.exe]
-	return {
-			{static_cast<int>(bms::EventFlags::ResetAfter), "Reset after"},
-			{static_cast<int>(bms::EventFlags::PreMission), "Pre-mission"},
-			{static_cast<int>(bms::EventFlags::PostMission), "Post-mission"},
-	};
-}
-
-int MissionDocument::event_flag_mask() const {
-	return static_cast<int>(bms::kEventAuthorFlagMask);
-}
-
-std::vector<MissionEnumEntry> MissionDocument::ai_attribute_flag_bits() const {
-	// Author-facing AI attribute flags (bmsi_attributes). Labels confirmed against the DFX2 object-properties
-	// dialog (Med_ObjectPropertiesDialog @0x4096d0; label table @0x5b1c84: BLIND / GUARDING / MULTIPLAYER /
-	// INDESTRUCTABLE / NAVIGATION_WAYPT / REFLECTIVE / ...). EngineRunning is accepted because it appears in
-	// shipped missions, but its editor label is not pinned, so it is intentionally omitted from checkboxes.
-	return {
-			{static_cast<int>(bms::BmsiAttributeFlags::Blind), "Blind"},
-			{static_cast<int>(bms::BmsiAttributeFlags::Guarding), "Guarding"},
-			{static_cast<int>(bms::BmsiAttributeFlags::RemoveIfLessThan), "Remove if fewer than"},
-			{static_cast<int>(bms::BmsiAttributeFlags::RemoveIfMoreThan), "Remove if more than"},
-			{static_cast<int>(bms::BmsiAttributeFlags::Multiplayer), "Multiplayer only"},
-			{static_cast<int>(bms::BmsiAttributeFlags::Berserk), "Berserk"},
-			{static_cast<int>(bms::BmsiAttributeFlags::FlyingOrganic), "Flying"},
-			{static_cast<int>(bms::BmsiAttributeFlags::Coward), "Coward"},
-			{static_cast<int>(bms::BmsiAttributeFlags::AdvancedAmmo), "Advanced ammo"},
-			{static_cast<int>(bms::BmsiAttributeFlags::Indestructible), "Indestructible"},
-			{static_cast<int>(bms::BmsiAttributeFlags::NavigationWaypoint), "Navigation waypoint"},
-			{static_cast<int>(bms::BmsiAttributeFlags::Reflective), "Reflective"},
-			{static_cast<int>(bms::BmsiAttributeFlags::NoShadow), "No shadow"},
-	};
 }
 
 const bms::File &MissionDocument::bms_file() const {

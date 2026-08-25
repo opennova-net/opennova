@@ -37,7 +37,7 @@ appear in tracked docs:
 | `ModSuperOed.exe` | NovaLogic's original mod-tools OED, the 3DI exporter (32-bit PE) | the 3DI3 wire format and its writers: [3di-gp-format-re.md](threedi/3di-gp-format-re.md); also the ground-truth comparator (§5 below) |
 | `dfvas.exe` | Delta Force: Black Hawk Down affiliate build | GP-era runtime `.3di` loaders: [3di-gp-format-re.md](threedi/3di-gp-format-re.md) |
 | `jodemo.exe` | the JO demo | historical citations only — the env grill re-anchored every jodemo-era address to retail ([env-tod-re.md](env/env-tod-re.md), atmosphere-parity appendix) |
-| `TrnGen.exe` | NovaLogic's terrain build tool (heightmap → `.trn`/`.tml`/`.tms`) | the byte-identical terrain-build ports: [terrain-re.md](terrain/terrain-re.md), `engine/formats/tpm` + the terrain builder |
+| `TrnGen.exe` | NovaLogic's terrain build tool (heightmap → `.trn`/`.tml`/`.tms`) | historical bake research retained in [terrain-re.md](terrain/terrain-re.md); the editor-love hard cut removed OpenNova's legacy terrain builder |
 | `ParticleEdit_v1_1.exe` | NovaLogic's `.ptl` particle editor | `.ptl` semantics: [ptl-format-re.md](particles/ptl-format-re.md) (`engine/formats/particle`) |
 | `Dflw.exe` | the Delta Force: Land Warrior executable | LW-era `.3di` loaders: [3di-lw-format-re.md](threedi/3di-lw-format-re.md) |
 
@@ -124,8 +124,9 @@ appear only where a record says so. Known scales, each owned by its record:
 Assets reference each other **by name, by convention**: a `.3di` points at its
 textures, a `.def` points at a `.3di` and its `.bad` animations, a mission points at
 definitions ([GOALS.md](../GOALS.md)). Honoring those conventions instead of
-hardcoding is the project's second pillar; modeling them as an asset dependency
-graph is the editor's long-term aim (same doc).
+hardcoding is the project's second pillar. Format tools write the canonical files
+directly, and the runtime resolves their names without an editor-owned project or
+asset database (same doc; [ADR 0037](adr/0037-oned-runs-game-data.md)).
 
 ### Wire format / network compatibility
 
@@ -220,9 +221,9 @@ Order of operations when you need an engine truth:
 5. **Runtime introspection:**
    - The debug overlay (F3 in the standalone game): Entities/Sim/Vars/Perf
      tabs, sim transport (play/pause/step), and mission-variable writes —
-     `godot/game/debug/nova_debug_overlay.gd`. ONED launches that same game
-     with F5, or its current saved loose mission with F6; it has no embedded
-     mission preview or debug overlay.
+     `godot/game/debug/nova_debug_overlay.gd`. ONED's Run OpenNova loose action
+     launches that same standalone game against the selected data directory;
+     ONED has no embedded preview or debug overlay.
    - `Simulation` introspection: `get_present_snapshot()`,
      `get_entity_debug(index)`, `get_fired_events_snapshot()`, `get_wac_state()`,
      and the mission/global/music variable snapshots.

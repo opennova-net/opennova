@@ -5,8 +5,8 @@ file `Jointops.exe` demands by literal name to boot to the main menu and to
 start a mission, with the witnessed failure behavior for each. This defines
 "what a person starts with to make a new game" — the source of truth for the
 ENG-6 engine-side manifest (Wave 2: a table in `engine/` near gameprofile that
-BOTH the game's boot validation and ONED's diagnostics consume) and for the
-ONED REQ conveniences (missing-required diagnostics, the "new game" scaffold).
+the game's boot validation consumes) and for the repository's minimum game-data
+tree.
 
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`, imagebase
 0x400000) — all addresses below are that binary's. Produced by a read-only
@@ -64,7 +64,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `charattr.def` | boot (soft) | [orig: Game_Run @ 0x4a7fe3 → CharAttr_LoadFromDef @ 0x412140] | missing → `_errlog.txt` "Server ERROR! Could not load charattr definitions.", continues |
 | `loading.pcx` | boot (soft) | [orig: Game_ShowLoadingScreen @ 0x4a544f] | graceful texture-miss pattern (not stepped through) |
 | `admin.cfg` | optional-fallback | [orig: CAdminServer_LoadConfig @ 0x406d80; callsite @ 0x4a72c2] | silent skip |
-| `*.bms` (loose walk + per-archive entry walk); `*.npj` + `*.npz` | boot (mission list) | [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 (loose `FindFirstFile`); Mission_BuildMapListFromPFF @ 0x562910 (the localres/language volumes)] | none found → empty mission list. The list is built from the `.bms` the two scans SEE: the loose `FindFirstFile *.bms` walk of the working directory (rows marked `*`, entry+4380) and the per-archive entry walk, which visits the localres/language volumes only — **a `.bms` archived in `resource.pff` mounts and loads by name yet never lists** (witnessed 2026-08-23: the menu simply empty, no error). Retail keeps its own where the walk looks: all 116 stock JO `.bms` live in `localres.pff` (none in resource.pff), and the `<stem>.bin` each is paired with for the title resolves through the ordinary by-name front door (88 of them in `language.pff`). ONED's packer names its single archive `localres.pff` for exactly this reason (`godot/modtools/editor/editor_game_packer.gd`). No shipped JO archive carries a `.npj`/`.npz`, and those legs are unported (`engine/runtime/mission/mission_catalog.h`). |
+| `*.bms` (loose walk + per-archive entry walk); `*.npj` + `*.npz` | boot (mission list) | [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 (loose `FindFirstFile`); Mission_BuildMapListFromPFF @ 0x562910 (the localres/language volumes)] | none found → empty mission list. The list is built from the `.bms` the two scans SEE: the loose `FindFirstFile *.bms` walk of the working directory (rows marked `*`, entry+4380) and the per-archive entry walk, which visits the localres/language volumes only — **a `.bms` archived in `resource.pff` mounts and loads by name yet never lists** (witnessed 2026-08-23: the menu simply empty, no error). Retail keeps its own where the walk looks: all 116 stock JO `.bms` live in `localres.pff` (none in resource.pff), and the `<stem>.bin` each is paired with for the title resolves through the ordinary by-name front door (88 of them in `language.pff`). The release packer names its single archive `localres.pff` for exactly this reason. No shipped JO archive carries a `.npj`/`.npz`, and those legs are unported (`engine/runtime/mission/mission_catalog.h`). |
 | `hiscore.txt` | optional-fallback | [orig: HUD_LoadHighScoreText @ 0x5630e5] | silent skip |
 
 ### Main menu (Menu_InitShellResources enter)
@@ -140,9 +140,6 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
 - `godot/game/main_game.gd` loads `hudpos.def` by the retail literal; ours
   warns on missing where retail silently skips — a host-side diagnostic on
   the same non-fatal behavior, not a divergence.
-- `godot/modtools/tools/screenshot_capture.gd` seed list: `main.mnu` ✓,
-  `hudpos.def` ✓; its `jo_gamemus.bin` is a fixture rename, not an engine
-  name.
 - Boot validation itself (refusing/erroring on the fatal set the way retail
   does) is the ENG-6 Wave-2 manifest deliverable, not a divergence row: the
   honest missing-resource errors land with the manifest table.
@@ -174,5 +171,5 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
   own gate), and the game shell raises honest missing-resource errors at
   mount (`main_game.gd`, reported-not-enforced — the picker flow keeps a
   partial dir inspectable where retail MessageBox-exits). Edits to this
-  record and the table land in the same change. ONED's diagnostics/new-game
-  scaffold conveniences over the same table remain ONED-REQ (Wave 3).
+  record and the table land in the same change. ADR 0037 retired the former
+  ONED diagnostics/new-game-scaffold plan.

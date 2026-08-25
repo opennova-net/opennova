@@ -5,8 +5,7 @@ extends RefCounted
 ##
 ##  - capture(): the GPU part — wait for a drawn frame (raced against a frame
 ##    budget so a minimized window or stalled renderer errors instead of
-##    hanging; headless fast-fails), then read the viewport texture. Mirrors
-##    the production pattern in modtools/tools/screenshot_capture.gd.
+##    hanging; headless fast-fails), then read the viewport texture.
 ##  - encode(): the pure-CPU part — optional crop, downscale, WebP encode with
 ##    PNG fallback, and an oversize retry — kept separate so headless tests
 ##    exercise it with constructed images.
@@ -34,7 +33,7 @@ static func capture(
 	if _cancel_requested(cancel_requested):
 		return { "ok": false, "error": "Screenshot capture was cancelled." }
 	if DisplayServer.get_name() == "headless":
-		return { "ok": false, "error": "No rendering in headless mode — screenshots need the windowed editor." }
+		return { "ok": false, "error": "No rendering in headless mode — screenshots need a windowed game." }
 	if viewport == null:
 		return { "ok": false, "error": "No viewport to capture." }
 	var tree := Engine.get_main_loop() as SceneTree
@@ -70,7 +69,7 @@ static func capture(
 	if not drawn["done"]:
 		if RenderingServer.frame_post_draw.is_connected(on_draw):
 			RenderingServer.frame_post_draw.disconnect(on_draw)
-		return { "ok": false, "error": "No frame drawn within %d frames — is the editor window minimized?" % DRAW_TIMEOUT_FRAMES }
+		return { "ok": false, "error": "No frame drawn within %d frames — is the game window minimized?" % DRAW_TIMEOUT_FRAMES }
 	var texture := viewport.get_texture()
 	var image := texture.get_image() if texture != null else null
 	if image == null or image.is_empty():

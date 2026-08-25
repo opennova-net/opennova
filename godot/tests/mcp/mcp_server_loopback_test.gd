@@ -52,7 +52,7 @@ func test_initialize_handshake() -> void:
 	assert_false(client.session_id().is_empty(), "Server issues Mcp-Session-Id.")
 	var result: Dictionary = envelope["result"]
 	assert_eq(result["protocolVersion"], "2025-03-26", "Known older version echoes.")
-	assert_eq(result["serverInfo"]["name"], "oned")
+	assert_eq(result["serverInfo"]["name"], "opennova")
 	assert_eq(result["instructions"], "test instructions")
 	assert_eq(result["capabilities"]["tools"]["listChanged"], false)
 

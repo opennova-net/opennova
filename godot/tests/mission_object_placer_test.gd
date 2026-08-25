@@ -115,82 +115,16 @@ func test_place_is_a_noop_on_null_inputs() -> void:
 	assert_null(parent.get_node_or_null("MissionObjects"), "no container without a mission")
 
 
-# --- Phase 3: incremental placement (place_single) ----------------------------
-# place_single renders one freshly-added entity into an existing container without
-# rebuilding the world. Asset-free coverage: the unresolved path (fixtures ship no
-# .3di, so a placed item resolves a graphic but no model) and the null guards. Real
-# render-placement is validated against assets out-of-band, like place() above.
-
-func test_place_single_reports_unresolved_when_no_model_resolves() -> void:
-	# Item 101291 carries an anim_def, so this exercises the ANIMATED branch's unresolved
-	# path (no .3di -> no ObjectData). The static branch is covered separately below.
+func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
+	# Exercise runtime static placement asset-free by pre-seeding the
+	# per-graphic batch cache with a dummy mesh.
 	var mission := MissionData.new()
-	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := ResourceRoot.new()
-	root.set_root_dir(_abs("res://../fixtures/def"))  # items.def but no .3di
-
-	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	placer.place(mission, parent)  # builds the MissionObjects container
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
-	assert_not_null(container, "the container exists to place into")
-
-	# Add a real entity, then render just that one.
-	var record := mission.add_entity(MissionData.KIND_ITEM, 101291, Vector3(1, 2, 3), Vector3.ZERO)
-	var index := int(record["index"])
-	var pickable_before := placer.pickable_records.size()
-	var delta: Dictionary = placer.place_single(mission, container, MissionData.KIND_ITEM, index)
-
-	assert_eq(int(delta.get("unresolved", 0)), 1, "a graphic with no .3di reports unresolved")
-	assert_eq(int(delta.get("placed", -1)), 0, "and places nothing")
-	assert_eq(placer.pickable_records.size(), pickable_before, "an unrendered entity adds no pickable record")
-
-
-func test_place_single_static_branch_reports_unresolved_without_a_model() -> void:
-	# Item 105004 "Static Crate" is type object with no anim_def, so it takes the STATIC
-	# branch. With no .3di and no seeded batch cache it resolves no geometry and must
-	# report unresolved without recording a pickable.
-	var mission := MissionData.new()
-	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
+	assert_eq(mission.create_default(), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	placer.place(mission, parent)
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
-
-	var record := mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO)
-	var index := int(record["index"])
-	var pickable_before := placer.pickable_records.size()
-	var delta: Dictionary = placer.place_single(mission, container, MissionData.KIND_ITEM, index)
-
-	assert_eq(int(delta.get("unresolved", 0)), 1, "a static graphic with no .3di reports unresolved")
-	assert_eq(int(delta.get("placed", -1)), 0, "and places nothing")
-	assert_eq(placer.pickable_records.size(), pickable_before, "an unrendered static adds no pickable record")
-
-
-func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
-	# The static success branch (a single-instance MultiMesh + the pickable record that
-	# later select / drag depend on) is the load-bearing new code. Exercise it asset-free
-	# by pre-seeding the per-graphic batch cache with a dummy mesh, so place_single
-	# renders without a real .3di. Full render fidelity is validated against real assets
-	# out-of-band, like place() itself.
-	var mission := MissionData.new()
-	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := ResourceRoot.new()
-	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	var env_state := EnvLightState.new()
 	var dry_values := EnvLightValues.retail_noon_defaults()
 	var dry_fog := Vector3(0.71, 0.18, 0.33)
@@ -199,8 +133,6 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	placer.set_environment_state(env_state)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
-	placer.place(mission, parent)
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
 
 	# Seed the static-batch cache so the static branch has geometry to instance.
 	var mesh := BoxMesh.new()
@@ -214,22 +146,20 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 		"mesh": mesh, "material": batch_material, "offset": offset, "submesh": 0,
 	}]))
 
-	var record := mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
-	var index := int(record["index"])
-	var pickable_before := placer.pickable_records.size()
-	var delta: Dictionary = placer.place_single(mission, container, MissionData.KIND_ITEM, index)
-
-	assert_eq(int(delta.get("placed", -1)), 1, "the static entity is placed")
-	assert_eq(int(delta.get("batched", -1)), 1, "via the static-batch branch")
-	assert_eq(int(delta.get("batches", -1)), 1, "one draw group for its single submesh")
-	assert_eq(placer.pickable_records.size(), pickable_before + 1, "it appends exactly one pickable record")
-
-	var rec: Dictionary = placer.pickable_records.back()
-	assert_eq(int(rec["kind"]), MissionData.KIND_ITEM)
-	assert_eq(int(rec["index"]), index, "the record points back at the placed entity")
-	assert_eq(int(rec["slot"]), 0, "a single-instance batch uses slot 0")
-	assert_false(bool(rec["animated"]))
-	var mmi := rec["mmi"] as MultiMeshInstance3D
+	assert_false(mission.add_entity(
+			MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5),
+			Vector3.ZERO).is_empty())
+	var stats: Dictionary = placer.place(mission, parent)
+	assert_eq(int(stats.get("placed", -1)), 1, "the static entity is placed")
+	assert_eq(int(stats.get("batched", -1)), 1, "via the static-batch branch")
+	assert_eq(int(stats.get("batches", -1)), 1, "one draw group for its single submesh")
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container)
+	var mmi := container.get_node_or_null("Batch_StaticCrate1_0") \
+			as MultiMeshInstance3D
+	assert_not_null(mmi)
+	if mmi == null:
+		return
 	assert_eq(mmi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"retail static batches receive dynamic silhouettes but never cast them")
 	assert_ne(mmi.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
@@ -239,18 +169,9 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 			+ "collectors @ 0x5c6f20/@0x5c8c60; flag writer @ 0x40e208]")
 	assert_eq(mmi.layers & Water.VISUAL_LAYER_WORLD, 0,
 			"presentation batching does not promote an item into the sector-building pass")
-	var mm: MultiMesh = rec["mm"]
-	assert_eq(mm.instance_count, 1, "the new static gets its own single-instance MultiMesh")
-	assert_true((rec["mmi"] as MultiMeshInstance3D).is_inside_tree(), "the batch instance is in the container")
-	assert_eq(rec["mesh_aabb"], mesh.get_aabb(), "the pick AABB is the batch mesh's bounds")
-	# The record carries the batch offset the drag path composes with the entity transform
-	# (_apply_selected_xform writes mm.set_instance_transform(slot, _selected_xform * offset)).
-	# The rendered instance transform itself can't be asserted headless: the dummy
-	# RenderingServer does not persist MultiMesh instance transforms (set/get_instance_transform
-	# round-trips to identity), which is also why the drag/commit tests assert the mission
-	# record rather than the MultiMesh. Render fidelity is validated against real assets
-	# out-of-band; here the placed entity's position is already pinned by the controller tests.
-	assert_eq(rec["offset"], offset, "the record carries the batch offset the drag path rewrites through")
+	var mm: MultiMesh = mmi.multimesh
+	assert_eq(mm.instance_count, 1, "the runtime static has one MultiMesh slot")
+	assert_true(mmi.is_inside_tree(), "the batch instance is in the runtime container")
 	placer.update_environment()
 	var batch_fog: Variant = batch_material.get_shader_parameter("u_fog_color")
 	assert_not_null(batch_fog,
@@ -291,24 +212,21 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	assert_eq(int(placer.get_static_item_effect_sources()[0].get("item_id", 0)), 105004)
 
 
-func test_place_single_static_vehicle_rides_the_mirror_visible_layer() -> void:
+func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	# env #30: the water mirror's above-water collection keeps only
 	# ItemDefType==vehicle entities [orig: Entity_InitFromModel @ 0x40e20a
 	# entity+36 |= 0x400; Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0 filterMask 0x400]. Fixture 106002 "Static Vehicle" is the
 	# type=vehicle twin of the crate case above.
 	var mission := MissionData.new()
-	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
+	assert_eq(mission.create_default(), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
-	placer.place(mission, parent)
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
 
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 1, 4)
@@ -318,62 +236,21 @@ func test_place_single_static_vehicle_rides_the_mirror_visible_layer() -> void:
 		"offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
 
-	var record := mission.add_entity(
-			MissionData.KIND_ITEM, 106002, Vector3(1, 2, 3), Vector3.ZERO)
-	var delta: Dictionary = placer.place_single(
-			mission, container, MissionData.KIND_ITEM, int(record["index"]))
-	assert_eq(int(delta.get("placed", -1)), 1, "the static vehicle places")
-
-	var rec: Dictionary = placer.pickable_records.back()
-	var mmi := rec["mmi"] as MultiMeshInstance3D
+	assert_false(mission.add_entity(
+			MissionData.KIND_ITEM, 106002, Vector3(1, 2, 3),
+			Vector3.ZERO).is_empty())
+	var stats: Dictionary = placer.place(mission, parent)
+	assert_eq(int(stats.get("placed", -1)), 1, "the static vehicle places")
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	var mmi := container.get_node_or_null("Batch_StaticVehicle1_0") \
+			as MultiMeshInstance3D
+	assert_not_null(mmi)
+	if mmi == null:
+		return
 	assert_ne(mmi.layers & Water.VISUAL_LAYER_WORLD, 0,
 			"a type=vehicle entity stays on the mirror-visible world layer")
 	assert_eq(mmi.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 			"the vehicle batch never rides the no-mirror layer")
-
-
-func test_place_single_static_caster_reuses_its_visible_instance() -> void:
-	var mission := MissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := ResourceRoot.new()
-	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
-	assert_true(placer.register_resolved_static_graphic(
-			"StaticCrate1", ObjectData.new(), [{
-				"mesh": BoxMesh.new(), "material": null,
-				"offset": Transform3D.IDENTITY, "submesh": 0,
-			}]))
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	placer.place(mission, parent)
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
-	var record := mission.add_entity(
-			MissionData.KIND_BUILDING, 105004,
-			Vector3(3, 4, 5), Vector3.ZERO)
-
-	var delta: Dictionary = placer.place_single(
-			mission, container, MissionData.KIND_BUILDING,
-			int(record["index"]))
-
-	assert_eq(int(delta.get("batched", -1)), 1)
-	var visible_batch := placer.pickable_records.back()["mmi"] \
-			as MultiMeshInstance3D
-	assert_eq(visible_batch.layers,
-			Water.VISUAL_LAYER_WORLD_NO_MIRROR \
-			| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
-			"the one visible draw also enters the isolated static-caster pass; "
-			+ "a building without the authored Reflective attribute stays out "
-			+ "of the above-water mirror [orig: Entity_SpawnFromBMSRecord "
-			+ "@ 0x40ed1d..0x40ed2b; collector mask @ 0x5c90a0]")
-	assert_eq(visible_batch.cast_shadow,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
-	assert_null(container.get_node_or_null(
-			"StaticShadow_StaticCrate1_k%d_i%d_s0" % [
-				MissionData.KIND_BUILDING, int(record["index"])]),
-			"place_single avoids a second node referencing the same MultiMesh")
 
 
 func test_dynamic_shadow_caster_policy_matches_retail_entity_slot_admission() -> void:
@@ -494,7 +371,6 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
@@ -529,24 +405,6 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 					"the filtered caster owns transforms independent of the visible batch")
 		assert_eq(shadow_batch.multimesh.instance_count, 2,
 				"slot identity stays parallel for destruction updates")
-	var eligible_record: Dictionary = {}
-	var ineligible_record: Dictionary = {}
-	for record_v in placer.pickable_records:
-		var record: Dictionary = record_v
-		if int(record.get("kind", -1)) != MissionData.KIND_BUILDING:
-			continue
-		if int(record.get("index", -1)) == 0:
-			eligible_record = record
-		elif int(record.get("index", -1)) == 1:
-			ineligible_record = record
-	var expected_shadow_mm := shadow_batch.multimesh \
-			if shadow_batch != null else null
-	assert_same(eligible_record.get("shadow_mm"), expected_shadow_mm,
-			"editor records move the eligible parallel caster with its visible slot")
-	assert_true(bool(eligible_record.get("casts_static_shadow", false)))
-	assert_same(ineligible_record.get("shadow_mm"), expected_shadow_mm)
-	assert_false(bool(ineligible_record.get("casts_static_shadow", true)),
-			"moving an ineligible peer keeps its parallel slot zero-scaled")
 
 
 func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> void:
@@ -582,7 +440,6 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
@@ -593,14 +450,12 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 
 	placer.place(mission, parent)
 
-	var building_batch: MultiMeshInstance3D = null
-	var item_batch: MultiMeshInstance3D = null
-	for record_v in placer.pickable_records:
-		var record: Dictionary = record_v
-		if int(record.get("kind", -1)) == MissionData.KIND_BUILDING:
-			building_batch = record.get("mmi") as MultiMeshInstance3D
-		elif int(record.get("kind", -1)) == MissionData.KIND_ITEM:
-			item_batch = record.get("mmi") as MultiMeshInstance3D
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container)
+	var building_batch := container.get_node_or_null(
+			"Batch_StaticCrate1_Mirror_0") as MultiMeshInstance3D
+	var item_batch := container.get_node_or_null(
+			"Batch_StaticCrate1_NoMirror_0") as MultiMeshInstance3D
 	assert_not_null(building_batch)
 	assert_not_null(item_batch)
 	assert_ne(building_batch, item_batch,
@@ -792,7 +647,6 @@ func test_authored_reflective_pool1_item_enters_the_mirror_population() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
@@ -803,11 +657,10 @@ func test_authored_reflective_pool1_item_enters_the_mirror_population() -> void:
 
 	placer.place(mission, parent)
 
-	var batch: MultiMeshInstance3D = null
-	for record_v in placer.pickable_records:
-		var record: Dictionary = record_v
-		if int(record.get("kind", -1)) == MissionData.KIND_ITEM:
-			batch = record.get("mmi") as MultiMeshInstance3D
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container)
+	var batch := container.get_node_or_null("Batch_StaticCrate1_0") \
+			as MultiMeshInstance3D
 	assert_not_null(batch)
 	if batch != null:
 		assert_ne(batch.layers & Water.VISUAL_LAYER_WORLD, 0,
@@ -871,9 +724,9 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 				"moving the individual entity cannot strand its caster")
 
 
-func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
+func test_runtime_vehicle_without_anim_def_stays_in_static_batch() -> void:
 	var mission := MissionData.new()
-	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
+	assert_eq(mission.create_default(), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	assert_eq(item_db.get_item_type(106002), ItemDatabase.TYPE_VEHICLE)
@@ -882,11 +735,8 @@ func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
-	placer.place(mission, parent)
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
 
 	var mesh := BoxMesh.new()
 	assert_true(placer.register_resolved_static_graphic(
@@ -894,61 +744,20 @@ func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
 
-	var record := mission.add_entity(MissionData.KIND_ITEM, 106002, Vector3.ZERO, Vector3.ZERO)
-	var delta: Dictionary = placer.place_single(
-		mission, container, MissionData.KIND_ITEM, int(record["index"]))
-
-	assert_eq(int(delta.get("placed", -1)), 1, "the vehicle is placed")
-	assert_eq(int(delta.get("batched", -1)), 1, "a vehicle without anim_def uses static batching")
-	assert_eq(int(delta.get("animated", -1)), 0, "the vehicle does not enter runtime presentation")
-	assert_false(bool(placer.pickable_records.back()["animated"]))
-
-
-func test_place_single_is_a_noop_on_null_inputs() -> void:
-	var placer := MissionObjectPlacer.new()
-	var delta: Dictionary = placer.place_single(null, null, MissionData.KIND_ITEM, 0)
-	assert_eq(int(delta.get("placed", -1)), 0, "null inputs place nothing")
-	assert_eq(int(delta.get("unresolved", 0)), 0, "and do not falsely count an unresolved")
+	assert_false(mission.add_entity(
+			MissionData.KIND_ITEM, 106002, Vector3.ZERO,
+			Vector3.ZERO).is_empty())
+	var stats: Dictionary = placer.place(mission, parent)
+	assert_eq(int(stats.get("placed", -1)), 1, "the vehicle is placed")
+	assert_eq(int(stats.get("batched", -1)), 1,
+			"a vehicle without anim_def uses static batching")
+	assert_eq(int(stats.get("animated", -1)), 0,
+			"the vehicle does not enter runtime presentation")
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container.get_node_or_null("Batch_StaticVehicle1_0"))
 
 
-# --- Engine-facade bake parity --------------------------------------------------
-# The authoring facade (engine/runtime/mission authoring.h) bakes the Ground anchor in mission
-# space with the conjugated engine matrix [orig: sub_401A90, dfx2med.exe;
-# Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40 + the .3di import's
-# model-forward correction]; the editor's live drag bakes in Godot space with
-# bms_to_godot_basis. The two MUST agree, or an anchored object would shift between
-# the drag preview and the committed record.
-func test_ground_bake_parity_with_engine_facade() -> void:
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	var rec: Dictionary = md.add_entity(MissionData.KIND_BUILDING, 102001, Vector3.ZERO, Vector3.ZERO)
-	assert_false(rec.is_empty(), "seed entity added")
-	var index := int(rec["index"])
-
-	var anchor_godot := Vector3(0.75, 0.5, -1.25)
-	var anchor_bms := MissionObjectPlacer.godot_to_bms_position(anchor_godot)
-	var hit_godot := Vector3(33.0, 8.0, -21.0)
-	var hit_bms := MissionObjectPlacer.godot_to_bms_position(hit_godot)
-
-	# Integer-degree rotations only (the format stores integer degrees).
-	for rot in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(15, 0, 0), Vector3(0, 0, 30),
-			Vector3(10, 45, -20), Vector3(-35, 220, 75), Vector3(90, 0, 0)]:
-		assert_true(md.set_entity_transform(MissionData.KIND_BUILDING, index, hit_bms, rot))
-		assert_true(md.move_entity_grounded(MissionData.KIND_BUILDING, index, hit_bms, anchor_bms),
-			"facade re-grounds at rot %s" % rot)
-		var moved: Dictionary = md.get_entity(MissionData.KIND_BUILDING, index)
-		var stored_bms: Vector3 = moved["position"]
-		assert_eq(moved["rotation_deg"], rot, "rotation preserved")
-		# The editor's Godot-space bake of the same gesture:
-		var expected_godot := hit_godot - MissionObjectPlacer.bms_to_godot_basis(rot) * anchor_godot
-		var expected_bms := MissionObjectPlacer.godot_to_bms_position(expected_godot)
-		assert_true(stored_bms.is_equal_approx(expected_bms),
-			"facade bake == editor bake at rot %s (facade %s vs editor %s)" % [rot, stored_bms, expected_bms])
-
-
-func test_ground_anchor_bms_is_the_axis_remap() -> void:
-	# ground_anchor_bms is godot_to_bms_position applied to the anchor offset — linear,
-	# so valid on offset vectors. Pin the remap so the facade's anchor input stays correct.
+func test_godot_to_bms_position_axis_remap() -> void:
 	assert_eq(MissionObjectPlacer.godot_to_bms_position(Vector3(1, 2, 3)), Vector3(1, -3, 2))
 
 
@@ -993,7 +802,6 @@ func _panm_placer(live: bool) -> MissionObjectPlacer:
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	placer.edit_mode = true
 	# item 105004: type object, no anim_def
 	placer.register_object_data("StaticCrate1", _armry_data(live))
 	placer.register_occlusion_verdict(105004, false)
@@ -1079,31 +887,6 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 		"portal sections require an individual model even when PANM is inert")
 	assert_eq(int(stats.get("batched", -1)), 0,
 		"the per-instance section mask cannot be represented by a MultiMesh batch")
-
-
-func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
-	var placer := _panm_placer(true)
-	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data authored with one live PANM track")
-	if placer.object_data_for("StaticCrate1") == null:
-		return
-	var mission := MissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	placer.place(mission, parent)  # builds the MissionObjects container
-	var container: Node3D = parent.get_node_or_null("MissionObjects")
-	assert_not_null(container)
-	if container == null:
-		return
-
-	var record := mission.add_entity(
-		MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
-	var delta: Dictionary = placer.place_single(
-		mission, container, MissionData.KIND_ITEM, int(record["index"]))
-
-	assert_eq(int(delta.get("animated", -1)), 1,
-		"place_single routes a live-PANM graphic to a live model")
-	assert_eq(int(delta.get("batched", -1)), 0, "not to a single-instance batch")
 
 
 func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:

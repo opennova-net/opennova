@@ -3,9 +3,8 @@
 // Internal to engine/runtime/mission — not part of the public interface. Split out of
 // mission.cpp (quality campaign W3-1); the bodies are unchanged.
 //
-// Display names for the BMS event-logic enums. The facade serves them to the editor
-// (trigger_main_types(), action_types(), ...) and the record conversions stamp them
-// into each typed record, so they need one home rather than two copies.
+// Display names for the BMS event-logic enums. Record conversions stamp them into
+// each typed record, so they live in one shared implementation.
 
 #include <string>
 

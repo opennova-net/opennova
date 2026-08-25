@@ -1,5 +1,10 @@
 # Bulk re-ground performance baseline (2026-06-12)
 
+> Historical measurement record. The Mission workspace and its dedicated
+> performance probe were removed by [ADR 0037](../adr/0037-oned-runs-game-data.md).
+> Reproducing these measurements now requires a new runtime- or tool-specific
+> harness; this document does not describe a supported ONED workflow.
+
 The recorded numbers behind the re-ground perf slices. The activate-time
 "terrain changed under N objects" flow (drift scan -> prompt -> bulk apply)
 was reported as very slow; this captures where the time actually goes, with
@@ -14,13 +19,10 @@ spans, see mission-load-baseline.md).
 - **Machine:** Windows 11 Pro, local NVMe, OS-warm second run.
 - **Godot:** 4.6.1-stable console build, `--headless`.
 - **GDExtension:** Debug (`template_debug`).
-- **Method:** `godot/tests/mission_reground_perf_probe.gd` — opens each
-  retail mission through `open_in_workspace("mission", path)`, raises the
-  entire editable heightmap 5 world units through the editor's own
-  height-commit seam (`_set_heightmap_image`, bumping the height revision),
-  then drives `reconcile_with_terrain()` (the activate-time scan) and
-  `reground_drifted()` (the prompt-confirm apply). Run with `JO_ASSETS_DIR`
-  pointing at a retail JO loose-asset directory.
+- **Method:** the retired Mission-workspace probe opened each retail mission,
+  raised the entire editable heightmap 5 world units through the former
+  height-commit seam, then drove the former drift scan and bulk re-ground
+  operation. `JO_ASSETS_DIR` pointed at a retail JO loose-asset directory.
 - **Missions:** the same three as the load baseline (CP15, ASH_I1gA, 03TR);
   the whole-surface raise drifts every groundable entity (~2,000-2,100 rows).
 - **Headless caveat:** the `rebake` span measures only the CPU side of

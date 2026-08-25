@@ -2,9 +2,9 @@
 
 OpenNova is a faithful reimplementation of NovaLogic's game engine. The aim is
 feature and visual parity with the original games, built so the engine runs off the
-same asset data those games shipped. Think of it as a build-your-own-game tool in
-the spirit of RPG in a Box, but for the NovaLogic catalog: an engine plus a deep
-editor for the data that drives it.
+same asset data those games shipped. The result is an engine and an open toolchain
+for understanding, producing, validating, and shipping NovaLogic-compatible game
+data.
 
 ## A faithful reimplementation
 
@@ -27,27 +27,21 @@ are the ones the games actually use.
 We chose Godot as the shell. Other options were considered (SDL3 + bgfx, a custom
 stack), but Godot is powerful enough that rebuilding the original engine's features
 on top of it is largely a matter of mapping NovaLogic concepts onto Godot ones. It
-also gives us a mature rendering pipeline, an editor framework, and cross-platform
-packaging. The portable engine core is C++; Godot is the shell that renders it and
-powers the tools.
+also gives us a mature rendering pipeline and cross-platform packaging. The portable
+engine core is C++; Godot is the shell that renders it and powers the game and ONED.
 
-## A deep editor
+## A source-first game-data loop
 
-The OpenNova Editor (ONED) is where you author the data the engine runs. Today it
-focuses on creating individual assets: terrain, 3D objects, missions, particle
-effects, playable characters, fonts, credits, strings, menus, music, sound
-profiles, and environment (plus a preview-only HUD layout workspace). The
-longer-term goal is depth:
+The game's canonical files live in an ordinary source tree. Format-specific writers,
+the importer, the Blender addon, and other external tools may produce those files;
+OpenNova consumes and validates them without requiring a proprietary project database.
+That keeps source ownership visible and makes retail compatibility the acceptance test.
 
-- **An asset dependency graph.** NovaLogic assets reference each other (a `.3di`
-  points at its textures, a `.def` points at a `.3di` and its `.bad` animations, a
-  mission points at definitions). Modeling that graph lets the editor validate
-  references, follow them, and show what breaks when something changes.
-- **A Game workspace.** A place to assemble a whole game: set up menus, bind assets
-  to the conventions the engine expects, and configure the pieces that turn a pile
-  of assets into a playable title.
-- **Export to a standalone game.** Eventually, produce a runnable executable from an
-  OpenNova project, so creators can ship what they build.
+ONED deliberately stays small. It stores the loose-data and retail-install settings,
+runs OpenNova against the selected loose tree, stages and runs retail against the
+same tree, and stops the child it owns. It does not duplicate the format tools as an
+integrated asset editor. CI uses the same shipped executable's hidden pack command to
+turn the tracked source tree into the standalone packed game layout.
 
 ## Target games
 
@@ -78,9 +72,9 @@ as an in-process listen server, so co-op and multiplayer share one replication p
 
 ## Where we are today
 
-OpenNova is pre-1.0 and under active development. The asset pipeline and the editor
-are the most exercised surfaces; the runtime loads exported scenes, runs the terrain
-and foliage systems, and simulates authored missions (WAC scripts, BMS events, AI);
+OpenNova is pre-1.0 and under active development. The engine and asset pipeline
+are the most exercised surfaces; the runtime loads the game data, runs the terrain
+and foliage systems, and simulates missions (WAC scripts, BMS events, AI);
 the gameplay systems (weapons, projectile physics and damage, throwables,
 mounted and emplaced weapons, vehicles, item destruction, optics and the HUD)
 are ported with test coverage, and multiplayer runs on the wire-compatible

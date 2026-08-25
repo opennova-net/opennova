@@ -17,36 +17,6 @@ func _items_abs() -> String:
 	return ProjectSettings.globalize_path(ITEMS_PATH)
 
 
-func test_reground_entities_counts_and_applies_with_one_policy() -> void:
-	var m := MissionData.new()
-	assert_eq(m.create_default(), OK)
-	# 5 = building in the witnessed type mapping [orig: ItemDef_ParseProperty @ 0x49eb00]
-	# (the pre-D-ITEMDEF-1 invented enum said 4; witnessed 4 = marker, which is
-	# mesh-less and skips the anchor bake this test asserts).
-	var placed: Dictionary = m.place_entity_grounded(102001, 5, Vector3(100, 50, 10), Vector3(1, 2, 3))
-	assert_false(placed.is_empty(), "the fixture entity places")
-	var request := {
-		"kind": int(placed["kind"]),
-		"index": int(placed["index"]),
-		"ground_hit_bms": Vector3(100, 50, 14),  # the terrain rose 4 under it
-		"ground_anchor_bms": Vector3(1, 2, 3),
-	}
-	m.mark_clean()
-	# Dry run counts the drift without writing or dirtying.
-	assert_eq(m.reground_entities([request], 0.01, false), 1, "dry run reports the drifted entity")
-	assert_false(m.is_dirty(), "a dry run never dirties the document")
-	# Apply moves it (zero-rotation bake keeps x/y offsets, lifts z), dirties once.
-	assert_eq(m.reground_entities([request]), 1, "apply moves the drifted entity")
-	assert_true(m.is_dirty(), "an applied re-ground dirties the document")
-	var moved: Dictionary = m.get_entity(int(placed["kind"]), int(placed["index"]))
-	assert_almost_eq((moved["position"] as Vector3).z, 11.0, 0.001, "grounded on the raised terrain (14 - anchor z)")
-	# Now everything is on the new ground: both count and apply are no-ops.
-	assert_eq(m.reground_entities([request], 0.01, false), 0, "no drift after the apply")
-	assert_eq(m.reground_entities([request]), 0)
-	# Malformed rows are skipped, never errors.
-	assert_eq(m.reground_entities([{ "kind": 0, "index": -1 }, {}]), 0)
-
-
 func test_mission_data_parses_header_and_entities() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK, "ash_i5b.reference.bms should parse")
@@ -381,29 +351,6 @@ func test_save_file_without_path_is_invalid() -> void:
 	assert_eq(m.save_file(), ERR_INVALID_PARAMETER, "save_file with no path is ERR_INVALID_PARAMETER")
 
 
-func test_ai_flag_bits_are_distinct_named_bits() -> void:
-	# get_ai_flag_bits drives the Behavior > Flags checkboxes; each entry must be a single distinct bit
-	# with a label so the inspector's merge-on-write (clear known mask, OR checked bits) is unambiguous.
-	var m := MissionData.new()
-	var bits := m.get_ai_flag_bits()
-	assert_gt(bits.size(), 0, "engine exposes AI attribute flag bits")
-	var seen_mask := 0
-	var masks: Array = []
-	for entry in bits:
-		var e := entry as Dictionary
-		var value := int(e.get("value", 0))
-		assert_false(String(e.get("name", "")).is_empty(), "each flag bit has a label")
-		assert_gt(value, 0, "flag value is positive")
-		assert_eq(value & (value - 1), 0, "flag value is a single bit (%d)" % value)
-		assert_eq(seen_mask & value, 0, "flag bits do not overlap (%d)" % value)
-		seen_mask |= value
-		masks.append(value)
-	# RE-confirmed positions (bms.h BmsiAttributeFlags / dfx2med object dialog).
-	assert_true(masks.has(1 << 0), "Blind is bit 0")
-	assert_true(masks.has(1 << 1), "Guarding is bit 1")
-	assert_true(masks.has(1 << 22), "NavigationWaypoint is bit 22")
-
-
 # --- Authoring (Phase 2): edit team / group ----------------------------------
 # set_entity_property_int seeds the lib's all-fields property setter from the entity's
 # current state and changes only the named field, so editing team must leave group and
@@ -516,24 +463,6 @@ func test_set_entity_property_int_supports_behavior_fields() -> void:
 		for other in _BEHAVIOR_PROPERTY_KEYS:
 			if other != prop:
 				assert_eq(int(after[other]), int(before[other]), "%s preserved through a %s edit" % [other, prop])
-
-
-func test_behavior_spin_table_matches_engine_setter() -> void:
-	# Drift guard: every numeric field the inspector's Behavior panel renders (MissionEntityFields,
-	# the single UI table) must be accepted by the engine's set_entity_property_int (whose name->member
-	# map lives in engine/runtime/mission). A typo'd or stale property in the table would otherwise bind a row
-	# whose edits are silently rejected. Section markers carry no property and are skipped.
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	var kind := _kind_with_entities(m)
-	var index := int(m.get_entities(kind)[0]["index"])
-	for entry in MissionEntityFields.SPIN_FIELDS:
-		if not entry.has("property"):
-			continue
-		var prop := String(entry["property"])
-		var current := int(_entity(m, kind, index).get(prop, 0))
-		assert_true(m.set_entity_property_int(kind, index, prop, current),
-			"the engine accepts the Behavior-panel field '%s'" % prop)
 
 
 func test_set_entity_property_int_behavior_field_persists_through_save_reload() -> void:
@@ -840,7 +769,7 @@ func test_waypoint_methods_reject_out_of_range_paths() -> void:
 # --- create_default (from-scratch) --------------------------------------------
 # create_default() builds a valid, empty mission in memory (no file). The byte fidelity of the
 # round-trip is proven at the lib level (tests/mission/mission_bms_test.cpp); here we assert the
-# GDScript boundary: loaded + empty, editable, and savable + reopenable.
+# GDScript boundary: loaded + empty, writable, and reopenable.
 
 func test_create_default_is_loaded_and_empty() -> void:
 	var m := MissionData.new()
@@ -850,7 +779,6 @@ func test_create_default_is_loaded_and_empty() -> void:
 	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), 0, "no items")
 	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), 0, "no buildings")
 	assert_eq(m.get_entity_count(MissionData.KIND_MARKER), 0, "no markers")
-	assert_false(m.is_dirty(), "a freshly-created mission is not dirty")
 
 
 func test_create_default_save_and_reopen() -> void:
@@ -912,87 +840,6 @@ func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
 	assert_string_contains(text, "extra_bheight 0", "no stale heights leak into the next save")
 	assert_string_contains(text, "height_lock 1", "the absolute declaration is unconditional")
 	DirAccess.remove_absolute(path)
-
-
-# --- Undo / redo + dirty (in-memory document history) -------------------------
-# The history holds in-memory document snapshots (no serialized bytes). begin_edit/commit_edit
-# bracket a gesture into one step (commit pushes only on a real change); undo/redo swap the
-# document; is_dirty() is exact against the clean baseline set by mark_clean().
-
-func test_begin_commit_undo_rewinds_a_mutation() -> void:
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	m.mark_clean()
-	var before := m.get_entity_count(MissionData.KIND_BUILDING)
-	assert_false(m.can_undo(), "a freshly opened mission has no undo history")
-
-	m.begin_edit()
-	m.add_entity(MissionData.KIND_BUILDING, 102001, Vector3(1, 2, 3), Vector3.ZERO)
-	m.commit_edit()
-	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before + 1, "the placement landed")
-	assert_true(m.can_undo(), "the committed edit is one undo step")
-	assert_eq(m.undo_depth(), 1, "exactly one step")
-
-	assert_true(m.undo(), "undo succeeds")
-	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before, "undo rewinds the placement")
-	assert_true(m.is_loaded(), "the document is still loaded after an undo")
-	assert_true(m.can_redo(), "and is now redoable")
-
-
-func test_no_change_session_pushes_no_step() -> void:
-	# A begin/commit with no actual mutation (or a same-value edit) must add no undo step --
-	# this pins bms::equal at the binding boundary.
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	m.begin_edit()
-	m.commit_edit()
-	assert_false(m.can_undo(), "an empty edit session pushes nothing")
-
-	var index := int(m.get_entities(MissionData.KIND_BUILDING)[0]["index"])
-	var pos: Vector3 = m.get_entity(MissionData.KIND_BUILDING, index)["position"]
-	var rot: Vector3 = m.get_entity(MissionData.KIND_BUILDING, index)["rotation_deg"]
-	m.begin_edit()
-	m.set_entity_transform(MissionData.KIND_BUILDING, index, pos, rot) # same value
-	m.commit_edit()
-	assert_false(m.can_undo(), "a same-value edit pushes nothing")
-
-
-func test_undo_redo_round_trip() -> void:
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := m.get_entity_count(MissionData.KIND_ITEM)
-	m.begin_edit()
-	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
-	m.commit_edit()
-	assert_true(m.undo(), "undo")
-	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), before, "undo removes the item")
-	assert_true(m.redo(), "redo")
-	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), before + 1, "redo re-adds the item")
-	assert_false(m.can_redo(), "the redo step is consumed")
-
-
-func test_is_dirty_tracks_the_clean_baseline() -> void:
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	m.mark_clean()
-	assert_false(m.is_dirty(), "a freshly-cleaned mission is not dirty")
-	m.begin_edit()
-	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
-	m.commit_edit()
-	assert_true(m.is_dirty(), "an edit dirties the mission")
-	assert_true(m.undo(), "undo")
-	assert_false(m.is_dirty(), "undoing back to the clean baseline clears dirty")
-	assert_true(m.redo(), "redo")
-	assert_true(m.is_dirty(), "redo re-dirties")
-	m.mark_clean()
-	assert_false(m.is_dirty(), "mark_clean rebaselines to the current state")
-
-
-func test_undo_on_empty_history_returns_false() -> void:
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_false(m.undo(), "undo with no history returns false")
-	assert_false(m.redo(), "redo with no history returns false")
 
 
 # --- Phase 1: hidden entity fields + mission-header editing --------------------
@@ -1067,19 +914,17 @@ func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
 
 
 func test_set_event_preserves_unmodeled_flag_bits() -> void:
-	# Regression (review #2): the inspector rebuilds an event's flags from the exposed checkboxes only
-	# (event_flag_bits = ResetAfter/PreMission/PostMission, mask 0x07 — matching the DFX2 editor), so
-	# set_event must preserve confirmed internal bits it does not surface (e.g. 0x10) instead of clobbering them,
-	# mirroring trigger condition_flags. Otherwise nudging any event attribute silently drops those bits.
+	# set_event accepts the three author-facing bits (ResetAfter/PreMission/PostMission, mask 0x07)
+	# and must preserve confirmed internal bits such as 0x10 rather than clobbering them.
 	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
-	var UNMODELED := 0x10 # confirmed internal bit: no event_flag_bits() checkbox, must survive edits
+	var UNMODELED := 0x10 # confirmed internal bit, must survive edits
 	# Seed an event carrying the unmodeled bit plus an exposed one (ResetAfter = 0x01).
 	var added := m.add_event(UNMODELED | 0x01, 0, 0)
 	assert_false(added.is_empty(), "event added")
 	var idx := int(added["index"])
 	assert_eq(int(m.get_event(idx)["flags"]) & UNMODELED, UNMODELED, "unmodeled bit present after add")
-	# An editor edit rebuilds flags from exposed checkboxes only (here PreMission = 0x02, ResetAfter off).
+	# Apply PreMission (0x02) while clearing ResetAfter (0x01).
 	assert_true(m.set_event(idx, 0x02, 0, 0), "set_event succeeds")
 	var flags := int(m.get_event(idx)["flags"])
 	assert_eq(flags & UNMODELED, UNMODELED, "internal bit 0x10 preserved across the edit")
@@ -1215,25 +1060,6 @@ func test_event_chain_dictionary_shape() -> void:
 	assert_true(chain.has("diagnostics"), "the chain carries diagnostics")
 	var summary := m.get_logic_summary()
 	assert_eq(int(summary["events"]), m.get_event_count(), "the logic summary event count matches")
-
-
-func test_enum_tables_reflect_the_engine_names() -> void:
-	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK)
-	# Group(1)..Player(7) -> 7 named main types.
-	assert_eq(m.get_trigger_main_types().size(), 7, "seven trigger main types")
-	# A non-contiguous, high-numbered sub-type still appears.
-	var found_high := false
-	for entry in m.get_trigger_sub_types(2):  # Single
-		if int(entry["value"]) == 45:
-			found_high = String(entry["name"]) == "SingleDoesNotSeeOrFarther"
-	assert_true(found_high, "the high-numbered Single sub-type reflects through")
-	var found_reset := false
-	for entry in m.get_action_types():
-		if int(entry["value"]) == 34:
-			found_reset = String(entry["name"]) == "ResetEvent"
-	assert_true(found_reset, "ResetEvent appears in the action types")
-	assert_eq(m.get_event_flag_bits().size(), 3, "three author-facing event-flag bits (matches dfx2med)")
 
 
 func test_add_event_with_trigger_and_action_persists_through_save_reload() -> void:

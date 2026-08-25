@@ -211,24 +211,6 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 }
 
 
-void ObjectModel::set_model_light_preview_enabled(bool p_enabled) {
-	if (model_light_preview_enabled_ == p_enabled) {
-		return;
-	}
-	model_light_preview_enabled_ = p_enabled;
-	last_light_push_valid_ = false;
-	wake_runtime_frame();
-	if (p_enabled) {
-		apply_lights();
-		return;
-	}
-	for (const Ref<ShaderMaterial> &material : surface_materials_) {
-		if (material.is_valid()) {
-			material->set_shader_parameter("u_local_light_count", 0);
-		}
-	}
-}
-
 void ObjectModel::set_shadow_caster_enabled(bool p_enabled) {
 	set_shadow_caster_layer_enabled(LAYER_DYNAMIC_SHADOW_CASTER, p_enabled);
 	// Dynamic casters join the render-slot ground-shadow group the SlotShadow
@@ -823,7 +805,7 @@ void ObjectModel::advance_runtime_frame(double p_delta) {
 
 bool ObjectModel::needs_runtime_frame_work() const {
 	if (bounds_dirty_ || has_live_panm_ || !dynamic_material_slots_.is_empty() ||
-			(model_light_preview_enabled_ && has_lights_) || !part_anims_.is_empty()) {
+			!part_anims_.is_empty()) {
 		return true;
 	}
 	if (skeleton_ == nullptr || skeletal_.is_null() || anim_key_.is_empty()) {
@@ -934,7 +916,6 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable) {
 			}
 		}
 	}
-	apply_lights();
 	apply_environment_to_materials();
 	if (bounds_dirty_ || part_changed || robj_changed) {
 		set_model_bounds(compute_transformed_mesh_bounds());
@@ -1113,8 +1094,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_native_frame);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "native_frame"),
 			"set_native_frame", "get_native_frame");
-	ClassDB::bind_method(D_METHOD("set_model_light_preview_enabled", "enabled"),
-			&ObjectModel::set_model_light_preview_enabled);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),

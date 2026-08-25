@@ -2,7 +2,7 @@
 
 The original engine expands `%VAR%` tokens over the **whole `.mnu` buffer before XML parsing** ([orig: `NapiXML_ExpandVariablesInText` @ 0x63a000, called from `UIScene_LoadAndParseContent` @ 0x63c830]). A variable can therefore appear in any field — text, a `<POSITION>` edge, a color, a font name, any attribute — and by the time the element parser ([orig: `CUIElement_ParseXMLDefinition` @ 0x648120]) reads, say, a color, it already sees the substituted hex string. The variable list is host-supplied (game state, stylesheet defines merged in by the host).
 
-We do not pre-expand. `MnuDocument` parses once and keeps the **raw `%VAR%` tokens** in the model; the ONED editor reads and re-serializes that model, so a menu authored with `%DEF_TEXT_FG%` round-trips with the token intact rather than being baked to a concrete value on first save. The runtime compiler (`engine/runtime/menu` `MenuFrameCompiler::resolve_var`) expands `%VAR%` **per consumed field** at configure time, through the flattened `MnsStyleSheet` variables, covering the same field set the engine's whole-buffer pass would: colors, fonts, textures, and literal text.
+We do not pre-expand. `MnuDocument` parses once and keeps the **raw `%VAR%` tokens** in the model; the former ONED menu-authoring surface read and re-serialized that model, so a menu authored with `%DEF_TEXT_FG%` round-tripped with the token intact rather than being baked to a concrete value on first save. The runtime compiler (`engine/runtime/menu` `MenuFrameCompiler::resolve_var`) expands `%VAR%` **per consumed field** at configure time, through the flattened `MnsStyleSheet` variables, covering the same field set the engine's whole-buffer pass would: colors, fonts, textures, and literal text.
 
 ## Why the split
 

@@ -1,16 +1,8 @@
 class_name ResourceDirSettings
 extends RefCounted
 
-## The RUNTIME's persisted settings: the asset directory it mounts (the on-disk folder of
-## .3di models and their textures), plus the player preferences that belong to playing rather
-## than authoring.
-##
-## ONED keeps its own ([OnedSettings], `user://oned.cfg`). The two shared one config until the
-## editor and the game routinely pointed at different things — ONED authors the loose asset tree
-## while the game runs a PACKED dir built from it, and sharing meant packing silently repointed
-## the editor at its own output. Clean cut: neither reads the other's file, nothing is migrated.
-##
-## Lives under game/ (not modtools/) because the runtime export excludes modtools/*.
+## The runtime's persisted resource directory and player preferences. ONED has its
+## own `user://oned.cfg`; neither side reads the other's state.
 
 const CONFIG_PATH := "user://opennova.cfg"
 const SECTION := "resources"
@@ -27,19 +19,12 @@ static func get_resource_dir() -> String:
 	return dir if is_valid_root(dir) else ""
 
 
-## Persist the resource directory, preserving any other sections in the config. A
-## valid, non-empty directory is also recorded at the front of the recently used
-## list (surfaced by the editor's "Recent directories…" dropdown); clearing ("")
-## or an invalid path leaves that list untouched. This is the single seam both the
-## editor (via resource_library.save_state) and the runtime (main_game) go
-## through, so recording is automatic for both with one disk write.
+## Persist the runtime resource directory, preserving other config sections.
 static func set_resource_dir(path: String) -> void:
 	ConfigStore.write(CONFIG_PATH, SECTION, DIR_KEY, path.strip_edges())
 
 
-## The persisted expansion name (e.g. "jox01"), or "" for the base game. Not validated
-## here (there is no dir context); resource_library.gd drops a name that no longer matches
-## an expansion under the live root.
+## The persisted expansion name (e.g. "jox01"), or "" for the base game.
 static func get_expansion() -> String:
 	return String(ConfigStore.read(CONFIG_PATH, SECTION, EXPANSION_KEY, ""))
 
@@ -52,7 +37,8 @@ static func set_expansion(name: String) -> void:
 ## The persisted game code (e.g. "jodemo"), or "jo" when unset. Selects the SCR decode
 ## key. A `/game` launch flag overrides this (see LaunchFlags.game).
 static func get_game() -> String:
-	var code := String(ConfigStore.read(CONFIG_PATH, SECTION, GAME_KEY, "jo")) 			.strip_edges().to_lower()
+	var code := String(ConfigStore.read(
+			CONFIG_PATH, SECTION, GAME_KEY, "jo")).strip_edges().to_lower()
 	return code if not code.is_empty() else "jo"
 
 

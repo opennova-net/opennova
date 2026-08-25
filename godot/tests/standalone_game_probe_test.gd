@@ -35,7 +35,6 @@ const RETIRED_PROBES: Array[String] = [
 	"res://tests/sun_shadow_catcher_probe.gd",
 	"res://tests/sun_shadow_catcher_probe.tscn",
 ]
-const SCREENSHOT_CAPTURE_PATH := "res://modtools/tools/screenshot_capture.gd"
 
 
 func test_rendered_probes_compile_without_editor_play_dependencies() -> void:
@@ -95,10 +94,3 @@ func test_retired_probes_are_removed() -> void:
 	for path in RETIRED_PROBES:
 		assert_false(ResourceLoader.exists(path),
 			"%s was retired with its device and should stay removed." % path)
-
-
-func test_editor_screenshot_driver_has_no_runtime_capture_leg() -> void:
-	var source := FileAccess.get_file_as_string(SCREENSHOT_CAPTURE_PATH)
-	assert_false(source.is_empty(), "Editor screenshot driver should remain readable.")
-	assert_false(source.contains("mission_" + "play"),
-		"Editor screenshots must not recreate an in-process game runtime.")

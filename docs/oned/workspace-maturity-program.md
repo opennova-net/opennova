@@ -1,11 +1,14 @@
 # ONED workspace maturity program (the maturity program's ONED track)
 
-**This document is the ONED track detail of the
+> **Historical.** [ADR 0037](../adr/0037-oned-runs-game-data.md) removed every
+> ONED authoring workspace in a hard cut. This closed program is retained as a
+> record and is not a roadmap.
+
+**This document was the ONED track detail of the
 [maturity program](../maturity-program.md)** — the umbrella owned waves,
 freeze policy, cross-track ordering, and enforcement; this doc owns the
 editor-side phases. **The umbrella program closed 2026-07-12 (freeze
-lifted); this doc survives as the editor's standing roadmap** — phases
-execute as ordinary slices under the standing ADRs, RE gates unchanged.
+lifted); its remaining roadmap was retired by ADR 0037.**
 Standing rules this track builds under: ADR 0015 (two
 products, serve mode), ADR 0016 (editor over public engine APIs — no
 bypasses), ADR 0017 (typed records, named constants), ADR 0018 (public-API
@@ -45,7 +48,7 @@ decision (ADR / RE-record entry) saying why not:
 - **G — Game loop.** The author saves canonical loose assets, then launches
   the real game: F5 runs the normal standalone game and F6 runs the current
   saved, top-level loose mission. F3 is the standalone game's debug UI, not
-  an editor launcher. Authoring that cannot be seen in the running game is
+  an ONED run control. Authoring that cannot be seen in the running game is
   not done.
 
 ## Current matrix (verified 2026-07-04; live-run policy refreshed 2026-07-29)
@@ -106,7 +109,7 @@ uses (the runtime draw that credits/killfeed/menus text rides — exact seam
 truthful "how the game draws it" panel. Gate: widget test + a golden-ish
 visual check in the driver run.
 
-### F3 — Play-with-overrides launcher ("See it in game")
+### F3 — Play with overrides ("See it in game")
 
 The editor gains one affordance that launches the game runtime with the
 authoring directory as the loose-file override — the engine's own mechanism
@@ -522,7 +525,7 @@ along seams that already exist as signal boundaries in the code.
 ### Terrain (bar-setter; verification only)
 
 - TER-1: historical bar audit — confirm all four axes against this doc's
-  definitions, wire the former staged-terrain launcher entry ("open the
+  definitions, wire the former staged-terrain run entry ("open the
   exported terrain's mission in game"), and record terrain as the E/G
   exemplar. No new capability. Gate: existing
   terrain suites; driver overview shot. **DONE 2026-07-12.** Audit: R ✓
@@ -531,15 +534,15 @@ along seams that already exist as signal boundaries in the code.
   TrnGen-parity bake + the roundtrip/import-export suites); E ✓ (the editor
   viewport IS the ported terrain renderer — the E exemplar); G ✓ (after an
   explicit save, F5/F6 run the standalone game over the mounted loose assets).
-  The historical terrain staging launcher described below was superseded by
+  The historical terrain staging flow described below was superseded by
   the saved-loose-assets boundary in ADR 0025: Run no longer exports, copies,
   or stages terrain data. One correction to the phase's wording remains:
   terrain export bakes the terrain data set (`.trn`/`.cpt`/`.til`/maps), not a
   mission dir — there is no "exported terrain's mission" to boot directly.
-  The retired launcher also introduced a per-workspace
+  The retired run surface also introduced a per-workspace
   `EditorWorkspace.get_game_launch_note(launch_dir)` -> `GameLaunchNote`
-  staging-note seam, consumed by the then-launcher's tooltip and post-launch
-  status; that seam was deleted with the launcher (ADR 0025 / PR #376) —
+  staging-note seam, consumed by its tooltip and post-launch status; that seam
+  was deleted with the run surface (ADR 0025 / PR #376) —
   today's F5/F6 runs carry no per-workspace launch notes.
 
 ### Environment

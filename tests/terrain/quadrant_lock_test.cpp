@@ -16,7 +16,7 @@
 //   4. Runtime surface normals share the generated-map kernel and lock policy.
 //   5. The default (all-zero locks) field still taps across the full atlas.
 //
-// [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/terrain_mesh.cpp.]
+// [orig: sub_402D20 @0x402D20.]
 
 #include "terrain_query/coords.h"
 #include "terrain_query/height_field.h"

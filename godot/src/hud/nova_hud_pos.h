@@ -25,8 +25,8 @@ class ResourceRoot;
 //
 // Read-only: it surfaces the original HUD layout — element positions in the
 // 1024x768 virtual design space, colors, stance/graphic frames and the HUD fonts
-// — for the ONED HUD preview workspace and the runtime HUD overlay. There is no
-// writer; hudpos.def authoring is out of scope (preview only).
+// for the runtime HUD overlay. There is no writer; hudpos.def authoring is out
+// of scope.
 //
 // Layout shape and field meanings are the witnessed originals; see
 // docs/interface/hud-re.md. [orig: loc_59F370 hudpos.def parser, registered by
@@ -211,8 +211,8 @@ public:
 	// stancecolor_good/middle/bad, tagcolor_*, etc.
 	Dictionary get_colors() const;
 
-	// The complete parsed layout as a nested Godot-native Dictionary (the ONED
-	// preview reads this). Keys mirror DefHudPosDef field names.
+	// The complete parsed layout as a nested Godot-native Dictionary. Keys mirror
+	// DefHudPosDef field names.
 	Dictionary to_dictionary() const;
 };
 

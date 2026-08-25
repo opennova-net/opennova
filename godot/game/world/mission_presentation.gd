@@ -110,8 +110,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		_sim.set_local_character_profile(options["local_character_profile"])
 	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	# load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
-	# sole live runtime owner (ADR 0025); F5/F6 launch that standalone path. Isolated tests/tooling previews may
-	# instantiate this same seam, but ONED does not. A co-op LAN host additionally binds a real UDP
+	# sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
+	# seam, but ONED does not. A co-op LAN host additionally binds a real UDP
 	# socket; a joiner is the non-authority client.
 	var playable := bool(options.get("playable", false))
 	var join_target: JoinTarget = options.get("join_target")

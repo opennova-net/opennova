@@ -99,15 +99,14 @@ func test_detail_mips_sample_anisotropically_with_conservative_terminal_guard() 
 
 func test_detail_uv_uses_the_retail_512_unit_source_grid() -> void:
 	# Retail writes UV1 from the parsed detail density divided by 512. Runtime
-	# and ONED carry normalized coordinates for the full 1024 terrain atlas, so
-	# their shared conversion must restore that factor of two. Stage 3 derives
+	# carries normalized coordinates for the full 1024 terrain atlas, so its
+	# conversion must restore that factor of two. Stage 3 derives
 	# its authored detail2/noise coordinates from the same retail UV1.
 	# [orig: density parse @ 0x60f993..0x60f9b3; config field +0x1738 passed
 	# @ 0x60e634; density/512 write @ 0x6029a0..0x6029aa; UV1 stores
 	# @ 0x602db5..0x602dbe; stage-3 matrices @ 0x609786..0x609810]
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
-	var editor := _compact(_source("res://shaders/terrain_editor.gdshader"))
 
 	assert_true(
 		shared.contains("vec2retail_detail_uv_from_atlas(vec2atlas_uv,floatdensity)") and
@@ -116,9 +115,6 @@ func test_detail_uv_uses_the_retail_512_unit_source_grid() -> void:
 	assert_true(runtime.contains(
 		"v_detail_uv=retail_detail_uv_from_atlas(UV,u_detail_density);"),
 		"Runtime terrain must use the shared retail detail coordinate.")
-	assert_true(editor.contains(
-		"v_detail_uv=retail_detail_uv_from_atlas(source_uv,u_detail_density);"),
-		"ONED terrain must use the same retail detail coordinate.")
 	assert_true(shared.contains(
 		"u_detail2,retail_detail_uv_from_atlas(colormap_uv,u_detail2_density)"),
 		"The authored stage-3 detail must use density2/512 coordinates.")
@@ -212,25 +208,22 @@ func test_terrain_point_light_pool_is_the_two_stage_modulate2x_fold() -> void:
 	assert_gt(fog, pool, "The pool sum is added before the fog mix so it fades with the batch.")
 
 
-func test_runtime_and_oned_share_tile_overlay_composition() -> void:
+func test_runtime_uses_shared_tile_overlay_composition() -> void:
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
-	var editor := _compact(_source("res://shaders/terrain_editor.gdshader"))
 
 	assert_true(shared.contains("uniformsampler2Du_tile_overlay"),
-		"The tile composite input must live in the surface shader shared by runtime and ONED.")
+		"The tile composite input must live in the shared surface include.")
 	assert_true(shared.contains("vec4compose_retail_tile_overlay"),
-		"Runtime and ONED must use one tile-composition implementation.")
+		"Runtime must use the shared tile-composition implementation.")
 	assert_true(runtime.contains("compose_retail_tile_overlay("),
 		"Runtime terrain must use the shared tile-composition implementation.")
-	assert_true(editor.contains("compose_retail_tile_overlay("),
-		"ONED terrain must composite mission tiles in its terrain material.")
-	# The shared environment binding (native MissionEnvironment) must apply the
-	# retail tile tint through the one terrain-uniform push both shells drive.
+	# The environment binding must apply the retail tile tint through the
+	# runtime terrain-uniform push.
 	var environment := MissionEnvironment.new()
 	add_child_autofree(environment)
 	var material := ShaderMaterial.new()
 	environment.apply_terrain_uniforms(material)
 	assert_eq(material.get_shader_parameter("u_tile_overlay_tint"),
 		environment.get_tile_overlay_tint(),
-		"The shared environment binding must apply the retail tile tint in runtime and ONED.")
+		"The environment binding must apply the retail tile tint in runtime.")

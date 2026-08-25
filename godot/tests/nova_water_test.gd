@@ -80,7 +80,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_false(cache.has_water_split_height())
 
 
-func test_height_precedence_is_direct_then_bms_then_signed_trn_then_env() -> void:
+func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../assets")), OK)
@@ -107,10 +107,6 @@ func test_height_precedence_is_direct_then_bms_then_signed_trn_then_env() -> voi
 	assert_eq(water.water_height, 0.0,
 			"an explicit BMS zero disables water and still beats TRN")
 	water.set_mission_water_height_override(15.0)
-	assert_eq(water.water_height, 15.0)
-	water.set_height_override(30.0)
-	assert_eq(water.water_height, 30.0)
-	water.set_height_override(NAN)
 	assert_eq(water.water_height, 15.0)
 	water.set_mission_water_height_override(NAN)
 	assert_eq(water.water_height, -10.0)
@@ -390,7 +386,7 @@ func test_underwater_swaps_to_opaque_side() -> void:
 	env.environment_data = env_data
 	fixture["viewport"].add_child(env)
 	water.environment_path = NodePath("../UnderwaterWaterEnv")
-	water.set_height_override(7.0)
+	water.set_mission_water_height_override(7.0)
 	water.advance_frame(TICK)
 	# Drop the camera below the 7.0 plane: the pass swaps to the OPAQUE
 	# material [orig: Water_ShaderOpaque @ 0x28ee8c8; selection

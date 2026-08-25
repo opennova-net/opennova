@@ -1,15 +1,13 @@
 class_name GameMcpCatalog
 extends RefCounted
 
-## Stable tool definitions shared by the game-side handlers and ONED's proxy.
-## Keeping the schemas here prevents the editor and runtime catalogs drifting
-## while their handlers remain correctly separated by the process boundary.
+## Stable tool definitions for the game-side runtime handlers.
 
 const SCREENSHOT_TIMEOUT_MS := 60_000
 
 ## The one list of public game_control actions. The game_control schema enum,
-## ONED's proxy allowlist, and the GameDebugAdapter contract test all read it, so
-## the three cannot drift; GameDebugAdapter.mcp_game_control implements each.
+## Handler registration and the GameDebugAdapter contract test both read this
+## list; GameDebugAdapter.mcp_game_control implements each action.
 const PUBLIC_GAME_CONTROL_ACTIONS: Array[String] = [
 	"pause",
 	"resume",
@@ -24,7 +22,7 @@ const PUBLIC_GAME_CONTROL_ACTIONS: Array[String] = [
 static func definitions() -> Array[McpToolDef]:
 	return [
 		McpToolDef.make("game_state",
-			"Read the editor-launched game's shell, mission, runtime and debug-connection state.",
+			"Read the game's shell, mission, runtime and debug-connection state.",
 			{}, [], false),
 		McpToolDef.make("game_entities",
 			"Discover the game's current rendered entity view. op=list returns a bounded page in "

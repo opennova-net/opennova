@@ -463,7 +463,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	file.close()
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
 	# The expansion pair exists ON DISK (list_expansions scans the path), but the
-	# mounted root is the editor's loose mount, which cannot layer it.
+	# mounted root is a loose-only mount, which cannot layer it.
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
 	])

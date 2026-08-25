@@ -2,7 +2,6 @@
 
 #include "resource_index/nova_resource_root.h"
 
-#include <mission/authoring.h>
 #include <mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
 #include <mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
 
@@ -34,36 +33,6 @@ opennova::mission::EntityKind to_native_kind(int kind) {
 		default:
 			return opennova::mission::EntityKind::Item;
 	}
-}
-
-Dictionary param_slot_to_dictionary(const opennova::mission::MissionParamSlot &slot) {
-	Dictionary out;
-	out["label"] = String(slot.label.c_str());
-	out["kind"] = static_cast<int>(slot.kind);
-	out["tip"] = String(slot.tip.c_str());
-	out["used"] = slot.used;
-	Array enum_values;
-	for (const opennova::mission::MissionParamEnumEntry &entry : slot.enum_values) {
-		Dictionary row;
-		row["value"] = entry.value;
-		row["label"] = String(entry.label.c_str());
-		enum_values.push_back(row);
-	}
-	out["enum"] = enum_values;
-	return out;
-}
-
-Dictionary param_spec_to_dictionary(const opennova::mission::MissionParamSpec &spec) {
-	Dictionary out;
-	out["desc"] = String(spec.description.c_str());
-	out["known"] = spec.known;
-	out["variable"] = spec.variable;
-	Array params;
-	for (const opennova::mission::MissionParamSlot &slot : spec.params) {
-		params.push_back(param_slot_to_dictionary(slot));
-	}
-	out["params"] = params;
-	return out;
 }
 
 } // namespace
@@ -99,13 +68,6 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_game_mode"), &MissionData::get_game_mode);
 	ClassDB::bind_method(D_METHOD("set_game_mode", "bit"), &MissionData::set_game_mode);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &MissionData::add_entity);
-	ClassDB::bind_static_method("MissionData", D_METHOD("kind_for_item_type", "def_item_type"), &MissionData::kind_for_item_type);
-	ClassDB::bind_method(D_METHOD("place_entity_grounded", "item_id", "def_item_type", "ground_hit_bms", "ground_anchor_bms"), &MissionData::place_entity_grounded);
-	ClassDB::bind_method(D_METHOD("move_entity_grounded", "kind", "index", "ground_hit_bms", "ground_anchor_bms"), &MissionData::move_entity_grounded);
-	ClassDB::bind_method(D_METHOD("reground_entities", "requests", "epsilon", "apply"), &MissionData::reground_entities, DEFVAL(0.01f), DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("reground_entities_apply", "requests", "epsilon"), &MissionData::reground_entities_apply, DEFVAL(0.01f));
-	ClassDB::bind_method(D_METHOD("marker_item_id_for_path", "path_index"), &MissionData::marker_item_id_for_path);
-	ClassDB::bind_method(D_METHOD("add_path_marker_grounded", "path_index", "ground_hit_bms", "insert_index"), &MissionData::add_path_marker_grounded, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &MissionData::remove_entity);
 
 	ClassDB::bind_method(D_METHOD("get_waypoint_summaries"), &MissionData::get_waypoint_summaries);
@@ -146,32 +108,11 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_event_action", "event_index", "local_index", "action"), &MissionData::set_event_action);
 	ClassDB::bind_method(D_METHOD("remove_event_action", "event_index", "local_index"), &MissionData::remove_event_action);
 	ClassDB::bind_method(D_METHOD("move_event_action", "event_index", "local_index", "delta"), &MissionData::move_event_action);
-	ClassDB::bind_method(D_METHOD("get_trigger_main_types"), &MissionData::get_trigger_main_types);
-	ClassDB::bind_method(D_METHOD("get_trigger_sub_types", "main_type"), &MissionData::get_trigger_sub_types);
-	ClassDB::bind_method(D_METHOD("get_action_types"), &MissionData::get_action_types);
-	ClassDB::bind_method(D_METHOD("get_action_sub_types", "action_type"), &MissionData::get_action_sub_types);
-	ClassDB::bind_method(D_METHOD("get_event_flag_bits"), &MissionData::get_event_flag_bits);
-	ClassDB::bind_method(D_METHOD("get_ai_flag_bits"), &MissionData::get_ai_flag_bits);
-	ClassDB::bind_method(D_METHOD("get_trigger_param_schema", "main_type", "sub_type"), &MissionData::get_trigger_param_schema);
-	ClassDB::bind_method(D_METHOD("get_action_param_schema", "action_type", "action_sub_type"), &MissionData::get_action_param_schema, DEFVAL(0));
-
 	ClassDB::bind_method(D_METHOD("save_file"), &MissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &MissionData::save_as);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights_world", "flat_write_order"), &MissionData::set_mis_base_heights_world);
-	ClassDB::bind_static_method("MissionData", D_METHOD("fixed_seconds_from_raw", "raw"), &MissionData::fixed_seconds_from_raw);
-	ClassDB::bind_static_method("MissionData", D_METHOD("fixed_seconds_to_raw", "seconds"), &MissionData::fixed_seconds_to_raw);
 	ClassDB::bind_method(D_METHOD("is_modified"), &MissionData::is_modified);
-	ClassDB::bind_method(D_METHOD("begin_edit"), &MissionData::begin_edit);
-	ClassDB::bind_method(D_METHOD("commit_edit"), &MissionData::commit_edit);
-	ClassDB::bind_method(D_METHOD("can_undo"), &MissionData::can_undo);
-	ClassDB::bind_method(D_METHOD("can_redo"), &MissionData::can_redo);
-	ClassDB::bind_method(D_METHOD("undo"), &MissionData::undo);
-	ClassDB::bind_method(D_METHOD("redo"), &MissionData::redo);
-	ClassDB::bind_method(D_METHOD("undo_depth"), &MissionData::undo_depth);
-	ClassDB::bind_method(D_METHOD("clear_history"), &MissionData::clear_history);
-	ClassDB::bind_method(D_METHOD("is_dirty"), &MissionData::is_dirty);
-	ClassDB::bind_method(D_METHOD("mark_clean"), &MissionData::mark_clean);
 	ClassDB::bind_method(D_METHOD("object_records_revision"), &MissionData::object_records_revision);
 	ClassDB::bind_method(D_METHOD("structure_fingerprint"), &MissionData::structure_fingerprint);
 
@@ -199,12 +140,6 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
 	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
 	BIND_CONSTANT(ITEM_ID_OFFSET);
-	BIND_CONSTANT(ACTION_CHANGE_GROUP_AI);
-	BIND_CONSTANT(ACTION_AREA_AI_RED);
-	BIND_CONSTANT(ACTION_AREA_AI_BLUE);
-	BIND_CONSTANT(ACTION_CHANGE_SINGLE_AI);
-	BIND_CONSTANT(ACTION_SUB_PLAY_PART_ANIM);
-	BIND_CONSTANT(FIXED_SECONDS_RAW_STEP);
 }
 
 static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
@@ -241,20 +176,6 @@ static_assert(MissionData::ATTRIB_TEAM_KING_OF_THE_HILL ==
 static_assert(MissionData::ATTRIB_SEARCH_AND_DESTROY ==
               static_cast<uint32_t>(opennova::bms::AttribFlags::SearchAndDestroy));
 static_assert(MissionData::ATTRIB_GAME_MODE_MASK == opennova::bms::kGameModeMask);
-// The scripting action-id mirrors pin to the engine schema enums.
-static_assert(MissionData::ACTION_CHANGE_GROUP_AI ==
-              static_cast<uint32_t>(opennova::bms::ActionType::ChangeGroupAI));
-static_assert(MissionData::ACTION_AREA_AI_RED ==
-              static_cast<uint32_t>(opennova::bms::ActionType::AreaAiRed));
-static_assert(MissionData::ACTION_AREA_AI_BLUE ==
-              static_cast<uint32_t>(opennova::bms::ActionType::AreaAiBlue));
-static_assert(MissionData::ACTION_CHANGE_SINGLE_AI ==
-              static_cast<uint32_t>(opennova::bms::ActionType::ChangeSingleAI));
-static_assert(MissionData::ACTION_SUB_PLAY_PART_ANIM ==
-              static_cast<uint32_t>(opennova::bms::AIActionSubType::PlayPartAnim));
-static_assert(MissionData::FIXED_SECONDS_RAW_STEP ==
-              opennova::mission::kFixedSecondsRawStep);
-
 Error MissionData::open_file(const String &path) {
 	source_path = path;
 	last_error = String();
@@ -272,11 +193,6 @@ Error MissionData::open_file(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 	modified = false;
-	// Drop any prior document's undo stack + clean baseline and adopt the freshly loaded mission as
-	// the clean baseline, so a reused MissionData instance never inherits the old mission's history
-	// (swap-based undo would otherwise overwrite the new document) or report a wrong dirty state.
-	clear_history();
-	mark_clean();
 	return OK;
 }
 
@@ -286,10 +202,6 @@ Error MissionData::create_default() {
 	mis_base_heights = PackedInt32Array(); // staged heights never apply to a different document
 	document.create_default();
 	modified = false;
-	clear_history();
-	// Adopt the empty document as the clean baseline; without this a reused instance keeps a prior
-	// mission's baseline and the brand-new mission reports is_dirty() == true with no edits.
-	mark_clean();
 	return OK;
 }
 
@@ -301,12 +213,9 @@ Error MissionData::open_wire_header(const PackedByteArray &p_header_bytes) {
 			p_header_bytes.ptr(), static_cast<size_t>(p_header_bytes.size()))) {
 		last_error = String(document.last_error().c_str());
 		modified = false;
-		clear_history();
 		return ERR_PARSE_ERROR;
 	}
 	modified = false;
-	clear_history();
-	mark_clean();
 	return OK;
 }
 
@@ -343,10 +252,6 @@ Error MissionData::open_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 	}
 	source_path = file;
 	modified = false;
-	// Mirror open_file(): clear any inherited history and re-baseline so a reused instance starts the
-	// reopened document clean with an empty undo stack.
-	clear_history();
-	mark_clean();
 	return OK;
 }
 
@@ -612,134 +517,6 @@ Dictionary MissionData::add_entity(int kind, int item_id, const Vector3 &positio
 	}
 	modified = true;
 	return entity_to_dictionary(record);
-}
-
-int MissionData::kind_for_item_type(int def_item_type) {
-	return static_cast<int>(opennova::mission::authoring::entity_kind_for_item_type(def_item_type));
-}
-
-Dictionary MissionData::place_entity_grounded(int item_id, int def_item_type, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms) {
-	const float hit[3] = {ground_hit_bms.x, ground_hit_bms.y, ground_hit_bms.z};
-	const float anchor[3] = {ground_anchor_bms.x, ground_anchor_bms.y, ground_anchor_bms.z};
-	opennova::mission::EntityRecord record;
-	if (!opennova::mission::authoring::place_entity_grounded(document, item_id, def_item_type, hit, anchor, &record)) {
-		return Dictionary();
-	}
-	modified = true;
-	return entity_to_dictionary(record);
-}
-
-bool MissionData::move_entity_grounded(int kind, int index, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms) {
-	if (index < 0) {
-		return false;
-	}
-	const float hit[3] = {ground_hit_bms.x, ground_hit_bms.y, ground_hit_bms.z};
-	const float anchor[3] = {ground_anchor_bms.x, ground_anchor_bms.y, ground_anchor_bms.z};
-	if (!opennova::mission::authoring::move_entity_grounded(document, to_native_kind(kind), static_cast<size_t>(index), hit, anchor)) {
-		return false;
-	}
-	modified = true;
-	return true;
-}
-
-// Shared request-Array parser for the two reground bindings. `row_to_request`
-// maps each engine row back to its index in the caller's Array: the parser
-// skips index < 0 rows, so engine row i is NOT requests[i] in general, and the
-// apply variant's moved-row report must stay aligned with what the caller sent.
-static void parse_reground_requests(const Array &requests,
-		std::vector<opennova::mission::authoring::RegroundRequest> &rows,
-		std::vector<int> &row_to_request) {
-	rows.reserve(static_cast<size_t>(requests.size()));
-	row_to_request.reserve(static_cast<size_t>(requests.size()));
-	for (int i = 0; i < requests.size(); i++) {
-		const Dictionary request = requests[i];
-		const int index = int(request.get("index", -1));
-		if (index < 0) {
-			continue;
-		}
-		opennova::mission::authoring::RegroundRequest row;
-		row.kind = to_native_kind(int(request.get("kind", -1)));
-		row.index = static_cast<size_t>(index);
-		const Vector3 hit = request.get("ground_hit_bms", Vector3());
-		const Vector3 anchor = request.get("ground_anchor_bms", Vector3());
-		row.ground_hit_bms[0] = hit.x;
-		row.ground_hit_bms[1] = hit.y;
-		row.ground_hit_bms[2] = hit.z;
-		row.ground_anchor_bms[0] = anchor.x;
-		row.ground_anchor_bms[1] = anchor.y;
-		row.ground_anchor_bms[2] = anchor.z;
-		rows.push_back(row);
-		row_to_request.push_back(i);
-	}
-}
-
-int MissionData::reground_entities(const Array &requests, float epsilon, bool apply) {
-	std::vector<opennova::mission::authoring::RegroundRequest> rows;
-	std::vector<int> row_to_request;
-	parse_reground_requests(requests, rows, row_to_request);
-	const size_t moved = opennova::mission::authoring::reground_entities(
-			document, rows.data(), rows.size(), epsilon, apply);
-	if (apply && moved > 0) {
-		modified = true;
-	}
-	return static_cast<int>(moved);
-}
-
-Dictionary MissionData::reground_entities_apply(const Array &requests, float epsilon) {
-	std::vector<opennova::mission::authoring::RegroundRequest> rows;
-	std::vector<int> row_to_request;
-	parse_reground_requests(requests, rows, row_to_request);
-	std::vector<size_t> moved_rows;
-	const size_t moved = opennova::mission::authoring::reground_entities(
-			document, rows.data(), rows.size(), epsilon, true, &moved_rows);
-	if (moved > 0) {
-		modified = true;
-	}
-	PackedInt32Array out_rows;
-	PackedVector3Array out_positions;
-	out_rows.resize(static_cast<int>(moved_rows.size()));
-	out_positions.resize(static_cast<int>(moved_rows.size()));
-	for (size_t n = 0; n < moved_rows.size(); ++n) {
-		const size_t row = moved_rows[n];
-		out_rows.set(static_cast<int>(n), row_to_request[row]);
-		opennova::mission::EntityRecord record;
-		// The row just moved, so the read-back cannot miss; the stored transform
-		// is the engine's own bake, the one truth the world update mirrors.
-		Vector3 position;
-		if (document.get_entity(rows[row].kind, rows[row].index, record)) {
-			position = Vector3(record.transform.x, record.transform.y, record.transform.z);
-		}
-		out_positions.set(static_cast<int>(n), position);
-	}
-	Dictionary out;
-	out["moved"] = static_cast<int>(moved);
-	out["rows"] = out_rows;
-	out["positions"] = out_positions;
-	return out;
-}
-
-int MissionData::marker_item_id_for_path(int path_index) const {
-	if (path_index < 0) {
-		return opennova::mission::authoring::kWaypointMarkerItemId;
-	}
-	return opennova::mission::authoring::marker_item_id_for_path(document, static_cast<size_t>(path_index));
-}
-
-Dictionary MissionData::add_path_marker_grounded(int path_index, const Vector3 &ground_hit_bms, int insert_index) {
-	if (path_index < 0) {
-		return Dictionary();
-	}
-	const float hit[3] = {ground_hit_bms.x, ground_hit_bms.y, ground_hit_bms.z};
-	opennova::mission::EntityRecord marker;
-	opennova::mission::WaypointPath path;
-	if (!opennova::mission::authoring::add_path_marker_grounded(document, static_cast<size_t>(path_index), hit, insert_index, &marker, &path)) {
-		return Dictionary();
-	}
-	modified = true;
-	Dictionary out;
-	out["marker"] = entity_to_dictionary(marker);
-	out["path"] = waypoint_path_to_dictionary(path);
-	return out;
 }
 
 bool MissionData::remove_entity(int kind, int index) {
@@ -1271,12 +1048,9 @@ bool MissionData::set_event(int index, int flags, int reset_after, int delay) {
 	if (!document.get_event(static_cast<size_t>(index), record)) {
 		return false;
 	}
-	// Preserve flag bits the editor does not surface, mirroring trigger_from_dictionary's condition_flags
-	// handling. The inspector rebuilds `flags` from the event_flag_bits() checkboxes only, so without this
-	// merge confirmed internal bits outside that exposed set (0x10/0x20) would be silently dropped on
-	// every event edit. `record.flags` is seeded from the existing on-disk event, so its complementary bits
-	// are exactly the ones to keep.
-	const int exposed = document.event_flag_mask();
+	// Preserve internal bits outside the three author-facing event flags. `record.flags` is seeded from
+	// the existing on-disk event, so its complementary bits are exactly the ones to keep.
+	const int exposed = static_cast<int>(opennova::bms::kEventAuthorFlagMask);
 	record.flags = (record.flags & ~exposed) | (flags & exposed);
 	record.reset_after = reset_after;
 	record.delay = delay;
@@ -1421,53 +1195,6 @@ bool MissionData::move_event_action(int event_index, int local_index, int delta)
 	return true;
 }
 
-namespace {
-
-Array enum_entries_to_array(const std::vector<opennova::mission::MissionEnumEntry> &entries) {
-	Array out;
-	for (const opennova::mission::MissionEnumEntry &entry : entries) {
-		Dictionary dict;
-		dict["value"] = entry.value;
-		dict["name"] = String::utf8(entry.name.c_str());
-		out.push_back(dict);
-	}
-	return out;
-}
-
-} // namespace
-
-Array MissionData::get_trigger_main_types() const {
-	return enum_entries_to_array(document.trigger_main_types());
-}
-
-Array MissionData::get_trigger_sub_types(int main_type) const {
-	return enum_entries_to_array(document.trigger_sub_types(main_type));
-}
-
-Array MissionData::get_action_types() const {
-	return enum_entries_to_array(document.action_types());
-}
-
-Array MissionData::get_action_sub_types(int action_type) const {
-	return enum_entries_to_array(document.action_sub_types(action_type));
-}
-
-Array MissionData::get_event_flag_bits() const {
-	return enum_entries_to_array(document.event_flag_bits());
-}
-
-Array MissionData::get_ai_flag_bits() const {
-	return enum_entries_to_array(document.ai_attribute_flag_bits());
-}
-
-Dictionary MissionData::get_trigger_param_schema(int main_type, int sub_type) const {
-	return param_spec_to_dictionary(opennova::mission::trigger_param_schema(main_type, sub_type));
-}
-
-Dictionary MissionData::get_action_param_schema(int action_type, int action_sub_type) const {
-	return param_spec_to_dictionary(opennova::mission::action_param_schema(action_type, action_sub_type));
-}
-
 Error MissionData::save_file() {
 	if (source_path.is_empty()) {
 		// No path yet: let the shell route to Save As (matches the editor save contract).
@@ -1536,65 +1263,6 @@ bool MissionData::is_modified() const {
 	return modified;
 }
 
-void MissionData::begin_edit() {
-	// Open an edit session, snapshotting the pre-edit document. The shared history
-	// coalesces a run of edits into one step (begin is inert while a session is open);
-	// we add only the "is a document loaded?" guard it cannot know about.
-	if (!document.is_loaded()) {
-		return;
-	}
-	history.begin(document.bms_file());
-}
-
-void MissionData::commit_edit() {
-	// Close the session, recording one undo step only if the document actually changed:
-	// the history's equal-gate uses bms::equal, so a plain click / same-value edit /
-	// programmatic refresh records nothing.
-	history.commit(document.bms_file());
-}
-
-bool MissionData::can_undo() const {
-	return history.can_undo();
-}
-
-bool MissionData::can_redo() const {
-	return history.can_redo();
-}
-
-bool MissionData::undo() {
-	// O(1) in-memory swap of the live file with the top undo step: no serialize / parse,
-	// so it cannot fail once a document is loaded.
-	if (!document.is_loaded()) {
-		return false;
-	}
-	return history.swap_undo(document.bms_file());
-}
-
-bool MissionData::redo() {
-	if (!document.is_loaded()) {
-		return false;
-	}
-	return history.swap_redo(document.bms_file());
-}
-
-int MissionData::undo_depth() const {
-	return static_cast<int>(history.undo_depth());
-}
-
-void MissionData::clear_history() {
-	history.clear();
-}
-
-bool MissionData::is_dirty() const {
-	// Exact: the document differs from the clean baseline (set at open / save / new).
-	// Before a baseline exists, fall back to the coarse "any mutation since load" flag.
-	return history.is_dirty(document.bms_file(), modified);
-}
-
-void MissionData::mark_clean() {
-	history.mark_clean(document.bms_file());
-}
-
 int64_t MissionData::object_records_revision() const {
 	// 64-bit FNV-1a over the raw bytes of the placed-object record vectors. This mirrors
 	// how bms::equal decides these vectors (memcmp via pod_vectors_equal), so two
@@ -1654,14 +1322,4 @@ bool MissionData::set_game_mode(int64_t bit) {
 	}
 	modified = true;
 	return true;
-}
-
-// FixedSeconds raw <-> seconds — one impl in engine/formats/mission
-// mission_schema.h (the Med_ParamAnimTime witness rides there).
-double MissionData::fixed_seconds_from_raw(int p_raw) {
-	return opennova::mission::fixed_seconds_from_raw(p_raw);
-}
-
-int MissionData::fixed_seconds_to_raw(double p_seconds) {
-	return opennova::mission::fixed_seconds_to_raw(p_seconds);
 }

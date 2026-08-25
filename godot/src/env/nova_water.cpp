@@ -51,8 +51,6 @@ void Water::_bind_methods() {
 						 PROPERTY_HINT_RANGE, "0,1,0.01"),
 			"set_water_alpha", "get_water_alpha");
 
-	ClassDB::bind_method(D_METHOD("set_height_override", "value"),
-			&Water::set_height_override);
 	ClassDB::bind_method(D_METHOD("set_mission_water_height_override", "value"),
 			&Water::set_mission_water_height_override);
 	ClassDB::bind_method(D_METHOD("set_world_rendering_enabled", "value"),
@@ -167,11 +165,6 @@ void Water::set_water_height(float p_value) {
 	// The strip vertices carry the plane height themselves (the mesh node
 	// stays pinned at the world origin) — no node repositioning here.
 	_sync_render_activity();
-}
-
-void Water::set_height_override(float p_value) {
-	height_override_ = p_value;
-	_apply_environment_water_height();
 }
 
 void Water::set_mission_water_height_override(float p_value) {
@@ -320,9 +313,6 @@ void Water::_recompute_terrain_water_fallback() {
 void Water::_apply_environment_water_height() {
 	MissionEnvironment *env = _env_node();
 	opennova::env::WaterHeightRungs rungs;
-	rungs.has_authoring_override = !std::isnan(height_override_);
-	rungs.authoring_override = rungs.has_authoring_override ? height_override_
-															: 0.0f;
 	rungs.has_mission_override = !std::isnan(mission_water_height_override_);
 	rungs.mission_override = rungs.has_mission_override
 			? mission_water_height_override_

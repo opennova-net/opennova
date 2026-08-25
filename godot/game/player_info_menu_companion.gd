@@ -35,8 +35,8 @@ const VOICE_PREVIEW_CONTROL := "TESTPLAYERVOICE"
 const VOICE_PREVIEW_BANK := "menu.lwf"
 const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 
-# The 3D character preview (compatible head/body .3di composited), reused from the
-# ONED Avatars workspace. Mounted over the PLAYER_PREVIEW widget rect and fed the
+# The 3D character preview (compatible head/body .3di composited). Mounted over
+# the PLAYER_PREVIEW widget rect and fed the
 # resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
 const AvatarPreviewScript := preload("res://game/avatar/avatar_preview.gd")
 const PlayerCharacterSelectionStateScript := preload(
@@ -749,10 +749,8 @@ func _wire_preview() -> void:
 	_preview.name = "PlayerInfoAvatarPreview"
 	frame.add_child(_preview)
 	_place_mount(_preview, preview_id)
-	# Locked menu portrait: no grid/axes, camera fixed, character facing the viewer.
-	# The editor Avatars workspace keeps the interactive fly camera; only this runtime
-	# mount opts into the portrait (idle spin + hover zoom/sway, see AvatarPreview).
-	_preview.set_menu_preview(true)
+	# Runtime PLAYER_INFO portrait: camera fixed, character facing the viewer,
+	# with idle spin and hover zoom/sway handled by AvatarPreview.
 	_preview.set_resource_root(_root)
 	_refresh_preview()
 
@@ -775,8 +773,8 @@ func _refresh_preview() -> void:
 	var idx := _selected_combo_index()
 	if idx < 0 or idx >= _db.get_combo_count(_sel_nat, _sel_div):
 		return
-	# [orig: combo -> spawned-player model is D-PLAYERINFO-1, unwitnessed; the preview
-	# stops at the resolved part .3di geometry, as the ONED Avatars workspace does.]
+	# [orig: combo -> spawned-player model is D-PLAYERINFO-1, unwitnessed; the
+	# portrait stops at the resolved part .3di geometry.]
 	_preview.load_combo(_db.resolve_combo(_sel_nat, _sel_div, idx))
 
 

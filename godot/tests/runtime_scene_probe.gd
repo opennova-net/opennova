@@ -50,7 +50,6 @@ func _run() -> void:
 
 	var terrain: Terrain = null
 	var dispatcher: FoliageDispatcher = null
-	var overlay: TerrainTileOverlay = null
 	var camera: Camera3D = null
 	var data: TerrainData = null
 
@@ -58,7 +57,6 @@ func _run() -> void:
 		await get_tree().process_frame
 		terrain = scene.get_node_or_null("World/Terrain")
 		dispatcher = scene.get_node_or_null("World/Terrain/FoliageDispatcher")
-		overlay = scene.get_node_or_null("World/Terrain/TileOverlay")
 		camera = scene.get_node_or_null("Camera3D")
 		data = world.get_terrain_data() if world != null else null
 		if data != null and data.is_loaded():
@@ -102,14 +100,6 @@ func _run() -> void:
 		"foliage_probe": foliage_probe,
 		"dispatcher_total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"dispatcher_frame_stats": foliage_stats,
-		"overlay_tile_info": overlay != null and overlay.tile_info != null,
-		"overlay_tilestrip": overlay != null and overlay.tilestrip != null,
-		"overlay_entries_rendered": overlay.get_entry_count_rendered() if overlay != null else -1,
-		"overlay_entry_count": overlay.tile_info.get_entry_count() if overlay != null and overlay.tile_info != null else -1,
-		"tilestrip_size": Vector2i(
-			overlay.tilestrip.get_width(),
-			overlay.tilestrip.get_height()
-		) if overlay != null and overlay.tilestrip != null else Vector2i.ZERO,
 	}
 	print("runtime_scene_probe diagnostics: ", diagnostics)
 

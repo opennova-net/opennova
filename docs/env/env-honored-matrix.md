@@ -1,10 +1,9 @@
 # Environment honored-matrix: which `.env` fields the renderer actually consumes
 
-The Environment workspace exposes nearly every `env::Config` field (water height still
-arrives via terrain/BMS rather than the inspector), but not every field reaches a
-visible render input yet. This matrix classifies each editor-exposed field
-so authors (and the editor UI) can tell a live control from a parsed-but-deferred one,
-and so renderer changes flip rows only with citations. It is the audit behind the
+The runtime parses nearly every `env::Config` field (water height still arrives via
+terrain/BMS), but not every field reaches a visible render input yet. This matrix
+classifies each parsed field so runtime work can distinguish a live control from a
+parsed-but-deferred one, and so renderer changes flip rows only with citations. It is the audit behind the
 environment fidelity work; the reverse-engineering record it
 leans on is [env-tod-re.md](env-tod-re.md).
 
@@ -13,12 +12,12 @@ Classifications:
 - **HONORED** — reaches a render input through the witnessed original behavior.
 - **PARTIAL** — reaches the renderer, but through approximated math, an incomplete
   trigger path, or only in some modes. Each PARTIAL row names what is missing.
-- **UNCONSUMED** — parsed, edited, and round-tripped, but no render effect today.
+- **UNCONSUMED** — parsed and round-tripped, but no render effect today.
   Rows marked *faithful* are unconsumed in retail too; the rest await a ported
   consumer and must **not** be faked (an untracked divergence would mis-train
   authors).
 
-Chains below run editor inspector → `EnvFile` (godot/src/env/env_file.h) →
+Chains below run source `.env` → `EnvFile` (godot/src/env/env_file.h) →
 runtime nodes (`MissionEnvironment` / `SkyDome` / `Water` / `Weather` /
 `Celestial`, godot/src/env/) → shader. The portable math lives in
 `engine/formats/env` (`env.h`, `env_weather.h`, `env_celestial.h`, `env_water_render.h`).
@@ -27,7 +26,7 @@ runtime nodes (`MissionEnvironment` / `SkyDome` / `Water` / `Weather` /
 
 | Field | Chain | Status | Original anchor | Notes |
 |---|---|---|---|---|
-| `env_name` | inspector → `EnvFile.env_name` | UNCONSUMED (*faithful*) | authoring extension; retail has no keyword | Display/round-trip only. |
+| `env_name` | source → `EnvFile.env_name` | UNCONSUMED (*faithful*) | OpenNova extension; retail has no keyword | Metadata/round-trip only. |
 | `timeofday` (enum) | `EnvFile` property | UNCONSUMED (*faithful*) | classification string only | Never read by the gradient in retail either. |
 | `curtime` | `EnvFile` → `MissionEnvironment.time_of_day` bootstrap | HONORED | [orig: Environment_SetCurrentTime @ 0x57c4b0] | Initial TOD at load. |
 | `envscale` | parse-time scale on every `*_rgb` getter | HONORED | [orig: Env_ParseEnvScale @ 0x840950] | Raw storage + getter-side scaling; cross-file parse-order bleed deliberately not replicated (see env-tod-re.md). |
@@ -68,7 +67,7 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `ground` | fill/ambient light → shader globals | HONORED | |
 | `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_UpdateWeatherTick @ 0x57f17c]. |
 | `sky` | sky ambient → shader globals | HONORED | |
-| `skyfog` | `get_frame_clear_color()` (horizon-blended, undoubled) -> the GameWorld `ClearColor` clear; `get_skyfog_color()` stays the doubled render color | HONORED (runtime) | [orig: Environment_UpdateWeatherTick blend @ 0x57f037-0x57f0a1; Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; Clear halving @ 0x67715d] | **Closed 2026-07-05** (env-tod-re.md #21): blend ported engine/formats/env-first, byte-exact; GameWorld clears with it (above/below-water choice witnessed). Editor preview adoption rides ENV-1; sentinel-mirror bleed still deliberately not replicated. |
+| `skyfog` | `get_frame_clear_color()` (horizon-blended, then doubled with saturation) -> the GameWorld `ClearColor` clear; `get_skyfog_color()` uses the same render-space scale | HONORED (runtime) | [orig: Environment_UpdateWeatherTick blend @ 0x57f037-0x57f0a1, double @ 0x57f1b1; Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf] | **Closed 2026-07-05; corrected 2026-07-07** (env-tod-re.md #21): blend and post-blend doubling ported engine/formats/env-first; GameWorld clears with that render-space value (above/below-water choice witnessed). Sentinel-mirror bleed still deliberately not replicated. |
 | `skybase` | `SkyDome` → `u_sky_base` | HONORED | Dome combine ported by C7 — see below. |
 | `skybright` | `SkyDome` → `u_sky_bright` | HONORED | |
 | `skyhighlight` | `SkyDome` → `u_sky_highlight` | HONORED | |

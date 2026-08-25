@@ -5,9 +5,7 @@
 //      godot/src/terrain/nova_terrain_data.cpp (float, & 0xF grid wrap, no
 //      id clamp, no local clamp). ref_resolve_world_sample() below is a verbatim
 //      copy of that formula and is the oracle for the runtime-mode kernel.
-//   2. The EDITOR guard divergences ported from
-//      godot/modtools/terrain/editor_terrain_mesh.gd world_to_source_coords /
-//      world_to_cell_source_coords / get_cell_atlas_rect: bounds-reject (instead
+//   2. The authoring-coordinate guard divergences: bounds-reject (instead
 //      of & 0xF wrap), clampi(sector_id, 0, 4), and clampf(local, 0, 512-0.001).
 //      These are exercised with hand-derived golden values.
 

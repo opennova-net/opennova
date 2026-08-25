@@ -3,6 +3,10 @@
 - **Status**: accepted (2026-08-08; the 2026-08-07 flattening assessment's
   "Shape A", maintainer-approved)
 - **Owners**: build/link topology
+- **Updated**: [ADR 0037](0037-oned-runs-game-data.md) removes the
+  `opennova_oned_edit` INTERFACE leaf and the editor-only `refs` subsystem;
+  the five group archives and `opennova_io` remain. References to `refs` in
+  the decision body record the topology at decision time.
 - **Supersedes/updates**: ADR 0024 decision 1's per-format-CMake-target clause
   and decisions 2–4 (the family link groups) — its one-directory-per-format
   layout, the decision-5 renderer reversal, and the decision-6 Model A/B

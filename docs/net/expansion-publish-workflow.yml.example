@@ -11,7 +11,7 @@
 #     -> server pushes refs/tags/<slug>-v<version> onto this repo  (THIS fires)
 #     -> package the repo content (LFS-hydrated) + sha256 + size, upload to S3
 #     -> POST <server>/admin/internal/expansions/<slug>/publish (or .../fail)
-#     -> server marks the release published; the launcher's Expansion Manager
+#     -> server marks the release published; OpenNova Launcher's Expansion Manager
 #        consumes the download_url.
 #
 # Secrets (set per repo by infra/github; the deps reconcile to our infra — there

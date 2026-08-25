@@ -891,7 +891,8 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	assert_not_null(world.get_node_or_null("Terrain/FoliageDispatcher"))
-	assert_not_null(world.get_node_or_null("Terrain/TileOverlay"))
+	assert_null(world.get_node_or_null("Terrain/TileOverlay"),
+		"the removed editor overlay is not part of the runtime world")
 	var terrain: Terrain = world.get_node("Terrain")
 	assert_eq(terrain.environment_path, NodePath("../MissionEnvironment"), "terrain env path survived extraction")
 	assert_eq(terrain.weather_path, NodePath("../Weather"), "terrain weather path survived extraction")
@@ -1150,7 +1151,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	# Cross the waterline with v_offset alone and pin the clear-color branch to
 	# the same adjusted eye used by Water strip classification.
 	var water := world.get_node("Water") as Water
-	water.set_height_override(10.0)
+	water.set_mission_water_height_override(10.0)
 	camera.position.y = 10.25
 	camera.v_offset = -0.25
 	world.tick(camera.global_position, camera.get_global_transform())
@@ -1242,7 +1243,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	world.tick(camera.global_position, camera.get_global_transform())
 	camera.v_offset = 0.0
 	camera.position.y = 71.0
-	water.set_height_override(NAN)
+	water.set_mission_water_height_override(NAN)
 	world.tick(camera.global_position, camera.get_global_transform())
 	assert_eq(world.get_current_frame_clear_color(), mission_clear)
 	assert_false(env.is_underwater_overlay_view(),
@@ -1358,7 +1359,7 @@ func test_exact_pose_refresh_retargets_a_frozen_water_mirror_without_advancing_t
 	assert_not_null(water)
 	if water == null:
 		return
-	water.set_height_override(10.0)
+	water.set_mission_water_height_override(10.0)
 	camera.global_position = Vector3(5.0, 30.0, 7.0)
 	water.advance_frame(0.0)
 

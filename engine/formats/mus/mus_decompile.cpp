@@ -18,10 +18,8 @@
    no Python entry (those are unused / no-op slots in the dispatch table).
 
    The pure rendering helpers (name resolution, control-flow analysis, and
-   stack-based expression reconstruction) live in mus_decompile_shared.h so the
-   structured AST builder (mus_ast.cpp) renders identically; only the linear
-   text-emission machinery (Buf + decompile_block) stays here. The two emitters
-   are pinned byte-for-byte by mus_ast_test.cpp. */
+   stack-based expression reconstruction) live in mus_decompile_shared.h; the
+   linear text-emission machinery (Buf + decompile_block) stays here. */
 
 #include "mus/mus.h"
 
@@ -37,11 +35,11 @@
 namespace {
 
 /* OpInfo / kOps[256] / MAX_OPERANDS / Instruction / disassemble() /
-   free_instructions() live in mus_decode.h (shared with mus_model.cpp). The
+   free_instructions() live in mus_decode.h. The
    name-resolution, control-flow analysis, and expression-reconstruction helpers
    (resolve_global_into, analyze_control_flow, reconstruct_expression,
    find_expr_start, resolve_play_name, format_play_token, ...) live in
-   mus_decompile_shared.h (shared with mus_ast.cpp). */
+   mus_decompile_shared.h. */
 
 /* Buffer that supports two-pass query (out=NULL, cap=0 → just count). */
 struct Buf {

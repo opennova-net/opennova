@@ -4,21 +4,20 @@
 #
 #   dist\opennova-windows-v<version>.zip           the DEV build (PRs + non-tag)
 #       opennova.exe            the game; default-mounts the assets\ beside it (loose)
-#       opennova-modtools.exe   the OpenNova Editor (ONED); same default project
+#       opennova-modtools.exe   ONED; same default source tree
 #       libopennova.windows.<flavour>.x86_64.dll
-#       assets\                 the game's loose sources — ONE copy of the data:
-#                               the game plays exactly what the editor edits
+#       assets\                 the game's tracked loose sources — ONE copy of the data
 #
 #   dist\opennova-game-windows-v<version>.zip      the GAME build (tagged releases)
 #       opennova.exe            default-mounts its own dir, retail-style
 #       libopennova.windows.<flavour>.x86_64.dll
-#       localres.pff            the packed game, built by the exported editor's own
+#       localres.pff            the packed game, built by ONED's
 #                               --pack-game CLI over the staged sources
 #       menumus.sbf gamemus.sbf earlyerr.txt       loose by contract
 #
 # Both are built on every run so pull-request CI exercises the pack CLI long
-# before a tag needs it. The dev zip keeps the editor beside the runtime because
-# the editor launches opennova.exe from its OWN directory (F5/F6).
+# before a tag needs it. The dev zip keeps ONED beside the runtime because
+# ONED runs the sibling opennova.exe against the loose assets tree.
 #
 # Requires:
 #   - MSVC toolchain + cmake (preinstalled on windows-latest)
@@ -36,8 +35,8 @@ param(
     # Godot export mode. "release" (default; what the release workflow ships):
     # --export-release, and the packaged exe loads the template_release
     # GDExtension. "debug" (pull-request CI): --export-debug, and the packaged exe
-    # loads the template_debug GDExtension — the flavour every editor session
-    # runs — so a PR only has to compile one flavour. The Godot editor itself
+    # loads the template_debug GDExtension — the development flavour — so a PR
+    # only has to compile one flavour. The Godot editor itself
     # always loads template_debug while it scans scripts for the export, so that
     # DLL is required in both modes.
     [ValidateSet("debug", "release")]
@@ -159,7 +158,7 @@ if ($SkipBuild) {
 else {
     # RelWithDebInfo, not Debug: the same optimized-plus-symbols flavour
     # scripts/build_godot.sh Dev and CI produce, so a debug-mode package ships
-    # the DLL every editor session runs rather than an /Od build.
+    # the DLL source/debug game and ONED runs use rather than an /Od build.
     Invoke-GDExtensionBuild `
         -GodotCppTarget "template_debug" `
         -BuildDir "build-godot-debug" `
@@ -321,15 +320,15 @@ function Copy-GameSources {
 }
 
 # ---------------------------------------------------------------------------
-# 6. Pack the game with the exported editor's own packer: the shipped localres.pff
-#    is provably produced by the shipped opennova-modtools.exe (--pack-game runs
-#    EditorGamePacker.export_game headless and drops the archive + the
-#    loose-by-contract files into the game-zip stage).
+# 6. Pack the game with ONED's hidden command. The shipped
+#    localres.pff is produced by the shipped opennova-modtools.exe; --pack-game
+#    runs headless and drops the archive plus loose-by-contract files into the
+#    game-zip stage.
 # ---------------------------------------------------------------------------
 function Invoke-PackGame {
     param([string]$AssetsDir, [string]$GameDir)
 
-    Write-Host "=== Packing the game with the exported editor ==="
+    Write-Host "=== Packing the game with ONED ==="
     $dllBeside = Join-Path (Split-Path $MODTOOLS_EXE -Parent) (Split-Path $SHIPPED_DLL -Leaf)
     if (-not (Test-Path $dllBeside)) {
         Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
@@ -361,8 +360,9 @@ function Invoke-PackGame {
 
 # ---------------------------------------------------------------------------
 # 7. The two zips. Dev: both exes + DLL + loose assets\ (one copy of the data;
-#    both apps default-mount it). Game: opennova.exe + DLL + the packed game,
-#    which default-mounts its own dir, retail-style.
+#    the game default-mounts it and ONED offers it as the implicit selection).
+#    Game: opennova.exe + DLL + the packed game, which default-mounts its own
+#    dir, retail-style.
 # ---------------------------------------------------------------------------
 function New-StageDir {
     param([string]$Name)

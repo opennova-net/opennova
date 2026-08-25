@@ -1,22 +1,22 @@
-# `assets/` — the game's own authored assets
+# `assets/` — the game's source-owned assets
 
-These are **the game's assets** — the ones OpenNova is built out from, authored
-in ONED and committed here. Not a test fixture: the per-format `fixtures/<fmt>/`
-sets and the retail-derived ones are expected to give way to this tree as it
-grows.
+These are **the game's assets** — the loose source tree OpenNova is built from
+and committed here. They are not an ONED project or a test fixture: the
+per-format `fixtures/<fmt>/` sets and the retail-derived ones are expected to
+give way to this tree as it grows.
 
 Every byte is authored from scratch by our own writers and tools; no retail
 asset is committed. Retail `Jointops.exe` is the **oracle**, not the target: it
 is the original consumer, so an asset it loads and renders is a correct asset.
 That is the whole reason the retail loop exists — proving compatibility both
-validates what ONED wrote and tells our own engine what it has to accept.
+validates our writers and source files and tells our own engine what it has to
+accept.
 
 This is the concrete instantiation of the R8 required-resources manifest
 ([../docs/required-resources.md](../docs/required-resources.md)) — that
 record answers "what a person starts with to make a new game"; this directory
-*is* that starting set, built and validated. It also seeds ONED-REQ's "new
-game scaffold" and is an end-to-end proof that our parity writers emit bytes a
-stock client loads.
+*is* that starting set, built and validated. It is an end-to-end proof that our
+parity writers emit bytes a stock client loads.
 
 ## Why this can be committed (asset policy)
 
@@ -42,17 +42,17 @@ acceptance step, never a committed input.
   once let loose retail copies slip into a commit. `.gitattributes` keeps that
   `.gitignore` a plain text blob on every checkout (an LFS pointer ignores
   nothing).
-- ONED's Play in Retail (F7) packs this tree and stages the retail runtime
-  into the **editor's own data dir** (`user://packed`) — never beside the
-  assets, so a distributed editor works against any mounted directory.
+- ONED's Stage & Run Retail stages this tree and the retail runtime into
+  **ONED's own data dir** (`user://packed`) — never beside the source
+  assets.
 - **This tree also ships, in two flavors**: the dev zip (`opennova-windows`)
-  stages the tracked files here under `assets/` — both shipped apps
-  default-mount that loose tree, so the game plays exactly what the editor
-  edits, no packing in the loop. The tagged-release zip
+  stages the tracked files here under `assets/` — the game default-mounts that
+  loose tree and ONED offers it as the implicit loose-data selection, so the
+  game runs the tracked source files with no packing in the loop. The
+  tagged-release zip
   (`opennova-game-windows`) carries the same game packed into `localres.pff`
-  beside `opennova.exe`, built by the editor's own
-  `opennova-modtools.exe --headless -- --pack-game <src> <game_dir>` (the
-  Export Game action in Settings is the same seam).
+  beside `opennova.exe`, built by ONED's hidden
+  `opennova-modtools.exe --headless -- --pack-game <src> <game_dir>` command.
 
 ## The set (grounded in required-resources.md)
 
@@ -70,17 +70,17 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `vmacros.bin` | `engine/formats/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `engine/formats/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
 | `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`. |
-| `main.mnu` (`"Startup"` node) | ONED menu workspace | the entry screen `[orig: sub_552500 @ 0x552651]`. |
+| `main.mnu` (`"Startup"` node) | project-authored MNU | the entry screen `[orig: sub_552500 @ 0x552651]`. |
 
 ### Host + join + single player — mission start + menus
 
 | File | Origin | Notes |
 |---|---|---|
-| `mnml.bms` | ONED mission workspace | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, minimal item set. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity). |
-| `mnml.trn` + `mnml.cpt` | ONED terrain workspace (`save_trn` + the CDEP bake) | the terrain config and its baked polydata. JO reads the compressed CDEP depth; the BHD-era DPTH the builder defaults to is a `.cpt` retail cannot decode. `sector_count` is the grid WIDTH, not a count of active sectors. |
-| `mnml.env` | ONED environment workspace (`save_env`) | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
-| `mp.mnu` | ONED menu workspace | the host/join menu `[orig: @ 0x5588fa]`. |
-| `sp.mnu` | ONED menu workspace | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
+| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, minimal item set. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity). |
+| `mnml.trn` + `mnml.cpt` | terrain writers (`save_trn` + the CDEP builder) | the terrain config and its baked polydata. JO reads the compressed CDEP depth; the BHD-era DPTH the builder defaults to is a `.cpt` retail cannot decode. `sector_count` is the grid WIDTH, not a count of active sectors. |
+| `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
+| `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
+| `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
 | `weapon.def`, `ammo.def` | authored text | minimal: one spawn weapon + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
@@ -93,7 +93,7 @@ walk of the working directory, and a per-archive entry walk over the
 A `.bms` archived in `resource.pff` mounts and loads by name and never appears
 in any list (witnessed 2026-08-23: the menu simply empty, no error). Retail
 keeps its own where the walk looks — all 116 stock JO `.bms` live in
-`localres.pff`, none in `resource.pff` — so ONED's packer names its single
+`localres.pff`, none in `resource.pff` — so the release packer names its single
 archive `localres.pff` and ships the mission archived, exactly like retail. The
 packaging tool's three-archive layout puts every `.bms` in `localres.pff` for
 the same reason; its loose layout lists the mission through the loose walk.
@@ -109,7 +109,7 @@ Every retail mission ships as `<stem>.bms` + `.til` + `.pcx` + `.dbf` +
 |---|---|---|
 | `mnml.dbf` + `mnml.lwf` | `engine/formats/dbf` + `engine/formats/lwf` | the per-mission dialog chain — `DialogSystem_Init @ 0x5275e0` loads `<base>.dbf`, which co-loads `<base>.lwf` `[orig: @ 0x44e7d4]`. Empty-but-valid (the minimal mission speaks no dialog). |
 | `mnml.bin` | `engine/formats/rtxt` | the briefing text table (`[Info] TITLE` / BRIEFING), looked up beside the `.bms` through the by-name front door. |
-| `mnml.pcx` | ONED | the map overview — retail's are 800×600 8-bit indexed. |
+| `mnml.pcx` | project-authored PCX | the map overview — retail's are 800×600 8-bit indexed. |
 | `mnml.til` | — deferred | the tile overlay; its loader is called ONLY from the render loop (`[orig: @ 0x5ca730, sole caller Render_ProcessMainSceneFrame @ 0x5ca0f0]`), so a miss cannot block boot/host — the terrain just renders untiled. |
 | `mnml.wac` | — deferred | witnessed silent skip (see above). |
 
@@ -128,11 +128,11 @@ retail ships one) → the three menu Bink slots (`main.bik`/`header.bik`/
 
 | File | Origin | Notes |
 |---|---|---|
-| the seven boot `.fnt`s | ONED fonts workspace (`engine/formats/fnt`) | one authored glyph set emitted under every hardcoded name. Retail ships fonts in `localres.pff`. |
+| the seven boot `.fnt`s | `engine/formats/fnt` writer | one authored glyph set emitted under every hardcoded name. Retail ships fonts in `localres.pff`. |
 | `menu_style.mns` | authored text | the stylesheet the shell loads by canonical name `[orig: @ 0x552604]`; carries the retail key set (key NAMES witnessed vs the JOTAC install — `DEF_FONTNAME`/`DEF_FONTNAME_LG`/`IMPACT_FONTNAME` + colors); values are ours, fonts point at the authored set. |
 | `menutxt.bin` | `engine/formats/rtxt` | the `TEXT_RSRC` string ids the authored menus reference (`MM_*`/`MP_*`). Retail ships it in `language.pff`. |
 | `newarow1.tga` | authored TGA | **the menu cursor** — declared per screen in the `.mnu` `<CURSOR>` block (retail FILENAME, our arrow art; 32×32 type-2 BGRA, alpha-keyed `STANDARD_TRANSPARENT`, bottom-up rows matching retail's format — `minimal_art_validate` pins that format). Without it there is no cursor and nothing is clickable. |
-| `menumus.sbf`/`gamemus.sbf` + `menumus.bin`/`gamemus.bin` | ONED music workspace (`engine/formats/sbf` + the `mus` compiler) | the hardcoded base-game music pairs `[orig: Expansion_LoadAssets @ 0x4a4730]`: a silent bank written LOOSE at the root (the `.sbf` banks stream by path and never resolve through an archive) + a minimal `play/done` script per name in `localres.pff`. |
+| `menumus.sbf`/`gamemus.sbf` + `menumus.bin`/`gamemus.bin` | `engine/formats/sbf` + the `mus` compiler | the hardcoded base-game music pairs `[orig: Expansion_LoadAssets @ 0x4a4730]`: a silent bank written LOOSE at the root (the `.sbf` banks stream by path and never resolve through an archive) + a minimal `play/done` script per name in `localres.pff`. |
 | `earlyerr.txt` | authored text | the pre-archive error text, read loose before any mount `[orig: Game_ShowEarlyError @ 0x4a68a0]`; line 3 is the no-archives message, line 4 the missing-`gameerr.bin` one. |
 
 Videos (`BIK`) stay omitted **by design**: they load loose via Win32
@@ -163,7 +163,7 @@ The writer-produced members of the set (`.trn` via `save_trn`, `.env` via
 text files — `items.def`, `weapon.def`, `ammo.def`, `main.mnu`, `mp.mnu`,
 `sp.mnu`, `menu_style.mns`, `earlyerr.txt` — have no writer to enforce it, and
 they are `-text -eol` in `.gitattributes` so git will not normalize them either
-way. One editor save in LF mode silently breaks the boot again, so
+way. One LF-normalizing save silently breaks the boot again, so
 `minimal_eol_guard` (ctest) pins all of them.
 
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
@@ -176,10 +176,9 @@ from minimal, not a requirement.
 
 ## Guards (ctest, run in CI)
 
-Nothing here is generated any more: every file is authored in ONED (or by
-hand, for the text ones) and committed, so the guards check what the ENGINE
-and RETAIL need from each file rather than asserting byte-equality against a
-throwaway generator:
+The tracked files here are the canonical source-owned outputs, not packaging
+artifacts. The guards check what the ENGINE and RETAIL need from each file
+rather than asserting byte-equality against a throwaway generator:
 
 | Guard | Covers |
 |---|---|
@@ -208,9 +207,11 @@ throwaway generator:
   With `OPENNOVA_JO_DIR` set it also stages `Jointops.exe` + `binkw32.dll` +
   `game.cfg` from your own install (never committed).
 
-ONED's own Play in Retail (F7) is the everyday loop: it packs the mounted tree
-into a single `localres.pff` under the editor's own data dir (`user://packed`),
-stages the retail runtime beside it, and launches — F8 stops it.
+ONED's Stage & Run Retail is the everyday compatibility loop: it stages the
+selected tree loose under ONED's own data dir (`user://packed`), adds
+the zero-entry `resource.pff` boot token, stages the retail runtime beside it,
+and runs it with `/d`; Stop ends that managed child. The hidden `--pack-game`
+command instead builds the packed `localres.pff` layout used by releases.
 
 ## Validation (asset-gated — needs a retail JO install)
 
@@ -236,4 +237,4 @@ When retail↔retail works on this set, it is simultaneously (a) the **MVP asset
 target** — the exact inputs our runtime must load to host + join our own
 engine — and (b) a **parity proof** that every writer in the chain
 (rtxt/mission/trn/env/mnu/def/fnt/sbf/pff) emits retail-loadable output end to
-end. The GOALS.md "export a game" path starts here.
+end. The package-time standalone game build starts here.

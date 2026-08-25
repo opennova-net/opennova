@@ -167,13 +167,11 @@ def count_engine_stdout_prints() -> int:
 
 
 GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
-# CLI drivers whose stdout IS the product; everything else in the shipping
-# godot layer routes through push_error/push_warning, print_verbose, or the
-# F3 debug system. CLI tool drivers are the exception: their console output IS
-# the interface.
-GD_PRINT_ALLOWLIST = {
-    "godot/modtools/tools/screenshot_capture.gd",
-    "godot/modtools/tools/pack_game_cli.gd",
+# The shipping Godot layer routes diagnostics through push_error/push_warning,
+# print_verbose, or the F3 debug system.
+GD_PRINT_ALLOWLIST: set[str] = {
+    # Hidden release-build CLI: stdout/stderr is its user interface.
+    "godot/modtools/pack_game_cli.gd",
 }
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
@@ -210,8 +208,8 @@ HAS_METHOD_GUARD = re.compile(r"(?<!\w)has_method\s*\(")
 
 def count_has_method_guards() -> int:
     """Duck-type guards in the shipping godot layer (W4-2): the floor is the
-    documented kept set (harness seams, workspace capability hooks, dynamic
-    dispatch) - not zero. class_has_method is excluded by the word boundary.
+    documented kept set (harness seams and dynamic dispatch), not zero.
+    class_has_method is excluded by the word boundary.
     Covers the native binding layer too (godot/src *.cpp/*.h) - a C++
     has_method() probe is the same duck dispatch, just invisible to GDScript
     greps."""
@@ -264,10 +262,10 @@ OVERSIZE_GD_LINE_LIMIT = 1200
 
 def count_oversize_gd_files() -> int:
     """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
-    leave seven residual offenders; no .gd under godot/src, godot/game, or
+    leave a ratcheted residual set; no .gd under godot/src, godot/game, or
     godot/modtools may grow past 1200 lines without splitting first.
-    godot/tests is deliberately out of scope: eleven test files already exceed
-    the limit and the test refit is ONED-TST's concern, not this ratchet's."""
+    godot/tests is deliberately out of scope; test-suite file size is a
+    separate maintainability concern."""
     count = 0
     for root in ("godot/src", "godot/game", "godot/modtools"):
         for path in (REPO / root).rglob("*.gd"):

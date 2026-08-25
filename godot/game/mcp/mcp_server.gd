@@ -4,7 +4,7 @@ extends Node
 ## The embedded MCP server: a loopback-only Streamable HTTP endpoint speaking
 ## JSON-RPC 2.0, polled from _process on the main thread. Protocol-only
 ## requests (initialize, ping, tools/list) answer same-frame; tools/call runs
-## through a serialized FIFO so tool handlers never re-enter editor state —
+## through a serialized FIFO so tool handlers never re-enter live state —
 ## except tools registered serial = false (read-only monitors), which run
 ## immediately alongside a queued job.
 ##
@@ -23,12 +23,12 @@ const SESSION_IDLE_MS := 8 * 3600 * 1000
 
 var registry := McpToolRegistry.new()
 var instructions := ""
-var server_name := "oned"
-var server_title := "OpenNova Editor (ONED)"
+var server_name := "opennova"
+var server_title := "OpenNova MCP"
 ## Disabled only by tests that exercise non-localhost behavior.
 var origin_check_enabled := true
 ## func(args: Dictionary) -> McpToolContext; when invalid, a bare context is
-## built (pure tests, no editor).
+## built (pure tests, no running game).
 var context_factory: Callable = Callable()
 ## Optional sink for server log lines: func(text: String).
 var log_sink: Callable = Callable()

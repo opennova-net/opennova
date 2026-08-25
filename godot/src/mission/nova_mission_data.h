@@ -15,8 +15,6 @@
 
 #include <mission/bms.h>
 #include <mission/mission.h>
-#include <mission/mission_schema.h>
-#include <oned_edit/edit_history.h>
 
 namespace godot {
 
@@ -34,28 +32,12 @@ private:
 	opennova::mission::MissionDocument document;
 	String source_path;
 	String last_error;
-	// True once an in-memory mutation lands and before the next successful save/load. Used only
-	// as the dirty fallback before a clean baseline exists; the exact dirty flag is the
-	// clean_baseline compare below.
+	// True once an in-memory mutation lands and before the next successful save/load.
 	bool modified = false;
 	// Staged terrain base heights for the next .mis save (see set_mis_base_heights). Cleared by
 	// every save_as() (whichever format ran) and by open_file()/create_default(), so stale
 	// heights can never leak onto a different document or a later save.
 	PackedInt32Array mis_base_heights;
-
-	// Whole-document undo / redo history + exact dirty, on the shared editor core
-	// (engine/base/oned_edit). The snapshot is the parsed bms::File (never serialized bytes);
-	// the no-op equal-gate and the dirty compare both use the byte-faithful bms::equal
-	// via BmsFileEqual (a free function, not operator==). begin_edit() captures the
-	// pre-edit document, commit_edit() records one step iff it changed, undo()/redo()
-	// swap the live file with a stack top in O(1), and is_dirty() compares against the
-	// baseline set by mark_clean() at open / save / new. See nova_mission_data.cpp.
-	struct BmsFileEqual {
-		bool operator()(const opennova::bms::File &a, const opennova::bms::File &b) const {
-			return opennova::bms::equal(a, b);
-		}
-	};
-	opennova::edit::EditHistory<opennova::bms::File, BmsFileEqual> history{100};
 
 	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
 	Dictionary waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const;
@@ -119,26 +101,7 @@ public:
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
 		// entity records — mission/mission.h]
 		ITEM_ID_OFFSET = 100000,
-		// The witnessed BMS scripting action ids the logic tooling
-		// special-cases: the AI-change action family plus its PLAYPARTANIM
-		// sub-type. Mirrors bms::ActionType / bms::AIActionSubType
-		// (engine/formats/mission bms.h carries the witness; pinned by
-		// static_assert in the .cpp).
-		ACTION_CHANGE_GROUP_AI = 3,
-		ACTION_AREA_AI_RED = 12,
-		ACTION_AREA_AI_BLUE = 13,
-		ACTION_CHANGE_SINGLE_AI = 21,
-		ACTION_SUB_PLAY_PART_ANIM = 34,
-		// The FIXED_SECONDS param spin step in raw 16.16 units (256/65536 s)
-		// — mirrors mission_schema.h kFixedSecondsRawStep, which carries the
-		// Med_ParamAnimTime witness (pinned in the .cpp).
-		FIXED_SECONDS_RAW_STEP = 256,
 	};
-
-	// FixedSeconds raw <-> seconds (one impl in engine/formats/mission
-	// mission_schema.h: raw int = seconds * 65536, editor-spin rounding).
-	static double fixed_seconds_from_raw(int p_raw);
-	static int fixed_seconds_to_raw(double p_seconds);
 
 	Error open_file(const String &path);
 	// Build a fresh, empty, valid mission in memory (no file backing). Mirrors open_file's
@@ -222,46 +185,6 @@ public:
 	// must re-fetch). Markers also repair the waypoint paths that referenced them.
 	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
 	bool remove_entity(int kind, int index);
-
-	// --- Authoring facade (engine/runtime/mission authoring.h) ---------------------------
-	// The editing policies the editor used to hand-roll, as engine capabilities:
-	// the items.def-type -> entity-list table, the author-time Ground-userpoint
-	// bake [orig: sub_401A90, dfx2med.exe], and the path-consistent marker
-	// item-id policy. All geometry is mission (BMS) space; the Godot shells convert
-	// with MissionObjectPlacer's axis maps (godot_to_bms_position /
-	// ground_anchor_bms) before calling in.
-	//
-	// The KIND_* value a new placement of an items.def `type` lands in.
-	static int kind_for_item_type(int def_item_type);
-	// Place a new rotation-zero entity with its ground point at `ground_hit_bms`
-	// (unrotated anchor subtraction; markers ignore the anchor). Returns the new
-	// entity dictionary like add_entity, or {} when rejected. Dirty on success.
-	Dictionary place_entity_grounded(int item_id, int def_item_type, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms);
-	// Re-ground an existing entity at `ground_hit_bms`, keeping its rotation
-	// (full rotated bake). Returns false when (kind, index) is out of range.
-	bool move_entity_grounded(int kind, int index, const Vector3 &ground_hit_bms, const Vector3 &ground_anchor_bms);
-	// Bulk re-ground after a terrain height change. Each request Dictionary
-	// carries { kind, index, ground_hit_bms: Vector3, ground_anchor_bms: Vector3 };
-	// rows whose baked origin is within `epsilon` of the stored one are skipped
-	// (markers store the hit directly, like move_entity_grounded). apply = false
-	// counts the would-move rows without writing, so the editor's prompt count and
-	// the apply share one policy. Returns the moved (or would-move) count; dirty
-	// only when something actually moved.
-	int reground_entities(const Array &requests, float epsilon = 0.01f, bool apply = true);
-	// Apply-mode bulk re-ground that also reports WHICH rows moved, so the editor
-	// can update its placed world in place instead of re-baking it. Returns
-	// { "moved": int, "rows": PackedInt32Array, "positions": PackedVector3Array }
-	// where rows are indices into the CALLER'S `requests` Array (the parser skips
-	// index < 0 rows, so engine row i is not requests[i] in general) and
-	// positions are the post-bake BMS origins parallel to rows, read back from
-	// the document after the write — exactly what it now stores.
-	Dictionary reground_entities_apply(const Array &requests, float epsilon = 0.01f);
-	// The item id a NEW marker on `path_index` should use: the path's own first
-	// marker's id, else the canonical waypoint id (106005).
-	int marker_item_id_for_path(int path_index) const;
-	// add_waypoint_marker with the item-id policy applied and the hit stored
-	// directly (markers have no anchor). Same return shape as add_waypoint_marker.
-	Dictionary add_path_marker_grounded(int path_index, const Vector3 &ground_hit_bms, int insert_index = -1);
 
 	// --- Waypoints ------------------------------------------------------------
 	// A mission carries 128 fixed waypoint paths; a path is an ordered list of marker
@@ -372,17 +295,6 @@ public:
 	Dictionary set_event_action(int event_index, int local_index, const Dictionary &action);
 	bool remove_event_action(int event_index, int local_index);
 	bool move_event_action(int event_index, int local_index, int delta);
-	// Enum choice lists for the editor's type dropdowns; each an Array of { value: int, name: String },
-	// reflected from engine/runtime/mission's name switches so new enum values appear without UI changes. The sub-type
-	// lists are composite (depend on the chosen main / action type).
-	Array get_trigger_main_types() const;
-	Array get_trigger_sub_types(int main_type) const;
-	Array get_action_types() const;
-	Array get_action_sub_types(int action_type) const;
-	Array get_event_flag_bits() const;
-	Array get_ai_flag_bits() const;
-	Dictionary get_trigger_param_schema(int main_type, int sub_type) const;
-	Dictionary get_action_param_schema(int action_type, int action_sub_type) const;
 
 	const opennova::mission::MissionDocument &native_document() const { return document; }
 
@@ -406,25 +318,6 @@ public:
 	// fixed-point convention. Same clearing/apply contract as the raw variant.
 	void set_mis_base_heights_world(const PackedFloat32Array &flat_write_order);
 	bool is_modified() const;
-
-	// --- Undo / redo + dirty (in-memory document snapshots) -------------------
-	// The history holds whole-document bms::File copies, never serialized bytes. A continuous
-	// gesture (a drag, a run of inspector edits) is bracketed by begin_edit()/commit_edit() and
-	// becomes one step; commit pushes a step only if the document actually changed (bms::equal),
-	// so a no-op edit adds nothing. One-shot mutations bracket the same way. undo()/redo() swap
-	// the live document's file with a stack top in O(1) and cannot fail (no parse). is_dirty() is
-	// exact: true iff the document differs from the clean baseline (set by mark_clean() at open /
-	// save / new); it falls back to the coarse modified flag before any baseline exists.
-	void begin_edit();
-	void commit_edit();
-	bool can_undo() const;
-	bool can_redo() const;
-	bool undo();
-	bool redo();
-	int undo_depth() const;
-	void clear_history();
-	bool is_dirty() const;
-	void mark_clean();
 
 	// A 64-bit content revision of the placed-object records (items / buildings /
 	// markers / organics): equal documents share it, any record byte or count change

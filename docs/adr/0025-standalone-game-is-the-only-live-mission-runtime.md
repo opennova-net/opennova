@@ -1,6 +1,9 @@
 # ADR 0025: the standalone game is ONED's only live mission runtime
 
 - **Status**: accepted (2026-07-29)
+- **Updated**: [ADR 0037](0037-oned-runs-game-data.md) retains the standalone
+  loose Run/Stop rule and removes F6/current-mission and unsaved-authoring
+  behavior.
 - **Supersedes/updates**: supersedes the embedded editor-preview, self-tick,
   editor Play/Stop, and rewind consequences of
   [ADR 0006](0006-unified-mission-runtime-present-pass.md). ADR 0006's
@@ -11,7 +14,7 @@
 
 ONED historically offered embedded mission simulation and later a
 play-in-editor local-player session. The editor toolbar also launched the game.
-Even when both products reused `MissionRuntime`, `LocalPlayerPresenter`, and the debug
+Even when both Godot products reused `MissionRuntime`, `LocalPlayerPresenter`, and the debug
 overlay, they entered different scene trees and owned different transport,
 input, mouse, pause, and teardown state. Testing inside ONED therefore was not
 literally the same operation as running the game.

@@ -6,8 +6,8 @@
 namespace renderer {
 
 // ---------------------------------------------------------------------------
-// OED-side helpers (the editor's light preview path). These predate REN-5 and
-// stay OED-cited; the runtime attenuation below shares their math.
+// OED-side light helpers. These predate REN-5 and stay OED-cited; the runtime
+// attenuation below shares their math.
 
 // Original OED reference: PrepareLightParams @ 0x46A500.
 std::array<float, 4> build_oed_light_attenuation(float light_range);

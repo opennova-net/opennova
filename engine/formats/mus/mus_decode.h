@@ -3,10 +3,8 @@
 
 /* Internal shared MUS bytecode decoder.
 
-   Single source of truth for the IDA-derived opcode table + operand widths, so
-   the source decompiler (mus_decompile.cpp) and the editor-facing structural
-   model (mus_model.cpp) decode bytecode identically and can never drift. Was
-   previously private to mus_decompile.cpp; lifted here verbatim (behaviour
+   Single source of truth for the IDA-derived opcode table and operand widths.
+   This was previously private to mus_decompile.cpp; lifted here verbatim (behaviour
    preserved, guarded by the golden byte-compare in mus_decompile_test.cpp).
 
    Header-only with internal (`static`) linkage: each translation unit that
