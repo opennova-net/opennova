@@ -54,8 +54,20 @@ SELF_POKE = re.compile(r"self\._")
 
 def _in_build_dir(parts) -> bool:
     """Local build output, not source. Generator dirs are named `build`,
-    `build-ninja`, `build-vs`, ... — any `build*` path segment qualifies."""
-    return any(part.startswith("build") for part in parts)
+    `build-ninja`, `build-vs`, ... and live at the REPO ROOT, as godot's own
+    `godot/build*`, or as the GDExtension's `godot/src/build*` (the generated
+    godot-cpp tree); only those qualify — a source directory that merely
+    starts with "build" elsewhere in the tree (`buildings/`) must stay
+    counted."""
+    parts = tuple(parts)
+    if not parts:
+        return False
+    if parts[0].startswith("build"):
+        return True
+    if len(parts) > 1 and parts[0] == "godot" and parts[1].startswith("build"):
+        return True
+    return len(parts) > 2 and parts[0] == "godot" and parts[1] == "src" and \
+        parts[2].startswith("build")
 
 
 def count_test_private_pokes() -> int:
