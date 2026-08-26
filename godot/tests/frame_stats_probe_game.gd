@@ -68,7 +68,7 @@ func _run() -> void:
 			_finish(1)
 			return
 	print("[fsp] mission=%s loaded, player spawned" % bms)
-	await _settle_ms(3000)
+	await ProbeClock.settle_ms(self, 3000)
 	_census_models()
 
 	# The real F3 path: summon the overlay, switch to the Stats tab.
@@ -82,16 +82,16 @@ func _run() -> void:
 		push_error("[fsp] overlay carries no Stats tab")
 		_finish(1)
 		return
-	await _settle_ms(500)
+	await ProbeClock.settle_ms(self, 500)
 	if not overlay.is_stats_capturing():
 		push_error("[fsp] the Stats tab did not open its capture window")
 		_finish(1)
 		return
 
-	await _settle_ms(2000)
+	await ProbeClock.settle_ms(self, 2000)
 	var first := _snapshot_rows(overlay)
 	_dump("READING 1", first)
-	await _settle_ms(2000)
+	await ProbeClock.settle_ms(self, 2000)
 	var second := _snapshot_rows(overlay)
 	_dump("READING 2", second)
 
@@ -163,9 +163,3 @@ func _finish(exit_code: int) -> void:
 		exit_code = 1
 	_requested_exit_code = exit_code
 	quit(exit_code)
-
-
-func _settle_ms(ms: int) -> void:
-	var deadline := Time.get_ticks_msec() + ms
-	while Time.get_ticks_msec() < deadline:
-		await process_frame

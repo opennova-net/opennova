@@ -98,8 +98,6 @@ func _process(delta: float) -> void:
 
 
 func _capture(name: String) -> void:
-	await RenderingServer.frame_post_draw
-	var image := get_viewport().get_texture().get_image()
 	var path := _out_dir.path_join(name)
-	if image.save_png(path) != OK:
+	if not await ProbeCapture.save_viewport_png(get_viewport(), path):
 		push_error("splash_render_probe: failed to save %s" % path)

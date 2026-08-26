@@ -332,34 +332,13 @@ func _ensure_menu() -> bool:
 func _on_frame_gui_input(event: InputEvent) -> void:
 	if _driver == null or not is_open():
 		return
-	if event is InputEventMouseMotion:
-		var motion := event as InputEventMouseMotion
-		_driver.process_mouse(motion.position,
-				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
-	elif event is InputEventMouseButton:
-		var button := event as InputEventMouseButton
-		if button.button_index == MOUSE_BUTTON_LEFT:
-			_driver.process_mouse(button.position, button.pressed)
-			_frame.accept_event()
+	MenuFrameSurface.forward_gui_input(event, _driver, _frame)
 
 
 func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	var bytes := root.read_file(STYLESHEET_FILE)
-	if bytes.is_empty():
-		return null
-	var s := MnsStyleSheet.new()
-	return s if s.load_from_bytes(bytes) == OK and s.is_runtime_valid() else null
+	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 
 
 func _recompute_fit() -> void:
-	if _frame == null or not is_instance_valid(_frame):
-		return
-	var target_size := Vector2.ZERO
-	if _layout_control != null:
-		target_size = _layout_control.size
-	elif _ui_parent != null and _ui_parent.get_viewport() != null:
-		target_size = _ui_parent.get_viewport().get_visible_rect().size
-	if target_size.x <= 1.0 or target_size.y <= 1.0:
-		return
-	_frame.position = Vector2.ZERO
-	_frame.size = target_size
+	# MenuFrameSurface.fit_frame (shared with the other presenters).
+	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)

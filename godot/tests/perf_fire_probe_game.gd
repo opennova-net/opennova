@@ -113,14 +113,14 @@ func _run() -> void:
 			_finish(1)
 			return
 	print("[pfg] mission=%s loaded, player spawned" % bms)
-	await _settle_ms(5000)
+	await ProbeClock.settle_ms(self, 5000)
 
-	_runtime = _find_by_method(root, "advance_session_frame")
+	_runtime = ProbeNodeSearch.find_by_method(root, "advance_session_frame")
 	if _runtime != null and _runtime.has_method("get_sim"):
 		_sim = _runtime.get_sim()
 	if _runtime != null:
 		_present = _runtime.get("_present")
-	_effect_world = _find_by_method(root, "get_debug_group_report")
+	_effect_world = ProbeNodeSearch.find_by_method(root, "get_debug_group_report")
 	_main = game
 	_gw = world
 	_hud_presenter = _main.get("_hud_presenter")
@@ -145,14 +145,14 @@ func _run() -> void:
 	# nearby terrain so every round lands its impact effects.
 	var pose_path := OS.get_environment("NOVA_PF_POSE").strip_edges()
 	if not pose_path.is_empty() and _apply_pose_dump(pose_path):
-		await _settle_ms(800)
+		await ProbeClock.settle_ms(self, 800)
 	else:
 		var look_dy := 120.0
 		var look_env := OS.get_environment("NOVA_PF_LOOK_DY").strip_edges()
 		if not look_env.is_empty():
 			look_dy = float(look_env)
-		_look(Vector2(0, look_dy))
-		await _settle_ms(1500)
+		ProbeInput.look(Vector2(0, look_dy))
+		await ProbeClock.settle_ms(self, 1500)
 	# First-shot hitch attribution: the very first live round pays every lazy
 	# one-time (pipeline compiles, texture/sound resolves). Tap 1 fires with
 	# the particle master switch hidden, tap 2 with particles live, tap 3 is
@@ -161,12 +161,12 @@ func _run() -> void:
 	# sustained cost.
 	if _gw != null and _gw.has_method("set_particles_hidden"):
 		_gw.set_particles_hidden(true)
-		await _settle_ms(400)
+		await ProbeClock.settle_ms(self, 400)
 		var tap1 := await _tap_and_measure("tap1-particles-hidden")
 		_gw.set_particles_hidden(false)
-		await _settle_ms(400)
+		await ProbeClock.settle_ms(self, 400)
 		var tap2 := await _tap_and_measure("tap2-particles-live")
-		await _settle_ms(400)
+		await ProbeClock.settle_ms(self, 400)
 		var tap3 := await _tap_and_measure("tap3-repeat")
 		print("[pfg] first-shot hitch: hidden=%.1fms live=%.1fms repeat=%.1fms" % [
 				tap1, tap2, tap3])
@@ -180,17 +180,17 @@ func _run() -> void:
 		_report("BASELINE", base)
 		_finish(0)
 		return
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 	var fire1 := await _measure("firing1", int(fire_s * 1000.0))
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
-	_hold(KEY_R, true)
-	await _settle_ms(120)
-	_hold(KEY_R, false)
-	await _settle_ms(2600)
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
+	ProbeInput.hold(KEY_R, true)
+	await ProbeClock.settle_ms(self, 120)
+	ProbeInput.hold(KEY_R, false)
+	await ProbeClock.settle_ms(self, 2600)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 	var fire2 := await _measure("firing2", int(fire_s * 1000.0))
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
-	await _settle_ms(1500)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
+	await ProbeClock.settle_ms(self, 1500)
 	var cool := await _measure("cooldown", 5000)
 
 	# HUD-canvas A/B: hide the WHOLE HUD layer (the _ui_parent subtree — hiding
@@ -230,7 +230,7 @@ func _run() -> void:
 		worldoff = await _measure("worldoff", 3000)
 		_restore_guarded(_main, &"_perf_probe_skip_world")
 	if _set_guarded_if_present(_main, &"_perf_probe_skip_hud", true):
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		hudtickoff = await _measure("hudtickoff", 3000)
 		_restore_guarded(_main, &"_perf_probe_skip_hud")
 
@@ -245,13 +245,13 @@ func _run() -> void:
 	if present_channels >= 0:
 		_present.set_output_channels(
 				present_channels & ~PresentApplier.OUTPUT_TRANSFORM)
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		xformoff = await _measure("xformoff", 3000)
 		_present.set_output_channels(present_channels)
 	if present_channels >= 0:
 		_present.set_output_channels(
 				present_channels & ~PresentApplier.OUTPUT_VISIBILITY)
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		visoff = await _measure("visoff", 3000)
 		_present.set_output_channels(present_channels)
 	# Body-anim A/B: freeze the pose dispatch (and with it the Skeleton3D
@@ -260,7 +260,7 @@ func _run() -> void:
 	if present_channels >= 0:
 		_present.set_output_channels(
 				present_channels & ~PresentApplier.OUTPUT_BODY_ANIM)
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		bodyoff = await _measure("bodyoff", 3000)
 		_present.set_output_channels(present_channels)
 
@@ -271,7 +271,7 @@ func _run() -> void:
 		occlusion_setter = &"set_perf_probe_occlusion_suspended"
 	if _set_guarded_if_present(
 			_gw, &"_perf_probe_skip_occl", true, occlusion_setter):
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		occloff = await _measure("occloff", 3000)
 		_restore_guarded(_gw, &"_perf_probe_skip_occl")
 
@@ -282,7 +282,7 @@ func _run() -> void:
 	if water != null:
 		var rvp2 = water.get("reflection_viewport")
 		if rvp2 is SubViewport:
-			await _settle_ms(500)
+			await ProbeClock.settle_ms(self, 500)
 			var process_guarded := _set_guarded_method(
 					water, &"process_enabled", &"is_processing", &"set_process", false)
 			var viewport_guarded := _set_guarded_if_present(
@@ -298,7 +298,7 @@ func _run() -> void:
 	# frame at low FPS).
 	var fxtickoff := {avg = -1.0}
 	if _set_guarded_if_present(_gw, &"_perf_probe_skip_effect_tick", true):
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		fxtickoff = await _measure("fxtickoff", 3000)
 		_restore_guarded(_gw, &"_perf_probe_skip_effect_tick")
 
@@ -306,7 +306,7 @@ func _run() -> void:
 	# skipping either bundle would mutate gameplay state and corrupt later legs.
 	var handleroff := {avg = -1.0}
 	if _set_guarded_if_present(_gw, &"_perf_probe_skip_fixed_handlers", true):
-		await _settle_ms(500)
+		await ProbeClock.settle_ms(self, 500)
 		handleroff = await _measure("handleroff", 3000)
 		_restore_guarded(_gw, &"_perf_probe_skip_fixed_handlers")
 
@@ -328,7 +328,7 @@ func _run() -> void:
 			walk_node.set_process(false)
 			process_disabled.append(walk_node)
 	print("[pfg] otherprocoff: disabled _process on %d node(s)" % process_disabled.size())
-	await _settle_ms(500)
+	await ProbeClock.settle_ms(self, 500)
 	otherprocoff = await _measure("otherprocoff", 3000)
 	for restored_node in process_disabled:
 		if is_instance_valid(restored_node):
@@ -348,7 +348,7 @@ func _run() -> void:
 	var modelprocoff := {avg = -1.0}
 	for m in models:
 		(m as Node).set_process(false)
-	await _settle_ms(500)
+	await ProbeClock.settle_ms(self, 500)
 	modelprocoff = await _measure("modelprocoff", 3000)
 	for m in models:
 		if is_instance_valid(m):
@@ -361,7 +361,7 @@ func _run() -> void:
 			panm_disabled.append(m)
 	print("[pfg] panmoff: suspended live PANM on %d of %d model(s)" % [
 			panm_disabled.size(), models.size()])
-	await _settle_ms(500)
+	await ProbeClock.settle_ms(self, 500)
 	panmoff = await _measure("panmoff", 3000)
 	for m in panm_disabled:
 		if is_instance_valid(m):
@@ -431,47 +431,7 @@ func _run() -> void:
 func _measure(phase: String, duration_ms: int) -> Dictionary:
 	_phase = phase
 	_sample_t0 = Time.get_ticks_msec()
-	var samples: Array[float] = []
-	var sec_accum := 0.0
-	var sec_frames := 0
-	var deadline := Time.get_ticks_msec() + duration_ms
-	var last := Time.get_ticks_usec()
-	while Time.get_ticks_msec() < deadline:
-		await process_frame
-		var now := Time.get_ticks_usec()
-		var ms := float(now - last) / 1000.0
-		last = now
-		samples.append(ms)
-		sec_accum += ms
-		sec_frames += 1
-		if sec_accum >= 1000.0:
-			print(_counter_row(sec_frames, sec_accum))
-			# Do not charge the probe's own diagnostic pulls to the next frame.
-			last = Time.get_ticks_usec()
-			sec_accum = 0.0
-			sec_frames = 0
-	print(_counter_row(sec_frames, sec_accum))
-	var s := samples.duplicate()
-	s.sort()
-	var n := s.size()
-	if n == 0:
-		return {avg = 0.0, p50 = 0.0, p95 = 0.0, mx = 0.0, n = 0, worst = []}
-	var sum := 0.0
-	for v in s:
-		sum += v
-	var worst: Array[String] = []
-	var tagged := []
-	var t_ms := 0.0
-	for v in samples:
-		tagged.append([v, t_ms])
-		t_ms += v
-	tagged.sort_custom(func(a, b): return a[0] > b[0])
-	for i in mini(8, tagged.size()):
-		worst.append("%.1fms@t+%.2fs" % [tagged[i][0], tagged[i][1] / 1000.0])
-	return {
-		avg = sum / n, p50 = s[n >> 1], p95 = s[int(float(n) * 0.95)], mx = s[n - 1],
-		n = n, worst = worst,
-	}
+	return await ProbeFrameSampler.measure(self, duration_ms, _counter_row)
 
 
 func _counter_row(sec_frames: int, sec_accum: float) -> String:
@@ -627,7 +587,7 @@ func _equip_clip_weapon() -> void:
 			var player_presenter = _main.get("_player_presenter") if _main != null else null
 			if player_presenter != null and player_presenter.has_method("refresh_viewmodel"):
 				player_presenter.refresh_viewmodel()
-		await _settle_ms(1500)  # draw anim settles before the baseline
+		await ProbeClock.settle_ms(self, 1500)  # draw anim settles before the baseline
 		var view = _gw.local_player_weapon_view() if _gw != null \
 				and _gw.has_method("local_player_weapon_view") else null
 		print("[pfg] equipped: %s (clip %d, reserve %d)" % [equipped,
@@ -671,15 +631,15 @@ func _tap_and_measure(label: String) -> float:
 	var worst := 0.0
 	var last := Time.get_ticks_usec()
 	var start := Time.get_ticks_msec()
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 	while Time.get_ticks_msec() - start < 600:
 		if Time.get_ticks_msec() - start >= 150:
-			_mouse_btn(MOUSE_BUTTON_LEFT, false)
+			ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 		await process_frame
 		var now := Time.get_ticks_usec()
 		worst = maxf(worst, float(now - last) / 1000.0)
 		last = now
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 	# Split the worst frame: a big draw share = pipeline compile at first
 	# draw; a small one = CPU-side cost (spawn/texture decode) in the process
 	# step.
@@ -784,41 +744,3 @@ func _restore_mount() -> Error:
 	if err != OK:
 		push_error("[pfg] failed to restore the shared mount config (error %d)" % err)
 	return err
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle_ms(ms: int) -> void:
-	var deadline := Time.get_ticks_msec() + ms
-	while Time.get_ticks_msec() < deadline:
-		await process_frame
-
-
-func _hold(k: Key, down: bool) -> void:
-	var e := InputEventKey.new()
-	e.keycode = k
-	e.physical_keycode = k
-	e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _mouse_btn(b: MouseButton, down: bool) -> void:
-	var e := InputEventMouseButton.new()
-	e.button_index = b
-	e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _look(total: Vector2) -> void:
-	for _i in 10:
-		var mm := InputEventMouseMotion.new()
-		mm.relative = total / 10.0
-		Input.parse_input_event(mm)

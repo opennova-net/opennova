@@ -97,12 +97,6 @@ func _shot(name: String) -> void:
 	print("PROBE shot saved: %s" % path)
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _fail(msg: String) -> void:
 	print("PROBE FAIL: %s" % msg)
 	quit(1)
@@ -194,7 +188,7 @@ func _run() -> void:
 	var sim = world.get_sim()
 	presenter.set_input_source(func() -> Dictionary:
 		return {"forward": _forward})
-	await _mission_wait(1.0)
+	await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 
 	# --- Sweep for CL volumes: the debug view is player-anchored (150u), so
 	# hop a teleport grid around the spawn and ACCUMULATE every CL in range.
@@ -216,7 +210,7 @@ func _run() -> void:
 		r += step
 	for p in probe_points:
 		sim.debug_teleport_local_player(Vector3(p.x, -p.y, 60.0), 0.0, 0.0)
-		await _mission_wait(0.12)
+		await ProbeClock.mission_wait(self, 0.12, TIME_SCALE)
 		for v in _cl_volumes(sim):
 			var c: Vector3 = v["center"]
 			var key := "%d_%d_%d" % [roundi(c.x * 4.0), roundi(c.y * 4.0), roundi(c.z * 4.0)]
@@ -271,7 +265,7 @@ func _run() -> void:
 			var hy := bface.z + 0.45 * sin(a)
 			for yaw_deg in [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]:
 				sim.debug_teleport_local_player(Vector3(hx, -hy, base + 0.6), yaw_deg, 30.0)
-				await _mission_wait(0.6)
+				await ProbeClock.mission_wait(self, 0.6, TIME_SCALE)
 				if String(sim.get_local_player_anim_key()).contains("climb"):
 					blatched = true
 					var blp: Vector3 = sim.get_local_player_position()
@@ -319,7 +313,7 @@ func _run() -> void:
 		var bz_max: float = sim.get_local_player_position().y
 		var drop_seen := false
 		for i in 60:
-			await _mission_wait(0.12)
+			await ProbeClock.mission_wait(self, 0.12, TIME_SCALE)
 			var lp2: Vector3 = sim.get_local_player_position()
 			var akey: String = sim.get_local_player_anim_key()
 			var drift := Vector2(lp2.x - bface.x, lp2.z - bface.z).length()
@@ -396,9 +390,9 @@ func _run() -> void:
 	var hold_z := 0.0
 	for h in hovers:
 		sim.debug_teleport_local_player(Vector3(h.x, -h.y, top - 0.3), 0.0, -30.0)
-		await _mission_wait(0.8)
+		await ProbeClock.mission_wait(self, 0.8, TIME_SCALE)
 		var z0: float = sim.get_local_player_position().y
-		await _mission_wait(0.5)
+		await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 		var z1: float = sim.get_local_player_position().y
 		var key: String = sim.get_local_player_anim_key()
 		if absf(z1 - z0) < 0.05 and z1 > base and key.contains("climb"):
@@ -417,7 +411,7 @@ func _run() -> void:
 	var shot1_z := hold_z
 	if not _shots_dir.is_empty():
 		presenter.set_debug_third_person(true)
-		await _mission_wait(0.4)
+		await ProbeClock.mission_wait(self, 0.4, TIME_SCALE)
 		# The from-above latch lands one rung under the top — climb DOWN to
 		# mid-ladder for the latch beat so the body hangs clear on the rungs
 		# (the held height IS the mechanic: climb_idle, gravity off).
@@ -425,9 +419,9 @@ func _run() -> void:
 			sim.add_local_player_look(0.0, 600.0)
 			await process_frame
 		_forward = true
-		await _mission_wait(0.8)
+		await ProbeClock.mission_wait(self, 0.8, TIME_SCALE)
 		_forward = false
-		await _mission_wait(0.3)
+		await ProbeClock.mission_wait(self, 0.3, TIME_SCALE)
 		shot1_z = sim.get_local_player_position().y
 		_frame_shot(sim, center, 0.6)
 		await _shot("1_latched")
@@ -442,7 +436,7 @@ func _run() -> void:
 	var mid_shot_taken := false
 	var top_shot_taken := false
 	for i in 30:
-		await _mission_wait(0.1)
+		await ProbeClock.mission_wait(self, 0.1, TIME_SCALE)
 		max_z = maxf(max_z, sim.get_local_player_position().y)
 		if not mid_shot_taken and max_z > shot1_z + 1.0:
 			mid_shot_taken = true
@@ -450,7 +444,7 @@ func _run() -> void:
 				# Freeze mid-climb (climb_idle holds the height exactly) so the
 				# body cannot outrun the framing at probe frame rates.
 				_forward = false
-				await _mission_wait(0.3)
+				await ProbeClock.mission_wait(self, 0.3, TIME_SCALE)
 				_frame_shot(sim, center)
 				await _shot("2_climbing")
 				_forward = true
@@ -461,7 +455,7 @@ func _run() -> void:
 			top_shot_taken = true
 			if _shot_cam != null:
 				_forward = false
-				await _mission_wait(0.25)
+				await ProbeClock.mission_wait(self, 0.25, TIME_SCALE)
 				_frame_shot(sim, center, 0.4)
 				await _shot("3_top")
 				_forward = true
@@ -470,7 +464,7 @@ func _run() -> void:
 		# Diagnostic burst before failing: what did the motor actually stamp?
 		_forward = true
 		for i in 6:
-			await _mission_wait(0.2)
+			await ProbeClock.mission_wait(self, 0.2, TIME_SCALE)
 			var lp: Vector3 = sim.get_local_player_position()
 			print("PROBE STALL: anim=%s pos %s pitch %.1f yaw %.1f in_air=%s" %
 					[sim.get_local_player_anim_key(), str(lp),
@@ -487,10 +481,10 @@ func _run() -> void:
 	# --- Hold again: release the stick — climb_idle keeps the height (gravity
 	# stays off while latched). A natural top-out above the volume falls instead,
 	# so only assert the hold when still inside the span.
-	await _mission_wait(0.5)
+	await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 	var settle: float = sim.get_local_player_position().y
 	if settle < top - 0.5:
-		await _mission_wait(0.6)
+		await ProbeClock.mission_wait(self, 0.6, TIME_SCALE)
 		var settle2: float = sim.get_local_player_position().y
 		if absf(settle2 - settle) > 0.3:
 			_fail("height not held after the climb (%.2f -> %.2f)" % [settle, settle2])

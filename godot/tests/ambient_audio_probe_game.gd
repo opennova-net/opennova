@@ -56,12 +56,6 @@ func _on_frame() -> void:
 		_tick_us.append(int(audio_counters.get("tick_us", 0)))
 
 
-func _settle_ms(ms: int) -> void:
-	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < ms:
-		await process_frame
-
-
 static func _avg(values: Array[int]) -> float:
 	if values.is_empty():
 		return 0.0
@@ -125,10 +119,10 @@ func _run() -> void:
 		_audio = _world.get_mission_audio()
 	process_frame.connect(_on_frame)
 
-	await _settle_ms(WARM_MS)
+	await ProbeClock.settle_ms(self, WARM_MS)
 	_sampling = true
 	_last_frame_t = 0
-	await _settle_ms(SAMPLE_MS)
+	await ProbeClock.settle_ms(self, SAMPLE_MS)
 	_sampling = false
 
 	var audio_stats: Dictionary = {}

@@ -30,7 +30,7 @@ func after_each() -> void:
 			f.close()
 	elif FileAccess.file_exists(STATE_CONFIG_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_remove_dir_recursive(OS.get_cache_dir().path_join(TEST_ROOT))
+	TestFs.remove_dir_recursive(OS.get_cache_dir().path_join(TEST_ROOT))
 
 
 # A fresh, real directory on disk under the test base (so is_valid_root passes).
@@ -124,20 +124,3 @@ func test_recording_preserves_other_sections() -> void:
 	var reloaded := ConfigFile.new()
 	assert_eq(reloaded.load(STATE_CONFIG_PATH), OK, "Config reloads.")
 	assert_eq(int(reloaded.get_value("layout", "left_split_offset", -1)), 123, "Unrelated sections survive a recents write.")
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)

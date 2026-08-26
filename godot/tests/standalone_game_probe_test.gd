@@ -22,6 +22,32 @@ const SELF_CONTAINED_PROBES: Array[String] = [
 	"res://tests/effects_visual_probe.gd",
 ]
 
+# Headless manual probes: extends-SceneTree scripts that boot their own
+# runtime (main_game.tscn, a mounted ResourceRoot, or a bare Simulation) and
+# print a verdict; asset-gated and operator-run, never collected. Inventoried
+# so every *_probe.gd is either listed here, above, or retired below; the
+# contract pins readable + compiles + no removed PIE API.
+const HEADLESS_PROBES: Array[String] = [
+	"res://tests/00tra_truck_rest_probe.gd",
+	"res://tests/00trg_rock_collision_probe.gd",
+	"res://tests/adm_dump_probe.gd",
+	"res://tests/frame_stats_probe_game.gd",
+	"res://tests/glare_ray_geometry_probe.gd",
+	"res://tests/held_weapon_frame_probe.gd",
+	"res://tests/held_weapon_placement_probe.gd",
+	"res://tests/itemfx_probe.gd",
+	"res://tests/mission_audio_probe.gd",
+	"res://tests/mission_rows_perf_probe.gd",
+	"res://tests/mount_timing_probe.gd",
+	"res://tests/muzzle_origin_probe.gd",
+	"res://tests/perf_sweep_probe_game.gd",
+	"res://tests/present_pass_probe_game.gd",
+	"res://tests/ptl_effect_dump_probe.gd",
+	"res://tests/reload_asset_probe.gd",
+	"res://tests/remote_prone_roll_probe.gd",
+	"res://tests/weapon_bake_probe.gd",
+]
+
 const REMOVED_PIE_PROBES: Array[String] = [
 	"res://tests/destruction_probe.gd",
 	"res://tests/destruction_probe.tscn",
@@ -30,10 +56,13 @@ const REMOVED_PIE_PROBES: Array[String] = [
 ]
 
 # Self-contained probes retired with the device they exercised: the projected
-# sun-shadow catcher went with the SlotShadow capture pipeline (2026-08-20).
+# sun-shadow catcher went with the SlotShadow capture pipeline (2026-08-20);
+# the ONED boot probe duplicated oned_app_test.gd's collected checks
+# (2026-08-25).
 const RETIRED_PROBES: Array[String] = [
 	"res://tests/sun_shadow_catcher_probe.gd",
 	"res://tests/sun_shadow_catcher_probe.tscn",
+	"res://tests/oned_app_boot_probe.gd",
 ]
 
 
@@ -55,6 +84,20 @@ func test_rendered_probes_compile_without_editor_play_dependencies() -> void:
 
 func test_self_contained_probes_compile_without_removed_pie_api() -> void:
 	for path in SELF_CONTAINED_PROBES:
+		var source := FileAccess.get_file_as_string(path)
+		assert_false(source.is_empty(), "%s should remain readable." % path)
+		for stale_api in [
+			"play_" + "mission(", "stop_" + "play_" + "mission(",
+			"play_" + "controller(", "get_active_" + "runtime(",
+		]:
+			assert_false(source.contains(stale_api),
+				"%s must not call removed PIE API %s." % [path, stale_api])
+		var script := load(path) as Script
+		assert_not_null(script, "%s should compile." % path)
+
+
+func test_headless_probes_compile_without_removed_pie_api() -> void:
+	for path in HEADLESS_PROBES:
 		var source := FileAccess.get_file_as_string(path)
 		assert_false(source.is_empty(), "%s should remain readable." % path)
 		for stale_api in [

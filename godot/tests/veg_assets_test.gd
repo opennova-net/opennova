@@ -286,32 +286,7 @@ func _copy_file(src: String, dst: String) -> void:
 
 
 func _write_pff(path: String, entries: Array) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, 'PFF fixture should be writable: %s' % path)
-	if file == null:
-		return
-	var header_size := 20
-	var entry_size := 36
-	var next_payload_offset := header_size + entries.size() * entry_size
-	file.store_32(header_size)
-	file.store_32(0x33464650)
-	file.store_32(entries.size())
-	file.store_32(entry_size)
-	file.store_32(header_size)
-	for entry in entries:
-		var bytes: PackedByteArray = entry.bytes
-		file.store_32(0)
-		file.store_32(next_payload_offset)
-		file.store_32(bytes.size())
-		file.store_32(0)
-		var name_bytes := String(entry.name).to_utf8_buffer()
-		for index in range(16):
-			file.store_8(name_bytes[index] if index < name_bytes.size() else 0)
-		file.store_32(0)
-		next_payload_offset += bytes.size()
-	for entry in entries:
-		file.store_buffer(entry.bytes)
-	file.close()
+	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 func _cleanup_dir(path: String) -> void:

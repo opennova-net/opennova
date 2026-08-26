@@ -14,7 +14,7 @@ var _temp_dirs: Array[String] = []
 
 func after_each() -> void:
 	for dir in _temp_dirs:
-		_remove_dir_recursive(dir)
+		TestFs.remove_dir_recursive(dir)
 	_temp_dirs.clear()
 
 
@@ -277,23 +277,6 @@ func _touch(path: String) -> void:
 	f.close()
 
 
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
-
-
 # A minimal valid 8-bit palettized PCX (2x2) so ResourceRoot.load_texture
 # has something real to decode.
 func _write_test_pcx(path: String) -> void:
@@ -358,32 +341,6 @@ func _solid_test_pcx(color: Color) -> PackedByteArray:
 	return bytes
 
 
-# PFF3: 20-byte header, 36-byte entries with 16-byte names, then payloads.
+# The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "the packed loading-art fixture is writable")
-	if file == null:
-		return
-	var header_size := 20
-	var entry_size := 36
-	var next_offset := header_size + entries.size() * entry_size
-	file.store_32(header_size)
-	file.store_32(0x33464650)
-	file.store_32(entries.size())
-	file.store_32(entry_size)
-	file.store_32(header_size)
-	for entry in entries:
-		var bytes: PackedByteArray = entry.bytes
-		var name_bytes := String(entry.name).to_utf8_buffer()
-		assert_true(name_bytes.size() <= 16, "%s fits the PFF name field" % entry.name)
-		file.store_32(0)
-		file.store_32(next_offset)
-		file.store_32(bytes.size())
-		file.store_32(0)
-		for index in range(16):
-			file.store_8(name_bytes[index] if index < name_bytes.size() else 0)
-		file.store_32(0)
-		next_offset += bytes.size()
-	for entry in entries:
-		file.store_buffer(entry.bytes)
-	file.close()
+	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)

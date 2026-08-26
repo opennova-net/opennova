@@ -31,12 +31,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _nearest_npc(sim, world) -> Dictionary:
 	var player_pos: Vector3 = world.get_sim().get_local_player_position()
 	var best := {}
@@ -140,7 +134,7 @@ func _run() -> void:
 	var prev_pos: Vector3 = world.get_sim().get_local_player_position()
 	_forward = true
 	while seconds < MAX_MISSION_SECONDS:
-		await _mission_wait(1.0)
+		await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 		seconds += 1
 		var hp: int = world.get_sim().get_local_player_health()
 		if hp < hp0:
@@ -182,27 +176,35 @@ func _run() -> void:
 			# The §17.4 presentation legs must have run for the shots that landed:
 			# fire events drained, the ai_launch sound played (immediate or delayed),
 			# the ai_launcheffect muzzle spawned, tracer rounds drawn (rate-gated).
-			var stats: Dictionary = world.get_fire_present_stats()
-			print("PROBE fire-present stats: %s" % str(stats))
-			if int(stats.get("fires", 0)) <= 0 or int(stats.get("sounds", 0)) <= 0:
+			var stats = world.get_fire_present_stats()
+			print("PROBE fire-present stats: %s" % _fire_stats_text(stats))
+			if stats == null or int(stats.fires) <= 0 or int(stats.sounds) <= 0:
 				print("PROBE FAIL: NPC fire presented no sound (stats above)")
 				quit(1)
 				return
-			if int(stats.get("effects", 0)) <= 0:
+			if int(stats.effects) <= 0:
 				print("PROBE WARN: no muzzle effect spawns (ai_launcheffect missing from data?)")
-			if int(stats.get("tracer_peak", 0)) <= 0:
+			if int(stats.tracer_peak) <= 0:
 				print("PROBE WARN: no tracer rounds observed (tracer_rate 0 on this ammo?)")
 			print("PROBE PASS: acquire -> fire (heard+seen) -> damage -> kill all observed in-game")
 			quit(0)
 			return
-		await _mission_wait(1.0)
+		await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 		seconds += 1
 		if seconds % 10 == 0:
 			var npc2 := _nearest_npc(sim, world)
 			print("PROBE t=%ds hp=%d nearest=%.1fu state=%d npc_hp=%d fire=%s" %
 					[seconds, hp2, float(npc2.get("distance", INF)),
 					int(npc2.get("state", -1)), int(npc2.get("ai_health", 0)),
-					str(world.get_fire_present_stats())])
+					_fire_stats_text(world.get_fire_present_stats())])
 	print("PROBE FAIL: player hp=%d after %ds (damaged_at=%d) — no kill observed" %
 			[world.get_sim().get_local_player_health(), MAX_MISSION_SECONDS, damaged_at])
 	quit(1)
+
+
+func _fire_stats_text(stats: Variant) -> String:
+	if stats == null:
+		return "none"
+	return "fires=%d sounds=%d effects=%d tracer_peak=%d" % [
+			int(stats.fires), int(stats.sounds), int(stats.effects),
+			int(stats.tracer_peak)]

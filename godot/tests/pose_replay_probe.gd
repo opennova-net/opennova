@@ -92,7 +92,7 @@ func _ready() -> void:
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
 	WindowState.set_fullscreen(get_window(), true)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 
 	var mission := MissionData.new()
 	if mission.open_file(root.path_join(mission_file)) != OK:
@@ -143,7 +143,7 @@ func _ready() -> void:
 	# heading + world volume corners — the same-entity two-shell comparison.
 	var probe_bms := int(OS.get_environment("NOVA_PR_BMS").to_int())
 	if probe_bms != 0:
-		var placer = _find_by_method(get_tree().root, "get_static_instance_transform")
+		var placer = ProbeNodeSearch.find_by_method(get_tree().root, "get_static_instance_transform")
 		if placer != null:
 			var rec: Variant = placer.get_static_instance_transform(probe_bms)
 			print("[pr] visual instance bms %d: %s" % [probe_bms, str(rec)])
@@ -163,10 +163,10 @@ func _ready() -> void:
 	# test) and park an orbit camera at the DUMPED pose for a screenshot —
 	# the visual-vs-collision eyeball check at the reported spot.
 	if OS.get_environment("NOVA_PR_HITBOXES").to_int() == 1:
-		var world_node = _find_by_method(get_tree().root, "set_hitbox_debug")
+		var world_node = ProbeNodeSearch.find_by_method(get_tree().root, "set_hitbox_debug")
 		if world_node != null:
 			world_node.set_hitbox_debug(true)
-			await _settle(30)
+			await ProbeClock.settle(get_tree(), 30)
 			var vp: Viewport = null
 			for n in get_tree().root.find_children("HitboxDebug", "", true, false):
 				vp = (n as Node3D).get_viewport()
@@ -178,7 +178,7 @@ func _ready() -> void:
 				shot_cam.global_position = from_g
 				shot_cam.look_at(from_g + fwd_g, Vector3.UP)
 				shot_cam.current = true
-				await _settle(20)
+				await ProbeClock.settle(get_tree(), 20)
 				await RenderingServer.frame_post_draw
 				var img: Image = vp.get_texture().get_image()
 				if img != null:
@@ -219,9 +219,9 @@ func _ready() -> void:
 			print("[pr] spawn FAILED (ammo '%s' unknown or pool full)" % ammo)
 		else:
 			fired += 1
-		await _settle(8)
+		await ProbeClock.settle(get_tree(), 8)
 	print("[pr] fired %d/%d rays with %s" % [fired, FAN.size(), ammo])
-	await _settle(180)  # let long flights resolve (terrain/expiry)
+	await ProbeClock.settle(get_tree(), 180)  # let long flights resolve (terrain/expiry)
 
 	var debug: Dictionary = sim.get_round_debug()
 	var events: Array = debug.get("events", [])
@@ -268,18 +268,3 @@ static func _rotated(fwd: Vector3, yaw_deg: float, pitch_deg: float) -> Vector3:
 	if right != Vector3.ZERO:
 		v = v.rotated(right, deg_to_rad(pitch_deg))
 	return v.normalized()
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame

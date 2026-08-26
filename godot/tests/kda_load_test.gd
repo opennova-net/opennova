@@ -10,7 +10,7 @@ var _temp_roots: Array[String] = []
 
 func after_each() -> void:
 	for root in _temp_roots:
-		_remove_dir_recursive(root)
+		TestFs.remove_dir_recursive(root)
 	_temp_roots.clear()
 
 
@@ -101,20 +101,3 @@ func _copy_fixture(src_path: String, dst_path: String) -> void:
 		dst.store_buffer(src.get_buffer(src.get_length()))
 		dst.close()
 	src.close()
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while not entry.is_empty():
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)

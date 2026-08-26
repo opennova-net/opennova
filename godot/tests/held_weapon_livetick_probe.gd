@@ -109,7 +109,7 @@ func _run() -> void:
 
 
 func _axis_of(model: Node3D) -> Variant:
-	return _combined_aabb(model, model.global_transform.affine_inverse())
+	return ProbeNodeSearch.combined_aabb(model, model.global_transform.affine_inverse())
 
 
 func _fmt(box: Variant) -> String:
@@ -119,20 +119,6 @@ func _fmt(box: Variant) -> String:
 	var s: Vector3 = b.size
 	var axis: String = "X" if (s.x >= s.y and s.x >= s.z) else ("Y" if s.y >= s.z else "Z")
 	return "(%.3f,%.3f,%.3f) %s" % [s.x, s.y, s.z, axis]
-
-
-func _combined_aabb(node: Node, to_local: Transform3D) -> Variant:
-	var out: Variant = null
-	if node is MeshInstance3D:
-		var mi := node as MeshInstance3D
-		if mi.mesh != null:
-			out = ((to_local * mi.global_transform) * mi.mesh.get_aabb()) as AABB
-	for child in node.get_children():
-		var sub: Variant = _combined_aabb(child, to_local)
-		if sub == null:
-			continue
-		out = sub if out == null else (out as AABB).merge(sub as AABB)
-	return out
 
 
 func _v(v: Vector3) -> String:

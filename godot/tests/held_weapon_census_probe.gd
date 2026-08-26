@@ -58,7 +58,7 @@ func _init() -> void:
 		if model == null:
 			print("%-5d %-18s %-16s  <model did not build>" % [i + 1, nm, gfx3])
 			continue
-		var box: Variant = _combined_aabb(model, model.global_transform.affine_inverse())
+		var box: Variant = ProbeNodeSearch.combined_aabb(model, model.global_transform.affine_inverse())
 		if box == null:
 			print("%-5d %-18s %-16s  <no meshes>" % [i + 1, nm, gfx3])
 			model.queue_free()
@@ -79,20 +79,6 @@ func _init() -> void:
 	print("Y-LONG (these draw NEAR-VERTICAL under a correct attach basis): %s" % [
 			", ".join(vertical) if not vertical.is_empty() else "<none>"])
 	quit(0)
-
-
-func _combined_aabb(node: Node, to_local: Transform3D) -> Variant:
-	var out: Variant = null
-	if node is MeshInstance3D:
-		var mi := node as MeshInstance3D
-		if mi.mesh != null:
-			out = ((to_local * mi.global_transform) * mi.mesh.get_aabb()) as AABB
-	for child in node.get_children():
-		var sub: Variant = _combined_aabb(child, to_local)
-		if sub == null:
-			continue
-		out = sub if out == null else (out as AABB).merge(sub as AABB)
-	return out
 
 
 func _v(v: Vector3) -> String:

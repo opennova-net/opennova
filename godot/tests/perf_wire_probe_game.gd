@@ -103,9 +103,9 @@ func _run() -> void:
 			return
 	print("[pwj] joined %s, local player spawned after %.1fs" % [
 			target, float(Time.get_ticks_msec() - wall_start) / 1000.0])
-	await _settle_ms(5000)
+	await ProbeClock.settle_ms(self, 5000)
 
-	_runtime = _find_by_method(root, "advance_session_frame")
+	_runtime = ProbeNodeSearch.find_by_method(root, "advance_session_frame")
 	_main = game
 	_gw = world
 	for target_v in [_main, _gw]:
@@ -121,7 +121,7 @@ func _run() -> void:
 	RenderingServer.frame_pre_draw.connect(_on_seg_pre_draw)
 	RenderingServer.frame_post_draw.connect(_on_seg_post_draw)
 	_census()
-	await _settle_ms(1500)
+	await ProbeClock.settle_ms(self, 1500)
 
 	var base := await _measure("baseline", 8000)
 
@@ -130,7 +130,7 @@ func _run() -> void:
 	var worldoff := {avg = -1.0}
 	if _main != null and "_perf_probe_skip_world" in _main:
 		_main.set("_perf_probe_skip_world", true)
-		await _settle_ms(300)
+		await ProbeClock.settle_ms(self, 300)
 		worldoff = await _measure("worldoff", 3000)
 		_main.set("_perf_probe_skip_world", false)
 
@@ -144,46 +144,7 @@ func _run() -> void:
 func _measure(phase: String, duration_ms: int) -> Dictionary:
 	_phase = phase
 	_sample_t0 = Time.get_ticks_msec()
-	var samples: Array[float] = []
-	var sec_accum := 0.0
-	var sec_frames := 0
-	var deadline := Time.get_ticks_msec() + duration_ms
-	var last := Time.get_ticks_usec()
-	while Time.get_ticks_msec() < deadline:
-		await process_frame
-		var now := Time.get_ticks_usec()
-		var ms := float(now - last) / 1000.0
-		last = now
-		samples.append(ms)
-		sec_accum += ms
-		sec_frames += 1
-		if sec_accum >= 1000.0:
-			print(_counter_row(sec_frames, sec_accum))
-			last = Time.get_ticks_usec()
-			sec_accum = 0.0
-			sec_frames = 0
-	print(_counter_row(sec_frames, sec_accum))
-	var s := samples.duplicate()
-	s.sort()
-	var n := s.size()
-	if n == 0:
-		return {avg = 0.0, p50 = 0.0, p95 = 0.0, mx = 0.0, n = 0, worst = []}
-	var sum := 0.0
-	for v in s:
-		sum += v
-	var worst: Array[String] = []
-	var tagged := []
-	var t_ms := 0.0
-	for v in samples:
-		tagged.append([v, t_ms])
-		t_ms += v
-	tagged.sort_custom(func(a, b): return a[0] > b[0])
-	for i in mini(8, tagged.size()):
-		worst.append("%.1fms@t+%.2fs" % [tagged[i][0], tagged[i][1] / 1000.0])
-	return {
-		avg = sum / n, p50 = s[n >> 1], p95 = s[int(float(n) * 0.95)], mx = s[n - 1],
-		n = n, worst = worst,
-	}
+	return await ProbeFrameSampler.measure(self, duration_ms, _counter_row)
 
 
 func _counter_row(sec_frames: int, sec_accum: float) -> String:
@@ -269,19 +230,3 @@ func _report(label: String, st: Dictionary) -> void:
 func _finish(code: int) -> void:
 	_requested_exit_code = code
 	quit(code)
-
-
-func _settle_ms(ms: int) -> void:
-	var deadline := Time.get_ticks_msec() + ms
-	while Time.get_ticks_msec() < deadline:
-		await process_frame
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var found := _find_by_method(ch, method)
-		if found != null:
-			return found
-	return null

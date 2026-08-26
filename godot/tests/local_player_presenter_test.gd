@@ -51,7 +51,7 @@ func before_all() -> void:
 
 
 func after_all() -> void:
-	_remove_dir_recursive(OS.get_cache_dir().path_join(TEST_ROOT))
+	TestFs.remove_dir_recursive(OS.get_cache_dir().path_join(TEST_ROOT))
 
 
 func after_each() -> void:
@@ -267,23 +267,6 @@ func _visual_instances(root: Node) -> Array:
 
 func _local_avatar(world: GameWorld) -> ObjectModel:
 	return world.get_node_or_null("PlayerAvatar_CharModel") as ObjectModel
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
 
 
 # --- input routing into the sim ----------------------------------------------

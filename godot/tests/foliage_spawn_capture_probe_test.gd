@@ -126,9 +126,9 @@ func test_spawn_capture_settles_visibility_changes_before_each_image() -> void:
 		"The shell tick must freeze with the world so presenter camera state stays exact.")
 	assert_true(source.contains("const VISIBILITY_SETTLE_FRAMES := 3"),
 		"The A/B probe should give renderer visibility changes time to reach the viewport.")
-	assert_true(source.contains("world.set_foliage_hidden(false)\n\tawait _settle(VISIBILITY_SETTLE_FRAMES)"),
+	assert_true(source.contains("world.set_foliage_hidden(false)\n\tawait ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)"),
 		"The visible capture must settle after enabling foliage.")
-	assert_true(source.contains("world.set_foliage_hidden(true)\n\tawait _settle(VISIBILITY_SETTLE_FRAMES)"),
+	assert_true(source.contains("world.set_foliage_hidden(true)\n\tawait ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)"),
 		"The hidden capture must settle after disabling foliage.")
 
 

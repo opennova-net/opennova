@@ -25,7 +25,7 @@ func _ready() -> void:
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
 	WindowState.set_fullscreen(get_window(), true)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
@@ -37,17 +37,17 @@ func _ready() -> void:
 	_play_viewport = session.viewport
 
 	var world: GameWorld = session.world
-	var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	var presenter := ProbeNodeSearch.find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	if world == null or presenter == null:
 		push_error("[body] no weapon world/presenter"); get_tree().quit(1); return
 
 	# Third person on foot (the debug override; no gameplay key resolves it),
 	# clear the spawn tents.
-	presenter.set_debug_third_person(true); await _settle(2)
-	_hold(KEY_W, true)
-	await _settle(240)
-	_hold(KEY_W, false)
-	await _settle(40)
+	presenter.set_debug_third_person(true); await ProbeClock.settle(get_tree(), 2)
+	ProbeInput.hold(KEY_W, true)
+	await ProbeClock.settle(get_tree(), 240)
+	ProbeInput.hold(KEY_W, false)
+	await ProbeClock.settle(get_tree(), 40)
 	await _capture("01_tp_idle.png")
 
 	var avatar: Node = presenter.get("_avatar")
@@ -59,21 +59,21 @@ func _ready() -> void:
 			"idle: body channel mirrors the state with its own playhead")
 
 	# Short burst so the magazine is not full (the reload input gate), then reload.
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
-	await _settle(20)
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
-	await _settle(12)
-	_hold(KEY_R, true)
-	await _settle(3)
-	_hold(KEY_R, false)
-	await _settle(20)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
+	await ProbeClock.settle(get_tree(), 20)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
+	await ProbeClock.settle(get_tree(), 12)
+	ProbeInput.hold(KEY_R, true)
+	await ProbeClock.settle(get_tree(), 3)
+	ProbeInput.hold(KEY_R, false)
+	await ProbeClock.settle(get_tree(), 20)
 	var mid = world.local_player_weapon_view()
 	print("[body] mid-reload: ", _body_str(mid))
 	_check(mid.current_action == 4, "mid-reload: FSM in RELOAD")
 	_check(String(mid.body_anim_key) == "anim_reload",
 			"mid-reload: body channel plays anim_reload")
 	var phase_a := int(mid.body_anim_phase)
-	await _settle(10)
+	await ProbeClock.settle(get_tree(), 10)
 	var phase_b := int(world.local_player_weapon_view().body_anim_phase)
 	_check(phase_b > phase_a, "mid-reload: body playhead advances (%d -> %d)" % [phase_a, phase_b])
 	if avatar != null:
@@ -88,9 +88,9 @@ func _ready() -> void:
 	# again while retaining its independent playhead.
 	var waits := 0
 	while world.local_player_weapon_view().current_action != 0 and waits < 60:
-		await _settle(10)
+		await ProbeClock.settle(get_tree(), 10)
 		waits += 1
-	await _settle(90)  # the 80-tick window outlives the FSM exit briefly; let it drain
+	await ProbeClock.settle(get_tree(), 90)  # the 80-tick window outlives the FSM exit briefly; let it drain
 	var post = world.local_player_weapon_view()
 	print("[body] post-reload: ", _body_str(post))
 	_check(post.current_action == 0, "post-reload: FSM back to IDLE")
@@ -130,37 +130,7 @@ func _body_str(v) -> String:
 		v.current_action, v.clip, v.reserve, v.body_anim_key, v.body_anim_phase]
 
 
-func _mouse_btn(b: MouseButton, down: bool) -> void:
-	var e := InputEventMouseButton.new()
-	e.button_index = b
-	e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame
-
-
-func _hold(k: Key, down: bool) -> void:
-	var e := InputEventKey.new(); e.keycode = k; e.physical_keycode = k; e.pressed = down
-	Input.parse_input_event(e)
-
-
 func _capture(name: String) -> void:
-	await RenderingServer.frame_post_draw
 	var vp: Viewport = _play_viewport if _play_viewport != null else get_viewport()
-	var img: Image = vp.get_texture().get_image()
-	if img != null:
-		img.save_png(_out_abs.path_join(name))
+	if await ProbeCapture.save_viewport_png(vp, _out_abs.path_join(name)):
 		print("[body] wrote ", name)

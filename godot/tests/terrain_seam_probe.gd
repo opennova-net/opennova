@@ -57,7 +57,7 @@ func _ready() -> void:
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
 	WindowState.set_fullscreen(get_window(), true)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 
 	var session: Dictionary = await StandaloneProbe.boot(
 		self, root, mission_file,
@@ -114,7 +114,7 @@ func _ready() -> void:
 	# Simulation's OWN TerrainHeightField, not TerrainData's — a second
 	# construction of the same struct, and the one that decides whether you fall
 	# through. Teleport across the boundary and read back where the motor settles.
-	var runtime := _find_by_method(get_tree().root, "get_sim")
+	var runtime := ProbeNodeSearch.find_by_method(get_tree().root, "get_sim")
 	var sim = runtime.get_sim() if runtime != null else null
 	if sim != null and sim.has_method("debug_teleport_local_player") \
 			and sim.has_method("get_local_player_position"):
@@ -124,7 +124,7 @@ func _ready() -> void:
 			var by: float = -seam_z + float(i) * 0.25
 			var h: float = terrain_data.get_height_world_bilinear(Vector3(from_g.x, 0.0, -by))
 			sim.debug_teleport_local_player(Vector3(from_g.x, by, h + 3.0), 0.0, 0.0)
-			await _settle(30)
+			await ProbeClock.settle(get_tree(), 30)
 			var p: Vector3 = sim.get_local_player_position()
 			var bad := p.y < h - 1.0
 			if bad:
@@ -176,7 +176,7 @@ func _shoot(name: String, from_g: Vector3, look_at: Vector3) -> void:
 	shot_cam.global_position = from_g
 	shot_cam.look_at(look_at, Vector3.UP)
 	shot_cam.current = true
-	await _settle(20)
+	await ProbeClock.settle(get_tree(), 20)
 	await RenderingServer.frame_post_draw
 	var img: Image = vp3d.get_texture().get_image()
 	if img != null:
@@ -203,21 +203,6 @@ func _find_by_class(node: Node, klass: String) -> Node:
 		if found != null:
 			return found
 	return null
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for child in node.get_children():
-		var found := _find_by_method(child, method)
-		if found != null:
-			return found
-	return null
-
-
-func _settle(frames: int) -> void:
-	for _i in frames:
-		await get_tree().process_frame
 
 
 static func _v3(d: Dictionary) -> Vector3:

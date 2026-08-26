@@ -40,16 +40,6 @@ func _finish(code: int) -> void:
 	quit(code)
 
 
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for child in node.get_children():
-		var found := _find_by_method(child, method)
-		if found != null:
-			return found
-	return null
-
-
 func _on_frame() -> void:
 	if not _sampling:
 		return
@@ -61,12 +51,6 @@ func _on_frame() -> void:
 		var counters: Dictionary = _runtime.get_perf_counters()
 		_present_us.append(int(counters.get("present_us", 0)))
 		_sim_us.append(int(counters.get("sim_us", 0)))
-
-
-func _settle_ms(ms: int) -> void:
-	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < ms:
-		await process_frame
 
 
 static func _avg(values: Array[int]) -> float:
@@ -128,17 +112,17 @@ func _run() -> void:
 
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
-	_runtime = _find_by_method(root, "advance_session_frame")
+	_runtime = ProbeNodeSearch.find_by_method(root, "advance_session_frame")
 	if _runtime == null:
 		push_error("[ppp] no mission runtime found")
 		_finish(1)
 		return
 	process_frame.connect(_on_frame)
 
-	await _settle_ms(WARM_MS)
+	await ProbeClock.settle_ms(self, WARM_MS)
 	_sampling = true
 	_last_frame_t = 0
-	await _settle_ms(SAMPLE_MS)
+	await ProbeClock.settle_ms(self, SAMPLE_MS)
 	_sampling = false
 
 	print("[ppp] frames=%d window=%.1fs" % [_present_us.size(), float(SAMPLE_MS) / 1000.0])

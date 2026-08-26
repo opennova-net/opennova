@@ -26,12 +26,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _self_state(sim, world) -> int:
 	var ppos: Vector3 = world.get_sim().get_local_player_position()
 	for i in AI_SCAN_CAP:
@@ -86,7 +80,7 @@ func _run() -> void:
 	# Pin the input: no movement, no jump — the player must stand dead still.
 	presenter.set_input_source(func() -> Dictionary: return {})
 
-	await _mission_wait(SETTLE_MISSION_SECONDS)
+	await ProbeClock.mission_wait(self, SETTLE_MISSION_SECONDS, TIME_SCALE)
 	var z0: float = world.get_sim().get_local_player_position().y
 	print("PROBE settled: z=%.4f state=%d — watching %.0f mission-s" %
 			[z0, _self_state(sim, world), WATCH_MISSION_SECONDS])

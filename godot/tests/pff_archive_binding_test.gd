@@ -211,7 +211,7 @@ func test_extract_to_status_raw_fallback() -> void:
 # ---------------------------------------------------------------------------
 
 func after_each() -> void:
-	_remove_dir_recursive(OS.get_cache_dir().path_join("opennova_pff_binding"))
+	TestFs.remove_dir_recursive(OS.get_cache_dir().path_join("opennova_pff_binding"))
 
 
 func _pff_dir() -> String:
@@ -228,56 +228,6 @@ func _write_file(path: String, text: String) -> void:
 		file.close()
 
 
-# Builds a modern PFF3: header(20) | directory(36 each) | payloads. file_table_offset points at
-# the directory right after the header (the engine and our reader both re-sort on load).
+# The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "PFF fixture should be writable: %s" % path)
-	if file == null:
-		return
-	var header_size := 20
-	var entry_size := 36
-	var next_payload_offset := header_size + entries.size() * entry_size
-
-	file.store_32(header_size)
-	file.store_32(0x33464650)
-	file.store_32(entries.size())
-	file.store_32(entry_size)
-	file.store_32(header_size)
-
-	for entry in entries:
-		var bytes := _entry_bytes(entry)
-		file.store_32(0)
-		file.store_32(next_payload_offset)
-		file.store_32(bytes.size())
-		file.store_32(0)
-		var name_bytes := String(entry.name).to_utf8_buffer()
-		for i in range(16):
-			file.store_8(name_bytes[i] if i < name_bytes.size() else 0)
-		file.store_32(0)
-		next_payload_offset += bytes.size()
-
-	for entry in entries:
-		file.store_buffer(_entry_bytes(entry))
-	file.close()
-
-
-func _entry_bytes(entry: Dictionary) -> PackedByteArray:
-	return entry.bytes if entry.bytes is PackedByteArray else String(entry.bytes).to_utf8_buffer()
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
+	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)

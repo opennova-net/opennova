@@ -48,12 +48,12 @@ func _init() -> void:
 	get_root().add_child(mount)
 
 	# A real posed character, because attach_transform reads bone 16 off a live skeleton.
-	var body: Node3D = placer.build_player_animated_model(0x14B9, mount, null)
+	var body: Node3D = placer.build_player_animated_model(0x14B9, mount, 0)
 	if body == null:
 		print("FAIL: the player character model did not build")
 		quit(1)
 		return
-	var skel := PresentApplier.find_skeleton(body)
+	var skel := PresentApplier.find_skeleton(body) as Skeleton3D
 	if skel == null:
 		print("FAIL: no Skeleton3D under the character model")
 		quit(1)
@@ -85,12 +85,12 @@ func _init() -> void:
 			bi, _v(origins[bi]) if origins.size() > bi else Vector3.INF])
 
 	# The model frame this probe reasons against, measured rather than assumed.
-	var weapon: Node3D = placer.build_model_from_graphic("M4_3RD", "", mount, "", null)
+	var weapon: Node3D = placer.build_model_from_graphic("M4_3RD", "", mount, "", "")
 	if weapon == null:
 		print("FAIL: M4_3RD did not build")
 		quit(1)
 		return
-	var box: Variant = _combined_aabb(weapon, weapon.global_transform.affine_inverse())
+	var box: Variant = ProbeNodeSearch.combined_aabb(weapon, weapon.global_transform.affine_inverse())
 	if box == null:
 		print("FAIL: M4_3RD has no meshes")
 		quit(1)
@@ -134,20 +134,6 @@ func _dominant_axis(b: AABB) -> Vector3:
 	if s.y >= s.z:
 		return Vector3(0.0, signf(c.y) if c.y != 0.0 else 1.0, 0.0)
 	return Vector3(0.0, 0.0, signf(c.z) if c.z != 0.0 else 1.0)
-
-
-func _combined_aabb(node: Node, to_local: Transform3D) -> Variant:
-	var out: Variant = null
-	if node is MeshInstance3D:
-		var mi := node as MeshInstance3D
-		if mi.mesh != null:
-			out = ((to_local * mi.global_transform) * mi.mesh.get_aabb()) as AABB
-	for child in node.get_children():
-		var sub: Variant = _combined_aabb(child, to_local)
-		if sub == null:
-			continue
-		out = sub if out == null else (out as AABB).merge(sub as AABB)
-	return out
 
 
 func _v(v: Vector3) -> String:

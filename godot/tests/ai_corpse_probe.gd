@@ -37,12 +37,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _nearest_npc(sim, world) -> Dictionary:
 	var player_pos: Vector3 = world.get_sim().get_local_player_position()
 	var best := {}
@@ -126,7 +120,7 @@ func _run() -> void:
 	var target_hp0 := -1
 	_forward = true
 	while seconds < MAX_MISSION_SECONDS:
-		await _mission_wait(1.0)
+		await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 		seconds += 1
 		var npc := _nearest_npc(sim, world)
 		if npc.is_empty():
@@ -174,11 +168,11 @@ func _run() -> void:
 		return
 	var yaw0 := cam.global_rotation.y
 	world.get_sim().add_local_player_look(50.0, 0.0)
-	await _mission_wait(0.2)
+	await ProbeClock.mission_wait(self, 0.2, TIME_SCALE)
 	var yaw_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.y - yaw0, -PI, PI))
 	var pitch0 := cam.global_rotation.x
 	world.get_sim().add_local_player_look(0.0, 50.0)
-	await _mission_wait(0.2)
+	await ProbeClock.mission_wait(self, 0.2, TIME_SCALE)
 	var pitch_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.x - pitch0, -PI, PI))
 	print("PROBE aim gains: yaw %.1f px/deg, pitch %.1f px/deg" % [yaw_gain, pitch_gain])
 	if not is_finite(yaw_gain) or not is_finite(pitch_gain) \
@@ -279,7 +273,7 @@ func _run() -> void:
 	# still be there (parked on the 62-tick retry), never hidden, anim held.
 	var watched_ok := true
 	for w in range(8):
-		await _mission_wait(5.0)
+		await ProbeClock.mission_wait(self, 5.0, TIME_SCALE)
 		seconds += 5
 		var c := _debug_row(sim, target_index)
 		var hidden := bool(c.get("hidden", false))

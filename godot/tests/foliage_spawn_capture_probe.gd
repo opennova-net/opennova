@@ -99,7 +99,7 @@ func _ready() -> void:
 	var play_viewport: Viewport = camera.get_viewport()
 	world.get_sim().set_player_input(false, false, false, false, false, false, false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	await _settle(PLAY_SETTLE_FRAMES)
+	await ProbeClock.settle(get_tree(), PLAY_SETTLE_FRAMES)
 
 	var environment = world.get_node_or_null("MissionEnvironment")
 	if environment == null or environment.get("time_of_day") == null:
@@ -158,7 +158,7 @@ func _ready() -> void:
 		return
 
 	world.set_foliage_hidden(false)
-	await _settle(VISIBILITY_SETTLE_FRAMES)
+	await ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)
 	if world.is_foliage_hidden():
 		_fail("GameWorld refused foliage-visible state")
 		return
@@ -172,7 +172,7 @@ func _ready() -> void:
 
 	# This is the public API used by the game and ONED debug overlay.
 	world.set_foliage_hidden(true)
-	await _settle(VISIBILITY_SETTLE_FRAMES)
+	await ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)
 	if not world.is_foliage_hidden():
 		_fail("GameWorld refused foliage-hidden state")
 		return
@@ -281,7 +281,7 @@ func _run_foliage_flicker_probe(
 	var base_transform := camera.global_transform
 
 	world.set_foliage_hidden(true)
-	await _settle(2)
+	await ProbeClock.settle(get_tree(), 2)
 	var hidden: Image = await _grab_flicker_image(viewport)
 	if hidden == null or hidden.is_empty():
 		_fail("flicker probe could not capture the foliage-hidden baseline")
@@ -317,7 +317,7 @@ func _probe_flicker_tier(
 	for _warmup in 2:
 		dispatcher.render_frame(base_transform)
 		_configure_flicker_draws(dispatcher, tier, false, 0.0)
-		await _settle(1)
+		await ProbeClock.settle(get_tree(), 1)
 
 	var images: Array[Image] = []
 	var setup := {}
@@ -562,11 +562,6 @@ func _capture(viewport: Viewport, path: String) -> Error:
 			str(expected), str(image.get_size())])
 		return ERR_INVALID_DATA
 	return image.save_png(path)
-
-
-func _settle(frames: int) -> void:
-	for _i in frames:
-		await get_tree().process_frame
 
 
 func _fail(reason: String) -> void:

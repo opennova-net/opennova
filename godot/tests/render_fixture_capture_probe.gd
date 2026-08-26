@@ -2030,7 +2030,7 @@ func _ready() -> void:
 				+ "capture warmup: %s" % error_string(warmup_shadow_error))
 		return
 	var capture_settings: Dictionary = catalog.get("capture", {})
-	await _settle(int(capture_settings.get("load_settle_frames", 132)))
+	await ProbeClock.settle(get_tree(), int(capture_settings.get("load_settle_frames", 132)))
 	if Vector2i(viewport.get_visible_rect().size) != _capture_size:
 		_fail("game viewport is %s, expected %s" % [
 			str(Vector2i(viewport.get_visible_rect().size)), str(_capture_size)])
@@ -2069,7 +2069,7 @@ func _ready() -> void:
 						fixture_id, String(spawn_witness.error),
 						String(fallback.error)])
 				return
-			await _settle(int(capture_settings.get(
+			await ProbeClock.settle(get_tree(), int(capture_settings.get(
 					"visibility_settle_frames", 3)))
 			spawn_witness = verify_comparison_spawn(_world, comparison_contract)
 			if spawn_witness.has("error"):
@@ -2316,7 +2316,7 @@ func _prepare_pose(
 		_fail("mission environment is unavailable while preparing an exact fixture pose")
 		return false
 	_expected_mission_time_fixed24 = environment.get_mission_time_fixed24()
-	await _settle(settle_frames)
+	await ProbeClock.settle(get_tree(), settle_frames)
 	if environment.get_mission_minute_of_day() != minute_of_day \
 			or environment.get_mission_time_fixed24() \
 			!= _expected_mission_time_fixed24:
@@ -2590,11 +2590,6 @@ func _settle_viewmodel_hold(max_frames: int) -> void:
 				held = false
 		if held:
 			return
-		await get_tree().process_frame
-
-
-func _settle(frames: int) -> void:
-	for _frame in range(maxi(frames, 0)):
 		await get_tree().process_frame
 
 

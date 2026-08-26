@@ -30,7 +30,7 @@ func _ready() -> void:
 	# persisted key is what GameWorld reads — mirror of the retail /exp flag).
 	var expn := OS.get_environment("NOVA_WR_EXPANSION").strip_edges()
 	WindowState.set_fullscreen(get_window(), true)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
@@ -39,13 +39,13 @@ func _ready() -> void:
 	if not String(session.get("error", "")).is_empty():
 		push_error("[wr] " + String(session.error)); get_tree().quit(1); return
 	_world = session.world
-	_presenter = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	_presenter = ProbeNodeSearch.find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	if _world == null:
 		push_error("[wr] no weapon world"); get_tree().quit(1); return
 
 	# Sanity: the standalone GameplayOverlay must carry the root viewport rect;
 	# a zero size here clips the HUD and armory to nothing.
-	var hud_presenter := _find_by_method(get_tree().root, "hud_objective_line")
+	var hud_presenter := ProbeNodeSearch.find_by_method(get_tree().root, "hud_objective_line")
 	if hud_presenter != null:
 		hud_presenter.tick()  # force the lazy HUD build
 		var hud = hud_presenter.get_hud()
@@ -74,10 +74,10 @@ func _ready() -> void:
 	var armory_done := await _armory_sequence()
 
 	# Open ground, level look.
-	_hold(KEY_W, true)
-	await _settle(300)
-	_hold(KEY_W, false)
-	await _settle(30)
+	ProbeInput.hold(KEY_W, true)
+	await ProbeClock.settle(get_tree(), 300)
+	ProbeInput.hold(KEY_W, false)
+	await ProbeClock.settle(get_tree(), 30)
 
 	# Baseline: the spread crosshair at the 1P design-center pin (whatever's equipped).
 	_log_view("hip baseline")
@@ -96,38 +96,38 @@ func _ready() -> void:
 
 	# Mid-ease: the crosshair MUST still draw a few frames after the RMB edge
 	# (D-HUD-9: it yields only at the settled sight view). ~2 sim ticks/frame.
-	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
-	await _settle(2)
-	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
-	await _settle(1)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await ProbeClock.settle(get_tree(), 2)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await ProbeClock.settle(get_tree(), 1)
 	_log_view("mid-ease")
 	await _capture("03_ads_ease_crosshair_up.png")
 
 	# Settled: fraction 1 -> the crosshair yields AND the Scoped weapon draws its
 	# SIGHTS card INSTEAD of the FP viewmodel.
-	await _settle(50)
+	await ProbeClock.settle(get_tree(), 50)
 	_log_view("settled (card)")
 	await _capture("04_sights_card_settled.png")
 
 	# Unscope-on-move: a movement key while SETTLED on a Scoped weapon forces the
 	# full unscope [orig: @0x4df4c9]. Capture mid-drop, then at rest.
-	_hold(KEY_W, true)
-	await _settle(4)
+	ProbeInput.hold(KEY_W, true)
+	await ProbeClock.settle(get_tree(), 4)
 	_log_view("moving (unscope firing)")
 	await _capture("05_unscope_on_move_drop.png")
-	await _settle(40)
-	_hold(KEY_W, false)
-	await _settle(20)
+	await ProbeClock.settle(get_tree(), 40)
+	ProbeInput.hold(KEY_W, false)
+	await ProbeClock.settle(get_tree(), 20)
 	_log_view("stopped (back at hip)")
 	await _capture("06_back_at_hip.png")
 
 	# Third person: the crosshair anchors at the PROJECTED aim point, not the
 	# screen center (D-HUD-10) — pitch down a touch so the offset is visible.
-	_look(Vector2(0, 140))
-	await _settle(12)
+	ProbeInput.look(Vector2(0, 140))
+	await ProbeClock.settle(get_tree(), 12)
 	# On-foot third person is the debug override (no gameplay key resolves it).
 	_presenter.set_debug_third_person(true)
-	await _settle(40)
+	await ProbeClock.settle(get_tree(), 40)
 	_log_view("third person")
 	await _capture("07_3p_projected_aim.png")
 
@@ -139,14 +139,14 @@ func _ready() -> void:
 # sniper was applied through the armory (false -> caller falls back to the direct
 # apply, still demoing the same ACCEPT plumbing).
 func _armory_sequence() -> bool:
-	_hold(KEY_SHIFT, true)
-	await _settle(4)
+	ProbeInput.hold(KEY_SHIFT, true)
+	await ProbeClock.settle(get_tree(), 4)
 	var menu := get_tree().root.find_child("ArmoryMenu", true, false)
 	if menu == null or not menu.visible:
-		_hold(KEY_SHIFT, false)
+		ProbeInput.hold(KEY_SHIFT, false)
 		print("[wr] armory did not open here (out of zone) — direct apply later")
 		return false
-	await _settle(20)
+	await ProbeClock.settle(get_tree(), 20)
 	await _capture("00_armory_open_live_play.png")
 
 	var primary := menu.find_child("PRIMARY", true, false)
@@ -159,16 +159,16 @@ func _armory_sequence() -> bool:
 		print("[wr] PRIMARY rows=%d barrett_row=%d" % [primary.get_item_count(), row])
 	if row >= 0:
 		primary.select(row)
-		await _settle(10)
+		await ProbeClock.settle(get_tree(), 10)
 
 	# The ACCEPT hotkey: the opener is still HELD from the open — release once to
 	# arm [orig: @0x4de2d0], press again to ACCEPT [orig: @0x5674a8].
-	_hold(KEY_SHIFT, false)
-	await _settle(5)
-	_hold(KEY_SHIFT, true)
-	await _settle(3)
-	_hold(KEY_SHIFT, false)
-	await _settle(60)
+	ProbeInput.hold(KEY_SHIFT, false)
+	await ProbeClock.settle(get_tree(), 5)
+	ProbeInput.hold(KEY_SHIFT, true)
+	await ProbeClock.settle(get_tree(), 3)
+	ProbeInput.hold(KEY_SHIFT, false)
+	await ProbeClock.settle(get_tree(), 60)
 	print("[wr] Shift ACCEPT accelerator: menu.visible=%s" % str(menu.visible))
 	return row >= 0 and not menu.visible
 
@@ -183,7 +183,7 @@ func _equip_direct(weapon: String) -> void:
 		return
 	if _presenter != null and _presenter.has_method("refresh_viewmodel"):
 		_presenter.refresh_viewmodel()
-	await _settle(90)
+	await ProbeClock.settle(get_tree(), 90)
 
 
 # Hold LMB and log the FSM/audio state — which layer breaks: the FSM (serials),
@@ -217,7 +217,7 @@ func _anim_trace() -> void:
 			v0.clip, v0.current_action]
 	print(pre)
 	if tracef != null: tracef.store_line(pre)
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 	for i in range(70):
 		await get_tree().process_frame
 		var v = _world.local_player_weapon_view()
@@ -226,7 +226,7 @@ func _anim_trace() -> void:
 				v.fired_serial, v.current_action, v.clip]
 		print(hl)
 		if tracef != null: tracef.store_line(hl)
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 	print("[wr] RELEASE")
 	if tracef != null: tracef.store_line("[wr] RELEASE")
 	for i in range(50):
@@ -260,25 +260,25 @@ func _fire_diag() -> void:
 				str(vdef.tpos_units), str(vdef.renderfov_h_deg), vdef.gfx1, vdef.animadm])
 	await _capture("90_diag_hip.png")
 	# ADS alignment check: raise, settle, capture, drop (the Sighted tpos view).
-	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
-	await _settle(3)
-	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
-	await _settle(40)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await ProbeClock.settle(get_tree(), 3)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await ProbeClock.settle(get_tree(), 40)
 	_log_view("diag ADS settled")
 	await _capture("91_diag_ads.png")
-	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
-	await _settle(3)
-	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
-	await _settle(30)
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await ProbeClock.settle(get_tree(), 3)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await ProbeClock.settle(get_tree(), 30)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 	for i in range(10):
-		await _settle(10)
+		await ProbeClock.settle(get_tree(), 10)
 		var v = _world.local_player_weapon_view()
 		print("[wr] fire t+%03d: act=%d fired=%d dry=%d clip=%d res=%d endss=%s" % [
 				(i + 1) * 10, v.current_action, v.fired_serial, v.dry_serial,
 				v.clip, v.reserve, v.action_end_soundset])
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
-	await _settle(10)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
+	await ProbeClock.settle(get_tree(), 10)
 	var vf = _world.local_player_weapon_view()
 	print("[wr] post-fire: act=%d fired=%d clip=%d res=%d" % [
 			vf.current_action, vf.fired_serial, vf.clip, vf.reserve])
@@ -289,11 +289,11 @@ func _fire_diag() -> void:
 	for r in range(3):
 		var press := true
 		var seen_serial: int = _world.local_player_weapon_view().play_serial
-		_hold(KEY_R, true)
-		await _settle(2)
-		_hold(KEY_R, false)
+		ProbeInput.hold(KEY_R, true)
+		await ProbeClock.settle(get_tree(), 2)
+		ProbeInput.hold(KEY_R, false)
 		for _w in range(30):
-			await _settle(5)
+			await ProbeClock.settle(get_tree(), 5)
 			var rv = _world.local_player_weapon_view()
 			if rv.anim_key.nocasecmp_to("anim_wpn_reload") == 0 and rv.play_serial != seen_serial:
 				print("[wr] reload %d: key=%s variant=%d clip=%d" % [r, rv.anim_key, rv.anim_variant, rv.clip])
@@ -301,11 +301,11 @@ func _fire_diag() -> void:
 				break
 		if press:
 			print("[wr] reload %d: NOT OBSERVED" % r)
-		await _settle(90)  # let the reload finish before the next request
-		_mouse_btn(MOUSE_BUTTON_LEFT, true)  # spend a round so the next reload is allowed
-		await _settle(6)
-		_mouse_btn(MOUSE_BUTTON_LEFT, false)
-		await _settle(20)
+		await ProbeClock.settle(get_tree(), 90)  # let the reload finish before the next request
+		ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)  # spend a round so the next reload is allowed
+		await ProbeClock.settle(get_tree(), 6)
+		ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
+		await ProbeClock.settle(get_tree(), 20)
 	# The armory-name thread: is the loadout text table resolvable on this root?
 	var root: ResourceRoot = _world.get_resource_root() \
 			if _world.has_method("get_resource_root") else null
@@ -329,42 +329,6 @@ func _log_view(stage: String) -> void:
 		str(wv.clip) if wv != null else "<null>"])
 
 
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame
-
-
-func _hold(k: Key, down: bool) -> void:
-	var e := InputEventKey.new(); e.keycode = k; e.physical_keycode = k; e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _mouse_btn(b: MouseButton, down: bool) -> void:
-	var e := InputEventMouseButton.new()
-	e.button_index = b
-	e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _look(total: Vector2) -> void:
-	for _i in 10:
-		var mm := InputEventMouseMotion.new(); mm.relative = total / 10.0
-		Input.parse_input_event(mm)
-
-
 func _capture(name: String) -> void:
-	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
-	if img != null:
-		img.save_png(_out_abs.path_join(name))
+	if await ProbeCapture.save_viewport_png(get_viewport(), _out_abs.path_join(name)):
 		print("[wr] wrote ", name)

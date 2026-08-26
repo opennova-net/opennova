@@ -62,7 +62,7 @@ func _run() -> void:
 	root.add_child(holder)
 
 	# The same call WirePresentPass makes for a remote player row.
-	var model: Node3D = placer.build_player_animated_model(0x14B9, holder, null)
+	var model: Node3D = placer.build_player_animated_model(0x14B9, holder, 0)
 	if model == null:
 		_fail_now("build_player_animated_model(0x14B9) returned null")
 		return

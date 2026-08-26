@@ -25,7 +25,7 @@ func _ready() -> void:
 		root = ResourceDirSettings.get_resource_dir()
 
 	WindowState.set_fullscreen(get_window(), true)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
@@ -39,12 +39,12 @@ func _ready() -> void:
 
 	# Walk forward a little, then aim down ~35 deg so the burst hits near ground
 	# a few meters ahead.
-	_hold(KEY_W, true)
-	await _settle(120)
-	_hold(KEY_W, false)
-	await _settle(30)
-	_look(Vector2(0, 300))
-	await _settle(24)
+	ProbeInput.hold(KEY_W, true)
+	await ProbeClock.settle(get_tree(), 120)
+	ProbeInput.hold(KEY_W, false)
+	await ProbeClock.settle(get_tree(), 30)
+	ProbeInput.look(Vector2(0, 300))
+	await ProbeClock.settle(get_tree(), 24)
 
 	var cam: Camera3D = session.camera
 	var world: GameWorld = session.world
@@ -58,12 +58,12 @@ func _ready() -> void:
 		print("[impact] aim ray @%0.0fm = %s" % [d, str(t.origin + fwd * float(d))])
 
 	# Short burst through the real input path.
-	_mouse_btn(MOUSE_BUTTON_LEFT, true)
-	await _settle(20)
-	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
+	await ProbeClock.settle(get_tree(), 20)
+	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 	# Let the rounds fly and impact (a few hundred m/s over tens of meters = a
 	# handful of ticks); keep groups alive for the report.
-	await _settle(30)
+	await ProbeClock.settle(get_tree(), 30)
 
 	var fx = world.get_effect_world()
 	if fx == null:
@@ -84,40 +84,6 @@ func _ready() -> void:
 	get_tree().quit()
 
 
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame
-
-
-func _hold(k: Key, down: bool) -> void:
-	var e := InputEventKey.new(); e.keycode = k; e.physical_keycode = k; e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _mouse_btn(b: MouseButton, down: bool) -> void:
-	var e := InputEventMouseButton.new(); e.button_index = b; e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _look(total: Vector2) -> void:
-	for _i in 10:
-		var mm := InputEventMouseMotion.new(); mm.relative = total / 10.0
-		Input.parse_input_event(mm)
-
-
 func _capture(name: String) -> void:
-	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
-	if img != null:
-		img.save_png(_out_abs.path_join(name))
+	if await ProbeCapture.save_viewport_png(get_viewport(), _out_abs.path_join(name)):
 		print("[impact] wrote ", name)
