@@ -650,6 +650,9 @@ void Terrain::set_light_context(const Ref<LightScene> &p_scene, int p_time_ms) {
 		_bind_light_textures();
 	} else if (terrain_material.is_valid()) {
 		terrain_material->set_shader_parameter("u_terrain_light_enabled", false);
+		// The direct write IS the latched value: a later re-arm must push the
+		// enable again, not compare against the stale 1.
+		light_rows_enabled_written = 0;
 		light_patches_lit = 0;
 		light_rows_total = 0;
 	}
@@ -955,6 +958,13 @@ void Terrain::_clear_patch_pool() {
 		last_mesh_rid[i] = RID();
 		last_transform[i] = Transform3D();
 		patch_visible[i] = false;
+		// A fresh instance carries no instance uniforms: every per-slot latch
+		// forgets this build's values, or a page that comes ready later on the
+		// next build with the same layer/projection would never be written.
+		patch_uniforms_stamped[i] = false;
+		last_page_ready[i] = false;
+		last_page_layer[i] = -1.0f;
+		last_page_projection[i] = Vector4();
 	}
 	patches_active = 0;
 }
