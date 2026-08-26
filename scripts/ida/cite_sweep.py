@@ -16,7 +16,7 @@ For each marker the tool asks the IDB what lives at the address and classifies t
   site-only     the marker names no symbol (`@0xADDR` alone, or a prose word before the @)
                 and the address is a defined location -- accepted
   other-image   the marker carries another image's qualifier (dfx2med, ModSuperOed,
-                misldr.dll, binkw32, jodemo, dfvas) -- skipped, this tool only knows the
+                misldr.dll, binkw32, jodemo, dfvas, TrnGen) -- skipped, this tool only knows the
                 Jointops.exe IDB
 
   name-mismatch        a real symbol name is cited, the IDB names that address differently
@@ -55,7 +55,7 @@ from collections import Counter, defaultdict
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 URL = os.environ.get("IDA_MCP_URL", "http://127.0.0.1:13337/mcp")
 
-CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "apps")
+CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/tests", "apps", "tests")
 DOC_ROOTS = ("docs",)
 CODE_EXT = (".cpp", ".h", ".hpp", ".gd", ".py", ".gdshader", ".json")
 DOC_EXT = (".md",)

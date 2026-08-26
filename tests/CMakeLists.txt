@@ -1013,7 +1013,7 @@ foreach(name emitter emit_shape translate effect_scene_contract)
 endforeach()
 
 # Smoke test stays disabled until the full 77-file corpus is mirrored into
-# fixtures/particle/ (mirrors the parametric_parity DISABLED pattern above).
+# fixtures/particle/ (registered DISABLED so the target still builds).
 set_tests_properties(particle_smoke_all_fixtures PROPERTIES DISABLED TRUE)
 
 # CBIN tests

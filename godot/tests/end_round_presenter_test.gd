@@ -6,7 +6,7 @@ extends GutTest
 # stub world with no simulation. The overlay element itself is pinned in
 # hud_overlay_test; the ladder/feed math in the end_round_overlay and
 # stat_screen_feed ctests.
-# [orig: sub_5C0060 @0x5c0060 -> UI_ProcessEndRoundScreenTransition @0x5b8600]
+# [orig: HUD_DrawOverlayPanels @0x5c0060 -> UI_ProcessEndRoundScreenTransition @0x5b8600]
 
 const EndRoundPresenterScript := preload("res://game/world/end_round_presenter.gd")
 

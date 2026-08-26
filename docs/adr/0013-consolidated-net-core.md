@@ -101,6 +101,11 @@ single `Server_InitNewRoundState` call.
   (`npruntime_golden_lan_join`, `npruntime_golden_gameplay`, `nw_dvxc1_groundtruth`,
   `nw_ingame_pool_records`, `nw_capture_decoder`) and the coverage gates
   (`nw_message_coverage`, `nw_golden_diff`) staying green, plus the GDExtension building.
+- **The outer framers are one implementation** (quality campaign W2-2, 2026-07-28): the
+  byte-identical `encode_session_outbound` / `decode_session_inbound` pair is gone and every
+  call site uses npwire's `nw_encode_outbound` / `nw_decode_inbound`; `nw_udp_listener`'s
+  server-direction framing leg calls the shared `frame_session_packet` instead of hand-stamping
+  a `ProtocolPacketHeader`. Wire-neutral, proven against the local goldens before and after.
 - **Adding a message is one path**, not three: registry entry → decoder → round-trip
   test → doc §5.x → `nw_pp` verify, and `--coverage` surfaces what is still missing.
 - **Scoped-next (this ADR names them so they are not silently skipped):**

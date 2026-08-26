@@ -1117,7 +1117,7 @@ void test_cac_combines_flag_and_zone_objectives() {
     CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == 0);
 
     // C&C's primary score and win arm remain the zone counter even though its
-    // retail FIELD row also exposes flag stats. [orig: sub_52C850 @0x52C850;
+    // retail FIELD row also exposes flag stats. [orig: ScoreRules_GetPrimaryScoreField @0x52C850;
     // GameType_CreateDefaultSettings @0x52DD00]
     world->match.record_zone_capture(*world, {blue});
     CHECK(world->match.player(blue)->stats[MatchStats::kZoneTakeovers] == 1);

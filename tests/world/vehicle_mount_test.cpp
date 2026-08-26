@@ -161,7 +161,7 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
 // offset. Our split local-player body must update target_heading too; otherwise
 // pose_if_mounted immediately restores the pre-attach look and swings the gun/body
 // overlay away from the authored neutral pose.
-// [orig: Entity_RequestVehicleAttach @0x4364a0, UseGun @0x43656c]
+// [orig: Entity_RequestVehicleAttach @0x4364a0, its UseGun leg @0x43656c]
 void test_usegun_attach_presnaps_local_look() {
     World w;
     AiSystem ai;

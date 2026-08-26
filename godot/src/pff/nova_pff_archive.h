@@ -63,12 +63,11 @@ private:
 
 	// Background extract job. The worker reads source_/entries_ and writes
 	// the output files off the main thread; the editor disables every other op while it runs, so the
-	// model it reads is stable (the same invariant the save worker relies on). Cancel is checked
+	// model it reads is stable. Cancel is checked
 	// between entries, so a single large file still finishes before the job stops, but the UI never
 	// blocks mid-entry.
 	struct ExtractState {
 		bool running = false;
-		bool finished = false;
 		bool cancel_requested = false;
 		uint32_t done = 0;
 		uint32_t total = 0;
@@ -99,7 +98,6 @@ private:
 	// (unreadable entry) still return false.
 	bool read_entry_bytes(const Entry &entry, bool decode, std::vector<uint8_t> &out,
 	                      bool *out_decoded = nullptr) const;
-	Error do_open(const String &path, bool legacy);
 	void join_extract_thread();
 	void extract_worker();
 

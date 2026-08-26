@@ -243,7 +243,7 @@ int main() {
 			// crewed helo must be at the cap, its phase must be advancing, and
 			// the angle both rotor registers read must stay inside the 16 bits
 			// the model takes. A static rotor fails the first of these.
-			// [orig: RotorSpin_Update @0x4928B0]
+			// [orig: Entity_UpdatePartSpinAccumulator @0x4928B0]
 			expect(ha->veh.part_spin.speed == 214748352,
 			       "the rotor reached full speed");
 			const int32_t phase_a = ha->veh.part_spin.angle;

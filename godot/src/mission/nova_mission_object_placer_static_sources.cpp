@@ -569,8 +569,20 @@ bool MissionObjectPlacer::register_object_data(const String &p_graphic,
 	return true;
 }
 
-bool MissionObjectPlacer::_retain_static_batches(const Array &p_batches,
-		Vector<StaticBatch> &r_retained) {
+void MissionObjectPlacer::register_occlusion_verdict(int p_item_id,
+		bool p_has_occlusion) {
+	_check_epoch();
+	occlusion_cache_[p_item_id] = p_has_occlusion;
+}
+
+bool MissionObjectPlacer::register_resolved_static_graphic(
+		const String &p_graphic, const Ref<ObjectData> &p_data,
+		const Array &p_batches) {
+	_check_epoch();
+	if (p_graphic.is_empty() || p_data.is_null() || p_batches.is_empty()) {
+		return false;
+	}
+	Vector<StaticBatch> retained;
 	for (int i = 0; i < p_batches.size(); ++i) {
 		if (p_batches[i].get_type() != Variant::DICTIONARY) {
 			return false;
@@ -586,31 +598,11 @@ bool MissionObjectPlacer::_retain_static_batches(const Array &p_batches,
 		retained_batch.offset = batch.get("offset", Transform3D());
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained_batch.robj_index = int(batch.get("robj_index", 0));
-		r_retained.push_back(retained_batch);
+		retained.push_back(retained_batch);
 		if (retained_batch.material.is_valid() &&
 				batch_materials_.find(retained_batch.material) < 0) {
 			batch_materials_.push_back(retained_batch.material);
 		}
-	}
-	return true;
-}
-
-void MissionObjectPlacer::register_occlusion_verdict(int p_item_id,
-		bool p_has_occlusion) {
-	_check_epoch();
-	occlusion_cache_[p_item_id] = p_has_occlusion;
-}
-
-bool MissionObjectPlacer::register_resolved_static_graphic(
-		const String &p_graphic, const Ref<ObjectData> &p_data,
-		const Array &p_batches) {
-	_check_epoch();
-	if (p_graphic.is_empty() || p_data.is_null() || p_batches.is_empty()) {
-		return false;
-	}
-	Vector<StaticBatch> retained;
-	if (!_retain_static_batches(p_batches, retained)) {
-		return false;
 	}
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;

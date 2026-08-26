@@ -1090,7 +1090,7 @@ int main() {
 	// --- 2b. The Show Score census: enemy-unit total at mission start counts
 	// non-player, team >= 2 entities with a non-zero items.def unit-class byte;
 	// the defined-subgoal count is the leading authored win-condition run.
-	// [orig: sub_509DC0 @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070] ---
+	// [orig: Score_CountMissionSubgoalsAndUnits @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070] ---
 	{
 		w::Entity unit;
 		unit.net_id = 200;

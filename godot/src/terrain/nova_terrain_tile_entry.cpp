@@ -95,16 +95,6 @@ bool TerrainTileEntry::has_flag(int flag) const {
 	return (flags & flag) != 0;
 }
 
-void TerrainTileEntry::set_flag(int flag, bool enabled) {
-	const int authored_flag = flag & static_cast<int>(opennova::TIL_FLAG_AUTHORED_MASK);
-	if (enabled) {
-		flags = std::clamp(flags | authored_flag, 0, 255);
-	} else {
-		flags &= ~authored_flag;
-	}
-	flags = clamp_int<int>(opennova::til_normalize_authored_flags(static_cast<uint8_t>(flags)), 0, 255);
-}
-
 Dictionary TerrainTileEntry::to_dictionary() const {
 	Dictionary out;
 	out["x_fixed"] = x_fixed;

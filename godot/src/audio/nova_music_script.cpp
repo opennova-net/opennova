@@ -177,51 +177,6 @@ Dictionary MusicScript::compile_text(const String &p_text) {
 	return out;
 }
 
-void MusicScript::set_compiled_bytecode(const PackedByteArray &p_bytecode) {
-	// Replaces the default script's chunk bytecode in place, then rewrites
-	// _file_bytes so the saver's raw-passthrough path picks up the new bytes
-	// without needing a separate re-encode hook.
-	if (!_opened || _mf.scripts == nullptr || _mf.header.chunk_count == 0) {
-		return;
-	}
-	MusScript &s = _mf.scripts[0];
-	if (s.code != nullptr) {
-		std::free(s.code);
-		s.code = nullptr;
-		s.code_size = 0;
-	}
-	int n = p_bytecode.size();
-	if (n > 0) {
-		s.code = (uint8_t *)std::malloc((size_t)n);
-		if (s.code == nullptr) {
-			return;
-		}
-		std::memcpy(s.code, p_bytecode.ptr(), (size_t)n);
-		s.code_size = (uint32_t)n;
-	}
-
-	// Re-emit the SCR0/MU01 wrapper from the live MusFile so the saver's raw
-	// passthrough writes the rewritten bytes. We collect chunk_count script
-	// pointers (typically 1 for jo_gamemus / bhd_menumus), feed mus_encode_file
-	// with the canonical 11 intrinsic-method names baked in by the encoder.
-	uint32_t cc = _mf.header.chunk_count;
-	std::vector<const MusScript *> ptrs(cc, nullptr);
-	for (uint32_t i = 0; i < cc; ++i) {
-		ptrs[i] = &_mf.scripts[i];
-	}
-	uint8_t *out_buf = nullptr;
-	size_t out_size = 0;
-	if (mus_encode_file(ptrs.data(), cc, &out_buf, &out_size) != 0 || out_buf == nullptr) {
-		UtilityFunctions::push_warning("MusicScript: mus_encode_file failed in set_compiled_bytecode");
-		return;
-	}
-	PackedByteArray fresh;
-	fresh.resize((int)out_size);
-	std::memcpy(fresh.ptrw(), out_buf, out_size);
-	mus_free(out_buf);
-	_file_bytes = fresh;
-}
-
 void MusicScript::set_compiled_file_bytes(const PackedByteArray &p_file_bytes) {
 	if (p_file_bytes.size() <= 0) {
 		return;

@@ -755,7 +755,7 @@ static void test_teammate_triggers() {
 // The AWOL counter: +1 per full quarter cycle (64 ticks) while the local player
 // is outside every ACTIVE zone (X/Y only), reset when back inside; PlayerAwol
 // compares it to the authored threshold. [orig: @0x454d50 cursor==0 ->
-// Entity_UpdateStuckCounter @0x439dc0 / probe @0x439d40; trigger @0x453d40]
+// Entity_UpdatePlayerAwolCounter @0x439dc0 / probe @0x439d40; trigger @0x453d40]
 static void test_player_awol_counter_and_trigger() {
     World w;
     w.cached.humans = 1;
@@ -1370,7 +1370,7 @@ static void test_dangling_zone_ref_neuters_trigger() {
 }
 
 // The BMS win actions end the round through the SAME entry the WAC win/lose
-// handlers use [orig: EventAction_Dispatch BlueWin @0x45447b ->
+// handlers use [orig: EventAction_Dispatch @0x4542e0, the BlueWin case @0x45447b ->
 // Server_ProcessRoundEnd(1), one shared round end for both script front-ends].
 static void test_bluewin_ends_round() {
     World w;

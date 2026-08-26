@@ -228,9 +228,6 @@ private:
 	};
 
 	void _check_epoch();
-	// Retains a batch-Dictionary list as StaticBatch rows (false on a
-	// malformed row); the static-graphic registration's shared leg.
-	bool _retain_static_batches(const Array &p_batches, Vector<StaticBatch> &r_retained);
 	void _ensure_item_db();
 	void _ensure_avatar_db();
 	String _graphic_for(int p_item_id) const;

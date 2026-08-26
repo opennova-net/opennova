@@ -112,7 +112,8 @@ Everything below was decompiled and read this session (pseudocode dumps:
   loop bit `Buffer[34*ch] & 1` = ONE-SHOT → stop at `count−1`, cooldown 20 (matches our port).
 - Output: `moveMode` (0 stop, 3 move, 4 waypoint-walk, 1/2/5/7/8/12 combat maneuvers) +
   `targetDist` + target pos.
-- TODO (next session): map marker+328/+16 to BMS record fields via `Entity_SpawnFromBMSRecord @ 0x40e9f0`.
+- The marker+328/+16 -> BMS record field mapping is CLOSED: the spawn map is ported into
+  promote (see §3.2; `Entity_SpawnFromBMSRecord @ 0x40e9f0`).
 
 ### 3.3 Heading pipeline (per tick)
 - **Body** `entity[35]`: `+= clamp((target(entity[106]) − body + 2) >> 2, ±69273360)` (~5.8°/tick);
@@ -5084,7 +5085,11 @@ routes, both ending in the same class death callback with reason 4:
 S2C `0x13` `[u16 handle][i16 killerSource]` — the health<=0 detection's
 non-player broadcast (`Entity_CheckAndProcessDeath @ 0x51b550`, msg 19, mask
 0x90) → `NapiNPClientMsg_EntityDeath @ 0x42eb50` (Health=0 @ 0x42ebd6,
-`deathAnimStateId` @ 0x42ebdf, cb(entity, 4, 0) @ 0x42ebf5); and S2C `0x26`
+`deathAnimStateId` @ 0x42ebdf — the wire's i16 killerSource doubles as the remote
+death-anim selection for organics, the same store zeroes the +0x1BA word (its IDB
+gloss "clear ammo/weapon field" remains wrong), and while the destructible fold
+consumes the handle + cb(4) legs the organic death-anim consumption still rides MP
+corpse parity — cb(entity, 4, 0) @ 0x42ebf5); and S2C `0x26`
 `[u16 victimSlot][u16 attacker]` — the destructible callback's own authority
 (re)send (`Server_SendEntityStatePacket @ 0x509d70`) →
 `NapiNPClientMsg_0x026 @ 0x42ec30` → `Entity_KillBySlotId @ 0x42bce0`

@@ -3175,8 +3175,8 @@ bool check_score_ini_drives_session_status_values() {
 // The host carries the persistent unnumbered capture transaction all the way to
 // retail bodies: 0x50 ownership changes, 0x53 start/progress/completion, 0x6C
 // unique presence changes, and 0x1E 41/43 start/completion events. Numbered
-// instant flips deliberately have no synthetic 0x53. [orig: CaptureCtx_* /
-// Server_UpdateCaptureZones @0x53B340..0x53B8F0; Server_ChangeEntityTeam
+// instant flips deliberately have no synthetic 0x53. [orig: the CaptureCtx_* /
+// Server_UpdateCaptureZones run from CaptureCtx_RemoveQueueEntries @0x53B340 to 0x53B8F0; Server_ChangeEntityTeam
 // @0x518D70; NetPacket writers @0x506AD0/@0x506D00/@0x506DE0]
 bool check_timed_capture_host_wire_transaction() {
 	opennova::np::NapiNPServerCtx ctx;

@@ -3371,7 +3371,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 // witnessed SHAPES and, above all, that the replies exist.
 // [orig: challenge senders NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0 (-> 0x1C),
 //  NapiNPClientMsg_0x043 @0x42FA90 (-> 0x08), NapiNPClientMsg_0x068 @0x42DAA0 (-> 0x3D);
-//  host side NapiNPServerMsg_0x01C @0x501D40 (discard @0x501d71 + counter
+//  host side NapiNPServerMsg_AnimChecksumRequest @0x501D40 (discard @0x501d71 + counter
 //  reset @0x501d79), NapiNPServerMsg_0x03D @0x500EC0, validate_time_sync @0x502210]
 bool build_retail_class8_charattr_table(
 		np::CharAttrChallengeTable &table) {

@@ -24,9 +24,10 @@ const SELF_CONTAINED_PROBES: Array[String] = [
 
 # Headless manual probes: extends-SceneTree scripts that boot their own
 # runtime (main_game.tscn, a mounted ResourceRoot, or a bare Simulation) and
-# print a verdict; asset-gated and operator-run, never collected. Inventoried
-# so every *_probe.gd is either listed here, above, or retired below; the
-# contract pins readable + compiles + no removed PIE API.
+# print a verdict; asset-gated and operator-run, never collected. These are the
+# probes the 2026-08 census found with no runner, test, or doc reference (the
+# rest of the *_probe.gd set stays operator-run and is not inventoried here);
+# the contract pins readable + compiles + no removed PIE API.
 const HEADLESS_PROBES: Array[String] = [
 	"res://tests/00tra_truck_rest_probe.gd",
 	"res://tests/00trg_rock_collision_probe.gd",

@@ -54,7 +54,7 @@
   `opennova_shared` (`opennova.dll` / `libopennova.so`) whole-archives the
   `OPENNOVA_CORE_TARGETS` list — the three sim-side ADR 0029 group targets
   `opennova_formats`, `opennova_base`, `opennova_runtime`; `opennova_net` and the
-  service are never bundled (ADR 0019 §5) — and exports ONLY
+  service are never bundled (ADR 0019, Decision 5) — and exports ONLY
   `OPENNOVA_API`-annotated symbols, the surface pinned by the `abi_export_identity`
   ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the Blender
   addon (`blender/opennova/*_ffi.py` mirrors). **Model B — C++ static link**: `godot/src`, the apps, the ctest suite,

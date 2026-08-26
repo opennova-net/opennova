@@ -228,7 +228,7 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 // The glow submit alpha, 16.16: dot_view^4 / 2 scaled by the occlusion
 // brightness (>> 8), the overcast blend and the SunDim fold
 // [orig: @ 0x5acfb8..0x5ad0a9]. frame_effects_quarter applies the
-// FBEFFECTS >= 3 quarter [orig: FrameFX_QualityAtLeast3 @ 0x581f6a reads the quality
+// FBEFFECTS >= 3 quarter [orig: FrameFX_QualityAtLeast3 @ 0x581f60 reads the quality
 // level; glow_intensity >>= 2 @ 0x5ad033..0x5ad03c] - the bloom pass
 // re-adds the glare, so the highest-quality program dims the direct draw.
 // The locked reimpl profile IS FBEFFECTS 3, so live callers pass true.
