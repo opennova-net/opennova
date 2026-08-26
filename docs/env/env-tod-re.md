@@ -883,6 +883,27 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
     fogs by `CUSTOM1.a` (the spec-alpha
     factor) toward the scene fog color, and drops the misported ref-32
     discard (see the material-set bullet re-grade above).
+- **The water-active predicate (witnessed 2026-08-26, the World-tick perf
+  pass).** `g_WaterActive @ 0x31BC918` is recomputed EVERY frame by
+  `terrain_setup_view_and_lighting @ 0x60fe40`: `terrain_render_visible_sectors
+  @ 0x6090c0` resets the tracked AABB (`@ 0x609177..0x60919f`) and traverses
+  every routed sector with `trackBounds = 1` (`@ 0x609263`;
+  `Terrain_TraverseQuadtreeNode @ 0x608a00` then ignores the distance emit
+  heuristic `@ 0x608d84`, subdivides every frustum-surviving node to the LOD
+  cap and accumulates the terminal nodes' bounds `@ 0x608ddf..0x608e8c`);
+  `sub_605F70 @ 0x605f70` converts the min/max triples through
+  `Math_FloatToFixedPoint3_YNegated` and returns their height components, and
+  the water is active iff `lo <= Env_WaterHeightFixed || hi <= Env_WaterHeightFixed`
+  (`@ 0x60ff12..0x60ff1a`, i.e. the lowest visible terrain sits at or below the
+  water) OR the previous frame's `g_BlinkWaterVisible @ 0x29ACE40`
+  (`dword_31BC910`, `@ 0x60ff31`). Only under that flag do the reflection
+  prerender, the noise regeneration and the strip march run (`Render_TerrainScene
+  @ 0x610cd9..0x610ce0`; `Terrain_RenderWaterPass @ 0x610640`). Reimpl:
+  `TerrainFrameCompiler` tracks the same bounds (`track_visible_bounds`,
+  `TerrainDrawList::visible_bounds`), the terrain leg now precedes the water leg
+  in `GameFramePipeline`, and `Water::is_water_pass_active()` gates the strip,
+  the noise pair and the mirror SubViewport; a world with no tracked bounds
+  (no terrain in view) keeps the pass live.
 - **Reflection pipeline (#30 internals witnessed at REN-6, 2026-07-06).** The
   reflection prerender runs BEFORE the main frame (`Render_TerrainScene @ 0x610c80`
   → `Water_ReflectionPrerender @ 0x5c2780`, ex `sub_5C2780`, gated on

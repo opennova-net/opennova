@@ -1349,11 +1349,21 @@ func render_environment_nodes_frame() -> void:
 
 
 ## The water strip march + mirror camera for this frame's render eye
-## (ex-self-clocked Water._process), before terrain consumes the below-water
-## state and the live noise texture it publishes.
+## (ex-self-clocked Water._process), under retail's per-frame water-active
+## test: the terrain leg just tracked the visible terrain bounds, and the
+## occlusion frame's Blink water verdict is last frame's, as retail reads it
+## [orig: terrain_setup_view_and_lighting @ 0x60fe40].
 func render_water_frame() -> void:
-	if _water != null:
-		_water.advance_frame(_frame_delta)
+	if _water == null:
+		return
+	if _terrain != null:
+		_water.set_visible_terrain_bounds(_terrain.has_visible_terrain_bounds(),
+				_terrain.get_visible_terrain_min_height(),
+				_terrain.get_visible_terrain_max_height())
+	var sim := get_sim()
+	_water.set_blink_water_visible(
+			sim != null and bool(sim.occlusion_water_visible()))
+	_water.advance_frame(_frame_delta)
 
 
 # Select the main scene's per-pass fog after the local player has placed the

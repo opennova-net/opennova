@@ -99,6 +99,12 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
 
 	// Debug API
+	ClassDB::bind_method(D_METHOD("has_visible_terrain_bounds"),
+			&Terrain::has_visible_terrain_bounds);
+	ClassDB::bind_method(D_METHOD("get_visible_terrain_min_height"),
+			&Terrain::get_visible_terrain_min_height);
+	ClassDB::bind_method(D_METHOD("get_visible_terrain_max_height"),
+			&Terrain::get_visible_terrain_max_height);
 	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &Terrain::get_traversal_stats);
 	ClassDB::bind_method(D_METHOD("get_visible_patch_count"), &Terrain::get_visible_patch_count);
 	ClassDB::bind_method(D_METHOD("get_lod_distribution"), &Terrain::get_lod_distribution);
@@ -1161,6 +1167,23 @@ bool Terrain::_build_terrain() {
 // ---------------------------------------------------------------------------
 // Debug API — cold reads over the compiler's last draw list
 // ---------------------------------------------------------------------------
+
+bool Terrain::has_visible_terrain_bounds() const {
+	return frame_draw_list_live &&
+			frame_compiler.last_draw_list().visible_bounds.valid;
+}
+
+float Terrain::get_visible_terrain_min_height() const {
+	return has_visible_terrain_bounds()
+			? frame_compiler.last_draw_list().visible_bounds.min[1]
+			: 0.0f;
+}
+
+float Terrain::get_visible_terrain_max_height() const {
+	return has_visible_terrain_bounds()
+			? frame_compiler.last_draw_list().visible_bounds.max[1]
+			: 0.0f;
+}
 
 Dictionary Terrain::get_traversal_stats() const {
 	const opennova::TraversalStats &stats =

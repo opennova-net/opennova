@@ -256,6 +256,61 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 }
 
 // ---------------------------------------------------------------------------
+// Visible-bounds tracking
+// ---------------------------------------------------------------------------
+
+void VisibleBounds::include(const float wmin[3], const float wmax[3]) {
+	if (!valid) {
+		for (int i = 0; i < 3; ++i) { min[i] = wmin[i]; max[i] = wmax[i]; }
+		valid = true;
+		return;
+	}
+	for (int i = 0; i < 3; ++i) {
+		if (wmin[i] < min[i]) min[i] = wmin[i];
+		if (wmax[i] > max[i]) max[i] = wmax[i];
+	}
+}
+
+// The same frustum rejection as the draw traversal, no distance heuristic:
+// a surviving node subdivides until the LOD cap (the leaves) and each
+// terminal node's world AABB joins the running bounds.
+// [orig: Terrain_TraverseQuadtreeNode @ 0x608a00 trackBounds leg]
+void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
+                          int node_idx,
+                          const Frustum& frustum,
+                          float sector_ox, float sector_oz,
+                          const TraversalConfig& config,
+                          VisibleBounds& out_bounds) {
+	if (node_idx < 0 || node_idx >= (int)quad_nodes.size()) return;
+	const QuadNode& node = quad_nodes[node_idx];
+	float wmin[3] = { sector_ox + node.aabb_min[0], node.aabb_min[1], sector_oz + node.aabb_min[2] };
+	float wmax[3] = { sector_ox + node.aabb_max[0], node.aabb_max[1], sector_oz + node.aabb_max[2] };
+	if (!config.no_frustum) {
+		if (!config.no_nearfar) {
+			if (aabb_outside_plane(frustum.planes[Frustum::P_NEAR], wmin, wmax)) return;
+			if (aabb_outside_plane(frustum.planes[Frustum::P_FAR], wmin, wmax)) return;
+		}
+		if (!config.no_sideplanes) {
+			if (aabb_outside_plane(frustum.planes[Frustum::P_LEFT], wmin, wmax)) return;
+			if (aabb_outside_plane(frustum.planes[Frustum::P_RIGHT], wmin, wmax)) return;
+			if (aabb_outside_plane(frustum.planes[Frustum::P_BOTTOM], wmin, wmax)) return;
+			if (aabb_outside_plane(frustum.planes[Frustum::P_TOP], wmin, wmax)) return;
+		}
+	}
+	bool has_children = false;
+	if (!node.is_leaf) {
+		for (int i = 0; i < 4; i++) {
+			if (node.children[i] >= 0) {
+				has_children = true;
+				track_visible_bounds(quad_nodes, node.children[i], frustum,
+				                     sector_ox, sector_oz, config, out_bounds);
+			}
+		}
+	}
+	if (!has_children) out_bounds.include(wmin, wmax);
+}
+
+// ---------------------------------------------------------------------------
 // Strip to list
 // ---------------------------------------------------------------------------
 

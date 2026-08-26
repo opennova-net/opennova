@@ -362,7 +362,7 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 | 0x2980514 / 0x2980518 | dword_2980514 / flt_2980518 | g_WaterMirrorActive / g_WaterMirrorMatrix | reflection-pass machinery (env #30) |
 | 0x8409DC / 0x8409D8 | flt_8409DC / flt_8409D8 | g_ProjectionNearZ / g_ProjectionFarZ | D3DX projection args |
 | 0x2C25CD8 | dword_2C25CD8 | g_EffectWorld | the particle/effect world singleton |
-| 0x31BC918 | dword_31BC918 | g_WaterActive | gates water render + reflection prerender |
+| 0x31BC918 | dword_31BC918 | g_WaterActive | gates water render + reflection prerender; recomputed per frame by terrain_setup_view_and_lighting @ 0x60fe40 from the tracked visible-terrain height range vs Env_WaterHeightFixed, OR last frame's g_BlinkWaterVisible (env-tod-re.md, the water-active predicate) |
 | 0x2721A08..38 | flt_2721A08.. | g_BatchSortDepthPlane{X,Y,Z,W} | the camera-forward plane the sort distance dots against |
 
 REN-4 additions (the pass-execution grill): `Light_IsSpotlight @ 0x5a9040`,

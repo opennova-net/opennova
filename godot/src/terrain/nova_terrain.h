@@ -232,6 +232,13 @@ public:
 	// no longer self-processes.
 	void render_frame();
 
+	// The frustum-surviving terrain height range of the last render_frame
+	// (the water leg's g_WaterActive input); false when no terrain was in
+	// view or no frame compiled.
+	bool has_visible_terrain_bounds() const;
+	float get_visible_terrain_min_height() const;
+	float get_visible_terrain_max_height() const;
+
 	// Debug API
 	Dictionary get_traversal_stats() const;
 	PackedInt32Array get_lod_distribution() const;
