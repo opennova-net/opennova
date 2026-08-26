@@ -658,33 +658,20 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 					? (REFLECTION_CULL_MASK | VISUAL_LAYER_WORLD_NO_MIRROR)
 					: REFLECTION_CULL_MASK);
 	reflection_camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-	// The source camera's long gameplay far plane is not a visible mirror
-	// requirement. Reflected scene color has already converged to fog at the
-	// active environment horizon; keep a small tail for exponential fog, then
-	// let Godot cull geometry which cannot affect the dimmed 256px reflection.
-	float reflection_far = p_cam->get_far();
-	MissionEnvironment *env = _env_node();
-	if (env != nullptr && env->is_loaded()) {
-		const float fog_end = env->get_fog_end_distance();
-		if (std::isfinite(fog_end) && fog_end > 0.0f) {
-			reflection_far = MIN(reflection_far,
-					MAX(fog_end * 1.25f, p_cam->get_near() + 0.01f));
-		}
-	}
 	switch (source.projection) {
 		case opennova::env::MirrorProjection::kOrthogonal:
 			reflection_camera_->set_orthogonal(view.horizontal_size,
-					p_cam->get_near(), reflection_far);
+					p_cam->get_near(), p_cam->get_far());
 			break;
 		case opennova::env::MirrorProjection::kFrustum:
 			reflection_camera_->set_frustum(view.horizontal_size,
 					Vector2(view.frustum_offset_x, view.frustum_offset_y),
-					p_cam->get_near(), reflection_far);
+					p_cam->get_near(), p_cam->get_far());
 			break;
 		case opennova::env::MirrorProjection::kPerspective:
 		default:
 			reflection_camera_->set_perspective(view.horizontal_fov_deg,
-					p_cam->get_near(), reflection_far);
+					p_cam->get_near(), p_cam->get_far());
 			break;
 	}
 	// These offsets are independent of the projection mode and are otherwise
