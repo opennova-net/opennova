@@ -446,11 +446,15 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     velocity (the bored weight-shift) that keeps the feet planted by swaying the centre of
     mass under the skeleton. The reimpl integrates unconditionally; the overturn note lives
     beside the code (`engine/runtime/world/infantry.cpp`, the `overturns D-INF-8` marker).
-  - **D-INF-9** player horizontal-slide decay. The player shares the NPC's slide-velocity damp, but
-    the original splits it by the grounded flag: a GROUNDED player decays `inf.vel[0]/[1]` by
-    `(63·v)>>6` with NO deadzone [orig: `Entity_UpdateInfantryPlayerBody @0x4b7949` — `shl 6 / sub /
-    sar 6` on `entity+0x98/0x9C`, selected by the `entity+0x24 & 0x2000` grounded flag `@0x4b78ab`];
-    an AIRBORNE player uses the same `(7v+4)>>3` + `abs<=8→0` deadzone as the NPC [orig: `@0x4b7982`].
+  - **D-INF-9** player horizontal-slide decay — **BRANCH SENSE CORRECTED 2026-08-26** (kong
+    differential): the selector `entity+0x24 & 0x2000` is the IN-AIR flag, not "grounded" — the
+    same function pins it (the jump SETS it with anim 30/31, the >0xF000 edge sets it with 31,
+    landing CLEARS it with the fall sounds, and body-anim selection is SKIPPED on it `@0x4b70b8`;
+    `entity.h` names it `kEntityFlagInAir`). So the AIRBORNE player preserves momentum:
+    `(63·v)>>6`, NO deadzone [orig: `@0x4b7949`]; a GROUNDED player decays by the NPC's
+    `(7v+4)>>3` + `abs<=8→0` snap [orig: `@0x4b7982`] — ground kills a slide in ~10 ticks. The
+    2026-08-25-era text of this entry had the two arms swapped; the port and its pin test carried
+    the inversion until the 2026-08-26 fix.
     The two formulas are mutually exclusive, not sequential. A prior pass gated slide damping behind
     `!is_local_player` (and dropped the grounded velocity zero), so the player's slope-slide impulse
     drifted forever; FIXED in `tick_infantry` (`engine/runtime/world/infantry.cpp`), guarded by the

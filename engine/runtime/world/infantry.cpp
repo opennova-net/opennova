@@ -710,14 +710,20 @@ void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
     // tier = pitch_tier + run_anim; the pitch tier reads entity+0x37C, which has NO
     // writer in the retail image (zero-initialized pool memory), so it contributes
     // the constant 2 (0 <= 0 < 0x210000 band; thresholds recorded in the RE doc,
-    // D-INF-16). tier 1 -> run_2 if available; tier >= 2 -> run_3, else run_2.
-    // [orig: @0x4b729d-0x4b731b; scope Flags&0x10 test @0x4b72e2]
+    // tier 1 -> run_2 if authored; tier >= 2 -> run_3 if authored, and NOTHING
+    // otherwise: the tier>=2 arm tests ONLY run_3 -- a body adm without run_3
+    // stays in the walk (no run_2 fallback; the earlier fallback here was an
+    // invention, corrected 2026-08-26 from the kong differential).
+    // [orig: @0x4b729d-0x4b731b; the >=2 arm tests only clip 10 @0x4b72fa
+    // (kong 193694-193701); scope Flags&0x10 test @0x4b72e2]
     if (target == anim_state::kWalkForward && !inf.scope_raised) {
         const int tier = 2 + inf.wpn_run_anim;
-        if (tier >= 2 && has(anim_state::kRun3))
-            target = anim_state::kRun3;              // [orig: @0x4b72fa]
-        else if (tier >= 1 && has(anim_state::kRun2))
+        if (tier >= 2) {
+            if (has(anim_state::kRun3))
+                target = anim_state::kRun3;          // [orig: @0x4b72fa]
+        } else if (tier >= 1 && has(anim_state::kRun2)) {
             target = anim_state::kRun2;              // [orig: @0x4b7311]
+        }
     }
 
     // Prone lean rolls from the lean bits; right (bit 7) wins when both are held.
@@ -1679,15 +1685,21 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     infantry_slope_pass(e, logic_tick, key);
 
     // Horizontal slide decay. NPC (org1): (7v+4)>>3 with an abs<=8 deadzone, every state. Player
-    // (org2): grounded+moving decays by (63*v)>>6 with NO deadzone [orig: @0x4b7949]; airborne uses
-    // the SAME (7v+4)>>3 + deadzone as the NPC [orig: @0x4b7982] (the two are mutually exclusive,
-    // selected by the 0x2000 grounded flag). Before this the player's slide was never damped, so a
-    // slope-slide impulse drifted the player forever. [D-INF-9; inf.airborne here is last
+    // (org2): the selector is Flags & 0x2000 = IN-AIR (entity.h already names it
+    // kEntityFlagInAir; the same function pins the sense — the jump SETS it with
+    // anim 30/31, the >0xF000 edge sets it with 31, landing CLEARS it with the
+    // fall sounds, and body-anim selection is SKIPPED on it @0x4b70b8). The
+    // AIRBORNE arm preserves momentum: (63*v)>>6, NO deadzone [orig: @0x4b7949];
+    // the GROUNDED arm kills a slide in ~10 ticks: (7v+4)>>3 with the abs<=8
+    // snap, same as the NPC [orig: @0x4b7982]. The earlier reading (D-INF-9)
+    // had the two arms swapped — a grounded slide persisted ~8x too long and an
+    // airborne one died fast; corrected 2026-08-26 from the kong differential
+    // (@0x4b78ab selector; kong 193989-194043). [inf.airborne here is last
     // tick's value — the vertical resolve below updates it.]
     if (!inf.is_local_player) {
         inf.vel[0] = damp_npc_slide(inf.vel[0]);
         inf.vel[1] = damp_npc_slide(inf.vel[1]);
-    } else if (!inf.airborne) {
+    } else if (inf.airborne) {
         inf.vel[0] = (63 * inf.vel[0]) >> 6;
         inf.vel[1] = (63 * inf.vel[1]) >> 6;
     } else {
@@ -1726,7 +1738,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
         // the skeletal FK slid the feet — the "idle skating" this overturns. capsule bottom/top and
         // vel are MOVEMENT data only; the visual is the skeleton, which never reads them.
         // [orig: Entity_UpdateInfantryAI @0x4b9910 integrates root delta for all states; overturns D-INF-8]
-        if (inf.anim_state == anim_state::kJumpLoop) fwd = 1024; // [data: retail ADM dump root row 4756]
+        if (inf.is_local_player && inf.airborne) {
+            // org2 zeroes the rotated ROOT while airborne — an in-air player
+            // body moves on the slide triplet alone [orig: the airborne arm
+            // zeroes channelData before the integrate, between @0x4b78ab and
+            // @0x4b7949 (kong 194029-194030)]. The kJumpLoop root force below
+            // is org1-witnessed and does not apply to the player body.
+            fwd = 0;
+            lat = 0;
+        } else if (inf.anim_state == anim_state::kJumpLoop) {
+            fwd = 1024; // [data: retail ADM dump root row 4756]
+        }
         // Org2 consumes the same-tick leg-midpoint body heading at entity+0x8C,
         // while org1 keeps body/render heading unified in e.heading.
         // [orig: Entity_UpdateInfantryPlayerBody loads entity+0x8C @0x4B41E4,
