@@ -57,10 +57,13 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_root_cpu": FrameStatsBoard.RENDER_ROOT_CPU,
 	"render_root_gpu": FrameStatsBoard.RENDER_ROOT_GPU,
 	"render_water_cpu": FrameStatsBoard.RENDER_WATER_CPU,
+	"render_water_gpu": FrameStatsBoard.RENDER_WATER_GPU,
 	"render_q3_cpu": FrameStatsBoard.RENDER_Q3_CPU,
 	"render_q3_gpu": FrameStatsBoard.RENDER_Q3_GPU,
 	"render_viewmodel_cpu": FrameStatsBoard.RENDER_VIEWMODEL_CPU,
+	"render_viewmodel_gpu": FrameStatsBoard.RENDER_VIEWMODEL_GPU,
 	"render_slot_cpu": FrameStatsBoard.RENDER_SLOT_CPU,
+	"render_slot_gpu": FrameStatsBoard.RENDER_SLOT_GPU,
 }
 # Per-pass submission counts (objects), averaged per drained frame.
 const ENGINE_COUNT_SAMPLES := {
@@ -134,7 +137,18 @@ func _run() -> void:
 		return
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	# SP missions pause on the start-mission splash (the world holds
+	# UN-TICKED under it); leave it through the public seam, the way the
+	# killfeed/scar probes do, or no present frame ever samples.
+	while game.is_world_loading():
+		game.dismiss_start_mission_splash()
+		await process_frame
+		if float(Time.get_ticks_msec() - wall_start) / 1000.0 \
+				> LOAD_TIMEOUT_WALL_SECONDS:
+			push_error("[mrp] timed out dismissing the start-mission splash")
+			_finish(1)
+			return
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 \
 				> LOAD_TIMEOUT_WALL_SECONDS:
@@ -583,8 +597,9 @@ func _print_window(index: int, count: int, frames: int,
 	var engine_parts := PackedStringArray()
 	for key in ["process_callbacks", "deferred_flush", "draw", "pacing_input",
 			"hud_draw_compile", "hud_draw_emit", "render_root_cpu",
-			"render_q3_cpu", "render_viewmodel_cpu", "render_water_cpu",
-			"render_slot_cpu"]:
+			"render_root_gpu", "render_q3_cpu", "render_q3_gpu",
+			"render_viewmodel_cpu", "render_viewmodel_gpu", "render_water_cpu",
+			"render_water_gpu", "render_slot_cpu", "render_slot_gpu"]:
 		var part: Dictionary = summaries[key]
 		if int(part["samples"]) > 0:
 			engine_parts.append("%s %.3f" % [key, float(part["mean_ms"])])
