@@ -217,6 +217,18 @@ def test_pyopennova_items_stride_reads_every_entry():
             for i in range(ifl.count)
         }
         assert launchups["Wire Test Rifleman"] == "mflash01"
+        # The twelve weap[lr][bmc]up[2] names (def+0x61B..0x6CB) sit between
+        # launchups_closeattack and clipsize: the emplaced 50cal's authored
+        # left/right b/m/c triplets are the canary, the `2` variants zero.
+        emplaced = next(ifl.entries[i] for i in range(ifl.count)
+                        if ifl.entries[i].display_name.decode()
+                        == "NON-Armored Emplaced 50cal for FAV")
+        userpoints = [bytes(emplaced.weapon_userpoints[k]).split(b"\0", 1)[0]
+                      for k in range(12)]
+        assert userpoints[:6] == [b"bullet", b"mflash01", b"bcasing",
+                                  b"bullet", b"mflash01", b"bcasing"]
+        assert userpoints[6:] == [b""] * 6
+        assert emplaced.clipsize == 0 or emplaced.clipsize >= 0  # the field after the block still reads
         # The 2026-08-20 shadow-decal tail (shadow_texture[16] + four floats)
         # is the far end of the stride: the ATV Quad's authored blob (entry 1,
         # past the always-fine entry 0) is the canary.

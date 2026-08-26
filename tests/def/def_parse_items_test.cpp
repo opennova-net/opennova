@@ -758,6 +758,9 @@ int main(void) {
         "  ammo_advancedrocket AMMO_AK47_556MM\n"
         "  ammo_marker3        AMMO_AK47_556MM\n"
         "  launchups_closeattack    mflash01\n"
+        "  weaprbup   gunfire_r\n"
+        "  weaplmup   flash_l\n"
+        "  weaprcup2  casing_r2\n"
         "end\n";
     DefItemsFile rifle_items;
     memset(&rifle_items, 0, sizeof(rifle_items));
@@ -788,6 +791,25 @@ int main(void) {
         def_free_items(&rifle_items);
         return 1;
     }
+    /* The twelve weap[lr][bmc]up[2] userpoint NAMES land in parse order
+       (weaplbup, weaplmup, weaplcup, weaprbup, weaprmup, weaprcup, then the
+       `2` variants), absent keys zero-filled [orig: ItemDef_ParseProperty
+       @ 0x4a0ff2..0x4a1301 -> def+0x61B..0x6CB]. */
+    {
+        const DefItemDef *r = &rifle_items.entries[0];
+        if (strcmp(r->weapon_userpoints[3], "gunfire_r") != 0 ||
+            strcmp(r->weapon_userpoints[1], "flash_l") != 0 ||
+            strcmp(r->weapon_userpoints[11], "casing_r2") != 0 ||
+            r->weapon_userpoints[0][0] != '\0' ||
+            r->weapon_userpoints[5][0] != '\0') {
+            fprintf(stderr, "FAIL: weapon userpoint keys mismatch: [3]='%s' [1]='%s' [11]='%s' [0]='%s' [5]='%s'\n",
+                    r->weapon_userpoints[3], r->weapon_userpoints[1],
+                    r->weapon_userpoints[11], r->weapon_userpoints[0],
+                    r->weapon_userpoints[5]);
+            def_free_items(&rifle_items);
+            return 1;
+        }
+    }
     def_free_items(&rifle_items);
 
     /* 'primary_weapon' — the ewep emplacement's mounted weapon.def entry (the attach
@@ -807,7 +829,16 @@ int main(void) {
         }
         if (!ewep || strcmp(ewep->primary_weapon, "WPN_EMPLCD50NA") != 0 ||
             strcmp(ewep->ai_function, "ewep") != 0 ||
-            ewep->armor_impact != -1 || ewep->armor_kz != -1) {
+            ewep->armor_impact != -1 || ewep->armor_kz != -1 ||
+            /* the fixture's authored l/r b/m/c userpoint triplets, `2` slots empty */
+            strcmp(ewep->weapon_userpoints[0], "bullet") != 0 ||
+            strcmp(ewep->weapon_userpoints[1], "mflash01") != 0 ||
+            strcmp(ewep->weapon_userpoints[2], "bcasing") != 0 ||
+            strcmp(ewep->weapon_userpoints[3], "bullet") != 0 ||
+            strcmp(ewep->weapon_userpoints[4], "mflash01") != 0 ||
+            strcmp(ewep->weapon_userpoints[5], "bcasing") != 0 ||
+            ewep->weapon_userpoints[6][0] != '\0' ||
+            ewep->weapon_userpoints[11][0] != '\0') {
             fprintf(stderr, "FAIL: ewep primary_weapon: '%s' ai='%s' (found=%d)\n",
                     ewep ? ewep->primary_weapon : "", ewep ? ewep->ai_function : "",
                     ewep != NULL);
