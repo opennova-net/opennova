@@ -281,6 +281,12 @@ struct Entity {
     //  @0x40df0a, scale @0x40dfd6..0x40e018; the LOS reads
     //  @0x4f1880..0x4f18c5 (sub 45) and @0x4f1728..0x4f176f (sub 44)]
     Vec3 bbox_center;
+    // The def "TARGET" userpoint (def+1350, a 1-based byte index into the
+    // model's userpoint table; 0 = none), resolved when the entity's model
+    // attaches [orig: Entity_InitFromModel @0x40dd04 resolves the hardcoded
+    // name TARGET]. The non-person aim/LOS origin transforms it by the
+    // placement matrix [orig: Entity_ComputeWeaponFireOrigin @0x43b5d4..0x43b5f6].
+    uint8_t target_userpoint_byte = 0;
     int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]

@@ -127,6 +127,7 @@ bool model_bone_table(const Threedi3di3 &model,
 
 void SimCollisionPoseProvider::clear() {
 	generic_models_.clear();
+	userpoint_models_.clear();
 	skeletal_sources_.clear();
 	rig_cache_.clear();
 	muzzle_queries_ = 0;
@@ -226,29 +227,7 @@ bool SimCollisionPoseProvider::resolve_userpoint_transform(world::World &world,
 		return false;
 	const ThreediUserPoint &point = model3di.user_points[userpoint_index - 1];
 
-	const int32_t position[3] = {
-			static_cast<int32_t>(e->position.x * 65536.0f),
-			static_cast<int32_t>(e->position.y * 65536.0f),
-			static_cast<int32_t>(e->position.z * 65536.0f),
-	};
-	// entity+0x10 is the live heading: the vehicle motor's BAM mirror when it
-	// has run, else the whole-degree mission yaw every other row carries.
-	const int32_t heading = e->veh.yaw_seeded
-			? e->veh.yaw_bam
-			: world::bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
-	world::CollisionMatrix entity_world = world::collision_matrix_from_euler(
-			heading, world::bam_from_degrees_wrapped(static_cast<double>(e->pitch)),
-			world::bam_from_degrees_wrapped(static_cast<double>(e->roll)), position);
-	if (e->uniform_scale_q16 != 0) {
-		// Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
-		// the scale rides the rotation diagonal.
-		constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
-		for (int index : rotation_indices) {
-			entity_world.m[index] = static_cast<int32_t>(
-					(static_cast<int64_t>(entity_world.m[index]) * e->uniform_scale_q16) >> 16);
-		}
-	}
-
+	const world::CollisionMatrix entity_world = world::entity_placement_matrix(*e);
 	world::CollisionMatrix bone_world = entity_world;
 	std::vector<ThreediMatrix4x4> part_matrices;
 	if (point.subobject_index >= 0 &&
@@ -264,6 +243,26 @@ bool SimCollisionPoseProvider::resolve_userpoint_transform(world::World &world,
 	const int32_t local_q16[3] = {point.x, point.y, point.z};
 	bone_world.transform_point(local_q16, out);
 	world::collision_matrix_to_euler(bone_world, out + 3);
+	return true;
+}
+
+bool SimCollisionPoseProvider::resolve_userpoint_rigid(world::World &world,
+		world::EntityHandle entity, int userpoint_index, int32_t out[3]) {
+	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
+		return false;
+	const world::Entity *e = world.registry.get(entity);
+	if (e == nullptr) return false;
+	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+	if (found == userpoint_models_.end() || found->second == nullptr) return false;
+	const Threedi3di3 &model3di = *found->second;
+	if (model3di.user_points == nullptr ||
+			static_cast<size_t>(userpoint_index) > model3di.user_point_count)
+		return false;
+	const ThreediUserPoint &point = model3di.user_points[userpoint_index - 1];
+	// The raw record position through the placement matrix alone
+	// [orig: Entity_ComputeWeaponFireOrigin @0x43b5f6].
+	const int32_t local_q16[3] = {point.x, point.y, point.z};
+	world::entity_placement_matrix(*e).transform_point(local_q16, out);
 	return true;
 }
 
