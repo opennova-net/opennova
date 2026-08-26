@@ -16,6 +16,9 @@
 #endif
 #include "oed/project_types.h"
 
+// [orig: ModSuperOed ConvertToInternal @0x4268B3 — the non-skinned GEOMOBJECT classification
+//  and internal-scene build; docs/threedi/3di-gp-format-re.md]
+
 namespace oed {
 namespace {
 

@@ -7,8 +7,8 @@
 
 namespace opennova {
 
-// Engine: jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0,
-// sub_5C42B0@0x5C42B0, Terrain_RenderSectorTile@0x5CDAA0
+// [orig: jodemo Terrain_DrawTileOverlays2D @0x5C79C0, sub_5C42B0 @0x5C42B0, Terrain_RenderSectorTile @0x5CDAA0]
+// [orig: PolyTrn_RenderTile @0x60df0d -> render_water_quad @0x604700; docs/tiles/til-re.md]
 // docs/engine_spec_tiles.md 4.1-4.5
 
 constexpr uint32_t TIL_MAGIC = 0x74696C30u;
@@ -197,7 +197,8 @@ inline TilUvQuad til_build_entry_render_uv_quad(uint8_t tile_index,
 		return quad;
 	}
 
-	// Engine: jodemo.exe sub_5C42B0@0x005C42B0.
+	// [orig: render_water_quad @0x604700 — u += +-0.5*flt_319F7C8, v += +-0.5*flt_319F7CC]
+	// (jodemo sub_5C42B0 @0x5C42B0.)
 	// The in-world sector pass shifts the already-transformed UV quad by a
 	// D3D half-texel in the active texture direction before drawing the
 	// TRIANGLESTRIP. This is separate from the authored atlas UVs above.
@@ -274,7 +275,7 @@ inline bool til_entry_matches_cell(const TilOverlayEntry &entry, int cell_x, int
 // Tests the candidate's square footprint against the mission tile array's
 // inclusive 16x16 world AABBs. Runtime foliage supplies radius 2.0.
 // [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
-// Terrain_LoadFoliageFile @ 0x60a740]
+// Terrain_LoadTileInfoFile @ 0x60a740]
 bool til_blocks_foliage(const TilFile &file, float world_x, float world_z, float radius);
 
 inline TilOverlayEntry make_til_overlay_entry(int cell_x,

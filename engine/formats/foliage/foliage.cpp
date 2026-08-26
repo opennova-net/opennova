@@ -1,8 +1,8 @@
 #include "foliage/foliage.h"
 
-// Engine: jodemo.exe foliage-def normalization and world->foliagemap helpers
-// consumed by sub_5C0240@0x5C0240 / sub_5C65E0@0x5C65E0
-// [orig: sub_5C0240 @ 0x5C0240 / sub_5C65E0 @ 0x5C65E0 (jodemo); docs/foliage/foliage-re.md]
+// Foliage-def normalization and world->foliagemap helpers.
+// [orig: jodemo Foliage_BuildPatchData @0x5C0240 / Terrain_GetFoliageMapValue @0x5C65E0]
+// [orig: Foliage_SampleFoliageMapMask @0x606620; Foliage_GenerateModelTileInstances @0x600980; docs/foliage/foliage-re.md]
 // docs/engine_spec_foliage.md 2.3, 4.4.4, 8
 
 #include <algorithm>

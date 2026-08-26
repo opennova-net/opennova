@@ -106,7 +106,7 @@ constexpr int kIconStripCells = 30;
 // WPIndctr.tga is a 4-cell vertical strip: 0 up-triangle (waypoint above),
 // 1 down-triangle (below), 2 circle (level), 3 blank. The altitude state
 // picks the frame. [orig: HUD_LoadAllTextures WPIndctr.tga -> 0x27231A8;
-//  frame = `extra` from sub_590970]
+//  frame = `extra` from HUD_UpdateWaypointAltitudeColor @0x590970]
 constexpr int kWpIndicatorCells = 4;
 // TSDicon cells the waypoint state line borrows for its tip: the chevron
 // (cell 7) at the clamped edge point while the waypoint projects OUTSIDE
@@ -1122,11 +1122,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// nonzero SPINMAPWPDISTOFF value suppresses it.
 	// [orig: bit8 leg @0x5a7850..0x5a78a0 -> drawer @0x599220 (line +
 	//  sub_67BAE0 tip cell, tip stored to slot[17]/[18], distance to
-	//  slot[20]); tricolor sub_590970; bit18 label gate @0x5a7a51..0x5a7ab5]
+	//  slot[20]); tricolor HUD_UpdateWaypointAltitudeColor @0x590970; bit18 label gate @0x5a7a51..0x5a7ab5]
 	uint32_t waypoint_state_color = 0;
 	int waypoint_nub_frame = 3; // blank
 	if (input.waypoint_present) {
-		// [orig: sub_590970 — waypoint z - player z vs +-0x20000 (2.0 wu)]
+		// [orig: HUD_UpdateWaypointAltitudeColor @0x590970 — waypoint z - player z vs +-0x20000 (2.0 wu)]
 		const int32_t dz = input.waypoint_z - input.player_z;
 		if (dz < -0x20000) {
 			waypoint_state_color = 0xFF20407Fu; // below -> blue

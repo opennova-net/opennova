@@ -25,7 +25,7 @@
 
 namespace opennova::controls {
 
-// Input device selector. [orig: dword_25DB7D8; sub_55BCD0 @ 0x55bcd0]
+// Input device selector. [orig: dword_25DB7D8; UI_SelectControlsInputDevice @ 0x55bcd0]
 enum class Device {
   Keyboard = 0,
   Mouse = 1,

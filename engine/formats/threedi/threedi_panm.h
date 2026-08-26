@@ -149,7 +149,7 @@ int threedi_panm_control_uses_register(uint8_t code);
 // Structural loader metadata, distinct from runtime dispatch. Retail treats
 // every PANM style above THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD (0x70) as
 // carrying a model-local CTRL reference and rewrites that parameter to a
-// global ordinal during model load [orig: loader fixup sub_5B4640 @ 0x5B4640].
+// global ordinal during model load [orig: loader fixup ThreediGp_LoadCtrlRegisters @ 0x5B4640].
 // Only style 113 subsequently reads the referenced register value.
 #define THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD 0x70
 int threedi_panm_parameter_is_ctrl_reference(uint8_t code);

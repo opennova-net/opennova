@@ -226,6 +226,8 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 	return result;
 }
 
+// [orig: GTexture_CreateFromPixelDataWithAlphaBlend @0x687270 — the custom mip builder stops
+//  after the 4x4 level, each level a GTexture_Downsample2x2_RGBA8 @0x687000 box reduction]
 std::vector<Rgba8Image> build_box_mip_chain_to_4x4(
 		const Rgba8Image &base) {
 	if (!base.is_valid() || !is_power_of_two(base.width) ||

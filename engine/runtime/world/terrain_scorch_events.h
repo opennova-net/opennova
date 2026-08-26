@@ -17,7 +17,10 @@ struct TerrainScorchEvent {
 	uint64_t source_order = 0;
 };
 
-// The simulation-side mirror of retail's append-only 4096-record registry.
+// The simulation-side mirror of retail's append-only 4096-record registry
+// [orig: Terrain_AddScorchRecord @0x605c90 (4096-record append + cached-tile invalidation);
+//  producers Terrain_AddScorchForEffectKind @0x6060d0 (rand() @0x6060f7/@0x606122 -> append
+//  @0x606105/@0x606130) and Terrain_AddScorchSized @0x606180 (@0x6061aa..0x6061b8)].
 // It resolves the CRT-selected texture at producer time and retains only rows
 // not yet handed to the renderer. Draining presentation rows never re-opens
 // registry capacity; only a mission reset does.

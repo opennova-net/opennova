@@ -124,7 +124,7 @@ public:
 
 	// One glyph's pixel width WITHOUT the spacing pad — the per-character
 	// extent the chat wrapper walks with [orig: CGameFont_GetCharExtent
-	// @0x674dc0, read as charSize[0] by sub_580980 @0x5809db]. Bytes the font
+	// @0x674dc0, read as charSize[0] by HUD_WordWrapText @0x5809db]. Bytes the font
 	// does not carry measure 0.
 	int char_width(uint8_t byte, float scale_x) const;
 

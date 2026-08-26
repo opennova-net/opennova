@@ -1,7 +1,7 @@
 // Client-retained map-overlay banks: the 0x40 capture-zone/overlay batches,
 // the 0x6B linked pulse markers, and their per-tick aging.
-// [orig: sub_425A54 (0x40) -> MapOverlay_DecodeOverlayEntries @0x5BEBB0 ->
-//  MapOverlay_UpdateOrCreateSlot @0x5BEA60 / sub_5BE970 @0x5BE970;
+// [orig: NapiNPClientMsg_0x040_Impl @0x425a54 (0x40) -> MapOverlay_DecodeOverlayEntries @0x5BEBB0 ->
+//  MapOverlay_UpdateOrCreateSlot @0x5BEA60 / MapOverlay_AllocSlot @0x5BE970;
 //  NapiNPClientMsg_0x06B @0x425520 -> update_minimap_overlay_entity @0x5BEC10;
 //  update_map_overlay_timers @0x5BFCE0]
 
@@ -59,7 +59,7 @@ ClientMinimapOverlaySlot *find_overlay(Bank &bank, uint16_t handle) {
 
 // A slot is reusable when unclaimed or expired (special-bank expiry floors
 // the lifetime at zero without clearing the handle).
-// [orig: sub_5BE970 @0x5be9b0 — free = handle == 0xFFFF || lifetime == 0]
+// [orig: MapOverlay_AllocSlot @0x5be9b0 — free = handle == 0xFFFF || lifetime == 0]
 template <typename Bank>
 ClientMinimapOverlaySlot *allocate_overlay(Bank &bank) {
 	for (ClientMinimapOverlaySlot &slot : bank) {
@@ -117,7 +117,7 @@ void ClientReplicaPipeline::apply_capture_zone_overlay(
 			// special draw walk gates on lifetime alone, no handle test).
 			// A clear for an absent handle allocates nothing.
 			// [orig: @0x5beb4b..0x5beb56 lifetime 0 + handle -1; the special
-			//  draw gate @0x5be794 reads slot+24 only; sub_5BE970 @0x5be978
+			//  draw gate @0x5be794 reads slot+24 only; MapOverlay_AllocSlot @0x5be978
 			//  returns 0 for flags & 0x20]
 			if (slot != nullptr) {
 				slot->remaining_ticks = 0;
@@ -131,7 +131,7 @@ void ClientReplicaPipeline::apply_capture_zone_overlay(
 		// never migrates or cross-clears banks. Only a miss reaches the
 		// flags-routed allocator: 0x40 special, 0x10 persistent, else
 		// transient. [orig: the found path @0x5beb60..0x5beb7f writes
-		//  pos/color/flags/param/source/lifetime only; sub_5BE970
+		//  pos/color/flags/param/source/lifetime only; MapOverlay_AllocSlot
 		//  @0x5be97d..0x5be99f routes the fresh allocation]
 		if (slot == nullptr) {
 			if ((entry.flags & 0x40u) != 0)
@@ -208,7 +208,7 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 		// new special slot, so a coexisting 0x40 special badge for the same
 		// handle keeps its own slot and both markers draw.
 		// [orig: overlay_obj = link[6] @0x5bece4 — in-place update
-		//  @0x5bed63..0x5bed80; fresh-link alloc sub_5BE970 @0x5bed39]
+		//  @0x5bed63..0x5bed80; fresh-link alloc MapOverlay_AllocSlot @0x5bed39]
 		ClientMinimapOverlaySlot *slot = nullptr;
 		if (!fresh_link && linked->slot_index >= 0 &&
 				static_cast<size_t>(linked->slot_index) <
@@ -241,7 +241,7 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 			// writes lifetime/icon/flags/color/pose alone (an aliased slot —
 			// the allocator reusing an expired special slot a live link still
 			// points at — keeps the other marker's identity, as retail does).
-			// [orig: sub_5BE970 writes the handle; @0x5bed63.. writes none]
+			// [orig: MapOverlay_AllocSlot writes the handle; @0x5bed63.. writes none]
 			slot->active = true;
 			slot->handle = entry.handle;
 			slot->source = 0;

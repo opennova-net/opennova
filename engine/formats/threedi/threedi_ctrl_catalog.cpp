@@ -147,7 +147,7 @@ uint8_t threedi_ctrl_register_loader_ordinal(const char *name)
     // The model loader stores CtrlName_ToOrdinal's zero result unchanged, so
     // an unknown authored CTRL name aliases LOD_FRAC just like a real ordinal
     // zero.  Keep this compatibility behavior out of ordinary lookups.
-    // [orig: sub_5B4640 @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
+    // [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
     return ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND
         ? static_cast<uint8_t>(THREEDI_CTRL_LOD_FRAC)
         : static_cast<uint8_t>(ordinal);

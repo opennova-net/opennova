@@ -11,7 +11,10 @@ namespace opennova {
 // 61-char SCRK matching retail captures (notes/retail_capture_findings.md:
 // ClientAuth and ServerAuth SCRK are both 61 chars; alphabet = A-Z0-9, 36
 // chars). We don't replicate the two-30-char-halves structure (random is
-// fine), only the length + alphabet.
+// fine), only the length + alphabet. Retail's own generator
+// [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 — 63 chars drawn from g_txkey_charset
+//  @0x849f10 via NapiPRNG_NextInRange @0x62e450 into conn+204] is the witness for the
+// key shape; this dev helper keeps the capture-observed length.
 namespace {
 constexpr int kDevScrkLength = 61;
 } // namespace

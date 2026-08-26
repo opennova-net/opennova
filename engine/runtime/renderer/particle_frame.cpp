@@ -542,6 +542,8 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 		}
 	};
 
+	// [orig: CParticleManager_RecursiveSortAndRender @0x5ec980 — the Z->X->Y axis cycle
+	//  ((2*mask) % 7), inclusive interval split, Utility_QuickSortWithAux @0x53d470 pivot]
 	auto recursive_sort_and_render = [&](auto &&self, int begin, int count,
 			std::uint32_t axis_mask, std::uint32_t tried_axes) -> void {
 		if (count <= 0)

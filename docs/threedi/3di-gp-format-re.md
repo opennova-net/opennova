@@ -136,7 +136,7 @@ catalog/loader/writer audit on 2026-07-29.
 | Component | Verdict | Evidence |
 |---|---|---|
 | Global CTRL catalog (`engine/formats/threedi/src/threedi_ctrl_catalog.cpp`) | **MATCHING** | all 96 populated 32-byte descriptors at `0x83DCE8..0x83E8E7` are preserved in ordinal order; the next descriptor at `0x83E8E8` is zero and terminates the scan, so 96 is the complete retail list. Case-insensitive lookup is pinned by `threedi_ctrl_catalog` `[orig: CtrlName_ToOrdinal @ 0x57B290]` |
-| Loader-compatible name resolution | **MATCHING** | ordinary lookup reports a miss unambiguously, while `threedi_ctrl_register_loader_ordinal` deliberately reproduces retail's miss → ordinal-0 alias `[orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6]` |
+| Loader-compatible name resolution | **MATCHING** | ordinary lookup reports a miss unambiguously, while `threedi_ctrl_register_loader_ordinal` deliberately reproduces retail's miss → ordinal-0 alias `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; ordinal store @ 0x5B46E6]` |
 | Structural loader remap | witnessed / represented | model-local CTRL references in material/texture animation, PANM, and lights become global ordinals during `ThreediGp_LoadFromFile` `[orig: @ 0x5B5C80..0x5B5DA2; @ 0x5B5E0B..0x5B5EF6; @ 0x5B5F4F..0x5B5F62]` |
 | PANM scalar-track sampler (`engine/formats/threedi/src/threedi_panm_runtime.cpp`) | **MATCHING MATH / PARTIAL RNG LIFETIME** | `threedi_panm_sample_track_raw` structurally translates `[orig: PANM_SampleTrack @ 0x5b2270]`; controlled and deterministic waveform paths are pinned, and noise dispatch consumes per submitted instance, but its LCG is not yet retail's whole-process CRT stream |
 | Controlled PANM mode catalog | **MATCHING** | only type 113 reads a control register; 114–117 remain ordinary waveform types `[orig: PANM_SampleTrack @ 0x5b2270; wave_lookup @ 0x5de6b0]`; all known shipped controlled PANM tracks are type 113 |
@@ -210,7 +210,7 @@ OpenNova keeps an unambiguous ordinary lookup
 #### Loader remap and runtime bus
 
 The CTRL chunk is a model-local list of authored names, but its list order is
-not the runtime bus layout. `[orig: sub_5B4640 @ 0x5B4640]` resolves each name
+not the runtime bus layout. `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` resolves each name
 through the global catalog and stores the global ordinal in the runtime CTRL
 record at `0x5B46E6`. `ThreediGp_LoadFromFile` then follows each file-local
 reference through that record and patches the consuming field to the global

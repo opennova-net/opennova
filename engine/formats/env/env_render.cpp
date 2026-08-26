@@ -1409,7 +1409,7 @@ void water_glint_tick(WaterGlintState &state, bool visible) {
 bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
                        float water_height, float view_z_jitter,
                        Vec3 &out_mission) {
-	// [orig: sub_5AC040] — structural translation of the fixed/float mix:
+	// [orig: Water_ComputeReflectedSunPoint @0x5ac040] — structural translation of the fixed/float mix:
 	// clip = 2*wh - cam_z - jitter; reject at clip >= wh; denom = cam_z +
 	// sun_z*2048 - clip; ratio = (wh - clip) / denom; out = (cam_xy +
 	// sun_xy*2048 * ratio, clip + denom * ratio) — the last fmulp
@@ -1497,7 +1497,7 @@ int glare_dot_factor(int view_dot_fixed) {
 }
 
 // The shared submit-alpha tail: the FBEFFECTS >= 3 quarter
-// [orig: sub_581F60 @ 0x581f6a; >>= 2 @ 0x5ad033..0x5ad03c], then the
+// [orig: FrameFX_QualityAtLeast3 @ 0x581f6a; >>= 2 @ 0x5ad033..0x5ad03c], then the
 // overcast x SunDim fold and the 16.16 clamp [orig: @ 0x5ad084..0x5ad0a9].
 int glare_alpha_tail(int scaled, int overcast_blend_fixed, int sun_dim_fixed,
 		bool frame_effects_quarter) {

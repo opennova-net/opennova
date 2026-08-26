@@ -9,12 +9,13 @@ namespace opennova {
 
 // NAPI TLV container — the inner message format carried by the envelope.
 //
-// Witnessed byte-exact in jodemo.exe:
-//   NapiMessage_Serialize@0x5f68b0  (container writer)
-//   NapiField_Serialize@0x5f6560    (field writer)
-//   sub_5F6700 (= NapiMessage_Parse — rename pending) @0x5f6700  (container reader)
-//   sub_5F6620 (= NapiField_Parse — rename pending) @0x5f6620    (field reader)
-//   sub_5F6270 (= NapiMessage_AddField — rename pending) @0x5f6270 (install field)
+// Witnessed byte-exact in the demo image
+// [orig: jodemo NapiMessage_Serialize @0x5f68b0 (container writer); jodemo NapiField_Serialize @0x5f6560 (field writer);
+//  jodemo sub_5F6700 @0x5f6700 (container reader); jodemo sub_5F6620 @0x5f6620 (field reader); jodemo sub_5F6270 @0x5f6270 (install field)]
+// and in retail Jointops.exe as the gate STATEMENT codec (docs/net/novaworld-net-re.md):
+// [orig: NapiStatement_Serialize @0x632870 (container writer); NapiStatementParam_Serialize @0x6325d0 (field writer);
+//  NapiStatementContext_ParseNode @0x632fc0 (container reader: 0x02 name, child 0x02 / param 0x04 / end 0x03);
+//  NapiStatementParam_ParseFromBuffer @0x632e30 (field reader: 0x04 name LE16 len data 0x00 0x05)]
 //
 // Wire format (all integers little-endian):
 //
@@ -74,9 +75,9 @@ int napi_message_decode(const uint8_t *data, size_t data_len, NapiMessage &out, 
 // ---------------------------------------------------------------------------
 // Message-stream layer (what lives inside the LSB-scatter CRC envelope).
 //
-// Witnessed byte-exact via CBufferList_Serialize@0x5f69e0 (encoder) and
-// sub_5F6810 (decoder — effectively CBufferList_Deserialize; rename
-// pending). Stream format:
+// Witnessed byte-exact in the demo image [orig: jodemo CBufferList_Serialize @0x5f69e0 (encoder); jodemo sub_5F6810 @0x5f6810 (decoder)]
+// and in retail [orig: NapiStatementContext_SerializeToBuffer @0x6331d0 (encoder, appends the lone 0x01);
+//  NapiStatementContext_DeserializeFromBuffer @0x633510 (decoder, 0x01 end marker)]. Stream format:
 //
 //   <container1 bytes> <container2 bytes> ... <containerN bytes> [0x01]
 //

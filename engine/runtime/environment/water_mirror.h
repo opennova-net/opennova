@@ -38,7 +38,7 @@
 namespace opennova::env {
 
 // Retail allocates a square 256 RTT at water detail 2; only detail >= 3 or
-// the capture override selects 512 [orig: sub_5C08B0 @ 0x5c08d1..0x5c0937].
+// the capture override selects 512 [orig: Water_CreateReflectionRenderTarget @ 0x5c08d1..0x5c0937].
 // The reimpl has no higher-detail/capture selector, so its witnessed mapping
 // is 256.
 inline constexpr int kReflectionRttSize = 256;

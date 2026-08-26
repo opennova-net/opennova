@@ -67,7 +67,7 @@ stands confirmed.
    `FileSystem_SetSearchLooseFirst(1)` [orig: @ 0x4a6fa3]. Consumers
    save/set/restore around their loads regardless of `/d`: **forced 1** —
    Expansion_ScanAndRegister @ 0x4a446a, Game_TryLoadSavedGame @ 0x4395a2,
-   sub_439680 @ 0x439692, Terrain_LoadFoliageFile @ 0x60a74e,
+   sub_439680 @ 0x439692, Terrain_LoadTileInfoFile @ 0x60a74e,
    Mission_LoadEncryptedConfig @ 0x4cdcf4 (gt.ssc),
    CUIImage_LoadTextureFromFile @ 0x6541ba, minimap sub_59B120 @ 0x59b13a;
    **forced 0** — Mission_LoadBMSFromPFF @ 0x40d43c,

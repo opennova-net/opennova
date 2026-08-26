@@ -174,7 +174,7 @@ static func load_mesh(resource_root: ResourceRoot, graphic: String) -> Mesh:
 	var data := ObjectData.new()
 	# Retail marks foliage model-def nodes before it freezes the C2S 0x3D
 	# renderer-definition snapshot; they remain renderable but are excluded from
-	# that network page. [orig: sub_5B2220 writes node+0x3D4 before sub_5B3A80]
+	# that network page. [orig: CEffectWorld_MarkModelsDirty @0x5b2220 writes node+0x3D4 before CEffectWorld_RebuildAllModelBuffers @0x5b3a80]
 	if data.open_from_resource_root(resource_root, model_path, false) != OK:
 		return null
 	var submeshes: Array = data.build_lod_submeshes(0)

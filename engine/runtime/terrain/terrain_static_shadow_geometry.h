@@ -82,7 +82,9 @@ struct TerrainStaticShadowResolvedMaterial {
 };
 
 // Exact evaluated state for one caster/material at the frame-shared retail
-// GetTickCount value and global CTRL-bus snapshot. This is computed once and
+// GetTickCount value and global CTRL-bus snapshot [orig: Render_SubmitEntity @0x5dad9d tick;
+//  collect_render_objects_for_batch @0x5d91ab..0x5d91de and CRenderBatchQueue_FlushBatches
+//  @0x5da1b8..0x5da1fd CTRL snapshot/restore]. This is computed once and
 // then shared by draw classification and rasterization so stochastic/channel
 // evaluation cannot disagree within one page job.
 struct TerrainStaticShadowMaterialState {

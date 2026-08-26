@@ -185,7 +185,7 @@ struct HudSightsRow {
 
 // The layout globals parsed once from hudpos.def (the embedder resolves
 // texture names to the slots above and hands the parsed .fnt).
-// [orig: the dword_27237xx.. layout global block, loc_59F370 parse]
+// [orig: the dword_27237xx.. layout global block, HUD_ParseHudposToken @0x59f370 parse]
 struct HudLayout {
 	HudPosRecord ammo_count;
 	HudPosRecord weapon_name;
@@ -202,7 +202,7 @@ struct HudLayout {
 	//  @0x5be210..0x5be228; the callback @0x5bb7a0 (no function boundary in
 	//  the IDB), stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841]. JO:CA ships
 	// NO hud.def (none in resource/localres/language.pff), so on the retail
-	// title the rows stay 0: the width is 4 and sub_580980 returns 1 at the
+	// title the rows stay 0: the width is 4 and HUD_WordWrapText returns 1 at the
 	// first character (@0x5809ea..0x5809fc, no space yet) — a retail chat
 	// line NEVER wraps. These are NOT the HUDCHATTEXT pair (that is the feed
 	// anchor dword_27237A8/AC): a layout builder must leave them absent
@@ -326,7 +326,7 @@ struct HudWaypointState {
 	int32_t world_x = 0;
 	int32_t world_y = 0;
 	// Altitude, Q16. Drives the spinmap state-line tricolor and the
-	// WPIndctr frame. [orig: dword_2723520 read by sub_590970]
+	// WPIndctr frame. [orig: dword_2723520 read by HUD_UpdateWaypointAltitudeColor @0x590970]
 	int32_t world_z = 0;
 };
 
@@ -788,7 +788,7 @@ private:
 	std::vector<HudMessageLine> chat_lines_;   // the CHAT ring (S2C 0x14)
 };
 
-// The chat word-wrap [orig: sub_580980 @0x580980]: the whole remaining text
+// The chat word-wrap [orig: HUD_WordWrapText @0x580980]: the whole remaining text
 // measured first — it fits when `extent < current_x + max_width` @0x5809c1
 // (ONE line); otherwise the characters are walked from `current_x`, each
 // adding its width + 1 @0x5809e4, the last space noted @0x5809cf, and the

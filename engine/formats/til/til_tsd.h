@@ -14,7 +14,7 @@ namespace opennova {
 // the file exists. No shipped JO install carries one, so every retail placed
 // tile reads class 0 = TSD_NULL — NOT the underlying charmap class.
 // [orig: memset @ 0x60c5c9; exists probe @ 0x60c5d3; File_ParseASCIIFile
-// @ 0x60c5ef with the per-line callback sub_604C00 @ 0x604c00, all in
+// @ 0x60c5ef with the per-line callback Terrain_ParseTsdRow @ 0x604c00, all in
 // PolyTrn_InitTextures @ 0x60aaa0]
 
 // The 20-entry TSD surface-class name table [orig: the 64-B-stride name table
@@ -40,7 +40,7 @@ struct TilSurfaceTable {
 // starts with '/' is skipped [orig: @ 0x53d91e]. Per line, token 2 is matched
 // case-insensitively against the TSD name table (no match -> 0) and, when
 // token 1 carries the case-insensitive "INDEX_" prefix, the ordinal lands at
-// atol(token1 + 6) [orig: sub_604C00 @ 0x604c00, store @ 0x604c62].
+// atol(token1 + 6) [orig: Terrain_ParseTsdRow @ 0x604c00, store @ 0x604c62].
 // Reimpl guards (both memory-safety class, noted in the record): an
 // out-of-range index is skipped where retail writes out of bounds, and the
 // name walk is bounded at the 20 real entries where retail's unbounded scan

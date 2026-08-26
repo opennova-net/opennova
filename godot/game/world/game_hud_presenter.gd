@@ -508,7 +508,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 			hud_keys_chorded, gameplay_input_active)
 	# The ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
 	# its flip runs the respawn-init wrapper, closing the other overlay windows
-	# the shell owns [orig: sub_4993C0 -> Game_InitRespawnState] — the
+	# the shell owns [orig: Game_InitRespawnStateKeepingToggle @0x4993c0 -> Game_InitRespawnState] — the
 	# sim-owned toggles (map overlay, emote/radio menus) clear through the
 	# sim's own respawn init.
 	_end_round_stats.update(_game_hud, sim, ControlsBindings.pressed("ShowScore"),

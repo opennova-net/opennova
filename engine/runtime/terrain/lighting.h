@@ -7,8 +7,10 @@ namespace opennova::terrain {
 // Packed colors are 0xAARRGGBB, matching the little-endian BYTE2/BYTE1/LOBYTE
 // access pattern in the Jointops.exe terrain routines.
 
-// Engine: Jointops.exe Terrain_SetLightingColors@0x005C4B10.
-// Builds the global light color later consumed by Terrain_GetModulatedColorAtPos.
+// [orig: jodemo Terrain_SetLightingColors @0x5C4B10]
+// [orig: init_terrain_lighting_color_ramps @0x604ee0 — per channel blend = ambient*0.707 + sun
+//  @0x604f6f..0x604f83, ratio = sun/blend (1.0 when blend == 0) packed ARGB @0x605182..0x60524c]
+// Builds the global light color later consumed by terrain_modulate_color_argb.
 uint32_t terrain_light_color_from_ambient_diffuse_argb(uint32_t ambient_argb,
                                                        uint32_t diffuse_argb) noexcept;
 
@@ -22,12 +24,15 @@ uint32_t terrain_light_color_from_ambient_diffuse_argb(uint32_t ambient_argb,
 float terrain_fog_start_for_type(float fog_end, int fog_type) noexcept;
 float terrain_fog_factor_for_distance(float distance, float fog_end, int fog_type) noexcept;
 
-// Foliage render-emitter parity helper. The old Foliage_BuildGeometry@0x005BF5F0
-// address is stale; keep this as the nibble-preserving four-sample average until
-// the retail emitter is re-anchored.
+// Foliage detail-tier parity helper (jodemo Foliage_BuildGeometry @0x5BF5F0 was the
+// pre-retail anchor): the nibble-split four-sample colormap average
+// [orig: generate_foliage_instances_0 @0x5ffdd0 — four sample_terrain_colormap_tinted taps at
+//  +-0x8000 @0x6001a3..0x6001eb, alpha sum >>2 @0x60021c, nibble split @0x600278].
 uint32_t terrain_average_four_argb(uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3) noexcept;
 
-// Engine: Jointops.exe Terrain_GetModulatedColorAtPos@0x005C5FE0.
+// [orig: jodemo Terrain_GetModulatedColorAtPos @0x5C5FE0]
+// [orig: sample_terrain_colormap_tinted @0x606030 — (base*light)>>7 per channel clamped
+//  to 255 @0x60606b..0x6060c2, alpha passthrough @0x6060c6]
 // Multiplies base colormap RGB by the packed light color, divides by 128
 // via >> 7, clamps each channel to 255, and preserves base alpha.
 uint32_t terrain_modulate_color_argb(uint32_t base_argb, uint32_t light_argb) noexcept;

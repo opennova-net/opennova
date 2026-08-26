@@ -428,7 +428,11 @@ void Water::build() {
 		add_child(reflection_viewport_);
 		reflection_camera_ = memnew(Camera3D);
 		reflection_camera_->set_name("WaterReflectionCamera");
-		// Every retail pass writes gamma-domain numeric values, so this RTT
+		// Every retail pass writes gamma-domain numeric values (no D3DSAMP_SRGBTEXTURE /
+		// D3DRS_SRGBWRITEENABLE in the device sweeps; the mirror scene renders through
+		// Water_RenderReflectedWorldScene @0x5c8510 into the Water_CreateReflectionRenderTarget
+		// @0x5c08b0 RTT - docs/render/render-material-re.md Color pipeline, docs/env/env-tod-re.md
+		// #30), so this RTT
 		// needs exactly one display decode before Godot's sRGB output encode
 		// for its stored bytes to be the retail gamma texels the water shader
 		// samples raw - and the witnessed dim quad below multiplies those

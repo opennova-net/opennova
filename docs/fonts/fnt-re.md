@@ -15,13 +15,13 @@ IDA session (PAR-R4, 2026-07-05); no IDB renames were made. It converts the
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| `.fnt` on-disk format (header + glyph table + pages) | **MATCHING** | `engine/formats/fnt` (`FNT_MAGIC` "FNT0", 224 glyphs × 20 B, 256×256×4 RGBA pages, 32-B header) maps field-for-field onto the parser `sub_674740 @ 0x674740` |
-| Font load path | **witnessed** | `HUD_LoadFontIntoSlot @ 0x580400` (renamed 2026-08-15, ex sub_580400; alloc `CGameFont` 0x1318 B → `CGameFont_Init @ 0x673a60` → `File_LoadResource @ 0x75b540` → `sub_674740` parse → free the file buffer) |
+| `.fnt` on-disk format (header + glyph table + pages) | **MATCHING** | `engine/formats/fnt` (`FNT_MAGIC` "FNT0", 224 glyphs × 20 B, 256×256×4 RGBA pages, 32-B header) maps field-for-field onto the parser `GameFont_LoadFromBlob @ 0x674740` |
+| Font load path | **witnessed** | `HUD_LoadFontIntoSlot @ 0x580400` (renamed 2026-08-15, ex sub_580400; alloc `CGameFont` 0x1318 B → `CGameFont_Init @ 0x673a60` → `File_LoadResource @ 0x75b540` → `GameFont_LoadFromBlob` parse → free the file buffer) |
 | Boot font set + slot scales | **witnessed** | `HUD_InitAllFonts @ 0x51ee20 → HUD_LoadFontIntoSlot(path, slot, scaleFP)`; the slot scale is `scaleFP × 0.000015258789` = **scaleFP / 65536** (16.16 fixed) written to slot+4 / slot+8; a null font slot leaves scale 1.0 (graceful, no crash — required-resources.md) |
 | Version/design-width handling | **FIXED 2026-07-05** | D-FNT-1/2 — reader reads +4 as the design width, scales `800/dw`, no equality gate; `fnt_roundtrip` pins a non-800 font parsing |
 | Reimpl glyph indexing (byte → glyph) | **MATCHING (D-FNT-4 FIXED 2026-07-19)** | retail selects the 20-byte glyph record from the unsigned text byte, skipping controls 0x7F–0x81 `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]`; `to_font_file` exposes each remaining record at that byte's decoded cp1252 codepoint and disables system-font fallback, so U+201C draws byte 0x93's bitmap and metric (`strings_encoding_test.gd`) |
 
-## The witnessed format (`sub_674740 @ 0x674740`)
+## The witnessed format (`GameFont_LoadFromBlob @ 0x674740`)
 
 The parser validates `fontData[0] == 0x30544E46` ("FNT0"; `-1` on mismatch), then:
 

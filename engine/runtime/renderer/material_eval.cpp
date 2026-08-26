@@ -57,7 +57,7 @@ static int16_t quantizeS16(float value, float scale) {
 // The loader rewrites the packed parameter byte for every style > 0x70,
 // even when a later consumer interprets that style as a waveform and uses
 // the byte as phase rather than reading the CTRL bus.
-// [orig: sub_5B4640 @ 0x5B4640]
+// [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]
 static uint8_t phaseOrRegisterByte(
         uint8_t style,
         float phase,
@@ -162,7 +162,7 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
     // Retail patches every model-local material parameter to one of the 96
     // global CTRL slots during load. Authored unknown/missing local references
     // inherit the loader's ordinal-zero result.
-    // [orig: sub_5B4640 @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
+    // [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
     const ControlRegisterValues& ctrl_bus = ctrl_values;
 
     if (mat.alpha_gen.style == 0) {

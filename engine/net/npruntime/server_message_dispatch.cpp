@@ -2165,7 +2165,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// walk stops at the highest OCCUPIED slot: a slot above that high-water
 				// mark was never streamed to any client, so listing it is a no-op that
 				// would only inflate the datagram.
-				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder @0x5160f0]
+				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0]
 				std::size_t consumed = 0;
 				if (world == nullptr ||
 				    !decode_empty_slots_request(

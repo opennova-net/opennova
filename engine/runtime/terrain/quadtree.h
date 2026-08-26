@@ -1,8 +1,7 @@
 #pragma once
 
 // Quadtree LOD traversal for terrain rendering.
-// Engine: jodemo.exe Terrain_TraverseQuadTreeNode@0x5C89C0,
-// Terrain_CollectVisibleSectors@0x5C9120, Terrain_BuildHeightMipChain@0x5C5310
+// [orig: jodemo Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120, Terrain_BuildHeightMipChain @0x5C5310]
 // docs/engine_spec_terrain.md 5.3, 7.1
 
 #include <cstdint>

@@ -378,7 +378,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		        // request (it writes world_stream_phase = 0 [orig: @0x5132f6]).
 			b.phase_loop_counter = 0;
 			break;
-		case 1: { // 0x10 pool-2 static structures [orig: sub_5042F0]
+		case 1: { // 0x10 pool-2 static structures [orig: serialize_pool2_static_to_buffer @0x5042f0]
 			const opennova::StaticEntityBatch full = opennova::netsim::build_pool2_static_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x10, full.records.size(),
 			                                initial_state_page_limits::pool2_static(),

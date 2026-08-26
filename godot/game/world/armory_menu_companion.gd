@@ -68,7 +68,7 @@ var _populating := false
 var _slot_rows := {}                 # control name -> Array[Dictionary] (row-1 aligned)
 # The grenade definitions assigned to GRENADE_AMMO1..3 in weapon.def table order.
 # Each authored control selects a count for its definition rather than a weapon row
-# [orig: sub_566D70 registration args 0/1/2 @0x567020].
+# [orig: WeaponDef_UISlotSelectCallback registration args 0/1/2 @0x567020].
 var _grenade_rows: Array = []
 # The ACCEPT-hotkey debounce: the opener press that showed the screen must release
 # once before the key acts as ACCEPT — the open stamps it, only the row's KEYUP
@@ -319,7 +319,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 # order. Availability is applied only after a definition owns its control, so a
 # banned grenade retains that position with a zero-only row. Their
 # registered callback args 0/1/2 address the same three positions
-# [orig: WeaponDef_RegisterUICallbacks @0x567020 -> sub_566D70].
+# [orig: WeaponDef_RegisterUICallbacks @0x567020 -> WeaponDef_UISlotSelectCallback].
 func _populate_grenades(team_mask: int) -> void:
 	# Unlike the three parent lists, availability does not remove a grenade def:
 	# retail assigns class/team/selectable category-3 defs to controls first, then

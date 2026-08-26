@@ -10,7 +10,7 @@ extends RefCounted
 ## [orig: HUD_DrawEndRoundStatistics @0x5b7600, drawn from the frame drawer
 ##  HUD_DrawOverlayPanels @0x5c0092 while dword_24C18AC; the toggle is
 ##  Input_HandleActionBinding case 422 @0x49bd29 (gated !is_in_session) ->
-##  sub_4993C0(&toggle) = Game_InitRespawnState keeping *ptr; cleared by
+##  Game_InitRespawnStateKeepingToggle @0x4993c0 (&toggle) = Game_InitRespawnState keeping *ptr; cleared by
 ##  Game_InitRespawnState @0x499381. Controls catalog row 99 "ShowScore"
 ##  ("!Show Score"), default VK 0x74 = F5 — nothing new is bound.]
 ##
@@ -38,7 +38,7 @@ func is_open() -> bool:
 ## [orig: @0x49bd29 — the case jumps to default while in a session].
 ## `close_siblings` is the shell's reach into the other overlay toggles the
 ## respawn-init wrapper clears (the sim-owned ones — map overlay, emote/radio
-## menus — clear through the sim's own respawn init) [orig: sub_4993C0].
+## menus — clear through the sim's own respawn init) [orig: Game_InitRespawnStateKeepingToggle @0x4993c0].
 func update(hud: HudOverlay, sim: Simulation, down: bool, chorded: bool,
 		active: bool, sp: bool, close_siblings: Callable) -> void:
 	if hud == null:

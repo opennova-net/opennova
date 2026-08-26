@@ -252,6 +252,8 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 			"aim leg field table must match the row cache size");
 	const float *p = snap.ptr();
 	const int base = row.base;
+	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
+	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	model->set_match_terrain_enabled(
 			(wfield_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
 	const int32_t respawn_revision =

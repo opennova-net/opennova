@@ -1,5 +1,9 @@
 #include "cpt/crypto.h"
 
+// The TPM1 payload cipher (docs/terrain/terrain-re.md, the TPM1 tile-mesh format): every
+// vertex/index payload is rotate-crypted [orig: TrnGen.exe MeshData_LoadFromFile @0x404100;
+//  pack/unpack family @0x403CD0 / @0x403DD0 / @0x403E70 / @0x403EF0].
+
 namespace opennova {
 
 static constexpr uint32_t ROTATE_KEY = 0xA55B1EED;

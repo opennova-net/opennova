@@ -161,7 +161,7 @@ struct HudMinimapInput {
 	float surface_h = 768.0f;
 	int32_t player_x = 0;
 	int32_t player_y = 0;
-	int32_t player_z = 0; // altitude, Q16 [orig: sub_590970 reads Position.Z]
+	int32_t player_z = 0; // altitude, Q16 [orig: HUD_UpdateWaypointAltitudeColor @0x590970 reads Position.Z]
 	int32_t player_heading_bam = 0;
 	// The map-mode cycle the `map_toggle` action drives: 0 off (this input
 	// describes the corner spinmap), 2 the 400x400 north-up window at
@@ -186,7 +186,7 @@ struct HudMinimapInput {
 	bool waypoint_present = false;
 	int32_t waypoint_x = 0;
 	int32_t waypoint_y = 0;
-	int32_t waypoint_z = 0; // Q16 [orig: dword_2723520, sub_590970 altitude test]
+	int32_t waypoint_z = 0; // Q16 [orig: dword_2723520, HUD_UpdateWaypointAltitudeColor @0x590970 altitude test]
 	int waypoint_distance_m = 0;
 	// The ring-edge distance label draws while this is ZERO — the retail
 	// global is BSS (uninitialized .data -> 0 = LIVE by default) and an

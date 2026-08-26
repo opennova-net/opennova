@@ -20,7 +20,7 @@ namespace opennova::world {
 // +324 symmetric, targetpitchmax/min +316/+320). Any nonzero per-seat value
 // selects the WHOLE quartet verbatim — an authored zero pair inside a live
 // quartet pins that axis at zero, exactly like retail's unconditional
-// sub_540CC0 calls on the returned values.
+// Math_ClampAngleToBounds calls on the returned values.
 struct TurretWindow {
 	// Upper/lower clamp bounds per axis, ready for the emplaced clamp
 	// (upper >= value >= lower in wrapped BAM). All four zero = no window.

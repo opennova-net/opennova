@@ -527,7 +527,7 @@ struct ClientMountedAmmoState {
 // Client-retained map-overlay banks. The capacities and routing bits are the
 // original fixed tables; keeping them bounded makes refresh, clear, and expiry
 // behavior independent from presentation.
-// [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; sub_5BE970 @0x5BE970;
+// [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; MapOverlay_AllocSlot @0x5BE970;
 //  update_map_overlay_timers @0x5BFCE0]
 inline constexpr std::size_t kMinimapTransientCapacity = 328;
 inline constexpr std::size_t kMinimapPersistentCapacity = 328;

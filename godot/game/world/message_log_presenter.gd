@@ -36,7 +36,7 @@ func is_open() -> bool:
 
 
 ## The ShowScore toggle's respawn-init wrapper closes this window too
-## [orig: sub_4993C0 -> Game_InitRespawnState @0x49939a].
+## [orig: Game_InitRespawnStateKeepingToggle @0x4993c0 -> Game_InitRespawnState @0x49939a].
 func close(hud: HudOverlay) -> void:
 	_open = false
 	if _pushed and hud != null:

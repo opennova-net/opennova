@@ -84,6 +84,8 @@ int TerrainTilePageLayout::texel_footprint(int world_units) const noexcept {
 			std::lround(static_cast<float>(world_units) * texels_per_world_unit));
 }
 
+// The c7/c8 page projection retail uploads per page [orig: Foliage_RenderFarPatches
+//  @0x60a220..0x60a34f; Foliage_SetupVertexShaderConstants @0x6006ab..0x600704].
 std::array<float, 2> TerrainTilePageProjection::project(
 		float world_x, float world_z) const noexcept {
 	return {
@@ -281,6 +283,8 @@ bool TerrainTileCompositionCache::invalidate(
 	return false;
 }
 
+// Page extent from the per-LOD world span [orig: PolyTrn_RenderTile @0x60da70 page LOD /
+//  128-slot cache; the overlap invalidation walk Terrain_AddScorchRecord @0x605c90].
 bool TerrainTileCompositionCache::page_overlaps_q16(
 		const TerrainTilePageKey &page,
 		int32_t minimum_x_q16, int32_t minimum_z_q16,

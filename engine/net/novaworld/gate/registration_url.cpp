@@ -4,6 +4,10 @@
 
 namespace opennova {
 
+// (jodemo Auth_ParseRegistrationURL @0x514c40 was the demo-era anchor.)
+// [orig: parse_connection_query_string @0x54dfb0 — HOSTKEY= preempts @0x54e0be; NK/CK are decoded
+//  with the cipher keys @0x7d3f30 / @0x7d3f04 ('&'-terminated), NI/NP/BK/LN/GS are copied plain]
+
 namespace {
 
 constexpr char FIELD_TERMINATOR = '&';

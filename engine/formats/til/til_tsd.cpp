@@ -39,7 +39,7 @@ bool ieq_prefix(const char *s, const char *prefix, size_t n) {
 	return true;
 }
 
-// One tokenized line -> the sub_604C00 row apply. [orig: sub_604C00 @ 0x604c00]
+// One tokenized line -> the Terrain_ParseTsdRow row apply. [orig: Terrain_ParseTsdRow @ 0x604c00]
 void apply_row(const char *key, const char *value, TilSurfaceTable &out) {
 	// token 2 vs the name table, case-insensitive; no match -> 0 (retail's
 	// unbounded walk is bounded at the 20 real entries here) [orig: @ 0x604c23].

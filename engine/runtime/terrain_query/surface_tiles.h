@@ -33,7 +33,7 @@ struct SurfaceTileFileSource {
 // reimpl BMS document carries no tileset field), so the .trn's authored
 // tilestrip names both the atlas and the .TSD — the recorded D-SND-15 residue.
 // [orig: PolyTrn_InitTextures — table memset @ 0x60c5c9, exists probe
-// @ 0x60c5d3, File_ParseASCIIFile @ 0x60c5ef with the sub_604C00 row
+// @ 0x60c5d3, File_ParseASCIIFile @ 0x60c5ef with the Terrain_ParseTsdRow row
 // callback; the .TSD extension pairing off the tilestrip copy @ 0x610a1c
 // (Terrain_LoadEnvironmentConfig); the unmodeled BMS override
 // Bms_TileSetName @ 0xa762e8, applied @ 0x6109ce]

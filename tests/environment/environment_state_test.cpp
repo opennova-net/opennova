@@ -367,7 +367,7 @@ int main() {
 	}
 
 	// --- water glint: window/chase, reflected point, submit alpha -----------
-	// [orig: update_sun_glare @ 0x5ad130; sub_5AC040].
+	// [orig: update_sun_glare @ 0x5ad130; Water_ComputeReflectedSunPoint].
 	{
 		opennova::env::WaterGlintState glint;
 		for (int i = 0; i < 20; ++i) {
@@ -393,7 +393,7 @@ int main() {
 		// clip = 2*10 - 30 = -10; denom = 30 + 251.29 + 10; ratio = 20 /
 		// denom; x = 0.9316*2048*ratio; z = clip + denom*ratio = the water
 		// height itself (the last fmulp multiplies ratio by the FULL delta
-		// [orig: sub_5AC040 @ 0x5ac0d0..0x5ac0e5]).
+		// [orig: Water_ComputeReflectedSunPoint @ 0x5ac0d0..0x5ac0e5]).
 		ok &= expect(near(point.x, 130.99f, 0.05f) &&
 						near(point.z, 10.0f, 0.01f),
 				"the reflected point lands on the water plane");

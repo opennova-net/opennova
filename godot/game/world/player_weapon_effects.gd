@@ -395,7 +395,7 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 				return model_to_world * Vector3(info.get("position", Vector3.ZERO))
 	if fallback != Vector3.INF:
 		return fallback
-	# Retail's deepest fallback is the ENTITY ORIGIN [orig: loc_401867 @0x401867..0x401887
+	# Retail's deepest fallback is the ENTITY ORIGIN [orig: Entity_ComputeActionTransform @0x401310, fallback site @0x401867..0x401887
 	# copies entity+4/+8/+0xC]. The eye was our own invention and put the flash on the
 	# player's face whenever a userpoint failed to resolve.
 	var sim := _sim()

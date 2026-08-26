@@ -9,7 +9,7 @@ extends Control
 ## frame]. Row rects live in the virtual 1024x768 design space and scale to the
 ## live viewport per draw [orig: Viewport_ScaleToVirtualCoords @0x5d2b20].
 ## Additive rows ride a per-row CanvasItemMaterial — the blend token map
-## [orig: sub_540180 blend/add/...].
+## [orig: WeaponDef_CreateBlendNamedMaterial @0x540180 blend/add/...].
 ##
 ## This stays a shell-side child-control stack (not a HudDrawList element)
 ## because each row needs its own CanvasItem for its blend mode; the engine
@@ -57,9 +57,9 @@ func set_weapon_sights(sights: Array, root: ResourceRoot) -> void:
 		var y1 := float(e.get("y1", 0))
 		row.rect_v = Rect2(x1, y1, float(e.get("x2", 0)) - x1, float(e.get("y2", 0)) - y1)
 		# Blend token 1 is the additive entry of the original's blend-token map
-		# [orig: sub_540180 blend/add/...]; the full map is not ported yet, so
+		# [orig: WeaponDef_CreateBlendNamedMaterial blend/add/...]; the full map is not ported yet, so
 		# the token stays a literal here — no bound name exists until the
-		# sub_540180 blend-map port lands in the engine.
+		# WeaponDef_CreateBlendNamedMaterial blend-map port lands in the engine.
 		if int(e.get("blend", 0)) == 1:
 			var mat := CanvasItemMaterial.new()
 			mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD

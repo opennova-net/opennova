@@ -3,6 +3,11 @@
 #include <algorithm>
 #include <cstddef>
 
+// [orig: Server_ValidatePlayerJoinRequest @0x512100 — the retail consumer of these plaintexts:
+//  NAMEINFO @0x512622, PCID @0x5126d8, SQUADINFO @0x5128b4, each decrypted with
+//  NapiPacket_DecryptAndVerify @0x4c2ad0 keyed on the local address + tag; the producer is the
+//  NovaWorld web service (NWJoin.dll PUB* cookies), not the client image]
+
 namespace opennova {
 namespace {
 

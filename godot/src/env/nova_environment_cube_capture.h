@@ -18,9 +18,8 @@ namespace godot {
 // object shader after the captured sky has received its 0x60 dim multiply.
 // Exact witness addresses and the quality selector are maintained in
 // docs/render/render-lighting-re.md (CubeEnvironment section):
-// update_environment_cubemap @ 0x6106a0;
-// GTexture_RenderCubeMapFace @ 0x6864d0;
-// environment face callback @ 0x5c3700].
+// (update_environment_cubemap @0x6106a0; GTexture_RenderCubeMapFace @0x6864d0;
+// environment face callback @0x5c3700 - docs/render/render-lighting-re.md).
 class EnvironmentCubeCapture : public Node {
 	GDCLASS(EnvironmentCubeCapture, Node)
 

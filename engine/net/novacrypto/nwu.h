@@ -10,7 +10,8 @@ namespace opennova {
 // NWU cipher — the 4-phase obfuscation used on selected NAPI control
 // messages (gate probes, ping probes). Keyed on an ASCII string.
 //
-// Witnessed byte-exact in jodemo.exe:
+// Witnessed byte-exact in the demo image
+// [orig: jodemo Crypto_DecryptBuffer @0x5e5230; jodemo PFF_EncryptBuffer @0x5e5300; jodemo Crypto_ComputeSeed @0x5e5160; jodemo CLCG_Init @0x5f3170]:
 //   Crypto_DecryptBuffer@0x5e5230  (decrypt entry)
 //   PFF_EncryptBuffer@0x5e5300     (encrypt entry, despite kong's 'PFF_' prefix)
 //   Crypto_ComputeSeed@0x5e5160
@@ -22,7 +23,9 @@ namespace opennova {
 //   Crypto_ApplyPRNG@0x5e51f0
 //
 // Re-grilled byte-exact in retail Jointops.exe (2026-06-11, grill wave 3) —
-// demo and retail ciphers are identical:
+// demo and retail ciphers are identical
+// [orig: NapiNP_EncryptBuffer @0x6187b0; NapiNP_DecryptBuffer @0x618880; NapiNP_ComputeKeySeed @0x618430;
+//  NapiPRNG_Init @0x62e430; Crypto_AddWithKey @0x6182d0; NapiNP_ReverseBuffer @0x618210]:
 //   NapiNP_EncryptBuffer@0x6187b0   (ADD chain == our nwu_decrypt)
 //   NapiNP_DecryptBuffer@0x618880   (SUB chain == our nwu_encrypt)
 //   NapiNP_ComputeKeySeed@0x618430  (== nwu_compute_seed; null->3252, sum(i+key[i]^2)+len+50)
@@ -34,7 +37,9 @@ namespace opennova {
 // Name-swap confirmed at the byte level: retail *EncryptBuffer* applies the
 // ADD chain, which is our nwu_decrypt (see reference_nwu_names_swapped).
 //
-// Key string used for the gate ping probes (sub_5F5420):
+// Key string used for the gate ping probes (jodemo sub_5F5420); retail:
+// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 — NapiNP_EncryptBuffer(tag, strlen+1, "GATEAPI")
+//  @0x633aaf on send, NapiNP_DecryptBuffer @0x633bcc on the reply]
 inline constexpr const char *NWU_GATE_KEY = "GATEAPI";
 
 // LCG multiplier lifted from CLCG_Init@0x5f3170 / NapiPRNG_Init@0x62e430.
