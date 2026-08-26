@@ -63,6 +63,27 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_slot_cpu": FrameStatsBoard.RENDER_SLOT_CPU,
 	"render_slot_gpu": FrameStatsBoard.RENDER_SLOT_GPU,
 }
+# Every FrameStatsBoard slot under the World tick (GameWorld.tick legs, the
+# awake-model walk, the occlusion frame, the sim step tree, traces, effects,
+# and the present rows) is sampled by prefix so one JSON carries the whole
+# world breakdown; the VALUE slots among them are counts, not spans.
+const WORLD_SLOT_PREFIXES := ["WORLD_", "MODEL_", "OCCL_", "SIM_", "TRACE_",
+		"EFFECTS_", "PRESENT_"]
+const WORLD_VALUE_SLOTS := [
+	"MODEL_AWAKE_MODELS",
+	"MODEL_RENDERABLE_MODELS",
+	"SIM_TICKS",
+	"TRACE_CALLS",
+	"TRACE_STATIC_SURVIVORS",
+	"TRACE_DYNAMIC_SURVIVORS",
+	"TRACE_PERSON_SURVIVORS",
+	"TRACE_STATIC_FACES",
+	"TRACE_DYNAMIC_FACES",
+	"PRESENT_MISSION_ROWS",
+	"PRESENT_MISSION_SUBMITTED_ROWS",
+	"PRESENT_MISSION_BODY_ROWS",
+	"PRESENT_MISSION_MUZZLE_ROWS",
+]
 # Per-pass submission counts (objects), averaged per drained frame.
 const ENGINE_COUNT_SAMPLES := {
 	"render_main_objects": FrameStatsBoard.RENDER_MAIN_OBJECTS,
@@ -91,9 +112,30 @@ const COUNTER_KEYS := [
 var _mount_guard = MountGuard.new()
 var _requested_exit_code := 1
 var _board: FrameStatsBoard = null
+# ENGINE_SLOT_SAMPLES + every prefixed world span slot (key = lower-cased slot
+# name), and ENGINE_COUNT_SAMPLES + the world VALUE slots.
+var _slot_samples: Dictionary = {}
+var _count_samples: Dictionary = {}
 
 
 func _initialize() -> void:
+	_slot_samples = ENGINE_SLOT_SAMPLES.duplicate()
+	_count_samples = ENGINE_COUNT_SAMPLES.duplicate()
+	var constants: Dictionary = (load("res://game/debug/frame_stats_board.gd")
+			as GDScript).get_script_constant_map()
+	for slot_name in constants:
+		var name := String(slot_name)
+		var prefixed := false
+		for prefix in WORLD_SLOT_PREFIXES:
+			if name.begins_with(prefix):
+				prefixed = true
+				break
+		if not prefixed:
+			continue
+		if WORLD_VALUE_SLOTS.has(name):
+			_count_samples[name.to_lower()] = int(constants[slot_name])
+		else:
+			_slot_samples[name.to_lower()] = int(constants[slot_name])
 	call_deferred("_run")
 
 
@@ -335,12 +377,12 @@ func _measure_window(seconds: float) -> Dictionary:
 			(samples["outside_shell_us"] as Array).append(maxi(
 					wall_us - _sum_slots(
 							captured.sums, SHELL_LEG_SLOTS), 0))
-		for key in ENGINE_SLOT_SAMPLES:
-			var slot := int(ENGINE_SLOT_SAMPLES[key])
+		for key in _slot_samples:
+			var slot := int(_slot_samples[key])
 			if captured.sample_frames[slot] > 0:
 				(samples[key + "_us"] as Array).append(int(captured.sums[slot]))
-		for key in ENGINE_COUNT_SAMPLES:
-			var slot := int(ENGINE_COUNT_SAMPLES[key])
+		for key in _count_samples:
+			var slot := int(_count_samples[key])
 			if captured.sample_frames[slot] > 0:
 				(samples[key] as Array).append(int(captured.sums[slot]))
 	return {
@@ -361,9 +403,9 @@ func _empty_samples() -> Dictionary:
 		"outside_shell_us": [],
 		"frame_us": [],
 	}
-	for key in ENGINE_SLOT_SAMPLES:
+	for key in _slot_samples:
 		samples[key + "_us"] = []
-	for key in ENGINE_COUNT_SAMPLES:
+	for key in _count_samples:
 		samples[key] = []
 	return samples
 
@@ -381,9 +423,9 @@ func _summaries(samples: Dictionary) -> Dictionary:
 		"outside_shell": _summary(samples["outside_shell_us"]),
 		"frame": _summary(samples["frame_us"]),
 	}
-	for key in ENGINE_SLOT_SAMPLES:
+	for key in _slot_samples:
 		summaries[key] = _summary(samples[key + "_us"])
-	for key in ENGINE_COUNT_SAMPLES:
+	for key in _count_samples:
 		summaries[key] = _count_summary(samples[key])
 	return summaries
 
@@ -411,12 +453,12 @@ func _metrics_with_samples(samples: Dictionary, summaries: Dictionary) -> Dictio
 			"samples_us": samples["frame_us"],
 		},
 	}
-	for key in ENGINE_SLOT_SAMPLES:
+	for key in _slot_samples:
 		metrics[key] = {
 			"summary_ms": summaries[key],
 			"samples_us": samples[key + "_us"],
 		}
-	for key in ENGINE_COUNT_SAMPLES:
+	for key in _count_samples:
 		metrics[key] = {
 			"summary": summaries[key],
 			"samples": samples[key],
@@ -601,11 +643,25 @@ func _print_window(index: int, count: int, frames: int,
 			engine_parts.append("%s %.3f" % [key, float(part["mean_ms"])])
 	print("[mrp]   engine: " + " | ".join(engine_parts))
 	var count_parts := PackedStringArray()
-	for key in ENGINE_COUNT_SAMPLES:
+	for key in _count_samples:
 		var part: Dictionary = summaries[key]
 		if int(part["samples"]) > 0:
 			count_parts.append("%s %.1f" % [key, float(part["mean"])])
 	print("[mrp]   passes: " + " | ".join(count_parts))
+	# The world breakdown: every prefixed world span, ranked by mean, so the
+	# console alone names the heaviest rows.
+	var ranked: Array = []
+	for key in _slot_samples:
+		if ENGINE_SLOT_SAMPLES.has(key):
+			continue
+		var part: Dictionary = summaries[key]
+		if int(part["samples"]) > 0 and float(part["mean_ms"]) > 0.0:
+			ranked.append([float(part["mean_ms"]), key, float(part["p95_ms"])])
+	ranked.sort_custom(func(a, b): return float(a[0]) > float(b[0]))
+	var world_parts := PackedStringArray()
+	for entry in ranked:
+		world_parts.append("%s %.3f/%.3f" % [entry[1], entry[0], entry[2]])
+	print("[mrp]   world (mean/p95 ms): " + " | ".join(world_parts))
 
 
 func _output_path(bms: String, label: String) -> String:
