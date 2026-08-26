@@ -144,8 +144,10 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_gt(int(first["compose_jobs"]), 0)
 	assert_eq(int(first["frame_compose_jobs"]), 0)
 	assert_eq(int(first["pending_jobs"]), 0)
-	assert_lte(int(first["frame_uploads"]), 2,
-			"main-thread Texture2DArray publication stays within its frame budget")
+	# The per-frame upload budget (upload_budget, pinned below) gates REFRESH
+	# uploads only; cold layers drain unbounded so first-fill completes in a few
+	# frames (TerrainTileCacheDevice::_drain_completed). How many cold completions
+	# land in the settle frame is worker timing, so it is not asserted here.
 	assert_eq(int(first["frame_capacity_fallbacks"]), 0)
 
 	terrain.render_frame()
