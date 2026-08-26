@@ -72,7 +72,7 @@ as an in-process listen server, so co-op and multiplayer share one replication p
 
 ## Where we are today
 
-OpenNova is pre-1.0 and under active development. The engine and asset pipeline
+OpenNova is pre-1.0 and under active development. The engine and its format libraries
 are the most exercised surfaces; the runtime loads the game data, runs the terrain
 and foliage systems, and simulates missions (WAC scripts, BMS events, AI);
 the gameplay systems (weapons, projectile physics and damage, throwables,

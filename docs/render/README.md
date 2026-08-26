@@ -183,10 +183,13 @@ table.
 
 ## Capture procedures
 
-The former registered-capture publication pipeline has been retired. The
-retained catalogs and screenshots are historical evidence, not a currently
-reproducible release gate. The remaining PowerShell helpers under
-`scripts/render/` support local OpenNova capture and comparison work.
+The former registered-capture publication pipeline (the render-parity runbook,
+`docs/render/render-parity-runbook.md` until 5820432c1, and the
+`scripts/render/*.py` tools) was retired with the Python FFI (ADR 0038). The
+retained catalogs and screenshots are historical evidence carrying their own
+provenance, not a currently reproducible release gate. The remaining PowerShell
+helpers under `scripts/render/` support local OpenNova capture and comparison
+work.
 
 The exact-pose harness both tiers drive is
 [`render_fixture_capture_probe.tscn`](../../godot/tests/render_fixture_capture_probe.tscn).

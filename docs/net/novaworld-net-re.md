@@ -5616,8 +5616,9 @@ retail (up to ~110 px). Five findings, in the order they were settled:
    `Entity_UpdateInfantryPlayerBody @ 0x4b8130..0x4b8261`) raises the rifle above the
    waterline; the port's swim states 36-40 landed 2026-08-24 (#566,
    `world/infantry_water.cpp`) — the raised-rifle hold itself still rides D-INF-3.
-   Procedure notes live in
-   `docs/render/render-parity-runbook.md` §8.
+   Procedure notes lived in
+   the retired render-parity runbook (`docs/render/render-parity-runbook.md`
+   section 8 at 5820432c1).
 
 **§5.40, seventh pass (2026-08-19 — the viewmodel-parity slice).** Three movements:
 

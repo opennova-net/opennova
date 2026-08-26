@@ -5,7 +5,8 @@ extends Node
 # standalone game, equips NOVA_VM_WEAPON (default WPN_M16BURST), and dumps the
 # viewmodel rig's placement inputs plus every bone's camera-relative transform so
 # they can be compared numerically against the retail FP bone-builder
-# transliteration in scripts/render/fp_bone_oracle.py (--probe-log). Run by hand:
+# transliteration that lived in scripts/render/fp_bone_oracle.py (--probe-log;
+# retired 2026-08-26 with the Python tooling, history at 5820432c1). Run by hand:
 #   NOVA_RESOURCE_DIR=<game dir> NOVA_MISSION_BMS=00TRa.bms NOVA_EXPANSION=revx02
 #   NOVA_MISSION_PATH=<loose .bms path when the mount lacks it>
 #   Godot --path godot --resolution 2000x1200 res://tests/game/vm_bone_probe.tscn
@@ -122,7 +123,8 @@ func _dump(presenter: LocalPlayerPresenter) -> void:
 
 # Clip sweep: pose every frame of every variant of these keys on BOTH parts
 # (the gun carries the receiver bones, the arms carry the left hand/fingers)
-# and dump each bone's global origin, for fp_bone_oracle.py --sweep-log. The
+# and dump each bone's global origin (the --sweep-log input of the retired
+# fp_bone_oracle.py). The
 # whole sweep is synchronous (play_body_clip_variant_at_time writes the
 # Skeleton3D in the same call), so the presenter's per-tick playhead pin never
 # runs between a pose and its dump.

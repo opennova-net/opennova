@@ -69,8 +69,9 @@ static int roundtrip(const char *path) {
 
     same = (memcmp(bufA, bufB, (size_t)orig_size) == 0);
 
-    // The memory-backed reader is part of the exported flat C interface used
-    // by DCC adapters. Pin it against the same bytes as the file adapter.
+    // The memory-backed reader is the VFS byte path the runtime takes (the
+    // simassets model cache, ObjectData's bytes load). Pin it against the same
+    // bytes as the file reader.
     memset(&model, 0, sizeof(model));
     memory_read_ok = threedi_3di3_read_memory(bufA, (size_t)orig_size, &model) == 0;
     if (memory_read_ok) threedi_3di3_free(&model);

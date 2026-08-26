@@ -1,8 +1,9 @@
 #include "mission/mission.h"
 
 // MissionDocument: the in-memory mission and its mutation operations. The .mis
-// text form, typed-record conversions, and flat C ABI each live in their own TU
-// beside this one (quality campaign W3-1); this file is the document itself.
+// text form and the typed-record conversions each live in their own TU beside
+// this one (quality campaign W3-1; the flat C ABI TU retired with the FFI,
+// ADR 0038); this file is the document itself.
 
 #include "mission_detail.h"
 #include "mission_mis.h"
