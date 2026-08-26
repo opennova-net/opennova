@@ -84,15 +84,10 @@ void ObjectModel::rebuild_scene() {
 		}
 		MeshInstance3D *instance = memnew(MeshInstance3D);
 		instance->set_mesh(mesh);
-		instance->set_cast_shadows_setting(shadow_caster_layers_ != 0
-						? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
-						: GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		// Mission placement has already resolved the engine's two-part
-		// building/vehicle reflection policy; this device leg only maps that
-		// typed decision to Godot visibility layers.
-		instance->set_layer_mask(
-				(mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR) |
-				shadow_caster_layers_);
+		// The stored presentation policy: fresh instances take the layer/cast
+		// decision the owner already made, so a rebuild never resets it.
+		instance->set_cast_shadows_setting(presentation_cast_setting(false));
+		instance->set_layer_mask(presentation_layer_mask(false));
 		Ref<ShaderMaterial> material = material_for_index(material_index);
 		// One imported submesh is one retail strip. Transparent strips must own
 		// their material instance because Godot stores render_priority on the
@@ -143,9 +138,8 @@ void ObjectModel::rebuild_scene() {
 			auxiliary_instance->set_mesh(mesh);
 			auxiliary_instance->set_material_override(auxiliary_material);
 			auxiliary_instance->set_cast_shadows_setting(
-					GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-			auxiliary_instance->set_layer_mask(
-					mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR);
+					presentation_cast_setting(true));
+			auxiliary_instance->set_layer_mask(presentation_layer_mask(true));
 			auxiliary_instance->set_meta("_opennova_auxiliary_draw", true);
 			auxiliary_instance->set_meta(p_kind_meta, true);
 			Node *surface_parent = instance->get_parent();

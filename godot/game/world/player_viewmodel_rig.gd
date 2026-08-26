@@ -265,13 +265,12 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# (retail's "viewmodel first" draw into the same backbuffer [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror, Q3, and
 	# capture cameras exclude the layer. The gameplay camera admits the world
-	# shadow-caster marker layers. Strip those markers here rather than
-	# preserving ObjectModel's defaults: the gun must never leak into world
-	# shadows.
-	set_visual_layers(_viewmodel, Water.VISUAL_LAYER_VIEWMODEL, false)
-	set_shadow_casting(_viewmodel, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+	# shadow-caster marker layers; the viewmodel policy strips those markers
+	# so the gun never leaks into world shadows. Both stamps are edge-gated
+	# on the model (policy value / scene build serial), never per frame.
 	for part in _vm_parts:
 		if is_instance_valid(part):
+			part.set_presentation_layer(ObjectModel.PRESENTATION_LAYER_VIEWMODEL)
 			part.set_viewmodel_pass(true)
 	# The card switch: while the SIGHTS card is up, the FP model does not draw —
 	# the frame shows one or the other [orig: selectors/clear @0x5ca299..0x5ca304;
@@ -353,38 +352,6 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 				for register in AvatarDatabase.part_camo_registers():
 					visual.clear_ctrl_override(CTRL_OWNER_FP_ARMS_CAMO, register)
 		visual.end_ctrl_update()
-
-
-# Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).
-# VisualInstance3D.layers is per-instance - a container's value does not
-# propagate to children - and both player models are ObjectModel subtrees
-# (mesh instances under Robj/Skeleton3D nodes) whose rebuild() recreates them
-# on the default layer, so the callers (this rig's viewmodel stamp and the
-# presenter's avatar/held-weapon stamps) re-stamp every frame.
-static func set_visual_layers(root: Node, layer_mask: int,
-		preserve_shadow_caster_layers: bool = true) -> void:
-	if root is VisualInstance3D:
-		var visual := root as VisualInstance3D
-		# Preserve the render-slot capture channel beside the caster marker:
-		# SlotShadow assigns it per frame and these per-frame presenter stamps
-		# must not strip an admitted body's capture bit.
-		var preserved := Water.VISUAL_LAYER_SHADOW_CASTER_MASK \
-				| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
-		var caster_layers := visual.layers & preserved \
-				if preserve_shadow_caster_layers else 0
-		visual.layers = layer_mask | caster_layers
-	for child in root.get_children():
-		set_visual_layers(child, layer_mask, preserve_shadow_caster_layers)
-
-
-# Stamp a Godot shadow-submission policy onto every geometry instance under
-# `root`. Kept beside set_visual_layers because ObjectModel.rebuild() can
-# recreate mesh children between frames, so player presentation reapplies both.
-static func set_shadow_casting(root: Node, setting: int) -> void:
-	if root is GeometryInstance3D:
-		(root as GeometryInstance3D).cast_shadow = setting
-	for child in root.get_children():
-		set_shadow_casting(child, setting)
 
 
 # Pull the resolved weapon.def view record from the world; null when no weapon.def (or the

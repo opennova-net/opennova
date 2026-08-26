@@ -14,6 +14,7 @@
 // GDScript origin); docs/adr/0007 + docs/world/world-wac-ai-re.md §14 for
 // the skeletal semantics, docs/render/render-lighting-re.md for lighting.
 
+#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -172,6 +173,30 @@ public:
 				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
 	};
 
+	// Which camera population this model's surface instances belong to. Retail
+	// decides "drawn by this camera" with one branch per submit (the FP body is
+	// a suppressed submit, the FP gun a viewmodel-first draw); Godot keeps that
+	// decision as per-instance layer/cast state, so the decision is STORED here
+	// and written on its edges + inside rebuild_scene, never per frame
+	// (retail: BoneCallback_org0_World @0x4e3940 the body submit gate;
+	// Player_RenderFirstPersonViewModel @0x4ded60, see
+	// docs/world/world-wac-ai-re.md section 13.1).
+	enum PresentationLayer {
+		// The ordinary entity: the mirror-policy world layer plus this model's
+		// shadow-caster markers; casts when it carries a marker.
+		PRESENTATION_LAYER_WORLD = 0,
+		// The local player's body/held gun as a drawn entity (third person,
+		// the debug body): the world layer, markers kept, always casting so
+		// the render-slot capture cameras photograph it.
+		PRESENTATION_LAYER_LOCAL_BODY = 1,
+		// The same models while first person hides them from every camera by
+		// LAYER (the hidden FP layer), still casting for the slot capture.
+		PRESENTATION_LAYER_LOCAL_BODY_HIDDEN = 2,
+		// The FP arms/gun: the viewmodel layer alone (every caster marker
+		// stripped so the gun never leaks into world shadows), never casting.
+		PRESENTATION_LAYER_VIEWMODEL = 3,
+	};
+
 	// Fixed layout returned by profile_awake_frame(delta). Keeping this a
 	// packed numeric record lets the F3 feed cross the script boundary once per
 	// frame without allocating Dictionaries or Strings on the render hot path.
@@ -276,6 +301,7 @@ private:
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
+	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool native_frame_ = false;
@@ -381,7 +407,14 @@ private:
 
 	// --- core (nova_object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
-	void apply_shadow_casting_below(Node *p_root);
+	// The stored layer/cast decision for one surface instance (auxiliary
+	// postmultiply draws never cast under the world policy) and the walk that
+	// re-applies it to every instance below `p_root`, preserving the
+	// render-slot capture bits SlotShadow stamps beside it.
+	uint32_t presentation_layer_mask(bool p_auxiliary) const;
+	GeometryInstance3D::ShadowCastingSetting presentation_cast_setting(
+			bool p_auxiliary) const;
+	void apply_presentation_layer_below(Node *p_root);
 	// The per-entry lighting factors (effectScale, interior flag, daylight t)
 	// as instance state on every surface instance.
 	void stamp_entity_lighting_instances();
@@ -491,6 +524,8 @@ public:
 			const PackedStringArray &p_part_local_registers = PackedStringArray());
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
+	void set_presentation_layer(PresentationLayer p_layer);
+	PresentationLayer get_presentation_layer() const { return presentation_layer_; }
 	void set_native_frame(bool p_native) { native_frame_ = p_native; }
 	bool get_native_frame() const { return native_frame_; }
 	void set_shadow_caster_enabled(bool p_enabled);
@@ -670,3 +705,4 @@ public:
 
 } // namespace godot
 VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);
+VARIANT_ENUM_CAST(godot::ObjectModel::PresentationLayer);

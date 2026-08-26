@@ -572,17 +572,11 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	# Same layer rule as the body: first person hides it from every camera by
 	# LAYER while keeping it a shadow source (the witnessed mirror never draws
 	# persons or their held weapons — the reflection collects vehicles only
-	# [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]).
+	# [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]). The
+	# model stores the decision and rewrites its instances on the edge only.
 	var draw_held_weapon := _third_person or debug_body_in_first_person
-	PlayerViewmodelRig.set_visual_layers(_held_weapon, Water.VISUAL_LAYER_WORLD
-			if draw_held_weapon else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
-	# Always camera-renderable: first person hides by LAYER alone so the
-	# render-slot capture cameras can photograph the silhouette
-	# (SHADOWS_ONLY geometry is invisible to every camera, capture
-	# viewports included; the beauty camera excludes both the FP layer and
-	# the capture channels at setup()).
-	PlayerViewmodelRig.set_shadow_casting(_held_weapon,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
+	_held_weapon.set_presentation_layer(ObjectModel.PRESENTATION_LAYER_LOCAL_BODY
+			if draw_held_weapon else ObjectModel.PRESENTATION_LAYER_LOCAL_BODY_HIDDEN)
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -722,16 +716,13 @@ func _update_avatar(pos: Vector3) -> void:
 	# enters the mirror [orig: Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a; the
 	# viewmodel pass stays Player_RenderFirstPersonViewModel @ 0x4ded60].
-	# Stamped every frame: ObjectModel.rebuild() recreates its mesh
-	# children on the default layer.
+	# Retail's "not drawn" is a skipped submit, not a state write: the model
+	# stores the policy and rewrites its instances only when it changes (and
+	# inside its own rebuild), never per frame.
 	_avatar.visible = true
 	var draw_avatar := _third_person or debug_body_in_first_person
-	PlayerViewmodelRig.set_visual_layers(_avatar, Water.VISUAL_LAYER_WORLD
-			if draw_avatar else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
-	# Always camera-renderable: hidden by LAYER alone (see the held-weapon
-	# stamp above) so the slot capture cameras see the posed body.
-	PlayerViewmodelRig.set_shadow_casting(_avatar,
-			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
+	_avatar.set_presentation_layer(ObjectModel.PRESENTATION_LAYER_LOCAL_BODY
+			if draw_avatar else ObjectModel.PRESENTATION_LAYER_LOCAL_BODY_HIDDEN)
 	_update_held_weapon(overlay)
 	var sim = _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""
