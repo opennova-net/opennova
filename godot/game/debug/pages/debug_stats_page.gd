@@ -723,7 +723,7 @@ func render_window(frames: int, sums: PackedInt64Array, maxes: PackedInt64Array,
 				_set_metric(item, 2, "")
 			_:
 				pass
-	_refresh_info(sums, counts, frames, runtime, sim)
+	_refresh_info(sums, maxes, counts, frames, runtime, sim)
 
 
 func _build_rows() -> void:
@@ -773,7 +773,8 @@ func _set_info(id: String, text: String) -> void:
 # The counter pulls: live Dictionaries/typed stats read at refresh cadence
 # only, every source optional (null when its mission-scoped owner is gone) so
 # SP, listen-host and joiner sessions all render what they have.
-func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int,
+func _refresh_info(sums: PackedInt64Array, maxes: PackedInt64Array,
+		counts: PackedInt32Array, frames: int,
 		runtime: MissionPresentation, sim: Simulation) -> void:
 	# Sources are mission-scoped and can disappear between divided refreshes.
 	# Clear every conditional cell first so reload/menu transitions cannot retain
@@ -784,17 +785,19 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 			"render_slot", "physics_callbacks"]:
 		_set_info(id, "")
 	var frame_info := "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS))
-	# Godot's own TIME_PROCESS (process + deferred flush + RS sync + draw):
-	# the cross-check for the callback + flush + draw rows above.
+	# Godot's own TIME_PROCESS (process + deferred flush + RS sync + draw) is a
+	# once-per-second worst-iteration figure, so it reads as a peak: the
+	# cross-check for the callback + flush + draw rows' PEAK column.
 	if frames > 0 and counts[FrameStatsBoard.FRAME_TIME_PROCESS] > 0:
-		frame_info += " · process %.2f ms" % (
-				float(sums[FrameStatsBoard.FRAME_TIME_PROCESS]) / 1000.0 / frames)
+		frame_info += " · godot process peak %.2f ms" % (
+				float(maxes[FrameStatsBoard.FRAME_TIME_PROCESS]) / 1000.0)
 	_set_info("frame", frame_info)
 	if frames > 0 and counts[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS] > 0:
-		# The servers' window is a per-frame max, the callbacks a sum: the
-		# difference bounds the empty-space step tax, it is not a measurement.
-		_set_info("physics_callbacks", "server max %.2f ms · %.1f iter/f" % [
-				float(sums[FrameStatsBoard.FRAME_PHYSICS_SERVER]) / 1000.0 / frames,
+		# The servers' window is Godot's once-per-second peak, the callbacks a
+		# per-frame sum: the two bound the empty-space step tax, they do not
+		# measure it.
+		_set_info("physics_callbacks", "server peak %.2f ms · %.1f iter/f" % [
+				float(maxes[FrameStatsBoard.FRAME_PHYSICS_SERVER]) / 1000.0,
 				float(sums[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS]) / frames])
 	_set_info("render", "%d draws · %d objs · %s prims · %d nodes" % [
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
