@@ -126,8 +126,8 @@ When a format already exists inside a runtime lib and passes the step-0 gate:
 5. Sweep the stragglers: doc path pointers (targeted per-file
    edits, never repo-wide sed — RE records mix moved and staying paths),
    README tables, `engine/CLAUDE.md` group lists.
-5. Verify like step 4 plus: the format's full roundtrip suite green with ZERO
-   `fixtures/**` drift and any touched GUT surface in
+6. Verify like step 4 plus: the format's full roundtrip suite green with ZERO
+   `fixtures/**` drift, all lint gates, and any touched GUT surface in
    single-file isolation after `scripts/build_godot.sh` + full editor restart
    (the `gut` skill's silent-drop check).
 

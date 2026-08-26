@@ -1759,7 +1759,7 @@ locomotion pose, clean mirror return post-reload.
 
 Session 2 (2026-07-09, same train) closed the kind-dword gap and landed the rest of the
 producer: `engine/formats/def` parses `special_hold`/`attack_anim` (ctest `def_parse_weapons`,
-both ctypes mirrors extended, layout-pinned by `test_def_ffi_mirror`);
+the ctypes mirrors that then pinned the layout retired with the FFI, ADR 0038);
 `WeaponDatabase` exposes them; `Simulation` refreshes the held kind + the
 scoped flag onto the entity pre-tick (`apply_player_input_pre_tick` — the @0x4b5d7f
 refresh) and stamps the fire-path attack via `infantry_weapon_attack_stamp`

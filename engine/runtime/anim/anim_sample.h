@@ -2,8 +2,8 @@
 //
 // Samples a parsed .bad into per-frame, per-bone transforms in the engine's NATIVE
 // space (Y-up, same as the original NovaLogic engine and as Godot). This is NOT the
-// Blender Z-up convention in blender/opennova/animation_build.py -- that conversion only
-// exists because Blender is Z-up. The proven Godot port (oscarmike opennova_adm) reads
+// Blender Z-up convention the retired Blender exporter used (ADR 0038) -- that
+// conversion only existed because Blender is Z-up. The proven Godot port (oscarmike opennova_adm) reads
 // BAD bone data natively: bone position as-is, the channel quaternion reordered only
 // (no axis swap); the mesh is the one carrying the (-x,y,z) handedness flip, and the
 // skin's global-rest-inverse bind keeps mesh and bones consistent.

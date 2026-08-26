@@ -7,16 +7,19 @@ hardening, and project health. Divergences from the original engine belong in
 
 ## Cleanup & verification backlog
 
-- [ ] Retail-LAN parity 24-cell verdict: blocked on an opennova-int MCP
-      harness defect — the opennova-int MCP's single-role `onhook_host_lan`/
-      `onhook_join_lan` pass role config via child env and never render `onhook.cfg`,
-      so `generate_parity_manifest.ps1` rejects every RO/OO server cfg snapshot
-      ("lacks one exact LanHostCallsign"). Fix belongs in opennova-int (make
-      `LaunchLanRole` render the cfg like the `onhook_run_lan_pair` half); when it
-      lands, run a full 24-cell suite under a NEW SuitePrefix to produce the verdict.
-      Until then acceptance rests on the wire-ready witnesses + `diff_vs_golden.ps1`
-      gates (both GREEN on the 2026-08-05 suites, 24/24 cells captured cleanly).
-      Details: `.agents/retail-lan-parity.md` §9
+- [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
+      (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
+      over `export_parity_corpus.py`) was retired with the Python FFI (ADR 0038; last
+      at 5820432c1), so no PARITY_STATUS verdict exists. To produce one: run the four
+      `scripts/net/run_parity_topology.ps1` cells (RR/RO/OR/OO) per case under one
+      RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness
+      + `diff_vs_golden.ps1`, and re-express the retired verifier's RO/OR/OO-vs-RR
+      comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
+      PowerShell verifier. Upstream blocker still open in opennova-int: the single-role
+      `onhook_host_lan`/`onhook_join_lan` MCP tools pass role config via child env and
+      never render `onhook.cfg` (make `LaunchLanRole` render it like the
+      `onhook_run_lan_pair` half). Baseline: the 2026-08-05 suites captured 24/24 cells
+      cleanly, wire-ready + `diff_vs_golden` GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       `engine/runtime/terrain` carries 23 anchors across 15 files and `godot/src/terrain/` 18
       across 8 of its ~16 source files (the cpt/til/trn resource-format files and the
@@ -53,9 +56,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;
       waves 1-4 landed as #310-#375): perf-span unify, sim debug-snapshot
       narrowing (debug half only), and remaining runtime push-downs — opportunistic
-- [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
-      rattrib/pattrib magic values — #365 landed the net-message-id and
-      witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
 - [ ] Cross-mission debug-intent replay: `DebugSession._explicit_values` is never
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on
@@ -77,8 +77,8 @@ hardening, and project health. Divergences from the original engine belong in
       never been deployed to production — steps in [DEPLOY.md](DEPLOY.md), the
       operator sequence in `plan/pr21-cutover-runbook.md` (its "#136 open"
       premise is historical; commands remain current)
-- [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, Python, and Godot gates.
-- [ ] Full Linux core tests: add an Ubuntu leg for the complete native/Python suite after triaging any platform-only failures. Acceptance: the full CTest and Python suites run on Linux for every PR without relying on the net-only or packaging jobs.
+- [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
+- [ ] Full Linux core tests: add an Ubuntu leg for the complete native suite after triaging any platform-only failures. Acceptance: the full CTest suite runs on Linux for every PR without relying on the net-only or packaging jobs.
 - [ ] Incremental conventional linting: establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 - [ ] Two ctests are `DISABLED TRUE` in `tests/CMakeLists.txt` with reasons recorded but no owner: `parametric_parity` (long byte-identical CPT fixture run, disabled pending CI stability/perf cost) and `particle_smoke_all_fixtures` (waiting on the full 77-file corpus being mirrored into `fixtures/particle/`). Acceptance: each is either re-enabled or converted into an env-gated test alongside the rest of the asset-gated set (`docs/asset-gated-tests.md`).
 - [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless

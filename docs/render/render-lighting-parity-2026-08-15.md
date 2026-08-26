@@ -150,9 +150,10 @@ repeatable driver. The scene validates the catalog variant order and mission
 SHA-256 before loading, realizes an exact catalog camera/TOD, freezes the
 production shell after settling, and records five variants per selection:
 `beauty`, `shadows_off`, `lighting_only`, `unshaded`, and
-`directional_shadow_atlas`. See the
-[render-parity runbook](render-parity-runbook.md#2-freeze-the-source-then-capture-opennova)
-for the exact invocation and environment contract.
+`directional_shadow_atlas`. See the retired
+render-parity runbook (`docs/render/render-parity-runbook.md` section 2 at commit
+5820432c1; retired 2026-08-26, ADR 0038) for the invocation and environment
+contract that produced these captures.
 
 ## Three-mission fixture scope
 
@@ -307,7 +308,7 @@ an ancestor of master by that PR's merge commit; the prior frozen source
 `58ea3e5ff…` is a master commit and stays reachable), fixture catalog v5 at
 SHA-256
 `d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e` — minted by
-[`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
+the retired `scripts/render/mint_retail_catalog.py` (5820432c1) from
 the settled retail sessions, every settled pose kept exactly —
 stage/restore v3 (tool 3.0.0), raw capture bundle v4 from bridge 1.5/onHook
 0.6.0, registered capture v5 (tool 4.1.0), and comparison v6 (tool 4.0.0).
@@ -455,8 +456,9 @@ Every registered pair must satisfy all of the following:
   `descriptive_explicit_presentation_regions`. Those numbers are not
   pixel-parity gates.
 
-The exact capture, registration, and comparison commands are maintained in
-the [render-parity runbook](render-parity-runbook.md#3a-retail-re-register-retained-bundles).
+The exact capture, registration, and comparison commands are recorded in the
+retired runbook (`docs/render/render-parity-runbook.md` section 3a at 5820432c1);
+the tooling is gone, the published records carry their own provenance.
 Raw bundles remain machine-local under `.scratch/` per the asset-gated policy;
 selected registered derivatives may be published only with their comparison
 manifest and captions intact.
@@ -634,10 +636,9 @@ Use
 [`build_render_comparison.ps1`](../../scripts/render/build_render_comparison.ps1)
 only for `subsystem-ab` evidence whose OpenNova variants share one frozen
 animated phase. Registered cross-engine evidence goes through
-[`register_retail_capture.py`](../../scripts/render/register_retail_capture.py)
-and
-[`build_retail_side_by_side.py`](../../scripts/render/build_retail_side_by_side.py).
-The latter rejects pre-normalized or undeclared inputs, identity/build
+the retired `scripts/render/register_retail_capture.py` and
+`scripts/render/build_retail_side_by_side.py` (5820432c1).
+The latter rejected pre-normalized or undeclared inputs, identity/build
 mismatches, and presentation-contract drift; it preserves both witness types
 and emits the qualitative metric policy with every comparison. Neither metric
 set substitutes for subsystem-specific visual review.

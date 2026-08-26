@@ -21,9 +21,13 @@ current game runtime.
 
 ## Decision
 
-1. The repository has no Python, Qt importer, Blender add-on, or DCC-specific
-   package. The cut is literal: no compatibility modules or deprecated entry
-   points remain.
+1. The repository has no Python product or toolchain code: no Python packages,
+   Qt importer, Blender add-on, DCC-specific package, `pyproject.toml`/lockfile,
+   or Python test suite. Stdlib-only repository lint and maintainer scripts
+   remain (`scripts/lint/`, the CI maturity gates; `scripts/ida/cite_sweep.py`;
+   `scripts/net/diff_0a.py`; `tools/net/pcap_to_hexcap.py`) and run on a stock
+   `actions/setup-python` interpreter. For product code the cut is literal: no
+   compatibility modules or deprecated entry points remain.
 2. Native ASE, TDP/3DP, and OED authoring modules are removed. Godot
    `ObjectData` loads and evaluates immutable 3DI runtime documents only.
 3. ADM and BAD remain runtime input formats. Their readers remain; repository
@@ -43,15 +47,40 @@ current game runtime.
 
 - The runtime module has one small interface: load 3DI and expose the parsed
   document for rendering, collision, animation, and inspection.
-- Build, test, and release no longer install Python or package DCC tooling.
+- Build, test, and release no longer need a Python toolchain (uv, pyproject,
+  wheels) or package DCC tooling; the CI lint step uses the runner's stock
+  interpreter.
 - Checked-in native WAC tables and Godot shader sources are authoritative
   sources rather than outputs whose missing Python generators are implied.
 - Historical reverse-engineering records may continue to discuss ASE, OED, or
   3DP as provenance. They must not advertise those paths as current products.
 
+- `engine/base/vfs/vfs_capi.{h,cpp}` and `engine/formats/mission/mission_capi.{h,cpp}`
+  (the flat C ABI over the VFS and MissionDocument) go with `opennova_shared`; the
+  `abi_export_identity` ctest, `scripts/lint/abi_exports_check.py` and its baseline
+  retire with them.
+- The `.bad`/`.adm` writers (`bad_write.cpp`, `adm_write`) and their byte-exact
+  round-trip proofs (`bad_roundtrip`, `adm_write`, `tests/test_bad_write_ffi.py`)
+  retire; the read side stays pinned by `bad_parse` and the `adm_*` ctests.
+- Re-expressed natively: `tests/test_bad_pos_derivation.py` becomes the synthetic
+  `anim_sample` pin plus the `OPENNOVA_JO_ASSETS`-gated `anim_positions_from_model_corpus`
+  ctest; `simassets_adm_skeletal_clips_weapon_channel` returns on a committed twist
+  fixture; the shader-resource pytests become `godot/tests/shader_resource_contract_test.gd`
+  and `shader_provenance_pins_test.gd` (the retail `.fx` decode legs go with
+  `third_party/modsuperoed`). GUT tests that authored their 3DI inputs through the
+  removed edit/export bindings load fixtures minted once from that path
+  (`fixtures/threedi/synthetic/`, recipes in its README).
+- The `scripts/lint/` gates, `scripts/ida/cite_sweep.py`, `scripts/net/diff_0a.py`
+  and `tools/net/pcap_to_hexcap.py` stay (decision 1); the render-parity
+  publication tools (`scripts/render/*.py`) and the net parity-matrix harness
+  (`export_parity_corpus.py` and its `.ps1` drivers) go, being FFI- and
+  Qt-bound.
+
 ## Verification
 
-- The tracked tree contains no Python, ASE, 3DP, or Blender scene files.
+- The tracked tree contains no Python package or product code, ASE, 3DP, or
+  Blender scene files; the only `.py` files are the stdlib scripts named in
+  decision 1.
 - Native and Godot builds succeed with no authoring-format or shared-FFI target.
 - Runtime tests exercise ADM/BAD readers and immutable 3DI fixtures.
 - Active product and release documentation names only the native runtime and
