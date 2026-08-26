@@ -43,7 +43,8 @@ and rejects runtime topology switches or source-generation paths.
 each of the 104 checked-in wrappers plus its transitive include closure,
 preserving the former composed-source regression sensitivity. A deliberate,
 witnessed shader change re-dumps with
-`OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1`; like the state-vector dump, that run
+`OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1` set for the GUT run; like the state-vector
+dump, that run
 rewrites the golden and intentionally fails.
 
 **T2 — swatch A/B (local, mandatory per REN slice).**
