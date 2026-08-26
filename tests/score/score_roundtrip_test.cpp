@@ -8,8 +8,8 @@
 // MEDICSAVE 2.
 //
 // The retail sweep is env-gated the way tests/mission/mission_corpus_test.cpp
-// gates its corpus: set OPENNOVA_SCORE_INI to a local score.ini (extract it from
-// the game archives with pyopennova's Vfs) and this test additionally asserts it
+// gates its corpus: set OPENNOVA_SCORE_INI to a local score.ini from a licensed
+// game installation and this test additionally asserts it
 // parses, carries the 12 shipped blocks, and that its Co-op row 2 reads
 // ENEMYKILL 5 -- the value the S2C 0x81 score mirror reproduces in the retail
 // capture (5, 10, 20, ... 220). Unset, that half prints a skip line and passes.

@@ -8,8 +8,8 @@
 //
 // These were file-local statics when every parser lived in one file. They now cross
 // a TU boundary, so they need linkage — but names this generic (read_file, tokenize,
-// next_line) must not enter the global namespace: engine/formats/avatars, engine/formats/ase, engine/formats/tdp
-// and engine/base/resource_index each have their own static read_file or tokenize, and one
+// next_line) must not enter the global namespace: engine/formats/avatars and
+// engine/base/resource_index each have their own static read_file or tokenize, and one
 // of those turning external later would collide. Hence the namespace; the family
 // TUs pull it in wholesale, so no call site changes.
 

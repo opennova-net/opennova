@@ -17,7 +17,7 @@ using namespace defscan; // the shared .def scanner, unqualified as before
 /* Legacy Single-Entry Parsing                                               */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_def(const char *path, DefFile *out) {
+int def_parse_def(const char *path, DefFile *out) {
     memset(out, 0, sizeof(*out));
 
     size_t file_len;
@@ -123,13 +123,13 @@ DEF_EXPORT int def_parse_def(const char *path, DefFile *out) {
     return 0;
 }
 
-DEF_EXPORT void def_free_def(DefFile *f) {
+void def_free_def(DefFile *f) {
     if (!f) return;
     free(f->weapon.actions);
     memset(f, 0, sizeof(*f));
 }
 
-DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n) {
+double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n) {
     /* [orig: calculate_loadout_weight @ 0x55f1f0] per weapon:
        weaponweight + (ammo_count > 0 ? ammo_count : maxclips) * clipweight. */
     if (!weapons) return 0.0;
@@ -142,7 +142,7 @@ DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *amm
     return total;
 }
 
-DEF_EXPORT double def_extra_ammo_weight(const DefWeaponDef *w, int count) {
+double def_extra_ammo_weight(const DefWeaponDef *w, int count) {
     /* [orig: the armory grenade/extra-ammo leg @ 0x5655c9..0x56561c and the
        PLAYER_INFO sub-weapon/grenade terms in the @ 0x55f1f0 family]: the
        category-3 rows are extra-ammo legs, not parent slots — count *
@@ -153,7 +153,7 @@ DEF_EXPORT double def_extra_ammo_weight(const DefWeaponDef *w, int count) {
     return (double)(clips > 0 ? clips : 0) * (double)w->clipweight;
 }
 
-DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight) {
+DefEncumbrance def_encumbrance_class(double weight) {
     /* [orig: update_player_info_weight_and_weapon_icons @ 0x55f480] the exact
        witnessed thresholds: >= 66.6 HEAVY, >= 33.3 NORMAL, else LIGHT. */
     if (weight >= 66.6) return DEF_ENCUMBRANCE_HEAVY;
@@ -169,7 +169,7 @@ static int round_type_ieq(const char *a, const char *b) {
     return *a == *b;
 }
 
-DEF_EXPORT int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
+int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
                                          size_t parent_index) {
     /* [orig: the stricmp walk over entry+192.. @ 0x55def0 / @ 0x55e8b0 /
        @ 0x55f1f0]: same-round entries expand the parent's ammo rows; the

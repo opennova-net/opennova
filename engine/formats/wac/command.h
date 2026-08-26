@@ -4,7 +4,7 @@
 // (condition/action), replication flags, param types, and derived argc/call_conv.
 // Extracted from the binary command table (Jointops.exe @0x82D290, 165 x 44-byte
 // records); argc/call_conv derived per the WacScript_InitAndLoad classification.
-// The generated rows live in command_table.gen.cpp.
+// The authoritative rows live in command_table_data.cpp.
 #ifndef OPENNOVA_WAC_COMMAND_H
 #define OPENNOVA_WAC_COMMAND_H
 
@@ -28,7 +28,7 @@ struct CommandDef {
 inline constexpr bool cmd_is_condition(const CommandDef &c) { return (c.flags & 0xFE) == 0; }
 inline constexpr bool cmd_is_replicated(const CommandDef &c) { return (c.flags & 0x18) != 0; }
 
-// The registry (generated). 165 entries; index == bytecode command id.
+// The registry. 165 entries; index == bytecode command id.
 const CommandDef *wac_commands();
 int wac_command_count();
 

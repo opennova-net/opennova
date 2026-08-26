@@ -1,7 +1,7 @@
 import axios from 'axios';
-import type { ToolAsset, ToolOs, ToolRelease } from '../types/downloads';
+import type { GameRelease, ReleaseAsset } from '../types/downloads';
 
-// Game and tool deliverables publish as GitHub Release assets on this repo, not
+// Game deliverables publish as GitHub Release assets on this repo, not
 // to S3 (only OpenNova Launcher rides S3, see api/downloads.ts). We skip its
 // "launcher-" tags so GitHub's /releases/latest cannot surface the wrong product.
 const RELEASES_URL =
@@ -23,21 +23,10 @@ interface GithubRelease {
 
 /**
  * Maps a release-asset filename to its presentation metadata. Names are stable and
- * version-suffixed; canonical naming lives in release/deliverables.toml. Returns null
- * for anything unrecognized (defensive against future additions).
+ * version-suffixed. Returns null for anything unrecognized.
  */
-function classifyAsset(name: string): Omit<ToolAsset, 'filename' | 'sizeBytes' | 'sizeHuman' | 'downloadUrl'> | null {
-  const rules: Array<{ re: RegExp; meta: Omit<ToolAsset, 'filename' | 'sizeBytes' | 'sizeHuman' | 'downloadUrl'> }> = [
-    { re: /^opennova-game-windows-/, meta: { product: 'OpenNova Game', os: 'windows', kind: 'app' } },
-    { re: /^opennova-asset-importer-windows-/, meta: { product: 'Asset Importer', os: 'windows', kind: 'tool' } },
-    { re: /^opennova-blender-ase-exporter-/, meta: { product: 'Blender ASE Exporter', os: 'any', kind: 'plugin' } },
-  ];
-  for (const { re, meta } of rules) {
-    if (re.test(name)) {
-      return meta;
-    }
-  }
-  return null;
+function classifyAsset(name: string): Pick<ReleaseAsset, 'product'> | null {
+  return /^opennova-game-windows-/.test(name) ? { product: 'OpenNova Game' } : null;
 }
 
 /** Formats a raw byte count as a compact human string (GitHub gives raw bytes). */
@@ -56,33 +45,32 @@ export function formatBytes(bytes: number): string {
   return `${rounded} ${units[unit]}`;
 }
 
-function isToolRelease(release: GithubRelease): boolean {
+function isGameRelease(release: GithubRelease): boolean {
   const tag = release.tag_name || '';
   return !release.draft && !release.prerelease && /^v\d/.test(tag) && !tag.startsWith('launcher');
 }
 
 /**
- * Fetches the latest tool release from the GitHub API and returns its recognized
- * deliverables as direct downloads. Ordered apps-first for a stable presentation.
+ * Fetches the latest game release from the GitHub API and returns its recognized
+ * deliverables as direct downloads.
  *
  * Note: unauthenticated GitHub API allows 60 req/hr per IP — one request per page load
  * is fine; cache client-side or proxy via the backend if that ever becomes a concern.
  */
-export async function fetchLatestToolRelease(signal?: AbortSignal): Promise<ToolRelease> {
+export async function fetchLatestGameRelease(signal?: AbortSignal): Promise<GameRelease> {
   const response = await axios.get<GithubRelease[]>(RELEASES_URL, {
     signal,
     headers: { Accept: 'application/vnd.github+json' },
   });
 
   const releases = Array.isArray(response.data) ? response.data : [];
-  const latest = releases.find(isToolRelease);
+  const latest = releases.find(isGameRelease);
   if (!latest) {
-    throw new Error('No tool release found');
+    throw new Error('No game release found');
   }
 
-  const kindOrder: Record<ToolAsset['kind'], number> = { app: 0, tool: 1, plugin: 2 };
-  const assets: ToolAsset[] = latest.assets
-    .map((asset): ToolAsset | null => {
+  const assets: ReleaseAsset[] = latest.assets
+    .map((asset): ReleaseAsset | null => {
       const meta = classifyAsset(asset.name);
       if (!meta) {
         return null;
@@ -95,11 +83,10 @@ export async function fetchLatestToolRelease(signal?: AbortSignal): Promise<Tool
         downloadUrl: asset.browser_download_url,
       };
     })
-    .filter((asset): asset is ToolAsset => asset !== null)
-    .sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.product.localeCompare(b.product));
+    .filter((asset): asset is ReleaseAsset => asset !== null);
 
   if (assets.length === 0) {
-    throw new Error('Latest release has no recognized tool downloads');
+    throw new Error('Latest release has no recognized game download');
   }
 
   return {
@@ -107,21 +94,4 @@ export async function fetchLatestToolRelease(signal?: AbortSignal): Promise<Tool
     htmlUrl: latest.html_url,
     assets,
   };
-}
-
-/** Detects the visitor's OS from the browser, defaulting to Windows when unknown. */
-export function detectOs(): Exclude<ToolOs, 'any'> {
-  const nav = typeof navigator !== 'undefined' ? navigator : undefined;
-  if (!nav) {
-    return 'windows';
-  }
-  const uaData = (nav as unknown as { userAgentData?: { platform?: string } }).userAgentData;
-  const hint = `${uaData?.platform ?? ''} ${nav.platform ?? ''} ${nav.userAgent ?? ''}`.toLowerCase();
-  if (hint.includes('mac')) {
-    return 'macos';
-  }
-  if (hint.includes('win')) {
-    return 'windows';
-  }
-  return 'windows';
 }

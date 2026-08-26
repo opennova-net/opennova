@@ -1,12 +1,10 @@
-// ObjectData — the GDScript surface: method/constant bindings and the
-// object_changed signal.
+// ObjectData's runtime GDScript surface: immutable .3di loading, inspection,
+// and evaluation plus the whole-content replacement signal.
 #include "object/nova_object_data_internal.h"
 
 using namespace novaobj;
 
 void ObjectData::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("snapshot_edit_state"), &ObjectData::snapshot_edit_state);
-	ClassDB::bind_method(D_METHOD("apply_edit_state", "bytes"), &ObjectData::apply_edit_state);
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &ObjectData::open_file);
 	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name",
 			"include_in_network_challenge"), &ObjectData::open_from_resource_root,
@@ -20,23 +18,16 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_static_method("ObjectData",
 			D_METHOD("network_challenge_model_count"),
 			&ObjectData::network_challenge_model_count);
-	ClassDB::bind_method(D_METHOD("export_3di_to_dir", "dir_path", "update_mask"), &ObjectData::export_3di_to_dir, DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("can_save_project"), &ObjectData::can_save_project);
-	ClassDB::bind_method(D_METHOD("can_export_3di"), &ObjectData::can_export_3di);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &ObjectData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ObjectData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_summary"), &ObjectData::get_summary);
 	ClassDB::bind_method(D_METHOD("get_lod_surfaces", "lod_index"), &ObjectData::get_lod_surfaces);
 	ClassDB::bind_method(D_METHOD("get_materials"), &ObjectData::get_materials);
 	ClassDB::bind_method(D_METHOD("get_material_info", "index"), &ObjectData::get_material_info);
-	ClassDB::bind_method(D_METHOD("set_material_field", "index", "key", "value"), &ObjectData::set_material_field);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);
-	ClassDB::bind_method(D_METHOD("set_control_register_name", "index", "name"),
-			&ObjectData::set_control_register_name);
 	ClassDB::bind_method(D_METHOD("load_material_texture", "material_index", "texture_index"), &ObjectData::load_material_texture);
 	ClassDB::bind_method(D_METHOD("get_light_count"), &ObjectData::get_light_count);
 	ClassDB::bind_method(D_METHOD("get_light_info", "index"), &ObjectData::get_light_info);
-	ClassDB::bind_method(D_METHOD("set_light_field", "index", "key", "value"), &ObjectData::set_light_field);
 	ClassDB::bind_method(D_METHOD("get_user_point_count"), &ObjectData::get_user_point_count);
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &ObjectData::get_user_point_info);
 	ClassDB::bind_method(D_METHOD("get_user_point_bone_mask", "name"),
@@ -53,13 +44,7 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_live_panm_lod"), &ObjectData::get_live_panm_lod);
 	ClassDB::bind_method(D_METHOD("get_effective_panm_targets", "lod_index"), &ObjectData::get_effective_panm_targets);
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &ObjectData::get_part_anim_count);
-	ClassDB::bind_method(D_METHOD("add_part_anim", "lod_index", "part_index"), &ObjectData::add_part_anim);
-	ClassDB::bind_method(D_METHOD("delete_part_anim", "lod_index", "anim_index"), &ObjectData::delete_part_anim);
-	ClassDB::bind_method(D_METHOD("set_part_anim_channel_enabled", "lod_index", "anim_index", "channel", "enabled"), &ObjectData::set_part_anim_channel_enabled);
-	ClassDB::bind_method(D_METHOD("set_part_anim_channel_mode", "lod_index", "anim_index", "channel", "axis", "mode", "control_register"), &ObjectData::set_part_anim_channel_mode);
-	ClassDB::bind_method(D_METHOD("set_part_anim_channel_values", "lod_index", "anim_index", "channel", "axis", "from_value", "to_value", "speed"), &ObjectData::set_part_anim_channel_values);
 	ClassDB::bind_method(D_METHOD("get_part_anim_info", "lod_index", "anim_index"), &ObjectData::get_part_anim_info);
-	ClassDB::bind_method(D_METHOD("set_part_anim_track_field", "lod_index", "anim_index", "track", "key", "value"), &ObjectData::set_part_anim_track_field);
 	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &ObjectData::get_render_lod_info);
 	ClassDB::bind_method(D_METHOD("get_bone_origins", "lod_index"), &ObjectData::get_bone_origins, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_bone_parents", "lod_index"), &ObjectData::get_bone_parents, DEFVAL(0));
@@ -72,14 +57,6 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_panm_evaluation_serial"),
 			&ObjectData::get_panm_evaluation_serial);
 	ClassDB::bind_method(D_METHOD("evaluate_lights", "time_ms", "ctrl_values"), &ObjectData::evaluate_lights);
-	ClassDB::bind_method(D_METHOD("set_part_animation_flags", "lod_index", "anim_index", "flags"), &ObjectData::set_part_animation_flags);
-
-	BIND_CONSTANT(UPDATE_NONE);
-	BIND_CONSTANT(UPDATE_MTRL);
-	BIND_CONSTANT(UPDATE_LGHT);
-	BIND_CONSTANT(UPDATE_PANM);
-	BIND_CONSTANT(UPDATE_ALL);
-
 	// 3DI3 flag/slot re-exports (engine threedi/threedi_3di3.h values).
 	BIND_CONSTANT(MATERIAL_FLAG_ALPHA_TEST);
 	BIND_CONSTANT(MATERIAL_FLAG_ALPHA_INVERT);

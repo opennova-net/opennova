@@ -7,8 +7,8 @@
 // pipeline and by the runtime/server when they need to know whether a
 // surface is glass / two-sided / additively-blended.
 //
-// ONED uses an exact static descriptor table derived from OED's
-// gMaterialInfoTable plus the original one-.fx-per-shader effects. Unknown
+// The runtime uses an exact static descriptor table derived from the retail
+// shader registry and the original one-.fx-per-shader effects. Unknown
 // tags stay unknown; classification does not guess from string fragments.
 
 #include <cstdint>

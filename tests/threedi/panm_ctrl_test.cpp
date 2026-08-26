@@ -101,12 +101,12 @@ static int roundtrip_and_compare(const char *path, const char id[4]) {
 int main(void) {
     const char *repo_root = test_paths_repo_root(__FILE__);
     static const char *kControlledFixtures[] = {
-        "fixtures/3dp/B50Cal/B50Cal.3di",
-        "fixtures/3dp/CarierU/CarierU.3di",
-        "fixtures/3dp/DLCAC2/DLCAC2.3di",
-        "fixtures/3dp/dm1a1/dm1a1.3di",
-        "fixtures/3dp/dsuv1/dsuv1.3di",
-        "fixtures/3dp/m1trret/M1trret.3di",
+        "fixtures/threedi/objects/B50Cal/B50Cal.3di",
+        "fixtures/threedi/objects/CarierU/CarierU.3di",
+        "fixtures/threedi/objects/DLCAC2/DLCAC2.3di",
+        "fixtures/threedi/objects/dm1a1/dm1a1.3di",
+        "fixtures/threedi/objects/dsuv1/dsuv1.3di",
+        "fixtures/threedi/objects/m1trret/M1trret.3di",
     };
     char path[4096];
     struct stat st;

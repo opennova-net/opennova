@@ -9,8 +9,8 @@ extends GutTest
 # only [orig: Terrain_RenderSectorModels @ 0x5c5d30].
 
 const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
-const PMP_3DI := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
-const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
+const PMP_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const ARMRY_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
 const SHED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
@@ -236,7 +236,7 @@ func _mesh_world_center(mesh: MeshInstance3D) -> Vector3:
 
 
 func test_transparent_strips_bin_independently_on_both_camera_sides() -> void:
-	# The native importer preserves each 3DI strip as one MeshInstance3D. This
+	# ObjectData preserves each 3DI strip as one MeshInstance3D. This
 	# fixture has transparent strips spread across the armory; rotate its widest
 	# center axis vertical, put the water plane through the spread, and prove
 	# each strip receives its own live Q1/Q2 material priority. A shared material
@@ -478,9 +478,8 @@ func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 # create per-frame work re-arms processing, and one runtime frame with no
 # live work parks the model again. Placed mission/wire models always carry the
 # shared PANM clock (mission_object_placer sets it on every model path);
-# clockless playing models are the OED-preview carve-out and stay awake so
-# their private age keeps accumulating. These tests pin the park/re-arm
-# contract itself.
+# clockless playing models stay awake so their private age keeps accumulating.
+# These tests pin the park/re-arm contract itself.
 
 func _clocked_spy_model() -> ObjectModel:
 	var model := _spy_model()
@@ -499,13 +498,13 @@ func test_idle_clocked_model_parks_after_one_runtime_frame() -> void:
 
 
 func test_clockless_playing_model_stays_awake() -> void:
-	# The OED-preview carve-out: no shared clock + playing means the private
-	# age accumulates per frame, so the model must keep processing.
+	# No shared clock + playing means the private age accumulates per frame, so
+	# the model must keep processing.
 	var model := _spy_model()
 	model.wake_runtime_frame()
 	model.advance_runtime_frame(0.016)
 	assert_true(model.is_runtime_frame_awake(),
-			"a clockless playing model keeps its private preview clock running")
+			"a clockless playing model keeps its private clock running")
 
 
 func test_mutators_rearm_processing_and_park_when_drained() -> void:

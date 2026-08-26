@@ -2,8 +2,8 @@
 
 #include "object/nova_object_model.h"
 
-#include "oed/material_descriptor.h"
 #include "renderer/material_classify.h"
+#include "renderer/material_descriptor.h"
 #include "renderer/object_shader_template.h"
 #include "renderer/render_order.h"
 #include "threedi/threedi_3di3.h"
@@ -323,9 +323,10 @@ int32_t ObjectShaderCache::alpha_rung_for_height(float world_height) const {
 
 PackedStringArray ObjectShaderCache::get_known_shader_tags() const {
 	PackedStringArray tags;
-	tags.resize(static_cast<int64_t>(oed::kMaterialInfoTableCount));
-	for (size_t i = 0; i < oed::kMaterialInfoTableCount; ++i) {
-		tags[static_cast<int64_t>(i)] = String(oed::kMaterialInfoTable[i].name);
+	tags.resize(static_cast<int64_t>(renderer::kMaterialDescriptorTableCount));
+	for (size_t i = 0; i < renderer::kMaterialDescriptorTableCount; ++i) {
+		tags[static_cast<int64_t>(i)] =
+				String(renderer::kMaterialDescriptorTable[i].name);
 	}
 	return tags;
 }

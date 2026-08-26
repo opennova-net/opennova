@@ -26,8 +26,8 @@ std::array<float, 3> lerp3(const std::array<float, 3> &a, const std::array<float
 
 }  // namespace
 
-std::array<float, 4> build_oed_light_attenuation(float light_range) {
-    // Original OED reference: PrepareLightParams @ 0x46A500 emits
+std::array<float, 4> build_point_light_attenuation(float light_range) {
+    // Retail PrepareLightParams @ 0x46A500 emits
     // {1, 0, 15 / range^2, 1} after scaling the runtime range by 1.25.
     // The retail runtime computes the identical set from the light record's
     // 16.16 range [orig: Light_GetPointLightParams @ 0x5a9251..0x5a9272].

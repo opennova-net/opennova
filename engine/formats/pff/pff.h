@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <io/export.h>
-#define PFF_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,7 +57,7 @@ typedef struct PffArchive {
 /* Open a modern PFF archive (PFF3/PFF4/BHD). Loads every directory entry (the engine does
    no deleted-entry filtering) and sorts them by uppercased name. Returns 0 on success.
    Models Jointops.exe PFF_Open @ 0x7682e0. */
-PFF_EXPORT int pff_open(PffArchive *archive, const char *path);
+int pff_open(PffArchive *archive, const char *path);
 
 /* Open a legacy (pre-PFF3) archive: entry count at file offset 12, 16-byte directory records
    {12-byte name across 3 dwords XOR 0xACEDDEAD, file offset}, sizes delta-encoded
@@ -67,28 +65,28 @@ PFF_EXPORT int pff_open(PffArchive *archive, const char *path);
    success. Models Jointops.exe PFF_OpenLegacyArchive @ 0x7683f0. Legacy archives carry no
    magic, so the caller must select this explicitly (auto-detecting a magic-less format is
    unsafe); retail JO uses only the modern format. */
-PFF_EXPORT int pff_open_legacy(PffArchive *archive, const char *path);
+int pff_open_legacy(PffArchive *archive, const char *path);
 
 /* Close and free internal resources. */
-PFF_EXPORT void pff_close(PffArchive *archive);
+void pff_close(PffArchive *archive);
 
 /* Find entry by name (case-insensitive, binary search). Returns NULL if not found.
    Models Jointops.exe PFF_FindEntry @ 0x7685d0. */
-PFF_EXPORT const PffEntry *pff_find(const PffArchive *archive, const char *name);
+const PffEntry *pff_find(const PffArchive *archive, const char *name);
 
 /* Extract a file entry into caller-provided buffer. out_buf must be at least entry->size
    bytes. If the entry is flagged PFF_FLAG_ENCRYPTED the payload is XOR-decrypted in place
    (models PFF_LoadFileToMemory @ 0x768920). Returns 0 on success. */
-PFF_EXPORT int pff_extract(const PffArchive *archive, const PffEntry *entry,
+int pff_extract(const PffArchive *archive, const PffEntry *entry,
                 uint8_t *out_buf, size_t buf_size);
 
 /* Like pff_extract but returns the raw archived bytes without decrypting, even when the
    entry is flagged encrypted. */
-PFF_EXPORT int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
+int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
                 uint8_t *out_buf, size_t buf_size);
 
 /* Check if raw data starts with a valid PFF header. */
-PFF_EXPORT int pff_is_pff(const uint8_t *data, size_t size);
+int pff_is_pff(const uint8_t *data, size_t size);
 
 /* --- Write API --- */
 
@@ -127,7 +125,7 @@ typedef struct PffWriteEntry {
    loader both re-sort on load regardless. The write goes to "<path>.tmp" then atomically renames
    onto `path`, so a crash never leaves a half-written archive. Returns PFF_WRITE_OK on success or
    one of the PFF_WRITE_ERR_* codes. Models the on-disk layout of PFF_Open @ 0x7682e0. */
-PFF_EXPORT int pff_write_archive(const char *path, PffFormat format,
+int pff_write_archive(const char *path, PffFormat format,
                                  const PffWriteEntry *entries, uint32_t n);
 
 /* Streaming variant. The writer pulls each entry's stored bytes via `read_entry` as it serializes,
@@ -147,7 +145,7 @@ typedef struct PffWriteStreamEntry {
     uint32_t    checksum;
 } PffWriteStreamEntry;
 
-PFF_EXPORT int pff_write_archive_streamed(const char *path, PffFormat format,
+int pff_write_archive_streamed(const char *path, PffFormat format,
                                           const PffWriteStreamEntry *entries, uint32_t n,
                                           PffReadEntryFn read_entry, void *ctx);
 
@@ -158,7 +156,7 @@ typedef void (*PffWriteProgressFn)(void *ctx, uint32_t done, uint32_t total);
 
 /* As pff_write_archive_streamed, plus a progress callback. pff_write_archive_streamed forwards here
    with progress == NULL, so the layout/behavior is identical when no progress is wanted. */
-PFF_EXPORT int pff_write_archive_streamed_progress(const char *path, PffFormat format,
+int pff_write_archive_streamed_progress(const char *path, PffFormat format,
                                                    const PffWriteStreamEntry *entries, uint32_t n,
                                                    PffReadEntryFn read_entry, void *ctx,
                                                    PffWriteProgressFn progress, void *progress_ctx);
@@ -167,7 +165,7 @@ PFF_EXPORT int pff_write_archive_streamed_progress(const char *path, PffFormat f
    same call encrypts (before storing a payload) and decrypts (after reading one). `container_key`
    is the keystream seed; every reversed NovaLogic game uses 0x0312A4CE (PFF_LoadFileToMemory
    @ 0x768920). No-op when buf is NULL or size is 0. */
-PFF_EXPORT void pff_container_xor(uint8_t *buf, size_t size, uint32_t container_key);
+void pff_container_xor(uint8_t *buf, size_t size, uint32_t container_key);
 
 #ifdef __cplusplus
 }

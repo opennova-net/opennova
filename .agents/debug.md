@@ -80,12 +80,11 @@ A skip is not coverage.
 - Godot: fully close the editor after GDExtension rebuilds. If GUT reports odd
   failures, rerun the single test file before trusting full-suite noise.
 - Visual Studio multi-config generators IGNORE `CMAKE_BUILD_TYPE`: judge a build's
-  flavor by which `build/<Config>/opennova.dll` (or the per-domain objects at
-  `build/engine/*/opennova_*.dir/<Config>/*.obj`) is NEWEST, never by cache variables
-  or directory existence (`opennova_shared`'s own .dir holds only a stub TU). For
-  perf observations never use a Debug config — `.agents/retail-lan-parity.md` §4
-  carries the GDExtension rule (MSVC /Od /RTC1 invalidates frame-time readings);
-  `scripts/build.sh` builds the main tree `--config Release`.
+  flavor by the selected `--config` and the timestamps of the corresponding
+  `build/engine/*/opennova_*.dir/<Config>/*.obj`, never by cache variables or
+  directory existence. For performance observations never use a Debug config;
+  MSVC `/Od` and `/RTC1` invalidate frame-time readings. `scripts/build.sh`
+  builds the main tree with `--config Release`.
 - Launcher: use the launcher to remove managed hosts entries. Inspect only the
   OpenNova marker block in the hosts file, and do not commit launcher settings.
 

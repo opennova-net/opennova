@@ -5,9 +5,8 @@ anim slots to `.bad` clip names) and `.bad` (the binary skeletal clip
 container). Implementing code: `engine/formats/adm` (parser + writer, flat C
 ABI), `engine/formats/bad` (parser + writer, flat C ABI); runtime consumers
 `engine/runtime/anim` (clip sampling), `engine/runtime/simassets` (clip
-index / root motion / skeletal clip resolution), `godot/src/object/
-nova_skeletal_anim.cpp`; DCC consumers through the ctypes FFI mirrors
-(`pyopennova/` and `blender/opennova/` — mirrors only, no byte knowledge).
+index / root motion / skeletal clip resolution), and
+`godot/src/object/nova_skeletal_anim.cpp`.
 Binary: retail Jointops.exe; all addresses are that binary's.
 
 This is a CONSOLIDATION record (2026-08-08): the findings below were witnessed
@@ -104,7 +103,7 @@ actually mean:
   lossy export artifact (257/477 retail `.bad`s triplicate X into all three
   components; 12/43 JO viewmodel rigs ship zeroed/stale positions and retail
   renders them all). It is reconstructible from bind + model
-  (`positions_from_model`; asset-gated pytest `test_bad_pos_derivation`).
+  (`positions_from_model`; native coverage in `tests/anim/anim_sample_test.cpp`).
 - **Channel evaluation** slerps the quaternion keyframes per bone
   [orig: `BoneAnim_TransformBones @ 0x410360`]; translations apply only under
   `flags & 2`.

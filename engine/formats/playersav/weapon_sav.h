@@ -14,8 +14,8 @@
 // "expansion\<g_ExpansionName>\weapon.sav" when an expansion is mounted and
 // plain "weapon.sav" otherwise [orig: @0x54f68c-@0x54f6b7].
 //
-// Model B (C++ static link, ADR 0024): no OPENNOVA_API annotations, not on the
-// flat C ABI. Godot-free, depends on engine/base/io only.
+// Native C++ static-link interface (ADR 0024). Godot-free, depends on
+// engine/base/io only.
 
 #ifndef OPENNOVA_PLAYERSAV_WEAPON_SAV_H
 #define OPENNOVA_PLAYERSAV_WEAPON_SAV_H

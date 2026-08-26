@@ -56,8 +56,8 @@ const EXCLUDED_EXTENSIONS := [".pff", ".exe", ".dll", ".sav", ".log", ".ini", ".
 	# Repo metadata that lives beside the assets but is not game data.
 	".md", ".gitignore", ".gitattributes"]
 
-## Subdirectories of the asset root that hold authoring sources, not game files. `src/` is
-## `.blend`/`.ase` — retail resolves bare filenames at the root, so nothing there is loadable.
+## Subdirectories of the asset root that hold source material, not game files. Retail resolves
+## bare filenames at the root, so nothing under `src/` is loadable.
 ## Any OTHER subdirectory is reported in `skipped_dirs`: the packer walks the root only, and a
 ## data directory that silently vanished from the pack is the bug that gets debugged in retail.
 const EXCLUDED_DIRS := ["src/"]

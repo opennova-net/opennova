@@ -1,17 +1,16 @@
 # engine/ — the engine (portable C++ core)
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
-  Godot binding code lives only in `godot/src/`. Blender-only scene assembly lives in
-  `apps/importer/scene_builder/` and `blender/`.
+  Godot binding code lives only in `godot/src/`.
 - Four groups (ADR 0028) — the directories and, since ADR 0029, the CMake build targets
   too; still never namespaces or include-path segments:
   - `base/` — shared substrate and repo plumbing: io, crt, vfs, resource_index,
     gameprofile, pcapio.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
-    runtime-fused: ADR 0030), 34 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
-    cbin, threedi, tdp, ase, bad, def, avatars, mission, trn, cpt, til,
-    foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, particle (.ptl),
-    score, bink, wac (front end; compiler/VM stay runtime), oed.
+    runtime-fused: ADR 0030), 31 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
+    cbin, threedi, bad, def, avatars, mission, trn, cpt, til, foliage, env,
+    mnu, mns, sbf, lwf, dbf, mus, playersav, particle (.ptl), score, bink,
+    wac (front end; compiler/VM stay runtime).
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
@@ -34,36 +33,8 @@
   the flatten: `terrain_query` owns its own `<terrain_query/...>` prefix (the ADR
   0020 seam headers — pre-flatten they shared `terrain/`), and the .ptl lib lives at
   `engine/formats/particle` (its historical `<particle/...>` prefix names the dir).
-  Namespace `opennova`. C ABI exports stay flat and
-  domain-prefixed — Python and Godot load the same `opennova_shared` library, so ABI
-  stability matters.
-- C ABI conventions for NEW exports: annotate with the lib's `<DOMAIN>_EXPORT` macro
-  (a per-lib alias of `OPENNOVA_API` from `io/export.h` — never copy the raw
-  `__declspec` block again), return `int` status with `0 = success`, out-params last,
-  ownership released by a matching `<domain>_free`/`_destroy`. Existing exports keep
-  their historical semantics (some predate this — `opennova_vfs_*` returns 1=success,
-  `oed` uses a status enum); changing a shipped export's return semantics is an FFI
-  behavior change and needs a deliberate, versioned decision.
-- A struct crossing the C ABI is mirrored in Python TWICE — `pyopennova/<x>_ffi.py` AND
-  `blender/opennova/<x>_ffi.py`. Any C-side layout change updates BOTH mirrors in the
-  same commit and extends the native-stride pin tests (`tests/test_def_ffi_mirror.py`,
-  `tests/test_threedi_ffi_mirror.py`) with the new fields. The cross-mirror comparison
-  alone proves nothing — the mirrors are copies of each other and have agreed on the
-  same stale stride before; only the native-stride pins catch the drift.
-- Two consumption models (LIBS-3, ADR 0024). **Model A — the flat C ABI**:
-  `opennova_shared` (`opennova.dll` / `libopennova.so`) whole-archives the
-  `OPENNOVA_CORE_TARGETS` list — the three sim-side ADR 0029 group targets
-  `opennova_formats`, `opennova_base`, `opennova_runtime`; `opennova_net` and the
-  service are never bundled (ADR 0019, Decision 5) — and exports ONLY
-  `OPENNOVA_API`-annotated symbols, the surface pinned by the `abi_export_identity`
-  ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the Blender
-  addon (`blender/opennova/*_ffi.py` mirrors). **Model B — C++ static link**: `godot/src`, the apps, the ctest suite,
-  and the entire net stack link the group targets directly; no export macro involved.
-  The net/protocol libs are Model B ONLY — formally outside the C ABI (ADR 0019; NET-4's
-  forbidden-family guard). A lib may mix models: only its annotated functions are
-  Model A (unannotated functions stay off the DLL under hidden default visibility).
-  Adding a Model-A export is a deliberate decision: annotate it AND bump the
-  `abi_export_identity` baseline in the same commit, logged in docs/maturity-program.md.
+  Namespace `opennova`. Native consumers link the static group targets directly;
+  no shared-library/FFI export surface is maintained.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
   exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
   thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
@@ -80,17 +51,16 @@
   links io, base links formats (base deliberately sits ABOVE formats because vfs
   parses pff/scr/bfc1),
   runtime links base, net links runtime, the service links net. The ADR 0024 family
-  groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
-  (`scripts/lint/include_graph_check.py` — for net/wac/mission/world the
-  `terrain/` prefix is fully forbidden; the seam is terrain_query's four
-  `<terrain_query/...>` headers), and `link_graph_check.py` keeps the sqlite
-  containment.
+  groups are deleted as subsumed. ADR 0020's terrain seam remains the four
+  `<terrain_query/...>` headers: net, wac, mission, and world must not include the
+  concrete `terrain/` implementation. The service target remains the sole sqlite
+  consumer.
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
   `BitWriter`, `io/le.h` primitives (including the `append_*_le` vector writers every
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers. Do not hand-roll a new byte
-  reader or export-macro block; migrate existing per-lib copies on-touch (delegate the
+  reader; migrate existing per-lib copies on-touch (delegate the
   body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
 - Two byte-cursor CONTRACTS exist on purpose, and a copy is only duplication if it
   matches one of them. `io::ByteReader` is the FORMAT-PARSER contract: a clipped read
@@ -130,8 +100,8 @@
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS
-  the model every consumer walks — format tools consume it directly, `tdp_from_3di`
-  generates `.3dp` from it, and the Python FFI mirrors its packed layout. There is no
+  the model every runtime consumer walks; the native parity writer accepts the same
+  struct. There is no
   intermediate model representation, and the GP-era (GPM/GPS/GPP) reader/writer is gone —
   the format knowledge lives in docs/threedi/3di-gp-format-re.md. Shared derivations are
   3DI3-native helpers in that header (userpoint decode, collision run prefix sums +

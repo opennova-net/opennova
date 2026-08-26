@@ -539,7 +539,7 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
     return 0;
 }
 
-DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
+int def_parse_hudpos(const char *path, DefHudPosFile *out) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
@@ -549,13 +549,13 @@ DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
     return rc;
 }
 
-DEF_EXPORT int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
+int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     return parse_hudpos_buf((const char *)data, size, out);
 }
 
-DEF_EXPORT void def_free_hudpos(DefHudPosFile *f) {
+void def_free_hudpos(DefHudPosFile *f) {
     if (!f) return;
     free(f->hud.stances);
     free(f->hud.declutter);

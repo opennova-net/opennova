@@ -87,7 +87,7 @@ func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
 
 
 const HUSK_GRAPHIC := 'Dbuggy1X'  # fixture items.def 101291's husk stage
-const HUSK_MODEL_3DI := 'res://../fixtures/3dp/armry01/Armry01.3di'
+const HUSK_MODEL_3DI := 'res://../fixtures/threedi/objects/armry01/Armry01.3di'
 
 
 # A REAL placer whose husk graphic resolves through the injected fixture

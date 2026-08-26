@@ -17,7 +17,6 @@ add_library(opennova_base STATIC
     # vfs — the engine-faithful PFF+loose+expansion mount stack
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_capi.cpp
 )
 
 target_include_directories(opennova_base

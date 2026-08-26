@@ -459,8 +459,8 @@ int main() {
     // --- positions_from_model: reconstruct BadBone.position from the model table + the ---
     // skeleton .bad's bind rotations -- position[i] = bind_rows[parent(i)] . (-rel.x, rel.y,
     // rel.z); roots / rows whose parent is past the bind's records take the x-negated rel
-    // unrotated. Synthetic exactness (mirrors pytest tests/test_bad_pos_derivation.py; the
-    // corpus legs are asset-gated there). [docs/net/novaworld-net-re.md section 5.40
+    // unrotated. Synthetic exactness is pinned directly below.
+    // [docs/net/novaworld-net-re.md section 5.40
     // position-derivation correction.]
     {
         BadBone pbones[2] = {};

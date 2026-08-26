@@ -797,23 +797,15 @@ func test_godot_to_bms_position_axis_remap() -> void:
 # blocks (Armry01 as shipped: entries
 # present, every control idle) must keep the perf-tier static batching.
 
-const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
+const ARMRY_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
+const PMPJK_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
 
 
-func _armry_data(with_live_rotation: bool) -> ObjectData:
+func _panm_data(live: bool) -> ObjectData:
 	var data := ObjectData.new()
-	if data.open_file(_abs(ARMRY_3DI)) != OK:
+	var path := PMPJK_3DI if live else ARMRY_3DI
+	if data.open_file(_abs(path)) != OK:
 		return null
-	if with_live_rotation:
-		# Author one live track the way the object workspace does. Armry01 ships
-		# all PANM controls idle; a sine wave is both active AND time-varying
-		# (retail's "slide" samples to a constant until a state machine drives it).
-		if not data.set_part_anim_channel_enabled(0, 0, "rotation", true):
-			return null
-		if not data.set_part_anim_channel_mode(0, 0, "rotation", "x", "sine_wave", -1):
-			return null
-		if not data.set_part_anim_channel_values(0, 0, "rotation", "x", 0.0, 90.0, 1.0):
-			return null
 	return data
 
 
@@ -828,7 +820,7 @@ func _panm_placer(live: bool) -> MissionObjectPlacer:
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
 	# item 105004: type object, no anim_def
-	placer.register_object_data("StaticCrate1", _armry_data(live))
+	placer.register_object_data("StaticCrate1", _panm_data(live))
 	placer.register_occlusion_verdict(105004, false)
 	return placer
 
@@ -915,7 +907,7 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 
 
 func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:
-	var data := _armry_data(false)
+	var data := _panm_data(false)
 	assert_not_null(data, "inert PANM fixture loads")
 	if data == null:
 		return
@@ -948,7 +940,7 @@ func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:
 
 
 func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
-	var data := _armry_data(true)
+	var data := _panm_data(true)
 	assert_not_null(data, "live PANM fixture loads")
 	if data == null:
 		return
@@ -960,8 +952,26 @@ func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	var parts: Dictionary = model.get_render_part_nodes()
-	assert_true(parts.has(0), "the authored live rotation drives robj part 0")
-	var part := parts[0] as Node3D
+	var targets := data.get_effective_panm_targets(0)
+	assert_gt(targets.size(), 0, "the immutable fixture identifies a live ROBJ")
+	if targets.is_empty():
+		return
+	# An authored PANM block may mix inert parents with live children. Select the
+	# retained ROBJ whose immutable track actually moves over the sampled clock
+	# interval instead of assuming the first effective node is the live one.
+	var pose_400: Dictionary = data.evaluate_panm(0, 400, {})
+	var pose_800: Dictionary = data.evaluate_panm(0, 800, {})
+	var target := -1
+	for candidate in targets:
+		var part_index := int(candidate)
+		if pose_400.get(part_index) != pose_800.get(part_index):
+			target = part_index
+			break
+	assert_ne(target, -1, "the immutable fixture has a clock-driven ROBJ")
+	if target == -1:
+		return
+	assert_true(parts.has(target), "the authored live track has a retained ROBJ")
+	var part := parts[target] as Node3D
 
 	# The authored slide sweeps rotation over time: each visible frame must
 	# re-derive part transforms from the absolute clock.

@@ -4,8 +4,8 @@ Some tests exercise data we cannot commit: retail game installs, extracted retai
 assets, and network captures of retail sessions. Each such test is gated on an
 environment variable and **skips as a PASS** when the variable is unset — the C++
 gates print a `SKIP`/`[skip]` line and `return 0` (they are plain `add_test`
-entries, not `GTEST_SKIP`/`DISABLED`), pytest gates use `pytest.skip`, and the one
-GUT gate uses `pending()`. Consequence: **a green full run does not mean these
+entries, not `GTEST_SKIP`/`DISABLED`), and the one GUT gate uses `pending()`.
+Consequence: **a green full run does not mean these
 tests exercised anything.** When touching a gated area, set the variable and check
 the test's output for real work, not just its exit code.
 
@@ -20,7 +20,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 |---|---|---|---|
 | `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `terrain_tile_composer` (CP12 `.til` entries #53/#1013; the D-TIL-4 00TRa fork order pin, entries #761/#781 — needs the packed `00TRA.TIL`/`TRNTILE10.TGA`, which JO:CA ships); GUT `terrain_static_shadow_runtime_test.gd` (the Scrate1 shadow witness legs) | retail JO install dir (packed `.pff`); the CP12 oracle additionally needs an install whose packed set carries `CP12.TIL`/`TRNTILEA1.TGA` (JO:CA ships without them — that leg skips) | never (copyright, ~1.5 GB) |
 | `OPENNOVA_MISSION_CORPUS` | ctest `mission_corpus`; GUT `mission_corpus_binding_test.gd` | dir of retail `.bms` missions | never (copyright) |
-| `OPENNOVA_JO_ASSETS` | ctest `occlusion_armry`, `root_motion`, the `wac_corpus` sweep; GUT `sound_dialog_test.gd`, `sound_integration_test.gd`; pytest `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
+| `OPENNOVA_JO_ASSETS` | ctest `occlusion_armry`, `root_motion`, the `wac_corpus` sweep; GUT `sound_dialog_test.gd`, `sound_integration_test.gd` | extracted retail assets with `weapon.def` + models | never (copyright) |
 | `OPENNOVA_WAC_CORPUS_DIRS` | ctest `wac_corpus` extra corpus dirs (semicolon list, beside the `OPENNOVA_JO_ASSETS` sweep) | dirs of retail `.wac` scripts | never (copyright) |
 | `OPENNOVA_MNU_EXTRA` | ctest `mnu_compat` developer-only loose menu leg | a single loose `.mnu` | never (developer-local) |
 | `NW_INGAME_HEXCAP` | ctest `nw_ingame_histogram`, `nw_ingame_pool_records` | focused in-match hexcap dump | possible: policy allows a small *sanitized* `.hexcap` via LFS (user-gated follow-up) |
@@ -35,8 +35,6 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 | `NW_GOLDEN_VEHICLE_SESSION` + `NW_ITEMS_DEF` | ctest `netsim_client_replica_pipeline_capture_parent_follow` (skips clean when either is absent) | golden retail vehicle-session capture (`.scratch/golden/retail-vehicle-session.pcapng`) + an extracted retail `ITEMS.DEF` for compact-record class resolution | never |
 | `NW_LIVE_WEAPON_ROOT` / `NW_LIVE_WEAPON_EXPANSION` | ctest `npruntime_weapon_table` corpus leg (its synthesized cases run ungated; getenv-gated in the test, not CMake) | retail `weapon.def` roots (base + expansion) | never (copyright) |
 | `OPENNOVA_WEAPON_SAV` | ctest `playersav_weapon_sav` (corpus leg only; its synthesized cases run ungated) | a retail `weapon.sav` player profile — `<install>/expansion/<exp>/weapon.sav`, else `<install>/weapon.sav` (net-re §5.66) | never (player profile data, and the file carries the local player's callsign-adjacent selections) |
-| `OPENNOVA_MODSUPEROED_DIR` | pytest modsuperoed automation smoke | third-party OED pack | already in CI (LFS submodule; the `modsuperoed-smoke` job) |
-| (LFS content, no env var) | pytest `test_retail_render_evidence.py` | the committed render-evidence store under `screenshots/parity/render-lighting-2026-08/` — the suite validates the repo's OWN published evidence (hashes, decodable PNGs, manifests), so its gate is LFS materialization, not an install: it skips as a PASS when the store holds LFS pointer stubs (e.g. `lfs.fetchexclude`d clones) | already in CI: the test job pulls full LFS and ctest's `opennova_python_pytest` wrapper (build.sh sets `-DOPENNOVA_ENABLE_PYTHON_TESTS=ON`) runs the whole pytest suite |
 
 The 00TRa tile-composer leg fingerprints the archived `TRNTILE10.TGA`
 payload (`SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490`)
@@ -52,13 +50,12 @@ mission with a retail install mounted, e.g. `ladder_climb_probe.gd`),
 `JO_ASSETS_DIR` + `JO_PROBE_MISSIONS` (mission load/re-ground perf probes),
 `JO_RESOURCE_DIR` / `JO_EXPANSION` / `JO_MISSION` (mount diagnostics),
 `NOVA_RESOURCE_DIR` / `NOVA_MISSION_BMS` (the modtools screenshot driver),
-and the render-fixture capture probe family (`render_fixture_capture_probe.gd`
-+ `scripts/render/`): `NOVA_RENDER_FIXTURE_ID` / `NOVA_RENDER_FIXTURE_MINUTE` /
+and the render-fixture capture probe family (`render_fixture_capture_probe.gd`):
+`NOVA_RENDER_FIXTURE_ID` / `NOVA_RENDER_FIXTURE_MINUTE` /
 `NOVA_RENDER_FIXTURE_OUTPUT`, `NOVA_RENDER_CAPTURE_MODE` /
 `NOVA_RENDER_CAPTURE_PROFILE`, `NOVA_MISSION_RESOURCE_DIR` /
 `NOVA_RUNTIME_RESOURCE_DIR` / `NOVA_EXPANSION`, `NOVA_EVIDENCE_SOURCE_COMMIT`,
-and `NOVA_RENDER_STATIC_SHADOW_SUPPRESS_BMS_IDS` — the full contract table lives in
-[docs/render/render-parity-runbook.md](render/render-parity-runbook.md).
+and `NOVA_RENDER_STATIC_SHADOW_SUPPRESS_BMS_IDS`.
 
 ## Local setup
 

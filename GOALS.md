@@ -32,9 +32,9 @@ engine core is C++; Godot is the shell that renders it and powers the game and O
 
 ## A source-first game-data loop
 
-The game's canonical files live in an ordinary source tree. Format-specific writers,
-the importer, the Blender addon, and other external tools may produce those files;
-OpenNova consumes and validates them without requiring a proprietary project database.
+The game's canonical files live in an ordinary source tree. Native format tools and,
+eventually, the GLB/GLTF editor may produce those files; OpenNova consumes and validates
+them without requiring a proprietary project database.
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
 ONED deliberately stays small. It stores the loose-data and retail-install settings,

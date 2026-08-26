@@ -1,6 +1,5 @@
 // Typed 3DI3 format parsing utilities.
-// This interprets GHDR/RLOD trees into C structs so we can diff our output
-// against ModSuperOED layouts.
+// This interprets GHDR/RLOD trees into stable native C structs.
 
 #ifndef THREEDI_3DI3_H
 #define THREEDI_3DI3_H
@@ -10,11 +9,6 @@
 #include <string.h>
 #include <math.h>
 #include "threedi/threedi.h"
-
-// Visibility macro for the flat C ABI (Python/DCC consumers load the shared
-// library; the GDExtension and ctests link statically and ignore it).
-#include <io/export.h>
-#define THREEDI_EXPORT OPENNOVA_API
 
 #if defined(_MSC_VER) && !defined(__cplusplus)
 // MSVC's C mode lacks _Static_assert; alias to C++ static_assert.
@@ -255,8 +249,8 @@ typedef struct ThreediUserPoint {
 // Decode a userpoint's authored 16.16 position into model-space floats.
 // Source axes swizzle as x->z, y->x, z->y, with the side axis mirrored so a
 // consumer's render-space -X transform preserves the authored driver/passenger
-// side. Every consumer (Godot document, DCC builders, ground anchor) applies
-// this one convention; keep the Python mirrors in sync.
+// side. Every consumer (Godot runtime and ground anchor) applies this one
+// convention.
 static inline void threedi_user_point_position(const ThreediUserPoint *up, float out[3]) {
     out[0] = -(float)up->y / 65536.0f;
     out[1] = (float)up->z / 65536.0f;
@@ -864,18 +858,17 @@ extern "C" {
 int threedi_3di3_parse(const ThreediFile *file, Threedi3di3 *out_model);
 
 // Convenience: read a file from disk and parse it into a Threedi3di3.
-// Exported on the flat C ABI: the Python FFI mirrors (pyopennova/threedi_ffi.py
-// and blender/opennova/threedi_ffi.py) load the model through this pair.
-THREEDI_EXPORT int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
+int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
 
 // Convenience: parse memory-backed 3DI bytes into a Threedi3di3.
-int threedi_3di3_read_memory(const uint8_t *data, size_t size, Threedi3di3 *out_model);
+int threedi_3di3_read_memory(const uint8_t *data, size_t size,
+                                            Threedi3di3 *out_model);
 
 // Convenience: write a previously-read model back to disk (round-trip).
 int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 
 // Free allocations inside a Threedi3di3.
-THREEDI_EXPORT void threedi_3di3_free(Threedi3di3 *model);
+void threedi_3di3_free(Threedi3di3 *model);
 
 // Compute a model's placement "ground anchor" — the point of the model that
 // should sit at an object's placed position. Resolution order:

@@ -1,6 +1,7 @@
 // WAC registry oracle: asserts our command table matches the binary-extracted
-// ISA (165 commands + 28 param types). Ground truth: the schema dumped from
-// Jointops.exe's command table @0x82D290 (notes/wac/wac_commands.schema.json).
+// ISA (165 commands + 28 param types). Ground truth: Jointops.exe's command
+// table @0x82D290; the authoritative recovered values live in
+// engine/formats/wac/command_table_data.cpp.
 #include <cstdio>
 #include <cstring>
 

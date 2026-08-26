@@ -22,7 +22,7 @@ jobs:
   # The C++ engine + ctest suite. Built with Ninja + sccache (GitHub Actions
   # cache backend): the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER,
   # so the ~640-TU engine compile used to run uncached (~16 min) on every push.
-  # scripts/build.sh is untouched — CMake reads CMAKE_GENERATOR and the launcher
+  # scripts/build.sh lets CMake read CMAKE_GENERATOR and the launcher
   # variables from the environment on a fresh configure — and Release carries no
   # PDB flags, so every object is cacheable as-is. First run after a cache miss
   # is cold; after that only changed sources recompile.
@@ -32,9 +32,6 @@ jobs:
       matrix:
         os: [windows-latest]
     runs-on: ${{ matrix.os }}
-    # Job-scoped on purpose: package-importer reads build-pkg\Release\ and
-    # modsuperoed-smoke passes -A Win32/x64, both of which a workflow-level Ninja
-    # default would break.
     env:
       SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
@@ -45,9 +42,6 @@ jobs:
         with:
           lfs: true
           submodules: recursive
-          # Full history so the diff-scoped maturity lint can resolve
-          # origin/master...HEAD on PR builds (it self-skips without a base).
-          fetch-depth: 0
 
       - name: Pull Git LFS assets
         shell: bash
@@ -55,40 +49,6 @@ jobs:
           git lfs install --local
           git lfs pull
           git lfs fsck --objects
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install uv
-        shell: bash
-        run: python -m pip install uv==0.11.17
-
-      # Maturity-program guards (docs/maturity-program.md, STD-1), enforced
-      # since the Wave-2 boundary (STD-3): the ratchet fails on any counter
-      # increase vs scripts/lint/maturity_baseline.json; the diff-scoped
-      # dict-contract lint fails on new class-level Dictionary contracts
-      # (magic numbers stay advisory); the ledger check fails if the
-      # divergence scoreboard drifts from its tables (--write regenerates).
-      # The link-graph check (LIBS-1, ADR 0020) has no configured build tree
-      # at this point in the job, so it walks the CMake files transitively;
-      # local runs against build/ use `cmake --graphviz` ground truth.
-      - name: Maturity gates (STD-1, enforced)
-        shell: bash
-        run: |
-          python scripts/lint/ratchet_counts.py --enforce
-          python scripts/lint/maturity_lint.py --enforce
-          python scripts/lint/link_graph_check.py --enforce
-          python scripts/lint/include_graph_check.py --enforce
-          # Orphan engine headers (the post-merge tidy rounds' recurring
-          # finding): a header included only by its test must carry the
-          # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
-          python scripts/lint/orphan_header_check.py --enforce
-          python scripts/lint/ledger_check.py --check
-          # Host-terminology gate (CONTEXT.md Host / Joiner): "host" means
-          # the game/server host and nothing else. Any uncovered use fails;
-          # the KEEP taxonomy lives in scripts/lint/host_allowlist.json.
-          python scripts/lint/host_lint.py --enforce
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
@@ -114,12 +74,6 @@ jobs:
         env:
           BUILD_GODOT: "0"
         run: scripts/build.sh
-
-      # (The full pytest suite already runs INSIDE the ctest step above:
-      # build.sh configures -DOPENNOVA_ENABLE_PYTHON_TESTS=ON, which registers
-      # the opennova_python_pytest wrapper. Asset-gated suites skip as a pass
-      # per docs/asset-gated-tests.md; the render-evidence suite runs for real
-      # because the LFS pull above materializes the committed store.)
 
       - name: sccache stats
         if: always()
@@ -169,66 +123,6 @@ jobs:
         run: |
           ctest --test-dir build-server --output-on-failure --parallel "$(nproc)" -R \
             "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture)$"
-
-  modsuperoed-smoke:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Validate ModSuperOED fixture pack
-        shell: bash
-        run: |
-          git -C third_party/modsuperoed lfs install --local
-          git -C third_party/modsuperoed lfs pull
-          git -C third_party/modsuperoed lfs fsck --objects
-          test -f third_party/modsuperoed/ModSuperOed.exe
-          test -f third_party/modsuperoed/CharModel.3dp
-          test -f third_party/modsuperoed/CharModel.3di
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install uv
-        shell: bash
-        run: python -m pip install uv==0.11.17
-
-      - name: Build ModSuperOED hook
-        shell: pwsh
-        run: |
-          cmake -S . -B build-modsuperoed -A Win32
-          cmake --build build-modsuperoed --config Release --target modsuperoed_injector modsuperoed_hook
-
-      - name: Build native comparator library
-        shell: pwsh
-        run: |
-          cmake -S . -B build -A x64 -DBUILD_SHARED_LIB=ON -DOPENNOVA_ENABLE_MODSUPEROED_TOOLS=OFF
-          cmake --build build --config Release --target opennova_shared
-
-      - name: Run ModSuperOED smoke
-        shell: pwsh
-        env:
-          OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
-        # The smoke drives the real OED exe and flakes on runner timing; retry
-        # up to 5 attempts before reporting the job red.
-        run: |
-          $max = 5
-          for ($i = 1; $i -le $max; $i++) {
-            uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
-            if ($LASTEXITCODE -eq 0) { exit 0 }
-            Write-Host "ModSuperOED smoke attempt $i/$max failed (exit $LASTEXITCODE)"
-          }
-          exit 1
 
   # Type-check + build the NovaWorld web portal (web/). The built dist is an
   # artifact only; production images bake it via web/Dockerfile (Track B).
@@ -450,70 +344,6 @@ jobs:
           fi
           bash scripts/test_godot.sh
 
-  package-addon:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    outputs:
-      artifact_id: ${{ steps.upload_blender.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Install MinGW
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64
-
-      - name: Package addon
-        run: scripts/package_addon.sh
-
-      - name: Upload Blender addon package
-        id: upload_blender
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova_blender-v*.zip
-          archive: false
-          if-no-files-found: error
-
-  package-importer:
-    if: github.event_name != 'pull_request'
-    runs-on: windows-latest
-    outputs:
-      artifact_id: ${{ steps.upload_importer.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Package importer
-        shell: pwsh
-        run: scripts/package_importer_windows.ps1
-
-      - name: Upload importer package
-        id: upload_importer
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/onimport-v*.exe
-          archive: false
-          if-no-files-found: error
-
   # One job, the workflow's two zips. The DEV zip (game + ONED + loose assets/,
   # one copy of the data) is what PRs and master builds hand out; the GAME zip
   # (opennova.exe + the packed pffs, built by ONED's
@@ -585,84 +415,6 @@ jobs:
           path: dist/opennova-game-windows-v*.zip
           archive: false
           if-no-files-found: error
-
-  validate-deliverables:
-    runs-on: ubuntu-latest
-    needs: [test, godot-tests, package-addon, package-importer, package-godot-windows]
-    # Tool-package jobs are skipped on PRs. always() avoids implicit skip
-    # propagation; the explicit result checks still block failed dependencies.
-    if: >-
-      ${{
-        always() &&
-        needs.test.result == 'success' &&
-        needs.godot-tests.result == 'success' &&
-        needs.package-godot-windows.result == 'success' &&
-        (
-          github.event_name == 'pull_request' ||
-          (
-            needs.package-addon.result == 'success' &&
-            needs.package-importer.result == 'success'
-          )
-        )
-      }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Download pull request package artifacts
-        if: github.event_name == 'pull_request'
-        uses: actions/download-artifact@v8
-        with:
-          path: dist
-          artifact-ids: >-
-            ${{ needs.package-godot-windows.outputs.artifact_id }},
-            ${{ needs.package-godot-windows.outputs.game_artifact_id }}
-          merge-multiple: true
-          skip-decompress: true
-
-      - name: Download non-PR package artifacts
-        if: github.event_name != 'pull_request'
-        uses: actions/download-artifact@v8
-        with:
-          path: dist
-          artifact-ids: >-
-            ${{ needs.package-addon.outputs.artifact_id }},
-            ${{ needs.package-importer.outputs.artifact_id }},
-            ${{ needs.package-godot-windows.outputs.artifact_id }},
-            ${{ needs.package-godot-windows.outputs.game_artifact_id }}
-          merge-multiple: true
-          # The package jobs upload with `archive: false` (raw blob, no archive
-          # wrapper), so the .zip deliverables are stored as the bare .zip. Without
-          # skip-decompress, download-artifact@v8 decompresses those payload zips and
-          # dumps their CONTENTS into dist/ — the .zip files themselves go missing and
-          # validation fails. skip-decompress keeps each artifact as its raw file.
-          skip-decompress: true
-
-      # PR packages are debug-mode exports, so the zips carry the template_debug
-      # GDExtension (see the package jobs); the manifest's {gdextension_target}
-      # placeholder resolves accordingly.
-      - name: Validate pull request deliverables
-        if: github.event_name == 'pull_request'
-        run: >-
-          python scripts/validate_release_deliverables.py
-          --release-version 0.0.0-ci
-          --gdextension-target template_debug
-          --only-id windows-apps
-          --only-id windows-game
-
-      - name: Validate non-PR deliverables
-        if: github.event_name != 'pull_request'
-        run: >-
-          python scripts/validate_release_deliverables.py
-          --release-version 0.0.0-ci
-          --gdextension-target template_release
-          --only-id asset-importer
-          --only-id blender-ase-exporter
-          --only-id windows-apps
-          --only-id windows-game
 
   # Surface the Windows build on the PR as a single comment that updates in
   # place. Depends on the Windows package job (not the test jobs), so the link

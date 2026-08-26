@@ -75,7 +75,7 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 			"res://../fixtures/def/items.def")), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal"))
+			"res://../fixtures/threedi/objects/B50Cal"))
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq(String(spec.get("error", "")), "")
 	var seats: Array = spec.get("seats", []) as Array
@@ -100,7 +100,7 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 			"res://../fixtures/def/items.def")), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal"))
+			"res://../fixtures/threedi/objects/B50Cal"))
 	var sim := Simulation.new()
 	autofree(sim)
 	assert_false(sim.install_seat_specs_for_type_ids(

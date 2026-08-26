@@ -5,12 +5,8 @@
 
 namespace renderer {
 
-// ---------------------------------------------------------------------------
-// OED-side light helpers. These predate REN-5 and stay OED-cited; the runtime
-// attenuation below shares their math.
-
-// Original OED reference: PrepareLightParams @ 0x46A500.
-std::array<float, 4> build_oed_light_attenuation(float light_range);
+// Runtime point-light parameter helper [orig: PrepareLightParams @ 0x46A500].
+std::array<float, 4> build_point_light_attenuation(float light_range);
 
 // Build a depth-mask plane (a, b, c, d so that ax + by + cz + d = 0 marks
 // the slice of space occluded by the light cone).  Used by spotlight
@@ -156,7 +152,7 @@ std::array<float, 3> point_light_color(const std::array<float, 3> &rgb,
 
 // Runtime point-light attenuation: {atten0 1, atten1 0, atten2 15 / range^2,
 // 1} with range = fixed_range * 1.25 / 65536 world units — byte-identical in
-// shape to the OED preview's build_oed_light_attenuation above.
+// shape to the runtime point-light attenuation helper above.
 // [orig: Light_GetPointLightParams @ 0x5a9251..0x5a9272;
 //  Light_FillD3DPointLight @ 0x5aa53b..0x5aa553]
 std::array<float, 4> point_light_attenuation(int32_t range_fixed);

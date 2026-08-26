@@ -104,8 +104,7 @@ The review remains scene-by-scene:
 
 The current publication catalog is
 [`render-fixtures-retail-v5.json`](render-fixtures-retail-v5.json), SHA-256
-`d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e` — minted by
-[`mint_retail_catalog.py`](../../scripts/render/mint_retail_catalog.py) from
+`d5ea3d0548f9854e38f8d30ecf3c0119053edcf4496260b27b611e35a39c8f3e` — minted from
 the 2026-08-22 SETTLED retail sessions: every fixture re-applied and left to
 settle before capture, so motion-lead saturation and the deterministic ground
 snap finish first, then each `camera_bms` recalibrated from its own registered
@@ -151,8 +150,7 @@ transient the settled 2026-08-22 refresh removed). Catalogs v2, v3, and v4
 [`render-fixtures-retail-v4.json`](render-fixtures-retail-v4.json)) are
 kept, like v1, as the record of the poses this revision inherits; they are not
 re-shootable — a catalog's `camera_bms` values bind its own capture session's
-physics (the [runbook](render-parity-runbook.md) section 3b carries the full
-constraint table).
+physics.
 
 Across the 18 current comparison-v6 manifests, full-frame MAE spans
 `5.165582`–`25.923306`, `world_center` MAE spans
@@ -185,12 +183,10 @@ table.
 
 ## Capture procedures
 
-The operator procedure for both tiers lives in
-[render-parity-runbook.md](render-parity-runbook.md): worktree preflight, the
-frozen-commit rule, the OpenNova probe and its environment contract, retail
-staging/registration (including re-registering retained bundles against a new
-commit), the comparison build, publication assembly, and failure triage. This
-page states what the evidence must prove; the runbook states how to produce it.
+The former registered-capture publication pipeline has been retired. The
+retained catalogs and screenshots are historical evidence, not a currently
+reproducible release gate. The remaining PowerShell helpers under
+`scripts/render/` support local OpenNova capture and comparison work.
 
 The exact-pose harness both tiers drive is
 [`render_fixture_capture_probe.tscn`](../../godot/tests/render_fixture_capture_probe.tscn).

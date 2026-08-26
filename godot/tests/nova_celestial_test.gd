@@ -4,7 +4,7 @@ extends GutTest
 # stands in for the retail body models, letting the test exercise the public
 # environment/resource-root lifecycle without requiring an external JO install.
 
-const MODEL_FIXTURE_ROOT := "res://../fixtures/3dp/CmpFireN"
+const MODEL_FIXTURE_ROOT := "res://../fixtures/threedi/objects/CmpFireN"
 const MODEL_NAME := "CmpFireN.3di"
 const CELESTIAL_SHADER := "res://shaders/celestial.gdshader"
 const ADDITIVE_SHADER := "res://shaders/celestial_additive.gdshader"

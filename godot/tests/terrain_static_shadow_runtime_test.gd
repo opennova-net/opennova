@@ -149,16 +149,6 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK,
 		"the House fixture must provide real selected-LOD ROBJ triangles")
-	var panm_index := object_data.add_part_anim(0, 0)
-	assert_gte(panm_index, 0)
-	assert_true(object_data.set_part_anim_channel_enabled(
-			0, panm_index, "rotation", true))
-	assert_true(object_data.set_part_anim_channel_mode(
-			0, panm_index, "rotation", "x", "sine_wave", -1))
-	assert_true(object_data.set_part_anim_channel_values(
-			0, panm_index, "rotation", "x", 0.0, 90.0, 1.0))
-	assert_true(object_data.has_live_panm_for_lod(0),
-		"fixture pins that the retail tile projector ignores live PANM")
 	var placer := MissionObjectPlacer.create(null, null)
 	assert_true(placer.register_object_data("House", object_data))
 	var ground_sample := Vector3(64.125, 0.0, 64.125)
@@ -280,26 +270,6 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_gt(int(unsuppressed["shadow_epoch_alpha_changed_bytes"]), 0)
 	assert_eq(int(unsuppressed["shadow_epoch_rgb_changed_bytes"]), 0)
 
-	assert_true(object_data.set_material_field(0, "uv_u_style", 1),
-		"the fixture must expose a time/control-driven UV mutation")
-	var animated_uv := await _settle_tile_cache(terrain)
-	assert_eq(int(animated_uv["shadow_provider_epoch_plan_failures"]), 0,
-		"the shared runtime evaluator must keep dynamic projected-shadow UV exact")
-	assert_eq(int(animated_uv["ready_pages"]), int(unsuppressed["ready_pages"]),
-		"dynamic UV evaluation must preserve every requested resident page")
-	assert_eq(int(animated_uv["shadow_raster_failures"]),
-		int(unsuppressed["shadow_raster_failures"]),
-		"dynamic UV evaluation must not create a device raster failure")
-	assert_eq(int(animated_uv["shadow_provider_epoch_unsupported_draw_count"]), 0,
-		"dynamic UV is a supported projected-shadow input, not skipped attribution")
-	assert_gt(int(animated_uv["shadow_provider_epoch_triangles"]), 0,
-		"the dynamically transformed material must still submit its silhouettes")
-	assert_true(object_data.set_material_field(0, "uv_u_style", 0))
-	var restored_material := await _settle_tile_cache(terrain)
-	assert_eq(int(restored_material["shadow_provider_epoch_plan_failures"]), 0,
-		"restoring a supported static material must make every page plan exact again")
-	assert_gt(int(restored_material["shadow_epoch_alpha_changed_bytes"]), 0)
-	assert_eq(int(restored_material["shadow_epoch_rgb_changed_bytes"]), 0)
 	# Force a fresh semantic epoch and prove the asynchronous rebuild converges
 	# to the identical canonical resident-page output.
 	terrain.set_static_terrain_shadow_enabled(false)
@@ -376,7 +346,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 		"pages the mover never touched must stay exact hits, not recompose")
 	assert_eq(int(moved["frame_ready_hits"]) + int(moved["frame_stale_hits"]),
 			int(moved["frame_requests"]),
-		"every request must be served — exact or stale — during a caster move")
+		"every request must be served â€” exact or stale â€” during a caster move")
 	assert_gt(int(moved["frame_stale_hits"]), 0,
 		"the mover's re-targeted pages must keep serving their published payload")
 
@@ -400,74 +370,6 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 		assert_eq(int(still["frame_ready_hits"]), int(still["frame_requests"]))
 		assert_eq(int(still["shadow_provider_source_revision"]), still_revision,
 			"still frames must not bump the placer's shadow source revision")
-
-	terrain.set_static_shadow_placer(null)
-	terrain.set_terrain_data(null)
-	viewport.free()
-	placer = null
-	object_data = null
-	terrain_data = null
-
-
-func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames() -> void:
-	# Material animation is sampled at the tick of the frame that requests a
-	# page (retail evaluates tile-model materials inside the tile render), so
-	# a continuously scrolling caster material must not republish the shared
-	# worker snapshot every frame: the provider's epoch counters, which reset
-	# only when a new snapshot is published, hold across still frames whose
-	# millisecond clock keeps advancing, and no resident page recomposes.
-	var viewport := SubViewport.new()
-	viewport.size = Vector2i(320, 180)
-	add_child_autofree(viewport)
-	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
-	assert_eq(terrain_data.load(), OK)
-	var terrain := Terrain.new()
-	viewport.add_child(terrain)
-	terrain.set_terrain_data(terrain_data)
-	terrain.build()
-	terrain.set_debug_no_frustum(true)
-	var camera := Camera3D.new()
-	viewport.add_child(camera)
-	camera.global_position = Vector3(64.0, 27.0, 64.0)
-	camera.make_current()
-
-	var object_data := ObjectData.new()
-	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK)
-	# Retail's time-scroll UV mode (style 16) at one texture per second on an
-	# alpha-sampled material: the evaluated UV translation moves every 1/256 s.
-	assert_true(object_data.set_material_field(0, "alpha_test_enabled", true))
-	assert_true(object_data.set_material_field(0, "uv_u_style", 16))
-	assert_true(object_data.set_material_field(0, "uv_u_rate", 1.0))
-	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
-	var origin := Vector3(64.0, 0.0, 64.0)
-	origin.y = terrain_data.get_height_world(origin)
-	placer.register_static_instance(100, "House", 0,
-			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
-	terrain.set_static_shadow_placer(placer)
-	var clock_ms := 1000
-	terrain.set_light_context(null, clock_ms)
-	var settled := await _settle_tile_cache(terrain)
-	assert_eq(int(settled["shadow_raster_failures"]), 0)
-	assert_eq(int(settled["shadow_provider_epoch_plan_failures"]), 0)
-	var epoch_plans := int(settled["shadow_provider_epoch_plan_count"])
-	assert_gt(epoch_plans, 0,
-		"resident pages must have planned through the shared worker snapshot")
-
-	for _frame in 3:
-		clock_ms += 16
-		terrain.set_light_context(null, clock_ms)
-		terrain.render_frame()
-		await get_tree().process_frame
-		var still := terrain.get_tile_cache_diagnostics()
-		assert_eq(int(still["frame_compose_jobs"]), 0,
-			"an advancing material clock must not recompose resident pages")
-		assert_eq(int(still["frame_ready_hits"]), int(still["frame_requests"]))
-		assert_eq(int(still["shadow_provider_epoch_plan_count"]), epoch_plans,
-			"an advancing material clock must not republish the worker snapshot")
-		assert_eq(int(still["shadow_provider_frame_plan_compiles"]), 0,
-			"an advancing material clock must reuse cached page plans outright")
 
 	terrain.set_static_shadow_placer(null)
 	terrain.set_terrain_data(null)
@@ -533,23 +435,6 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 	assert_gt(int(diagnostics["shadow_epoch_alpha_changed_bytes"]), 0,
 		"Scrate1 must rasterize a real opaque silhouette into page alpha")
 	assert_eq(int(diagnostics["shadow_epoch_rgb_changed_bytes"]), 0)
-
-	assert_true(object_data.set_material_field(
-		0, "alpha_test_enabled", true))
-	var constant_alpha_test := await _settle_tile_cache(terrain)
-	assert_eq(int(constant_alpha_test[
-			"shadow_provider_epoch_unsupported_draw_count"]), 0,
-		"style 24 is a static start-value generator and remains exact when alpha matters")
-	assert_gt(int(constant_alpha_test[
-			"shadow_provider_epoch_alpha_test_triangles"]), 0)
-
-	assert_true(object_data.set_material_field(0, "alpha_gen_style", 1))
-	var time_alpha := await _settle_tile_cache(terrain)
-	assert_eq(int(time_alpha["shadow_provider_epoch_unsupported_draw_count"]), 0,
-		"time-driven AlphaGen must use the shared exact material evaluator")
-	assert_eq(int(time_alpha["shadow_provider_epoch_plan_failures"]), 0)
-	assert_gt(int(time_alpha["shadow_provider_epoch_alpha_test_triangles"]), 0,
-		"the evaluated AlphaGen value must reach the live projected alpha test")
 
 	terrain.set_static_shadow_placer(null)
 	terrain.set_terrain_data(null)

@@ -12,14 +12,6 @@
 // Helpers
 // --------------------------------------------------------------------------
 
-// Trim leading/trailing whitespace in-place, returning pointer into buf.
-static const char *trim(const char *start, const char *end) {
-    while (start < end && isspace((unsigned char)*start)) ++start;
-    while (end > start && isspace((unsigned char)*(end - 1))) --end;
-    return start;
-    // Note: caller uses (end - start) for length after calling trim
-}
-
 // Copy a trimmed substring into dst, null-terminated, capped at max_len chars.
 static void copy_trimmed(char *dst, size_t dst_size,
                          const char *start, const char *end) {
@@ -160,11 +152,6 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
                          sizeof(out->entries[out->count].key),
                          trimmed_start, q1);
 
-            // Value = between quotes, trimmed
-            copy_trimmed(out->entries[out->count].value,
-                         sizeof(out->entries[out->count].value),
-                         q1 + 1, q2);
-
             // Every additional quoted token on the row is a VARIANT of the
             // same anim slot [orig: AnimMap_ParseConfigLine @ 0x40cb60 loops
             // the whole line, registering each token on one slot ring].
@@ -172,21 +159,21 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
                 AdmEntry *e = &out->entries[out->count];
                 const char *vq1 = q1;
                 const char *vq2 = q2;
-                e->value_count = 0;
-                while (vq1 && vq2 && e->value_count < ADM_MAX_VARIANTS) {
-                    copy_trimmed(e->values[e->value_count],
-                                 sizeof(e->values[e->value_count]),
+                e->variant_count = 0;
+                while (vq1 && vq2 && e->variant_count < ADM_MAX_VARIANTS) {
+                    copy_trimmed(e->variants[e->variant_count],
+                                 sizeof(e->variants[e->variant_count]),
                                  vq1 + 1, vq2);
-                    if (e->values[e->value_count][0] != '\0')
-                        e->value_count++;
+                    if (e->variants[e->variant_count][0] != '\0')
+                        e->variant_count++;
                     vq1 = (const char *)memchr(vq2 + 1, '"',
                                 (size_t)(trimmed_end - (vq2 + 1)));
                     vq2 = vq1 ? (const char *)memchr(vq1 + 1, '"',
                                 (size_t)(trimmed_end - (vq1 + 1)))
                               : NULL;
                 }
-                if (e->value_count == 0)
-                    e->values[0][0] = '\0';
+                if (e->variant_count == 0)
+                    e->variants[0][0] = '\0';
             }
 
             // Skip entries with empty key
@@ -253,42 +240,4 @@ void adm_free(AdmFile *af) {
     free(af->entries);
     af->entries = NULL;
     af->count = 0;
-}
-
-int adm_write(const char *path, const AdmEntry *entries, size_t count) {
-    FILE *f;
-    size_t i;
-    int ok = 1;
-
-    if (!path) return -1;
-    if (count > 0 && !entries) return -1;
-
-    f = fopen(path, "wb");
-    if (!f) return -1;
-
-    // Leading blank line.
-    if (fputs("\r\n", f) < 0) ok = 0;
-
-    for (i = 0; i < count && ok; ++i) {
-        if (fprintf(f, "%s\t\t\t\t\"%s\"", entries[i].key, entries[i].value) < 0) ok = 0;
-        // Additional variants ride the same row as further quoted tokens
-        // (stock multi-clip rows: anim_wpn_reload "m4_1r" "m4_1r" "m4_1r2").
-        if (ok && entries[i].value_count > 1) {
-            size_t v;
-            for (v = 1; v < entries[i].value_count && ok; ++v) {
-                if (fprintf(f, " \"%s\"", entries[i].values[v]) < 0) ok = 0;
-            }
-        }
-        if (ok && i + 1 < count) {
-            if (fputs("\r\n", f) < 0) ok = 0;
-        }
-    }
-
-    // Trailing CRLF*3 + NUL (the parser maps embedded NULs to newlines).
-    if (ok) {
-        if (fwrite("\r\n\r\n\r\n\0", 1, 7, f) != 7) ok = 0;
-    }
-
-    fclose(f);
-    return ok ? 0 : -1;
 }

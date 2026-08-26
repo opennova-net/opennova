@@ -22,6 +22,7 @@ static int roundtrip(const char *path) {
     long orig_size, round_size;
     unsigned char *bufA, *bufB;
     int same;
+    int memory_read_ok;
 
     memset(&model, 0, sizeof(model));
     if (threedi_3di3_read(path, &model) != 0) {
@@ -67,10 +68,20 @@ static int roundtrip(const char *path) {
     fclose(fb);
 
     same = (memcmp(bufA, bufB, (size_t)orig_size) == 0);
+
+    // The memory-backed reader is part of the exported flat C interface used
+    // by DCC adapters. Pin it against the same bytes as the file adapter.
+    memset(&model, 0, sizeof(model));
+    memory_read_ok = threedi_3di3_read_memory(bufA, (size_t)orig_size, &model) == 0;
+    if (memory_read_ok) threedi_3di3_free(&model);
     free(bufA);
     free(bufB);
     remove(tmp);
 
+    if (!memory_read_ok) {
+        fprintf(stderr, "Memory read failed for %s\n", path);
+        return 0;
+    }
     if (!same) {
         fprintf(stderr, "Roundtrip mismatch for %s\n", path);
     }

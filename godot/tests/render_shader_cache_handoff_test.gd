@@ -19,7 +19,7 @@ const EXPECTED_KEYS := {
 	"VS_PHONGT/base": [["VS_PHONGT", 0x00, 0, 0, 128], 0x00002408],
 	"VS_DOT3DIFFOBJ/base": [["VS_DOT3DIFFOBJ", 0x00, 0, 0, 128], 0x00000c08],
 	"VS_DOT3DIFF2/base": [["VS_DOT3DIFF2", 0x00, 0, 0, 128], 0x00001410],
-	# 0x5410 -> 0x21410 at REN-4 + this audit: the OED dump's GLASS bit on the
+	# 0x5410 -> 0x21410 at REN-4 + this audit: the old dump's GLASS bit on the
 	# SkB*T rows was table drift (no ReflectColor reference), while the witnessed
 	# skinned vertex topology now has an explicit compile-time capability bit.
 	# [orig: HLSLEffect_LoadFromFile probe @ 0x5ae690; D-RMAT-4].
@@ -44,9 +44,9 @@ func test_classify_binding_matches_golden_keys() -> void:
 func test_known_shader_tag_table_reaches_gdscript() -> void:
 	var cache = ObjectShaderCache.get_singleton()
 	var tags: PackedStringArray = cache.get_known_shader_tags()
-	# 46 = OED's 45-entry gMaterialInfoTable + VS_TRACER, matching the runtime
-	# registry retail builds at boot (REN-2; docs/render/render-material-re.md).
-	assert_eq(tags.size(), 46, "table mirrors the runtime registry (45 OED + VS_TRACER)")
+	# 46 entries, including VS_TRACER, match the runtime registry retail builds
+	# at boot (REN-2; docs/render/render-material-re.md).
+	assert_eq(tags.size(), 46, "table mirrors the runtime registry")
 	assert_true("FF_ST_OP" in tags, "table carries FF_ST_OP")
 	assert_true("FFP_GLASS" in tags, "table carries FFP_GLASS")
 	assert_true("VS_TRACER" in tags, "table carries the runtime-only VS_TRACER row")

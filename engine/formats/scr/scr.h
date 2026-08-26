@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <io/export.h>
-#define SCR_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,15 +23,15 @@ extern "C" {
 
 /* Check if data starts with a valid SCR container header.
    Returns 1 if SCR, 0 otherwise. */
-SCR_EXPORT int scr_is_scr(const uint8_t *data, size_t size);
+int scr_is_scr(const uint8_t *data, size_t size);
 
 /* Get version byte from SCR header.
    Returns version byte, or 0 if data is too small. */
-SCR_EXPORT uint8_t scr_get_version(const uint8_t *data, size_t size);
+uint8_t scr_get_version(const uint8_t *data, size_t size);
 
 /* Decrypt payload in-place (caller must strip the 4-byte header first).
    Reverses bytes, then XORs with keystream derived from key. */
-SCR_EXPORT void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
+void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
 
 /* Strip SCR header and decrypt into caller-provided buffer.
    On entry, *out_size is the buffer capacity.
@@ -41,7 +39,7 @@ SCR_EXPORT void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
    Returns  0 on success,
            -1 if data is not SCR,
            -2 if output buffer is too small. */
-SCR_EXPORT int scr_decrypt_buf(const uint8_t *data, size_t size,
+int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key);
 
 #ifdef __cplusplus

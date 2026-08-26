@@ -13,9 +13,7 @@ extern "C" {
    diagnostics consume. Rows are ordered by the witnessed boot sequence
    (phase-major).
 
-   Consumption is Model B only (ADR 0024): these functions are deliberately
-   NOT exported to the flat C ABI — no FFI consumer exists, so they carry no
-   GAMEPROFILE_EXPORT annotation and stay off the DLL surface. */
+   These functions are internal to the native engine (ADR 0024). */
 
 /* The witnessed load phase [orig: Game_Run @ 0x4a7fb0 -> Game_InitSubsystems
    @ 0x4a6cd0; MainMenu enter Menu_InitShellResources @ 0x552500; Game_StartMission

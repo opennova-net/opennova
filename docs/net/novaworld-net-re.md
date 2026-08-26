@@ -5414,18 +5414,15 @@ with a *position-residual* metric instead of frame matching refutes the unrecove
    X-triplicated rigs (JOX ak47/M4) the reconstruction disagrees with 38/38 broken bones and
    leaks 0 healthy ones. The per-parent orthogonal solve reproduced the third pass first
    (≤1.02e-4 across the four solvable parents) before any rule work.
-4. **Port.** `bad_positions_from_model` in `pyopennova/bad_build.py` (byte-identical mirror
-   in `blender/opennova/bad_build.py`): index-paired to the model part table, root bones
+4. **Port.** `opennova::anim::positions_from_model` in
+   `engine/runtime/anim/anim_sample.cpp`: index-paired to the model part table, root bones
    (parent < 0/self) take the x-negated rel unrotated (zero on every shipped rig), surplus
-   `.bad` bones past the part count excluded by construction. Evidence: pytest
-   `tests/test_bad_pos_derivation.py` — synthetic exactness runs unconditionally;
-   `OPENNOVA_JO_ASSETS`-gated legs reconstruct M16/M24/M21/Frag within 5e-4 per bone and
-   prove the ak47 triplication control (see docs/asset-gated-tests.md).
+   `.bad` bones past the part count excluded by construction. Synthetic exactness is pinned
+   in `tests/anim/anim_sample_test.cpp`; the corpus observations above remain the witness.
 
-Consequence: DCC import of the broken-12 no longer depends on the shipped field — armatures
-can derive it from the model + bind; anything that consumes `BadBone.position` (the pre-repo
-oscarmike path, our exporters' round-trips) has a corpus-exact reconstruction. The runtime is
-untouched — the model-pivot path above remains the witnessed-faithful rig source.
+Consequence: the broken-12 no longer depends on the shipped field. The native skeletal path
+derives the rest positions from the model + bind, while the model-pivot path above remains the
+witnessed-faithful rig source.
 
 **§5.40 per-weapon def plumbing + position-source unification (2026-07-09, fifth pass).**
 Two loose ends of the series closed together, validated end to end on both SKUs:

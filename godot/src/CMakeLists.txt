@@ -76,7 +76,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_data_state.cpp
     object/nova_object_data_materials.cpp
     object/nova_object_data_geometry.cpp
-    object/nova_object_data_panm_edit.cpp
+    object/nova_object_data_panm_inspection.cpp
     object/nova_object_data_runtime_eval.cpp
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp

@@ -38,8 +38,8 @@ func _init() -> void:
 			print("  id %d %-28s particlefx %s @ %s" % [id, db.get_display_name(id),
 					a.get("effect"), a.get("userpoint")])
 	print("probe: %d items author particlefx" % with_fx)
-	# The DBuggy1 def leg (the model side — FX00 with direction — is pinned by the
-	# pyopennova userpoint dump; the attach matches it case-insensitively).
+	# The DBuggy1 def leg (the model side — FX00 with direction — is pinned by
+	# native ObjectData inspection; the attach matches it case-insensitively).
 	var fx: Dictionary = db.get_particle_effects(101291)
 	print("probe: DBuggy1 -> ", fx.get("particlefx"))
 	quit(0)

@@ -224,7 +224,7 @@ struct ResolvedEntry {
 struct Vfs::Impl {
     std::vector<std::string> search_paths;                 // add order (highest precedence)
     // mount_game retains these even in Packed mode. Retail callers such as foliage/UI can
-    // force one loose-first lookup without making loose data visible to the legacy index.
+    // force one loose-first lookup without making loose data visible to the flat index.
     // [orig: Terrain_LoadTileInfoFile @ 0x60a74e; FileSystem_OpenFile @ 0x75b1c0]
     std::vector<std::string> retail_loose_probe_paths;
     std::unique_ptr<ArchiveMount> primary;
@@ -478,9 +478,9 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     }
 
     if (discovery == VfsArchiveDiscovery::ScanAll) {
-        // Authoring discovery (the editor's browse index): every base-root
-        // *.pff, alphabetical for determinism. A deliberate divergence from
-        // the retail table so modders' arbitrary archives are indexable
+        // Explicit catalog discovery: every base-root *.pff, alphabetical for
+        // determinism. A deliberate divergence from the retail table so
+        // arbitrary mod archives are indexable
         // (docs/vfs/vfs-pff-mount-re.md D-VFS-2 records the decision).
         std::vector<fs::path> base_pffs;
         for (const fs::directory_entry &de :
@@ -594,7 +594,7 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
         return true;
     }
 
-    // Archive extraction retains the legacy read_file_raw contract: PFF container
+    // Archive extraction retains the flat read_file_raw contract: PFF container
     // encryption is removed, while SCR/BFC1 payload decoding is left to read_file.
     out.resize(resolved.entry->size);
     if (pff_extract(&resolved.archive->ar, resolved.entry,

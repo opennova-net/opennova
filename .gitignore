@@ -36,14 +36,6 @@ build/
 
 # SCons
 .sconsign.dblite
-*.pyc
-__pycache__/
-
-# Python tooling
-.venv/
-.pytest_cache/
-pytest-cache-files-*/
-*.egg-info/
 
 # CMake
 CMakeCache.txt
@@ -52,9 +44,6 @@ cmake_install.cmake
 Makefile
 compile_commands.json
 Testing/Temporary/
-
-# PyInstaller
-*.spec
 
 # Runtime logs
 *.log
@@ -67,12 +56,6 @@ infra/github/.terraform/
 *.tfstate.*
 terraform.tfvars
 *.auto.tfvars
-
-# Blender addon native libs and wheels (built/downloaded artifacts)
-blender/lib/**/*.so
-blender/lib/**/*.dll
-blender/lib/**/*.dylib
-blender/wheels/
 
 # Shared library build directories
 build-*/

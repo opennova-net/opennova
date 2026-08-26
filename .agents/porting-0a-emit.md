@@ -339,10 +339,9 @@ numbering").
 
 - **Unit:** `netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`) pins the header cycle deterministically
   — no live client needed.
-- **Shape diff:** `python scripts/net/diff_0a.py --ours <cap> --golden <golden> --items ~/Desktop/JOX/ITEMS.DEF`
-  compares sub-block distribution + record-class mix + per-field population vs the retail-host golden. The
-  golden profile caches to `<golden>.0a.json` (instant re-runs; `--refresh` after a decoder change). This
-  is the machine-readable "are we sending what retail sends" check.
+- **Coverage diff:** `scripts/net/diff_vs_golden.ps1` compares native decoder
+  tag coverage with a retail-host golden. Detailed state-shape invariants belong
+  in focused native `netsim_*`, `npruntime_*`, or `nw_*` CTests.
 - **Golden:** `.scratch/retail-ashi5a-*.pcapng` = retail host + retail joiner on ASH_I5A (the spec; C 0x0f
   = 0). Live re-capture runbook: `[[reference_retail_join_test_stack]]` / the memory
   `project_0x0f_flood_root_cause`.

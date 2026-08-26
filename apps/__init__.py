@@ -1,1 +1,0 @@
-# OpenNova standalone tools

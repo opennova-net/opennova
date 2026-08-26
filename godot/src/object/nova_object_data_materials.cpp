@@ -1,9 +1,9 @@
-// ObjectData — materials & textures: MTRL introspection and editing on
-// the parsed model, the shader catalog, and texture resolution through the
-// resource root / loose source directory.
+// ObjectData materials and textures: immutable MTRL inspection, runtime shader
+// classification, and texture resolution through a resource root or loose
+// source directory.
 #include "object/nova_object_data_internal.h"
 
-#include <oed/material_descriptor.h>
+#include <renderer/material_classify.h>
 #include <threedi/threedi_ctrl_catalog.h>
 
 #include "util/texture_path_resolver.h"
@@ -15,81 +15,61 @@ namespace {
 // The MTRL texture-slot array capacity (ThreediMaterial::textures).
 constexpr uint32_t kMaxMaterialTextures = 24;
 
-int dict_int(const Dictionary &dict, const char *key, int fallback) {
-	const String dict_key(key);
-	if (!dict.has(dict_key)) {
-		return fallback;
-	}
-	return static_cast<int>(dict[dict_key]);
-}
-
-uint32_t shader_flags_for_tag(const char *shader_name) {
-	if (const oed::MaterialDescriptorRecord *descriptor =
-			oed::find_material_descriptor(shader_name != nullptr ? shader_name : "")) {
-		return static_cast<uint32_t>(descriptor->shader_flags);
-	}
-	return static_cast<uint32_t>(oed::kMaterialInfoTable[0].flags);
-}
-
-const char *shader_family_name(oed::MaterialDescriptorFamily family) {
-	switch (family) {
-		case oed::MaterialDescriptorFamily::Unknown: return "unknown";
-		case oed::MaterialDescriptorFamily::FixedFunction: return "fixed_function";
-		case oed::MaterialDescriptorFamily::Phong: return "phong";
-		case oed::MaterialDescriptorFamily::Flag: return "flag";
-		case oed::MaterialDescriptorFamily::Dot3: return "dot3";
-		case oed::MaterialDescriptorFamily::Environment: return "environment";
-		case oed::MaterialDescriptorFamily::Glass: return "glass";
-	}
-	return "unknown";
-}
-
-const char *shader_blend_name(oed::MaterialDescriptorBlend blend) {
+const char *shader_blend_name(renderer::ObjectBlendMode blend) {
 	switch (blend) {
-		case oed::MaterialDescriptorBlend::Opaque: return "opaque";
-		case oed::MaterialDescriptorBlend::AlphaBlend: return "alpha_blend";
-		case oed::MaterialDescriptorBlend::Additive: return "additive";
-		case oed::MaterialDescriptorBlend::Multiplicative: return "multiplicative";
+		case renderer::ObjectBlendMode::Opaque: return "opaque";
+		case renderer::ObjectBlendMode::AlphaBlend: return "alpha_blend";
+		case renderer::ObjectBlendMode::Additive: return "additive";
+		case renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
 	}
 	return "opaque";
 }
 
-const char *shader_normal_space_name(oed::MaterialDescriptorNormalSpace normal_space) {
+const char *shader_normal_space_name(renderer::ObjectNormalSpace normal_space) {
 	switch (normal_space) {
-		case oed::MaterialDescriptorNormalSpace::None: return "none";
-		case oed::MaterialDescriptorNormalSpace::Tangent: return "tangent";
-		case oed::MaterialDescriptorNormalSpace::Object: return "object";
+		case renderer::ObjectNormalSpace::None: return "none";
+		case renderer::ObjectNormalSpace::Tangent: return "tangent";
+		case renderer::ObjectNormalSpace::Object: return "object";
 	}
 	return "none";
 }
 
-void add_shader_flag_fields(Dictionary &item, const char *shader_name, uint32_t flags) {
-	const oed::MaterialDescriptorRecord *descriptor =
-		oed::find_material_descriptor(shader_name != nullptr ? shader_name : "");
-	const uint32_t descriptor_flags = descriptor != nullptr ? descriptor->descriptor_flags : 0;
-	item["shader_flags"] = static_cast<int64_t>(flags);
-	item["has_diffuse"] = (flags & oed::MATERIAL_FLAG_DIFFUSE) != 0;
-	item["has_secondary"] = (flags & oed::MATERIAL_FLAG_SECONDARY) != 0;
-	item["has_normal_a"] = (flags & oed::MATERIAL_FLAG_NORMAL_A) != 0;
-	item["has_normal_b"] = (flags & oed::MATERIAL_FLAG_NORMAL_B) != 0;
-	item["is_alpha"] = (flags & oed::MATERIAL_FLAG_ALPHA) != 0;
+void add_shader_classification_fields(Dictionary &item,
+		const ThreediMaterial &material) {
+	const renderer::ObjectMaterialClassification classification =
+			renderer::classify_object_material(material.shader_name,
+					material.material_flags, material.emissive_type,
+					material.is_glass, material.alpha_test_value_byte);
+	bool has_diffuse = false;
+	for (uint32_t i = 0; i < material.texture_count && i < kMaxMaterialTextures; ++i) {
+		if (material.textures[i].slot == THREEDI_TEX_SLOT_DIFFUSE) {
+			has_diffuse = true;
+			break;
+		}
+	}
+	item["has_diffuse"] = has_diffuse;
+	item["has_secondary"] = classification.has_detail;
+	item["has_normal_a"] = classification.needs_normal_map;
+	item["has_normal_b"] = classification.normal_uses_uv2;
+	item["is_alpha"] = classification.blend == renderer::ObjectBlendMode::AlphaBlend;
 	// Self-lum keys on EMISSIVE; 0x10000000 is the separate glow/bloom-copy
-	// capability (REN-4, D-RMAT-4 — the two ride together on FF _LUM rows but
+	// capability (REN-4, D-RMAT-4 â€” the two ride together on FF _LUM rows but
 	// FFP_GLASS carries only the capability).
-	item["is_luminance"] = (flags & oed::MATERIAL_FLAG_EMISSIVE) != 0;
-	item["is_glow_capable"] = (flags & oed::MATERIAL_FLAG_GLOW) != 0;
-	item["is_glass_shader"] = (flags & oed::MATERIAL_FLAG_GLASS) != 0;
-	item["is_skinned_shader"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SKINNED) != 0;
-	item["is_blending_shader"] = (flags & oed::MATERIAL_FLAG_BLENDING) != 0;
-	item["uses_uv_generators"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
-	item["uses_environment"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
-	item["uses_specular"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
-	item["environment_textured"] =
-			(descriptor_flags & oed::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
-	item["uses_flag_animation"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_FLAG_ANIMATION) != 0;
-	item["shader_family"] = descriptor != nullptr ? from_native(shader_family_name(descriptor->family)) : String("unknown");
-	item["shader_blend"] = descriptor != nullptr ? from_native(shader_blend_name(descriptor->blend)) : String("opaque");
-	item["normal_space"] = descriptor != nullptr ? from_native(shader_normal_space_name(descriptor->normal_space)) : String("none");
+	item["is_luminance"] = classification.is_luminance;
+	item["is_glow_capable"] = classification.is_glow_capable;
+	item["is_glass_shader"] = classification.is_glass;
+	item["is_skinned_shader"] = classification.is_skinned;
+	item["is_blending_shader"] = classification.blend != renderer::ObjectBlendMode::Opaque;
+	item["uses_uv_generators"] = material.u_params.style != 0 || material.v_params.style != 0;
+	item["uses_environment"] = classification.uses_environment;
+	item["uses_specular"] = classification.uses_specular;
+	item["environment_textured"] = classification.environment_textured;
+	item["uses_flag_animation"] = classification.family == renderer::ObjectShaderFamily::Flag;
+	item["shader_family"] = from_native(
+			renderer::object_shader_family_name(classification.family));
+	item["shader_blend"] = from_native(shader_blend_name(classification.blend));
+	item["normal_space"] = from_native(
+			shader_normal_space_name(classification.normal_space));
 }
 
 Dictionary uv_params_to_dict(const ThreediUvParams &params) {
@@ -133,42 +113,6 @@ Dictionary texture_animation_to_dict(const ThreediTexAnim &anim) {
 	return dict;
 }
 
-void set_material_texture_slot_entry(ThreediMaterial &mat, int slot, int frame, const String &value, uint8_t flags) {
-	const String filename = String(value).get_file();
-	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
-		ThreediMaterialTexture &tex = mat.textures[i];
-		if (tex.slot == static_cast<uint8_t>(slot) && tex.frame == static_cast<uint8_t>(frame) &&
-				((flags & THREEDI_TEX_FLAG_ANIMATED) == 0 || (tex.flags & THREEDI_TEX_FLAG_ANIMATED) != 0)) {
-			if (filename.is_empty()) {
-				if (i + 1 < mat.texture_count) {
-					mat.textures[i] = mat.textures[mat.texture_count - 1];
-				}
-				std::memset(&mat.textures[mat.texture_count - 1], 0, sizeof(ThreediMaterialTexture));
-				--mat.texture_count;
-			} else {
-				copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
-				tex.slot = static_cast<uint8_t>(slot);
-				tex.frame = static_cast<uint8_t>(frame);
-				tex.flags |= flags;
-			}
-			return;
-		}
-	}
-
-	if (filename.is_empty() || mat.texture_count >= kMaxMaterialTextures) {
-		return;
-	}
-	ThreediMaterialTexture &tex = mat.textures[mat.texture_count++];
-	std::memset(&tex, 0, sizeof(tex));
-	copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
-	tex.slot = static_cast<uint8_t>(slot);
-	// Slot -> texture-type policy lives engine-side (threedi_3di3.h): normal
-	// slots stamp NORMAL_MDT, everything else DIFFUSE.
-	tex.type = threedi_tex_default_type_for_slot(tex.slot);
-	tex.flags = flags;
-	tex.frame = static_cast<uint8_t>(frame);
-}
-
 } // namespace
 
 int ObjectData::get_material_count() const {
@@ -186,7 +130,7 @@ Array ObjectData::get_materials() const {
 		item["index"] = static_cast<int64_t>(i);
 		item["material_index"] = mat.index;
 		item["shader"] = from_native(mat.shader_name);
-		add_shader_flag_fields(item, mat.shader_name, shader_flags_for_tag(mat.shader_name));
+		add_shader_classification_fields(item, mat);
 		item["texture_count"] = mat.texture_count;
 		item["alpha_threshold"] = static_cast<float>(mat.alpha_test_value_byte) / 255.0f;
 		item["flags"] = static_cast<int64_t>(mat.material_flags);
@@ -284,117 +228,6 @@ Dictionary ObjectData::get_material_info(int p_index) const {
 	return info;
 }
 
-bool ObjectData::set_material_field(int p_index, const String &p_key, const Variant &p_value) {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
-		return false;
-	}
-	ThreediMaterial &mat = source_model.materials[p_index];
-	const String key = p_key;
-
-	auto set_flag = [&](uint8_t flag) {
-		if (static_cast<bool>(p_value)) {
-			mat.material_flags |= flag;
-		} else {
-			mat.material_flags &= static_cast<uint8_t>(~flag);
-		}
-	};
-	auto set_color = [&](float out[4]) {
-		const Color c = p_value;
-		out[0] = c.r;
-		out[1] = c.g;
-		out[2] = c.b;
-		out[3] = c.a;
-	};
-	auto resolve_reg = [&](const String &name, int32_t &reg) -> bool {
-		return resolve_control_register_index(source_model, name, reg);
-	};
-
-	if (key == "shader_tag" || key == "name") {
-		copy_cstr(mat.shader_name, sizeof(mat.shader_name), to_std(String(p_value)).c_str());
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "alpha_test") {
-		mat.alpha_test_value_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "alpha_test_enabled") {
-		set_flag(THREEDI_MATERIAL_FLAG_ALPHA_TEST);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "alpha_invert") {
-		set_flag(THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "two_sided") {
-		set_flag(THREEDI_MATERIAL_FLAG_TWO_SIDED);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "is_glass") {
-		mat.is_glass = static_cast<bool>(p_value) ? 1 : 0;
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "emissive") {
-		mat.emissive_type = static_cast<bool>(p_value) ? THREEDI_EMISSIVE_FULL : THREEDI_EMISSIVE_NONE;
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "diffuse_a") {
-		set_material_texture_slot_entry(mat, THREEDI_TEX_SLOT_DIFFUSE, 0, p_value, 0);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "detail_a") {
-		set_material_texture_slot_entry(mat, THREEDI_TEX_SLOT_DETAIL, 0, p_value, 0);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "normal_a") {
-		set_material_texture_slot_entry(mat, THREEDI_TEX_SLOT_NORMAL, 0, p_value, 0);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "reflect_color") {
-		set_color(mat.reflect_color);
-		_notify_object_changed(UPDATE_MTRL);
-		return true;
-	}
-	if (key == "rgb_gen_style") { mat.rgb_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "rgb_gen_rate") { mat.rgb_gen.rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "rgb_gen_phase") { mat.rgb_gen.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "rgb_gen_start_color") { set_color(mat.rgb_gen.start_color); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "rgb_gen_end_color") { set_color(mat.rgb_gen.end_color); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "rgb_gen_reg") { mat.rgb_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "rgb_gen_reg_name") { if (!resolve_reg(String(p_value), mat.rgb_gen.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_style") { mat.alpha_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_rate") { mat.alpha_gen.rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_phase") { mat.alpha_gen.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_start") { mat.alpha_gen.start = clamp_to_i16(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_end") { mat.alpha_gen.end = clamp_to_i16(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_reg") { mat.alpha_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_reg_name") { if (!resolve_reg(String(p_value), mat.alpha_gen.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_style") { mat.u_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_rate") { mat.u_params.gen_rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_phase") { mat.u_params.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_start") { mat.u_params.start = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_end") { mat.u_params.end = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_reg") { mat.u_params.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_u_reg_name") { if (!resolve_reg(String(p_value), mat.u_params.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_style") { mat.v_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_rate") { mat.v_params.gen_rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_phase") { mat.v_params.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_start") { mat.v_params.start = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_end") { mat.v_params.end = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_reg") { mat.v_params.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "uv_v_reg_name") { if (!resolve_reg(String(p_value), mat.v_params.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
-	return false;
-}
-
 PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) const {
 	PackedStringArray out;
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
@@ -454,25 +287,6 @@ Array ObjectData::get_control_registers() const {
 	return result;
 }
 
-bool ObjectData::set_control_register_name(
-		int p_index, const String &p_name) {
-	if (!has_source_model || source_model.ctrl.registers == nullptr || p_index < 0 ||
-			static_cast<uint32_t>(p_index) >= source_model.ctrl.count) {
-		return false;
-	}
-	const std::string name = to_std(p_name);
-	if (name.size() > 24) {
-		return false;
-	}
-	copy_cstr(source_model.ctrl.registers[p_index].name,
-			sizeof(source_model.ctrl.registers[p_index].name), name.c_str());
-	// A local CTRL rename can retarget material, texture, PANM, and light
-	// references after the retail loader-name fixup, so invalidate every
-	// dependent view rather than guessing which blocks cite this slot.
-	_notify_object_changed(UPDATE_ALL);
-	return true;
-}
-
 String ObjectData::resolve_material_texture_path(int p_material_index, int p_texture_index) const {
 	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count ||
 			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
@@ -518,4 +332,3 @@ Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const
 	}
 	return opennova::load_texture_from_dir(source_dir, p_texture_name);
 }
-

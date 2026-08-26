@@ -74,11 +74,11 @@ skip-and-pass (`pending`/`pass_test`) when the fixture or asset env var is
 absent — so a green count does not prove coverage; check for "skipping"/pending
 lines when you expected assets present. Non-collected helper scripts (probes)
 get a `_probe.gd` suffix, not `_test.gd`. Never bulk-edit `.gd` files with
-PowerShell 5.1 Get/Set-Content (BOM mangling) — use bash or python.
+PowerShell 5.1 Get/Set-Content (BOM mangling) — use `apply_patch` or another
+UTF-8-safe editor.
 
 ## Done
 
 Wrapper exits 0 with no parse/drop lines, and every failure you saw was either
-reproduced in isolation or explained by an identified state leak. CI parity:
-the `godot-tests` job runs this same wrapper; a red `modsuperoed-smoke` job is
-known-unrelated drift — never gate on it.
+reproduced in isolation or explained by an identified state leak. The CI
+`godot-tests` job runs this same wrapper.

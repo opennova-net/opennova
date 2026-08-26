@@ -237,7 +237,7 @@ func _fx_object_data(fixture_dir: String, model_file: String) -> ObjectData:
 
 
 func _fx_anchor_data() -> ObjectData:
-	return _fx_object_data("res://../fixtures/3dp/B50Cal", "B50Cal.3di")
+	return _fx_object_data("res://../fixtures/threedi/objects/B50Cal", "B50Cal.3di")
 
 
 func _fx_plain_data() -> ObjectData:

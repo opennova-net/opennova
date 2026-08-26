@@ -8,7 +8,7 @@ extends GutTest
 # [orig: g_HiddenSectionMask consumption in Terrain_RenderSectorModels
 #  @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
 
-const PMP_3DI := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
+const PMP_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
 
 
 func _object_data() -> ObjectData:

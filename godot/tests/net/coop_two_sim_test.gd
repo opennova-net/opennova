@@ -115,10 +115,10 @@ func before_all() -> void:
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
 			"created the flat native asset dir")
 	assert_true(_write_native_model("B50Cal.3di",
-			_repo_file_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di")),
+			_repo_file_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")),
 			"composed the B50Cal native model fixture")
 	var carrier := _with_user_point_position(
-			_repo_file_bytes("res://../fixtures/3dp/dsuv1/dsuv1.3di"),
+			_repo_file_bytes("res://../fixtures/threedi/objects/dsuv1/dsuv1.3di"),
 			"ctrlx13", 0, 0, 0)
 	for site in ["sitex00d", "sitex08c", "sitex06b", "sitex12a"]:
 		carrier = _with_renamed_user_point(carrier, site, "x" + site.substr(1))
@@ -996,7 +996,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	# PLAYPARTANIM is intentionally not part of this contract.
 	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")), OK)
 	var moving_anchor := _moving_eweap_userpoint(model)
 	assert_false(moving_anchor.is_empty(),
 			"B50Cal exposes a userpoint carried by EWEAP_GUNYAW")
@@ -1129,7 +1129,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	# applies its uplink look to H and drives the parent's EWEAP controls.
 	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")), OK)
 	var moving_anchor := _moving_eweap_userpoint(model)
 	assert_false(moving_anchor.is_empty(),
 			"B50Cal exposes a real ROBJ carried by EWEAP_GUNYAW")

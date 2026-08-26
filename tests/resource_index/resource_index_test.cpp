@@ -96,9 +96,7 @@ int main() {
 
 	write_file(root / "Alpha.TRN", "trn");
 	write_file(root / "Bravo.env", "env");
-	write_file(root / "object.3dp", "3dp");
 	write_file(root / "preview.3di", "3di");
-	write_file(root / "scene.ASE", "ase");
 	write_file(root / "vehicle.glb", "glb");
 	write_file(root / "Menus.BIN", "RTXTstrings");
 	write_file(root / "jo_gamemus.sbf", "SBF0");
@@ -119,7 +117,6 @@ int main() {
 	write_file(root / "missions" / "first.bms", "bms");
 	write_file(root / "models" / "tree.glb", "glb");
 	write_file(root / "models" / "tree.3di", "3di");
-	write_file(root / "models" / "source.ase", "ase");
 	write_file(root / "credits" / "finale.kda", "kda");
 	write_file(root / "fonts" / "Serpen24.fnt", "fnt");
 	write_file(root / "strings" / "menu.bin", "bin");
@@ -131,7 +128,7 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 17);  // base 13 +1 hudpos.def (HUD) +1 briefing.MIS (mission) +1 Avatars.def (avatar) +1 sparks.ptl (particle)
+	TEST_EXPECT(all_files.size() == 15);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Avatars.def"));
 	TEST_EXPECT(!has_relative_path(all_files, "weapon.def"));  // co-extension .def stays unbrowsable
@@ -148,15 +145,13 @@ int main() {
 	TEST_EXPECT(has_relative_path(all_files, "sparks.ptl"));
 	TEST_EXPECT(!has_relative_path(all_files, "missions/first.bms"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.3di"));
-	TEST_EXPECT(!has_relative_path(all_files, "models/source.ase"));
 	TEST_EXPECT(!has_relative_path(all_files, "credits/finale.kda"));
 	TEST_EXPECT(!has_relative_path(all_files, "fonts/Serpen24.fnt"));
 	TEST_EXPECT(!has_relative_path(all_files, "Scratch.bin"));
 	TEST_EXPECT(!has_relative_path(all_files, "vehicle.glb"));
 	TEST_EXPECT(!has_relative_path(all_files, "models/tree.glb"));
 
-	// Loose entries carry on-disk size + modified time (the editor's resource
-	// browser shows these as columns). Sizes match the fixture byte counts.
+	// Loose entries carry on-disk size + modified time. Sizes match the fixture bytes.
 	const opennova::ResourceFileEntry *alpha = find_relative_path(all_files, "Alpha.TRN");
 	TEST_EXPECT(alpha != nullptr);
 	TEST_EXPECT(alpha->source_type == "file");
@@ -169,9 +164,7 @@ int main() {
 	TEST_EXPECT(index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.resource_files("environment").size() == 1);
 	TEST_EXPECT(index.resource_files("mission").size() == 2);
-	TEST_EXPECT(index.resource_files("object_project").size() == 1);
 	TEST_EXPECT(index.resource_files("object_model").size() == 1);
-	TEST_EXPECT(index.resource_files("object_scene").size() == 1);
 	TEST_EXPECT(index.resource_files("strings").size() == 1);
 	TEST_EXPECT(index.resource_files("menu").size() == 1);
 	TEST_EXPECT(index.resource_files("mnu").size() == 1);  // alias normalizes to "menu"
@@ -187,10 +180,8 @@ int main() {
 	TEST_EXPECT(index.resource_files("mis").size() == 2);
 	TEST_EXPECT(index.resource_files("trn").size() == 1);
 	TEST_EXPECT(index.resource_files("env").size() == 1);
-	TEST_EXPECT(index.resource_files("3dp").size() == 1);
 	TEST_EXPECT(index.resource_files("3di").size() == 1);
-	TEST_EXPECT(index.resource_files("ase").size() == 1);
-	TEST_EXPECT(index.resource_files("object").size() == 3);
+	TEST_EXPECT(index.resource_files("object").size() == 1);
 	TEST_EXPECT(index.resource_files("object_model").size() == 1);
 	TEST_EXPECT(index.resource_files("object_model")[0].display_name == "preview");
 	TEST_EXPECT(index.resource_files("credits").size() == 1);
@@ -234,7 +225,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 20);  // the 17 loose (incl. hudpos.def + briefing.MIS + Avatars.def + sparks.ptl) +3 archive-only logical names
+	TEST_EXPECT(mounted_files.size() == 18);  // 15 loose recognized assets + 3 archive-only names
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));

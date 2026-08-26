@@ -1,7 +1,7 @@
 // ObjectModel: retained-scene construction — child teardown, cache
 // reset, Skeleton3D/Skin construction, mesh/material assembly, the
-// submission notifier, and transformed-mesh bounds. Ported verbatim from
-// nova_object_scene_builder.gd (2026-08-09 de-scripting).
+// submission notifier, and transformed-mesh bounds. Ported during the
+// 2026-08-09 de-scripting.
 
 #include "object/nova_object_model.h"
 
@@ -89,7 +89,7 @@ void ObjectModel::rebuild_scene() {
 		instance->set_cast_shadows_setting(presentation_cast_setting(false));
 		instance->set_layer_mask(presentation_layer_mask(false));
 		Ref<ShaderMaterial> material = material_for_index(material_index);
-		// One imported submesh is one retail strip. Transparent strips must own
+		// One source submesh is one retail strip. Transparent strips must own
 		// their material instance because Godot stores render_priority on the
 		// material, while retail chooses Q1/Q2 independently for every strip on
 		// every frame (renderer/render_order owns the cited queue contract).

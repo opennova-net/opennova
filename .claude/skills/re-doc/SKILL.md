@@ -32,9 +32,8 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
 
 1. `docs/README.md` — add/refresh the "RE records by domain" row and status
    (landed / unlanded with PR reference / in flight).
-2. `docs/divergence-ledger.md` — close/open the D-rows in the same PR;
-   `python scripts/lint/ledger_check.py --write` regenerates the scoreboard.
-   A D-id born in the ledger must ALSO get its full row in the record's
+2. `docs/divergence-ledger.md` — close/open the D-rows and update its scoreboard
+   in the same PR. A D-id born in the ledger must ALSO get its full row in the record's
    catalog — the ledger mirrors, the record owns.
 3. `docs/engine-primer.md` — the domain's subsystem row — and
    `docs/current-state.md` — the domain's routing row.

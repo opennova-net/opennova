@@ -1,5 +1,5 @@
 /* DEF file parser — pure C API.
- * Flat structs suitable for FFI (ctypes, etc.).
+ * Stable plain C structs for native runtime consumers.
  * Parses Novalogic .def files: weapon.def, items.def, ammo.def, hudpos.def.
  */
 
@@ -9,8 +9,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <io/export.h>
-#define DEF_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {
@@ -131,7 +129,7 @@ typedef struct DefAmmoDef {
     size_t effects_table_count;
     char (*raw_lines)[512];
     size_t raw_lines_count;
-    /* Kill-zone blast geometry (appended; FFI mirror stability). The explosion
+    /* Kill-zone blast geometry (appended; layout stability). The explosion
      * queue's blast radius is kz_maxradius (or the entry's float override); the
      * linear damage falloff starts at kz_minradius; kz_pieslice != 0 makes the
      * blast a cone around the entry direction. [orig: AmmoDef_ParseProperty
@@ -142,7 +140,7 @@ typedef struct DefAmmoDef {
     int kz_maxradius_fp16;   /* +56 */
     int kz_pieslice_bam;     /* +60 */
     /* The impact flash light, 'light_impact <radius> <r> <g> <b> <seconds>' —
-     * a fading pool light at the impact point (appended; FFI mirror stability).
+     * a fading pool light at the impact point (appended; layout stability).
      * [orig: AmmoDef_ParseProperty @0x40af79 -> +132 radius ParseFixedPoint16,
      * +128 ((r<<8)+g)<<8 + b, +136 seconds -> 62 Hz ticks (AmmoDef_ParseSecondsToTicks), 0 -> 10
      * @0x40b005; consumer AmmoDef_ProcessImpactEffect @0x40a280 ->
@@ -151,12 +149,12 @@ typedef struct DefAmmoDef {
     int light_impact_radius_fp16; /* +132 */
     int light_impact_color;       /* +128: packed 0xRRGGBB */
     int light_impact_ticks;       /* +136: authored seconds * 62; 0 -> 10 */
-    /* The permanent terrain scorch selector, 'scorch_id <n>' (appended; FFI
-     * mirror stability). Projectile terrain impacts route this word through
+    /* The permanent terrain scorch selector, 'scorch_id <n>' (appended for
+     * layout stability). Projectile terrain impacts route this word through
      * the permanent terrain-cache scorch registry. [orig: word +0x74;
      * Projectile_HandleTerrainImpact @0x4E9314 -> sub_6060D0] */
     int scorch_id;               /* word +0x74 */
-    /* The impact scar kind, 'scar_type <n>' (appended; FFI mirror stability):
+    /* The impact scar kind, 'scar_type <n>' (appended; layout stability):
      * 0 = no mark, 1 = the ordinary ring scar, 2 = glass-only (the projected
      * glass decal leg without the ring fallback). [orig: AmmoDef_ParseProperty
      * @0x40aeea..0x40af11 atol -> word +0x76; consumer AmmoDef_ProcessImpactEffect
@@ -304,7 +302,7 @@ typedef struct DefWeaponDef {
     size_t raw_lines_count;
     /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
        consumer populate_weapon_slot_lists @ 0x560430]. Appended to keep the leading
-       struct offsets (and the FFI mirrors) stable. loadout_selectable (+32: a row
+       struct offsets (and native layouts) stable. loadout_selectable (+32: a row
        appears only when non-zero), loadout_subclasses (+36: sub-entry expansion
        count), and maxclips (+136) live above with the §5.57 loadout keys. */
     char loadout_menu_textid[64];  /* +40: GameText "WepDes" key -> display name */
@@ -336,7 +334,7 @@ typedef struct DefWeaponDef {
     int special_hold;
     int attack_anim;
     /* The second FLAGS dword (NoSelect/Parachute/.../Inset/NoAutoZero/Invisible) —
-       the token table's fourth column. Appended (FFI mirror stability); `flags`
+       the token table's fourth column. Appended (layout stability); `flags`
        above stays the flags1 dword. [orig: the 16-B-stride token table @ 0x830bf0] */
     int flags2;
     /* Run-gait class (record +0xAC, plain atol, 0 = key absent). The player body's
@@ -662,7 +660,7 @@ typedef struct DefItemDef {
     char (*raw_lines)[512];
     size_t raw_lines_count;
     /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
-       Appended (FFI mirror stability). Only the closeattack slot is surfaced: JO
+       Appended (layout stability). Only the closeattack slot is surfaced: JO
        riflemen author all four ammo_* names to the same rifle round, and the AI
        port's single-ammo stand-in consumes one. 32 bytes = the witnessed def slot
        stride (+0x56B..+0x58B). [orig: ItemDef_ParseProperty 'ammo_closeattack'
@@ -697,12 +695,12 @@ typedef struct DefItemDef {
     int deathtime_ticks;
     /* items.def 'primary_weapon' — the weapon.def entry an ewep emplacement mounts
        (the gun entity's slot-0 weapon; the attach label's text source). Appended
-       (FFI mirror stability). [orig: ItemDef_ParseProperty -> def+0x54B primaryWeapon
+       (layout stability). [orig: ItemDef_ParseProperty -> def+0x54B primaryWeapon
        char[32] (docs/world/itemdef-re.md); consumers: the spawn weapon-slot build and
        draw_vehicle_seat_and_armory_labels @ 0x5a351d via slot0->def+0x3A0] */
     char primary_weapon[32];
     /* --- The destruction/husk block (docs/world/world-wac-ai-re.md §24). Appended
-       (FFI mirror stability). [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
+       (layout stability). [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
     char huskfinal[128];    /* 'huskfinal' -> def+0x80 huskFinal model name — the final
                                (burned-out) wreck stage; death pieces + the dead-wreck
                                effect banks prefer it over husk */
@@ -749,12 +747,12 @@ typedef struct DefItemDef {
     /* items.def 'phrase_set', plain signed atol -> target itemDef+0x86C.
        Mounted gunner skeletal selection reads this dword.  Presence is explicit
        because authored zero is a witnessed configuration and zero-init otherwise
-       means the key was absent. Appended for FFI mirror stability.
+       means the key was absent. Appended for layout stability.
        [orig: ItemDef_ParseProperty @ 0x49F9DB..0x49FA0A; consumer
        Entity_BuildBoneTransformMatrices @ 0x4B1884] */
     int phrase_set;
     int phrase_set_valid;
-    /* Projectile damage traits, appended for normalized-struct/FFI stability.
+    /* Projectile damage traits, appended for normalized-struct/layout stability.
        Retail storage: damage reduction +0x188/+0x18C, signed armor classes
        +0x190/+0x192. armor_impact is shared with the destruction block above;
        armor_kz is the projectile-facing normalized mirror of armor_blast. */
@@ -762,20 +760,19 @@ typedef struct DefItemDef {
     float damage_reduc_max;
     int armor_kz;     /* ItemDef+0x192 signed i16, sign-extended in this ABI */
     /* Ordered items.def addeweap/addeweapG/addeweapC records. Appended for
-       normalized-struct/FFI stability. */
+       normalized-struct/layout stability. */
     DefItemEmplacementAttachment *emplacement_attachments;
     size_t emplacement_attachments_count;
     /* 1-based stored-slot markers. A later G/C record overwrites its marker;
        zero means that variant was not stored. */
     int emplacement_g_slot;
     int emplacement_c_slot;
-    /* Building-interior daylight transfer, appended for normalized-struct/FFI
-       stability. `light_transfer` is parsed as atoi clamped 0..100, then x0.01
+    /* Building-interior daylight transfer, appended for normalized-struct layout stability. `light_transfer` is parsed as atoi clamped 0..100, then x0.01
        into retail ItemDef+0x218. Ihq01 authors 20 -> 0.2.
        [orig: ItemDef_ParseProperty @0x4A19FD..0x4A1A50] */
     float light_transfer;
     /* items.def 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
-       blob decal. Appended for FFI mirror stability. Retail copies the name
+       blob decal. Appended for layout stability. Retail copies the name
        UNGUARDED into the 16-byte slot at ItemDef+0xA0 (huskshadow starts at
        +0xB0) and atofs the four floats to +0x11C/+0x120/+0x124/+0x128
        (width/length in world units, planar offset x/y); the resolved texture
@@ -1009,32 +1006,32 @@ typedef struct DefFile {
 /* API                                                                       */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out);
+int def_parse_ammo(const char *path, DefAmmoFile *out);
 /* Parse ammo.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_ammo as usual. Returns 0 on success, -1 on bad input. */
-DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
-DEF_EXPORT void def_free_ammo(DefAmmoFile *f);
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
+void def_free_ammo(DefAmmoFile *f);
 
-DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out);
+int def_parse_weapons(const char *path, DefWeaponsFile *out);
 /* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
-DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
-DEF_EXPORT void def_free_weapons(DefWeaponsFile *f);
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
+void def_free_weapons(DefWeaponsFile *f);
 
-DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out);
+int def_parse_items(const char *path, DefItemsFile *out);
 /* Parse items.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_items as usual. Returns 0 on success, -1 on bad input. */
-DEF_EXPORT int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out);
-DEF_EXPORT void def_free_items(DefItemsFile *f);
+int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out);
+void def_free_items(DefItemsFile *f);
 
-DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out);
+int def_parse_hudpos(const char *path, DefHudPosFile *out);
 /* Parse hudpos.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_hudpos as usual. Returns 0 on success, -1 on bad input. */
-DEF_EXPORT int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out);
-DEF_EXPORT void def_free_hudpos(DefHudPosFile *f);
+int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out);
+void def_free_hudpos(DefHudPosFile *f);
 
-DEF_EXPORT int def_parse_def(const char *path, DefFile *out);
-DEF_EXPORT void def_free_def(DefFile *f);
+int def_parse_def(const char *path, DefFile *out);
+void def_free_def(DefFile *f);
 
 /* PLAYER_INFO loadout weight + encumbrance [orig: calculate_loadout_weight
    @ 0x55f1f0; update_player_info_weight_and_weapon_icons @ 0x55f480]. */
@@ -1049,18 +1046,18 @@ typedef enum DefEncumbrance {
    (ammo_count > 0 ? ammo_count : maxclips) * clipweight (maxclips +136, clipweight
    +140). `ammo_counts[i] <= 0` selects the weapon's default clip count (maxclips),
    matching the engine's `<=0 -> maxclips` branch. Returns the summed weight. */
-DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n);
+double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n);
 
 /* One extra-ammo (category-3) weight term [orig: the armory grenade leg
    @ 0x5655c9..0x56561c; the PLAYER_INFO sub-weapon/grenade terms in the
    @ 0x55f1f0 family]: count * clipweight only — no weaponweight. count < 0
    (the untouched sentinel) takes the maxclips default; a chosen zero row
    weighs nothing. */
-DEF_EXPORT double def_extra_ammo_weight(const DefWeaponDef *w, int count);
+double def_extra_ammo_weight(const DefWeaponDef *w, int count);
 
 /* Encumbrance class for a loadout weight [orig: @ 0x55f480]: >= 66.6 HEAVY,
    >= 33.3 NORMAL, else LIGHT (the witnessed thresholds, exact). */
-DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight);
+DefEncumbrance def_encumbrance_class(double weight);
 
 /* The sub-weapon behind a PLAYER_INFO parent slot [orig: the round-type walk
    over the parent's following table entries @ 0x55def0 / @ 0x55e8b0 /
@@ -1069,7 +1066,7 @@ DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight);
    case-insensitive) is an ammo expansion and is skipped; the FIRST differing
    entry is the sub-weapon (satchel -> detonator). Returns its absolute index,
    or -1 when no candidate differs or the table ends. */
-DEF_EXPORT int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
+int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
                                          size_t parent_index);
 
 #ifdef __cplusplus

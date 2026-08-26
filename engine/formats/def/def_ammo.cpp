@@ -88,7 +88,7 @@ static int parse_age_ticks_n(const char *s, size_t len) {
 
 static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);
 
-DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
+int def_parse_ammo(const char *path, DefAmmoFile *out) {
     memset(out, 0, sizeof(*out));
 
     size_t file_len;
@@ -99,7 +99,7 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
     return rc;
 }
 
-DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     char *buf = (char *)malloc(size + 1);
@@ -434,7 +434,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
     return 0;
 }
 
-DEF_EXPORT void def_free_ammo(DefAmmoFile *f) {
+void def_free_ammo(DefAmmoFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
         free(f->entries[i].effects_table);

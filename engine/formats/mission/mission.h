@@ -150,7 +150,7 @@ struct AreaTriggerRecord {
 // ammo_primary/ammo_secondary are requested clip counts (-1 = the weapon's default fill).
 // flags is load-bearing: it becomes the per-ammo damage-class byte consumed by
 // Weapon_CalcImpactDamage (1 = x0.9, 2 = x1.1, every other value neutral), so it must
-// survive every editor and FFI round-trip. New rows default it to "-1".
+// survive every document round-trip. New rows default it to "-1".
 struct WeaponLoadoutEntry {
 	std::string name;
 	std::string ammo_primary;

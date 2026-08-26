@@ -47,7 +47,7 @@ target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SO
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
 # ADM tests
-foreach(test comment trim_value parse write variants)
+foreach(test comment trim_value parse variants)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -59,11 +59,6 @@ add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_parse COMMAND bad_parse_test)
-
-add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
-target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
-target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
 # Native BIKi menu-video decoder: a deterministic generated bitstream plus an
 # OPENNOVA_JO_DIR-gated retail smoke test.
@@ -167,11 +162,6 @@ target_link_libraries(mission_mis_idempotency_test PRIVATE opennova_formats)
 target_include_directories(mission_mis_idempotency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis_idempotency COMMAND mission_mis_idempotency_test)
-
-add_executable(mission_c_abi_test mission/mission_c_abi_test.cpp)
-target_link_libraries(mission_c_abi_test PRIVATE opennova_formats)
-target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
 
 # Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
 # Gated on OPENNOVA_MISSION_CORPUS (copyrighted assets, not committed); skips + passes when unset.
@@ -592,11 +582,6 @@ target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
 
-add_executable(simassets_adm_skeletal_clips_weapon_channel_test simassets/adm_skeletal_clips_weapon_channel_test.cpp)
-target_link_libraries(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
-target_include_directories(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_adm_skeletal_clips_weapon_channel COMMAND simassets_adm_skeletal_clips_weapon_channel_test)
-
 add_executable(simassets_item_traits_test simassets/item_traits_test.cpp)
 target_link_libraries(simassets_item_traits_test PRIVATE opennova_runtime)
 target_include_directories(simassets_item_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -607,27 +592,6 @@ target_link_libraries(simassets_seat_spec_extract_test PRIVATE opennova_runtime)
 target_include_directories(simassets_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_test)
 
-# OED object workspace/export tests
-add_executable(oed_build_model_test oed/build_model_test.cpp)
-target_link_libraries(oed_build_model_test PRIVATE opennova_formats)
-target_include_directories(oed_build_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME oed_build_model COMMAND oed_build_model_test)
-
-add_executable(oed_export_3di_test oed/export_3di_test.cpp)
-target_link_libraries(oed_export_3di_test PRIVATE opennova_formats)
-target_include_directories(oed_export_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME oed_export_3di COMMAND oed_export_3di_test)
-
-add_executable(oed_error_test oed/error_test.cpp)
-target_link_libraries(oed_error_test PRIVATE opennova_formats)
-target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME oed_error COMMAND oed_error_test)
-
-add_executable(oed_skinned_tangents_test oed/skinned_tangents_test.cpp)
-target_link_libraries(oed_skinned_tangents_test PRIVATE opennova_formats)
-target_include_directories(oed_skinned_tangents_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME oed_skinned_tangents COMMAND oed_skinned_tangents_test)
-
 # Object renderer/shader tests
 foreach(test light_runtime light_scene light_terrain_pass material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order
@@ -635,9 +599,7 @@ foreach(test light_runtime light_scene light_terrain_pass material_classify mate
         state_vectors tracer_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
-    target_include_directories(renderer_${test}_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/engine/formats/oed/include)
+    target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
@@ -646,33 +608,6 @@ endforeach()
 # tree (dump mode rewrites it there — ADR 0023).
 target_compile_definitions(renderer_state_vectors_test PRIVATE
     RENDER_STATE_VECTORS_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_state_vectors.golden")
-
-# ASE tests
-add_executable(ase_smoke_test ase/ase_smoke_test.cpp)
-target_link_libraries(ase_smoke_test PRIVATE opennova_formats)
-target_include_directories(ase_smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME ase_smoke COMMAND ase_smoke_test)
-
-add_executable(ase_parser_unit_test ase/ase_parser_unit_test.cpp)
-target_link_libraries(ase_parser_unit_test PRIVATE opennova_formats)
-target_include_directories(ase_parser_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME ase_parser_unit COMMAND ase_parser_unit_test)
-
-add_executable(ase_writer_test ase/ase_writer_test.cpp)
-target_link_libraries(ase_writer_test PRIVATE opennova_formats)
-target_include_directories(ase_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME ase_writer COMMAND ase_writer_test)
-
-# TDP tests
-add_executable(tdp_roundtrip_test tdp/tdp_roundtrip_test.cpp)
-target_link_libraries(tdp_roundtrip_test PRIVATE opennova_formats)
-target_include_directories(tdp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tdp_roundtrip COMMAND tdp_roundtrip_test)
-
-add_executable(tdp_from_3di_test tdp/tdp_from_3di_test.cpp)
-target_link_libraries(tdp_from_3di_test PRIVATE opennova_formats)
-target_include_directories(tdp_from_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tdp_from_3di COMMAND tdp_from_3di_test)
 
 # Terrain format library tests
 add_executable(fnt_roundtrip_test fnt/fnt_roundtrip_test.cpp)
@@ -1352,7 +1287,7 @@ target_link_libraries(occlusion_armry_test PRIVATE opennova_runtime opennova_for
 target_include_directories(occlusion_armry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_armry_test PRIVATE cxx_std_17)
 target_compile_definitions(occlusion_armry_test PRIVATE
-    OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/3dp/armry01/Armry01.3di")
+    OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/threedi/objects/armry01/Armry01.3di")
 add_test(NAME occlusion_armry COMMAND occlusion_armry_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
@@ -2457,20 +2392,6 @@ if(WIN32)
     target_link_libraries(npruntime_two_endpoint_socket_test PRIVATE ws2_32)
 endif()
 add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
-
-# NET-4 (ADR 0019 §5): the C-ABI export-identity guard. The shared library's
-# flat export list must match scripts/lint/abi_exports_baseline.txt, and no
-# net-lib symbol family may appear at all. Runs wherever BUILD_SHARED_LIB=ON
-# builds run ctest (scripts/build.sh, the CI build-and-test job).
-if(BUILD_SHARED_LIB)
-    find_package(Python3 COMPONENTS Interpreter QUIET)
-    if(Python3_Interpreter_FOUND)
-        add_test(NAME abi_export_identity
-            COMMAND "${Python3_EXECUTABLE}"
-                    "${CMAKE_SOURCE_DIR}/scripts/lint/abi_exports_check.py"
-                    --lib "$<TARGET_FILE:opennova_shared>")
-    endif()
-endif()
 
 # weapon.sav player-profile format tests (engine/formats/playersav).
 add_subdirectory(playersav)
