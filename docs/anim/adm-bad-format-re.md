@@ -25,7 +25,7 @@ in place.
 | `.bad` container read/write | MATCHING (byte-exact roundtrip) | ctests `bad_parse`, `bad_roundtrip` (parse→write→parse equality + self byte-stability); `tests/test_bad_write_ffi.py` |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
-| `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; pytest `test_bad_pos_derivation` (asset-gated) |
+| `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
 
 ## The `.adm` format
 
@@ -103,7 +103,7 @@ actually mean:
   lossy export artifact (257/477 retail `.bad`s triplicate X into all three
   components; 12/43 JO viewmodel rigs ship zeroed/stale positions and retail
   renders them all). It is reconstructible from bind + model
-  (`positions_from_model`; native coverage in `tests/anim/anim_sample_test.cpp`).
+  (`positions_from_model`; synthetic pin in `tests/anim/anim_sample_test.cpp`, retail pin in the `OPENNOVA_JO_ASSETS`-gated `anim_positions_from_model_corpus` ctest).
 - **Channel evaluation** slerps the quaternion keyframes per bone
   [orig: `BoneAnim_TransformBones @ 0x410360`]; translations apply only under
   `flags & 2`.

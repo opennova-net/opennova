@@ -5418,7 +5418,9 @@ with a *position-residual* metric instead of frame matching refutes the unrecove
    `engine/runtime/anim/anim_sample.cpp`: index-paired to the model part table, root bones
    (parent < 0/self) take the x-negated rel unrotated (zero on every shipped rig), surplus
    `.bad` bones past the part count excluded by construction. Synthetic exactness is pinned
-   in `tests/anim/anim_sample_test.cpp`; the corpus observations above remain the witness.
+   in `tests/anim/anim_sample_test.cpp`; the retail legs (M16/M24/M21/Frag within 5e-4 on every
+   norm-consistent bone, the ak47_1st triplication control) are the `OPENNOVA_JO_ASSETS`-gated
+   `anim_positions_from_model_corpus` ctest; the corpus observations above remain the witness.
 
 Consequence: the broken-12 no longer depends on the shipped field. The native skeletal path
 derives the rest positions from the model + bind, while the model-pivot path above remains the
