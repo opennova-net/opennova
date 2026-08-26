@@ -594,6 +594,14 @@ target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
 
+# The SECONDARY (weapon) channel composition over the committed BINOC.bad rig
+# plus fixtures/bad/BINOC_twist.bad (the two-bone twist minted once from the
+# retired writer; the test asserts that provenance before probing).
+add_executable(simassets_adm_skeletal_clips_weapon_channel_test simassets/adm_skeletal_clips_weapon_channel_test.cpp)
+target_link_libraries(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
+target_include_directories(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_adm_skeletal_clips_weapon_channel COMMAND simassets_adm_skeletal_clips_weapon_channel_test)
+
 add_executable(simassets_item_traits_test simassets/item_traits_test.cpp)
 target_link_libraries(simassets_item_traits_test PRIVATE opennova_runtime)
 target_include_directories(simassets_item_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
