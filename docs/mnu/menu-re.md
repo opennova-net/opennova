@@ -974,7 +974,7 @@ binding array (kb `dword_25c7724` / mouse `byte_25c784c` / joy `byte_25c7740`).
 `refresh_control_mapping_list @ 0x55b320` recomputes per-row conflict state
 (`check_weapon_slot_conflict @ 0x55ae60`, a kong-misnomer for *binding* conflict) and tints
 conflicting rows yellow (`sub_640110(row, …, -256)`). The device radios call
-`sub_55bcd0(mode) @ 0x55bcd0` (sets `dword_25db7d8`, swaps the REMAP_INSTRUCTIONS text id
+`UI_SelectControlsInputDevice(mode) @ 0x55bcd0` (sets `dword_25db7d8`, swaps the REMAP_INSTRUCTIONS text id
 `REMAP_Keyboard`/`REMAP_Mouse`/`REMAP_Joystick`, repopulates).
 
 **Control column format** `[orig: KeyBinding_FormatBindingString @ 0x559a10]`: up to two key slots,
@@ -1499,10 +1499,10 @@ custom cursor carrying the claim's retail texture; the compiled software
 cursor stays off in the game shell (drawing both showed a trailing second
 cursor).
 
-## Controls key-remap flow `[orig: sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c]`
+## Controls key-remap flow `[orig: UI_ControlsRemapArmHandler @ 0x55d560; the capture pump @ 0x55c67c]`
 
 The OPTIONS scene registers per-widget callbacks (`@ 0x55d737..0x55d827`):
-`CONTROL_MAPPING` -> the arm handler `sub_55D560 @ 0x55d560`, `DEFAULTS` ->
+`CONTROL_MAPPING` -> the arm handler `UI_ControlsRemapArmHandler @ 0x55d560`, `DEFAULTS` ->
 `@ 0x55bd90`, `CLEAR_KEY` -> `@ 0x55bfd0`. The arm fires on the table
 activation event `0x5000002` OR a click on the already-stored row: it sets the
 options pump to remap state, stores the row's value (the catalog index) in the
@@ -1644,7 +1644,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
-| `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `nova_menu_shell.gd::_seed_control_mapping` |
+| `UI_SelectControlsInputDevice @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `nova_menu_shell.gd::_seed_control_mapping` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) + `CUITable_Render @ 0x6411d0` | `mnu::parse_table_*` + `MenuFrameCompiler::emit_table` — FONT "W" header height, separate top-level-MIN_ITEM_HEIGHT body rows/page, full-height authored-or-22px scrollbar rect, default-state art/thumb geometry |
 | `ControlsModel` (Godot wrapper) | `godot/src/mnu/nova_controls_model.cpp` |
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
@@ -1700,14 +1700,13 @@ IDB state note (2026-07-16 dropdown-input grill): renamed, all anchored —
 `sub_64AB80 -> CCheckboxWnd_HandleNamedEvent`, `CWnd_EmitEventToNamedHandlerAndCallbacks ->
 CWnd_EmitEventToNamedHandlerAndCallbacks`, `sub_6471C0 -> CWnd_MarkDirtyWithChildren`;
 data `dword_31C16CC -> g_ui_mouse_capture_wnd`, `dword_31C16D0 -> g_ui_active_combo_wnd`,
-`dword_31C16D8 -> g_ui_open_popup_wnd`. Witness comments at `0x65c190`, `0x63ab00`,
-`0x63e691`, `0x646299`, `0x647917`, `0x647932`, `0x63b6b0`, `0x6480e0`; `idb_save` done.
-~~Open: `dword_31C16D4` / `dword_31C16DC` (cleared alongside capture by scripted actions
-`@ 0x6498c8/0x6498d4`) remain unnamed — likely the focus/edit pair, unwitnessed.~~
-CLOSED by the 2026-08-09 draw-walk grill: `0x31C16D4` = `g_ui_focus_wnd` (keyboard
-focus — the caret gate), `0x31C16DC` = `g_ui_mouseover_wnd` (the per-frame hovered
-widget); both witnessed via the debug formatter `@ 0x6394f0` ("mouseover / capture /
-focus") and the keyboard dispatch `@ 0x63ad10`. See "Widget render dispatch".
+`dword_31C16D8 -> g_ui_open_popup_wnd`, and (2026-08-09 draw-walk grill) `dword_31C16D4 ->
+g_ui_focus_wnd` (keyboard focus — the caret gate), `dword_31C16DC -> g_ui_mouseover_wnd`
+(the per-frame hovered widget; both cleared alongside capture by scripted actions
+`@ 0x6498c8/0x6498d4`, witnessed via the debug formatter `@ 0x6394f0` and the keyboard
+dispatch `@ 0x63ad10` — see "Widget render dispatch"). Witness comments at `0x65c190`,
+`0x63ab00`, `0x63e691`, `0x646299`, `0x647917`, `0x647932`, `0x63b6b0`, `0x6480e0`;
+`idb_save` done.
 
 ### Element struct fields (witnessed offsets)
 
@@ -1799,7 +1798,7 @@ PORTED 2026-07-11 (the weapon round): `ArmoryMenuCompanion.accept_hotkey_edge`
 | PRIMARY_AMMO1_TYPE | `sub_566650` | round-type combo |
 | SECONDARY (+ ammo/type) | `UI_OnSecondaryWeaponChanged @ 0x566670`, `sub_5669C0/…F0` | |
 | ACCESSORY (+ ammo) | `ui_on_weapon_ammo_slot_changed @ 0x566a10`, `sub_566D40` | |
-| GRENADE_AMMO1..3 | `sub_566D70` (arg 0/1/2) | |
+| GRENADE_AMMO1..3 | `WeaponDef_UISlotSelectCallback` (arg 0/1/2) | |
 | PLAYER_CLASS | `handle_team_class_selection @ 0x566f60` (kind 0x40 spinlist) | MP-only flip; host fills the authored-empty items |
 | ACCEPT / CANCEL | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (arg 0/1) | kind 8 buttons |
 
@@ -1883,10 +1882,7 @@ path is exposed; the S2C 0x66/admin availability writers ride it), MP class
 selection, the `*_AMMO1_TYPE` round-type cascade + per-ammo-def weight,
 `*_AMMO2`, the icon swaps, the MP scoreboard overlay, and
 the use-item key's non-armory leg (the ACCEPT hotkeys landed with the weapon
-round — see the on-show section above). Open questions: ~~the SP-time
-value/writer of `g_hostClassAllowMask`~~ (CLOSED 2026-07-18: MP = the per-class
-host settings vs the mission entry's class word, SP = the mission entry word
-directly — net-re §5.63); the runtime site that stamps the shipped default keys
+round — see the on-show section above). Open questions: the runtime site that stamps the shipped default keys
 into the binding rows (default.key ships in no JO PFF; the KeyChart is the
 defaults witness); the entity Team {1,3}->mask 2 else 1 convention vs our
 avatar team ids.

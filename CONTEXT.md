@@ -91,11 +91,11 @@ NovaLogic's online matchmaking and account service, and our reimplementation of 
 _Avoid_: emulator, lobby server
 
 **Gate**:
-The first-contact UDP service (`novaworld_gate`, port 7597) that bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint.
+The first-contact UDP service (port 7597; the `novaworld_gate` probe leg: `engine/net/novaworld/gate` for the protocol, `GateListener` in `apps/novaworld_server/gate_listener.cpp` for the listener) that bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint.
 _Avoid_: lobby
 
 **Browser**:
-The in-game server list (`novaworld_browser`) populated from the service's GSB/GLB data.
+The in-game server list (`NovaWorldPanel` in `godot/game/novaworld_panel.gd` over the `NovaWorldClient` pump and `engine/net/novaworld/gate/gsb.cpp`) populated from the service's GSB/GLB data.
 _Avoid_: lobby, server list (in code)
 
 **Wire-compatible / wire protocol**:
