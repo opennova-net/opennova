@@ -373,8 +373,9 @@ lit-water attenuation while leaving the later HUD untouched.
 
 The ordering has one important tail: skybox sun glow is drawn after the murk
 quad (`@ 0x5c9714`), and the HUD later still (`@ 0x5cad04`). The port draws the
-quad in `PlayerViewEffects`, after `ViewmodelPass` CanvasLayer 0 and behind HUD
-CanvasLayer 1, which preserves the scene/weapon/HUD contract. Its bounded
+quad in `PlayerViewEffects`, over the beauty pass (which carries the weapon
+through its shader-side viewmodel projection) and behind HUD CanvasLayer 1,
+which preserves the scene/weapon/HUD contract. Its bounded
 residual is that the reimpl's 3D celestial/glow is also below the overlay; retail
 redraws sun glow above it. See render-order divergence D-RORD-9.
 

@@ -5,6 +5,7 @@ shader_type spatial;
 // to Bump, but this exact program remains reachable through numeric type 6.
 render_mode unshaded, cull_disabled, blend_add, depth_draw_never;
 
+#include "res://shaders/nova_viewmodel_pass.gdshaderinc"
 #include "res://shaders/nova_color.gdshaderinc"
 
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
@@ -22,4 +23,12 @@ void fragment() {
 	float dotv = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
 	ALBEDO = nova_scene_output(vec3(dotv));
 	ALPHA = texel.a * COLOR.a;
+}
+
+// The first-person particle batch rides the viewmodel's renderfov projection
+// + depth band inside the beauty pass (nova_viewmodel_pass.gdshaderinc).
+void vertex() {
+	// Every path writes POSITION (see nova_viewmodel_pass.gdshaderinc).
+	POSITION = nova_viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
+			MODELVIEW_MATRIX * vec4(VERTEX, 1.0), PROJECTION_MATRIX);
 }

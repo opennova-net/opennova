@@ -136,3 +136,7 @@ opennova_water_reflection_eye={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+opennova_viewmodel_projection={
+"type": "vec4",
+"value": Vector4(1, 0.05, 4000, 1)
+}

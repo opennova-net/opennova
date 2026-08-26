@@ -274,10 +274,14 @@ func _run_foliage_flicker_probe(
 	# Freeze every scene update and drive only the real foliage dispatcher. The
 	# renderer stays live, so any remaining pixel changes come from foliage draws.
 	world.process_mode = Node.PROCESS_MODE_DISABLED
-	var viewmodel_pass: Node = _game.find_child("ViewmodelPass", true, false) \
+	# The FP gun draws inside the beauty pass; the presenter owns its node
+	# (the world is frozen above, so nothing re-asserts its visibility).
+	var presenter: Node = _game.get_node_or_null("LocalPlayerPresenter") \
 			if _game != null else null
-	if viewmodel_pass is CanvasItem:
-		viewmodel_pass.visible = false
+	if presenter is LocalPlayerPresenter:
+		var viewmodel: Node3D = (presenter as LocalPlayerPresenter).viewmodel()
+		if viewmodel != null:
+			viewmodel.visible = false
 	var base_transform := camera.global_transform
 
 	world.set_foliage_hidden(true)

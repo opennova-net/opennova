@@ -105,6 +105,10 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // Values keep the celestial group before all world alpha and leave the
 // camera-side rung at Godot's default 0 so unclassified transparents land
 // there naturally.
+// The first-person viewmodel flushes whole (its alpha strips included) before
+// the sky pass [orig: Player_RenderViewModelIfAlive @ 0x4e0140, step 3 of
+// Render_ProcessMainSceneFrame]; its depth band keeps later world alpha off it.
+constexpr int kRungViewmodel = -7;
 constexpr int kRungSkyStars = -6;        // star field (sky pass, before bodies)
 constexpr int kRungSkyBody = -5;         // sun / moon bodies
 // BmTxMirrT's P3 post-multiply is a PASS of the strip's own technique, not a

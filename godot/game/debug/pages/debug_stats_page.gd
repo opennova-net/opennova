@@ -524,18 +524,14 @@ const _ROWS := [
 	{"id": "render_water_gpu", "label": "Water RTT GPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_WATER_GPU},
 	# The other per-frame scene renders: FrameFx's shared-world Q3 view (the
-	# glow/envmap source), the first-person viewmodel pass, and the slot-shadow
-	# capture chain (only the slots that rendered are counted).
+	# glow/envmap source) and the slot-shadow capture chain (only the slots
+	# that rendered are counted). The first-person gun draws inside the main
+	# view (its shader-side projection), so it has no pass of its own.
 	{"id": "render_q3", "label": "FrameFX Q3 view", "depth": 1, "kind": _KIND_HEADER},
 	{"id": "render_q3_cpu", "label": "Q3 CPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_Q3_CPU},
 	{"id": "render_q3_gpu", "label": "Q3 GPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_Q3_GPU},
-	{"id": "render_viewmodel", "label": "Viewmodel pass", "depth": 1, "kind": _KIND_HEADER},
-	{"id": "render_viewmodel_cpu", "label": "Viewmodel CPU", "depth": 2,
-			"kind": _KIND_SPAN, "slot": FrameStatsBoard.RENDER_VIEWMODEL_CPU},
-	{"id": "render_viewmodel_gpu", "label": "Viewmodel GPU", "depth": 2,
-			"kind": _KIND_SPAN, "slot": FrameStatsBoard.RENDER_VIEWMODEL_GPU},
 	{"id": "render_slot", "label": "Slot-shadow captures", "depth": 1, "kind": _KIND_HEADER},
 	{"id": "render_slot_cpu", "label": "Captures CPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_SLOT_CPU},
@@ -791,7 +787,7 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 	for id in ["sim", "net", "trace", "effects", "fire", "destruction",
 			"throwable", "mission_rows", "wire_rows", "occl", "material",
 			"render_main", "render_shadow", "render_water", "render_q3",
-			"render_viewmodel", "render_slot", "physics_callbacks"]:
+			"render_slot", "physics_callbacks"]:
 		_set_info(id, "")
 	var frame_info := "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS))
 	# Godot's own TIME_PROCESS (process + deferred flush + RS sync + draw):
@@ -821,9 +817,6 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 			FrameStatsBoard.RENDER_WATER_OBJECTS, FrameStatsBoard.RENDER_WATER_DRAWS)
 	_set_pass_counts("render_q3", sums, counts, frames,
 			FrameStatsBoard.RENDER_Q3_OBJECTS, FrameStatsBoard.RENDER_Q3_DRAWS)
-	_set_pass_counts("render_viewmodel", sums, counts, frames,
-			FrameStatsBoard.RENDER_VIEWMODEL_OBJECTS,
-			FrameStatsBoard.RENDER_VIEWMODEL_DRAWS)
 	if frames > 0 and counts[FrameStatsBoard.RENDER_SLOT_VIEWPORTS] > 0:
 		_set_info("render_slot", "%d objs · %d draws · %.1f captures/f" % [
 			int(float(sums[FrameStatsBoard.RENDER_SLOT_OBJECTS]) / frames),

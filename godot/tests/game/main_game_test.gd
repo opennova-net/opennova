@@ -156,46 +156,40 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	add_child_autofree(mount)
 	var hud := CanvasLayer.new()
 	var menu_layer := CanvasLayer.new()
-	var viewmodel_layer := CanvasLayer.new()
 	var nested_owner := Node.new()
 	var nested_overlay := CanvasLayer.new()
-	viewmodel_layer.name = "ViewmodelPass"
 	nested_overlay.name = "DebugOverlay"
 	mount.add_child(hud)
 	mount.add_child(menu_layer)
-	# The production shape: the rig parents ViewmodelPass to the CAMERA's
-	# viewport (the build step in player_viewmodel_rig.gd), and the session's
-	# lookup is that viewport — there is no name-search fallback.
-	var camera := Camera3D.new()
-	mount.add_child(camera)
-	camera.get_viewport().add_child(viewmodel_layer)
-	autofree(viewmodel_layer)
+	# The FP gun draws inside the beauty pass: a world-only capture hides it
+	# through the presenter's capture latch, not through a CanvasLayer.
+	var presenter := LocalPlayerPresenter.new()
+	presenter.name = "LocalPlayerPresenter"
+	mount.add_child(presenter)
 
 	var visible_hud := Control.new()
 	var hidden_hud := Control.new()
 	var visible_menu := Control.new()
-	var visible_viewmodel := Control.new()
 	hidden_hud.visible = false
 	hud.add_child(visible_hud)
 	hud.add_child(hidden_hud)
 	hud.add_child(nested_owner)
 	nested_owner.add_child(nested_overlay)
 	menu_layer.add_child(visible_menu)
-	viewmodel_layer.add_child(visible_viewmodel)
 
-	assert_eq(session.begin_world_only_capture(hud, menu_layer, camera), OK)
+	assert_eq(session.begin_world_only_capture(hud, menu_layer, presenter), OK)
 	assert_false(hud.visible,
 			"the HUD layer hides nested CanvasLayers such as DebugOverlay")
 	assert_false(menu_layer.visible)
-	assert_false(viewmodel_layer.visible)
+	assert_true(presenter.viewmodel_rig().is_capture_hidden(),
+			"the capture latches the FP gun hidden through the presenter")
 	assert_false(nested_overlay.visible,
 			"CanvasLayer visibility does not propagate to nested layers")
 	assert_true(visible_hud.visible,
 			"capture suppression must not rewrite descendant UI state")
 	assert_false(hidden_hud.visible)
 	assert_true(visible_menu.visible)
-	assert_true(visible_viewmodel.visible)
-	assert_eq(session.begin_world_only_capture(hud, menu_layer, camera),
+	assert_eq(session.begin_world_only_capture(hud, menu_layer, presenter),
 			ERR_BUSY,
 			"a nested capture cannot overwrite the saved visibility snapshot")
 
@@ -205,13 +199,13 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	session.finish_world_only_capture()
 	assert_true(hud.visible)
 	assert_true(menu_layer.visible)
-	assert_true(viewmodel_layer.visible)
+	assert_false(presenter.viewmodel_rig().is_capture_hidden(),
+			"cleanup releases the FP gun's capture latch")
 	assert_true(nested_overlay.visible)
 	assert_true(visible_hud.visible)
 	assert_false(hidden_hud.visible, "an initially hidden child stays hidden")
 	assert_false(visible_menu.visible,
 			"a visibility change made during capture survives cleanup")
-	assert_true(visible_viewmodel.visible)
 	session.finish_world_only_capture() # idempotent cleanup
 
 

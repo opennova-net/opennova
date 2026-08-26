@@ -216,8 +216,6 @@ enum {
 	RENDER_WATER_GPU,
 	RENDER_Q3_CPU,         # FrameFx's shared-world Q3 view
 	RENDER_Q3_GPU,
-	RENDER_VIEWMODEL_CPU,  # the first-person viewmodel pass
-	RENDER_VIEWMODEL_GPU,
 	RENDER_SLOT_CPU,       # summed over the slot-shadow captures that rendered
 	RENDER_SLOT_GPU,
 	# Per-pass render counts (RenderingServer per-viewport render info for the
@@ -232,8 +230,6 @@ enum {
 	RENDER_WATER_DRAWS,    # VALUE: water mirror visible-pass draw calls
 	RENDER_Q3_OBJECTS,     # VALUE: Q3 view visible-pass objects
 	RENDER_Q3_DRAWS,       # VALUE: Q3 view visible-pass draw calls
-	RENDER_VIEWMODEL_OBJECTS, # VALUE: viewmodel pass visible-pass objects
-	RENDER_VIEWMODEL_DRAWS,   # VALUE: viewmodel pass visible-pass draw calls
 	RENDER_SLOT_OBJECTS,   # VALUE: slot captures' visible-pass objects (rendered slots only)
 	RENDER_SLOT_DRAWS,     # VALUE: slot captures' visible-pass draw calls
 	RENDER_SLOT_VIEWPORTS, # VALUE: slot captures that rendered

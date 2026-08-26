@@ -1,7 +1,7 @@
 extends GutTest
 
 
-# Beauty (0x18401) draws the given color; the isolated Q3 view (0x10401)
+# Beauty (0x18C01) draws the given color; the isolated Q3 view (0x10401)
 # draws the optional glow color; every other camera discards.
 func _canary_material(beauty: Color, q3 := Color(0.0, 0.0, 0.0, 0.0)) -> ShaderMaterial:
 	var shader := Shader.new()
@@ -13,7 +13,7 @@ uniform vec3 u_q3;
 uniform bool u_q3_present = false;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 99329u) {
+	if (CAMERA_VISIBLE_LAYERS == 101377u) {
 		ALBEDO = u_beauty;
 	} else if (CAMERA_VISIBLE_LAYERS == 66561u && u_q3_present) {
 		ALBEDO = u_q3;
@@ -153,7 +153,8 @@ func test_world_frame_module_owns_kernel_sized_q3_and_the_terminal_effect() -> v
 		await get_tree().process_frame
 
 	var report := renderer.get_backend_report()
-	assert_eq(int(report.get("beauty_camera_mask", -1)), 99329)
+	assert_eq(int(report.get("beauty_camera_mask", -1)), 101377,
+			"the beauty signature admits the first-person viewmodel layer")
 	assert_eq(int(report.get("q3_camera_mask", -1)), 66561)
 	assert_true(bool(report.get("q3_viewport_present", false)))
 	# Kernel height, beauty aspect: a 2:1 beauty view yields a 512x256 source
@@ -166,7 +167,7 @@ func test_world_frame_module_owns_kernel_sized_q3_and_the_terminal_effect() -> v
 			"the Q3 source keeps gamma-domain numbers: no sRGB encode on its target")
 	assert_eq(int(report.get("q3_update_mode", -1)), SubViewport.UPDATE_ALWAYS)
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
-	assert_eq(camera.cull_mask, 99329,
+	assert_eq(camera.cull_mask, 101377,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),
 			"no auxiliary far-alpha view exists: pass A rides PRE_TRANSPARENT")

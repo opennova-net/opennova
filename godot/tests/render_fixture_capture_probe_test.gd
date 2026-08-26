@@ -135,9 +135,16 @@ class ComparisonWorld:
 class ComparisonPresenter:
 	extends Node
 	var refresh_calls := 0
+	var viewmodel_node := Node3D.new()
+
+	func _init() -> void:
+		add_child(viewmodel_node)
 
 	func refresh_viewmodel() -> void:
 		refresh_calls += 1
+
+	func viewmodel() -> Node3D:
+		return viewmodel_node
 
 
 class CaptureTransactionGame:
@@ -364,9 +371,6 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	var world := ComparisonWorld.new()
 	add_child_autofree(world)
 	var viewport := SubViewport.new()
-	var viewmodel := CanvasLayer.new()
-	viewmodel.name = "ViewmodelPass"
-	viewport.add_child(viewmodel)
 	add_child_autofree(viewport)
 	var contract := {
 		"weapon": "WPN_M16BURST",
@@ -479,6 +483,9 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	var hidden_hud := CanvasLayer.new()
 	hidden_hud.name = "HUD"
 	hidden_game.add_child(hidden_hud)
+	var hidden_presenter := ComparisonPresenter.new()
+	hidden_presenter.name = "LocalPlayerPresenter"
+	hidden_game.add_child(hidden_presenter)
 	var hidden_contract := {
 		"capture_mode": "hud_hidden",
 		"equipped_weapon": "WPN_M16BURST",

@@ -1,12 +1,12 @@
 class_name PlayerViewmodelRig
 extends RefCounted
 
-const VIEWMODEL_COMPOSITE_SHADER := preload("res://shaders/viewmodel_composite.gdshader")
-
 # The local player's first-person viewmodel presentation, split out of
-# LocalPlayerPresenter (W4-4): the FP render pass (SubViewport + renderfov camera),
-# the viewmodel node + parts lifetime, the weapon.def placement (pos/tpos ADS
-# lerp, rotation bias, axis map), and the first-person control-register writers.
+# LocalPlayerPresenter (W4-4): the FP projection feed (the renderfov focal
+# ratio + depth band the object shaders apply to flagged instances inside the
+# beauty pass), the viewmodel node + parts lifetime, the weapon.def placement
+# (pos/tpos ADS lerp, rotation bias, axis map), and the first-person
+# control-register writers.
 # The presenter keeps the player camera, the avatar/held-weapon presentation, and
 # the third-person flag; per-frame inputs (the view snapshot, the weapon view,
 # the camera mode, the debug force flag) arrive as update_viewmodel arguments.
@@ -76,11 +76,12 @@ var _world
 var _presenter
 var _camera: Camera3D = null
 var _viewmodel: Node3D = null
-# The FP render pass nodes (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG).
-var _vm_pass_layer: CanvasLayer = null
-var _vm_viewport: SubViewport = null
-var _vm_camera: Camera3D = null
 var _vm_parts: Array[ObjectModel] = []  # the builder's typed viewmodel models
+# A world-only render capture hides the gun for its duration (the shell's
+# capture session latches this; the per-frame submission gate ANDs it in).
+var _capture_hidden := false
+# The last FP projection feed pushed to the shader global (k, near, far).
+var _projection_feed := Vector4.ZERO
 # The showhud bit-0 FP-gun gate (GameHudPresenter cycles the flags and pushes
 # the bit through LocalPlayerPresenter.set_fp_gun_visible). Default on = the
 # boot flags value 3. [orig: g_FpWeaponViewFlags bit 0, tested by
@@ -96,20 +97,15 @@ func setup(world, presenter, camera: Camera3D) -> void:
 	_world = world
 	_presenter = presenter
 	_camera = camera
-	# Deferred: the game shell calls setup() from its own _ready, while the root
-	# viewport is still mid-scene-setup — a direct add_child into it fails then
-	# ("parent busy"), which would leave the viewmodel layer masked off the player
-	# camera with NO pass to draw it (an invisible FP viewmodel). The build's own
-	# guards make the deferred call a no-op after teardown()/double setup().
-	_build_viewmodel_pass.call_deferred()
 
 
 func teardown() -> void:
 	clear_viewmodel()
-	_free_viewmodel_pass()
 	_world = null
 	_presenter = null
 	_camera = null
+	_capture_hidden = false
+	_projection_feed = Vector4.ZERO
 
 
 # W4-2-style justified accessors: PlayerWeaponEffects resolves action
@@ -130,13 +126,19 @@ func camera() -> Camera3D:
 	return _camera
 
 
-## The FP render pass's viewport and camera (null until the pass is built).
-func vm_viewport() -> SubViewport:
-	return _vm_viewport
+## A world-only render capture hides the gun for its duration.
+func set_capture_hidden(hidden: bool) -> void:
+	_capture_hidden = hidden
 
 
-func vm_camera() -> Camera3D:
-	return _vm_camera
+func is_capture_hidden() -> bool:
+	return _capture_hidden
+
+
+## The FP projection feed last pushed to `opennova_viewmodel_projection`
+## (x = renderfov focal ratio, y = near, z = far).
+func projection_feed() -> Vector4:
+	return _projection_feed
 
 
 ## The viewmodel branch of the presenter's model lifetime: (re)build the FP model
@@ -172,69 +174,36 @@ func clear_viewmodel() -> void:
 	_vm_parts.clear()
 
 
-# Build the dedicated FP render pass (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG): a SubViewport
-# sharing this presenter's World3D whose camera draws ONLY the viewmodel layer through the
-# weapon renderfov projection, composited over the world frame below the HUD (layer 0 —
-# the game HUD CanvasLayers sit at 1+). The container ignores the mouse so gameplay
-# input passes through.
-func _build_viewmodel_pass() -> void:
-	if _camera == null or _vm_pass_layer != null or not _camera.is_inside_tree():
+# The witnessed FP projection, fed to the object shaders as one global: the gun
+# draws INSIDE the beauty pass (retail's "viewmodel first" into the same
+# backbuffer) through the weapon renderfov — a HORIZONTAL fov in degrees,
+# converted to the vertical through the live aspect [orig:
+# Render_SetViewAndProjectionMatrices @0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)]
+# — with the near plane swapped to 0.05 [orig: Render_SwapProjectionNearZ @0x4dee29]
+# and the depth range clamped to the nearest tenth [orig: Render_SetViewportDepth01
+# @0x58a7b0]. Both frusta share the viewport aspect, so the shader needs only the
+# focal ratio between the renderfov projection and the live beauty projection
+# (shaders/nova_viewmodel_pass.gdshaderinc applies it per flagged instance).
+func _update_viewmodel_projection() -> void:
+	if _camera == null or not _camera.is_inside_tree():
 		return
-	_vm_pass_layer = CanvasLayer.new()
-	_vm_pass_layer.name = "ViewmodelPass"
-	_vm_pass_layer.layer = 0
-	var container := SubViewportContainer.new()
-	container.stretch = true
-	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	var composite_material := ShaderMaterial.new()
-	composite_material.shader = VIEWMODEL_COMPOSITE_SHADER
-	container.material = composite_material
-	_vm_viewport = SubViewport.new()
-	# Render the CAMERA's World3D: the pass re-renders the SAME scene, culled to the
-	# viewmodel layer [orig: one scene, second projection + depth window @0x4ded60].
-	# Assigned explicitly — this presenter node may live OUTSIDE the play viewport
-	# (tests presenter the rig off the game tree), so tree-inherited world/canvas
-	# targets would be the presenter window's, not the game's.
-	_vm_viewport.world_3d = _camera.get_world_3d()
-	_vm_viewport.transparent_bg = true
-	_vm_viewport.handle_input_locally = false
-	_vm_camera = Camera3D.new()
-	_vm_camera.cull_mask = Water.VISUAL_LAYER_VIEWMODEL
-	# The world compositor is the terminal retail-frame transfer. The FP pass
-	# is composited later as Canvas and therefore must not inherit it.
-	_vm_camera.compositor = Compositor.new()
-	_vm_camera.near = Simulation.viewmodel_pass_near_z()  # [orig: Render_SwapProjectionNearZ(0.05) @0x4dee29]
-	_vm_viewport.add_child(_vm_camera)
-	container.add_child(_vm_viewport)
-	_vm_pass_layer.add_child(container)
-	# Composite INTO the viewport the player camera renders (the play viewport), sized
-	# to it via the full-rect container — not into this node's own ancestor viewport.
-	_camera.get_viewport().add_child(_vm_pass_layer)
-
-
-func _free_viewmodel_pass() -> void:
-	if _vm_pass_layer != null and is_instance_valid(_vm_pass_layer):
-		_vm_pass_layer.queue_free()
-	_vm_pass_layer = null
-	_vm_viewport = null
-	_vm_camera = null
-
-
-# Track the player camera 1:1 and rebuild the witnessed projection: renderfov is a
-# HORIZONTAL fov in degrees, converted to Godot's vertical fov through the live aspect
-# [orig: Render_SetViewAndProjectionMatrices @0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)].
-func _update_viewmodel_pass() -> void:
-	if _vm_camera == null or _camera == null:
+	var size := _camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
 		return
-	_vm_camera.global_transform = _camera.global_transform
-	_vm_camera.far = _camera.far
-	_vm_camera.attributes = _camera.attributes
-	_vm_camera.environment = _camera.environment
-	var size := _vm_viewport.size
-	if size.x > 0 and size.y > 0:
-		_vm_camera.fov = Simulation.fov_vertical_from_horizontal(
-				PLAYER_VIEWMODEL_RENDERFOV_H_DEG, float(size.x) / float(size.y))
+	var aspect := size.x / size.y
+	var near := float(Simulation.viewmodel_pass_near_z())
+	var fov_fp_v := Simulation.fov_vertical_from_horizontal(
+			PLAYER_VIEWMODEL_RENDERFOV_H_DEG, aspect)
+	var beauty := _camera.get_camera_projection()
+	if is_zero_approx(beauty.y.y):
+		return
+	var fp := Projection.create_perspective(fov_fp_v, aspect, near, _camera.far)
+	var feed := Vector4(fp.y.y / beauty.y.y, near, _camera.far, 1.0)
+	if feed == _projection_feed:
+		return
+	_projection_feed = feed
+	RenderingServer.global_shader_parameter_set(
+			&"opennova_viewmodel_projection", feed)
 
 
 # First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1,
@@ -291,15 +260,19 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 						int(vs.x), int(vs.y)))
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * view_offset)
-	# The FP overlay never enters the water mirror OR the main camera: retail draws it
-	# as its own renderfov/near-Z pass over the finished frame [orig:
-	# Player_RenderFirstPersonViewModel @ 0x4ded60]; in the port, the dedicated layer is drawn
-	# only by the pass camera (and excluded by the mirror camera's cull_mask).
-	# The gameplay camera admits the world shadow-caster marker layers. Strip
-	# those markers here rather than preserving ObjectModel's defaults: this
-	# dedicated near-Z pass must never leak its arms/weapon into world shadows.
+	# The FP overlay rides its own visual layer: the beauty camera admits it and
+	# every mesh instance applies the renderfov projection + depth band
+	# (retail's "viewmodel first" draw into the same backbuffer [orig:
+	# Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror, Q3, and
+	# capture cameras exclude the layer. The gameplay camera admits the world
+	# shadow-caster marker layers. Strip those markers here rather than
+	# preserving ObjectModel's defaults: the gun must never leak into world
+	# shadows.
 	set_visual_layers(_viewmodel, Water.VISUAL_LAYER_VIEWMODEL, false)
 	set_shadow_casting(_viewmodel, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+	for part in _vm_parts:
+		if is_instance_valid(part):
+			part.set_viewmodel_pass(true)
 	# The card switch: while the SIGHTS card is up, the FP model does not draw —
 	# the frame shows one or the other [orig: selectors/clear @0x5ca299..0x5ca304;
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
@@ -325,9 +298,9 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# The debug override intentionally extends retail's submission scope, but a
 	# model made visible by that probe still needs a coherent CTRL snapshot.
 	var submit_viewmodel := retail_submit or force_visible
-	_viewmodel.visible = submit_viewmodel
+	_viewmodel.visible = submit_viewmodel and not _capture_hidden
 	_apply_viewmodel_control_registers(submit_viewmodel, weapon_view)
-	_update_viewmodel_pass()
+	_update_viewmodel_projection()
 
 
 func _apply_viewmodel_control_registers(submit_viewmodel: bool,

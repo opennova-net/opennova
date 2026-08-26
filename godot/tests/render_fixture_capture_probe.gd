@@ -1727,10 +1727,13 @@ static func observe_comparison_contract(
 			if game is Node else null
 	if hud == null or not hud.visible:
 		return {"error": "comparison HUD CanvasLayer is absent or hidden"}
-	var viewmodel: CanvasLayer = (viewport as Node).get_node_or_null(
-			"ViewmodelPass") as CanvasLayer if viewport is Node else null
+	# The FP gun draws inside the beauty pass; the presenter owns its node.
+	var presenter: Object = (game as Node).get_node_or_null(
+			"LocalPlayerPresenter") if game is Node else null
+	var viewmodel: Node3D = presenter.call("viewmodel") as Node3D \
+			if presenter != null and presenter.has_method("viewmodel") else null
 	if viewmodel == null or not viewmodel.visible:
-		return {"error": "comparison ViewmodelPass CanvasLayer is absent or hidden"}
+		return {"error": "comparison first-person viewmodel is absent or hidden"}
 	if not world.has_method("get_terrain_data") \
 			or world.call("get_terrain_data") == null:
 		return {"error": "comparison terrain data is unavailable"}
@@ -2084,11 +2087,6 @@ func _ready() -> void:
 		# evidence. Let the hold establish before the pose is frozen.
 		await _settle_viewmodel_hold(VIEWMODEL_HOLD_MAX_FRAMES)
 
-	# ViewmodelPass is a sibling of MainGame under the gameplay viewport, not a
-	# descendant of MainGame. Query the same ownership seam used by
-	# mcp_begin_world_only_capture() so the manifest reports the real capture
-	# precondition rather than a scene-tree approximation.
-	var has_viewmodel_pass := viewport.get_node_or_null("ViewmodelPass") != null
 	var camera_spec: Dictionary = fixture.get("camera_bms", {})
 	var raw_position: Array = camera_spec.get("position", [])
 	if raw_position.size() != 3:
@@ -2124,7 +2122,9 @@ func _ready() -> void:
 			"resolution": [_capture_size.x, _capture_size.y],
 			"mode": String(capture_mode.mode),
 			"world_only": world_only,
-			"viewmodel_hidden": has_viewmodel_pass and world_only,
+			# A world-only capture hides the FP gun through the presenter's
+			# capture latch (mcp_begin_world_only_capture).
+			"viewmodel_hidden": world_only,
 			"post_spawn": post_spawn_state,
 			"phase_contract": capture_phase_contract(),
 			"comparison_contract": (catalog_contract as Dictionary).duplicate(true) \
