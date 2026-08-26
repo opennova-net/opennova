@@ -1294,8 +1294,7 @@ def test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() -
         "Vector2i(kFrameFxSide, kFrameFxSide), 0.0f",
         "direction_for_degrees(45.0f, 0.0027621093f)",
         "BlendMode::SourceAlphaAdd, FramePass::FinalAverage",
-        '"resolved_beauty"',
-        '"linear_rgba8_highest_quality"',
+        'result["capture_filter"] = "linear_rgba8_highest_quality"',
     ):
         assert token in frame_renderer
 

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -14,6 +13,7 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
 #include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
@@ -32,6 +32,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -43,8 +44,9 @@ namespace {
 
 // A normal gameplay camera keeps precisely the beauty layers left after the
 // player/fly camera removes FP, shadow-only, and the twelve slot-capture bits.
-// The old Q3 signature remains for shader/probe compatibility; production
-// FrameFX now extracts highlights from this beauty frame directly.
+// Q3 omits the otherwise-unused TERRAIN_SHADOW_RECEIVER plumbing bit. That
+// gives shaders a collision-free exact-mask signature without admitting any
+// hidden viewmodel, caster, or slot-capture geometry into the isolated pass.
 constexpr std::uint32_t kBeautyCameraMask = 0x00018401u;
 constexpr std::uint32_t kQ3CameraMask = 0x00010401u;
 // FrameFX's working size: the 256-square blur targets, and the height of the
@@ -68,7 +70,6 @@ enum class FramePass : std::uint32_t {
 	FinalAverage = 3,
 	GammaDecode = 4,
 	Snapshot = 5,
-	SceneBloomDecode = 6,
 };
 
 enum class BlendMode : std::uint8_t {
@@ -122,14 +123,6 @@ vec4 average_cardinal(vec2 uv, vec2 direction) {
 			+ texture(source_color, uv - perpendicular)) * 0.25;
 }
 
-vec3 bright_extract(vec3 color) {
-	float peak = max(color.r, max(color.g, color.b));
-	float floor_channel = min(color.r, min(color.g, color.b));
-	float luma = dot(color, vec3(0.25, 0.60, 0.15));
-	float signal = max(luma, peak * (peak - floor_channel));
-	return color * smoothstep(0.90, 0.98, signal);
-}
-
 void main() {
 	if (pc.mode == 0u) {
 		// IDirect3DDevice9::StretchRect(D3DTEXF_LINEAR): texel centers map
@@ -159,20 +152,6 @@ void main() {
 		frag_color = average_cardinal(d3d_quad_uv(),
 				pc.base_direction.zw);
 		frag_color.a = 0.5;
-		return;
-	}
-	if (pc.mode == 6u) {
-		ivec2 pixel = ivec2(gl_FragCoord.xy);
-		vec3 scene = texelFetch(source_color, pixel, 0).rgb;
-		vec2 uv = gl_FragCoord.xy / pc.target_source_size.xy;
-		vec2 texel = vec2(1.0) / pc.target_source_size.zw;
-		vec3 bloom = bright_extract(scene) * 2.0;
-		bloom += bright_extract(texture(source_color, uv + vec2(10.0, 10.0) * texel).rgb);
-		bloom += bright_extract(texture(source_color, uv + vec2(-10.0, 10.0) * texel).rgb);
-		bloom += bright_extract(texture(source_color, uv + vec2(10.0, -10.0) * texel).rgb);
-		bloom += bright_extract(texture(source_color, uv - vec2(10.0, 10.0) * texel).rgb);
-		bloom *= 1.0 / 6.0;
-		frag_color = vec4(gamma_to_linear(scene + bloom * 0.5), 1.0);
 		return;
 	}
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
@@ -295,7 +274,6 @@ public:
 
 	mutable std::mutex source_mutex;
 	RID q3_server_texture;
-	std::atomic_bool scene_bloom_enabled{false};
 	// The render-thread view of the Q3 source: the server RID it was resolved
 	// from and the RenderingDevice texture behind it. Re-resolved only when the
 	// source changes or the dependent uniform set is invalidated.
@@ -312,7 +290,6 @@ public:
 	Vector2i last_size;
 	Vector2i last_capture_size;
 	bool q3_sampled = false;
-	bool scene_bloom_drawn = false;
 
 	RenderingDevice *rd = nullptr;
 	RID shader;
@@ -802,56 +779,29 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	if (!ensure_targets(buffers, count, size))
 		return false;
 
-	const bool scene_bloom = scene_bloom_enabled.load();
-	RID q3_rd_texture;
-	if (!scene_bloom) {
-		const RID q3_texture = source_snapshot();
-		const bool q3_uniform_stale = targets.empty() ||
-				!targets.front().q3_uniform.is_valid() ||
-				!rd->uniform_set_is_valid(targets.front().q3_uniform);
-		if (q3_texture != q3_resolved_server_texture || q3_uniform_stale) {
-			RenderingServer *server = RenderingServer::get_singleton();
-			q3_resolved_server_texture = q3_texture;
-			q3_resolved_rd_texture = server != nullptr && q3_texture.is_valid()
-					? server->texture_get_rd_texture(q3_texture, false)
-					: RID();
-		}
-		q3_rd_texture = q3_resolved_rd_texture;
+	const RID q3_texture = source_snapshot();
+	const bool q3_uniform_stale = targets.empty() ||
+			!targets.front().q3_uniform.is_valid() ||
+			!rd->uniform_set_is_valid(targets.front().q3_uniform);
+	if (q3_texture != q3_resolved_server_texture || q3_uniform_stale) {
+		RenderingServer *server = RenderingServer::get_singleton();
+		q3_resolved_server_texture = q3_texture;
+		q3_resolved_rd_texture = server != nullptr && q3_texture.is_valid()
+				? server->texture_get_rd_texture(q3_texture, false)
+				: RID();
 	}
+	const RID q3_rd_texture = q3_resolved_rd_texture;
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
-	bool drew_scene_bloom = false;
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
-		if (scene_bloom) {
-			// One stable source copy plus one terminal filter/decode. Keeping the
-			// blur in a single draw avoids the render-pass setup cost that made
-			// the old chain nearly as expensive as its duplicate scene camera.
-			if (!draw_one(target.scene_scratch_framebuffer, target.color_uniform,
-					BlendMode::Replace, FramePass::Snapshot, target.size,
-					target.size, 0, 0, 0, 0, false, true))
-				return false;
-			++draws;
-			if (!draw_one(target.color_framebuffer, target.scratch_uniform,
-					BlendMode::Replace, FramePass::SceneBloomDecode, target.size,
-					target.size, 0, 0, 0, 0, false, true))
-				return false;
-			++draws;
-			drew_scene_bloom = true;
-			continue;
-		}
-		RID bloom_uniform;
-		Vector2i bloom_size;
 		if (ensure_q3_uniform(target, q3_rd_texture)) {
-			bloom_uniform = target.q3_uniform;
-			bloom_size = target.q3_size != Vector2i()
+			const Vector2i q3_size = target.q3_size != Vector2i()
 					? target.q3_size
 					: target.capture_size;
-		}
-		if (bloom_uniform.is_valid()) {
-			if (!draw_one(target.capture_framebuffer, bloom_uniform,
+			if (!draw_one(target.capture_framebuffer, target.q3_uniform,
 					BlendMode::Replace, FramePass::Stretch,
-					target.capture_size, bloom_size, 0, 0, 0, 0,
+					target.capture_size, q3_size, 0, 0, 0, 0,
 					false, true))
 				return false;
 			++draws;
@@ -903,7 +853,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	}
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
-		status = sampled_q3 || drew_scene_bloom ? "drawn" : "drawn_without_bloom";
+		status = sampled_q3 ? "drawn" : "drawn_without_q3";
 		failure.clear();
 		++rendered_frames;
 		gpu_draw_calls = draws;
@@ -912,40 +862,30 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		last_capture_size = targets.empty() ? Vector2i() :
 				targets.front().capture_size;
 		q3_sampled = sampled_q3;
-		scene_bloom_drawn = drew_scene_bloom;
 	}
 	return true;
 }
 
 Dictionary FrameFxCompositorEffect::Impl::report() const {
 	std::lock_guard<std::mutex> lock(diagnostics_mutex);
-	const bool scene_bloom = scene_bloom_enabled.load();
 	Dictionary result;
 	result["backend"] = "rendering_device_framefx";
 	result["callback"] = "post_transparent_terminal";
 	result["callback_type"] = static_cast<int>(
 			CompositorEffect::EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
-	result["quality_path"] = scene_bloom ? 4 : 3;
-	result["bloom_source"] = scene_bloom
-			? "beauty_bright_extract"
-			: "q3_isolated_target";
-	result["q3_isolated_target"] = !scene_bloom;
-	result["scene_bloom_enabled"] = scene_bloom;
-	result["scene_bloom_drawn"] = scene_bloom_drawn;
-	result["capture_filter"] = scene_bloom
-			? "resolved_beauty"
-			: "linear_rgba8_highest_quality";
-	result["capture_power_of_two_floor"] = !scene_bloom;
-	result["blur_target_size"] = scene_bloom
-			? int64_t(0)
-			: static_cast<int64_t>(kFrameFxSide);
-	result["weighted_taps"] = scene_bloom
-			? "2@center,1@four_diagonals"
-			: "0.50@0.5,0.46@2.5,0.35@4.5,0.19@6.5";
-	result["blur_radius_pixels"] = scene_bloom ? 10.0 : 0.0;
-	result["final_blend"] = scene_bloom
-			? "shader_add_half"
-			: "SRCALPHA,ONE";
+	result["quality_path"] = 3;
+	result["q3_isolated_target"] = true;
+	result["capture_filter"] = "linear_rgba8_highest_quality";
+	result["capture_power_of_two_floor"] = true;
+	result["blur_target_size"] = static_cast<int64_t>(kFrameFxSide);
+	result["downsample_angle_degrees"] = 30.0;
+	result["downsample_base_uv"] = 1.0 / 2048.0;
+	result["downsample_radius_uv"] = 1.0 / 1024.0;
+	result["weighted_taps"] = "0.50@0.5,0.46@2.5,0.35@4.5,0.19@6.5";
+	result["blur_angles_degrees"] = "90,270,0,180";
+	result["final_angle_degrees"] = 45.0;
+	result["final_radius_uv"] = 0.0027621093;
+	result["final_blend"] = "SRCALPHA,ONE";
 	result["final_alpha"] = 0.5;
 	result["framebuffer_blend_domain"] = "gamma";
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
@@ -957,7 +897,7 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["gpu_draw_calls"] = static_cast<int64_t>(gpu_draw_calls);
 	result["view_count"] = static_cast<int64_t>(view_count);
 	result["frame_size"] = last_size;
-	result["capture_size"] = scene_bloom ? Vector2i() : last_capture_size;
+	result["capture_size"] = last_capture_size;
 	result["q3_sampled"] = q3_sampled;
 	return result;
 }
@@ -975,11 +915,6 @@ FrameFxCompositorEffect::~FrameFxCompositorEffect() = default;
 void FrameFxCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFxCompositorEffect::get_backend_report);
-}
-
-void FrameFxCompositorEffect::set_scene_bloom_enabled(bool p_enabled) {
-	if (impl_)
-		impl_->scene_bloom_enabled.store(p_enabled);
 }
 
 void FrameFxCompositorEffect::set_q3_texture_rid(const RID &p_texture) {
@@ -1027,12 +962,57 @@ void FrameFx::_bind_methods() {
 	BIND_CONSTANT(kQ3CameraMask);
 }
 
-void FrameFx::initialize_effect() {
-	if (terminal_effect_.is_valid())
+void FrameFx::build_auxiliary_views() {
+	if (q3_viewport_ != nullptr)
 		return;
-	terminal_effect_.instantiate();
-	terminal_effect_->set_scene_bloom_enabled(true);
-	terminal_effect_->clear_q3_texture_rid();
+	if (terminal_effect_.is_null())
+		terminal_effect_.instantiate();
+
+	q3_viewport_ = memnew(SubViewport);
+	q3_viewport_->set_name("Q3View");
+	q3_viewport_->set_size(Vector2i(kFrameFxSide, kFrameFxSide));
+	q3_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
+	q3_viewport_->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
+	q3_viewport_->set_transparent_background(true);
+	q3_viewport_->set_disable_3d(false);
+	q3_viewport_->set_use_own_world_3d(false);
+	q3_viewport_->set_handle_input_locally(false);
+	q3_viewport_->set_positional_shadow_atlas_size(0);
+	// Retail's altbuffer inherits the backbuffer multisample mode; here the
+	// samples also stand in for the StretchRect box filter over the missing
+	// full-resolution source (see kFrameFxSide).
+	q3_viewport_->set_msaa_3d(Viewport::MSAA_8X);
+	q3_viewport_->set_screen_space_aa(Viewport::SCREEN_SPACE_AA_DISABLED);
+	q3_viewport_->set_use_taa(false);
+	q3_viewport_->set_use_debanding(false);
+	// Every retail pass writes gamma-domain numeric values and this view has
+	// no terminal decode, so keep Godot's sRGB output encode OFF: an HDR 2D
+	// target stores the numbers the Q3 shaders wrote, which is what the
+	// FrameFX capture samples (the display transfer runs once, on the beauty
+	// target, after the composite).
+	q3_viewport_->set_use_hdr_2d(true);
+	add_child(q3_viewport_);
+
+	q3_camera_ = memnew(Camera3D);
+	q3_camera_->set_name("Q3Camera");
+	q3_camera_->set_cull_mask(kQ3CameraMask);
+	Ref<Environment> black_environment;
+	black_environment.instantiate();
+	black_environment->set_background(Environment::BG_COLOR);
+	black_environment->set_bg_color(Color(0, 0, 0, 0));
+	black_environment->set_ambient_source(Environment::AMBIENT_SOURCE_DISABLED);
+	black_environment->set_glow_enabled(false);
+	q3_camera_->set_environment(black_environment);
+	// The shared WorldEnvironment owns the terminal effect. Q3 is its source,
+	// never another consumer of it.
+	Ref<Compositor> empty_compositor;
+	empty_compositor.instantiate();
+	q3_camera_->set_compositor(empty_compositor);
+	q3_viewport_->add_child(q3_camera_);
+	q3_camera_->make_current();
+	Ref<ViewportTexture> q3_texture = q3_viewport_->get_texture();
+	if (q3_texture.is_valid())
+		terminal_effect_->set_q3_texture_rid(q3_texture->get_rid());
 }
 
 void FrameFx::install_compositor() {
@@ -1073,13 +1053,16 @@ void FrameFx::restore_synced_camera_mask() {
 }
 
 void FrameFx::advance_frame() {
-	if (terminal_effect_.is_null())
+	if (q3_viewport_ == nullptr || q3_camera_ == nullptr ||
+			terminal_effect_.is_null())
 		return;
 	Viewport *viewport = get_viewport();
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	const bool active = camera != nullptr && is_visible_in_tree();
 	if (!active) {
 		restore_synced_camera_mask();
+		q3_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
+		terminal_effect_->clear_q3_texture_rid();
 		return;
 	}
 	const ObjectID camera_id(camera->get_instance_id());
@@ -1092,17 +1075,53 @@ void FrameFx::advance_frame() {
 	// Standardize the highest-quality retail beauty pass. The layers removed
 	// here are rendered only by their dedicated capture/viewmodel devices.
 	camera->set_cull_mask(kBeautyCameraMask);
+
+	// Kernel height, beauty aspect: the camera projection copied below then
+	// frames exactly the beauty view, and the FrameFX capture squashes it
+	// into the 256-square like retail's StretchRect of the altbuffer.
+	const Vector2 visible_size = viewport->get_visible_rect().size;
+	const float aspect = visible_size.y > 0.0f
+			? visible_size.x / visible_size.y
+			: 1.0f;
+	const Vector2i target_size = aspect >= 1.0f
+			? Vector2i(std::max(1, static_cast<int>(std::round(
+					  static_cast<float>(kFrameFxSide) * aspect))),
+					  static_cast<int>(kFrameFxSide))
+			: Vector2i(static_cast<int>(kFrameFxSide),
+					  std::max(1, static_cast<int>(std::round(
+					  static_cast<float>(kFrameFxSide) / aspect))));
+	if (q3_viewport_->get_size() != target_size)
+		q3_viewport_->set_size(target_size);
+	q3_viewport_->set_world_3d(viewport->get_world_3d());
+	q3_camera_->set_global_transform(camera->get_global_transform());
+	q3_camera_->set_projection(camera->get_projection());
+	q3_camera_->set_fov(camera->get_fov());
+	q3_camera_->set_size(camera->get_size());
+	q3_camera_->set_frustum_offset(camera->get_frustum_offset());
+	q3_camera_->set_near(camera->get_near());
+	q3_camera_->set_far(camera->get_far());
+	q3_camera_->set_keep_aspect_mode(camera->get_keep_aspect_mode());
+	q3_camera_->set_h_offset(camera->get_h_offset());
+	q3_camera_->set_v_offset(camera->get_v_offset());
+	q3_camera_->set_attributes(camera->get_attributes());
+	q3_camera_->set_cull_mask(kQ3CameraMask);
+	q3_viewport_->set_update_mode(SubViewport::UPDATE_ALWAYS);
+	Ref<ViewportTexture> q3_texture = q3_viewport_->get_texture();
+	if (q3_texture.is_valid())
+		terminal_effect_->set_q3_texture_rid(q3_texture->get_rid());
 }
 
 void FrameFx::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
-		initialize_effect();
+		build_auxiliary_views();
 		install_compositor();
 		// One placement-independent sync so a headless/no-pipeline embedder
 		// still boots with coherent views; the live per-frame sync is the
 		// ordered GameFramePipeline leg, never a process callback.
 		advance_frame();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		if (q3_viewport_ != nullptr)
+			q3_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
 		if (terminal_effect_.is_valid())
 			terminal_effect_->clear_q3_texture_rid();
 		restore_synced_camera_mask();
@@ -1116,12 +1135,18 @@ Dictionary FrameFx::get_backend_report() const {
 			Dictionary();
 	result["beauty_camera_mask"] = static_cast<int64_t>(kBeautyCameraMask);
 	result["q3_camera_mask"] = static_cast<int64_t>(kQ3CameraMask);
-	result["q3_viewport_present"] = false;
-	result["q3_viewport_size"] = Vector2i();
-	result["q3_working_height"] = static_cast<int64_t>(0);
-	result["q3_msaa_3d"] = static_cast<int>(Viewport::MSAA_DISABLED);
-	result["q3_hdr_2d"] = false;
-	result["q3_update_mode"] = static_cast<int>(SubViewport::UPDATE_DISABLED);
+	result["q3_viewport_present"] = q3_viewport_ != nullptr;
+	result["q3_viewport_size"] = q3_viewport_ != nullptr ?
+			q3_viewport_->get_size() : Vector2i();
+	result["q3_working_height"] = static_cast<int64_t>(kFrameFxSide);
+	result["q3_msaa_3d"] = q3_viewport_ != nullptr ?
+			static_cast<int>(q3_viewport_->get_msaa_3d()) :
+			static_cast<int>(Viewport::MSAA_DISABLED);
+	result["q3_hdr_2d"] = q3_viewport_ != nullptr &&
+			q3_viewport_->is_using_hdr_2d();
+	result["q3_update_mode"] = q3_viewport_ != nullptr ?
+			static_cast<int>(q3_viewport_->get_update_mode()) :
+			static_cast<int>(SubViewport::UPDATE_DISABLED);
 	WorldEnvironment *world_environment =
 			world_environment_from_id(world_environment_id_);
 	result["terminal_compositor_installed"] = world_environment != nullptr &&

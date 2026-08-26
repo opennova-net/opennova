@@ -115,7 +115,7 @@ func _water_order_particle_scene() -> EffectScene:
 	return scene
 
 
-func test_world_frame_module_extracts_beauty_bloom_in_the_terminal_effect() -> void:
+func test_world_frame_module_owns_kernel_sized_q3_and_the_terminal_effect() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 32)
 	viewport.own_world_3d = true
@@ -136,14 +136,14 @@ func test_world_frame_module_extracts_beauty_bloom_in_the_terminal_effect() -> v
 	camera.cull_mask = 0x12345
 	viewport.add_child(camera)
 
-	# A small saturated beauty highlight must create a halo. Its blue Q3 color
-	# is deliberately different: production no longer opens that second view.
+	# Green in beauty, red in the isolated Q3 source: the FrameFX composite
+	# must add a blurred red glow over the green frame.
 	var quad := MeshInstance3D.new()
 	var mesh := QuadMesh.new()
-	mesh.size = Vector2(0.25, 0.25)
+	mesh.size = Vector2(8.0, 8.0)
 	quad.mesh = mesh
-	quad.material_override = _canary_material(Color(1.0, 0.0, 0.0),
-			Color(0.0, 0.0, 1.0, 1.0))
+	quad.material_override = _canary_material(Color(0.0, 1.0, 0.0),
+			Color(1.0, 0.0, 0.0, 1.0))
 	quad.position = Vector3(0.0, 0.0, -2.0)
 	viewport.add_child(quad)
 
@@ -155,16 +155,16 @@ func test_world_frame_module_extracts_beauty_bloom_in_the_terminal_effect() -> v
 	var report := renderer.get_backend_report()
 	assert_eq(int(report.get("beauty_camera_mask", -1)), 99329)
 	assert_eq(int(report.get("q3_camera_mask", -1)), 66561)
-	assert_false(bool(report.get("q3_viewport_present", true)),
-			"bloom must not re-render the scene through a second viewport")
-	assert_eq(int(report.get("q3_working_height", -1)), 0)
-	assert_eq(report.get("q3_viewport_size", Vector2i(-1, -1)), Vector2i.ZERO)
-	assert_eq(int(report.get("q3_msaa_3d", -1)), Viewport.MSAA_DISABLED)
-	assert_false(bool(report.get("q3_hdr_2d", true)))
-	assert_eq(int(report.get("q3_update_mode", -1)), SubViewport.UPDATE_DISABLED)
-	assert_eq(String(report.get("bloom_source", "")), "beauty_bright_extract")
-	assert_true(bool(report.get("scene_bloom_enabled", false)))
-	assert_false(bool(report.get("q3_isolated_target", true)))
+	assert_true(bool(report.get("q3_viewport_present", false)))
+	# Kernel height, beauty aspect: a 2:1 beauty view yields a 512x256 source
+	# that the capture squashes into the 256-square exactly like retail's
+	# StretchRect of the backbuffer-sized altbuffer.
+	assert_eq(int(report.get("q3_working_height", -1)), 256)
+	assert_eq(report.get("q3_viewport_size", Vector2i.ZERO), Vector2i(512, 256))
+	assert_eq(int(report.get("q3_msaa_3d", -1)), Viewport.MSAA_8X)
+	assert_true(bool(report.get("q3_hdr_2d", false)),
+			"the Q3 source keeps gamma-domain numbers: no sRGB encode on its target")
+	assert_eq(int(report.get("q3_update_mode", -1)), SubViewport.UPDATE_ALWAYS)
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
 	assert_eq(camera.cull_mask, 99329,
 			"the module selects the one supported beauty camera signature")
@@ -185,17 +185,13 @@ func test_world_frame_module_extracts_beauty_bloom_in_the_terminal_effect() -> v
 		RenderingServer.force_sync()
 		assert_eq(String(report.get("status", "")), "drawn",
 				String(report.get("failure", "FrameFX terminal failed")))
-		assert_true(bool(report.get("scene_bloom_drawn", false)))
-		assert_false(bool(report.get("q3_sampled", true)))
-		var image := viewport.get_texture().get_image()
-		var center := image.get_pixel(32, 16)
-		var halo := 0.0
-		for point in [Vector2i(22, 6), Vector2i(42, 6),
-				Vector2i(22, 26), Vector2i(42, 26)]:
-			halo = maxf(halo, image.get_pixelv(point).r)
-		assert_gt(center.r, 0.9, "the beauty highlight survives terminal decode")
-		assert_gt(halo, 0.02, "the beauty highlight produces a compact halo")
-		assert_lt(center.b, 0.05, "the retired blue Q3 source is never sampled")
+		assert_true(bool(report.get("q3_sampled", false)),
+				"the terminal sampled the kernel-sized Q3 source")
+		var center := viewport.get_texture().get_image().get_pixel(32, 16)
+		assert_gt(center.g, 0.9, "beauty green survives the terminal transfer")
+		assert_gt(center.r, 0.1,
+				"the Q3 red glow is composited at half strength over beauty")
+		assert_lt(center.b, 0.05)
 	else:
 		pending("RenderingDevice unavailable under this Godot renderer")
 

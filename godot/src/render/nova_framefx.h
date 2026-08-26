@@ -19,10 +19,11 @@ class SubViewport;
 class WorldEnvironment;
 
 // The frame's terminal compositor effect: the post-transparent device leg
-// that extracts bright/saturated beauty highlights, adds a compact bloom,
-// and performs the sole display decode. The retained Q3 source methods keep
-// decode-only/diagnostic callers compatible, but gameplay no longer opens a
-// second scene camera for FrameFX.
+// that composites the Q3 glow source and performs the sole display decode
+// (FrameFX_RenderBloomPass @0x582940 - docs/render/render-order-re.md).
+// The source RID is the isolated Q3 view owned by FrameFx; the effect runs
+// the POT capture, 256x256 two-axis weighted blur, half-strength additive
+// composite, and the final gamma->linear bridge.
 class FrameFxCompositorEffect : public CompositorEffect {
 	GDCLASS(FrameFxCompositorEffect, CompositorEffect)
 
@@ -37,7 +38,6 @@ public:
 	FrameFxCompositorEffect();
 	~FrameFxCompositorEffect() override;
 
-	void set_scene_bloom_enabled(bool p_enabled);
 	void set_q3_texture_rid(const RID &p_texture);
 	void clear_q3_texture_rid();
 	Dictionary get_backend_report() const;
@@ -46,13 +46,17 @@ public:
 			RenderData *p_render_data) override;
 };
 
-// World-owned coordinator. Production bloom is extracted from the resolved
-// beauty frame and blurred by the terminal compositor, avoiding a second
-// shared-world scene render.
+// World-owned coordinator. One private shared-world view owns the isolated
+// Q3 (glow/envmap duplicate) pass at FrameFX's working size; the terminal
+// compositor effect installed on the shared WorldEnvironment consumes it.
+// Callers publish no pass plumbing: this module installs the terminal
+// FrameFX compositor effect and reports through get_backend_report().
 class FrameFx : public Node3D {
 	GDCLASS(FrameFx, Node3D)
 
 private:
+	SubViewport *q3_viewport_ = nullptr;
+	Camera3D *q3_camera_ = nullptr;
 	// The owning WorldEnvironment by identity: an embedder may free it before
 	// this node leaves the tree (preview teardown), so never a raw pointer.
 	ObjectID world_environment_id_;
@@ -63,7 +67,7 @@ private:
 	uint32_t synced_camera_original_mask_ = 0;
 	bool has_synced_camera_mask_ = false;
 
-	void initialize_effect();
+	void build_auxiliary_views();
 	void install_compositor();
 	void uninstall_compositor();
 	void restore_synced_camera_mask();
@@ -78,10 +82,12 @@ public:
 
 	// Ordered device leg, driven from GameFramePipeline immediately after the
 	// local-view camera placement. This module must NOT self-clock: a node
-	// process callback races the pipeline's camera producer.
+	// process callback races the pipeline's camera producer, and a Q3 view
+	// rendered from last frame's pose composites a stale glow over the
+	// current beauty frame.
 	void advance_frame();
 
-	SubViewport *get_q3_viewport() const { return nullptr; }
+	SubViewport *get_q3_viewport() const { return q3_viewport_; }
 	Dictionary get_backend_report() const;
 };
 
