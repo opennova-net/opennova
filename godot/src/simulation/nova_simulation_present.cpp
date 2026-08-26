@@ -10,6 +10,8 @@
 #include <vector>
 
 #include <netsim/client_state.h> // minimap_team_argb (the ONE palette home)
+#include <netsim/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
+#include <world/zone_chain.h> // zone_chain_zone_info_byte
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
 #include <world/minimap_overlay.h>   // classifier + the blip draw policy
@@ -19,6 +21,22 @@
 using namespace novasim;
 
 namespace {
+
+// The presented mission yaw of one pool row. Retail draws entity+0x10 (the
+// 32-bit engine-frame heading); the port keeps that mirror on the vehicle motor
+// (VehicleMotorState::yaw_bam) and on the infantry AI row (AiEntity::heading),
+// while Entity::yaw is the whole-degree mission mirror every other row carries.
+double host_present_yaw_deg(const opennova::world::Entity &e,
+		const opennova::world::AiEntity *ae, opennova::EntityClass cls) {
+	if (e.emplacement_parent.valid() && e.emplacement_pose_metadata_resolved)
+		return static_cast<double>(e.yaw); // World::update_emplacement_attachments' exact result
+	if (cls == opennova::EntityClass::Vehicle && e.veh.yaw_seeded)
+		return opennova::world::mission_yaw_deg_from_bam_heading(e.veh.yaw_bam);
+	if (cls == opennova::EntityClass::Infantry && ae != nullptr)
+		return opennova::world::mission_yaw_deg_from_bam_heading(ae->heading);
+	return static_cast<double>(e.yaw);
+}
+
 
 inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
 	row[Simulation::PF_SECTION_MASK_VALID] = 1.0f;
@@ -1291,6 +1309,44 @@ bool Simulation::cache_present_effect_pose(
 	return true;
 }
 
+bool Simulation::cache_present_effect_pose(
+		const opennova::world::Entity &p_entity) const {
+	const uint16_t handle = p_entity.handle.packed;
+	if (present_effect_poses_by_handle_.find(handle) !=
+			present_effect_poses_by_handle_.end()) {
+		return true;
+	}
+	const AiEntity *ae = world_->ai != nullptr
+			? world_->ai->for_handle(p_entity.handle) : nullptr;
+	PresentEffectPose pose;
+	pose.position = Vector3(p_entity.position.x, p_entity.position.z,
+			-p_entity.position.y);
+	pose.rotation_deg = Vector3(
+			static_cast<float>(p_entity.pitch),
+			static_cast<float>(host_present_yaw_deg(
+					p_entity, ae, opennova::netsim::entity_class_of(p_entity))),
+			static_cast<float>(p_entity.roll));
+	present_effect_poses_by_handle_[handle] = pose;
+	present_effect_missing_handles_.erase(handle);
+	if (p_entity.bms_id > 0) {
+		const int bms_id = static_cast<int>(p_entity.bms_id);
+		present_effect_handles_by_bms_id_[bms_id] = handle;
+		present_effect_missing_bms_ids_.erase(bms_id);
+	}
+	if (p_entity.net_id > 0) {
+		const int ssn = static_cast<int>(p_entity.net_id);
+		present_effect_handles_by_ssn_[ssn] = handle;
+		present_effect_missing_ssns_.erase(ssn);
+	}
+	const int kind = opennova::world::spawn_origin_kind(p_entity.spawn_origin);
+	const int index = static_cast<int>(
+			opennova::world::spawn_origin_index(p_entity.spawn_origin));
+	const uint64_t origin = present_effect_origin_key(kind, index);
+	present_effect_handles_by_origin_[origin] = handle;
+	present_effect_missing_origins_.erase(origin);
+	return true;
+}
+
 PackedVector3Array Simulation::cached_present_effect_state_for_handle(
 		uint16_t p_handle) const {
 	PackedVector3Array out;
@@ -1308,6 +1364,15 @@ PackedVector3Array Simulation::present_effect_state_for_handle(uint16_t p_handle
 	if (!cached.is_empty() || !runtime_) return cached;
 	if (present_effect_missing_handles_.find(p_handle) !=
 			present_effect_missing_handles_.end()) {
+		return PackedVector3Array();
+	}
+	if (!joiner_) {
+		const opennova::world::Entity *entity =
+				world_->registry.get(opennova::world::EntityHandle{p_handle});
+		if (entity != nullptr && cache_present_effect_pose(*entity)) {
+			return cached_present_effect_state_for_handle(p_handle);
+		}
+		present_effect_missing_handles_.insert(p_handle);
 		return PackedVector3Array();
 	}
 	for (const opennova::netsim::ClientEntityState &entity_state :
@@ -1334,15 +1399,12 @@ PackedVector3Array Simulation::get_present_effect_state_for_ssn(int p_ssn) const
 			present_effect_missing_ssns_.end()) {
 		return PackedVector3Array();
 	}
-	for (const opennova::netsim::ClientEntityState &entity_state :
-			runtime_->state().entities) {
-		const opennova::world::Entity *entity = world_->registry.get(
-				opennova::world::EntityHandle{entity_state.handle});
-		if (!entity || static_cast<int>(entity->net_id) != p_ssn) continue;
-		if (cache_present_effect_pose(entity_state)) {
-			return cached_present_effect_state_for_handle(entity_state.handle);
-		}
-		break;
+	const opennova::world::Entity *match = nullptr;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (match == nullptr && static_cast<int>(e.net_id) == p_ssn) match = &e;
+	});
+	if (match != nullptr && cache_present_effect_pose(*match)) {
+		return cached_present_effect_state_for_handle(match->handle.packed);
 	}
 	present_effect_missing_ssns_.insert(p_ssn);
 	return PackedVector3Array();
@@ -1369,15 +1431,10 @@ PackedVector3Array Simulation::get_present_effect_state_for_bms_id(int p_bms_id)
 			present_effect_missing_bms_ids_.end()) {
 		return PackedVector3Array();
 	}
-	for (const opennova::netsim::ClientEntityState &entity_state :
-			runtime_->state().entities) {
-		const opennova::world::Entity *entity = world_->registry.get(
-				opennova::world::EntityHandle{entity_state.handle});
-		if (!entity || static_cast<int>(entity->bms_id) != p_bms_id) continue;
-		if (cache_present_effect_pose(entity_state)) {
-			return cached_present_effect_state_for_handle(entity_state.handle);
-		}
-		break;
+	const opennova::world::Entity *entity =
+			world_->registry.get(handle_for_bms_id(p_bms_id));
+	if (entity != nullptr && cache_present_effect_pose(*entity)) {
+		return cached_present_effect_state_for_handle(entity->handle.packed);
 	}
 	present_effect_missing_bms_ids_.insert(p_bms_id);
 	return PackedVector3Array();
@@ -1397,18 +1454,15 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 			present_effect_missing_origins_.end()) {
 		return PackedVector3Array();
 	}
-	for (const opennova::netsim::ClientEntityState &entity_state :
-			runtime_->state().entities) {
-		const opennova::world::Entity *entity = world_->registry.get(
-				opennova::world::EntityHandle{entity_state.handle});
-		if (!entity) continue;
-		const int kind = opennova::world::spawn_origin_kind(entity->spawn_origin);
-		const int index = static_cast<int>(opennova::world::spawn_origin_index(entity->spawn_origin));
-		if (present_effect_origin_key(kind, index) != requested_origin) continue;
-		if (cache_present_effect_pose(entity_state)) {
-			return cached_present_effect_state_for_handle(entity_state.handle);
-		}
-		break;
+	const opennova::world::Entity *match = nullptr;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (match != nullptr) return;
+		const int kind = opennova::world::spawn_origin_kind(e.spawn_origin);
+		const int index = static_cast<int>(opennova::world::spawn_origin_index(e.spawn_origin));
+		if (present_effect_origin_key(kind, index) == requested_origin) match = &e;
+	});
+	if (match != nullptr && cache_present_effect_pose(*match)) {
+		return cached_present_effect_state_for_handle(match->handle.packed);
 	}
 	present_effect_missing_origins_.insert(requested_origin);
 	return PackedVector3Array();
@@ -1475,16 +1529,18 @@ bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
 PackedFloat32Array Simulation::get_present_snapshot() const {
 	const uint64_t start_us =
 			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-	// P7 (ADR 0011 Decision 1): every authoritative live mission is an in-process listen server in
-	// standalone MainGame/GameWorld. The present pass reads the state the LOCAL CLIENT decoded off the
-	// wire (ClientState), not the authoritative sim directly. Standalone SP and LAN hosts therefore
-	// render exactly what a networked peer would; a joiner renders remote entities wire-direct.
-	// ADR 0025 retired ONED's live editor preview, while bare sims remain available to tests/tooling.
-	// The old no-net AI-pool present is retired. Empty when no runtime is active (a bare sim) — scalar
-	// getters (get_entity_*) read the AI pool for tooling.
+	// ADR 0011 Decision 1 (as amended, D-NET-140 closed): every authoritative live mission is an
+	// in-process listen server in standalone MainGame/GameWorld, and the listen host presents
+	// from its OWN pools — retail's local client reads process memory and its loopback 0x0A is
+	// header-only (retail: serialize_entity_states_to_packet @0x50f07e;
+	// collect_visible_entities_for_terrain @0x5c8c60). A joiner renders the host's stream
+	// wire-direct from the state its ClientReplicaPipeline decoded (ClientState).
+	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
+	// AI pool for tooling.
 	PackedFloat32Array out;
 	if (runtime_) {
-		out = present_snapshot_from_client_replicas();
+		out = joiner_ ? present_snapshot_from_client_replicas()
+		              : present_snapshot_from_world();
 	}
 	last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
 	std::vector<PresentRowIdentity> next_layout;
@@ -1809,5 +1865,222 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 	// Consume-once: each transition pulse dispatches exactly one presented
 	// frame (the rows above copied any live pulse into PF_ANIM_STATE_PULSE).
 	runtime_->state().clear_anim_pulses();
+	return out;
+}
+
+PackedFloat32Array Simulation::present_snapshot_from_world() const {
+	PackedFloat32Array out;
+	if (!world_) return out;
+	const opennova::world::World &w = *world_;
+	const opennova::world::Entity *local_player =
+			w.registry.get(w.cached.local_player);
+	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
+	// not Entity.hidden: parent equality + first-person camera + raw UseGun seat.
+	// The per-row tail below adds the live EquippedSlot/Def tests.
+	// (retail: Entity_RenderVehicleModel @0x4407f6..0x44084c, sole submit @0x440918;
+	//  see docs/world/world-wac-ai-re.md)
+	const bool local_first_person_usegun =
+			!player_view_.third_person && local_player != nullptr &&
+			local_player->mounted &&
+			local_player->mount_type == opennova::world::SeatType::Gunner;
+	// One row per live pool slot, in registry order — the set the host's own
+	// ClientState held before D-NET-140 closed (every slot the 0x0C/0x0D/0x10/
+	// 0x20 spawn batches stream plus every 0x0A record), now read straight
+	// from the pools (retail: collect_visible_entities_for_terrain @0x5c8c60
+	// walks the pools; see docs/net/novaworld-net-re.md D-NET-140). A row
+	// without a def keeps PF_TYPE_ID 0, which the wire pass skips.
+	int count = 0;
+	w.registry.for_each([&](const opennova::world::Entity &) { ++count; });
+	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
+	float *rows = out.ptrw();
+	int i = 0;
+	w.registry.for_each([&](const opennova::world::Entity &e) {
+		float *r = rows + static_cast<int64_t>(i++) * PF_STRIDE;
+		const opennova::world::EntityHandle h = e.handle;
+		const opennova::EntityClass cls = opennova::netsim::entity_class_of(e);
+		const AiEntity *ae = w.ai != nullptr ? w.ai->for_handle(h) : nullptr;
+		opennova::np::initialize_client_replica_present_row(r);
+
+		// Wire identity + lifecycle, exactly what project_client_replica_present_row
+		// derives for a decoded row, sourced from the authoritative record.
+		r[PF_TYPE_ID] = static_cast<float>(static_cast<uint16_t>(e.item_id));
+		r[PF_WIRE_HANDLE] = static_cast<float>(h.packed);
+		// The groundEntity/mount link the footstep slot reads (mount wins over
+		// ground — retail: NetPacket_SerializePlayerState op1 @0x4c0a08, see
+		// docs/net/novaworld-net-re.md); -1 = free-standing.
+		const uint16_t carrier = e.mounted && e.mount_target.valid()
+				? e.mount_target.packed
+				: (e.ground_target.valid() ? e.ground_target.packed
+				                           : opennova::world::EntityHandle::kInvalid);
+		r[PF_CARRIER_HANDLE] = carrier != opennova::world::EntityHandle::kInvalid
+				? static_cast<float>(carrier) : -1.0f;
+		if (cls == opennova::EntityClass::Player) {
+			// A player's wire net_id IS its packed character id (entity+0x15C).
+			r[PF_CHARACTER_ID] =
+					static_cast<float>(opennova::netsim::player_wire_net_id(e));
+		}
+		r[PF_POS_X] = e.position.x;
+		r[PF_POS_Y] = e.position.z;
+		r[PF_POS_Z] = -e.position.y;
+		r[PF_PITCH_DEG] = static_cast<float>(e.pitch);
+		r[PF_YAW_DEG] = static_cast<float>(host_present_yaw_deg(e, ae, cls));
+		r[PF_ROLL_DEG] = static_cast<float>(e.roll);
+		// The decoded fold bumps a row's respawn revision on every dead->alive
+		// edge of its wire state byte (organic bit 1; vehicle wrecks flag 4).
+		// Mirror that edge from the authoritative flags so WirePresentPass
+		// re-seeds the same way on the host.
+		{
+			const uint8_t dead_bit = cls == opennova::EntityClass::Vehicle
+					? opennova::netsim::kVehicleFlagDeadPose
+					: static_cast<uint8_t>(opennova::world::kEntityFlagDead);
+			const bool dead = (e.flags & dead_bit) != 0u;
+			HostPresentLifecycle &life = host_present_lifecycle_[h.packed];
+			if (life.registry_spawn_id != e.registry_spawn_id) {
+				life.registry_spawn_id = e.registry_spawn_id;
+				life.dead_known = false;
+			}
+			if (life.dead_known && life.dead && !dead) ++life.respawn_revision;
+			life.dead_known = true;
+			life.dead = dead;
+			r[PF_RESPAWN_REVISION] = static_cast<float>(life.respawn_revision);
+		}
+		r[PF_KIND] = static_cast<float>(e.spawn_origin >> 24);
+		r[PF_INDEX] = static_cast<float>(opennova::world::spawn_origin_index(e.spawn_origin));
+		r[PF_BMS_ID] = static_cast<float>(e.bms_id);
+		r[PF_NET_ID] = static_cast<float>(e.net_id);
+		r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
+		r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
+		r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
+		// The authority owns the exact MoveOrder stance latch (bits 8/9 of
+		// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
+		// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
+		r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
+		write_present_section_mask(r, e.section_mask);
+		r[PF_RIGHT_HAND_COLLAPSED] =
+				mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
+		// The cveh render callback publishes directly from the live entity
+		// motor fields (retail: Entity_CacheVehicleHUDStats @0x4929B0, stores
+		// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md).
+		write_present_vehicle_motion_controls(r, w, e);
+		// Only a carrier in the witnessed live UseGun attachment relation
+		// publishes its inline MountSlot's HEAT_GLOW, including owned cold zero.
+		// (retail: attachment call @0x546518; HUD_CacheWeaponSlotInfo stores
+		//  @0x440969 / @0x440991; see docs/world/world-wac-ai-re.md)
+		write_present_world_model_heat_glow(r, w, e);
+		// The local first-person UseGun parent cull is a render verdict of THIS
+		// machine's own mount state (retail: Entity_RenderVehicleModel @0x4407d0
+		// predicate @0x4407f6..0x44084c, sole submit @0x440918; see
+		// docs/world/world-wac-ai-re.md).
+		if (local_first_person_usegun && local_player->mount_target == h) {
+			const opennova::world::WeaponTableEntry *mount_def =
+					w.weapons.by_index(e.primary_weapon_slot_adm);
+			// Primary retail leg: FP model exists and this exact embedded
+			// MountSlot is the live EquippedSlot. flags2 Invisible is the
+			// witnessed alternate forced-cull leg and does not require the
+			// EquippedSlot comparison.
+			// (retail: Def+0x16c @0x440824; EquippedSlot @0x440833;
+			//  Def+0x0c & 0x800 @0x44083f; see docs/world/world-wac-ai-re.md)
+			const bool equipped_parent_slot =
+					local_weapon_.usegun_slot_active && local_weapon_.usegun_mount == h &&
+					local_weapon_.usegun_weapon_adm == e.primary_weapon_slot_adm;
+			if (mount_def != nullptr &&
+					((mount_def->has_first_person_model_reference &&
+					  local_weapon_.first_person_model_adm == e.primary_weapon_slot_adm &&
+					  equipped_parent_slot) ||
+					 (mount_def->flags2 &
+					  opennova::world::weapon_flag2::kInvisible) != 0))
+				r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+		}
+		// Two retail callbacks write this three-register family. The sector
+		// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that
+		// reaches its model callback. The generic-world callback publishes the
+		// same TEX_TEAM plus TEAMSWING for a nonzero packed zone byte, and writes
+		// LFP only when the client-side shared timer-list entry exists.
+		// (retail: render_sector_entity @0x5C424F..0x5C425F;
+		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md)
+		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
+		const bool zone_ctrl = e.zone_number != 0 &&
+				opennova::world::zone_chain_zone_info_byte(w.zone_chain, e) != 0;
+		const int32_t signed_team = e.team < 0x80u
+				? static_cast<int32_t>(e.team)
+				: static_cast<int32_t>(e.team) - 0x100;
+		if (sector_model_row || zone_ctrl) {
+			r[PF_TEX_TEAM_VALID] = 1.0f;
+			r[PF_TEX_TEAM] = static_cast<float>(signed_team);
+		}
+		if (zone_ctrl) {
+			r[PF_ZONE_CTRL_VALID] = 1.0f;
+			const int32_t team_swing = e.team == 1u
+					? 0
+					: (e.team == 2u ? 0x10000 : 0x8000);
+			r[PF_TEAMSWING] = static_cast<float>(team_swing);
+			int32_t camp_percent = 0;
+			if (runtime_ && runtime_->lfp_cam_percent(h.packed, camp_percent)) {
+				r[PF_LFP_CAMPPERCENT_VALID] = 1.0f;
+				r[PF_LFP_CAMPPERCENT] = static_cast<float>(camp_percent);
+			}
+		}
+		EmplacedWeaponControls emplaced;
+		if (emplaced_weapon_controls_for(w, ai_.get(), e, emplaced))
+			write_present_emplaced_controls(r, emplaced);
+		if (ae == nullptr) return;
+		for (int slot = 0; slot < 2; ++slot) {
+			// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
+			// signed dwords. Do not normalize wrapping zero-time states.
+			// (retail: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
+			//  see docs/world/world-wac-ai-re.md)
+			const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
+			const bool publish = slot != 0 || (e.item_attrib & 0x1000u) == 0;
+			uint32_t phase_bits;
+			std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
+			// The float snapshot transports both 16-bit words as exact
+			// integers. ACTIVE zero means unpublished; otherwise it is
+			// high16+1.
+			r[PF_PHASE1 + slot * 2] = static_cast<float>(phase_bits & 0xFFFFu);
+			r[PF_ACTIVE1 + slot * 2] = publish
+					? static_cast<float>((phase_bits >> 16) + 1u)
+					: 0.0f;
+		}
+		if (!ae->inf.active) return;
+		r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
+		r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+		if (ae->inf.body_blend_active()) {
+			r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
+			r[PF_ANIM_SOURCE_PHASE_TICKS] =
+					static_cast<float>(ae->inf.anim_prev_clip_phase);
+			r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
+		}
+		// The upper-body weapon channel this body derived for itself; the gate
+		// is the §14.8.6 consumer test and engine_flags bit 0x100 is the "is a
+		// player" mirror of entity+0x24 (NPCs carry no hold ladder).
+		if (opennova::world::infantry_weapon_channel_visible(
+					ae->inf,
+					(e.engine_flags & opennova::world::kEntityFlagPlayer) != 0,
+					mount_blocks_weapon_channel(e))) {
+			r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
+			r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
+			r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
+			if (ae->inf.weapon_blend_active()) {
+				r[PF_WPN_SOURCE_STATE] = static_cast<float>(ae->inf.wpn_prev);
+				r[PF_WPN_SOURCE_PHASE_TICKS] =
+						static_cast<float>(ae->inf.wpn_prev_clip_phase);
+				r[PF_WPN_BLEND_WEIGHT] = ae->inf.wpn_blend_weight;
+				r[PF_WPN_SOURCE_VARIANT] =
+						static_cast<float>(ae->inf.wpn_prev_variant);
+			}
+		}
+		const opennova::anim::AimOverlayInputs inputs = aim_overlay_inputs_for(*ae, e);
+		opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
+		opennova::anim::compute_aim_overlay_angles(inputs, angles);
+		write_present_overlay(r, angles);
+		// This body's third-person gun. Player rows only: retail's composition
+		// gate is the Flags 0x100 player classifier.
+		if ((e.engine_flags & opennova::world::kEntityFlagPlayer) != 0) {
+			write_present_held_weapon(
+					r, e.equipped_adm_index,
+					(e.flags & opennova::world::kEntityFlagDead) != 0, inputs,
+					ae->inf.wpn_state);
+		}
+	});
 	return out;
 }

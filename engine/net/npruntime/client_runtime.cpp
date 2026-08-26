@@ -71,7 +71,11 @@ ClientRuntime::ClientRuntime(std::string player_name,
 }
 
 ClientRuntime::ClientRuntime(netsim::ISessionTransport &host_loopback)
-		: role_(Role::HostClient), loopback_(&host_loopback) {}
+		: role_(Role::HostClient), loopback_(&host_loopback) {
+	// The host's own player parses the retail header-only loopback 0x0A
+	// (D-NET-140 closed) [orig: NapiNPClientMsg_0x00A @0x430174].
+	view_.set_authority_recipient(true);
+}
 
 const std::string &ClientRuntime::server_name() const {
 	return joiner_ ? joiner_->server_name() : empty_runtime_string();
@@ -604,9 +608,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		}
 		// Host authority already spawned every accepted round/refill. Its decoded
 		// listen-client replica pipeline must not retain duplicate visual gameplay
-		// events. Deaths too: the authority's own damage pass ran the death chain
+		// events (the header-only loopback 0x0A carries no round events at all).
+		// Deaths too: the authority's own damage pass ran the death chain
 		// (and its 0x13 broadcast skips the loopback — mask 0x90 NOT_HOST).
-		view_.drain_round_events();
 		view_.drain_weapon_reloads();
 		view_.drain_entity_deaths();
 	} else {

@@ -801,7 +801,8 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 // case 0 = 11 B, 1 = 6 B, 2 = 11 B (ENV), 3 = 0 B (objective-gametype gated).
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
-                         FrameUpdate &out, bool is_objective_gametype) {
+                         FrameUpdate &out, bool is_objective_gametype,
+                         bool authority_recipient) {
 	Cursor c{body, body + len, true};
 	auto finish = [&](bool complete) {
 		out.complete = complete;
@@ -816,11 +817,16 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	out.flags1 = c.u8();    // loadprog / death-spectator signals
 	out.flags2 = c.u8();
 	out.sub_block = uint8_t(out.flags2 & kFrameFlags2SubBlockCycleMask);
+	if (!c.ok) return finish(false);
+	if (authority_recipient && out.sub_block != 0) {
+		// The listen host's own frame: no sub-block, tail, or event loop follows
+		// [orig: NapiNPClientMsg_0x00A @0x430174].
+		return finish(true);
+	}
 	switch (out.sub_block) {
 	case 0:
 		// Local-player weapon/reload/uniform state (11 B) [orig: NetPacket_WritePlayerState
 		// @0x4ff81b (writer) / 0x430054..0x430136 (reader)].
-		out.weapon.present           = true;
 		out.weapon.preround_timer    = c.u8();
 		out.weapon.slot_state360     = c.u8();
 		out.weapon.slot_state368     = c.u8();
@@ -829,19 +835,21 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		out.weapon.slot_state460     = c.u8();
 		out.weapon.reload_seconds    = c.u8();
 		out.weapon.uniform_team_mask = c.i32();
+		if (!c.ok) return finish(false);
+		out.weapon.present           = true;
 		break;
 	case 1:
 		// Round/game timer (6 B) [orig: 0x430191..0x430235].
-		out.timer.present       = true;
 		out.timer.state0        = c.u8();
 		out.timer.state1        = c.u8();
 		out.timer.state2        = c.u8();
 		out.timer.state3        = c.u8();
 		out.timer.timer_seconds = c.i16();
+		if (!c.ok) return finish(false);
+		out.timer.present       = true;
 		break;
 	case 2:
 		// ENV snapshot (11 B): 3× u16 + 5× u8 [orig: 0x430244..0x43034C].
-		out.env.present      = true;
 		out.env.fog_dist     = c.u16();
 		out.env.fog_accel    = c.u16();
 		out.env.tod_fixed    = c.u16();
@@ -850,6 +858,8 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		out.env.rain_pct = c.u8();
 		out.env.overcast     = c.u8();
 		out.env.env_param    = c.u8();
+		if (!c.ok) return finish(false);
+		out.env.present      = true;
 		break;
 	case 3:
 		// Objective-gametype block (4× i32, 16 B) present ONLY when the host's
@@ -868,6 +878,10 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		}
 		break;
 	}
+
+	// The listen host's own frame ends with the phase-0 block
+	// [orig: NapiNPClientMsg_0x00A @0x430174].
+	if (authority_recipient) return finish(true);
 
 	// 7-byte fixed tail: state_flag u8, mount u16, health i16, state_word i16.
 	out.state_flag_byte = c.u8();

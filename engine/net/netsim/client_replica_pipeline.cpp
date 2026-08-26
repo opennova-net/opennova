@@ -1938,7 +1938,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	// so we apply whatever decoded cleanly (out.complete reflects a clean terminator).
 	decode_frame_update(body.data(), body.size(),
 	                    [this](uint16_t tid) { return classify(tid); }, fu,
-	                    game_type::is_objective(game_type_));
+	                    game_type::is_objective(game_type_), authority_recipient_);
 
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
@@ -1969,6 +1969,15 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.respawn_penalty_seconds = fu.weapon.slot_state360;
 		state_.local_revive_seconds = fu.weapon.slot_state368;
 		state_.spawn_hold_seconds = fu.weapon.slot_state364;
+	}
+	if (authority_recipient_) {
+		// The listen host's own frame carries nothing past the phase-0 block
+		// [orig: NapiNPClientMsg_0x00A @0x430174]; the timer, environment,
+		// objective, tail, and every entity/round come from the host's own
+		// World on this role.
+		++state_.frames_applied;
+		state_.mark_changed();
+		return;
 	}
 	if (fu.timer.present) {
 		// The round clock: 62 x the wire's whole seconds, negative = untimed

@@ -978,9 +978,14 @@ struct FrameUpdate {
 // only emits it when `g_GameType & 0x20000` is set — a gate not on the wire, so
 // the caller supplies it (e.g. from the 0x7B `extra` field = g_GameType). Default
 // false (correct for every non-objective capture).
+// `authority_recipient` is the listen host's own player parsing its loopback
+// frame: the walk returns after the anchor, flags1, phase byte, and the phase-0
+// block — retail's local client never reads a tail, records, or rounds
+// [orig: NapiNPClientMsg_0x00A local return @0x430174].
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
-                         FrameUpdate &out, bool is_objective_gametype = false);
+                         FrameUpdate &out, bool is_objective_gametype = false,
+                         bool authority_recipient = false);
 
 // ===========================================================================
 // S2C game-event + kill messages — the kill feed and entity-death replication.

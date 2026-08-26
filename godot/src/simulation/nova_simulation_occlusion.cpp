@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <netsim/connection_fan.h>
+#include <netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
 #include <renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
 #include <world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
@@ -298,7 +299,44 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 	// docs/render/render-lighting-re.md). Throttling the casts themselves to
 	// that cadence would hold a moving vehicle's sun factor stale for up to
 	// 16 ticks; the per-handle cache below only suppresses unchanged emits.
-	if (runtime_) {
+	if (!joiner_) {
+		// The host presents its own pools (D-NET-140 closed): the wire-rendered
+		// rows are the runtime-spawned pool-0 organics and pool-1 dynamics with
+		// no authored identity; placed rows went through the walk above.
+		for (int pool = 0; pool <= 1; ++pool) {
+			world_->registry.for_each_in_pool(pool, [&](const opennova::world::Entity &e) {
+				const uint16_t handle = e.handle.packed;
+				if (e.item_id == 0 || e.handle == world_->cached.local_player ||
+						e.spawn_origin != opennova::world::kSpawnOriginNone) {
+					sun_quality_last_by_wire_.erase(handle);
+					return;
+				}
+				// A hidden row is not drawn, so retail does not push a new stack
+				// value; preserve the last emitted quality (see the wire loop).
+				if ((e.flags & 0x01u) != 0) return;
+				const opennova::EntityClass cls = opennova::netsim::entity_class_of(e);
+				const bool person_source = pool == 0 &&
+						(cls == opennova::EntityClass::Player ||
+						 cls == opennova::EntityClass::Infantry);
+				const bool dynamic_source = pool == 1 &&
+						wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
+								.pool1_candidate_source_eligible;
+				if (!person_source && !dynamic_source) {
+					sun_quality_last_by_wire_.erase(handle);
+					return;
+				}
+				const uint8_t quality = entity_quality(e);
+				const auto it = sun_quality_last_by_wire_.find(handle);
+				const uint8_t last =
+						it != sun_quality_last_by_wire_.end() ? it->second : 4;
+				if (quality == last) return;
+				sun_quality_last_by_wire_[handle] = quality;
+				out.push_back(handle);
+				out.push_back(0);
+				out.push_back(quality);
+			});
+		}
+	} else if (runtime_) {
 		for (const opennova::netsim::ClientEntityState &es :
 				runtime_->state().entities) {
 			const uint16_t handle = es.handle;

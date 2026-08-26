@@ -33,6 +33,11 @@ EntityClass entity_class_of(const world::Entity &e);
 // i32 16.16 (world::to_fixed). euler_z is the engine heading (entity+16, D-NET-86).
 GameEntitySnapshot snapshot_of(const world::Entity &e);
 
+// The wire "net_id" of a player row is its minimap slot id (entity+0x15C): the
+// per-team id picked at add when present, else the D-NET-137 encoding shim. The
+// host's own present reads the same identity the 0x0C/0x0A writers emit.
+uint16_t player_wire_net_id(const world::Entity &e);
+
 // The §5.10 player compact-record field-17 byte: `(healthTier << 4) | (playerClass & 0xF)`,
 // the tier quantized from health/health_max in 16.16 (boundaries 49152 = 0.75 and 28671 =
 // 0.4375). Exact inverse of the client apply Entity_SetHealthFromDifficultyByte @0x4AD580,

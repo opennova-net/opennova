@@ -206,7 +206,14 @@ std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec);
 // constructs the FrameUpdate from live entity state (anchor = subject world pos;
 // each compact record's positions compressed via network_compress_fixedpoint
 // relative to the anchor) and this emits the wire bytes the client decodes.
-std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu);
+// `authority_recipient` is the listen host's OWN player: retail's writer stops
+// after the phase byte (plus the phase-0 block when flags2&3 == 0) — no
+// server-status/env/gametype sub-block, no 7-byte tail, no mounted-ammo record,
+// no records, no rounds, no terminator; the local client reads process memory
+// [orig: NetPacket_WritePlayerState local gate @0x4ff9cd;
+//  serialize_entity_states_to_packet early return @0x50f07e].
+std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
+                                         bool authority_recipient = false);
 
 // ===========================================================================
 // C2S encoders — the joiner-side uplinks (a remote client PRODUCES these; the

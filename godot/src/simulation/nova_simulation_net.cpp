@@ -392,6 +392,8 @@ void Simulation::host_pump() {
 // (the row stays chase-only, truthful). Cached per type so late-joining
 // peers and respawns cost one map lookup.
 void Simulation::resolve_client_row_adm_ids() {
+	// The host never presents a decoded row (D-NET-140 closed).
+	if (!joiner_) return;
 	if (runtime_ == nullptr || infantry_anim_.empty() ||
 			infantry_adm_resource_root_.is_null() ||
 			infantry_adm_item_db_.is_null())

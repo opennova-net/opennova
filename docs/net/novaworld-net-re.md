@@ -6671,11 +6671,13 @@ packet build itself [orig: `CNapiNPConnection_PumpEnumeratorAndSend @ 0x6290C0` 
 The period IS the dictated value (a period of 12 = every 12th tick ≈ 5.2 Hz).
 
 The per-session values [orig: `NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0`, switch on transport
-mode]: SP/none = 1 (62.5 Hz); NovaWorld = 12 (~5.2 Hz); LAN non-authority = 6; LAN authority by
+mode]: mode 0 (SP/none) = 1 (62.5 Hz) — the ONLY case returning 1; modes 1 and 3 (NovaWorld) = 12
+(~5.2 Hz); LAN non-authority = 6; LAN authority by
 `g_LanMode @ 0x2550BFC` (server-config `lanmode 1..4` [orig: parse `@ 0x550425`, invalid → 2;
 `Config_SetDefaults @ 0x54d23a` → 1]): 1 → 12 (~5.2 Hz, the stock default), 2 → 6 (~10.4 Hz),
 3 → 4 (~15.6 Hz), 4 → 3 (~20.8 Hz — the fastest cadence a retail host can produce). Loopback and
-out-of-session connections force 1 [orig: `@ 0x4c5f63/@ 0x4c5f69`]. Field measurement
+out-of-session connections force 1 in the caller's else-branch, not inside the switch
+[orig: `NapiNPServer_UpdateHoldoffTicks @ 0x4c5f40` `@ 0x4c5f63/@ 0x4c5f69`]. Field measurement
 (2026-08-06, the RR 00TRg oracle run): the retail host on this machine ran `lanmode = 4` from
 its SAVED `game.cfg` — median 0x0A inter-frame 49.8 ms = holdoff 3 (~19–20 Hz measured), one
 record for the busiest vehicle in EVERY frame at the same 600-B budget. The onhook
@@ -6728,6 +6730,12 @@ additional recipient-scoped mounted-weapon ammo tail every 16th frame:
 | 1 | server-status | `[u8 C6EAE0][u8 C6EAE4 fall-dmg tol][u8 g_serverFps][u8 g_serverCpuPct][i16 dword_24C1958/62]` (6 B) |
 | 2 | environment | `[u16 fog>>16][u16 (min(FogDistAccelClamp,0xFF0000)+255)>>8][u16 (CurTimeFixed24+4096)>>13][u8 min(quake,255)][u8 min(cloud>>10,255)][u8 min(rainCurrent>>8,255)][u8 min(overcastCurrent>>8,255)][u8 precipitationKind]` (11 B; `0=rain`, `1=snow`; raw POD field `env_param`) |
 | 3 | gametype | 4×`i32` scores, **only if `g_GameType & 0x20000`** (`@0x4ffc2d`) — else 0 B |
+
+For the listen host's OWN player the writer stops right after the phase byte, or after the
+sub-block-0 body when `phase & 3 == 0` (`NetPacket_WritePlayerState` local gate `@0x4ff9cd`): no
+sub-block 1/2/3, no 7-byte tail, no phase-8 record, and `serialize_entity_states_to_packet` adds
+nothing (`@0x50f07e`) — 14 or 25 bytes total; the client parser returns at `@0x430174`
+(D-NET-140, closed 2026-08-26).
 
 Env scales witnessed against the decoder (`NapiNPClientMsg_0x00A @0x430244` case 2) and the golden:
 `CurTimeFixed24 = hours × 2^24` (the day spans `0x18000000 = 24 × 0x1000000`,
@@ -11941,12 +11949,17 @@ uptime>2000 @0x517c62), pool-0 tick-displacement for the speed metric (our infan
 store no per-tick delta — vehicles are exact), and the recipient EYE offset on the anchor.
 Interop-safe: ordering is server-local policy.
 
-**D-NET-140** [reimpl divergence by design, DOCUMENTED 2026-07-02] **The listen host's OWN
-loopback connection receives the full 0x0A record set; retail sends its local player header-only
-frames.** Retail: the priority build is skipped for the local player (@0x517c1b) and
-`serialize_entity_states_to_packet` returns immediately (@0x50f07e) — the local client reads
-process memory. Our serve-and-play local view RENDERS FROM the loopback 0x0A fold (ADR 0011), so
-the loopback gets full records. That frame never leaves the process — retail interop unaffected.
+**D-NET-140** [FIXED 2026-08-26] **The listen host's OWN player receives retail's header-only
+0x0A and the host presents from its own pools.** Retail: the priority build is skipped for the
+local player (@0x517c1b), `serialize_entity_states_to_packet` returns immediately (@0x50f07e), the
+header writer stops after the phase byte / phase-0 block (@0x4ff9cd — no server-status/env/gametype
+sub-block, no 7-byte tail, no phase-8 record), and the parser returns at @0x430174; the local
+client reads process memory. Port: `emit_connection_s2c` sends the recipient whose owned entity IS
+`cached.local_player` the 14/25-byte frame (`encode_frame_update(fu, authority_recipient)`),
+`ClientReplicaPipeline::set_authority_recipient` folds it where the parser returns, and
+`Simulation::present_snapshot_from_world` presents the host's registry (ADR 0011 Decision 1
+amended). `Server_TickUpdate` runs the raycast prep + world snapshot only when some in-match
+recipient takes records.
 
 **D-NET-141** [reimpl divergence, FIXED 2026-07-02] **The S2C 0x5A ammo bytes echoed the
 request's 255 ("default") instead of resolved counts — degenerate when the weapon's
