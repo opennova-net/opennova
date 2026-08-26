@@ -64,6 +64,17 @@ func after_each() -> void:
 	_native_fixture_dirs.clear()
 
 
+# Authored 3DI variants minted once from the retired edit surface
+# (fixtures/threedi/synthetic/README.md): CTRL names, PANM rows and flags the
+# sim's own parse-once cache consumes from disk.
+const SYN_B50CAL_HEAT_GLOW_SLIDE := "res://../fixtures/threedi/synthetic/b50cal_heat_glow_slide_part1.3di"
+const SYN_ARMRY_SPECIAL1_SLIDE := "res://../fixtures/threedi/synthetic/armry01_special1_slide_part1.3di"
+const SYN_ARMRY_SPECIAL2_SLIDE := "res://../fixtures/threedi/synthetic/armry01_special2_slide_part1.3di"
+const SYN_DM1A1_SPECIAL1_SLIDE_EWEP01 := "res://../fixtures/threedi/synthetic/dm1a1_special1_slide_ewep01.3di"
+const SYN_PMP_LOD0_INERT_LOD1_LIVE := "res://../fixtures/threedi/synthetic/pmpjk01_lod0_inert_lod1_sine_rotz.3di"
+const SYN_PANM_LIVENESS_DIR := "res://../fixtures/threedi/synthetic/"
+
+
 func _native_fixture_dir() -> String:
 	var dir := OS.get_cache_dir().path_join("nova_sim_native_%d_%d" % [
 			Time.get_ticks_usec(), _native_fixture_dirs.size()])
@@ -133,8 +144,9 @@ func _bytes_with_renamed_user_point(bytes: PackedByteArray, from_name: String,
 	return bytes
 
 
-# Serialize an edited ObjectData back to .3di bytes so the sim's own
-# parse-once cache (the only pose/collision source) consumes authored edits.
+# The 19-bone CharModel + BINOC rig as a named organic graphic: <graphic>.3di,
+# <graphic>.adm (the anim map the native pose provider resolves through the
+# item's anim_def), and the shared BINOC.bad clip.
 func _write_char_rig(dir: String, graphic: String) -> void:
 	_copy_fixture(dir, "res://../fixtures/threedi/3di3/CharModel.3di",
 			graphic + ".3di")
@@ -2969,6 +2981,133 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	sim.free()
 
 
+func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
+	# The emplacement carries a deterministic HEAT_GLOW collision track: the
+	# B50Cal fixture with its LOD0 rows replaced by one register-driven slide of
+	# part 1 (0..4 wu on CTRL 0 = HEAT_GLOW). The scoped parent visual/collision
+	# frame must sample its embedded MountSlot only while a live UseGun child is
+	# attached; the local FP state is the comparison witness for the
+	# intentionally different endpoint.
+	# [orig: attachment caller @ 0x546518;
+	#  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
+	var object_data := ObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
+			SYN_B50CAL_HEAT_GLOW_SLIDE)), OK)
+	assert_eq(String((object_data.get_control_registers()[0] as Dictionary).get("name", "")),
+			"HEAT_GLOW")
+	assert_eq(object_data.get_part_anim_count(0), 1)
+	var slide: Dictionary = object_data.get_part_anim_info(0, 0)
+	assert_eq(int(slide.get("transform_as", -1)), 1)
+	assert_eq(int((slide.get("translation", {}) as Dictionary).get("control", 0)), 113,
+			"the fixture authors a register-driven translation track on part 1")
+
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(MissionData.KIND_ITEM, 101419,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	var gun_index := int(gun["index"])
+
+	var sim := Simulation.new()
+	sim.enable_listen_server(true)
+	# The authored HEAT_GLOW track rides the fixture bytes; the sim's own parse
+	# of B50cal.3di is the only seat/collision source.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, SYN_B50CAL_HEAT_GLOW_SLIDE, "B50cal.3di")
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
+	assert_eq(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 1,
+			"the fixture model resolves as the one mounted-pose source")
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	# Listen-host player creation rebuilds the authoritative registry. Bind the
+	# collision instance to that final registry identity, as GameWorld does.
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	var weapons := WeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var mounted: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50NA"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	sim.step()
+
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, gun_index,
+			Simulation.PF_WORLD_HEAT_GLOW_VALID), 0,
+			"an unoccupied carrier is outside retail's attachment writer scope")
+	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(before_rows.size(), 1)
+	if before_rows.size() != 1:
+		sim.free()
+		return
+	var before: PackedVector3Array = (before_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	var mounted_switch := false
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+			mounted_switch = true
+	assert_true(mounted_switch)
+	sim.set_local_player_weapon(mounted, {}, true)
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, gun_index,
+			Simulation.PF_WORLD_HEAT_GLOW_VALID), 1)
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, gun_index,
+			Simulation.PF_WORLD_HEAT_GLOW), 0,
+			"a live UseGun carrier owns the cold zero branch")
+
+	sim.set_local_player_weapon_input(true, true, false)
+	var fp_heat_glow := 0
+	for _tick in range(3000):
+		sim.step()
+		fp_heat_glow = int(sim.get_local_player_weapon_state().get(
+				"heat_glow", 0))
+		if fp_heat_glow >= 0x10000:
+			break
+	sim.set_local_player_weapon_input(false, false, false)
+	assert_eq(fp_heat_glow, 0x10000,
+			"the mounted first-person consumer reaches its distinct endpoint")
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, gun_index,
+			Simulation.PF_WORLD_HEAT_GLOW_VALID), 1)
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, gun_index,
+			Simulation.PF_WORLD_HEAT_GLOW), 0xFFFF,
+			"the same inline slot saturates the world model at 0xFFFF")
+
+	var after_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(after_rows.size(), 1)
+	if after_rows.size() != 1:
+		sim.free()
+		return
+	var after: PackedVector3Array = (after_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	for index in before.size():
+		if before[index].distance_to(after[index]) > 3.9:
+			moved += 1
+	assert_gt(moved, 0,
+			"headless collision consumes the same authoritative HEAT_GLOW frame")
+	sim.free()
+
+
 func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	# B50Cal's authored PANM binds its turret and barrel to the semantic
 	# EWEAP_GUNYAW/EWEAP_GUNPITCH registers. A mounted local player's live look
@@ -4167,6 +4306,84 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	sim.free()
 
 
+func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
+	# Ten Shed variants, each with its LOD0 rows replaced by one row whose flags
+	# and track controls are the case (fixtures/threedi/synthetic/README.md):
+	# every track control 0, the case's live tracks 0x10.
+	var cases := [
+		["panm_live_01_spinner", true, "spinner uses raw coefficients"],
+		["panm_live_02_view3", true, "view rotation type 3 is evaluated"],
+		["panm_live_03_view4", true, "view rotation type 4 is evaluated"],
+		["panm_live_04_rotz", true, "rotation family samples rotation tracks"],
+		["panm_inert_05_rot_scalex", false,
+				"rotation ignores an unrelated live scale track"],
+		["panm_inert_06_uniform_scaley", false,
+				"uniform scale type samples only scale_x"],
+		["panm_live_07_uniform_scalex", true, "uniform scale type samples scale_x"],
+		["panm_live_08_axis_scaley", true, "axis scale samples all three scale tracks"],
+		["panm_live_09_translation", true, "translation flag samples the translation track"],
+		["panm_inert_10_rotrev", false,
+				"rotation-reversed without a rotation family is inert"],
+	]
+	for case in cases:
+		var data := ObjectData.new()
+		assert_eq(data.open_file(ProjectSettings.globalize_path(
+				SYN_PANM_LIVENESS_DIR + String(case[0]) + ".3di")), OK)
+		assert_eq(data.get_part_anim_count(0), 1,
+				"%s carries exactly one LOD0 row" % case[0])
+		assert_eq(data.has_live_panm_for_lod(0), bool(case[1]), String(case[2]))
+
+
+func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
+	# The pump jack with an inert local LOD0 row and one live sine rotation on
+	# LOD1 (fixtures/threedi/synthetic/README.md).
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+		SYN_PMP_LOD0_INERT_LOD1_LIVE)), OK)
+	var lod_count := int(data.get_summary().get("lod_count", 0))
+	assert_gt(lod_count, 1, "fixture needs a second visual LOD")
+	if lod_count <= 1:
+		return
+
+	# A nonempty local block wins even when inert; model-level live rows must
+	# not leak through it for canonical LOD0.
+	assert_eq(data.get_part_anim_count(0), 1)
+	assert_false(data.has_live_panm_for_lod(0))
+	assert_eq(Array(data.get_effective_panm_targets(0)), [0],
+		"inert local row suppresses the model-level fallback")
+
+	# Only LOD1 is live. Visual de-batching may see it, but retail Generic
+	# collision always uses canonical LOD0 COBJ ordinals.
+	assert_eq(data.get_part_anim_count(1), 1)
+	assert_true(data.has_live_panm_for_lod(1))
+	assert_eq(data.get_live_panm_lod(), 1)
+
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(
+		MissionData.KIND_BUILDING, 102001,
+		Vector3.ZERO, Vector3.ZERO).is_empty())
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+		"res://../fixtures/def/items.def")), OK)
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, SYN_PMP_LOD0_INERT_LOD1_LIVE, "GuardTwr1.3di")
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	sim.debug_set_panm_time_ms(0)
+	var before: PackedVector3Array = (
+		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
+		.get("tris", PackedVector3Array()))
+	sim.debug_set_panm_time_ms(640)
+	var after: PackedVector3Array = (
+		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
+		.get("tris", PackedVector3Array()))
+	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
+	sim.free()
+
+
 func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -4286,6 +4503,303 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 			sim, MissionData.KIND_ITEM, int(placed["index"]), 2), 65536)
 	assert_false(sim.get_entity_part_anim_active(0, 1))
 	assert_true(sim.get_entity_part_anim_active(0, 2))
+	sim.free()
+
+
+func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
+	# The M1A1 with a deterministic VEHICLE_SPECIAL1 track on its real turret
+	# part (the part owning the ewep01 user point); hang the synthetic ewep from
+	# that user point. A rigid parent-local reconstruction stays at the authored
+	# point; the authoritative mounted pose carries it four metres with the live
+	# part.
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			SYN_DM1A1_SPECIAL1_SLIDE_EWEP01)), OK)
+	assert_eq(String((data.get_control_registers()[0] as Dictionary).get("name", "")),
+			"VEHICLE_SPECIAL1", "the fixture authors the semantic local CTRL name")
+	var anchor_index := -1
+	var anchor_info := {}
+	for index in range(data.get_user_point_count()):
+		var candidate: Dictionary = data.get_user_point_info(index)
+		if String(candidate.get("name", "")).to_lower() == "ewep01":
+			anchor_index = index
+			anchor_info = candidate
+			break
+	assert_gte(anchor_index, 0, "M1A1 fixture has its authored ewep01 attachment point")
+	if anchor_index < 0:
+		return
+	var anchor_part := int(anchor_info.get("subobject", -1))
+	assert_gte(anchor_part, 0, "ewep01 is bound to a model part")
+	if anchor_part < 0:
+		return
+	assert_eq(data.get_part_anim_count(0), 1)
+	assert_eq(int(data.get_part_anim_info(0, 0).get("transform_as", -1)), anchor_part,
+			"the fixture slides exactly the part that owns ewep01")
+
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21,
+		"action_sub_type": 34,
+		"param1": ssn,
+		"param2": 1,
+		"param3": 1,
+		"param4": 65536,
+	}).is_empty())
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_trigger(1, {
+		"main_type": 4,
+		"sub_type": 1,
+		"param1": 7,
+		"param2": 1,
+	}).is_empty())
+	assert_false(md.add_event_action(1, {
+		"action_type": 20,
+		"param1": ssn,
+	}).is_empty())
+
+	var sim := Simulation.new()
+	sim.enable_listen_server(true)
+	# The carrier def authors the addeweap row; the fixture model resolves the
+	# ewep01 anchor natively (dm1a1 also authors the ctrlx25 controller seat the
+	# old dict spec faked). This attachment lifecycle needs the real
+	# carrier/child rows (health, class, and NoNetworkCallback), so the def is
+	# the fixture superset, not an isolated FastRope fixture.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, SYN_DM1A1_SPECIAL1_SLIDE_EWEP01, "dm1a1.3di")
+	var item_db := _item_db_from_text(dir, _fixture_items_text()
+			.replace("graphic Dbuggy1", "graphic dm1a1")
+			.replace("id 101291", "id 101291\n  addeweap ewep01 101419"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1291]))
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+
+	# First fold materializes the synthetic row before the scripted animation has
+	# reached its endpoint. Retain that baseline so the assertion cannot pass on
+	# a root-only follow implementation.
+	sim.step()
+	var stride := sim.get_present_stride()
+	var snapshot := sim.get_present_snapshot()
+	var initial_position := Vector3.INF
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
+			initial_position = Vector3(
+					snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y],
+					snapshot[base + Simulation.PF_POS_Z])
+			break
+	assert_true(initial_position.is_finite(), "synthetic ewep reached the listen client")
+	for _tick in range(79):
+		sim.step()
+	assert_eq(_present_phase_for_origin(
+			sim, MissionData.KIND_ITEM, int(placed["index"]), 1), 65536,
+			"carrier reached the scripted live PANM endpoint")
+	snapshot = sim.get_present_snapshot()
+	var final_position := Vector3.INF
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
+			final_position = Vector3(
+					snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y],
+					snapshot[base + Simulation.PF_POS_Z])
+			break
+	assert_true(final_position.is_finite(), "animated attachment remains presented")
+	if initial_position.is_finite() and final_position.is_finite():
+		assert_gt(final_position.distance_to(initial_position), 3.9,
+				"presented attachment follows its animated userpoint, not only the parent root")
+		var expected: Vector3 = anchor_info.get("position", Vector3.ZERO) + Vector3(4, 0, 0)
+		assert_lt(final_position.distance_to(expected), 0.002,
+				"host snapshot uses the authoritative mounted child pose")
+
+	# A zero-health vehicle compact legitimately retires the decoded attachment
+	# subtree. Stop restores the authoritative baseline; its fresh decoded view
+	# must replay the load stream because this child has no live compact of its own.
+	sim.set_mission_variable(7, 1)
+	var retired := false
+	for _tick in range(80):
+		sim.step()
+		snapshot = sim.get_present_snapshot()
+		retired = true
+		for record in range(snapshot.size() / stride):
+			if int(snapshot[record * stride + Simulation.PF_TYPE_ID]) == 1419:
+				retired = false
+				break
+		if retired:
+			break
+	assert_true(retired,
+			"decoded zero-health carrier retires the synthetic child subtree")
+
+	sim.reset_session()
+	snapshot = sim.get_present_snapshot()
+	var restored := false
+	for record in range(snapshot.size() / stride):
+		if int(snapshot[record * stride + Simulation.PF_TYPE_ID]) == 1419:
+			restored = true
+			break
+	assert_true(restored,
+			"restart immediately replays restored NoNetworkCallback attachments")
+
+	# The first live 0x0A after replay must use the re-applied authoritative
+	# items.def classes. If restore had reverted the carrier callback width, this
+	# fold would desynchronize and lose/scatter the following child row.
+	sim.step()
+	snapshot = sim.get_present_snapshot()
+	var live_carrier := false
+	var live_child := false
+	for record in range(snapshot.size() / stride):
+		var type_id := int(snapshot[record * stride + Simulation.PF_TYPE_ID])
+		live_carrier = live_carrier or type_id == 1291
+		live_child = live_child or type_id == 1419
+	assert_true(live_carrier and live_child,
+			"post-restart 0x0A keeps carrier and attachment class widths aligned")
+	sim.free()
+
+
+func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int) -> int:
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			MissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21, "action_sub_type": 34,
+		"param1": ssn, "param2": channel,
+		"param3": 1, "param4": 65536,
+	}).is_empty())
+
+	var item_db := _fast_rope_item_db()
+	assert_not_null(item_db)
+	if item_db == null:
+		return 0
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(fixture_res_path)), OK)
+	assert_eq(data.get_part_anim_count(0), 1,
+			"the fixture carries one register-driven slide of part 1")
+	assert_eq(int(data.get_part_anim_info(0, 0).get("transform_as", -1)), 1)
+
+	var sim := Simulation.new()
+	# One fixture carries both the register-driven PANM row (CTRL 0 named
+	# VEHICLE_SPECIAL1 or VEHICLE_SPECIAL2) and, after the byte rename below,
+	# the ctrlx00 controller seat (Armory renamed post-export).
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes(fixture_res_path), "Armory", "ctrlx00"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(before_rows.size(), 1)
+	if before_rows.size() != 1:
+		sim.free()
+		return 0
+	var before: PackedVector3Array = (before_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	for _tick in range(80):
+		sim.step()
+	var after_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(after_rows.size(), 1)
+	if after_rows.size() != 1:
+		sim.free()
+		return 0
+	var after: PackedVector3Array = (after_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	for i in before.size():
+		if before[i].distance_to(after[i]) > 3.99:
+			moved += 1
+	sim.free()
+	return moved
+
+
+func test_fast_rope_collision_publishes_special2_but_not_special1() -> void:
+	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL1_SLIDE, 1), 0,
+			"FastRope suppresses SPECIAL1 in authoritative collision evaluation")
+	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL2_SLIDE, 2), 639,
+			"SPECIAL2 remains published through the same collision CTRL dictionary")
+
+
+func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
+	# Armry COBJ parents are all 0; face counts are [24, 213, 1, 12].
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get('bms_id', 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		'action_type': 21, 'action_sub_type': 34,
+		'param1': ssn, 'param2': 1,
+		'param3': 1, 'param4': 65536,
+	}).is_empty())
+
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+		'res://../fixtures/def/items.def')), OK)
+	# Armry01 with CTRL 0 named VEHICLE_SPECIAL1 and one register-driven slide
+	# of ordinal 1 (fixtures/threedi/synthetic/README.md).
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(SYN_ARMRY_SPECIAL1_SLIDE)), OK)
+	assert_eq(String((data.get_control_registers()[0] as Dictionary).get("name", "")),
+			"VEHICLE_SPECIAL1", "the fixture authors the semantic local CTRL name")
+	assert_true(data.has_collision())
+	assert_eq(data.get_part_anim_count(0), 1)
+	assert_eq(int(data.get_part_anim_info(0, 0).get("transform_as", -1)), 1,
+			"the fixture slides ordinal 1")
+
+	var sim := Simulation.new()
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes(SYN_ARMRY_SPECIAL1_SLIDE), "Armory", "ctrlx00"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.get_entity_count(), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	var before_debug: Array = sim.get_hitbox_debug().get(
+		'entities', [])
+	assert_eq(before_debug.size(), 1)
+	assert_eq(int((before_debug[0] as Dictionary).get(
+		'face_total', 0)), 250)
+	var before: PackedVector3Array = (before_debug[0] as Dictionary).get(
+		'tris', PackedVector3Array())
+	assert_eq(before.size(), 250 * 3)
+
+	# No present pass/render node: collision reads authoritative AI state.
+	for _tick in range(80):
+		sim.step()
+	assert_eq(sim.get_entity_part_anim_phase(0, 1), 65536)
+	var after_debug: Array = sim.get_hitbox_debug().get(
+		'entities', [])
+	assert_eq(after_debug.size(), 1)
+	var after: PackedVector3Array = (after_debug[0] as Dictionary).get(
+		'tris', PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	var stayed := 0
+	var partial := 0
+	for i in before.size():
+		var distance := before[i].distance_to(after[i])
+		if distance > 3.99:
+			assert_almost_eq(distance, 4.0, 0.002)
+			moved += 1
+		elif distance < 0.002:
+			stayed += 1
+		else:
+			partial += 1
+	assert_eq(moved, 639, "only ordinal 1 moves")
+	assert_eq(stayed, 111)
+	assert_eq(partial, 0)
 	sim.free()
 
 
