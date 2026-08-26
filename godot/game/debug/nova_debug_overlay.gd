@@ -273,6 +273,27 @@ func get_active_page_id() -> StringName:
 	return _active_page.page_id() if _active_page != null else &""
 
 
+## A registered page by id (null when none): probes drive a page directly.
+func get_page(page_id: StringName) -> DebugPage:
+	for page in _pages:
+		if page.page_id() == page_id:
+			return page
+	return null
+
+
+## Render one Stats window from a probe's own drains, inside the same
+## draw-sentinel bracket the timer refresh uses, so the page's Tree re-shape
+## and redraw land on the "F3 overlay redraw" row exactly as in-game.
+func render_stats_window(frames: int, sums: PackedInt64Array, peaks: PackedInt64Array,
+		counts: PackedInt32Array, runtime: MissionPresentation, sim: Simulation) -> void:
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
+	if stats_on:
+		_draw_head.queue_redraw()
+	_stats_pane.render_window(frames, sums, peaks, counts, runtime, sim)
+	if stats_on:
+		_draw_tail.queue_redraw()
+
+
 ## Programmatic option write (tests, automation): routes through the shared
 ## session, so the owning page's control re-syncs and the session's
 ## control_invoked fires exactly like a click.
