@@ -81,10 +81,6 @@ void SunShadow::_apply_projection_masks() {
 	if (projection_mode_ == PROJECTION_STATIC_TERRAIN) {
 		set_cull_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
 		set_shadow_caster_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
-		set_shadow_mode(DirectionalLight3D::SHADOW_PARALLEL_4_SPLITS);
-		set_param(Light3D::PARAM_SHADOW_MAX_DISTANCE, 192.0f);
-		set_param(Light3D::PARAM_SHADOW_FADE_START, 0.95f);
-		set_param(Light3D::PARAM_SHADOW_OPACITY, 1.0f);
 		set_shadow(true);
 	} else {
 		// Receivers: both world-entity layers plus the hidden FP body (its
