@@ -213,31 +213,17 @@ void TerrainSurfaceInputs::_bind_methods() {
 		DEFVAL(Ref<TerrainTileInfo>()), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("rebuild_blend"),
 		&TerrainSurfaceInputs::rebuild_blend);
-	ClassDB::bind_method(D_METHOD("rebuild_heightfield"),
-		&TerrainSurfaceInputs::rebuild_heightfield);
-	ClassDB::bind_method(D_METHOD("rebuild_detail_textures"),
-		&TerrainSurfaceInputs::rebuild_detail_textures);
 	ClassDB::bind_method(D_METHOD("rebuild_tile_overlay"),
 		&TerrainSurfaceInputs::rebuild_tile_overlay);
-	ClassDB::bind_method(D_METHOD("clear_derived_textures"),
-		&TerrainSurfaceInputs::clear_derived_textures);
-	ClassDB::bind_method(D_METHOD("clear_tile_overlay"),
-		&TerrainSurfaceInputs::clear_tile_overlay);
 	ClassDB::bind_method(D_METHOD("apply_to_material", "material"),
 		&TerrainSurfaceInputs::apply_to_material);
 
 	ClassDB::bind_method(D_METHOD("get_colormap_texture"),
 		&TerrainSurfaceInputs::get_colormap_texture);
-	ClassDB::bind_method(D_METHOD("get_detailmap_texture"),
-		&TerrainSurfaceInputs::get_detailmap_texture);
 	ClassDB::bind_method(D_METHOD("get_blend_texture"),
 		&TerrainSurfaceInputs::get_blend_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_c1_texture"),
 		&TerrainSurfaceInputs::get_detail_c1_texture);
-	ClassDB::bind_method(D_METHOD("get_detail_c2_texture"),
-		&TerrainSurfaceInputs::get_detail_c2_texture);
-	ClassDB::bind_method(D_METHOD("get_detail_c3_texture"),
-		&TerrainSurfaceInputs::get_detail_c3_texture);
 	ClassDB::bind_method(D_METHOD("get_normalized_blend_texture"),
 		&TerrainSurfaceInputs::get_normalized_blend_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_coefficient_texture"),
@@ -248,10 +234,6 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::get_detail2_texture);
 	ClassDB::bind_method(D_METHOD("has_detail2"),
 		&TerrainSurfaceInputs::has_detail2);
-	ClassDB::bind_method(D_METHOD("get_detail2_density"),
-		&TerrainSurfaceInputs::get_detail2_density);
-	ClassDB::bind_method(D_METHOD("get_heightfield_normal_texture"),
-		&TerrainSurfaceInputs::get_heightfield_normal_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_overlay_texture"),
 		&TerrainSurfaceInputs::get_tile_overlay_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_density"),

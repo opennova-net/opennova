@@ -42,7 +42,6 @@ public:
 	String get_last_error() const { return last_error_; }
 
 	int get_dialog_count() const;
-	PackedStringArray get_dialog_ids() const;
 	bool has_dialog(const String &p_id) const;
 	// The ordered def_id_name(s) (LWF set names) a dialog group plays; empty if
 	// the id is unknown. v1 callers play the first.

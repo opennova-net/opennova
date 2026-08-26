@@ -49,9 +49,7 @@ public:
 	void set_glyph_spacing(int p_glyph_spacing);
 
 	Ref<Image> get_page_image(int p_page) const;
-	Error set_page_image(int p_page, const Ref<Image> &p_image);
 
-	int get_glyph_page(int p_char_code) const;
 	Rect2i get_glyph_rect(int p_char_code) const;
 	Error set_glyph_rect(int p_char_code, int p_page, const Rect2i &p_rect);
 

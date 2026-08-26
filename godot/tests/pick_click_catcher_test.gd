@@ -48,7 +48,7 @@ func test_left_press_ray_picks_through_the_live_sim() -> void:
 
 	assert_true(viewport.is_input_handled(),
 			"the click ray-picked through the sim and consumed the event")
-	assert_eq(list.size(), 0,
+	assert_eq(list.get_picks().size(), 0,
 			"a worldless sim answers an honest miss, which the list rejects")
 
 
@@ -70,7 +70,7 @@ func test_other_input_is_ignored() -> void:
 	catcher._unhandled_input(motion)
 
 	assert_false(viewport.is_input_handled(), "no ray ever ran")
-	assert_eq(list.size(), 0)
+	assert_eq(list.get_picks().size(), 0)
 
 
 func test_detached_pick_list_never_consumes_the_click() -> void:

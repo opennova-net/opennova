@@ -93,7 +93,6 @@ public:
 	// aim_screen is the projected aim point in screen pixels; a non-finite
 	// vector (Vector2.INF) is the first-person pin to the design center.
 	void set_view_state(bool p_binoculars_view_active, const Vector2 &p_aim_screen);
-	void set_objective_line(const String &p_text);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
 	// The Tab board: whether it is held open, the strings the shell resolved,
@@ -169,7 +168,6 @@ public:
 	// @0x4E0561): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
-	int get_showhud_flags() const;
 	// Per-frame environment feed: the fog cull distance (16.16; <= 0 disables)
 	// and the speaking entity's voice level 0..255.
 	void set_friendly_tag_env(int p_fog_dist_q16, int p_speaking_level255);

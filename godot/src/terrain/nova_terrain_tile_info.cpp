@@ -8,7 +8,8 @@
 
 #include <godot_cpp/classes/file_access.hpp>
 
-// Engine: jodemo.exe Terrain_LoadTileInfoFile@0x5CA730
+// Retail: Terrain_LoadTileInfoFile @0x60a740 (jodemo twin Terrain_LoadTileInfoFile @0x5CA730);
+// docs/tiles/til-re.md
 // docs/engine_spec_tiles.md 4.1
 
 #include <godot_cpp/core/object.hpp>
@@ -61,15 +62,9 @@ void TerrainTileInfo::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entries"), &TerrainTileInfo::get_entries);
 	ClassDB::bind_method(D_METHOD("set_entries", "entries"), &TerrainTileInfo::set_entries);
 	ClassDB::bind_method(D_METHOD("get_entry", "index"), &TerrainTileInfo::get_entry);
-	ClassDB::bind_method(D_METHOD("set_entry", "index", "entry"), &TerrainTileInfo::set_entry);
 	ClassDB::bind_method(D_METHOD("add_entry", "entry"), &TerrainTileInfo::add_entry);
 	ClassDB::bind_method(D_METHOD("remove_entry", "index"), &TerrainTileInfo::remove_entry);
 	ClassDB::bind_method(D_METHOD("clear_entries"), &TerrainTileInfo::clear_entries);
-	ClassDB::bind_method(D_METHOD("find_entry_index_at_cell", "cell_x", "cell_z"), &TerrainTileInfo::find_entry_index_at_cell);
-	ClassDB::bind_method(D_METHOD("get_entry_indices_at_cell", "cell_x", "cell_z"), &TerrainTileInfo::get_entry_indices_at_cell);
-	ClassDB::bind_static_method("TerrainTileInfo",
-	                            D_METHOD("transform_local_uv", "uv", "flags"),
-	                            &TerrainTileInfo::transform_local_uv);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "entries", PROPERTY_HINT_ARRAY_TYPE, "TerrainTileEntry"),
 	             "set_entries",
 	             "get_entries");
@@ -139,15 +134,6 @@ Ref<TerrainTileEntry> TerrainTileInfo::get_entry(int index) const {
 	return tile_entry_to_object(til.entries[static_cast<size_t>(index)]);
 }
 
-void TerrainTileInfo::set_entry(int index, const Ref<TerrainTileEntry> &entry) {
-	if (entry.is_null() || index < 0 || index >= static_cast<int>(til.entries.size())) {
-		return;
-	}
-
-	til.entries[static_cast<size_t>(index)] = opennova::til_normalize_overlay_entry(entry->to_native());
-	emit_changed();
-}
-
 void TerrainTileInfo::add_entry(const Ref<TerrainTileEntry> &entry) {
 	if (entry.is_null()) {
 		return;
@@ -169,32 +155,6 @@ void TerrainTileInfo::remove_entry(int index) {
 void TerrainTileInfo::clear_entries() {
 	til.entries.clear();
 	emit_changed();
-}
-
-int TerrainTileInfo::find_entry_index_at_cell(int cell_x, int cell_z) const {
-	for (size_t i = 0; i < til.entries.size(); ++i) {
-		if (opennova::til_entry_matches_cell(til.entries[i], cell_x, cell_z)) {
-			return static_cast<int>(i);
-		}
-	}
-	return -1;
-}
-
-PackedInt32Array TerrainTileInfo::get_entry_indices_at_cell(int cell_x, int cell_z) const {
-	PackedInt32Array indices;
-	for (size_t i = 0; i < til.entries.size(); ++i) {
-		if (opennova::til_entry_matches_cell(til.entries[i], cell_x, cell_z)) {
-			indices.push_back(static_cast<int32_t>(i));
-		}
-	}
-	return indices;
-}
-
-Vector2 TerrainTileInfo::transform_local_uv(Vector2 uv, int flags) {
-	const opennova::TilUv result = opennova::til_transform_local_uv(
-	    opennova::TilUv{static_cast<float>(uv.x), static_cast<float>(uv.y)},
-	    static_cast<uint8_t>(flags & 0xFF));
-	return Vector2(result.u, result.v);
 }
 
 void TerrainTileInfo::copy_from_native(const opennova::TilFile &file) {

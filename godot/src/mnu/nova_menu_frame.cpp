@@ -273,11 +273,6 @@ opennova::menu::MenuWidgetState &MenuFrame::widget_(int p_index) {
 	return state_.widgets.back();
 }
 
-void MenuFrame::clear_widget_states() {
-	state_.widgets.clear();
-	queue_redraw();
-}
-
 void MenuFrame::set_widget_shown_override(int p_index, bool p_shown) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
 	ws.hide = !p_shown;
@@ -285,25 +280,8 @@ void MenuFrame::set_widget_shown_override(int p_index, bool p_shown) {
 	queue_redraw();
 }
 
-void MenuFrame::clear_widget_shown_override(int p_index) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.hide = false;
-	ws.show = false;
-	queue_redraw();
-}
-
 void MenuFrame::set_widget_disabled(int p_index, bool p_disabled) {
 	widget_(p_index).disabled = p_disabled;
-	queue_redraw();
-}
-
-void MenuFrame::set_widget_hovered(int p_index, bool p_hovered) {
-	widget_(p_index).hovered = p_hovered;
-	queue_redraw();
-}
-
-void MenuFrame::set_widget_pressed(int p_index, bool p_pressed) {
-	widget_(p_index).pressed = p_pressed;
 	queue_redraw();
 }
 
@@ -328,13 +306,6 @@ void MenuFrame::set_widget_text(int p_index, const String &p_text) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
 	ws.has_text = true;
 	ws.text = to_std(p_text);
-	queue_redraw();
-}
-
-void MenuFrame::clear_widget_text(int p_index) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_text = false;
-	ws.text.clear();
 	queue_redraw();
 }
 
@@ -398,13 +369,6 @@ void MenuFrame::set_widget_items(int p_index,
 	queue_redraw();
 }
 
-void MenuFrame::clear_widget_items(int p_index) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_items = false;
-	ws.items.clear();
-	queue_redraw();
-}
-
 void MenuFrame::set_widget_selected_set(int p_index,
 		const PackedInt32Array &p_rows) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
@@ -433,11 +397,6 @@ void MenuFrame::set_widget_table_rows(int p_index,
 	queue_redraw();
 }
 
-void MenuFrame::clear_widget_table_rows(int p_index) {
-	widget_(p_index).table_rows.clear();
-	queue_redraw();
-}
-
 void MenuFrame::set_widget_marquee_lines(int p_index,
 		const PackedStringArray &p_lines) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
@@ -447,11 +406,6 @@ void MenuFrame::set_widget_marquee_lines(int p_index,
 		ws.marquee_lines.push_back(to_std(p_lines[i]));
 	}
 	ws.marquee_reset = true; // fresh content restarts the roll
-	queue_redraw();
-}
-
-void MenuFrame::reset_widget_marquee(int p_index) {
-	widget_(p_index).marquee_reset = true;
 	queue_redraw();
 }
 
@@ -945,19 +899,11 @@ void MenuFrame::_bind_methods() {
 					"text_lookup"),
 			&MenuFrame::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &MenuFrame::is_configured);
-	ClassDB::bind_method(D_METHOD("clear_widget_states"),
-			&MenuFrame::clear_widget_states);
 	ClassDB::bind_method(
 			D_METHOD("set_widget_shown_override", "index", "shown"),
 			&MenuFrame::set_widget_shown_override);
-	ClassDB::bind_method(D_METHOD("clear_widget_shown_override", "index"),
-			&MenuFrame::clear_widget_shown_override);
 	ClassDB::bind_method(D_METHOD("set_widget_disabled", "index", "disabled"),
 			&MenuFrame::set_widget_disabled);
-	ClassDB::bind_method(D_METHOD("set_widget_hovered", "index", "hovered"),
-			&MenuFrame::set_widget_hovered);
-	ClassDB::bind_method(D_METHOD("set_widget_pressed", "index", "pressed"),
-			&MenuFrame::set_widget_pressed);
 	ClassDB::bind_method(D_METHOD("set_widget_checked", "index", "checked"),
 			&MenuFrame::set_widget_checked);
 	ClassDB::bind_method(D_METHOD("set_widget_focused", "index", "focused"),
@@ -966,8 +912,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_widget_caret);
 	ClassDB::bind_method(D_METHOD("set_widget_text", "index", "text"),
 			&MenuFrame::set_widget_text);
-	ClassDB::bind_method(D_METHOD("clear_widget_text", "index"),
-			&MenuFrame::clear_widget_text);
 	ClassDB::bind_method(D_METHOD("set_widget_hover_item", "index", "row"),
 			&MenuFrame::set_widget_hover_item);
 	ClassDB::bind_method(D_METHOD("get_widget_hover_item", "index"),
@@ -1009,18 +953,12 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("set_widget_items", "index", "items"),
 			&MenuFrame::set_widget_items);
-	ClassDB::bind_method(D_METHOD("clear_widget_items", "index"),
-			&MenuFrame::clear_widget_items);
 	ClassDB::bind_method(D_METHOD("set_widget_selected_set", "index", "rows"),
 			&MenuFrame::set_widget_selected_set);
 	ClassDB::bind_method(D_METHOD("set_widget_table_rows", "index", "rows"),
 			&MenuFrame::set_widget_table_rows);
-	ClassDB::bind_method(D_METHOD("clear_widget_table_rows", "index"),
-			&MenuFrame::clear_widget_table_rows);
 	ClassDB::bind_method(D_METHOD("set_widget_marquee_lines", "index", "lines"),
 			&MenuFrame::set_widget_marquee_lines);
-	ClassDB::bind_method(D_METHOD("reset_widget_marquee", "index"),
-			&MenuFrame::reset_widget_marquee);
 	ClassDB::bind_method(D_METHOD("widget_count"), &MenuFrame::widget_count);
 	ClassDB::bind_method(D_METHOD("widget_name", "index"),
 			&MenuFrame::widget_name);

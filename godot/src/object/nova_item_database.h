@@ -271,10 +271,7 @@ public:
 	// items.def default_aip (+0x8B8); empty when unauthored or unknown id.
 	String get_default_aip(int id) const;
 	String get_move_function(int id) const;
-	String get_render_function(int id) const;
-	String get_disk_function(int id) const;
 	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
-	int get_hp(int id) const;
 	int get_item_type(int id) const;
 	// Effective authored model scale source, signed Q16.16. Zero is retail's
 	// unscaled sentinel (a visual/collision scale of 1.0).

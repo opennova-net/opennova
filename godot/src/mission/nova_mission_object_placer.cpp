@@ -80,8 +80,6 @@ void MissionObjectPlacer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("place", "mission", "parent", "options"),
 			&MissionObjectPlacer::place, DEFVAL(Dictionary()));
-	ClassDB::bind_method(D_METHOD("build_animated_model", "item_id", "parent"),
-			&MissionObjectPlacer::build_animated_model);
 	ClassDB::bind_method(
 			D_METHOD("resolve_player_visual_item_id", "runtime_type_id"),
 			&MissionObjectPlacer::resolve_player_visual_item_id);
@@ -125,8 +123,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::graphic_for);
 	ClassDB::bind_method(D_METHOD("object_data_for", "graphic"),
 			&MissionObjectPlacer::object_data_for);
-	ClassDB::bind_method(D_METHOD("skeletal_anim_for", "item_id", "graphic"),
-			&MissionObjectPlacer::skeletal_anim_for);
 
 	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_transform);
@@ -165,9 +161,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::register_resolved_static_graphic);
 	ClassDB::bind_method(D_METHOD("register_object_data", "graphic", "data"),
 			&MissionObjectPlacer::register_object_data);
-	ClassDB::bind_method(
-			D_METHOD("register_static_batches", "graphic", "batches"),
-			&MissionObjectPlacer::register_static_batches);
 	ClassDB::bind_method(
 			D_METHOD("register_occlusion_verdict", "item_id", "has_occlusion"),
 			&MissionObjectPlacer::register_occlusion_verdict);
@@ -1235,6 +1228,8 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 							bound_q16 = MAX(bound_q16, husk_bound_q16);
 						}
 					}
+					// The +0x1000 pad on the entity bound (Entity_InitFromModel @0x40dc30 -
+					// docs/render/render-lighting-re.md).
 					if (bound_q16 > 0) {
 						entity_bound = static_cast<float>(bound_q16 + 0x1000) /
 								65536.0f;
@@ -1420,30 +1415,6 @@ String MissionObjectPlacer::graphic_for(int p_item_id) {
 Ref<ObjectData> MissionObjectPlacer::object_data_for(const String &p_graphic) {
 	_check_epoch();
 	return _load_object_data(p_graphic);
-}
-
-// Authoritative read-only skeletal set for simulation collision: the same
-// ADM + canonical model bone-table cache as the rendered ObjectModel, so
-// headless per-bone collision cannot drift onto lossy BAD parents/pivots.
-Ref<SkeletalAnim> MissionObjectPlacer::skeletal_anim_for(int p_item_id,
-		const String &p_graphic) {
-	_check_epoch();
-	if (resource_root_.is_null() || item_db_.is_null()) {
-		return Ref<SkeletalAnim>();
-	}
-	const Ref<ObjectData> data = _load_object_data(p_graphic);
-	if (data.is_null()) {
-		return Ref<SkeletalAnim>();
-	}
-	const String anim_def = item_db_->get_anim_def(p_item_id);
-	if (anim_def.is_empty()) {
-		return Ref<SkeletalAnim>();
-	}
-	const String adm_name = anim_def.to_lower().ends_with(".adm")
-			? anim_def
-			: anim_def + String(".adm");
-	return _skeletal_from_adm(adm_name, data->get_bone_origins(),
-			data->get_bone_parents());
 }
 
 Node3D *MissionObjectPlacer::_ensure_container(Node3D *p_parent) {

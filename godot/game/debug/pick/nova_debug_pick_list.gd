@@ -60,10 +60,6 @@ func clear() -> void:
 	changed.emit()
 
 
-func size() -> int:
-	return _picks.size()
-
-
 func is_full() -> bool:
 	return _picks.size() >= MAX_PICKS
 

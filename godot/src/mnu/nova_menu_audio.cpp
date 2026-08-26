@@ -32,14 +32,6 @@ void MenuAudio::set_sound_profile(const Ref<LwfData> &p_profile) {
 	sound_profile_ = p_profile;
 }
 
-void MenuAudio::set_master_volume(int p_volume) {
-	master_volume_ = p_volume < 0 ? 0 : (p_volume > 255 ? 255 : p_volume);
-}
-
-int MenuAudio::get_master_volume() const {
-	return master_volume_;
-}
-
 void MenuAudio::ensure_sound_pool_() {
 	if (!sound_players_.is_empty()) {
 		return;
@@ -184,10 +176,6 @@ void MenuAudio::_bind_methods() {
 			&MenuAudio::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_sound_profile", "profile"),
 			&MenuAudio::set_sound_profile);
-	ClassDB::bind_method(D_METHOD("set_master_volume", "volume"),
-			&MenuAudio::set_master_volume);
-	ClassDB::bind_method(D_METHOD("get_master_volume"),
-			&MenuAudio::get_master_volume);
 	ClassDB::bind_method(D_METHOD("play_widget_sound", "trigger", "file"),
 			&MenuAudio::play_widget_sound);
 }

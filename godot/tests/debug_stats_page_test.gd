@@ -16,6 +16,12 @@ class DestructionInfoStub:
 	var glass_points := 1
 
 
+class FireInfoStub:
+	extends RefCounted
+	var fires := 2
+	var sounds := 1
+
+
 class ThrowableInfoStub:
 	extends RefCounted
 	var live := 5
@@ -32,8 +38,8 @@ class WorldInfoHarness:
 		return {"runtime": {"sim": {"present_entity_count": 7}}}
 	func get_effect_world() -> EffectWorld:
 		return effect
-	func get_fire_present_stats() -> Dictionary:
-		return {"fires": 2, "sounds": 1}
+	func get_fire_present_stats() -> RefCounted:
+		return FireInfoStub.new()
 	func get_destruction_present_stats() -> RefCounted:
 		return DestructionInfoStub.new()
 

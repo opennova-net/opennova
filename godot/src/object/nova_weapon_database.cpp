@@ -38,7 +38,6 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_count"), &WeaponDatabase::get_count);
 	ClassDB::bind_method(D_METHOD("get_slot_weapons", "slot", "class_mask", "team_mask"),
 			&WeaponDatabase::get_slot_weapons);
-	ClassDB::bind_method(D_METHOD("get_weapons"), &WeaponDatabase::get_weapons);
 	ClassDB::bind_method(D_METHOD("get_weapon", "index"), &WeaponDatabase::get_weapon);
 	ClassDB::bind_method(D_METHOD("find_weapon", "name"), &WeaponDatabase::find_weapon);
 	ClassDB::bind_method(D_METHOD("loadout_weight", "weapon_indices", "ammo_counts"),
@@ -323,14 +322,6 @@ Array WeaponDatabase::get_slot_weapons(int slot, int class_mask, int team_mask) 
 		if ((w.team_mask & team_mask) == 0) {
 			continue;
 		}
-		out.push_back(weapon_dict(i));
-	}
-	return out;
-}
-
-Array WeaponDatabase::get_weapons() const {
-	Array out;
-	for (int i = 0; i < static_cast<int>(weapons.size()); ++i) {
 		out.push_back(weapon_dict(i));
 	}
 	return out;

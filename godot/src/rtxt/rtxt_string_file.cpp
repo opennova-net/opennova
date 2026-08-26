@@ -124,38 +124,12 @@ bool RtxtStringFile::has_string_in_section(const String &p_section, const String
 	return file_.find_in_section(gd_to_std(p_section), gd_to_std(String(p_key))) != nullptr;
 }
 
-int RtxtStringFile::find_entry_in_section(const String &p_section, const StringName &p_key) const {
-	const opennova::rtxt::Entry *entry =
-			file_.find_in_section(gd_to_std(p_section), gd_to_std(String(p_key)));
-	if (entry == nullptr) {
-		return -1;
-	}
-	return static_cast<int>(entry - file_.entries.data());
-}
-
 Vector2i RtxtStringFile::get_position(const StringName &p_key) const {
 	const int idx = find_entry_by_key(p_key);
 	if (idx < 0) {
 		return Vector2i();
 	}
 	return get_entry_position(idx);
-}
-
-int RtxtStringFile::get_section_index_for_key(const StringName &p_key) const {
-	const int idx = find_entry_by_key(p_key);
-	if (idx < 0) {
-		return -1;
-	}
-	return static_cast<int>(file_.entries[idx].section_index);
-}
-
-PackedStringArray RtxtStringFile::get_keys() const {
-	PackedStringArray keys;
-	keys.resize(static_cast<int64_t>(file_.entries.size()));
-	for (size_t i = 0; i < file_.entries.size(); ++i) {
-		keys.set(static_cast<int64_t>(i), std_to_gd(file_.entries[i].key));
-	}
-	return keys;
 }
 
 int RtxtStringFile::get_entry_count() const {
@@ -182,11 +156,6 @@ String RtxtStringFile::get_section_name(int p_section_index) const {
 	return std_to_gd(file_.sections[p_section_index].name);
 }
 
-int RtxtStringFile::get_section_string_count(int p_section_index) const {
-	ERR_FAIL_INDEX_V(p_section_index, static_cast<int>(file_.sections.size()), 0);
-	return static_cast<int>(file_.sections[p_section_index].string_count);
-}
-
 PackedStringArray RtxtStringFile::get_section_keys(int p_section_index) const {
 	PackedStringArray keys;
 	for (const auto &entry : file_.entries) {
@@ -199,11 +168,6 @@ PackedStringArray RtxtStringFile::get_section_keys(int p_section_index) const {
 
 // --- Indexed entry access ---
 
-String RtxtStringFile::get_entry_key(int p_index) const {
-	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), String());
-	return std_to_gd(file_.entries[p_index].key);
-}
-
 String RtxtStringFile::get_entry_text(int p_index) const {
 	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), String());
 	return std_to_gd(file_.entries[p_index].text);
@@ -213,11 +177,6 @@ Vector2i RtxtStringFile::get_entry_position(int p_index) const {
 	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), Vector2i());
 	const auto &pos = file_.entries[p_index].position;
 	return Vector2i(pos.x, pos.y);
-}
-
-int RtxtStringFile::get_entry_section_index(int p_index) const {
-	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), 0);
-	return static_cast<int>(file_.entries[p_index].section_index);
 }
 
 int RtxtStringFile::find_entry_by_key(const StringName &p_key) const {
@@ -256,23 +215,9 @@ void RtxtStringFile::remove_entry(int p_index) {
 	emit_signal("entries_structure_changed");
 }
 
-void RtxtStringFile::set_entry_key(int p_index, const String &p_key) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
-	file_.entries[p_index].key = gd_to_std(p_key);
-	_refresh();  // key feeds the lookup map
-	emit_signal("entries_structure_changed");
-}
-
 void RtxtStringFile::set_entry_text(int p_index, const String &p_text) {
 	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
 	file_.entries[p_index].text = gd_to_std(p_text);
-	emit_signal("entry_text_changed", p_index);
-}
-
-void RtxtStringFile::set_entry_position(int p_index, const Vector2i &p_position) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
-	file_.entries[p_index].position.x = static_cast<int16_t>(p_position.x);
-	file_.entries[p_index].position.y = static_cast<int16_t>(p_position.y);
 	emit_signal("entry_text_changed", p_index);
 }
 
@@ -332,50 +277,6 @@ int RtxtStringFile::add_section(const String &p_name) {
 	return static_cast<int>(file_.sections.size()) - 1;
 }
 
-void RtxtStringFile::remove_section(int p_index, int p_reassign_to) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.sections.size()));
-	const int section_count = static_cast<int>(file_.sections.size());
-	const bool reassign = p_reassign_to >= 0 && p_reassign_to < section_count && p_reassign_to != p_index;
-
-	// Reassign or drop entries that pointed at the removed section.
-	std::vector<opennova::rtxt::Entry> kept;
-	kept.reserve(file_.entries.size());
-	for (auto &entry : file_.entries) {
-		if (static_cast<int>(entry.section_index) == p_index) {
-			if (!reassign) {
-				continue;  // drop
-			}
-			entry.section_index = static_cast<uint32_t>(p_reassign_to);
-		}
-		kept.push_back(std::move(entry));
-	}
-	file_.entries = std::move(kept);
-
-	// Drop the section, then shift any higher index references down by one.
-	file_.sections.erase(file_.sections.begin() + p_index);
-	for (auto &entry : file_.entries) {
-		if (static_cast<int>(entry.section_index) > p_index) {
-			entry.section_index -= 1;
-		}
-	}
-
-	// Reassigning to a lower-numbered section can leave the moved run sitting
-	// after sections it now precedes numerically; restore the grouping invariant.
-	if (!file_.is_grouped()) {
-		file_.normalize_grouping();
-	}
-
-	_refresh();
-	emit_signal("sections_changed");
-	emit_signal("entries_structure_changed");
-}
-
-void RtxtStringFile::rename_section(int p_index, const String &p_name) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.sections.size()));
-	file_.sections[p_index].name = gd_to_std(p_name);
-	emit_signal("sections_changed");
-}
-
 // --- I/O ---
 
 Error RtxtStringFile::load_from_path(const String &p_path) {
@@ -395,11 +296,6 @@ Error RtxtStringFile::save_to_path(const String &p_path) const {
 	file->store_buffer(packed);
 	file->close();
 	return OK;
-}
-
-void RtxtStringFile::reset_empty() {
-	file_ = opennova::rtxt::File{};
-	file_.build_lookup();
 }
 
 // --- Snapshot ---
@@ -460,15 +356,6 @@ String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_overrid
 			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
 }
 
-Dictionary RtxtStringFile::strip_hotkey_with_index(const String &p_text) {
-	int idx = -1;
-	const std::string stripped = opennova::rtxt::strip_hotkey(gd_to_std(p_text), idx);
-	Dictionary out;
-	out["text"] = std_to_gd(stripped);
-	out["index"] = idx;
-	return out;
-}
-
 void RtxtStringFile::set_native(const opennova::rtxt::File &p_file) {
 	file_ = p_file;
 	file_.build_lookup();
@@ -479,46 +366,31 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_string", "key"), &RtxtStringFile::has_string);
 	ClassDB::bind_method(D_METHOD("get_string_in_section", "section", "key"), &RtxtStringFile::get_string_in_section);
 	ClassDB::bind_method(D_METHOD("has_string_in_section", "section", "key"), &RtxtStringFile::has_string_in_section);
-	ClassDB::bind_method(D_METHOD("find_entry_in_section", "section", "key"), &RtxtStringFile::find_entry_in_section);
 	ClassDB::bind_method(D_METHOD("is_grouped"), &RtxtStringFile::is_grouped);
 	ClassDB::bind_method(D_METHOD("normalize_grouping"), &RtxtStringFile::normalize_grouping);
-	ClassDB::bind_method(D_METHOD("get_position", "key"), &RtxtStringFile::get_position);
-	ClassDB::bind_method(D_METHOD("get_section_index_for_key", "key"), &RtxtStringFile::get_section_index_for_key);
-	ClassDB::bind_method(D_METHOD("get_keys"), &RtxtStringFile::get_keys);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &RtxtStringFile::get_entry_count);
 
 	ClassDB::bind_method(D_METHOD("get_section_count"), &RtxtStringFile::get_section_count);
 	ClassDB::bind_method(D_METHOD("get_section_names"), &RtxtStringFile::get_section_names);
 	ClassDB::bind_method(D_METHOD("get_section_name", "section_index"), &RtxtStringFile::get_section_name);
-	ClassDB::bind_method(D_METHOD("get_section_string_count", "section_index"), &RtxtStringFile::get_section_string_count);
 	ClassDB::bind_method(D_METHOD("get_section_keys", "section_index"), &RtxtStringFile::get_section_keys);
 
-	ClassDB::bind_method(D_METHOD("get_entry_key", "index"), &RtxtStringFile::get_entry_key);
 	ClassDB::bind_method(D_METHOD("get_entry_text", "index"), &RtxtStringFile::get_entry_text);
-	ClassDB::bind_method(D_METHOD("get_entry_position", "index"), &RtxtStringFile::get_entry_position);
-	ClassDB::bind_method(D_METHOD("get_entry_section_index", "index"), &RtxtStringFile::get_entry_section_index);
-	ClassDB::bind_method(D_METHOD("find_entry_by_key", "key"), &RtxtStringFile::find_entry_by_key);
 
 	ClassDB::bind_method(D_METHOD("add_entry", "key", "text", "section_index", "position"), &RtxtStringFile::add_entry);
 	ClassDB::bind_method(D_METHOD("remove_entry", "index"), &RtxtStringFile::remove_entry);
-	ClassDB::bind_method(D_METHOD("set_entry_key", "index", "key"), &RtxtStringFile::set_entry_key);
 	ClassDB::bind_method(D_METHOD("set_entry_text", "index", "text"), &RtxtStringFile::set_entry_text);
-	ClassDB::bind_method(D_METHOD("set_entry_position", "index", "position"), &RtxtStringFile::set_entry_position);
 	ClassDB::bind_method(D_METHOD("set_entry_section_index", "index", "section_index"), &RtxtStringFile::set_entry_section_index);
 
 	ClassDB::bind_method(D_METHOD("add_section", "name"), &RtxtStringFile::add_section);
-	ClassDB::bind_method(D_METHOD("remove_section", "index", "reassign_to"), &RtxtStringFile::remove_section, DEFVAL(-1));
-	ClassDB::bind_method(D_METHOD("rename_section", "index", "name"), &RtxtStringFile::rename_section);
 
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &RtxtStringFile::load_from_path);
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &RtxtStringFile::save_to_path);
-	ClassDB::bind_method(D_METHOD("reset_empty"), &RtxtStringFile::reset_empty);
 
 	ClassDB::bind_method(D_METHOD("to_byte_array"), &RtxtStringFile::to_byte_array);
 	ClassDB::bind_method(D_METHOD("load_from_byte_array", "bytes"), &RtxtStringFile::load_from_byte_array);
 
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
-	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey_with_index", "text"), &RtxtStringFile::strip_hotkey_with_index);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
 

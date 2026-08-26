@@ -147,13 +147,6 @@ bool Simulation::local_player_in_armory_zone() const {
 	       (e->flags & opennova::world::kEntityFlagArmoryZone) != 0;
 }
 
-bool Simulation::local_player_in_vehicle_loadout_zone() const {
-	if (!world_) return false;
-	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	return e != nullptr &&
-	       (e->flags & opennova::world::kEntityFlagVehicleLoadoutZone) != 0;
-}
-
 bool Simulation::local_player_toggle_mount() {
 	// The USE-ITEM mount toggle for the local player — the shell calls this when the
 	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release

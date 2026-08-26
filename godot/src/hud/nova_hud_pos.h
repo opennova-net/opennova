@@ -29,7 +29,7 @@ class ResourceRoot;
 // of scope.
 //
 // Layout shape and field meanings are the witnessed originals; see
-// docs/interface/hud-re.md. [orig: loc_59F370 hudpos.def parser, registered by
+// docs/interface/hud-re.md. [orig: HUD_ParseHudposToken @0x59f370 hudpos.def parser, registered by
 // HUD_InitOverlaySystem @0x5a4620]
 class HudPos : public RefCounted {
 	GDCLASS(HudPos, RefCounted)
@@ -107,7 +107,6 @@ public:
 	static Vector2i stance_center_offset(const Vector2i &p_frame0_size, int p_q16);
 	static int health_color_band(float p_fraction);
 	static int message_expire_tick(int p_now_ticks, int p_prev_expire, bool p_has_prev);
-	static Color half_bright(const Color &p_color);
 	static String format_ammo(int p_clip, int p_reserve, int p_capacity);
 	static int weapon_name_x_nudge(bool p_narrow_surface, int p_align);
 	static int round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor);

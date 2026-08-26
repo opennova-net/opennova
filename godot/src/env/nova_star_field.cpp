@@ -5,7 +5,6 @@ namespace godot {
 void StarField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("regenerate", "seed"), &StarField::regenerate);
 	ClassDB::bind_method(D_METHOD("get_count"), &StarField::get_count);
-	ClassDB::bind_method(D_METHOD("tick_frame", "light_dir"), &StarField::tick_frame);
 }
 
 void StarField::regenerate(int p_seed) {

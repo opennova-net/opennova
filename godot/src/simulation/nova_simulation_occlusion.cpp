@@ -96,10 +96,10 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 			(p_force_indoors ? opennova::world::kBlinkIndoorsBit : 0u);
 
 	const uint64_t occl_build_start =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
+			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	occlusion_world_.build_frame(*world_, collision_world_, cam);
 	const uint64_t occl_probe_start =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
+			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	if (runtime_profiling_enabled_)
 		last_occlusion_build_us_ = occl_probe_start - occl_build_start;
 
@@ -122,7 +122,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 			occlusion_culled_bms_.push_back(e->bms_id);
 	}
 	if (runtime_profiling_enabled_)
-		last_occlusion_probe_us_ = perf_now_us() - occl_probe_start;
+		last_occlusion_probe_us_ = opennova::io::perf_now_us() - occl_probe_start;
 }
 
 PackedInt64Array Simulation::get_building_visibility() const {
@@ -411,10 +411,6 @@ void Simulation::reset_occlusion_apply_baseline() {
 
 bool Simulation::occlusion_water_visible() const {
 	return occlusion_world_.water_visible();
-}
-
-bool Simulation::occlusion_camera_indoors() const {
-	return occlusion_world_.camera_indoors();
 }
 
 bool Simulation::local_player_indoors() const {

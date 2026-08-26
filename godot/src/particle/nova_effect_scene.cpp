@@ -131,90 +131,6 @@ Dictionary bounds_dictionary(const EffectBounds &bounds) {
 	return result;
 }
 
-Dictionary curve_dictionary(const CurveRef &curve) {
-	Dictionary result;
-	result["name"] = godot_string(curve.name);
-	result["reverse"] = curve.reverse;
-	result["inverse"] = curve.inverse;
-	result["present"] = curve.present;
-	result["baked"] = curve.baked;
-	PackedByteArray lut;
-	if (curve.baked) {
-		lut.resize(static_cast<int64_t>(curve.baked_lut.size()));
-		std::memcpy(lut.ptrw(), curve.baked_lut.data(),
-				curve.baked_lut.size());
-	}
-	result["lut"] = lut;
-	return result;
-}
-
-Dictionary graphic_dictionary(const GraphicLayer &graphic) {
-	Dictionary result;
-	result["index"] = graphic.index;
-	result["present"] = graphic.present;
-	result["texture"] = godot_string(graphic.texture);
-	result["blend_mode_raw"] = godot_string(graphic.blend_mode_raw);
-	result["blend_mode"] = static_cast<int>(graphic.blend_mode);
-	result["blend_mode_name"] =
-			String::utf8(opennova::particle::blend_mode_name(graphic.blend_mode));
-	result["flip_frames"] = graphic.flip_frames;
-	result["flip_rate"] = graphic.flip_rate;
-	result["color1"] = godot_color(graphic.color1);
-	result["color2"] = godot_color(graphic.color2);
-	result["color3"] = godot_color(graphic.color3);
-	result["color4"] = godot_color(graphic.color4);
-	result["color_overrides_set"] = graphic.color_overrides_set;
-	result["alpha"] = graphic.alpha;
-	result["scale"] = graphic.scale;
-	result["scale_adj"] = graphic.scale_adj;
-	result["scale_func"] = curve_dictionary(graphic.scale_func);
-	result["alpha_func"] = curve_dictionary(graphic.alpha_func);
-	result["red_func"] = curve_dictionary(graphic.red_func);
-	result["green_func"] = curve_dictionary(graphic.green_func);
-	result["blue_func"] = curve_dictionary(graphic.blue_func);
-
-	Array uv_rects;
-	uv_rects.resize(static_cast<int64_t>(graphic.baked_uv_rects.size()));
-	for (std::size_t i = 0; i < graphic.baked_uv_rects.size(); ++i) {
-		const auto &uv = graphic.baked_uv_rects[i];
-		Dictionary value;
-		value["u_min"] = uv.u_min;
-		value["v_min"] = uv.v_min;
-		value["u_max"] = uv.u_max;
-		value["v_max"] = uv.v_max;
-		value["inset"] = uv.inset;
-		uv_rects[static_cast<int64_t>(i)] = value;
-	}
-	result["baked_uv_rects"] = uv_rects;
-	return result;
-}
-
-Dictionary definition_dictionary(const ParticleDef &definition,
-		std::size_t index) {
-	Dictionary result;
-	result["definition_index"] = static_cast<int64_t>(index);
-	result["id"] = godot_string(definition.id);
-	result["flags"] = static_cast<int64_t>(definition.flags);
-	result["move"] = static_cast<int64_t>(definition.move);
-	result["alpha"] = definition.alpha;
-	result["scale"] = definition.scale;
-	result["bump_scale"] = definition.bump_scale;
-	result["scale_func"] = curve_dictionary(definition.scale_func);
-	result["alpha_func"] = curve_dictionary(definition.alpha_func);
-	result["red_func"] = curve_dictionary(definition.red_func);
-	result["green_func"] = curve_dictionary(definition.green_func);
-	result["blue_func"] = curve_dictionary(definition.blue_func);
-
-	Array graphics;
-	graphics.resize(static_cast<int64_t>(definition.graphics.size()));
-	for (std::size_t i = 0; i < definition.graphics.size(); ++i) {
-		graphics[static_cast<int64_t>(i)] =
-				graphic_dictionary(definition.graphics[i]);
-	}
-	result["graphics"] = graphics;
-	return result;
-}
-
 String spawn_status_name(EffectSpawnStatus status) {
 	switch (status) {
 		case EffectSpawnStatus::Spawned: return "spawned";
@@ -295,108 +211,6 @@ std::vector<opennova::particle::EffectOwnerPoseUpdate> owner_pose_updates(
 		updates.push_back(update);
 	}
 	return updates;
-}
-
-Dictionary frame_dictionary(
-		const opennova::particle::ParticleFrameSnapshot &frame) {
-	Dictionary result;
-	result["frame_index"] = token_to_godot(frame.frame_index);
-	result["simulation_time_seconds"] = frame.simulation_time_seconds;
-
-	Array definitions;
-	if (frame.definitions) {
-		definitions.resize(static_cast<int64_t>(frame.definitions->size()));
-		for (std::size_t i = 0; i < frame.definitions->size(); ++i) {
-			definitions[static_cast<int64_t>(i)] =
-					definition_dictionary((*frame.definitions)[i], i);
-		}
-	}
-	result["definitions"] = definitions;
-
-	Array groups;
-	groups.resize(static_cast<int64_t>(frame.groups.size()));
-	for (std::size_t i = 0; i < frame.groups.size(); ++i) {
-		const auto &group = frame.groups[i];
-		Dictionary value;
-		value["group_id"] = token_to_godot(group.id.value);
-		value["effect_handle"] = static_cast<int64_t>(group.effect.value);
-		value["effect_name"] = godot_string(group.effect_name);
-		value["source"] = godot_string(group.source);
-		value["transform"] = godot_pose(group.pose);
-		value["render_domain"] = static_cast<int>(group.render_domain);
-		value["source_tick"] = token_to_godot(group.source_tick);
-		value["source_order"] = token_to_godot(group.source_order);
-		value["first_emitter"] =
-				static_cast<int64_t>(group.first_emitter);
-		value["emitter_count"] =
-				static_cast<int64_t>(group.emitter_count);
-		value["detached"] = group.detached;
-		groups[static_cast<int64_t>(i)] = value;
-	}
-	result["groups"] = groups;
-
-	Array emitters;
-	emitters.resize(static_cast<int64_t>(frame.emitters.size()));
-	for (std::size_t i = 0; i < frame.emitters.size(); ++i) {
-		const auto &emitter = frame.emitters[i];
-		Dictionary value;
-		value["emitter_id"] = token_to_godot(emitter.id);
-		value["group_index"] = static_cast<int64_t>(emitter.group_index);
-		value["ordinal"] = static_cast<int64_t>(emitter.ordinal);
-		value["definition_index"] =
-				static_cast<int64_t>(emitter.definition_index);
-		value["first_particle"] =
-				static_cast<int64_t>(emitter.first_particle);
-		value["particle_count"] =
-				static_cast<int64_t>(emitter.particle_count);
-		value["position"] = godot_vector(emitter.position);
-		value["forward"] = godot_vector(emitter.forward);
-		value["color_tint"] = godot_vector(emitter.color_tint);
-		value["age"] = emitter.age;
-		value["spring_const"] = emitter.spring_const;
-		value["lod_divisor"] = static_cast<int64_t>(emitter.lod_divisor);
-		value["kill_plane"] = static_cast<int>(emitter.kill_plane);
-		value["kill_plane_y"] = emitter.kill_plane_y;
-		emitters[static_cast<int64_t>(i)] = value;
-	}
-	result["emitters"] = emitters;
-
-	Array particles;
-	particles.resize(static_cast<int64_t>(frame.particles.size()));
-	for (std::size_t i = 0; i < frame.particles.size(); ++i) {
-		const auto &particle = frame.particles[i];
-		Dictionary value;
-		value["position"] = godot_vector(particle.position);
-		value["velocity"] = godot_vector(particle.velocity);
-		value["age"] = particle.age;
-		value["lifetime"] = particle.lifetime;
-		value["size"] = particle.size;
-		value["curve_phase"] = particle.curve_phase;
-		value["phase_rate"] = particle.phase_rate;
-		value["rotation"] = particle.rotation;
-		value["rotation_rate"] = particle.rotation_rate;
-		value["yaw"] = particle.yaw;
-		value["yaw_rate"] = particle.yaw_rate;
-		value["pitch"] = particle.pitch;
-		value["pitch_rate"] = particle.pitch_rate;
-		value["color"] = godot_color(particle.color, particle.alpha);
-		value["color_r"] = static_cast<int>(particle.color.r);
-		value["color_g"] = static_cast<int>(particle.color.g);
-		value["color_b"] = static_cast<int>(particle.color.b);
-		value["alpha"] = static_cast<int>(particle.alpha);
-
-		value["color_slot"] = static_cast<int>(particle.color_slot);
-		value["graphic_layer"] = static_cast<int>(particle.graphic_layer);
-		value["serial"] = static_cast<int>(particle.serial);
-		value["flags"] = static_cast<int64_t>(particle.flags);
-		particles[static_cast<int64_t>(i)] = value;
-	}
-	result["particles"] = particles;
-	result["definition_count"] = definitions.size();
-	result["group_count"] = groups.size();
-	result["emitter_count"] = emitters.size();
-	result["particle_count"] = particles.size();
-	return result;
 }
 
 Dictionary debug_dictionary(
@@ -510,8 +324,6 @@ void EffectScene::_bind_methods() {
 			&EffectScene::reset_runtime_state);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
 			&EffectScene::advance_in_place);
-	ClassDB::bind_method(D_METHOD("get_frame_snapshot"),
-			&EffectScene::get_frame_snapshot);
 	ClassDB::bind_method(D_METHOD("get_live_counts"),
 			&EffectScene::get_live_counts);
 	ClassDB::bind_method(D_METHOD("inspect", "include_bounds"),
@@ -701,11 +513,6 @@ void EffectScene::advance_in_place(double p_delta_seconds) {
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	scene_.advance_simulation(request);
 	snapshot_dirty_ = true;
-}
-
-Dictionary EffectScene::get_frame_snapshot() const {
-	_materialize_snapshot();
-	return frame_dictionary(last_frame_);
 }
 
 Dictionary EffectScene::get_live_counts() const {

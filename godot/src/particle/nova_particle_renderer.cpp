@@ -292,6 +292,8 @@ struct ParticleCameraFrame {
 	bool projection_valid = false;
 };
 
+// The manager camera matrix retail folds into view space per frame
+// (CParticleManager_TransformToViewSpace @0x5ecc50 - docs/particles/ptl-format-re.md).
 ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 	ParticleCameraFrame result;
 	if (camera == nullptr)
@@ -973,6 +975,8 @@ public:
 
 	static std::uint32_t lit_primary_color(const LitQuadInput &lit,
 			const Basis &view_basis) {
+		// k = 0.5773503 and the transpose(Rx(roll) * view) light rotation
+		// (CParticleEmitter_BuildBillboardQuads @0x5e6d60 - docs/particles/ptl-format-re.md).
 		constexpr float light_component = 0.5773503f;
 		const Vector3 seed = lit.bump_scale *
 				Vector3(light_component, light_component, light_component);
@@ -1248,7 +1252,8 @@ public:
 						quad_count * expanded_bytes_per_quad));
 				std::uint8_t *destination =
 						submission->triangle_vertices.ptrw();
-				// Retail's quad index pattern 0/1/2/1/3/2: the first triangle
+				// Retail's quad index pattern 0/1/2/1/3/2 (CParticleEmitter_BuildBillboardQuads
+				// @0x5e6d60 - docs/particles/ptl-format-re.md): the first triangle
 				// is the quad's contiguous first three vertices, so it copies
 				// as one block.
 				constexpr std::size_t stride = sizeof(renderer::ParticleVertex);
@@ -1372,9 +1377,6 @@ String ParticleRenderer::retail_frame_name(const String &p_authored,
 }
 
 void ParticleRenderer::_bind_methods() {
-	ClassDB::bind_static_method("ParticleRenderer",
-			D_METHOD("retail_frame_name", "authored", "frame_count", "frame"),
-			&ParticleRenderer::retail_frame_name);
 	ClassDB::bind_method(D_METHOD("warm_pipelines", "position"),
 			&ParticleRenderer::warm_pipelines);
 	ClassDB::bind_method(D_METHOD("clear_warm_pipelines"),

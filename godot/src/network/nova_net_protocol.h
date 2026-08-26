@@ -115,18 +115,11 @@ public:
 	// Wire entity-handle decode (npwire wire_handle.h).
 	static int wire_handle_pool(int p_handle);
 	static int wire_handle_slot(int p_handle);
-	// The pool taxonomy label ("organics"/"items"/"buildings"/"markers"/
-	// "effects"; "?" out of range) by POOL INDEX, not handle.
-	static String wire_handle_pool_label(int p_pool_index);
 
 	// The ClientAuth character_id bit-pack [alignment:1|combo:6|div:4|nat:5]
 	// (npwire session_hello.h character_id). alignment: 0 good / nonzero evil.
 	static int pack_character_id(int p_nationality, int p_division, int p_combo,
 			int p_alignment);
-	static int character_id_nationality(int p_packed);
-	static int character_id_division(int p_packed);
-	static int character_id_combo(int p_packed);
-	static int character_id_alignment(int p_packed);
 };
 
 } // namespace godot

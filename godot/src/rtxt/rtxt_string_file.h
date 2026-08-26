@@ -49,33 +49,25 @@ public:
 	// matching key within its contiguous run) [orig: 0x75D250 / 0x75D1E0].
 	String get_string_in_section(const String &p_section, const StringName &p_key) const;
 	bool has_string_in_section(const String &p_section, const StringName &p_key) const;
-	int find_entry_in_section(const String &p_section, const StringName &p_key) const;
 	Vector2i get_position(const StringName &p_key) const;
-	int get_section_index_for_key(const StringName &p_key) const;
-	PackedStringArray get_keys() const;
 	int get_entry_count() const;
 
 	// --- Section read ---
 	int get_section_count() const;
 	PackedStringArray get_section_names() const;
 	String get_section_name(int p_section_index) const;
-	int get_section_string_count(int p_section_index) const;
 	PackedStringArray get_section_keys(int p_section_index) const;
 
 	// --- Indexed entry access (editor table) ---
-	String get_entry_key(int p_index) const;
 	String get_entry_text(int p_index) const;
 	Vector2i get_entry_position(int p_index) const;
-	int get_entry_section_index(int p_index) const;
 	int find_entry_by_key(const StringName &p_key) const;
 
 	// --- Entry mutations ---
 	// add_entry inserts at the end of the section's run and returns the new index.
 	int add_entry(const String &p_key, const String &p_text, int p_section_index, const Vector2i &p_position);
 	void remove_entry(int p_index);
-	void set_entry_key(int p_index, const String &p_key);
 	void set_entry_text(int p_index, const String &p_text);
-	void set_entry_position(int p_index, const Vector2i &p_position);
 	// Moves the entry to the end of its new section's run; returns the new index.
 	int set_entry_section_index(int p_index, int p_section_index);
 
@@ -85,16 +77,10 @@ public:
 
 	// --- Section CRUD ---
 	int add_section(const String &p_name);
-	// Removes section p_index. Entries in it are reassigned to p_reassign_to when
-	// that is a valid section, otherwise they are removed. Higher section indices
-	// (and entry references to them) shift down by one.
-	void remove_section(int p_index, int p_reassign_to = -1);
-	void rename_section(int p_index, const String &p_name);
 
 	// --- I/O ---
 	Error load_from_path(const String &p_path);
 	Error save_to_path(const String &p_path) const;
-	void reset_empty();
 
 	// --- Snapshot (for editor undo/redo): faithful byte image of the table. ---
 	PackedByteArray to_byte_array() const;
@@ -102,7 +88,6 @@ public:
 
 	// --- Hotkey helpers ---
 	static String strip_hotkey(const String &p_text);
-	static Dictionary strip_hotkey_with_index(const String &p_text);
 
 	// --- Engine-faithful lookup policy re-exports (engine/formats/rtxt owns
 	// the marker text and the ordering; see rtxt.h for the witnesses) ---

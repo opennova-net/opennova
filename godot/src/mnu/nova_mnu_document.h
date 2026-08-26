@@ -159,7 +159,6 @@ public:
 
 	// --- Authoring canvas size ---
 	Vector2i get_menu_size() const { return menu_size_; }
-	void set_menu_size(const Vector2i &p_size);
 
 	// --- Tree read ---
 	int get_screen_count() const;
@@ -170,7 +169,6 @@ public:
 	int get_parent_id(int p_id) const;
 	PackedInt32Array get_child_ids(int p_id) const;
 	int get_widget_type(int p_id) const; // WidgetType, or -1 for a screen
-	String get_widget_type_name(int p_type) const;
 	String get_widget_name(int p_id) const;
 	Rect2 get_window_rect(int p_id) const;
 
@@ -179,11 +177,9 @@ public:
 	bool get_screen_has_music_var(int p_screen_id) const;
 	int get_screen_music_var(int p_screen_id) const;
 	String get_screen_text_rsrc(int p_screen_id) const;
-	String get_screen_cursor_file(int p_screen_id) const;
-	String get_screen_cursor_flags(int p_screen_id) const;
 	void set_screen_property(int p_screen_id, const String &p_key, const Variant &p_value);
 
-	// Which POSITION extents are explicitly authored (get_window_rect_flags
+	// Which POSITION extents are explicitly authored (the window-rect
 	// bitmask). Shipped menus omit RIGHT/BOTTOM for auto-size widgets (the
 	// original engine stretches appearance art across an explicit width).
 	enum RectFlags {
@@ -198,15 +194,12 @@ public:
 	// A negative rect width/height means auto-size: clears has_right/has_bottom
 	// so the writer omits RIGHT/BOTTOM, the shipped auto-size spelling.
 	void set_window_rect(int p_id, const Rect2 &p_rect);
-	int get_window_rect_flags(int p_id) const;
 
 	String get_widget_text(int p_id) const;       // string_data.value
 	void set_widget_text(int p_id, const String &p_text);
 	String get_widget_string_type(int p_id) const; // "id" or "" (literal)
-	void set_widget_string_type(int p_id, const String &p_type);
 
 	String get_widget_font(int p_id) const;
-	void set_widget_font(int p_id, const String &p_font);
 
 	// Scalar template fields surfaced by the inspector (M9): the marquee data
 	// source file and the scroll/marquee orientation.
@@ -268,71 +261,34 @@ public:
 	TypedArray<Dictionary> get_table_headers(int p_id) const;
 	void set_table_header(int p_id, int p_index, const Dictionary &p_row);
 	int add_table_header(int p_id, const Dictionary &p_row); // returns the new index, or -1
-	void remove_table_header(int p_id, int p_index);
 	TypedArray<Dictionary> get_table_bodies(int p_id) const;
 	void set_table_body(int p_id, int p_index, const Dictionary &p_row);
 	int add_table_body(int p_id, const Dictionary &p_row); // returns the new index, or -1
 	void remove_table_body(int p_id, int p_index);
 	TypedArray<Dictionary> get_table_substs(int p_id) const;
-	void set_table_subst(int p_id, int p_index, const Dictionary &p_row);
-	int add_table_subst(int p_id, const Dictionary &p_row); // returns the new index, or -1
-	void remove_table_subst(int p_id, int p_index);
 
 	String get_widget_color(int p_id, int p_slot) const; // raw string, preserves %VAR%
-	void set_widget_color(int p_id, int p_slot, const String &p_value);
-
-	// The MNU color-token codec, re-exported from the engine parser (values
-	// and witnesses live at engine/formats/mnu: mnu.h parse_hex_color /
-	// format_hex_color, the 0xAARRGGBB dword order). parse_color_token
-	// returns a Color, or null for a %VAR% reference / empty / invalid token
-	// (so editors can render it as "unresolved"); format_color_token writes
-	// the uppercase AARRGGBB form, dropping the alpha pair for fully-opaque
-	// colors when force_alpha is false so 6-digit-authored values stay
-	// 6-digit.
-	static Variant parse_color_token(const String &p_token);
-	static String format_color_token(const Color &p_color, bool p_force_alpha = true);
 
 	String get_widget_texture(int p_id, int p_slot) const;
-	void set_widget_texture(int p_id, int p_slot, const String &p_value);
 
 	int get_widget_flags(int p_id) const;
-	void set_widget_flags(int p_id, int p_flags);
 	int get_widget_group(int p_id) const;
 	void set_widget_group(int p_id, int p_group);
-	PackedStringArray get_flag_labels() const;
 
 	// Full per-state appearance rows {state, type, value, map_state, height};
 	// set replaces the whole list. This is the only writer that can author the
 	// stock empty-state rows (no type) and "custom" rows — the color/texture
 	// slot setters always create type="image" rows.
 	TypedArray<Dictionary> get_widget_appearances(int p_id) const;
-	void set_widget_appearances(int p_id, const TypedArray<Dictionary> &p_rows);
 
 	// FRAME assets {stencil, stencil_size, brush, monogram}: DRAW_FRAME children
 	// render with the nearest ancestor's frame; shipped screens carry it on the
 	// root window. insetx/insety round-trip data is preserved untouched.
 	Dictionary get_window_frame(int p_id) const;
-	void set_window_frame(int p_id, const Dictionary &p_frame);
-
-	// Corpus-structure probes for the game-safety analyzer: every shipped LIST
-	// has a SCROLLBAR subtree, every shipped SPINLIST has SPINUP+SPINDOWN.
-	bool widget_has_scrollbar(int p_id) const;
-	bool widget_has_spin_arrows(int p_id) const;
 
 	// --- Structural mutation (emit changed; return the affected id) ---
 	int add_widget(int p_parent_id, int p_type, const Rect2 &p_rect);
 	void delete_widget(int p_id);
-	int add_screen(const String &p_name);
-	void delete_screen(int p_screen_id);
-	// Lossless subtree clipboard. The payload is a self-contained MNU document,
-	// so editor copy/cut/paste preserves every nested authored field while pasted
-	// nodes receive fresh stable ids.
-	PackedByteArray capture_widget_subtree(int p_id) const;
-	int insert_widget_subtree(int p_parent_id, const PackedByteArray &p_payload,
-			int p_index = -1, const Vector2i &p_offset = Vector2i());
-	bool move_widget_to_index(int p_id, int p_index);
-	int duplicate_screen(int p_screen_id, const String &p_name);
-	bool move_screen_to_index(int p_screen_id, int p_index);
 
 	// --- Snapshot + reparent (M8: structural undo) ---
 	// capture_state returns an opaque state {mnu, ids, next_id, menu_size};

@@ -175,14 +175,13 @@ int PffDocument::read_entry_cb(void *ctx, uint32_t index, uint8_t *out, uint32_t
 PffDocument::PffDocument() {}
 
 PffDocument::~PffDocument() {
-	// Join both workers BEFORE freeing the source handle / model vectors they read. Request cancel
+	// Join the worker BEFORE freeing the source handle / model vectors it reads. Request cancel
 	// first so a long-running extract stops at the next entry boundary instead of running to the end.
 	{
 		std::lock_guard<std::mutex> lock(extract_mutex_);
 		extract_state_.cancel_requested = true;
 	}
 	join_extract_thread();
-	join_save_thread();
 	close_source();
 }
 
@@ -193,7 +192,6 @@ PffDocument::~PffDocument() {
 void PffDocument::_bind_methods() {
 	ClassDB::bind_static_method("PffDocument", D_METHOD("list_games"), &PffDocument::list_games);
 	ClassDB::bind_method(D_METHOD("open", "path"), &PffDocument::open);
-	ClassDB::bind_method(D_METHOD("open_legacy", "path"), &PffDocument::open_legacy);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &PffDocument::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &PffDocument::get_last_error);
 	ClassDB::bind_method(D_METHOD("set_game", "game_id"), &PffDocument::set_game);
@@ -203,14 +201,11 @@ void PffDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entries"), &PffDocument::get_entries);
 	ClassDB::bind_method(D_METHOD("read_entry", "name", "decode"), &PffDocument::read_entry, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("extract_to", "name", "out_path", "decode"), &PffDocument::extract_to, DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("extract_selected", "names", "out_dir", "decode"), &PffDocument::extract_selected, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("extract_all", "out_dir", "decode"), &PffDocument::extract_all, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("extract_to_status", "name", "out_path", "decode"), &PffDocument::extract_to_status, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_last_undecoded_count"), &PffDocument::get_last_undecoded_count);
 	ClassDB::bind_method(D_METHOD("extract_async", "names", "out_dir", "decode"), &PffDocument::extract_async, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_extract_running"), &PffDocument::is_extract_running);
-	ClassDB::bind_method(D_METHOD("is_extract_finished"), &PffDocument::is_extract_finished);
-	ClassDB::bind_method(D_METHOD("request_extract_cancel"), &PffDocument::request_extract_cancel);
 	ClassDB::bind_method(D_METHOD("get_extract_progress_done"), &PffDocument::get_extract_progress_done);
 	ClassDB::bind_method(D_METHOD("get_extract_progress_total"), &PffDocument::get_extract_progress_total);
 	ClassDB::bind_method(D_METHOD("get_extract_ok_count"), &PffDocument::get_extract_ok_count);
@@ -221,14 +216,6 @@ void PffDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_entries", "names"), &PffDocument::remove_entries);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &PffDocument::is_dirty);
 	ClassDB::bind_method(D_METHOD("save_as", "out_path"), &PffDocument::save_as);
-	ClassDB::bind_method(D_METHOD("save_as_async", "out_path"), &PffDocument::save_as_async);
-	ClassDB::bind_method(D_METHOD("is_save_running"), &PffDocument::is_save_running);
-	ClassDB::bind_method(D_METHOD("is_save_finished"), &PffDocument::is_save_finished);
-	ClassDB::bind_method(D_METHOD("get_save_progress_done"), &PffDocument::get_save_progress_done);
-	ClassDB::bind_method(D_METHOD("get_save_progress_total"), &PffDocument::get_save_progress_total);
-	ClassDB::bind_method(D_METHOD("get_save_result"), &PffDocument::get_save_result);
-	ClassDB::bind_method(D_METHOD("get_save_error"), &PffDocument::get_save_error);
-	ClassDB::bind_method(D_METHOD("wait_for_save_completion"), &PffDocument::wait_for_save_completion);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,10 +277,6 @@ Error PffDocument::do_open(const String &path, bool legacy) {
 
 Error PffDocument::open(const String &path) {
 	return do_open(path, false);
-}
-
-Error PffDocument::open_legacy(const String &path) {
-	return do_open(path, true);
 }
 
 String PffDocument::get_source_path() const {
@@ -388,20 +371,6 @@ int PffDocument::extract_to_status(const String &name, const String &out_path, b
 		return 2; // hard failure, nothing written
 	}
 	return (last_undecoded_count_ > before) ? 1 : 0; // 1 = saved raw, 0 = decoded ok
-}
-
-Error PffDocument::extract_selected(const PackedStringArray &names, const String &out_dir, bool decode) const {
-	last_undecoded_count_ = 0;
-	Error last = OK;
-	for (int i = 0; i < names.size(); ++i) {
-		const String name = names[i];
-		const String out_path = out_dir.path_join(String(name).get_file());
-		const Error rc = extract_to(name, out_path, decode);
-		if (rc != OK) {
-			last = rc;
-		}
-	}
-	return last;
 }
 
 Error PffDocument::extract_all(const String &out_dir, bool decode) const {
@@ -571,140 +540,7 @@ Error PffDocument::save_as(const String &out_path) {
 }
 
 // ---------------------------------------------------------------------------
-// Async Save (background thread)
-// ---------------------------------------------------------------------------
-
-void PffDocument::join_save_thread() {
-	if (save_thread_.joinable()) {
-		save_thread_.join();
-	}
-}
-
-void PffDocument::save_progress_cb(void *ctx, uint32_t done, uint32_t total) {
-	PffDocument *self = static_cast<PffDocument *>(ctx);
-	std::lock_guard<std::mutex> lock(self->save_mutex_);
-	self->save_state_.done = done;
-	self->save_state_.total = total;
-}
-
-// Runs on the worker thread. The ONLY reader of source_ while a save is in flight (the editor
-// disables every other op via _set_busy, so there is no concurrent main-thread read).
-void PffDocument::save_worker() {
-	int rc;
-	try {
-		rc = pff_write_archive_streamed_progress(
-				save_out_native_.c_str(), save_format_,
-				save_entries_.empty() ? nullptr : save_entries_.data(),
-				static_cast<uint32_t>(save_entries_.size()),
-				&PffDocument::read_entry_cb, this,
-				&PffDocument::save_progress_cb, this);
-	} catch (...) {
-		rc = -1000; // unexpected exception
-	}
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	if (rc == PFF_WRITE_OK) {
-		save_state_.result = OK;
-		save_state_.message.clear();
-	} else {
-		save_state_.result = ERR_CANT_CREATE;
-		switch (rc) {
-			case PFF_WRITE_ERR_NAME_LEN: save_state_.message = "An entry name exceeds 16 characters"; break;
-			case PFF_WRITE_ERR_NAME_EMPTY: save_state_.message = "An entry has an empty name"; break;
-			case PFF_WRITE_ERR_DUP_NAME: save_state_.message = "Two entries share the same name"; break;
-			case PFF_WRITE_ERR_TOO_LARGE: save_state_.message = "Archive is too large (max 4GB total)"; break;
-			case -1000: save_state_.message = "Internal error while saving"; break;
-			default: save_state_.message = "Failed to write archive"; break;
-		}
-	}
-	save_state_.running = false;
-	save_state_.finished = true;
-}
-
-Error PffDocument::save_as_async(const String &out_path) {
-	last_error_ = String();
-	join_save_thread(); // never start a second save over a running one
-	const String native = to_native_path(out_path).strip_edges();
-	if (native.is_empty()) {
-		last_error_ = "Output path is empty";
-		return ERR_INVALID_PARAMETER;
-	}
-	if (!source_path_.empty()) {
-		const String src(source_path_.c_str());
-		if (native.to_lower().replace("\\", "/") == src.to_lower().replace("\\", "/")) {
-			last_error_ = "Refusing to overwrite the source archive; choose a different file.";
-			return ERR_ALREADY_IN_USE;
-		}
-	}
-
-	// Snapshot the model into worker-owned buffers, on the main thread.
-	const uint32_t n = static_cast<uint32_t>(entries_.size());
-	save_names_.assign(n, std::string());
-	save_entries_.assign(n, PffWriteStreamEntry());
-	for (uint32_t i = 0; i < n; ++i) {
-		save_names_[i] = entries_[i].name;
-		save_entries_[i].name = save_names_[i].c_str();
-		save_entries_[i].size = entries_[i].size;
-		save_entries_[i].flags = entries_[i].flags;
-		save_entries_[i].timestamp = entries_[i].timestamp;
-		save_entries_[i].checksum = entries_[i].checksum;
-	}
-	save_out_native_ = native.utf8().get_data();
-	save_format_ = source_format_;
-
-	{
-		std::lock_guard<std::mutex> lock(save_mutex_);
-		save_state_ = SaveState();
-		save_state_.running = true;
-		save_state_.total = n;
-	}
-	save_thread_ = std::thread(&PffDocument::save_worker, this);
-	return OK;
-}
-
-bool PffDocument::is_save_running() const {
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	return save_state_.running;
-}
-
-bool PffDocument::is_save_finished() const {
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	return save_state_.finished;
-}
-
-int PffDocument::get_save_progress_done() const {
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	return static_cast<int>(save_state_.done);
-}
-
-int PffDocument::get_save_progress_total() const {
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	return static_cast<int>(save_state_.total);
-}
-
-int PffDocument::get_save_result() const {
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	return save_state_.result;
-}
-
-String PffDocument::get_save_error() const {
-	std::lock_guard<std::mutex> lock(save_mutex_);
-	return String(save_state_.message.c_str());
-}
-
-void PffDocument::wait_for_save_completion() {
-	join_save_thread();
-	bool ok;
-	{
-		std::lock_guard<std::mutex> lock(save_mutex_);
-		ok = save_state_.finished && save_state_.result == OK;
-	}
-	if (ok) {
-		dirty_ = false; // cleared on the main thread only
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Async Extract (background thread; mirrors the Save worker)
+// Async Extract (background thread)
 // ---------------------------------------------------------------------------
 
 void PffDocument::join_extract_thread() {
@@ -714,7 +550,7 @@ void PffDocument::join_extract_thread() {
 }
 
 // Runs on the worker thread. Reads source_/entries_ and writes output files; the editor disables
-// every other op while it runs, so the model is stable (same invariant as save_worker).
+// every other op while it runs, so the model is stable.
 void PffDocument::extract_worker() {
 	for (const ExtractJob &job : extract_jobs_) {
 		{
@@ -810,16 +646,6 @@ Error PffDocument::extract_async(const PackedStringArray &names, const String &o
 bool PffDocument::is_extract_running() const {
 	std::lock_guard<std::mutex> lock(extract_mutex_);
 	return extract_state_.running;
-}
-
-bool PffDocument::is_extract_finished() const {
-	std::lock_guard<std::mutex> lock(extract_mutex_);
-	return extract_state_.finished;
-}
-
-void PffDocument::request_extract_cancel() {
-	std::lock_guard<std::mutex> lock(extract_mutex_);
-	extract_state_.cancel_requested = true;
 }
 
 int PffDocument::get_extract_progress_done() const {

@@ -45,17 +45,9 @@ public:
 	Array get_entries() const;
 	void set_entries(const Array &p_entries);
 	Ref<TerrainTileEntry> get_entry(int index) const;
-	void set_entry(int index, const Ref<TerrainTileEntry> &entry);
 	void add_entry(const Ref<TerrainTileEntry> &entry);
 	void remove_entry(int index);
 	void clear_entries();
-	int find_entry_index_at_cell(int cell_x, int cell_z) const;
-	PackedInt32Array get_entry_indices_at_cell(int cell_x, int cell_z) const;
-
-	// Runtime-shared tile-atlas UV flag transform (flip X, flip Y, rotate 90)
-	// shared with the renderer. opennova::til_transform_local_uv @ engine/formats/til/til.h;
-	// engine jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0, sub_5C42B0@0x5C42B0.
-	static Vector2 transform_local_uv(Vector2 uv, int flags);
 
 	void copy_from_native(const opennova::TilFile &file);
 	opennova::TilFile to_native() const;

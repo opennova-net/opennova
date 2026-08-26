@@ -483,7 +483,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# reloading this mission's render resources. Reset before environment/terrain:
 	# Celestial resolves its models from _load_environment, and foliage loaded
 	# by terrain must remain present-but-excluded in the same generation.
-	# [orig: sub_5B5710 @0x524A6F]
+	# [orig: EffectWorld_DestroyAllAndInitDeviceCaps @0x524A6F]
 	ObjectData.reset_network_challenge_model_registry()
 	_load_mission_tile_info(
 			bms_name, resource_root, PackedByteArray(),
@@ -540,7 +540,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# celestial, HUD, and renderer resource loads and before the loading screen
 	# drops. MissionPresentation.setup has now resolved the placed/wire mission models
 	# (including collision/husk definitions); late network spawns must not change
-	# this page. [orig: sub_5B3A80 @0x5871CF from Game_StartMission @0x525A6E]
+	# this page. [orig: CEffectWorld_RebuildAllModelBuffers @0x5871CF from Game_StartMission @0x525A6E]
 	var challenge_sim: Simulation = _runtime.get_sim()
 	if challenge_sim != null and not wire_header_join:
 		if challenge_sim.is_joiner():
@@ -872,7 +872,7 @@ func _apply_join_network_environment_update() -> void:
 # terrain overlays/surface overrides, network initial state, and both foliage
 # generators' radius-2 blocker.
 # Its file probe/read force loose-first around this one load.
-# [orig: Terrain_LoadFoliageFile @ 0x60a740, policy force @ 0x60a74e;
+# [orig: Terrain_LoadTileInfoFile @ 0x60a740, policy force @ 0x60a74e;
 # Terrain_GetSurfaceTypeAtPosition @ 0x606510;
 # Foliage_PathBlockedByPlacedTile @ 0x606490]
 func _load_mission_tile_info(bms_name: String, resource_root: ResourceRoot,
@@ -1646,7 +1646,6 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
-		"fire": get_fire_present_stats(),
 	}
 
 
@@ -1659,9 +1658,10 @@ func _fire_listener_position() -> Vector3:
 	return _last_tick_camera_pos
 
 
-# Fire-presentation counters (probe/diagnostic seam; empty until a mission runs).
-func get_fire_present_stats() -> Dictionary:
-	return _runtime.get_fire_present_stats() if _runtime != null else {}
+# Fire-presentation counters (FirePresentPass.Stats, typed per ADR 0017;
+# null until a mission runs).
+func get_fire_present_stats() -> RefCounted:
+	return _runtime.get_fire_present_stats() if _runtime != null else null
 
 
 # Destruction-presentation counters (DestructionPresentPass.Stats, typed per
@@ -1734,7 +1734,7 @@ func _local_player_visual_spec() -> Dictionary:
 
 # Resolve the .3DI definitions that LocalPlayerPresenter would otherwise load only on
 # its first visible frame. Retail's Game_ReloadEntityModelsAndCallbacks and HUD
-# model pass load the player + current weapon overlay before sub_5B3A80 freezes
+# model pass load the player + current weapon overlay before CEffectWorld_RebuildAllModelBuffers freezes
 # the C2S 0x3D source; doing the lightweight data lookup here gives our snapshot
 # the same boundary without constructing hidden scene nodes. Later builders hit
 # the placer's cache, so they cannot introduce a definition just after freeze.
@@ -2357,7 +2357,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# Terrain-tile (.til) bytes for the S2C 0x45 terrain-tile load a listen host streams to joiners so
 	# their g_loading_progress climbs 5 -> 6 and terrain finishes loading (net-re §5.37). The tile-overlay
 	# .til is named after the MISSION (localres.pff: ASH_I5A.til), not the terrain tileinfo
-	# [orig: Terrain_LoadFoliageFile @ 0x60a740;
+	# [orig: Terrain_LoadTileInfoFile @ 0x60a740;
 	# serialize_terrain_tiles @ 0x6080f0]. Reuse the payload parsed before terrain build.
 	if not _mission_til_bytes.is_empty():
 		opts["terrain_til"] = _mission_til_bytes

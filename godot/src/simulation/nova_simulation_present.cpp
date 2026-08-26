@@ -1115,15 +1115,6 @@ int Simulation::get_entity_kind(int p_index) const {
 	return opennova::world::spawn_origin_kind(ent->spawn_origin); // [orig promote: (kind<<24)|index]
 }
 
-int Simulation::get_entity_index(int p_index) const {
-	if (!ai_ || !world_) return -1;
-	AiEntity *e = ai_->at(p_index);
-	if (!e) return -1;
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	if (!ent) return -1;
-	return static_cast<int>(opennova::world::spawn_origin_index(ent->spawn_origin));
-}
-
 Vector3 Simulation::get_entity_position(int p_index) const {
 	if (!ai_) return Vector3();
 	AiEntity *e = ai_->at(p_index);
@@ -1132,19 +1123,6 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 	return Vector3(static_cast<float>(e->pos[0] / kFixed16),
 	               static_cast<float>(e->pos[2] / kFixed16),
 	               static_cast<float>(-e->pos[1] / kFixed16));
-}
-
-// The AI brain stores heading in the ENGINE frame (90 - mission yaw): the spawn seed and the
-// waypoint mover (atan2(dY,dX) bearing) both use it, so a unit faces consistently whether parked or
-// moving. The shell basis (MissionObjectPlacer.bms_to_godot_basis) takes the MISSION yaw and internally
-// applies the faithful (90 - yaw) engine heading, so the present converts engine -> mission here:
-// mission_yaw = 90 - engine_heading. (Stationary units still report their authored yaw.)
-float Simulation::get_entity_yaw(int p_index) const {
-	if (!ai_) return 0.0f;
-	AiEntity *e = ai_->at(p_index);
-	if (!e) return 0.0f;
-	const double mission_yaw_deg = opennova::world::mission_yaw_deg_from_bam_heading(e->heading);
-	return static_cast<float>(mission_yaw_deg * 0.017453292519943295);
 }
 
 float Simulation::get_entity_yaw_deg(int p_index) const {
@@ -1436,14 +1414,6 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 	return PackedVector3Array();
 }
 
-int Simulation::get_entity_bms_id(int p_index) const {
-	if (!ai_ || !world_) return 0;
-	AiEntity *e = ai_->at(p_index);
-	if (!e) return 0;
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	return ent ? ent->bms_id : 0;
-}
-
 // [D-NET-112] entity+0x78 ownerConnectionId (the connection/dcb that owns this entity). A networked
 // PLAYER is identified by this + its handle, NOT by an SSN (players carry net_id 0). 0 = unowned (AI /
 // mission entity / the host's dedicated reservation).
@@ -1502,25 +1472,9 @@ bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
 	return true;
 }
 
-int Simulation::get_entity_body_anim_slot(int p_index) const {
-	if (!ai_ || !world_) return -1;
-	AiEntity *e = ai_->at(p_index);
-	if (!e) return -1;
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	return ent ? ent->body_anim_slot : -1;
-}
-
-bool Simulation::get_entity_hidden(int p_index) const {
-	if (!ai_ || !world_) return false;
-	AiEntity *e = ai_->at(p_index);
-	if (!e) return false;
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	return ent ? ent->hidden : false;
-}
-
 PackedFloat32Array Simulation::get_present_snapshot() const {
 	const uint64_t start_us =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
+			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	// P7 (ADR 0011 Decision 1): every authoritative live mission is an in-process listen server in
 	// standalone MainGame/GameWorld. The present pass reads the state the LOCAL CLIENT decoded off the
 	// wire (ClientState), not the authoritative sim directly. Standalone SP and LAN hosts therefore
@@ -1550,7 +1504,7 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 		++present_layout_revision_;
 	}
 	if (runtime_profiling_enabled_)
-		last_present_snapshot_us_ = perf_now_us() - start_us;
+		last_present_snapshot_us_ = opennova::io::perf_now_us() - start_us;
 	return out;
 }
 PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
@@ -1631,7 +1585,9 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
-			// The authority owns the exact MoveOrder stance latch. The compact
+			// The authority owns the exact MoveOrder stance latch (bits 8/9 of
+			// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
+			// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md). The compact
 			// projection above reconstructs this from animation flags for joiners;
 			// host/SP must prefer the source byte used by retail's gate.
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);

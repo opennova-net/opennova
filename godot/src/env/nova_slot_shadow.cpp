@@ -164,8 +164,6 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_shadow_detail", "detail"),
 			&SlotShadow::set_shadow_detail);
-	ClassDB::bind_method(D_METHOD("get_shadow_detail"),
-			&SlotShadow::get_shadow_detail);
 	ClassDB::bind_method(D_METHOD("set_local_player_model", "model"),
 			&SlotShadow::set_local_player_model);
 	ClassDB::bind_method(
@@ -243,7 +241,9 @@ void SlotShadow::_ensure_captures() {
 		// (render_slot_shadow.h carries the witness).
 		const int size = renderer::slot_texture_size(i, shadow_detail_);
 		viewport->set_size(Vector2i(size, size));
-		// Retail clears 0x00FFFFFF: white RGB and alpha 0. The drape samples
+		// Retail clears 0x00FFFFFF: white RGB and alpha 0 (the slot pass
+		// render_shadow_pass @0x5d7b70 - engine/runtime/renderer/render_slot_shadow.h
+		// carries the witness map). The drape samples
 		// the resolved RGB, while transparent_background preserves that alpha
 		// byte. This target stays plain RGBA8: HDR 2D is
 		// not needed for the gamma contract here, and it breaks

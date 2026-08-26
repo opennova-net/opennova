@@ -27,8 +27,6 @@ public:
 	// Authoring fallback bank for file-less or unresolved <SOUND> elements
 	// (the original fails the element parse / stays silent).
 	void set_sound_profile(const Ref<LwfData> &p_profile);
-	void set_master_volume(int p_volume);
-	int get_master_volume() const;
 
 	// Play `trigger` from the .lwf bank named by `file`. Returns true when at
 	// least one member played.

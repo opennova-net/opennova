@@ -827,10 +827,10 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 					int(fx.active_entry_count()), drain_ms])
 
 	if world != null:
-		var fire: Dictionary = world.get_fire_present_stats()
-		if not fire.is_empty():
+		var fire = world.get_fire_present_stats()
+		if fire != null:
 			_set_info("fire", "%d fires · %d snd" % [
-					int(fire.get("fires", 0)), int(fire.get("sounds", 0))])
+					int(fire.fires), int(fire.sounds)])
 
 	if world != null:
 		var destruction = world.get_destruction_present_stats()

@@ -34,7 +34,6 @@ public:
 	CbinEntry();
 	virtual ~CbinEntry();
 
-	virtual CbinEntryType get_entry_type() const { return CBIN_ENTRY_TEXT; }
 };
 
 // Text entry - displays text with font, color, and justification.
@@ -47,8 +46,6 @@ protected:
 public:
 	CbinTextEntry();
 	~CbinTextEntry();
-
-	virtual CbinEntryType get_entry_type() const override { return CBIN_ENTRY_TEXT; }
 
 	void set_text(const String &p_text);
 	String get_text() const;
@@ -83,7 +80,6 @@ public:
 	CbinNewlineEntry();
 	~CbinNewlineEntry();
 
-	virtual CbinEntryType get_entry_type() const override { return CBIN_ENTRY_NEWLINE; }
 };
 
 // Image entry - displays an image.
@@ -99,8 +95,6 @@ protected:
 public:
 	CbinImageEntry();
 	~CbinImageEntry();
-
-	virtual CbinEntryType get_entry_type() const override { return CBIN_ENTRY_IMAGE; }
 
 	void set_texture(const Ref<Resource> &p_texture);
 	Ref<Resource> get_texture() const;
@@ -173,7 +167,6 @@ public:
 	int get_entry_count() const;
 	Ref<CbinEntry> get_entry(int p_index) const;
 	void add_entry(const Ref<CbinEntry> &p_entry);
-	void insert_entry(int p_index, const Ref<CbinEntry> &p_entry);
 	void remove_entry(int p_index);
 	void clear_entries();
 

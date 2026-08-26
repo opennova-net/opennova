@@ -161,7 +161,6 @@ Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteAr
 // ============================================================================
 
 void CbinEntry::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_entry_type"), &CbinEntry::get_entry_type);
 
 	BIND_ENUM_CONSTANT(CBIN_ENTRY_TEXT);
 	BIND_ENUM_CONSTANT(CBIN_ENTRY_NEWLINE);
@@ -297,7 +296,6 @@ void CbinImageEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture_name"), &CbinImageEntry::get_texture_name);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_name"), "set_texture_name", "get_texture_name");
 
-	ClassDB::bind_method(D_METHOD("get_texture_path"), &CbinImageEntry::get_texture_path);
 }
 
 CbinImageEntry::CbinImageEntry() {}
@@ -410,7 +408,6 @@ void CbinCreditsResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &CbinCreditsResource::get_entry_count);
 	ClassDB::bind_method(D_METHOD("get_entry", "index"), &CbinCreditsResource::get_entry);
 	ClassDB::bind_method(D_METHOD("add_entry", "entry"), &CbinCreditsResource::add_entry);
-	ClassDB::bind_method(D_METHOD("insert_entry", "index", "entry"), &CbinCreditsResource::insert_entry);
 	ClassDB::bind_method(D_METHOD("remove_entry", "index"), &CbinCreditsResource::remove_entry);
 	ClassDB::bind_method(D_METHOD("clear_entries"), &CbinCreditsResource::clear_entries);
 
@@ -534,17 +531,6 @@ void CbinCreditsResource::add_entry(const Ref<CbinEntry> &p_entry) {
 	}
 	_connect_entry(p_entry);
 	entries_.push_back(p_entry);
-	emit_changed();
-	emit_signal("entries_structure_changed");
-}
-
-void CbinCreditsResource::insert_entry(int p_index, const Ref<CbinEntry> &p_entry) {
-	ERR_FAIL_INDEX(p_index, entries_.size() + 1);
-	if (!p_entry.is_valid() || _contains_entry_ref(p_entry)) {
-		return;
-	}
-	_connect_entry(p_entry);
-	entries_.insert(p_index, p_entry);
 	emit_changed();
 	emit_signal("entries_structure_changed");
 }

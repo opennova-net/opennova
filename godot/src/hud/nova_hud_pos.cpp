@@ -117,7 +117,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("stance_center_offset", "frame0_size", "q16"), &HudPos::stance_center_offset);
 	ClassDB::bind_static_method("HudPos", D_METHOD("health_color_band", "fraction"), &HudPos::health_color_band);
 	ClassDB::bind_static_method("HudPos", D_METHOD("message_expire_tick", "now_ticks", "prev_expire", "has_prev"), &HudPos::message_expire_tick);
-	ClassDB::bind_static_method("HudPos", D_METHOD("half_bright", "color"), &HudPos::half_bright);
 	ClassDB::bind_static_method("HudPos", D_METHOD("format_ammo", "clip", "reserve", "capacity"), &HudPos::format_ammo);
 	ClassDB::bind_static_method("HudPos", D_METHOD("weapon_name_x_nudge", "narrow_surface", "align"), &HudPos::weapon_name_x_nudge);
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
@@ -158,32 +157,14 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_loaded"), &HudPos::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &HudPos::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &HudPos::get_last_error);
-	ClassDB::bind_method(D_METHOD("get_font_hi"), &HudPos::get_font_hi);
-	ClassDB::bind_method(D_METHOD("get_font_lo"), &HudPos::get_font_lo);
 	ClassDB::bind_method(D_METHOD("get_health_rect"), &HudPos::get_health_rect);
-	ClassDB::bind_method(D_METHOD("get_heat_rect"), &HudPos::get_heat_rect);
-	ClassDB::bind_method(D_METHOD("get_powerbar_rect"), &HudPos::get_powerbar_rect);
-	ClassDB::bind_method(D_METHOD("get_ammo_count_pos"), &HudPos::get_ammo_count_pos);
-	ClassDB::bind_method(D_METHOD("get_weapon_name_pos"), &HudPos::get_weapon_name_pos);
-	ClassDB::bind_method(D_METHOD("get_game_info_pos"), &HudPos::get_game_info_pos);
-	ClassDB::bind_method(D_METHOD("get_wpd_info_pos"), &HudPos::get_wpd_info_pos);
-	ClassDB::bind_method(D_METHOD("get_chat_text_pos"), &HudPos::get_chat_text_pos);
-	ClassDB::bind_method(D_METHOD("get_sys_text_pos"), &HudPos::get_sys_text_pos);
-	ClassDB::bind_method(D_METHOD("get_clip_pos"), &HudPos::get_clip_pos);
-	ClassDB::bind_method(D_METHOD("get_alpha_fade"), &HudPos::get_alpha_fade);
-	ClassDB::bind_method(D_METHOD("get_hud_chline"), &HudPos::get_hud_chline);
-	ClassDB::bind_method(D_METHOD("get_stance_pos"), &HudPos::get_stance_pos);
 	ClassDB::bind_method(D_METHOD("get_veh_stance_pos"), &HudPos::get_veh_stance_pos);
 	ClassDB::bind_method(D_METHOD("get_lfp_flags"), &HudPos::get_lfp_flags);
 	ClassDB::bind_method(D_METHOD("get_stances"), &HudPos::get_stances);
-	ClassDB::bind_method(D_METHOD("get_static_frames"), &HudPos::get_static_frames);
 	ClassDB::bind_method(D_METHOD("get_vehicle_hud", "sid"), &HudPos::get_vehicle_hud);
-	ClassDB::bind_method(D_METHOD("get_parachute_icon"), &HudPos::get_parachute_icon);
-	ClassDB::bind_method(D_METHOD("get_armor_icon"), &HudPos::get_armor_icon);
 	ClassDB::bind_method(D_METHOD("get_spinmap_bounds"), &HudPos::get_spinmap_bounds);
 	ClassDB::bind_method(D_METHOD("get_spinmap_wp_dist_off"),
 			&HudPos::get_spinmap_wp_dist_off);
-	ClassDB::bind_method(D_METHOD("get_map_coords"), &HudPos::get_map_coords);
 	ClassDB::bind_method(D_METHOD("get_declutter_flags", "name"),
 			&HudPos::get_declutter_flags);
 	ClassDB::bind_method(D_METHOD("get_colors"), &HudPos::get_colors);
@@ -637,18 +618,6 @@ int HudPos::health_color_band(float p_fraction) {
 
 int HudPos::message_expire_tick(int p_now_ticks, int p_prev_expire, bool p_has_prev) {
 	return opennova::hud::message_expire_tick(p_now_ticks, p_prev_expire, p_has_prev);
-}
-
-Color HudPos::half_bright(const Color &p_color) {
-	const auto channel = [](float c) {
-		const int v = static_cast<int>(c * 255.0f + 0.5f);
-		return static_cast<uint32_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
-	};
-	const uint32_t argb = 0xFF000000u | (channel(p_color.r) << 16) |
-			(channel(p_color.g) << 8) | channel(p_color.b);
-	const uint32_t hb = opennova::hud::half_bright_argb(argb);
-	return Color(((hb >> 16) & 0xFFu) / 255.0f, ((hb >> 8) & 0xFFu) / 255.0f,
-			(hb & 0xFFu) / 255.0f, 1.0f);
 }
 
 String HudPos::format_ammo(int p_clip, int p_reserve, int p_capacity) {

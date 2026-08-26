@@ -20,7 +20,8 @@ class WorldEnvironment;
 
 // The frame's terminal compositor effect: the post-transparent device leg
 // that composites the Q3 glow source and performs the sole display decode
-// (FrameFX_RenderBloomPass @0x582940 - docs/render/render-order-re.md).
+// (FrameFX_RenderBloomPass @0x582940; targets create_frame_effect_render_targets @0x583c40;
+// capture FrameFX_CaptureRenderTarget @0x584020 - docs/render/render-order-re.md).
 // The source RID is the isolated Q3 view owned by FrameFx; the effect runs
 // the POT capture, 256x256 two-axis weighted blur, half-strength additive
 // composite, and the final gamma->linear bridge.
@@ -87,7 +88,6 @@ public:
 	// current beauty frame.
 	void advance_frame();
 
-	SubViewport *get_q3_viewport() const { return q3_viewport_; }
 	Dictionary get_backend_report() const;
 };
 
@@ -117,9 +117,6 @@ private:
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
-
-public:
-	Dictionary get_backend_report() const;
 };
 
 } // namespace godot

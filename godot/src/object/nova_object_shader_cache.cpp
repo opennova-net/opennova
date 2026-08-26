@@ -120,7 +120,8 @@ String shader_resource_path(
 			cull_suffix + ".gdshader";
 }
 
-// Render_CreateSystemTextures builds gsys_phong as a 256x256 RGBA8 lookup.
+// Render_CreateSystemTextures @0x58aca0 builds gsys_phong as a 256x256 RGBA8 lookup
+// (docs/render/render-lighting-re.md).
 // X is N.L (also copied verbatim to alpha); Y is N.H; RGB are the truncated
 // 255*x^(4,16,64) curves. The source multiplier is the exact binary32
 // 0x3b808081 value loaded by retail rather than an idealized 1/255.
@@ -185,15 +186,11 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_shader_for_key", "key"), &ObjectShaderCache::get_shader_for_key);
 	ClassDB::bind_method(D_METHOD("configure_material_for_key", "material", "key"), &ObjectShaderCache::configure_material_for_key);
 	ClassDB::bind_method(D_METHOD("classify", "shader_tag", "material_flags", "emissive_type", "is_glass_flag", "alpha_test_byte"), &ObjectShaderCache::classify);
-	ClassDB::bind_method(D_METHOD("family_for_key", "key"), &ObjectShaderCache::family_for_key);
-	ClassDB::bind_method(D_METHOD("blend_for_key", "key"), &ObjectShaderCache::blend_for_key);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &ObjectShaderCache::get_known_shader_tags);
 	ClassDB::bind_method(D_METHOD("clear"), &ObjectShaderCache::clear);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "height", "camera_above"), &ObjectShaderCache::set_water_plane);
 	ClassDB::bind_method(D_METHOD("clear_water_plane"), &ObjectShaderCache::clear_water_plane);
 	ClassDB::bind_method(D_METHOD("has_water_plane"), &ObjectShaderCache::has_water_plane);
-	ClassDB::bind_method(D_METHOD("get_water_plane_generation"),
-			&ObjectShaderCache::get_water_plane_generation);
 	ClassDB::bind_method(D_METHOD("alpha_rung_for_height", "world_height"), &ObjectShaderCache::alpha_rung_for_height);
 
 	// The per-material 3DI flag byte, single-sourced from engine/formats/threedi so
@@ -210,7 +207,7 @@ void ObjectShaderCache::_bind_methods() {
 	// tables).
 	ClassDB::bind_integer_constant(get_class_static(), "", "CAP_DETAIL", renderer::OSCAP_DETAIL);
 
-	// ObjectBlendMode (renderer::ObjectBlendMode) for blend_for_key callers.
+	// ObjectBlendMode (renderer::ObjectBlendMode) constants.
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_OPAQUE", static_cast<int64_t>(renderer::ObjectBlendMode::Opaque));
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ALPHA", static_cast<int64_t>(renderer::ObjectBlendMode::AlphaBlend));
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ADDITIVE", static_cast<int64_t>(renderer::ObjectBlendMode::Additive));
@@ -280,14 +277,6 @@ int32_t ObjectShaderCache::classify(const String &shader_tag,
 			static_cast<uint8_t>(is_glass_flag),
 			static_cast<uint8_t>(alpha_test_byte));
 	return static_cast<int32_t>(renderer::build_object_shader_key(cls));
-}
-
-int32_t ObjectShaderCache::family_for_key(int32_t key) const {
-	return static_cast<int32_t>(renderer::decode_object_shader_family(static_cast<uint32_t>(key)));
-}
-
-int32_t ObjectShaderCache::blend_for_key(int32_t key) const {
-	return static_cast<int32_t>(renderer::decode_object_shader_blend(static_cast<uint32_t>(key)));
 }
 
 void ObjectShaderCache::set_water_plane(float height, bool camera_above) {

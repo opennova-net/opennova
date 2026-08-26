@@ -224,7 +224,6 @@ private:
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
-	bool env_has_generation_ = false;
 	// Last applied point-light selections (FNV over count + packed vectors).
 	// Per-render-object selection hashes. Retail re-scopes a building's owner
 	// group for every ROBJ draw; a single model-wide hash cannot represent that
@@ -485,7 +484,6 @@ public:
 	// Exact-pose capture tail: stamp current env values on awake visible models
 	// without advancing any clock-derived render state.
 	static void refresh_awake_environment();
-	static int64_t awake_model_count();
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	// True while this model is in the shared awake set (the park/re-arm gate's
@@ -544,7 +542,6 @@ public:
 	Vector4 get_slot_shadow_decal_dims() const;
 	void update_slot_shadow_group();
 	void set_environment_state(const Ref<EnvLightState> &p_state);
-	Ref<EnvLightState> get_environment_state() const { return env_state_; }
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
 			float p_interior_daylight);
 	void set_interior_section_light_transfer(float p_daylight);
@@ -584,7 +581,6 @@ public:
 	// Retail submits MATCHTERRAIN only for a skinned entity whose MoveOrder
 	// stance bits are crouch/prone. The live presentation row owns that gate.
 	void set_match_terrain_enabled(bool p_enabled);
-	bool is_match_terrain_enabled() const { return match_terrain_enabled_; }
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
@@ -595,12 +591,9 @@ public:
 	}
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
 	Array get_surface_materials() const;
-	Dictionary get_material_defs() const;
 	bool is_playing() const { return is_playing_; }
 	void set_playing(bool p_value);
 	void set_panm_clock(const Ref<PanmClock> &p_clock);
-	Ref<PanmClock> get_panm_clock() const { return panm_clock_; }
-	void reset_animation_time();
 	void set_active_lod(int p_lod_index);
 	int get_active_lod() const { return active_lod_; }
 	void rebuild();
@@ -629,7 +622,6 @@ public:
 	// The def-authored launch userpoint name; rebuild resolves it against the
 	// model's userpoint table (case-insensitive, retail's by-name lookup).
 	void set_muzzle_point_name(const String &p_name);
-	String get_muzzle_point_name() const { return muzzle_point_name_; }
 	Vector3 get_muzzle_world_position() const;
 	void play_body_clip(const String &p_key);
 	void play_body_clip_variant(const String &p_key, int p_variant);

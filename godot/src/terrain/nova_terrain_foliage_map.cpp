@@ -41,10 +41,6 @@ void TerrainFoliageMap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_width"), &TerrainFoliageMap::get_width);
 	ClassDB::bind_method(D_METHOD("get_height"), &TerrainFoliageMap::get_height);
 	ClassDB::bind_method(D_METHOD("get_index", "x", "y"), &TerrainFoliageMap::get_index);
-	ClassDB::bind_method(D_METHOD("map_x_from_heightmap_x", "heightmap_x"), &TerrainFoliageMap::map_x_from_heightmap_x);
-	ClassDB::bind_method(D_METHOD("map_y_from_heightmap_y", "heightmap_y"), &TerrainFoliageMap::map_y_from_heightmap_y);
-	ClassDB::bind_method(D_METHOD("sample_detail_index_world", "world_x", "world_z"),
-	                     &TerrainFoliageMap::sample_detail_index_world);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "width"), "", "get_width");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "height"), "", "get_height");

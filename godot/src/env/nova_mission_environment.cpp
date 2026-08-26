@@ -53,8 +53,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("configure_mission_clock", "start_time_q8_8", "minutes_per_day"),
 			&MissionEnvironment::configure_mission_clock);
-	ClassDB::bind_method(D_METHOD("get_mission_advance_per_tick"),
-			&MissionEnvironment::get_mission_advance_per_tick);
 	ClassDB::bind_static_method("MissionEnvironment",
 			D_METHOD("mission_start_time_hhmm", "start_time_q8_8"),
 			&MissionEnvironment::mission_start_time_hhmm);
@@ -82,8 +80,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_network_rain_current);
 	ClassDB::bind_method(D_METHOD("get_overcast_blend"),
 			&MissionEnvironment::get_overcast_blend);
-	ClassDB::bind_method(D_METHOD("get_network_precipitation_kind"),
-			&MissionEnvironment::get_network_precipitation_kind);
 
 	ClassDB::bind_method(D_METHOD("set_weather_driven", "driven"),
 			&MissionEnvironment::set_weather_driven);
@@ -107,12 +103,8 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_underwater_overlay_alpha_byte);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_color"),
 			&MissionEnvironment::get_scene_fog_color);
-	ClassDB::bind_method(D_METHOD("get_scene_fog_start"),
-			&MissionEnvironment::get_scene_fog_start);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_end"),
 			&MissionEnvironment::get_scene_fog_end);
-	ClassDB::bind_method(D_METHOD("get_scene_fog_type"),
-			&MissionEnvironment::get_scene_fog_type);
 
 	ClassDB::bind_method(D_METHOD("get_sun_light"),
 			&MissionEnvironment::get_sun_light);
@@ -156,12 +148,8 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_sun_light_target);
 	ClassDB::bind_method(D_METHOD("get_fog_color_target"),
 			&MissionEnvironment::get_fog_color_target);
-	ClassDB::bind_method(D_METHOD("get_fog_color_base_target"),
-			&MissionEnvironment::get_fog_color_base_target);
 	ClassDB::bind_method(D_METHOD("get_sky_ambient_target"),
 			&MissionEnvironment::get_sky_ambient_target);
-	ClassDB::bind_method(D_METHOD("get_skyfog_color_target"),
-			&MissionEnvironment::get_skyfog_color_target);
 	ClassDB::bind_method(D_METHOD("get_ceiling_color_target"),
 			&MissionEnvironment::get_ceiling_color_target);
 	ClassDB::bind_method(D_METHOD("get_cloud_tint_target"),
@@ -170,18 +158,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_floor_color_target);
 	ClassDB::bind_method(D_METHOD("get_lightning_color_target"),
 			&MissionEnvironment::get_lightning_color_target);
-	ClassDB::bind_method(D_METHOD("get_sky_base_target"),
-			&MissionEnvironment::get_sky_base_target);
-	ClassDB::bind_method(D_METHOD("get_sky_bright_target"),
-			&MissionEnvironment::get_sky_bright_target);
-	ClassDB::bind_method(D_METHOD("get_sky_highlight_target"),
-			&MissionEnvironment::get_sky_highlight_target);
-	ClassDB::bind_method(D_METHOD("get_cloud_base_target"),
-			&MissionEnvironment::get_cloud_base_target);
-	ClassDB::bind_method(D_METHOD("get_cloud_highlight_target"),
-			&MissionEnvironment::get_cloud_highlight_target);
-	ClassDB::bind_method(D_METHOD("get_cloud_edge_target"),
-			&MissionEnvironment::get_cloud_edge_target);
 
 	ClassDB::bind_method(D_METHOD("get_terrain_tint"),
 			&MissionEnvironment::get_terrain_tint);
@@ -233,8 +209,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_color_src_gain);
 	ClassDB::bind_method(D_METHOD("get_env_generation"),
 			&MissionEnvironment::get_env_generation);
-	ClassDB::bind_method(D_METHOD("get_scene_generation"),
-			&MissionEnvironment::get_scene_generation);
 
 	ClassDB::bind_method(D_METHOD("get_fog_distance"),
 			&MissionEnvironment::get_fog_distance);
@@ -259,8 +233,6 @@ void MissionEnvironment::_bind_methods() {
 					"sun_dim_pct", "rain_current", "overcast_blend"),
 			&MissionEnvironment::set_smoothed_scalars, DEFVAL(0.0f), DEFVAL(0.0f),
 			DEFVAL(0.0f));
-	ClassDB::bind_method(D_METHOD("get_sun_dim_pct"),
-			&MissionEnvironment::get_sun_dim_pct);
 
 	ClassDB::bind_method(D_METHOD("get_sky_map1_tex"),
 			&MissionEnvironment::get_sky_map1_tex);
@@ -460,10 +432,6 @@ void MissionEnvironment::configure_mission_clock(int p_start_time_q8_8,
 	}
 }
 
-int MissionEnvironment::get_mission_advance_per_tick() const {
-	return state_.mission_advance_per_tick();
-}
-
 double MissionEnvironment::mission_start_time_hhmm(int p_start_time_q8_8) {
 	return opennova::env::EnvironmentState::mission_start_time_hhmm(
 			p_start_time_q8_8);
@@ -531,10 +499,6 @@ float MissionEnvironment::get_network_rain_current() const {
 
 float MissionEnvironment::get_overcast_blend() const {
 	return state_.overcast_blend();
-}
-
-int MissionEnvironment::get_network_precipitation_kind() const {
-	return state_.network_precipitation_kind();
 }
 
 // --- weather split / NVG ----------------------------------------------------
@@ -710,16 +674,8 @@ Vector3 MissionEnvironment::get_fog_color_target() const {
 	return to_vector3(state_.fog_color_target());
 }
 
-Vector3 MissionEnvironment::get_fog_color_base_target() const {
-	return to_vector3(state_.fog_color_base_target());
-}
-
 Vector3 MissionEnvironment::get_sky_ambient_target() const {
 	return to_vector3(state_.sky_ambient_target());
-}
-
-Vector3 MissionEnvironment::get_skyfog_color_target() const {
-	return to_vector3(state_.skyfog_color_target());
 }
 
 Vector3 MissionEnvironment::get_ceiling_color_target() const {
@@ -736,30 +692,6 @@ Vector3 MissionEnvironment::get_floor_color_target() const {
 
 Vector3 MissionEnvironment::get_lightning_color_target() const {
 	return to_vector3(state_.lightning_color_target());
-}
-
-Vector3 MissionEnvironment::get_sky_base_target() const {
-	return to_vector3(state_.sky_base_target());
-}
-
-Vector3 MissionEnvironment::get_sky_bright_target() const {
-	return to_vector3(state_.sky_bright_target());
-}
-
-Vector3 MissionEnvironment::get_sky_highlight_target() const {
-	return to_vector3(state_.sky_highlight_target());
-}
-
-Vector3 MissionEnvironment::get_cloud_base_target() const {
-	return to_vector3(state_.cloud_base_target());
-}
-
-Vector3 MissionEnvironment::get_cloud_highlight_target() const {
-	return to_vector3(state_.cloud_highlight_target());
-}
-
-Vector3 MissionEnvironment::get_cloud_edge_target() const {
-	return to_vector3(state_.cloud_edge_target());
 }
 
 Vector3 MissionEnvironment::get_terrain_tint() const {
@@ -938,10 +870,6 @@ void MissionEnvironment::set_smoothed_scalars(float p_fog_distance,
 	state_.set_smoothed_scalars(p_fog_distance, p_sky_height, p_sun_dim_pct,
 			p_rain_current, p_overcast_blend);
 	flush_publication();
-}
-
-float MissionEnvironment::get_sun_dim_pct() const {
-	return state_.sun_dim_pct();
 }
 
 Ref<Texture2D> MissionEnvironment::get_sky_map1_tex() const {

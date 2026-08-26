@@ -136,12 +136,12 @@ func present_draw_list(draw: Dictionary) -> void:
 		return
 	var owner_nodes := _resolve_owner_nodes(draw)
 	_presenter.present(draw, owner_nodes)
-	var device: Dictionary = _presenter.get_stats()
-	_stats.batches = int(device.get("batches", 0))
-	_stats.world_surfaces = int(device.get("world_surfaces", 0))
-	_stats.entity_meshes = int(device.get("entity_meshes", 0))
-	_stats.textures_missing = int(device.get("textures_missing", 0))
-	_stats.strips_unsupported = int(device.get("strips_unsupported", 0))
+	var device: ScarPresenterStats = _presenter.get_stats_record()
+	_stats.batches = device.batches
+	_stats.world_surfaces = device.world_surfaces
+	_stats.entity_meshes = device.entity_meshes
+	_stats.textures_missing = device.textures_missing
+	_stats.strips_unsupported = device.strips_unsupported
 
 
 # Every entity-ring owner in the list -> its live node (packed handle -> Node3D).

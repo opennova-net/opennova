@@ -117,21 +117,6 @@ Dictionary make_set() {
 	return s;
 }
 
-// Reorder `arr` in place: move the element at p_from to p_to (both clamped).
-void array_move(Array arr, int p_from, int p_to) {
-	const int n = arr.size();
-	if (p_from < 0 || p_from >= n) {
-		return;
-	}
-	p_to = std::clamp(p_to, 0, n - 1);
-	if (p_from == p_to) {
-		return;
-	}
-	Variant v = arr[p_from];
-	arr.remove_at(p_from);
-	arr.insert(p_to, v);
-}
-
 } // namespace
 
 void LwfData::_bind_methods() {
@@ -145,31 +130,19 @@ void LwfData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("is_loaded"), &LwfData::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_modified"), &LwfData::is_modified);
-	ClassDB::bind_method(D_METHOD("mark_clean"), &LwfData::mark_clean);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &LwfData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &LwfData::get_last_error);
 
 	ClassDB::bind_method(D_METHOD("get_set_count"), &LwfData::get_set_count);
-	ClassDB::bind_method(D_METHOD("get_sets"), &LwfData::get_sets);
 	ClassDB::bind_method(D_METHOD("get_set", "set_index"), &LwfData::get_set);
-	ClassDB::bind_method(D_METHOD("get_layer_count", "set_index"), &LwfData::get_layer_count);
-	ClassDB::bind_method(D_METHOD("get_layer", "set_index", "layer_index"), &LwfData::get_layer);
-	ClassDB::bind_method(D_METHOD("get_member_count", "set_index", "layer_index"), &LwfData::get_member_count);
-	ClassDB::bind_method(D_METHOD("get_member", "set_index", "layer_index", "member_index"), &LwfData::get_member);
 
 	ClassDB::bind_method(D_METHOD("set_set_field", "set_index", "key", "value"), &LwfData::set_set_field);
 	ClassDB::bind_method(D_METHOD("set_layer_field", "set_index", "layer_index", "key", "value"), &LwfData::set_layer_field);
 	ClassDB::bind_method(D_METHOD("set_member_field", "set_index", "layer_index", "member_index", "key", "value"), &LwfData::set_member_field);
 
 	ClassDB::bind_method(D_METHOD("add_set"), &LwfData::add_set);
-	ClassDB::bind_method(D_METHOD("remove_set", "set_index"), &LwfData::remove_set);
-	ClassDB::bind_method(D_METHOD("move_set", "from", "to"), &LwfData::move_set);
 	ClassDB::bind_method(D_METHOD("add_layer", "set_index"), &LwfData::add_layer);
-	ClassDB::bind_method(D_METHOD("remove_layer", "set_index", "layer_index"), &LwfData::remove_layer);
-	ClassDB::bind_method(D_METHOD("move_layer", "set_index", "from", "to"), &LwfData::move_layer);
 	ClassDB::bind_method(D_METHOD("add_member", "set_index", "layer_index"), &LwfData::add_member);
-	ClassDB::bind_method(D_METHOD("remove_member", "set_index", "layer_index", "member_index"), &LwfData::remove_member);
-	ClassDB::bind_method(D_METHOD("move_member", "set_index", "layer_index", "from", "to"), &LwfData::move_member);
 
 	BIND_CONSTANT(SELECTION_FIRST);
 	BIND_CONSTANT(SELECTION_RANDOM);
@@ -495,32 +468,8 @@ int LwfData::get_set_count() const {
 	return sets_.size();
 }
 
-Array LwfData::get_sets() const {
-	return sets_.duplicate(true);
-}
-
 Dictionary LwfData::get_set(int p_si) const {
 	return set_ref(p_si).duplicate(true);
-}
-
-int LwfData::get_layer_count(int p_si) const {
-	Dictionary set = set_ref(p_si);
-	Array layers = set.get("layers", Array());
-	return layers.size();
-}
-
-Dictionary LwfData::get_layer(int p_si, int p_li) const {
-	return layer_ref(p_si, p_li).duplicate(true);
-}
-
-int LwfData::get_member_count(int p_si, int p_li) const {
-	Dictionary layer = layer_ref(p_si, p_li);
-	Array members = layer.get("members", Array());
-	return members.size();
-}
-
-Dictionary LwfData::get_member(int p_si, int p_li, int p_mi) const {
-	return member_ref(p_si, p_li, p_mi).duplicate(true);
 }
 
 // ------------------------------------------------------------------- scalar edits
@@ -560,19 +509,6 @@ int LwfData::add_set() {
 	return sets_.size() - 1;
 }
 
-void LwfData::remove_set(int p_si) {
-	if (p_si < 0 || p_si >= sets_.size()) {
-		return;
-	}
-	sets_.remove_at(p_si);
-	modified_ = true;
-}
-
-void LwfData::move_set(int p_from, int p_to) {
-	array_move(sets_, p_from, p_to);
-	modified_ = true;
-}
-
 int LwfData::add_layer(int p_si) {
 	Dictionary set = set_ref(p_si);
 	if (set.is_empty()) {
@@ -584,23 +520,6 @@ int LwfData::add_layer(int p_si) {
 	return layers.size() - 1;
 }
 
-void LwfData::remove_layer(int p_si, int p_li) {
-	Dictionary set = set_ref(p_si);
-	Array layers = set.get("layers", Array());
-	if (p_li < 0 || p_li >= layers.size()) {
-		return;
-	}
-	layers.remove_at(p_li);
-	modified_ = true;
-}
-
-void LwfData::move_layer(int p_si, int p_from, int p_to) {
-	Dictionary set = set_ref(p_si);
-	Array layers = set.get("layers", Array());
-	array_move(layers, p_from, p_to);
-	modified_ = true;
-}
-
 int LwfData::add_member(int p_si, int p_li) {
 	Dictionary layer = layer_ref(p_si, p_li);
 	if (layer.is_empty()) {
@@ -610,23 +529,6 @@ int LwfData::add_member(int p_si, int p_li) {
 	members.push_back(make_member());
 	modified_ = true;
 	return members.size() - 1;
-}
-
-void LwfData::remove_member(int p_si, int p_li, int p_mi) {
-	Dictionary layer = layer_ref(p_si, p_li);
-	Array members = layer.get("members", Array());
-	if (p_mi < 0 || p_mi >= members.size()) {
-		return;
-	}
-	members.remove_at(p_mi);
-	modified_ = true;
-}
-
-void LwfData::move_member(int p_si, int p_li, int p_from, int p_to) {
-	Dictionary layer = layer_ref(p_si, p_li);
-	Array members = layer.get("members", Array());
-	array_move(members, p_from, p_to);
-	modified_ = true;
 }
 
 } // namespace godot

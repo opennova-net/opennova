@@ -184,7 +184,6 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_weapon_state);
 	ClassDB::bind_method(D_METHOD("set_view_state", "binoculars_view_active", "aim_screen"),
 			&HudOverlay::set_view_state);
-	ClassDB::bind_method(D_METHOD("set_objective_line", "text"), &HudOverlay::set_objective_line);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
 			D_METHOD("set_scoreboard", "shown", "game_type", "strings", "sim"),
@@ -231,8 +230,6 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_hud_detail_level);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
-	ClassDB::bind_method(D_METHOD("get_showhud_flags"),
-			&HudOverlay::get_showhud_flags);
 	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
 			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
@@ -814,11 +811,6 @@ void HudOverlay::set_view_state(bool p_binoculars_view_active, const Vector2 &p_
 	queue_redraw();
 }
 
-void HudOverlay::set_objective_line(const String &p_text) {
-	state_.objective_text = p_text.utf8().get_data();
-	queue_redraw();
-}
-
 void HudOverlay::set_objectives_header(const String &p_text) {
 	state_.objectives_header = p_text.utf8().get_data();
 }
@@ -1093,10 +1085,6 @@ void HudOverlay::set_showhud_flags(int p_flags) {
 	// docs/interface/hud-re.md)
 	state_.showhud_flags = static_cast<uint32_t>(p_flags) & 3u;
 	queue_redraw();
-}
-
-int HudOverlay::get_showhud_flags() const {
-	return static_cast<int>(state_.showhud_flags);
 }
 
 void HudOverlay::set_friendly_tag_env(int p_fog_dist_q16,

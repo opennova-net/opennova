@@ -33,19 +33,13 @@ void SbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entries"), &SbfBank::get_entries);
 	ClassDB::bind_method(D_METHOD("has_entry", "name"), &SbfBank::has_entry);
 	ClassDB::bind_method(D_METHOD("get_entry_name", "index"), &SbfBank::get_entry_name);
-	ClassDB::bind_method(D_METHOD("get_stream", "name"), &SbfBank::get_stream);
-	ClassDB::bind_method(D_METHOD("get_stream_at", "index"), &SbfBank::get_stream_at);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &SbfBank::load_from_path);
 	ClassDB::bind_static_method("SbfBank", D_METHOD("create_empty"), &SbfBank::create_empty);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &SbfBank::get_raw_file_bytes);
 	ClassDB::bind_method(D_METHOD("set_entry_pcm", "index", "samples"), &SbfBank::set_entry_pcm);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &SbfBank::is_dirty);
-	ClassDB::bind_method(D_METHOD("clear_dirty"), &SbfBank::clear_dirty);
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &SbfBank::save_to_path);
-	ClassDB::bind_method(D_METHOD("reorder_entry", "from", "to"), &SbfBank::reorder_entry);
-	ClassDB::bind_method(D_METHOD("rename_entry", "index", "name"), &SbfBank::rename_entry);
 	ClassDB::bind_method(D_METHOD("add_entry", "name", "samples"), &SbfBank::add_entry);
-	ClassDB::bind_method(D_METHOD("delete_entry", "index"), &SbfBank::delete_entry);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "source_path",
 								   PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT),
@@ -171,21 +165,6 @@ bool SbfBank::read_file_block(uint64_t p_offset, uint32_t p_size, PackedByteArra
 	r_block.resize(static_cast<int64_t>(p_size));
 	std::memcpy(r_block.ptrw(), _file_bytes.ptr() + p_offset, p_size);
 	return true;
-}
-
-Ref<SbfAudioStream> SbfBank::get_stream(const StringName &p_name) {
-	if (!_opened) {
-		return Ref<SbfAudioStream>();
-	}
-	String s = String(p_name);
-	const SbfRawEntry *e = sbf_find_by_name(&_arc, s.utf8().get_data());
-	if (!e) {
-		return Ref<SbfAudioStream>();
-	}
-	Ref<SbfAudioStream> stream;
-	stream.instantiate();
-	stream->configure(this, (int)(e - _arc.entries));
-	return stream;
 }
 
 Ref<SbfAudioStream> SbfBank::get_stream_at(int p_index) {
@@ -324,79 +303,6 @@ Error SbfBank::build_encoded_bytes(PackedByteArray &out) const {
 // reads the override map keyed by current index, so swapping/shifting
 // requires both the entries[] array and the override map to stay in sync.
 
-Error SbfBank::reorder_entry(int p_from, int p_to) {
-	if (!_opened) {
-		return ERR_UNCONFIGURED;
-	}
-	const uint32_t n = _arc.header.entry_count;
-	if (p_from < 0 || (uint32_t)p_from >= n) {
-		return ERR_INVALID_PARAMETER;
-	}
-	if (p_to < 0 || (uint32_t)p_to >= n) {
-		return ERR_INVALID_PARAMETER;
-	}
-	if (p_from == p_to) {
-		return OK;
-	}
-
-	// Move entries[p_from] to slot p_to, shifting the slice in between.
-	SbfRawEntry moving = _arc.entries[p_from];
-	if (p_from < p_to) {
-		// Shift left: indices (from+1 .. to) move down by one to (from .. to-1).
-		for (int i = p_from; i < p_to; ++i) {
-			_arc.entries[i] = _arc.entries[i + 1];
-		}
-	} else {
-		// Shift right: indices (to .. from-1) move up by one to (to+1 .. from).
-		for (int i = p_from; i > p_to; --i) {
-			_arc.entries[i] = _arc.entries[i - 1];
-		}
-	}
-	_arc.entries[p_to] = moving;
-
-	// Remap override keys. Build a fresh map so we don't trip over a key we
-	// just wrote during in-place shifting.
-	HashMap<int, Vector<int16_t>> remapped;
-	for (HashMap<int, Vector<int16_t>>::ConstIterator it = _entry_pcm_overrides.begin();
-			it != _entry_pcm_overrides.end(); ++it) {
-		int k = it->key;
-		int new_k;
-		if (k == p_from) {
-			new_k = p_to;
-		} else if (p_from < p_to && k > p_from && k <= p_to) {
-			new_k = k - 1;
-		} else if (p_from > p_to && k >= p_to && k < p_from) {
-			new_k = k + 1;
-		} else {
-			new_k = k;
-		}
-		remapped[new_k] = it->value;
-	}
-	_entry_pcm_overrides = remapped;
-	_dirty = true;
-	return OK;
-}
-
-Error SbfBank::rename_entry(int p_index, const String &p_name) {
-	if (!_opened) {
-		return ERR_UNCONFIGURED;
-	}
-	if (p_index < 0 || (uint32_t)p_index >= _arc.header.entry_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	CharString utf8 = p_name.utf8();
-	const char *src = utf8.get_data();
-	const int src_len = (int)utf8.length();
-	const int copy_len = src_len < (SBF_NAME_SIZE - 1) ? src_len : (SBF_NAME_SIZE - 1);
-
-	std::memset(_arc.entries[p_index].name, 0, SBF_NAME_SIZE);
-	if (copy_len > 0 && src != nullptr) {
-		std::memcpy(_arc.entries[p_index].name, src, (size_t)copy_len);
-	}
-	_dirty = true;
-	return OK;
-}
-
 Error SbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_samples) {
 	if (!_opened) {
 		return ERR_UNCONFIGURED;
@@ -456,37 +362,6 @@ Error SbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_sampl
 		dst[i] = (int16_t)(f * 32767.0f);
 	}
 	_entry_pcm_overrides[(int)n] = int16_samples;
-	_dirty = true;
-	return OK;
-}
-
-Error SbfBank::delete_entry(int p_index) {
-	if (!_opened) {
-		return ERR_UNCONFIGURED;
-	}
-	const uint32_t n = _arc.header.entry_count;
-	if (p_index < 0 || (uint32_t)p_index >= n) {
-		return ERR_INVALID_PARAMETER;
-	}
-
-	// Shift entries left.
-	for (uint32_t i = (uint32_t)p_index; i + 1 < n; ++i) {
-		_arc.entries[i] = _arc.entries[i + 1];
-	}
-	_arc.header.entry_count = n - 1;
-
-	// Remap override map: drop the deleted key, shift higher keys down by one.
-	HashMap<int, Vector<int16_t>> remapped;
-	for (HashMap<int, Vector<int16_t>>::ConstIterator it = _entry_pcm_overrides.begin();
-			it != _entry_pcm_overrides.end(); ++it) {
-		int k = it->key;
-		if (k == p_index) {
-			continue;
-		}
-		int new_k = (k > p_index) ? (k - 1) : k;
-		remapped[new_k] = it->value;
-	}
-	_entry_pcm_overrides = remapped;
 	_dirty = true;
 	return OK;
 }

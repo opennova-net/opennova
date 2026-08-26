@@ -45,7 +45,6 @@ public:
 	String get_variable(const String &p_name) const;
 	bool has_variable(const String &p_name) const;
 	String substitute(const String &p_text) const;
-	int get_variable_count() const;
 	Dictionary get_variables() const;
 
 	// --- Mutation (each successful mutation emits changed exactly once;
@@ -59,8 +58,7 @@ public:
 	// Ordered active defines: {name, value, raw_value, inline_comment, line,
 	// node_index, multiline, group, preceding_comments}.
 	Array get_entries() const;
-	// Number of entries (duplicates listed separately; get_variable_count is
-	// the collapsed flatten count).
+	// Number of entries (duplicates listed separately).
 	int get_entry_count() const;
 	// {line, severity: "error"|"warning", code, message}
 	Array get_diagnostics() const;

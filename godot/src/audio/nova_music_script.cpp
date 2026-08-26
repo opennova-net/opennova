@@ -35,16 +35,10 @@ void MusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_script_count"), &MusicScript::get_script_count);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &MusicScript::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_default_script_name"), &MusicScript::get_default_script_name);
-	ClassDB::bind_method(D_METHOD("get_scripts"), &MusicScript::get_scripts);
-	ClassDB::bind_method(D_METHOD("has_script", "name"), &MusicScript::has_script);
-	ClassDB::bind_method(D_METHOD("get_script_names"), &MusicScript::get_script_names);
 	ClassDB::bind_method(D_METHOD("get_section_names", "script_name"), &MusicScript::get_section_names);
-	ClassDB::bind_method(D_METHOD("get_locals_frame_offset", "script_name"), &MusicScript::get_locals_frame_offset);
-	ClassDB::bind_method(D_METHOD("get_intrinsic_names"), &MusicScript::get_intrinsic_names);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text", "script_name"), &MusicScript::get_decompiled_text);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &MusicScript::get_decompiled_text_with_bank);
 	ClassDB::bind_method(D_METHOD("compile_text", "text"), &MusicScript::compile_text);
-	ClassDB::bind_method(D_METHOD("set_compiled_bytecode", "bytecode"), &MusicScript::set_compiled_bytecode);
 	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &MusicScript::set_compiled_file_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_decrypted_bytes", "bytes", "source"),
 			&MusicScript::load_from_decrypted_bytes);
@@ -91,61 +85,6 @@ String MusicScript::get_default_script_name() const {
 	return String(buf);
 }
 
-Array MusicScript::get_scripts() const {
-	Array out;
-	if (!_opened) {
-		return out;
-	}
-	for (uint32_t i = 0; i < _mf.header.chunk_count; ++i) {
-		const MusScript &s = _mf.scripts[i];
-		char name_buf[MUS_NAME_SIZE + 1] = { 0 };
-		std::memcpy(name_buf, s.name, MUS_NAME_SIZE);
-
-		Array section_names;
-		for (uint32_t j = 0; j < s.section_count; ++j) {
-			char sec_buf[MUS_SECTION_NAME_SIZE + 1] = { 0 };
-			std::memcpy(sec_buf, s.sections[j].name, MUS_SECTION_NAME_SIZE);
-			section_names.append(String(sec_buf));
-		}
-
-		Dictionary d;
-		d["name"] = String(name_buf);
-		d["code_size"] = (int64_t)s.code_size;
-		d["section_count"] = (int64_t)s.section_count;
-		d["sections"] = section_names;
-		out.append(d);
-	}
-	return out;
-}
-
-bool MusicScript::has_script(const StringName &p_name) const {
-	if (!_opened) {
-		return false;
-	}
-	String want = String(p_name);
-	for (uint32_t i = 0; i < _mf.header.chunk_count; ++i) {
-		char buf[MUS_NAME_SIZE + 1] = { 0 };
-		std::memcpy(buf, _mf.scripts[i].name, MUS_NAME_SIZE);
-		if (want == String(buf)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-PackedStringArray MusicScript::get_script_names() const {
-	PackedStringArray out;
-	if (!_opened) {
-		return out;
-	}
-	for (uint32_t i = 0; i < _mf.header.chunk_count; ++i) {
-		char buf[MUS_NAME_SIZE + 1] = { 0 };
-		std::memcpy(buf, _mf.scripts[i].name, MUS_NAME_SIZE);
-		out.push_back(String(buf));
-	}
-	return out;
-}
-
 PackedStringArray MusicScript::get_section_names(const StringName &p_script_name) const {
 	PackedStringArray out;
 	if (!_opened) {
@@ -165,31 +104,6 @@ PackedStringArray MusicScript::get_section_names(const StringName &p_script_name
 			out.push_back(String(sec_buf));
 		}
 		break;
-	}
-	return out;
-}
-
-// Byte offset where the `enter` (MUS_OP_ENTER) frame op banks the caller's
-// arguments in the locals area: l_<base + 4k> is the state's (k+1)-th input.
-// The witness and the 0x20 stock value live at MUS_DEFAULT_LOCALS_BASE
-// (engine mus.h); the editor uses this to render those slots as "Input N".
-int MusicScript::get_locals_frame_offset(const StringName &p_script_name) const {
-	const MusScript *s = raw_script(String(p_script_name));
-	if (s == nullptr || s->locals_frame_offset == 0) {
-		return MUS_DEFAULT_LOCALS_BASE;
-	}
-	return (int)s->locals_frame_offset;
-}
-
-PackedStringArray MusicScript::get_intrinsic_names() const {
-	PackedStringArray out;
-	if (!_opened) {
-		return out;
-	}
-	for (uint32_t i = 0; i < _mf.intrinsic_count && i < (uint32_t)MUS_INTRINSIC_NAMES; ++i) {
-		char buf[MUS_INTRINSIC_NAME_SIZE + 1] = { 0 };
-		std::memcpy(buf, _mf.intrinsic_names[i], MUS_INTRINSIC_NAME_SIZE);
-		out.push_back(String(buf));
 	}
 	return out;
 }

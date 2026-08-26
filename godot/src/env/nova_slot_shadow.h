@@ -81,7 +81,6 @@ public:
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.
 	void set_shadow_detail(int p_detail);
-	int get_shadow_detail() const { return shadow_detail_; }
 	// The local player's model: halved slot priority, the every-frame
 	// refresh exception, and the first-person drape gates (detail >= 2, not
 	// prone) (retail: RenderSlot_DrawAllDrapes @0x5d6e70..0x5d6e90, see

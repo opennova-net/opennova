@@ -60,12 +60,9 @@ public:
 	void present(const Dictionary &p_draw_list, const Dictionary &p_owner_nodes);
 	// Drop every scar mesh (the Stop -> Play boundary, teardown).
 	void clear();
-	// Typed counters: world_surfaces, entity_meshes, batches, vertices,
-	// textures_missing (strips drawn this present whose TGA has not resolved —
-	// re-tried every present), strips_unsupported (strips drawn this present
-	// whose mode word decodes to neither shipped drawer state; they draw in
-	// the scorch state).
-	Dictionary get_stats() const;
+	// The typed counter snapshot (ScarPresenterStats: world_surfaces,
+	// entity_meshes, batches, vertices, textures_missing, strips_unsupported).
+	Ref<class ScarPresenterStats> get_stats_record() const;
 
 protected:
 	static void _bind_methods();

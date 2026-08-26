@@ -232,7 +232,6 @@ public:
 	// a pre-thresholded binary mask is NOT equivalent there.
 	Ref<ImageTexture> build_minimap_water_mask(
 			float p_water_height_wu = NAN) const;
-	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;
 	// Detail grass reads the flat, 1024-wrapped foliagemap. The fixed overload
 	// keeps runtime candidates on their original Q16 coordinates; the world
 	// overload is the public/GDScript seam.
@@ -255,16 +254,11 @@ public:
 	int get_tile_count() const;
 
 	// GDScript-facing accessors for foliage + sector grid
-	Dictionary load_foliage_indices() const;
 	void set_sector_grid(const PackedInt32Array &p_grid);
 	PackedInt32Array get_sector_grid() const;
 	Ref<TerrainFoliageMap> get_foliage_map() const;
 	Array get_foliage_defs() const;
 	void set_foliage_defs(const Array &p_defs);
-	void set_trn_texture_filename(const String &slot_id, const String &filename);
-	String get_trn_texture_filename(const String &slot_id) const;
-	void set_polydata_filename(const String &filename);
-	String get_polydata_filename() const;
 	void set_tileinfo_filename(const String &filename);
 	String get_tileinfo_filename() const;
 	// Lazy-load the .til referenced by trn.tileinfo, resolved relative to

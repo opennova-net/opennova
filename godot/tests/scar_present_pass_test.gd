@@ -213,7 +213,7 @@ func test_shared_ring_batches_become_one_world_mesh_with_a_surface_per_batch() -
 	assert_eq(stats.batches, 2)
 	assert_eq(stats.textures_missing, 0)
 	assert_eq(stats.slots_live, 4)
-	assert_eq(int(presenter.get_stats().get("strips_unsupported", -1)), 0,
+	assert_eq(presenter.get_stats_record().strips_unsupported, 0,
 			"both shipped words decode to a carried drawer state")
 	assert_eq(_entity_meshes(self).size(), 0)
 	scar_pass.teardown()

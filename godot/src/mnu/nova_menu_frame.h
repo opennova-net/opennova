@@ -87,11 +87,8 @@ public:
 	// Typed per-widget per-frame state, keyed by the widget's pre-order index
 	// in the screen tree (0 = the root window; children in authored order).
 	// State persists until cleared; each setter queues a redraw.
-	void clear_widget_states();
 	void set_widget_shown_override(int p_index, bool p_shown);
-	void clear_widget_shown_override(int p_index);
 	void set_widget_disabled(int p_index, bool p_disabled);
-	void set_widget_hovered(int p_index, bool p_hovered);
 	// The open dropdown's hovered ROW (style 2) — the driver's popup-exclusive
 	// pump updates it per move (the witness map lives at the engine compiler,
 	// engine/runtime/menu/menu_frame.h).
@@ -101,12 +98,10 @@ public:
 	// engine pump and reports through the scroll_value_changed signal.
 	int scroll_hit_at(int p_index, const Vector2 &p_position) const;
 	int get_widget_hover_item(int p_index) const;
-	void set_widget_pressed(int p_index, bool p_pressed);
 	void set_widget_checked(int p_index, bool p_checked);
 	void set_widget_focused(int p_index, bool p_focused);
 	void set_widget_caret(int p_index, int p_caret);
 	void set_widget_text(int p_index, const String &p_text);
-	void clear_widget_text(int p_index);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
 			int p_scroll_row);
 	// Standalone type=scroll range/page/value. Page is the original inclusive
@@ -117,12 +112,9 @@ public:
 	// Runtime content channels (the Control-tree path's set_items /
 	// add_row_values / marquee content, now engine state).
 	void set_widget_items(int p_index, const PackedStringArray &p_items);
-	void clear_widget_items(int p_index);
 	void set_widget_selected_set(int p_index, const PackedInt32Array &p_rows);
 	void set_widget_table_rows(int p_index, const TypedArray<PackedStringArray> &p_rows);
-	void clear_widget_table_rows(int p_index);
 	void set_widget_marquee_lines(int p_index, const PackedStringArray &p_lines);
-	void reset_widget_marquee(int p_index);
 
 	// Widget queries over the configured screen (design-space rects; the
 	// pre-order index space matches a document DFS of the same screen).

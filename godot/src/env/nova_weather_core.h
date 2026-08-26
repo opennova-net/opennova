@@ -58,9 +58,7 @@ public:
 	// The armed-gust decay semantics are env::WeatherCore's (an OpenNova
 	// authoring extension, noted in docs/env/env-tod-re.md).
 	void set_wind_intensity(int p_value);
-	int get_wind_intensity() const;
 	void set_wind_duration_ticks(int p_ticks);
-	int get_wind_duration_ticks() const;
 
 	void trigger_lightning_short();
 	void trigger_lightning_long();
@@ -90,16 +88,11 @@ public:
 	// @ 0x58db30; EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaef0].
 	Vector3 get_color_src_gain() const;
 
-	Color get_fill() const;
-	Color get_sun() const;
 	Color get_fog() const;
-	Color get_sky() const;
 	Color get_skyfog() const;
 	Color get_ceiling() const;
 	Color get_cloud() const;
 	Color get_floor() const;
-	Color get_ceiling_pre_mod() const;
-	Color get_floor_pre_mod() const;
 	Color get_skybase() const;
 	Color get_skybright() const;
 	Color get_skyhighlight() const;
@@ -135,11 +128,6 @@ public:
 	// The smoothed scalar currents (world units / percent).
 	float get_fog_distance() const;
 	float get_sky_height() const;
-	float get_sun_dim_pct() const;
-	float get_rain_pct() const;
-	int get_fog_accel_clamp_fixed() const;
-	int get_rain_pct_fixed() const;
-	int get_overcast_blend_fixed() const;
 
 	// The witnessed water UV transform (scale, bias, offset_u, offset_v):
 	// scale/bias from the fog-distance INT part, offsets from the layer-1
