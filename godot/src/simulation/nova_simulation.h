@@ -672,13 +672,13 @@ private:
 	PackedFloat32Array present_snapshot_from_world() const;
 	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
 	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
-	struct HostPresentLifecycle {
+	struct PoolPresentLifecycle {
 		uint64_t registry_spawn_id = 0;
 		uint32_t respawn_revision = 0;
 		bool dead_known = false;
 		bool dead = false;
 	};
-	mutable std::unordered_map<uint16_t, HostPresentLifecycle> host_present_lifecycle_;
+	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
 
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
 	// finish_load; the runtime_ member is declared in the P7 block below). joiner_pump drives the

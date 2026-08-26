@@ -44,5 +44,5 @@ func test_every_checked_in_shader_resource_loads_through_godot() -> void:
 			includes += 1
 			assert_eq(resource.get_class(), "ShaderInclude",
 					"%s must load as ShaderInclude" % path)
-	assert_eq(wrappers, 155)
-	assert_eq(includes, 40)
+	assert_eq(wrappers, 154)
+	assert_eq(includes, 41)

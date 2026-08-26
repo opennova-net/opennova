@@ -26,7 +26,7 @@ namespace {
 // 32-bit engine-frame heading); the port keeps that mirror on the vehicle motor
 // (VehicleMotorState::yaw_bam) and on the infantry AI row (AiEntity::heading),
 // while Entity::yaw is the whole-degree mission mirror every other row carries.
-double host_present_yaw_deg(const opennova::world::Entity &e,
+double pool_present_yaw_deg(const opennova::world::Entity &e,
 		const opennova::world::AiEntity *ae, opennova::EntityClass cls) {
 	if (e.emplacement_parent.valid() && e.emplacement_pose_metadata_resolved)
 		return static_cast<double>(e.yaw); // World::update_emplacement_attachments' exact result
@@ -1331,7 +1331,7 @@ bool Simulation::cache_present_effect_pose(
 			-p_entity.position.y);
 	pose.rotation_deg = Vector3(
 			static_cast<float>(p_entity.pitch),
-			static_cast<float>(host_present_yaw_deg(
+			static_cast<float>(pool_present_yaw_deg(
 					p_entity, ae, opennova::netsim::entity_class_of(p_entity))),
 			static_cast<float>(p_entity.roll));
 	present_effect_poses_by_handle_[handle] = pose;
@@ -1931,7 +1931,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		r[PF_POS_Y] = e.position.z;
 		r[PF_POS_Z] = -e.position.y;
 		r[PF_PITCH_DEG] = static_cast<float>(e.pitch);
-		r[PF_YAW_DEG] = static_cast<float>(host_present_yaw_deg(e, ae, cls));
+		r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(e, ae, cls));
 		r[PF_ROLL_DEG] = static_cast<float>(e.roll);
 		// The decoded fold bumps a row's respawn revision on every dead->alive
 		// edge of its wire state byte (organic bit 1; vehicle wrecks flag 4).
@@ -1942,7 +1942,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 					? opennova::netsim::kVehicleFlagDeadPose
 					: static_cast<uint8_t>(opennova::world::kEntityFlagDead);
 			const bool dead = (e.flags & dead_bit) != 0u;
-			HostPresentLifecycle &life = host_present_lifecycle_[h.packed];
+			PoolPresentLifecycle &life = pool_present_lifecycle_[h.packed];
 			if (life.registry_spawn_id != e.registry_spawn_id) {
 				life.registry_spawn_id = e.registry_spawn_id;
 				life.dead_known = false;
