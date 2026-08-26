@@ -424,6 +424,31 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         collision->local_player = world.cached.local_player; // blink accumulation target
         collision->build_tick_tables(world);
     }
+    // The static pools' stagger think: retail visits one eighth of pool 2
+    // per tick (start tick & 7, stride 8), decrements each visited static's
+    // age by 8 and, at or below zero, runs its blink/indoors refresh and
+    // resets the age to 62 — the only place a placed static's indoors state
+    // moves (a destroyed enclosing building shows up here, not at a query).
+    // Our registry keeps retail's pool-2 statics as pool 2 (buildings/items)
+    // and pool 3 (markers), so both walk the same cohort cadence.
+    // [orig: Entity_UpdateAllEntities @0x4c2100 pool-2 loop @0x4c225a..0x4c22fa:
+    //  age -= 8 @0x4c22c9, Entity_BuildProximityList @0x4c229c, reset 62 @0x4c22ba]
+    if (collision_active) {
+        const int cohort = static_cast<int>(ctx.logic_tick & 7u);
+        for (int pool = 2; pool <= 3; ++pool) {
+            world.registry.for_each_in_pool(pool, [&](const Entity &row) {
+                if ((row.handle.slot() & 7) != cohort) return;
+                Entity *ent = world.registry.get(row.handle);
+                if (ent == nullptr) return;
+                if (ent->static_think_age > 0) {
+                    ent->static_think_age -= 8;
+                    return;
+                }
+                collision->refresh_blink(world, *ent);
+                ent->static_think_age = 62;
+            });
+        }
+    }
     if (perf != nullptr) {
         const uint64_t now = io::perf_now_us();
         perf->collision_tables_us = now - phase_start;

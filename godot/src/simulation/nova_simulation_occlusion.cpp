@@ -516,24 +516,41 @@ int64_t Simulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
 	const int32_t sp[3] = {opennova::world::to_fixed(source_pos.x),
 	                       opennova::world::to_fixed(-source_pos.z),
 	                       opennova::world::to_fixed(source_pos.y)};
+	// Retail's emitter slot carries the source entity pointer from
+	// registration (@0x528659 passes slot+4); the id index is that identity.
+	// A static's blink/indoors state is the pool stagger think's product
+	// (AiSystem, [orig: Entity_UpdateAllEntities @0x4c2299..0x4c22ba]), not
+	// something the audio query refreshes.
 	opennova::world::EntityHandle source;
 	if (source_bms_id < 0) {
 		source = world_->cached.local_player;
 	} else if (source_bms_id > 0) {
-		world_->registry.for_each([&](const opennova::world::Entity &e) {
-			if (!source.valid() && e.bms_id == source_bms_id) source = e.handle;
-		});
-	}
-	// Static/env emitters do not ride the moving-entity collision resolver.
-	// Refresh their blink/indoors state at the audio query boundary so the
-	// both-indoors terrain bypass sees the source state retail registered.
-	if (source.valid() && source != world_->cached.local_player) {
-		if (opennova::world::Entity *source_entity = world_->registry.get(source))
-			collision_world_.refresh_blink(*world_, *source_entity);
+		source = handle_for_bms_id(source_bms_id);
 	}
 	return collision_world_.sound_occlusion_inflate(*world_, world_->cached.local_player,
 	                                                source, lp, sp,
 	                                                static_cast<int32_t>(distance_q16));
+}
+
+opennova::world::EntityHandle Simulation::handle_for_bms_id(int p_bms_id) const {
+	if (!world_ || p_bms_id <= 0) return opennova::world::EntityHandle{};
+	const uint64_t serial = world_->registry.spawn_serial();
+	if (bms_handle_index_world_ != world_.get() || bms_handle_index_serial_ != serial) {
+		bms_handle_index_.clear();
+		world_->registry.for_each([&](const opennova::world::Entity &e) {
+			if (e.bms_id > 0 && bms_handle_index_.find(e.bms_id) == bms_handle_index_.end())
+				bms_handle_index_[e.bms_id] = e.handle;
+		});
+		bms_handle_index_world_ = world_.get();
+		bms_handle_index_serial_ = serial;
+	}
+	const auto found = bms_handle_index_.find(p_bms_id);
+	if (found == bms_handle_index_.end()) return opennova::world::EntityHandle{};
+	// A despawned row's slot may have been reused; confirm the occupant still
+	// carries the id before handing the handle out.
+	const opennova::world::Entity *e = world_->registry.get(found->second);
+	return e != nullptr && e->bms_id == p_bms_id ? found->second
+	                                              : opennova::world::EntityHandle{};
 }
 
 PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,

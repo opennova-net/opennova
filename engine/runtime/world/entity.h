@@ -239,6 +239,12 @@ struct Entity {
     // fixed pool slots; this host-only serial distinguishes two entities that
     // occupied the same slot, even when all authored/net fields are identical.
     uint64_t registry_spawn_id = 0;
+    // The static pools' think age: every stagger visit (one cohort of eight
+    // per tick) subtracts 8; at or below zero the blink/indoors refresh runs
+    // and the age resets to 62 (a 72-tick period). Zero at spawn so the
+    // first visit refreshes immediately. [orig: entity+0x2AC in the pool-2
+    // walk of Entity_UpdateAllEntities @ 0x4c2299..0x4c22ba]
+    int32_t static_think_age = 0;
 
     // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
     // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This
