@@ -85,10 +85,6 @@ public:
 	void set_avatar_db(const Ref<AvatarDatabase> &p_db);
 	Ref<AvatarDatabase> get_avatar_db();
 	void set_panm_clock(const Ref<PanmClock> &p_clock);
-	// The typed environment light channel (published by MissionEnvironment).
-	// Set once by the owner; every model built here holds the same record,
-	// and update_environment() restamps the harvested static-batch materials.
-	void set_environment_state(const Ref<EnvLightState> &p_state);
 
 	// The items database (items.def), loaded on demand from the resource
 	// root; null if items.def cannot be resolved.
@@ -138,12 +134,6 @@ public:
 			const String &p_adm_name, Node3D *p_parent,
 			const String &p_clip_key = String(),
 			const String &p_rig_graphic = String());
-
-	// Re-stamp every harvested static-batch material from the live
-	// environment — retail relights every entity from the current lighting
-	// block each frame (witness: placement_traits.h ledger);
-	// generation/value-equality gated like ObjectModel's stamp.
-	void update_environment();
 
 	// --- read-back seams --------------------------------------------------
 	Array get_placed_entity_records() const { return placed_entity_records_; }
@@ -277,7 +267,6 @@ private:
 	Ref<ItemDatabase> item_db_;
 	Ref<AvatarDatabase> avatar_db_;
 	Ref<PanmClock> panm_clock_;
-	Ref<EnvLightState> env_state_;
 
 	Array placed_entity_records_;
 	Array static_user_point_sources_;
@@ -300,9 +289,6 @@ private:
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
-	Vector<Ref<Material>> batch_materials_;
-	int64_t last_batch_env_gen_ = -1;
-	Ref<EnvLightValues> last_batch_env_values_;
 	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
 

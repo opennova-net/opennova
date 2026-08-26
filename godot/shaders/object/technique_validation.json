@@ -111,7 +111,7 @@
       "channels": "Diffuse1.rgb is multiplied by SelfLumColor (RgbGen) and saturated ColorSrcGlobalGain at 2x. Retail SELFLUM writes alpha zero; AlphaGenValue is not consumed.",
       "light_response": "Unlit by world or point lights; responds only to ColorSrcGlobalGain as retail SELFLUM does.",
       "state": "NORMAL SELFLUM specialization with the six static material policies.",
-      "shader_tokens": ["obj_self_lit", "u_color_src_global_gain"],
+      "shader_tokens": ["obj_self_lit", "opennova_light_block_gain"],
       "forbidden_shader_tokens": ["obj_ff_lighting", "obj_bump_diffuse_lighting", "obj_phong_lighting"],
       "parity_status": "matching",
       "exceptions": []
@@ -482,7 +482,7 @@
       "channels": "Reflected environment is tinted by ReflectColor and ColorSrcGlobalGain under MODULATE2X; Diffuse1 is not sampled in RGB and retail MaterialDiffuse.a is zero, so NORMAL/GLOW coverage is zero.",
       "light_response": "No direct diffuse/specular light response; appearance changes with the hosted environment cube and global source gain.",
       "state": "Additive ONE/ONE, no depth write, additive fog; optional alpha cutout remains no-write.",
-      "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "u_color_src_global_gain", "* 2.0"],
+      "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "opennova_light_block_gain", "* 2.0"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -499,7 +499,7 @@
       "light_response": "No direct diffuse/specular light response; appearance changes only with the hosted environment cube.",
       "state": "Additive ONE/ONE, no depth write, additive shader fog; optional alpha cutout remains no-write.",
       "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "* 2.0"],
-      "forbidden_shader_tokens": ["u_color_src_global_gain"],
+      "forbidden_shader_tokens": ["opennova_light_block_gain"],
       "parity_status": "matching",
       "exceptions": []
     }

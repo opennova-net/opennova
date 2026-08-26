@@ -140,7 +140,7 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"occl_light_apply", &"occl_water_apply", &"occl_apply_remainder",
 			&"env", &"sun_veil", &"light", &"material",
 			&"model_clock_animation", &"model_panm", &"model_material",
-			&"model_environment", &"model_order_bounds",
+			&"model_order_bounds",
 			&"model_runtime_remainder", &"slot_shadow",
 			&"particles", &"audio", &"clear", &"env_cube", &"world_remainder",
 			&"hud", &"stats_sample", &"shell_control", &"round_flow",

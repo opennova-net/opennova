@@ -755,10 +755,13 @@ def test_every_wrapper_declares_one_shader_type_and_inherits_a_citation() -> Non
 def test_lighting_contracts_reach_the_shader_math() -> None:
     object_shared = (SHADER_DIR / "object" / "shared.gdshaderinc").read_text()
     for token in (
-        "u_hemi_sky_color",
-        "u_hemi_ground_color",
-        "u_dir_light_dir",
-        "u_dir_light_color",
+        "opennova_light_block_hemi_sky",
+        "opennova_light_block_hemi_ground",
+        "opennova_light_block_dir",
+        "opennova_light_block_dir_color",
+        "opennova_fog_enabled",
+        "u_entity_light",
+        "obj_dir_light_color",
         "u_point_light_count",
         "obj_ff_lighting",
         "obj_point_light_sum",

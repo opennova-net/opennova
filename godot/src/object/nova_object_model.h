@@ -43,10 +43,13 @@ namespace godot {
 class Terrain;
 class MeshInstance3D;
 
-// The env-derived lighting/fog values the object shaders consume (ADR 0017's
-// typed record, native). Computed once per env change and stamped onto many
-// materials — live model surfaces AND the mission placer's static batches.
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+// The env-derived world lighting/fog values (ADR 0017's typed record,
+// native). Computed once per env change; the object shader family reads the
+// same block as the opennova_light_block_* / opennova_fog_* global shader
+// parameters MissionEnvironment writes, and the typed record serves the
+// light director, the terrain light rows, and the diagnostics.
+// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 ->
+//  RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]
 class EnvLightValues : public RefCounted {
 	GDCLASS(EnvLightValues, RefCounted)
 
@@ -102,10 +105,10 @@ public:
 	int get_fog_type() const { return fog_type; }
 };
 
-// The typed channel between the environment system and every lit consumer:
-// the env PUBLISHES its current world light/fog values here; models (and the
-// placer's static batches) hold this ref and read values + generation through
-// typed calls — no consumer ever holds the environment object itself.
+// The typed channel between the environment system and its non-shader
+// consumers: the env PUBLISHES its current world light/fog values here and
+// consumers hold this ref, reading values + generation through typed calls —
+// no consumer ever holds the environment object itself.
 class EnvLightState : public RefCounted {
 	GDCLASS(EnvLightState, RefCounted)
 
@@ -154,10 +157,6 @@ public:
 	static Vector3 default_dir_light_color() { return Vector3(170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f); }
 	static Vector3 default_hemi_ground_color() { return Vector3(49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f); }
 
-	enum LightingContext {
-		LIGHTING_CONTEXT_ENTITY = 0,
-		LIGHTING_CONTEXT_INTERIOR_SECTION = 1,
-	};
 
 	// Visual-layer bits, mirrored from the authoritative GDScript table in
 	// adapter/environment/nova_water.gd (the water/mirror pass owns the layer
@@ -173,9 +172,6 @@ public:
 				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
 	};
 
-	// This model's fixed slot spread for staggered environment restamps.
-	static constexpr int kEnvRestampSpreadFrames = 16;
-
 	// Fixed layout returned by profile_awake_frame(delta). Keeping this a
 	// packed numeric record lets the F3 feed cross the script boundary once per
 	// frame without allocating Dictionaries or Strings on the render hot path.
@@ -183,7 +179,6 @@ public:
 		AWAKE_PROFILE_CLOCK_ANIMATION_US = 0,
 		AWAKE_PROFILE_PANM_US,
 		AWAKE_PROFILE_MATERIAL_US,
-		AWAKE_PROFILE_ENVIRONMENT_US,
 		AWAKE_PROFILE_ORDER_BOUNDS_US,
 		AWAKE_PROFILE_AWAKE_MODELS,
 		AWAKE_PROFILE_RENDERABLE_MODELS,
@@ -195,7 +190,6 @@ private:
 		int64_t clock_animation_us = 0;
 		int64_t panm_us = 0;
 		int64_t material_us = 0;
-		int64_t environment_us = 0;
 		int64_t order_bounds_us = 0;
 		int64_t awake_models = 0;
 		int64_t renderable_models = 0;
@@ -239,7 +233,6 @@ private:
 	int64_t section_visibility_mask_ = -1;
 	PackedInt32Array surface_material_indices_;
 	Vector<Ref<ShaderMaterial>> surface_materials_;
-	PackedByteArray surface_lighting_contexts_;
 	HashMap<int64_t, Array> anim_frames_by_mat_;
 	// This retained model stores the latest CTRL snapshot applied to it
 	// (Dictionary: ObjectData's PANM/material evaluators consume it).
@@ -266,7 +259,6 @@ private:
 	int active_lod_ = 0;
 	bool is_playing_ = true;
 	AABB model_bounds_;
-	Ref<EnvLightState> env_state_;
 	float lighting_effect_scale_ = 1.0f;
 	bool interior_lerp_ = false;
 	float interior_daylight_ = 0.0f;
@@ -284,7 +276,6 @@ private:
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
-	int env_stagger_slot_ = 0;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool native_frame_ = false;
@@ -383,9 +374,6 @@ private:
 		int anim_frame = -1;
 	};
 	std::vector<MaterialRuntimeStamp> material_runtime_stamps_;
-	int64_t last_env_gen_ = -1;
-	Ref<EnvLightValues> last_env_values_;
-	Ref<EnvLightValues> last_section_env_values_;
 	// Set by a PresentApplier row plan that retains this model by pointer and
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
@@ -394,7 +382,9 @@ private:
 	// --- core (nova_object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
 	void apply_shadow_casting_below(Node *p_root);
-	int lighting_context_for_robj(int p_robj_index) const;
+	// The per-entry lighting factors (effectScale, interior flag, daylight t)
+	// as instance state on every surface instance.
+	void stamp_entity_lighting_instances();
 	static int64_t ctrl_dword(int64_t p_value);
 	void finish_ctrl_change(bool p_apply_now);
 	Node3D *get_or_create_robj_node(int p_robj_index);
@@ -405,8 +395,6 @@ private:
 	bool apply_robj_transforms();
 	int64_t last_object_update_mask() const;
 	void on_object_changed();
-	void on_env_generation_changed();
-	void on_env_pass_changed();
 	void wake_runtime_frame();
 	void sleep_runtime_frame_if_idle();
 	bool needs_runtime_frame_work() const;
@@ -446,8 +434,7 @@ private:
 
 	// --- materials/environment (nova_object_model_materials.cpp) ---
 	void build_material_defs();
-	Ref<ShaderMaterial> material_for_index(int p_material_array_index,
-			int p_lighting_context);
+	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
 	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
 	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
 	void collect_anim_frames(int p_material_index);
@@ -457,10 +444,8 @@ private:
 	static void set_material_and_auxiliary_parameter(
 			const Ref<ShaderMaterial> &p_material, const StringName &p_name,
 			const Variant &p_value);
-	void apply_default_environment_to_material(const Ref<ShaderMaterial> &p_material);
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
-	void apply_environment_to_materials();
 
 	// --- retained-scene construction (nova_object_model_scene.cpp) ---
 	void rebuild_scene();
@@ -491,9 +476,6 @@ public:
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
 	static PackedInt64Array profile_awake_frame(double p_delta);
-	// Exact-pose capture tail: stamp current env values on awake visible models
-	// without advancing any clock-derived render state.
-	static void refresh_awake_environment();
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	// True while this model is in the shared awake set (the park/re-arm gate's
@@ -551,7 +533,6 @@ public:
 	String get_slot_shadow_decal_texture() const;
 	Vector4 get_slot_shadow_decal_dims() const;
 	void update_slot_shadow_group();
-	void set_environment_state(const Ref<EnvLightState> &p_state);
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
 			float p_interior_daylight);
 	void set_interior_section_light_transfer(float p_daylight);
@@ -685,17 +666,7 @@ public:
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).
 	bool is_body_pose_dirty() const { return body_pose_dirty_; }
-
-	// --- environment-value derivation (static; the placer's static batches
-	// consume the same values/skip logic as live models) ---
-	static Ref<EnvLightValues> entity_lighting_values(
-			const Ref<EnvLightValues> &p_world_values, float p_effect_scale,
-			bool p_interior_lerp, float p_interior_daylight);
-	static void apply_environment_values(const Ref<ShaderMaterial> &p_material,
-			const Ref<EnvLightValues> &p_values);
 };
 
 } // namespace godot
-
-VARIANT_ENUM_CAST(godot::ObjectModel::LightingContext);
 VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);

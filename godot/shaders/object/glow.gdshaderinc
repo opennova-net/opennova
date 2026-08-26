@@ -10,7 +10,7 @@
 vec3 obj_rotated_specular_cube(vec3 reflection_world) {
 	// MatRotSpecular is built from Environment_GetLightDirectionFloat's
 	// direct tuple (not the negated diffuse-light vector).
-	vec3 to_sun = normalize(u_dir_light_dir);
+	vec3 to_sun = normalize(opennova_light_block_dir);
 	float aligned = max(dot(normalize(reflection_world), to_sun), 0.0);
 	vec3 white_lobe = vec3(1.4) * pow(aligned, 800.0);
 	vec3 warm_lobe = vec3(1.0, 248.0 / 255.0, 240.0 / 255.0) *
@@ -23,7 +23,7 @@ vec3 obj_glass_glow(vec3 camera_position_world) {
 	vec3 normal = normalize(v_geom_normal);
 	vec3 reflection = reflect(-view_dir, normal);
 	return obj_rotated_specular_cube(reflection) * u_reflect_color.rgb *
-			u_color_src_global_gain * 2.0;
+			opennova_light_block_gain * 2.0;
 }
 
 void obj_apply_q3_coverage(vec3 camera_position_world) {

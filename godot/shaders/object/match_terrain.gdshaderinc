@@ -23,7 +23,7 @@ bool obj_match_terrain_replaces_normal(out vec3 terrain_color) {
 	// ps_1_1: mad_d2 r0.rgb,t0.a,c1,c0; mul_x4 r0.rgb,r0,t0.
 	// D3D's _d2 then _x4 modifiers reduce to a net x2.
 	terrain_color = tile.rgb *
-			(u_hemi_sky_color + tile.a * u_dir_light_color) * 2.0;
+			(obj_hemi_sky_color() + tile.a * obj_dir_light_color()) * 2.0;
 	return true;
 	#else
 	return false;

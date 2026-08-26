@@ -12,10 +12,8 @@ void obj_evaluate_surface(vec3 camera_position_world, mat4 model_matrix,
 	vec3 reflection = reflect(-view_dir, normal);
 	vec3 reflected = obj_environment_cube_approx(reflection) * u_reflect_color.rgb;
 	vec3 point_specular = obj_mirror_points(normal, view_dir);
-	if (u_fog_enabled) {
-		float visibility = obj_fog_visibility(
-				distance(camera_position_world, v_world_pos),
-				u_fog_start, u_fog_end, u_fog_type);
+	if (opennova_fog_enabled) {
+		float visibility = obj_scene_fog_visibility(camera_position_world);
 		reflected = mix(vec3(127.0 / 255.0), reflected, visibility);
 		point_specular *= visibility;
 	}

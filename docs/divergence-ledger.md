@@ -966,12 +966,19 @@ harvested at load (no live owner for the template-harvested materials;
 even the pre-first-iris-tick modulator was baked in), while retail relights
 every entity from the current lighting block each frame
 `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`. The placer
-now registers every harvested batch material and re-stamps from the live env
-per frame (generation-gated; single-sourced stamping shared with
+first registered every harvested batch material and re-stamped it from the
+live env per frame (generation-gated; single-sourced stamping shared with
 ObjectModel). The same slice re-derived the no-environment fallback defaults to
 the retail noon register (full_00.env tod 1200 bytes — composer +
 nova_object_model + shader-global + terrain-include defaults, one cited
-register).
+register). Mechanism re-ported 2026-08-26 (the World-tick perf pass): the
+per-material restamp was the reimpl's own; retail keeps one lighting block
+per scene pass plus two per-entry factors `[orig:
+CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 ->
+RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]`, so the block is now the
+`opennova_light_block_*` global shader parameters `MissionEnvironment`
+writes once per env change and the factors one `u_entity_light` instance
+uniform; no material carries lighting state (render-lighting-re.md D-RLIT-7).
 
 Minted-and-closed 2026-07-06 (the REN-6 session): **D-RLIT-8** -> `FIXED` —
 the object per-material `hemi_sky` served the RAW TOD keyframe while

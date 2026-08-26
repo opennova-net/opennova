@@ -217,20 +217,34 @@ func _container() -> Node3D:
 	return container
 
 
-func _assert_dir_light(model: ObjectModel, expected: Vector3,
+# The per-entity lighting factors (x = effectScale, y = interior flag,
+# z = interior daylight t) are one instance uniform stamped on the direct
+# GeometryInstance3D children of every ROBJ part node and of the model's own
+# Skeleton3D (skinned submeshes bind there instead of under a part).
+func _entity_light_instances(model: ObjectModel) -> Array[GeometryInstance3D]:
+	var parents: Array[Node] = []
+	var parts: Dictionary = model.get_render_part_nodes()
+	for key in parts.keys():
+		parents.append(parts[key] as Node3D)
+	if model.has_skeleton():
+		parents.append(model.get_skeleton())
+	var out: Array[GeometryInstance3D] = []
+	for parent in parents:
+		for child in parent.get_children():
+			var instance := child as GeometryInstance3D
+			if instance != null:
+				out.append(instance)
+	return out
+
+
+func _assert_entity_light(model: ObjectModel, expected: Vector4,
 		message: String) -> void:
 	var checked := 0
-	for value in model.get_surface_materials():
-		var material := value as ShaderMaterial
-		if material == null:
-			continue
-		var actual: Variant = material.get_shader_parameter("u_dir_light_color")
-		if not actual is Vector3:
-			continue
-		var color: Vector3 = actual
-		assert_almost_eq(color.x, expected.x, 0.0001, message + " (r)")
-		assert_almost_eq(color.y, expected.y, 0.0001, message + " (g)")
-		assert_almost_eq(color.z, expected.z, 0.0001, message + " (b)")
+	for instance in _entity_light_instances(model):
+		var actual: Variant = instance.get_instance_shader_parameter("u_entity_light")
+		assert_true(actual is Vector4 and (actual as Vector4).is_equal_approx(expected),
+				"%s: %s carries %s, expected %s" % [
+						message, instance.name, actual, expected])
 		checked += 1
 	assert_gt(checked, 0, message + " (at least one lit surface)")
 
@@ -1265,10 +1279,12 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 		skeleton.add_bone("Bone%d" % bone_index)
 	body.add_child(skeleton)
 	# Replica sun quality is cached by wire identity. It applies immediately to
-	# the body and must also reach a held weapon built AFTER this change.
-	var expected_dir := EnvLightValues.retail_noon_defaults().dir_color * 0.25
+	# the body and must also reach a held weapon built AFTER this change. The
+	# factor is the x (effectScale) lane of the per-entity instance uniform the
+	# object shaders scale the pass-global directional term by.
+	var expected_light := Vector4(0.25, 0.0, 0.0, 0.0)
 	p.set_entity_lighting_context(0x1004, 0.25, false, 0.0)
-	_assert_dir_light(body, expected_dir,
+	_assert_entity_light(body, expected_light,
 			"wire sun quality dims the body directional term")
 
 	# Now the peer is holding something the table can resolve.
@@ -1277,7 +1293,7 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	var weapon: ObjectModel = p.held_weapon_node(0x1004)
 	assert_not_null(weapon, "the model is resolved from the ADM index the wire carries")
 	assert_true(weapon.visible)
-	_assert_dir_light(weapon, expected_dir,
+	_assert_entity_light(weapon, expected_light,
 			"a late-built held weapon inherits its body's cached sun quality")
 	snap.entities[0]["hidden"] = 1
 	_present(p, snap)
@@ -1287,9 +1303,9 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	_present(p, snap)
 	assert_true(weapon.visible,
 			"the caster and color model return on the same visible snapshot")
-	_assert_dir_light(body, expected_dir,
+	_assert_entity_light(body, expected_light,
 			"a hidden-visible cycle preserves the last pushed body lighting")
-	_assert_dir_light(weapon, expected_dir,
+	_assert_entity_light(weapon, expected_light,
 			"a hidden-visible cycle preserves the last pushed weapon lighting")
 
 	# Stowing it again retires the node rather than leaving a gun floating.

@@ -1,7 +1,7 @@
 extends GutTest
 
 # The per-model _process residual fix: clock-DERIVED render work (material
-# generators, PANM transforms, lights, the env push) runs only while the model
+# generators, PANM transforms, lights) runs only while the model
 # can render, while time-ACCUMULATING state (commanded part anims, the skeletal
 # clip clock) advances regardless — a door commanded open while culled is open
 # when next seen, and every skipped value re-derives from the absolute clock on
@@ -16,23 +16,9 @@ const ANIM_FIXTURES := "res://../fixtures/anim"
 
 
 # The render-work gates are pinned through OBSERVABLES on real native models:
-# the environment stamp lands on surface-material uniforms, and PANM transform
-# derivation lands on the Robj part nodes — never through instrumentation
+# PANM transform derivation lands on the Robj part nodes and the per-entity
+# lighting factors land on instance uniforms, never through instrumentation
 # overrides.
-func _fresh_env_state(dir_color: Vector3) -> EnvLightState:
-	var state := EnvLightState.new()
-	var values := EnvLightValues.retail_noon_defaults()
-	values.dir_color = dir_color
-	state.publish(values)
-	return state
-
-
-func _first_material(model: ObjectModel) -> ShaderMaterial:
-	var materials: Array = model.get_surface_materials()
-	assert(materials.size() > 0)
-	return materials[0] as ShaderMaterial
-
-
 func _animated_part_node(model: ObjectModel) -> Node3D:
 	# Part 0 is the fixture's static root; the PANM channels drive parts 1+.
 	var parts: Dictionary = model.get_render_part_nodes()
@@ -68,25 +54,17 @@ func _loaded_skeletal() -> SkeletalAnim:
 	return skeletal
 
 
-func test_hidden_model_skips_render_work_but_advances_part_anims() -> void:
+func test_hidden_model_advances_commanded_part_anims() -> void:
 	var model := _spy_model()
-	var material := _first_material(model)
 	model.play_part_anim(1, 1, 1.0)
 	model.visible = false
 
-	var hidden_color := Vector3(0.9, 0.1, 0.1)
-	model.set_environment_state(_fresh_env_state(hidden_color))
-	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
 	model.advance_runtime_frame(0.5)
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), before,
-			"a hidden model pushes no environment state")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
 			"the commanded part anim still advanced while hidden")
 
 	model.visible = true
 	model.advance_runtime_frame(0.5)
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), hidden_color,
-			"render work resumes on the visible frame")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 62 * 1048,
 			"two half-second render frames preserve retail's fixed 16 ms tick count")
 	model.advance_runtime_frame(0.008)
@@ -94,20 +72,64 @@ func test_hidden_model_skips_render_work_but_advances_part_anims() -> void:
 			"the 63rd retail tick strictly overshoots and clamps the sweep endpoint")
 
 
-func test_hidden_fast_path_skips_the_env_push() -> void:
-	var model := _spy_model()  # static house -> the fast path
-	var material := _first_material(model)
-	model.visible = false
-	var fast_color := Vector3(0.2, 0.8, 0.3)
-	model.set_environment_state(_fresh_env_state(fast_color))
-	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
-	model.advance_runtime_frame(0.016)
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), before,
-			"hidden fast-path frames do nothing")
-	model.visible = true
-	model.advance_runtime_frame(0.016)
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), fast_color,
-			"a visible fast-path frame keeps the env gate")
+# The per-entity lighting factors are stamped on the direct GeometryInstance3D
+# children of every ROBJ part node and of the model's own Skeleton3D (skinned
+# submeshes bind there instead of under a part).
+func _entity_light_instances(model: ObjectModel) -> Array[GeometryInstance3D]:
+	var parents: Array[Node] = []
+	var parts: Dictionary = model.get_render_part_nodes()
+	for key in parts.keys():
+		parents.append(parts[key] as Node3D)
+	if model.has_skeleton():
+		parents.append(model.get_skeleton())
+	var out: Array[GeometryInstance3D] = []
+	for parent in parents:
+		for child in parent.get_children():
+			var instance := child as GeometryInstance3D
+			if instance != null:
+				out.append(instance)
+	return out
+
+
+func _assert_entity_light(model: ObjectModel, expected: Vector4,
+		message: String) -> void:
+	var instances := _entity_light_instances(model)
+	assert_gt(instances.size(), 0, message + " (at least one surface instance)")
+	for instance in instances:
+		var actual: Variant = instance.get_instance_shader_parameter("u_entity_light")
+		assert_true(actual is Vector4 and (actual as Vector4).is_equal_approx(expected),
+				"%s: %s carries %s, expected %s" % [
+						message, instance.name, actual, expected])
+
+
+func test_entity_lighting_context_stamps_every_surface_instance() -> void:
+	# Retail pushes the per-entry factors (effectScale, the interior-parented
+	# flag, the parent interior's daylight t) per batch entry on top of the
+	# pass-global lighting block. Here they are ONE instance uniform, written
+	# on every surface instance at each context edge, never per frame, and
+	# instances recreated by a rebuild come up already stamped.
+	# [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+	var expected := Vector4(0.25, 1.0, 0.4, 0.0)
+	var rigid := _spy_model(PMP_3DI)
+	rigid.set_entity_lighting_context(0.25, true, 0.4)
+	_assert_entity_light(rigid, expected,
+			"every rigid part instance carries the entity lighting factors")
+	rigid.set_entity_lighting_context(0.25, true, 0.4)
+	_assert_entity_light(rigid, expected,
+			"an identical context is a no-op that leaves the stamp in place")
+	rigid.rebuild()
+	_assert_entity_light(rigid, expected,
+			"instances recreated by a rebuild come up stamped")
+
+	var skinned := ObjectModel.new()
+	add_child_autofree(skinned)
+	skinned.set_process(false)
+	skinned.set_skeletal_anim(_loaded_skeletal())
+	skinned.set_object_data(_object_data(SHED_3DI))
+	assert_true(skinned.has_skeleton(), "the rigid fixture fake-skins into a skeleton")
+	skinned.set_entity_lighting_context(0.25, true, 0.4)
+	_assert_entity_light(skinned, expected,
+			"skinned submeshes bound to the Skeleton3D carry the same factors")
 
 
 func test_live_panm_transforms_rederive_on_the_visible_frame() -> void:
@@ -457,9 +479,8 @@ func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 # live work parks the model again. Placed mission/wire models always carry the
 # shared PANM clock (mission_object_placer sets it on every model path);
 # clockless playing models are the OED-preview carve-out and stay awake so
-# their private age keeps accumulating. The staggered environment-restamp
-# wake is live-verified (it depends on the wall frame counter); these tests
-# pin the park/re-arm contract itself.
+# their private age keeps accumulating. These tests pin the park/re-arm
+# contract itself.
 
 func _clocked_spy_model() -> ObjectModel:
 	var model := _spy_model()
@@ -475,27 +496,6 @@ func test_idle_clocked_model_parks_after_one_runtime_frame() -> void:
 	model.advance_runtime_frame(0.016)
 	assert_false(model.is_runtime_frame_awake(),
 			"a shared-clock model with no live per-frame work parks itself")
-
-
-func test_scene_pass_transition_restamps_visible_model_synchronously() -> void:
-	var model := _clocked_spy_model()
-	var material := _first_material(model)
-	var state := _fresh_env_state(Vector3(0.2, 0.3, 0.4))
-	model.set_environment_state(state)
-	model.advance_runtime_frame(0.0)
-	var underwater_color := Vector3(0.04, 0.16, 0.09)
-	var underwater := EnvLightValues.retail_noon_defaults()
-	underwater.fog_color = underwater_color
-	underwater.fog_end = 25.0
-	underwater.fog_type = 1
-
-	state.publish(underwater, true)
-
-	assert_true(Vector3(material.get_shader_parameter("u_fog_color"))
-			.is_equal_approx(underwater_color),
-			"a pass transition bypasses the 16-frame TOD stagger before capture/draw")
-	assert_almost_eq(float(material.get_shader_parameter("u_fog_end")), 25.0, 0.001)
-	assert_eq(int(material.get_shader_parameter("u_fog_type")), 1)
 
 
 func test_clockless_playing_model_stays_awake() -> void:
@@ -526,20 +526,20 @@ func test_mutators_rearm_processing_and_park_when_drained() -> void:
 			"a live part-anim sweep is per-frame work: stays awake")
 
 
-func test_visibility_edge_rearms_for_one_restamp_frame() -> void:
+func test_visibility_edge_rearms_for_one_runtime_frame() -> void:
 	var model := _clocked_spy_model()
 	model.advance_runtime_frame(0.016)
 	assert_false(model.is_runtime_frame_awake(), "baseline: parked while idle")
 	model.visible = false
 	assert_true(model.is_runtime_frame_awake(),
-			"a visibility edge re-arms the env-restamp check")
+			"a visibility edge re-arms the runtime frame")
 	model.advance_runtime_frame(0.016)
 	assert_false(model.is_runtime_frame_awake(), "a hidden idle model parks again")
 	model.visible = true
 	assert_true(model.is_runtime_frame_awake(),
-			"re-shown models re-check the env generation missed while hidden")
+			"re-shown models wake for one catch-up frame")
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_runtime_frame_awake(), "and park once the restamp is done")
+	assert_false(model.is_runtime_frame_awake(), "and park once that frame is done")
 
 
 # --- Camera-submission gate: retail computes per SUBMITTED model ------------
@@ -603,23 +603,12 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	var part := _animated_part_node(model)
-	var material := _first_material(model)
-	var offscreen_color := Vector3(0.1, 0.2, 0.9)
-	var state := _fresh_env_state(offscreen_color)
-	model.set_environment_state(state)
 	model.set_on_screen(false)
-	var catchup_color := Vector3(0.7, 0.2, 0.1)
-	var catchup := EnvLightValues.retail_noon_defaults()
-	catchup.dir_color = catchup_color
-	state.publish(catchup)
 	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
 	part.transform = poison
-	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
 	model.play_part_anim(1, 1, 1.0)
 
 	model.advance_runtime_frame(0.5)
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), before,
-			"an off-camera model pushes no environment state")
 	assert_eq(part.transform, poison, "no PANM evaluation while off camera")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
 			"the commanded part anim still advanced while off camera")
@@ -631,26 +620,3 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	model.advance_runtime_frame(0.5)
 	assert_ne(part.transform, poison,
 			"the submitted frame re-derives transforms from the absolute clock")
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), catchup_color,
-			"and catches up the environment restamp")
-
-
-func test_frozen_pose_refresh_restamps_a_model_newly_visible_at_moved_camera() -> void:
-	var model := _clocked_spy_model()
-	var material := _first_material(model)
-	var state := _fresh_env_state(Vector3(0.2, 0.3, 0.4))
-	model.set_environment_state(state)
-	model.advance_runtime_frame(0.0)
-	model.set_on_screen(false)
-	var underwater := EnvLightValues.retail_noon_defaults()
-	underwater.dir_color = Vector3(0.7, 0.15, 0.05)
-	state.publish(underwater, true)
-	assert_ne(material.get_shader_parameter("u_dir_light_color"), underwater.dir_color,
-			"the off-screen pass transition deliberately leaves render derives stale")
-
-	# The exact-pose camera has moved, but VisibleOnScreenNotifier3D has not had
-	# another render to publish its screen-entered edge. The capture path cannot
-	# wait for that edge or advance animation/material time here.
-	ObjectModel.refresh_awake_environment()
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), underwater.dir_color,
-			"the non-time-owning frozen refresh ignores the stale off-screen bit")

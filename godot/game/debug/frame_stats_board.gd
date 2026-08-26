@@ -76,7 +76,6 @@ enum {
 	MODEL_CLOCK_ANIMATION,  # native model clocks + part/body animation
 	MODEL_PANM,             # native PANM transform evaluation/publication
 	MODEL_MATERIAL,         # native dynamic material generator/texture writes
-	MODEL_ENVIRONMENT,      # retained environment-generation checks/restamps
 	MODEL_ORDER_BOUNDS,     # alpha-strip ordering + changed model bounds
 	MODEL_AWAKE_MODELS,     # VALUE: models visited by the shared awake walk
 	MODEL_RENDERABLE_MODELS,# VALUE: visited models currently camera-submitted

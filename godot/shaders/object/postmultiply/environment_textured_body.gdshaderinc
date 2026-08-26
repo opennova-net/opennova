@@ -32,11 +32,9 @@ void fragment() {
 	#endif
 
 	vec3 source_gamma = source.rgb;
-	if (u_fog_enabled) {
-		float visibility = obj_fog_visibility(
-				distance(CAMERA_POSITION_WORLD, v_world_pos),
-				u_fog_start, u_fog_end, u_fog_type);
-		source_gamma = mix(u_fog_color, source_gamma, visibility);
+	if (opennova_fog_enabled) {
+		source_gamma = mix(opennova_fog_color, source_gamma,
+				obj_scene_fog_visibility(CAMERA_POSITION_WORLD));
 	}
 	vec3 destination_gamma = nova_scene_input(
 			textureLod(u_post_screen, SCREEN_UV, 0.0).rgb);
