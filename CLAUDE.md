@@ -56,6 +56,7 @@ processes.
 scripts/build.sh          # C++ build + full ctest (Release); BUILD_GODOT=0 skips the GDExtension
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
 scripts/test_godot.sh     # GUT GDScript suite, headless
+python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv; ledger_check takes --check)
 ```
 
 - Fresh worktree/clone: `git submodule update --init --recursive` first — `third_party/`
@@ -78,7 +79,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `.claude/settings.local.json` `env` (never tracked); capture files default to the
   gitignored `.scratch/` under the repo root (goldens in `.scratch/golden/`).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
-  Use `apply_patch` or another UTF-8-safe editor.
+  Do bulk text rewrites with bash sed/perl, not PowerShell.
 
 ## Conventions
 
@@ -121,7 +122,9 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   and ADRs 0009–0012.
 - "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
   attach-points are Mounts, presentation owners are Presenters, front-ends are Shells,
-  a lib's embedding app is its embedder.
+  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`
+  (code suffixes only — Markdown gets a non-failing added-lines advisory and `.agents/**`
+  is exempt, so vocabulary in docs is honor-system).
 - ONED is run-only (ADR 0037). Do not add authoring workspaces, project/import
   state, preview runtimes, an asset database, or embedded MCP.
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
@@ -151,8 +154,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   each domain to the record that names its next step. It is a router, not a priority list.
 - [docs/maturity-program.md](docs/maturity-program.md) — the maturity program
   (pre-reimplementation rearchitecture), CLOSED 2026-07-12 with the freeze lifted:
-  the dashboard and close-out dispositions live there. Its Python enforcement
-  scripts are retired. ADRs 0015–0018 and 0022–0024 carry the standing rules every slice
+  the dashboard, close-out dispositions, and the permanent enforcement instruments
+  live there. ADRs 0015–0018 and 0022–0024 carry the standing rules every slice
   still builds under (two products/serve mode, engine layering, typed
   records, public-API testability, divergence burn-down, render parity, family
   topology).

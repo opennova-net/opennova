@@ -63,7 +63,11 @@ C++ surfaces.
 
 Both CMake roots share `engine/CMakeLists.txt`; the group target is already
 linked by `godot/src` and the tests. Do not add a second target or a dynamic
-FFI wrapper.
+FFI wrapper. One thing still matters:
+
+- If the format is terrain-family (or otherwise seam-relevant), check whether
+  `scripts/lint/include_graph_check.py` needs the new include prefix in its
+  forbidden list — same commit.
 
 ## 3. Fixtures (`fixtures/<name>/`)
 
@@ -116,7 +120,10 @@ When a format already exists inside a runtime lib and passes the step-0 gate:
 3. Flip the format-level tests' link word to `opennova_formats` in
    `tests/CMakeLists.txt`; consumer-level tests stay on `opennova_runtime`
    (it PUBLIC-chains formats).
-4. Sweep the stragglers: doc path pointers (targeted per-file
+4. Instruments: the citation ratchet is move-invariant (it walks every `engine/<group>/<lib>` source);
+   update `include_graph_check.py` prefixes if the format was previously covered by
+   a blanket-forbidden directory prefix.
+5. Sweep the stragglers: doc path pointers (targeted per-file
    edits, never repo-wide sed — RE records mix moved and staying paths),
    README tables, `engine/CLAUDE.md` group lists.
 5. Verify like step 4 plus: the format's full roundtrip suite green with ZERO

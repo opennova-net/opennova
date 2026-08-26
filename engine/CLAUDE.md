@@ -51,10 +51,11 @@
   links io, base links formats (base deliberately sits ABOVE formats because vfs
   parses pff/scr/bfc1),
   runtime links base, net links runtime, the service links net. The ADR 0024 family
-  groups are deleted as subsumed. ADR 0020's terrain seam remains the four
-  `<terrain_query/...>` headers: net, wac, mission, and world must not include the
-  concrete `terrain/` implementation. The service target remains the sole sqlite
-  consumer.
+  groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
+  (`scripts/lint/include_graph_check.py` — for net/wac/mission/world the
+  `terrain/` prefix is fully forbidden; the seam is terrain_query's four
+  `<terrain_query/...>` headers), and `link_graph_check.py` keeps the sqlite
+  containment.
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
   `BitWriter`, `io/le.h` primitives (including the `append_*_le` vector writers every
