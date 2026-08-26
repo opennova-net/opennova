@@ -4,6 +4,11 @@ const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 const DestructionPresentPass := preload(
 		"res://game/world/destruction_present_pass.gd")
 const ARMRY_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
+# Authored light variants minted once from the retired edit surface
+# (fixtures/threedi/synthetic/README.md); each test reads the authored record
+# back before probing the director.
+const SYN_SHED_LGHT0_SUB2 := "res://../fixtures/threedi/synthetic/shed_lght0_sub2_origin_atten100.3di"
+const SYN_ARMRY_LGHT0_SUB1 := "res://../fixtures/threedi/synthetic/armry01_lght0_sub1_offset.3di"
 
 # The EffectWorld dynamic point-light wiring (D-RLIT-4): the LightScene
 # binding round trip, the witnessed <= 4 select + global-parameter push, and
@@ -370,6 +375,79 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	director.render_frame(null)
 
 
+func _synthetic_object_data(res_path: String) -> ObjectData:
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(res_path)), OK,
+			"%s loads as an authored light-source variant" % res_path.get_file())
+	return data
+
+
+func test_director_selects_static_building_lght_into_its_exact_robj_row() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	# Shed's one LGHT authored onto subobject 2 at the origin with a 100-wu
+	# radius; the atlas pixel below compares against the entity origin, so the
+	# authored position is asserted, not assumed.
+	var data := _synthetic_object_data(SYN_SHED_LGHT0_SUB2)
+	assert_eq(data.get_light_count(), 1)
+	var light: Dictionary = data.get_light_info(0)
+	assert_eq(int(light.get("subobject", -1)), 2)
+	assert_true((light.get("position", Vector3.ONE) as Vector3).is_equal_approx(Vector3.ZERO))
+	assert_almost_eq(float(light.get("atten_end", 0.0)), 100.0, 0.001)
+	var xform := Transform3D(Basis.IDENTITY, Vector3(5.0, 1.0, 0.0))
+	var source := {
+		"source_index": 0,
+		"kind": MissionData.KIND_BUILDING,
+		"entity_index": 0,
+		"bms_id": 7001,
+		"item_id": 1,
+		"object_data": data,
+		"world_transform": xform,
+	}
+	var draw := {
+		"atlas_row": 0,
+		"source_index": 0,
+		"kind": MissionData.KIND_BUILDING,
+		"entity_index": 0,
+		"bms_id": 7001,
+		"item_id": 1,
+		"robj_index": 2,
+		"world_bounds": AABB(Vector3(-5.0, -5.0, -5.0),
+				Vector3(20.0, 20.0, 20.0)),
+		"active": true,
+	}
+	var director := EffectLightDirector.new()
+	director.setup(world, func() -> Array: return [source],
+			func() -> Array: return [draw])
+	director.reattach()
+	assert_ne(EffectLightDirector.owner_id_for_static_source(0), 0)
+	assert_ne(EffectLightDirector.owner_id_for_static_source(0),
+			EffectLightDirector.owner_id_for_wire(0),
+			"static and wire handle zero occupy distinct non-world owner domains")
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(5.0, 2.0, 8.0)
+	director.render_frame(camera)
+	var report := director.get_report()
+	assert_eq(report.static_rows, 1)
+	assert_eq(report.static_draws, 1)
+	assert_eq(report.lit_static_draws, 1,
+			"the section-2 LGHT reaches exactly the section-2 static draw")
+	var atlas := director.scene().get_static_light_rows_image()
+	assert_not_null(atlas)
+	if atlas == null:
+		return
+	assert_almost_eq(atlas.get_pixel(0, 0).r, 1.0, 0.001)
+	var posr := atlas.get_pixel(1, 0)
+	assert_true(Vector3(posr.r, posr.g, posr.b).is_equal_approx(xform.origin),
+			"the atlas carries the authored LGHT transformed by its static entity")
+
+
+## Corona billboards (the D-RLIT-4 corona leg): the binding surfaces the
+## portable walk's quads [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
+## three segments toward the camera, the authored corona-disable, the
+## 100-wu cull; semantics pinned by ctest renderer_light_scene].
 func test_corona_rows_surface_the_witnessed_segments() -> void:
 	var scene := LightScene.new()
 	assert_gt(scene.spawn_model_light({
@@ -500,6 +578,87 @@ func test_powerup_respawn_routes_authored_lght_once_per_live_entity() -> void:
 	director.on_wire_node_spawned(respawn, MissionData.KIND_ITEM, 0)
 	assert_eq(director.get_report().live, 1,
 			"the replacement node takes the retail powerup_respawn LGHT path")
+
+
+func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	var container := Node3D.new()
+	container.name = "MissionObjects"
+	world.add_child(container)
+	# Armry01 with its LGHT 0 authored onto ROBJ 1 at (0.25, 0.5, -0.75), a
+	# 1000-wu radius and light objects enabled.
+	var data := _synthetic_object_data(SYN_ARMRY_LGHT0_SUB1)
+	assert_gt(data.get_light_count(), 0,
+			"the committed multi-part fixture exposes an authored light")
+	if data.get_light_count() <= 0:
+		return
+	var light: Dictionary = data.get_light_info(0)
+	var attach_part := int(light.get("subobject", -1))
+	assert_gt(attach_part, 0,
+			"the fixture attaches its LGHT to a nonzero ROBJ")
+	if attach_part <= 0:
+		return
+	var authored_position := Vector3(0.25, 0.5, -0.75)
+	assert_true((light.get("position", Vector3.ZERO) as Vector3).is_equal_approx(
+			authored_position))
+	assert_almost_eq(float(light.get("atten_end", 0.0)), 1000.0, 0.001)
+	assert_false(bool(light.get("disable_lightobjects", true)))
+	var node := ObjectModel.new()
+	container.add_child(node)
+	node.set_object_data(data)
+	assert_true(node.get_render_part_nodes().has(attach_part),
+			"the authored attach ROBJ is a live render part")
+	await get_tree().process_frame
+	var part := node.get_render_part_nodes().get(attach_part) as Node3D
+	assert_not_null(part)
+	if part == null:
+		return
+	part.position += Vector3(2.0, 0.0, 0.0)
+	var spawn_position := node.global_transform * authored_position
+	var attached_position := node.get_model_light_world_position(0)
+	assert_false(attached_position.is_equal_approx(spawn_position),
+			"the control ROBJ transform differs from the entity placement matrix")
+	node.set_meta("entity_ref", {"wire_handle": 33})
+	var director := EffectLightDirector.new()
+	director.setup(world, Callable(), Callable())
+	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(0.0, 2.0, 8.0)
+	director.render_frame(camera)
+	var rows := director.get_report().rows
+	assert_gt(rows.size(), 0)
+	var saw_spawn_position := false
+	var saw_attached_position := false
+	for row in rows:
+		if row.position.is_equal_approx(spawn_position):
+			saw_spawn_position = true
+		if row.position.is_equal_approx(attached_position):
+			saw_attached_position = true
+	assert_true(saw_spawn_position,
+			"LGHT position uses the entity placement matrix at spawn")
+	assert_false(saw_attached_position,
+			"subobject selects an owner section, not a position transform")
+
+	node.position += Vector3(3.0, 0.0, 0.0)
+	part.position += Vector3(2.0, 0.0, 0.0)
+	var moved_position := node.global_transform * authored_position
+	assert_false(moved_position.is_equal_approx(spawn_position))
+	director.render_frame(camera)
+	rows = director.get_report().rows
+	var still_at_spawn := false
+	var followed_entity := false
+	for row in rows:
+		if row.position.is_equal_approx(spawn_position):
+			still_at_spawn = true
+		if row.position.is_equal_approx(moved_position):
+			followed_entity = true
+	assert_true(still_at_spawn,
+			"authored LGHT remains at its spawn-time world position")
+	assert_false(followed_entity,
+			"authored LGHT has no per-frame entity follow path in retail")
 
 
 func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> void:

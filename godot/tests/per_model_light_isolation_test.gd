@@ -8,6 +8,10 @@ extends GutTest
 ## @ 0x5abc50 with that draw's owner group].
 
 const PMP_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const SHED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
+# Shed with its one LGHT authored onto subobject 2 (origin, 100-wu radius),
+# minted once from the retired edit surface (fixtures/threedi/synthetic/README.md).
+const SYN_SHED_LGHT0_SUB2 := "res://../fixtures/threedi/synthetic/shed_lght0_sub2_origin_atten100.3di"
 
 
 func _fixture_object_data(model: String) -> ObjectData:
@@ -197,6 +201,69 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 ## Entity_SpawnGlowEffects @ 0x56c8ae]) — before the fix it spawned unowned
 ## and leaked onto every nearby draw. A subobject-0 record stays a world
 ## light every draw receives.
+func test_static_source_subobject_light_is_owner_scoped() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	var container: Node = world.get_node_or_null("MissionObjects")
+	if container == null:
+		container = Node3D.new()
+		container.name = "MissionObjects"
+		world.add_child(container)
+	# House.3di carries no light records: these draws only ever see what the
+	# static source spawns.
+	var model_a := _placed_model(container, Vector3(0.0, 0.0, 0.0))
+	var model_b := _placed_model(container, Vector3(3.0, 0.0, 0.0))
+	# Shed.3di carries one authored record; the fixture attaches it to
+	# subobject 2 to model the armory lamp shape.
+	var lit := ObjectData.new()
+	assert_eq(lit.open_file(ProjectSettings.globalize_path(SYN_SHED_LGHT0_SUB2)), OK)
+	assert_eq(lit.get_light_count(), 1)
+	assert_eq(int(lit.get_light_info(0).get("subobject", -1)), 2,
+			"the fixture attaches the record to subobject 2")
+	var director := EffectLightDirector.new()
+	director.setup(world, func() -> Array:
+		return [{
+			"object_data": lit,
+			"world_transform": Transform3D(Basis.IDENTITY,
+					Vector3(1.5, 0.0, 0.0)),
+		}], Callable())
+	director.reattach()
+	assert_eq(director.get_report().live, 1,
+			"the static source spawns its subobject-attached record")
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(1.5, 1.0, 6.0)
+	director.render_frame(camera)
+	var surface_a := _surface_instance(model_a)
+	var surface_b := _surface_instance(model_b)
+	if surface_a == null or surface_b == null:
+		return
+	assert_eq(float(surface_a.get_instance_shader_parameter(
+			"u_point_light_count")), 0.0,
+			"a static subobject light is scoped to its own building, " +
+			"not a nearby draw")
+	assert_eq(float(surface_b.get_instance_shader_parameter(
+			"u_point_light_count")), 0.0,
+			"no bystander draw receives the owned static light")
+	# The same record detached (subobject 0) is a mission-start world light:
+	# reload the pristine Shed (subobject 0, atten 0..3) into the ObjectData the
+	# source closure holds.
+	assert_eq(lit.open_file(ProjectSettings.globalize_path(SHED_3DI)), OK)
+	assert_eq(int(lit.get_light_info(0).get("subobject", -1)), 0)
+	director.reattach()
+	director.render_frame(camera)
+	assert_eq(float(surface_a.get_instance_shader_parameter(
+			"u_point_light_count")), 1.0,
+			"a subobject-0 static record lights every nearby draw")
+	assert_eq(float(surface_b.get_instance_shader_parameter(
+			"u_point_light_count")), 1.0)
+
+
+## The corona owner visible-section gate [orig: the sectorFilter leg of
+## EffectWorld_RenderLightCoronas @ 0x5ab027 -> Terrain_IsBuildingSectionBitSet
+## @ 0x5c6960]: an owned corona draws only while its owner's section bit is
+## set in the occlusion verdict mask; owners without a verdict pass.
 func test_owned_corona_gates_on_owner_section_visibility() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
