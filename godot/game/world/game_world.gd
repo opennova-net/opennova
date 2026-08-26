@@ -1553,8 +1553,13 @@ func finish_device_frame() -> void:
 # its last counters, so an unarmed slot would report a stale render.
 func _sample_auxiliary_render_stats(stats_on: bool) -> void:
 	if _q3_render_stats != null and _q3_render_stats.begin_frame(stats_on):
-		_q3_render_stats.sample_viewport(0,
-				_framefx.get_q3_viewport() if _framefx != null else null, true)
+		# FrameFx parks the Q3 viewport in UPDATE_DISABLED without a beauty
+		# camera; a disabled viewport keeps its last counters like an unarmed
+		# slot, so it counts only while it renders.
+		var q3_viewport: SubViewport = 				_framefx.get_q3_viewport() if _framefx != null else null
+		_q3_render_stats.sample_viewport(0, q3_viewport,
+				q3_viewport != null and q3_viewport.render_target_update_mode
+						!= SubViewport.UPDATE_DISABLED)
 	var armed := _slot_render_armed_mask
 	_slot_render_armed_mask = (
 			_slot_shadow.get_armed_capture_mask() if _slot_shadow != null else 0)
@@ -2900,9 +2905,10 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	render_foliage_frame()
 	apply_occlusion_frame()
 
-	# These native devices normally self-refresh during a live frame. A fixture
-	# freezes their parent before moving the capture camera, so drive their
-	# public zero-delta frame seams explicitly after that move.
+	# These native devices advance as GameFramePipeline legs (sky/celestial
+	# before terrain, water between terrain and foliage). A fixture freezes
+	# their parent before moving the capture camera, so drive their public
+	# zero-delta frame seams explicitly after that move.
 	if _sky_dome != null:
 		_sky_dome.advance_frame(0.0)
 	if _water != null:
