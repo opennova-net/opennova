@@ -213,6 +213,37 @@ private:
       model_mesh_cache_;
   std::vector<MeshInstance3D *> detail_draw_pool_;
   std::vector<MeshInstance3D *> model_draw_pool_;
+  // What each pool node currently holds on the RenderingServer, so a steady
+  // frame writes nothing: the draw list is diff-applied per slot (mesh,
+  // material, instance uniforms) and only the pool tail past this frame's
+  // command count is hidden. `bound` = the node is visible with a mesh.
+  struct DrawNodeStamp {
+    bool bound = false;
+    Ref<Mesh> mesh;
+    Ref<Material> material;
+    float fade = 0.0f;
+    float alpha_reference = 0.0f;
+    float high_pass_cutoff = 0.0f;
+    float wind_phase = 0.0f;
+    bool tile_cache_ready = false;
+    float tile_cache_layer = 0.0f;
+    Vector4 tile_cache_projection;
+  };
+  std::vector<DrawNodeStamp> detail_draw_stamps_;
+  std::vector<DrawNodeStamp> model_draw_stamps_;
+  // The material inputs last written (texture RIDs + tint): _update_materials
+  // writes the ~100 material parameters only when one of them changes.
+  struct MaterialInputs {
+    RID colormap;
+    RID heightfield_normal;
+    RID tile_overlay;
+    RID tile_cache;
+    Vector3 tile_overlay_tint;
+    RID fd_textures[opennova::FOLIAGE_MAX_DEFS];
+    bool operator==(const MaterialInputs &p_other) const;
+  };
+  MaterialInputs material_inputs_{};
+  bool material_inputs_written_ = false;
 
   FrameStats frame_stats_{};
   int64_t total_frame_calls_ = 0;
@@ -222,8 +253,13 @@ private:
   void _ensure_visuals();
   void _update_materials();
   MeshInstance3D *_ensure_draw_node(std::vector<MeshInstance3D *> &r_pool,
+                                    std::vector<DrawNodeStamp> &r_stamps,
                                     size_t p_index, const String &p_prefix);
   void _hide_draw_pools();
+  // Hide (and unbind) every pool node from p_first on; earlier nodes keep
+  // this frame's bindings.
+  void _hide_pool_tail(std::vector<MeshInstance3D *> &r_pool,
+                       std::vector<DrawNodeStamp> &r_stamps, size_t p_first);
   void _clear_meshes();
   void _on_terrain_data_changed();
   void _on_tile_info_changed();

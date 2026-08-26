@@ -536,10 +536,34 @@ void FoliageDispatcher::_ensure_visuals() {
   };
 
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    const bool fresh = detail_high_materials_[slot].is_null() ||
+                       detail_low_materials_[slot].is_null() ||
+                       silhouette_materials_[slot].is_null();
     ensure_material(detail_high_materials_[slot], detail_high_shader_);
     ensure_material(detail_low_materials_[slot], detail_low_shader_);
     ensure_material(silhouette_materials_[slot], silhouette_shader_);
+    if (fresh) {
+      // A new material holds no parameters yet: force the next write.
+      material_inputs_written_ = false;
+    }
   }
+}
+
+bool FoliageDispatcher::MaterialInputs::operator==(
+    const MaterialInputs &p_other) const {
+  if (colormap != p_other.colormap ||
+      heightfield_normal != p_other.heightfield_normal ||
+      tile_overlay != p_other.tile_overlay ||
+      tile_cache != p_other.tile_cache ||
+      tile_overlay_tint != p_other.tile_overlay_tint) {
+    return false;
+  }
+  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    if (fd_textures[slot] != p_other.fd_textures[slot]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void FoliageDispatcher::_update_materials() {
@@ -563,6 +587,25 @@ void FoliageDispatcher::_update_materials() {
   const bool has_heightfield_normal = heightfield_normal.is_valid();
   const bool has_tile_overlay = tile_overlay.is_valid();
   const bool has_tile_cache = tile_cache.is_valid();
+
+  // Steady frames write nothing: the inputs are retained textures + one
+  // tint, so their identities decide whether the material parameters moved.
+  MaterialInputs inputs;
+  inputs.colormap = has_colormap ? colormap->get_rid() : RID();
+  inputs.heightfield_normal =
+      has_heightfield_normal ? heightfield_normal->get_rid() : RID();
+  inputs.tile_overlay = has_tile_overlay ? tile_overlay->get_rid() : RID();
+  inputs.tile_cache = has_tile_cache ? tile_cache->get_rid() : RID();
+  inputs.tile_overlay_tint = tile_overlay_tint;
+  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    inputs.fd_textures[slot] =
+        fd_textures_[slot].is_valid() ? fd_textures_[slot]->get_rid() : RID();
+  }
+  if (material_inputs_written_ && inputs == material_inputs_) {
+    return;
+  }
+  material_inputs_ = inputs;
+  material_inputs_written_ = true;
 
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     const Ref<Texture2D> fd_texture = fd_textures_[slot];
@@ -601,8 +644,12 @@ void FoliageDispatcher::_update_materials() {
 }
 
 MeshInstance3D *FoliageDispatcher::_ensure_draw_node(
-    std::vector<MeshInstance3D *> &r_pool, size_t p_index,
+    std::vector<MeshInstance3D *> &r_pool,
+    std::vector<DrawNodeStamp> &r_stamps, size_t p_index,
     const String &p_prefix) {
+  if (r_stamps.size() <= p_index) {
+    r_stamps.resize(p_index + 1);
+  }
   while (r_pool.size() <= p_index) {
     MeshInstance3D *instance = memnew(MeshInstance3D);
     instance->set_name(p_prefix +
@@ -629,34 +676,31 @@ MeshInstance3D *FoliageDispatcher::_ensure_draw_node(
 }
 
 void FoliageDispatcher::_hide_draw_pools() {
-  for (MeshInstance3D *instance : detail_draw_pool_) {
-    if (instance != nullptr) {
-      instance->set_visible(false);
-      // Drop the prior frame's draw ownership before this draw list's eviction
-      // events are applied. Resident meshes remain owned by the caches.
-      instance->set_mesh(Ref<Mesh>());
+  _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, 0);
+  _hide_pool_tail(model_draw_pool_, model_draw_stamps_, 0);
+}
+
+void FoliageDispatcher::_hide_pool_tail(
+    std::vector<MeshInstance3D *> &r_pool,
+    std::vector<DrawNodeStamp> &r_stamps, size_t p_first) {
+  for (size_t i = p_first; i < r_pool.size(); ++i) {
+    MeshInstance3D *instance = r_pool[i];
+    DrawNodeStamp *stamp = i < r_stamps.size() ? &r_stamps[i] : nullptr;
+    if (instance == nullptr || (stamp != nullptr && !stamp->bound)) {
+      continue;
     }
-  }
-  for (MeshInstance3D *instance : model_draw_pool_) {
-    if (instance != nullptr) {
-      instance->set_visible(false);
-      instance->set_mesh(Ref<Mesh>());
+    instance->set_visible(false);
+    // Drop the draw's mesh ownership: resident meshes stay owned by the
+    // caches, an evicted identity frees with its last binding.
+    instance->set_mesh(Ref<Mesh>());
+    if (stamp != nullptr) {
+      *stamp = DrawNodeStamp{};
     }
   }
 }
 
 void FoliageDispatcher::_clear_meshes() {
   _hide_draw_pools();
-  for (MeshInstance3D *instance : detail_draw_pool_) {
-    if (instance != nullptr) {
-      instance->set_mesh(Ref<Mesh>());
-    }
-  }
-  for (MeshInstance3D *instance : model_draw_pool_) {
-    if (instance != nullptr) {
-      instance->set_mesh(Ref<Mesh>());
-    }
-  }
 }
 
 void FoliageDispatcher::reset() {
@@ -988,7 +1032,6 @@ void FoliageDispatcher::_compile_and_apply(
     const renderer::FoliageViewInput &p_view) {
   _ensure_visuals();
   _update_materials();
-  _hide_draw_pools();
 
   renderer::FoliageExpansionSamplers expansion;
   expansion.terrain_uv_at = [this](float p_world_x, float p_world_z,
@@ -1101,39 +1144,63 @@ void FoliageDispatcher::_apply_draw_list(
       continue;
     }
 
+    const size_t draw_index = detail ? detail_draw_index++ : model_draw_index++;
+    std::vector<DrawNodeStamp> &stamps =
+        detail ? detail_draw_stamps_ : model_draw_stamps_;
     MeshInstance3D *draw =
-        detail ? _ensure_draw_node(detail_draw_pool_, detail_draw_index++,
+        detail ? _ensure_draw_node(detail_draw_pool_, stamps, draw_index,
                                    String("FoliageDetailDraw"))
-               : _ensure_draw_node(model_draw_pool_, model_draw_index++,
+               : _ensure_draw_node(model_draw_pool_, stamps, draw_index,
                                    String("FoliageModelDraw"));
-    draw->set_mesh(found->second.mesh);
+    // Diff-apply against what the node already holds: a steady frame writes
+    // nothing to the RenderingServer (instance_set_base tears down and
+    // re-pairs the instance; every uniform write is a server call).
+    DrawNodeStamp &stamp = stamps[draw_index];
+    const bool fresh = !stamp.bound;
+    const Ref<Mesh> mesh = found->second.mesh;
+    if (fresh || stamp.mesh != mesh) {
+      draw->set_mesh(mesh);
+      stamp.mesh = mesh;
+    }
+    Ref<Material> material;
     if (detail) {
       const bool high =
           command.pass == opennova::foliage::DetailPass::HighAlphaTest;
-      draw->set_material_override(high ? detail_high_materials_[slot]
-                                       : detail_low_materials_[slot]);
-      draw->set_instance_shader_parameter(StringName("u_fade"), command.fade);
+      material = high ? detail_high_materials_[slot]
+                      : detail_low_materials_[slot];
     } else {
-      draw->set_material_override(silhouette_materials_[slot]);
+      material = silhouette_materials_[slot];
     }
-    draw->set_instance_shader_parameter(StringName("u_alpha_ref"),
-                                        command.alpha_reference);
-    if (detail) {
+    if (fresh || stamp.material != material) {
+      draw->set_material_override(material);
+      stamp.material = material;
+    }
+    if (detail && (fresh || stamp.fade != command.fade)) {
+      draw->set_instance_shader_parameter(StringName("u_fade"), command.fade);
+      stamp.fade = command.fade;
+    }
+    if (fresh || stamp.alpha_reference != command.alpha_reference) {
+      draw->set_instance_shader_parameter(StringName("u_alpha_ref"),
+                                          command.alpha_reference);
+      stamp.alpha_reference = command.alpha_reference;
+    }
+    if (detail && (fresh || stamp.high_pass_cutoff != command.high_pass_cutoff)) {
       // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
       // the cutoff discard keeps it off every texel the HIGH pass accepted.
       // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
       draw->set_instance_shader_parameter(StringName("u_high_pass_cutoff"),
                                           command.high_pass_cutoff);
+      stamp.high_pass_cutoff = command.high_pass_cutoff;
     }
-    draw->set_instance_shader_parameter(StringName("u_wind_phase"),
-                                        command.wind_phase);
+    if (fresh || stamp.wind_phase != command.wind_phase) {
+      draw->set_instance_shader_parameter(StringName("u_wind_phase"),
+                                          command.wind_phase);
+      stamp.wind_phase = command.wind_phase;
+    }
     if (detail) {
-      draw->set_instance_shader_parameter(
-          StringName("u_instance_tile_cache_ready"), false);
-      draw->set_instance_shader_parameter(
-          StringName("u_instance_tile_cache_layer"), 0.0f);
-      draw->set_instance_shader_parameter(
-          StringName("u_instance_tile_cache_projection"), Vector4());
+      bool ready = false;
+      float layer = 0.0f;
+      Vector4 projection_row;
       if (terrain_ != nullptr) {
         const Vector2 center = foliage_detail_cell_center(command.cell_key);
         const std::optional<opennova::TerrainTilePageBinding> page =
@@ -1144,23 +1211,40 @@ void FoliageDispatcher::_apply_draw_list(
               opennova::TerrainTileCompositionCache::page_projection(
                   page->page);
           if (projection.has_value()) {
-            draw->set_instance_shader_parameter(
-                StringName("u_instance_tile_cache_ready"), true);
-            draw->set_instance_shader_parameter(
-                StringName("u_instance_tile_cache_layer"),
-                static_cast<float>(page->layer));
-            draw->set_instance_shader_parameter(
-                StringName("u_instance_tile_cache_projection"),
-                Vector4(projection->world_origin_x,
-                        projection->world_origin_z,
-                        projection->inverse_world_span,
-                        projection->world_span));
+            ready = true;
+            layer = static_cast<float>(page->layer);
+            projection_row = Vector4(projection->world_origin_x,
+                                     projection->world_origin_z,
+                                     projection->inverse_world_span,
+                                     projection->world_span);
           }
         }
       }
+      if (fresh || stamp.tile_cache_ready != ready) {
+        draw->set_instance_shader_parameter(
+            StringName("u_instance_tile_cache_ready"), ready);
+        stamp.tile_cache_ready = ready;
+      }
+      if (fresh || stamp.tile_cache_layer != layer) {
+        draw->set_instance_shader_parameter(
+            StringName("u_instance_tile_cache_layer"), layer);
+        stamp.tile_cache_layer = layer;
+      }
+      if (fresh || stamp.tile_cache_projection != projection_row) {
+        draw->set_instance_shader_parameter(
+            StringName("u_instance_tile_cache_projection"), projection_row);
+        stamp.tile_cache_projection = projection_row;
+      }
     }
-    draw->set_visible(true);
+    if (fresh) {
+      draw->set_visible(true);
+      stamp.bound = true;
+    }
   }
+  // Pool nodes past this frame's command count held the previous frame's
+  // draws: hide them once (they stay hidden until rebound).
+  _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, detail_draw_index);
+  _hide_pool_tail(model_draw_pool_, model_draw_stamps_, model_draw_index);
 
   // 3) A regenerated identity may still have been submitted earlier in this
   // same draw_list. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership

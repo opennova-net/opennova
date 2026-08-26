@@ -117,13 +117,19 @@ func set_resource_root(root: ResourceRoot) -> void:
 
 
 func update_info(info: Dictionary) -> void:
+	# A redraw re-records this item in Godot's deferred flush every frame; the
+	# overlay only changes with its inputs (and the rangefinder easing).
+	var changed := _info != info
 	_info = info
 	if bool(_info.get("binoculars_view_active", false)):
-		_range_display = smooth_range_value(
+		var eased := smooth_range_value(
 				_range_display, int(_info.get("binocular_range", 1)))
+		changed = changed or eased != _range_display
+		_range_display = eased
 	if _nvg_post != null:
 		_nvg_post.visible = bool(_info.get("nvg_visible", false))
-	queue_redraw()
+	if changed:
+		queue_redraw()
 
 
 ## Retail's persistent rangefinder easing. Large corrections step quickly while

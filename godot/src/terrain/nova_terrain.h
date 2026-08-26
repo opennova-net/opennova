@@ -65,6 +65,13 @@ private:
 	RID last_mesh_rid[PATCH_POOL_SIZE];
 	Transform3D last_transform[PATCH_POOL_SIZE];
 	bool patch_visible[PATCH_POOL_SIZE] = {};
+	// The per-instance uniforms each slot holds (written on change only: an
+	// instance uniform write is a RenderingServer call per patch per frame).
+	bool patch_uniforms_stamped[PATCH_POOL_SIZE] = {};
+	Vector2 last_quadrant[PATCH_POOL_SIZE];
+	bool last_page_ready[PATCH_POOL_SIZE] = {};
+	float last_page_layer[PATCH_POOL_SIZE] = {};
+	Vector4 last_page_projection[PATCH_POOL_SIZE];
 	int patches_active = 0;
 
 	// Shader
@@ -99,6 +106,10 @@ private:
 	Ref<Image> light_rows_image;
 	Ref<ImageTexture> light_rows_texture;
 	PackedByteArray light_rows_bytes;
+	// The bytes the rows texture currently holds: the per-frame rebuild
+	// uploads only when they differ (a full RGBAF texture update otherwise).
+	PackedByteArray light_rows_uploaded;
+	int light_rows_enabled_written = -1; // -1 unset, else the bool last pushed
 	bool light_textures_bound = false;
 	int light_patches_lit = 0;
 	int light_rows_total = 0;

@@ -112,6 +112,10 @@ uint64_t mix_value_bytes(uint64_t p_hash, const T &p_value) {
 	return p_hash;
 }
 
+// The page's resident-output identity: the page key plus its pixels. The
+// pixel fold consumes eight bytes per step (a 256 KB page per upload, up to
+// two uploads a frame, on the main thread) — only relative equality of these
+// hashes is ever read (the tile-cache diagnostics).
 uint64_t page_output_hash(
 		const opennova::TerrainTileCompositionJob &p_job,
 		const opennova::terrain::Rgba8Image &p_pixels) {
@@ -121,7 +125,16 @@ uint64_t page_output_hash(
 	hash = mix_value_bytes(hash, p_job.target.page.page_local_x);
 	hash = mix_value_bytes(hash, p_job.target.page.page_local_z);
 	hash = mix_value_bytes(hash, p_job.target.page.page_lod_level);
-	for (uint8_t value : p_pixels.pixels) hash = mix_byte(hash, value);
+	const uint8_t *bytes = p_pixels.pixels.data();
+	const std::size_t size = p_pixels.pixels.size();
+	std::size_t index = 0;
+	for (; index + 8 <= size; index += 8) {
+		uint64_t word = 0;
+		std::memcpy(&word, bytes + index, sizeof(word));
+		hash = (hash ^ word) * UINT64_C(1099511628211);
+		hash ^= hash >> 29;
+	}
+	for (; index < size; ++index) hash = mix_byte(hash, bytes[index]);
 	return hash;
 }
 
