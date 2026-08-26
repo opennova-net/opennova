@@ -102,7 +102,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 
 | Library | Format | Description |
 |---------|--------|-------------|
-| **threedi** | `.3di` | 3D models: geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
+| **threedi** | `.3di` | 3D models: geometry, materials, part animations (PANM), collision, occlusion. The 3DI3 format, consumed directly (ADR 0027); the GP era is documented only. |
 | **ase** | `.ase` | ASCII Scene Export: read/write scene files used by the object pipeline. |
 | **tdp** | `.3dp` | Object projects: material definitions, LOD settings, part-animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
@@ -127,6 +127,10 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **dbf** | `.dbf` | Dialog banks (DLG0): grouped dialog and voice entries. |
 | **sbf** | `.sbf` | Sound-buffer banks: the sample banks behind interactive music. |
 | **mus** | `.bin` | Interactive-music scripts (SCR0/MU01): parser, compiler, and VM. |
+| **bink** | `.bik` | Bink video: the portable BIKi video-only decoder behind the menu movies, with the retail YUV to RGB law (`binkw32.dll`). |
+| **score** | `score.ini` | Scoring configuration: the per-game-type table of fixed 452-byte rows behind the end-of-round board. |
+| **playersav** | `weapon.sav` | Player-profile weapon file: five profile slots, each with BLUE and RED side blocks (class byte, avatar selection, per-class kit pages) plus a single-player kit page. |
+| **foliage** | `.trn` foliage map | Foliage definitions and procedural scatter from the foliage map, distance cull, dispatch. |
 | **wac** | `.wac` | Mission scripts, the language front end: lexer, parser/AST, the 165-command table, and the compiled-program model. |
 | **scr** | | SCR decryption (multiple keys for different game editions). |
 | **sph** | `.sph` | The `/PROFILE` server-log FOURCC chunk container (payload records decode in the net stack). |
@@ -138,7 +142,6 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 |---------|-------------|
 | **terrain** | Terrain core: heightmap sampling, normals, sector mesh geometry, LOD. |
 | **terrain_query** | The world-to-terrain query seam: the zero-dependency height and coordinate query leaf that `world` links and `terrain` builds on (ADR 0020). |
-| **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
 | **renderer** | Material classification and per-vertex/object light evaluation used by the runtime. |
 | **world** | World substrate: entity registry and pools, variable store, the logic tick, and the ported gameplay systems on top of it: AI and the infantry motor, collision and occlusion queries, the weapon FSM/inventory/tables, rounds and ballistics, throwables, vehicle mount and drive, item destruction, spawn selection, zones, and the player view. |
 | **wac** | WAC scripting: the compiler (binds script names and vars against the live world) and the bytecode VM (the language front end lives in the wac parser lib). |
@@ -156,11 +159,10 @@ Wire-compatible with the original protocols: our encoders produce bytes a stock 
 | Library | Description |
 |---------|-------------|
 | **novacrypto** | CRC-32/MPEG-2 and the NWU/EPASK/URL ciphers behind every NovaWorld exchange. |
-| **napi** | NAPI envelope and TLV containers: the checksummed message envelope of the lobby protocol. |
+| **napi** | NAPI envelope and TLV containers: the checksummed message envelope of the NovaWorld matchmaking protocol. |
 | **npwire** | The in-game wire protocol: the in-match message codec and catalog, NWU session framing, and the capture decode chain (ADR 0019). |
-| **novaworld** | The NovaWorld matchmaking and service lib: session state above the framing, gate (first contact, login, server-browser data), and lobby persistence (the only sqlite link). |
-| **netsim** | The in-match net seam: the World-to-wire bridge, transports, and the in-process loopback behind single-player-as-listen-server. |
-| **npruntime** | The in-match NP server and client state machines and frame loop, ported from the original engine over the netsim seam. |
+| **novaworld** | The NovaWorld matchmaking lib: session state above the framing and the gate (first contact, login, server-browser data). The matchmaking/session persistence service builds separately as `opennova_novaworld_service` (the only sqlite link). |
+| **inmatch** | The in-match session boundary (ADR 0036): `opennova::inmatch::Session` owns lifecycle, role policy, fixed-tick banking, and input consumption over an `inmatch::TickTarget`. `netsim` (the World-to-wire bridge, transports, and the in-process loopback behind single-player-as-listen-server) and `npruntime` (the NP server and client state machines and frame loop, ported from the original engine) are its implementation directories, not public libraries. |
 
 ### Tooling support
 

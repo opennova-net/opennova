@@ -270,7 +270,13 @@ Everything below was decompiled and read this session (pseudocode dumps:
    `tests/world/infantry_test.cpp`.
 5. Inter-entity separation + 8-direction avoidance raycasts + combat maneuver modes
    (1/2/5/7/8/12) — **RE'd to address level, detail pass pending** (dump lines ~1080–1290, 3000–4550).
-   The swim/float details are done: §29.1 (both motors, byte-witnessed).
+   The swim/float details are done: §29.1 (both motors, byte-witnessed). Avoidance
+   (negative result, 2026-06-10): patrol walking has **no peer/obstacle steering** in
+   `0x4b9910`. The probe fans are (a) a peer-cohesion *facing* average for combat idles
+   163/44/126 only (same-team peers ≤ 3u + a 9-direction
+   `Entity_CheckLineOfSightTerrainAndEntities` clearance fan biasing `entity[106]`; dump
+   3734–4082), and (b) vehicle-entry approach probes inside the command path. Entity
+   separation = the resolver's push-out (§4 item 5), not AI steering.
 
 ### 3.6 Death/corpse/respawn (health ≤ 0 edge)
 Drop/detach, corpse timer `entity[82] = def+2192` (−61 in the silent-cleanup variant), death anim
@@ -289,18 +295,11 @@ and the vehicle rows 21/23) — ported 2026-07-16.
   real-assets ctest; unit tests inject synthetic velocities. State→clip resolution uses the
   `off_8135F0` names through `.adm` (engine/runtime/anim) — the exact original data path.
 - Tables (`off_8135F0` names, `g_animStateFlagsTable` flags) land as generated C++ tables (wac-style).
+- Anim-state selection + commit rules per moveMode are ported (walk/run/jog/turn/wounded +
+  lock/emote queueing; dump lines 3000–3700). The 147-availability rule is a post-commit
+  force `147 → 43 idle` (dump 4084), **not** a gait fallback — the port is aligned to that.
 
 ## 4. Open items (tracked, addressed)
-1. ~~Anim-state **selection thresholds** per moveMode (dump lines 3000–3700)~~ CLOSED 2026-06-10:
-   selection + commit rules ported (walk/run/jog/turn/wounded + lock/emote queueing); the
-   147-availability rule is a post-commit force `147 → 43 idle` (dump 4084), **not** a gait
-   fallback — port aligned.
-2. ~~**Avoidance** internals~~ CLOSED 2026-06-10 (negative result): patrol walking has **no
-   peer/obstacle steering** in `0x4b9910`. The probe fans found are (a) a peer-cohesion
-   *facing* average for combat idles 163/44/126 only (same-team peers ≤ 3u + a 9-direction
-   `Entity_CheckLineOfSightTerrainAndEntities` clearance fan biasing `entity[106]`; dump 3734–4082), and (b) vehicle-entry
-   approach probes inside the command path. Entity separation = the resolver's push-out
-   (item 5), not AI steering.
 3. **Swim**: no swim locomotion in the unread regions beyond the known state overlays
    (36/37/154 selection + wash 27–29); swimming physics lives in the resolver (item 5,
    water flags at entity+36). The airborne overlay decoded: flags 0x2000/0x20 set + 0x40
@@ -310,17 +309,12 @@ and the vehicle rows 21/23) — ported 2026-07-16.
    resolver). Type-4 bookkeeping was initially decoded under the incorrect platform reading;
    the manual pins CL as ladder, and the entry/chase/exit semantics landed with the
    D-COL-5 port 2026-08-15 (§30).
-6. ~~Marker wait/facing **BMS field mapping**~~ CLOSED (spawn map ported into promote; see §3.2).
 7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `Entity_CheckLineOfSightTerrainAndEntities`.
-8. `dword_C6EAE4` (fall-damage gravity scale) value/source. ~~1024-entry sin/cos table
-   extraction~~ CLOSED 2026-07-05: the table is 1281 entries built by
-   `Math_BuildSinTable @ 0x613050` (accumulating step `dbl_7DF578`, scale `dbl_7C3600` =
-   4194304.0, `_ftol2_sse` truncation); `off_849934` = `outMillis + 0x400` — cos is a
-   +256-entry alias into the SAME table, not a second table (see D-INF-4).
+8. `dword_C6EAE4` (fall-damage gravity scale) value/source.
 9. Death move-step movers `0x461c30`/`0x461cb0` (ids 0/2) — define + decode.
 10. Vehicle-SM per-tick invocation site (event-callback path is confirmed; the tick-mode caller for
     vehicles not yet pinned — likely inside `Entity_UpdateVehiclePhysics`).
-11. The 62-frame divider + spawn-event `f[3] = sub_4E7000()[17]` re-checks (carried from the plan).
+11. The 62-frame divider + spawn-event `f[3] = Projectile_GetHitRecord()[17]` re-checks (carried from the plan).
 12. **Command-path bodies decoded** (dump 1545–2330, rides the command-source phase / D-INF-2):
     move-to-entity orders resolve the target by net-id across pools 0–3; vehicle boarding is a
     staged bone walk (count free `E1..E8` entry bones, claim a slot via entity+866 cross-checked
@@ -2305,6 +2299,12 @@ entity's ammo index to `FLARE`/`GROUND_FLARE` (renderInstance type 2 selects the
 variant), fires one round per AI fire slot via `Weapon_FireProcess @ 0x53f5b0`, then
 restores the original ammo; a countermeasure dispenser, not a generic fire-position
 helper. The two `engine/runtime/world/src/ai.cpp` citations updated in the same commit.
+Body detail (2026-07-16): while `brain[9]` (the flare timer, not a weapon timer) > 0 it
+fires `FLARE` / `GROUND_FLARE` (`profile+16 == 2` selects GROUND_FLARE; ids cached in
+`dword_B21F84/B21F88` via `AmmoDef_LookupByName @ 0x409870`) from the brain's fire-point
+array (`brain[89]` count, `brain+360` point ptrs `{pos xyz, dir xyz; dirZ 0 → 24576}`),
+each transformed by the entity matrix → yaw/pitch → `Weapon_FireProcess`;
+`equippedAdmIndex` saved/restored around the volley.
 
 ### 15.8 The projectile face raycast — the CFAC "bullet LOD" (engine-research 2026-07-17)
 
@@ -2782,27 +2782,8 @@ recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMo
 
 ### 16.5 Open follow-ups (this session's unknowns)
 
-1. ~~`AIEntity_ProcessWeaponFire @ 0x472e00` full-body digest~~ CLOSED 2026-07-16 → §17.6.
-2. ~~The **infantry** combat pass inside `Entity_UpdateInfantryAI @ 0x4b9910`~~ CLOSED
-   2026-07-16 → §17.1–17.5 (perception fn = `Entity_FindNearestThreat @ 0x4b0990`, the
-   ex kong "Entity_SpawnProjectile" misnomer; LOS fan = `Entity_CheckLineOfSightTerrainAndEntities`, renamed
-   `Entity_CheckLineOfSightTerrainAndEntities`).
-3. ~~brain[42] (retarget timer) incrementer unfound.~~ CLOSED 2026-07-16: it is inside the
-   state-17 tick itself — `brain[42] += 16` per processed tick `[orig: @ 0x472e00, the
-   accum>=16 block]` (§17.6).
 4. `Entity_ProcessInfantryWeaponFire @ 0x471710` is wired as the **state-8 tick**
    (`@ 0x8152bc`, HELO enum range) yet named "Infantry" — identity/misname unresolved.
-5. ~~`Entity_ComputeWeaponFirePositions @ 0x455ef0` body~~ CLOSED 2026-07-16: a witnessed
-   MISNOMER — it is the AI **flare/countermeasure dispenser**, not a fire-position
-   solver: while `brain[9]` (the flare timer, not a weapon timer) > 0 it fires
-   `FLARE` / `GROUND_FLARE` (`profile+16 == 2` selects GROUND_FLARE; ids cached in
-   `dword_B21F84/B21F88` via `AmmoDef_LookupByName @ 0x409870`) from the brain's
-   fire-point array (`brain[89]` count, `brain+360` point ptrs `{pos xyz, dir xyz;
-   dirZ 0 → 24576}`), each transformed by the entity matrix → yaw/pitch →
-   `Weapon_FireProcess`; `equippedAdmIndex` saved/restored around the volley. Rename
-   proposal pending (curated name).
-6. ~~`Physics_RaycastTerrainAndSectors @ 0x539910` internals~~ CLOSED 2026-07-16 → §18.5
-   (witnessed + ported: `CollisionWorld::raycast_clear`; ledger D-AI-7).
 7. `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1` classes).
 
 ### 16.6 IDB write-backs (2026-07-16, saved)
@@ -2819,7 +2800,7 @@ variant select), `@ 0x53f5b0` (ammo-def table + authority gate + target hint).
 
 ## 17. Appendix: the infantry combat pass + the state-17 tick digest (engine-research, 2026-07-16)
 
-Slice-1 witness session 2, closing §16.5 items 1/2/3/5: how an org1 rifleman perceives,
+Slice-1 witness session 2, closing four of the §16.5 follow-ups: how an org1 rifleman perceives,
 maneuvers, aims, and fires inside `Entity_UpdateInfantryAI @ 0x4b9910`, and the full body
 of the SM state-17 tick `AIEntity_ProcessWeaponFire @ 0x472e00`. All addresses retail
 `Jointops.exe` (imagebase 0x400000, IDB `Jointops.exe.kong.i64`). In everything below,
@@ -3078,7 +3059,7 @@ Per tick (health ≤ 0 → the §16.1 death event 3/4 instead): `brain[52] += 0x
 in one add; `brain[8] += step` accumulates and every ≥16 fires a **processed tick**:
 `brain[40] += 16` (no-target/give-up), `brain[41] −= 16` clamp 0 (the §16.4 fire
 delay), `brain[42] += 16` (the §16.3 retarget timer — its incrementer), and while
-`brain[9] > 0` the flare dispenser runs (§16.5 item 5). `profile+100` mode bits:
+`brain[9] > 0` the flare dispenser runs (`AIEntity_ReleaseFlareCountermeasures`, the §15.7 IDB addendum). `profile+100` mode bits:
 
 - **0x80 stationary** (.aip `RC_FIRE`, emplacements): fire only while byte
   `brain+785` is set — CORRECTED 2026-08-12: that byte is NOT solver-written; it is
@@ -3443,7 +3424,7 @@ modeled weapon per NPC under D-AI-5); the trail pool =
 `get_tracer_trails()`; the round graphic / glow / smoke-anim residuals are
 D-AI-12.
 
-### 18.5 `Physics_RaycastTerrainAndSectors @ 0x539910` — the LOS raycast (closes §16.5 item 6)
+### 18.5 `Physics_RaycastTerrainAndSectors @ 0x539910` — the LOS raycast (closes the §16.5 raycast follow-up)
 
 Returns TRUE = CLEAR. Arg 5 is a RAY RADIUS (not a flag): the terrain leg lowers
 both endpoint Z by it (thick-ray conservative) and the sector leg inflates every
@@ -3543,7 +3524,7 @@ scopeup/scopedown`. `g_animStateFlagsTable @ 0x8139E8` rows 200..239 = `0x82`
 
 This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFromItemDef
 @ 0x49e550` installs it). Type 1 (the round kill, reading the global hit record
-`sub_4E7000()`: `[14]` = hit BONE section, `[16]` = the round entity):
+`Projectile_GetHitRecord()`: `[14]` = hit BONE section, `[16]` = the round entity):
 
 - players (`Flags & 0x100`) → `Score_ProcessNetworkKillEvent`; NPCs → aiSlot move
   byte 2 + `TriggerGroup_SetAlertRed(commandGroup)` — a member's death alerts its
@@ -3754,26 +3735,8 @@ the cveh SM tick; our earlier bring-up event is removed).
 
 1. `entity+0x11E` (the death-edge skip word) and `byte +0x134` bit 0 (the silent
    cleanup) — writers unwalked.
-2. ~~The scream chain~~ CLOSED 2026-07-17: the SndProf.def profile system is
-   witnessed + ported (§17.4b; the audio record's §sound-profile) — the scream
-   plays (slot 7, or 8 `SSNightDead` on `Bms_AttribFlags & 0x100000` =
-   the mission **EnableNVG** attribute, the formerly-unidentified author). The
-   org2 player edge's composite-name variant stays open (D-SND-14).
-3. ~~The S2C 0x13 client consumer (`NapiNPClientMsg_EntityDeath @ 0x42ebd0`
-   region) also writes `+0x2C0`~~ WALKED 2026-08-05 (§24.3 client fold,
-   D-NET-208): `@ 0x42eb50` stores the body's i16 killerSource into
-   `deathAnimStateId` (+0x2C0) @ 0x42ebdf and zeroes the +0x1BA word — so
-   the wire's second field doubles as the remote death-anim selection for
-   organics; the destructible fold consumes the handle + cb(4) legs, the
-   organic death-anim consumption still rides MP corpse parity (its IDB
-   gloss "clear ammo/weapon field" remains wrong).
-4. ~~`Entity_InitDeathSounds @ 0x4939b0`, `Entity_SpawnDeathPieces @ 0x493400`,
-   the `@ 0x815410` table rows, and `Entity_ProcessFallingDeathPhysics @ 0x461d30`
-   internals~~ CLOSED by §24's destruction port. The specialized unitType-3
-   `DeathPiece_PhysicsUpdate @ 0x48f500` and `sub_48F0B0 @ 0x48f0b0` closed
-   under D-ITEM-18 on 2026-08-23.
-5. The drowning source (`Flags & 0x8000` → 175) rides the unmodeled swim flags.
-6. The player edge (`Entity_UpdateInfantryPlayerBody @ 0x4b4c72/0x4b61c6/0x4b7d83`
+2. The drowning source (`Flags & 0x8000` → 175) rides the unmodeled swim flags.
+3. The player edge (`Entity_UpdateInfantryPlayerBody @ 0x4b4c72/0x4b61c6/0x4b7d83`
    sites) shares the same consume; the player-death PRESENTATION (death camera,
    respawn flow) is the P2b slice.
 
@@ -5169,7 +5132,7 @@ huskFinal/husk `ObjectData` resolution separately from the authored name,
 and the building callback reads that runtime bit. D-ITEM-20 closed 2026-07-22.
 For unitType 3 it spawns the pieces and installs the explicit `PiecePhysics`
 mode backed by `DeathPiece_PhysicsUpdate`, followed by `PiecePitchSettle` for
-`sub_48F0B0`; this specialized pair is ported under D-ITEM-18 rather than
+`DeathPiece_SettlePitch`; this specialized pair is ported under D-ITEM-18 rather than
 substituted with generic falling. UnitType 11's
 common pieces and per-`KZ` blast path run, and as of 2026-08-15 its first husk's
 case-insensitive `DEAD` bank is transformed through the complete entity pose;
@@ -5364,7 +5327,7 @@ ground):
   emits `Effect_HeloGroundHit`, standard terrain scorch 7, authority-only
   `kz_OrganicBlast` then `kz_MItemBlast`, and the authored +140 sound or
   `EXPLO_VEHCL_LG`. The portable four-ray query has the exact terrain segment
-  and bound correction; object hits stay in D-ITEM-9. `sub_48F0B0 @ 0x48f0b0`
+  and bound correction; object hits stay in D-ITEM-9. `DeathPiece_SettlePitch @ 0x48f0b0`
   then steps pitch toward the stored slope by at most two degrees, snaps inside
   four, and only on the following equal-pitch tick transitions to Generic and
   runs `Entity_TransitionToGroundDeath`. D-ITEM-18 closed 2026-08-23; the
@@ -5426,7 +5389,7 @@ the FFI structs.
 | D-ITEM-15 | Wreck effects are one origin-anchored group per authored family plus one fire-crackle roll per wreck; there are no four-slot Dead/water/Fire/Other bone banks, per-slot bone follow, or underwater `g_fx_Boat01Steam` transition. The effect kill plane is particle culling only and cannot substitute for spawning steam | `Entity_InitDeathSounds @ 0x4939b0`; `Entity_UpdateDeadWreckEffects @ 0x493140` | large/multi-bone wreck effects originate and roll at one point, and burning bones entering water neither steam nor retire like retail |
 | D-ITEM-16 | **FIXED 2026-08-16.** The intact `CollisionWorld` view now samples every section at the total-face 8.8 stride, uses retail's signed centroid arithmetic and first callback matrix, derives the witnessed blast/radial direction, and emits material-17 foliage versus wood effects at each sampled triangle | `Entity_SpawnSectionDebris @ 0x43f580` | `destruction_test::test_section_debris_samples_collision_faces` pins 150 samples plus centroid/transform/direction/material; the present-pass test pins the resolved event row |
 | D-ITEM-17 | **FIXED 2026-08-16.** Exact stock graphic→userpoint resolution feeds full-Euler glass points; the pool-2 blast leg uses authored `kz_maxradius`, four ordered probabilistic shatter families, exact PRNG consumption, and a persistent per-point broken bit | `Projectile_ProcessExplosionQueue @0x4eb814-0x4eb85d`; `Terrain_SpawnEffectsAtUserPoint @0x5cee20` | native `destruction` pins range/effects/RNG/break-once; GUT pins real-model name/axis resolution and verbatim presentation |
-| D-ITEM-18 | **FIXED 2026-08-23.** UnitType 3's explicit `PiecePhysics` callback now ports raw-Q16 air/water motion, the one-draw angle branch, four Q22 slope probes and the husk-picked model-bottom correction, strict landing pose, `Effect_HeloGroundHit`, scorch 7, authority-only Organic/MItem dual blasts, exact fallback sounds, and a separate `PiecePitchSettle` state for `sub_48F0B0`'s two-degree step/four-degree snap/delayed transition | `DeathPiece_PhysicsUpdate @0x48f500`; `Entity_CalcSlopeForces @0x4b0b00`; `sub_48F0B0 @0x48f0b0` | `destruction_test::test_specialized_piece_physics_callback` pins dry/wet/ramp/authority paths; object participation in the four rays is tracked once under D-ITEM-9 |
+| D-ITEM-18 | **FIXED 2026-08-23.** UnitType 3's explicit `PiecePhysics` callback now ports raw-Q16 air/water motion, the one-draw angle branch, four Q22 slope probes and the husk-picked model-bottom correction, strict landing pose, `Effect_HeloGroundHit`, scorch 7, authority-only Organic/MItem dual blasts, exact fallback sounds, and a separate `PiecePitchSettle` state for `DeathPiece_SettlePitch`'s two-degree step/four-degree snap/delayed transition | `DeathPiece_PhysicsUpdate @0x48f500`; `Entity_CalcSlopeForces @0x4b0b00`; `DeathPiece_SettlePitch @0x48f0b0` | `destruction_test::test_specialized_piece_physics_callback` pins dry/wet/ramp/authority paths; object participation in the four rays is tracked once under D-ITEM-9 |
 | D-ITEM-19 | **FIXED 2026-08-15.** Collision resolution retains exact case-insensitive `DEAD` points from the first husk only; UnitType 11 transforms each through full Euler and emits one family-0 `Effect_ShockWaterBrdg` at raw water height, first transition only, with no origin fallback | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | `destruction_test::test_bridge_dead_points_emit_water_shocks` pins count, full-pose positions, zero water, first-transition gating, no fallback, and non-UnitType-11 silence; `nova_simulation_test` pins real 3DI user-point axes |
 | D-ITEM-20 | **FIXED 2026-07-22.** Building Static/collapse dispatch gates on `ItemDeathTraits::husk_model_loaded`, fed by successful live huskFinal/husk `ObjectData` resolution and kept separate from authored `has_husk` | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | missing/corrupt husk assets receive the matched-row death flags, but no pieces, Static motion, or collapse sound; valid first-stage and final-only models both open the gate |
 | D-ITEM-21 | **FIXED 2026-08-22 (grill).** The bullet person impact-effect leg. Correspondence first, because the dispatch is easy to misread: bullets reach a person ONLY through the bone-section pass. `Entity_BuildProximityLists_Pool01` fills `g_DynProx*` from pool 1 `@0x4b9389` and `g_PersonProx*` from pool 0 `@0x4b93eb`; `Projectile_RaycastProximitySlots` walks `g_StaticProx` for slotType 2 and `g_DynProx` for slotType 1, reaching `g_PersonProx` only on its DEFAULT leg `@0x4e57e7`, which the bullet dispatch never calls (it passes 2 `@0x4ea4f5` and 1 `@0x4ea535` only). Pool 0 is reached solely via `Physics_RaycastAgainstProximityList @0x4ea5bf` → `Physics_RaycastAgainstBoneSections @0x4e4670` (sole caller `@0x4e4c59`) → dispatch case 3 → `Projectile_HandleTerrainImpact_0 @0x4e98f0`, an auto-namer misnomer that is in fact the person-impact handler. Cases 1/2 therefore cannot produce a person hit, and the bone-bounds call inside `Projectile_HandleEntityImpact @0x4e9672` is a different thing (`Entity_ComputeBoneCollisionBounds`, gated `weaponType==15 && itemDef+92==5`). Ported from that handler: an already-dead victim (`hitEntity+36 & 2`) presents NOTHING; the LOCAL player takes tag 2 'player'; every other person takes tag 23 'flesh' but ONLY IF the victim's group differs from the local player's OR the victim is below half its items.def hp — a same-group victim at or above half health shows no impact effect at all (squad declutter). The two tag legs are mutually exclusive, not additive. Ours previously emitted tag 2 for every person collision | dead gate `@0x4e9920`/`@0x4e994f`; local compare `@0x4e9a55`, push 2 `@0x4e9aa1`; group WORDs +0x11C `@0x4e9aac`/`@0x4e9ab3`; healthMax WORD itemDef+0x17C halved by `sar dx,1` `@0x4e9abf`..`@0x4e9ac6`; signed Health WORD +0x11E compared with `jge` skipping the spawn `@0x4e9ac9`/`@0x4e9ad0`; push 17h `@0x4e9ad7` | shooting an enemy now plays the flesh row (`imp_bullet_flesh`) instead of the player row, and a healthy squad-mate no longer sprays. `projectile_combat::test_person_impact_tag_splits_on_identity_and_squad_health` pins all five branches; `npruntime_round_sim` and `nova_simulation_test` pin the non-local sound row. RESIDUAL: the ADDITIVE body-armor leg `@0x4e99f8`..`@0x4e9a38` (tag 24 'bodyarmor' when the hit zone `hitContext+0x80` is 0..4 UNSIGNED and `victim+0x2C & 8`, the armor carry bit from weapon def `flags & 0x1000` — `WeaponSlotTable_LoadAllFromDefs @0x5415ac`) is UNPORTED: `WeaponInventory::carry_flags` exists but has no per-entity mirror, so the victim's bit is unreadable. Needs an `Entity` field plus a host/wire feed |
@@ -6078,7 +6041,7 @@ Those same EWEAP controls also pose the parent PANM consumed by the mounted carr
 **HEAT_GLOW (writer audit corrected 2026-07-29).** B50Cal's leading CTRL entry is live:
 `HEAT_GLOW` is global ordinal **54** in the 96-entry table (`aLodFrac @ 0x83dce8`, resolved by
 `CtrlName_ToOrdinal @ 0x57b290`, stored per model CtrlReg by the loader
-`[orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6]`), directly ahead of
+`[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; ordinal store @ 0x5B46E6]`), directly ahead of
 `EWEAP_GUNYAW` (55) and `EWEAP_GUNPITCH` (56). The checked-in `B50Cal.3di` CTRL chunk still carries
 exactly those three in local order, but the loader remaps them to global ordinals.
 

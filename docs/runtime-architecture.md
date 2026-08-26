@@ -13,7 +13,7 @@ quanta, runs zero or more fixed logic ticks, then renders once:
 outer frame
   bank elapsed time
   while one 16 ms quantum is due:
-    Game_ProcessMainFrame                 one 62.5 Hz logic tick
+    Game_ProcessMainFrame                 one 62 Hz logic tick
   Render_ProcessMainSceneFrame           one variable-rate render
 ```
 

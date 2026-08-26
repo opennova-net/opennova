@@ -75,10 +75,10 @@ Every recent slice ran this same shape, and a new one should too:
 
 Counts come from the ledger's generated scoreboard — read them there, not here,
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
-nothing keeps this sentence honest. As of the 2026-08-15 regeneration the shape was:
-**World/AI** carries the largest share (63 of 154 domain-open), **UI** (40 — swollen
+nothing keeps this sentence honest. As of the 2026-08-25 regeneration the shape was:
+**World/AI** carries the largest share (59 of 140 domain-open), **UI** (40 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
-small or permanent-register candidates) and **Net** (24) the next largest, and every
+small or permanent-register candidates) and **Net** (23) the next largest, and every
 other domain is in single digits.
 
 Each domain's next step is named in its own record, not centrally:
@@ -88,8 +88,8 @@ Each domain's next step is named in its own record, not centrally:
 | World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§31); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology) |
 | Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/net/npruntime/ROADMAP.md` |
 | UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
-| Render (materials, order, lighting, occlusion) | ledger § Render ×3 | [render/README.md](render/README.md) |
-| Terrain / foliage / tiles | ledger § Terrain, Foliage, Tiles | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
+| Render (materials, order, lighting, occlusion) | ledger § Render — draw order (the materials/state and lighting tables hold no open rows) | [render/README.md](render/README.md) |
+| Terrain / foliage / tiles | ledger § Terrain, Foliage (§ Tiles holds no open rows: D-TIL-1..4 FIXED) | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
 | Environment | ledger § Environment | [env/env-tod-re.md](env/env-tod-re.md), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md) |
 
@@ -114,20 +114,21 @@ decided it needs answered. Get the current list straight from the ledger:
 grep -n 'NEEDS-RE' docs/divergence-ledger.md
 ```
 
-Two rows across the ledger are explicitly tagged **`research starter`** in their
-Slice column — one `NEEDS-RE` row (D-THROW-6) and one `OPEN` row waiting on a
-specific witness (D-HUD-6). D-PLAYERINFO-1 closed on 2026-08-15 after the packed
+One row across the ledger is explicitly tagged **`research starter`** in its
+Slice column — the `NEEDS-RE` row D-THROW-6 (the `lndm` minefield def wiring).
+D-HUD-6 dropped the tag when it narrowed to the centre announce banner
+(2026-08-21). D-PLAYERINFO-1 closed on 2026-08-15 after the packed
 character-id, world/first-person submit, and per-part `TEX_CAMO` paths were
 witnessed and ported. D-HUD-7 closed with the 2026-07-31 recoil/spread grill;
 D-NET-49 closed pre-2026-08-01 (its stale ledger row was reconciled in #403).
-The remaining two are scoped small enough to be somebody's first grill.
+The remaining one is scoped small enough to be somebody's first grill.
 
 ## The instruments that keep this honest
 
 | Instrument | What it prevents | How it runs |
 |---|---|---|
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
-| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates | CI, fail-on-increase against a committed baseline |
+| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; `godot/src` cite markers growing (`adapter_cpp_orig_cites_pushdown`, banked at 365 on 2026-08-25) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`) |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
 | `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission may include only terrain_query's four `terrain_query/` headers, never the terrain-format stack | CI, hard-fail |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |

@@ -151,7 +151,7 @@ SHA-256 before loading, realizes an exact catalog camera/TOD, freezes the
 production shell after settling, and records five variants per selection:
 `beauty`, `shadows_off`, `lighting_only`, `unshaded`, and
 `directional_shadow_atlas`. See the
-[render evidence README](README.md#reproducible-three-mission-fixture-capture)
+[render-parity runbook](render-parity-runbook.md#2-freeze-the-source-then-capture-opennova)
 for the exact invocation and environment contract.
 
 ## Three-mission fixture scope
@@ -456,7 +456,7 @@ Every registered pair must satisfy all of the following:
   pixel-parity gates.
 
 The exact capture, registration, and comparison commands are maintained in
-the [render evidence README](README.md#registered-retailopennova-comparison-capture).
+the [render-parity runbook](render-parity-runbook.md#3a-retail-re-register-retained-bundles).
 Raw bundles remain machine-local under `.scratch/` per the asset-gated policy;
 selected registered derivatives may be published only with their comparison
 manifest and captions intact.

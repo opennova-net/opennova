@@ -160,7 +160,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | BMS event runtime + promotion | `engine/runtime/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
 | World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§31 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, throwables, the water/deck-ride channel, and the ladder climb state machine. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW / D-VEH; open rows in the [ledger](divergence-ledger.md); 2026-08-21: §24.9 impact scars, §14.6 the mounted camera, §25.9 the round-effect lifecycle, the spring leg and the part-animation registers PORTED |
 | Items (items.def entity defs) | `engine/formats/def`, `ItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
-| HUD + interface overlays | `engine/runtime/hud` (`HudFrameCompiler` + `hud_math`; `hud_minimap` — `HudMinimapCompiler`/`HudMapControl`; the `hud_declutter` module), `engine/runtime/world` `minimap_overlay`/`minimap_footprint`, `engine/net/netsim` `client_replica_minimap`, `godot/src/hud` (`HudOverlay`/`HudPos`) | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels, friendly tags, the gameplay spinmap + M-map, the HUDDECLUT declutter system; D-HUD-1..22 — open rows in the ledger); 2026-08-21: the mounted-vehicle panel, the Recent Messages window + the chat ring, the AAS zone status panel and the map medic marker ported |
+| HUD + interface overlays | `engine/runtime/hud` (`HudFrameCompiler` + `hud_math`; `hud_minimap` — `HudMinimapCompiler`/`HudMapControl`; the `hud_declutter` module), `engine/runtime/world` `minimap_overlay`/`minimap_footprint`, `engine/net/netsim` `client_replica_minimap`, `godot/src/hud` (`HudOverlay`/`HudPos`) | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels, friendly tags, the gameplay spinmap + M-map, the HUDDECLUT declutter system; D-HUD-1..25 — open rows in the ledger); 2026-08-21: the mounted-vehicle panel, the Recent Messages window + the chat ring, the AAS zone status panel and the map medic marker ported; 2026-08-24: the MP end-of-round presentation (D-HUD-25) closed, the S2C 0x1E message feed (D-HUD-23) and the Tab scoreboard (D-HUD-24) partial |
 | Mission loading screen | `godot/game/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar / SP splash (D-LOADSCR-1..8; re-verified 2026-08-15) |
 | Player info / avatars | `engine/formats/avatars`, `AvatarDatabase`, `player_info_menu_companion.gd`, `MissionObjectPlacer` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser, screen orchestration, active-slot per-side persistence/network identity, selected world/first-person composition, raw per-part `TEX_CAMO` controls, and packed-id head-sex projection into player sound profiles (D-PLAYERINFO-1 and D-SND-12 FIXED 2026-08-15; -12's per-team memory ported; open: -12's five-slot selector, -9's edited kit pages + `player.sav` options) |
 | Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `ObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
@@ -168,7 +168,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Render — lighting | `engine/runtime/renderer/light_runtime`, `engine/formats/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog); 2026-08-21: the per-light terrain projected pass ported; D-RLIT-4 closed 2026-08-23 after the max-quality foliage selector was proved inert |
 | Render — occlusion / blink boxes | `engine/runtime/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine ported 2026-07-17 — init, mask build, traversal, occluder culling (engine/runtime/world/occlusion.cpp); D-OCC-1..8) |
 | Skeletal animation (`.bad`/`.adm`) | `engine/runtime/anim`, SkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
-| Models (`.3di`: 3DI3 + GP) | `engine/formats/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
+| Models (`.3di`: 3DI3, consumed directly; the GP era is documented only, ADR 0027) | `engine/formats/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
 | Particles (`.ptl`, plus the `.ptu`/`.ptg` gore sets #563 made first-class) | `engine/runtime/particle`, `engine/runtime/renderer` particle path, `godot/src/particle` (EffectScene / ParticleFile) | [particles/ptl-format-re.md](particles/ptl-format-re.md) | landed (#237); D-PTL catalog in the ledger |
 | NovaWorld networking | `engine/net/npwire`, `engine/net/novaworld`, `engine/net/napi`, `engine/net/novacrypto`, `engine/net/netsim`, `apps/novaworld_server`, `godot/src/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match replication exercised in both directions against captures and live retail sessions (retail clients join and play on our hosts); remaining gaps ledgered) |
@@ -176,7 +176,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | VFS / PFF mount stack | `engine/base/vfs`, `engine/formats/pff`, `ResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..11 |
 | Terrain (TRN + runtime queries) | `engine/runtime/terrain`, `engine/runtime/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
 | Foliage | `engine/formats/foliage`, `FoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10 open) |
-| Tiles (`.til` overlay) | `engine/formats/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
+| Tiles (`.til` overlay) | `engine/formats/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1..4 all FIXED, the last 2026-08-20) |
 | Fonts (`.fnt`) | `engine/formats/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..4) |
 | Credits (CBIN) | `engine/formats/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
 | Importer pipeline | `apps/importer`, `pyopennova` | [importer/importer-audit.md](importer/importer-audit.md) | tracked-by-composition (PAR-R6) |
@@ -219,13 +219,17 @@ Order of operations when you need an engine truth:
      `apps/modsuperoed.py`, fixture pack in `third_party/modsuperoed`, gated on
      `OPENNOVA_MODSUPEROED_DIR`.
    - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
-     (98/98 retail bins), `tests/terrain/dvd4_parity_test.cpp`, the `.bad`/3DI
+     (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
+     `tests/terrain/trn_config_roundtrip_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
    - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
      `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see docs/asset-gated-tests.md).
 5. **Runtime introspection:**
-   - The debug overlay (F3 in the standalone game): Entities/Sim/Vars/Perf
-     tabs, sim transport (play/pause/step), and mission-variable writes —
+   - The debug overlay (F3 in the standalone game): 15 pages under
+     `godot/game/debug/pages/` (animation, audio, entities, environment, net,
+     occlusion, particles, perf, player, rendering, rounds, sim, stats, terrain,
+     vars) selected via `select_page(page_id)`, sim transport (play/pause/step),
+     and mission-variable writes —
      `godot/game/debug/nova_debug_overlay.gd`. ONED's Run OpenNova loose action
      launches that same standalone game against the selected data directory;
      ONED has no embedded preview or debug overlay.

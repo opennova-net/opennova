@@ -220,11 +220,11 @@ this slice does not claim those behaviors.
 
 ## Open follow-ups (unwitnessed / partial)
 
-- ~~`particleEffects` (0x278–0x54b) is mapped as one blob~~ — RESOLVED 2026-07-13:
-  the key→offset map is decomposed in the field-map row above and parsed by
-  `engine/formats/def`; the remaining thread is the RUNTIME semantics of the fxs/fxw1..4
-  movement tiers (`Entity_SpawnBoneEffectsAtMask @ 0x458750` from the movement
-  updaters) and the damage-state death/fire/other spawns (ptl-format-re §8).
+- The RUNTIME semantics of the `particleEffects` fxs/fxw1..4 movement tiers
+  (`Entity_SpawnBoneEffectsAtMask @ 0x458750` from the movement updaters) and the
+  damage-state death/fire/other spawns (ptl-format-re §8); the key→offset map itself
+  (0x278–0x54b) is decomposed in the field-map row above and parsed by
+  `engine/formats/def`.
 - The `*_function` class slots (`0x130/0x13c/0x150/0x15c/0x168`) are typed
   `void*` from their single-store witness; the exact class-binding record
   (tag vs resolved fn pointers, and how the chosen class' `fn[3]` lands in

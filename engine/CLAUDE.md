@@ -5,13 +5,13 @@
   `apps/importer/scene_builder/` and `blender/`.
 - Four groups (ADR 0028) — the directories and, since ADR 0029, the CMake build targets
   too; still never namespaces or include-path segments:
-  - `base/` — shared substrate and repo plumbing: io, vfs, resource_index, gameprofile,
-    pcapio.
+  - `base/` — shared substrate and repo plumbing: io, crt, vfs, resource_index,
+    gameprofile, pcapio.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
-    runtime-fused: ADR 0030): adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt, cbin,
-    threedi, tdp, ase, bad, def, avatars, mission, trn, cpt, til,
+    runtime-fused: ADR 0030), 34 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
+    cbin, threedi, tdp, ase, bad, def, avatars, mission, trn, cpt, til,
     foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, particle (.ptl),
-    wac (front end; compiler/VM stay runtime), oed.
+    score, bink, wac (front end; compiler/VM stay runtime), oed.
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
@@ -52,7 +52,9 @@
   same stale stride before; only the native-stride pins catch the drift.
 - Two consumption models (LIBS-3, ADR 0024). **Model A — the flat C ABI**:
   `opennova_shared` (`opennova.dll` / `libopennova.so`) whole-archives the
-  `OPENNOVA_CORE_TARGETS` list — the ADR 0029 group targets now — and exports ONLY
+  `OPENNOVA_CORE_TARGETS` list — the three sim-side ADR 0029 group targets
+  `opennova_formats`, `opennova_base`, `opennova_runtime`; `opennova_net` and the
+  service are never bundled (ADR 0019 §5) — and exports ONLY
   `OPENNOVA_API`-annotated symbols, the surface pinned by the `abi_export_identity`
   ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the Blender
   addon (`blender/opennova/*_ffi.py` mirrors). **Model B — C++ static link**: `godot/src`, the apps, the ctest suite,
@@ -102,10 +104,10 @@
   their own clamp semantics. `engine/formats/cpt`'s bit codec and `io/bit_stream.h` have DIVERGED
   since the latter was lifted (cpt's writer carries a normalizing `set_position` and a
   `write_to_file`; its reader carries `remaining_bits`) — adopting the shared one in cpt
-  is a real migration needing a CPT-corpus byte diff, not a swap. The byte diff is
-  available: `tests/terrain/parametric_parity_test` asserts byte-identical CPT output
-  across four fixtures (it is registered but DISABLED in CI for runtime, so run the
-  built exe directly whenever you touch the CPT encoder). The BMS `Reader`
+  is a real migration needing a CPT-corpus byte diff, not a swap. That byte diff is
+  NOT in ctest today: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) pins the
+  bit codec and the DPTH/CDEP/POLY round-trips on synthetic buffers only, so run a
+  retail-corpus byte diff by hand whenever you touch the CPT encoder. The BMS `Reader`
   (`engine/formats/mission/bms.cpp` since the mission-format move) is still its own
   class with a safe bound (`count <= remaining()`), so what remains is a mechanical
   migration, not a hardening one.

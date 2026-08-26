@@ -59,21 +59,6 @@ here.
 4. **Legs land in dependency order, one increment each:**
    - **Phase 0 — Endpoint switch.** Persisted OpenNova/real target + a picker in `novaworld_panel.gd`.
      No protocol, no grill. Unblocks live testing of every later leg.
-   - **Phase 1 — Session auth/verify (foundation). [DONE]** Parse `ServerHello.hk` and echo it in
-     `ClientAuth.hk` (removes the `=0` stub); wire `protocol_message.h` decode into the `0x83`
-     handler. Target: the client reaches `ServerVerifyResult`. Landed as the Godot-free
-     `libs/novaworld/client_session.{h,cpp}` (the binding is now a thin socket pump) plus the new
-     `parse_server_hello` / `parse_server_auth` client-direction parsers; verified by
-     `tests/novaworld/client_session_loopback_test` (HK echo + verify handshake to `Verified`).
-     See `docs/net/novaworld-net-re.md` §7.1.
-   - **Phase 2 — GSB browse (first visible win, read-only). [DONE]** Client GSB query + parser
-     (inverse of `gsb_build_response`; chunks IVAR/FLDS/SVRS/SVRS/XXXX, key `3209452104342624532341`).
-     Landed as `gsb_parse_response` in `libs/novaworld/gsb.{h,cpp}` (verified by `gsb_parse_roundtrip`)
-     plus the binding's HTTP browse leg: a Godot `HTTPRequest` child fetches `<startup_url>/jop_2.gsb`
-     on reaching Verified, parses it, and exposes `get_server_rows()` + a `server_list_updated` signal
-     that fills the panel list. Grill NW-G3 (`docs/net/novaworld-net-re.md` §8): the client GSB
-     *request* URL is not a binary literal — the client GETs a server-provided URL, so OpenNova
-     matches by construction (the cookie question for real NW is carried to Phase 3).
    - **Phase 3 — EPASK account login (the real-NW gate). [protocol core landed; host wiring pending]**
      Client HTTP: read the EPASK `exp:mod:key` from the login page → POST `/NWLogin.dll` with
      `epask_encrypt(NAME/PASSWORD)` (NW-C2) + the form fields → parse `NWHANDLE`/`PCID` cookies

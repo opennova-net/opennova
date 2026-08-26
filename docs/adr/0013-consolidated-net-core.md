@@ -104,39 +104,6 @@ single `Server_InitNewRoundState` call.
 - **Adding a message is one path**, not three: registry entry → decoder → round-trip
   test → doc §5.x → `nw_pp` verify, and `--coverage` surfaces what is still missing.
 - **Scoped-next (this ADR names them so they are not silently skipped):**
-  - **DONE (D-NET-132, 2026-06-30):** merged `NapiGameSettings` + `ServerRules` +
-    `SessionReplyConfig` into one `GameConfig` (`libs/npruntime/.../game_config.h`) mirroring the
-    `CAdminServer SET` field set (§6.9), collapsing the reimpl's three diverging `g_GameType` copies
-    onto the one field IDA proves the 0x08 block AND the 0x7B body read (`ServerConfig_SerializeToPacket
-    @0x505bd0` / `NapiNPMsg_0x7B_BuildPayload @0x507740`). And collapsed the reactive-reply roster
-    identity onto `link.owned_entity`: team (@entity+344, `CAdminServer_HandleStatus @0x402e30`) + the
-    wire handle are read THROUGH the live registry entity, retiring the
-    `SessionReplyState.{binding_valid, player_entity_handle, team}` cache; the pre-World reactive path
-    (`bind_session_reply_player`) stamps `owned_entity` with the bare wire handle. Wire-neutral on the
-    byte-parity goldens.
-  - **DONE (2026-06-30):** a shared spawn-batch chunker — `np::slice_batch_pages`
-    (`libs/npruntime/.../batch_chunker.h`), the byte-budget world-stream pager factored out of
-    `emit_paged_pool` so the §5.2a burst pages every pool through one named, unit-tested component
-    [orig: `Server_SendInitialGameStateToPlayer @0x51bba0`].
-  - **DONE (2026-06-30):** a shared `SessionSequencing` / `SessionCrypto` retiring the 3× seq/ack + SCRK
-    copies — `frame_session_packet` / `deframe_session_packet` (`libs/novaworld/.../protocol_message.h`),
-    used by the host S2C (`NapiNPConnection`), joiner C2S (`JoinerConnection`), and lobby C2S
-    (`ClientSession`) framing paths (each keeps its own byte-identical outer NWU envelope). Wire-neutral.
-  - **DONE (2026-07-25, PR #300):** `nw_udp_listener`'s JO responder folded onto
-    `start_host_session` — the third copy-paste site from consolidation problem 3. Cost:
-    the shared machinery requires a `ctx.world`, so the service now carries the minimal
-    infrastructure world described in Context, with the admission-depth caution recorded
-    there.
-  - **DONE (2026-07-28, quality campaign W2-2):** the byte-identical outer framers are collapsed —
-    `libs/novaworld`'s `encode_session_outbound` / `decode_session_inbound` are deleted and their
-    call sites use npwire's `nw_encode_outbound` / `nw_decode_inbound` (it was four functions, both
-    directions, not two). And `nw_udp_listener`'s server-direction **framing** leg now calls the
-    shared `frame_session_packet` instead of hand-stamping a `ProtocolPacketHeader` beside the raw
-    `encode_protocol_packet_plaintext` — the last copy of the stamping `npruntime`'s
-    `frame_session_replies` already owned. Wire-neutral, proven before/after against the local
-    goldens (472 decoded S2C tags, 2351 C2S `0x0C` / 2361 S2C `0x0A`, the `0x2A` byte-exact records,
-    and the `0x81`/`0x82` first-diff offsets all unchanged; `golden_client`'s re-framed-datagram
-    byte assertion covers the framing path directly).
   - **CLOSED (2026-07-28, quality campaign W2-3) — REFUTED, not implemented.** The remaining
     item read as "fold `nw_udp_listener`'s per-connection lobby state into the shared
     registry". Doing that would REGRESS the retransmit path, so the item is retired rather

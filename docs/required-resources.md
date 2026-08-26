@@ -4,9 +4,17 @@ The original engine's **boot-required, hardcoded-by-name resource set**: every
 file `Jointops.exe` demands by literal name to boot to the main menu and to
 start a mission, with the witnessed failure behavior for each. This defines
 "what a person starts with to make a new game" — the source of truth for the
-ENG-6 engine-side manifest (Wave 2: a table in `engine/` near gameprofile that
-the game's boot validation consumes) and for the repository's minimum game-data
-tree.
+ENG-6 engine-side manifest and for the repository's minimum game-data tree.
+The manifest is `engine/base/gameprofile/required_resources.h`: it instantiates
+this record (phase-major witnessed order, severity classes, per-row failure
+text + citation; the `required_resources` ctest pins the fatal set and
+completeness). `ResourceRoot.list_missing_boot_resources()` /
+`boot_resource_failure_text()` probe the individually-fatal file rows against
+the mounted root (the archive-table trio stays `mount_runtime`'s own gate), and
+the game shell raises honest missing-resource errors at mount (`main_game.gd`,
+reported-not-enforced — the picker flow keeps a partial dir inspectable where
+retail MessageBox-exits). Edits to this record and the table land in the same
+change; ADR 0037 retired the former ONED diagnostics/new-game-scaffold plan.
 
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`, imagebase
 0x400000) — all addresses below are that binary's. Produced by a read-only
@@ -77,7 +85,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `MENUMUS.SBF` + `MENUMUS.BIN` | menu music | [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60; names set Expansion_LoadAssets @ 0x4a4798] | graceful; expansion form `M<n>.sbf`/`M<n>.bin` |
 | `menu_style.mns`, `brand.mns` | menu-required | [orig: @ 0x552604 / @ 0x552616 via NapiConfigMap_LoadIncludeFile @ 0x63b970] | silent skip (unstyled UI); brand appended after style |
 | `main.bik`, `header.bik`, `footer.bik` | optional-fallback | [orig: UI_CreateMenuBinkVideos @ 0x54b590; strings @ 0x7d2a00–0x7d2a54] | expansion → default path fallback; missing → no menu video |
-| `nw_cdata.coo` | menu-required | [orig: @ 0x55262b → sub_63A500] | HRESULT ignored |
+| `nw_cdata.coo` | menu-required | [orig: @ 0x55262b → CUIStringTable_OpenAndLoad @ 0x63a500] | HRESULT ignored |
 | `main.mnu` (`"Startup"`) | **the entry screen** | see fatal set | menu dead-ends silently |
 | `menutxt.bin` | menu (lazy) | [orig: UIStringTable_LookupAndDup @ 0x63b290; e.g. @ 0x55840e, @ 0x5561b7] | fallback literals used (`nw_error.mnx` hardcoded @ 0x558449) |
 | `Arial12b/14n/14b/16n/16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | menu+HUD fonts | [orig: HUD_InitAllFonts @ 0x51ee20 → HUD_LoadFontIntoSlot @ 0x580400] | missing → null font slot, scale 1.0, no crash (width breakpoints 640/800/1024) |
@@ -92,7 +100,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `failsafe.bad` | mission-required (fallback anim) | [orig: AnimMap_Init @ 0x40be96; AnimMap_FindOrLoadBoneFile @ 0x40c285] | it IS the fallback when a mission `.bad` is missing; loaded every mission start |
 | `<exp>L.lwf`, `<exp>.lwf`, `gamelocl.lwf`, `game.lwf`, `game3.lwf`, `game2.lwf` | mission sound banks | [orig: @ 0x525443 loop over the 260-byte-stride table @ 0x82a5b0 via SoundBank_LoadIfExists; names @ 0x82a7b8+; expansion slots @ 0x4a4972/@ 0x4a499d] | exists-checked per slot, silent skip |
 | `ammo.def` | mission-required | [orig: @ 0x52548a → AmmoDef_LoadAll @ 0x40b0b0] | silent (empty ammo table); key 0x2A5A8EAD |
-| `powerup.def` | mission-required | [orig: @ 0x5256cd → sub_443350] | `_errlog.txt` "Unable to load powerup.def", continues |
+| `powerup.def` | mission-required | [orig: @ 0x5256cd → PowerUpDef_LoadFromFile @ 0x443350] | `_errlog.txt` "Unable to load powerup.def", continues |
 | `<missionbase>.bin` → `medmssn.bin` | mission text | [orig: TextResource_LoadMissionTextBin @ 0x51ed90] | mission-named exists-checked; literal fallback `medmssn.bin` |
 | `game.wac`, `server.wac`, `<missionbase>.wac` | mission scripts (authority) | [orig: WacScript_InitAndLoad @ 0x4f91f0 (game @ 0x4f9454, server @ 0x4f94bc)] | each exists-checked, silent skip; compiled game→server→mission into one buffer |
 | `GAMEMUS.SBF` + `GAMEMUS.BIN` | mission music (MP) | [orig: @ 0x525581–0x525598 → AudioVM_OpenMusicContext @ 0x6722a0; names @ 0x4a47da] | graceful; expansion form `G<n>.sbf`/`G<n>.bin`; SP stops the music context. Full driving witness (var writer map, the always-0 Var1, the dead WAC `music` stream via `Sbf_OpenFile_Gamemus @ 0x4ed6c0`): docs/audio/mus-sbf-re.md §Game music driving |
@@ -161,15 +169,3 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
   (expected from `menu_style.mns`); the specific `.fnt` names were not traced.
 - `menutxt.bin`'s first load-from-archive site was not individually traced
   (witnessed only as lazy lookups).
-- ~~Wave-2 deliverable: the engine-side manifest table~~ **LANDED (ENG-6,
-  Wave-2 trunk)**: `engine/base/gameprofile/required_resources.h` instantiates this
-  record (phase-major witnessed order, severity classes, per-row failure text
-  + citation; `required_resources` ctest pins the fatal set and completeness).
-  `ResourceRoot.list_missing_boot_resources()` /
-  `boot_resource_failure_text()` probe the individually-fatal file rows
-  against the mounted root (the archive-table trio stays `mount_runtime`'s
-  own gate), and the game shell raises honest missing-resource errors at
-  mount (`main_game.gd`, reported-not-enforced — the picker flow keeps a
-  partial dir inspectable where retail MessageBox-exits). Edits to this
-  record and the table land in the same change. ADR 0037 retired the former
-  ONED diagnostics/new-game-scaffold plan.
