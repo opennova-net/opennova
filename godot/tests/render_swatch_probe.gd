@@ -697,6 +697,13 @@ func _lighting_mode(out_dir: String, prefix: String) -> void:
 	var techniques: Array = parsed.get("techniques", [])
 	const COLS := 6
 	const SPACING := 2.2
+	# The world lighting block is pass-global (opennova_light_block_*), not
+	# material state: publish this probe's own register before the first
+	# capture so no other writer's values leak into it. The response states
+	# rewrite the direction and hemisphere pair per capture.
+	RenderingServer.global_shader_parameter_set("opennova_light_block_gain",
+			Vector3(0.5, 0.5, 0.5))
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for i in range(techniques.size()):
 		var technique: Dictionary = techniques[i]
 		var policies: Array = technique.get("policies", [])
@@ -724,7 +731,6 @@ func _lighting_mode(out_dir: String, prefix: String) -> void:
 		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 		material.set_shader_parameter("u_alpha_mod", 1.0)
 		material.set_shader_parameter("u_reflect_color", Color(0.7, 0.8, 0.9, 0.25))
-		material.set_shader_parameter("u_color_src_global_gain", Vector3(0.5, 0.5, 0.5))
 		material.set_shader_parameter("u_local_light_count", 0)
 
 		var sphere := MeshInstance3D.new()
@@ -1158,6 +1164,18 @@ func _clip_mode(out_dir: String, prefix: String) -> void:
 	var entries: Array[Dictionary] = []
 	const SPACING := 0.88
 	const QUAD_SIZE := Vector2(0.72, 2.0)
+	# The lighting block is pass-global: publish this probe's flat register
+	# once before the first capture rather than trusting another writer's.
+	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
+			Vector3(0.22, 0.22, 0.22))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
+			Vector3(0.22, 0.22, 0.22))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir",
+			Vector3(0.0, 0.0, -1.0))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
+			Vector3(0.16, 0.16, 0.16))
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for i in range(techniques.size()):
 		var technique: Dictionary = techniques[i]
 		var policies: Array = technique.get("policies", [])
@@ -1187,11 +1205,6 @@ func _clip_mode(out_dir: String, prefix: String) -> void:
 		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 		material.set_shader_parameter("u_alpha_mod", 1.0)
 		material.set_shader_parameter("u_reflect_color", Color(0.65, 0.72, 0.8, 0.8))
-		material.set_shader_parameter("u_color_src_global_gain", Vector3.ONE)
-		material.set_shader_parameter("u_hemi_sky_color", Vector3(0.22, 0.22, 0.22))
-		material.set_shader_parameter("u_hemi_ground_color", Vector3(0.22, 0.22, 0.22))
-		material.set_shader_parameter("u_dir_light_dir", Vector3(0.0, 0.0, -1.0))
-		material.set_shader_parameter("u_dir_light_color", Vector3(0.16, 0.16, 0.16))
 		material.set_shader_parameter("u_alpha_test_threshold", 0.5)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)
 		material.set_shader_parameter("u_local_light_count", 0)
@@ -1532,6 +1545,18 @@ func _apply_matchterrain_probe_state(entries: Array[Dictionary], state: String,
 	var page_ready := state != "page_unready"
 	var tile = textures["tile_low"] if state == "active_alpha_low" else \
 			textures["tile_high"]
+	# The lighting block is pass-global: publish this state's register with
+	# every capture so each starts from its own values, not a prior writer's.
+	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
+			Vector3(0.10, 0.18, 0.24))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
+			Vector3(0.10, 0.18, 0.24))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir",
+			Vector3(0.0, 0.0, -1.0) if accepted else Vector3(0.0, 0.0, 1.0))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
+			Vector3(0.34, 0.22, 0.12))
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for entry in entries:
 		var material: ShaderMaterial = entry["material"]
 		var mesh: MeshInstance3D = entry["mesh"]
@@ -1546,16 +1571,9 @@ func _apply_matchterrain_probe_state(entries: Array[Dictionary], state: String,
 		material.set_shader_parameter("u_alpha_mod", 1.0)
 		material.set_shader_parameter("u_reflect_color",
 				Color(0.7, 0.8, 0.9, 0.88 if accepted else 0.12))
-		material.set_shader_parameter("u_color_src_global_gain", Vector3.ONE)
-		material.set_shader_parameter("u_hemi_sky_color", Vector3(0.10, 0.18, 0.24))
-		material.set_shader_parameter("u_hemi_ground_color", Vector3(0.10, 0.18, 0.24))
-		material.set_shader_parameter("u_dir_light_dir",
-				Vector3(0.0, 0.0, -1.0) if accepted else Vector3(0.0, 0.0, 1.0))
-		material.set_shader_parameter("u_dir_light_color", Vector3(0.34, 0.22, 0.12))
 		material.set_shader_parameter("u_alpha_test_threshold", 0.5)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)
 		material.set_shader_parameter("u_local_light_count", 0)
-		material.set_shader_parameter("u_fog_enabled", false)
 		material.set_shader_parameter("u_match_terrain_cache", tile)
 		material.set_shader_parameter("u_has_match_terrain_cache", has_cache)
 		mesh.set_instance_shader_parameter("u_point_light_count", 0.0)
@@ -1615,6 +1633,17 @@ func _glow_mode(out_dir: String, prefix: String) -> void:
 	const COLS := 6
 	const SPACING := 2.5
 	const QUAD_SIZE := Vector2(1.30, 1.30)
+	# The lighting block is pass-global. A zero direction color keeps every
+	# NORMAL technique flat so only the glow cube can follow the direction,
+	# which each capture aims below.
+	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
+			Vector3(0.04, 0.04, 0.04))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
+			Vector3(0.04, 0.04, 0.04))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
+			Vector3.ZERO)
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for i in range(techniques.size()):
 		var technique: Dictionary = techniques[i]
 		var name := str(technique["engine_enum"])
@@ -1642,11 +1671,6 @@ func _glow_mode(out_dir: String, prefix: String) -> void:
 		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 		material.set_shader_parameter("u_alpha_mod", 1.0)
 		material.set_shader_parameter("u_reflect_color", Color(1.0, 1.0, 1.0, 1.0))
-		material.set_shader_parameter("u_color_src_global_gain", Vector3.ONE)
-		material.set_shader_parameter("u_hemi_sky_color", Vector3(0.04, 0.04, 0.04))
-		material.set_shader_parameter("u_hemi_ground_color", Vector3(0.04, 0.04, 0.04))
-		material.set_shader_parameter("u_dir_light_color", Vector3.ZERO)
-		material.set_shader_parameter("u_fog_enabled", false)
 		material.set_shader_parameter("u_local_light_count", 0)
 		var quad := QuadMesh.new()
 		quad.size = QUAD_SIZE
@@ -1680,19 +1704,23 @@ func _glow_mode(out_dir: String, prefix: String) -> void:
 		frame_renderer.visible = state in ["nopass_on", "glow_on_aligned", "glow_on_away"]
 		var aligned: bool = not state.ends_with("_away")
 		var show_glow_contracts: bool = state.begins_with("glow_")
+		var reflection := Vector3(0.0, 0.0, 1.0)
 		for entry in entries:
-			var material: ShaderMaterial = entry["material"]
 			var mesh: MeshInstance3D = entry["mesh"]
 			mesh.visible = (str(entry["contract"]) != "no_pass") == show_glow_contracts
+			if str(entry["contract"]) != "rotated_specular":
+				continue
 			# D3D's camera-space reflection coordinate changes across this
 			# orthographic grid because CameraPos remains a single world point.
-			# Aim the very narrow retail cube lobes at each swatch's actual
-			# center reflection instead of assuming its coordinate is +/-Z.
+			# The block direction is one value per pass, so aim the very narrow
+			# retail cube lobes at the rotated_specular swatch's actual center
+			# reflection instead of assuming its coordinate is +/-Z; every other
+			# visible swatch draws with a zero direction color and cannot follow.
 			var incident := (mesh.global_position - camera.global_position).normalized()
-			var reflection := (incident - 2.0 * Vector3(0.0, 0.0, 1.0) *
+			reflection = (incident - 2.0 * Vector3(0.0, 0.0, 1.0) *
 					incident.dot(Vector3(0.0, 0.0, 1.0))).normalized()
-			var direction := reflection if aligned else -reflection
-			material.set_shader_parameter("u_dir_light_dir", direction)
+		RenderingServer.global_shader_parameter_set("opennova_light_block_dir",
+				reflection if aligned else -reflection)
 		var frame: Image = await _capture_lighting_image()
 		if frame == null:
 			push_error("render_swatch_probe glow: no viewport image for %s" % state)
@@ -1969,6 +1997,18 @@ func _apply_projshadow_probe_state(entries: Array[Dictionary], state: String,
 	var detail = textures["detail_low"] if state == "detail_low" else \
 			textures["detail_high"]
 	var alpha_mod := 0.25 if state == "alpha_gen_low" else 1.0
+	# The lighting block is pass-global: publish this probe's flat register
+	# with every state so each capture starts from its own values.
+	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
+			Vector3(0.2, 0.2, 0.2))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
+			Vector3(0.2, 0.2, 0.2))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir",
+			Vector3(0.0, 0.0, -1.0))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
+			Vector3(0.2, 0.2, 0.2))
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for entry in entries:
 		var material: ShaderMaterial = entry["material"]
 		material.set_shader_parameter("u_diffuse", diffuse)
@@ -1979,11 +2019,6 @@ func _apply_projshadow_probe_state(entries: Array[Dictionary], state: String,
 		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 		material.set_shader_parameter("u_alpha_mod", alpha_mod)
 		material.set_shader_parameter("u_reflect_color", Color(0.7, 0.8, 0.9, 0.8))
-		material.set_shader_parameter("u_color_src_global_gain", Vector3.ONE)
-		material.set_shader_parameter("u_hemi_sky_color", Vector3(0.2, 0.2, 0.2))
-		material.set_shader_parameter("u_hemi_ground_color", Vector3(0.2, 0.2, 0.2))
-		material.set_shader_parameter("u_dir_light_dir", Vector3(0.0, 0.0, -1.0))
-		material.set_shader_parameter("u_dir_light_color", Vector3(0.2, 0.2, 0.2))
 		material.set_shader_parameter("u_alpha_test_threshold", 0.5)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)
 		material.set_shader_parameter("u_local_light_count", 0)
@@ -2011,6 +2046,26 @@ func _apply_channel_probe_state(entries: Array[Dictionary], state: String,
 	var color_phase := state.begins_with("rgb_") or \
 			state.begins_with("specular_alpha_")
 	var high := state.ends_with("_high")
+	# The lighting block is pass-global, so one direction serves every swatch
+	# of a capture. The coverage states swing it for the vertex_diffuse_alpha
+	# source (its coverage is the directional self-shadow, direction only);
+	# with a zero direction color no other technique's lit result can follow
+	# the swing, so the flip reaches exactly the swatches it did per material.
+	var direction := Vector3(0.0, 0.0, -1.0)
+	var direction_color := Vector3.ZERO
+	if state.begins_with("specular_alpha_"):
+		direction_color = Vector3(0.55, 0.55, 0.55)
+	elif state.begins_with("coverage_"):
+		direction = Vector3(0.0, 0.0, -1.0) if high else Vector3(0.0, 0.0, 1.0)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
+			Vector3(0.18, 0.18, 0.18))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
+			Vector3(0.18, 0.18, 0.18))
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir", direction)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
+			direction_color)
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for entry in entries:
 		var color_mesh: MeshInstance3D = entry["color_mesh"]
 		var coverage_mesh: MeshInstance3D = entry["coverage_mesh"]
@@ -2020,25 +2075,20 @@ func _apply_channel_probe_state(entries: Array[Dictionary], state: String,
 		var diffuse_high := true
 		var normal_high := true
 		var reflect_alpha := 0.75
-		var direction := Vector3(0.0, 0.0, -1.0)
-		var direction_color := Vector3.ZERO
 		var rgb_mod := Vector3.ONE
 		var alpha_mod := 1.0
 		if state.begins_with("rgb_"):
 			rgb_mod = Vector3.ONE if high else Vector3(0.2, 0.2, 0.2)
 		elif state.begins_with("specular_alpha_"):
 			diffuse_high = high
-			direction_color = Vector3(0.55, 0.55, 0.55)
 		elif state.begins_with("coverage_"):
+			# vertex_diffuse_alpha rides the pass direction published above.
 			if coverage_source == "diffuse_alpha":
 				diffuse_high = high
 			elif coverage_source == "normal_alpha":
 				normal_high = high
 			elif coverage_source == "reflect_alpha":
 				reflect_alpha = 0.75 if high else 0.25
-			elif coverage_source == "vertex_diffuse_alpha":
-				direction = Vector3(0.0, 0.0, -1.0) if high else \
-						Vector3(0.0, 0.0, 1.0)
 		elif state.begins_with("alpha_gen_"):
 			alpha_mod = 1.0 if high else 0.25
 
@@ -2060,11 +2110,6 @@ func _apply_channel_probe_state(entries: Array[Dictionary], state: String,
 			shader_material.set_shader_parameter("u_alpha_mod", alpha_mod)
 			shader_material.set_shader_parameter("u_reflect_color",
 					Color(0.7, 0.8, 0.9, reflect_alpha))
-			shader_material.set_shader_parameter("u_color_src_global_gain", Vector3.ONE)
-			shader_material.set_shader_parameter("u_hemi_sky_color", Vector3(0.18, 0.18, 0.18))
-			shader_material.set_shader_parameter("u_hemi_ground_color", Vector3(0.18, 0.18, 0.18))
-			shader_material.set_shader_parameter("u_dir_light_dir", direction)
-			shader_material.set_shader_parameter("u_dir_light_color", direction_color)
 			shader_material.set_shader_parameter("u_alpha_test_threshold", 0.5)
 			shader_material.set_shader_parameter("u_alpha_test_invert", 0.0)
 			shader_material.set_shader_parameter("u_local_light_count", 0)
@@ -2099,16 +2144,19 @@ func _apply_lighting_probe_state(entries: Array[Dictionary], state: String) -> v
 		direction_color = Vector3.ZERO
 		point_on = state == "point_on"
 
+	# One pass-global lighting block per capture, shared by the sphere and its
+	# MultiMesh twin exactly as a live world shares it across every draw.
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky", hemi_sky)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
+			hemi_ground)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir", direction)
+	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
+			direction_color)
 	for entry in entries:
-		var material: ShaderMaterial = entry["material"]
 		var mesh: MeshInstance3D = entry["mesh"]
 		var static_mesh: MultiMeshInstance3D = entry["static_mesh"]
 		mesh.visible = state != "point_static"
 		static_mesh.visible = state == "point_static"
-		material.set_shader_parameter("u_hemi_sky_color", hemi_sky)
-		material.set_shader_parameter("u_hemi_ground_color", hemi_ground)
-		material.set_shader_parameter("u_dir_light_dir", direction)
-		material.set_shader_parameter("u_dir_light_color", direction_color)
 		mesh.set_instance_shader_parameter("u_point_light_count", 1.0 if point_on else 0.0)
 		var point_position := mesh.global_position + Vector3(0.0, 0.0, 2.0)
 		mesh.set_instance_shader_parameter("u_point_light_posr_0",

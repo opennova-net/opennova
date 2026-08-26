@@ -233,7 +233,6 @@ func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
 	var model = ObjectModel.new()
 	model.name = "AvatarPart_%s" % slot
 	_model_root.add_child(model)
-	model.set_environment_state(_environment.get_light_state())
 	model.set_object_data(data)
 	# Each part carries its own authored camo triplet, stored immediately before
 	# that part's preview submit [orig: Avatar_SetHeadCamoCtrl @0x57a370 /

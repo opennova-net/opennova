@@ -354,8 +354,49 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 		return;
 	}
 	last_published_generation_ = state_.env_generation();
-	light_state_->publish(_build_light_values(), p_pass_changed);
+	const Ref<EnvLightValues> values = _build_light_values();
+	light_state_->publish(values, p_pass_changed);
+	_write_lighting_block_globals(values);
 	emit_signal("env_generation_changed");
+}
+
+MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;
+
+void MissionEnvironment::_write_lighting_block_globals(
+		const Ref<EnvLightValues> &p_values) {
+	if (p_values.is_null()) {
+		return;
+	}
+	const EnvLightValues &v = **p_values;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_light_block_dir", v.dir);
+	rs->global_shader_parameter_set("opennova_light_block_dir_color",
+			v.dir_color);
+	rs->global_shader_parameter_set("opennova_light_block_hemi_sky",
+			v.hemi_sky);
+	rs->global_shader_parameter_set("opennova_light_block_hemi_ground",
+			v.hemi_ground);
+	rs->global_shader_parameter_set("opennova_light_block_ceiling", v.ceiling);
+	rs->global_shader_parameter_set("opennova_light_block_floor",
+			v.floor_color);
+	rs->global_shader_parameter_set("opennova_light_block_gain", v.gain);
+	// The scene fog block itself (color/start/end/type) is the pass state
+	// write_shader_globals / the weather tick / the pass switch already
+	// publish for every fogged consumer; the object family only needs the
+	// enable, which a loaded world always carries.
+	rs->global_shader_parameter_set("opennova_fog_enabled", v.fog_enabled);
+	lighting_block_writer_ = this;
+}
+
+void MissionEnvironment::_notification(int p_what) {
+	if (p_what == NOTIFICATION_EXIT_TREE &&
+			lighting_block_writer_ == this) {
+		// Globals are process-wide: leave the shipped noon defaults behind so
+		// a later preview or mission does not inherit this world's block.
+		lighting_block_writer_ = nullptr;
+		_write_lighting_block_globals(EnvLightValues::retail_noon_defaults());
+		lighting_block_writer_ = nullptr;
+	}
 }
 
 Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {

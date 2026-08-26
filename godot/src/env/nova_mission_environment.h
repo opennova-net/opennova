@@ -19,10 +19,11 @@ namespace godot {
 // witnessed state: the mission TOD clock, the keyframe-TARGET vs smoothed-
 // CURRENT split, network phase-2 overrides, the NVG rewrite, and the
 // change-gated env generation. This node keeps only device work: the .env
-// document property + reload signal, the ten opennova_* global shader
-// parameter pushes, the terrain ShaderMaterial uniform pushes, the sky-map
-// texture handles, and the EnvLightState publication + env_generation_changed
-// signal. Ported from nova_environment.gd (2026-08-09 de-scripting); RE record:
+// document property + reload signal, the opennova_* global shader parameter
+// pushes (the scene-pass block terrain/foliage/water read, and the object
+// family's lighting block — retail's per-pass RenderBatchCtx constants), the
+// terrain ShaderMaterial uniform pushes, the sky-map texture handles, and the
+// EnvLightState publication + env_generation_changed signal. Ported from nova_environment.gd (2026-08-09 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class MissionEnvironment : public Node {
 	GDCLASS(MissionEnvironment, Node)
@@ -37,11 +38,11 @@ public:
 	double get_time_of_day() const { return state_.time_of_day(); }
 	bool is_loaded() const;
 
-	// The typed light channel every lit consumer holds (models and the placer's
-	// static batches): every generation bump
-	// publishes the current world values into it. Consumers hold THIS record
-	// — never this node — and its `changed` signal is what wakes a parked
-	// model for exactly one restamp frame.
+	// The typed light channel for the non-shader consumers (the light
+	// director, terrain light rows, diagnostics, view effects): every
+	// generation bump publishes the current world values into it. Consumers
+	// hold THIS record — never this node. The object shaders read the same
+	// values as global shader parameters (write_lighting_block_globals).
 	Ref<EnvLightState> get_light_state() const { return light_state_; }
 
 	// --- mission clock -----------------------------------------------------
@@ -187,8 +188,9 @@ public:
 	// engine-side writeback path cannot perform itself.
 	opennova::env::EnvironmentState &state() { return state_; }
 	const opennova::env::EnvironmentState &state() const { return state_; }
-	// Publish the typed light record + emit env_generation_changed when the
-	// engine generation moved since the last publish.
+	// Publish the typed light record, write the object lighting block globals,
+	// and emit env_generation_changed when the engine generation moved since
+	// the last publish.
 	void flush_publication(bool p_pass_changed = false);
 	// The standalone-owner full global refresh (the weather node owns the
 	// per-frame write while present).
@@ -198,6 +200,7 @@ public:
 
 protected:
 	static void _bind_methods();
+	void _notification(int p_what);
 
 private:
 	void _ensure_loaded();
@@ -209,6 +212,13 @@ private:
 	void _after_tod_update();
 	Ref<EnvLightValues> _build_light_values() const;
 	void _write_scene_fog_globals();
+	// The object family's per-pass lighting block as global shader
+	// parameters: the world block the object shaders scale per entity at
+	// draw time (renderer/light_runtime.h carries the RenderBatchCtx
+	// witness). One write per env change; process-wide, so the last writer
+	// restores the shipped noon defaults when it leaves the tree.
+	void _write_lighting_block_globals(const Ref<EnvLightValues> &p_values);
+	static MissionEnvironment *lighting_block_writer_;
 
 	Ref<EnvFile> environment_data_;
 	opennova::env::EnvironmentState state_;

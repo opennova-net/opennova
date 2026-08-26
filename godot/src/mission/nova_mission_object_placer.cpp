@@ -52,8 +52,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::get_avatar_db);
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"),
 			&MissionObjectPlacer::set_panm_clock);
-	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
-			&MissionObjectPlacer::set_environment_state);
 	ClassDB::bind_method(D_METHOD("get_item_db"),
 			&MissionObjectPlacer::get_item_db);
 
@@ -96,8 +94,6 @@ void MissionObjectPlacer::_bind_methods() {
 					"parent", "clip_key", "rig_graphic"),
 			&MissionObjectPlacer::build_model_from_graphic, DEFVAL(String()),
 			DEFVAL(String()));
-	ClassDB::bind_method(D_METHOD("update_environment"),
-			&MissionObjectPlacer::update_environment);
 
 	ClassDB::bind_method(D_METHOD("get_placed_entity_records"),
 			&MissionObjectPlacer::get_placed_entity_records);
@@ -192,11 +188,6 @@ void MissionObjectPlacer::set_panm_clock(const Ref<PanmClock> &p_clock) {
 	panm_clock_ = p_clock;
 }
 
-void MissionObjectPlacer::set_environment_state(
-		const Ref<EnvLightState> &p_state) {
-	env_state_ = p_state;
-}
-
 Ref<ItemDatabase> MissionObjectPlacer::get_item_db() {
 	_ensure_item_db();
 	return item_db_;
@@ -241,9 +232,6 @@ void MissionObjectPlacer::_check_epoch() {
 	skeletal_cache_.clear();
 	static_batch_cache_.clear();
 	graphic_panm_cache_.clear();
-	batch_materials_.clear();
-	last_batch_env_gen_ = -1;
-	last_batch_env_values_.unref();
 	occlusion_cache_.clear();
 	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
 		static_terrain_shadow_sources_.write[i].object_data.unref();
@@ -339,33 +327,6 @@ bool MissionObjectPlacer::_placement_is_mirror_reflected(
 }
 
 // --- environment relight -----------------------------------------------------
-
-void MissionObjectPlacer::update_environment() {
-	if (batch_materials_.is_empty()) {
-		return;
-	}
-	int64_t gen = -1;
-	Ref<EnvLightValues> values;
-	if (env_state_.is_valid()) {
-		gen = env_state_->get_generation();
-		if (gen == last_batch_env_gen_ && last_batch_env_values_.is_valid()) {
-			return;
-		}
-		values = env_state_->get_values();
-	}
-	if (values.is_null()) {
-		values = EnvLightValues::retail_noon_defaults();
-	}
-	if (values->equals(last_batch_env_values_)) {
-		last_batch_env_gen_ = gen;
-		return;
-	}
-	last_batch_env_values_ = values;
-	last_batch_env_gen_ = gen;
-	for (const Ref<Material> &material : batch_materials_) {
-		ObjectModel::apply_environment_values(material, values);
-	}
-}
 
 // --- placement ---------------------------------------------------------------
 
@@ -750,12 +711,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	spans["static_batches"] = clock->get_ticks_usec() - stage_begin;
 	stage_begin = clock->get_ticks_usec();
 
-	// Align every harvested batch material with the env AS OF placement end —
-	// the throwaway-template harvest sees mid-load values (e.g. the modulator
-	// before its first iris tick).
-	last_batch_env_values_.unref();
-	update_environment();
-
 	// Animated: an individual ObjectModel per entity.
 	int animated_count = 0;
 	for (int a_index = 0; a_index < animated.size(); ++a_index) {
@@ -783,9 +738,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		// placement_traits.h ledger, author-time Ground bake).
 		model->set_transform(a.get("xform", Transform3D()));
 		container->add_child(model);
-		if (env_state_.is_valid()) {
-			model->set_environment_state(env_state_);
-		}
 		_configure_item_shadow(model, item_id);
 		_configure_item_lighting(model, item_id);
 		// Load the entity's body-animation set (.adm) BEFORE the data:
@@ -866,9 +818,6 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 	model->set_mirror_reflected(_item_is_mirror_reflected(p_item_id));
 	_configure_item_scale(model, p_item_id);
 	p_parent->add_child(model);
-	if (env_state_.is_valid()) {
-		model->set_environment_state(env_state_);
-	}
 	_configure_item_shadow(model, p_item_id);
 	_apply_skeletal_anim(model, p_item_id, data->get_bone_origins(),
 			data->get_bone_parents());
@@ -1037,9 +986,6 @@ ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 	model->set_panm_clock(panm_clock_);
 	model->set_name(vformat("Viewmodel_%s", p_graphic));
 	p_parent->add_child(model);
-	if (env_state_.is_valid()) {
-		model->set_environment_state(env_state_);
-	}
 	if (!p_adm_name.is_empty()) {
 		// The ADM names the CLIP SET; the rig table belongs to the equipped
 		// FP gun — the arms and gun ride one shared table, exactly as retail
@@ -1332,9 +1278,6 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 		ObjectModel *model = memnew(ObjectModel);
 		p_tree_parent->add_child(model);
 		model->set_object_data(data);
-		if (env_state_.is_valid()) {
-			model->set_environment_state(env_state_);
-		}
 		model->rebuild();
 		int submesh = 0;
 		const Dictionary part_nodes = model->get_render_part_nodes();
@@ -1360,11 +1303,6 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 				batch.auxiliary_draw = bool(mi->get_meta(
 						"_opennova_auxiliary_draw", false));
 				batches.push_back(batch);
-				const Ref<ShaderMaterial> shader_material = batch.material;
-				if (shader_material.is_valid() &&
-						batch_materials_.find(batch.material) < 0) {
-					batch_materials_.push_back(batch.material);
-				}
 				++submesh;
 			}
 		}

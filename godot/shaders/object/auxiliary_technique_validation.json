@@ -133,7 +133,7 @@
         {"file": "_tSkFolg.fx", "symbols": ["technique Simple_MatchTerrain_PS", "vscSkMatchTerrain", "mad_d2", "mul_x4", "TexCurProj"]}
       ],
       "runtime_evidence": [
-        {"path": "godot/shaders/object/match_terrain.gdshaderinc", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready", "(u_hemi_sky_color + tile.a * u_dir_light_color) * 2.0"]},
+        {"path": "godot/shaders/object/match_terrain.gdshaderinc", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready", "(obj_hemi_sky_color() + tile.a * obj_dir_light_color()) * 2.0"]},
         {"path": "godot/src/object/nova_object_model.cpp", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready"]},
         {"path": "godot/tests/render_swatch_probe.gd", "tokens": ["MATCHTERRAIN stance/page gate", "has no MATCHTERRAIN contract"]}
       ],

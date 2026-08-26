@@ -621,7 +621,6 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 		_local_character_profile = {}
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
-	_placer.set_environment_state(_env.get_light_state())
 	var options := {}
 	# A wire-header join deliberately has no authored body records. The load stream
 	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
@@ -1290,8 +1289,6 @@ func advance_weather_frame() -> void:
 		var weather: Weather = _weather
 		if weather != null:
 			weather.advance_world_driven(_frame_delta, get_sim())
-	if _placer != null:
-		_placer.update_environment()
 	if _frame_timing:
 		var weather_us := Time.get_ticks_usec() - probe_phase_start
 		if _frame_probe_enabled:
@@ -1578,8 +1575,6 @@ func render_material_frame() -> void:
 			profile[ObjectModel.AWAKE_PROFILE_PANM_US])
 	_frame_stats.add(FrameStatsBoard.MODEL_MATERIAL,
 			profile[ObjectModel.AWAKE_PROFILE_MATERIAL_US])
-	_frame_stats.add(FrameStatsBoard.MODEL_ENVIRONMENT,
-			profile[ObjectModel.AWAKE_PROFILE_ENVIRONMENT_US])
 	_frame_stats.add(FrameStatsBoard.MODEL_ORDER_BOUNDS,
 			profile[ObjectModel.AWAKE_PROFILE_ORDER_BOUNDS_US])
 	_frame_stats.add(FrameStatsBoard.MODEL_AWAKE_MODELS,
@@ -2873,17 +2868,9 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# time-owning leg. Terrain publishes the detail-cell handoff consumed by
 	# foliage; occlusion then resolves the world visibility for this exact view.
 	apply_scene_environment_frame()
-	if _placer != null:
-		# Static MultiMesh batches are retained materials rather than ObjectModels;
-		# the frozen path omits Weather's normal relight tail, so restamp them now.
-		_placer.update_environment()
 	render_terrain_frame()
 	render_foliage_frame()
 	apply_occlusion_frame()
-	# A pass transition can precede the moved camera's visibility notification.
-	# Restamp only environment values after the exact-pose collector admits new
-	# models; do not advance PANM, material generators, animation, or clocks.
-	ObjectModel.refresh_awake_environment()
 
 	# These native devices normally self-refresh during a live frame. A fixture
 	# freezes their parent before moving the capture camera, so drive their

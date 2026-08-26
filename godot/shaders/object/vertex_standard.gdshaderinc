@@ -21,7 +21,7 @@ void vertex() {
 	#endif
 	// Pixel-shader NORMAL passes interpolate these oD0-equivalent factors;
 	// their normal-map N.L/N.H terms remain fragment-rate.
-	v_dir_self_shadow = obj_self_shadow(v_geom_normal, -u_dir_light_dir);
+	v_dir_self_shadow = obj_self_shadow(v_geom_normal, -opennova_light_block_dir);
 	#ifdef OBJ_VERTEX_POINT_LIGHTS_SELF_SHADOWED_ATTENUATION
 	v_pixel_point_factor = obj_pixel_point_vertex_factors(
 			v_world_pos, v_geom_normal);

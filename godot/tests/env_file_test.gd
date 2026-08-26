@@ -297,7 +297,11 @@ func test_light_direction_render_tuple_is_the_raw_getter_and_the_godot_vector_it
 			"the Godot-axes light is the raw tuple's x/z swap (env_axes.h), nothing else")
 
 
-func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -> void:
+func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> void:
+	# The object family reads retail's per-pass lighting block as global shader
+	# parameters written on every publication; the per-entity factors ride the
+	# u_entity_light instance uniform (nova_object_model tests) and the lerp/
+	# scale math is pinned engine-side (renderer::compute_entity_lighting).
 	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
@@ -306,23 +310,38 @@ func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -
 
 	assert_true(world_values.floor_color.is_equal_approx(env_node.get_floor_color()))
 	assert_true(world_values.ceiling.is_equal_approx(env_node.get_ceiling_color()))
+	var expected := {
+		"opennova_light_block_dir": world_values.dir,
+		"opennova_light_block_dir_color": world_values.dir_color,
+		"opennova_light_block_hemi_sky": world_values.hemi_sky,
+		"opennova_light_block_hemi_ground": world_values.hemi_ground,
+		"opennova_light_block_ceiling": world_values.ceiling,
+		"opennova_light_block_floor": world_values.floor_color,
+		"opennova_light_block_gain": world_values.gain,
+	}
+	# The headless Dummy RenderingServer does not retain global shader
+	# parameters (get returns null); a rendering run verifies the writes.
+	if RenderingServer.global_shader_parameter_get(
+			"opennova_light_block_dir_color") == null:
+		pending("the headless RenderingServer retains no global shader parameters")
+		return
+	for name in expected:
+		var published: Vector3 = RenderingServer.global_shader_parameter_get(name)
+		assert_true(published.is_equal_approx(expected[name]),
+				"%s carries the published block value" % name)
+	assert_true(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
+			"a loaded world fogs the object family")
 
-	var covered = ObjectModel.entity_lighting_values(
-			world_values, 0.25, false, 0.0)
-	assert_true(covered.dir_color.is_equal_approx(world_values.dir_color * 0.25),
-			"three blocked retail rays leave one quarter directional light")
-	assert_true(covered.hemi_ground.is_equal_approx(world_values.hemi_ground),
-			"sun visibility does not dim the outdoor hemisphere")
-	assert_true(covered.hemi_sky.is_equal_approx(world_values.hemi_sky))
-
-	var interior = ObjectModel.entity_lighting_values(
-			world_values, 1.0, true, 0.2)
-	assert_true(interior.dir_color.is_equal_approx(world_values.dir_color * 0.2),
-			"Ihq01 light_transfer 20 leaves twenty percent directional light")
-	assert_true(interior.hemi_ground.is_equal_approx(
-			world_values.floor_color.lerp(world_values.hemi_ground, 0.2)))
-	assert_true(interior.hemi_sky.is_equal_approx(
-			world_values.ceiling.lerp(world_values.hemi_sky, 0.2)))
+	# Leaving the tree restores the shipped noon register so a later preview
+	# or mission never inherits this world's block (the globals are process-wide).
+	remove_child(env_node)
+	var noon := EnvLightValues.retail_noon_defaults()
+	assert_true(Vector3(RenderingServer.global_shader_parameter_get(
+			"opennova_light_block_dir_color")).is_equal_approx(noon.dir_color),
+			"the exiting writer leaves the noon directional color behind")
+	assert_false(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
+			"and clears the object fog enable")
+	add_child(env_node)
 
 
 func test_weather_publishes_the_active_moon_direction_at_night() -> void:

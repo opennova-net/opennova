@@ -115,7 +115,7 @@ func test_place_is_a_noop_on_null_inputs() -> void:
 	assert_null(parent.get_node_or_null("MissionObjects"), "no container without a mission")
 
 
-func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
+func test_runtime_static_batch_publishes_effect_source() -> void:
 	# Exercise runtime static placement asset-free by pre-seeding the
 	# per-graphic batch cache with a dummy mesh.
 	var mission := MissionData.new()
@@ -125,12 +125,6 @@ func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
-	var env_state := EnvLightState.new()
-	var dry_values := EnvLightValues.retail_noon_defaults()
-	var dry_fog := Vector3(0.71, 0.18, 0.33)
-	dry_values.fog_color = dry_fog
-	env_state.publish(dry_values)
-	placer.set_environment_state(env_state)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -178,27 +172,6 @@ func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
 	# same limitation as transforms below). The rendered shader probe verifies
 	# that atlas row zero arrives as INSTANCE_CUSTOM.x == 1.0.
 	assert_true(mmi.is_inside_tree(), "the batch instance is in the runtime container")
-	placer.update_environment()
-	var batch_fog: Variant = batch_material.get_shader_parameter("u_fog_color")
-	assert_not_null(batch_fog,
-			"registered production-equivalent batches retain their material for relighting")
-	if batch_fog == null:
-		return
-	assert_true(Vector3(batch_fog)
-			.is_equal_approx(dry_fog),
-			"the retained static-batch material consumes the shared environment")
-	var underwater_values := EnvLightValues.retail_noon_defaults()
-	var underwater_fog := Vector3(0.03, 0.14, 0.08)
-	underwater_values.fog_color = underwater_fog
-	underwater_values.fog_end = 24.0
-	underwater_values.fog_type = 1
-	env_state.publish(underwater_values)
-	placer.update_environment()
-	assert_true(Vector3(batch_material.get_shader_parameter("u_fog_color"))
-			.is_equal_approx(underwater_fog),
-			"pose refresh can restamp a static batch to the selected underwater payload")
-	assert_almost_eq(float(batch_material.get_shader_parameter("u_fog_end")), 24.0, 0.001)
-	assert_eq(int(batch_material.get_shader_parameter("u_fog_type")), 1)
 
 	# The batch has no per-entity Node3D, but mission-start item effects still
 	# receive one immutable value descriptor for the successfully rendered entity.

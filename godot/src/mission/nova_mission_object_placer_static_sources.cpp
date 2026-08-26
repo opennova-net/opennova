@@ -599,10 +599,6 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained_batch.robj_index = int(batch.get("robj_index", 0));
 		retained.push_back(retained_batch);
-		if (retained_batch.material.is_valid() &&
-				batch_materials_.find(retained_batch.material) < 0) {
-			batch_materials_.push_back(retained_batch.material);
-		}
 	}
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;

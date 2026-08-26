@@ -30,7 +30,6 @@ void ObjectModel::rebuild_scene() {
 	muzzle_bone_ = -1;
 	surface_material_indices_.clear();
 	surface_materials_.clear();
-	surface_lighting_contexts_.clear();
 	alpha_strip_draws_.clear();
 	alpha_strip_models_.erase(this);
 	render_order_dirty_ = true;
@@ -45,9 +44,6 @@ void ObjectModel::rebuild_scene() {
 	material_needs_eval_.clear();
 	dynamic_material_slots_ = PackedInt32Array();
 	material_runtime_stamps_.clear();
-	last_env_gen_ = -1;
-	last_env_values_.unref();
-	last_section_env_values_.unref();
 	point_light_selection_hashes_.clear();
 	robj_dense_ = Array();
 	panm_applied_revision_ = 0;
@@ -86,7 +82,6 @@ void ObjectModel::rebuild_scene() {
 			robj_rest_transforms_[robj_index] =
 					Transform3D(Basis(), submesh.get("abs", Vector3()));
 		}
-		const int lighting_context = lighting_context_for_robj(robj_index);
 		MeshInstance3D *instance = memnew(MeshInstance3D);
 		instance->set_mesh(mesh);
 		instance->set_cast_shadows_setting(shadow_caster_layers_ != 0
@@ -98,8 +93,7 @@ void ObjectModel::rebuild_scene() {
 		instance->set_layer_mask(
 				(mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR) |
 				shadow_caster_layers_);
-		Ref<ShaderMaterial> material =
-				material_for_index(material_index, lighting_context);
+		Ref<ShaderMaterial> material = material_for_index(material_index);
 		// One imported submesh is one retail strip. Transparent strips must own
 		// their material instance because Godot stores render_priority on the
 		// material, while retail chooses Q1/Q2 independently for every strip on
@@ -171,16 +165,17 @@ void ObjectModel::rebuild_scene() {
 				"_opennova_postmultiply_proxy");
 		surface_material_indices_.append(material_index);
 		surface_materials_.push_back(material);
-		surface_lighting_contexts_.append(static_cast<uint8_t>(lighting_context));
 		collect_anim_frames(material_index);
 	}
 
 	classify_materials();
 	apply_runtime_state(0.0);
 	// Newly rebuilt GeometryInstance3Ds have default instance uniforms. Keep
-	// the stance gate immediately correct; the terrain-frame leg supplies the
-	// resident page after Terrain has serviced its cache requests.
+	// the stance gate and the per-entity lighting factors immediately correct;
+	// the terrain-frame leg supplies the resident page after Terrain has
+	// serviced its cache requests.
 	stamp_match_terrain_instances(false, 0.0f, Vector4());
+	stamp_entity_lighting_instances();
 	if (!alpha_strip_draws_.is_empty()) {
 		alpha_strip_models_.insert(this);
 		set_notify_transform(true);
