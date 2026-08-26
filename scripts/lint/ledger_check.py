@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Divergence-ledger scoreboard sync (docs/divergence-ledger.md, PAR track).
+
+The ledger's count-to-zero scoreboard drifted from its own tables twice in
+the program's first two days (hand arithmetic over ~70 rows). This script
+makes the scoreboard GENERATED: it parses every `D-<DOMAIN>-n` / `env #n`
+row in the per-domain OPEN tables, aggregates dispositions under the
+canonical vocabulary (ADR 0022), and rewrites the marked block between
+`<!-- scoreboard:generated:begin -->` and `<!-- scoreboard:generated:end -->`.
+
+Modes:
+  --check (default)  exit 1 if the committed block differs from the tables
+  --write            regenerate the block in place
+
+Like the ratchet, this is hard-fail from day one: a mismatch is never a
+false positive, because `--write` IS the fix. An unparseable disposition or
+an unmapped ID prefix exits 2 — extend DOMAIN_ORDER / fix the row in the
+same commit that adds it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+LEDGER = REPO / "docs" / "divergence-ledger.md"
+
+BEGIN = "<!-- scoreboard:generated:begin -->"
+END = "<!-- scoreboard:generated:end -->"
+
+# ID prefix -> scoreboard domain row. Aggregation is by display name, so
+# two prefixes may share one row (INF/EVT). Order here is row order.
+DOMAIN_ORDER: list[tuple[str, str]] = [
+    ("NET", "Net"),
+    ("env", "Environment"),
+    ("INF", "World / AI + events"),
+    ("AI", "World / AI + events"),
+    ("ANIM", "World / AI + events"),
+    ("EVT", "World / AI + events"),
+    ("WPN", "World / AI + events"),
+    ("ITEM", "World / AI + events"),
+    ("THROW", "World / AI + events"),
+    ("COL", "World / AI + events"),
+    ("ITEMDEF", "Item def"),
+    ("MNU", "UI (menu/ctrl/sound/playerinfo/HUD)"),
+    ("CTRL", "UI (menu/ctrl/sound/playerinfo/HUD)"),
+    ("PLAYERINFO", "UI (menu/ctrl/sound/playerinfo/HUD)"),
+    ("SND", "UI (menu/ctrl/sound/playerinfo/HUD)"),
+    ("HUD", "UI (menu/ctrl/sound/playerinfo/HUD)"),
+    ("LOADSCR", "UI (menu/ctrl/sound/playerinfo/HUD)"),
+    ("MIS", "Mission `.mis`"),
+    ("3DILW", "LW `.3di`"),
+    ("PTL", "Particles `.ptl`"),
+    ("3DI", "3DI `.3di` (GP)"),
+    ("VFS", "VFS / PFF mount stack"),
+    ("CBIN", "Credits (CBIN)"),
+    ("TERRAIN", "Terrain"),
+    ("TIL", "Tiles"),
+    ("FOLIAGE", "Foliage"),
+    ("FNT", "Fonts"),
+    ("BOOT", "Boot-required resources"),
+    ("RMAT", "Render — materials/state"),
+    ("RORD", "Render — draw order"),
+    ("RLIT", "Render — lighting"),
+    ("MUS", "Music VM"),
+    ("SCR", "SCR container"),
+]
+
+ROW_ID = re.compile(r"^(D-([A-Z0-9]+)-\d+|env #\d+)$")
+
+OPEN_TAGS = ("OPEN", "NEEDS-RE", "WITNESSED-READY-DEFERRED")
+CLOSED_TAGS = ("FIXED", "PERMANENT")
+
+
+def parse_rows(section: str) -> list[tuple[str, str, str]]:
+    """(id, primary_tag, full_disposition) for every catalog row."""
+    rows: list[tuple[str, str, str]] = []
+    for line in section.splitlines():
+        if not line.startswith("|"):
+            continue
+        # Split on unescaped pipes only: `\|` inside a cell is GFM's own
+        # escape for a literal pipe (see D-FOLIAGE-1).
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+        if len(cells) < 5:
+            continue
+        rid = cells[0]
+        if not ROW_ID.match(rid):
+            continue
+        dispo = cells[3].replace("**", "").strip()
+        first = dispo.split()[0].rstrip(":,") if dispo else ""
+        tag = next((t for t in OPEN_TAGS + CLOSED_TAGS if first.startswith(t)), None)
+        if tag is None:
+            sys.exit(f"[ledger] ERROR: unparseable disposition for {rid}: {dispo!r}\n"
+                     f"[ledger] rows use the canonical vocabulary "
+                     f"(ADR 0022) as the FIRST word of the Disposition cell. "
+                     f"A raw '|' inside a cell also causes this — escape it as \\|.")
+        rows.append((rid, tag, dispo))
+    return rows
+
+
+def domain_of(rid: str) -> str:
+    prefix = "env" if rid.startswith("env") else ROW_ID.match(rid).group(2)
+    for pfx, name in DOMAIN_ORDER:
+        if pfx == prefix:
+            return name
+    sys.exit(f"[ledger] ERROR: no scoreboard domain for ID prefix {prefix!r} "
+             f"({rid}) — add it to DOMAIN_ORDER in scripts/lint/ledger_check.py "
+             f"in the same commit.")
+
+
+def generate(rows: list[tuple[str, str, str]]) -> str:
+    domains: dict[str, dict[str, int]] = {}
+    duals: list[str] = []
+    for _, name in DOMAIN_ORDER:
+        domains.setdefault(name, {"OPEN": 0, "NEEDS-RE": 0,
+                                  "WITNESSED-READY-DEFERRED": 0, "closed": 0})
+    for rid, tag, dispo in rows:
+        bucket = domains[domain_of(rid)]
+        if tag in OPEN_TAGS:
+            bucket[tag] += 1
+            if tag != "NEEDS-RE" and "NEEDS-RE" in dispo:
+                duals.append(rid)
+        else:
+            bucket["closed"] += 1
+
+    lines = [
+        BEGIN,
+        "<!-- Generated by scripts/lint/ledger_check.py --write. Do not hand-edit"
+        " this block; the CI lint step checks it against the tables. -->",
+        "",
+        "| Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total"
+        " | Closed rows still tabled |",
+        "|---|---|---|---|---|---|",
+    ]
+    totals = {"OPEN": 0, "NEEDS-RE": 0, "WITNESSED-READY-DEFERRED": 0, "closed": 0}
+    for name in dict.fromkeys(n for _, n in DOMAIN_ORDER):
+        b = domains[name]
+        open_total = b["OPEN"] + b["NEEDS-RE"] + b["WITNESSED-READY-DEFERRED"]
+        if open_total == 0 and b["closed"] == 0:
+            continue  # domain has no tabled rows (fully burned down + pruned)
+        for k in totals:
+            totals[k] += b[k]
+        lines.append(f"| {name} | {b['OPEN']} | {b['NEEDS-RE']} "
+                     f"| {b['WITNESSED-READY-DEFERRED']} | {open_total} "
+                     f"| {b['closed']} |")
+    grand_open = totals["OPEN"] + totals["NEEDS-RE"] + totals["WITNESSED-READY-DEFERRED"]
+    lines.append(f"| **Total** | **{totals['OPEN']}** | **{totals['NEEDS-RE']}** "
+                 f"| **{totals['WITNESSED-READY-DEFERRED']}** | **{grand_open}** "
+                 f"| {totals['closed']} |")
+    lines.append("")
+    if duals:
+        lines.append(f"Dual-flagged rows (also carry a NEEDS-RE facet): "
+                     f"{', '.join(sorted(duals))}.")
+        lines.append("")
+    lines.append(END)
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true",
+                      help="verify the committed scoreboard matches the tables (the default)")
+    mode.add_argument("--write", action="store_true",
+                      help="regenerate the scoreboard block in place")
+    args = parser.parse_args()
+
+    text = LEDGER.read_text(encoding="utf-8")
+    try:
+        tables = text[text.index("## Per-domain OPEN tables"):
+                      text.index("## Count-to-zero scoreboard")]
+        begin = text.index(BEGIN)
+        end = text.index(END) + len(END)
+    except ValueError:
+        sys.exit("[ledger] ERROR: ledger structure markers missing "
+                 "(per-domain heading, scoreboard heading, or the "
+                 "scoreboard:generated comment pair).")
+
+    block = generate(parse_rows(tables))
+    if args.write:
+        LEDGER.write_text(text[:begin] + block + text[end:],
+                          encoding="utf-8", newline="\n")
+        print("[ledger] scoreboard block regenerated")
+        return 0
+    if text[begin:end] != block:
+        print("[ledger] MISMATCH: the count-to-zero scoreboard does not match "
+              "the per-domain tables. Run: python scripts/lint/ledger_check.py "
+              "--write (and commit the result in the same PR).")
+        return 1
+    print("[ledger] scoreboard matches the tables")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -42,6 +42,9 @@ jobs:
         with:
           lfs: true
           submodules: recursive
+          # Full history so the diff-scoped maturity lint can resolve
+          # origin/master...HEAD on PR builds (it self-skips without a base).
+          fetch-depth: 0
 
       - name: Pull Git LFS assets
         shell: bash
@@ -49,6 +52,36 @@ jobs:
           git lfs install --local
           git lfs pull
           git lfs fsck --objects
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Maturity-program guards (docs/maturity-program.md, STD-1), enforced
+      # since the Wave-2 boundary (STD-3): the ratchet fails on any counter
+      # increase vs scripts/lint/maturity_baseline.json; the diff-scoped
+      # dict-contract lint fails on new class-level Dictionary contracts
+      # (magic numbers stay advisory); the ledger check fails if the
+      # divergence scoreboard drifts from its tables (--write regenerates).
+      # The link-graph check (LIBS-1, ADR 0020) has no configured build tree
+      # at this point in the job, so it walks the CMake files transitively;
+      # local runs against build/ use `cmake --graphviz` ground truth.
+      - name: Maturity gates (STD-1, enforced)
+        shell: bash
+        run: |
+          python scripts/lint/ratchet_counts.py --enforce
+          python scripts/lint/maturity_lint.py --enforce
+          python scripts/lint/link_graph_check.py --enforce
+          python scripts/lint/include_graph_check.py --enforce
+          # Orphan engine headers (the post-merge tidy rounds' recurring
+          # finding): a header included only by its test must carry the
+          # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
+          python scripts/lint/orphan_header_check.py --enforce
+          python scripts/lint/ledger_check.py --check
+          # Host-terminology gate (CONTEXT.md Host / Joiner): "host" means
+          # the game/server host and nothing else. Any uncovered use fails;
+          # the KEEP taxonomy lives in scripts/lint/host_allowlist.json.
+          python scripts/lint/host_lint.py --enforce
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
