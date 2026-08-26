@@ -97,9 +97,21 @@ func _run() -> void:
 		var skel_bones := -1
 		if n.has_method("get_skeleton") and n.get_skeleton() != null:
 			skel_bones = n.get_skeleton().get_bone_count()
-		print("PROBE model=%s ups=%s bones=%d muzzle_bone=%d has_muzzle=%s" %
-				[n.name, str(ups), skel_bones, int(n.get("_muzzle_bone")), str(n.has_muzzle())])
+		print("PROBE model=%s ups=%s bones=%d has_muzzle=%s" %
+				[n.name, str(ups), skel_bones, str(n.has_muzzle())])
 		dumped += 1
+
+	# A/B: the presented skeleton's muzzle (ObjectModel.get_muzzle_world_position)
+	# against the sim-resolved point for the same body (matched by proximity).
+	var node_muzzles: Array = []  # [node global_position, posed muzzle]
+	var stack2: Array[Node] = [root]
+	while not stack2.is_empty():
+		var n2: Node = stack2.pop_back()
+		for c2 in n2.get_children():
+			stack2.push_back(c2)
+		if n2 is ObjectModel and n2.has_muzzle():
+			node_muzzles.append([n2.global_position, n2.get_muzzle_world_position()])
+	print("PROBE presented skeletons with a muzzle: %d" % node_muzzles.size())
 
 	var checked := 0
 	var stamped := 0
@@ -125,6 +137,13 @@ func _run() -> void:
 		if stamped <= 6:
 			print("PROBE muzzle net=%d team=%d up=%.2f horiz=%.2f (pos=%s muz=%s)" %
 					[int(d.get("net_id", -1)), int(d.get("team", -1)), up, horiz, str(pos), str(muz)])
+			for entry in node_muzzles:
+				if pos.distance_to(entry[0]) < 1.0:
+					var nm: Vector3 = entry[1]
+					print("PROBE   node muzzle=%s delta(sim-node)=%s node_up=%.2f node_horiz=%.2f" %
+							[str(nm), str(muz - nm), nm.y - pos.y,
+							Vector2(nm.x - pos.x, nm.z - pos.z).length()])
+					break
 		# The rifle muzzle: between waist and shoulder, held away from the spine.
 		if up > 0.0 and up < 0.8 and horiz > 0.1 and horiz < 2.0:
 			good += 1

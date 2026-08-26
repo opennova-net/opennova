@@ -179,13 +179,14 @@ bool SimCollisionPoseProvider::register_skeletal_entity(
 							source.rig->bone_count()) {
 				continue;
 			}
-			float position[3];
-			threedi_user_point_position(&point, position);
+			// The RAW authored record position: the fixed matrix chain works in
+			// the native model frame (the render-frame swizzle lives inside the
+			// pose sandwich), exactly as retail transforms record[+0..+8].
+			// [orig: @0x4b272e..0x4b2743]
 			source.muzzle_bone = point.subobject_index;
-			for (int axis = 0; axis < 3; ++axis) {
-				source.muzzle_model_position[axis] = static_cast<int32_t>(
-						std::lround(position[axis] * 65536.0f));
-			}
+			source.muzzle_model_position[0] = point.x;
+			source.muzzle_model_position[1] = point.y;
+			source.muzzle_model_position[2] = point.z;
 			break;
 		}
 	}
@@ -258,13 +259,9 @@ bool SimCollisionPoseProvider::resolve_userpoint_transform(world::World &world,
 					bone_world))
 			return false;
 	}
-	float local[3];
-	threedi_user_point_position(&point, local);
-	const int32_t local_q16[3] = {
-			static_cast<int32_t>(std::lround(local[0] * 65536.0f)),
-			static_cast<int32_t>(std::lround(local[1] * 65536.0f)),
-			static_cast<int32_t>(std::lround(local[2] * 65536.0f)),
-	};
+	// The raw authored record position in the native model frame
+	// [orig: @0x56c4f2..0x56c513 transforms record[+0..+8] as stored].
+	const int32_t local_q16[3] = {point.x, point.y, point.z};
 	bone_world.transform_point(local_q16, out);
 	world::collision_matrix_to_euler(bone_world, out + 3);
 	return true;
