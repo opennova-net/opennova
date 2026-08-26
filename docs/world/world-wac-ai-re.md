@@ -4217,7 +4217,12 @@ on demand. The port does the same (2026-08-26; the present-pass push and its sta
 Evidence: `ai` ctest (`test_fire_pass_uses_embedder_fed_muzzle`, `test_weapon_fire_origin_fallback_chain`,
 the LOS band case, the aim-pitch case, the mounted UseGun case — all through a fake
 `IMuzzlePoseProvider`); in-game `godot/tests/ai_muzzle_probe.gd` reads the same provider
-through `get_entity_debug` (`muzzle_valid` / `muzzle`).
+through `get_entity_debug` (`muzzle_valid` / `muzzle`) and A/Bs it against the presented
+skeleton's `ObjectModel.get_muzzle_world_position()`: CP01 2026-08-26 PASS, 92/102 infantry in
+the rifle envelope, the sim point within 1e-5 u of the node's for the in-range bodies. That A/B
+caught the skeletal leg feeding the userpoint in the render-swizzled frame (0.5 u low, ~90°
+off) — the fixed matrix chain works in the native model frame and retail transforms the raw
+record position (`@ 0x4b272e..0x4b2743`); both legs now use the raw 16.16 record.
 
 ### 21.4 Divergences + open follow-ups
 
