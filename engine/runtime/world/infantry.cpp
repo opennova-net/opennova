@@ -1700,6 +1700,29 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
         inf.vel[0] = damp_npc_slide(inf.vel[0]);
         inf.vel[1] = damp_npc_slide(inf.vel[1]);
     } else if (inf.airborne) {
+        // Airborne STEER, before the decay [orig: @0x4b78b7..0x4b790f]: while
+        // the moving bit is held, push the slide pair 64/tick along
+        // (cos,sin)(lookYawBam16 * dbl_7C9BC0 + dir * dbl_7C9BB0). The two
+        // doubles are retail's STORED approximations (2*pi/65536 and pi/4,
+        // read from the image at 0x7C9BC0/0x7C9BB0) and are ported verbatim;
+        // the form is the subtract of the ftol-truncated (value * -64.0f)
+        // products [orig: flt_7C9BD8 = -64.0f; ftol2_sse @0x76bc00], exactly
+        // as retail computes it. The DOUBLED arm (Flags&0x20 chute deployed,
+        // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) is
+        // unreachable until the parachute state lands (D-INF-20) and stays
+        // unported -- declared, not bridged.
+        if (inf.player_moving) {
+            const double angle =
+                    static_cast<double>(static_cast<int16_t>(e.heading >> 16)) *
+                            9.587371826171875e-05 +
+                    static_cast<double>(inf.player_move_dir_index & 7) * 0.7853975;
+            const int32_t cx = static_cast<int32_t>(
+                    static_cast<float>(std::cos(angle)) * -64.0f);
+            const int32_t sy = static_cast<int32_t>(
+                    static_cast<float>(std::sin(angle)) * -64.0f);
+            inf.vel[0] -= cx;
+            inf.vel[1] -= sy;
+        }
         inf.vel[0] = (63 * inf.vel[0]) >> 6;
         inf.vel[1] = (63 * inf.vel[1]) >> 6;
     } else {
