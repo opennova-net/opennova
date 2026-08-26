@@ -388,14 +388,34 @@ void MissionEnvironment::_write_lighting_block_globals(
 	lighting_block_writer_ = this;
 }
 
+void MissionEnvironment::_release_lighting_block() {
+	if (lighting_block_writer_ != this) {
+		return;
+	}
+	// Globals are process-wide: leave the shipped noon defaults behind so a
+	// later preview or mission does not inherit this world's block.
+	_write_lighting_block_globals(EnvLightValues::retail_noon_defaults());
+	lighting_block_writer_ = nullptr;
+	// The block the world carries is no longer published anywhere: the next
+	// flush must write it again even though the generation did not move.
+	last_published_generation_ = -1;
+}
+
 void MissionEnvironment::_notification(int p_what) {
-	if (p_what == NOTIFICATION_EXIT_TREE &&
-			lighting_block_writer_ == this) {
-		// Globals are process-wide: leave the shipped noon defaults behind so
-		// a later preview or mission does not inherit this world's block.
-		lighting_block_writer_ = nullptr;
-		_write_lighting_block_globals(EnvLightValues::retail_noon_defaults());
-		lighting_block_writer_ = nullptr;
+	switch (p_what) {
+		case NOTIFICATION_EXIT_TREE:
+		case NOTIFICATION_PREDELETE:
+			_release_lighting_block();
+			break;
+		case NOTIFICATION_ENTER_TREE:
+			// A re-entered environment publishes its live block again (the
+			// exit above handed the globals back to noon).
+			if (state_.is_loaded() && last_published_generation_ < 0) {
+				flush_publication();
+			}
+			break;
+		default:
+			break;
 	}
 }
 

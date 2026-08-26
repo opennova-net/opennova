@@ -341,7 +341,14 @@ func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> 
 			"the exiting writer leaves the noon directional color behind")
 	assert_false(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
 			"and clears the object fog enable")
+	# Re-entering republishes the live block even though its generation did
+	# not move (the exit forgot the published generation).
 	add_child(env_node)
+	assert_true(Vector3(RenderingServer.global_shader_parameter_get(
+			"opennova_light_block_dir_color")).is_equal_approx(world_values.dir_color),
+			"a re-entered environment writes its block again")
+	assert_true(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
+			"and re-enables the object fog")
 
 
 func test_weather_publishes_the_active_moon_direction_at_night() -> void:

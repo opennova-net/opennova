@@ -218,6 +218,9 @@ private:
 	// witness). One write per env change; process-wide, so the last writer
 	// restores the shipped noon defaults when it leaves the tree.
 	void _write_lighting_block_globals(const Ref<EnvLightValues> &p_values);
+	// The writer leaving the tree or dying puts the noon register back and
+	// forgets its publication generation, so re-entering republishes.
+	void _release_lighting_block();
 	static MissionEnvironment *lighting_block_writer_;
 
 	Ref<EnvFile> environment_data_;
