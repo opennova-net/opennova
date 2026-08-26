@@ -36,6 +36,8 @@ build/
 
 # SCons
 .sconsign.dblite
+*.pyc
+__pycache__/
 
 # CMake
 CMakeCache.txt

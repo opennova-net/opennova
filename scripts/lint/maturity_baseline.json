@@ -1,0 +1,48 @@
+{
+  "citation_allowlist_engine": [
+    "bfc1",
+    "gameprofile",
+    "io",
+    "pcapio",
+    "resource_index",
+    "scr",
+    "vfs"
+  ],
+  "counters": {
+    "adapter_cpp_orig_cites_device": 196,
+    "adapter_cpp_orig_cites_pushdown": 364,
+    "cpp_binding_console_writes": 0,
+    "engine_stdout_prints": 0,
+    "engine_uncited_src_files": 21,
+    "gd_prints_outside_debug": 0,
+    "has_method_guards": 0,
+    "oversize_cpp_files": 1,
+    "oversize_gd_files": 1,
+    "test_private_pokes": 99
+  },
+  "dict_contract_allowlist": [
+    "player_profile.gd|static func load_character_profile(",
+    "armory_menu_companion.gd|func selected_weapon(",
+    "mcp_tool_def.gd|var input_schema",
+    "mcp_tool_def.gd|func to_list_entry()",
+    "waypoint_hud_entry.gd|func to_info_dict()",
+    "host_session_config.gd|func to_session_options()",
+    "occlusion_frame_pass.gd|func occlusion_hidden_ids()",
+    "occlusion_frame_pass.gd|func present_visibility()",
+    "item_seat_specs.gd|static func command_rule(",
+    "item_seat_specs.gd|static func predict_best_seat(",
+    "effect_world.gd|func get_debug_draw_list_report()",
+    "game_render_diagnostics.gd|func to_json_value()",
+    "effect_light_report.gd|func to_json_value()",
+    "debug_snapshot_writer.gd|static func capture(",
+    "debug_snapshot_writer.gd|static func write(",
+    "nova_debug_options.gd|static func find(",
+    "debug_entity_picker.gd|static func pick_at_crosshair(",
+    "game_packer.gd|static func pack(",
+    "game_packer.gd|static func stage_loose(",
+    "game_packer.gd|static func export_game(",
+    "game_packer.gd|static func stage_retail(",
+    "game_run_session.gd|func get_state()",
+    "mission_presentation.gd|const _SESSION_PERF_SLOTS"
+  ]
+}
