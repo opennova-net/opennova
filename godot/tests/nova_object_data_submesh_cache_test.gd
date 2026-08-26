@@ -110,3 +110,37 @@ func test_lod_round_trip_returns_the_cached_meshes() -> void:
 	data.build_lod_submeshes(1)  # may be empty on single-LOD fixtures; harmless
 	assert_eq(_mesh_rids(data.build_lod_submeshes(0)), lod0,
 		"returning to LOD 0 reuses the cached meshes")
+
+
+func test_reload_on_a_shared_data_does_not_leak_across_models() -> void:
+	var data := _open(SHED)
+	var a: Node3D = add_child_autofree(ObjectModel.new())
+	var b: Node3D = add_child_autofree(ObjectModel.new())
+	a.set_object_data(data)
+	b.set_object_data(data)
+	# Snapshot the pre-reload meshes: the post-reload assertions below would all
+	# hold on this initial shared state too, so PROVING the deferred rebuild +
+	# cache invalidation happened requires the post-reload RIDs to be disjoint
+	# from these.
+	var pre_reload_rids: Array = []
+	for mi in _mesh_instances(a):
+		pre_reload_rids.append((mi as MeshInstance3D).mesh.get_rid())
+	assert_false(pre_reload_rids.is_empty(), "the models built render meshes before the reload")
+	# A reload (the one document change left on the runtime surface) notifies
+	# object_changed (deferred) -> both models rebuild from the fresh cache;
+	# their material overrides must remain distinct objects.
+	assert_eq(data.open_file(ProjectSettings.globalize_path(SHED)), OK)
+	await get_tree().process_frame
+	var a_meshes := _mesh_instances(a)
+	var b_meshes := _mesh_instances(b)
+	assert_false(a_meshes.is_empty(), "models rebuilt after the reload")
+	for i in range(mini(a_meshes.size(), b_meshes.size())):
+		var mi_a := a_meshes[i] as MeshInstance3D
+		var mi_b := b_meshes[i] as MeshInstance3D
+		assert_false(pre_reload_rids.has(mi_a.mesh.get_rid()),
+			"the deferred rebuild really happened: post-reload meshes are FRESH, not the pre-reload set")
+		assert_eq(mi_a.mesh.get_rid(), mi_b.mesh.get_rid(),
+			"post-reload rebuilds still share the (fresh) meshes")
+		if mi_a.material_override != null:
+			assert_ne(mi_a.material_override, mi_b.material_override,
+				"...with materials still per-instance")
