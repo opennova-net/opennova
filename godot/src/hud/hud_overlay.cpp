@@ -12,7 +12,9 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
@@ -242,6 +244,10 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_minimap_footprints", "feed"),
 			&HudOverlay::set_minimap_footprints);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
+	ClassDB::bind_method(D_METHOD("set_draw_timing_enabled", "enabled"),
+			&HudOverlay::set_draw_timing_enabled);
+	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
+			&HudOverlay::consume_draw_timing_us);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
@@ -1572,7 +1578,36 @@ void HudOverlay::_draw() {
 	// Retail re-inits the overlay fonts on resolution change; the lazy tier
 	// check is that re-init (the policy lives in hud_label_font_choice).
 	ensure_label_fonts_(surface.x);
-	render_list_(compiler_.compile(state_, surface.x, surface.y));
+	const bool timing = draw_timing_enabled_;
+	Time *clock = timing ? Time::get_singleton() : nullptr;
+	const uint64_t t0 = timing ? clock->get_ticks_usec() : 0;
+	const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
+	const uint64_t t1 = timing ? clock->get_ticks_usec() : 0;
+	render_list_(list);
+	if (timing) {
+		const uint64_t t2 = clock->get_ticks_usec();
+		draw_compile_us_ += static_cast<int64_t>(t1 - t0);
+		draw_emit_us_ += static_cast<int64_t>(t2 - t1);
+	}
+}
+
+void HudOverlay::set_draw_timing_enabled(bool p_enabled) {
+	if (draw_timing_enabled_ == p_enabled) {
+		return;
+	}
+	draw_timing_enabled_ = p_enabled;
+	draw_compile_us_ = 0;
+	draw_emit_us_ = 0;
+}
+
+PackedInt64Array HudOverlay::consume_draw_timing_us() {
+	PackedInt64Array out;
+	out.resize(2);
+	out.set(0, draw_compile_us_);
+	out.set(1, draw_emit_us_);
+	draw_compile_us_ = 0;
+	draw_emit_us_ = 0;
+	return out;
 }
 
 void HudOverlay::render_list_(const HudDrawList &p_list) {

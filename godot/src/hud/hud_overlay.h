@@ -192,6 +192,13 @@ public:
 	// draw list's element counts.
 	Dictionary get_draw_list_stats();
 
+	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
+	// Node callback), so its compile + canvas-emit cost is timed here and
+	// consumed by the HUD presenter's next tick. Clock reads only while enabled.
+	void set_draw_timing_enabled(bool p_enabled);
+	// [compile_us, emit_us] accumulated since the last consume; zeroes after.
+	PackedInt64Array consume_draw_timing_us();
+
 	void _draw() override;
 
 protected:
@@ -232,6 +239,9 @@ private:
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
+	bool draw_timing_enabled_ = false;
+	int64_t draw_compile_us_ = 0;
+	int64_t draw_emit_us_ = 0;
 	// The HUDVEHSTANCEPOS anchor (the vehicle panel's base before the stance
 	// offset) and the sid whose silhouette currently occupies the
 	// kHudTexVehiclePanel slot (reloaded on change).

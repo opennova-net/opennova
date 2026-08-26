@@ -173,6 +173,12 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_local_player_prone);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &SlotShadow::advance_frame);
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
+	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_capture_count"),
+			&SlotShadow::get_capture_count);
+	ClassDB::bind_method(D_METHOD("get_capture_viewport", "order"),
+			&SlotShadow::get_capture_viewport);
+	ClassDB::bind_method(D_METHOD("get_armed_capture_mask"),
+			&SlotShadow::get_armed_capture_mask);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_drape_material"),
 			&SlotShadow::get_drape_material);
 }
@@ -360,12 +366,24 @@ Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 	return to_uv * Projection(view);
 }
 
+int SlotShadow::get_capture_count() {
+	return static_cast<int>(renderer::kSlotCaptureCount);
+}
+
+SubViewport *SlotShadow::get_capture_viewport(int p_order) const {
+	if (p_order < 0 || p_order >= static_cast<int>(renderer::kSlotCaptureCount)) {
+		return nullptr;
+	}
+	return viewports_[p_order];
+}
+
 void SlotShadow::advance_frame() {
 	if (!is_inside_tree()) {
 		return;
 	}
 	_ensure_captures();
 	++frame_;
+	armed_capture_mask_ = 0;
 	const Ref<ShaderMaterial> drape = get_drape_material();
 	MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
 			ObjectDB::get_instance(environment_node_id_));
@@ -732,6 +750,7 @@ void SlotShadow::advance_frame() {
 		if (renderer::slot_refresh_due(assignment.record_index, frame_,
 					effective_mask, assignment.capture_dirty)) {
 			slot_viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+			armed_capture_mask_ |= 1u << order;
 		}
 
 		// The local player's first-person drape gate

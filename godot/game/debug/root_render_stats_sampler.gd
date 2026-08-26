@@ -4,11 +4,14 @@ extends RefCounted
 # Root-viewport render-time sampling for the F3 Stats tab, split out of the
 # game shell (the W4-6 oversize ratchet): measurement flips on only while the
 # tab captures (it is not free), then the previous frame's CPU/GPU times land
-# on the board each frame. RootFramePhaseSampler owns wall/process timing.
+# on the board each frame. RootFramePhaseSampler owns wall/process timing. The
+# first-person viewmodel pass (a second full-window scene render) rides the
+# same entry through a ViewportRenderStatsSampler.
 
 var _board: FrameStatsBoard
 var _measured := false
 var _viewport_ref: WeakRef = null
+var _viewmodel_stats: ViewportRenderStatsSampler = null
 
 
 ## Render-time measurement is RenderingServer state, not Node-owned state.
@@ -17,6 +20,10 @@ var _viewport_ref: WeakRef = null
 func setup(board: FrameStatsBoard) -> void:
 	_board = board
 	board.capture_changed.connect(_on_capture_changed)
+	_viewmodel_stats = ViewportRenderStatsSampler.new(board,
+			FrameStatsBoard.RENDER_VIEWMODEL_CPU, FrameStatsBoard.RENDER_VIEWMODEL_GPU,
+			FrameStatsBoard.RENDER_VIEWMODEL_OBJECTS,
+			FrameStatsBoard.RENDER_VIEWMODEL_DRAWS)
 
 
 ## Whether measurement is live on a still-valid viewport (the host's public
@@ -27,8 +34,12 @@ func is_measured() -> bool:
 
 
 ## Per-frame entry: `viewport` is the host's current root viewport (a changed
-## viewport re-arms measurement on the new one).
-func sample(viewport: Viewport, stats_on: bool) -> void:
+## viewport re-arms measurement on the new one); `viewmodel_viewport` is the
+## first-person pass when a rig is live.
+func sample(viewport: Viewport, stats_on: bool,
+		viewmodel_viewport: Viewport = null) -> void:
+	if _viewmodel_stats != null and _viewmodel_stats.begin_frame(stats_on):
+		_viewmodel_stats.sample_viewport(0, viewmodel_viewport, true)
 	if not stats_on and not _measured:
 		return
 	if not stats_on or viewport == null:
@@ -75,6 +86,8 @@ func stop() -> void:
 				(previous as Viewport).get_viewport_rid(), false)
 	_viewport_ref = null
 	_measured = false
+	if _viewmodel_stats != null:
+		_viewmodel_stats.stop()
 
 
 func _on_capture_changed(active: bool) -> void:

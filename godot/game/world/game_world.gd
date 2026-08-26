@@ -1120,6 +1120,12 @@ var _perf_probe_occlusion_skipped := false
 var _frame_stats: FrameStatsBoard = null
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
+# The other auxiliary scene renders (FrameFx's Q3 view, the slot-shadow
+# capture chain) — measured only while the board captures.
+var _q3_render_stats: ViewportRenderStatsSampler = null
+var _slot_render_stats: ViewportRenderStatsSampler = null
+# The captures the previous frame armed: their counters are that draw's.
+var _slot_render_armed_mask := 0
 
 
 ## The game shell hands its FrameStatsBoard here; the world re-hands it to
@@ -1132,11 +1138,23 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
 			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_stop_water_render_stats()
+	if _q3_render_stats != null:
+		_q3_render_stats.stop()
+	if _slot_render_stats != null:
+		_slot_render_stats.stop()
+	_q3_render_stats = null
+	_slot_render_stats = null
 	_frame_stats = board
 	if _frame_stats != null:
 		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
+		_q3_render_stats = ViewportRenderStatsSampler.new(board,
+				FrameStatsBoard.RENDER_Q3_CPU, FrameStatsBoard.RENDER_Q3_GPU,
+				FrameStatsBoard.RENDER_Q3_OBJECTS, FrameStatsBoard.RENDER_Q3_DRAWS)
+		_slot_render_stats = ViewportRenderStatsSampler.new(board,
+				FrameStatsBoard.RENDER_SLOT_CPU, FrameStatsBoard.RENDER_SLOT_GPU,
+				FrameStatsBoard.RENDER_SLOT_OBJECTS, FrameStatsBoard.RENDER_SLOT_DRAWS)
 	_occlusion.set_frame_stats_board(board)
 	if _runtime != null:
 		_runtime.set_frame_stats_board(board)
@@ -1482,6 +1500,31 @@ func finish_device_frame() -> void:
 		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
 	_sample_water_render_stats(_frame_stats_on)
+	_sample_auxiliary_render_stats(_frame_stats_on)
+
+
+# The auxiliary scene renders the root-viewport rows cannot see: FrameFx's
+# shared-world Q3 view and the slot-shadow capture chain. Slot captures count
+# only the viewports the PREVIOUS frame armed — an UPDATE_ONCE viewport keeps
+# its last counters, so an unarmed slot would report a stale render.
+func _sample_auxiliary_render_stats(stats_on: bool) -> void:
+	if _q3_render_stats != null and _q3_render_stats.begin_frame(stats_on):
+		_q3_render_stats.sample_viewport(0,
+				_framefx.get_q3_viewport() if _framefx != null else null, true)
+	var armed := _slot_render_armed_mask
+	_slot_render_armed_mask = (
+			_slot_shadow.get_armed_capture_mask() if _slot_shadow != null else 0)
+	if _slot_render_stats == null or _slot_shadow == null \
+			or not _slot_render_stats.begin_frame(stats_on):
+		return
+	var rendered := 0
+	for order in range(SlotShadow.get_capture_count()):
+		var counted := (armed & (1 << order)) != 0
+		_slot_render_stats.sample_viewport(order,
+				_slot_shadow.get_capture_viewport(order), counted)
+		if counted:
+			rendered += 1
+	_frame_stats.add(FrameStatsBoard.RENDER_SLOT_VIEWPORTS, rendered)
 
 
 func render_material_frame() -> void:

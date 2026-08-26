@@ -94,6 +94,14 @@ public:
 	void advance_frame();
 	Dictionary get_report() const;
 
+	// F3 render-sampler seams: the capture viewport chain by slot order (null
+	// before the captures exist) and the bitmask of slots advance_frame armed
+	// for a render this frame, so a sampler counts only the captures that
+	// actually rendered (an UPDATE_ONCE viewport retains stale counters).
+	static int get_capture_count();
+	SubViewport *get_capture_viewport(int p_order) const;
+	int get_armed_capture_mask() const { return static_cast<int>(armed_capture_mask_); }
+
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
@@ -118,6 +126,8 @@ private:
 	renderer::RenderSlotPlan plan_;
 	SubViewport *viewports_[renderer::kSlotCaptureCount] = {};
 	Camera3D *cameras_[renderer::kSlotCaptureCount] = {};
+	// Slots set to UPDATE_ONCE by the latest advance_frame (bit = slot order).
+	uint32_t armed_capture_mask_ = 0;
 	// instance id -> applied capture bit (for removal on churn).
 	HashMap<uint64_t, uint32_t> applied_bits_;
 	HashMap<String, Ref<Texture2D>> blob_textures_;

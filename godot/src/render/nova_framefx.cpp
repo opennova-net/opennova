@@ -958,6 +958,8 @@ void FrameFx::_bind_methods() {
 			&FrameFx::get_backend_report);
 	ClassDB::bind_method(D_METHOD("advance_frame"),
 			&FrameFx::advance_frame);
+	ClassDB::bind_method(D_METHOD("get_q3_viewport"),
+			&FrameFx::get_q3_viewport);
 	BIND_CONSTANT(kBeautyCameraMask);
 	BIND_CONSTANT(kQ3CameraMask);
 }

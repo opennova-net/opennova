@@ -44,6 +44,35 @@ const SHELL_LEG_SLOTS := [
 	FrameStatsBoard.FRAME_PLAYER_AFTER,
 	FrameStatsBoard.FRAME_HUD,
 ]
+# The engine-frame decomposition (RootFramePhaseSampler's draw-signal split
+# plus the per-viewport render samplers): one sample per drained frame each,
+# so a slice that moves work between the callbacks and the residual is seen.
+const ENGINE_SLOT_SAMPLES := {
+	"process_callbacks": FrameStatsBoard.FRAME_PROCESS_CALLBACKS,
+	"deferred_flush": FrameStatsBoard.FRAME_DEFERRED_FLUSH,
+	"draw": FrameStatsBoard.FRAME_DRAW,
+	"pacing_input": FrameStatsBoard.FRAME_PACING_INPUT,
+	"hud_draw_compile": FrameStatsBoard.HUD_DRAW_COMPILE,
+	"hud_draw_emit": FrameStatsBoard.HUD_DRAW_EMIT,
+	"render_root_cpu": FrameStatsBoard.RENDER_ROOT_CPU,
+	"render_root_gpu": FrameStatsBoard.RENDER_ROOT_GPU,
+	"render_water_cpu": FrameStatsBoard.RENDER_WATER_CPU,
+	"render_q3_cpu": FrameStatsBoard.RENDER_Q3_CPU,
+	"render_q3_gpu": FrameStatsBoard.RENDER_Q3_GPU,
+	"render_viewmodel_cpu": FrameStatsBoard.RENDER_VIEWMODEL_CPU,
+	"render_slot_cpu": FrameStatsBoard.RENDER_SLOT_CPU,
+}
+# Per-pass submission counts (objects), averaged per drained frame.
+const ENGINE_COUNT_SAMPLES := {
+	"render_main_objects": FrameStatsBoard.RENDER_MAIN_OBJECTS,
+	"render_main_draws": FrameStatsBoard.RENDER_MAIN_DRAWS,
+	"render_water_objects": FrameStatsBoard.RENDER_WATER_OBJECTS,
+	"render_q3_objects": FrameStatsBoard.RENDER_Q3_OBJECTS,
+	"render_q3_draws": FrameStatsBoard.RENDER_Q3_DRAWS,
+	"render_viewmodel_objects": FrameStatsBoard.RENDER_VIEWMODEL_OBJECTS,
+	"render_slot_objects": FrameStatsBoard.RENDER_SLOT_OBJECTS,
+	"render_slot_viewports": FrameStatsBoard.RENDER_SLOT_VIEWPORTS,
+}
 const COUNTER_KEYS := [
 	"plan_rebuilds",
 	"transform_builds",
@@ -295,6 +324,14 @@ func _measure_window(seconds: float) -> Dictionary:
 			(samples["outside_shell_us"] as Array).append(maxi(
 					wall_us - _sum_slots(
 							captured.sums, SHELL_LEG_SLOTS), 0))
+		for key in ENGINE_SLOT_SAMPLES:
+			var slot := int(ENGINE_SLOT_SAMPLES[key])
+			if captured.sample_frames[slot] > 0:
+				(samples[key + "_us"] as Array).append(int(captured.sums[slot]))
+		for key in ENGINE_COUNT_SAMPLES:
+			var slot := int(ENGINE_COUNT_SAMPLES[key])
+			if captured.sample_frames[slot] > 0:
+				(samples[key] as Array).append(int(captured.sums[slot]))
 	return {
 		"elapsed_seconds":
 				float(Time.get_ticks_usec() - start) / 1_000_000.0,
@@ -306,13 +343,18 @@ func _measure_window(seconds: float) -> Dictionary:
 
 
 func _empty_samples() -> Dictionary:
-	return {
+	var samples := {
 		"mission_rows_us": [],
 		"present_us": [],
 		"world_us": [],
 		"outside_shell_us": [],
 		"frame_us": [],
 	}
+	for key in ENGINE_SLOT_SAMPLES:
+		samples[key + "_us"] = []
+	for key in ENGINE_COUNT_SAMPLES:
+		samples[key] = []
+	return samples
 
 
 func _append_samples(destination: Dictionary, source: Dictionary) -> void:
@@ -321,17 +363,22 @@ func _append_samples(destination: Dictionary, source: Dictionary) -> void:
 
 
 func _summaries(samples: Dictionary) -> Dictionary:
-	return {
+	var summaries := {
 		"mission_rows": _summary(samples["mission_rows_us"]),
 		"present": _summary(samples["present_us"]),
 		"world": _summary(samples["world_us"]),
 		"outside_shell": _summary(samples["outside_shell_us"]),
 		"frame": _summary(samples["frame_us"]),
 	}
+	for key in ENGINE_SLOT_SAMPLES:
+		summaries[key] = _summary(samples[key + "_us"])
+	for key in ENGINE_COUNT_SAMPLES:
+		summaries[key] = _count_summary(samples[key])
+	return summaries
 
 
 func _metrics_with_samples(samples: Dictionary, summaries: Dictionary) -> Dictionary:
-	return {
+	var metrics := {
 		"mission_rows": {
 			"summary_ms": summaries["mission_rows"],
 			"samples_us": samples["mission_rows_us"],
@@ -352,6 +399,32 @@ func _metrics_with_samples(samples: Dictionary, summaries: Dictionary) -> Dictio
 			"summary_ms": summaries["frame"],
 			"samples_us": samples["frame_us"],
 		},
+	}
+	for key in ENGINE_SLOT_SAMPLES:
+		metrics[key] = {
+			"summary_ms": summaries[key],
+			"samples_us": samples[key + "_us"],
+		}
+	for key in ENGINE_COUNT_SAMPLES:
+		metrics[key] = {
+			"summary": summaries[key],
+			"samples": samples[key],
+		}
+	return metrics
+
+
+func _count_summary(values: Array) -> Dictionary:
+	if values.is_empty():
+		return {"samples": 0, "mean": 0.0, "max": 0}
+	var total := 0
+	var peak := 0
+	for value in values:
+		total += int(value)
+		peak = maxi(peak, int(value))
+	return {
+		"samples": values.size(),
+		"mean": float(total) / float(values.size()),
+		"max": peak,
 	}
 
 
@@ -506,6 +579,22 @@ func _print_window(index: int, count: int, frames: int,
 			float(mission["max_ms"]), float(present["mean_ms"]),
 			float(world["mean_ms"]), float(outside["mean_ms"]),
 			float(frame["mean_ms"])])
+	# The engine-frame decomposition, mean ms per drained frame.
+	var engine_parts := PackedStringArray()
+	for key in ["process_callbacks", "deferred_flush", "draw", "pacing_input",
+			"hud_draw_compile", "hud_draw_emit", "render_root_cpu",
+			"render_q3_cpu", "render_viewmodel_cpu", "render_water_cpu",
+			"render_slot_cpu"]:
+		var part: Dictionary = summaries[key]
+		if int(part["samples"]) > 0:
+			engine_parts.append("%s %.3f" % [key, float(part["mean_ms"])])
+	print("[mrp]   engine: " + " | ".join(engine_parts))
+	var count_parts := PackedStringArray()
+	for key in ENGINE_COUNT_SAMPLES:
+		var part: Dictionary = summaries[key]
+		if int(part["samples"]) > 0:
+			count_parts.append("%s %.1f" % [key, float(part["mean"])])
+	print("[mrp]   passes: " + " | ".join(count_parts))
 
 
 func _output_path(bms: String, label: String) -> String:
