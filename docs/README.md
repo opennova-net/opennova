@@ -27,9 +27,10 @@ behavior is summarized and cited.
 - **The ledger is OPEN-only.** [`divergence-ledger.md`](divergence-ledger.md)'s
   per-domain tables list open rows; a FIXED / PERMANENT row retires to a dated
   closure line there and keeps its full row in the owning record. Every D-id in
-  the ledger resolves to exactly one record row. Update its scoreboard in the
-  same change. Check code markers, IDB names, and record rows through the live
-  IDA MCP connection when reviewing drift.
+  the ledger resolves to exactly one record row, and
+  `scripts/lint/ledger_check.py --check` keeps the scoreboard honest. The
+  three-way drift check (code markers ↔ IDB names ↔ record rows) is
+  `scripts/ida/cite_sweep.py`, run against a live IDA.
 
 ## Architecture
 
@@ -45,7 +46,7 @@ behavior is summarized and cited.
 | [`dev-env-vars.md`](dev-env-vars.md) | The dev environment-variable registry: launch, capture, and asset-path vars and where each is read |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
 | [`threedi/scene-naming-contract.md`](threedi/scene-naming-contract.md) | Format-neutral scene names reserved for the future GLB/GLTF ↔ 3DI editor seam; no importer metadata or DCC custom properties |
-| [`maturity-program.md`](maturity-program.md) | Historical dashboard for the pre-reimplementation rearchitecture program, closed 2026-07-12. Its Python enforcement instruments are retired; applicable architectural decisions remain in the ADR index below. |
+| [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard. **Closed 2026-07-12** (freeze lifted); the enforcement instruments and standing ADRs survive it |
 | [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
 | [`render/README.md`](render/README.md) | The render domain's own index: which REN record covers what, and the three-tier parity instrument (state vectors, offline compare, retail scene attestation) |
 | [`required-resources.md`](required-resources.md) | The witnessed boot-required, hardcoded-by-name resource set (R8/ENG-6): the fatal set, per-resource failure behavior, the ordered boot sequence, and the D-BOOT catalog — the source for the ENG-6 manifest and minimum game-data tree |
@@ -82,7 +83,7 @@ behavior is summarized and cited.
 | [0026](adr/0026-one-client-replica-pipeline.md) | One decoded-entity stack: `ClientReplicaPipeline` is the sole S2C reducer, `WirePresentPass` the sole presenter, and Person/controller/Vehicle are independent domain axes |
 | [0027](adr/0027-3di3-only-no-model-ir.md) | 3DI3 is the only model format and consumers walk the parsed `Threedi3di3` directly; the `ThreediModelIR` layer and GP-era (GPM/GPS/GPP) reader/writer are removed |
 | [0028](adr/0028-engine-directory-and-shell-adapter.md) | `engine/` is the engine (four groups: base/formats/runtime/net), `godot/src/` is the shell adapter; new engine logic starts in the engine and gameplay loops live in the engine. Its "directories only" target-name clause is superseded by ADR 0029 |
-| [0029](adr/0029-engine-group-targets.md) | Engine target topology: five STATIC group targets plus `opennova_io`; base links above formats and sqlite remains contained in the separate service target. ADR 0037 removes the former editor leaf; ADR 0038 removes shared-library staging and Python topology guards |
+| [0029](adr/0029-engine-group-targets.md) | Engine target topology: the per-lib CMake targets and family groups collapse into five STATIC group targets (`opennova_formats` — with mission's format half folded in — `opennova_base`, `opennova_runtime`, `opennova_net`, `opennova_novaworld_service`) plus `opennova_io`; base links ABOVE formats; sqlite containment stays linker-enforced by the separate service target; ADR 0020's terrain seam moves to `include_graph_check.py`. ADR 0037 removes the former `opennova_oned_edit` interface leaf; ADR 0038 removes the `opennova_shared` staging |
 | [0030](adr/0030-formats-placement-criterion.md) | The formats placement rule: ALL file knowledge lives in `engine/formats/` (parsed model + read/write over io/ only) and no format parser stays runtime-fused — runtime keeps only execution over the parsed model (VM, emitter, promotion); plus the shared-include-prefix rule for split domains and the extraction discipline |
 | [0031](adr/0031-adapter-composition-contract.md) | The adapter composition contract: the five bands adapter C++ may be (binding glue, ONED document surface, presentation, res:// loaders, documented seam bridges); engine-grade logic starts in `engine/` (ADR 0028's rule extended to adapter C++); the `adapter_cpp_orig_cites` ratchet makes "thin wrappers only" measurable; the per-TU simulation/ dispositions *(superseded as the standing contract by ADR 0033; census + dispositions remain the record)* |
 | [0032](adr/0032-direct-document-io.md) | Direct document I/O — godot/ adds nothing but Godot: Nova formats never integrate with Godot's resource system (the ResourceFormat fleet is deleted); documents read/write themselves via load_from_path/save_to_path; adapter code exists only where a Godot type, API, or lifecycle demands it *(replaced by ADR 0033, which restates the operative rules)* |

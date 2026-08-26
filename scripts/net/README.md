@@ -6,9 +6,10 @@ retail data stay under the gitignored `.scratch/` tree and must never be
 committed without the sanitization review described in
 [`docs/asset-gated-tests.md`](../../docs/asset-gated-tests.md).
 
-The former generated parity matrix, corpus exporter, manifest verifier, and
-field-shape analysis pipeline have been removed. Do not treat these remaining
-helpers as a hash-bound parity verdict.
+The former generated parity matrix, corpus exporter and manifest verifier have
+been removed (they depended on the retired Python FFI); `diff_0a.py`, the S2C
+0x0A field-shape diff, remains. Do not treat these remaining helpers as a
+hash-bound parity verdict.
 
 ## Tools
 
@@ -18,6 +19,7 @@ helpers as a hash-bound parity verdict.
 | `capture.ps1` | Start or stop a tagged local packet capture. |
 | `decode.ps1` | Decode a capture with the native `nw_pp` application. |
 | `diff_vs_golden.ps1` | Compare native decoder tag coverage against a local golden capture. |
+| `diff_0a.py` | Per-FIELD shape diff of the S2C 0x0A stream vs a retail-host golden (sub-block cycle, record-class mix, field population); caches `<golden>.0a.json` beside the input. |
 | `launch_retail.ps1` | Launch a stock retail client for a manual host or join run. |
 | `launch_retail_cfg.ps1` | Launch retail from a role-specific onHook configuration. |
 | `exercise_retail_input.ps1` | Drive the bounded Windows input trajectory used by live probes. |
@@ -96,3 +98,23 @@ For automated native coverage, run the relevant `nw_*`, `npruntime_*`, and
 `netsim_*` CTests. Asset-gated cases skip successfully when their environment
 variables or local captures are absent, so read their output as well as the
 exit code.
+
+## 0x0A shape diff
+
+`diff_vs_golden.ps1` is a per-TAG coverage diff (which messages flow). For the
+in-match replication core, `diff_0a.py` is a per-FIELD **shape** diff of just the
+S2C `0x0A` stream — the two captures are different sessions, so it compares what
+should match between any two hosts on the same map rather than raw bytes:
+
+```bash
+python scripts/net/diff_0a.py \
+    --ours   .scratch/ov-<stamp>.pcapng \
+    --golden .scratch/retail-ashi5a-<stamp>.pcapng \
+    --items ~/Desktop/JOX/ITEMS.DEF
+```
+
+It reports the sub-block cycle (golden rotates `flags2` low-2 through aim/timer/env/
+gametype), the record-class mix (golden replicates vehicles; a `Vehicle ours=0`
+row means we send none), the header field value-sets, and per-record-class field
+population (a field golden always fills but we leave zero is an under-send). The
+golden's parsed profile caches to `<golden>.0a.json`, so iterating on our encoder

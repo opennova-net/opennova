@@ -27,8 +27,8 @@ marker, which the `adapter_cpp_orig_cites_*` ratchets count. The
 record-owned witness; genuinely witnessed engine behavior belongs in `engine/`
 with a real `[orig:]` cite.
 
-Size policy: no `.cpp` here past 2500 lines and no shipping `.gd` past 1200 —
-split first.
+Size ratchets: no `.cpp` here past 2500 lines and no shipping `.gd` past 1200 —
+split first; `scripts/lint/ratchet_counts.py` fails on any increase.
 
 The game-level GDScript runtime (world, debug, mission, object, terrain,
 ui, avatar, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything

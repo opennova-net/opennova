@@ -207,7 +207,12 @@ Order of operations when you need an engine truth:
      (`.claude/skills/grill-ida/`): interrogates reimpl vs binary axis by axis and
      ends in a per-system verdict, landed via the `re-doc` skill.
 4. **Ground truth without IDA:**
-    - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
+   - **Has the three-way link drifted?** → `scripts/ida/cite_sweep.py` joins every
+     `[orig:`/`(retail:` marker in code and docs against the live IDB by address and
+     prints the disagreements (stale names, auto-names, undefined or other-image
+     addresses, stale `reimpl:` back-links); run it after a merge train and before a
+     release (grill-ida `LIFECYCLE.md` §4).
+   - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
      (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
      `tests/terrain/trn_config_roundtrip_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.

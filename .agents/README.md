@@ -24,7 +24,8 @@ divergences in its §8 catalog):
   behind it, not current status
 - `.agents/porting-0a-emit.md` — runbook for porting the per-frame S2C 0x0A emit
   from the witnessed retail chain (phase counter + sub-blocks + priority/budget
-  entity loop) and the current ported-vs-not state.
+  entity loop), with the verify loop (`scripts/net/diff_0a.py` + the golden) and
+  the current ported-vs-not state.
 - `.agents/retail-lan-parity.md` — MCP-first four-topology retail/OpenNova LAN
   probing without the retired generated Python parity matrix.
 

@@ -9,7 +9,7 @@ instrument wins and this page is stale.
 
 | Period | What it was | State |
 |---|---|---|
-| through 2026-07-12 | **The maturity program** — the pre-reimplementation rearchitecture: seven tracks, five waves, the boundary-conformance checklist, the enforcement ratchets | **CLOSED** 2026-07-12, freeze lifted ([maturity-program.md](maturity-program.md)). The standing architectural decisions remain the historical basis; the Python enforcement scripts have been retired. |
+| through 2026-07-12 | **The maturity program** — the pre-reimplementation rearchitecture: seven tracks, five waves, the boundary-conformance checklist, the enforcement ratchets | **CLOSED** 2026-07-12, freeze lifted ([maturity-program.md](maturity-program.md)). The standing rules (ADRs 0015–0018, 0022–0024, 0028's engine/shell split, 0037's ONED hard cut, and [ADR 0038](adr/0038-native-runtime-assets-glb-editor.md)'s native-runtime-assets hard cut) and the enforcement instruments survive it |
 | since 2026-07-12 | **Retail-fidelity slices** — one system at a time, witnessed in IDA and ported | **current**. There is no separate program doc: the [divergence ledger](divergence-ledger.md) *is* the plan, and each slice's witness lands in its RE record |
 
 The distinction matters for scoping a task. The maturity program was
@@ -67,13 +67,15 @@ Every recent slice ran this same shape, and a new one should too:
    closing witness; gaps the slice leaves behind get rows *at birth*. A slice
    that ports 80% of a system and opens rows for the other 20% is a good slice;
    one that ports 80% silently is not.
-5. **Green bar.** Full CTest and the GUT suite. See root `CLAUDE.md` for the commands and the
-   asset-gated-test caveat.
+5. **Green bar.** Full CTest, the GUT suite, and the lint gates (`scripts/lint/`).
+   See root `CLAUDE.md` for the commands and the asset-gated-test caveat.
 
 ## Where the open work sits
 
-Counts come from the ledger's scoreboard — read them there, not here. As of the
-2026-08-25 regeneration the shape was:
+Counts come from the ledger's generated scoreboard — read them there, not here,
+because `scripts/lint/ledger_check.py --check` keeps that table honest and
+nothing keeps this sentence honest. As of the 2026-08-25 regeneration the shape
+was:
 **World/AI** carries the largest share (59 of 140 domain-open), **UI** (40 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
 small or permanent-register candidates) and **Net** (23) the next largest, and every
@@ -125,7 +127,12 @@ The remaining one is scoped small enough to be somebody's first grill.
 
 | Instrument | What it prevents | How it runs |
 |---|---|---|
-| [divergence-ledger.md](divergence-ledger.md) | a divergence being known but untracked, or the scoreboard drifting from its own tables | update and review with every fidelity slice |
+| [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
+| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; `godot/src` cite markers growing (`adapter_cpp_orig_cites_pushdown`, banked at 364 on 2026-08-26) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`) |
+| `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
+| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission may include only terrain_query's four `terrain_query/` headers, never the terrain-format stack | CI, hard-fail |
+| `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
+| `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |
 | [asset-gated-tests.md](asset-gated-tests.md) | believing a green run exercised retail data when the env vars were unset | read it before trusting a parity green |
 
 ## What this page is not

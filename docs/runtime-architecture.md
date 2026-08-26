@@ -264,5 +264,5 @@ Focused local coverage pins:
 - the frame-driven parity joiner waiting on settlement rather than elapsed
   frames.
 
-The PR CI matrix owns the exhaustive native, Godot, web, launcher, and
-packaging run.
+The PR CI matrix owns the exhaustive native, Godot, architecture-lint, web,
+launcher, and packaging run.

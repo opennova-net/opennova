@@ -395,8 +395,8 @@ kong misnomer cluster `CWeaponSlotManager*` renamed `ZoneSlotChain_*` — it man
 | `apply_session_settings_to_globals` | `0x551500` | host options → `g_capture_duration`/`g_capture_speed_setting`/`g_spawn_wave_time_base+zone`/`g_respawn_requires_team_dead` | D-NET-162 | all ported end-to-end, including cfg `nodefaultspawnpoints` under the accurate domain name `default_spawn_requires_no_team_zone`, S2C 0x0F bit1, and its exact SpawnZoneList gate (the retail global/helper names do not describe a living-player census) |
 
 Server per-frame S2C 0x0A emit (§5.47; witnessed 2026-07-01; reimpl in `engine/net/netsim/src/connection_fan.cpp`
-+ `netsim::Connection::s2c_phase`; pinned by `netsim_two_peer_fanout`
-`run_0a_subblock_phase_cycle`):
++ `netsim::Connection::s2c_phase`; `netsim_two_peer_fanout` `run_0a_subblock_phase_cycle` + shape harness
+`scripts/net/diff_0a.py`):
 
 | original | addr | role | D-NET | status |
 |---|---|---|---|---|
