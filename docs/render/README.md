@@ -37,15 +37,14 @@ maps that descriptor to one of the finite checked-in resources under
 golden and deliberately fails. Re-dumps carry witness citations in the same
 commit. A thin GUT leg (`godot/tests/render_shader_cache_handoff_test.gd`)
 pins the GDScript→native binding, while
-`tests/test_object_shader_resources.py` pins the complete resource manifest
-and rejects runtime topology switches or source-generation paths.
-`tests/object_shader_resource_hashes.golden.json` pins a normalized SHA-256 of
-each of the 104 checked-in wrappers plus its transitive include closure,
-preserving the former composed-source regression sensitivity. A deliberate,
-witnessed shader change re-dumps with
-`OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1` set for the GUT run; like the state-vector
-dump, that run
-rewrites the golden and intentionally fails.
+`godot/tests/shader_resource_contract_test.gd` pins the complete resource
+manifest and rejects runtime topology switches or source-generation paths.
+`godot/tests/object_shader_resource_hashes.golden.json` pins a normalized
+SHA-256 of each of the 132 checked-in object wrappers (128 generated + 4
+auxiliary) plus its transitive include closure, preserving the former
+composed-source regression sensitivity. A deliberate, witnessed shader change
+re-dumps with `OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1` set for the GUT run; like
+the state-vector dump, that run rewrites the golden and intentionally fails.
 
 **T2 — swatch A/B (local, mandatory per REN slice).**
 `godot/tests/render_swatch_probe.gd` renders one cell per unique object-shader
