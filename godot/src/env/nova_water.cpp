@@ -80,6 +80,13 @@ void Water::_bind_methods() {
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Water::advance_frame);
+	ClassDB::bind_method(D_METHOD("set_visible_terrain_bounds", "valid",
+								"min_height", "max_height"),
+			&Water::set_visible_terrain_bounds);
+	ClassDB::bind_method(D_METHOD("set_blink_water_visible", "visible"),
+			&Water::set_blink_water_visible);
+	ClassDB::bind_method(D_METHOD("is_water_pass_active"),
+			&Water::is_water_pass_active);
 
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_WORLD", VISUAL_LAYER_WORLD);
@@ -236,7 +243,7 @@ void Water::_push_water_split_height() {
 	if (!built_ || !is_inside_tree()) {
 		return;
 	}
-	const bool active = is_water_render_active() && is_visible_in_tree();
+	const bool active = is_water_pass_active() && is_visible_in_tree();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_water_active", active);
 	rs->global_shader_parameter_set("opennova_water_height", water_height_);
@@ -256,12 +263,23 @@ void Water::_push_water_split_height() {
 	}
 }
 
+void Water::set_visible_terrain_bounds(bool p_valid, float p_min_height,
+		float p_max_height) {
+	terrain_bounds_valid_ = p_valid;
+	terrain_min_height_ = p_min_height;
+	terrain_max_height_ = p_max_height;
+}
+
+void Water::set_blink_water_visible(bool p_visible) {
+	blink_water_visible_ = p_visible;
+}
+
 void Water::_sync_render_activity() {
 	if (!built_) {
 		return;
 	}
 	const bool world_active =
-			is_water_render_active() && is_inside_tree() && is_visible_in_tree();
+			is_water_pass_active() && is_inside_tree() && is_visible_in_tree();
 	if (mesh_instance_ != nullptr) {
 		mesh_instance_->set_visible(world_active);
 	}
@@ -516,8 +534,10 @@ void Water::advance_frame(double p_delta) {
 		cached_cam_id_ = cam != nullptr ? ObjectID(cam->get_instance_id())
 										: ObjectID();
 	}
-	if (!world_rendering_enabled_ || !is_water_active() ||
-			!is_visible_in_tree() || cam == nullptr) {
+	// The witnessed per-frame gate: no visible terrain at or below the water
+	// and no Blink-visible water last frame means no prerender, no noise
+	// regeneration and no strip this frame.
+	if (!is_water_pass_active() || !is_visible_in_tree() || cam == nullptr) {
 		_clear_strip_surfaces();
 		_sync_render_activity();
 		return;

@@ -127,6 +127,12 @@ struct TerrainDrawList {
 	// cameraY < Env_WaterHeightFixed @ 0x60FEE0; terrain_render_visible_sectors
 	// copies it to dword_319FB3C @ 0x60915F].
 	bool below_water = false;
+	// The frustum-surviving terrain bounds of this compile (every routed
+	// sector's trackBounds walk), reset per compile; the water-active test
+	// reads their height range. [orig: terrain_render_visible_sectors
+	// @ 0x6090c0 resets the tracked AABB @ 0x609177..0x60919f and traverses
+	// with trackBounds = 1 @ 0x609263]
+	VisibleBounds visible_bounds{};
 	TerrainFrameDebugCounters debug{};
 };
 

@@ -114,6 +114,26 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        std::vector<VisiblePatch>& out_patches,
                        TraversalStats& stats);
 
+// The frustum-surviving world AABB of one sector's quadtree: retail's
+// trackBounds traversal ignores the distance emit heuristic, subdivides every
+// surviving node to the LOD cap, and accumulates the terminal nodes' bounds
+// into one running min/max (the water-active test reads its height range).
+// [orig: Terrain_TraverseQuadtreeNode @ 0x608a00 — the `!trackBounds` emit
+//  gate @ 0x608d84, the accumulation @ 0x608ddf..0x608e8c]
+struct VisibleBounds {
+	bool valid = false;
+	float min[3] = {0.0f, 0.0f, 0.0f};
+	float max[3] = {0.0f, 0.0f, 0.0f};
+	void include(const float wmin[3], const float wmax[3]);
+};
+
+void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
+                          int node_idx,
+                          const Frustum& frustum,
+                          float sector_ox, float sector_oz,
+                          const TraversalConfig& config,
+                          VisibleBounds& out_bounds);
+
 // Convert triangle strip to triangle list.
 void strip_to_list(const std::vector<uint16_t>& strip,
                    std::vector<uint32_t>& out, uint32_t base);

@@ -230,6 +230,20 @@ int main() {
 		const opennova::TerrainDrawList &away = compiler.compile(scene, fv);
 		if (!expect(away.patches.empty() && away.detail_cells.empty(),
 				"a camera facing away culls everything")) return 1;
+		// The tracked visible bounds follow the same frustum verdict: valid
+		// with the tile heights inside them when terrain is in view, absent
+		// when nothing survives [orig: Terrain_TraverseQuadtreeNode @ 0x608a00
+		// trackBounds leg; terrain_render_visible_sectors @ 0x609263].
+		if (!expect(!away.visible_bounds.valid,
+				"no visible terrain tracks no bounds")) return 1;
+		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 8.0f, 32.0f},
+				{0.0f, 1.0f, 0.0f});
+		const opennova::TerrainDrawList &toward = compiler.compile(scene, fv);
+		if (!expect(toward.visible_bounds.valid,
+				"terrain in view tracks bounds")) return 1;
+		if (!expect(toward.visible_bounds.min[1] <= 8.0f &&
+						toward.visible_bounds.max[1] >= 8.0f,
+				"the tracked height range spans the visible tile heights")) return 1;
 	}
 
 	// --- The shared emission budget across routed sectors -------------------

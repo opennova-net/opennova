@@ -70,22 +70,26 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	_world.apply_scene_environment_frame()
 	_end_leg(FrameStatsBoard.WORLD_SCENE_ENV, leg_start)
 	# The environment presenters (weather smoothing, sun direction, sky dome,
-	# celestial bodies) and the water strip/mirror: ex-self-clocked _process
-	# nodes, now ordered here so they take THIS frame's render eye and every
-	# later leg (terrain's below-water state, foliage, the lit draws) consumes
-	# what they published this frame, never last frame's.
+	# celestial bodies): ex-self-clocked _process nodes, now ordered here so
+	# they take THIS frame's render eye and every later leg consumes what they
+	# published this frame, never last frame's.
 	leg_start = _begin_leg()
 	_world.render_environment_nodes_frame()
 	_end_leg(FrameStatsBoard.WORLD_ENV_NODES, leg_start)
-	leg_start = _begin_leg()
-	_world.render_water_frame()
-	_end_leg(FrameStatsBoard.WORLD_WATER, leg_start)
-	# Terrain samples the viewport camera directly; foliage receives the same
-	# live render transform. Their producer order stays terrain then foliage so
-	# foliage consumes this frame's detail-cell handoff.
+	# Terrain samples the viewport camera directly and tracks the visible
+	# terrain bounds the water leg's g_WaterActive test reads, so it runs
+	# first (retail: terrain_setup_view_and_lighting precedes the reflection
+	# prerender, and the water pass draws after the terrain pass); the water
+	# noise the terrain binds is the previous frame's, exactly as retail's
+	# water pass regenerates it after the terrain draw.
 	leg_start = _begin_leg()
 	_world.render_terrain_frame()
 	_end_leg(FrameStatsBoard.WORLD_TERRAIN, leg_start)
+	leg_start = _begin_leg()
+	_world.render_water_frame()
+	_end_leg(FrameStatsBoard.WORLD_WATER, leg_start)
+	# Foliage receives the same live render transform and consumes this
+	# frame's detail-cell handoff, so it follows terrain.
 	_world.render_foliage_frame()
 	leg_start = _begin_leg()
 	var network_frame_ok: bool = _world.drive_network_frame()

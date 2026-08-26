@@ -80,6 +80,34 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_false(cache.has_water_plane())
 
 
+func test_water_pass_follows_the_visible_terrain_height_range() -> void:
+	# Retail runs the reflection prerender, the noise pair and the strip only
+	# while the lowest visible terrain sits at or below the water height, or
+	# the Blink walk saw the water last frame [orig:
+	# terrain_setup_view_and_lighting @ 0x60fe40 @ 0x60ff12..0x60ff33].
+	var fixture := _make_water_fixture(4.0)
+	var water: Node = fixture["water"]
+	assert_true(water.is_water_pass_active(),
+			"no tracked terrain bounds keep the pass live")
+	water.set_visible_terrain_bounds(true, 6.0, 40.0)
+	assert_false(water.is_water_pass_active(),
+			"terrain wholly above the water switches the pass off")
+	water.advance_frame(TICK)
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
+			SubViewport.UPDATE_DISABLED,
+			"an inactive pass renders no mirror")
+	water.set_blink_water_visible(true)
+	assert_true(water.is_water_pass_active(),
+			"last frame's Blink water-visible forces the pass")
+	water.set_blink_water_visible(false)
+	water.set_visible_terrain_bounds(true, 2.0, 40.0)
+	assert_true(water.is_water_pass_active(),
+			"terrain reaching below the water keeps the pass live")
+	water.set_visible_terrain_bounds(false, 0.0, 0.0)
+	assert_true(water.is_water_pass_active(),
+			"losing the bounds (no terrain in view) falls back to live")
+
+
 func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(ProjectSettings.globalize_path(

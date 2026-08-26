@@ -238,6 +238,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 	// non-negative, so a dry map's 0 height never fires in practice).
 	// [orig: setl @ 0x60fea5, store @ 0x60FEE0 -> dword_319FB3C @ 0x60915F]
 	draw_list_.below_water = view.cam_y < view.water_height;
+	draw_list_.visible_bounds = VisibleBounds{};
 	visible_.clear();
 
 	if (!scene.valid()) {
@@ -296,6 +297,11 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			const float sector_oz = static_cast<float>(sz * 512);
 
 			const size_t sector_patch_begin = visible_.size();
+			// Retail walks each routed sector twice per frame: the
+			// bounds-tracking pass at view setup, then the draw pass.
+			track_visible_bounds(scene.quad_nodes, scene.l1_children[child],
+					frustum, sector_ox, sector_oz, view.config,
+					draw_list_.visible_bounds);
 			traverse_quadtree(scene.quad_nodes, scene.tile_meshes,
 					scene.l1_children[child], frustum,
 					view.cam_x, view.cam_y, view.cam_z,
