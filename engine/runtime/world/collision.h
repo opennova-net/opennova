@@ -261,6 +261,15 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
 // [orig: BoneCallback_Generic @ 0x4e26d0;
 // Math_FixedPointToFloatMatrix4x4_Swizzled @ 0x611080;
 // Math_FloatMatrixToFixedPoint22 @ 0x611140.]
+// The entity placement matrix retail rebuilds at entity+0xB4 before it
+// transforms a userpoint or the bbox center: the euler rotation from the live
+// heading (the vehicle motor's BAM mirror when seeded, else the whole-degree
+// mission yaw), pitch and roll about the 16.16 position, the uniform item
+// scale riding the rotation diagonal [orig: the builder select
+// @0x43b56c..0x43b5bd; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+// @0x614210; Math_BuildFixedPointMatrixFromEulerAngles @0x613f40].
+CollisionMatrix entity_placement_matrix(const Entity &e);
+
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],
                                         CollisionMatrix &out);

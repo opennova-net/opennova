@@ -4227,9 +4227,13 @@ record position (`@ 0x4b272e..0x4b2743`); both legs now use the raw 16.16 record
 ### 21.4 Divergences + open follow-ups
 
 D-AI-6 (ledger): the fire origin is exact in-sim at fire time for persons with a rig and for
-UseGun shots. Residuals: (a) the LOS/aim-TARGET endpoint substitutes the posed muzzle for
-retail's `Entity_ComputeWeaponFireOrigin @ 0x43b4b0` person leg (`pos + entity+0x6C`; the
-+0x6C writer stays unwalked); (b) the weapon-def userpoint (`+0x333 <- weaponDef+856`) and the
+UseGun shots. The aim/LOS origin (`Entity_ComputeWeaponFireOrigin @ 0x43b4b0`) is
+`AiSystem::weapon_aim_origin` at both mutual-LOS ends and the aim TARGET point: its
+non-person leg is ported 2026-08-26 (the def TARGET userpoint def+1350 — resolved from the
+hardcoded name at `Entity_InitFromModel @ 0x40dd04` into `Entity::target_userpoint_byte` —
+through the placement matrix `@ 0x43b5d4..0x43b5f6`, else the collision-bbox center
+entity+0x1FC `@ 0x43b619`, else the raw position `@ 0x43b54f`). Residuals: (a) the PERSON
+leg (`pos + entity+0x6C`; the +0x6C writer stays unwalked) substitutes the posed muzzle; (b) the weapon-def userpoint (`+0x333 <- weaponDef+856`) and the
 person `+0x4D8` cluster are not carried; (c) the AI fire pitch adds `inf.recoil_pitch`, which
 the AI fire path was not seen to add (`@ 0x4b274b` copies entity Pitch); (d) the
 `ItemDef+0x144` pre-evaluation hook (the BoneCallback pair from `BoneCallback_LookupByTag

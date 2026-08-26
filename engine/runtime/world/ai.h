@@ -778,20 +778,26 @@ public:
     // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
     void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
-    // The aim/LOS fire origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 —
-    // person leg pos + (entity+0x6C)/2 + jitter (the +0x6C writer is unwalked,
-    // D-AI-6 facet d); non-person leg = the def "TARGET" userpoint by the entity
-    // euler matrix, fallback entity+0x1FC or the raw position]. Our binding seam
-    // substitutes the POSED gun-flash stamp while fresh; the 0.9 u chest lift
-    // stays the stampless fallback. The aim EYE use is exact: retail's combat-pass
-    // aim anchor IS the posed bone the stamp carries
-    // [orig: Entity_GetAttachmentWorldPosition @0x4b2670 on bone +0x366 —
-    // world-wac-ai-re §21.1/§21.4].
+    // The aim/LOS origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0]. The
+    // person leg (def type 3) is pos + (entity+0x6C >> 1|2) + jitter with the
+    // +0x6C writer unwalked (D-AI-6 residual), so persons keep the muzzle seam
+    // below; a modeled non-person transforms its def "TARGET" userpoint
+    // (def+1350) by the placement matrix (@0x43b5d4..0x43b5f6), else the model
+    // collision-bbox center entity+0x1FC (@0x43b619); without a model the raw
+    // position (@0x43b54f). Both ends of the mutual-LOS test and the aim
+    // TARGET point ride this [orig: Entity_CheckMutualLineOfSight @0x539be0].
+    void weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) const;
+    void weapon_aim_origin(World &world, const AiEntity &e, int32_t out[3]) const;
+    // The fire origin: the static forms copy the raw entity origin, retail's
+    // own no-model / no-point copy [orig: Entity_GetAttachmentWorldPosition
+    // @0x4b2767..0x4b278e]. The aim EYE use is exact: retail's combat-pass aim
+    // anchor IS the posed launch bone [orig: Entity_GetAttachmentWorldPosition
+    // @0x4b2670 on bone +0x366 — world-wac-ai-re §21.1/§21.4].
     static void weapon_fire_origin(const AiEntity &e, int32_t out[3]);
     static void weapon_fire_origin(const Entity &e, int32_t out[3]);
     // Asset-aware live-pose form used by the simulation. It asks the world's
-    // native provider at the actual LOS/aim/fire call site, then the fresh
-    // no-native-rig stamp, then the chest lift.
+    // native muzzle-pose provider at the actual LOS/aim/fire call site (the
+    // posed launch userpoint of the current tick), else copies the raw origin.
     void weapon_fire_origin(World &world, const AiEntity &e,
                             int32_t out[3]) const;
     void weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const;

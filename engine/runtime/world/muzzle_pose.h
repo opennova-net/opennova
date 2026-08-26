@@ -30,6 +30,14 @@ struct IMuzzlePoseProvider {
 			World &, EntityHandle, int /*userpoint_index*/, int32_t /*out*/[6]) {
 		return false;
 	}
+	// A userpoint (1-based table index) through the entity placement matrix
+	// ALONE, no part pose: the aim/LOS origin's TARGET point (16.16 world).
+	// [orig: Entity_ComputeWeaponFireOrigin @0x43b5f6 Math_FixedPointTransformPoint22
+	//  (entity+0xB4, userpoint record)]
+	virtual bool resolve_userpoint_rigid(
+			World &, EntityHandle, int /*userpoint_index*/, int32_t /*out*/[3]) {
+		return false;
+	}
 };
 
 } // namespace opennova::world

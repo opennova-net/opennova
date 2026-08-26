@@ -369,6 +369,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		if (resolved_model >= 0) {
 			deps.collision.assign_entity(h, resolved_model, e->registry_spawn_id);
 			++attached;
+			// The aim/LOS origin's TARGET userpoint [orig: Entity_InitFromModel
+			// @0x40dd04 -> def+1350]; 0 when the model has none.
+			if (const Threedi3di3 *m3 = deps.models.model_for(key))
+				e->target_userpoint_byte = userpoint_index_by_name(*m3, "TARGET");
 			if (!is_organic && (def->attrib & world::kItemAttribEweap) != 0u) {
 				if (const Threedi3di3 *m3 = deps.models.model_for(key))
 					resolve_weapon_userpoint_bytes(*def, *m3, *e);

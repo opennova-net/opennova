@@ -9,6 +9,7 @@
 #include "terrain_query/height_field.h"
 #include "world/ai.h"
 #include "world/body_anim.h"
+#include "world/collision.h"
 #include "world/muzzle_pose.h"
 #include "world/world.h"
 
@@ -129,6 +130,15 @@ void test_vehicle_death_rows() {
 struct FakeMuzzleProvider : IMuzzlePoseProvider {
     std::unordered_map<uint16_t, std::array<int32_t, 3>> points;
     std::unordered_map<uint16_t, std::array<int32_t, 6>> userpoints;
+    std::unordered_map<uint16_t, std::array<int32_t, 3>> rigid_points;
+    int rigid_index_seen = 0;
+    bool resolve_userpoint_rigid(World &, EntityHandle h, int index, int32_t out[3]) override {
+        const auto it = rigid_points.find(h.packed);
+        if (it == rigid_points.end()) return false;
+        rigid_index_seen = index;
+        out[0] = it->second[0]; out[1] = it->second[1]; out[2] = it->second[2];
+        return true;
+    }
     bool resolve_muzzle_pose(World &, EntityHandle h, int32_t out[3]) override {
         const auto it = points.find(h.packed);
         if (it == points.end()) return false;
@@ -296,6 +306,69 @@ static void test_los_endpoints_use_muzzle_stamp() {
 
     w.muzzle_pose_provider = nullptr; // no provider -> the raw origins again
     CHECK(!clear_between());
+}
+
+// The aim/LOS origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0]: a
+// modeled non-person takes its def TARGET userpoint through the placement
+// matrix when the model carries one (def+1350), else its collision-bbox
+// center entity+0x1FC through the same matrix; without a model the raw
+// position; a person keeps the muzzle seam (the +0x6C leg is the D-AI-6
+// residual).
+static void test_aim_origin_takes_the_non_person_leg() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    CollisionWorld collision;
+    w.collision = &collision;
+    AiSystem sys;
+
+    Entity veh_seed{};
+    veh_seed.kind = EntityKind::Item;
+    veh_seed.has_item_def = true;
+    veh_seed.item_type = 1; // not def type 3: the non-person leg
+    veh_seed.alive = true;
+    veh_seed.position = Vec3{10.0f, 20.0f, 0.0f};
+    veh_seed.yaw = 90;
+    veh_seed.bbox_center = Vec3{0.0f, 0.0f, 1.5f};
+    const EntityHandle veh = w.registry.spawn(1, veh_seed);
+
+    int32_t out[3];
+    // No attached model: the raw position [orig: @0x43b54f].
+    sys.weapon_aim_origin(w, *w.registry.get(veh), out);
+    CHECK(out[0] == (10 << 16) && out[1] == (20 << 16) && out[2] == 0);
+
+    // A model, no TARGET userpoint: the bbox center through the placement
+    // matrix — a vertical offset survives the yaw untouched [orig: @0x43b619].
+    collision.assign_entity(veh, collision.add_model(CollisionModel{}));
+    sys.weapon_aim_origin(w, *w.registry.get(veh), out);
+    CHECK(out[0] == (10 << 16) && out[1] == (20 << 16));
+    CHECK(out[2] == static_cast<int32_t>(1.5 * 65536.0));
+
+    // The def TARGET userpoint through the provider's rigid transform
+    // [orig: @0x43b5d4..0x43b5f6].
+    FakeMuzzleProvider provider;
+    provider.rigid_points[veh.packed] = {11 << 16, 22 << 16, 33 << 16};
+    w.muzzle_pose_provider = &provider;
+    w.registry.get(veh)->target_userpoint_byte = 2;
+    sys.weapon_aim_origin(w, *w.registry.get(veh), out);
+    CHECK(out[0] == (11 << 16) && out[1] == (22 << 16) && out[2] == (33 << 16));
+    CHECK(provider.rigid_index_seen == 2);
+
+    // A person keeps the muzzle seam: the posed muzzle when the provider has
+    // one, else the raw origin.
+    Entity person_seed{};
+    person_seed.kind = EntityKind::Organic;
+    person_seed.has_item_def = true;
+    person_seed.item_type = 3;
+    person_seed.alive = true;
+    person_seed.position = Vec3{1.0f, 2.0f, 0.0f};
+    const EntityHandle person = w.registry.spawn(0, person_seed);
+    sys.weapon_aim_origin(w, *w.registry.get(person), out);
+    CHECK(out[0] == (1 << 16) && out[1] == (2 << 16) && out[2] == 0);
+    provider.points[person.packed] = {3 << 16, 4 << 16, 5 << 16};
+    sys.weapon_aim_origin(w, *w.registry.get(person), out);
+    CHECK(out[0] == (3 << 16) && out[1] == (4 << 16) && out[2] == (5 << 16));
+    w.muzzle_pose_provider = nullptr;
 }
 
 // D-AI-6a: the aim solution's EYE and TARGET point ride the seam. Stampless,
@@ -2780,6 +2853,7 @@ int main() {
     test_weapon_fire_origin_fallback_chain();
     test_los_endpoints_use_muzzle_stamp();
     test_aim_solution_uses_muzzle_stamp();
+    test_aim_origin_takes_the_non_person_leg();
     test_world_feed_never_engages_same_team();
     test_berserk_candidate_is_intentional_team_exception();
     test_damage_hit_sets_retail_alert_state();

@@ -174,10 +174,10 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     const LosBlockedFn probe = [](void *ctx, const AiCandidate &c) -> bool {
         LosCtx *lc = static_cast<LosCtx *>(ctx);
         int32_t sa[3];
-        lc->sys->weapon_fire_origin(*lc->world, *lc->scanner, sa);
+        lc->sys->weapon_aim_origin(*lc->world, *lc->scanner, sa);
         int32_t sb[3];
         if (const Entity *te = lc->world->registry.get(c.handle)) {
-            lc->sys->weapon_fire_origin(*lc->world, *te, sb);
+            lc->sys->weapon_aim_origin(*lc->world, *te, sb);
         } else {
             sb[0] = c.pos[0];
             sb[1] = c.pos[1];
@@ -328,6 +328,45 @@ static bool provider_muzzle_origin(World &world, EntityHandle h, int32_t out[3])
 void AiSystem::weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const {
     if (provider_muzzle_origin(world, e.handle, out)) return;
     weapon_fire_origin(e, out);
+}
+
+void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) const {
+    // [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 — def+92 == 3 selects
+    //  the person leg; the +0x6C vector's writer is unwalked, so the muzzle
+    //  seam stands in for it (D-AI-6)]
+    const bool person = e.has_item_def ? e.item_type == 3 : e.kind == EntityKind::Organic;
+    if (person) {
+        weapon_fire_origin(world, e, out);
+        return;
+    }
+    // No graphic model: the raw position [orig: @0x43b54f..0x43b55b].
+    const bool has_model = world.collision != nullptr &&
+                           world.collision->entity_model_id(e.handle) >= 0;
+    if (!has_model) {
+        weapon_fire_origin(e, out);
+        return;
+    }
+    // def+1350: the TARGET userpoint through the placement matrix
+    // [orig: @0x43b5d4..0x43b5f6].
+    if (e.target_userpoint_byte != 0 && world.muzzle_pose_provider != nullptr &&
+        world.muzzle_pose_provider->resolve_userpoint_rigid(
+                world, e.handle, e.target_userpoint_byte, out))
+        return;
+    // Else the model collision-bbox center entity+0x1FC through the same
+    // matrix [orig: @0x43b619].
+    const int32_t center[3] = {
+        static_cast<int32_t>(e.bbox_center.x * 65536.0f),
+        static_cast<int32_t>(e.bbox_center.y * 65536.0f),
+        static_cast<int32_t>(e.bbox_center.z * 65536.0f)};
+    entity_placement_matrix(e).transform_point(center, out);
+}
+
+void AiSystem::weapon_aim_origin(World &world, const AiEntity &e, int32_t out[3]) const {
+    if (const Entity *ent = world.registry.get(e.handle)) {
+        weapon_aim_origin(world, *ent, out);
+        return;
+    }
+    weapon_fire_origin(world, e, out);
 }
 
 void AiSystem::weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const {

@@ -2078,12 +2078,12 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             const int64_t ddy = static_cast<int64_t>(cpos[1]) - e.pos[1];
             const int64_t d2 = ddx * ddx + ddy * ddy;
             if (d2 >= best_d2) continue; // nearest-first [orig: -fwd_dist descending sort]
-            // Fire-origin -> fire-origin endpoints via the muzzle seam
-            // [orig: Entity_CheckMutualLineOfSight @0x539be0].
+            // Aim-origin -> aim-origin endpoints (Entity_ComputeWeaponFireOrigin
+            // at both ends) [orig: Entity_CheckMutualLineOfSight @0x539be0].
             int32_t sa[3];
-            sys.weapon_fire_origin(world, e, sa);
+            sys.weapon_aim_origin(world, e, sa);
             int32_t sb[3];
-            sys.weapon_fire_origin(world, *c, sb);
+            sys.weapon_aim_origin(world, *c, sb);
             if (!sys.line_of_sight_clear(world, sa, sb, e.handle, h))
                 continue; // LOS last, in order
             best = h;
@@ -2127,12 +2127,12 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             inf.last_attacker.valid() && (slot.f[1] & 1) == 0) {
             if (const Entity *att = world.registry.get(inf.last_attacker)) {
                 if (att->health > 0 && att->team != e.team) {
-                    // The mutual-LOS fire-origin endpoints stand in here too —
+                    // The mutual-LOS aim-origin endpoints stand in here too —
                     // @0x53b130's own endpoint recipe is unwitnessed.
                     int32_t sa[3];
-                    weapon_fire_origin(world, e, sa);
+                    weapon_aim_origin(world, e, sa);
                     int32_t sb[3];
-                    weapon_fire_origin(world, *att, sb);
+                    weapon_aim_origin(world, *att, sb);
                     if (line_of_sight_clear(world, sa, sb, e.handle, inf.last_attacker))
                         found = inf.last_attacker;
                 }
@@ -2327,17 +2327,18 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         err_unit * (32 - static_cast<int32_t>((key >> 2) & 0x3Fu)));
 
     // The aim EYE rides the muzzle seam — retail's combat-pass aim anchor IS
-    // the posed bone the stamp carries [orig: Entity_GetAttachmentWorldPosition
-    // @0x4b2670 on bone +0x366, §21.1]; stampless rows keep the chest lift.
-    // The horizontal eye components shift with the pose too, as retail's do.
+    // the posed launch bone [orig: Entity_GetAttachmentWorldPosition @0x4b2670
+    // on bone +0x366, §21.1]; a row without a resolvable point keeps the raw
+    // entity origin (retail's copy @0x4b2767). The horizontal eye components
+    // shift with the pose too, as retail's do.
     int32_t eye[3];
     weapon_fire_origin(world, e, eye);
-    // The aim TARGET point is the target's fire origin, not its ground origin
+    // The aim TARGET point is the target's aim origin, not its ground origin
     // [orig: §17.5 — target chest point via Entity_ComputeWeaponFireOrigin
     // @0x43b4b0]. The lead stays computed over the raw positions (inf.aim_point
     // is also the movement sample); the origin offset is added on top.
     int32_t t_origin[3];
-    weapon_fire_origin(world, *tent, t_origin);
+    weapon_aim_origin(world, *tent, t_origin);
     const double adx = static_cast<double>(led[0]) + (t_origin[0] - tpos[0]) - eye[0];
     const double ady = static_cast<double>(led[1]) + (t_origin[1] - tpos[1]) - eye[1];
     const double adz = static_cast<double>(led[2]) + (t_origin[2] - tpos[2]) - eye[2];
@@ -2375,8 +2376,9 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     if ((ev & 0x8u) != 0) inf.fire_secondary_latch = true;
     if (!fire_primary && !fire_c && !inf.fire_secondary_latch) return;
 
-    // The muzzle origin: the embedder-fed posed gun-flash userpoint when FRESH,
-    // chest lift otherwise — the shared seam helper (the D-AI-6 seam — [orig:
+    // The muzzle origin: the launch userpoint on the sim's own posed skeleton,
+    // resolved now by the world's muzzle-pose provider, else the raw entity
+    // origin — the shared seam helper (the D-AI-6 seam — [orig:
     // Entity_GetAttachmentWorldPosition @0x4b2670 transforms the fire-bone
     // userpoint's local position by the ANIMATED bone matrix, called from the
     // anim-event fire block @0x4bf326..0x4bf425]).
