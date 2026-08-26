@@ -115,9 +115,9 @@ func teardown() -> void:
 	if _projection_feed != Vector4.ZERO:
 		var shipped: Dictionary = ProjectSettings.get_setting(
 				"shader_globals/opennova_viewmodel_projection", {})
-		RenderingServer.global_shader_parameter_set(
-				&"opennova_viewmodel_projection",
-				shipped.get("value", Vector4(1.0, 0.05, 4000.0, 1.0)))
+		if shipped.has("value"):
+			RenderingServer.global_shader_parameter_set(
+					&"opennova_viewmodel_projection", shipped["value"])
 	_projection_feed = Vector4.ZERO
 
 
@@ -323,8 +323,11 @@ func _place_viewmodel_at_camera() -> void:
 				sim.local_player_viewmodel_bias_view_units(
 						PLAYER_VIEWMODEL_POS_UNITS, PLAYER_VIEWMODEL_TPOS_UNITS,
 						int(vs.x), int(vs.y)))
-	_viewmodel.global_transform = _camera.global_transform * Transform3D(
-		vm_basis, bias * view_offset)
+	# An unchanged write would still dirty every part into the flush's
+	# transform notifications; a still view writes nothing.
+	var next := _camera.global_transform * Transform3D(vm_basis, bias * view_offset)
+	if _viewmodel.global_transform != next:
+		_viewmodel.global_transform = next
 
 
 ## Re-place the gun and re-push its projection feed against the camera's

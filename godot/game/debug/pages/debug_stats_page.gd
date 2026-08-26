@@ -546,8 +546,17 @@ const _ROWS := [
 var status_label: Label
 var stats_tree: Tree
 
+# The info cells a refresh may leave unwritten (their sources are
+# mission-scoped); the flush blanks exactly those instead of blanking every
+# cell first and rewriting it, which made each one dirty twice per window.
+const _CONDITIONAL_INFO_IDS := ["sim", "net", "trace", "effects", "fire", "destruction",
+		"throwable", "mission_rows", "wire_rows", "occl", "material",
+		"render_main", "render_shadow", "render_water", "render_q3",
+		"render_slot", "physics_callbacks", "flush_tail"]
+
 var _board: FrameStatsBoard = null
 var _overlay_visible := false
+var _pending_info: Dictionary = {}  # row id -> info text for this refresh
 var _capture_active := false
 var _refresh_count := 0
 var _items: Dictionary = {}  # row id -> TreeItem
@@ -761,6 +770,7 @@ func _build_rows() -> void:
 
 
 func _clear_display_values() -> void:
+	_pending_info.clear()
 	for item_v in _items.values():
 		var item := item_v as TreeItem
 		_set_metric(item, 1, "-")
@@ -775,9 +785,22 @@ func _set_metric(item: TreeItem, column: int, text: String) -> void:
 
 
 func _set_info(id: String, text: String) -> void:
-	var item := _items[id] as TreeItem
-	item.set_text(3, text)
-	item.set_tooltip_text(3, text)
+	_pending_info[id] = text
+
+
+# Apply this refresh's info cells once: unwritten conditional cells blank,
+# every other cell takes its text (TreeItem skips an unchanged string, so a
+# steady counter costs no re-shape).
+func _flush_pending_info() -> void:
+	for id in _CONDITIONAL_INFO_IDS:
+		if not _pending_info.has(id):
+			_pending_info[id] = ""
+	for id in _pending_info:
+		var item := _items[id] as TreeItem
+		var text := String(_pending_info[id])
+		item.set_text(3, text)
+		item.set_tooltip_text(3, text)
+	_pending_info.clear()
 
 
 # The counter pulls: live Dictionaries/typed stats read at refresh cadence
@@ -786,14 +809,10 @@ func _set_info(id: String, text: String) -> void:
 func _refresh_info(sums: PackedInt64Array, maxes: PackedInt64Array,
 		counts: PackedInt32Array, frames: int,
 		runtime: MissionPresentation, sim: Simulation) -> void:
-	# Sources are mission-scoped and can disappear between divided refreshes.
-	# Clear every conditional cell first so reload/menu transitions cannot retain
-	# counters from the previous world.
-	for id in ["sim", "net", "trace", "effects", "fire", "destruction",
-			"throwable", "mission_rows", "wire_rows", "occl", "material",
-			"render_main", "render_shadow", "render_water", "render_q3",
-			"render_slot", "physics_callbacks", "flush_tail"]:
-		_set_info(id, "")
+	# Sources are mission-scoped and can disappear between divided refreshes;
+	# _flush_pending_info blanks the conditional cells this refresh leaves
+	# unwritten so reload/menu transitions cannot retain the previous world's.
+	_pending_info.clear()
 	var frame_info := "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS))
 	# Godot's own TIME_PROCESS (process + deferred flush + RS sync + draw) is a
 	# once-per-second worst-iteration figure, so it reads as a peak: the
@@ -932,6 +951,7 @@ func _refresh_info(sums: PackedInt64Array, maxes: PackedInt64Array,
 					int(occ_counts.get("instances", 0)),
 					int(occ_counts.get("visible", 0)),
 					int(occ_counts.get("culled_entities", 0))])
+	_flush_pending_info()
 
 
 # One pass-count info cell: window-averaged objects/draws submitted per frame
