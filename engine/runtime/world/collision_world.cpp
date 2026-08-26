@@ -67,12 +67,14 @@ void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id,
         husk = existing->second.husk_model_id;
     }
     instances_[h.packed] = Instance{model_id, husk, registry_spawn_id};
+    if (h.pool() == 2) statics_dirty_ = true;
     invalidate_trace_view(h);
 }
 
 void CollisionWorld::remove_entity_instance(EntityHandle h) {
     if (!h.valid()) return;
     instances_.erase(h.packed);
+    if (h.pool() == 2) statics_dirty_ = true;
     invalidate_trace_view(h);
 }
 
@@ -194,6 +196,7 @@ bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
         // The packed slot was despawned/reused. Never let its old intact or
         // husk model satisfy a query for the new registry lifetime.
         instances_.erase(existing);
+        if (h.pool() == 2) statics_dirty_ = true;
         invalidate_trace_view(h);
     }
     if (section_matrix_provider_ == nullptr) return false;
@@ -588,6 +591,7 @@ void CollisionWorld::build_initial_tables(World &world) {
     //  HeliLift_SpawnPickup) also call it directly]
     slice_refresh_counter_ = 16; // force the cadence gate — retail's direct
                                  // builder call bypasses the @0x4c240f gate
+    statics_dirty_ = true;
     build_tables(world, true);
 }
 
@@ -606,15 +610,23 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         if (entity == nullptr ||
             (it->second.registry_spawn_id != 0 &&
              it->second.registry_spawn_id != entity->registry_spawn_id)) {
+            if (h.pool() == 2) statics_dirty_ = true;
             it = instances_.erase(it);
         } else {
             ++it;
         }
     }
 
-    // --- pool-2 statics: buildings first, then the rest. [orig: 0x4b9430] ---
-    statics_.clear();
-    static_building_count_ = 0;
+    // --- pool-2 statics: buildings first, then the rest. Built at mission
+    // start / teleport / the instance and registry edges that arm
+    // statics_dirty_, never per tick [orig: Entity_BuildAllProximityLists
+    // @0x4c20f0 -> 0x4b9430; xrefs = Entity_InitAllFromModels @0x40e5a1,
+    // Game_StartMission @0x525c90 and the teleport paths] ---
+    const bool rebuild_statics = statics_dirty_;
+    if (rebuild_statics) {
+        statics_.clear();
+        static_building_count_ = 0;
+    }
     auto push_static = [&](const Entity &e) {
         // The original's count saturates at 1199 — the 1200th slot is written
         // but never counted, so 1199 is the effective cap. [orig: the
@@ -723,21 +735,23 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         dynamics_.push_back(d);
     };
 
-    // Each output table retains the same registry-relative order, but their
-    // independent filters share one capacity walk. Statics still require a
-    // second pass so the complete Building prefix precedes every other pool-2
-    // entry exactly as retail authored it.
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() == 2 && e.kind == EntityKind::Building) push_static(e);
-        push_person(e);
-        push_dynamic(e);
-    });
-    static_building_count_ = static_cast<int32_t>(statics_.size());
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() != 2 || e.kind == EntityKind::Building) return;
-        push_static(e);
-    });
-    static_count_ = static_cast<int32_t>(statics_.size());
+    // Retail walks each pool's own array: pool 1 then pool 0 every tick
+    // [orig: 0x4b9340 @0x4b9389 / @0x4b93eb], and pool 2 twice at the start
+    // of a mission so the complete Building prefix precedes every other
+    // pool-2 entry [orig: 0x4b9430].
+    world.registry.for_each_in_pool(0, push_person);
+    world.registry.for_each_in_pool(1, push_dynamic);
+    if (rebuild_statics) {
+        world.registry.for_each_in_pool(2, [&](const Entity &e) {
+            if (e.kind == EntityKind::Building) push_static(e);
+        });
+        static_building_count_ = static_cast<int32_t>(statics_.size());
+        world.registry.for_each_in_pool(2, [&](const Entity &e) {
+            if (e.kind != EntityKind::Building) push_static(e);
+        });
+        static_count_ = static_cast<int32_t>(statics_.size());
+        statics_dirty_ = false;
+    }
 
     if (!advance_candidate_slices) return;
 
@@ -894,10 +908,12 @@ void CollisionWorld::refresh_after_registry_change(World &world) {
         if (tick_tables_built_) build_initial_tables(world);
         return;
     }
-    // Entity_BuildAllProximityLists is the spawn/teleport path in retail. Route
-    // through the normal builder so pool snapshots and the shared arena remain
-    // one coherent epoch; forcing the cadence gate also resets its counter.
+    // Entity_BuildAllProximityLists is the spawn/teleport path in retail: the
+    // statics table rebuilds here and nowhere per tick. Route through the
+    // normal builder so pool snapshots and the shared arena remain one coherent
+    // epoch; forcing the cadence gate also resets its counter.
     slice_refresh_counter_ = 16;
+    statics_dirty_ = true;
     build_tick_tables(world);
 }
 

@@ -115,6 +115,20 @@ public:
         }
     }
 
+    // One pool's used slots in slot order — the retail per-pool array walk
+    // (g_pool_list[pool].used entries) the per-tick systems take instead of
+    // the whole registry [orig: Entity_UpdateAllEntities @0x4c2100 walks pool
+    // 1 @0x4c2140.., pool 0 @0x4c244c..; Entity_BuildProximityLists_Pool01
+    // @0x4b9340 walks pools 1 then 0].
+    template <class F>
+    void for_each_in_pool(int pool, F &&fn) const {
+        if (pool < 0 || pool >= kPoolCount) return;
+        const Pool &p = pools_[pool];
+        for (size_t s = 0; s < p.slots.size(); ++s) {
+            if (p.used[s]) fn(p.slots[s]);
+        }
+    }
+
 private:
     struct Pool {
         std::vector<Entity> slots;

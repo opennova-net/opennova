@@ -1292,6 +1292,36 @@ void test_slice_cadence_and_invuln() {
         CHECK(refresh_cw.candidate_count(source) == 1);
     }
 
+    // The statics table is NOT a per-tick product: retail builds it at mission
+    // start and on teleport (Entity_BuildAllProximityLists @0x4c20f0), so a
+    // pool-2 row that moves between ticks keeps its start-of-mission slot
+    // until a registry/instance edge republishes the table.
+    {
+        World static_world;
+        CollisionWorld static_cw;
+        static_world.registry.configure_pool(2, 4);
+        Entity crate_seed;
+        crate_seed.kind = EntityKind::Item;
+        crate_seed.position = {20.0f, 0.0f, 0.0f};
+        crate_seed.bound_radius = 1.0f;
+        crate_seed.alive = true;
+        const EntityHandle crate = static_world.registry.spawn(2, crate_seed);
+        static_cw.build_initial_tables(static_world);
+        CHECK(static_cw.static_count() == 1);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 20);
+        static_world.registry.get(crate)->position.x = 40.0f;
+        for (int i = 0; i < 17; ++i) static_cw.build_tick_tables(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 20);
+        static_cw.refresh_after_registry_change(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 40);
+        // A late collision instance on a pool-2 row is an edge too.
+        const int32_t crate_model = static_cw.add_model(box_model(1, 0, 1.0, 1.0, 1.0));
+        static_world.registry.get(crate)->position.x = 60.0f;
+        static_cw.assign_entity(crate, crate_model);
+        static_cw.build_tick_tables(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 60);
+    }
+
     // DH/DM/DL volumes never damage an EngineFlags-0x4000000 entity. [orig: the
     // (Flags & 0x4000000) == 0 wrap @ 0x4b3148]
     Rig rig(box_model(18, 0, 3.0, 3.0, 3.0));

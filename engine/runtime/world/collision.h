@@ -725,11 +725,14 @@ struct ProjectileHit {
 };
 
 // ----------------------------------------------------------------------------
-// CollisionWorld: the per-tick proximity tables + per-entity instances, and the
-// world-level blink state. [orig: the g_StaticProx*/g_DynProx*/g_PersonProx*
-// tables + g_ProxCandidateArena rebuilt each tick by
-// Entity_BuildProximityLists_Pool2 @ 0x4b9430, _Pool01 @ 0x4b9340 and
-// Entity_BuildProximityListsFromPools @ 0x4b8eb0.]
+// CollisionWorld: the proximity tables + per-entity instances, and the
+// world-level blink state. [orig: the g_StaticProx* table is built at mission
+// start and on the teleport paths by Entity_BuildAllProximityLists @ 0x4c20f0
+// -> Entity_BuildProximityLists_Pool2 @ 0x4b9430; the g_DynProx*/g_PersonProx*
+// tables are rebuilt every tick by Entity_BuildProximityLists_Pool01
+// @ 0x4b9340 (Entity_UpdateAllEntities @ 0x4c240a); the g_ProxCandidateArena
+// slices every 17th tick by Entity_BuildProximityListsFromPools @ 0x4b8eb0
+// (gate @ 0x4c2416).]
 // ----------------------------------------------------------------------------
 class CollisionWorld {
 public:
@@ -811,12 +814,16 @@ public:
     bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
-    // --- per-tick snapshots ---
-    // [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430] statics (pool-2 style):
-    // buildings first [0..static_building_count), all statics [0..static_count),
-    // positions quantized (p + 0x8000) >> 16 as u16, radius padded +111876, cap 1200.
+    // --- the per-tick snapshot ---
     // [orig: Entity_BuildProximityLists_Pool01 @ 0x4b9340] persons (pool 0) into the
-    // full-precision repulsion table; dynamics (pool 1) into the dyn table.
+    // full-precision repulsion table; dynamics (pool 1) into the dyn table, every
+    // tick. The statics table (pool 2, [orig: Entity_BuildProximityLists_Pool2
+    // @ 0x4b9430]: buildings first [0..static_building_count), all statics
+    // [0..static_count), positions quantized (p + 0x8000) >> 16 as u16, radius
+    // padded +111876, cap 1200) is rebuilt only when a pool-2 instance or the
+    // registry changed — retail builds it at mission start and on teleport
+    // (Entity_BuildAllProximityLists @ 0x4c20f0), never per tick; the instance
+    // and registry-lifetime edges below stand in for those paths.
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0] per-entity candidate
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
@@ -1454,6 +1461,8 @@ private:
     // still authoritative and must not fall back to whole-registry scans.
     bool tick_tables_built_ = false;
     bool candidate_slices_built_ = false;
+    // A pool-2 instance/registry edge since the statics table was last built.
+    bool statics_dirty_ = true;
     // Candidate slices rebuild only every 17th tick — the counter increments per
     // tick and the rebuild fires (and resets it) once it reaches 16; pool tables
     // rebuild every tick. BSS-zero start: retail's first slice build lands on

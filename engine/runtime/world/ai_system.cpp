@@ -408,10 +408,12 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         perf->reactions_us = now - phase_start;
         phase_start = now;
     }
-    // Rebuild the collision proximity tables once per tick, before any entity update.
-    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildAllProximityLists
-    // @0x4c20f0 (pool-2 statics + pool-0/1 snapshots) + Entity_BuildProximityListsFromPools
-    // @0x4b8eb0 (per-entity candidate slices)]
+    // Rebuild the pool-0/1 proximity tables once per tick, before any entity update
+    // (the pool-2 statics table rebuilds only on its registry/instance edges).
+    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
+    // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
+    // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
+    // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
     // Pool-0 person publication does not depend on any entity having a 3DI
     // collision instance.  RoundSim still queries this snapshot on missions
     // containing only organic entities, so always rebuild the pool tables when
@@ -510,8 +512,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     if (is_authority && !world.vehicle_traits.empty()) {
         uint64_t vehicle_phase_start = perf != nullptr ? io::perf_now_us() : 0;
         vehicle_pass_handles_.clear();
-        world.registry.for_each([&](const Entity &e) {
-            if (e.handle.pool() != 1) return;
+        world.registry.for_each_in_pool(1, [&](const Entity &e) {
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
             // Ground/water rows are selector-gated. Direct CHel/cpln rows are
             // admitted regardless of the selector — they branch to the shared
@@ -670,8 +671,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     // @0x48d181..0x48d1c4]
     if (!is_authority && !world.vehicle_traits.empty()) {
         vehicle_pass_handles_.clear();
-        world.registry.for_each([&](const Entity &e) {
-            if (e.handle.pool() != 1) return;
+        world.registry.for_each_in_pool(1, [&](const Entity &e) {
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
             if (traits == nullptr) return;
             // Ground/water/bike rows retain their selector gate. CHel/cpln
