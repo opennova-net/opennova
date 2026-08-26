@@ -1192,9 +1192,9 @@ Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 			: ERR_INVALID_PARAMETER;
 }
 
-// Compatibility half of the D-AI-6 muzzle seam. Native mission assets resolve the
-// authored gun-flash userpoint lazily in the simulation; embedders without those
-// assets may still push the presented position here once per frame. Godot
+// The no-native-rig half of the D-AI-6 muzzle seam. Native mission assets resolve
+// the authored gun-flash userpoint lazily in the simulation; rows without a native
+// skeletal rig push the presented position here once per frame instead. Godot
 // (x, up, z) -> mission (x, -gz, gy) in 16.16 fixed — the inverse of the present
 // mapping godot = (mx, mz, -my).
 // [orig: Entity_GetAttachmentWorldPosition @0x4b2670 from the anim-event fire block

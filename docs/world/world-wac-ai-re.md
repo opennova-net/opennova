@@ -4211,10 +4211,17 @@ Ground truth (retail JOX models): US01 = `GFlash01`@part15 + `Look`; EIndo01-08 
 `MFlash01`/`bullet` (+`GFlash01`/`bcasing` on some); CIndo civilians = `LOOK` only
 (no muzzle — civilians never fire).
 
-### 21.3 The port: the binding muzzle seam
+### 21.3 The port: the in-sim muzzle seam (the binding push as fallback)
 
-engine/runtime/world carries no skeletal pose, so the posed-muzzle transform runs where the
-pose lives and feeds back (the binding-fed input pattern, like the terrain sampler):
+The simulation resolves the muzzle itself (2026-08-25): `World::muzzle_pose_provider`
+(`IMuzzlePoseProvider`, `engine/runtime/world/muzzle_pose.h`) is the native collision rig,
+`SimCollisionPoseProvider::resolve_muzzle_pose` (`engine/runtime/simassets/sim_collision_pose.cpp`),
+which evaluates the entity's composed clip/blend/aim-overlay pose at the logic-tick call
+site, accumulates the launch bone's FK prefix against `rest_global_inverse`, and transforms
+the def's `launchups_closeattack` userpoint through `collision_matrix_from_euler(body
+overlay, position)` — the in-sim equivalent of `Entity_GetAttachmentWorldPosition @ 0x4b2670`.
+The present-pass push below remains only as the fallback for rows without a native
+skeletal rig (embedders without mission assets, headless tests):
 
 - The DEF names the muzzle: `items.def launchups_closeattack` authors the launch
   userpoint name (JO NPC riflemen: `mflash01`); the placer pushes it onto the
@@ -4225,7 +4232,8 @@ pose lives and feeds back (the binding-fed input pattern, like the terrain sampl
   bone). No authored name = no AI muzzle (civilians). The model exposes
   `get_muzzle_world_position()` = `skeleton.global * bone_pose * bone_rest⁻¹ *
   model_pos` — the same attachment transform the userpoint debug overlay uses.
-- The NATIVE present applier pushes it per presented row with `has_muzzle`
+- The NATIVE present applier pushes it per presented row with `has_muzzle` and
+  no native rig (`!has_native_muzzle` — `Simulation::has_native_ai_muzzle`)
   (`nova_present_applier.cpp` → `Simulation::set_ai_muzzle_world`; the earlier
   `mission_present_pass._push_muzzle` GDScript leg was rewritten native —
   wording corrected 2026-08-13), keyed by
@@ -4235,12 +4243,13 @@ pose lives and feeds back (the binding-fed input pattern, like the terrain sampl
 - `Simulation::set_ai_muzzle_world(net_id, pos)` converts Godot→mission 16.16
   and stamps BOTH `Entity::posed_muzzle_*` and
   `AiSystem::set_entity_muzzle(handle, pos, logic_tick)`.
-- The consumers share `AiSystem::weapon_fire_origin` (2026-08-13, the D-AI-6a
-  slice): the fire pass spawns rounds from it, the LOS endpoints (mutual-LOS
-  acquire probe, threat scan, lastAttacker, the D-EVT-3 sub-44/45 trigger rays)
-  ray between two of them, and the aim solution reads it for the EYE and the
-  target chest point — stamp while FRESH (≤ `kMuzzleFreshTicks` = 4), else the
-  chest-lift stand-in (headless ctests, out-of-view NPCs). The corpse watch
+- The consumers share `AiSystem::weapon_fire_origin(World&, ...)` (2026-08-13, the
+  D-AI-6a slice; in-sim provider first since 2026-08-25): the fire pass spawns
+  rounds from it, the LOS endpoints (mutual-LOS acquire probe, threat scan,
+  lastAttacker, the D-EVT-3 sub-44/45 trigger rays) ray between two of them, and
+  the aim solution reads it for the EYE and the target chest point — the
+  provider's current-tick pose, else the stamp while FRESH (≤ `kMuzzleFreshTicks`
+  = 4), else the chest-lift stand-in (headless ctests). The corpse watch
   (D-AI-9c), the USE-scan eye (D-AI-11), and the netsim priority ray keep
   explicit 0.9 u lifts at their call sites — deliberately not fire origins.
 
@@ -4256,17 +4265,20 @@ Residuals: (a) **LANDED 2026-08-13 with an approximation**: the LOS endpoints
 and the aim-solution eye point ride the binding muzzle stamp while fresh
 (`AiSystem::weapon_fire_origin`, chest-lift fallback — facet c). The aim EYE
 now matches the original exactly (the combat-pass aim anchor
-`Entity_GetAttachmentWorldPosition @ 0x4b2670` on bone +0x366, one frame
-stale); the LOS/aim-target endpoints substitute the posed muzzle for the
+`Entity_GetAttachmentWorldPosition @ 0x4b2670` on bone +0x366, evaluated
+in-sim on the current tick since 2026-08-25); the LOS/aim-target endpoints substitute the posed muzzle for the
 person-leg vector (`Entity_ComputeWeaponFireOrigin @ 0x43b4b0` — the +0x6C
 writer stays unwalked, facet d), chest lift when stampless;
 (b) the def-authored userpoint NAME is plumbed for the closeattack family
 (2026-08-09: `launchups_closeattack` parse → ItemDatabase → placer →
 `set_muzzle_point_name`; the old flash-name preference is deleted) — the
 rocket/marker3 siblings and the full twelve-name clusters (def+0x61B..0x6CB)
-remain unsurfaced; (c) the stamp rides
-the RENDER skeleton one frame stale, and out-of-replication-range NPCs fall back
-(the original computes in-sim); (d) entity+0x6C (the person aim vector) and the
+remain unsurfaced; (c) CLOSED 2026-08-25 for native-asset worlds: the origin is
+evaluated in-sim on the current tick, on- or off-screen (`resolve_muzzle_pose`);
+the one-frame-stale stamp survives only on the no-native-rig fallback. The
+provider re-evaluates the composed pose per query (no per-tick memo — an aim
+overlay written between two queries of one tick must be seen), a measured
+follow-up; (d) entity+0x6C (the person aim vector) and the
 +0x358..0x367 block writer are unwalked; (e) the vehicle userpoint path @ 0x545c60
 waits on D-AI-2.
 

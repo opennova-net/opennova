@@ -384,15 +384,16 @@ struct AiEntity {
     // [orig: selector @0x4ba10f / @0x4b6d99]
     uint32_t def_attrib = 0;
 
-    // --- compatibility muzzle stamp (D-AI-6) ---
+    // --- the no-native-rig muzzle stamp fallback (D-AI-6) ---
     // Native mission assets resolve their gun-flash userpoint lazily through the
-    // world's muzzle-pose provider. Embedders without that native rig may push this
-    // posed position (16.16 fixed, mission frame) once per presented frame.
+    // world's muzzle-pose provider. Rows without a native skeletal rig (embedders
+    // without mission assets, headless tests) push this posed position (16.16
+    // fixed, mission frame) once per presented frame instead.
     // [orig: the anim-event fire transforms the fire-bone userpoint by the live pose —
     // Entity_GetAttachmentWorldPosition @0x4b2670 (userpoint local pos x posed bone
     // matrix, model userpoint table @model+0xC0) from the fire block @0x4bf326..0x4bf425;
-    // muzzle_tick stamps the world logic tick of the compatibility push. Consumers
-    // use it only while fresh and otherwise fall back to the chest-lift stand-in.
+    // muzzle_tick stamps the world logic tick of that push. Consumers use it only
+    // while fresh and otherwise fall back to the chest-lift stand-in.
     int32_t muzzle_world[3] = {};
     uint32_t muzzle_tick = 0;
     bool muzzle_valid = false;
@@ -687,8 +688,8 @@ public:
     AiEntity *for_handle(EntityHandle h);
     int count() const { return static_cast<int>(entities_.size()); }
 
-    // Compatibility muzzle seam (D-AI-6): embedders without the native pose
-    // provider can stamp a posed gun-flash userpoint for consumers to use while
+    // The no-native-rig muzzle fallback (D-AI-6): rows the native pose provider
+    // cannot resolve stamp a posed gun-flash userpoint for consumers to use while
     // fresh. [orig: Entity_GetAttachmentWorldPosition @0x4b2670]
     void set_entity_muzzle(EntityHandle h, const int32_t pos[3], uint32_t logic_tick);
 
@@ -796,7 +797,7 @@ public:
     // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
     void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
-    // Freshness window for the compatibility presentation stamp. Native providers
+    // Freshness window for the no-native-rig presentation stamp. Native providers
     // resolve against the current simulation pose and do not use this window.
     static constexpr uint32_t kMuzzleFreshTicks = 4;
 
@@ -812,8 +813,8 @@ public:
     static void weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]);
     static void weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]);
     // Asset-aware live-pose form used by the simulation. It asks the world's
-    // native provider at the actual LOS/aim/fire call site, then preserves the
-    // fresh embedder stamp and chest-lift behavior as compatibility fallbacks.
+    // native provider at the actual LOS/aim/fire call site, then the fresh
+    // no-native-rig stamp, then the chest lift.
     void weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const;
     void weapon_fire_origin(World &world, const AiEntity &e,
                             uint32_t logic_tick, int32_t out[3]) const;

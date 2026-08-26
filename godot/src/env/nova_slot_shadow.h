@@ -134,7 +134,10 @@ private:
 	ObjectID local_player_id_;
 	bool local_first_person_ = true;
 	bool local_prone_ = false;
-	int shadow_detail_ = 4;
+	// Retail's highest selectable SHADOWQUALITY is 3 (Settings_ClampGraphicsOptions
+	// @0x54d546, copied into RenderSlot_DetailLevel @0x5d6159); 4 is the
+	// unreachable 1024-base oversample tier.
+	int shadow_detail_ = 3;
 	uint32_t frame_ = 0;
 	int report_captures_ = 0;
 	int report_blobs_ = 0;

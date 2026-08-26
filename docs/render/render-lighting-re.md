@@ -292,8 +292,9 @@ jge` @ 0x5d9226..0x5d9229; the twin in collect_render_batches_for_entity
 exactly those three slots (`X[2] = 3` @ 0x5da26b, splitting spot vs point),
 pushes the point survivors as `PointLightCoordArray`/`PointLightColorArray`/
 `PointLightAttenArray` with `CurNumPointLights` = the entry count for the
-shader pass `[orig: Light_GetPointLightParams @ 0x5da6a8; SetInt @ 0x5da6ed;
-SetVectorArray ×3 @ 0x5da71a/@ 0x5da740/@ 0x5da766 through the handles stored
+shader pass `[orig: Light_GetPointLightParams @ 0x5da6a8; the ID3DXEffect
+count-setter vtable call @ 0x5da6ed; the three vector-array vtable calls
+@ 0x5da71a/@ 0x5da740/@ 0x5da766 through the handles stored
 @ 0x5af51b..0x5af566]`, and for the fixed-function pass first disables EVERY
 enabled D3D light (`CEffectWorld_ClearActiveSamplerStates @ 0x5da5de`) and
 re-enables only the entry's (`Light_ApplyAsD3DLight @ 0x5da61a`). So the
@@ -803,10 +804,12 @@ only below detail 3; the dirty bit forces. Lighting via
 attached light (D3D light 4 + luminance-weighted NEGATED colors
 `(c+lum)/2 × −3` into PS c21..c23 — the silhouette darkening math) or a
 white directional with 0.75 ambient material. The PROJSHAD effect output is
-black, not the normally lit material: `_vsPost.fx::vsPostBlackT1` and
-`_vsSkPost.fx::vsSkinPostBlackT1` return `(0,0,0,1)` over the RT's white
-clear, with the effect-family diffuse/detail/AlphaGen policy supplying
-coverage.
+black, not the normally lit material: `_vsPost.fx::vsPostBlackT1` writes
+`Diff = (0,0,0,1)` and `_vsSkPost.fx::vsSkinPostBlackT1` writes `Diff = 0`;
+every PROJSHAD pass selects that diffuse for color (`TSSColor SelectArg2
+Diffuse`; `_FFP.fx TBoringFFPProjShad` zeroes the material), so RGB is black
+over the RT's white clear, with the effect-family diffuse/detail/AlphaGen
+policy supplying coverage.
 
 *Drape* — `RenderSlot_DrawAllDrapes @ 0x5d6e20` (detail > 0, dead entities
 skip; the LOCAL player in first person skips while prone-latched
@@ -862,8 +865,14 @@ riders fold into the ancestor exclusion; the attached-light drape folds
 the light's attenuation at the entity into the per-slot term (retail
 varies it per patch vertex); and `nova_scene_output` leaves the factor in
 the retail gamma-byte domain for the shared FrameFx display decode. The
-packaged runtime serves shadow detail 4 (the top retail option: every-frame
-refresh, 1024-base chain).
+packaged runtime serves shadow detail 3, retail's highest SHADOWQUALITY
+(`options.mnu` rows 0..3; `Settings_ClampGraphicsOptions` clamps to 3
+`@ 0x54d546`; the 0x34-byte settings block copy `@ 0x551500` lands it in
+`RenderSlot_DetailLevel` unchanged via `Terrain_Init @ 0x60fcc5` ->
+`@ 0x5d6159`): the 512-base chain, the mask-1 refresh stagger for non-player
+slots, every-frame local player. The `>= 4` 1024-base every-frame tier
+(`RenderSlot_InitTextureChain @ 0x5d535a`) is unreachable from any retail
+config.
 
 **Low-sun drape defect remains open (revalidated 2026-08-24, 03TR dawn,
 PR #560).** At the 03TR spawn the M939 drape remains visibly different, and
