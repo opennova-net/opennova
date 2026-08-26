@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Per-draw owner light isolation (the D-RLIT-4 per-model close): each visible
-## ObjectModel is its own draw context â€” owned pool lights reach ONLY their
+## ObjectModel is its own draw context — owned pool lights reach ONLY their
 ## owner entity's draws, world lights reach every nearby draw, and the
 ## selected three land as per-instance shader parameters
 ## [orig: the per-draw collect @ 0x5aa250 feeding update_light_slots
@@ -194,7 +194,7 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 ## Batched static sources spawn through reattach() with a tagged static owner:
 ## a subobject-attached record must be owner-scoped (retail attaches the
 ## spawning entity whenever the record's attach bone != 0 [orig:
-## Entity_SpawnGlowEffects @ 0x56c8ae]) â€” before the fix it spawned unowned
+## Entity_SpawnGlowEffects @ 0x56c8ae]) — before the fix it spawned unowned
 ## and leaked onto every nearby draw. A subobject-0 record stays a world
 ## light every draw receives.
 func test_owned_corona_gates_on_owner_section_visibility() -> void:

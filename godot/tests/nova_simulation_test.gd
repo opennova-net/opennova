@@ -106,8 +106,8 @@ func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
 	return db
 
 
-# Rename one 16-byte USRP name field in raw .3di bytes (whole-name match) â€”
-# the same byte-patch technique the KZ husk test uses â€” so a committed model
+# Rename one 16-byte USRP name field in raw .3di bytes (whole-name match) —
+# the same byte-patch technique the KZ husk test uses — so a committed model
 # can stand in for any retail seat prefix without another binary fixture.
 func _bytes_with_renamed_user_point(bytes: PackedByteArray, from_name: String,
 		to_name: String) -> PackedByteArray:
@@ -659,7 +659,7 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 # The HUD waypoint track: the demo mission's BLUE route becomes the player track;
 # a spawned local player latches waypoint 0 on the first tick and walking into the
 # radius advances. [orig chain: NetPacket_WriteWorldStateLoad0x0F @0x502e41 list ->
-# Player_UpdatePerFrame @0x4de5f7 advance; docs/interface/hud-re.md Â§Waypoint HUD]
+# Player_UpdatePerFrame @0x4de5f7 advance; docs/interface/hud-re.md §Waypoint HUD]
 func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
@@ -1268,7 +1268,7 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	# lengths arrive as per-key VARIANT arrays; the bake consumes ONE ring entry per
 	# 'auto' delay field (serve-then-advance), and every play consumes + latches the
 	# served variant into the state dict. A both-auto reload over a 3-ring therefore
-	# eats entries 0 and 1 at bake â€” the FIRST reload PLAY serves variant 2, the
+	# eats entries 0 and 1 at bake — the FIRST reload PLAY serves variant 2, the
 	# next serves 0 (the REVVY M4 "m4_1r" "m4_1r" "m4_1r2" shape).
 	# [orig: Anim_InitActions reads @0x5421c5/@0x5421d8 via Anim_GetDurationTicks
 	#  @0x53ee10; AnimMap_PlayAnimBySlot @0x40bda0 latches at animState+68]
@@ -1296,7 +1296,7 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	assert_eq(String(state.get("anim_key", "")), "anim_wpn_idle", "fresh slot idles")
 	assert_eq(int(state.get("anim_variant", -1)), 0, "single-entry rings always serve 0")
 
-	# Spend a round (letting the fire+recoil chain settle back to idle â€” the reload
+	# Spend a round (letting the fire+recoil chain settle back to idle — the reload
 	# dispatch gate refuses the edge mid-FIRE), then reload: the bake left the reload
 	# ring's head at 2 (two 'auto' reads), so the FIRST reload serves variant 2.
 	sim.set_local_player_weapon_input(false, true, false)
@@ -1314,7 +1314,7 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 			first_reload_serial = int(state.get("play_serial", 0))
 			break
 	assert_eq(reload_variant, 2,
-		"the first reload serves variant 2 â€” the both-auto bake consumed entries 0+1")
+		"the first reload serves variant 2 — the both-auto bake consumed entries 0+1")
 
 	# Let the reload finish (ds 32 + de 32 ticks and the transitions), spend another
 	# round, reload again: the ring wrapped, so the play serves variant 0.
@@ -1532,7 +1532,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_eq(md.create_default(), OK)
 	# Spawn yaw 0 = mission yaw 0 = engine heading 90 BAM-deg, which faces
 	# mission +y (bearing 90). The target sits 8 m along +y so the shot connects
-	# only when the round bearing rides the heading frame directly â€” the old
+	# only when the round bearing rides the heading frame directly — the old
 	# (90 - heading) flip flew the shot along +x and only an east-side target
 	# could pass (the compensating-error pair the fp_impact_probe pinned;
 	# ledger D-WPN-18).
@@ -1578,7 +1578,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# The fixture M4's first shot samples the pre-consume 30-round magazine, so
 	# ((30 & 3) << 4) | 2 produces 0x22, not a hard-coded 0x02 and not the
 	# unrelated category/rank weapon-slot combo.
-	# [orig: WeaponAction_Fire @ 0x542c11; net-re Â§5.9.1 capture cross-witness]
+	# [orig: WeaponAction_Fire @ 0x542c11; net-re §5.9.1 capture cross-witness]
 	assert_eq(int(weapon_state.get("last_round_flags", 0)), 0x22)
 	assert_eq(int(weapon_state.get("last_round_subtype", 0)), 12,
 			"ordinary on-foot hip fire carries the retail default zoom subtype")
@@ -1590,7 +1590,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 		# The victim is a NON-LOCAL person, so the flesh row (23), not the local
 		# player's row (2). Real small-arms ammo authors Effect_AmHitBody on both,
 		# so only the SOUND distinguishes them.
-		# [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 â€” local-player compare
+		# [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — local-player compare
 		#  @0x4e9a55, push 2 @0x4e9aa1, push 17h @0x4e9ad7]
 		assert_eq(String((impacts[0] as Dictionary).get("effect", "")), "Effect_AmHitBody")
 		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_FLESH")
@@ -1605,7 +1605,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 
 	# Presentation generations reset when the weapon is remounted, but the wire
 	# round sequence belongs to the shooter and stays monotonic across adm/slot
-	# changes. [orig: word_B7C670; net-re Â§5.9.1 capture 0x020b..0x0217]
+	# changes. [orig: word_B7C670; net-re §5.9.1 capture 0x020b..0x0217]
 	sim.set_local_player_weapon(fire_def, {})
 	sim.step()
 	sim.drain_local_player_weapon_events()
@@ -2357,7 +2357,7 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := Simulation.new()
 	# The fixture def row (101419) authors graphic B50cal, phrase_set 4, and
-	# primary_weapon WPN_EMPLCD50NA â€” the native install reads all three.
+	# primary_weapon WPN_EMPLCD50NA — the native install reads all three.
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
@@ -2452,7 +2452,7 @@ end
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
 	# A second command-125 rider: with the controller seat claimed it takes the
-	# first passenger row (sitex00d), whose authored direction faces backward â€”
+	# first passenger row (sitex00d), whose authored direction faces backward —
 	# the yaw-offset carry witness.
 	var rider := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(9, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
@@ -2529,7 +2529,7 @@ end
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
 	# The mounted origin is the model's authored ctrlx13 point through the
-	# placer's entity transform â€” the same identity the render side applies.
+	# placer's entity transform — the same identity the render side applies.
 	var expected_ctrl := MissionObjectPlacer.entity_transform(
 			Vector3(10, 0, 0), Vector3.ZERO) * ctrl_point
 	assert_lt(pos.distance_to(expected_ctrl), 0.001,
@@ -2706,7 +2706,7 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	assert_false(soldier.is_empty())
-	# Command-125 mounts the soldier into the best seat at promote â€” that seat must not label.
+	# Command-125 mounts the soldier into the best seat at promote — that seat must not label.
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
 	# Same team as the local player: a live ENEMY occupant would reject the whole
@@ -2767,7 +2767,7 @@ end
 
 
 # Drivable items (control-seat specs) attach AI brains at promote since the vehicle
-# pass, so organics no longer sit at AI index 0 â€” resolve the first pool-0 row.
+# pass, so organics no longer sit at AI index 0 — resolve the first pool-0 row.
 func _organic_ai_index_with_mount_type(sim: Simulation, mount_type: int) -> int:
 	for i in 64:
 		var d: Dictionary = sim.get_entity_debug(i)
@@ -3560,7 +3560,7 @@ end
 	sim.free()
 
 
-# (P7: the 3 no-net AI-pool present-snapshot tests were deleted â€” the present is now the listen-
+# (P7: the 3 no-net AI-pool present-snapshot tests were deleted — the present is now the listen-
 #  server ClientState, covered by nova_listen_server_test; the editor no-net preview is retired.)
 
 

@@ -1,4 +1,4 @@
-// ObjectData â€” geometry views: LOD surfaces and memoized submesh builds,
+// ObjectData — geometry views: LOD surfaces and memoized submesh builds,
 // bones/skinning, collision volumes, lights and user points.
 #include "object/nova_object_data_internal.h"
 
@@ -427,7 +427,7 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		return result;
 	}
 	// Memo hit: hand back a deep copy of the ENTRY dictionaries (so a caller's
-	// edits never taint the cache) whose ArrayMesh refs stay SHARED â€”
+	// edits never taint the cache) whose ArrayMesh refs stay SHARED —
 	// Array::duplicate(true) does not duplicate Resources, and that sharing is
 	// the point: N models from one data render one set of meshes.
 	const uint64_t cache_key = _submesh_cache_key(p_lod_index, p_skeletal, p_bone_count, p_native_frame);
@@ -451,7 +451,7 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		PackedInt32Array mesh_indices = surface.get("indices", PackedInt32Array());
 		if (p_native_frame) {
 			// Undo the baked (-x,y,z) runtime mirror: native positions/normals/tangents, and
-			// reverse each triangle's winding â€” the source D3D clockwise-front order is only
+			// reverse each triangle's winding — the source D3D clockwise-front order is only
 			// CCW-correct for Godot BECAUSE of that mirror; unmirrored it must be re-reversed.
 			// (See header: the FP viewmodel path, paired with SkeletalAnim model_bind.)
 			for (int v = 0; v < vertices.size(); ++v) {

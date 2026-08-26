@@ -346,7 +346,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 		"pages the mover never touched must stay exact hits, not recompose")
 	assert_eq(int(moved["frame_ready_hits"]) + int(moved["frame_stale_hits"]),
 			int(moved["frame_requests"]),
-		"every request must be served â€” exact or stale â€” during a caster move")
+		"every request must be served — exact or stale — during a caster move")
 	assert_gt(int(moved["frame_stale_hits"]), 0,
 		"the mover's re-targeted pages must keep serving their published payload")
 

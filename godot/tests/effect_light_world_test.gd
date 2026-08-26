@@ -209,7 +209,7 @@ func test_director_muzzle_and_round_glow_routes() -> void:
 	assert_true(report_contract is EffectLightReport,
 			"the native LightScene dictionary is decoded at the director FFI seam")
 	# The muzzle glow: spawn-once per shooter, re-armed per shot, dead five
-	# ticks after the last shot â€” and the cached handle stays dead (the
+	# ticks after the last shot — and the cached handle stays dead (the
 	# witnessed per-life behavior, light_scene.h map).
 	director.on_muzzle_fire(7, Vector3(1.0, 1.0, 1.0))
 	assert_eq(director.get_report().live, 1,
