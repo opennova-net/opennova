@@ -1,4 +1,5 @@
 #include "world/collision.h"
+#include <io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -7,7 +8,6 @@
 // — what the queries above are pointed at.
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 
 #include "collision_detail.h"
@@ -34,11 +34,6 @@ int32_t stable_los_cell_coord(int64_t q16) {
 uint64_t stable_los_cell_key(int32_t x, int32_t y) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) |
            static_cast<uint32_t>(y);
-}
-
-uint64_t stable_los_perf_now_us() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 } // namespace
@@ -310,7 +305,7 @@ void CollisionWorld::reset_query_view_cache() {
 void CollisionWorld::prepare_cached_raycast_queries(World &world,
                                                      RaycastPrepPerf *perf) {
     if (perf != nullptr) *perf = {};
-    uint64_t phase_start = perf != nullptr ? stable_los_perf_now_us() : 0;
+    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
     // This is a new stable-world epoch: no matrix view or positional index may
     // survive from movement/destruction earlier in the logic tick.
     invalidate_trace_views();
@@ -328,7 +323,6 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
         StableLosCandidate candidate;
         candidate.h = e.handle;
         if (!target_solid_bound(world, e.handle, candidate.pos, candidate.radius)) return;
-        if (candidate.radius < 0) candidate.radius = 0;
         stable_los_candidates_.push_back(candidate);
     };
 
@@ -355,7 +349,7 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
     }
 
     if (perf != nullptr) {
-        const uint64_t now = stable_los_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->candidate_collect_us = now - phase_start;
         phase_start = now;
     }
@@ -405,7 +399,7 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
         }
     }
     if (perf != nullptr) {
-        const uint64_t now = stable_los_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->grid_span_us = now - phase_start;
         phase_start = now;
     }
@@ -467,7 +461,7 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
         }
     }
     if (perf != nullptr) {
-        const uint64_t now = stable_los_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->grid_bucket_us = now - phase_start;
         phase_start = now;
     }
@@ -475,7 +469,7 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
     stable_los_query_candidates_.reserve(stable_los_candidates_.size());
     stable_los_index_ready_ = true;
     if (perf != nullptr) {
-        const uint64_t now = stable_los_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->grid_workspace_us = now - phase_start;
         perf->grid_publish_us = now - grid_start;
     }

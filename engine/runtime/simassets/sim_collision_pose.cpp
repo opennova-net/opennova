@@ -273,8 +273,14 @@ bool SimCollisionPoseProvider::resolve_muzzle_pose(world::World &world,
 		anim::quat_to_mat3_rows(pose[static_cast<size_t>(i)].rotation,
 				local.rows);
 		local.origin = pose[static_cast<size_t>(i)].origin;
+		// The same collapsed row build_skeletal() keeps for COBJ 16: the
+		// zero-scale local (origin kept) is the row itself, not composed onto
+		// its parent, so a muzzle below it lands where the collision pose does.
+		// [orig: special row @0x4b1290]
 		if (collapse_right_hand && i == kRightHandBoneIndex) {
 			std::memset(local.rows, 0, sizeof(local.rows));
+			pose_global[static_cast<size_t>(i)] = local;
+			continue;
 		}
 		const int parent = rig->parents()[static_cast<size_t>(i)];
 		pose_global[static_cast<size_t>(i)] = parent >= 0

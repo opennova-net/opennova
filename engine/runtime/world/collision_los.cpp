@@ -1,4 +1,5 @@
 #include "world/collision.h"
+#include <io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -6,7 +7,6 @@
 // Line of sight and ground casts: the terrain raycast legs, raycast_clear, the
 // sound LOS/occlusion queries and the static-segment test.
 
-#include <chrono>
 #include <cmath>
 #include <terrain_query/height_field.h>
 #include <terrain_query/terrain_raycast.h>
@@ -124,18 +124,13 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
 // @ 0x606720].
 namespace {
 
-uint64_t collision_los_perf_now_us() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-
 class ScopedCollisionLosPerf {
 public:
     explicit ScopedCollisionLosPerf(uint64_t *target) : target_(target) {
-        if (target_ != nullptr) start_ = collision_los_perf_now_us();
+        if (target_ != nullptr) start_ = io::perf_now_us();
     }
     ~ScopedCollisionLosPerf() {
-        if (target_ != nullptr) *target_ += collision_los_perf_now_us() - start_;
+        if (target_ != nullptr) *target_ += io::perf_now_us() - start_;
     }
 
 private:
@@ -184,10 +179,13 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
         ctx.base_z = sector.quadrant_z;
     }
     if (!ctx.sector_valid) return s; // height 0, matching the invalid-coords branch
-    // This LOS variant reads the nearest render-cache texel and expands its
-    // half-unit byte (raw16 >> 7, then sample << 15), not the generic
+    // This LOS variant reads the nearest 1 u render-cache texel and expands
+    // its half-unit byte (raw16 >> 7, then sample << 15), not the generic
     // floor-sampled full-precision height-field point contract.
-    // [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 point callback]
+    // [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 point callback — retail
+    //  samples its 128x128 4 u cache tile by truncation ((local >> 18) & 0x7F)
+    //  with a +1 u start bias (@ 0x60c760 tile index); this port's nearest
+    //  1 u texel of the runtime height field is the D-AI-7 open delta]
     // quadrant_* is integral and the sector-local Q16 coordinate is always
     // nonnegative, so floor(base + local + 0.5) is exactly the integer
     // nearest-sample fold below. Besides avoiding two float conversions and
@@ -352,7 +350,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
     // and volume inflation are no-ops and are folded out here.]
     if (perf != nullptr) ++perf->calls;
-    const uint64_t terrain_start = perf != nullptr ? collision_los_perf_now_us() : 0;
+    const uint64_t terrain_start = perf != nullptr ? io::perf_now_us() : 0;
     const Entity *ea = world.registry.get(exclude_a);
     const Entity *eb = world.registry.get(exclude_b);
 
@@ -366,7 +364,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     const bool terrain_hit = !both_indoors && terrain != nullptr && terrain->valid() &&
                              los_terrain_blocked(*terrain, a, b);
     if (perf != nullptr)
-        perf->terrain_us += collision_los_perf_now_us() - terrain_start;
+        perf->terrain_us += io::perf_now_us() - terrain_start;
     if (terrain_hit) return false; // [orig: heightmap hit -> return 0 @ 0x539968]
 
     ScopedCollisionLosPerf sector_timer(perf != nullptr ? &perf->sector_us : nullptr);
