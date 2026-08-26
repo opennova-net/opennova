@@ -768,6 +768,43 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 			"the binocular card path suppresses the FP CTRL writers too")
 
 
+func test_the_world_only_capture_latch_hides_the_viewmodel_without_a_frame() -> void:
+	# A render fixture freezes the shell before it captures, so the latch must
+	# apply to the node at once instead of waiting for the next per-frame
+	# viewmodel update; releasing it restores the last submission verdict.
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.viewmodel().visible, "the FP viewmodel submits")
+
+	presenter.set_viewmodel_capture_hidden(true)
+	assert_false(presenter.viewmodel().visible,
+			"a world-only capture hides the gun immediately")
+	presenter.set_viewmodel_capture_hidden(false)
+	assert_true(presenter.viewmodel().visible,
+			"releasing the latch shows it again without a frame")
+
+	# The frozen-fixture path: the camera moves without a frame, and the
+	# restamp seam re-places the gun at it (the fold draws the world pose).
+	var before: Transform3D = presenter.viewmodel().global_transform
+	camera.global_transform = Transform3D(Basis.from_euler(Vector3(0.0, PI * 0.5, 0.0)),
+			camera.global_position + Vector3(40.0, 0.0, 0.0))
+	assert_eq(presenter.viewmodel().global_transform, before,
+			"without a frame the gun stays where the last pass put it")
+	presenter.restamp_viewmodel_at_camera()
+	var relative: Transform3D = camera.global_transform.affine_inverse() \
+			* presenter.viewmodel().global_transform
+	var previous_relative: Transform3D = camera.global_transform.affine_inverse() \
+			* before
+	assert_false(presenter.viewmodel().global_transform == before,
+			"the restamp moves the gun with the camera")
+	assert_true(relative.origin.distance_to(previous_relative.origin) < 30.0,
+			"the restamped gun sits in front of the moved camera")
+
+
 func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	# The equipped FSM's FIRE begin lands its clip on BOTH viewmodel parts (arms
 	# + gun share the animadm) at the production-tick phase, and the fire ->

@@ -80,6 +80,9 @@ var _vm_parts: Array[ObjectModel] = []  # the builder's typed viewmodel models
 # A world-only render capture hides the gun for its duration (the shell's
 # capture session latches this; the per-frame submission gate ANDs it in).
 var _capture_hidden := false
+# The last per-frame submission verdict, so the capture latch can re-apply
+# visibility without a frame.
+var _submit_viewmodel := false
 # The last FP projection feed pushed to the shader global (k, near, far).
 var _projection_feed := Vector4.ZERO
 # The showhud bit-0 FP-gun gate (GameHudPresenter cycles the flags and pushes
@@ -105,6 +108,16 @@ func teardown() -> void:
 	_presenter = null
 	_camera = null
 	_capture_hidden = false
+	_submit_viewmodel = false
+	# The projection feed is process-wide: leave the project default behind
+	# like the lighting block does, so a preview or the next mission never
+	# inherits this one's focal ratio.
+	if _projection_feed != Vector4.ZERO:
+		var shipped: Dictionary = ProjectSettings.get_setting(
+				"shader_globals/opennova_viewmodel_projection", {})
+		RenderingServer.global_shader_parameter_set(
+				&"opennova_viewmodel_projection",
+				shipped.get("value", Vector4(1.0, 0.05, 4000.0, 1.0)))
 	_projection_feed = Vector4.ZERO
 
 
@@ -126,9 +139,13 @@ func camera() -> Camera3D:
 	return _camera
 
 
-## A world-only render capture hides the gun for its duration.
+## A world-only render capture hides the gun for its duration. Applied at once:
+## the fixture flow freezes the shell before it captures, so no per-frame
+## update runs between the latch and the readback.
 func set_capture_hidden(hidden: bool) -> void:
 	_capture_hidden = hidden
+	if _viewmodel != null and is_instance_valid(_viewmodel):
+		_viewmodel.visible = _submit_viewmodel and not _capture_hidden
 
 
 func is_capture_hidden() -> bool:
@@ -226,40 +243,7 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# camera x bias(def rot, about the eye in view axes) x axis map(rig -> camera).
 	# [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Def.Bone.rot to the view angles and
 	# rotates Def.Bone.pos into view orientation before adding to the eye.]
-	var b := PLAYER_VIEWMODEL_ROT_BIAS_DEF
-	var bias := Basis.from_euler(Vector3(
-		deg_to_rad(_wrap180(b.y)),    # their pitch -> Godot x
-		deg_to_rad(_wrap180(b.x)),    # their yaw   -> Godot y
-		deg_to_rad(-_wrap180(b.z))))  # their roll  -> Godot z (opposite sense)
-	var vm_basis := bias * Basis.from_euler(Vector3(
-		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
-		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
-		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
-	# The ADS pos -> tpos blend, the /256 scale, and the NoCardSwitch reload
-	# suppression run in the SIM (world/player_view.h player_view_bias_view_units,
-	# S8) — one blended VIEW-FRAME offset per frame; _viewmodel_view_offset maps
-	# the view axes onto Godot camera axes. Harness sim doubles implement the
-	# same seam.
-	# [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the interp
-	#  bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C -> +0x124]
-	var sim = _world.get_sim() if _world != null else null
-	var view_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)
-	if sim != null:
-		# Sampling the viewport size is this rig's device work; the
-		# 4:3-or-narrower RULE the z drop keys on lives engine-side
-		# (world/player_view.h player_view_narrow_aspect; retail: the
-		# viewport block @0x4dd571). Out-of-tree (teardown frames) passes
-		# 0x0, which the engine rule reads as narrow — the same posture as
-		# the old 4:3 default.
-		var vs := Vector2.ZERO
-		if _world.is_inside_tree():
-			vs = _world.get_viewport().get_visible_rect().size
-		view_offset = _viewmodel_view_offset(
-				sim.local_player_viewmodel_bias_view_units(
-						PLAYER_VIEWMODEL_POS_UNITS, PLAYER_VIEWMODEL_TPOS_UNITS,
-						int(vs.x), int(vs.y)))
-	_viewmodel.global_transform = _camera.global_transform * Transform3D(
-		vm_basis, bias * view_offset)
+	_place_viewmodel_at_camera()
 	# The FP overlay rides its own visual layer: the beauty camera admits it and
 	# every mesh instance applies the renderfov projection + depth band
 	# (retail's "viewmodel first" draw into the same backbuffer [orig:
@@ -297,8 +281,60 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# The debug override intentionally extends retail's submission scope, but a
 	# model made visible by that probe still needs a coherent CTRL snapshot.
 	var submit_viewmodel := retail_submit or force_visible
+	_submit_viewmodel = submit_viewmodel
 	_viewmodel.visible = submit_viewmodel and not _capture_hidden
 	_apply_viewmodel_control_registers(submit_viewmodel, weapon_view)
+	_update_viewmodel_projection()
+
+
+# The gun's world pose is load-bearing for the beauty-pass fold (the shader
+# folds the camera's view of the instance's WORLD transform), so the root sits
+# at the camera every frame.
+func _place_viewmodel_at_camera() -> void:
+	var b := PLAYER_VIEWMODEL_ROT_BIAS_DEF
+	var bias := Basis.from_euler(Vector3(
+		deg_to_rad(_wrap180(b.y)),    # their pitch -> Godot x
+		deg_to_rad(_wrap180(b.x)),    # their yaw   -> Godot y
+		deg_to_rad(-_wrap180(b.z))))  # their roll  -> Godot z (opposite sense)
+	var vm_basis := bias * Basis.from_euler(Vector3(
+		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
+		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
+		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
+	# The ADS pos -> tpos blend, the /256 scale, and the NoCardSwitch reload
+	# suppression run in the SIM (world/player_view.h player_view_bias_view_units,
+	# S8) — one blended VIEW-FRAME offset per frame; _viewmodel_view_offset maps
+	# the view axes onto Godot camera axes. Harness sim doubles implement the
+	# same seam.
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the interp
+	#  bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C -> +0x124]
+	var sim = _world.get_sim() if _world != null else null
+	var view_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)
+	if sim != null:
+		# Sampling the viewport size is this rig's device work; the
+		# 4:3-or-narrower RULE the z drop keys on lives engine-side
+		# (world/player_view.h player_view_narrow_aspect; retail: the
+		# viewport block @0x4dd571). Out-of-tree (teardown frames) passes
+		# 0x0, which the engine rule reads as narrow — the same posture as
+		# the old 4:3 default.
+		var vs := Vector2.ZERO
+		if _world.is_inside_tree():
+			vs = _world.get_viewport().get_visible_rect().size
+		view_offset = _viewmodel_view_offset(
+				sim.local_player_viewmodel_bias_view_units(
+						PLAYER_VIEWMODEL_POS_UNITS, PLAYER_VIEWMODEL_TPOS_UNITS,
+						int(vs.x), int(vs.y)))
+	_viewmodel.global_transform = _camera.global_transform * Transform3D(
+		vm_basis, bias * view_offset)
+
+
+## Re-place the gun and re-push its projection feed against the camera's
+## CURRENT pose without advancing any sim state: a frozen-shell fixture moves
+## the beauty camera after the per-frame pass stopped, and the fold draws the
+## gun where the root last sat.
+func restamp_at_camera() -> void:
+	if _viewmodel == null or not is_instance_valid(_viewmodel) or _camera == null:
+		return
+	_place_viewmodel_at_camera()
 	_update_viewmodel_projection()
 
 

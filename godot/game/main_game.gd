@@ -1066,6 +1066,14 @@ func mcp_begin_world_only_capture() -> Error:
 func mcp_end_world_only_capture() -> void: _shell_presentation.finish_world_only_capture()
 
 
+## The frozen-shell capture seam: after a fixture moves the beauty camera with
+## processing disabled, the FP viewmodel (drawn inside the beauty pass at its
+## world pose) follows the camera again.
+func mcp_restamp_viewmodel_for_capture() -> void:
+	if _player_presenter != null and is_instance_valid(_player_presenter):
+		_player_presenter.restamp_viewmodel_at_camera()
+
+
 ## Begin a reversible retail HUD-detail-3 capture. Unlike world_only this
 ## deliberately keeps the HUD CanvasLayer, PlayerViewEffects, viewmodel pass,
 ## and world presentation mounted; the shell suppresses compiled gameplay HUD

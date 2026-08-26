@@ -281,6 +281,12 @@ func set_viewmodel_capture_hidden(hidden: bool) -> void:
 	_viewmodel_rig.set_capture_hidden(hidden)
 
 
+## Re-place the FP viewmodel against the camera's current pose without a
+## frame (the frozen-shell fixture capture moves the camera after freezing).
+func restamp_viewmodel_at_camera() -> void:
+	_viewmodel_rig.restamp_at_camera()
+
+
 ## The world this presenter was set up on (null before setup).
 func world() -> GameWorld:
 	return _world

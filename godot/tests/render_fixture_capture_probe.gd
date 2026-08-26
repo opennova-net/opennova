@@ -2336,6 +2336,10 @@ func _prepare_pose(
 	camera.v_offset = 0.0
 	camera.global_transform = Transform3D(camera_basis(yaw_deg, pitch_deg), position)
 	camera.make_current()
+	# The FP gun draws inside the beauty pass at its WORLD pose; with the shell
+	# frozen nothing re-places it at the moved camera, so the shell does that
+	# here (the hud_hidden variants capture WITH the gun).
+	_game.mcp_restamp_viewmodel_for_capture()
 	_finish_static_shadow_warmup_suspension()
 	var refresh_error := _world.debug_refresh_render_pose(camera)
 	if refresh_error != OK:
