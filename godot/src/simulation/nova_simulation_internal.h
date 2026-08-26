@@ -8,6 +8,7 @@
 
 #include "simulation/nova_simulation.h"
 
+#include <io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
 #include <simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
 #include <threedi/threedi_ctrl_catalog.h>
 #include <wac/compiler.h>
@@ -15,7 +16,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -85,12 +85,6 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailP
 inline uint64_t present_effect_origin_key(int kind, int index) {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
 	       static_cast<uint32_t>(index);
-}
-
-inline uint64_t perf_now_us() {
-	using Clock = std::chrono::steady_clock;
-	return static_cast<uint64_t>(
-	    std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
 }
 
 inline int32_t trace_profile_lane(int64_t value) {

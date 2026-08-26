@@ -407,77 +407,18 @@ private:
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
 	// Capture-window-only attribution summed across every fixed tick consumed by
-	// one render frame. Ordinary play leaves runtime_profiling_enabled_ false,
-	// so producers neither read clocks nor write these fields.
+	// one render frame: the engine's own per-pump records accumulate as-is
+	// (np::HostSessionPerf carries the ServerTickPerf world/replication split,
+	// np::ClientFramePerf the local ClientRuntime frame) plus the shell-side
+	// legs measured here. get_session_perf flattens them onto the F3 keys.
+	// Ordinary play leaves runtime_profiling_enabled_ false, so producers
+	// neither read clocks nor write these fields.
 	struct SessionPhasePerf {
-		int64_t host_prep_us = 0;
-		int64_t host_pump_us = 0;
-		int64_t host_receive_us = 0;
-		int64_t host_connections_us = 0;
-		int64_t host_adapter_us = 0;
-		int64_t server_tick_us = 0;
-		int64_t server_input_us = 0;
-		int64_t server_world_us = 0;
-		int64_t world_setup_us = 0;
-		int64_t world_scripts_us = 0;
-		int64_t world_ai_us = 0;
-		int64_t world_ai_reactions_us = 0;
-		int64_t world_ai_collision_tables_us = 0;
-		int64_t world_ai_entities_us = 0;
-		int64_t world_ai_infantry_entities_us = 0;
-		int64_t world_ai_infantry_remote_us = 0;
-		int64_t world_ai_infantry_combat_us = 0;
-		int64_t world_ai_infantry_animation_us = 0;
-		int64_t world_ai_infantry_collision_us = 0;
-		int64_t world_ai_infantry_collision_contacts_us = 0;
-		int64_t world_ai_infantry_collision_repulsion_us = 0;
-		int64_t world_ai_infantry_collision_ground_us = 0;
-		int64_t world_ai_other_entities_us = 0;
-		int64_t world_ai_authority_vehicles_us = 0;
-		int64_t world_ai_vehicle_scan_us = 0;
-		int64_t world_ai_vehicle_motors_us = 0;
-		int64_t world_ai_vehicle_riders_us = 0;
-		int64_t world_ai_client_vehicles_us = 0;
-		int64_t world_ai_events_us = 0;
-		int64_t world_attachments_us = 0;
-		int64_t world_attachment_orphans_us = 0;
-		int64_t world_attachment_child_pose_us = 0;
-		int64_t world_attachment_riders_us = 0;
-		int64_t world_throwables_us = 0;
-		int64_t world_weapons_us = 0;
-		int64_t world_projectiles_us = 0;
-		int64_t world_destruction_us = 0;
-		int64_t world_housekeeping_us = 0;
-		int64_t match_us = 0;
-		int64_t server_rules_us = 0;
-		int64_t server_replication_us = 0;
-		int64_t replication_query_prep_us = 0;
-		int64_t replication_query_collect_us = 0;
-		int64_t replication_query_grid_us = 0;
-		int64_t replication_query_grid_span_us = 0;
-		int64_t replication_query_grid_bucket_us = 0;
-		int64_t replication_query_grid_workspace_us = 0;
-		int64_t replication_snapshot_us = 0;
-		int64_t replication_fan_us = 0;
-		int64_t replication_fan_setup_us = 0;
-		int64_t replication_round_selection_us = 0;
-		int64_t replication_entity_selection_us = 0;
-		int64_t replication_entity_setup_us = 0;
-		int64_t replication_entity_scoring_us = 0;
-		int64_t replication_entity_los_us = 0;
-		int64_t replication_entity_los_terrain_us = 0;
-		int64_t replication_entity_los_sector_us = 0;
-		int64_t replication_entity_sort_us = 0;
-		int64_t replication_entity_budget_us = 0;
-		int64_t replication_encode_us = 0;
-		int64_t replication_enqueue_us = 0;
-		int64_t host_send_us = 0;
-		int64_t host_player_us = 0;
-		int64_t client_decode_us = 0;
-		int64_t client_setup_us = 0;
-		int64_t client_receive_us = 0;
-		int64_t client_maintenance_us = 0;
-		int64_t client_send_us = 0;
+		opennova::np::HostSessionPerf host_session;
+		opennova::np::ClientFramePerf client;
+		int64_t host_prep_us = 0; // viewport/input/request setup before host_session_pump
+		int64_t host_player_us = 0; // the host's local view/weapon/medic pumps
+		int64_t client_decode_us = 0; // the local ClientState fold (host) / joiner wire leg
 		int64_t adm_resolve_us = 0;
 	};
 	SessionPhasePerf frame_phase_perf_;
@@ -1185,7 +1126,7 @@ public:
 	~Simulation() override;
 
 	// Load + promote an in-memory bms::File. This remains a narrow fixture/tooling seam;
-	// ONED gameplay launches only from a saved loose .bms through load_mission_file().
+	// ONED gameplay launches only from a saved loose .bms (GameWorld.load_mission).
 	bool load_from_mission_data(const Ref<MissionData> &p_mission);
 	// S9 (ADR 0028): the ordered mission boot — engine/runtime/mission
 	// runtime_boot owns the sequence + the file-resolution policy; this entry
@@ -1202,17 +1143,9 @@ public:
 	// The boot's native resolution decisions, for the shell's S9 assert-equal
 	// soak (text source/size, .aip rows, the effective adm name).
 	Dictionary get_mission_boot_debug() const;
-	// Load + promote a .bms mission from disk; false on parse failure.
-	bool load_mission_file(const String &path);
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
 	void build_demo_mission();
 	bool is_loaded() const;
-	int get_session_state() const {
-		return static_cast<int>(session_.state());
-	}
-	String get_session_error() const {
-		return String::utf8(session_.last_error().message.c_str());
-	}
 
 	// Transport.
 	bool is_playing() const {
@@ -1293,7 +1226,6 @@ public:
 	// The tick cadence as a rate, and wall-clock ms -> whole logic ticks —
 	// re-exports of the engine tick home (world/tick_accumulator.h carries
 	// the current_tick witness).
-	static double ticks_per_second() { return opennova::world::kTicksPerSecond; }
 	static int ticks_from_ms(int64_t p_ms) {
 		return opennova::world::ticks_from_ms(p_ms);
 	}
@@ -1318,10 +1250,12 @@ public:
 	bool pause_session();
 	bool resume_session();
 	bool reset_session();
-	void fail_session(const String &p_reason);
 	void close_session();
-	// Last frame's spans: {tick_us, sim_us, present_us, effects_us, net_us,
-	// did_tick, ticks} — the probe/F3 accounting seam.
+	// Last frame's spans — the probe/F3 accounting seam. Always: frame_us,
+	// tick_us, ticks. Only while runtime profiling is on: sim_us, sink_us,
+	// net_us and the phase keys flattened from frame_phase_perf_ (the
+	// HostSessionPerf/ServerTickPerf/ClientFramePerf fields plus the shell
+	// legs), which mission_presentation.gd maps onto FrameStatsBoard slots.
 	Dictionary get_session_perf() const;
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
@@ -1924,10 +1858,10 @@ public:
 	// Install a compiled program on the script VM (WacProgram). Applied now if
 	// loaded and re-applied on every (re)load. Pass null to uninstall.
 	void set_wac_program(const Ref<WacProgram> &p_program);
-	Ref<WacProgram> get_wac_program() const { return wac_program_; }
 	// Compile `sources` against the LIVE promoted world (symbolic group/area names
 	// resolve through the registry) and install on success. False (program not
-	// installed) when compilation has errors; inspect via get_wac_program().
+	// installed) when compilation has errors; the retained WacProgram holder
+	// carries the diagnostics.
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
 	// Retail executes the freshly installed WAC once before the 255-tick
 	// environment settle. Host/standalone authority only; idempotent per load.
@@ -1955,7 +1889,6 @@ public:
 	Vector2i get_last_projectile_trace_faces() const;
 	// Allocation-free int forms of the same last-frame counters, for per-frame
 	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
-	int64_t get_last_sim_tick_us() const { return static_cast<int64_t>(last_sim_tick_us_); }
 	int64_t get_last_net_tick_us() const { return static_cast<int64_t>(last_net_tick_us_); }
 	int64_t get_last_present_snapshot_us() const {
 		return static_cast<int64_t>(last_present_snapshot_us_);
@@ -2204,9 +2137,7 @@ public:
 	// its promoted mission record and already-rendered node.
 	int get_entity_count() const;
 	int get_entity_kind(int p_index) const;         // mission ItemType (3 = Organic), -1 if none
-	int get_entity_index(int p_index) const;        // index within its kind's list
 	Vector3 get_entity_position(int p_index) const; // mission (x,y,z) -> Godot (x, z, -y), units
-	float get_entity_yaw(int p_index) const;        // BAM heading -> radians
 	float get_entity_yaw_deg(int p_index) const;    // heading in mission degrees (for shell remap)
 	int get_entity_state(int p_index) const;        // AI state id (16 = GROUND_FOLLOWWP)
 	int get_entity_net_id(int p_index) const;       // runtime SSN (WAC/BMS addressing), 0 if none
@@ -2220,7 +2151,6 @@ public:
 	PackedVector3Array get_present_effect_state_for_wire_handle(int p_wire_handle) const;
 	PackedVector3Array get_present_effect_state_for_bms_id(int p_bms_id) const;
 	PackedVector3Array get_present_effect_state_for_origin(int p_kind, int p_index) const;
-	int get_entity_bms_id(int p_index) const;       // file entity id; the shell maps this to a placed node
 	int get_entity_owner_connection_id(int p_index) const; // entity+0x78 dcb; the networked-player identity (D-NET-112)
 	int get_entity_wire_handle(int p_index) const;  // (pool<<12)|slot — the per-entity wire identity
 	// Godot-space positions of the entities the distant MODEL/depth-mask foliage
@@ -2244,14 +2174,6 @@ public:
 	// zero, must overwrite a prior pose. Channel 1 is suppressed by
 	// ItemDefAttrib 0x1000; channel 2 is unconditional.
 	bool get_entity_part_anim_active(int p_index, int channel) const;
-	// Entity.body_anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written
-	// by EntityCommands::set_ssn_anim; consumed only by the shell's deferred apply_body_anim seam
-	// today (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 =
-	// none. (Distinct from world Entity.anim_slot = the retail +0x374 character-model selector.)
-	int get_entity_body_anim_slot(int p_index) const;
-	// True when the entity is flagged hidden (HideSingle / held). The present pass maps
-	// (not hidden and alive) -> Node3D.visible.
-	bool get_entity_hidden(int p_index) const;
 
 	// ONE batched present snapshot for the per-tick render pass: a flat PackedFloat32Array of
 	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the
@@ -2401,7 +2323,6 @@ public:
 	// full frame state (the occlusion A/B seam and shell cache resets use it).
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
-	bool occlusion_camera_indoors() const;
 
 	// Read-only collision-world geometry for the F3 "Show collision" debug view:
 	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw deg),
@@ -2576,7 +2497,6 @@ public:
 	// contact), vehicle.mnu VEHICLE on Flags & 0x800 (type-11);
 	// Input_HandleActionBinding @0x49b848/@0x49b858].
 	bool local_player_in_armory_zone() const;
-	bool local_player_in_vehicle_loadout_zone() const;
 
 	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a

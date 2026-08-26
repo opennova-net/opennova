@@ -88,12 +88,6 @@ bool Simulation::reset_session() {
 	return out.applied();
 }
 
-void Simulation::fail_session(const String &p_reason) {
-	const CharString reason = p_reason.utf8();
-	(void)session_.fail({opennova::inmatch::SessionErrorCode::SessionLost,
-			std::string(reason.get_data(), static_cast<size_t>(reason.length()))});
-}
-
 void Simulation::close_session() {
 	(void)session_.close();
 }
@@ -238,84 +232,86 @@ Dictionary Simulation::get_session_perf() const {
 	Dictionary out;
 	out["frame_us"] = perf.frame_us;
 	out["tick_us"] = perf.tick_us;
+	out["ticks"] = perf.ticks;
+	if (!runtime_profiling_enabled_)
+		return out;
+	// The phase attribution (frame_phase_perf_) exists only while the native
+	// clocks run; the keys are the F3 Stats board's vocabulary
+	// (mission_presentation.gd maps each onto its FrameStatsBoard slot).
+	const SessionPhasePerf &phase = frame_phase_perf_;
+	const opennova::np::HostSessionPerf &host_session = phase.host_session;
+	const opennova::np::ServerTickPerf &server = host_session.server;
 	out["sim_us"] = frame_sim_us_;
 	out["sink_us"] = frame_sink_us_;
 	out["net_us"] = frame_net_us_;
-	out["host_prep_us"] = frame_phase_perf_.host_prep_us;
-	out["host_pump_us"] = frame_phase_perf_.host_pump_us;
-	out["host_receive_us"] = frame_phase_perf_.host_receive_us;
-	out["host_connections_us"] = frame_phase_perf_.host_connections_us;
-	out["host_adapter_us"] = frame_phase_perf_.host_adapter_us;
-	out["server_tick_us"] = frame_phase_perf_.server_tick_us;
-	out["server_input_us"] = frame_phase_perf_.server_input_us;
-	out["server_world_us"] = frame_phase_perf_.server_world_us;
-	out["world_setup_us"] = frame_phase_perf_.world_setup_us;
-	out["world_scripts_us"] = frame_phase_perf_.world_scripts_us;
-	out["world_ai_us"] = frame_phase_perf_.world_ai_us;
-	out["world_ai_reactions_us"] = frame_phase_perf_.world_ai_reactions_us;
-	out["world_ai_collision_tables_us"] = frame_phase_perf_.world_ai_collision_tables_us;
-	out["world_ai_entities_us"] = frame_phase_perf_.world_ai_entities_us;
-	out["world_ai_infantry_entities_us"] = frame_phase_perf_.world_ai_infantry_entities_us;
-	out["world_ai_infantry_remote_us"] = frame_phase_perf_.world_ai_infantry_remote_us;
-	out["world_ai_infantry_combat_us"] = frame_phase_perf_.world_ai_infantry_combat_us;
-	out["world_ai_infantry_animation_us"] = frame_phase_perf_.world_ai_infantry_animation_us;
-	out["world_ai_infantry_collision_us"] = frame_phase_perf_.world_ai_infantry_collision_us;
-	out["world_ai_infantry_collision_contacts_us"] =
-			frame_phase_perf_.world_ai_infantry_collision_contacts_us;
-	out["world_ai_infantry_collision_repulsion_us"] =
-			frame_phase_perf_.world_ai_infantry_collision_repulsion_us;
-	out["world_ai_infantry_collision_ground_us"] =
-			frame_phase_perf_.world_ai_infantry_collision_ground_us;
-	out["world_ai_other_entities_us"] = frame_phase_perf_.world_ai_other_entities_us;
-	out["world_ai_authority_vehicles_us"] = frame_phase_perf_.world_ai_authority_vehicles_us;
-	out["world_ai_vehicle_scan_us"] = frame_phase_perf_.world_ai_vehicle_scan_us;
-	out["world_ai_vehicle_motors_us"] = frame_phase_perf_.world_ai_vehicle_motors_us;
-	out["world_ai_vehicle_riders_us"] = frame_phase_perf_.world_ai_vehicle_riders_us;
-	out["world_ai_client_vehicles_us"] = frame_phase_perf_.world_ai_client_vehicles_us;
-	out["world_ai_events_us"] = frame_phase_perf_.world_ai_events_us;
-	out["world_attachments_us"] = frame_phase_perf_.world_attachments_us;
-	out["world_attachment_orphans_us"] = frame_phase_perf_.world_attachment_orphans_us;
-	out["world_attachment_child_pose_us"] = frame_phase_perf_.world_attachment_child_pose_us;
-	out["world_attachment_riders_us"] = frame_phase_perf_.world_attachment_riders_us;
-	out["world_throwables_us"] = frame_phase_perf_.world_throwables_us;
-	out["world_weapons_us"] = frame_phase_perf_.world_weapons_us;
-	out["world_projectiles_us"] = frame_phase_perf_.world_projectiles_us;
-	out["world_destruction_us"] = frame_phase_perf_.world_destruction_us;
-	out["world_housekeeping_us"] = frame_phase_perf_.world_housekeeping_us;
-	out["match_us"] = frame_phase_perf_.match_us;
-	out["server_rules_us"] = frame_phase_perf_.server_rules_us;
-	out["server_replication_us"] = frame_phase_perf_.server_replication_us;
-	out["replication_query_prep_us"] = frame_phase_perf_.replication_query_prep_us;
-	out["replication_query_collect_us"] = frame_phase_perf_.replication_query_collect_us;
-	out["replication_query_grid_us"] = frame_phase_perf_.replication_query_grid_us;
-	out["replication_query_grid_span_us"] = frame_phase_perf_.replication_query_grid_span_us;
-	out["replication_query_grid_bucket_us"] = frame_phase_perf_.replication_query_grid_bucket_us;
-	out["replication_query_grid_workspace_us"] =
-			frame_phase_perf_.replication_query_grid_workspace_us;
-	out["replication_snapshot_us"] = frame_phase_perf_.replication_snapshot_us;
-	out["replication_fan_us"] = frame_phase_perf_.replication_fan_us;
-	out["replication_fan_setup_us"] = frame_phase_perf_.replication_fan_setup_us;
-	out["replication_round_selection_us"] = frame_phase_perf_.replication_round_selection_us;
-	out["replication_entity_selection_us"] = frame_phase_perf_.replication_entity_selection_us;
-	out["replication_entity_setup_us"] = frame_phase_perf_.replication_entity_setup_us;
-	out["replication_entity_scoring_us"] = frame_phase_perf_.replication_entity_scoring_us;
-	out["replication_entity_los_us"] = frame_phase_perf_.replication_entity_los_us;
-	out["replication_entity_los_terrain_us"] =
-			frame_phase_perf_.replication_entity_los_terrain_us;
-	out["replication_entity_los_sector_us"] =
-			frame_phase_perf_.replication_entity_los_sector_us;
-	out["replication_entity_sort_us"] = frame_phase_perf_.replication_entity_sort_us;
-	out["replication_entity_budget_us"] = frame_phase_perf_.replication_entity_budget_us;
-	out["replication_encode_us"] = frame_phase_perf_.replication_encode_us;
-	out["replication_enqueue_us"] = frame_phase_perf_.replication_enqueue_us;
-	out["host_send_us"] = frame_phase_perf_.host_send_us;
-	out["host_player_us"] = frame_phase_perf_.host_player_us;
-	out["client_decode_us"] = frame_phase_perf_.client_decode_us;
-	out["client_setup_us"] = frame_phase_perf_.client_setup_us;
-	out["client_receive_us"] = frame_phase_perf_.client_receive_us;
-	out["client_maintenance_us"] = frame_phase_perf_.client_maintenance_us;
-	out["client_send_us"] = frame_phase_perf_.client_send_us;
-	out["adm_resolve_us"] = frame_phase_perf_.adm_resolve_us;
-	out["ticks"] = perf.ticks;
+	out["host_prep_us"] = phase.host_prep_us;
+	out["host_pump_us"] = static_cast<int64_t>(host_session.total_us);
+	out["host_receive_us"] = static_cast<int64_t>(host_session.receive_us);
+	out["host_connections_us"] = static_cast<int64_t>(host_session.connections_us);
+	out["host_adapter_us"] = static_cast<int64_t>(host_session.adapter_us);
+	out["server_tick_us"] = static_cast<int64_t>(host_session.server_us);
+	out["server_input_us"] = static_cast<int64_t>(server.input_us);
+	out["server_world_us"] = static_cast<int64_t>(server.world_us);
+	out["world_setup_us"] = static_cast<int64_t>(server.world_setup_us);
+	out["world_scripts_us"] = static_cast<int64_t>(server.world_scripts_us);
+	out["world_ai_us"] = static_cast<int64_t>(server.world_ai_us);
+	out["world_ai_reactions_us"] = static_cast<int64_t>(server.world_ai_reactions_us);
+	out["world_ai_collision_tables_us"] = static_cast<int64_t>(server.world_ai_collision_tables_us);
+	out["world_ai_entities_us"] = static_cast<int64_t>(server.world_ai_entities_us);
+	out["world_ai_infantry_entities_us"] = static_cast<int64_t>(server.world_ai_infantry_entities_us);
+	out["world_ai_infantry_remote_us"] = static_cast<int64_t>(server.world_ai_infantry_remote_us);
+	out["world_ai_infantry_combat_us"] = static_cast<int64_t>(server.world_ai_infantry_combat_us);
+	out["world_ai_infantry_animation_us"] = static_cast<int64_t>(server.world_ai_infantry_animation_us);
+	out["world_ai_infantry_collision_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_us);
+	out["world_ai_infantry_collision_contacts_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_contacts_us);
+	out["world_ai_infantry_collision_repulsion_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_repulsion_us);
+	out["world_ai_infantry_collision_ground_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_ground_us);
+	out["world_ai_other_entities_us"] = static_cast<int64_t>(server.world_ai_other_entities_us);
+	out["world_ai_authority_vehicles_us"] = static_cast<int64_t>(server.world_ai_authority_vehicles_us);
+	out["world_ai_vehicle_scan_us"] = static_cast<int64_t>(server.world_ai_vehicle_scan_us);
+	out["world_ai_vehicle_motors_us"] = static_cast<int64_t>(server.world_ai_vehicle_motors_us);
+	out["world_ai_vehicle_riders_us"] = static_cast<int64_t>(server.world_ai_vehicle_riders_us);
+	out["world_ai_client_vehicles_us"] = static_cast<int64_t>(server.world_ai_client_vehicles_us);
+	out["world_ai_events_us"] = static_cast<int64_t>(server.world_ai_events_us);
+	out["world_attachments_us"] = static_cast<int64_t>(server.world_attachments_us);
+	out["world_attachment_orphans_us"] = static_cast<int64_t>(server.world_attachment_orphans_us);
+	out["world_attachment_child_pose_us"] = static_cast<int64_t>(server.world_attachment_child_pose_us);
+	out["world_attachment_riders_us"] = static_cast<int64_t>(server.world_attachment_riders_us);
+	out["world_throwables_us"] = static_cast<int64_t>(server.world_throwables_us);
+	out["world_weapons_us"] = static_cast<int64_t>(server.world_weapons_us);
+	out["world_projectiles_us"] = static_cast<int64_t>(server.world_projectiles_us);
+	out["world_destruction_us"] = static_cast<int64_t>(server.world_destruction_us);
+	out["world_housekeeping_us"] = static_cast<int64_t>(server.world_housekeeping_us);
+	out["match_us"] = static_cast<int64_t>(server.match_us);
+	out["replication_query_prep_us"] = static_cast<int64_t>(server.replication_query_prep_us);
+	out["replication_query_collect_us"] = static_cast<int64_t>(server.replication_query_collect_us);
+	out["replication_query_grid_us"] = static_cast<int64_t>(server.replication_query_grid_us);
+	out["replication_query_grid_span_us"] = static_cast<int64_t>(server.replication_query_grid_span_us);
+	out["replication_query_grid_bucket_us"] = static_cast<int64_t>(server.replication_query_grid_bucket_us);
+	out["replication_query_grid_workspace_us"] = static_cast<int64_t>(server.replication_query_grid_workspace_us);
+	out["replication_snapshot_us"] = static_cast<int64_t>(server.replication_snapshot_us);
+	out["replication_fan_us"] = static_cast<int64_t>(server.replication_fan_us);
+	out["replication_fan_setup_us"] = static_cast<int64_t>(server.replication_fan_setup_us);
+	out["replication_round_selection_us"] = static_cast<int64_t>(server.replication_round_selection_us);
+	out["replication_entity_selection_us"] = static_cast<int64_t>(server.replication_entity_selection_us);
+	out["replication_entity_setup_us"] = static_cast<int64_t>(server.replication_entity_setup_us);
+	out["replication_entity_scoring_us"] = static_cast<int64_t>(server.replication_entity_scoring_us);
+	out["replication_entity_los_us"] = static_cast<int64_t>(server.replication_entity_los_us);
+	out["replication_entity_los_terrain_us"] = static_cast<int64_t>(server.replication_entity_los_terrain_us);
+	out["replication_entity_los_sector_us"] = static_cast<int64_t>(server.replication_entity_los_sector_us);
+	out["replication_entity_sort_us"] = static_cast<int64_t>(server.replication_entity_sort_us);
+	out["replication_entity_budget_us"] = static_cast<int64_t>(server.replication_entity_budget_us);
+	out["replication_encode_us"] = static_cast<int64_t>(server.replication_encode_us);
+	out["replication_enqueue_us"] = static_cast<int64_t>(server.replication_enqueue_us);
+	out["server_rules_us"] = static_cast<int64_t>(server.rules_us);
+	out["server_replication_us"] = static_cast<int64_t>(server.replication_us);
+	out["host_send_us"] = static_cast<int64_t>(host_session.send_us);
+	out["host_player_us"] = phase.host_player_us;
+	out["client_decode_us"] = phase.client_decode_us;
+	out["client_setup_us"] = static_cast<int64_t>(phase.client.setup_us);
+	out["client_receive_us"] = static_cast<int64_t>(phase.client.receive_us);
+	out["client_maintenance_us"] = static_cast<int64_t>(phase.client.maintenance_us);
+	out["client_send_us"] = static_cast<int64_t>(phase.client.send_us);
+	out["adm_resolve_us"] = phase.adm_resolve_us;
 	return out;
 }

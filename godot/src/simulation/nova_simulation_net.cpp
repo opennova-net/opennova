@@ -317,7 +317,7 @@ void Simulation::drain_host_client_gameplay_requests() {
 void Simulation::host_pump() {
 	namespace np = opennova::np;
 	const bool profiling = runtime_profiling_enabled_;
-	const uint64_t prep_start = profiling ? perf_now_us() : 0;
+	const uint64_t prep_start = profiling ? opennova::io::perf_now_us() : 0;
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
 	// and wraps against the current renderer viewport height [orig:
 	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
@@ -351,158 +351,35 @@ void Simulation::host_pump() {
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	if (profiling)
 		frame_phase_perf_.host_prep_us +=
-				static_cast<int64_t>(perf_now_us() - prep_start);
+				static_cast<int64_t>(opennova::io::perf_now_us() - prep_start);
 	np::HostSessionPerf host_perf;
 	np::host_session_pump(host_owner_, sock,
 			&Simulation::resolve_infantry_adm_before_server_tick, this,
 			nullptr, nullptr, profiling ? &host_perf : nullptr);
-	if (profiling) {
-		frame_phase_perf_.host_pump_us += static_cast<int64_t>(host_perf.total_us);
-		frame_phase_perf_.host_receive_us += static_cast<int64_t>(host_perf.receive_us);
-		frame_phase_perf_.host_connections_us +=
-				static_cast<int64_t>(host_perf.connections_us);
-		frame_phase_perf_.host_adapter_us += static_cast<int64_t>(host_perf.adapter_us);
-		frame_phase_perf_.server_tick_us += static_cast<int64_t>(host_perf.server_us);
-		frame_phase_perf_.server_input_us +=
-				static_cast<int64_t>(host_perf.server.input_us);
-		frame_phase_perf_.server_world_us +=
-				static_cast<int64_t>(host_perf.server.world_us);
-		frame_phase_perf_.world_setup_us +=
-				static_cast<int64_t>(host_perf.server.world_setup_us);
-		frame_phase_perf_.world_scripts_us +=
-				static_cast<int64_t>(host_perf.server.world_scripts_us);
-		frame_phase_perf_.world_ai_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_us);
-		frame_phase_perf_.world_ai_reactions_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_reactions_us);
-		frame_phase_perf_.world_ai_collision_tables_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_collision_tables_us);
-		frame_phase_perf_.world_ai_entities_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_entities_us);
-		frame_phase_perf_.world_ai_infantry_entities_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_infantry_entities_us);
-		frame_phase_perf_.world_ai_infantry_remote_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_infantry_remote_us);
-		frame_phase_perf_.world_ai_infantry_combat_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_infantry_combat_us);
-		frame_phase_perf_.world_ai_infantry_animation_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_infantry_animation_us);
-		frame_phase_perf_.world_ai_infantry_collision_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_infantry_collision_us);
-		frame_phase_perf_.world_ai_infantry_collision_contacts_us += static_cast<int64_t>(
-				host_perf.server.world_ai_infantry_collision_contacts_us);
-		frame_phase_perf_.world_ai_infantry_collision_repulsion_us += static_cast<int64_t>(
-				host_perf.server.world_ai_infantry_collision_repulsion_us);
-		frame_phase_perf_.world_ai_infantry_collision_ground_us += static_cast<int64_t>(
-				host_perf.server.world_ai_infantry_collision_ground_us);
-		frame_phase_perf_.world_ai_other_entities_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_other_entities_us);
-		frame_phase_perf_.world_ai_authority_vehicles_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_authority_vehicles_us);
-		frame_phase_perf_.world_ai_vehicle_scan_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_vehicle_scan_us);
-		frame_phase_perf_.world_ai_vehicle_motors_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_vehicle_motors_us);
-		frame_phase_perf_.world_ai_vehicle_riders_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_vehicle_riders_us);
-		frame_phase_perf_.world_ai_client_vehicles_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_client_vehicles_us);
-		frame_phase_perf_.world_ai_events_us +=
-				static_cast<int64_t>(host_perf.server.world_ai_events_us);
-		frame_phase_perf_.world_attachments_us +=
-				static_cast<int64_t>(host_perf.server.world_attachments_us);
-		frame_phase_perf_.world_attachment_orphans_us +=
-				static_cast<int64_t>(host_perf.server.world_attachment_orphans_us);
-		frame_phase_perf_.world_attachment_child_pose_us +=
-				static_cast<int64_t>(host_perf.server.world_attachment_child_pose_us);
-		frame_phase_perf_.world_attachment_riders_us +=
-				static_cast<int64_t>(host_perf.server.world_attachment_riders_us);
-		frame_phase_perf_.world_throwables_us +=
-				static_cast<int64_t>(host_perf.server.world_throwables_us);
-		frame_phase_perf_.world_weapons_us +=
-				static_cast<int64_t>(host_perf.server.world_weapons_us);
-		frame_phase_perf_.world_projectiles_us +=
-				static_cast<int64_t>(host_perf.server.world_projectiles_us);
-		frame_phase_perf_.world_destruction_us +=
-				static_cast<int64_t>(host_perf.server.world_destruction_us);
-		frame_phase_perf_.world_housekeeping_us +=
-				static_cast<int64_t>(host_perf.server.world_housekeeping_us);
-		frame_phase_perf_.match_us += static_cast<int64_t>(host_perf.server.match_us);
-		frame_phase_perf_.server_rules_us +=
-				static_cast<int64_t>(host_perf.server.rules_us);
-		frame_phase_perf_.server_replication_us +=
-				static_cast<int64_t>(host_perf.server.replication_us);
-		frame_phase_perf_.replication_query_prep_us +=
-				static_cast<int64_t>(host_perf.server.replication_query_prep_us);
-		frame_phase_perf_.replication_query_collect_us +=
-				static_cast<int64_t>(host_perf.server.replication_query_collect_us);
-		frame_phase_perf_.replication_query_grid_us +=
-				static_cast<int64_t>(host_perf.server.replication_query_grid_us);
-		frame_phase_perf_.replication_query_grid_span_us +=
-				static_cast<int64_t>(host_perf.server.replication_query_grid_span_us);
-		frame_phase_perf_.replication_query_grid_bucket_us +=
-				static_cast<int64_t>(host_perf.server.replication_query_grid_bucket_us);
-		frame_phase_perf_.replication_query_grid_workspace_us +=
-				static_cast<int64_t>(host_perf.server.replication_query_grid_workspace_us);
-		frame_phase_perf_.replication_snapshot_us +=
-				static_cast<int64_t>(host_perf.server.replication_snapshot_us);
-		frame_phase_perf_.replication_fan_us +=
-				static_cast<int64_t>(host_perf.server.replication_fan_us);
-		frame_phase_perf_.replication_fan_setup_us +=
-				static_cast<int64_t>(host_perf.server.replication_fan_setup_us);
-		frame_phase_perf_.replication_round_selection_us +=
-				static_cast<int64_t>(host_perf.server.replication_round_selection_us);
-		frame_phase_perf_.replication_entity_selection_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_selection_us);
-		frame_phase_perf_.replication_entity_setup_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_setup_us);
-		frame_phase_perf_.replication_entity_scoring_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_scoring_us);
-		frame_phase_perf_.replication_entity_los_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_los_us);
-		frame_phase_perf_.replication_entity_los_terrain_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_los_terrain_us);
-		frame_phase_perf_.replication_entity_los_sector_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_los_sector_us);
-		frame_phase_perf_.replication_entity_sort_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_sort_us);
-		frame_phase_perf_.replication_entity_budget_us +=
-				static_cast<int64_t>(host_perf.server.replication_entity_budget_us);
-		frame_phase_perf_.replication_encode_us +=
-				static_cast<int64_t>(host_perf.server.replication_encode_us);
-		frame_phase_perf_.replication_enqueue_us +=
-				static_cast<int64_t>(host_perf.server.replication_enqueue_us);
-		frame_phase_perf_.host_send_us += static_cast<int64_t>(host_perf.send_us);
-	}
-	const uint64_t player_start = profiling ? perf_now_us() : 0;
+	if (profiling)
+		frame_phase_perf_.host_session += host_perf;
+	const uint64_t player_start = profiling ? opennova::io::perf_now_us() : 0;
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
 	if (profiling)
 		frame_phase_perf_.host_player_us +=
-				static_cast<int64_t>(perf_now_us() - player_start);
+				static_cast<int64_t>(opennova::io::perf_now_us() - player_start);
 	// The host's measurable net leg for the F3 Stats board: the ClientState
 	// fold. The S2C serialize/emit half rides inside np::host_session_pump
 	// (fused with the logic tick) and stays inside the Sim step number until
 	// npruntime grows a phase seam.
-	const uint64_t net_start = profiling ? perf_now_us() : 0;
+	const uint64_t net_start = profiling ? opennova::io::perf_now_us() : 0;
 	np::ClientFramePerf client_perf;
 	if (runtime_)
 		runtime_->Client_ProcessNetworkFrame(
 				now, profiling ? &client_perf : nullptr); // fold host_loop_ -> ClientState
 	if (profiling) {
-		last_net_tick_us_ = perf_now_us() - net_start;
+		last_net_tick_us_ = opennova::io::perf_now_us() - net_start;
 		frame_phase_perf_.client_decode_us +=
 				static_cast<int64_t>(last_net_tick_us_);
-		frame_phase_perf_.client_setup_us +=
-				static_cast<int64_t>(client_perf.setup_us);
-		frame_phase_perf_.client_receive_us +=
-				static_cast<int64_t>(client_perf.receive_us);
-		frame_phase_perf_.client_maintenance_us +=
-				static_cast<int64_t>(client_perf.maintenance_us);
-		frame_phase_perf_.client_send_us +=
-				static_cast<int64_t>(client_perf.send_us);
+		frame_phase_perf_.client += client_perf;
 	}
 }
 
@@ -644,7 +521,7 @@ void Simulation::joiner_pump() {
 	// uplink ship, ending where the local (non-authority) world work begins.
 	// The bridge fires on_wire_leg_complete at exactly that boundary.
 	const uint64_t net_start =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
+			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	// The frame itself — provider wiring, hello, recv-fold + uplink + folds,
 	// the decoded-consequence application, the local World tick, and the
 	// post-tick recompose — lives in the engine bridge (S10a, ADR 0028). This
@@ -661,7 +538,7 @@ void Simulation::joiner_pump() {
 	hooks.resolve_row_adm_ids = [this] { resolve_client_row_adm_ids(); };
 	if (runtime_profiling_enabled_)
 		hooks.on_wire_leg_complete = [this, net_start] {
-			last_net_tick_us_ = perf_now_us() - net_start;
+			last_net_tick_us_ = opennova::io::perf_now_us() - net_start;
 		};
 	hooks.apply_authoritative_loadout =
 			[this] { apply_joiner_authoritative_loadout(); };

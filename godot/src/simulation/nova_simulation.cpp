@@ -759,22 +759,6 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	return true;
 }
 
-bool Simulation::load_mission_file(const String &path) {
-	if (!begin_session_load()) return false;
-	reset_world();
-	opennova::bms::File file;
-	std::string err;
-	if (!opennova::bms::parse_file(std::string(path.utf8().get_data()), file, err)) {
-		fail_session_load(err.c_str());
-		return false;
-	}
-	host_session_config_.mission_file = std::string(path.get_file().utf8().get_data());
-	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
-	finish_load(file);
-	apply_host_session_mission_header(file);
-	return true;
-}
-
 void Simulation::build_demo_mission() {
 	if (!begin_session_load()) return;
 	reset_world();
@@ -798,16 +782,16 @@ bool Simulation::advance_world_tick() {
 	// Server_TickUpdate owns the C2S drain at the top of the loop and the post-logic S2C fan;
 	// host_pump drives it and the local client's decode happens via the host's ClientRuntime.
 	const uint64_t sim_start =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
+			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
 		const uint64_t adm_start =
-				runtime_profiling_enabled_ ? perf_now_us() : 0;
+				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 		resolve_new_infantry_adm_ids();
 		if (runtime_profiling_enabled_) {
 			frame_phase_perf_.adm_resolve_us +=
-					static_cast<int64_t>(perf_now_us() - adm_start);
-			last_sim_tick_us_ = perf_now_us() - sim_start;
+					static_cast<int64_t>(opennova::io::perf_now_us() - adm_start);
+			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
 		}
 		return true;
 	}
@@ -817,12 +801,12 @@ bool Simulation::advance_world_tick() {
 			frame_phase_perf_.client_decode_us +=
 					static_cast<int64_t>(last_net_tick_us_);
 		const uint64_t adm_start =
-				runtime_profiling_enabled_ ? perf_now_us() : 0;
+				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 		resolve_new_infantry_adm_ids();
 		if (runtime_profiling_enabled_) {
 			frame_phase_perf_.adm_resolve_us +=
-					static_cast<int64_t>(perf_now_us() - adm_start);
-			last_sim_tick_us_ = perf_now_us() - sim_start;
+					static_cast<int64_t>(opennova::io::perf_now_us() - adm_start);
+			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
 		}
 		return true;
 	}
@@ -833,20 +817,16 @@ bool Simulation::advance_world_tick() {
 			opennova::world::TickPhase::Gameplay,
 			runtime_profiling_enabled_ ? &world_perf : nullptr);
 	if (runtime_profiling_enabled_) {
-		frame_phase_perf_.world_setup_us += static_cast<int64_t>(world_perf.setup_us);
-		frame_phase_perf_.world_scripts_us += static_cast<int64_t>(world_perf.scripts_us);
-		frame_phase_perf_.world_ai_us += static_cast<int64_t>(world_perf.ai_us);
-		frame_phase_perf_.world_attachments_us +=
-				static_cast<int64_t>(world_perf.attachments_us);
-		frame_phase_perf_.world_throwables_us +=
-				static_cast<int64_t>(world_perf.throwables_us);
-		frame_phase_perf_.world_weapons_us += static_cast<int64_t>(world_perf.weapons_us);
-		frame_phase_perf_.world_projectiles_us +=
-				static_cast<int64_t>(world_perf.projectiles_us);
-		frame_phase_perf_.world_destruction_us +=
-				static_cast<int64_t>(world_perf.destruction_us);
-		frame_phase_perf_.world_housekeeping_us +=
-				static_cast<int64_t>(world_perf.housekeeping_us);
+		opennova::np::ServerTickPerf &server = frame_phase_perf_.host_session.server;
+		server.world_setup_us += world_perf.setup_us;
+		server.world_scripts_us += world_perf.scripts_us;
+		server.world_ai_us += world_perf.ai_us;
+		server.world_attachments_us += world_perf.attachments_us;
+		server.world_throwables_us += world_perf.throwables_us;
+		server.world_weapons_us += world_perf.weapons_us;
+		server.world_projectiles_us += world_perf.projectiles_us;
+		server.world_destruction_us += world_perf.destruction_us;
+		server.world_housekeeping_us += world_perf.housekeeping_us;
 	}
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
@@ -854,7 +834,7 @@ bool Simulation::advance_world_tick() {
 	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
 	resolve_new_infantry_adm_ids();
 	if (runtime_profiling_enabled_)
-		last_sim_tick_us_ = perf_now_us() - sim_start;
+		last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
 	return true;
 }
 
@@ -998,8 +978,8 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	opennova::wac::Program program = opennova::wac::compile_program(sources, env);
 	Ref<WacProgram> holder;
 	holder.instantiate();
-	// Adopt the registry-compiled program into the holder so get_wac_program()
-	// exposes its diagnostics either way.
+	// Adopt the registry-compiled program into the holder so the retained
+	// WacProgram carries its diagnostics either way.
 	holder->adopt(std::move(program));
 	wac_program_ = holder;
 	if (!wac_program_->is_ok()) {

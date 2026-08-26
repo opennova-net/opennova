@@ -555,9 +555,11 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	frame_outcome = sim.step_session_frame(frame_input, Callable())
 	assert_not_null(frame_outcome)
 	session_perf = sim.get_session_perf()
+	assert_true(session_perf.has("ticks"),
+			"the tick accounting is exported with profiling closed")
 	for key in SESSION_PHASE_TIMING_KEYS:
-		assert_eq(int(session_perf.get(key, -1)), 0,
-				"%s stays zero while F3/native profiling is closed" % key)
+		assert_false(session_perf.has(key),
+				"%s is not exported while F3/native profiling is closed" % key)
 	sim.free()
 
 
