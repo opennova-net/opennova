@@ -484,11 +484,21 @@ const _ROWS := [
 	# split at RenderingServer's draw signals (RootFramePhaseSampler).
 	{"id": "deferred_flush", "label": "Deferred flush (draw callbacks, transforms)",
 			"depth": 2, "kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_DEFERRED_FLUSH},
-	# HudOverlay._draw is the one every-frame _draw in a live mission.
-	{"id": "hud_draw_compile", "label": "HUD draw compile", "depth": 3,
+	# The two halves the late boundary's deferred marker splits: what the
+	# callbacks queued (every call_deferred / queue_redraw -> _draw of the
+	# frame: the HUD overlay, this overlay's own page, the view effects) and
+	# the tail behind them (draws the flush itself queued, transform
+	# notifications, timers/tweens, node frees, accessibility, the RS sync).
+	{"id": "flush_queued", "label": "Queued by callbacks (deferred calls, draws)",
+			"depth": 3, "kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_FLUSH_QUEUED},
+	{"id": "hud_draw_compile", "label": "HUD draw compile", "depth": 4,
 			"kind": _KIND_SPAN, "slot": FrameStatsBoard.HUD_DRAW_COMPILE},
-	{"id": "hud_draw_emit", "label": "HUD draw emit", "depth": 3,
+	{"id": "hud_draw_emit", "label": "HUD draw emit", "depth": 4,
 			"kind": _KIND_SPAN, "slot": FrameStatsBoard.HUD_DRAW_EMIT},
+	{"id": "debug_draw", "label": "F3 overlay redraw (observer cost)", "depth": 4,
+			"kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_DEBUG_DRAW},
+	{"id": "flush_tail", "label": "Flush tail (transforms, timers, node frees, RS sync)",
+			"depth": 3, "kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_FLUSH_TAIL},
 	{"id": "render_draw", "label": "RenderingServer draw (all viewports)",
 			"depth": 2, "kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_DRAW},
 	{"id": "pacing_input", "label": "Servers/input/pacing", "depth": 2,
@@ -782,7 +792,7 @@ func _refresh_info(sums: PackedInt64Array, maxes: PackedInt64Array,
 	for id in ["sim", "net", "trace", "effects", "fire", "destruction",
 			"throwable", "mission_rows", "wire_rows", "occl", "material",
 			"render_main", "render_shadow", "render_water", "render_q3",
-			"render_slot", "physics_callbacks"]:
+			"render_slot", "physics_callbacks", "flush_tail"]:
 		_set_info(id, "")
 	var frame_info := "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS))
 	# Godot's own TIME_PROCESS (process + deferred flush + RS sync + draw) is a
@@ -799,6 +809,17 @@ func _refresh_info(sums: PackedInt64Array, maxes: PackedInt64Array,
 		_set_info("physics_callbacks", "server peak %.2f ms · %.1f iter/f" % [
 				float(maxes[FrameStatsBoard.FRAME_PHYSICS_SERVER]) / 1000.0,
 				float(sums[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS]) / frames])
+	if frames > 0 and counts[FrameStatsBoard.FRAME_NODES_FREED] > 0:
+		# Node churn lands in the delete-queue flush of the tail; an active
+		# assistive/UIA client makes Godot 4.6 process accessibility updates
+		# for every changed Control there too.
+		var screen_reader := DisplayServer.has_feature(
+				DisplayServer.FEATURE_ACCESSIBILITY_SCREEN_READER) \
+				and DisplayServer.accessibility_screen_reader_active()
+		_set_info("flush_tail", "%.1f freed · %.1f added nodes/f · a11y %s" % [
+				float(sums[FrameStatsBoard.FRAME_NODES_FREED]) / frames,
+				float(sums[FrameStatsBoard.FRAME_NODES_ADDED]) / frames,
+				"on" if screen_reader else "off"])
 	_set_info("render", "%d draws · %d objs · %s prims · %d nodes" % [
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),

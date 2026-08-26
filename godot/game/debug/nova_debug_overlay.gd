@@ -47,8 +47,28 @@ const CATEGORY_ORDER: Array[StringName] = [
 	DebugPage.CATEGORY_DIAGNOSTICS,
 ]
 
+## A zero-size CanvasItem whose _draw runs at its place in the deferred
+## flush's FIFO: a head/tail pair queued around the page refresh brackets
+## every redraw that refresh queued (the Tree, the labels, the min-size
+## updates), so the Stats page can show what the overlay itself costs.
+class DrawSentinel:
+	extends Control
+
+	var drawn_usec := 0
+	var head: DrawSentinel = null
+	var board: FrameStatsBoard = null
+
+	func _draw() -> void:
+		drawn_usec = Time.get_ticks_usec()
+		if head != null and board != null and head.drawn_usec > 0:
+			board.add(FrameStatsBoard.FRAME_DEBUG_DRAW, drawn_usec - head.drawn_usec)
+			head.drawn_usec = 0
+
+
 var _config_path: String
 var _ctx := DebugContext.new()
+var _draw_head: DrawSentinel
+var _draw_tail: DrawSentinel
 var _session: DebugSession
 var _timer: Timer
 var _panel: PanelContainer
@@ -97,6 +117,15 @@ func _init(
 	if shared_session == null:
 		_bind_builtin_targets()
 	_build_panel()
+	_draw_head = DrawSentinel.new()
+	_draw_head.name = "StatsDrawHead"
+	_draw_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_draw_head)
+	_draw_tail = DrawSentinel.new()
+	_draw_tail.name = "StatsDrawTail"
+	_draw_tail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_draw_tail.head = _draw_head
+	add_child(_draw_tail)
 	_session.edit_unlock_changed.connect(_on_edit_unlock_changed)
 	_on_edit_unlock_changed(_session.is_edit_unlocked())
 	_build_default_pages()
@@ -214,6 +243,7 @@ func close() -> void:
 ## The shell-owned FrameStatsBoard feeding the Stats page (null detaches).
 func set_frame_stats_board(board) -> void:
 	_frame_stats = board as FrameStatsBoard
+	_draw_tail.board = _frame_stats
 	_stats_pane.set_frame_stats_board(board)
 
 
@@ -712,6 +742,10 @@ func _restore_config() -> void:
 func _refresh() -> void:
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var refresh_start := Time.get_ticks_usec() if stats_on else 0
+	# The head sentinel goes into the deferred queue before any redraw this
+	# refresh queues; the tail follows the last one.
+	if stats_on:
+		_draw_head.queue_redraw()
 	_session.sync()
 	var status := _runtime_status()
 	var has_sim := _ctx.sim() != null
@@ -754,6 +788,7 @@ func _refresh() -> void:
 		_active_page.refresh()
 		_active_page.refresh_debug_controls()
 	if stats_on:
+		_draw_tail.queue_redraw()
 		_frame_stats.add(FrameStatsBoard.FRAME_DEBUG_REFRESH,
 				Time.get_ticks_usec() - refresh_start)
 

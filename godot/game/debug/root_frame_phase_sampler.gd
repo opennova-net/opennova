@@ -8,7 +8,12 @@ extends Node
 ## time is split further at RenderingServer's draw signals: the deferred flush
 ## (late callback -> frame_pre_draw), the draw itself (frame_pre_draw ->
 ## frame_post_draw), and servers/input/pacing (frame_post_draw -> the next
-## early callback).
+## early callback). The deferred flush splits once more at a marker the late
+## boundary queues with call_deferred: MessageQueue is FIFO, so everything the
+## callbacks queued (every call_deferred and queue_redraw -> _draw of the
+## frame) runs before the marker, and the SceneTree tail (draws the flush
+## itself queued, transform notifications, timers/tweens, node frees,
+## accessibility, the RenderingServer sync) after it.
 
 
 class LateBoundary:
@@ -18,6 +23,7 @@ class LateBoundary:
 
 	func _process(_delta: float) -> void:
 		sampler.finish_process_window()
+		sampler.queue_flush_marker()
 
 	func _physics_process(_delta: float) -> void:
 		sampler.finish_physics_window()
@@ -33,6 +39,8 @@ var _process_start_usec := 0
 var _process_end_usec := 0
 var _pre_draw_usec := 0
 var _post_draw_usec := 0
+var _flush_marker_usec := 0
+var _last_node_count := -1
 var _physics_start_usec := 0
 var _pending_physics_usec := 0
 var _last_physics_frames := 0
@@ -136,6 +144,14 @@ func _process(_delta: float) -> void:
 	# window here so FrameStatsBoard assigns them to the same render frame.
 	_board.add(FrameStatsBoard.FRAME_PHYSICS_CALLBACKS, _pending_physics_usec)
 	_pending_physics_usec = 0
+	# Node churn since the previous frame: a delete-queue flush shows as freed
+	# nodes, a spawn burst as added ones (both land in the flush tail).
+	var node_count := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
+	if _last_node_count >= 0:
+		var delta := node_count - _last_node_count
+		_board.add(FrameStatsBoard.FRAME_NODES_FREED, maxi(-delta, 0))
+		_board.add(FrameStatsBoard.FRAME_NODES_ADDED, maxi(delta, 0))
+	_last_node_count = node_count
 	var physics_frames := Engine.get_physics_frames()
 	if _last_physics_frames > 0:
 		_board.add(FrameStatsBoard.FRAME_PHYSICS_ITERATIONS,
@@ -175,6 +191,25 @@ func finish_physics_window() -> void:
 	_physics_start_usec = 0
 
 
+## Queue the flush marker behind everything the callbacks deferred. Called by
+## the late boundary once its window closed.
+func queue_flush_marker() -> void:
+	if _process_end_usec <= 0 or _board == null or not _board.is_capture_active():
+		return
+	_mark_flush_queue.call_deferred()
+
+
+# The marker fires inside MessageQueue.flush after every deferred call and
+# CanvasItem redraw the callbacks queued this frame.
+func _mark_flush_queue() -> void:
+	if _board == null or not _board.is_capture_active():
+		return
+	var now := Time.get_ticks_usec()
+	if _process_end_usec > 0:
+		_board.add(FrameStatsBoard.FRAME_FLUSH_QUEUED, now - _process_end_usec)
+	_flush_marker_usec = now
+
+
 # RenderingServer.frame_pre_draw: the deferred flush (every call_deferred and
 # queue_redraw -> _draw), transform-notification flush, SceneTree timers/tweens/
 # delete queue, and the RenderingServer sync are behind us.
@@ -184,6 +219,9 @@ func _on_frame_pre_draw() -> void:
 	var now := Time.get_ticks_usec()
 	if _process_end_usec > 0:
 		_board.add(FrameStatsBoard.FRAME_DEFERRED_FLUSH, now - _process_end_usec)
+	if _flush_marker_usec > 0:
+		_board.add(FrameStatsBoard.FRAME_FLUSH_TAIL, now - _flush_marker_usec)
+	_flush_marker_usec = 0
 	_process_end_usec = 0
 	_pre_draw_usec = now
 
@@ -220,6 +258,8 @@ func _set_capture_active(active: bool) -> void:
 	_process_end_usec = 0
 	_pre_draw_usec = 0
 	_post_draw_usec = 0
+	_flush_marker_usec = 0
+	_last_node_count = -1
 	_physics_start_usec = 0
 	_pending_physics_usec = 0
 	_last_physics_frames = 0
