@@ -60,8 +60,8 @@ std::string extension_for_name(const std::string &name) {
 
 std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
 	const std::string extension = extension_for_name(name);
-	// Avatars.def is the singular player-character database, browsable + openable in
-	// the Avatars workspace. Matched by NAME, not extension: the .def extension is
+	// Avatars.def is the singular player-character database. Matched by NAME, not
+	// extension: the .def extension is
 	// shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
 	// runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
 	// opens "Avatars.def" by exact name]
@@ -77,14 +77,8 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (extension == ".env") {
 		return "environment";
 	}
-	if (extension == ".3dp") {
-		return "object_project";
-	}
 	if (extension == ".3di") {
 		return "object_model";
-	}
-	if (extension == ".ase") {
-		return "object_scene";
 	}
 	if (extension == ".kda") {
 		return "credits";
@@ -118,14 +112,13 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	}
 	// The .def family is name-keyed, not extension-keyed (items/weapon/ammo/avatars all share
 	// .def and are consumed at runtime by name). Only hudpos.def is a browsable kind, for the
-	// HUD layout preview workspace; the rest stay unclassified.
+	// HUD layout catalog; the rest stay unclassified.
 	if (extension == ".def" && to_lower_ascii(fs::path(name).filename().string()) == "hudpos.def") {
 		return "hudpos";
 	}
 	// NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
-	// It is consumed at runtime by name (DbfData), and the Sound workspace only
-	// opens .lwf — classifying .dbf as "sound" made it show up in the sound quick-open
-	// next to a mission's co-named .lwf and broke "open" (a DLG0 file is not an LWF1).
+	// It is consumed at runtime by name (DbfData); classifying it as an LWF sound
+	// profile would conflate two unrelated formats.
 	if (extension == ".bin" && is_scr_bin) {
 		return "music_script";
 	}
@@ -149,14 +142,8 @@ std::string normalize_kind(const std::string &kind) {
 	if (key == "env") {
 		return "environment";
 	}
-	if (key == "3dp" || key == "tdp" || key == "object_workspace") {
-		return "object_project";
-	}
 	if (key == "3di") {
 		return "object_model";
-	}
-	if (key == "ase" || key == "scene") {
-		return "object_scene";
 	}
 	if (key == "kda") {
 		return "credits";
@@ -187,11 +174,10 @@ std::string normalize_kind(const std::string &kind) {
 }
 
 bool is_object_kind(const std::string &kind) {
-	return kind == "object_project" || kind == "object_model" || kind == "object_scene";
+	return kind == "object_model";
 }
 
-// The Music workspace browses .sbf banks and .bin (SCR0) scripts together under
-// one "music" umbrella kind, mirroring how "object" spans its sub-kinds.
+// The music umbrella groups .sbf banks and .bin (SCR0) scripts.
 bool is_music_kind(const std::string &kind) {
 	return kind == "sbf" || kind == "music_script";
 }
@@ -204,16 +190,16 @@ std::string display_name_from_name(const std::string &name) {
 
 } // namespace
 
-// ResourceIndex is the editor-domain kind classifier on top of the engine-faithful Vfs. The
+// ResourceIndex is the runtime-facing kind catalog on top of the engine-faithful Vfs. The
 // Vfs owns mount precedence, decryption/decoding, and byte reads; ResourceIndex enumerates it
-// and tags each top-level/archived file with a UI "kind". scan(root) mounts the root the way
+// and tags each top-level/archived file with a format kind. scan(root) mounts the root the way
 // the game would (loose files shadow archives; root *.pff are mounted as secondaries in sorted
 // order). read_file delegates to the Vfs, so any file resolves (not only recognized kinds).
 struct ResourceIndex::Impl {
 	Vfs vfs;
 	std::string root_dir;
 	std::string last_error;
-	std::vector<ResourceFileEntry> records; // recognized-kind entries, for the browser
+	std::vector<ResourceFileEntry> records; // recognized-kind entries
 };
 
 ResourceIndex::ResourceIndex() : impl_(std::make_unique<Impl>()) {}

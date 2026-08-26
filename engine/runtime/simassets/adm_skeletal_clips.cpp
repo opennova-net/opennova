@@ -128,7 +128,8 @@ bool AdmSkeletalClips::load_from_adm(
 	// different/zero bone positions, so sampling must use the shared origins.
 	std::string reset_value;
 	for (size_t i = 0; i < adm.count; ++i) {
-		const char *value = adm.entries[i].value;
+		if (adm.entries[i].variant_count == 0) continue;
+		const char *value = adm.entries[i].variants[0];
 		if (value == nullptr || value[0] == '\0') {
 			continue;
 		}
@@ -156,12 +157,9 @@ bool AdmSkeletalClips::load_from_adm(
 	std::vector<std::pair<std::string, std::vector<uint8_t>>> clip_bads;
 	for (size_t i = 0; i < adm.count; ++i) {
 		const std::string key = adm.entries[i].key;
-		const size_t vcount =
-				adm.entries[i].value_count > 0 ? adm.entries[i].value_count : 1;
-		for (size_t v = 0; v < vcount; ++v) {
-			const char *value = v < adm.entries[i].value_count
-					? adm.entries[i].values[v]
-					: adm.entries[i].value;
+		const size_t variant_count = adm.entries[i].variant_count;
+		for (size_t v = 0; v < variant_count; ++v) {
+			const char *value = adm.entries[i].variants[v];
 			if (value == nullptr || value[0] == '\0') {
 				continue;
 			}

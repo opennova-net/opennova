@@ -1,7 +1,7 @@
 // Collision (CDTA) fidelity on the parsed 3DI3 model: packed struct layout
-// pins (the Python FFI mirrors and the 44-B runtime CFAC record depend on
-// them), the runtime-safety validator, the per-COBJ run prefix sums, and the
-// exact recovery of authored fixed-point values through the float parse.
+// pins (the 44-B runtime CFAC record depends on them), the runtime-safety
+// validator, per-COBJ run prefix sums, and exact recovery of authored
+// fixed-point values through the float parse.
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -233,8 +233,8 @@ static void test_collision_probe_boxes_follow_the_witnessed_folds() {
 }
 
 int main() {
-    // Packed struct layout pins: the Python ctypes mirrors and the 44-B
-    // runtime CFAC record shape depend on these staying exact.
+    // Packed struct layout pins: the 44-B runtime CFAC record shape depends
+    // on these staying exact.
     check(sizeof(ThreediCollisionNormal) == 14, "collision normal is 14 packed bytes");
     check(sizeof(ThreediCollisionFace) == 44,
           "collision face matches the 44-B runtime CFAC record");

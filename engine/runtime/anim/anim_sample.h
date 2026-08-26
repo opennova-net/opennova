@@ -67,8 +67,8 @@ struct ClipBone {
     std::string name;
     int parent_index = -1;
     // BIND pose the embedder builds the Skeleton3D REST from. Default mode: the raw BadBone 3x3
-    // world bind rotation (row-major) + bind position, straight from the .bad (matching oscarmike
-    // adm_import_plugin + the Blender importer's build_armature_from_bad). model_bind mode:
+    // world bind rotation (row-major) + bind position, straight from the .bad (matching the
+    // witnessed oscarmike path). model_bind mode:
     // IDENTITY rotation -- the original's bind is a pure translation (the skin bind-inverse is
     // T(-pivot)), and the channel rotations are re-based to be relative to the .bad bind
     // [orig: BoneAnim_BuildWorldMatrices @0x40c400 + AnimChannel_ComputeBoneMatrices @0x410da0].
@@ -147,7 +147,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
 // past the bind's bone count fall back to the unrotated form. This is what lets a rig
 // whose SHIPPED positions are zeroed/stale (12 of 43 JO viewmodel rigs) rebuild the
 // exact healthy table from data that never rots: the model pivots and the bind
-// rotations. Mirror of pyopennova/bad_build.py bad_positions_from_model.
+// rotations. This native function is the sole implementation.
 std::vector<Vec3> positions_from_model(const BadFile &bind_bad,
                                        const std::vector<int> &model_parents,
                                        const std::vector<Vec3> &model_rel_positions);

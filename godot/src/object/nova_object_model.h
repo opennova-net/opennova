@@ -1,9 +1,8 @@
 #pragma once
 
 // ObjectModel — the retained visual for one NovaLogic object graphic,
-// NATIVE (the 2026-08-09 de-scripting: the former nova_object_model.gd +
-// nova_object_body_anim.gd + nova_object_materials.gd +
-// nova_object_scene_builder.gd, ported verbatim). One Node3D owns the
+// NATIVE (the 2026-08-09 de-scripting of the former GDScript implementation).
+// One Node3D owns the
 // retained scene (Robj part nodes / Skeleton3D + Skin / materials), the
 // main-body skeletal channels, the PLAYPARTANIM part channels, the CTRL
 // register store, environment lighting application, and the event-driven
@@ -426,7 +425,6 @@ private:
 	void advance_runtime_frame_profiled(double p_delta,
 			AwakeFrameProfile *p_profile);
 	bool apply_robj_transforms();
-	int64_t last_object_update_mask() const;
 	void on_object_changed();
 	void wake_runtime_frame();
 	void sleep_runtime_frame_if_idle();

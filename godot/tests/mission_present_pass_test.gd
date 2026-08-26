@@ -15,8 +15,8 @@ extends GutTest
 # real layout.
 
 const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
-const MUZZLE_3DI := "res://../fixtures/3dp/dapche2/dapche2.3di"
-const SECTIONED_3DI := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
+const MUZZLE_3DI := "res://../fixtures/threedi/objects/dapche2/dapche2.3di"
+const SECTIONED_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
 
 
 # Builds the flat PF-layout snapshot Simulation.get_present_snapshot()

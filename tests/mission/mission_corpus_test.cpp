@@ -4,8 +4,7 @@
 //
 // The corpus is copyrighted game data and is NOT committed. The test is gated on the env var
 // OPENNOVA_MISSION_CORPUS (point it at e.g. an extracted JO_ASSETS dir). When the var is unset the
-// test prints a skip line and passes, so it never runs bare in CI. Mirrors the env-gated pattern in
-// tests/oed/export_3di_test.cpp.
+// test prints a skip line and passes, so it never runs bare in CI.
 
 #include <algorithm>
 #include <cstdint>

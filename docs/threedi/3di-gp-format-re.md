@@ -366,7 +366,7 @@ unused PANM styles.
 Corpus: 639 `.3di` files (GPM/GPS/GPP) from the `AS_ASSETS` BHD affiliate build
 (`~/Desktop/AS_ASSETS`, `__temp.3di` excluded); 639/639 parsed cleanly against
 the since-removed reader. The material-struct probe (§2.3 first table) used
-the smaller 22-file `fixtures/3dp/` set instead. Struct/field names below
+the smaller 22-file `fixtures/threedi/objects/` set instead. Struct/field names below
 follow the removed `threedi_gp.h`'s vocabulary; fields proven always-zero and
 loader-unread are named `pad_<struct>_<hexoffset>` and round-tripped verbatim.
 
@@ -426,7 +426,7 @@ file; mesh/texture blobs can follow it.
 
 ### 2.3 Materials
 
-`ThreediGpMaterial` (22/22 `fixtures/3dp/` fixtures probed):
+`ThreediGpMaterial` (22/22 `fixtures/threedi/objects/` fixtures probed):
 
 | Offset | Field | Corpus | Notes |
 |---|---|---|---|

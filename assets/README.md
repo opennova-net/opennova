@@ -33,7 +33,6 @@ acceptance step, never a committed input.
   in git, binaries in LFS), guarded by the `minimal_*` ctests. Retail resolves
   bare filenames at the root, which is why nothing loadable lives in a
   subdirectory.
-- **`src/`** — modelling sources (`.blend`, `.ase`) that retail never loads.
 - **the same root is also the game dir** the asset-gated validation runs retail
   out of, so `Jointops.exe`, `binkw32.dll`, the retail runtime's own writes
   (`game.cfg`, `player.sav`, `_filelog.txt`, ...) and the packaging tool's

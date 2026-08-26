@@ -174,7 +174,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // meride(SSN) then set(vX,..)` — with these unimplemented every chain
     // evaluated false and no scripted vehicle ever received its drive order).
     // Schema rows: area idx111 @0x4ED0C0, meride idx116 @0x4F1260, SSNonSSN
-    // idx16 @0x4F19A0 (engine/runtime/wac/tools/wac_commands.schema.json).
+    // idx16 @0x4F19A0 (see formats/wac/command_table_data.cpp).
     if (ieq(n, "area")) {
         // Local player inside area-trigger index A(0). [orig: handler @0x4ED0C0
         // (body absent from the decompilation dump — IDA verify pending); the

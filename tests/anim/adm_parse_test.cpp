@@ -21,23 +21,28 @@ int main(void) {
     if (adm.count != 9) {
         fprintf(stderr, "FAIL: expected 9 entries, got %zu\n", adm.count);
         for (size_t i = 0; i < adm.count; ++i)
-            fprintf(stderr, "  %zu: %s -> %s\n", i, adm.entries[i].key, adm.entries[i].value);
+            fprintf(stderr, "  %zu: %s -> %s\n", i, adm.entries[i].key,
+                    adm.entries[i].variant_count ? adm.entries[i].variants[0] : "");
         adm_free(&adm);
         return 1;
     }
 
     if (strcmp(adm.entries[0].key, "anim_reset") != 0 ||
-        strcmp(adm.entries[0].value, "mp5_RST") != 0) {
+        adm.entries[0].variant_count != 1 ||
+        strcmp(adm.entries[0].variants[0], "mp5_RST") != 0) {
         fprintf(stderr, "FAIL: first entry mismatch: '%s' -> '%s'\n",
-                adm.entries[0].key, adm.entries[0].value);
+                adm.entries[0].key,
+                adm.entries[0].variant_count ? adm.entries[0].variants[0] : "");
         adm_free(&adm);
         return 1;
     }
 
     if (strcmp(adm.entries[4].key, "anim_wpn_reload") != 0 ||
-        strcmp(adm.entries[4].value, "mp5_1r") != 0) {
+        adm.entries[4].variant_count != 1 ||
+        strcmp(adm.entries[4].variants[0], "mp5_1r") != 0) {
         fprintf(stderr, "FAIL: reload entry mismatch: '%s' -> '%s'\n",
-                adm.entries[4].key, adm.entries[4].value);
+                adm.entries[4].key,
+                adm.entries[4].variant_count ? adm.entries[4].variants[0] : "");
         adm_free(&adm);
         return 1;
     }

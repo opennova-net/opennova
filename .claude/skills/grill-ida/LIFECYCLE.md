@@ -79,9 +79,8 @@ get edited by hand). Periodically — before a release, or when resuming after a
    name mismatches (names drift legitimately — the address decides who's right).
 4. The D-ID half is the `re-doc` skill's cross-file step 3: grep `D-<DOMAIN>-` across source vs
    records and confirm both directions resolve.
-5. Steps 1–3 against the live IDB are mechanical: `python scripts/ida/cite_sweep.py` (needs IDA on
-   `127.0.0.1:13337`; `scripts/ida/README.md`) joins every marker and IDB `reimpl:` back-link by
-   address and prints the disagreements, exit 1 on any.
+5. Check steps 1–3 against the live IDB through the IDA MCP connection: inspect
+   each address and its `reimpl:` back-link, then report disagreements before editing.
 
 ---
 

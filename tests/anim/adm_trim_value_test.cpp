@@ -43,17 +43,17 @@ int main(void) {
         remove(temp_path);
         return 1;
     }
-    if (strcmp(adm.entries[0].value, "Dt1IdleA.bad") != 0) {
-        fprintf(stderr, "FAIL: entry 0 value not trimmed: '%s'\n", adm.entries[0].value);
+    if (strcmp(adm.entries[0].variants[0], "Dt1IdleA.bad") != 0) {
+        fprintf(stderr, "FAIL: entry 0 value not trimmed: '%s'\n", adm.entries[0].variants[0]);
         adm_free(&adm);
         remove(temp_path);
         return 1;
     }
 
     if (strcmp(adm.entries[1].key, "anim_run") != 0 ||
-        strcmp(adm.entries[1].value, "RunAnim.bad") != 0) {
+        strcmp(adm.entries[1].variants[0], "RunAnim.bad") != 0) {
         fprintf(stderr, "FAIL: entry 1 mismatch: '%s' -> '%s'\n",
-                adm.entries[1].key, adm.entries[1].value);
+                adm.entries[1].key, adm.entries[1].variants[0]);
         adm_free(&adm);
         remove(temp_path);
         return 1;
@@ -65,8 +65,8 @@ int main(void) {
         remove(temp_path);
         return 1;
     }
-    if (strcmp(adm.entries[2].value, "WalkAnim.bad") != 0) {
-        fprintf(stderr, "FAIL: entry 2 value not trimmed: '%s'\n", adm.entries[2].value);
+    if (strcmp(adm.entries[2].variants[0], "WalkAnim.bad") != 0) {
+        fprintf(stderr, "FAIL: entry 2 value not trimmed: '%s'\n", adm.entries[2].variants[0]);
         adm_free(&adm);
         remove(temp_path);
         return 1;

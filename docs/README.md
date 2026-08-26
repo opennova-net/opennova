@@ -27,10 +27,9 @@ behavior is summarized and cited.
 - **The ledger is OPEN-only.** [`divergence-ledger.md`](divergence-ledger.md)'s
   per-domain tables list open rows; a FIXED / PERMANENT row retires to a dated
   closure line there and keeps its full row in the owning record. Every D-id in
-  the ledger resolves to exactly one record row, and
-  `scripts/lint/ledger_check.py --check` keeps the scoreboard honest. The
-  three-way drift check (code markers ↔ IDB names ↔ record rows) is
-  `scripts/ida/cite_sweep.py`, run against a live IDA.
+  the ledger resolves to exactly one record row. Update its scoreboard in the
+  same change. Check code markers, IDB names, and record rows through the live
+  IDA MCP connection when reviewing drift.
 
 ## Architecture
 
@@ -45,10 +44,10 @@ behavior is summarized and cited.
 | [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
 | [`dev-env-vars.md`](dev-env-vars.md) | The dev environment-variable registry: launch, capture, and asset-path vars and where each is read |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
-| [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard. **Closed 2026-07-12** (freeze lifted); the enforcement instruments and standing ADRs survive it |
+| [`threedi/scene-naming-contract.md`](threedi/scene-naming-contract.md) | Format-neutral scene names reserved for the future GLB/GLTF ↔ 3DI editor seam; no importer metadata or DCC custom properties |
+| [`maturity-program.md`](maturity-program.md) | Historical dashboard for the pre-reimplementation rearchitecture program, closed 2026-07-12. Its Python enforcement instruments are retired; applicable architectural decisions remain in the ADR index below. |
 | [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
 | [`render/README.md`](render/README.md) | The render domain's own index: which REN record covers what, and the three-tier parity instrument (state vectors, offline compare, retail scene attestation) |
-| [`render/render-parity-runbook.md`](render/render-parity-runbook.md) | The operator procedure behind T3: freeze a commit, capture the fixture catalog, stage/register retail (or re-register retained bundles), build the side-by-sides, publish, and repoint every reference — plus single-fixture retakes and growing the set from an in-game debug snapshot |
 | [`required-resources.md`](required-resources.md) | The witnessed boot-required, hardcoded-by-name resource set (R8/ENG-6): the fatal set, per-resource failure behavior, the ordered boot sequence, and the D-BOOT catalog — the source for the ENG-6 manifest and minimum game-data tree |
 
 ## Decision records
@@ -78,12 +77,12 @@ behavior is summarized and cited.
 | [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
 | [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
 | [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |
-| [0024](adr/0024-lib-family-topology.md) | Lib family topology: one-lib-per-format affirmed; the renderer-fold reversal recorded; the two consumption models named (Model A flat C ABI / Model B C++ static link). Its per-lib CMake targets and family link groups are superseded by ADR 0029; the directory layout stands |
+| [0024](adr/0024-lib-family-topology.md) | Historical lib-family topology. Its per-lib targets and family link groups are superseded by ADR 0029; ADR 0038 retires its flat shared-FFI model. The directory layout stands |
 | [0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md) | The standalone game is the sole live mission runtime; ADR 0037 retains loose Run/Stop and removes F6/current-mission authoring behavior |
 | [0026](adr/0026-one-client-replica-pipeline.md) | One decoded-entity stack: `ClientReplicaPipeline` is the sole S2C reducer, `WirePresentPass` the sole presenter, and Person/controller/Vehicle are independent domain axes |
 | [0027](adr/0027-3di3-only-no-model-ir.md) | 3DI3 is the only model format and consumers walk the parsed `Threedi3di3` directly; the `ThreediModelIR` layer and GP-era (GPM/GPS/GPP) reader/writer are removed |
 | [0028](adr/0028-engine-directory-and-shell-adapter.md) | `engine/` is the engine (four groups: base/formats/runtime/net), `godot/src/` is the shell adapter; new engine logic starts in the engine and gameplay loops live in the engine. Its "directories only" target-name clause is superseded by ADR 0029 |
-| [0029](adr/0029-engine-group-targets.md) | Engine target topology: the per-lib CMake targets and family groups collapse into five STATIC group targets (`opennova_formats` — with mission's format half folded in — `opennova_base`, `opennova_runtime`, `opennova_net`, `opennova_novaworld_service`) plus `opennova_io`; base links ABOVE formats; sqlite containment stays linker-enforced by the separate service target; ADR 0020's terrain seam moves to `include_graph_check.py`. ADR 0037 removes the former `opennova_oned_edit` interface leaf |
+| [0029](adr/0029-engine-group-targets.md) | Engine target topology: five STATIC group targets plus `opennova_io`; base links above formats and sqlite remains contained in the separate service target. ADR 0037 removes the former editor leaf; ADR 0038 removes shared-library staging and Python topology guards |
 | [0030](adr/0030-formats-placement-criterion.md) | The formats placement rule: ALL file knowledge lives in `engine/formats/` (parsed model + read/write over io/ only) and no format parser stays runtime-fused — runtime keeps only execution over the parsed model (VM, emitter, promotion); plus the shared-include-prefix rule for split domains and the extraction discipline |
 | [0031](adr/0031-adapter-composition-contract.md) | The adapter composition contract: the five bands adapter C++ may be (binding glue, ONED document surface, presentation, res:// loaders, documented seam bridges); engine-grade logic starts in `engine/` (ADR 0028's rule extended to adapter C++); the `adapter_cpp_orig_cites` ratchet makes "thin wrappers only" measurable; the per-TU simulation/ dispositions *(superseded as the standing contract by ADR 0033; census + dispositions remain the record)* |
 | [0032](adr/0032-direct-document-io.md) | Direct document I/O — godot/ adds nothing but Godot: Nova formats never integrate with Godot's resource system (the ResourceFormat fleet is deleted); documents read/write themselves via load_from_path/save_to_path; adapter code exists only where a Godot type, API, or lifecycle demands it *(replaced by ADR 0033, which restates the operative rules)* |
@@ -92,6 +91,7 @@ behavior is summarized and cited.
 | [0035](adr/0035-mission-session-game-frame-pipeline.md) | Historical MissionSession cutover with the first-class Godot frame pipeline; lifecycle name/location superseded by ADR 0036, device-order decisions remain |
 | [0036](adr/0036-one-inmatch-session-wire-first.md) | One `opennova::inmatch::Session`, `world::Match` owns gameplay, and `npwire` is the retail compatibility boundary; full cutover with no legacy API (accepted 2026-08-22) |
 | [0037](adr/0037-oned-runs-game-data.md) | Hard cut: ONED stores run settings, runs OpenNova loose, stages and runs retail, and stops its child; no authoring, project/import system, workspaces, or MCP; hidden `--pack-game` remains release infrastructure |
+| [0038](adr/0038-native-runtime-assets-glb-editor.md) | Hard cut to native runtime assets: Python/DCC and ASE/OED/TDP authoring retire; ObjectData is immutable 3DI; a future editor uses an independent GLB/GLTF ↔ 3DI seam |
 
 ## RE records by domain
 
@@ -105,7 +105,6 @@ behavior is summarized and cited.
 | Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..4; cp1252 glyph mapping fixed 2026-07-19) |
 | Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (fresh 2026-07-13 re-grill and replacement: ported detail/MODEL tier semantics, separate flat-detail and sector-routed MODEL authored-map gates, all-surface LOD0 geometry, `:fd`, shaders, static `.til` RGB/tint at the pre-wind coordinate, persistent LRU/1000-entry cache cadence, identity/eviction order, and matching shadow-off for retail's dead flag; D-FOLIAGE-7/-9/-10 bound the general page/cache + ordered RT producer, visibility membership, and reimpl draw order/reflection) |
 | Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`; D-TIL-1..4 all FIXED — latest D-TIL-4 flip/rotate composition order 2026-08-20; tile-set atlas source witnessed) |
-| Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes the RE'd engine libraries via `pyopennova`) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
 | Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (fresh 2026-07-13 rendering re-grill: exact eight-family LOD selector, authored coefficient/DBlend/paired mips, four-lock heightfield-normal atlas, bare cached-tile RGB/DOT3 alpha, direct light packing, top ps.1.4 arithmetic, overlay order, and fog; D-TERRAIN-7 bounds the remaining runtime dynamic-composition and local-light/shadow work; D-TERRAIN-9 retired with ONED authoring; D-TERRAIN-8 FIXED 2026-08-13) |
 | Interface | [`interface/loading-screen-re.md`](interface/loading-screen-re.md) | landed (2026-07-12; re-verified no-drift + SP splash witnessed AND ported 2026-08-15: sidecar rule, MP session text, bar + creep, splash; D-LOADSCR-1..8 — the epilog re-show D-LOADSCR-8 deferred) |

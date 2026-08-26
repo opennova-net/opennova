@@ -7,7 +7,7 @@ namespace opennova {
 namespace {
 
 uint32_t scr_key_for_version(uint8_t version) {
-    // Mirrors pyopennova/asset_resolver _SCR_VERSION_KEYS.
+    // SCR version-byte key table shared by every runtime asset path.
     switch (version) {
         case 1:  return SCR_KEY_JO_DFX2;
         case 2:  return SCR_KEY_SHADERS;

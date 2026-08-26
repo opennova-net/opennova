@@ -20,7 +20,7 @@ func before_all() -> void:
 
 
 const ROUND_GRAPHIC := "Frag_3rd"  # fixture items.def 101883's graphic
-const ROUND_MODEL_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
+const ROUND_MODEL_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
 
 
 # A REAL placer whose round graphic resolves through the injected fixture

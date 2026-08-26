@@ -103,7 +103,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 				dir.path_join("B50cal.3di"), FileAccess.WRITE)
 		assert_not_null(model_file)
 		model_file.store_buffer(FileAccess.get_file_as_bytes(
-				"res://../fixtures/3dp/B50Cal/B50Cal.3di"))
+				"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"))
 		model_file.close()
 		_install_native_seats(sim, dir, _fixture_items_text().replace(
 				"id 101294",

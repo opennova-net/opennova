@@ -80,17 +80,6 @@ func test_cache_keys_separate_static_and_fake_skin_builds() -> void:
 		"...and repeat skeletal builds share within their own key")
 
 
-func test_document_edits_invalidate_the_cache() -> void:
-	var data := _open(SHED)
-	var before := _mesh_rids(data.build_lod_submeshes(0))
-	assert_true(data.set_material_field(0, "rgb_gen_rate", 1.0),
-		"a material edit goes through the OED setter funnel")
-	var after := _mesh_rids(data.build_lod_submeshes(0))
-	assert_false(before.is_empty())
-	for rid in after:
-		assert_false(before.has(rid), "any document edit rebuilds fresh meshes")
-
-
 func test_reload_invalidates_the_cache() -> void:
 	var data := _open(SHED)
 	var before := _mesh_rids(data.build_lod_submeshes(0))
@@ -121,35 +110,3 @@ func test_lod_round_trip_returns_the_cached_meshes() -> void:
 	data.build_lod_submeshes(1)  # may be empty on single-LOD fixtures; harmless
 	assert_eq(_mesh_rids(data.build_lod_submeshes(0)), lod0,
 		"returning to LOD 0 reuses the cached meshes")
-
-
-func test_material_edit_on_a_shared_data_does_not_leak_across_models() -> void:
-	var data := _open(SHED)
-	var a: Node3D = add_child_autofree(ObjectModel.new())
-	var b: Node3D = add_child_autofree(ObjectModel.new())
-	a.set_object_data(data)
-	b.set_object_data(data)
-	# Snapshot the pre-edit meshes: the post-edit assertions below would all hold
-	# on this initial shared state too, so PROVING the deferred rebuild + cache
-	# invalidation happened requires the post-edit RIDs to be disjoint from these.
-	var pre_edit_rids: Array = []
-	for mi in _mesh_instances(a):
-		pre_edit_rids.append((mi as MeshInstance3D).mesh.get_rid())
-	assert_false(pre_edit_rids.is_empty(), "the models built render meshes before the edit")
-	# An edit notifies object_changed (deferred) -> both models rebuild from the
-	# fresh cache; their material overrides must remain distinct objects.
-	data.set_material_field(0, "rgb_gen_rate", 2.0)
-	await get_tree().process_frame
-	var a_meshes := _mesh_instances(a)
-	var b_meshes := _mesh_instances(b)
-	assert_false(a_meshes.is_empty(), "models rebuilt after the edit")
-	for i in range(mini(a_meshes.size(), b_meshes.size())):
-		var mi_a := a_meshes[i] as MeshInstance3D
-		var mi_b := b_meshes[i] as MeshInstance3D
-		assert_false(pre_edit_rids.has(mi_a.mesh.get_rid()),
-			"the deferred rebuild really happened: post-edit meshes are FRESH, not the pre-edit set")
-		assert_eq(mi_a.mesh.get_rid(), mi_b.mesh.get_rid(),
-			"post-edit rebuilds still share the (fresh) meshes")
-		if mi_a.material_override != null:
-			assert_ne(mi_a.material_override, mi_b.material_override,
-				"...with materials still per-instance")

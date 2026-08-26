@@ -1,11 +1,10 @@
 // Unit tests for renderer::classify_object_material + its typed pipeline
 // descriptor in engine/runtime/renderer. Verifies the static shader_tag -> family/blend table without
-// `.fx` parsing matches the canonical's runtime classifications for every
-// shader_tag in the original OED's gMaterialInfoTable.
+// `.fx` parsing matches the canonical runtime classifications.
 
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
-#include "oed/material_descriptor.h"
+#include "renderer/material_descriptor.h"
 #include "threedi/threedi_3di3.h"
 
 #include <cstdlib>
@@ -42,61 +41,15 @@ int main() {
 	expect(object_phong_map_texel(255, 255) == ObjectPhongMapTexel{255, 255, 255, 255},
 	       "PhongMap white endpoint");
 
-	// 0. The renderer descriptor table is exact and complete for OED's table.
-	// The shader_flags column matches the OED dump EXCEPT the five rows where
-	// the runtime derivation is witnessed to differ (D-RMAT-4,
-	// docs/render/render-material-re.md): retail probes every technique at
-	// .fx load [orig: HLSLEffect_LoadFromFile @ 0x5ae690], and the descriptor
-	// table carries those runtime words.
-	{
-		struct RuntimeFlagFix { const char *tag; uint32_t flags; };
-		const RuntimeFlagFix runtime_fixes[] = {
-			// no VS => no TANGENT; the GLOW technique uses TexCubeRotSpecular
-			{ "FFP_GLASS", oed::MATERIAL_FLAG_GLASS | oed::MATERIAL_FLAG_BLENDING |
-			               oed::MATERIAL_FLAG_GLOW },
-			// tangent-space skinned bump: In.Tangent read, ReflectColor absent
-			{ "VS_SKBUMPDIFFT", oed::MATERIAL_FLAG_TANGENT | oed::MATERIAL_FLAG_SKINNED |
-			                    oed::MATERIAL_FLAG_NORMAL_A | oed::MATERIAL_FLAG_DIFFUSE },
-			{ "VS_SKBUMPPHONGT", oed::MATERIAL_FLAG_TANGENT | oed::MATERIAL_FLAG_SKINNED |
-			                     oed::MATERIAL_FLAG_NORMAL_A | oed::MATERIAL_FLAG_DIFFUSE },
-			{ "VS_SKBUMPDIFFT2", oed::MATERIAL_FLAG_TANGENT | oed::MATERIAL_FLAG_SKINNED |
-			                     oed::MATERIAL_FLAG_NORMAL_A | oed::MATERIAL_FLAG_DIFFUSE |
-			                     oed::MATERIAL_FLAG_SECONDARY },
-			// untextured glass: no TexDiffuse1 reference
-			{ "VS_SKGLASS", oed::MATERIAL_FLAG_GLASS | oed::MATERIAL_FLAG_SKINNED |
-			                oed::MATERIAL_FLAG_BLENDING },
-		};
-		expect(oed::kMaterialDescriptorTableCount == oed::kMaterialInfoTableCount,
-		       "descriptor table count matches OED material table count");
-		for (size_t i = 0; i < oed::kMaterialInfoTableCount; ++i) {
-			const auto &info = oed::kMaterialInfoTable[i];
-			const auto *descriptor = oed::find_material_descriptor(info.name);
-			expect(descriptor != nullptr, std::string("descriptor exists for ") + info.name);
-			expect(std::string(descriptor->name) == info.name,
-			       std::string("descriptor exact-name lookup for ") + info.name);
-			uint32_t expected_flags = static_cast<uint32_t>(info.flags);
-			for (const RuntimeFlagFix &fix : runtime_fixes) {
-				if (std::string(info.name) == fix.tag) {
-					expected_flags = fix.flags;
-					break;
-				}
-			}
-			expect(static_cast<uint32_t>(descriptor->shader_flags) == expected_flags,
-			       std::string("descriptor flags match the runtime derivation for ") + info.name);
-			const auto cls = classify_object_material(info.name, 0, 0, 0, 128);
-			expect(cls.known_shader, std::string("classifier recognizes descriptor tag ") + info.name);
-		}
-		for (size_t i = 0; i < oed::kMaterialDescriptorTableCount; ++i) {
-			const auto &descriptor = oed::kMaterialDescriptorTable[i];
-			bool found = false;
-			for (size_t j = 0; j < oed::kMaterialInfoTableCount; ++j) {
-				if (std::string(descriptor.name) == oed::kMaterialInfoTable[j].name) {
-					found = true;
-					break;
-				}
-			}
-			expect(found, std::string("descriptor references known OED tag ") + descriptor.name);
-		}
+	// The renderer-owned registry is the canonical enumeration interface used
+	// by runtime shader probes.
+	expect(kMaterialDescriptorTableCount > 0, "material registry is populated");
+	for (size_t i = 0; i < kMaterialDescriptorTableCount; ++i) {
+		const auto &descriptor = kMaterialDescriptorTable[i];
+		expect(find_material_descriptor(descriptor.name) == &descriptor,
+		       std::string("exact descriptor lookup for ") + descriptor.name);
+		expect(classify_object_material(descriptor.name, 0, 0, 0, 128).known_shader,
+		       std::string("classifier recognizes ") + descriptor.name);
 	}
 
 	// 1. Plain FF_ST_OP - opaque fixed-function diffuse.
@@ -170,7 +123,7 @@ int main() {
 	// 8. Skinned tangent-bump shaders are opaque, and — per the runtime
 	// capability probe (D-RMAT-4) — NOT glass by tag: their effects read
 	// In.Tangent and never reference ReflectColor [orig: probe @ 0x5ae690
-	// over SkBDiffT/SkBPhongT/SkBDiffT2 + _vsSkDfT.fx]. The OED dump's GLASS
+	// over SkBDiffT/SkBPhongT/SkBDiffT2 + _vsSkDfT.fx]. The legacy dump's GLASS
 	// bit on these rows was table drift. The 3DI per-material glass override
 	// still applies.
 	{
@@ -252,7 +205,7 @@ int main() {
 		       "Flag.fx has no invented self-lit NORMAL technique");
 	}
 
-	// 10. VS_LEAVESWIND - not an original OED gMaterialInfoTable shader.
+	// 10. VS_LEAVESWIND - not an legacy authoring table shader.
 	{
 		const auto with_at = classify_object_material(
 			"VS_LEAVESWIND", THREEDI_MATERIAL_FLAG_ALPHA_TEST, 0, 0, 128);
@@ -427,8 +380,7 @@ int main() {
 	// decoded retail corpus has one material-variant _FFP declaration, fifteen
 	// hard-opaque shader declarations, and no pass for tracer/flag/glass.
 	// Shared declarations expand to all 24 reachable runtime techniques.
-	// [orig: _FFP.fx TBoringFFPProjShad; TECHNIQUE_PROJSHAD declarations in
-	// third_party/modsuperoed]
+	// [orig: _FFP.fx TBoringFFPProjShad; shipped TECHNIQUE_PROJSHAD declarations]
 	{
 		struct ProjectedCase {
 			ObjectShaderTechnique technique;

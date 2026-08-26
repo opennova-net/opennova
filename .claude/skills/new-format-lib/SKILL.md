@@ -7,8 +7,8 @@ description: Scaffolds a new NovaLogic format library under engine/formats/ end 
 
 Done dozens of times; the conventions are strict. Copy a living exemplar, don't
 invent: `engine/formats/dbf` (small binary format), `engine/formats/lwf` +
-`tests/lwf/` (byte-exact roundtrip), `engine/formats/bad` (reader + writer +
-flat C ABI), `engine/formats/adm` (a text format extracted from runtime).
+`tests/lwf/` (byte-exact roundtrip), `engine/formats/bad` (binary animation),
+and `engine/formats/adm` (a text format extracted from runtime).
 
 ## 0. The placement gate (ADR 0030)
 
@@ -57,23 +57,13 @@ Include prefix: keep the format's historical prefix (usually `<name>/...`).
 When a domain is split across formats/ and runtime/, the two libs may expose
 ONE prefix with disjoint header sets (ADR 0030 decision 2; precedents:
 terrain/terrain_query, particle/, mission/). Namespace `opennova::<name>` for
-C++ surfaces; flat domain-prefixed C ABI for FFI surfaces (`<NAME>_EXPORT`
-aliasing `OPENNOVA_API` from `io/export.h` — see `engine/CLAUDE.md` for the
-export conventions and the two-Python-mirror rule).
+C++ surfaces.
 
-## 2. Nothing to register twice — but the ABI ritual still applies
+## 2. Nothing to register twice
 
 Both CMake roots share `engine/CMakeLists.txt`; the group target is already
-linked by the DLL, `godot/src`, and the tests. Two things still matter:
-
-- A new C ABI export is a deliberate Model-A decision: annotate it AND bump
-  `scripts/lint/abi_exports_baseline.txt` in the same commit, logged in
-  docs/maturity-program.md. (A lib with no annotations adds nothing to the
-  DLL surface — `opennova_formats` is whole-archived but only annotated
-  symbols export.)
-- If the format is terrain-family (or otherwise seam-relevant), check whether
-  `scripts/lint/include_graph_check.py` needs the new include prefix in its
-  forbidden list — same commit.
+linked by `godot/src` and the tests. Do not add a second target or a dynamic
+FFI wrapper.
 
 ## 3. Fixtures (`fixtures/<name>/`)
 
@@ -126,16 +116,11 @@ When a format already exists inside a runtime lib and passes the step-0 gate:
 3. Flip the format-level tests' link word to `opennova_formats` in
    `tests/CMakeLists.txt`; consumer-level tests stay on `opennova_runtime`
    (it PUBLIC-chains formats).
-4. Instruments: the citation ratchet is move-invariant (it walks every `engine/<group>/<lib>` source);
-   pure moves never touch `abi_exports_baseline.txt`; update
-   `include_graph_check.py` prefixes if the format was previously covered by
-   a blanket-forbidden directory prefix.
-5. Sweep the stragglers: FFI mirror docstrings (`pyopennova/` AND
-   `blender/opennova/` — both copies), doc path pointers (targeted per-file
+4. Sweep the stragglers: doc path pointers (targeted per-file
    edits, never repo-wide sed — RE records mix moved and staying paths),
    README tables, `engine/CLAUDE.md` group lists.
-6. Verify like step 4 plus: the format's full roundtrip suite green with ZERO
-   `fixtures/**` drift, all lint gates, and any touched GUT surface in
+5. Verify like step 4 plus: the format's full roundtrip suite green with ZERO
+   `fixtures/**` drift and any touched GUT surface in
    single-file isolation after `scripts/build_godot.sh` + full editor restart
    (the `gut` skill's silent-drop check).
 

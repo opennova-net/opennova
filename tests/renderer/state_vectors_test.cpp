@@ -51,7 +51,7 @@
 #include "renderer/object_shader_template.h"
 #include "renderer/render_order.h"
 #include "renderer/uv_anim.h"
-#include "oed/material_descriptor.h"
+#include "renderer/material_descriptor.h"
 #include "threedi/threedi_3di3.h"
 
 #include <cstdint>
@@ -159,11 +159,11 @@ std::string generate() {
 	out << "# render-state-vectors v1 (renderer_state_vectors_test; REN-1, ADR 0023)\n";
 
 	// Tag list: the full canonical table, in table order, then the
-	// unknown-tag probes (a non-OED tag, a case-mismatch probe, and empty —
+	// unknown-tag probes (a unknown tag, a case-mismatch probe, and empty —
 	// classification is deliberately exact-tag only).
 	std::vector<std::string> tags;
-	for (size_t i = 0; i < oed::kMaterialInfoTableCount; ++i)
-		tags.push_back(oed::kMaterialInfoTable[i].name);
+	for (size_t i = 0; i < renderer::kMaterialDescriptorTableCount; ++i)
+		tags.push_back(renderer::kMaterialDescriptorTable[i].name);
 	tags.push_back("VS_LEAVESWIND");
 	tags.push_back("ff_st_op");
 	tags.push_back("");

@@ -20,8 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <oed/oed.h>
-#include <tdp/tdp.h>
 #include <threedi/threedi_3di3.h>
 #include <threedi/threedi_panm.h>
 
@@ -35,29 +33,14 @@ class ObjectData : public Resource {
 	GDCLASS(ObjectData, Resource)
 
 private:
-	enum class SourceKind {
-		Empty,
-		Threedi,
-		Project,
-		Ase,
-	};
-
-	// THE document: the parsed (or OED-built) 3DI3 model, edited in place.
-	// 3DI sources parse straight into it; project/ASE sources keep the model
-	// the OED session builds. There is no intermediate representation.
+	// Immutable parsed runtime content. Loading another .3di replaces the whole
+	// model and invalidates every derived cache; there is no Godot authoring
+	// session or editable intermediate representation.
 	Threedi3di3 source_model = {};
-	TdpProject source_project = {};
-	OedSession *oed_session = nullptr;
-
-	SourceKind source_kind = SourceKind::Empty;
 	bool has_source_model = false;
-	bool has_source_project = false;
-	uint8_t oed_dirty_mask = 0;
-	uint8_t last_oed_update_mask = 0;
 	uint64_t change_revision_ = 0;
-	// Process-wide edit counter bumped alongside every per-document
-	// change_revision_ bump. Per-frame consumers (the static-shadow planner)
-	// compare it once instead of walking every tracked document.
+	// Process-wide content counter bumped alongside every per-document revision.
+	// Per-frame consumers compare it once instead of walking every tracked model.
 	static std::atomic<uint64_t> global_change_counter_;
 
 	String source_path;
@@ -70,10 +53,10 @@ private:
 	// Entries hold SHARED Ref<ArrayMesh> refs: every model instance built from
 	// one ObjectData renders the same meshes (the mission placer shares one
 	// data per graphic, so N animated entities stop paying N mesh builds).
-	// Consumers must never mutate the meshes — materials apply via
+	// Consumers must never mutate the meshes; materials apply via
 	// MeshInstance3D.material_override. Cleared by _clear() and
-	// _notify_object_changed(), the two funnels every document mutation passes
-	// through. Main-thread only, like the rest of this class.
+	// _notify_object_changed(), the two whole-content replacement funnels.
+	// Main-thread only, like the rest of this class.
 	mutable std::unordered_map<uint64_t, Array> submesh_cache;
 	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame);
 
@@ -121,25 +104,10 @@ private:
 	}
 
 	void _clear();
-	void _clear_oed_session();
 	void _clear_source_model();
-	void _clear_source_project();
-	void _mark_oed_dirty(uint8_t p_update_mask);
-	void _clear_oed_dirty(uint8_t p_update_mask);
-	uint8_t _normalize_oed_update_mask(int p_update_mask) const;
-	void _notify_object_changed(uint8_t p_update_mask = 0);
+	void _notify_object_changed();
 	Error _open_3di(const String &p_path);
 	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
-	Error _open_3dp(const String &p_path);
-	Error _open_ase(const String &p_path);
-	void _seed_project_materials_from_ase_session();
-	Error _build_model_from_project_session(const char *p_model_name, uint8_t p_dirty_mask = 0);
-	Error _rebuild_oed_session_from_project(uint8_t p_dirty_mask = 0);
-	Error _export_project_backed_3di(const String &p_path, uint8_t p_update_mask);
-	Error _export_patched_3di(const String &p_path);
-	TdpProject _build_project_from_model() const;
-	String _export_basename() const;
-	String _source_kind_name() const;
 	bool _effective_panm_for_lod(int p_lod_index,
 			std::vector<ThreediPartAnimation> &r_nodes) const;
 
@@ -147,17 +115,9 @@ protected:
 	static void _bind_methods();
 
 public:
-	enum {
-		UPDATE_NONE = 0,
-		UPDATE_MTRL = OED_UPDATE_MTRL,
-		UPDATE_LGHT = OED_UPDATE_LGHT,
-		UPDATE_PANM = OED_UPDATE_PANM,
-		UPDATE_ALL = OED_UPDATE_ALL,
-	};
-
 	// 3DI3 flag/slot re-exports (engine threedi/threedi_3di3.h is the value
 	// authority; defined FROM it so they can never drift). Bound as class
-	// constants so the ONED inspectors stop re-declaring the bytes.
+	// constants so runtime consumers do not re-declare the bytes.
 	enum {
 		MATERIAL_FLAG_ALPHA_TEST = THREEDI_MATERIAL_FLAG_ALPHA_TEST,
 		MATERIAL_FLAG_ALPHA_INVERT = THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
@@ -210,24 +170,10 @@ public:
 	static void mark_cached_network_challenge_foliage_model(const String &p_name);
 	static void reset_network_challenge_model_registry();
 	static int64_t network_challenge_model_count();
-	Error export_3di_to_dir(const String &p_dir_path, int p_update_mask = 0);
-
-	// Whole-document edit-state snapshot for the editor's undo (B3): the
-	// OED-editable state (object name, materials, lights, per-LOD part
-	// animations, project LOD scalars, dirty mask) as one opaque in-process
-	// byte blob. NOT a persistence format: raw POD bytes + a version tag,
-	// valid only against the same geometry (apply validates the fixed
-	// material/light/LOD counts and rejects cross-geometry restores).
-	PackedByteArray snapshot_edit_state() const;
-	Error apply_edit_state(const PackedByteArray &p_bytes);
 
 	bool has_document() const;
-	bool can_save_project() const;
-	bool can_export_3di() const;
 	String get_source_path() const;
 	String get_last_error() const;
-	int get_oed_dirty_mask() const;
-	int get_last_oed_update_mask() const;
 	uint64_t get_change_revision() const { return change_revision_; }
 	static uint64_t get_global_change_counter() {
 		return global_change_counter_.load(std::memory_order_relaxed);
@@ -239,30 +185,27 @@ public:
 	bool is_skinned(int p_lod_index) const;
 	Array get_materials() const;
 	Dictionary get_material_info(int p_index) const;
-	bool set_material_field(int p_index, const String &p_key, const Variant &p_value);
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
 	static String canonical_control_register_name(const String &p_name);
 	Array get_control_registers() const;
-	bool set_control_register_name(int p_index, const String &p_name);
 	String resolve_material_texture_path(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
 	int get_light_count() const;
 	Dictionary get_light_info(int p_index) const;
-	bool set_light_field(int p_index, const String &p_key, const Variant &p_value);
 	int get_user_point_count() const;
 	Dictionary get_user_point_info(int p_index) const;
 	// The item-effect attach scan: name -> 16-bit mask over the FIRST 16
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
 	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 	int get_user_point_bone_mask(const String &p_name) const;
-	// The PLAYPARTANIM editor-preview integrator's engine math (one impl in
-	// engine/runtime/world ai.h): the witnessed rate from ANIMTIME seconds
+	// PLAYPARTANIM's engine math (one impl in engine/runtime/world ai.h): the
+	// witnessed rate from ANIMTIME seconds
 	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9] and one 16 ms sweep step
 	// (returns {"phase": int, "finished": bool})
 	// [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]. The
-	// authoritative runtime integrates in AiSystem and presents through
-	// set_part_phase; the preview drives the same math through these.
+	// authoritative AI path integrates in AiSystem and presents through
+	// set_part_phase; local runtime controllers use the same helpers.
 	static int part_anim_rate_for_seconds(double p_seconds);
 	static Dictionary part_anim_step(int p_phase, int p_dir, int p_rate);
 	Vector3 get_ground_anchor(int p_lod_index = 0) const;
@@ -280,13 +223,7 @@ public:
 	int get_live_panm_lod() const;
 	PackedInt32Array get_effective_panm_targets(int p_lod_index) const;
 	int get_part_anim_count(int p_lod_index) const;
-	int add_part_anim(int p_lod_index, int p_part_index);
-	bool delete_part_anim(int p_lod_index, int p_anim_index);
-	bool set_part_anim_channel_enabled(int p_lod_index, int p_anim_index, const String &p_channel, bool p_enabled);
-	bool set_part_anim_channel_mode(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, const String &p_mode, int p_control_register);
-	bool set_part_anim_channel_values(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, double p_from_value, double p_to_value, double p_speed);
 	Dictionary get_part_anim_info(int p_lod_index, int p_anim_index) const;
-	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
 	// Per-part parent-relative bone pivot (native model space, raw ThreediRenderObject.rel),
 	// indexed by part index, for the given LOD -- the model's authoritative bone rest positions.
@@ -303,15 +240,14 @@ public:
 	// the .bad.]
 	PackedInt32Array get_bone_parents(int p_lod_index = 0) const;
 	// p_native_frame: emit vertices/normals/tangents in the NATIVE model frame (no (-x,y,z)
-	// import flip) with triangle winding reversed to stay front-facing under Godot's CCW cull.
+	// runtime mirror) with triangle winding reversed to stay front-facing under Godot's CCW cull.
 	// For the first-person viewmodel rigs, whose skeletal runtime (SkeletalAnim model_bind)
 	// poses in the native frame; the owner maps the whole rig to the camera in one container
 	// transform. World models keep the default flipped frame.
 	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0,
 			bool p_native_frame = false) const;
 	Dictionary eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
-	// Typed render hot path. The script-facing methods above remain the tooling
-	// boundary; ObjectModel converts its CTRL dictionary once per frame, then
+	// Typed render hot path. ObjectModel converts its CTRL dictionary once per frame, then
 	// evaluates every dynamic material without Dictionary/Variant round trips.
 	static renderer::ControlRegisterValues runtime_control_values(
 			const Dictionary &p_ctrl_values);
@@ -333,8 +269,6 @@ public:
 			int64_t p_applied_revision) const;
 	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
-
-	Error set_part_animation_flags(int p_lod_index, int p_anim_index, int p_flags);
 };
 
 } // namespace godot

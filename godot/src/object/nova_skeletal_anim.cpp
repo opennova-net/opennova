@@ -180,7 +180,7 @@ bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 		return false;
 	}
 
-	// Resolve the reset/bind clip's .bad (key contains "reset", else the first non-empty value).
+	// Resolve the reset/bind clip's .bad (key contains "reset", else the first non-empty variant).
 	// ALL clips of a model share this ONE skeleton's bone offsets + bind pose; each clip's own
 	// .bad may carry different/zero bone positions, so sampling must use the shared origins.
 	auto resolve_bad = [](const String &value) -> String {
@@ -192,7 +192,9 @@ bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 	};
 	String reset_value;
 	for (size_t i = 0; i < adm.count; ++i) {
-		const String value = String(adm.entries[i].value);
+		const String value = adm.entries[i].variant_count > 0
+				? String(adm.entries[i].variants[0])
+				: String();
 		if (value.is_empty()) {
 			continue;
 		}
@@ -222,17 +224,15 @@ bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 		// reload "m4_1r" "m4_1r" "m4_1r2" plays r twice per r2 cycle)
 		// [orig: AnimMap_ParseConfigLine @ 0x40cb60 loops the tokens;
 		//  AnimMap_RegisterBoneNode @ 0x40c2d0 links each into the slot ring].
-		const size_t vcount = adm.entries[i].value_count > 0 ? adm.entries[i].value_count : 1;
+		const size_t vcount = adm.entries[i].variant_count;
 		for (size_t v = 0; v < vcount; ++v) {
-			const String value = v < adm.entries[i].value_count
-					? String(adm.entries[i].values[v])
-					: String(adm.entries[i].value);
+			const String value = String(adm.entries[i].variants[v]);
 			if (value.is_empty()) {
 				continue;
 			}
 			const PackedByteArray bad_bytes = p_resource_root->read_file(resolve_bad(value));
 			if (bad_bytes.is_empty()) {
-				continue;  // continue-on-failure (matches the DCC importer's behaviour)
+				continue;  // Missing optional clips do not invalidate the remaining set.
 			}
 			clip_bads.emplace_back(key, bad_bytes);
 		}
@@ -339,7 +339,7 @@ bool SkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
 		bones_ = reset_clip.bones;
 		// Legacy positional override (no parents supplied): when the model supplies per-bone bind
 		// positions (one per bone), they OVERRIDE the reset .bad's bone positions -- the .bad's
-		// BadBone.position is a lossy export (~half the corpus triplicates X into all 3 slots,
+		// BadBone.position is a lossy stored field (~half the corpus triplicates X into all 3 slots,
 		// destroying Y/Z), while the .3di model carries the real pivots (parent-relative,
 		// model-frame). In model-table mode sample_clip already sourced count/hierarchy from the
 		// model and positions from the reconstruction above.

@@ -163,7 +163,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | HUD + interface overlays | `engine/runtime/hud` (`HudFrameCompiler` + `hud_math`; `hud_minimap` — `HudMinimapCompiler`/`HudMapControl`; the `hud_declutter` module), `engine/runtime/world` `minimap_overlay`/`minimap_footprint`, `engine/net/netsim` `client_replica_minimap`, `godot/src/hud` (`HudOverlay`/`HudPos`) | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels, friendly tags, the gameplay spinmap + M-map, the HUDDECLUT declutter system; D-HUD-1..25 — open rows in the ledger); 2026-08-21: the mounted-vehicle panel, the Recent Messages window + the chat ring, the AAS zone status panel and the map medic marker ported; 2026-08-24: the MP end-of-round presentation (D-HUD-25) closed, the S2C 0x1E message feed (D-HUD-23) and the Tab scoreboard (D-HUD-24) partial |
 | Mission loading screen | `godot/game/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar / SP splash (D-LOADSCR-1..8; re-verified 2026-08-15) |
 | Player info / avatars | `engine/formats/avatars`, `AvatarDatabase`, `player_info_menu_companion.gd`, `MissionObjectPlacer` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser, screen orchestration, active-slot per-side persistence/network identity, selected world/first-person composition, raw per-part `TEX_CAMO` controls, and packed-id head-sex projection into player sound profiles (D-PLAYERINFO-1 and D-SND-12 FIXED 2026-08-15; -12's per-team memory ported; open: -12's five-slot selector, -9's edited kit pages + `player.sav` options) |
-| Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `ObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
+| Render — materials / state | `engine/runtime/renderer` material registry, `ObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
 | Render — draw order | `engine/runtime/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
 | Render — lighting | `engine/runtime/renderer/light_runtime`, `engine/formats/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog); 2026-08-21: the per-light terrain projected pass ported; D-RLIT-4 closed 2026-08-23 after the max-quality foliage selector was proved inert |
 | Render — occlusion / blink boxes | `engine/runtime/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine ported 2026-07-17 — init, mask build, traversal, occluder culling (engine/runtime/world/occlusion.cpp); D-OCC-1..8) |
@@ -179,11 +179,9 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Tiles (`.til` overlay) | `engine/formats/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1..4 all FIXED, the last 2026-08-20) |
 | Fonts (`.fnt`) | `engine/formats/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..4) |
 | Credits (CBIN) | `engine/formats/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
-| Importer pipeline | `apps/importer`, `pyopennova` | [importer/importer-audit.md](importer/importer-audit.md) | tracked-by-composition (PAR-R6) |
 
-Every subsystem now has a dedicated RE record (full or partial) or a
-tracked-by-composition audit — the PAR-R1..R7 sweep (2026-07-05) landed the last seven
-(terrain, foliage, tiles, fonts, credits, the importer, and the VFS/PFF mount stack; the
+Every subsystem now has a dedicated RE record (full or partial) — the PAR sweep
+(2026-07-05) landed terrain, foliage, tiles, fonts, credits, and the VFS/PFF mount stack; the
 PFF write side is [ADR 0008](adr/0008-pff-writer-policy.md)). The full per-record status
 table is [docs/README.md](README.md).
 
@@ -208,17 +206,8 @@ Order of operations when you need an engine truth:
    - **Does our reimplementation match?** → the `grill-ida` skill
      (`.claude/skills/grill-ida/`): interrogates reimpl vs binary axis by axis and
      ends in a per-system verdict, landed via the `re-doc` skill.
-   - **Has the three-way link drifted?** → `scripts/ida/cite_sweep.py` joins every
-     `[orig:`/`(retail:` marker in code and docs against the live IDB by address and
-     prints the disagreements (stale names, auto-names, undefined or other-image
-     addresses, stale `reimpl:` back-links); run it after a merge train and before a
-     release (grill-ida `LIFECYCLE.md` §4).
 4. **Ground truth without IDA:**
-   - ModSuperOed comparator — drive the retail exporter headlessly and byte-compare
-     its `.3di` output with ours: `tools/modsuperoed` (32-bit hook DLL + injector) +
-     `apps/modsuperoed.py`, fixture pack in `third_party/modsuperoed`, gated on
-     `OPENNOVA_MODSUPEROED_DIR`.
-   - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
+    - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
      (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
      `tests/terrain/trn_config_roundtrip_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.

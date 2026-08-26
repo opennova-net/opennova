@@ -1,4 +1,4 @@
-// ObjectData — geometry views: LOD surfaces and memoized submesh builds,
+// ObjectData â€” geometry views: LOD surfaces and memoized submesh builds,
 // bones/skinning, collision volumes, lights and user points.
 #include "object/nova_object_data_internal.h"
 
@@ -64,71 +64,6 @@ Dictionary ObjectData::get_light_info(int p_index) const {
 	info["colorgen_rate"] = static_cast<int>(light.rate);
 	info["light_type"] = (light.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0 ? 1 : 0;
 	return info;
-}
-
-bool ObjectData::set_light_field(int p_index, const String &p_key, const Variant &p_value) {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.light_count) {
-		return false;
-	}
-	ThreediLight &light = source_model.lights[p_index];
-	const String key = p_key;
-	auto set_flag = [&](uint8_t bit) {
-		if (static_cast<bool>(p_value)) {
-			light.flags |= bit;
-		} else {
-			light.flags &= static_cast<uint8_t>(~bit);
-		}
-	};
-	// The falloff byte and rotation[3] carry the same authored angle (the
-	// latter as its cosine); keep them in sync exactly like the exporter does.
-	auto set_falloff = [&](float degrees) {
-		light.falloff_byte = to_u8_255(degrees);
-		light.rotation[3] = std::cos(static_cast<float>(light.falloff_byte) * 0.017453292519943295f);
-	};
-	if (key == "position") {
-		const Vector3 v = p_value;
-		light.offset[0] = -v.x;
-		light.offset[1] = v.y;
-		light.offset[2] = v.z;
-		_notify_object_changed(UPDATE_LGHT);
-		return true;
-	}
-	if (key == "atten_start") { light.atten_start = static_cast<float>(p_value); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "atten_end") { light.atten_end = static_cast<float>(p_value); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "color_start") {
-		const Color c = p_value;
-		light.color_start[0] = to_u8_color(c.b);
-		light.color_start[1] = to_u8_color(c.g);
-		light.color_start[2] = to_u8_color(c.r);
-		_notify_object_changed(UPDATE_LGHT);
-		return true;
-	}
-	if (key == "color_end") {
-		const Color c = p_value;
-		light.color_end[0] = to_u8_color(c.b);
-		light.color_end[1] = to_u8_color(c.g);
-		light.color_end[2] = to_u8_color(c.r);
-		_notify_object_changed(UPDATE_LGHT);
-		return true;
-	}
-	if (key == "falloff_deg") { set_falloff(static_cast<float>(p_value)); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "subobject") { light.subobj_index = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "disable_corona") { set_flag(THREEDI_LIGHT_FLAG_DISABLE_CORONA); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "disable_lightterrain") { set_flag(THREEDI_LIGHT_FLAG_DISABLE_TERRAIN); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "disable_lightobjects") { set_flag(THREEDI_LIGHT_FLAG_DISABLE_OBJECTS); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "colorgen_style") { light.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "colorgen_phase") { light.phase = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "colorgen_rate") { light.rate = static_cast<uint16_t>(std::clamp(static_cast<int>(p_value), 0, 65535)); _notify_object_changed(UPDATE_LGHT); return true; }
-	if (key == "light_type") {
-		if (static_cast<int>(p_value) != 0) {
-			light.flags |= THREEDI_LIGHT_FLAG_TYPE_TARGET;
-		} else {
-			light.flags &= static_cast<uint8_t>(~THREEDI_LIGHT_FLAG_TYPE_TARGET);
-		}
-		_notify_object_changed(UPDATE_LGHT);
-		return true;
-	}
-	return false;
 }
 
 int ObjectData::get_user_point_count() const {
@@ -204,18 +139,17 @@ bool ObjectData::has_occlusion() const {
 Array ObjectData::get_collision_volumes() const {
 	// Expose the parsed collision bounding volumes (the engine's CB/CC collidable
 	// primitives) in Godot model-local space. Each volume carries its AABB plus the
-	// bounding planes that carve the convex region; callers build ConvexPolygonShape3D
-	// hulls from them (editor picking now, runtime collision later).
+	// bounding planes that carve the convex region; runtime callers build
+	// ConvexPolygonShape3D hulls from them.
 	//
-	// Coordinate frame: unlike render geometry (RDTA, which the importer stores already
+	// Coordinate frame: unlike render geometry (RDTA, which the 3DI reader stores already
 	// converted to engine space, so the Godot boundary only needs godot_position's
 	// negate-x), collision geometry (CVRT) is stored in *workspace* space with no
-	// conversion -- confirmed in the OED exporter and validated here against the visual
-	// mesh AABB. RDTA reaches engine space via (-y, z, x); composing that with
+	// conversion, as validated against the visual mesh AABB. RDTA reaches engine
+	// space via (-y, z, x); composing that with
 	// godot_position's negate-x gives the net workspace->Godot map (x, y, z) -> (y, z, x),
 	// a pure cyclic axis rotation. Applying it makes a hull placed at the same transform
-	// as the visual model coincide with it (empirically the best of the candidates: see
-	// the Object Editor "Collision" overlay).
+	// as the visual model coincide with it.
 	Array out;
 	if (!has_source_model || source_model.collision == nullptr) {
 		return out;
@@ -493,7 +427,7 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		return result;
 	}
 	// Memo hit: hand back a deep copy of the ENTRY dictionaries (so a caller's
-	// edits never taint the cache) whose ArrayMesh refs stay SHARED —
+	// edits never taint the cache) whose ArrayMesh refs stay SHARED â€”
 	// Array::duplicate(true) does not duplicate Resources, and that sharing is
 	// the point: N models from one data render one set of meshes.
 	const uint64_t cache_key = _submesh_cache_key(p_lod_index, p_skeletal, p_bone_count, p_native_frame);
@@ -516,8 +450,8 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
 		PackedInt32Array mesh_indices = surface.get("indices", PackedInt32Array());
 		if (p_native_frame) {
-			// Undo the baked (-x,y,z) import flip: native positions/normals/tangents, and
-			// reverse each triangle's winding — the source D3D clockwise-front order is only
+			// Undo the baked (-x,y,z) runtime mirror: native positions/normals/tangents, and
+			// reverse each triangle's winding â€” the source D3D clockwise-front order is only
 			// CCW-correct for Godot BECAUSE of that mirror; unmirrored it must be re-reversed.
 			// (See header: the FP viewmodel path, paired with SkeletalAnim model_bind.)
 			for (int v = 0; v < vertices.size(); ++v) {
@@ -611,4 +545,3 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 	submesh_cache.emplace(cache_key, result);
 	return result.duplicate(true);
 }
-

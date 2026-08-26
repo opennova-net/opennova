@@ -17,8 +17,7 @@ struct ResourceFileEntry {
 	std::string relative_path;
 	std::string source_type;
 	std::string archive_path;
-	// File metadata, filled at scan time for loose entries (the editor mounts
-	// LooseOnly, so these are always populated there). Archive (.pff) entries
+	// File metadata, filled at scan time for loose entries. Archive (.pff) entries
 	// leave these zero because the location carries no size/time. size_bytes is
 	// the on-disk byte count; modified_time is the last-write time in Unix
 	// seconds (UTC), or 0 when unknown.
@@ -41,10 +40,10 @@ public:
 	// <root>/expansion/<name>/<name>.pff exists, the expansion's loose files + archives
 	// override the base game (see opennova::Vfs::mount_game). Empty expansion = base game.
 	// `mode` selects which layers are mounted (loose, archives, or both) — see VfsMountMode.
-	// `discovery` selects base-archive discovery: the index defaults to ScanAll (the
-	// editor's browse index must see arbitrary modder archives — a deliberate divergence,
-	// docs/vfs/vfs-pff-mount-re.md D-VFS-2); the game runtime passes RetailTable (the
-	// witnessed fixed boot table [orig: PFF_OpenAllArchives @ 0x4a4310]).
+	// `discovery` selects base-archive discovery. The catalog defaults to ScanAll
+	// so explicitly mounted mod roots can expose arbitrary archives; boot callers
+	// pass RetailTable, the witnessed fixed table
+	// [orig: PFF_OpenAllArchives @ 0x4a4310].
 	// Scanning an already-mounted index REPLACES the mount outright (clear() first: archives
 	// closed, search paths dropped, entries rebuilt) — it never layers onto the previous one,
 	// so a remount in place is how a live root moves to another expansion.

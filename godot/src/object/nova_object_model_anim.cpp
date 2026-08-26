@@ -661,9 +661,9 @@ String ObjectModel::resolve_anim_channel_owner(int p_slot) const {
 	return String(kPartAnimCtrlOwners[p_slot]);
 }
 
-// Play a model part animation for the editor/legacy mission-controller path.
-// The authoritative runtime integrates the same fields in AiSystem and
-// presents them through set_part_phase().
+// Play a model part animation from a local runtime controller. The authoritative
+// AI path integrates the same fields in AiSystem and presents them through
+// set_part_phase().
 void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->play_part_anim(p_channel, p_play_type, p_time_s);
@@ -694,8 +694,8 @@ void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s
 	part_anims_[reg] = channel;
 }
 
-// Editor-preview convenience: seed the channel at its rest start (0 forward /
-// max reverse) then play. Stop must freeze the part where it is (no reseed).
+// Seed a locally controlled channel at its rest start (0 forward / max reverse)
+// then play. Stop must freeze the part where it is (no reseed).
 void ObjectModel::restart_part_anim(int p_channel, int p_play_type, double p_time_s) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->restart_part_anim(p_channel, p_play_type, p_time_s);

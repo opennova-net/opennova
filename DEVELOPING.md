@@ -4,14 +4,12 @@ How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
 game and ONED, and the NovaWorld servers, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
-For the asset pipeline and packaging (Blender addon, standalone importer, Godot
-exports) see the [Building](README.md#building) section of the
-README. For deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
+For the runtime build and release layout see [README.md](README.md). For
+deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 
 ## Prerequisites
 
 - **CMake 3.16+** and a **C++17** compiler (MSVC, Clang, or GCC).
-- **Python 3.11 + [uv](https://docs.astral.sh/uv/)** for the importer tooling and Python tests.
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS) to run the NovaWorld servers locally.
 - **.NET 8 SDK** to build the launcher (Windows).
@@ -43,7 +41,7 @@ scripts/build.sh
 The manual equivalent:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIB=ON -DOPENNOVA_ENABLE_PYTHON_TESTS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
@@ -222,7 +220,6 @@ Notes:
 - **GDScript (GUT)**: `scripts/test_godot.sh` (headless; needs `GODOT_BIN` or a binary in
   `.godot-bin/`). The script fails if a `*_test.gd` is dropped from collection (usually a
   stale GDExtension DLL missing a class), so a green run means the extension is current.
-- **Python**: `scripts/test_python.sh`.
 
 The full cross-system suite can be flaky from shared state; if a run shows an unrelated
 red, re-run that single test file in isolation to confirm before treating it as real.
@@ -240,6 +237,6 @@ red, re-run that single test file in isolation to confirm before treating it as 
 
 ## Where to go next
 
-- [README.md](README.md): the asset pipeline and packaging.
+- [README.md](README.md): project layout, runtime build, and packaging.
 - [DEPLOY.md](DEPLOY.md): deploying your own instance.
 - [docs/README.md](docs/README.md): architecture and the reverse-engineering records.

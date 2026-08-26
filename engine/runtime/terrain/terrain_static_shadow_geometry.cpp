@@ -293,9 +293,8 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		}
 		const int alpha_ref = std::clamp(
 				static_cast<int>(mat.alpha_test_value_byte), 0, 255);
-		// Empty shader names resolve to the tag table's first entry, FF_ST_OP
-		// (the ModSuperOed FindMaterialIndexByName fallback the .tdp writer
-		// mirrors — engine/formats/oed/material_descriptor.h).
+		// Empty shader names resolve to the runtime tag table's first entry,
+		// FF_ST_OP (engine/runtime/renderer/material_descriptor.h).
 		const std::string shader_tag =
 				mat.shader_name[0] != '\0' ? std::string(mat.shader_name)
 										   : std::string("FF_ST_OP");

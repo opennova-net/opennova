@@ -34,7 +34,6 @@ All commands are Git Bash, inside the current worktree only.
     BUILD_GODOT=0 bash scripts/build.sh      # C++ + full ctest
     bash scripts/build_godot.sh              # GDExtension (if godot/ touched)
     bash scripts/test_godot.sh               # GUT (use the gut skill's GODOT_BIN setup)
-    bash scripts/test_python.sh              # pytest (if Python touched)
 
 Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
 
@@ -43,15 +42,10 @@ Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
 - Push, then `gh pr create` with the context in the PR description (what the
   slice does, what it deliberately excludes, what depends on it). Never post PR
   comments. Do not merge — the maintainer merges.
-- CI gate: branch protection requires `test (windows-latest)`,
-  `godot-tests (windows-latest)`, `package-addon`, and `package-importer`; also
-  expect `build-gdextension-windows (template_debug)` (PRs build the debug
-  flavour only; master adds `(template_release)`) and `validate-deliverables`
-  (`--gdextension-target template_debug` on PRs) green. There are no macOS
-  builds anywhere in CI — macOS delivery was removed entirely, and
-  `tests/test_release_deliverables.py` asserts it stays out of `release.yml`.
-  A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
-  block or report on it.
+- CI gate: require the applicable jobs in `.github/workflows/ci.yml` green.
+  PRs build the `template_debug` GDExtension; master and manual runs also build
+  `template_release`. Packaging publishes the game and ONED development
+  archive plus the game-only archive. There are no Python or add-on jobs.
 
 ## 5. Advance the train
 

@@ -94,13 +94,13 @@ func before_all() -> void:
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
 			"created the flat native asset dir")
 	assert_true(_write_native_model("dm1a1.3di",
-			_repo_file_bytes("res://../fixtures/3dp/dm1a1/dm1a1.3di")),
+			_repo_file_bytes("res://../fixtures/threedi/objects/dm1a1/dm1a1.3di")),
 			"composed the single-control-seat vehicle fixture")
 	assert_true(_write_native_model("B50Cal.3di",
-			_repo_file_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di")),
+			_repo_file_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")),
 			"composed the B50 child fixture")
 	var swap := _with_renamed_user_point(
-			_repo_file_bytes("res://../fixtures/3dp/dsuv1/dsuv1.3di"),
+			_repo_file_bytes("res://../fixtures/threedi/objects/dsuv1/dsuv1.3di"),
 			"ctrlx13", "sitex13")
 	swap = _with_renamed_user_point(swap, "sitex00d", "ctrlx01")
 	assert_true(_write_native_model("dsuvswap.3di", swap),
@@ -109,7 +109,7 @@ func before_all() -> void:
 	# (196608, 0, 0) lands the anchor at mission-local (0, 3, 0) — the exact
 	# offset the retired hand table authored for this fixture.
 	var parent := _with_renamed_user_point(
-			_repo_file_bytes("res://../fixtures/3dp/dm1a1/dm1a1.3di"),
+			_repo_file_bytes("res://../fixtures/threedi/objects/dm1a1/dm1a1.3di"),
 			"ctrlx25", "cxrlx25")
 	parent = _with_user_point_position(parent, "ewep01", 196608, 0, 0)
 	assert_true(_write_native_model("dm1a1gp.3di", parent),

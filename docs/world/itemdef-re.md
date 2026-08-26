@@ -3,7 +3,7 @@
 Structure-mapping record for the original engine's runtime **`ItemDef`** (the
 per-item-type template loaded from `items.def`) and its copy into the 904-byte
 `GamePlayerEntity`. The reimplementation surface is the parsed model
-`DefItemDef` (`engine/formats/def`, `apps/importer/pyopennova`) and the Godot wrapper
+`DefItemDef` (`engine/formats/def`) and the Godot wrapper
 `ItemDatabase` (`godot/src/object`); the runtime entity copy lands in
 `engine/runtime/world` / `engine/net/netsim`. Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is

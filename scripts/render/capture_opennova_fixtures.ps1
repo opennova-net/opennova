@@ -3,9 +3,7 @@
 Capture OpenNova render fixtures through the exact-pose probe, one id at a time.
 
 .DESCRIPTION
-The OpenNova leg of the registered render-parity workflow
-(docs/render/render-parity-runbook.md). Runs
-godot/tests/render_fixture_capture_probe.tscn once per fixture id and judges
+Runs `godot/tests/render_fixture_capture_probe.tscn` once per fixture id and judges
 each run by the probe's 11-file output contract (5 variant PNGs + 5 state
 sidecars + 1 manifest) -- never by stdout, which PowerShell 5.1 garbles for
 the non-console Godot binary.
@@ -22,7 +20,7 @@ environment or parameters -- never tracked defaults.
 .\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $frozen
 
 .EXAMPLE
-# Retake two fixtures (same frozen commit -- see the runbook's retake section)
+# Retake two fixtures from the same source commit
 .\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $frozen `
   -Ids 00tra-tire-marks-retail,cp01-water-wide-retail
 #>

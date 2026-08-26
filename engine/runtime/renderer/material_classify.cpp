@@ -1,53 +1,53 @@
 #include "renderer/material_classify.h"
 
-#include "oed/material_descriptor.h"
+#include "renderer/material_descriptor.h"
 #include "threedi/threedi_3di3.h"
 
 namespace renderer {
 
 namespace {
 
-ObjectShaderFamily map_family(::oed::MaterialDescriptorFamily family) {
+ObjectShaderFamily map_family(MaterialDescriptorFamily family) {
 	switch (family) {
-		case ::oed::MaterialDescriptorFamily::Unknown:
+		case MaterialDescriptorFamily::Unknown:
 			return ObjectShaderFamily::Unknown;
-		case ::oed::MaterialDescriptorFamily::FixedFunction:
+		case MaterialDescriptorFamily::FixedFunction:
 			return ObjectShaderFamily::FixedFunction;
-		case ::oed::MaterialDescriptorFamily::Phong:
+		case MaterialDescriptorFamily::Phong:
 			return ObjectShaderFamily::Phong;
-		case ::oed::MaterialDescriptorFamily::Flag:
+		case MaterialDescriptorFamily::Flag:
 			return ObjectShaderFamily::Flag;
-		case ::oed::MaterialDescriptorFamily::Dot3:
+		case MaterialDescriptorFamily::Dot3:
 			return ObjectShaderFamily::Dot3;
-		case ::oed::MaterialDescriptorFamily::Environment:
+		case MaterialDescriptorFamily::Environment:
 			return ObjectShaderFamily::Environment;
-		case ::oed::MaterialDescriptorFamily::Glass:
+		case MaterialDescriptorFamily::Glass:
 			return ObjectShaderFamily::Glass;
 	}
 	return ObjectShaderFamily::Unknown;
 }
 
-ObjectBlendMode map_blend(::oed::MaterialDescriptorBlend blend) {
+ObjectBlendMode map_blend(MaterialDescriptorBlend blend) {
 	switch (blend) {
-		case ::oed::MaterialDescriptorBlend::Opaque:
+		case MaterialDescriptorBlend::Opaque:
 			return ObjectBlendMode::Opaque;
-		case ::oed::MaterialDescriptorBlend::AlphaBlend:
+		case MaterialDescriptorBlend::AlphaBlend:
 			return ObjectBlendMode::AlphaBlend;
-		case ::oed::MaterialDescriptorBlend::Additive:
+		case MaterialDescriptorBlend::Additive:
 			return ObjectBlendMode::Additive;
-		case ::oed::MaterialDescriptorBlend::Multiplicative:
+		case MaterialDescriptorBlend::Multiplicative:
 			return ObjectBlendMode::Multiplicative;
 	}
 	return ObjectBlendMode::Opaque;
 }
 
-ObjectNormalSpace map_normal_space(::oed::MaterialDescriptorNormalSpace normal_space) {
+ObjectNormalSpace map_normal_space(MaterialDescriptorNormalSpace normal_space) {
 	switch (normal_space) {
-		case ::oed::MaterialDescriptorNormalSpace::None:
+		case MaterialDescriptorNormalSpace::None:
 			return ObjectNormalSpace::None;
-		case ::oed::MaterialDescriptorNormalSpace::Tangent:
+		case MaterialDescriptorNormalSpace::Tangent:
 			return ObjectNormalSpace::Tangent;
-		case ::oed::MaterialDescriptorNormalSpace::Object:
+		case MaterialDescriptorNormalSpace::Object:
 			return ObjectNormalSpace::Object;
 	}
 	return ObjectNormalSpace::None;
@@ -82,8 +82,7 @@ ObjectMaterialClassification classify_object_material(const std::string &shader_
 	c.is_emissive = emissive_type == THREEDI_EMISSIVE_FULL;
 	c.is_glass = is_glass_flag != 0;
 
-	const ::oed::MaterialDescriptorRecord *descriptor =
-		::oed::find_material_descriptor(shader_name);
+	const MaterialDescriptorRecord *descriptor = find_material_descriptor(shader_name);
 	if (descriptor == nullptr)
 		return c;
 
@@ -98,19 +97,19 @@ ObjectMaterialClassification classify_object_material(const std::string &shader_
 	// @ 0x5af790; _FFP.fx SELFLUM block]); 0x10000000 is the separate
 	// glow-copy CAPABILITY (is_glow_capable below) — the two ride together on
 	// LUM rows but FFP_GLASS carries only the capability (D-RMAT-4).
-	c.is_luminance = (info_flags & ::oed::MATERIAL_FLAG_EMISSIVE) != 0;
-	c.is_glow_capable = (info_flags & ::oed::MATERIAL_FLAG_GLOW) != 0;
-	c.view_angle_fade = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_VIEW_FADE) != 0;
-	c.needs_normal_map = (info_flags & (::oed::MATERIAL_FLAG_NORMAL_A |
-	                                     ::oed::MATERIAL_FLAG_NORMAL_B)) != 0;
-	c.is_glass = c.is_glass || (info_flags & ::oed::MATERIAL_FLAG_GLASS) != 0;
-	c.uses_environment = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
-	c.has_detail = (info_flags & ::oed::MATERIAL_FLAG_SECONDARY) != 0;
-	c.is_skinned = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_SKINNED) != 0;
-	c.uses_specular = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
+	c.is_luminance = (info_flags & MATERIAL_FLAG_EMISSIVE) != 0;
+	c.is_glow_capable = (info_flags & MATERIAL_FLAG_GLOW) != 0;
+	c.view_angle_fade = (descriptor_flags & MATERIAL_DESCRIPTOR_VIEW_FADE) != 0;
+	c.needs_normal_map = (info_flags & (MATERIAL_FLAG_NORMAL_A |
+	                                     MATERIAL_FLAG_NORMAL_B)) != 0;
+	c.is_glass = c.is_glass || (info_flags & MATERIAL_FLAG_GLASS) != 0;
+	c.uses_environment = (descriptor_flags & MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
+	c.has_detail = (info_flags & MATERIAL_FLAG_SECONDARY) != 0;
+	c.is_skinned = (descriptor_flags & MATERIAL_DESCRIPTOR_SKINNED) != 0;
+	c.uses_specular = (descriptor_flags & MATERIAL_DESCRIPTOR_SPECULAR) != 0;
 	c.environment_textured =
-			(descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
-	c.normal_uses_uv2 = (info_flags & ::oed::MATERIAL_FLAG_NORMAL_B) != 0;
+			(descriptor_flags & MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
+	c.normal_uses_uv2 = (info_flags & MATERIAL_FLAG_NORMAL_B) != 0;
 	c.normal_space = c.needs_normal_map ? map_normal_space(descriptor->normal_space)
 	                                    : ObjectNormalSpace::None;
 

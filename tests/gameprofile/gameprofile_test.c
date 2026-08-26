@@ -62,7 +62,7 @@ static int test_universal_key_and_labels(void) {
     return 1;
 }
 
-/* gameprofile_by_code + the game->policy seam the runtime and Python importer share. */
+/* gameprofile_by_code + the game-to-policy seam used by native runtime loaders. */
 static int test_by_code_and_policy(void) {
     const NovaGameProfile *demo = gameprofile_by_code("jodemo");
     CHECK(demo != NULL && demo->id == NOVA_GAME_JO_DEMO, "by_code jodemo -> demo");

@@ -90,8 +90,8 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 	for (size_t i = 0; i < adm.count; ++i) {
 		const std::string key = strutil::to_lower(adm.entries[i].key);
 		std::vector<std::string> ring;
-		for (size_t v = 0; v < adm.entries[i].value_count; ++v) {
-			const std::string value = adm.entries[i].values[v];
+		for (size_t v = 0; v < adm.entries[i].variant_count; ++v) {
+			const std::string value = adm.entries[i].variants[v];
 			if (!value.empty()) ring.push_back(value);
 		}
 		if (!ring.empty()) {

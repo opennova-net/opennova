@@ -1,7 +1,6 @@
 # OpenNova — agent notes
 
-Open-source (MIT) reimplementation of NovaLogic's game engine, plus the toolchain for
-extracting, converting, validating, and shipping its asset data. Joint Operations (JO) is the first
+Open-source (MIT) reimplementation of NovaLogic's game engine. Joint Operations (JO) is the first
 game being brought up. Repo layout, downloads, and end-user build docs live in
 [README.md](README.md); the vision is [GOALS.md](GOALS.md). This file covers what is
 easier to relay than to rediscover.
@@ -15,13 +14,13 @@ easier to relay than to rediscover.
   header-only `opennova_io`; no per-lib targets except the `opennova_crt`
   STATIC leaf — the shared CRT rand stream both formats and runtime link):
   `base/` (io, crt, vfs, resource_index, gameprofile, pcapio),
-  `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
+  `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, ...;
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, simassets),
   `net/` (novacrypto, napi, npwire, novaworld, inmatch, plus the internal
-  netsim/npruntime implementation directories). Consumed via the
-  flat C ABI by Python and the Blender addon, by direct static link everywhere else.
+  netsim/npruntime implementation directories). Native consumers link the engine
+  groups directly.
   See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
@@ -30,14 +29,10 @@ easier to relay than to rediscover.
   `modtools/` (ONED: settings, loose OpenNova run,
   staged retail run, Stop, and the hidden release pack command),
   `tests/` (GUT suite).
-- `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
-  `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
+- `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
   `nw_pp/` (NovaWorld in-game packet pretty-printer/decoder), `common/` (shared
-  socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`),
-  `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` is the
-  export addon, `pyopennova/` the Python ctypes FFI layer, and `opennova_blender/`
-  the standalone Blender importer backend.
+  socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
   stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and
   deployment stack (DEPLOY.md).
@@ -45,7 +40,7 @@ easier to relay than to rediscover.
 - `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
-- `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed; never edit in
+- `third_party/` — vendored submodules (godot-cpp and gut; never edit in
   place — bump submodules upstream) plus vendored in-tree bcrypt sources and a
   hash-pinned sqlite FetchContent (bump sqlite by editing the URL/URL_HASH in
   `third_party/sqlite/CMakeLists.txt`).
@@ -60,14 +55,13 @@ processes.
 ```bash
 scripts/build.sh          # C++ build + full ctest (Release); BUILD_GODOT=0 skips the GDExtension
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
-scripts/test_python.sh    # uv run --frozen pytest (Python pinned >=3.11,<3.12)
 scripts/test_godot.sh     # GUT GDScript suite, headless
 ```
 
 - Fresh worktree/clone: `git submodule update --init --recursive` first — `third_party/`
   ships empty and the build scripts self-init only GUT (`scripts/build.sh` and
-  `scripts/test_godot.sh` both run `scripts/bootstrap_godot.sh`); godot-cpp and
-  modsuperoed still need the manual init. Then build the GDExtension (`godot/bin/` has no DLL in a
+  `scripts/test_godot.sh` both run `scripts/bootstrap_godot.sh`); godot-cpp still
+  needs the manual init. Then build the GDExtension (`godot/bin/` has no DLL in a
   fresh worktree) and run `"$GODOT_BIN" --headless --path godot --import` once, or engine
   classes appear missing.
 - `scripts/test_godot.sh` needs `GODOT_BIN` or a `Godot_v4.6.1-stable_*` binary in
@@ -76,10 +70,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   failure, re-run that one file in isolation (see `godot/tests/CLAUDE.md`).
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
-- A stale `build/Debug/opennova.dll` shadows `build/Release/` for the PYTHON FFI loader
-  (`pyopennova/_native.py` searches Debug first) — delete it if pytest/onimport run stale
-  native code. The Godot editor loads only `godot/bin/libopennova.*` and is unaffected;
-  for a stale editor, rebuild via `scripts/build_godot.sh` and fully restart it.
+- For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
 - Asset-gated tests SKIP-AS-PASS unless env vars point at local retail installs or
   captures — a green run does not mean they exercised data. The full var→test→data
   matrix, local setup, and the never-commit-captures policy live in
@@ -87,14 +78,12 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `.claude/settings.local.json` `env` (never tracked); capture files default to the
   gitignored `.scratch/` under the repo root (goldens in `.scratch/golden/`).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
-  Do bulk text rewrites with bash sed/python, not PowerShell.
+  Use `apply_patch` or another UTF-8-safe editor.
 
 ## Conventions
 
 - `engine/` libraries: built as the five group targets (ADR 0029 — no per-lib CMake
-  targets), C++ namespace `opennova`, flat domain-prefixed C ABI (consumed by
-  `apps/importer/` and `godot/src/`). The shared FFI target is `opennova_shared`
-  (`opennova.dll` / `libopennova.so`).
+  targets), C++ namespace `opennova`; `godot/src/` is the typed Godot binding layer.
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
   original as a structural translation and cite it inline (`[orig: Name @ 0xADDR]`) unless a
@@ -132,15 +121,12 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   and ADRs 0009–0012.
 - "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
   attach-points are Mounts, presentation owners are Presenters, front-ends are Shells,
-  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`
-  (code suffixes only — Markdown gets a non-failing added-lines advisory and `.agents/**`
-  is exempt, so vocabulary in docs is honor-system).
+  a lib's embedding app is its embedder.
 - ONED is run-only (ADR 0037). Do not add authoring workspaces, project/import
   state, preview runtimes, an asset database, or embedded MCP.
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
   don't bundle pre-JO Delta Force titles; say pre-1.0/experimental, never
   "production-ready"; no em dashes.
-- Blender custom properties owned by this project use `opennova_*` keys.
 - Completed TODO/checklist entries are DELETED, not checked off — the history lives in
   git, not the tracked file. (Exception: docs that self-identify as historical records,
   e.g. `plan/status.md`, keep their completed rows.)
@@ -151,8 +137,6 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   current worktree.
 - Never post PR comments — context goes in the PR description and commit messages. Never
   merge PRs; the maintainer merges.
-- CI: ignore the `modsuperoed-smoke` job — known unrelated OED parity drift; never gate
-  or report on it.
 - PR CI builds only the `template_debug` GDExtension and packages debug-mode exports
   (`-ExportMode debug`); `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
@@ -167,8 +151,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   each domain to the record that names its next step. It is a router, not a priority list.
 - [docs/maturity-program.md](docs/maturity-program.md) — the maturity program
   (pre-reimplementation rearchitecture), CLOSED 2026-07-12 with the freeze lifted:
-  the dashboard, close-out dispositions, and the permanent enforcement instruments
-  live there. ADRs 0015–0018 and 0022–0024 carry the standing rules every slice
+  the dashboard and close-out dispositions live there. Its Python enforcement
+  scripts are retired. ADRs 0015–0018 and 0022–0024 carry the standing rules every slice
   still builds under (two products/serve mode, engine layering, typed
   records, public-API testability, divergence burn-down, render parity, family
   topology).
@@ -188,5 +172,4 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
-  `extract-pr`, `grill-ida`, `engine-research`, `blender-object`, `diagnosing-bugs`,
-  `render-parity`.
+  `extract-pr`, `grill-ida`, `engine-research`, and `diagnosing-bugs`.

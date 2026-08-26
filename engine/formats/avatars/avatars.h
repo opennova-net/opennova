@@ -1,5 +1,5 @@
 /* Avatars.def parser + writer — pure C API.
- * Flat structs suitable for FFI (ctypes, Godot GDExtension).
+ * Stable plain C structs for native and Godot runtime consumers.
  *
  * Avatars.def defines selectable player characters in Joint Operations: a pool
  * of modular head/body/arms PARTS composed into COMBO entries grouped under a
@@ -19,20 +19,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define AVATARS_EXPORT __declspec(dllexport)
-#  else
-#    define AVATARS_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define AVATARS_EXPORT __attribute__((visibility("default")))
-#  else
-#    define AVATARS_EXPORT
-#  endif
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -169,17 +155,17 @@ typedef struct AvatarsFile {
  * expected to be plaintext (the original decrypts with key 0x2A56F6AD upstream
  * of the parser — docs/playerinfo/avatars-re.md). `out` is zero-filled then
  * populated; free with avatars_free(). */
-AVATARS_EXPORT int avatars_parse(const char *path, AvatarsFile *out);
-AVATARS_EXPORT int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out);
-AVATARS_EXPORT void avatars_free(AvatarsFile *file);
+int avatars_parse(const char *path, AvatarsFile *out);
+int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out);
+void avatars_free(AvatarsFile *file);
 
 /* Serialize `file` to a canonical Avatars.def from scratch (never raw
  * passthrough — docs/adr/0003, policy docs/adr/0021). On success returns 0 and
  * sets *out_data (malloc'd, NUL-terminated) and *out_size (length excluding the
  * NUL). Free with avatars_free_buffer(). The write is deterministic: a
  * parse->write->parse->write round-trip is byte-identical on the second write. */
-AVATARS_EXPORT int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
-AVATARS_EXPORT void avatars_free_buffer(char *data);
+int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
+void avatars_free_buffer(char *data);
 
 #ifdef __cplusplus
 }

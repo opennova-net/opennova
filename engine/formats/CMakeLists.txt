@@ -11,14 +11,10 @@ add_library(opennova_formats STATIC
     # aip — AI profile text (PARTIAL PORT: the two witnessed speed keys; the
     # remainder is the ledgered D-AI-11(h) gap and lands here when witnessed)
     ${CMAKE_CURRENT_SOURCE_DIR}/aip/aip.cpp
-    # ase — 3ds Max ASCII scene export (the OED model source format)
-    ${CMAKE_CURRENT_SOURCE_DIR}/ase/ase_parser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ase/ase_writer.cpp
     # avatars — Avatars.def
     ${CMAKE_CURRENT_SOURCE_DIR}/avatars/avatars.cpp
     # bad — skeletal animation
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad_write.cpp
     # bink — native BIKi menu-video decode
     ${CMAKE_CURRENT_SOURCE_DIR}/bink/bink.cpp
     # bfc1 — compressed container (vendored miniz stays in-tree here)
@@ -58,7 +54,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/authoring.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission.cpp          # MissionDocument — the document and its edit operations
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_capi.cpp     # the flat C ABI over it
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_names.cpp    # BMS event-logic enum display names
@@ -75,12 +70,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_decompile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_vm.cpp
-    # oed — the OED project/convert/export pipeline
-    ${CMAKE_CURRENT_SOURCE_DIR}/oed/oed.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/oed/convert_internal.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/oed/export_3di.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/oed/rdta.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/oed/material_utils.cpp
     # pcx — image
     ${CMAKE_CURRENT_SOURCE_DIR}/pcx/pcx_io.cpp
     # pff — the archive format
@@ -105,8 +94,6 @@ add_library(opennova_formats STATIC
     # sph — the /PROFILE server-log FOURCC chunk container (payload records:
     # engine/net/npwire serverlog_decode)
     ${CMAKE_CURRENT_SOURCE_DIR}/sph/sph.cpp
-    # tdp — OED project structs
-    ${CMAKE_CURRENT_SOURCE_DIR}/tdp/tdp.cpp
     # threedi — the .3di model format (3DI3 first-class, ADR 0027)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3
@@ -130,7 +117,7 @@ add_library(opennova_formats STATIC
     # table (names + param types), and the compiled Program model. The compiler
     # (binds names/vars against the live world) and the VM are engine/runtime/wac.
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table.gen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/lexer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/parser.cpp
 )
@@ -144,7 +131,6 @@ target_include_directories(opennova_formats
     PRIVATE
 )
 
-# io/export.h (and for some libs io/le.h) is used from public headers.
 target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
 
 # Link math library (needed for sin/cos/floorf in pure C builds; not needed on

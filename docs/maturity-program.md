@@ -3,7 +3,9 @@
 > **Historical program.** The program closed on 2026-07-12. Any remaining
 > ONED workspace roadmap or editor-backlog language below was retired by
 > [ADR 0037](adr/0037-oned-runs-game-data.md); ONED is now run-only. The
-> landed-slices and C-ABI logs remain append-only records.
+> landed-slices and C-ABI logs remain append-only records. The Python lint,
+> ratchet, and release-validator scripts named below were retired with the
+> zero-Python cleanup; their commands describe the historical program only.
 
 Before further reimplementation: rearchitect where it pays, refactor the
 rest, and institutionalize the codebase design. Started 2026-07-04, after

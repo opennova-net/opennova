@@ -11,9 +11,9 @@ namespace opennova {
 enum class VfsSource { LooseDir, Archive };
 
 // Which layers mount_game brings online.
-//   LooseOnly              - loose search paths only; archives ignored. The editor authors
-//                            loose files and never reads PFFs.
-//   Packed                 - archives back the session default and legacy index while any are
+//   LooseOnly              - loose search paths only; archives ignored. Used by
+//                            explicit loose development roots.
+//   Packed                 - archives back the session default and flat index while any are
 //                            online. Loose roots remain latent for explicit ForceLooseFirst
 //                            calls; standalone no-archive sessions fall back loose, while the
 //                            game runtime rejects that state via has_mounted_archive().
@@ -33,10 +33,9 @@ enum class VfsLookupPolicy { SessionDefault, ForceLooseFirst, ForceArchiveOnly }
 //                 resource.pff probed by name (case-insensitive), slot order =
 //                 precedence; extra .pff files in the root NEVER mount
 //                 [orig: PFF_OpenAllArchives @ 0x4a4310, name table @ 0x829f90].
-//                 The game-shaped default (runtime, importer, C ABI).
-//   ScanAll     - every base-root *.pff, alphabetical. A deliberate authoring
-//                 divergence: the editor's browse index must see arbitrary
-//                 archives a modder drops in (docs/vfs/vfs-pff-mount-re.md
+//                 The game-shaped default.
+//   ScanAll     - every base-root *.pff, alphabetical. An explicit catalog
+//                 policy for arbitrary mod archives (docs/vfs/vfs-pff-mount-re.md
 //                 D-VFS-2 records the decision).
 enum class VfsArchiveDiscovery { RetailTable, ScanAll };
 
@@ -47,8 +46,8 @@ struct VfsFileLocation {
     int precedence = 0;                       // 0 = highest priority; grows down the stack
 };
 
-// Engine-faithful virtual file system. The legacy overloads preserve the authoring/importer
-// model: a flat (basename), case-insensitive index where mounted loose paths shadow the
+// Engine-faithful virtual file system. The flat overloads provide a basename,
+// case-insensitive index where mounted loose paths shadow the
 // primary archive and then ordered secondaries. The policy overloads mirror retail
 // FileSystem_OpenFile @ 0x75b1c0: they retain the full relative query and choose loose/archive
 // order per call. Packed mode is archive-default while an archive is online and keeps loose
@@ -91,18 +90,17 @@ public:
 
     // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy / gameprofile ScrPolicy value
     // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware
-    // caller (runtime launch flag, importer) sets this so demo-vs-retail keying is correct.
+    // caller sets this so demo-vs-retail keying is correct.
     void set_scr_policy(int scr_policy);
 
-    // --- Legacy resolution (flat, case-insensitive filename) ---
-    // These overloads intentionally retain the authoring/importer compatibility model.
+    // --- Flat resolution (case-insensitive filename) ---
     bool has_file(const std::string &name) const;
     bool read_file(const std::string &name, std::vector<uint8_t> &out) const;      // + SCR/BFC1 decode
     bool read_file_raw(const std::string &name, std::vector<uint8_t> &out) const;  // stored bytes only
 
     // --- Retail per-query resolution ---
     // The full relative query is used for loose probes and archive comparison. Policy changes
-    // only this call's search order; it never mutates the session default or legacy index.
+    // only this call's search order; it never mutates the session default or flat index.
     bool has_file(const std::string &name, VfsLookupPolicy policy) const;
     bool read_file(const std::string &name, std::vector<uint8_t> &out,
                    VfsLookupPolicy policy) const;      // + SCR/BFC1 decode

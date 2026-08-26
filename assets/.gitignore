@@ -74,13 +74,3 @@
 !/mnml_t.tga
 !/mnml_m.pcx
 !/mnml_f.pcx
-
-# --- Modelling sources (src/) ---------------------------------------------
-# .blend / .ase and their texture sources live in a SUBDIR, not the flat game
-# dir: retail resolves bare filenames at this root under /d, so anything here
-# is a file retail might try to load. src/ is ours alone, which is also why it
-# can be allowed wholesale -- no retail file ever lands there. Compiled .3di
-# and their .TGA textures DO go at the root (the engine loads them by
-# `graphic` + ".3di"), so they get allowlisted by name like everything else.
-!/src/
-!/src/**

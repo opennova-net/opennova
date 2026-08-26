@@ -11,7 +11,7 @@ const VegAssets := preload("res://game/terrain/veg_assets.gd")
 #
 # Use: `godot --headless --path godot res://tests/runtime_scene_probe.tscn -- <dir>`
 
-const FOLIAGE_MODEL_FIXTURE := "res://../fixtures/3dp/CmpFireN/CmpFireN.3di"
+const FOLIAGE_MODEL_FIXTURE := "res://../fixtures/threedi/objects/CmpFireN/CmpFireN.3di"
 
 
 func _ready() -> void:

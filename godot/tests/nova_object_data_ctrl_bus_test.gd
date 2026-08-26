@@ -4,8 +4,7 @@ extends GutTest
 # model-local CTRL record, while runtime evaluation consumes the shared retail
 # 96-register bus.
 
-const B50CAL := "res://../fixtures/3dp/B50Cal/B50Cal.3di"
-const ARMRY := "res://../fixtures/3dp/armry01/Armry01.3di"
+const B50CAL := "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"
 const TRACK_NAMES := [
 	"rotation_x", "rotation_y", "rotation_z",
 	"scale_x", "scale_y", "scale_z", "translation",
@@ -96,96 +95,3 @@ func test_panm_uses_case_insensitive_signed_global_dwords() -> void:
 	assert_gt(_transform_delta(full_upper, almost_full), 0.000001,
 			"the exact 0x10000 endpoint must not truncate to uint16")
 	_assert_cached_apply_matches(data, {"eWeAp_GuNyAw": -0x8000})
-
-
-func test_duplicate_and_unknown_authored_names_follow_retail_loader_aliases() -> void:
-	var duplicate := _open(B50CAL)
-	assert_true(duplicate.set_control_register_name(1, "HEAT_GLOW"))
-	var registers: Array = duplicate.get_control_registers()
-	assert_eq(String((registers[0] as Dictionary).get("name", "")), "HEAT_GLOW")
-	assert_eq(String((registers[1] as Dictionary).get("name", "")), "HEAT_GLOW")
-	var duplicate_track := _controlled_track(duplicate, 1)
-	assert_false(duplicate_track.is_empty())
-	if not duplicate_track.is_empty():
-		var part := int(duplicate_track.get("part_index", -1))
-		assert_gt(_transform_delta(
-				_pose(duplicate, part, {"HEAT_GLOW": 0x8000}),
-				_pose(duplicate, part, {"HEAT_GLOW": 0})), 0.001,
-				"duplicate local CTRL records should alias one global slot")
-
-	var unknown := _open(B50CAL)
-	assert_true(unknown.set_control_register_name(1, "NOT_RETAIL"))
-	var unknown_track := _controlled_track(unknown, 1)
-	assert_false(unknown_track.is_empty())
-	if not unknown_track.is_empty():
-		var part := int(unknown_track.get("part_index", -1))
-		assert_gt(_transform_delta(
-				_pose(unknown, part, {"lod_frac": 0x8000}),
-				_pose(unknown, part, {"LOD_FRAC": 0})), 0.001,
-				"an unknown authored CTRL name should alias retail ordinal zero")
-
-
-func test_wave_styles_receive_the_loader_resolved_phase_ordinal() -> void:
-	var normal := _open(B50CAL)
-	var normal_track := _controlled_track(normal, 1)
-	assert_false(normal_track.is_empty())
-	if normal_track.is_empty():
-		return
-	assert_true(normal.set_part_anim_track_field(
-			0, int(normal_track.get("anim_index", -1)),
-			String(normal_track.get("track_name", "")), "control", 114))
-
-	var patched := _open(B50CAL)
-	assert_true(patched.set_control_register_name(1, "LOD_FRAC"))
-	var patched_track := _controlled_track(patched, 1)
-	assert_false(patched_track.is_empty())
-	if patched_track.is_empty():
-		return
-	assert_true(patched.set_part_anim_track_field(
-			0, int(patched_track.get("anim_index", -1)),
-			String(patched_track.get("track_name", "")), "control", 114))
-
-	var part := int(normal_track.get("part_index", -1))
-	assert_gt(_transform_delta(
-			_pose(normal, part, {}),
-			_pose(patched, part, {})), 0.001,
-			"style 114 should use global ordinal 55 vs LOD_FRAC ordinal zero as phase")
-
-
-func test_light_controls_share_the_case_insensitive_global_bus() -> void:
-	var data := _open(ARMRY)
-	assert_true(data.set_light_field(0, "disable_lightobjects", false))
-	assert_true(data.set_light_field(0, "colorgen_style", 113))
-	assert_true(data.set_light_field(0, "colorgen_phase", 0))
-	assert_true(data.set_light_field(0, "color_start", Color.BLACK))
-	assert_true(data.set_light_field(0, "color_end", Color.WHITE))
-	var upper: Color = (data.evaluate_lights(
-			0, {"FLICKER": 0x8000})[0] as Dictionary).get("color")
-	var mixed: Color = (data.evaluate_lights(
-			0, {"fLiCkEr": 0x8000})[0] as Dictionary).get("color")
-	assert_true(mixed.is_equal_approx(upper),
-			"light CTRL lookup should use the same case-insensitive global bus")
-	assert_almost_eq(mixed.r, 127.0 / 255.0, 0.00001)
-
-
-func test_material_case_aliases_collapse_in_dictionary_order() -> void:
-	var data := _open(B50CAL)
-	assert_true(data.set_material_field(0, "rgb_gen_style", 113))
-	assert_true(data.set_material_field(0, "rgb_gen_reg", 1))
-	assert_true(data.set_material_field(
-			0, "rgb_gen_start_color", Color.BLACK))
-	assert_true(data.set_material_field(
-			0, "rgb_gen_end_color", Color.WHITE))
-
-	var high: Vector3 = data.eval_material_runtime(0, 0, {
-		"EWEAP_GUNYAW": 0,
-		"eweap_gunyaw": 65536,
-	}).get("rgb_mod")
-	var low: Vector3 = data.eval_material_runtime(0, 0, {
-		"eweap_gunyaw": 65536,
-		"EWEAP_GUNYAW": 0,
-	}).get("rgb_mod")
-	assert_true(high.is_equal_approx(Vector3.ONE),
-			"the later case alias should own the single global slot")
-	assert_true(low.is_equal_approx(Vector3.ZERO),
-			"reversing insertion order should reverse the same-slot winner")

@@ -2,20 +2,18 @@
   <main class="space-y-24 bg-surface">
     <section class="px-6 pt-24 pb-24">
       <div class="mx-auto max-w-4xl text-center">
-        <p class="text-sm uppercase tracking-[0.3em] text-accent">Community tools</p>
-        <h1 class="mt-4 text-4xl font-bold text-ink sm:text-5xl">Tools</h1>
+        <p class="text-sm uppercase tracking-[0.3em] text-accent">Game releases</p>
+        <h1 class="mt-4 text-4xl font-bold text-ink sm:text-5xl">OpenNova downloads</h1>
         <p class="mt-6 max-w-3xl mx-auto text-lg text-ink-muted">
           OpenNova keeps game data as ordinary source-controlled files. ONED is the compact
           companion for selecting loose or packed game data, running OpenNova, staging and
-          running retail for comparison, and stopping the process it started. Asset authoring
-          stays in the format tools, Blender, and other external DCC applications.
+          running retail for comparison, and stopping the process it started. Runtime game
+          data stays in ordinary source-controlled files.
         </p>
         <p class="mt-4 max-w-3xl mx-auto text-lg text-ink-muted">
           Everything is pre-1.0, open source, and under active development. Tagged releases
-          publish the Windows game and standalone tools. CI development builds pair the game,
-          ONED, and the loose sources. The same repository carries the Blender exchange tools
-          and Python utilities used to take assets apart and put them back together. Start with
-          the README and docs for current workflows and known limits.
+          publish the Windows game. CI development builds pair the game, ONED, and the loose
+          sources. Start with the README and docs for current workflows and known limits.
         </p>
       </div>
     </section>
@@ -44,13 +42,13 @@
         <template v-else-if="release">
           <div class="flex flex-col items-center text-center">
             <p class="text-xs uppercase tracking-[0.3em] text-accent">Latest release</p>
-            <h2 class="mt-2 text-2xl font-bold text-ink">Downloads for {{ osLabel }}</h2>
+            <h2 class="mt-2 text-2xl font-bold text-ink">Windows download</h2>
             <p class="mt-1 text-sm text-ink-muted">Release v{{ release.version }}</p>
           </div>
 
           <div class="mt-8 grid gap-4 sm:grid-cols-2">
             <a
-              v-for="asset in primaryAssets"
+              v-for="asset in release.assets"
               :key="asset.filename"
               :href="asset.downloadUrl"
               class="group flex flex-col rounded-panel border border-border-strong bg-raised p-5 transition hover:border-accent"
@@ -58,31 +56,13 @@
               <span class="text-base font-semibold text-ink group-hover:text-ink-bright">
                 {{ asset.product }}
               </span>
-              <span class="mt-1 text-sm text-accent">{{ osName(asset.os) }} · Download</span>
+              <span class="mt-1 text-sm text-accent">Windows · Download</span>
               <span class="mt-3 truncate text-xs text-ink-muted">
                 {{ asset.filename }}<template v-if="asset.sizeHuman"> · {{ asset.sizeHuman }}</template>
               </span>
             </a>
           </div>
 
-          <div v-if="otherAssets.length" class="mt-12">
-            <h3 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">
-              Other platforms
-            </h3>
-            <div class="mt-4 grid gap-3 sm:grid-cols-2">
-              <a
-                v-for="asset in otherAssets"
-                :key="asset.filename"
-                :href="asset.downloadUrl"
-                class="flex items-center justify-between gap-3 rounded-control border border-border-strong px-4 py-3 text-sm transition hover:border-accent"
-              >
-                <span class="text-ink">{{ asset.product }} · {{ osName(asset.os) }}</span>
-                <span v-if="asset.sizeHuman" class="shrink-0 text-xs text-ink-muted">
-                  {{ asset.sizeHuman }}
-                </span>
-              </a>
-            </div>
-          </div>
         </template>
 
         <div class="mt-12 flex flex-wrap items-center justify-center gap-4">
@@ -111,48 +91,27 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive } from 'vue';
 import type { AxiosError } from 'axios';
-import { detectOs, fetchLatestToolRelease } from '../api/releases';
-import type { ToolOs, ToolRelease } from '../types/downloads';
+import { fetchLatestGameRelease } from '../api/releases';
+import type { GameRelease } from '../types/downloads';
 
 const releasesPageUrl = 'https://github.com/opennova-net/opennova/releases';
 
-const state = reactive<{ loading: boolean; error: string; release: ToolRelease | null }>({
+const state = reactive<{ loading: boolean; error: string; release: GameRelease | null }>({
   loading: true,
   error: '',
   release: null,
 });
 
-const os = detectOs();
 const release = computed(() => state.release);
-
-// The visitor's OS build plus cross-platform ('any') downloads lead; the other OS follows.
-const primaryAssets = computed(() =>
-  (release.value?.assets ?? []).filter((a) => a.os === os || a.os === 'any'),
-);
-const otherAssets = computed(() =>
-  (release.value?.assets ?? []).filter((a) => a.os !== os && a.os !== 'any'),
-);
-
-const osLabel = computed(() => osName(os));
-
-function osName(value: ToolOs): string {
-  if (value === 'macos') {
-    return 'macOS';
-  }
-  if (value === 'windows') {
-    return 'Windows';
-  }
-  return 'All platforms';
-}
 
 let controller: AbortController | null = null;
 
 onMounted(async () => {
   controller = new AbortController();
   try {
-    state.release = await fetchLatestToolRelease(controller.signal);
+    state.release = await fetchLatestGameRelease(controller.signal);
   } catch (error) {
-    console.error('Failed to fetch tool release', error);
+    console.error('Failed to fetch game release', error);
     state.error = parseErrorMessage(error);
   } finally {
     state.loading = false;

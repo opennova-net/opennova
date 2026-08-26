@@ -15,8 +15,8 @@ extends RefCounted
 # Reference via preload(), not class_name, to keep the global class table small.
 
 
-# Collidable-type abbreviations (from the reference exporter's map_collidable_type).
-# The LETTER CODES are exporter-side naming; the RUNTIME semantics are now witnessed
+# Collidable-type abbreviations from the documented 3DI naming convention.
+# The LETTER CODES are scene naming; the RUNTIME semantics are now witnessed
 # (docs/world/world-wac-ai-re.md §15.4): 1 generic CB solid (the only BVOL type
 # generic rays clip), 4 CL ladder contact/alignment (the climb motor rides it),
 # 5 contact-no-force, 6 CA armory zone (Flags 0x400000 gates weapon.mnu),

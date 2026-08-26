@@ -514,7 +514,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     return 0;
 }
 
-DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
+int def_parse_weapons(const char *path, DefWeaponsFile *out) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
@@ -524,13 +524,13 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
     return rc;
 }
 
-DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     return parse_weapons_buf((const char *)data, size, out);
 }
 
-DEF_EXPORT void def_free_weapons(DefWeaponsFile *f) {
+void def_free_weapons(DefWeaponsFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
         for (size_t j = 0; j < f->entries[i].actions_count; ++j) {

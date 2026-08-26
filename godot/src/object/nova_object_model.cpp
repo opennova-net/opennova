@@ -668,7 +668,7 @@ void ObjectModel::rebuild() {
 // frame ladder (REN-3): the side away from the camera draws before the water
 // surface and the camera-side strip after it. The portable contract and exact
 // witness addresses live in renderer/render_order and render-order-re.md. The
-// importer retains one MeshInstance3D per source strip; transform its authored
+// renderer retains one MeshInstance3D per source strip; transform its source
 // min/max center through the live ROBJ transform and classify it whenever
 // that transform or the water plane changed (identical to retail's per-frame
 // recompute, without a per-frame server round trip per strip).
@@ -715,29 +715,9 @@ void ObjectModel::mark_render_order_dirty_all() {
 }
 
 void ObjectModel::on_object_changed() {
-	wake_runtime_frame();
-	const int64_t update_mask = last_object_update_mask();
-	const int64_t panm_lght = ObjectData::UPDATE_PANM | ObjectData::UPDATE_LGHT;
-	if (update_mask == ObjectData::UPDATE_PANM ||
-			update_mask == ObjectData::UPDATE_LGHT ||
-			update_mask == panm_lght) {
-		// A coalesced deferred-flush batch could read LGHT/PANM even when a
-		// generator style also changed; reclassify (cheap, idempotent) so the
-		// dynamic-material set can never go stale relative to the current data.
-		classify_materials();
-		refresh_live_panm_classification();
-		bounds_dirty_ = true;
-		apply_runtime_state(0.0);
-		return;
-	}
+	// ObjectData changes only when its immutable .3di content is replaced, so
+	// every observer takes the same full rebuild path.
 	rebuild();
-}
-
-int64_t ObjectModel::last_object_update_mask() const {
-	if (object_data_.is_valid()) {
-		return int64_t(object_data_->get_last_oed_update_mask()) & ObjectData::UPDATE_ALL;
-	}
-	return ObjectData::UPDATE_ALL;
 }
 
 // The shared awake set: every model with live per-frame work. One driver
@@ -952,8 +932,8 @@ void ObjectModel::sleep_runtime_frame_if_idle() {
 	if (needs_runtime_frame_work()) {
 		return;
 	}
-	// The private preview clock accumulates wall time per frame while playing
-	// (OED preview owners; mission/wire models ride the shared PANM clock).
+	// A model without a shared PANM clock owns a local runtime clock and must
+	// remain awake while playing; mission/wire models ride the shared clock.
 	if (panm_clock_.is_null() && is_playing_) {
 		return;
 	}

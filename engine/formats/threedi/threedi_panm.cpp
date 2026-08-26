@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// Table of known control functions. Names mirror the C# importer docs.
+// Table of known control functions from the witnessed 3DI catalog.
 typedef struct ControlEntry {
     uint8_t code;
     ThreediControlFuncInfo info;

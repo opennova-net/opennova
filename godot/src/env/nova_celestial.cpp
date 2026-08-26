@@ -219,7 +219,7 @@ void Celestial::_rebuild_if_needed() {
 		// axes (render_celestial_bodies @ 0x5acaa0 sun/moon,
 		// render_skybox_sun_glow @ 0x5acd00 + update_sun_glare @ 0x5ad130
 		// glare/glint - docs/env/env-tod-re.md): the authored quads face
-		// render +Z = EAST. The importer bakes model (x, y, z) as Godot
+		// render +Z = EAST. ObjectData maps model (x, y, z) into Godot
 		// (-x, y, z) (nova_object_data_geometry.cpp godot_position), which
 		// under an identity basis leaves the quad facing Godot +Z (south) -
 		// edge-on at a sunrise/sunset pose, the "squashed oval sun". The

@@ -39,7 +39,7 @@ public:
 			int32_t is_glass_flag,
 			int32_t alpha_test_byte);
 
-	// Every shader tag in the canonical descriptor table (engine/formats/oed), in table
+	// Every shader tag in the canonical runtime renderer descriptor table, in table
 	// order. Lets tooling (the render swatch probe, material pickers) iterate
 	// the real table instead of duplicating the tag list.
 	PackedStringArray get_known_shader_tags() const;
