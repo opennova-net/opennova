@@ -728,10 +728,6 @@ void MnuDocument::create_empty() {
 	touch();
 }
 
-void MnuDocument::set_menu_size(const Vector2i &p_size) {
-	menu_size_ = p_size;
-}
-
 // --- Tree read ---
 
 int MnuDocument::get_screen_count() const {
@@ -809,10 +805,6 @@ int MnuDocument::get_widget_type(int p_id) const {
 	return static_cast<int>(window_at(loc)->type);
 }
 
-String MnuDocument::get_widget_type_name(int p_type) const {
-	return to_gd(mnu::window_type_name(static_cast<mnu::WindowType>(p_type)));
-}
-
 String MnuDocument::get_widget_name(int p_id) const {
 	const Locator loc = locate(p_id);
 	if (loc.is_screen) {
@@ -866,22 +858,6 @@ String MnuDocument::get_screen_text_rsrc(int p_screen_id) const {
 		return String();
 	}
 	return to_gd(doc_.screens[loc.screen_index].text_rsrc);
-}
-
-String MnuDocument::get_screen_cursor_file(int p_screen_id) const {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return String();
-	}
-	return to_gd(doc_.screens[loc.screen_index].cursor_file);
-}
-
-String MnuDocument::get_screen_cursor_flags(int p_screen_id) const {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return String();
-	}
-	return to_gd(doc_.screens[loc.screen_index].cursor_flags);
 }
 
 void MnuDocument::set_screen_property(int p_screen_id, const String &p_key, const Variant &p_value) {
@@ -948,16 +924,6 @@ void MnuDocument::set_window_rect(int p_id, const Rect2 &p_rect) {
 	touch();
 }
 
-int MnuDocument::get_window_rect_flags(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return 0;
-	}
-	const mnu::Position &p = w->position;
-	return (p.has_left ? RECT_HAS_LEFT : 0) | (p.has_top ? RECT_HAS_TOP : 0) |
-			(p.has_right ? RECT_HAS_RIGHT : 0) | (p.has_bottom ? RECT_HAS_BOTTOM : 0);
-}
-
 String MnuDocument::get_widget_text(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->string_data.value) : String();
@@ -978,28 +944,9 @@ String MnuDocument::get_widget_string_type(int p_id) const {
 	return w ? to_gd(w->string_data.type) : String();
 }
 
-void MnuDocument::set_widget_string_type(int p_id, const String &p_type) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	w->string_data.present = true;
-	w->string_data.type = to_std(p_type);
-	touch();
-}
-
 String MnuDocument::get_widget_font(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->font.name) : String();
-}
-
-void MnuDocument::set_widget_font(int p_id, const String &p_font) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	w->font.name = to_std(p_font);
-	touch();
 }
 
 String MnuDocument::get_widget_datasource(int p_id) const {
@@ -1530,31 +1477,6 @@ TypedArray<Dictionary> MnuDocument::get_widget_appearances(int p_id) const {
 	return out;
 }
 
-void MnuDocument::set_widget_appearances(int p_id, const TypedArray<Dictionary> &p_rows) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	std::vector<mnu::Appearance> next;
-	next.reserve(static_cast<size_t>(p_rows.size()));
-	for (int i = 0; i < p_rows.size(); ++i) {
-		const Dictionary d = p_rows[i];
-		mnu::Appearance a;
-		a.state = to_std(String(d.get("state", "")));
-		a.type = to_std(String(d.get("type", "")));
-		a.value = to_std(String(d.get("value", "")));
-		a.has_map_state = static_cast<bool>(d.get("has_map_state",
-				d.has("map_state") && int(d.get("map_state", -1)) >= 0));
-		a.map_state = int(d.get("map_state", -1));
-		a.has_height = static_cast<bool>(d.get("has_height",
-				d.has("height") && int(d.get("height", 0)) != 0));
-		a.height = int(d.get("height", 0));
-		next.push_back(a);
-	}
-	w->appearances = next;
-	touch();
-}
-
 Dictionary MnuDocument::get_window_frame(int p_id) const {
 	Dictionary out;
 	const mnu::Window *w = window_at(locate(p_id));
@@ -1571,34 +1493,6 @@ Dictionary MnuDocument::get_window_frame(int p_id) const {
 	out["has_insety"] = w->frame.has_insety;
 	out["insety"] = w->frame.insety;
 	return out;
-}
-
-void MnuDocument::set_window_frame(int p_id, const Dictionary &p_frame) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	w->frame.stencil = to_std(String(p_frame.get("stencil", "")));
-	w->frame.has_stencil_size = bool(p_frame.get("has_stencil_size",
-			p_frame.has("stencil_size") ? true : w->frame.has_stencil_size));
-	w->frame.stencil_size = int(p_frame.get("stencil_size", 0));
-	w->frame.brush = to_std(String(p_frame.get("brush", "")));
-	w->frame.monogram = to_std(String(p_frame.get("monogram", "")));
-	w->frame.has_insetx = bool(p_frame.get("has_insetx", w->frame.has_insetx));
-	w->frame.insetx = int(p_frame.get("insetx", w->frame.insetx));
-	w->frame.has_insety = bool(p_frame.get("has_insety", w->frame.has_insety));
-	w->frame.insety = int(p_frame.get("insety", w->frame.insety));
-	touch();
-}
-
-bool MnuDocument::widget_has_scrollbar(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
-	return w != nullptr && w->table_data.scrollbar.present;
-}
-
-bool MnuDocument::widget_has_spin_arrows(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
-	return w != nullptr && w->spinup.present && w->spindown.present;
 }
 
 TypedArray<Dictionary> MnuDocument::get_widget_actions(int p_id) const {
@@ -1800,15 +1694,6 @@ int MnuDocument::add_table_header(int p_id, const Dictionary &p_row) {
 	return static_cast<int>(td->column.headers.size()) - 1;
 }
 
-void MnuDocument::remove_table_header(int p_id, int p_index) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
-	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.headers.size())) {
-		return;
-	}
-	td->column.headers.erase(td->column.headers.begin() + p_index);
-	touch();
-}
-
 TypedArray<Dictionary> MnuDocument::get_table_bodies(int p_id) const {
 	TypedArray<Dictionary> out;
 	const mnu::TableData *td = table_of(window_at(locate(p_id)));
@@ -1861,34 +1746,6 @@ TypedArray<Dictionary> MnuDocument::get_table_substs(int p_id) const {
 	return out;
 }
 
-void MnuDocument::set_table_subst(int p_id, int p_index, const Dictionary &p_row) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
-	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.substitutions.size())) {
-		return;
-	}
-	td->column.substitutions[p_index] = subst_from_dict(p_row);
-	touch();
-}
-
-int MnuDocument::add_table_subst(int p_id, const Dictionary &p_row) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
-	if (td == nullptr) {
-		return -1;
-	}
-	td->column.substitutions.push_back(subst_from_dict(p_row));
-	touch();
-	return static_cast<int>(td->column.substitutions.size()) - 1;
-}
-
-void MnuDocument::remove_table_subst(int p_id, int p_index) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
-	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.substitutions.size())) {
-		return;
-	}
-	td->column.substitutions.erase(td->column.substitutions.begin() + p_index);
-	touch();
-}
-
 String MnuDocument::get_widget_color(int p_id, int p_slot) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
@@ -1917,68 +1774,6 @@ String MnuDocument::get_widget_color(int p_id, int p_slot) const {
 	}
 }
 
-void MnuDocument::set_widget_color(int p_id, int p_slot, const String &p_value) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	mnu::Font &f = w->font;
-	const std::string v = to_std(p_value);
-	switch (p_slot) {
-		case COLOR_DEFAULT_FG:
-			f.default_fg = v;
-			break;
-		case COLOR_DEFAULT_BG:
-			f.default_bg = v;
-			break;
-		case COLOR_MOUSEOVER_FG:
-			f.mouseover_fg = v;
-			break;
-		case COLOR_MOUSEOVER_BG:
-			f.mouseover_bg = v;
-			break;
-		case COLOR_SELECTED_FG:
-			f.selected_fg = v;
-			break;
-		case COLOR_SELECTED_BG:
-			f.selected_bg = v;
-			break;
-		case COLOR_DISABLED_FG:
-			f.disabled_fg = v;
-			break;
-		case COLOR_DISABLED_BG:
-			f.disabled_bg = v;
-			break;
-		default:
-			return;
-	}
-	touch();
-}
-
-Variant MnuDocument::parse_color_token(const String &p_token) {
-	// Marshalling only: the token grammar (RRGGBB / AARRGGBB / '#' strip /
-	// %VAR% rejection) lives at engine mnu.h parse_hex_color.
-	uint8_t r = 0;
-	uint8_t g = 0;
-	uint8_t b = 0;
-	uint8_t a = 0;
-	if (!mnu::parse_hex_color(to_std(p_token.strip_edges()), r, g, b, a)) {
-		return Variant();
-	}
-	return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
-}
-
-String MnuDocument::format_color_token(const Color &p_color, bool p_force_alpha) {
-	const auto channel = [](float c) {
-		const int v = static_cast<int>(c * 255.0f + 0.5f);
-		return static_cast<uint32_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
-	};
-	const uint32_t argb = (channel(p_color.a) << 24) |
-			(channel(p_color.r) << 16) | (channel(p_color.g) << 8) |
-			channel(p_color.b);
-	return to_gd(mnu::format_hex_color(argb, p_force_alpha));
-}
-
 String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
@@ -1991,16 +1786,6 @@ String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 		}
 	}
 	return String();
-}
-
-void MnuDocument::set_widget_texture(int p_id, int p_slot, const String &p_value) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	mnu::Appearance *app = find_appearance(*w, state_for_slot(p_slot), true);
-	app->value = to_std(p_value);
-	touch();
 }
 
 int MnuDocument::get_widget_flags(int p_id) const {
@@ -2030,20 +1815,6 @@ int MnuDocument::get_widget_flags(int p_id) const {
 	return flags;
 }
 
-void MnuDocument::set_widget_flags(int p_id, int p_flags) {
-	mnu::Window *w = window_at(locate(p_id));
-	if (!w) {
-		return;
-	}
-	w->hidden = (p_flags & FLAG_HIDDEN) != 0;
-	w->disabled = (p_flags & FLAG_DISABLED) != 0;
-	w->checked = (p_flags & FLAG_CHECKED) != 0;
-	w->draw_frame = (p_flags & FLAG_DRAW_FRAME) != 0;
-	w->modal = (p_flags & FLAG_MODAL) != 0;
-	w->readonly = (p_flags & FLAG_READONLY) != 0;
-	touch();
-}
-
 int MnuDocument::get_widget_group(int p_id) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	return w ? w->group : 0;
@@ -2057,17 +1828,6 @@ void MnuDocument::set_widget_group(int p_id, int p_group) {
 	w->has_group = true;
 	w->group = p_group;
 	touch();
-}
-
-PackedStringArray MnuDocument::get_flag_labels() const {
-	PackedStringArray out;
-	out.push_back("Hidden");
-	out.push_back("Disabled");
-	out.push_back("Checked");
-	out.push_back("Draw Frame");
-	out.push_back("Modal");
-	out.push_back("Read Only");
-	return out;
 }
 
 // --- Structural mutation ---
@@ -2135,160 +1895,6 @@ void MnuDocument::delete_widget(int p_id) {
 	touch();
 }
 
-int MnuDocument::add_screen(const String &p_name) {
-	mnu::Screen screen = make_default_screen(to_std(p_name));
-	// Stock-shaped root: every shipped screen root is a MAIN window with a full
-	// 4-corner POSITION and at least one APPEARANCE row — the original engine's
-	// layout/render paths assume them (a bare root crashed it).
-	doc_.screens.push_back(std::move(screen));
-
-	IdScreen s;
-	s.id = next_id_++;
-	s.root.id = next_id_++;
-	ids_.push_back(std::move(s));
-
-	touch();
-	return ids_.back().id;
-}
-
-void MnuDocument::delete_screen(int p_screen_id) {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return;
-	}
-	doc_.screens.erase(doc_.screens.begin() + loc.screen_index);
-	ids_.erase(ids_.begin() + loc.screen_index);
-	touch();
-}
-
-PackedByteArray MnuDocument::capture_widget_subtree(int p_id) const {
-	PackedByteArray out;
-	const mnu::Window *w = window_at(locate(p_id));
-	if (w == nullptr) {
-		return out;
-	}
-	mnu::Document clipboard;
-	mnu::Screen screen;
-	screen.name = "CLIPBOARD";
-	screen.root_window = *w;
-	clipboard.screens.push_back(std::move(screen));
-	const std::string bytes = mnu::serialize(clipboard, true, 2);
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
-}
-
-int MnuDocument::insert_widget_subtree(int p_parent_id, const PackedByteArray &p_payload,
-		int p_index, const Vector2i &p_offset) {
-	if (p_payload.is_empty()) {
-		return -1;
-	}
-	mnu::Document clipboard;
-	std::string error;
-	if (!mnu::parse(p_payload.ptr(), static_cast<size_t>(p_payload.size()), clipboard, error)
-			|| clipboard.screens.empty()) {
-		return -1;
-	}
-	const Locator parent_loc = locate(p_parent_id);
-	if (!parent_loc.valid()) {
-		return -1;
-	}
-	mnu::Window *parent = nullptr;
-	IdWindow *id_parent = nullptr;
-	if (parent_loc.is_screen) {
-		parent = &doc_.screens[parent_loc.screen_index].root_window;
-		id_parent = &ids_[parent_loc.screen_index].root;
-	} else {
-		parent = window_at(parent_loc);
-		id_parent = id_window_at(parent_loc);
-	}
-	if (parent == nullptr || id_parent == nullptr) {
-		return -1;
-	}
-
-	mnu::Window pasted = clipboard.screens.front().root_window;
-	if (pasted.position.has_left) pasted.position.left += p_offset.x;
-	if (pasted.position.has_right) pasted.position.right += p_offset.x;
-	if (pasted.position.has_top) pasted.position.top += p_offset.y;
-	if (pasted.position.has_bottom) pasted.position.bottom += p_offset.y;
-	IdWindow pasted_ids = make_id_window(pasted);
-	const int new_id = pasted_ids.id;
-	const int index = p_index < 0
-			? static_cast<int>(parent->children.size())
-			: CLAMP(p_index, 0, static_cast<int>(parent->children.size()));
-	parent->children.insert(parent->children.begin() + index, std::move(pasted));
-	id_parent->children.insert(id_parent->children.begin() + index, std::move(pasted_ids));
-	touch();
-	return new_id;
-}
-
-bool MnuDocument::move_widget_to_index(int p_id, int p_index) {
-	const Locator loc = locate(p_id);
-	if (!loc.valid() || loc.is_screen || loc.path.empty()) {
-		return false;
-	}
-	mnu::Window *parent = &doc_.screens[loc.screen_index].root_window;
-	IdWindow *id_parent = &ids_[loc.screen_index].root;
-	for (size_t i = 0; i + 1 < loc.path.size(); ++i) {
-		parent = &parent->children[loc.path[i]];
-		id_parent = &id_parent->children[loc.path[i]];
-	}
-	const int from = loc.path.back();
-	const int to = CLAMP(p_index, 0, static_cast<int>(parent->children.size()) - 1);
-	if (from == to) {
-		return false;
-	}
-	mnu::Window moved = std::move(parent->children[from]);
-	IdWindow moved_ids = std::move(id_parent->children[from]);
-	parent->children.erase(parent->children.begin() + from);
-	id_parent->children.erase(id_parent->children.begin() + from);
-	const int insert_at = CLAMP(to, 0, static_cast<int>(parent->children.size()));
-	parent->children.insert(parent->children.begin() + insert_at, std::move(moved));
-	id_parent->children.insert(id_parent->children.begin() + insert_at, std::move(moved_ids));
-	touch();
-	return true;
-}
-
-int MnuDocument::duplicate_screen(int p_screen_id, const String &p_name) {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return -1;
-	}
-	mnu::Screen screen = doc_.screens[loc.screen_index];
-	screen.name = to_std(p_name);
-	IdScreen ids;
-	ids.id = next_id_++;
-	ids.root = make_id_window(screen.root_window);
-	const int insert_at = loc.screen_index + 1;
-	doc_.screens.insert(doc_.screens.begin() + insert_at, std::move(screen));
-	ids_.insert(ids_.begin() + insert_at, std::move(ids));
-	touch();
-	return ids_[insert_at].id;
-}
-
-bool MnuDocument::move_screen_to_index(int p_screen_id, int p_index) {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen || doc_.screens.size() < 2) {
-		return false;
-	}
-	const int from = loc.screen_index;
-	const int to = CLAMP(p_index, 0, static_cast<int>(doc_.screens.size()) - 1);
-	if (from == to) {
-		return false;
-	}
-	mnu::Screen moved = std::move(doc_.screens[from]);
-	IdScreen moved_ids = std::move(ids_[from]);
-	doc_.screens.erase(doc_.screens.begin() + from);
-	ids_.erase(ids_.begin() + from);
-	const int insert_at = CLAMP(to, 0, static_cast<int>(doc_.screens.size()));
-	doc_.screens.insert(doc_.screens.begin() + insert_at, std::move(moved));
-	ids_.insert(ids_.begin() + insert_at, std::move(moved_ids));
-	touch();
-	return true;
-}
-
 void MnuDocument::set_native(const mnu::Document &p_doc) {
 	doc_ = p_doc;
 	rebuild_ids();
@@ -2304,7 +1910,6 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_empty"), &MnuDocument::create_empty);
 
 	ClassDB::bind_method(D_METHOD("get_menu_size"), &MnuDocument::get_menu_size);
-	ClassDB::bind_method(D_METHOD("set_menu_size", "size"), &MnuDocument::set_menu_size);
 
 	ClassDB::bind_method(D_METHOD("get_screen_count"), &MnuDocument::get_screen_count);
 	ClassDB::bind_method(D_METHOD("get_screen_ids"), &MnuDocument::get_screen_ids);
@@ -2314,7 +1919,6 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_parent_id", "id"), &MnuDocument::get_parent_id);
 	ClassDB::bind_method(D_METHOD("get_child_ids", "id"), &MnuDocument::get_child_ids);
 	ClassDB::bind_method(D_METHOD("get_widget_type", "id"), &MnuDocument::get_widget_type);
-	ClassDB::bind_method(D_METHOD("get_widget_type_name", "type"), &MnuDocument::get_widget_type_name);
 	ClassDB::bind_method(D_METHOD("get_widget_name", "id"), &MnuDocument::get_widget_name);
 	ClassDB::bind_method(D_METHOD("get_window_rect", "id"), &MnuDocument::get_window_rect);
 
@@ -2322,8 +1926,6 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_screen_has_music_var", "screen_id"), &MnuDocument::get_screen_has_music_var);
 	ClassDB::bind_method(D_METHOD("get_screen_music_var", "screen_id"), &MnuDocument::get_screen_music_var);
 	ClassDB::bind_method(D_METHOD("get_screen_text_rsrc", "screen_id"), &MnuDocument::get_screen_text_rsrc);
-	ClassDB::bind_method(D_METHOD("get_screen_cursor_file", "screen_id"), &MnuDocument::get_screen_cursor_file);
-	ClassDB::bind_method(D_METHOD("get_screen_cursor_flags", "screen_id"), &MnuDocument::get_screen_cursor_flags);
 	ClassDB::bind_method(D_METHOD("set_screen_property", "screen_id", "key", "value"), &MnuDocument::set_screen_property);
 
 	ClassDB::bind_method(D_METHOD("set_widget_name", "id", "name"), &MnuDocument::set_widget_name);
@@ -2331,9 +1933,7 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_widget_text", "id"), &MnuDocument::get_widget_text);
 	ClassDB::bind_method(D_METHOD("set_widget_text", "id", "text"), &MnuDocument::set_widget_text);
 	ClassDB::bind_method(D_METHOD("get_widget_string_type", "id"), &MnuDocument::get_widget_string_type);
-	ClassDB::bind_method(D_METHOD("set_widget_string_type", "id", "type"), &MnuDocument::set_widget_string_type);
 	ClassDB::bind_method(D_METHOD("get_widget_font", "id"), &MnuDocument::get_widget_font);
-	ClassDB::bind_method(D_METHOD("set_widget_font", "id", "font"), &MnuDocument::set_widget_font);
 	ClassDB::bind_method(D_METHOD("get_widget_datasource", "id"), &MnuDocument::get_widget_datasource);
 	ClassDB::bind_method(D_METHOD("set_widget_datasource", "id", "value"), &MnuDocument::set_widget_datasource);
 	ClassDB::bind_method(D_METHOD("get_widget_orientation", "id"), &MnuDocument::get_widget_orientation);
@@ -2360,51 +1960,24 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_table_headers", "id"), &MnuDocument::get_table_headers);
 	ClassDB::bind_method(D_METHOD("set_table_header", "id", "index", "row"), &MnuDocument::set_table_header);
 	ClassDB::bind_method(D_METHOD("add_table_header", "id", "row"), &MnuDocument::add_table_header);
-	ClassDB::bind_method(D_METHOD("remove_table_header", "id", "index"), &MnuDocument::remove_table_header);
 	ClassDB::bind_method(D_METHOD("get_table_bodies", "id"), &MnuDocument::get_table_bodies);
 	ClassDB::bind_method(D_METHOD("set_table_body", "id", "index", "row"), &MnuDocument::set_table_body);
 	ClassDB::bind_method(D_METHOD("add_table_body", "id", "row"), &MnuDocument::add_table_body);
 	ClassDB::bind_method(D_METHOD("remove_table_body", "id", "index"), &MnuDocument::remove_table_body);
-	ClassDB::bind_method(D_METHOD("get_table_substs", "id"), &MnuDocument::get_table_substs);
-	ClassDB::bind_method(D_METHOD("set_table_subst", "id", "index", "row"), &MnuDocument::set_table_subst);
-	ClassDB::bind_method(D_METHOD("add_table_subst", "id", "row"), &MnuDocument::add_table_subst);
-	ClassDB::bind_method(D_METHOD("remove_table_subst", "id", "index"), &MnuDocument::remove_table_subst);
 
 	ClassDB::bind_method(D_METHOD("get_widget_color", "id", "slot"), &MnuDocument::get_widget_color);
-	ClassDB::bind_method(D_METHOD("set_widget_color", "id", "slot", "value"), &MnuDocument::set_widget_color);
-	ClassDB::bind_static_method("MnuDocument", D_METHOD("parse_color_token", "token"),
-			&MnuDocument::parse_color_token);
-	ClassDB::bind_static_method("MnuDocument", D_METHOD("format_color_token", "color", "force_alpha"),
-			&MnuDocument::format_color_token, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_widget_texture", "id", "slot"), &MnuDocument::get_widget_texture);
-	ClassDB::bind_method(D_METHOD("set_widget_texture", "id", "slot", "value"), &MnuDocument::set_widget_texture);
 	ClassDB::bind_method(D_METHOD("get_widget_appearances", "id"), &MnuDocument::get_widget_appearances);
-	ClassDB::bind_method(D_METHOD("set_widget_appearances", "id", "rows"), &MnuDocument::set_widget_appearances);
-	ClassDB::bind_method(D_METHOD("get_window_frame", "id"), &MnuDocument::get_window_frame);
-	ClassDB::bind_method(D_METHOD("set_window_frame", "id", "frame"), &MnuDocument::set_window_frame);
-	ClassDB::bind_method(D_METHOD("widget_has_scrollbar", "id"), &MnuDocument::widget_has_scrollbar);
-	ClassDB::bind_method(D_METHOD("widget_has_spin_arrows", "id"), &MnuDocument::widget_has_spin_arrows);
-	ClassDB::bind_method(D_METHOD("get_window_rect_flags", "id"), &MnuDocument::get_window_rect_flags);
 	BIND_CONSTANT(RECT_HAS_LEFT);
 	BIND_CONSTANT(RECT_HAS_TOP);
 	BIND_CONSTANT(RECT_HAS_RIGHT);
 	BIND_CONSTANT(RECT_HAS_BOTTOM);
 	ClassDB::bind_method(D_METHOD("get_widget_flags", "id"), &MnuDocument::get_widget_flags);
-	ClassDB::bind_method(D_METHOD("set_widget_flags", "id", "flags"), &MnuDocument::set_widget_flags);
 	ClassDB::bind_method(D_METHOD("get_widget_group", "id"), &MnuDocument::get_widget_group);
 	ClassDB::bind_method(D_METHOD("set_widget_group", "id", "group"), &MnuDocument::set_widget_group);
-	ClassDB::bind_method(D_METHOD("get_flag_labels"), &MnuDocument::get_flag_labels);
 
 	ClassDB::bind_method(D_METHOD("add_widget", "parent_id", "type", "rect"), &MnuDocument::add_widget);
 	ClassDB::bind_method(D_METHOD("delete_widget", "id"), &MnuDocument::delete_widget);
-	ClassDB::bind_method(D_METHOD("add_screen", "name"), &MnuDocument::add_screen);
-	ClassDB::bind_method(D_METHOD("delete_screen", "screen_id"), &MnuDocument::delete_screen);
-	ClassDB::bind_method(D_METHOD("capture_widget_subtree", "id"), &MnuDocument::capture_widget_subtree);
-	ClassDB::bind_method(D_METHOD("insert_widget_subtree", "parent_id", "payload", "index", "offset"),
-			&MnuDocument::insert_widget_subtree, DEFVAL(-1), DEFVAL(Vector2i()));
-	ClassDB::bind_method(D_METHOD("move_widget_to_index", "id", "index"), &MnuDocument::move_widget_to_index);
-	ClassDB::bind_method(D_METHOD("duplicate_screen", "screen_id", "name"), &MnuDocument::duplicate_screen);
-	ClassDB::bind_method(D_METHOD("move_screen_to_index", "screen_id", "index"), &MnuDocument::move_screen_to_index);
 
 	ClassDB::bind_method(D_METHOD("capture_state"), &MnuDocument::capture_state);
 	ClassDB::bind_method(D_METHOD("apply_state", "state"), &MnuDocument::apply_state);

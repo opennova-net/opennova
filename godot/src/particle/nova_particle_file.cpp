@@ -24,7 +24,6 @@ void ParticleFile::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("load_from_file", "path"), &ParticleFile::load_from_file);
 	ClassDB::bind_method(D_METHOD("load_from_buffer", "bytes", "display_path"), &ParticleFile::load_from_buffer);
-	ClassDB::bind_method(D_METHOD("save_to_file", "path"), &ParticleFile::save_to_file);
 	ClassDB::bind_method(D_METHOD("find_effect", "id"), &ParticleFile::find_effect);
 	ClassDB::bind_method(D_METHOD("find_particle", "id"), &ParticleFile::find_particle);
 	ClassDB::bind_method(D_METHOD("find_table", "id"), &ParticleFile::find_table);
@@ -81,35 +80,6 @@ Error ParticleFile::load_from_buffer(const PackedByteArray &bytes, const String 
 	}
 	source_path = display_path;
 	copy_from_native(native);
-	return OK;
-}
-
-Error ParticleFile::save_to_file(const String &path) {
-	opennova::particle::ParticleFile native = to_native();
-	std::string err;
-	std::ostringstream stream;
-	if (!opennova::particle::save_particles(stream, native, err)) {
-		UtilityFunctions::push_warning(String::utf8(("ptl save failed: " + err).c_str()));
-		return ERR_FILE_CANT_WRITE;
-	}
-	const std::string serialized = stream.str();
-	PackedByteArray bytes;
-	bytes.resize(static_cast<int64_t>(serialized.size()));
-	if (!serialized.empty()) {
-		std::memcpy(bytes.ptrw(), serialized.data(), serialized.size());
-	}
-	Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
-	if (file.is_null()) {
-		UtilityFunctions::push_warning("ptl save failed: cannot open ", path);
-		return ERR_FILE_CANT_WRITE;
-	}
-	if (!file->store_buffer(bytes)) {
-		file->close();
-		UtilityFunctions::push_warning("ptl save failed: short write to ", path);
-		return ERR_FILE_CANT_WRITE;
-	}
-	file->close();
-	source_path = path;
 	return OK;
 }
 

@@ -454,14 +454,6 @@ Array ObjectModel::get_surface_materials() const {
 	return result;
 }
 
-Dictionary ObjectModel::get_material_defs() const {
-	Dictionary result;
-	for (const KeyValue<int64_t, Dictionary> &kv : material_defs_) {
-		result[kv.key] = kv.value;
-	}
-	return result;
-}
-
 void ObjectModel::set_playing(bool p_value) {
 	is_playing_ = p_value;
 	wake_runtime_frame();
@@ -473,16 +465,6 @@ void ObjectModel::set_panm_clock(const Ref<PanmClock> &p_clock) {
 	if (panm_clock_.is_valid()) {
 		anim_time_ms_ = panm_clock_->get_time_ms();
 	}
-	apply_runtime_state(0.0);
-}
-
-void ObjectModel::reset_animation_time() {
-	wake_runtime_frame();
-	anim_time_ms_ = 0;
-	anim_time_ = 0.0;
-	anim_external_phase_ = false;
-	body_phase_stamp_valid_ = false;
-	reset_remote_body_state();
 	apply_runtime_state(0.0);
 }
 
@@ -781,10 +763,9 @@ void ObjectModel::refresh_awake_environment() {
 	}
 }
 
-int64_t ObjectModel::awake_model_count() {
-	return static_cast<int64_t>(awake_models_.size());
-}
-
+// MATCHTERRAIN-class instances read the terrain page projection (the c7/c8 fold at
+// Foliage_RenderFarPatches @0x60a220..0x60a34f; class selection CRenderBatchQueue_FlushBatches
+// @0x5d9ff3 - docs/render/render-material-re.md).
 void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 		float p_layer, const Vector4 &p_projection) {
 	const StringName enabled_name("u_match_terrain_enabled");
@@ -1409,8 +1390,6 @@ void ObjectModel::_bind_methods() {
 			D_METHOD("refresh_awake_environment"),
 			&ObjectModel::refresh_awake_environment);
 	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("awake_model_count"), &ObjectModel::awake_model_count);
-	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("refresh_match_terrain_frame", "terrain"),
 			&ObjectModel::refresh_match_terrain_frame);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
@@ -1439,8 +1418,6 @@ void ObjectModel::_bind_methods() {
 			"set_native_frame", "get_native_frame");
 	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
 			&ObjectModel::set_match_terrain_enabled);
-	ClassDB::bind_method(D_METHOD("is_match_terrain_enabled"),
-			&ObjectModel::is_match_terrain_enabled);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
@@ -1449,34 +1426,16 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_static_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_static_shadow_caster_enabled"),
 			&ObjectModel::is_static_shadow_caster_enabled);
-	ClassDB::bind_method(D_METHOD("set_slot_shadow_person", "person"),
-			&ObjectModel::set_slot_shadow_person);
-	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
-			&ObjectModel::is_slot_shadow_person);
-	ClassDB::bind_method(D_METHOD("set_entity_uniform_scale_q16", "scale_q16"),
-			&ObjectModel::set_entity_uniform_scale_q16);
 	ClassDB::bind_method(D_METHOD("get_entity_uniform_scale_q16"),
 			&ObjectModel::get_entity_uniform_scale_q16);
 	ClassDB::bind_method(D_METHOD("compose_entity_transform", "basis", "origin"),
 			&ObjectModel::compose_entity_transform);
 	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
 			&ObjectModel::set_shadow_bound_radii);
-	ClassDB::bind_method(D_METHOD("get_model_sphere_radius"),
-			&ObjectModel::get_model_sphere_radius);
-	ClassDB::bind_method(D_METHOD("get_entity_bound_radius"),
-			&ObjectModel::get_entity_bound_radius);
-	ClassDB::bind_method(D_METHOD("set_slot_shadow_decal", "texture", "dims"),
-			&ObjectModel::set_slot_shadow_decal);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
 			&ObjectModel::set_slot_shadow_capture_with);
-	ClassDB::bind_method(D_METHOD("get_slot_shadow_decal_texture"),
-			&ObjectModel::get_slot_shadow_decal_texture);
-	ClassDB::bind_method(D_METHOD("get_slot_shadow_decal_dims"),
-			&ObjectModel::get_slot_shadow_decal_dims);
 	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
 			&ObjectModel::set_environment_state);
-	ClassDB::bind_method(D_METHOD("get_environment_state"),
-			&ObjectModel::get_environment_state);
 	ClassDB::bind_method(
 			D_METHOD("set_entity_lighting_context", "effect_scale", "interior_lerp",
 					"interior_daylight"),
@@ -1494,19 +1453,13 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_surface_material_indices);
 	ClassDB::bind_method(D_METHOD("get_surface_materials"),
 			&ObjectModel::get_surface_materials);
-	ClassDB::bind_method(D_METHOD("get_material_defs"), &ObjectModel::get_material_defs);
 	ClassDB::bind_method(D_METHOD("is_playing"), &ObjectModel::is_playing);
 	ClassDB::bind_method(D_METHOD("set_playing", "value"), &ObjectModel::set_playing);
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"), &ObjectModel::set_panm_clock);
-	ClassDB::bind_method(D_METHOD("get_panm_clock"), &ObjectModel::get_panm_clock);
-	ClassDB::bind_method(D_METHOD("reset_animation_time"),
-			&ObjectModel::reset_animation_time);
 	ClassDB::bind_method(D_METHOD("set_active_lod", "lod_index"),
 			&ObjectModel::set_active_lod);
 	ClassDB::bind_method(D_METHOD("get_active_lod"), &ObjectModel::get_active_lod);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
-	ClassDB::bind_method(D_METHOD("refresh_render_order"),
-			&ObjectModel::refresh_render_order);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
@@ -1533,8 +1486,6 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_muzzle"), &ObjectModel::has_muzzle);
 	ClassDB::bind_method(D_METHOD("set_muzzle_point_name", "name"),
 			&ObjectModel::set_muzzle_point_name);
-	ClassDB::bind_method(D_METHOD("get_muzzle_point_name"),
-			&ObjectModel::get_muzzle_point_name);
 	ClassDB::bind_method(D_METHOD("get_muzzle_world_position"),
 			&ObjectModel::get_muzzle_world_position);
 	ClassDB::bind_method(D_METHOD("play_body_clip", "key"), &ObjectModel::play_body_clip);

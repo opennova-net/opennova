@@ -24,10 +24,8 @@ void MissionCatalogRow::_bind_methods() {
 			D_METHOD("create", "file", "title", "briefing", "game_type", "loose"),
 			&MissionCatalogRow::create);
 	ClassDB::bind_method(D_METHOD("get_file"), &MissionCatalogRow::get_file);
-	ClassDB::bind_method(D_METHOD("get_title"), &MissionCatalogRow::get_title);
 	ClassDB::bind_method(D_METHOD("get_briefing"), &MissionCatalogRow::get_briefing);
 	ClassDB::bind_method(D_METHOD("get_game_type"), &MissionCatalogRow::get_game_type);
-	ClassDB::bind_method(D_METHOD("is_loose"), &MissionCatalogRow::is_loose);
 	ClassDB::bind_method(D_METHOD("display_text"), &MissionCatalogRow::display_text);
 }
 

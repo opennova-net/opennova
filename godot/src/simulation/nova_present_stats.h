@@ -43,9 +43,30 @@ public:
 	NOVA_STAT_FIELD(live)
 	NOVA_STAT_FIELD(spawned)
 	NOVA_STAT_FIELD(unresolved)
+	NOVA_STAT_FIELD(pending) // cold rows the spawn budget deferred last frame
 
 	static Ref<WirePresentStats> create(int64_t p_live, int64_t p_spawned,
-			int64_t p_unresolved);
+			int64_t p_unresolved, int64_t p_pending = 0);
+
+protected:
+	static void _bind_methods();
+};
+
+// Typed diagnostic snapshot for the ScarPresenter device: world_surfaces,
+// entity_meshes, batches, vertices, textures_missing (strips drawn this
+// present whose TGA has not resolved — re-tried every present),
+// strips_unsupported (strips drawn this present whose mode word decodes to
+// neither shipped drawer state; they draw in the scorch state).
+class ScarPresenterStats : public RefCounted {
+	GDCLASS(ScarPresenterStats, RefCounted)
+
+public:
+	NOVA_STAT_FIELD(world_surfaces)
+	NOVA_STAT_FIELD(entity_meshes)
+	NOVA_STAT_FIELD(batches)
+	NOVA_STAT_FIELD(vertices)
+	NOVA_STAT_FIELD(textures_missing)
+	NOVA_STAT_FIELD(strips_unsupported)
 
 protected:
 	static void _bind_methods();

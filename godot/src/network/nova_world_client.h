@@ -93,7 +93,6 @@ public:
 	// the GSB endpoint once the session is verified; rows arrive asynchronously
 	// (watch the `server_list_updated` signal, then read get_server_rows()).
 	Array get_server_rows() const;
-	void refresh_server_list();   // re-fetch the GSB now (also auto-fired on connect)
 
 	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
 	// (prepare GET -> login POST -> relay GET) and fills the cookie jar the

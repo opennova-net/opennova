@@ -89,35 +89,12 @@ void PresentApplier::_bind_methods() {
 			D_METHOD("profile_present_snapshot", "snap", "stride",
 					"layout_revision"),
 			&PresentApplier::profile_present_snapshot);
-	ClassDB::bind_method(D_METHOD("get_stats"), &PresentApplier::get_stats);
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&PresentApplier::get_stats_record);
 	ClassDB::bind_method(D_METHOD("present"), &PresentApplier::present);
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("bms_to_godot_basis", "rot_deg"),
 			&PresentApplier::bms_to_godot_basis);
-	ClassDB::bind_method(D_METHOD("setup_wire", "rebuild_held_weapon"),
-			&PresentApplier::setup_wire);
-	ClassDB::bind_method(
-			D_METHOD("begin_wire_plan", "layout_revision", "stride",
-					"snapshot_size", "index_generation", "local_handle"),
-			&PresentApplier::begin_wire_plan);
-	ClassDB::bind_method(
-			D_METHOD("append_wire_row", "node", "base", "handle", "spawned_now"),
-			&PresentApplier::append_wire_row);
-	ClassDB::bind_method(D_METHOD("append_wire_deferred", "node"),
-			&PresentApplier::append_wire_deferred);
-	ClassDB::bind_method(
-			D_METHOD("wire_plan_is_current", "snapshot_size", "stride",
-					"layout_revision", "index_generation", "local_handle"),
-			&PresentApplier::wire_plan_is_current);
-	ClassDB::bind_method(
-			D_METHOD("present_wire_rows", "snap", "stride", "tick_delta"),
-			&PresentApplier::present_wire_rows);
-	ClassDB::bind_method(D_METHOD("release_wire_handle", "handle"),
-			&PresentApplier::release_wire_handle);
-	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
-			&PresentApplier::reset_wire_runtime_state);
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",
 					"hand_frame"),
@@ -144,31 +121,8 @@ void PresentApplier::_bind_methods() {
 			D_METHOD("aim_apply", "node", "snap", "base", "drive_root_basis"),
 			&PresentApplier::aim_apply, DEFVAL(true));
 	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("aim_apply_valid", "node", "snap", "base", "drive_root_basis"),
-			&PresentApplier::aim_apply_valid, DEFVAL(true));
-	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("emplaced_apply", "node", "snap", "base", "clear_when_invalid"),
 			&PresentApplier::emplaced_apply);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("emplaced_clear", "node"), &PresentApplier::emplaced_clear);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("vehicle_motion_apply", "node", "snap", "base"),
-			&PresentApplier::vehicle_motion_apply);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("vehicle_motion_clear", "node"),
-			&PresentApplier::vehicle_motion_clear);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("zone_team_apply", "node", "snap", "base"),
-			&PresentApplier::zone_team_apply);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("zone_team_clear", "node"),
-			&PresentApplier::zone_team_clear);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("world_heat_apply", "node", "snap", "base"),
-			&PresentApplier::world_heat_apply);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("world_heat_clear", "node"),
-			&PresentApplier::world_heat_clear);
 	BIND_ENUM_CONSTANT(OUTPUT_TRANSFORM);
 	BIND_ENUM_CONSTANT(OUTPUT_PART_ANIM);
 	BIND_ENUM_CONSTANT(OUTPUT_VISIBILITY);
@@ -245,23 +199,6 @@ void PresentApplier::set_shared_visibility_maps(
 		const Dictionary &occlusion_hidden_ids, const Dictionary &present_visibility) {
 	occlusion_hidden_ids_ = occlusion_hidden_ids;
 	present_visibility_ = present_visibility;
-}
-
-Dictionary PresentApplier::get_stats() const {
-	Dictionary d;
-	d["moved"] = stat_moved_;
-	d["posed"] = stat_posed_;
-	d["hidden"] = stat_hidden_;
-	d["muzzles"] = stat_muzzles_;
-	d["plan_rebuilds"] = stat_plan_rebuilds_;
-	d["transform_builds"] = stat_transform_builds_;
-	d["aim_dispatches"] = stat_aim_dispatches_;
-	d["rhc_dispatches"] = stat_rhc_dispatches_;
-	d["part_dispatches"] = stat_part_dispatches_;
-	d["control_dispatches"] = stat_control_dispatches_;
-	d["body_dispatches"] = stat_body_dispatches_;
-	d["muzzle_queries"] = stat_muzzle_queries_;
-	return d;
 }
 
 Ref<MissionPresentStats> PresentApplier::get_stats_record() const {
@@ -566,52 +503,6 @@ int PresentApplier::emplaced_apply(Object *node,
 	return model != nullptr
 			? emplaced_apply_typed(model, snap, base, clear_when_invalid)
 			: 0;
-}
-
-void PresentApplier::emplaced_clear(Object *node) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	if (model != nullptr) {
-		emplaced_clear_typed(model);
-	}
-}
-
-int PresentApplier::vehicle_motion_apply(Object *node,
-		const PackedFloat32Array &snap, int base) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	return model != nullptr ? vehicle_motion_apply_typed(model, snap, base) : 0;
-}
-
-void PresentApplier::vehicle_motion_clear(Object *node) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	if (model != nullptr) {
-		vehicle_motion_clear_typed(model);
-	}
-}
-
-int PresentApplier::zone_team_apply(Object *node,
-		const PackedFloat32Array &snap, int base) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	return model != nullptr ? zone_team_apply_typed(model, snap, base) : 0;
-}
-
-void PresentApplier::zone_team_clear(Object *node) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	if (model != nullptr) {
-		zone_team_clear_typed(model);
-	}
-}
-
-int PresentApplier::world_heat_apply(Object *node,
-		const PackedFloat32Array &snap, int base) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	return model != nullptr ? world_heat_apply_typed(model, snap, base) : 0;
-}
-
-void PresentApplier::world_heat_clear(Object *node) {
-	ObjectModel *model = Object::cast_to<ObjectModel>(node);
-	if (model != nullptr) {
-		world_heat_clear_typed(model);
-	}
 }
 
 int64_t PresentApplier::current_index_generation() {

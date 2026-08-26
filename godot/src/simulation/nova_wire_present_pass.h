@@ -72,7 +72,6 @@ public:
 
 	// Cold rows the budget deferred on the last presented frame.
 	int pending_spawn_count() const { return pending_spawn_count_; }
-	Dictionary get_stats() const;
 	Ref<WirePresentStats> get_stats_record() const;
 
 	// The live model owned by this presenter for a packed pool/slot handle
@@ -141,6 +140,9 @@ private:
 	HashMap<int32_t, int32_t> unresolved_;
 	HashMap<int32_t, ObjectID> weapon_nodes_;
 	HashMap<int32_t, String> weapon_graphics_;
+	// Mirrors the retail per-entity lighting fields (setup_terrain_effect_for_entity
+	// @0x5c74a0; sun visibility Entity_ComputeSunVisibility @0x5c6800 -
+	// docs/render/render-lighting-re.md).
 	struct LightingContext {
 		float effect_scale = 1.0f;
 		bool interior_lerp = false;

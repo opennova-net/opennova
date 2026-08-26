@@ -58,10 +58,6 @@ Error WacProgram::compile_from_resource_root(const Ref<ResourceRoot> &p_root, co
 	return compile_sources(sources);
 }
 
-bool WacProgram::is_compiled() const {
-	return compiled_;
-}
-
 bool WacProgram::is_ok() const {
 	return compiled_ && program_.ok();
 }
@@ -95,7 +91,6 @@ void WacProgram::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("compile_source", "source"), &WacProgram::compile_source);
 	ClassDB::bind_method(D_METHOD("compile_sources", "sources"), &WacProgram::compile_sources);
 	ClassDB::bind_method(D_METHOD("compile_from_resource_root", "root", "mission_basename"), &WacProgram::compile_from_resource_root);
-	ClassDB::bind_method(D_METHOD("is_compiled"), &WacProgram::is_compiled);
 	ClassDB::bind_method(D_METHOD("is_ok"), &WacProgram::is_ok);
 	ClassDB::bind_method(D_METHOD("get_error_count"), &WacProgram::get_error_count);
 	ClassDB::bind_method(D_METHOD("get_diagnostics"), &WacProgram::get_diagnostics);

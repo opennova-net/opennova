@@ -221,7 +221,7 @@ func _ctrl(model: ObjectModel, name: String) -> int:
 
 
 func _stat(p: Object, key: String) -> int:
-	return int(p.get_stats()[key])
+	return int(p.get_stats_record().get(key))
 
 
 func _clip_time(model: ObjectModel, key: String, phase_ticks: int) -> float:
@@ -931,23 +931,20 @@ func test_stable_revisioned_snapshot_caches_pose_and_reasserts_live_publishers()
 		"right_hand_collapsed": 1,
 	}]
 	_present(p, snap)
-	var stats: Dictionary = p.get_stats()
-	var stats_record: MissionPresentStats = p.get_stats_record()
-	assert_eq(stats_record.transform_builds, int(stats["transform_builds"]))
-	assert_eq(stats_record.muzzle_queries, int(stats["muzzle_queries"]))
+	var stats: MissionPresentStats = p.get_stats_record()
 
 	# Visibility and the AI muzzle seam are live outputs, so a stable snapshot
 	# must not short-circuit the entire row.
 	model.visible = false
 	_present(p, snap)
-	var next_stats: Dictionary = p.get_stats()
+	var next_stats: MissionPresentStats = p.get_stats_record()
 	assert_true(model.visible, "live visibility ownership is reconciled every frame")
-	assert_eq(int(next_stats["muzzle_queries"]), int(stats["muzzle_queries"]) + 1,
+	assert_eq(next_stats.muzzle_queries, stats.muzzle_queries + 1,
 			"the four-tick muzzle-freshness seam still samples every frame")
-	assert_eq(int(next_stats["muzzles"]), int(stats["muzzles"]) + 1,
+	assert_eq(next_stats.muzzles, stats.muzzles + 1,
 			"the fresh muzzle sample still reaches the simulation")
 
-	assert_eq(int(next_stats["moved"]), int(stats["moved"]),
+	assert_eq(next_stats.moved, stats.moved,
 			"stable transform inputs do not rebuild or write the root transform")
 	for key in [
 		"transform_builds",
@@ -955,10 +952,10 @@ func test_stable_revisioned_snapshot_caches_pose_and_reasserts_live_publishers()
 		"rhc_dispatches",
 		"body_dispatches",
 	]:
-		assert_eq(int(next_stats[key]), int(stats[key]),
+		assert_eq(int(next_stats.get(key)), int(stats.get(key)),
 				"stable rows add no %s work" % key)
-	assert_eq(int(next_stats["part_dispatches"]),
-			int(stats["part_dispatches"]) + 1,
+	assert_eq(next_stats.part_dispatches,
+			stats.part_dispatches + 1,
 			"an active PLAYPART writer is reasserted at every submission")
 	assert_eq(int(next_stats["control_dispatches"]),
 			int(stats["control_dispatches"]) + 2,

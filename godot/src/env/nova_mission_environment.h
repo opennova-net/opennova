@@ -46,7 +46,6 @@ public:
 
 	// --- mission clock -----------------------------------------------------
 	void configure_mission_clock(int p_start_time_q8_8, int p_minutes_per_day);
-	int get_mission_advance_per_tick() const;
 	static double mission_start_time_hhmm(int p_start_time_q8_8);
 	void advance_mission_clock(int p_ticks);
 	Error debug_set_mission_minute_of_day(double p_minute_of_day);
@@ -64,7 +63,6 @@ public:
 	int get_network_quake_ticks() const;
 	float get_network_rain_current() const;
 	float get_overcast_blend() const;
-	int get_network_precipitation_kind() const;
 
 	// --- the weather-driven split -------------------------------------------
 	void set_weather_driven(bool p_driven);
@@ -117,19 +115,11 @@ public:
 	Vector3 get_fill_light_target() const;
 	Vector3 get_sun_light_target() const;
 	Vector3 get_fog_color_target() const;
-	Vector3 get_fog_color_base_target() const;
 	Vector3 get_sky_ambient_target() const;
-	Vector3 get_skyfog_color_target() const;
 	Vector3 get_ceiling_color_target() const;
 	Vector3 get_cloud_tint_target() const;
 	Vector3 get_floor_color_target() const;
 	Vector3 get_lightning_color_target() const;
-	Vector3 get_sky_base_target() const;
-	Vector3 get_sky_bright_target() const;
-	Vector3 get_sky_highlight_target() const;
-	Vector3 get_cloud_base_target() const;
-	Vector3 get_cloud_highlight_target() const;
-	Vector3 get_cloud_edge_target() const;
 
 	// --- terrain / water / directions ---------------------------------------
 	Vector3 get_terrain_tint() const;
@@ -188,7 +178,6 @@ public:
 	void set_smoothed_scalars(float p_fog_distance, float p_sky_height,
 			float p_sun_dim_pct = 0.0f, float p_rain_current = 0.0f,
 			float p_overcast_blend = 0.0f);
-	float get_sun_dim_pct() const;
 
 	Ref<Texture2D> get_sky_map1_tex() const;
 	Ref<Texture2D> get_sky_map2_tex() const;

@@ -403,7 +403,7 @@ func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:
 	snap.entities = [{ "type_id": TYPE_UNRESOLVED, "handle": 0x1004 }]
 	_present(p, snap)
 	assert_eq(p.entity_count(), 0)
-	assert_eq(int(p.get_stats().get("unresolved", -1)), 1)
+	assert_eq(int(p.get_stats_record().unresolved), 1)
 
 	snap.entities = []
 	_present(p, snap, 2)
@@ -603,7 +603,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 	_present(p, snap)
 	assert_eq(p.entity_count(), 2,
 			"one presentation call cannot build beyond its cold-spawn budget")
-	assert_eq(int(p.get_stats().get("pending", -1)), 3)
+	assert_eq(int(p.get_stats_record().pending), 3)
 	assert_eq(observer.calls.size(), 2)
 	assert_eq(camera.position, Vector3.ZERO,
 			"one-shot spectator framing waits for the complete cold cohort")
@@ -614,7 +614,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 	snap.entities[0]["x"] = 40.0
 	_present(p, snap)
 	assert_eq(p.entity_count(), 4)
-	assert_eq(int(p.get_stats().get("pending", -1)), 1)
+	assert_eq(int(p.get_stats_record().pending), 1)
 	assert_almost_eq(first.position.x, 40.0, 0.001,
 			"already-live rows keep updating while later cold rows drain")
 	assert_eq(observer.calls.size(), 4)
@@ -622,7 +622,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 
 	_present(p, snap)
 	assert_eq(p.entity_count(), 5)
-	assert_eq(int(p.get_stats().get("pending", -1)), 0)
+	assert_eq(int(p.get_stats_record().pending), 0)
 	assert_eq(observer.calls.size(), 5,
 			"every materialized row is registered exactly once across batches")
 	assert_almost_eq(camera.position.x, 13.2, 0.001,
@@ -662,13 +662,13 @@ func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacemen
 	_present(p, snap, 2)
 	assert_null(p.resolve_wire_handle(0x1004),
 			"a now-mismatched live node is retired even after this frame spends its budget")
-	assert_eq(int(p.get_stats().get("pending", -1)), 2)
+	assert_eq(int(p.get_stats_record().pending), 2)
 
 	_present(p, snap, 2)
 	_present(p, snap, 2)
 	assert_ne(p.resolve_wire_handle(0x1004), retired)
 	assert_eq(p.entity_count(), 3)
-	assert_eq(int(p.get_stats().get("pending", -1)), 0)
+	assert_eq(int(p.get_stats_record().pending), 0)
 	assert_eq(observer.calls.size(), 4,
 			"the retired incarnation and each replacement register only once")
 
@@ -684,14 +684,14 @@ func test_unresolved_attempt_consumes_budget_without_stranding_later_rows() -> v
 		{ "type_id": TYPE_PUMP, "handle": 0x1005 },
 	]
 	_present(p, snap)
-	assert_eq(int(p.get_stats().get("unresolved", -1)), 1)
-	assert_eq(int(p.get_stats().get("pending", -1)), 1)
+	assert_eq(int(p.get_stats_record().unresolved), 1)
+	assert_eq(int(p.get_stats_record().pending), 1)
 	_present(p, snap)
 	assert_eq(p.entity_count(), 1,
 			"a cached unresolved row does not consume every later batch")
-	assert_eq(int(p.get_stats().get("pending", -1)), 0)
+	assert_eq(int(p.get_stats_record().pending), 0)
 	_present(p, snap)
-	assert_eq(int(p.get_stats().get("unresolved", -1)), 1,
+	assert_eq(int(p.get_stats_record().unresolved), 1,
 			"a stable unresolved type is not retried once the plan converges")
 
 

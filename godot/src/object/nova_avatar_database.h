@@ -156,7 +156,6 @@ public:
 	// by (kind, name). Dictionaries carry name/display_name/graphic/graphic_j/
 	// graphic_s/camo (Vector3i-as-Array)/voice/sex/kind.
 	PackedStringArray get_part_names(int kind) const;
-	Array get_parts(int kind) const;
 	Dictionary get_part(int kind, const String &name) const;
 
 	// Tree navigation by index (the order they appear in the file).

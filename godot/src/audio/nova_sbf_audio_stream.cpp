@@ -16,7 +16,6 @@ using namespace godot;
 
 void SbfAudioStream::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_index"), &SbfAudioStream::get_index);
-	ClassDB::bind_method(D_METHOD("get_entry_index"), &SbfAudioStream::get_entry_index);
 }
 
 void SbfAudioStream::configure(SbfBank *p_bank, int p_entry_index) {

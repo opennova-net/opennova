@@ -50,7 +50,6 @@ public:
 	// Parse from in-memory bytes (VFS/PFF-mounted .ptl); display_path becomes
 	// source_path for status surfaces without implying a loose file exists.
 	Error load_from_buffer(const PackedByteArray &bytes, const String &display_path);
-	Error save_to_file(const String &path);
 
 	// Convenience lookups by id (returns null Ref on miss).
 	Ref<ParticleEffect> find_effect(const String &id) const;

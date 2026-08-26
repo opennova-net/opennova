@@ -43,7 +43,6 @@ public:
 	// mission — callers leave the VM unloaded).
 	Error compile_from_resource_root(const Ref<ResourceRoot> &p_root, const String &p_mission_basename);
 
-	bool is_compiled() const;
 	bool is_ok() const;
 	int get_error_count() const;
 	// Array of { line, col, message, error } from parse + compile.

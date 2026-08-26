@@ -86,7 +86,6 @@ void MissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_weapon_loadout"), &MissionData::get_weapon_loadout);
 	ClassDB::bind_method(D_METHOD("set_weapon_loadout", "entries"), &MissionData::set_weapon_loadout);
-	ClassDB::bind_method(D_METHOD("get_item_availability"), &MissionData::get_item_availability);
 	ClassDB::bind_method(D_METHOD("get_group_count"), &MissionData::get_group_count);
 	ClassDB::bind_method(D_METHOD("get_groups"), &MissionData::get_groups);
 	ClassDB::bind_method(D_METHOD("get_group", "index"), &MissionData::get_group);
@@ -105,13 +104,11 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_event_trigger", "event_index", "local_index"), &MissionData::remove_event_trigger);
 	ClassDB::bind_method(D_METHOD("move_event_trigger", "event_index", "local_index", "delta"), &MissionData::move_event_trigger);
 	ClassDB::bind_method(D_METHOD("add_event_action", "event_index", "action"), &MissionData::add_event_action);
-	ClassDB::bind_method(D_METHOD("set_event_action", "event_index", "local_index", "action"), &MissionData::set_event_action);
 	ClassDB::bind_method(D_METHOD("remove_event_action", "event_index", "local_index"), &MissionData::remove_event_action);
 	ClassDB::bind_method(D_METHOD("move_event_action", "event_index", "local_index", "delta"), &MissionData::move_event_action);
 	ClassDB::bind_method(D_METHOD("save_file"), &MissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &MissionData::save_as);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);
-	ClassDB::bind_method(D_METHOD("set_mis_base_heights_world", "flat_write_order"), &MissionData::set_mis_base_heights_world);
 	ClassDB::bind_method(D_METHOD("is_modified"), &MissionData::is_modified);
 	ClassDB::bind_method(D_METHOD("object_records_revision"), &MissionData::object_records_revision);
 	ClassDB::bind_method(D_METHOD("structure_fingerprint"), &MissionData::structure_fingerprint);
@@ -1147,32 +1144,6 @@ Dictionary MissionData::add_event_action(int event_index, const Dictionary &acti
 	return event_chain_to_dictionary(chain);
 }
 
-Dictionary MissionData::set_event_action(int event_index, int local_index, const Dictionary &action) {
-	if (event_index < 0 || local_index < 0) {
-		return Dictionary();
-	}
-	opennova::mission::MissionEventRecord event;
-	if (!document.get_event(static_cast<size_t>(event_index), event)) {
-		return Dictionary();
-	}
-	if (local_index >= event.action_count) {
-		return Dictionary();
-	}
-	const size_t global = static_cast<size_t>(event.action_index) + static_cast<size_t>(local_index);
-	opennova::mission::MissionActionRecord existing;
-	if (!document.get_action(global, existing)) {
-		return Dictionary();
-	}
-	const opennova::mission::MissionActionRecord record = action_from_dictionary(action, existing);
-	if (!document.set_action(global, record)) {
-		return Dictionary();
-	}
-	modified = true;
-	opennova::mission::MissionEventChain chain;
-	document.get_event_chain(static_cast<size_t>(event_index), chain);
-	return event_chain_to_dictionary(chain);
-}
-
 bool MissionData::remove_event_action(int event_index, int local_index) {
 	if (event_index < 0 || local_index < 0) {
 		return false;
@@ -1239,24 +1210,6 @@ Error MissionData::save_as(const String &path) {
 
 void MissionData::set_mis_base_heights(const PackedInt32Array &flat_write_order) {
 	mis_base_heights = flat_write_order;
-}
-
-void MissionData::set_mis_base_heights_world(const PackedFloat32Array &flat_write_order) {
-	// Encode the world-unit heights to the 16.16 raws here (round-to-nearest,
-	// NaN -> 0 — an unsampled height stages the .bms default), so no caller
-	// restates the fixed-point convention.
-	PackedInt32Array fixed;
-	fixed.resize(flat_write_order.size());
-	const float *src = flat_write_order.ptr();
-	int32_t *dst = fixed.ptrw();
-	for (int64_t i = 0; i < flat_write_order.size(); ++i) {
-		const float h = src[i];
-		dst[i] = std::isnan(h)
-				? 0
-				: static_cast<int32_t>(std::lround(
-						  static_cast<double>(h) * 65536.0));
-	}
-	mis_base_heights = fixed;
 }
 
 bool MissionData::is_modified() const {

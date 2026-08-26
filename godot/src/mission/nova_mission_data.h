@@ -292,7 +292,6 @@ public:
 	// Event-local action ops, mirroring the trigger ops. `action` is an editor dictionary (action_type,
 	// action_sub_type, param1..4).
 	Dictionary add_event_action(int event_index, const Dictionary &action);
-	Dictionary set_event_action(int event_index, int local_index, const Dictionary &action);
 	bool remove_event_action(int event_index, int local_index);
 	bool move_event_action(int event_index, int local_index, int delta);
 
@@ -316,7 +315,6 @@ public:
 	// The same staging fed world-unit floats: each height is encoded to the
 	// 16.16 raw here (round-to-nearest, NaN -> 0) so callers never restate the
 	// fixed-point convention. Same clearing/apply contract as the raw variant.
-	void set_mis_base_heights_world(const PackedFloat32Array &flat_write_order);
 	bool is_modified() const;
 
 	// A 64-bit content revision of the placed-object records (items / buildings /

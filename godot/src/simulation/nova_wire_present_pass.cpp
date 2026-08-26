@@ -75,18 +75,9 @@ void WirePresentPass::set_spectator_camera(Camera3D *p_camera) {
 	camera_framed_ = false;
 }
 
-Dictionary WirePresentPass::get_stats() const {
-	Dictionary stats;
-	stats["spawned"] = stat_spawned_;
-	stats["unresolved"] = stat_unresolved_;
-	stats["live"] = stat_live_;
-	stats["pending"] = int64_t(pending_spawn_count_);
-	return stats;
-}
-
 Ref<WirePresentStats> WirePresentPass::get_stats_record() const {
 	return WirePresentStats::create(stat_live_, stat_spawned_,
-			stat_unresolved_);
+			stat_unresolved_, pending_spawn_count_);
 }
 
 ObjectModel *WirePresentPass::resolve_wire_handle(int p_handle) const {
@@ -554,7 +545,6 @@ void WirePresentPass::_bind_methods() {
 			&WirePresentPass::present_snapshot);
 	ClassDB::bind_method(D_METHOD("pending_spawn_count"),
 			&WirePresentPass::pending_spawn_count);
-	ClassDB::bind_method(D_METHOD("get_stats"), &WirePresentPass::get_stats);
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&WirePresentPass::get_stats_record);
 	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),

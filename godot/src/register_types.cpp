@@ -144,6 +144,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionTickOutcome);
 	GDREGISTER_CLASS(MissionFrameOutcome);
 	GDREGISTER_CLASS(WirePresentStats);
+	GDREGISTER_CLASS(ScarPresenterStats);
 	GDREGISTER_CLASS(WirePresentPass);
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(WacProgram);

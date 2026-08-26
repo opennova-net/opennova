@@ -46,10 +46,6 @@ String MnsStyleSheet::substitute(const String &p_text) const {
 	return to_gd(sheet_.substitute(to_std(p_text)));
 }
 
-int MnsStyleSheet::get_variable_count() const {
-	return static_cast<int>(sheet_.variables.size());
-}
-
 Dictionary MnsStyleSheet::get_variables() const {
 	Dictionary out;
 	for (const auto &kv : sheet_.variables) {
@@ -314,8 +310,6 @@ void MnsStyleSheet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_variable", "name"), &MnsStyleSheet::get_variable);
 	ClassDB::bind_method(D_METHOD("has_variable", "name"), &MnsStyleSheet::has_variable);
 	ClassDB::bind_method(D_METHOD("substitute", "text"), &MnsStyleSheet::substitute);
-	ClassDB::bind_method(D_METHOD("get_variable_count"), &MnsStyleSheet::get_variable_count);
-	ClassDB::bind_method(D_METHOD("get_variables"), &MnsStyleSheet::get_variables);
 
 	ClassDB::bind_method(D_METHOD("set_variable", "name", "value"), &MnsStyleSheet::set_variable);
 	ClassDB::bind_method(D_METHOD("remove_variable", "name"), &MnsStyleSheet::remove_variable);

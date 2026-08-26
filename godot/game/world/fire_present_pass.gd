@@ -64,11 +64,22 @@ var _mesh: ImmediateMesh
 var _mesh_instance: MeshInstance3D
 var _mat_additive: StandardMaterial3D  # std/rapid/sniper/df1/NVG [orig: fog-black additive]
 var _mat_alpha: StandardMaterial3D     # rocket/at4/grenade smoke [orig: alpha + scene fog]
-# Probe/diagnostic counters (ai_threat_probe asserts the presentation actually ran).
-var _stats := {"fires": 0, "sounds": 0, "effects": 0, "tracer_peak": 0}
 
-func get_stats() -> Dictionary:
-	return _stats.duplicate()
+## Typed diagnostic counters (ADR 0017: cross-object contracts are typed
+## records) — probes assert the presentation legs actually ran.
+class Stats:
+	extends RefCounted
+	var fires := 0
+	var sounds := 0
+	var effects := 0
+	var tracer_peak := 0
+
+
+var _stats := Stats.new()
+
+
+func get_stats() -> Stats:
+	return _stats
 
 
 ## The ribbon geometry surface — the ADR 0018 read seam for tests asserting the
@@ -302,7 +313,7 @@ func draw_tracer_rows(rows: PackedFloat32Array) -> void:
 	if not cam.is_finite():
 		cam = Vector3.ZERO
 	var frame: Dictionary = Simulation.compile_tracer_ribbons(rows, cam)
-	_stats.tracer_peak = maxi(int(_stats.tracer_peak), int(frame.get("channels", 0)))
+	_stats.tracer_peak = maxi(_stats.tracer_peak, int(frame.get("channels", 0)))
 	_emit_strip(frame.get("additive", {}), _mat_additive)
 	_emit_strip(frame.get("alpha", {}), _mat_alpha)
 

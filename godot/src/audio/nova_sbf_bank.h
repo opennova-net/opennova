@@ -42,7 +42,6 @@ public:
 	Array get_entries() const;
 	bool has_entry(const StringName &p_name) const;
 	String get_entry_name(int p_index) const;
-	Ref<SbfAudioStream> get_stream(const StringName &p_name);
 	Ref<SbfAudioStream> get_stream_at(int p_index);
 
 	// Used by AudioStreamPlayback in Phase E to re-open chunk reads against
@@ -64,10 +63,7 @@ public:
 
 	// Phase E (bank-edit ops). All mutate _arc.entries + override map and set
 	// _dirty so the saver re-encodes.
-	Error reorder_entry(int p_from, int p_to);
-	Error rename_entry(int p_index, const String &p_name);
 	Error add_entry(const String &p_name, const PackedFloat32Array &p_samples);
-	Error delete_entry(int p_index);
 
 	// Build a fresh SBF byte stream from the current entry table + override
 	// PCM map. Entries without an override are decoded from the original

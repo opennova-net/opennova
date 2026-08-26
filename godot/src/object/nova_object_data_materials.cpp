@@ -15,28 +15,12 @@ namespace {
 // The MTRL texture-slot array capacity (ThreediMaterial::textures).
 constexpr uint32_t kMaxMaterialTextures = 24;
 
-float dict_float(const Dictionary &dict, const char *key, float fallback) {
-	const String dict_key(key);
-	if (!dict.has(dict_key)) {
-		return fallback;
-	}
-	return static_cast<float>(dict[dict_key]);
-}
-
 int dict_int(const Dictionary &dict, const char *key, int fallback) {
 	const String dict_key(key);
 	if (!dict.has(dict_key)) {
 		return fallback;
 	}
 	return static_cast<int>(dict[dict_key]);
-}
-
-Color dict_color(const Dictionary &dict, const char *key, const Color &fallback) {
-	const String dict_key(key);
-	if (!dict.has(dict_key)) {
-		return fallback;
-	}
-	return dict[dict_key];
 }
 
 uint32_t shader_flags_for_tag(const char *shader_name) {
@@ -147,43 +131,6 @@ Dictionary texture_animation_to_dict(const ThreediTexAnim &anim) {
 	dict["animation_type"] = anim.animation_type;
 	dict["cycle_frame_time"] = anim.cycle_frame_time;
 	return dict;
-}
-
-void apply_uv_params(ThreediUvParams &dst, const Dictionary &params) {
-	dst.style = static_cast<uint8_t>(std::clamp(dict_int(params, "style", dst.style), 0, 255));
-	dst.phase = dict_float(params, "phase", dst.phase);
-	dst.reg = dict_int(params, "reg", dst.reg);
-	dst.gen_rate = dict_float(params, "rate", dst.gen_rate);
-	dst.start = dict_float(params, "start", dst.start);
-	dst.end = dict_float(params, "end", dst.end);
-}
-
-void apply_alpha_gen(ThreediAlphaGen &dst, const Dictionary &params) {
-	dst.style = static_cast<uint8_t>(std::clamp(dict_int(params, "style", dst.style), 0, 255));
-	dst.phase = dict_float(params, "phase", dst.phase);
-	dst.reg = dict_int(params, "reg", dst.reg);
-	dst.rate = dict_float(params, "rate", dst.rate);
-	dst.start = clamp_to_i16(dict_int(params, "start", dst.start));
-	dst.end = clamp_to_i16(dict_int(params, "end", dst.end));
-}
-
-void apply_rgb_gen(ThreediRgbGen &dst, const Dictionary &params) {
-	dst.style = static_cast<uint8_t>(std::clamp(dict_int(params, "style", dst.style), 0, 255));
-	dst.phase = dict_float(params, "phase", dst.phase);
-	dst.reg = dict_int(params, "reg", dst.reg);
-	dst.rate = dict_float(params, "rate", dst.rate);
-	const Color start = dict_color(params, "start_color",
-			Color(dst.start_color[0], dst.start_color[1], dst.start_color[2], dst.start_color[3]));
-	const Color end = dict_color(params, "end_color",
-			Color(dst.end_color[0], dst.end_color[1], dst.end_color[2], dst.end_color[3]));
-	dst.start_color[0] = start.r;
-	dst.start_color[1] = start.g;
-	dst.start_color[2] = start.b;
-	dst.start_color[3] = start.a;
-	dst.end_color[0] = end.r;
-	dst.end_color[1] = end.g;
-	dst.end_color[2] = end.b;
-	dst.end_color[3] = end.a;
 }
 
 void set_material_texture_slot_entry(ThreediMaterial &mat, int slot, int frame, const String &value, uint8_t flags) {
@@ -448,13 +395,6 @@ bool ObjectData::set_material_field(int p_index, const String &p_key, const Vari
 	return false;
 }
 
-int ObjectData::get_material_shader_flags(int p_index) const {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
-		return 0;
-	}
-	return static_cast<int>(shader_flags_for_tag(source_model.materials[p_index].shader_name));
-}
-
 PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) const {
 	PackedStringArray out;
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
@@ -478,43 +418,6 @@ PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) 
 		}
 	}
 	return out;
-}
-
-bool ObjectData::set_material_anim_frame(int p_index, int p_slot, int p_frame_idx, const String &p_path) {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
-		return false;
-	}
-	ThreediMaterial &mat = source_model.materials[p_index];
-	if (p_frame_idx < 0 || p_frame_idx >= static_cast<int>(mat.animation.num_frames)) {
-		return false;
-	}
-	set_material_texture_slot_entry(mat, p_slot, p_frame_idx, p_path, THREEDI_TEX_FLAG_ANIMATED);
-	_notify_object_changed(UPDATE_MTRL);
-	return true;
-}
-
-Array ObjectData::get_shader_catalog() const {
-	Array result;
-	for (size_t i = 0; i < oed::kMaterialDescriptorTableCount; ++i) {
-		const oed::MaterialDescriptorRecord &record = oed::kMaterialDescriptorTable[i];
-		Dictionary item;
-		item["index"] = static_cast<int64_t>(i);
-		item["name"] = from_native(record.name);
-		add_shader_flag_fields(item, record.name, static_cast<uint32_t>(record.shader_flags));
-		result.push_back(item);
-	}
-	return result;
-}
-
-Array ObjectData::get_global_control_register_catalog() {
-	Array result;
-	for (size_t ordinal = 0; ordinal < THREEDI_CTRL_REGISTER_COUNT; ++ordinal) {
-		Dictionary item;
-		item["ordinal"] = static_cast<int64_t>(ordinal);
-		item["name"] = from_native(threedi_ctrl_register_name(ordinal));
-		result.push_back(item);
-	}
-	return result;
 }
 
 String ObjectData::canonical_control_register_name(const String &p_name) {
@@ -544,7 +447,7 @@ Array ObjectData::get_control_registers() const {
 		// Keep the authored model-local spelling available to editors, but
 		// expose the exact global slot selected by retail's loader fixup.
 		// Unknown and empty names intentionally resolve to ordinal zero.
-		// [orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6;
+		// [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; ordinal store @ 0x5B46E6;
 		//  CtrlName_ToOrdinal @ 0x57B290]
 		result.push_back(item);
 	}
@@ -606,17 +509,6 @@ Ref<Texture2D> ObjectData::load_material_texture(int p_material_index, int p_tex
 			: opennova::load_texture_from_dir(source_dir, texture_name);
 }
 
-String ObjectData::resolve_texture_name(const String &p_texture_name) const {
-	if (!has_source_model || p_texture_name.is_empty()) {
-		return String();
-	}
-	if (resource_root.is_valid()) {
-		const String resolved = resource_root->resolve_file(p_texture_name);
-		return resolved.is_empty() && resource_root->load_texture(p_texture_name).is_valid() ? p_texture_name : resolved;
-	}
-	return opennova::resolve_texture_path(source_dir, p_texture_name);
-}
-
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {
 	if (!has_source_model || p_texture_name.is_empty()) {
 		return Ref<Texture2D>();
@@ -627,159 +519,3 @@ Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const
 	return opennova::load_texture_from_dir(source_dir, p_texture_name);
 }
 
-Error ObjectData::set_material_shader(int p_material_index, const String &p_shader_name) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	copy_cstr(source_model.materials[p_material_index].shader_name,
-			sizeof(source_model.materials[p_material_index].shader_name),
-			to_std(p_shader_name).c_str());
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_texture(int p_material_index, int p_texture_index, const String &p_texture_name) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	ThreediMaterial &material = source_model.materials[p_material_index];
-	if (p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
-		return ERR_INVALID_PARAMETER;
-	}
-	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
-		material.texture_count = static_cast<uint32_t>(p_texture_index + 1);
-	}
-	copy_cstr(material.textures[p_texture_index].name, sizeof(material.textures[p_texture_index].name),
-			to_std(p_texture_name).c_str());
-	if (material.textures[p_texture_index].slot == 0) {
-		material.textures[p_texture_index].slot = THREEDI_TEX_SLOT_DIFFUSE;
-	}
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_texture_slot(int p_material_index, int p_slot, const String &p_texture_name) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	if (p_slot < THREEDI_TEX_SLOT_DIFFUSE || p_slot > THREEDI_TEX_SLOT_NORMAL_B) {
-		return ERR_INVALID_PARAMETER;
-	}
-
-	ThreediMaterial &material = source_model.materials[p_material_index];
-	int texture_index = -1;
-	for (uint32_t i = 0; i < material.texture_count && i < kMaxMaterialTextures; ++i) {
-		if (material.textures[i].slot == static_cast<uint8_t>(p_slot)) {
-			texture_index = static_cast<int>(i);
-			break;
-		}
-	}
-
-	if (texture_index < 0) {
-		if (p_texture_name.is_empty()) {
-			return OK;
-		}
-		if (material.texture_count >= kMaxMaterialTextures) {
-			return ERR_OUT_OF_MEMORY;
-		}
-		texture_index = static_cast<int>(material.texture_count);
-		++material.texture_count;
-		ThreediMaterialTexture &texture = material.textures[texture_index];
-		std::memset(&texture, 0, sizeof(texture));
-		texture.slot = static_cast<uint8_t>(p_slot);
-		texture.type = (p_slot == THREEDI_TEX_SLOT_NORMAL || p_slot == THREEDI_TEX_SLOT_NORMAL_B) ? 4 : 0;
-	}
-
-	ThreediMaterialTexture &texture = material.textures[texture_index];
-	copy_cstr(texture.name, sizeof(texture.name), to_std(p_texture_name.get_file()).c_str());
-	texture.slot = static_cast<uint8_t>(p_slot);
-	if (p_slot == THREEDI_TEX_SLOT_NORMAL || p_slot == THREEDI_TEX_SLOT_NORMAL_B) {
-		const String texture_name = p_texture_name.to_lower();
-		texture.type = texture_name.contains(".tga") ? 5 : 4;
-	} else {
-		texture.type = 0;
-	}
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_texture_slot_options(int p_material_index, int p_slot, int p_flags, int p_frame, int p_type) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	if (p_slot < THREEDI_TEX_SLOT_DIFFUSE || p_slot > THREEDI_TEX_SLOT_NORMAL_B) {
-		return ERR_INVALID_PARAMETER;
-	}
-
-	ThreediMaterial &material = source_model.materials[p_material_index];
-	for (uint32_t i = 0; i < material.texture_count && i < kMaxMaterialTextures; ++i) {
-		ThreediMaterialTexture &texture = material.textures[i];
-		if (texture.slot != static_cast<uint8_t>(p_slot)) {
-			continue;
-		}
-		texture.flags = static_cast<uint8_t>(std::clamp(p_flags, 0, 255));
-		texture.frame = static_cast<uint8_t>(std::clamp(p_frame, 0, 255));
-		texture.type = static_cast<uint8_t>(std::clamp(p_type, 0, 255));
-		_notify_object_changed(UPDATE_MTRL);
-		return OK;
-	}
-
-	return ERR_DOES_NOT_EXIST;
-}
-
-Error ObjectData::set_material_alpha_threshold(int p_material_index, float p_alpha_threshold) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	source_model.materials[p_material_index].alpha_test_value_byte =
-			to_u8_color(std::clamp(p_alpha_threshold, 0.0f, 1.0f));
-	source_model.materials[p_material_index].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_uv_generator(int p_material_index, const String &p_axis, const Dictionary &p_params) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	const String axis = p_axis.to_lower();
-	if (axis == "u") {
-		apply_uv_params(source_model.materials[p_material_index].u_params, p_params);
-	} else if (axis == "v") {
-		apply_uv_params(source_model.materials[p_material_index].v_params, p_params);
-	} else {
-		return ERR_INVALID_PARAMETER;
-	}
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_rgb_generator(int p_material_index, const Dictionary &p_params) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	apply_rgb_gen(source_model.materials[p_material_index].rgb_gen, p_params);
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_alpha_generator(int p_material_index, const Dictionary &p_params) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	apply_alpha_gen(source_model.materials[p_material_index].alpha_gen, p_params);
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}
-
-Error ObjectData::set_material_texture_animation(int p_material_index, const Dictionary &p_params) {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	ThreediTexAnim &animation = source_model.materials[p_material_index].animation;
-	animation.num_frames = static_cast<uint8_t>(std::clamp(dict_int(p_params, "num_frames", animation.num_frames), 0, 255));
-	animation.animation_type = static_cast<uint8_t>(std::clamp(dict_int(p_params, "animation_type", animation.animation_type), 0, 255));
-	animation.cycle_frame_time = clamp_to_i16(dict_int(p_params, "cycle_frame_time", animation.cycle_frame_time));
-	_notify_object_changed(UPDATE_MTRL);
-	return OK;
-}

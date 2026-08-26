@@ -23,7 +23,6 @@ public:
 	void configure(SbfBank *p_bank, int p_entry_index);
 
 	SbfBank *get_bank() const { return _bank.ptr(); }
-	int get_entry_index() const { return _entry_index; }
 	int get_index() const { return _entry_index; }
 
 	// AudioStream overrides

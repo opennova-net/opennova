@@ -79,16 +79,12 @@ void CreditsPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_playing"), &CreditsPlayer::is_playing);
 
 	// Scroll offset.
-	ClassDB::bind_method(D_METHOD("set_scroll_offset", "offset"), &CreditsPlayer::set_scroll_offset);
-	ClassDB::bind_method(D_METHOD("get_scroll_offset"), &CreditsPlayer::get_scroll_offset);
 
 	// Rebuild.
 	ClassDB::bind_method(D_METHOD("rebuild"), &CreditsPlayer::rebuild);
 	ClassDB::bind_method(D_METHOD("_rebuild_content_if_needed"), &CreditsPlayer::_rebuild_content_if_needed);
 
 	// Highlight.
-	ClassDB::bind_method(D_METHOD("highlight_entry", "index"), &CreditsPlayer::highlight_entry);
-	ClassDB::bind_method(D_METHOD("clear_highlight"), &CreditsPlayer::clear_highlight);
 
 	// Autoplay.
 	ClassDB::bind_method(D_METHOD("set_autoplay", "autoplay"), &CreditsPlayer::set_autoplay);
@@ -96,8 +92,6 @@ void CreditsPlayer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "autoplay"), "set_autoplay", "get_autoplay");
 
 	// Entry-lookup helpers (for editor scroll sync).
-	ClassDB::bind_method(D_METHOD("entry_index_at_scroll_center"), &CreditsPlayer::entry_index_at_scroll_center);
-	ClassDB::bind_method(D_METHOD("content_y_for_entry", "index"), &CreditsPlayer::content_y_for_entry);
 
 	// Signals.
 	ADD_SIGNAL(MethodInfo("finished"));
@@ -261,22 +255,6 @@ void CreditsPlayer::set_speed_scale(float p_scale) {
 
 float CreditsPlayer::get_speed_scale() const {
 	return speed_scale_;
-}
-
-void CreditsPlayer::set_scroll_offset(float p_offset) {
-	if (scroll_offset_ == p_offset) {
-		return;
-	}
-	scroll_offset_ = p_offset;
-	if (content_) {
-		content_->set_position(Vector2(0, get_size().y - scroll_offset_));
-		_update_fade_nodes();
-	}
-	emit_signal("scroll_offset_changed", scroll_offset_);
-}
-
-float CreditsPlayer::get_scroll_offset() const {
-	return scroll_offset_;
 }
 
 void CreditsPlayer::rebuild() {
@@ -594,45 +572,6 @@ void CreditsPlayer::_rebuild_content() {
 	_update_fade_nodes();
 }
 
-void CreditsPlayer::highlight_entry(int p_index) {
-	clear_highlight();
-
-	if (!content_ || p_index < 0 || !credits_resource_.is_valid()) return;
-
-	// Find the node for this entry.
-	if (!entry_to_node_.has(p_index)) {
-		// No visual node for this entry.
-		// Find the next entry that has a visual node and scroll near it.
-		for (int i = p_index + 1; i < credits_resource_->get_entry_count(); ++i) {
-			if (entry_to_node_.has(i)) {
-				p_index = i;
-				break;
-			}
-		}
-		if (!entry_to_node_.has(p_index)) return;
-	}
-
-	Control *node = entry_to_node_[p_index];
-	if (!node) return;
-
-	highlighted_entry_ = p_index;
-	highlight_node_ = node;
-	original_color_ = node->get_modulate();
-
-	// Scroll to show the node. Get node's position relative to content, then offset content.
-	float node_y = node->get_position().y;
-	float view_height = get_size().y;
-
-	// Center the node in the view if possible.
-	float target_offset = node_y - view_height / 2 + node->get_size().y / 2;
-	target_offset = Math::max(0.0f, target_offset);
-
-	content_->set_position(Vector2(0, -target_offset));
-
-	// Apply highlight effect - yellow tint.
-	node->set_modulate(original_color_ * Color(1.0, 1.0, 0.5, 1.0));
-}
-
 void CreditsPlayer::clear_highlight() {
 	if (highlight_node_ && highlighted_entry_ >= 0) {
 		// Restore original color.
@@ -693,31 +632,6 @@ void CreditsPlayer::_update_fade_nodes() {
 		current.a = alpha;
 		overlay.node->set_modulate(current);
 	}
-}
-
-int CreditsPlayer::entry_index_at_scroll_center() const {
-	if (entry_stream_y_.is_empty()) {
-		return -1;
-	}
-	float center_content_y = scroll_offset_ - get_size().y * 0.5f;
-	int best_index = -1;
-	float best_distance = 1e9f;
-	for (int i = 0; i < entry_stream_y_.size(); ++i) {
-		float node_y = entry_stream_y_[i];
-		float distance = Math::abs(node_y - center_content_y);
-		if (distance < best_distance) {
-			best_distance = distance;
-			best_index = i;
-		}
-	}
-	return best_index;
-}
-
-float CreditsPlayer::content_y_for_entry(int p_index) const {
-	if (p_index < 0 || p_index >= entry_stream_y_.size()) {
-		return 0.0f;
-	}
-	return entry_stream_y_[p_index];
 }
 
 }  // namespace godot

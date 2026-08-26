@@ -34,12 +34,7 @@ public:
 	int get_script_count() const;
 	String get_source_path() const { return source_path; }
 	String get_default_script_name() const;
-	Array get_scripts() const;
-	bool has_script(const StringName &p_name) const;
-	PackedStringArray get_script_names() const;
 	PackedStringArray get_section_names(const StringName &p_script_name) const;
-	int get_locals_frame_offset(const StringName &p_script_name) const;
-	PackedStringArray get_intrinsic_names() const;
 
 	// Reusable text codec surface.
 	String get_decompiled_text(const StringName &p_script_name);

@@ -51,19 +51,10 @@ public:
 	void set_speed_scale(float p_scale);
 	float get_speed_scale() const;
 
-	// Current scroll position.
-	void set_scroll_offset(float p_offset);
-	float get_scroll_offset() const;
-
-	// Editor helpers: entry lookup by scroll position and vice versa.
-	int entry_index_at_scroll_center() const;
-	float content_y_for_entry(int p_index) const;
-
 	// Rebuild the visual tree from the resource.
 	void rebuild();
 
 	// Highlight/select a specific entry by index. Scrolls to show it and highlights it.
-	void highlight_entry(int p_index);
 	void clear_highlight();
 
 private:

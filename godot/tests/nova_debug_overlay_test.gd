@@ -1528,10 +1528,10 @@ func test_entities_page_renders_and_curates_the_pick_list() -> void:
 			(rows.get_child(0).get_node("SelectPick0") as Button).text, "crate_a")
 
 	(rows.get_child(0).get_node("RemovePick") as Button).pressed.emit()
-	assert_eq(picks.size(), 1, "the row's X removes exactly that pick")
+	assert_eq(picks.get_picks().size(), 1, "the row's X removes exactly that pick")
 	assert_eq(int(picks.get_picks()[0].get("entity_handle", -1)), 2)
 	(overlay.find_child("ClearPicks", true, false) as Button).pressed.emit()
-	assert_eq(picks.size(), 0, "Clear picks empties the set")
+	assert_eq(picks.get_picks().size(), 0, "Clear picks empties the set")
 	await wait_process_frames(2)
 
 

@@ -61,25 +61,7 @@ private:
 	// recent extract batch / extract_to_status call. Lets the UI warn "N saved as raw".
 	mutable int last_undecoded_count_ = 0;
 
-	// Background Save-As job. The worker thread is the ONLY reader of
-	// source_ while a save runs; the UI disables all other ops, so there is no concurrent access.
-	struct SaveState {
-		bool running = false;
-		bool finished = false;
-		int result = 0;             // godot Error (OK == 0)
-		uint32_t done = 0;
-		uint32_t total = 0;
-		std::string message;        // error text for get_save_error()
-	};
-	mutable std::mutex save_mutex_;
-	std::thread save_thread_;
-	SaveState save_state_;
-	std::vector<PffWriteStreamEntry> save_entries_;  // captured snapshot for the worker
-	std::vector<std::string> save_names_;            // keeps save_entries_[i].name alive
-	std::string save_out_native_;
-	PffFormat save_format_ = PFF_FORMAT_PFF3;
-
-	// Background extract job (mirrors the Save worker). The worker reads source_/entries_ and writes
+	// Background extract job. The worker reads source_/entries_ and writes
 	// the output files off the main thread; the editor disables every other op while it runs, so the
 	// model it reads is stable (the same invariant the save worker relies on). Cancel is checked
 	// between entries, so a single large file still finishes before the job stops, but the UI never
@@ -118,8 +100,6 @@ private:
 	bool read_entry_bytes(const Entry &entry, bool decode, std::vector<uint8_t> &out,
 	                      bool *out_decoded = nullptr) const;
 	Error do_open(const String &path, bool legacy);
-	void join_save_thread();
-	void save_worker();
 	void join_extract_thread();
 	void extract_worker();
 
@@ -127,7 +107,6 @@ private:
 	static PffFormat format_from_magic(uint32_t magic);
 	// Streaming-writer callback: fills `out` with entry[index]'s stored bytes. ctx is `this`.
 	static int read_entry_cb(void *ctx, uint32_t index, uint8_t *out, uint32_t size);
-	static void save_progress_cb(void *ctx, uint32_t done, uint32_t total);
 
 protected:
 	static void _bind_methods();
@@ -140,7 +119,6 @@ public:
 	static Array list_games();
 
 	Error open(const String &path);
-	Error open_legacy(const String &path);
 	String get_source_path() const;
 	String get_last_error() const;
 
@@ -156,7 +134,6 @@ public:
 	// the raw stored bytes. Decoded bytes are an export only — they never re-enter the archive.
 	PackedByteArray read_entry(const String &name, bool decode) const;
 	Error extract_to(const String &name, const String &out_path, bool decode) const;
-	Error extract_selected(const PackedStringArray &names, const String &out_dir, bool decode) const;
 	Error extract_all(const String &out_dir, bool decode) const;
 	// Per-file extract for the editor's batched loop. Returns 0 = extracted (decoded), 1 = extracted
 	// but saved raw (decode requested but failed), 2 = hard failure (nothing written).
@@ -167,11 +144,9 @@ public:
 	// Non-blocking batch extract. Resolves the job list on the calling (main) thread, then reads,
 	// decodes, and writes each file on a background thread. `names` empty means "every entry";
 	// output files are written into out_dir by basename. Returns OK if the job started (then poll
-	// is_extract_running() and read the counters), else an error. Mirrors save_as_async.
+	// is_extract_running() and read the counters), else an error.
 	Error extract_async(const PackedStringArray &names, const String &out_dir, bool decode);
 	bool is_extract_running() const;
-	bool is_extract_finished() const;
-	void request_extract_cancel();          // ask the worker to stop after the current entry
 	int get_extract_progress_done() const;  // entries processed so far (incl. failures)
 	int get_extract_progress_total() const;
 	int get_extract_ok_count() const;       // extracted and fully decoded
@@ -186,17 +161,6 @@ public:
 
 	// Writes a NEW archive (never the source). Preserves the source container format, PFF3 default.
 	Error save_as(const String &out_path);
-
-	// Non-blocking Save-As: validates + snapshots on the calling (main) thread, then writes on a
-	// background thread. Returns OK if the job started (poll is_save_finished()), else an error.
-	Error save_as_async(const String &out_path);
-	bool is_save_running() const;
-	bool is_save_finished() const;
-	int get_save_progress_done() const;
-	int get_save_progress_total() const;
-	int get_save_result() const;        // godot Error of the finished save
-	String get_save_error() const;
-	void wait_for_save_completion();     // joins the worker; clears dirty on success (main thread)
 };
 
 } // namespace godot

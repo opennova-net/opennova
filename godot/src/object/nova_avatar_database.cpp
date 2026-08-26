@@ -119,7 +119,6 @@ void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_part_count"), &AvatarDatabase::get_part_count);
 	ClassDB::bind_method(D_METHOD("get_nationality_count"), &AvatarDatabase::get_nationality_count);
 	ClassDB::bind_method(D_METHOD("get_part_names", "kind"), &AvatarDatabase::get_part_names);
-	ClassDB::bind_method(D_METHOD("get_parts", "kind"), &AvatarDatabase::get_parts);
 	ClassDB::bind_method(D_METHOD("get_part", "kind", "name"), &AvatarDatabase::get_part);
 	ClassDB::bind_method(D_METHOD("get_nationality", "nat_index"), &AvatarDatabase::get_nationality);
 	ClassDB::bind_method(D_METHOD("get_division_count", "nat_index"), &AvatarDatabase::get_division_count);
@@ -490,23 +489,6 @@ PackedStringArray AvatarDatabase::get_part_names(int kind) const {
 	out.resize(static_cast<int>(sel.size()));
 	for (size_t i = 0; i < sel.size(); ++i) {
 		out.set(static_cast<int>(i), sel[i]->name);
-	}
-	return out;
-}
-
-Array AvatarDatabase::get_parts(int kind) const {
-	std::vector<const Part *> sel;
-	for (const Part &p : parts) {
-		if (p.kind == kind) {
-			sel.push_back(&p);
-		}
-	}
-	std::sort(sel.begin(), sel.end(), [](const Part *a, const Part *b) {
-		return a->name.naturalnocasecmp_to(b->name) < 0;
-	});
-	Array out;
-	for (const Part *p : sel) {
-		out.push_back(part_dict(*p));
 	}
 	return out;
 }

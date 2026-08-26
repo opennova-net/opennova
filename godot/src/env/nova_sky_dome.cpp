@@ -56,8 +56,6 @@ void SkyDome::_bind_methods() {
 						 PROPERTY_HINT_RESOURCE_TYPE, "Environment"),
 			"set_frame_clear_environment", "get_frame_clear_environment");
 	ClassDB::bind_method(D_METHOD("build"), &SkyDome::build);
-	ClassDB::bind_method(D_METHOD("sync_frame_clear_color"),
-			&SkyDome::sync_frame_clear_color);
 	ClassDB::bind_method(D_METHOD("is_built"), &SkyDome::is_built);
 	ClassDB::bind_method(D_METHOD("get_sky_material"),
 			&SkyDome::get_sky_material);

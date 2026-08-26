@@ -131,14 +131,10 @@ void ParticleDef::_bind_methods() {
 	#undef BIND_GETSET
 
 	// Canonical-table introspection + deep clone (editor helpers).
-	ClassDB::bind_static_method("ParticleDef", D_METHOD("get_particle_flag_table"), &ParticleDef::get_particle_flag_table);
 	BIND_CONSTANT(FLAG_YAW_AND_PITCH);
 	BIND_CONSTANT(FLAG_FOREVER_EMIT);
 	BIND_CONSTANT(FLAG_POSITION_RELATIVE);
-	ClassDB::bind_static_method("ParticleDef", D_METHOD("get_move_flag_table"), &ParticleDef::get_move_flag_table);
-	ClassDB::bind_static_method("ParticleDef", D_METHOD("get_blend_mode_names"), &ParticleDef::get_blend_mode_names);
 	ClassDB::bind_static_method("ParticleDef", D_METHOD("format_particle_flags", "bits"), &ParticleDef::format_particle_flags);
-	ClassDB::bind_static_method("ParticleDef", D_METHOD("format_move_flags", "bits"), &ParticleDef::format_move_flags);
 	ClassDB::bind_method(D_METHOD("clone"), &ParticleDef::clone);
 
 	ADD_GROUP("Identity", "");
@@ -398,36 +394,8 @@ void ParticleDef::copy_from_native(const opennova::particle::ParticleDef &def) {
 	emit_changed();
 }
 
-Dictionary ParticleDef::get_particle_flag_table() {
-	Dictionary out;
-	for (const auto &entry : opennova::particle::particle_flag_entries()) {
-		out[String::utf8(entry.first.c_str())] = static_cast<int>(entry.second);
-	}
-	return out;
-}
-
-Dictionary ParticleDef::get_move_flag_table() {
-	Dictionary out;
-	for (const auto &entry : opennova::particle::move_flag_entries()) {
-		out[String::utf8(entry.first.c_str())] = static_cast<int>(entry.second);
-	}
-	return out;
-}
-
-PackedStringArray ParticleDef::get_blend_mode_names() {
-	PackedStringArray out;
-	for (const std::string &name : opennova::particle::blend_mode_names()) {
-		out.push_back(String::utf8(name.c_str()));
-	}
-	return out;
-}
-
 String ParticleDef::format_particle_flags(int bits) {
 	return String::utf8(opennova::particle::format_particle_flags(static_cast<std::uint32_t>(bits)).c_str());
-}
-
-String ParticleDef::format_move_flags(int bits) {
-	return String::utf8(opennova::particle::format_move_bits(static_cast<std::uint32_t>(bits)).c_str());
 }
 
 Ref<ParticleDef> ParticleDef::clone() const {

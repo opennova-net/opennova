@@ -63,27 +63,17 @@ void WeatherCore::_bind_methods() {
 								  "sky_speed"),
 			&WeatherCore::tick);
 	ClassDB::bind_method(D_METHOD("tick_cloud_scroll", "sky_speed"), &WeatherCore::tick_cloud_scroll);
-	ClassDB::bind_method(D_METHOD("set_scalar_targets", "fog_distance", "sky_height"), &WeatherCore::set_scalar_targets);
-	ClassDB::bind_method(D_METHOD("snap_scalar_currents_to_targets"),
-			&WeatherCore::snap_scalar_currents_to_targets);
 	ClassDB::bind_method(D_METHOD("apply_network_environment_sample", "fog_dist", "fog_accel", "rain_pct", "overcast"),
 			&WeatherCore::apply_network_environment_sample);
 	ClassDB::bind_method(D_METHOD("get_fog_distance"), &WeatherCore::get_fog_distance);
 	ClassDB::bind_method(D_METHOD("get_sky_height"), &WeatherCore::get_sky_height);
-	ClassDB::bind_method(D_METHOD("get_sun_dim_pct"), &WeatherCore::get_sun_dim_pct);
-	ClassDB::bind_method(D_METHOD("get_rain_pct"), &WeatherCore::get_rain_pct);
-	ClassDB::bind_method(D_METHOD("get_fog_accel_clamp_fixed"), &WeatherCore::get_fog_accel_clamp_fixed);
-	ClassDB::bind_method(D_METHOD("get_rain_pct_fixed"), &WeatherCore::get_rain_pct_fixed);
-	ClassDB::bind_method(D_METHOD("get_overcast_blend_fixed"), &WeatherCore::get_overcast_blend_fixed);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"), &WeatherCore::get_cloud_uv_offset1);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "cam_x", "cam_z"), &WeatherCore::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"), &WeatherCore::get_cloud_uv_rate_per_second);
 	ClassDB::bind_method(D_METHOD("get_water_uv_state", "cam_x", "cam_z", "fog_distance"),
 			&WeatherCore::get_water_uv_state);
 	ClassDB::bind_method(D_METHOD("set_wind_intensity", "value"), &WeatherCore::set_wind_intensity);
-	ClassDB::bind_method(D_METHOD("get_wind_intensity"), &WeatherCore::get_wind_intensity);
 	ClassDB::bind_method(D_METHOD("set_wind_duration_ticks", "ticks"), &WeatherCore::set_wind_duration_ticks);
-	ClassDB::bind_method(D_METHOD("get_wind_duration_ticks"), &WeatherCore::get_wind_duration_ticks);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_short"), &WeatherCore::trigger_lightning_short);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_long"), &WeatherCore::trigger_lightning_long);
 	ClassDB::bind_method(D_METHOD("set_exposure_from_iris", "light_dir", "iris_percent", "iris_center"),
@@ -92,16 +82,11 @@ void WeatherCore::_bind_methods() {
 			D_METHOD("set_exposure_from_iris_samples", "samples", "light_dir", "ceiling", "floor", "iris_percent", "iris_center"),
 			&WeatherCore::set_exposure_from_iris_samples);
 	ClassDB::bind_method(D_METHOD("get_color_src_gain"), &WeatherCore::get_color_src_gain);
-	ClassDB::bind_method(D_METHOD("get_fill"), &WeatherCore::get_fill);
-	ClassDB::bind_method(D_METHOD("get_sun"), &WeatherCore::get_sun);
 	ClassDB::bind_method(D_METHOD("get_fog"), &WeatherCore::get_fog);
-	ClassDB::bind_method(D_METHOD("get_sky"), &WeatherCore::get_sky);
 	ClassDB::bind_method(D_METHOD("get_skyfog"), &WeatherCore::get_skyfog);
 	ClassDB::bind_method(D_METHOD("get_ceiling"), &WeatherCore::get_ceiling);
 	ClassDB::bind_method(D_METHOD("get_cloud"), &WeatherCore::get_cloud);
 	ClassDB::bind_method(D_METHOD("get_floor"), &WeatherCore::get_floor);
-	ClassDB::bind_method(D_METHOD("get_ceiling_pre_mod"), &WeatherCore::get_ceiling_pre_mod);
-	ClassDB::bind_method(D_METHOD("get_floor_pre_mod"), &WeatherCore::get_floor_pre_mod);
 	ClassDB::bind_method(D_METHOD("get_skybase"), &WeatherCore::get_skybase);
 	ClassDB::bind_method(D_METHOD("get_skybright"), &WeatherCore::get_skybright);
 	ClassDB::bind_method(D_METHOD("get_skyhighlight"), &WeatherCore::get_skyhighlight);
@@ -176,16 +161,8 @@ void WeatherCore::set_wind_intensity(int p_value) {
 	core_.set_wind_intensity(p_value);
 }
 
-int WeatherCore::get_wind_intensity() const {
-	return core_.oscillator.intensity;
-}
-
 void WeatherCore::set_wind_duration_ticks(int p_ticks) {
 	core_.set_wind_duration_ticks(p_ticks);
-}
-
-int WeatherCore::get_wind_duration_ticks() const {
-	return core_.wind_duration_ticks;
 }
 
 void WeatherCore::trigger_lightning_short() {
@@ -216,23 +193,11 @@ Vector3 WeatherCore::get_color_src_gain() const {
 	return Vector3(scale[0], scale[1], scale[2]);
 }
 
-Color WeatherCore::get_fill() const {
-	return packed_to_color(core_.fill_block.render_color);
-}
-
-Color WeatherCore::get_sun() const {
-	return packed_to_color(core_.sun_block.render_color);
-}
-
 Color WeatherCore::get_fog() const {
 	// Fog color blocks operate in authored half-intensity bytes; the derived
 	// render color doubles only after smoothing, lightning and modulation.
 	return rgb_to_color(opennova::env::double_saturate(
 			packed_to_rgb01(core_.fog_block.render_color)));
-}
-
-Color WeatherCore::get_sky() const {
-	return packed_to_color(core_.sky_block.render_color);
 }
 
 Color WeatherCore::get_skyfog() const {
@@ -257,14 +222,6 @@ Color WeatherCore::get_cloud() const {
 
 Color WeatherCore::get_floor() const {
 	return packed_to_color(core_.sky_color_blocks.floor.render_color);
-}
-
-Color WeatherCore::get_ceiling_pre_mod() const {
-	return packed_to_color(core_.sky_color_blocks.ceiling.pre_mod_color);
-}
-
-Color WeatherCore::get_floor_pre_mod() const {
-	return packed_to_color(core_.sky_color_blocks.floor.pre_mod_color);
 }
 
 Color WeatherCore::get_skybase() const {
@@ -355,22 +312,3 @@ float WeatherCore::get_sky_height() const {
 	return static_cast<float>(core_.scalar_channels.sky_height_fp) / 65536.0f;
 }
 
-float WeatherCore::get_sun_dim_pct() const {
-	return static_cast<float>(core_.scalar_channels.sun_dim_fp) / 65536.0f;
-}
-
-float WeatherCore::get_rain_pct() const {
-	return static_cast<float>(core_.scalar_channels.rain_pct_fp) / 65536.0f;
-}
-
-int WeatherCore::get_fog_accel_clamp_fixed() const {
-	return core_.scalar_channels.fog_step_fp;
-}
-
-int WeatherCore::get_rain_pct_fixed() const {
-	return core_.scalar_channels.rain_pct_fp;
-}
-
-int WeatherCore::get_overcast_blend_fixed() const {
-	return core_.scalar_channels.overcast_fp;
-}

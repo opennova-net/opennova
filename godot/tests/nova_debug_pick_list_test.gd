@@ -29,10 +29,10 @@ func test_add_dedupes_by_handle_and_refreshes_the_row() -> void:
 	list.changed.connect(func(): emissions[0] += 1)
 	assert_eq(list.add(_pick(5, "crate", 10)), 0)
 	assert_eq(list.add(_pick(9, "jeep", 11)), 1)
-	assert_eq(list.size(), 2)
+	assert_eq(list.get_picks().size(), 2)
 	assert_eq(list.add(_pick(5, "crate", 99)), 0,
 			"re-picking a listed entity refreshes ITS row, never appends")
-	assert_eq(list.size(), 2)
+	assert_eq(list.get_picks().size(), 2)
 	assert_eq(int(list.get_picks()[0].get("tick", -1)), 99,
 			"the refreshed row carries the newest pick metadata")
 	assert_eq(emissions[0], 3, "every mutation announces itself")
@@ -46,7 +46,7 @@ func test_rejects_misses_and_caps_without_evicting() -> void:
 		assert_eq(list.add(_pick(i)), i)
 	assert_true(list.is_full())
 	assert_eq(list.add(_pick(100)), -1, "a full list rejects instead of evicting")
-	assert_eq(list.size(), DebugPickList.MAX_PICKS)
+	assert_eq(list.get_picks().size(), DebugPickList.MAX_PICKS)
 	assert_eq(list.add(_pick(3, "again", 50)), 3,
 			"...but refreshing a listed entity still works at cap")
 
@@ -58,12 +58,12 @@ func test_remove_and_clear_announce() -> void:
 	var emissions := [0]
 	list.changed.connect(func(): emissions[0] += 1)
 	list.remove_at(0)
-	assert_eq(list.size(), 1)
+	assert_eq(list.get_picks().size(), 1)
 	assert_eq(int(list.get_picks()[0].get("entity_handle", -1)), 2)
 	list.remove_at(99)
 	assert_eq(emissions[0], 1, "an out-of-range remove is a silent no-op")
 	list.clear()
-	assert_eq(list.size(), 0)
+	assert_eq(list.get_picks().size(), 0)
 	list.clear()
 	assert_eq(emissions[0], 2, "clearing an empty list is a silent no-op")
 

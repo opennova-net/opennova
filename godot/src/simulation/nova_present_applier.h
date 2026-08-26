@@ -87,7 +87,6 @@ public:
 	PackedInt64Array profile_present_snapshot(const PackedFloat32Array &snap,
 			int stride, int64_t layout_revision);
 
-	Dictionary get_stats() const;
 	Ref<class MissionPresentStats> get_stats_record() const;
 
 	// The one placement convention — a thin wrapper over the engine's
@@ -152,23 +151,6 @@ public:
 	// clear_ctrl_values() would also erase live WAC channels.
 	static int emplaced_apply(Object *node, const PackedFloat32Array &snap,
 			int base, bool clear_when_invalid);
-	static void emplaced_clear(Object *node);
-	// Authoritative ground-vehicle VEHICLE_STEERING/VEHICLE_SPEED pair.
-	// Invalid compact/non-vehicle rows release only this semantic writer.
-	static int vehicle_motion_apply(Object *node,
-			const PackedFloat32Array &snap, int base);
-	static void vehicle_motion_clear(Object *node);
-	// Bounded per-model projection of the retail sector/generic-zone CTRL
-	// writers. Validity bits distinguish an omitted global-bus write from a
-	// literal zero store; clears affect only these presentation owners.
-	static int zone_team_apply(Object *node,
-			const PackedFloat32Array &snap, int base);
-	static void zone_team_clear(Object *node);
-	// Attachment-scoped carrier HEAT_GLOW. A valid row includes cold zero;
-	// invalid/unavailable rows release only this dedicated writer.
-	static int world_heat_apply(Object *node, const PackedFloat32Array &snap,
-			int base);
-	static void world_heat_clear(Object *node);
 
 protected:
 	static void _bind_methods();

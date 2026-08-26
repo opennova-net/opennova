@@ -73,7 +73,7 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 		assert_eq(String(audio.calls[0]["set"]), "AI_FIRE")
 		assert_eq(int(audio.calls[0]["source_bms_id"]), 77)
 		assert_eq(audio.calls[1]["pos"], Vector3(4, 1, 2))
-	assert_eq(int(presenter.get_stats()["sounds"]), 2)
+	assert_eq(presenter.get_stats().sounds, 2)
 	presenter.teardown()
 
 
@@ -93,7 +93,7 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	for _frame in range(128):
 		presenter.present_fires([local.duplicate(), remote.duplicate()])
 
-	assert_eq(int(presenter.get_stats()["fires"]), 128,
+	assert_eq(presenter.get_stats().fires, 128,
 			"only the decoded remote shot reaches the presentation legs")
 	presenter.teardown()
 
@@ -126,7 +126,7 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 		var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
 		assert_almost_eq(cols[0].r, 0.0, 0.01, "oldest pair rides the base color (black)")
 		assert_gt(cols[4].r, 0.5, "newer pairs ride the red ramp")
-	assert_eq(int(presenter.get_stats()["tracer_peak"]), 1)
+	assert_eq(presenter.get_stats().tracer_peak, 1)
 	presenter.teardown()
 
 

@@ -8,21 +8,6 @@ void WaterCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("update", "frame_counter"), &WaterCore::update);
 	ClassDB::bind_method(D_METHOD("get_color_rgba8"), &WaterCore::get_color_rgba8);
 	ClassDB::bind_method(D_METHOD("get_normal_rgba8"), &WaterCore::get_normal_rgba8);
-	ClassDB::bind_method(D_METHOD("get_texture_size"), &WaterCore::get_texture_size);
-	ClassDB::bind_method(
-			D_METHOD("strip_set_view", "cam_transform", "cam_projection", "viewport_px", "fog_end_world"),
-			&WaterCore::strip_set_view);
-	ClassDB::bind_method(
-			D_METHOD("strip_build", "plane_height_world", "murk", "water_color_lit", "uv_scale",
-					"uv_bias", "underwater", "nightvision"),
-			&WaterCore::strip_build);
-	ClassDB::bind_method(D_METHOD("strip_positions"), &WaterCore::strip_positions);
-	ClassDB::bind_method(D_METHOD("strip_colors"), &WaterCore::strip_colors);
-	ClassDB::bind_method(D_METHOD("strip_speculars"), &WaterCore::strip_speculars);
-	ClassDB::bind_method(D_METHOD("strip_uv0"), &WaterCore::strip_uv0);
-	ClassDB::bind_method(D_METHOD("strip_custom0"), &WaterCore::strip_custom0);
-	ClassDB::bind_method(D_METHOD("strip_custom1"), &WaterCore::strip_custom1);
-	ClassDB::bind_method(D_METHOD("strip_custom2"), &WaterCore::strip_custom2);
 	ClassDB::bind_method(D_METHOD("strip_indices"), &WaterCore::strip_indices);
 }
 

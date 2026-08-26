@@ -133,22 +133,8 @@ void NetProtocol::_bind_methods() {
 	ClassDB::bind_static_method("NetProtocol", D_METHOD("wire_handle_slot", "handle"),
 			&NetProtocol::wire_handle_slot);
 	ClassDB::bind_static_method("NetProtocol",
-			D_METHOD("wire_handle_pool_label", "pool_index"),
-			&NetProtocol::wire_handle_pool_label);
-	ClassDB::bind_static_method("NetProtocol",
 			D_METHOD("pack_character_id", "nationality", "division", "combo", "alignment"),
 			&NetProtocol::pack_character_id);
-	ClassDB::bind_static_method("NetProtocol",
-			D_METHOD("character_id_nationality", "packed"),
-			&NetProtocol::character_id_nationality);
-	ClassDB::bind_static_method("NetProtocol",
-			D_METHOD("character_id_division", "packed"),
-			&NetProtocol::character_id_division);
-	ClassDB::bind_static_method("NetProtocol", D_METHOD("character_id_combo", "packed"),
-			&NetProtocol::character_id_combo);
-	ClassDB::bind_static_method("NetProtocol",
-			D_METHOD("character_id_alignment", "packed"),
-			&NetProtocol::character_id_alignment);
 
 	BIND_CONSTANT(GAME_TYPE_DEATHMATCH);
 	BIND_CONSTANT(GAME_TYPE_KING_OF_THE_HILL);
@@ -237,29 +223,9 @@ int NetProtocol::wire_handle_slot(int p_handle) {
 	return opennova::wire_handle::slot(static_cast<uint16_t>(p_handle));
 }
 
-String NetProtocol::wire_handle_pool_label(int p_pool_index) {
-	return String(opennova::wire_handle::pool_label(p_pool_index));
-}
-
 int NetProtocol::pack_character_id(int p_nationality, int p_division, int p_combo,
 		int p_alignment) {
 	return opennova::character_id::pack(p_nationality, p_division, p_combo, p_alignment);
-}
-
-int NetProtocol::character_id_nationality(int p_packed) {
-	return opennova::character_id::nationality(static_cast<uint16_t>(p_packed));
-}
-
-int NetProtocol::character_id_division(int p_packed) {
-	return opennova::character_id::division(static_cast<uint16_t>(p_packed));
-}
-
-int NetProtocol::character_id_combo(int p_packed) {
-	return opennova::character_id::combo(static_cast<uint16_t>(p_packed));
-}
-
-int NetProtocol::character_id_alignment(int p_packed) {
-	return opennova::character_id::alignment(static_cast<uint16_t>(p_packed));
 }
 
 } // namespace godot

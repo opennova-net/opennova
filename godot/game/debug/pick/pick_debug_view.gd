@@ -53,10 +53,12 @@ func render_picks(live_positions: Dictionary) -> void:
 	_mesh.clear_surfaces()
 	for lb in _labels:
 		lb.visible = false
-	if _pick_list == null or _pick_list.size() == 0:
+	if _pick_list == null:
+		return
+	var picks := _pick_list.get_picks()
+	if picks.is_empty():
 		return
 	var segments: Array = []
-	var picks := _pick_list.get_picks()
 	for i in range(mini(picks.size(), _labels.size())):
 		var pick: Dictionary = picks[i]
 		var color := Color.from_hsv(IndexHue.hue_for_index(i), 0.75, 1.0)

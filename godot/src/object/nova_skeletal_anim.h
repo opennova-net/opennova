@@ -144,7 +144,6 @@ public:
 
 	bool is_loaded() const { return loaded_; }
 	String get_last_error() const { return last_error_; }
-	String get_adm_name() const { return adm_name_; }
 
 	int get_bone_count() const { return static_cast<int>(bones_.size()); }
 	PackedStringArray get_clip_keys() const;

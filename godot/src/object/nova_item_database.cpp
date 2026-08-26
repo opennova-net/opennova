@@ -54,29 +54,17 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_death_traits", "id"), &ItemDatabase::get_death_traits);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &ItemDatabase::get_anim_def);
 	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &ItemDatabase::get_ai_function);
-	ClassDB::bind_method(D_METHOD("get_hp", "id"), &ItemDatabase::get_hp);
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &ItemDatabase::get_move_function);
-	ClassDB::bind_method(D_METHOD("get_render_function", "id"), &ItemDatabase::get_render_function);
-	ClassDB::bind_method(D_METHOD("get_disk_function", "id"), &ItemDatabase::get_disk_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &ItemDatabase::get_item_type);
-	ClassDB::bind_method(D_METHOD("get_model_scale_q16", "id"),
-			&ItemDatabase::get_model_scale_q16);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &ItemDatabase::get_light_transfer);
 	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &ItemDatabase::is_ai_capable);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &ItemDatabase::get_display_name);
 	ClassDB::bind_method(
 			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
 			&ItemDatabase::extract_seat_specs_for_item);
-	ClassDB::bind_method(D_METHOD("get_ammo_closeattack", "id"), &ItemDatabase::get_ammo_closeattack);
-	ClassDB::bind_method(D_METHOD("get_launchups_closeattack", "id"), &ItemDatabase::get_launchups_closeattack);
-	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &ItemDatabase::get_clipsize);
-	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &ItemDatabase::get_deathtime_ticks);
-	ClassDB::bind_method(D_METHOD("get_primary_weapon", "id"), &ItemDatabase::get_primary_weapon);
 	ClassDB::bind_method(D_METHOD("get_emplacement_attachments", "id"), &ItemDatabase::get_emplacement_attachments);
 	ClassDB::bind_method(D_METHOD("get_emplacement_attachment_markers", "id"), &ItemDatabase::get_emplacement_attachment_markers);
 	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &ItemDatabase::get_mount_config);
-	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &ItemDatabase::get_sound_profile);
-	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &ItemDatabase::get_sound_loops);
 	ClassDB::bind_method(D_METHOD("resolve_envs_markers", "mission"),
 			&ItemDatabase::resolve_envs_markers);
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &ItemDatabase::get_particle_effects);
@@ -359,21 +347,6 @@ String ItemDatabase::get_default_aip(int id) const {
 String ItemDatabase::get_move_function(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.move_function;
-}
-
-String ItemDatabase::get_render_function(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.render_function;
-}
-
-String ItemDatabase::get_disk_function(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.disk_function;
-}
-
-int ItemDatabase::get_hp(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.hp;
 }
 
 int ItemDatabase::get_item_type(int id) const {

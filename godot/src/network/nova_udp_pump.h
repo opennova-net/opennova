@@ -60,7 +60,6 @@ public:
 	int send_to_host(const PackedByteArray &bytes);
 
 	// Datagrams written to the capture file so far; 0 when not recording.
-	int captured_count() const;
 	bool is_capturing() const { return capture_ != nullptr; }
 
 protected:

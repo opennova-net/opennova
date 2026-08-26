@@ -19,8 +19,8 @@ class ParticleTable : public Resource {
 private:
 	String id;
 	// Stored as one PackedByteArray of length 256 (32 rows × 8 cols, row-major).
-	// Editor exposure as a flat array keeps inspector simple; sample()/get_row()
-	// give per-row access.
+	// Editor exposure as a flat array keeps inspector simple; sample() gives
+	// per-row access.
 	PackedByteArray data;
 
 protected:
@@ -35,7 +35,6 @@ public:
 	PackedByteArray get_data() const;
 
 	int row_count() const;
-	PackedByteArray get_row(int row) const;
 	void set_row(int row, const PackedByteArray &values);
 
 	// Sample the 256-byte curve at t in [0, 1]. Linear interpolation between

@@ -57,10 +57,6 @@ void UdpPump::record_(bool inbound, const String &peer_ip, int peer_port,
 	}
 }
 
-int UdpPump::captured_count() const {
-	return capture_ != nullptr ? int(capture_->records()) : 0;
-}
-
 int UdpPump::bind_listen(int port) {
 	close();
 	socket_.instantiate();
@@ -176,8 +172,6 @@ void UdpPump::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close"), &UdpPump::close);
 	ClassDB::bind_method(D_METHOD("poll"), &UdpPump::poll);
 	ClassDB::bind_method(D_METHOD("is_capturing"), &UdpPump::is_capturing);
-	ClassDB::bind_method(D_METHOD("captured_count"), &UdpPump::captured_count);
-	ClassDB::bind_method(D_METHOD("has_inbound"), &UdpPump::has_inbound);
 	ClassDB::bind_method(D_METHOD("inbound_count"), &UdpPump::inbound_count);
 	ClassDB::bind_method(D_METHOD("take_inbound"), &UdpPump::take_inbound);
 	ClassDB::bind_method(D_METHOD("send_to", "ip", "port", "bytes"), &UdpPump::send_to);

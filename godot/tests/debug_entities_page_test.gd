@@ -426,7 +426,7 @@ func test_removing_a_pending_pick_cancels_its_future_auto_selection() -> void:
 	picks.add(_guard_pick())
 	assert_true(list.is_selected(0))
 	picks.remove_at(1)
-	assert_eq(picks.size(), 1, "the unrelated vehicle pick remains")
+	assert_eq(picks.get_picks().size(), 1, "the unrelated vehicle pick remains")
 
 	fixture.model.cards = saved_cards
 	fixture.model.guard_present = true

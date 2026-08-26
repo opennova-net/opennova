@@ -97,16 +97,10 @@ public:
 	bool is_modified() const { return modified_; }
 	String get_source_path() const { return source_path_; }
 	String get_last_error() const { return last_error_; }
-	void mark_clean() { modified_ = false; }
 
 	// --- read (deep copies) ---
 	int get_set_count() const;
-	Array get_sets() const;
 	Dictionary get_set(int p_si) const;
-	int get_layer_count(int p_si) const;
-	Dictionary get_layer(int p_si, int p_li) const;
-	int get_member_count(int p_si, int p_li) const;
-	Dictionary get_member(int p_si, int p_li, int p_mi) const;
 
 	// --- scalar edits ---
 	void set_set_field(int p_si, const String &p_key, const Variant &p_value);
@@ -115,14 +109,8 @@ public:
 
 	// --- structural edits (return new index where applicable, -1 on error) ---
 	int add_set();
-	void remove_set(int p_si);
-	void move_set(int p_from, int p_to);
 	int add_layer(int p_si);
-	void remove_layer(int p_si, int p_li);
-	void move_layer(int p_si, int p_from, int p_to);
 	int add_member(int p_si, int p_li);
-	void remove_member(int p_si, int p_li, int p_mi);
-	void move_member(int p_si, int p_li, int p_from, int p_to);
 
 	LwfData() = default;
 };

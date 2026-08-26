@@ -39,9 +39,6 @@ public:
 			int32_t is_glass_flag,
 			int32_t alpha_test_byte);
 
-	int32_t family_for_key(int32_t key) const;
-	int32_t blend_for_key(int32_t key) const;
-
 	// Every shader tag in the canonical descriptor table (engine/formats/oed), in table
 	// order. Lets tooling (the render swatch probe, material pickers) iterate
 	// the real table instead of duplicating the tag list.

@@ -24,7 +24,6 @@ void ParticleTable::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_data", "value"), &ParticleTable::set_data);
 	ClassDB::bind_method(D_METHOD("get_data"), &ParticleTable::get_data);
 	ClassDB::bind_method(D_METHOD("row_count"), &ParticleTable::row_count);
-	ClassDB::bind_method(D_METHOD("get_row", "row"), &ParticleTable::get_row);
 	ClassDB::bind_method(D_METHOD("set_row", "row", "values"), &ParticleTable::set_row);
 	ClassDB::bind_method(D_METHOD("sample", "t"), &ParticleTable::sample);
 
@@ -54,19 +53,6 @@ PackedByteArray ParticleTable::get_data() const { return data; }
 
 int ParticleTable::row_count() const {
 	return ROWS;
-}
-
-PackedByteArray ParticleTable::get_row(int row) const {
-	PackedByteArray out;
-	out.resize(COLS);
-	if (row < 0 || row >= ROWS) {
-		for (int i = 0; i < COLS; ++i) out[i] = 0;
-		return out;
-	}
-	for (int i = 0; i < COLS; ++i) {
-		out[i] = data[row * COLS + i];
-	}
-	return out;
 }
 
 void ParticleTable::set_row(int row, const PackedByteArray &values) {

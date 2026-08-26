@@ -79,8 +79,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// particle_flag:: bits GDScript composes directly (the full name<->bit
-	// table stays introspectable via get_particle_flag_table()). Pinned to
+	// particle_flag:: bits GDScript composes directly. Pinned to
 	// engine/runtime/particle by static_asserts in the .cpp.
 	enum {
 		FLAG_YAW_AND_PITCH = 0x100,
@@ -161,11 +160,7 @@ public:
 	// Editor introspection of the canonical name<->bit tables (single source of
 	// truth in engine/runtime/particle). The Particle workspace builds flag/move pickers
 	// and blend-mode dropdowns from these instead of hand-copying the tables.
-	static Dictionary get_particle_flag_table();   // {name(String): bit(int)}, engine table order
-	static Dictionary get_move_flag_table();        // {name(String): bit(int)}
-	static PackedStringArray get_blend_mode_names(); // indexed by BlendMode value 0..7
 	static String format_particle_flags(int bits);  // canonical " NAME1 NAME2 " display string
-	static String format_move_flags(int bits);
 
 	// Deep copy of every field (incl. the 4 graphic layers and curve refs) via
 	// the native round-trip. Backs the editor's Duplicate action.

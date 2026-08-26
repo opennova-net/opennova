@@ -184,6 +184,8 @@ void write_f32(PackedByteArray &bytes, std::uint32_t offset, float value) {
 	std::memcpy(bytes.ptrw() + offset, &value, sizeof(value));
 }
 
+// The kernel tap directions of the bloom passes (FrameFX_RenderBloomPass @0x582940 -
+// docs/render/render-order-re.md).
 std::array<float, 2> direction_for_degrees(float degrees, float radius) {
 	const float radians = degrees * (kPi / 180.0f);
 	// The retail builders store (sin(angle), cos(angle)) in texture space.
@@ -952,8 +954,6 @@ FrameFx::FrameFx() = default;
 FrameFx::~FrameFx() = default;
 
 void FrameFx::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_q3_viewport"),
-			&FrameFx::get_q3_viewport);
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFx::get_backend_report);
 	ClassDB::bind_method(D_METHOD("advance_frame"),
@@ -978,7 +978,9 @@ void FrameFx::build_auxiliary_views() {
 	q3_viewport_->set_use_own_world_3d(false);
 	q3_viewport_->set_handle_input_locally(false);
 	q3_viewport_->set_positional_shadow_atlas_size(0);
-	// Retail's altbuffer inherits the backbuffer multisample mode; here the
+	// Retail's altbuffer inherits the backbuffer multisample mode
+	// (FrameFX_CreateAltBufferTexture @0x582120, CreateRenderTarget @0x58217e -
+	// docs/render/render-order-re.md D-RORD-10); here the
 	// samples also stand in for the StretchRect box filter over the missing
 	// full-resolution source (see kFrameFxSide).
 	q3_viewport_->set_msaa_3d(Viewport::MSAA_8X);
@@ -1078,7 +1080,8 @@ void FrameFx::advance_frame() {
 
 	// Kernel height, beauty aspect: the camera projection copied below then
 	// frames exactly the beauty view, and the FrameFX capture squashes it
-	// into the 256-square like retail's StretchRect of the altbuffer.
+	// into the 256-square like retail's StretchRect of the altbuffer
+	// (FrameFX_CaptureRenderTarget @0x584020 - docs/render/render-order-re.md).
 	const Vector2 visible_size = viewport->get_visible_rect().size;
 	const float aspect = visible_size.y > 0.0f
 			? visible_size.x / visible_size.y
@@ -1154,10 +1157,7 @@ Dictionary FrameFx::get_backend_report() const {
 	return result;
 }
 
-void DisplayDecode::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_backend_report"),
-			&DisplayDecode::get_backend_report);
-}
+void DisplayDecode::_bind_methods() {}
 
 void DisplayDecode::install() {
 	if (effect_.is_null())
@@ -1206,19 +1206,4 @@ void DisplayDecode::_notification(int p_what) {
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		uninstall();
 	}
-}
-
-Dictionary DisplayDecode::get_backend_report() const {
-	Dictionary result = effect_.is_valid() ? effect_->get_backend_report()
-										   : Dictionary();
-	WorldEnvironment *world_environment =
-			world_environment_from_id(world_environment_id_);
-	result["decode_installed"] =
-			(world_environment != nullptr &&
-					world_environment->get_compositor() == installed_compositor_) ||
-			(world_.is_valid() && installed_compositor_.is_valid());
-	result["decode_owner"] = world_environment != nullptr
-			? String("world_environment")
-			: (world_.is_valid() ? String("world_3d") : String("none"));
-	return result;
 }

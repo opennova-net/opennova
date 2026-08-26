@@ -15,7 +15,6 @@ void DbfData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source_path"), &DbfData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &DbfData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_dialog_count"), &DbfData::get_dialog_count);
-	ClassDB::bind_method(D_METHOD("get_dialog_ids"), &DbfData::get_dialog_ids);
 	ClassDB::bind_method(D_METHOD("has_dialog", "id"), &DbfData::has_dialog);
 	ClassDB::bind_method(D_METHOD("resolve_dialog", "id"), &DbfData::resolve_dialog);
 }
@@ -77,14 +76,6 @@ bool DbfData::load_bytes(const PackedByteArray &p_bytes) {
 
 int DbfData::get_dialog_count() const {
 	return static_cast<int>(file_.groups.size());
-}
-
-PackedStringArray DbfData::get_dialog_ids() const {
-	PackedStringArray out;
-	for (const auto &group : file_.groups) {
-		out.push_back(String::utf8(group.group_name.c_str()));
-	}
-	return out;
 }
 
 bool DbfData::has_dialog(const String &p_id) const {

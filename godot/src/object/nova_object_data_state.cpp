@@ -271,18 +271,6 @@ String ObjectData::get_source_path() const {
 	return source_path;
 }
 
-String ObjectData::get_source_dir() const {
-	return source_dir;
-}
-
-String ObjectData::get_object_name() const {
-	return object_name;
-}
-
-String ObjectData::get_source_kind() const {
-	return _source_kind_name();
-}
-
 String ObjectData::get_last_error() const {
 	return last_error;
 }
@@ -311,65 +299,3 @@ Dictionary ObjectData::get_summary() const {
 	return result;
 }
 
-Array ObjectData::get_project_lods() const {
-	Array result;
-	if (!has_source_project) {
-		return result;
-	}
-	for (int i = 0; i < TDP_MAX_LODS; ++i) {
-		const TdpLod &lod = source_project.lods[i];
-		if (lod.scene_file[0] == '\0') {
-			break;
-		}
-		Dictionary item;
-		item["index"] = i;
-		item["scene_file"] = from_native(lod.scene_file);
-		const std::string resolved_scene_path = resolve_relative_file(source_dir, lod.scene_file);
-		item["scene_path"] = source_dir.is_empty() ? String() : from_native(resolved_scene_path.c_str());
-		item["attributes"] = lod.attributes;
-		item["render_function"] = from_native(lod.render_function);
-		item["threshold"] = lod.threshold;
-		item["part_anim_enabled"] = lod.part_anim_enabled != 0;
-		item["part_anim_count"] = static_cast<int64_t>(lod.part_anim_count);
-		item["light_count"] = static_cast<int64_t>(lod.light_count);
-		result.push_back(item);
-	}
-	return result;
-}
-
-bool ObjectData::set_lod_field(int p_lod_index, const String &p_key, const Variant &p_value) {
-	if (!has_source_project || p_lod_index < 0 || p_lod_index >= project_lod_count(source_project)) {
-		return false;
-	}
-	TdpLod &lod = source_project.lods[p_lod_index];
-	const String key = p_key.to_lower();
-	if (key == "attributes") {
-		lod.attributes = static_cast<int32_t>(p_value);
-	} else if (key == "render_function") {
-		copy_cstr(lod.render_function, sizeof(lod.render_function), to_std(String(p_value)).c_str());
-	} else if (key == "threshold") {
-		lod.threshold = static_cast<float>(p_value);
-	} else {
-		return false;
-	}
-
-	if (oed_session != nullptr) {
-		return _build_model_from_project_session(nullptr, UPDATE_ALL) == OK;
-	}
-	_notify_object_changed(UPDATE_ALL);
-	return true;
-}
-
-bool ObjectData::set_project_field(const String &p_key, const Variant &p_value) {
-	const String key = p_key.to_lower();
-	if (key != "poly_collision_lod") {
-		return false;
-	}
-	if (!has_source_project) {
-		tdp_init(&source_project);
-		has_source_project = true;
-	}
-	source_project.poly_collision_lod = std::clamp(static_cast<int32_t>(p_value), 0, TDP_MAX_LODS - 1);
-	_notify_object_changed(UPDATE_ALL);
-	return true;
-}

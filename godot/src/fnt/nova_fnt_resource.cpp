@@ -23,9 +23,7 @@ void FntResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_glyph_spacing", "glyph_spacing"), &FntResource::set_glyph_spacing);
 
 	ClassDB::bind_method(D_METHOD("get_page_image", "page"), &FntResource::get_page_image);
-	ClassDB::bind_method(D_METHOD("set_page_image", "page", "image"), &FntResource::set_page_image);
 
-	ClassDB::bind_method(D_METHOD("get_glyph_page", "char_code"), &FntResource::get_glyph_page);
 	ClassDB::bind_method(D_METHOD("get_glyph_rect", "char_code"), &FntResource::get_glyph_rect);
 	ClassDB::bind_method(D_METHOD("set_glyph_rect", "char_code", "page", "rect"), &FntResource::set_glyph_rect);
 
@@ -193,46 +191,6 @@ Ref<Image> FntResource::get_page_image(int p_page) const {
 	data.resize(FNT_TEXTURE_SIZE);
 	std::memcpy(data.ptrw(), page, FNT_TEXTURE_SIZE);
 	return Image::create_from_data(FNT_TEXTURE_WIDTH, FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, data);
-}
-
-Error FntResource::set_page_image(int p_page, const Ref<Image> &p_image) {
-	if (!_has_valid_font() || p_page < 0 || p_page >= static_cast<int>(font_.num_pages) || p_image.is_null()) {
-		return ERR_INVALID_PARAMETER;
-	}
-
-	Ref<Image> image = p_image->duplicate();
-	if (image.is_null() || image->is_empty()) {
-		return ERR_INVALID_PARAMETER;
-	}
-	if (image->is_compressed()) {
-		image->decompress();
-	}
-	if (image->get_format() != Image::FORMAT_RGBA8) {
-		image->convert(Image::FORMAT_RGBA8);
-	}
-	if (image->get_width() != static_cast<int>(FNT_TEXTURE_WIDTH) ||
-	    image->get_height() != static_cast<int>(FNT_TEXTURE_HEIGHT)) {
-		return ERR_INVALID_PARAMETER;
-	}
-
-	PackedByteArray src = image->get_data();
-	uint8_t *dst = fnt_get_page_data(&font_, static_cast<uint32_t>(p_page));
-	for (int i = 0; i < src.size(); i += FNT_TEXTURE_CHANNELS) {
-		dst[i + 0] = 255;
-		dst[i + 1] = 255;
-		dst[i + 2] = 255;
-		dst[i + 3] = src[i + 3];
-	}
-	emit_changed();
-	return OK;
-}
-
-int FntResource::get_glyph_page(int p_char_code) const {
-	uint32_t index = 0;
-	if (!_has_valid_font() || !_char_to_index(p_char_code, index)) {
-		return -1;
-	}
-	return static_cast<int>(font_.glyphs[index].page);
 }
 
 Rect2i FntResource::get_glyph_rect(int p_char_code) const {

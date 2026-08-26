@@ -337,21 +337,12 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load"), &TerrainData::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &TerrainData::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &TerrainData::is_loaded);
-	ClassDB::bind_method(D_METHOD("get_change_revision"),
-			&TerrainData::get_change_revision);
-	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &TerrainData::get_depth_raw16);
-	ClassDB::bind_method(D_METHOD("get_heightmap_image"), &TerrainData::get_heightmap_image);
-	ClassDB::bind_method(D_METHOD("get_colormap_image"), &TerrainData::get_colormap_image);
-	ClassDB::bind_method(D_METHOD("get_blendmap_image"), &TerrainData::get_blendmap_image);
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &TerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &TerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &TerrainData::get_height_world_bilinear);
 	ClassDB::bind_method(D_METHOD("get_surface_normal_world", "world_pos"), &TerrainData::get_surface_normal_world);
-	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &TerrainData::get_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("build_minimap_water_mask", "water_height_wu"),
 			&TerrainData::build_minimap_water_mask, DEFVAL(NAN));
-	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
-	                     &TerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_detail_foliage_index_world", "world_x", "world_z"),
 	                     &TerrainData::get_detail_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &TerrainData::get_foliage_index_world);
@@ -359,16 +350,11 @@ void TerrainData::_bind_methods() {
 	                     &TerrainData::world_to_runtime_source_coords);
 	ClassDB::bind_method(D_METHOD("raycast_terrain", "from", "to"), &TerrainData::raycast_terrain);
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &TerrainData::get_tile_count);
-	ClassDB::bind_method(D_METHOD("load_foliage_indices"), &TerrainData::load_foliage_indices);
 	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &TerrainData::set_sector_grid);
 	ClassDB::bind_method(D_METHOD("get_sector_grid"), &TerrainData::get_sector_grid);
 	ClassDB::bind_method(D_METHOD("get_foliage_map"), &TerrainData::get_foliage_map);
 	ClassDB::bind_method(D_METHOD("get_foliage_defs"), &TerrainData::get_foliage_defs);
 	ClassDB::bind_method(D_METHOD("set_foliage_defs", "value"), &TerrainData::set_foliage_defs);
-	ClassDB::bind_method(D_METHOD("set_trn_texture_filename", "slot_id", "filename"), &TerrainData::set_trn_texture_filename);
-	ClassDB::bind_method(D_METHOD("get_trn_texture_filename", "slot_id"), &TerrainData::get_trn_texture_filename);
-	ClassDB::bind_method(D_METHOD("set_polydata_filename", "filename"), &TerrainData::set_polydata_filename);
-	ClassDB::bind_method(D_METHOD("get_polydata_filename"), &TerrainData::get_polydata_filename);
 	ClassDB::bind_method(D_METHOD("set_tileinfo_filename", "filename"), &TerrainData::set_tileinfo_filename);
 	ClassDB::bind_method(D_METHOD("get_tileinfo_filename"), &TerrainData::get_tileinfo_filename);
 	ClassDB::bind_method(D_METHOD("get_tileinfo_resource"), &TerrainData::get_tileinfo_resource);
@@ -661,9 +647,8 @@ static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &t
 
 // Sync Godot scalar properties (name, sector grid, water, wrap, etc.) into
 // the underlying TrnConfig. Always safe to run — does not touch texture
-// filename fields, which are either (a) owned by Ref<Texture2D> setters
-// (covered by _sync_trn_texture_filenames_from_refs below), or (b) set
-// explicitly via set_trn_texture_filename().
+// filename fields, which are owned by the Ref<Texture2D> setters (covered by
+// _sync_trn_texture_filenames_from_refs below) and the import/reset paths.
 void TerrainData::_sync_trn_scalars_from_properties() {
 	trn.name = terrain_name.utf8().get_data();
 	trn.detail_density = detail_density;
@@ -686,9 +671,8 @@ void TerrainData::_sync_trn_scalars_from_properties() {
 
 // Re-derive texture filename fields from the Ref<Texture2D> paths. Only
 // called from IMPL_TEX_PROP setters — running this elsewhere would
-// silently overwrite filenames that set_trn_texture_filename had
-// explicitly set (the Ref still carries its source path even after the
-// user asked for a new export name).
+// silently overwrite filenames the import/reset paths own (the Ref still
+// carries its source path after a slot was renamed).
 void TerrainData::_sync_trn_texture_filenames_from_refs() {
 	_sync_texture_filename(colormap, trn.colormap);
 	_sync_texture_filename(detailmap, trn.detailmap);
@@ -707,9 +691,8 @@ void TerrainData::_sync_trn_texture_filenames_from_refs() {
 void TerrainData::_notify_terrain_changed() {
 	// Always sync scalars — cheap and needed so `trn` stays consistent for
 	// saves. Deliberately DO NOT sync texture filenames here: that would
-	// clobber filenames set via set_trn_texture_filename (e.g. Save Project's
-	// rename-from-imported-to-exported step). Texture Ref setters call the
-	// filename sync themselves.
+	// clobber filenames the import/reset paths own. Texture Ref setters call
+	// the filename sync themselves.
 	_sync_trn_scalars_from_properties();
 	++change_revision_;
 	if (change_revision_ == 0) ++change_revision_;
@@ -1134,10 +1117,11 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 }
 
 Color TerrainData::get_colormap_color_world(float world_x, float world_z) const {
-	// Engine: Terrain_GetModulatedColorAtPos@0x005C5FE0 indexes the colormap
-	// directly as x & 0x3FF, (-z) & 0x3FF. It does not go through sector-grid
-	// quadrant remapping; the foliage render-emitter caller is still pending a
-	// verified retail anchor.
+	// sample_terrain_colormap_tinted @0x606030 indexes the colormap directly as
+	// x & 0x3FF, (-z) & 0x3FF (jodemo Terrain_GetModulatedColorAtPos @0x5C5FE0;
+	// docs/terrain/terrain-re.md). It does not go through sector-grid quadrant
+	// remapping; the foliage detail tier samples it four times around each
+	// vertex (generate_foliage_instances_0 @0x5ffdd0).
 	if (!_ensure_colormap_cpu_cache()) {
 		return Color(1.0f, 1.0f, 1.0f, 1.0f);
 	}
@@ -1147,24 +1131,6 @@ Color TerrainData::get_colormap_color_world(float world_x, float world_z) const 
 	const int sample_x = ((x % colormap_cpu_width) + colormap_cpu_width) % colormap_cpu_width;
 	const int sample_z = ((z % colormap_cpu_height) + colormap_cpu_height) % colormap_cpu_height;
 	return colormap_cpu_image->get_pixel(sample_x, sample_z);
-}
-
-Color TerrainData::get_modulated_colormap_color_world(float world_x,
-                                                          float world_z,
-                                                          const Color &light_color) const {
-	auto to_byte = [](float value) -> uint32_t {
-		return static_cast<uint32_t>(std::clamp(static_cast<int>(std::lround(value * 255.0f)), 0, 255));
-	};
-	const Color base = get_colormap_color_world(world_x, world_z);
-	const uint32_t base_argb = (to_byte(base.a) << 24) | (to_byte(base.r) << 16) |
-	                           (to_byte(base.g) << 8) | to_byte(base.b);
-	const uint32_t light_argb = 0xFF000000u | (to_byte(light_color.r) << 16) |
-	                            (to_byte(light_color.g) << 8) | to_byte(light_color.b);
-	const uint32_t modulated = opennova::terrain::terrain_modulate_color_argb(base_argb, light_argb);
-	return Color(static_cast<float>((modulated >> 16) & 0xFFu) / 255.0f,
-	             static_cast<float>((modulated >> 8) & 0xFFu) / 255.0f,
-	             static_cast<float>(modulated & 0xFFu) / 255.0f,
-	             static_cast<float>((modulated >> 24) & 0xFFu) / 255.0f);
 }
 
 Vector2 TerrainData::world_to_runtime_source_coords(float world_x, float world_z) const {
@@ -1324,28 +1290,6 @@ int TerrainData::get_foliage_index_world(float world_x, float world_z) const {
 	return static_cast<int>(foliage_map_resource->get_index(map_x, map_y));
 }
 
-Dictionary TerrainData::load_foliage_indices() const {
-	Dictionary result;
-	if (foliagemap_width <= 0 || foliagemap_height <= 0 ||
-	    foliagemap_indices.size() < static_cast<size_t>(foliagemap_width * foliagemap_height)) {
-		return result;
-	}
-
-	PackedByteArray data;
-	data.resize(static_cast<int64_t>(foliagemap_indices.size()));
-	std::memcpy(data.ptrw(), foliagemap_indices.data(), foliagemap_indices.size());
-
-	PackedByteArray palette;
-	palette.resize(256 * 3);
-	std::memcpy(palette.ptrw(), foliagemap_palette, sizeof(foliagemap_palette));
-
-	result["data"] = data;
-	result["width"] = foliagemap_width;
-	result["height"] = foliagemap_height;
-	result["palette"] = palette;
-	return result;
-}
-
 PackedInt32Array TerrainData::get_sector_grid() const {
 	return sector_grid;
 }
@@ -1376,52 +1320,6 @@ void TerrainData::set_foliage_defs(const Array &p_defs) {
 		}
 	}
 	_notify_terrain_changed();
-}
-
-void TerrainData::set_trn_texture_filename(const String &slot_id, const String &filename) {
-	const std::string native = filename.utf8().get_data();
-	if (slot_id == "colormap") trn.colormap = native;
-	else if (slot_id == "detailmap") trn.detailmap = native;
-	else if (slot_id == "detailmap_c1") trn.detailmap_c1 = native;
-	else if (slot_id == "detailmap_c2") trn.detailmap_c2 = native;
-	else if (slot_id == "detailmap_c3") trn.detailmap_c3 = native;
-	else if (slot_id == "detailmap2") trn.detailmap2 = native;
-	else if (slot_id == "detailmapdist") trn.detailmapdist = native;
-	else if (slot_id == "detailmapdist2") trn.detailmapdist2 = native;
-	else if (slot_id == "detailblendmap") trn.detailblendmap = native;
-	else if (slot_id == "charmap") trn.charmap = native;
-	else if (slot_id == "foliagemap") trn.foliagemap = native;
-	else if (slot_id == "tilestrip") trn.tilestrip = native;
-	else {
-		UtilityFunctions::push_error("TerrainData: unknown TRN texture field '", slot_id, "'");
-		return;
-	}
-	_notify_terrain_changed();
-}
-
-String TerrainData::get_trn_texture_filename(const String &slot_id) const {
-	if (slot_id == "colormap") return String(trn.colormap.c_str());
-	if (slot_id == "detailmap") return String(trn.detailmap.c_str());
-	if (slot_id == "detailmap_c1") return String(trn.detailmap_c1.c_str());
-	if (slot_id == "detailmap_c2") return String(trn.detailmap_c2.c_str());
-	if (slot_id == "detailmap_c3") return String(trn.detailmap_c3.c_str());
-	if (slot_id == "detailmap2") return String(trn.detailmap2.c_str());
-	if (slot_id == "detailmapdist") return String(trn.detailmapdist.c_str());
-	if (slot_id == "detailmapdist2") return String(trn.detailmapdist2.c_str());
-	if (slot_id == "detailblendmap") return String(trn.detailblendmap.c_str());
-	if (slot_id == "charmap") return String(trn.charmap.c_str());
-	if (slot_id == "foliagemap") return String(trn.foliagemap.c_str());
-	if (slot_id == "tilestrip") return String(trn.tilestrip.c_str());
-	return "";
-}
-
-void TerrainData::set_polydata_filename(const String &filename) {
-	trn.polydata = filename.utf8().get_data();
-	_notify_terrain_changed();
-}
-
-String TerrainData::get_polydata_filename() const {
-	return String(trn.polydata.c_str());
 }
 
 void TerrainData::set_tileinfo_filename(const String &filename) {

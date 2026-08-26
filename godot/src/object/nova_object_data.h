@@ -189,21 +189,6 @@ public:
 	// headers carry the witnesses) ---
 	// PANM track units (threedi_panm.h): rotations in 360/16384-degree
 	// counts, values/speeds in signed 8.8 (1/256 per count).
-	static double panm_rotation_unit_deg();
-	static double panm_value_unit();
-	// Authorable per-track ranges in human units — tracks are int16, so this
-	// is the int16 span through the units above:
-	// { rotation_min/max: deg, value_min/max: 8.8, speed_min/max: 8.8 }.
-	static Dictionary panm_track_limits();
-	// The semantic PANM mode catalog the part-animation inspector offers:
-	// [{ mode:String, label:String, control:int, uses_control_register:bool }].
-	static Array get_panm_mode_options();
-	// The canonical generator-style byte list (engine kControlEntries) + the
-	// per-consumer dispatch matrix and the loader's ctrl-reference rule.
-	static PackedInt32Array get_generator_style_ids();
-	static String generator_style_code_name(int p_style_id);
-	static bool generator_style_reads_control_value(int p_consumer, int p_style_id);
-	static bool generator_style_parameter_is_ctrl_reference(int p_style_id);
 
 	ObjectData();
 	~ObjectData();
@@ -225,10 +210,7 @@ public:
 	static void mark_cached_network_challenge_foliage_model(const String &p_name);
 	static void reset_network_challenge_model_registry();
 	static int64_t network_challenge_model_count();
-	Error save_project_to_dir(const String &p_dir_path);
 	Error export_3di_to_dir(const String &p_dir_path, int p_update_mask = 0);
-	void reset_empty(const String &p_name = "untitled");
-	Error set_lod_scene(int p_lod_index, const String &p_path);
 
 	// Whole-document edit-state snapshot for the editor's undo (B3): the
 	// OED-editable state (object name, materials, lights, per-LOD part
@@ -243,9 +225,6 @@ public:
 	bool can_save_project() const;
 	bool can_export_3di() const;
 	String get_source_path() const;
-	String get_source_dir() const;
-	String get_object_name() const;
-	String get_source_kind() const;
 	String get_last_error() const;
 	int get_oed_dirty_mask() const;
 	int get_last_oed_update_mask() const;
@@ -254,9 +233,6 @@ public:
 		return global_change_counter_.load(std::memory_order_relaxed);
 	}
 	Dictionary get_summary() const;
-	Array get_project_lods() const;
-	bool set_lod_field(int p_lod_index, const String &p_key, const Variant &p_value);
-	bool set_project_field(const String &p_key, const Variant &p_value);
 
 	int get_material_count() const;
 	Array get_lod_surfaces(int p_lod_index) const;
@@ -264,20 +240,14 @@ public:
 	Array get_materials() const;
 	Dictionary get_material_info(int p_index) const;
 	bool set_material_field(int p_index, const String &p_key, const Variant &p_value);
-	int get_material_shader_flags(int p_index) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
-	bool set_material_anim_frame(int p_index, int p_slot, int p_frame_idx, const String &p_path);
-	Array get_shader_catalog() const;
-	static Array get_global_control_register_catalog();
 	static String canonical_control_register_name(const String &p_name);
 	Array get_control_registers() const;
 	bool set_control_register_name(int p_index, const String &p_name);
 	String resolve_material_texture_path(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;
-	String resolve_texture_name(const String &p_texture_name) const;
 	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
 	int get_light_count() const;
-	Array get_lights() const;
 	Dictionary get_light_info(int p_index) const;
 	bool set_light_field(int p_index, const String &p_key, const Variant &p_value);
 	int get_user_point_count() const;
@@ -310,18 +280,12 @@ public:
 	int get_live_panm_lod() const;
 	PackedInt32Array get_effective_panm_targets(int p_lod_index) const;
 	int get_part_anim_count(int p_lod_index) const;
-	Array get_part_animations(int p_lod_index) const;
-	Array get_part_anim_editor_entries(int p_lod_index) const;
 	int add_part_anim(int p_lod_index, int p_part_index);
-	int duplicate_part_anim(int p_lod_index, int p_anim_index);
 	bool delete_part_anim(int p_lod_index, int p_anim_index);
-	bool set_part_anim_target(int p_lod_index, int p_anim_index, int p_part_index, int p_parent_part);
 	bool set_part_anim_channel_enabled(int p_lod_index, int p_anim_index, const String &p_channel, bool p_enabled);
 	bool set_part_anim_channel_mode(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, const String &p_mode, int p_control_register);
 	bool set_part_anim_channel_values(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, double p_from_value, double p_to_value, double p_speed);
-	bool set_part_anim_rotation_reversed(int p_lod_index, int p_anim_index, bool p_reversed);
 	Dictionary get_part_anim_info(int p_lod_index, int p_anim_index) const;
-	bool set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value);
 	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
 	// Per-part parent-relative bone pivot (native model space, raw ThreediRenderObject.rel),
@@ -346,7 +310,6 @@ public:
 	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0,
 			bool p_native_frame = false) const;
 	Dictionary eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
-	int compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	// Typed render hot path. The script-facing methods above remain the tooling
 	// boundary; ObjectModel converts its CTRL dictionary once per frame, then
 	// evaluates every dynamic material without Dictionary/Variant round trips.
@@ -371,16 +334,6 @@ public:
 	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 
-	Error set_material_shader(int p_material_index, const String &p_shader_name);
-	Error set_material_texture(int p_material_index, int p_texture_index, const String &p_texture_name);
-	Error set_material_texture_slot(int p_material_index, int p_slot, const String &p_texture_name);
-	Error set_material_texture_slot_options(int p_material_index, int p_slot, int p_flags, int p_frame, int p_type);
-	Error set_material_alpha_threshold(int p_material_index, float p_alpha_threshold);
-	Error set_material_uv_generator(int p_material_index, const String &p_axis, const Dictionary &p_params);
-	Error set_material_rgb_generator(int p_material_index, const Dictionary &p_params);
-	Error set_material_alpha_generator(int p_material_index, const Dictionary &p_params);
-	Error set_material_texture_animation(int p_material_index, const Dictionary &p_params);
-	Error set_light_colors(int p_light_index, const Color &p_start, const Color &p_end);
 	Error set_part_animation_flags(int p_lod_index, int p_anim_index, int p_flags);
 };
 

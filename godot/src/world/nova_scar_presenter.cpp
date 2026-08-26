@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "object/nova_object_model.h"
+#include "simulation/nova_present_stats.h"
 
 namespace godot {
 
@@ -79,7 +80,8 @@ void ScarPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("present", "draw_list", "owner_nodes"),
 			&ScarPresenter::present);
 	ClassDB::bind_method(D_METHOD("clear"), &ScarPresenter::clear);
-	ClassDB::bind_method(D_METHOD("get_stats"), &ScarPresenter::get_stats);
+	ClassDB::bind_method(D_METHOD("get_stats_record"),
+			&ScarPresenter::get_stats_record);
 }
 
 void ScarPresenter::_notification(int p_what) {
@@ -354,15 +356,16 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 	stat_entity_meshes_ = static_cast<int>(entity_meshes_.size());
 }
 
-Dictionary ScarPresenter::get_stats() const {
-	Dictionary out;
-	out["world_surfaces"] = stat_world_surfaces_;
-	out["entity_meshes"] = stat_entity_meshes_;
-	out["batches"] = stat_batches_;
-	out["vertices"] = stat_vertices_;
-	out["textures_missing"] = stat_textures_missing_;
-	out["strips_unsupported"] = stat_strips_unsupported_;
-	return out;
+Ref<ScarPresenterStats> ScarPresenter::get_stats_record() const {
+	Ref<ScarPresenterStats> stats;
+	stats.instantiate();
+	stats->world_surfaces = stat_world_surfaces_;
+	stats->entity_meshes = stat_entity_meshes_;
+	stats->batches = stat_batches_;
+	stats->vertices = stat_vertices_;
+	stats->textures_missing = stat_textures_missing_;
+	stats->strips_unsupported = stat_strips_unsupported_;
+	return stats;
 }
 
 } // namespace godot

@@ -86,7 +86,6 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_server_info"), &NovaWorldClient::get_server_info);
 	ClassDB::bind_method(D_METHOD("get_session_debug"), &NovaWorldClient::get_session_debug);
 	ClassDB::bind_method(D_METHOD("get_server_rows"), &NovaWorldClient::get_server_rows);
-	ClassDB::bind_method(D_METHOD("refresh_server_list"), &NovaWorldClient::refresh_server_list);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	// Bound so the HTTPRequest.request_completed signals can target them.
@@ -436,10 +435,6 @@ void NovaWorldClient::sync_session_state() {
 
 Array NovaWorldClient::get_server_rows() const {
 	return server_rows_;
-}
-
-void NovaWorldClient::refresh_server_list() {
-	trigger_gsb();
 }
 
 // ---- Lobby HTTP pump (over engine/net/novaworld LobbyHttpFlow) ----------------

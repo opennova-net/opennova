@@ -787,7 +787,6 @@ void SkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad", "model_bone_origins", "model_bone_parents"), &SkeletalAnim::load_from_bad_files, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("is_loaded"), &SkeletalAnim::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &SkeletalAnim::get_last_error);
-	ClassDB::bind_method(D_METHOD("get_adm_name"), &SkeletalAnim::get_adm_name);
 	ClassDB::bind_method(D_METHOD("get_bone_count"), &SkeletalAnim::get_bone_count);
 	ClassDB::bind_method(D_METHOD("get_clip_keys"), &SkeletalAnim::get_clip_keys);
 	ClassDB::bind_method(D_METHOD("get_skeleton_bones"), &SkeletalAnim::get_skeleton_bones);
@@ -805,5 +804,4 @@ void SkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("eval_pose_blended_overlay", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_blended_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("pose_skeleton_blended", "skeleton", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::pose_skeleton_blended, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
 }

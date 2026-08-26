@@ -167,7 +167,6 @@ public:
 	// Each entry is a weapon_dict(); the caller prepends the "NONE" row.
 	Array get_slot_weapons(int slot, int class_mask, int team_mask) const;
 	// All weapons, unfiltered, in table order.
-	Array get_weapons() const;
 	Dictionary get_weapon(int index) const;
 	// Table index of the weapon named `name` (the raw weapon "<id>" token,
 	// case-insensitive like every def lookup), or -1 when absent.
