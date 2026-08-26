@@ -19,6 +19,7 @@
 #include "terrain_query/height_field.h"
 #include "io/bam.h"
 #include "world/angle.h"
+#include "world/ai.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -4945,6 +4946,78 @@ void test_entity_sun_visibility_rays_and_eligibility() {
     CHECK(collision.sun_visibility_blocked_rays(world, *r, sun) == 0);
 }
 
+// The replication fan's stable-phase LOS form keeps the endpoint carrier /
+// emplacement fold of line_of_sight_clear: a mounted recipient (or target)
+// sees through its own hull on both the live pool walk and the prepared
+// stable index, while an unmounted body at the same spot is occluded by it.
+// [orig: raycast_find_collision_entity @0x539a70 endpoint resolve
+//  @0x539aba..0x539b10; raycast_against_entity_pool @0x538720 skips
+//  entity_a/entity_b/parent_a/parent_b]
+void test_cached_los_excludes_the_endpoint_carrier() {
+    static Field flat(0);
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+
+    Entity hull{};
+    hull.kind = EntityKind::Item;
+    hull.has_item_def = true;
+    hull.health = 100;
+    hull.alive = true;
+    hull.net_id = 0x20;
+    hull.position = Vec3{10.0f, 10.0f, 0.0f};
+    hull.yaw = 90;
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    hull.seats.push_back(seat);
+    const EntityHandle hull_h = world.registry.spawn(1, hull);
+
+    Entity rider{};
+    rider.kind = EntityKind::Organic;
+    rider.health = 100;
+    rider.alive = true;
+    rider.net_id = 0x10;
+    rider.position = Vec3{10.0f, 10.0f, 0.0f};
+    rider.bound_radius = 1.0f;
+    const EntityHandle rider_h = world.registry.spawn(0, rider);
+
+    Entity walker = rider;
+    walker.net_id = 0x11;
+    const EntityHandle walker_h = world.registry.spawn(0, walker);
+
+    Entity target = rider;
+    target.net_id = 0x12;
+    target.position = Vec3{30.0f, 10.0f, 0.0f};
+    const EntityHandle target_h = world.registry.spawn(0, target);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(box_model(1, 0, 3.0, 3.0, 3.0));
+    collision.assign_entity(hull_h, model_id);
+    CHECK(world.commands.mount(0x10, 0x20));
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    const Entity *mounted = world.registry.get(rider_h);
+    CHECK(mounted != nullptr && mounted->mounted && mounted->mount_target == hull_h);
+
+    AiSystem sys;
+    sys.terrain = &flat.field;
+    sys.collision = &collision;
+
+    const int32_t a[3] = {fx(10.0), fx(10.0), fx(0.9)};
+    const int32_t b[3] = {fx(30.0), fx(10.0), fx(0.9)};
+    // The hull blocks an unmounted body standing inside it ...
+    CHECK(!sys.line_of_sight_clear(world, a, b, walker_h, target_h));
+    CHECK(!sys.line_of_sight_clear_cached(world, a, b, walker_h, target_h));
+    // ... but never its own rider, on the live walk or the stable index.
+    CHECK(sys.line_of_sight_clear(world, a, b, rider_h, target_h));
+    CHECK(sys.line_of_sight_clear_cached(world, a, b, rider_h, target_h));
+    collision.prepare_cached_raycast_queries(world);
+    CHECK(!sys.line_of_sight_clear_cached(world, a, b, walker_h, target_h));
+    CHECK(sys.line_of_sight_clear_cached(world, a, b, rider_h, target_h));
+    // The fold applies to the far endpoint too: a ray INTO a mounted target.
+    CHECK(sys.line_of_sight_clear_cached(world, b, a, target_h, rider_h));
+    CHECK(!sys.line_of_sight_clear_cached(world, b, a, target_h, walker_h));
+}
+
 int main() {
     test_matrix_roundtrip();
     test_retail_render_pose_matrix_roundtrip_and_order();
@@ -4984,6 +5057,7 @@ int main() {
     test_cached_raycast_spatial_candidates();
     test_cached_raycast_sparse_extent_uses_exact_hash_fallback();
     test_raycast_uses_stamped_bound_for_live_section_pose();
+    test_cached_los_excludes_the_endpoint_carrier();
     test_los_point_bias();
     test_proximity_tables_use_host_bound_radius();
     test_face_raycast();
