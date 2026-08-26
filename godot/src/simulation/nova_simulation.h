@@ -606,6 +606,9 @@ private:
 	mutable const opennova::np::ClientRuntime *present_effect_pose_cache_runtime_ = nullptr;
 	mutable std::unordered_map<uint16_t, PresentEffectPose> present_effect_poses_by_handle_;
 	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_bms_id_;
+	mutable std::unordered_map<int, opennova::world::EntityHandle> bms_handle_index_;
+	mutable uint64_t bms_handle_index_serial_ = 0;
+	mutable const opennova::world::World *bms_handle_index_world_ = nullptr;
 	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_ssn_;
 	mutable std::unordered_map<uint64_t, uint16_t> present_effect_handles_by_origin_;
 	// A missing owner is also stable for one decoded-client epoch. Remember
@@ -2473,6 +2476,10 @@ public:
 	int64_t sound_occlusion_distance_q16(const Vector3 &listener_pos,
 	                                     const Vector3 &source_pos, int64_t distance_q16,
 	                                     int source_bms_id = 0);
+	// Authored bms id -> registry handle, rebuilt on the registry's spawn
+	// serial (retail's slot carries the entity pointer from registration;
+	// this is the lookup that identity stands in for).
+	opennova::world::EntityHandle handle_for_bms_id(int p_bms_id) const;
 
 	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
 	// for WeatherCore.set_exposure_from_iris_samples — the camera ray runs

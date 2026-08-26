@@ -98,6 +98,9 @@ public:
     int intern_group(std::string_view name); // stable id for a named group
 
     size_t live_count() const;
+    // Monotonic spawn serial: differs whenever any entity has spawned since a
+    // caller last sampled it (the cheap "rebuild your handle index" edge).
+    uint64_t spawn_serial() const { return next_spawn_id_; }
 
     // Configured slot capacity of `pool` (0 for an unconfigured/invalid pool) — the bound
     // the original validates wire handles against [orig: g_pool_list[pool].capacity reads,
