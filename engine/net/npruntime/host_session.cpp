@@ -54,6 +54,11 @@ uint32_t monotonic_milliseconds() {
 	return low != 0 ? low : 1u;
 }
 
+uint64_t host_perf_now_us() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
 	startup.host_key = cfg.host_key != 0 ? cfg.host_key : mint_nonzero_session_value();
@@ -348,7 +353,11 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 
 void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
-		HostEventObserverFn event_observer, void *event_observer_context) {
+		HostEventObserverFn event_observer, void *event_observer_context,
+		HostSessionPerf *perf) {
+	if (perf != nullptr) *perf = {};
+	const uint64_t total_start = perf != nullptr ? host_perf_now_us() : 0;
+	uint64_t phase_start = total_start;
 	const uint32_t now = owner.now_tick;
 	// S2C 0x58 reports elapsed session milliseconds, while gameplay producers
 	// consume a 62 Hz logical tick. Keep those clock domains explicit: retail
@@ -420,6 +429,11 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		for (const std::vector<uint8_t> &dg : t.outbound)
 			send_or_stage_established_datagram(owner, sock, t.peer, dg);
 	}
+	if (perf != nullptr) {
+		const uint64_t at = host_perf_now_us();
+		perf->receive_us = at - phase_start;
+		phase_start = at;
+	}
 
 	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
 	for (TickOut &t : tick_connections(
@@ -442,11 +456,26 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// Owner-side entity registration belongs between creation and the first body update.
 	// Retail's AnimMap_RegisterEntity runs at entity creation; adapters with external
 	// animation registries use this boundary to preserve the same lifetime.
+	if (perf != nullptr) {
+		const uint64_t at = host_perf_now_us();
+		perf->connections_us = at - phase_start;
+		phase_start = at;
+	}
 	if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
+	if (perf != nullptr) {
+		const uint64_t at = host_perf_now_us();
+		perf->adapter_us = at - phase_start;
+		phase_start = at;
+	}
 
 	// (3) Logic and C2S remain full-rate. Server_TickUpdate consults the
 	// already-advanced per-connection boundary only for fresh remote 0x0A.
-	Server_TickUpdate(owner.ctx);
+	Server_TickUpdate(owner.ctx, perf != nullptr ? &perf->server : nullptr);
+	if (perf != nullptr) {
+		const uint64_t at = host_perf_now_us();
+		perf->server_us = at - phase_start;
+		phase_start = at;
+	}
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
 	// Drain each remote transport into the ordered pending queue every tick;
@@ -533,6 +562,11 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	}
 
 	++owner.now_tick;
+	if (perf != nullptr) {
+		const uint64_t at = host_perf_now_us();
+		perf->send_us = at - phase_start;
+		perf->total_us = at - total_start;
+	}
 }
 
 void start_host_session(HostOwner &owner, const HostConfig &cfg) {

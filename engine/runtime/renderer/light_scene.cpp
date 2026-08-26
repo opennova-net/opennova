@@ -105,6 +105,7 @@ LightHandle LightScene::spawn(const LightSpawnParams &params) {
 				static_cast<int64_t>(params.position_fixed[axis]) +
 				params.radius_fixed);
 	}
+	++selection_revision_;
 	return LightHandle{
 			static_cast<uint16_t>(slot_index | kHandleFlag), generation};
 }
@@ -128,8 +129,12 @@ void LightScene::set_blend(LightHandle handle, float amount) {
 	}
 	// [orig: CEffectInstance_SetBlendAmount @ 0x5a8ee0 — f14 = amount; < 0.001 sets the
 	// hidden bit, >= 0.001 clears it (the mode-5 re-show path)]
+	const bool hidden = amount < 0.001f;
+	if (slot->hidden != hidden) {
+		++selection_revision_;
+	}
 	slot->blend = amount;
-	slot->hidden = amount < 0.001f;
+	slot->hidden = hidden;
 }
 
 void LightScene::set_owner(LightHandle handle, uint64_t owner_entity,
@@ -138,12 +143,18 @@ void LightScene::set_owner(LightHandle handle, uint64_t owner_entity,
 	if (slot == nullptr) {
 		return;
 	}
+	if (slot->params.owner_entity == owner_entity &&
+			slot->params.owner_section == owner_section) {
+		return;
+	}
 	slot->params.owner_entity = owner_entity;
 	slot->params.owner_section = owner_section;
+	++selection_revision_;
 }
 
 void LightScene::tick() {
 	// [orig: EffectWorld_TickInstancesAndLightScale @ 0x5aa170]
+	bool selection_changed = false;
 	for (Slot &slot : slots_) {
 		if (!slot.live) {
 			continue;
@@ -153,9 +164,13 @@ void LightScene::tick() {
 			slot.fade_counter = counter - 1;
 			if (counter == 1) {
 				if (slot.params.fade_mode == 5) {
-					slot.hidden = true; // [orig: flags |= 2 @ 0x5aa1c3]
+					if (!slot.hidden) {
+						slot.hidden = true; // [orig: flags |= 2 @ 0x5aa1c3]
+						selection_changed = true;
+					}
 				} else {
 					slot = Slot{}; // [orig: memset(entry, 0, 0xB0) @ 0x5aa1b9]
+					selection_changed = true;
 					continue;
 				}
 			}
@@ -167,12 +182,16 @@ void LightScene::tick() {
 					static_cast<float>(slot.fade_initial);
 		}
 	}
+	if (selection_changed) {
+		++selection_revision_;
+	}
 }
 
 void LightScene::despawn(LightHandle handle) {
 	Slot *slot = slot_for(handle);
 	if (slot != nullptr) {
 		slot->live = false;
+		++selection_revision_;
 	}
 }
 
@@ -180,6 +199,9 @@ void LightScene::set_position(LightHandle handle,
 		const std::array<int32_t, 3> &position_fixed) {
 	Slot *slot = slot_for(handle);
 	if (slot == nullptr) {
+		return;
+	}
+	if (slot->params.position_fixed == position_fixed) {
 		return;
 	}
 	slot->params.position_fixed = position_fixed;
@@ -191,6 +213,7 @@ void LightScene::set_position(LightHandle handle,
 				static_cast<int64_t>(position_fixed[axis]) +
 				slot->params.radius_fixed);
 	}
+	++selection_revision_;
 }
 
 bool LightScene::alive(LightHandle handle) const {
@@ -198,6 +221,9 @@ bool LightScene::alive(LightHandle handle) const {
 }
 
 void LightScene::clear() {
+	if (!slots_.empty()) {
+		++selection_revision_;
+	}
 	slots_.clear();
 	report_ = {};
 }
@@ -375,7 +401,7 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 		bool d3d_light_path,
 		LightDrawSelection *out) const {
 	static_assert(std::tuple_size<decltype(LightDrawSelection::lights)>::value ==
-			kSelectLimit, "LightDrawSelection carries the witnessed 4-cap");
+			kSelectLimit, "LightDrawSelection carries the witnessed 3-cap");
 	if (draws == nullptr || out == nullptr || draw_count == 0) {
 		return;
 	}

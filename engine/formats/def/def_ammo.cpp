@@ -289,6 +289,13 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
              * [orig: atol -> cdq/sub/sar signed div 2 -> imul 0xB60B60 @0x40ad51] */
             current.kz_pieslice_bam = (parse_int_n(v, vl) / 2) * 11930464;
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "scorch_id", 9)) {
+            /* Permanent terrain scorch selector [orig: AmmoDef_ParseProperty
+             * stores atol into word +0x74; Projectile_HandleTerrainImpact
+             * reads it before the effect presenter]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.scorch_id = parse_int_n(v, vl);
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "scar_type", 9)) {
             /* The impact scar kind [orig: AmmoDef_ParseProperty @0x40aeea..0x40af11,
              * atol -> word +0x76]. */

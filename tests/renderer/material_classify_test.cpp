@@ -30,6 +30,18 @@ bool contains(const std::string &haystack, const char *needle) {
 int main() {
 	using namespace renderer;
 
+	// Retail's generated gsys_phong bytes, including its truncation rule.
+	expect(object_phong_map_texel(0, 0) == ObjectPhongMapTexel{0, 0, 0, 0},
+	       "PhongMap black endpoint");
+	expect(object_phong_map_texel(37, 64) == ObjectPhongMapTexel{1, 0, 0, 37},
+	       "PhongMap quarter N.H row and independent N.L alpha");
+	expect(object_phong_map_texel(128, 192) == ObjectPhongMapTexel{81, 2, 0, 128},
+	       "PhongMap pow-4/16/64 truncation at row 192");
+	expect(object_phong_map_texel(254, 254) == ObjectPhongMapTexel{251, 239, 198, 254},
+	       "PhongMap penultimate row preserves the binary32 1/255 source");
+	expect(object_phong_map_texel(255, 255) == ObjectPhongMapTexel{255, 255, 255, 255},
+	       "PhongMap white endpoint");
+
 	// 0. The renderer descriptor table is exact and complete for OED's table.
 	// The shader_flags column matches the OED dump EXCEPT the five rows where
 	// the runtime derivation is witnessed to differ (D-RMAT-4,
@@ -173,6 +185,15 @@ int main() {
 		}
 		const auto with_detail = classify_object_material("VS_SKBUMPDIFFT2", 0, 0, 0, 128);
 		expect(with_detail.has_detail, "VS_SKBUMPDIFFT2 has detail map");
+		const auto detail_pipeline = describe_object_shader_pipeline(
+			build_object_shader_key(with_detail));
+		expect(detail_pipeline.technique ==
+		               ObjectShaderTechnique::Dot3TangentDetailSkinned,
+		       "SkBDiffT2 keeps its fixed-function encoded-vector topology");
+		const auto no_detail_pipeline = describe_object_shader_pipeline(
+			build_object_shader_key(with_detail) & ~OSCAP_DETAIL);
+		expect(no_detail_pipeline.technique == ObjectShaderTechnique::Dot3TangentSkinned,
+		       "missing SkBDiffT2 detail drops only its second texture stage");
 	}
 
 	// 8b. The glow-copy capability and the tracer view fade (REN-4):
@@ -200,18 +221,35 @@ int main() {
 
 	// 9. Environment mirror effects are reflective but their normal pass is opaque.
 	{
+		const auto mirror_cls = classify_object_material("VS_BUMPMIRRT", 0, 0, 0, 128);
+		expect(mirror_cls.family == ObjectShaderFamily::Environment, "VS_BUMPMIRRT family");
+		expect(!mirror_cls.environment_textured,
+		       "VS_BUMPMIRRT leaves the reflection untextured");
+		const auto mirror = describe_object_shader_pipeline(build_object_shader_key(mirror_cls));
+		expect(mirror.technique == ObjectShaderTechnique::EnvironmentMirror,
+		       "VS_BUMPMIRRT selects the untextured mirror technique");
+
 		const auto cls = classify_object_material("VS_BMTXMIRRT", 0, 0, 0, 128);
 		expect(cls.family == ObjectShaderFamily::Environment, "VS_BMTXMIRRT family");
 		expect(cls.blend == ObjectBlendMode::Opaque, "VS_BMTXMIRRT normal pass is opaque");
 		expect(cls.is_glass, "VS_BMTXMIRRT preserves glass/reflect flag");
 		expect(cls.uses_environment, "VS_BMTXMIRRT uses environment reflection");
+		expect(cls.environment_textured,
+		       "VS_BMTXMIRRT post-multiplies the reflection by Diffuse1");
 		expect(cls.normal_space == ObjectNormalSpace::Tangent, "VS_BMTXMIRRT tangent space");
+		const auto textured = describe_object_shader_pipeline(build_object_shader_key(cls));
+		expect(textured.technique == ObjectShaderTechnique::EnvironmentMirrorTextured,
+		       "VS_BMTXMIRRT selects the textured mirror technique");
 	}
 
 	// 9. VS_FLAG - Flag wind sway family.
 	{
 		const auto cls = classify_object_material("VS_FLAG", 0, 0, 0, 128);
 		expect(cls.family == ObjectShaderFamily::Flag, "VS_FLAG family");
+		const auto emissive = classify_object_material("VS_FLAG", 0, 2, 0, 128);
+		expect(describe_object_shader_pipeline(build_object_shader_key(emissive)).technique ==
+		               ObjectShaderTechnique::Flag,
+		       "Flag.fx has no invented self-lit NORMAL technique");
 	}
 
 	// 10. VS_LEAVESWIND - not an original OED gMaterialInfoTable shader.
@@ -267,6 +305,17 @@ int main() {
 		expect(!ff.writes_alpha, "opaque FF does not write fragment alpha");
 		expect(!ff.uses_detail && !ff.uses_normal_map, "plain FF has no extra texture stages");
 
+		const auto sk_basic = describe_object_shader_pipeline(build_object_shader_key(
+			classify_object_material("VS_SKBASIC", 0, 0, 0, 128)));
+		expect(sk_basic.technique == ObjectShaderTechnique::FixedSkinned,
+		       "SkBasic keeps its shader alpha/RGB contract separate from _FFP");
+		const auto synthetic_emissive_sk_basic = describe_object_shader_pipeline(
+			build_object_shader_key(classify_object_material(
+				"VS_SKBASIC", 0, THREEDI_EMISSIVE_FULL, 0, 128)));
+		expect(synthetic_emissive_sk_basic.technique ==
+		               ObjectShaderTechnique::FixedSkinned,
+		       "an emissive byte cannot invent a SkBasic SELFLUM technique");
+
 		const auto mk = build_object_shader_key(classify_object_material("FF_MT_OP", 0, 0, 0, 128));
 		const auto mt = describe_object_shader_pipeline(mk);
 		expect(mt.uses_detail, "multi-texture pipeline enables the detail stage");
@@ -281,7 +330,7 @@ int main() {
 		       "additive glass does not write depth");
 		expect(glass.environment_source == ObjectEnvironmentSource::HemisphereApproximation,
 		       "glass explicitly reports the tracked hemisphere environment stand-in");
-		expect(glass.technique == ObjectShaderTechnique::Glass,
+		expect(glass.technique == ObjectShaderTechnique::GlassFixed,
 		       "glass selects its checked-in technique");
 		expect(!glass.writes_alpha, "additive glass does not write AlphaBlend opacity");
 
@@ -296,10 +345,33 @@ int main() {
 		expect(phong.uses_normal_map, "Phong pipeline samples a normal map");
 		expect(phong.normal_space == ObjectNormalSpace::Tangent,
 		       "Phong pipeline reports tangent-space normals");
-		expect(phong.specular_source == ObjectSpecularSource::AnalyticPow16,
-		       "Phong explicitly reports the tracked pow-16 specular stand-in");
+		expect(phong.specular_source == ObjectSpecularSource::AnalyticPow8DiffuseAlpha,
+		       "Phong reports the retail pow-8 lobe scaled by Diffuse1 alpha");
 		expect(phong.technique == ObjectShaderTechnique::PhongTangentSpecular,
 		       "Phong tangent/specular topology is selected at classification time");
+
+		const auto skinned_tangent = describe_object_shader_pipeline(build_object_shader_key(
+			classify_object_material("VS_SKBUMPPHONGT", 0, 0, 0, 128)));
+		expect(skinned_tangent.technique ==
+		               ObjectShaderTechnique::PhongTangentSpecularSkinned,
+		       "skinned tangent Phong selects its distinct retail vertex topology");
+		expect(skinned_tangent.specular_source ==
+		               ObjectSpecularSource::AnalyticPow8DiffuseAlpha,
+		       "skinned tangent Phong keeps the pow-8 Diffuse1-alpha lobe");
+
+		const auto phong_map = describe_object_shader_pipeline(build_object_shader_key(
+			classify_object_material("VS_SKBUMPPHONGOBJ", 0, 0, 0, 128)));
+		expect(phong_map.technique ==
+		               ObjectShaderTechnique::PhongObjectSpecularPhongMap,
+		       "skinned object Phong selects the PhongMap topology");
+		expect(phong_map.specular_source ==
+		               ObjectSpecularSource::PhongMapLookupDiffuseAlpha,
+		       "PhongMap reports Diffuse1 alpha as its pow-4/pow-64 control");
+
+		const auto skinned_glass = describe_object_shader_pipeline(build_object_shader_key(
+			classify_object_material("VS_SKGLASS", 0, 0, 0, 128)));
+		expect(skinned_glass.technique == ObjectShaderTechnique::GlassSkinned,
+		       "VS_SKGLASS selects its untextured skinned glass technique");
 
 		const auto skinned_key = build_object_shader_key(classify_object_material("VS_SKBUMPDIFFT2", 0, 0, 0, 128));
 		const auto skinned = describe_object_shader_pipeline(skinned_key);
@@ -307,6 +379,8 @@ int main() {
 		       "skinned bump/detail pipeline writes depth as opaque");
 		expect(!skinned.writes_alpha,
 		       "skinned bump/detail pipeline does not use texture alpha as opacity");
+		expect(skinned.technique == ObjectShaderTechnique::Dot3TangentDetailSkinned,
+		       "skinned bump/detail selects its authored DOT3 technique");
 
 		ObjectMaterialClassification normal_b_cls;
 		normal_b_cls.family = ObjectShaderFamily::Dot3;
@@ -328,8 +402,14 @@ int main() {
 		const auto cutout_key = build_object_shader_key(classify_object_material(
 			"FF_ST_OP", THREEDI_MATERIAL_FLAG_ALPHA_TEST, 0, 0, 128));
 		const auto cutout = describe_object_shader_pipeline(cutout_key);
-		expect(cutout.alpha_test && cutout.depth == ObjectDepthPolicy::AlphaPrepass,
-		       "alpha-tested pipeline selects the alpha depth prepass");
+		expect(cutout.alpha_test && cutout.depth == ObjectDepthPolicy::Opaque,
+		       "opaque alpha-tested pipeline writes only surviving fragments");
+
+		const auto blended_cutout = describe_object_shader_pipeline(build_object_shader_key(
+			classify_object_material("FF_ST_AB", THREEDI_MATERIAL_FLAG_ALPHA_TEST,
+					0, 0, 128)));
+		expect(blended_cutout.depth == ObjectDepthPolicy::TransparentNoWrite,
+		       "alpha testing does not turn a blended retail technique into a depth writer");
 
 		const auto alpha_key = build_object_shader_key(classify_object_material(
 			"FF_ST_AB", 0, 0, 0, 128));
@@ -341,6 +421,50 @@ int main() {
 			classify_object_material("FF_MT_OP_LUM", 0, 2, 0, 128)));
 		expect(self_lit.technique == ObjectShaderTechnique::SelfLitDetail,
 		       "self-lit detail topology is selected without a runtime cap branch");
+	}
+
+	// 14. PROJSHAD state is technique-owned, not inherited from NORMAL. The
+	// decoded retail corpus has one material-variant _FFP declaration, fifteen
+	// hard-opaque shader declarations, and no pass for tracer/flag/glass.
+	// Shared declarations expand to all 24 reachable runtime techniques.
+	// [orig: _FFP.fx TBoringFFPProjShad; TECHNIQUE_PROJSHAD declarations in
+	// third_party/modsuperoed]
+	{
+		struct ProjectedCase {
+			ObjectShaderTechnique technique;
+			ObjectProjectedShadowPolicy policy;
+		};
+		const ProjectedCase cases[] = {
+			{ObjectShaderTechnique::Unsupported, ObjectProjectedShadowPolicy::NoPass},
+			{ObjectShaderTechnique::Fixed, ObjectProjectedShadowPolicy::MaterialBlend},
+			{ObjectShaderTechnique::FixedSkinned, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::FixedDetail, ObjectProjectedShadowPolicy::MaterialBlend},
+			{ObjectShaderTechnique::SelfLit, ObjectProjectedShadowPolicy::MaterialBlend},
+			{ObjectShaderTechnique::SelfLitDetail, ObjectProjectedShadowPolicy::MaterialBlend},
+			{ObjectShaderTechnique::Tracer, ObjectProjectedShadowPolicy::NoPass},
+			{ObjectShaderTechnique::Flag, ObjectProjectedShadowPolicy::NoPass},
+			{ObjectShaderTechnique::PhongTangentDiffuse, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongTangentSpecular, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongTangentSpecularSkinned, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongObjectDiffuse, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongObjectSpecular, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongObjectSpecularPhongMap, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::Dot3Tangent, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::Dot3TangentDetail, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::Dot3TangentSkinned, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::Dot3TangentDetailSkinned, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::Dot3Object, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::Dot3ObjectDetail, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::EnvironmentMirror, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::EnvironmentMirrorTextured, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::EnvironmentPhong, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::GlassFixed, ObjectProjectedShadowPolicy::NoPass},
+			{ObjectShaderTechnique::GlassSkinned, ObjectProjectedShadowPolicy::NoPass},
+		};
+		for (const ProjectedCase &test : cases) {
+			expect(object_projected_shadow_policy(test.technique) == test.policy,
+			       "every object technique preserves its retail PROJSHAD state");
+		}
 	}
 
 	std::cerr << "renderer_material_classify_test ok\n";

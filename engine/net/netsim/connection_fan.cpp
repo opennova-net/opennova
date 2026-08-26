@@ -1,6 +1,7 @@
 #include "netsim/connection_fan.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -20,6 +21,11 @@
 namespace opennova::netsim {
 
 namespace {
+
+uint64_t fan_perf_now_us() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 
 // The per-connection 0x0A header state emit_connection_s2c derives from the RECIPIENT — the
 // flags1 signal byte and the 7-byte local-player tail's stance/mount fields.
@@ -471,7 +477,9 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
                                                       std::size_t header_bytes,
-                                                      std::size_t hard_frame_limit) {
+                                                      std::size_t hard_frame_limit,
+                                                      ConnectionS2CPerf *perf) {
+	uint64_t phase_start = perf != nullptr ? fan_perf_now_us() : 0;
 	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
 	for (uint8_t &a : conn.s2c_entity_age) {
 		if (a != 0xFF) ++a;
@@ -481,6 +489,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		int64_t key;
 		const GameEntitySnapshot *snap;
 	};
+	uint64_t los_us = 0;
+	world::CollisionWorld::RaycastPerf los_perf;
 	std::vector<Scored> scored;
 	scored.reserve(entities.size());
 
@@ -513,6 +523,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	// residual) [orig: @0x50e677..0x50e693].
 	const bool self_dead_or_spectator =
 			self != nullptr && (self->state_flags & 0x02) != 0;
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->entity_setup_us = now - phase_start;
+		phase_start = now;
+	}
 
 	for (const GameEntitySnapshot &e : entities) {
 		if (record_wire_size(e) == 0) continue; // no compact form
@@ -621,9 +636,12 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				const int32_t b3[3] = {e.x, e.y, e.z + kSightLift};
 				// The ray's collision scratch is write-only bookkeeping; the world is
 				// otherwise untouched (the AiSystem method itself is const).
-				los = w.ai->line_of_sight_clear(const_cast<world::World &>(w), a3, b3,
-				                                conn.owned_entity,
-				                                world::EntityHandle{e.wire_handle});
+				const uint64_t los_start = perf != nullptr ? fan_perf_now_us() : 0;
+				los = w.ai->line_of_sight_clear_cached(
+						const_cast<world::World &>(w), a3, b3, conn.owned_entity,
+						world::EntityHandle{e.wire_handle},
+						perf != nullptr ? &los_perf : nullptr);
+				if (perf != nullptr) los_us += fan_perf_now_us() - los_start;
 			}
 			const bool is_carrier = e.wire_handle == carrier_handle;
 
@@ -669,10 +687,23 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		const int64_t key = age + boost + v + ((age * (boost + v)) >> 8);
 		scored.push_back({key, &e});
 	}
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->entity_scoring_us = now - phase_start;
+		perf->entity_los_us = los_us;
+		perf->entity_los_terrain_us = los_perf.terrain_us;
+		perf->entity_los_sector_us = los_perf.sector_us;
+		phase_start = now;
+	}
 
 	// 3. Highest priority first [orig: descending shell sort @0x526cf0].
 	std::stable_sort(scored.begin(), scored.end(),
 	                 [](const Scored &a, const Scored &b) { return a.key > b.key; });
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->entity_sort_us = now - phase_start;
+		phase_start = now;
+	}
 
 	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
 	// stamps on selection [orig: @0x50f168 age; @0x50f17c heading (Yaw+0x800000)>>24;
@@ -694,6 +725,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		written += record_bytes;
 		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
+	if (perf != nullptr)
+		perf->entity_budget_us = fan_perf_now_us() - phase_start;
 	return selected;
 }
 
@@ -957,7 +990,10 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type,
-                         std::size_t max_frame_body_bytes) {
+                         std::size_t max_frame_body_bytes,
+                         ConnectionS2CPerf *perf) {
+	if (perf != nullptr) *perf = {};
+	uint64_t phase_start = perf != nullptr ? fan_perf_now_us() : 0;
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
 	if (owned == nullptr) return false;
@@ -1044,6 +1080,11 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 			: (max_frame_body_bytes > header_bytes
 					? max_frame_body_bytes - header_bytes
 					: 0);
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->setup_us = now - phase_start;
+		phase_start = now;
+	}
 	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
 	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
 	// The first grouped-order port handed rounds only the leftovers — a real-world
@@ -1060,15 +1101,33 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	std::size_t rounds_bytes = 0;
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->round_selection_us = now - phase_start;
+		phase_start = now;
+	}
 	const std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
 					w, conn, ents, anchor, header_bytes + rounds_bytes,
-					max_frame_body_bytes);
+					max_frame_body_bytes, perf);
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->entity_selection_us = now - phase_start;
+		phase_start = now;
+	}
 
-	conn.transport->host_send(s2c::PER_FRAME_UPDATE,
-	                          build_0a_frame(anchor, selected, flags2, hs, game_type, w.subgoals,
-	                                         std::move(rounds)),
+	std::vector<uint8_t> frame = build_0a_frame(
+			anchor, selected, flags2, hs, game_type, w.subgoals,
+			std::move(rounds));
+	if (perf != nullptr) {
+		const uint64_t now = fan_perf_now_us();
+		perf->encode_us = now - phase_start;
+		phase_start = now;
+	}
+	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 	                          /*reliable=*/false);
+	if (perf != nullptr)
+		perf->enqueue_us = fan_perf_now_us() - phase_start;
 	return true;
 }
 

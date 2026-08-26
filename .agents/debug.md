@@ -14,6 +14,21 @@ behavior.
 - Confirm `tshark`/Npcap only when converting or acquiring captures outside
   the native `nw_pp` reader.
 
+## Performance Build Invariant
+
+Always build the editor/F5 runtime used for FPS or frame-time measurements with:
+
+```bash
+bash scripts/build_godot.sh
+```
+
+The command must report `Dev -> CMake config RelWithDebInfo`. Do not benchmark a
+DLL produced by `cmake --build godot/src/build --config Debug`: that is the
+`DebugFull` `/Od` + runtime-check build, even though it has the same
+`template_debug` artifact name, and it can make native simulation 5-10x slower.
+`DebugFull` is only for native stepping and memory-corruption diagnosis. Rebuild
+with the canonical Dev command before every live performance comparison.
+
 ## Common Commands
 
 Library and net-focused CTest:
@@ -85,4 +100,3 @@ Stop and report instead of guessing when:
   visible desktop operator.
 - A refactor would change packet order, byte layout, DCB/handle semantics, or
   load timing without a retail witness.
-

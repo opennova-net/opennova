@@ -9,7 +9,9 @@ shader_type spatial;
 // cleared-page fragment against this loose (un-cleared) texture.
 render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never;
 
-uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
+#include "res://shaders/nova_color.gdshaderinc"
+
+uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
 void fragment() {
@@ -23,6 +25,6 @@ void fragment() {
 		// The diagnostic disc rides RGB; additive alpha is witnessed-dead.
 		rgb *= mask;
 	}
-	ALBEDO = rgb;
+	ALBEDO = nova_scene_output(rgb);
 	ALPHA = 0.0;
 }

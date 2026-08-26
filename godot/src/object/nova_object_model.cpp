@@ -4,7 +4,12 @@
 
 #include "object/nova_object_model.h"
 
+#include <godot_cpp/classes/mesh_instance3d.hpp>
+
+#include <algorithm>
+
 #include "env/nova_slot_shadow.h"
+#include "terrain/nova_terrain.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -14,6 +19,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "object/nova_object_shader_cache.h"
+#include <renderer/render_order.h>
 
 namespace godot {
 
@@ -138,6 +144,7 @@ ObjectModel::~ObjectModel() {
 		awake_ = false;
 		awake_models_.erase(this);
 	}
+	match_terrain_models_.erase(this);
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
@@ -208,6 +215,7 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 		}
 	}
 	presentation_links_.push_back(link);
+	p_model->set_match_terrain_enabled(match_terrain_enabled_);
 }
 
 
@@ -239,6 +247,24 @@ void ObjectModel::set_slot_shadow_person(bool p_person) {
 
 bool ObjectModel::is_slot_shadow_person() const {
 	return slot_shadow_person_;
+}
+
+void ObjectModel::set_entity_uniform_scale_q16(int64_t p_scale_q16) {
+	entity_uniform_scale_q16_ = static_cast<int32_t>(
+			static_cast<uint32_t>(p_scale_q16));
+}
+
+int64_t ObjectModel::get_entity_uniform_scale_q16() const {
+	return entity_uniform_scale_q16_;
+}
+
+Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
+		const Vector3 &p_origin) const {
+	if (entity_uniform_scale_q16_ == 0) {
+		return Transform3D(p_basis, p_origin);
+	}
+	const float scale = static_cast<float>(entity_uniform_scale_q16_) / 65536.0f;
+	return Transform3D(p_basis.scaled(Vector3(scale, scale, scale)), p_origin);
 }
 
 void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bound) {
@@ -308,7 +334,8 @@ void ObjectModel::apply_shadow_casting_below(Node *p_root) {
 	for (int i = 0; i < p_root->get_child_count(); ++i) {
 		Node *child = p_root->get_child(i);
 		GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
-		if (geometry != nullptr) {
+		if (geometry != nullptr &&
+				!bool(geometry->get_meta("_opennova_auxiliary_draw", false))) {
 			geometry->set_cast_shadows_setting(setting);
 			geometry->set_layer_mask((geometry->get_layer_mask() &
 											 ~uint32_t(LAYER_SHADOW_CASTER_MASK)) |
@@ -405,6 +432,7 @@ void ObjectModel::set_section_visibility_mask(int64_t p_mask) {
 		return;
 	}
 	section_visibility_mask_ = p_mask;
+	point_light_draw_parts_dirty_ = true;
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
 		if (kv.value != nullptr) {
 			kv.value->set_visible(p_mask == -1 || ((p_mask >> kv.key) & 1) == 1);
@@ -597,22 +625,50 @@ void ObjectModel::rebuild() {
 	rebuild_scene();
 }
 
-// Blended materials take their water-side transparency rung from the witnessed
-// frame ladder (REN-3): below-water alpha draws before the water surface,
-// above-water after [orig: the Q1/Q2 split @ 0x5d932e..0x5d9354 + the flush
-// bracket @ 0x5c9596 / @ 0x5c967a]. Retail bins per STRIP; we bin per MODEL
-// from its placed height (D-RORD-3).
+// Blended strips take their water-side transparency rung from the witnessed
+// frame ladder (REN-3): the side away from the camera draws before the water
+// surface and the camera-side strip after it. The portable contract and exact
+// witness addresses live in renderer/render_order and render-order-re.md. The
+// importer retains one MeshInstance3D per source strip; transform its authored
+// min/max center through the live ROBJ transform and classify it whenever
+// that transform or the water plane changed (identical to retail's per-frame
+// recompute, without a per-frame server round trip per strip).
 void ObjectModel::refresh_render_order() {
-	if (alpha_materials_.is_empty() || !is_inside_tree()) {
+	if (alpha_strip_draws_.is_empty() || !is_inside_tree()) {
 		return;
 	}
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
-	const int32_t rung = shader_cache->alpha_rung_for_height(
-			static_cast<float>(get_global_position().y));
-	for (const Ref<ShaderMaterial> &material : alpha_materials_) {
-		if (material.is_valid()) {
-			material->set_render_priority(rung);
+	const uint64_t generation = shader_cache->get_water_plane_generation();
+	if (!render_order_dirty_ && generation == render_order_generation_) {
+		return;
+	}
+	render_order_dirty_ = false;
+	render_order_generation_ = generation;
+	for (AlphaStripDraw &draw : alpha_strip_draws_) {
+		if (draw.instance != nullptr && draw.material.is_valid() &&
+				draw.instance->is_inside_tree()) {
+			// The rigid collector classifies every strip from its transformed
+			// authored center. The bone collector does not recompute deformed strip
+			// centers: its caller selects Q1/Q2 for the whole entity with submit bit
+			// 0x20 (renderer/render_order owns the cited submit-bit contract).
+			const float world_height = draw.bone_path
+					? static_cast<float>(get_global_position().y)
+					: static_cast<float>(draw.instance->get_global_transform()
+							.xform(draw.local_center).y);
+			const int32_t rung =
+					shader_cache->alpha_rung_for_height(world_height);
+			if (rung != draw.rung) {
+				draw.rung = rung;
+				draw.material->set_render_priority(rung);
+			}
 		}
+	}
+}
+
+void ObjectModel::mark_render_order_dirty_all() {
+	for (ObjectModel *model : alpha_strip_models_) {
+		model->render_order_dirty_ = true;
+		model->wake_runtime_frame();
 	}
 }
 
@@ -648,8 +704,31 @@ int64_t ObjectModel::last_object_update_mask() const {
 // their one process loop. There is no per-node _process, so nothing self-clocks
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;
+HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
+HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
+uint64_t ObjectModel::lifetime_generation_ = 0;
 
 void ObjectModel::advance_awake_frame(double p_delta) {
+	advance_awake_frame_impl(p_delta, nullptr);
+}
+
+PackedInt64Array ObjectModel::profile_awake_frame(double p_delta) {
+	AwakeFrameProfile profile;
+	advance_awake_frame_impl(p_delta, &profile);
+	PackedInt64Array result;
+	result.resize(AWAKE_PROFILE_SLOT_COUNT);
+	result.set(AWAKE_PROFILE_CLOCK_ANIMATION_US, profile.clock_animation_us);
+	result.set(AWAKE_PROFILE_PANM_US, profile.panm_us);
+	result.set(AWAKE_PROFILE_MATERIAL_US, profile.material_us);
+	result.set(AWAKE_PROFILE_ENVIRONMENT_US, profile.environment_us);
+	result.set(AWAKE_PROFILE_ORDER_BOUNDS_US, profile.order_bounds_us);
+	result.set(AWAKE_PROFILE_AWAKE_MODELS, profile.awake_models);
+	result.set(AWAKE_PROFILE_RENDERABLE_MODELS, profile.renderable_models);
+	return result;
+}
+
+void ObjectModel::advance_awake_frame_impl(double p_delta,
+		AwakeFrameProfile *p_profile) {
 	// The set is process-global while the drivers are per-context; a per-frame
 	// guard keeps exactly one advance per Godot frame no matter how many
 	// contexts call — the first caller wins, so a game frame and an idle menu
@@ -672,7 +751,10 @@ void ObjectModel::advance_awake_frame(double p_delta) {
 	}
 	for (ObjectModel *model : batch) {
 		if (awake_models_.has(model)) {
-			model->advance_runtime_frame(p_delta);
+			if (p_profile != nullptr) {
+				++p_profile->awake_models;
+			}
+			model->advance_runtime_frame_profiled(p_delta, p_profile);
 		}
 	}
 }
@@ -696,6 +778,103 @@ void ObjectModel::refresh_awake_environment() {
 
 int64_t ObjectModel::awake_model_count() {
 	return static_cast<int64_t>(awake_models_.size());
+}
+
+void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
+		float p_layer, const Vector4 &p_projection) {
+	const StringName enabled_name("u_match_terrain_enabled");
+	const StringName ready_name("u_match_terrain_page_ready");
+	const StringName layer_name("u_match_terrain_page_layer");
+	const StringName projection_name("u_match_terrain_page_projection");
+	const auto apply_to = [&](Node *p_parent) {
+		if (p_parent == nullptr) {
+			return;
+		}
+		const int children = p_parent->get_child_count();
+		for (int child = 0; child < children; ++child) {
+			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
+					p_parent->get_child(child));
+			if (instance == nullptr) {
+				continue;
+			}
+			instance->set_instance_shader_parameter(
+					enabled_name, match_terrain_enabled_);
+			instance->set_instance_shader_parameter(
+					ready_name, match_terrain_enabled_ && p_page_ready);
+			instance->set_instance_shader_parameter(layer_name, p_layer);
+			instance->set_instance_shader_parameter(projection_name, p_projection);
+		}
+	};
+	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
+		apply_to(Object::cast_to<Node>(
+				static_cast<Object *>(robj_dense_[entry])));
+	}
+	apply_to(skeleton_);
+}
+
+void ObjectModel::set_match_terrain_enabled(bool p_enabled) {
+	if (match_terrain_enabled_ == p_enabled) {
+		return;
+	}
+	match_terrain_enabled_ = p_enabled;
+	if (p_enabled) {
+		match_terrain_models_.insert(this);
+	} else {
+		match_terrain_models_.erase(this);
+	}
+	stamp_match_terrain_instances(false, 0.0f, Vector4());
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_match_terrain_enabled(p_enabled);
+	}
+}
+
+void ObjectModel::refresh_match_terrain_frame(Terrain *p_terrain) {
+	if (match_terrain_models_.is_empty()) {
+		return;
+	}
+	LocalVector<ObjectModel *> batch;
+	batch.reserve(match_terrain_models_.size());
+	for (ObjectModel *model : match_terrain_models_) {
+		batch.push_back(model);
+	}
+	const Ref<Texture2DArray> cache = p_terrain != nullptr
+			? p_terrain->get_tile_cache_texture()
+			: Ref<Texture2DArray>();
+	for (ObjectModel *model : batch) {
+		if (!match_terrain_models_.has(model)) {
+			continue;
+		}
+		for (const Ref<ShaderMaterial> &material : model->surface_materials_) {
+			if (material.is_valid()) {
+				material->set_shader_parameter("u_match_terrain_cache", cache);
+				material->set_shader_parameter(
+						"u_has_match_terrain_cache", cache.is_valid());
+			}
+		}
+		bool ready = false;
+		float layer = 0.0f;
+		Vector4 projection_uniform;
+		if (p_terrain != nullptr && cache.is_valid() && model->is_inside_tree()) {
+			const Vector3 position = model->get_global_position();
+			const std::optional<opennova::TerrainTilePageBinding> page =
+					p_terrain->get_tile_cache_binding_for_world_point_native(
+							position.x, position.z);
+			if (page.has_value() && page->ready) {
+				const std::optional<opennova::TerrainTilePageProjection> projection =
+						opennova::TerrainTileCompositionCache::page_projection(
+								page->page);
+				ready = projection.has_value();
+				layer = static_cast<float>(page->layer);
+				if (projection.has_value()) {
+					projection_uniform = Vector4(projection->world_origin_x,
+							projection->world_origin_z,
+							projection->inverse_world_span,
+							projection->world_span);
+				}
+			}
+		}
+		model->stamp_match_terrain_instances(ready, layer, projection_uniform);
+	}
 }
 
 // Event-driven scheduling for the per-frame runtime advance. Models self-park:
@@ -738,6 +917,22 @@ void ObjectModel::on_env_generation_changed() {
 	wake_runtime_frame();
 }
 
+bool ObjectModel::environment_restamp_due() const {
+	if (env_restamp_forced_ || last_env_values_.is_null() ||
+			(interior_section_lighting_ && last_section_env_values_.is_null())) {
+		return true;
+	}
+	if (env_state_.is_null() ||
+			env_state_->get_generation() == last_env_gen_) {
+		return false;
+	}
+	// A live PANM/material model never parks, so its environment signal cannot
+	// serve as the stagger gate. Apply the same per-model slot here instead of
+	// restamping every one of those models on every slowly changing TOD tick.
+	return (Engine::get_singleton()->get_process_frames() + env_stagger_slot_) %
+			kEnvRestampSpreadFrames == 0;
+}
+
 void ObjectModel::on_env_pass_changed() {
 	// Crossing the water plane changes fog by a large amount in one render
 	// pass. Unlike slow TOD/weather drift, it cannot ride the 16-frame stagger:
@@ -747,6 +942,7 @@ void ObjectModel::on_env_pass_changed() {
 		apply_environment_to_materials();
 	} else {
 		// Hidden/off-screen models catch up through the ordinary visibility gate.
+		env_restamp_forced_ = true;
 		wake_runtime_frame();
 	}
 }
@@ -760,8 +956,19 @@ void ObjectModel::_notification(int p_what) {
 		update_slot_shadow_group();
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible must re-check the env generation missed while hidden.
+		if (is_visible_in_tree()) {
+			env_restamp_forced_ = true;
+		}
+		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
+	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
+		// Only models with blended strips enable this notification: a moved
+		// model re-classifies its strips against the water plane in place,
+		// without waking the full runtime walk.
+		render_order_dirty_ = true;
+		refresh_render_order();
 	} else if (p_what == NOTIFICATION_PREDELETE) {
+		++lifetime_generation_;
 		// A freed model must not leave a stale off-screen claim in the shared
 		// submission registry (the walk would keep gating a reused id).
 		if (submission_registry_bound_) {
@@ -771,6 +978,7 @@ void ObjectModel::_notification(int p_what) {
 			awake_ = false;
 			awake_models_.erase(this);
 		}
+		alpha_strip_models_.erase(this);
 	}
 }
 
@@ -778,6 +986,11 @@ void ObjectModel::_notification(int p_what) {
 // and tests: clocks continue while hidden; render-derived work waits until the
 // model can be submitted again.
 void ObjectModel::advance_runtime_frame(double p_delta) {
+	advance_runtime_frame_profiled(p_delta, nullptr);
+}
+
+void ObjectModel::advance_runtime_frame_profiled(double p_delta,
+		AwakeFrameProfile *p_profile) {
 	if (object_data_.is_null() || !object_data_->has_document()) {
 		if (awake_) {
 			awake_ = false;
@@ -786,25 +999,43 @@ void ObjectModel::advance_runtime_frame(double p_delta) {
 		return;
 	}
 	const bool renderable = is_visible_in_tree() && on_screen_;
+	if (p_profile != nullptr && renderable) {
+		++p_profile->renderable_models;
+	}
 	if (!needs_runtime_frame_work()) {
 		// Keep the private preview clock continuous even while the model has no
 		// time-driven consumer.
+		const uint64_t clock_start = p_profile != nullptr
+				? Time::get_singleton()->get_ticks_usec()
+				: 0;
 		if (panm_clock_.is_null() && is_playing_) {
 			anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(p_delta * 1000.0)) &
 					0xffffffff;
 		}
+		if (p_profile != nullptr) {
+			p_profile->clock_animation_us +=
+					Time::get_singleton()->get_ticks_usec() - clock_start;
+		}
 		if (renderable) {
+			const uint64_t env_start = p_profile != nullptr
+					? Time::get_singleton()->get_ticks_usec()
+					: 0;
 			apply_environment_to_materials();
+			if (p_profile != nullptr) {
+				p_profile->environment_us +=
+						Time::get_singleton()->get_ticks_usec() - env_start;
+			}
 		}
 		sleep_runtime_frame_if_idle();
 		return;
 	}
-	apply_runtime_state(p_delta, renderable);
+	apply_runtime_state(p_delta, renderable, p_profile);
 	sleep_runtime_frame_if_idle();
 }
 
 bool ObjectModel::needs_runtime_frame_work() const {
 	if (bounds_dirty_ || has_live_panm_ || !dynamic_material_slots_.is_empty() ||
+			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) ||
 			!part_anims_.is_empty()) {
 		return true;
 	}
@@ -855,10 +1086,14 @@ Node3D *ObjectModel::get_or_create_robj_node(int p_robj_index) {
 	return node;
 }
 
-void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable) {
+void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
+		AwakeFrameProfile *p_profile) {
 	if (object_data_.is_null() || !object_data_->has_document()) {
 		return;
 	}
+	const uint64_t clock_start = p_profile != nullptr
+			? Time::get_singleton()->get_ticks_usec()
+			: 0;
 	if (panm_clock_.is_valid()) {
 		anim_time_ms_ = panm_clock_->get_time_ms();
 	} else if (is_playing_) {
@@ -867,6 +1102,10 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable) {
 	}
 	const bool part_changed = advance_part_anims(p_delta);
 	advance_body_animation(p_delta, p_renderable);
+	if (p_profile != nullptr) {
+		p_profile->clock_animation_us +=
+				Time::get_singleton()->get_ticks_usec() - clock_start;
+	}
 	if (!p_renderable) {
 		// Everything below derives from the absolute clock + the register/pose
 		// state advanced above; it re-derives on the next visible frame.
@@ -877,12 +1116,26 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable) {
 	// stream. [orig: Render_SubmitEntity @0x5DAD80 -> Model_TransformBoneMatrices
 	//  @0x58E390; CRenderBatchQueue_SortAndFlush @0x5DAE40 ->
 	//  apply_shader_parameters @0x58DB80]
+	const uint64_t panm_start = p_profile != nullptr
+			? Time::get_singleton()->get_ticks_usec()
+			: 0;
 	bool robj_changed = false;
 	if (has_live_panm_ || bounds_dirty_) {
 		robj_changed = apply_robj_transforms();
 	}
+	if (p_profile != nullptr) {
+		p_profile->panm_us +=
+				Time::get_singleton()->get_ticks_usec() - panm_start;
+	}
 	// Only dynamic materials need a per-frame push; static slots keep the
 	// identity values written at material creation.
+	const uint64_t material_start = p_profile != nullptr
+			? Time::get_singleton()->get_ticks_usec()
+			: 0;
+	const renderer::ControlRegisterValues material_ctrl_values =
+			dynamic_material_slots_.is_empty()
+			? renderer::ControlRegisterValues{}
+			: ObjectData::runtime_control_values(ctrl_values_);
 	for (int64_t s = 0; s < dynamic_material_slots_.size(); ++s) {
 		const int i = dynamic_material_slots_[s];
 		const Ref<ShaderMaterial> material = surface_materials_[i];
@@ -890,36 +1143,81 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable) {
 			continue;
 		}
 		const int material_index = surface_material_indices_[i];
+		MaterialRuntimeStamp &stamp = material_runtime_stamps_[
+				static_cast<size_t>(i)];
 		if (material_needs_eval_[i]) {
-			const Dictionary runtime = object_data_->eval_material_runtime(
-					material_index, anim_time_ms_, ctrl_values_);
-			if (!runtime.is_empty()) {
-				material->set_shader_parameter("u_uv_transform_u",
-						runtime.get("uv_transform_u", Vector3(1.0f, 0.0f, 0.0f)));
-				material->set_shader_parameter("u_uv_transform_v",
-						runtime.get("uv_transform_v", Vector3(0.0f, 1.0f, 0.0f)));
-				material->set_shader_parameter("u_rgb_mod",
-						runtime.get("rgb_mod", Vector3(1.0f, 1.0f, 1.0f)));
-				material->set_shader_parameter("u_alpha_mod",
-						runtime.get("alpha_mod", 1.0f));
+			renderer::MaterialRuntime runtime;
+			if (object_data_->eval_material_runtime_native(material_index,
+						anim_time_ms_, material_ctrl_values, runtime)) {
+				const renderer::MaterialRuntime &previous = stamp.runtime;
+				if (!stamp.runtime_valid || runtime.uv.m00 != previous.uv.m00 ||
+						runtime.uv.m10 != previous.uv.m10 ||
+						runtime.uv.m20 != previous.uv.m20) {
+					material->set_shader_parameter("u_uv_transform_u",
+							Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20));
+				}
+				if (!stamp.runtime_valid || runtime.uv.m01 != previous.uv.m01 ||
+						runtime.uv.m11 != previous.uv.m11 ||
+						runtime.uv.m21 != previous.uv.m21) {
+					material->set_shader_parameter("u_uv_transform_v",
+							Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21));
+				}
+				if (!stamp.runtime_valid || runtime.rgb_r != previous.rgb_r ||
+						runtime.rgb_g != previous.rgb_g ||
+						runtime.rgb_b != previous.rgb_b) {
+					material->set_shader_parameter("u_rgb_mod",
+							Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
+				}
+				if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
+					material->set_shader_parameter("u_alpha_mod", runtime.alpha);
+				}
+				stamp.runtime = runtime;
+				stamp.runtime_valid = true;
 			}
 		}
 		const Array *frames = anim_frames_by_mat_.getptr(material_index);
 		if (frames != nullptr && frames->size() > 1) {
-			const int frame_index = object_data_->compute_anim_frame(
-					material_index, anim_time_ms_, ctrl_values_);
-			if (frame_index >= 0 && frame_index < frames->size()) {
+			const int frame_index = object_data_->compute_anim_frame_native(
+					material_index, anim_time_ms_, material_ctrl_values);
+			if (frame_index != stamp.anim_frame && frame_index >= 0 &&
+					frame_index < frames->size()) {
 				const Ref<Texture2D> frame = (*frames)[frame_index];
 				if (frame.is_valid()) {
-					material->set_shader_parameter("u_diffuse", frame);
+					set_material_and_auxiliary_parameter(material, "u_diffuse", frame);
+					stamp.anim_frame = frame_index;
 				}
 			}
 		}
 	}
-	apply_environment_to_materials();
+	if (p_profile != nullptr) {
+		p_profile->material_us +=
+				Time::get_singleton()->get_ticks_usec() - material_start;
+	}
+	const uint64_t environment_start = p_profile != nullptr
+			? Time::get_singleton()->get_ticks_usec()
+			: 0;
+	if (environment_restamp_due()) {
+		apply_environment_to_materials();
+	}
+	if (p_profile != nullptr) {
+		p_profile->environment_us +=
+				Time::get_singleton()->get_ticks_usec() - environment_start;
+	}
+	const uint64_t order_start = p_profile != nullptr
+			? Time::get_singleton()->get_ticks_usec()
+			: 0;
+	if (part_changed || robj_changed) {
+		render_order_dirty_ = true;
+		point_light_draw_parts_dirty_ = true;
+	}
+	refresh_render_order();
 	if (bounds_dirty_ || part_changed || robj_changed) {
 		set_model_bounds(compute_transformed_mesh_bounds());
 		bounds_dirty_ = false;
+	}
+	if (p_profile != nullptr) {
+		p_profile->order_bounds_us +=
+				Time::get_singleton()->get_ticks_usec() - order_start;
 	}
 }
 
@@ -947,6 +1245,7 @@ void ObjectModel::set_on_screen(bool p_value) {
 	on_screen_ = p_value;
 	publish_submission_state();
 	if (p_value) {
+		env_restamp_forced_ = true;
 		wake_runtime_frame();
 	}
 }
@@ -999,8 +1298,79 @@ AABB ObjectModel::get_world_bounds() const {
 	return get_global_transform().xform(model_bounds_);
 }
 
-void ObjectModel::apply_point_light_selection(int p_count,
-		const Vector4 *p_posr, const Vector4 *p_color) {
+void ObjectModel::collect_point_light_draw_parts(
+		std::vector<PointLightDrawPart> &r_parts) const {
+	const Transform3D current = is_inside_tree() ? get_global_transform()
+												: Transform3D();
+	if (!point_light_draw_parts_dirty_ &&
+			current == point_light_draw_parts_transform_) {
+		r_parts = point_light_draw_parts_cache_;
+		return;
+	}
+	point_light_draw_parts_dirty_ = false;
+	point_light_draw_parts_transform_ = current;
+	r_parts.clear();
+	r_parts.reserve(robj_nodes_.size());
+	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
+		Node3D *part = kv.value;
+		if (part == nullptr || !part->is_visible_in_tree()) {
+			continue;
+		}
+		bool has_bounds = false;
+		AABB world_bounds;
+		for (int child = 0; child < part->get_child_count(); ++child) {
+			MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(
+					part->get_child(child));
+			if (instance == nullptr || !instance->is_visible_in_tree()) {
+				continue;
+			}
+			const AABB child_bounds = instance->get_global_transform().xform(
+					instance->get_aabb());
+			world_bounds = has_bounds ? world_bounds.merge(child_bounds)
+					: child_bounds;
+			has_bounds = true;
+		}
+		if (has_bounds) {
+			r_parts.push_back(PointLightDrawPart{kv.key, world_bounds});
+		}
+	}
+	std::stable_sort(r_parts.begin(), r_parts.end(),
+			[](const PointLightDrawPart &a, const PointLightDrawPart &b) {
+				return a.robj_index < b.robj_index;
+			});
+	point_light_draw_parts_cache_ = r_parts;
+}
+
+Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
+	if (object_data_.is_null() || p_index < 0 ||
+			p_index >= object_data_->get_light_count()) {
+		return get_global_position();
+	}
+	const Dictionary info = object_data_->get_light_info(p_index);
+	const Vector3 model_position = info.get("position", Vector3());
+	Vector3 position = get_global_transform().xform(model_position);
+	const int subobject = int(info.get("subobject", 0));
+	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
+	// the rest-to-live transform, matching the user-point attachment basis.
+	if (subobject > 0 && skeleton_ != nullptr &&
+			subobject < skeleton_->get_bone_count()) {
+		position = (skeleton_->get_global_transform() *
+					   skeleton_->get_bone_global_pose(subobject) *
+					   skeleton_->get_bone_global_rest(subobject).affine_inverse())
+					   .xform(model_position);
+	} else if (subobject > 0) {
+		Node3D *const *node = robj_nodes_.getptr(subobject);
+		const Transform3D *rest = robj_rest_transforms_.getptr(subobject);
+		if (node != nullptr && *node != nullptr && rest != nullptr) {
+			position = (*node)->get_global_transform().xform(
+					rest->affine_inverse().xform(model_position));
+		}
+	}
+	return position;
+}
+
+void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
+		int p_count, const Vector4 *p_posr, const Vector4 *p_color) {
 	const int count = CLAMP(p_count, 0, 4);
 	uint64_t hash = 0xcbf29ce484222325ull;
 	const auto mix = [&hash](const void *data, size_t size) {
@@ -1014,10 +1384,11 @@ void ObjectModel::apply_point_light_selection(int p_count,
 		mix(&p_posr[i], sizeof(Vector4));
 		mix(&p_color[i], sizeof(Vector4));
 	}
-	if (hash == last_point_light_selection_hash_) {
+	const uint64_t *last = point_light_selection_hashes_.getptr(p_robj_index);
+	if (last != nullptr && hash == *last) {
 		return;
 	}
-	last_point_light_selection_hash_ = hash;
+	point_light_selection_hashes_[p_robj_index] = hash;
 	// Applies are hash-gated and infrequent; per-call StringName construction
 	// avoids a DLL-teardown-ordered static against Godot's name table.
 	const StringName count_name("u_point_light_count");
@@ -1052,13 +1423,25 @@ void ObjectModel::apply_point_light_selection(int p_count,
 			}
 		}
 	};
+	Node *target = p_robj_index < 0 ? static_cast<Node *>(skeleton_) : nullptr;
+	if (p_robj_index >= 0) {
+		Node3D *const *part = robj_nodes_.getptr(p_robj_index);
+		target = part != nullptr ? static_cast<Node *>(*part) : nullptr;
+	}
+	apply_to(target);
+}
+
+void ObjectModel::apply_point_light_selection(int p_count,
+		const Vector4 *p_posr, const Vector4 *p_color) {
 	// Surface instances are direct children of their Robj part node or the
 	// shared skeleton (nova_object_model_scene.cpp attach split).
-	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
-		apply_to(Object::cast_to<Node>(
-				static_cast<Object *>(robj_dense_[entry])));
+	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
+		apply_point_light_selection_to_robj(
+				kv.key, p_count, p_posr, p_color);
 	}
-	apply_to(skeleton_);
+	if (skeleton_ != nullptr) {
+		apply_point_light_selection_to_robj(-1, p_count, p_posr, p_color);
+	}
 }
 
 void ObjectModel::_bind_methods() {
@@ -1066,10 +1449,16 @@ void ObjectModel::_bind_methods() {
 			D_METHOD("advance_awake_frame", "delta"),
 			&ObjectModel::advance_awake_frame);
 	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("profile_awake_frame", "delta"),
+			&ObjectModel::profile_awake_frame);
+	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("refresh_awake_environment"),
 			&ObjectModel::refresh_awake_environment);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("awake_model_count"), &ObjectModel::awake_model_count);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("refresh_match_terrain_frame", "terrain"),
+			&ObjectModel::refresh_match_terrain_frame);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
 			&ObjectModel::is_runtime_frame_awake);
 	ClassDB::bind_method(D_METHOD("wake_runtime_frame"),
@@ -1094,6 +1483,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_native_frame);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "native_frame"),
 			"set_native_frame", "get_native_frame");
+	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
+			&ObjectModel::set_match_terrain_enabled);
+	ClassDB::bind_method(D_METHOD("is_match_terrain_enabled"),
+			&ObjectModel::is_match_terrain_enabled);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
@@ -1106,6 +1499,12 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_slot_shadow_person);
 	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
 			&ObjectModel::is_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("set_entity_uniform_scale_q16", "scale_q16"),
+			&ObjectModel::set_entity_uniform_scale_q16);
+	ClassDB::bind_method(D_METHOD("get_entity_uniform_scale_q16"),
+			&ObjectModel::get_entity_uniform_scale_q16);
+	ClassDB::bind_method(D_METHOD("compose_entity_transform", "basis", "origin"),
+			&ObjectModel::compose_entity_transform);
 	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
 			&ObjectModel::set_shadow_bound_radii);
 	ClassDB::bind_method(D_METHOD("get_model_sphere_radius"),
@@ -1131,6 +1530,8 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_interior_section_light_transfer", "daylight"),
 			&ObjectModel::set_interior_section_light_transfer);
 	ClassDB::bind_method(D_METHOD("get_model_bounds"), &ObjectModel::get_model_bounds);
+	ClassDB::bind_method(D_METHOD("get_model_light_world_position", "index"),
+			&ObjectModel::get_model_light_world_position);
 	ClassDB::bind_method(D_METHOD("get_render_part_nodes"),
 			&ObjectModel::get_render_part_nodes);
 	ClassDB::bind_method(D_METHOD("set_section_visibility_mask", "mask"),
@@ -1262,6 +1663,14 @@ void ObjectModel::_bind_methods() {
 
 	BIND_ENUM_CONSTANT(LIGHTING_CONTEXT_ENTITY);
 	BIND_ENUM_CONSTANT(LIGHTING_CONTEXT_INTERIOR_SECTION);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_CLOCK_ANIMATION_US);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_PANM_US);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_MATERIAL_US);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_ENVIRONMENT_US);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_ORDER_BOUNDS_US);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_AWAKE_MODELS);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_RENDERABLE_MODELS);
+	BIND_ENUM_CONSTANT(AWAKE_PROFILE_SLOT_COUNT);
 }
 
 } // namespace godot

@@ -1,4 +1,5 @@
 #include "renderer/material_eval.h"
+#include "crt/crt_rng.h"
 #include "threedi/threedi_panm_runtime.h"
 
 #include <cmath>
@@ -91,7 +92,7 @@ int main() {
         material.u_params.end = 1.0f;
         material.v_params.style = 0x36;
         material.v_params.end = 1.0f;
-        threedi_wave_srand(1);
+        crt_srand(1);
         const renderer::MaterialRuntime dual_noise =
                 eval_runtime(material, 0);
         expect(nearly_equal(dual_noise.uv.m20,
@@ -106,7 +107,7 @@ int main() {
         ThreediTransform panm_noise{};
         panm_noise.control = 0x36;
         panm_noise.end = 256;
-        threedi_wave_srand(1);
+        crt_srand(1);
         expect(threedi_panm_sample_track_raw(&panm_noise, 0, nullptr) == 656,
                "PANM should consume the first seeded waveform-noise sample");
         const renderer::MaterialRuntime after_panm =

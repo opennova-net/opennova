@@ -1,6 +1,9 @@
 #include "env/nova_slot_shadow.h"
 
+#include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -78,6 +81,7 @@ static SlotUniformNames &slot_uniforms() {
 	static SlotUniformNames names;
 	return names;
 }
+
 
 static void reset_material_slots(const Ref<ShaderMaterial> &p_material) {
 	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
@@ -239,7 +243,20 @@ void SlotShadow::_ensure_captures() {
 		// (render_slot_shadow.h carries the witness).
 		const int size = renderer::slot_texture_size(i, shadow_detail_);
 		viewport->set_size(Vector2i(size, size));
+		// Retail clears 0x00FFFFFF: white RGB and alpha 0. The drape samples
+		// the resolved RGB, while transparent_background preserves that alpha
+		// byte. This target stays plain RGBA8: HDR 2D is
+		// not needed for the gamma contract here, and it breaks
+		// transparent_background (the world background filled the RT and
+		// draped the whole patch as one featureless blob).
 		viewport->set_transparent_background(true);
+		// Antialias the silhouette: the drape preserves the resolved gray RGB
+		// edge, and a hard-aliased 1-2 px silhouette line scintillates against the
+		// breathing first-person camera (the witnessed eye rides the posed
+		// head bone). MSAA on the capture supplies the same partial-coverage
+		// RGB that retail's multisampled black-on-white RT resolves, like the
+		// Q3 view's MSAA stands in for the StretchRect box filter.
+		viewport->set_msaa_3d(Viewport::MSAA_4X);
 		viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
 		viewport->set_disable_3d(false);
 		viewport->set_use_own_world_3d(false);
@@ -247,6 +264,19 @@ void SlotShadow::_ensure_captures() {
 		add_child(viewport);
 		Camera3D *camera = memnew(Camera3D);
 		camera->set_name("Camera");
+		Ref<Compositor> capture_compositor;
+		capture_compositor.instantiate();
+		camera->set_compositor(capture_compositor);
+		// A plain-color environment override: the capture must not render
+		// the world's sky/fog — only the clear plus the entity (the slot
+		// pass clear 0x00FFFFFF + fog color 0 @0x5d780f/@0x5d78b6 -
+		// docs/render/render-lighting-re.md; the transparent clear retains
+		// white RGB as the drape's no-op sample).
+		Ref<Environment> capture_environment;
+		capture_environment.instantiate();
+		capture_environment->set_background(Environment::BG_COLOR);
+		capture_environment->set_bg_color(Color(1.0f, 1.0f, 1.0f));
+		camera->set_environment(capture_environment);
 		camera->set_projection(Camera3D::PROJECTION_ORTHOGONAL);
 		camera->set_cull_mask(kCaptureLayerBits[i]);
 		viewport->add_child(camera);
@@ -344,7 +374,6 @@ void SlotShadow::advance_frame() {
 			viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	const bool live = env != nullptr && env->is_loaded() &&
 			camera != nullptr && shadow_detail_ > 0;
-
 	// Gather the caster group.
 	std::vector<CasterInfo> casters;
 	HashMap<uint64_t, size_t> caster_index;
@@ -509,12 +538,22 @@ void SlotShadow::advance_frame() {
 		std::array<float, 2> anchor = {float(p_pos.x), float(p_pos.z)};
 		if (terrain_data_.is_valid()) {
 			const TerrainData *terrain = terrain_data_.ptr();
+			const auto height_at = [terrain](float x, float z) {
+				return terrain->get_height_world(Vector3(x, 0.0f, z));
+			};
+			// Retail marches from the live simulated entity. Static mission
+			// presentation has no vehicle-settle tick, so grounded vehicles can
+			// retain the authored handful of Q16 ticks above the raw16 terrain
+			// (03TR M939: 2.500107 over 2.5). Reconcile only that sub-quantum
+			// contact before the exact march; otherwise the tiny gap becomes a
+			// whole planar step and crosses the lod-20 four-unit patch snap.
+			const float start_y = renderer::slot_march_start_height(
+					float(p_pos.y), height_at(float(p_pos.x), float(p_pos.z)),
+					renderer::kSlotTerrainHeightQuantumUnits);
 			anchor = renderer::march_shadow_anchor(
-					{float(p_pos.x), float(p_pos.y), float(p_pos.z)},
+					{float(p_pos.x), start_y, float(p_pos.z)},
 					{float(p_dir.x), float(p_dir.y), float(p_dir.z)},
-					[terrain](float x, float z) {
-						return terrain->get_height_world(Vector3(x, 0.0f, z));
-					});
+					height_at);
 		}
 		const renderer::SlotPatch patch =
 				renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
@@ -752,6 +791,10 @@ void SlotShadow::advance_frame() {
 	drape->set_shader_parameter("u_slot_clip_v", clip_v);
 	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
 	blob_material_->set_shader_parameter("u_slot_patch", blob_patches);
+	// The object shaders select their retail PROJSHAD blocks from the capture
+	// camera's cull mask (exactly one of the twelve capture layer bits, see
+	// kCaptureLayerBits); the main view and unrelated SubViewports carry bits
+	// outside that set and stay on NORMAL.
 
 	// Casters the full table refused (no assignment row of their own): a
 	// linked child still rides its parent's slot RT — retail's child walk

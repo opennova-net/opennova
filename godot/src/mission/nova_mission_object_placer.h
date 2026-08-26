@@ -7,6 +7,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/templates/vector.hpp>
+#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
@@ -151,6 +152,17 @@ public:
 	}
 	Array get_static_user_point_sources();
 	Array get_static_item_effect_sources();
+	// One row per retained static entity/ROBJ light draw. Row order is the
+	// atlas index stamped into each matching MultiMesh INSTANCE_CUSTOM.x;
+	// descriptors carry the source identity, exact world AABB, and live carve
+	// state. The EffectWorld device selects this row's <=4 lights into the
+	// shared RGBAF atlas (retail: collect_render_objects_for_batch @0x5d8ff7,
+	// see docs/render/render-lighting-re.md).
+	Array get_static_light_draw_sources();
+	// Advances whenever a row is appended, the table is reset, or a carve
+	// changes any row's `active` state: consumers rebuild their packed row
+	// arrays only on a change instead of re-reading the rows every frame.
+	uint64_t get_static_light_draw_source_revision() const;
 	Vector<StaticTerrainShadowSource> get_static_terrain_shadow_sources();
 	uint64_t get_static_terrain_shadow_source_revision();
 	// Dictionary mirror for focused shell/asset diagnostics. Production
@@ -217,6 +229,8 @@ private:
 		Ref<Material> material;
 		Transform3D offset;
 		int submesh = 0;
+		int robj_index = 0;
+		bool auxiliary_draw = false;
 	};
 
 	void _check_epoch();
@@ -231,6 +245,10 @@ private:
 	bool _item_is_mirror_reflected(int p_item_id) const;
 	bool _placement_is_mirror_reflected(uint32_t p_entity_attrib,
 			int p_item_id) const;
+	int32_t _item_model_scale_q16(int p_item_id) const;
+	Transform3D _entity_transform_for_item(const Vector3 &p_position,
+			const Vector3 &p_rotation_deg, int p_item_id) const;
+	void _configure_item_scale(ObjectModel *p_model, int p_item_id) const;
 	void _configure_item_shadow(ObjectModel *p_model, int p_item_id);
 	void _configure_item_lighting(ObjectModel *p_model, int p_item_id);
 	Ref<SkeletalAnim> _skeletal_from_adm(const String &p_adm_name,
@@ -249,8 +267,12 @@ private:
 			const Array &p_transforms);
 	void _append_static_user_point_source(const String &p_graphic,
 			const Transform3D &p_xform);
-	void _append_static_item_effect_source(int p_kind, int p_item_id,
-			const String &p_graphic, const Transform3D &p_xform);
+	int _append_static_item_effect_source(int p_kind, int p_entity_index,
+			int p_bms_id, int p_item_id, const String &p_graphic,
+			const Transform3D &p_xform);
+	int _append_static_light_draw_source(int p_source_index, int p_kind,
+			int p_entity_index, int p_bms_id, int p_item_id,
+			int p_robj_index, const AABB &p_world_bounds);
 	void _record_static_terrain_shadow_source(int p_kind, int p_index,
 			int p_bms_id, int p_team, uint32_t p_entity_attrib, int p_item_id,
 			const String &p_graphic, const Transform3D &p_xform,
@@ -266,6 +288,8 @@ private:
 	Array placed_entity_records_;
 	Array static_user_point_sources_;
 	Array static_item_effect_sources_;
+	Array static_light_draw_sources_;
+	uint64_t static_light_draw_source_revision_ = 1;
 	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
 	HashMap<uint64_t, Vector<int>> static_terrain_shadow_source_rows_;
 	HashMap<int, Vector<int>> static_terrain_shadow_rows_by_bms_;

@@ -32,6 +32,8 @@ enum ObjectShaderCapBits : uint32_t {
 	// (The glow-copy capability — is_glow_capable — deliberately is not a key
 	// bit: it selects the Q3/bloom duplicate, not the normal-pass look.)
 	OSCAP_VIEW_FADE    = 0x00010000u,
+	OSCAP_SKINNED      = 0x00020000u,
+	OSCAP_ENV_TEXTURED = 0x00040000u,
 };
 
 using ObjectShaderKey = uint32_t;
@@ -39,7 +41,6 @@ using ObjectShaderKey = uint32_t;
 enum class ObjectDepthPolicy : uint8_t {
 	Opaque,
 	TransparentNoWrite,
-	AlphaPrepass,
 };
 
 enum class ObjectCullPolicy : uint8_t {
@@ -57,8 +58,28 @@ enum class ObjectEnvironmentSource : uint8_t {
 
 enum class ObjectSpecularSource : uint8_t {
 	None,
+	AnalyticPow8DiffuseAlpha,
+	PhongMapLookupDiffuseAlpha,
 	AnalyticPow16,
 };
+
+struct ObjectPhongMapTexel {
+	uint8_t red_pow4 = 0;
+	uint8_t green_pow16 = 0;
+	uint8_t blue_pow64 = 0;
+	uint8_t alpha_ndotl = 0;
+
+	bool operator==(const ObjectPhongMapTexel &other) const {
+		return red_pow4 == other.red_pow4 &&
+				green_pow16 == other.green_pow16 &&
+				blue_pow64 == other.blue_pow64 &&
+				alpha_ndotl == other.alpha_ndotl;
+	}
+};
+
+// One byte-exact gsys_phong texel. X is N.L and Y is N.H.
+// [orig: Render_CreateSystemTextures @ 0x58ad69..0x58aeb6].
+ObjectPhongMapTexel object_phong_map_texel(uint8_t ndotl, uint8_t ndoth);
 
 // Shader execution topology. These are the combinations reachable from the
 // canonical material descriptor table plus the runtime's missing-detail
@@ -67,24 +88,45 @@ enum class ObjectSpecularSource : uint8_t {
 enum class ObjectShaderTechnique : uint8_t {
 	Unsupported,
 	Fixed,
+	FixedSkinned,
 	FixedDetail,
 	SelfLit,
 	SelfLitDetail,
 	Tracer,
 	Flag,
-	FlagSelfLit,
 	PhongTangentDiffuse,
 	PhongTangentSpecular,
+	PhongTangentSpecularSkinned,
 	PhongObjectDiffuse,
 	PhongObjectSpecular,
+	PhongObjectSpecularPhongMap,
 	Dot3Tangent,
 	Dot3TangentDetail,
+	Dot3TangentSkinned,
+	Dot3TangentDetailSkinned,
 	Dot3Object,
 	Dot3ObjectDetail,
-	EnvironmentTangent,
-	EnvironmentTangentSpecular,
-	Glass,
+	EnvironmentMirror,
+	EnvironmentMirrorTextured,
+	EnvironmentPhong,
+	GlassFixed,
+	GlassSkinned,
 };
+
+// The PROJSHAD pass is not a copy of NORMAL's blend policy. The four _FFP
+// techniques compile material blend variants, the live file-effect passes
+// force opaque ONE/ZERO state, and effects without a PROJSHAD declaration do
+// not submit a fallback pass.
+// [orig: _FFP.fx TBoringFFPProjShad; the 15 shipped shader PROJSHAD
+// declarations; HLSLEffect_LoadFromFile @ 0x5AE690]
+enum class ObjectProjectedShadowPolicy : uint8_t {
+	NoPass,
+	MaterialBlend,
+	Opaque,
+};
+
+ObjectProjectedShadowPolicy object_projected_shadow_policy(
+		ObjectShaderTechnique technique) noexcept;
 
 struct ObjectShaderPipelineDescriptor {
 	ObjectShaderKey key = 0;
@@ -106,6 +148,8 @@ struct ObjectShaderPipelineDescriptor {
 	bool normal_uses_uv2 = false;
 	bool uses_detail = false;
 	bool uses_specular = false;
+	bool is_skinned = false;
+	bool environment_textured = false;
 	bool glass = false;
 	bool view_angle_fade = false;
 };

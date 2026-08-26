@@ -59,6 +59,7 @@ struct Rig {
         veh.net_id = 11; // 00TRa's DTruck1 SSN
         veh.bms_id = 11;
         veh.kind = EntityKind::Item;
+        veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
         veh.item_id = 1294;
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.yaw = 0;

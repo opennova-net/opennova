@@ -175,6 +175,10 @@ public:
 	Ref<Texture2D> get_foliagemap_tex() const;
 	void set_tilestrip_tex(const Ref<Texture2D> &p_tex);
 	Ref<Texture2D> get_tilestrip_tex() const;
+	// C++ runtime auxiliary-texture seam: resolves through the same mounted VFS
+	// (or loose TRN directory) as authored terrain slots without exposing the
+	// ResourceRoot or a second lookup policy.
+	Ref<Texture2D> load_source_texture(const String &p_filename) const;
 
 	// Numeric accessors
 	void set_detail_density(int p_val);

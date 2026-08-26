@@ -183,6 +183,13 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
 			forces_indoors)
 	var native_end := Time.get_ticks_usec() if timing else 0
+	var building_query_us := 0
+	var building_apply_us := 0
+	var cull_query_us := 0
+	var cull_apply_us := 0
+	var light_query_us := 0
+	var light_apply_us := 0
+	var water_apply_us := 0
 
 	# Building batch visibility + per-section masks (bit N = render part N,
 	# forced-visible def bits already merged by the sim), applied as CHANGES:
@@ -190,7 +197,11 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 	# walks nothing. Batch culls claim the occlusion-hidden bit; the same
 	# verdicts as the full-walk form land on the nodes.
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
+	var building_query_start := Time.get_ticks_usec() if timing else 0
 	var changes: PackedInt64Array = sim.get_building_visibility_changes()
+	if timing:
+		building_query_us = Time.get_ticks_usec() - building_query_start
+	var building_apply_start := Time.get_ticks_usec() if timing else 0
 	for i in range(0, changes.size(), 2):
 		var bms_id := int(changes[i])
 		var node := _occlusion_node(registry, bms_id)
@@ -199,10 +210,16 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		var packed := int(changes[i + 1])
 		node.set_section_visibility_mask(packed & 0xFFFFFFFF)
 		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
+	if timing:
+		building_apply_us = Time.get_ticks_usec() - building_apply_start
 
 	# Entity render gates (the blink-hits gate + the outdoors three-ray latch),
 	# also applied as changes. [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
+	var cull_query_start := Time.get_ticks_usec() if timing else 0
 	var culled_changes: PackedInt32Array = sim.get_render_culled_changes()
+	if timing:
+		cull_query_us = Time.get_ticks_usec() - cull_query_start
+	var cull_apply_start := Time.get_ticks_usec() if timing else 0
 	if culled_changes.size() >= 2:
 		var added := int(culled_changes[0])
 		for i in range(1, 1 + added):
@@ -213,33 +230,52 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 			var node := _occlusion_node(registry, int(culled_changes[i]))
 			if node != null:
 				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
+	if timing:
+		cull_apply_us = Time.get_ticks_usec() - cull_apply_start
 
 	# The per-drawn-entity sun-visibility factor (D-RLIT-3), also applied as
 	# changes: quality 1..4 maps to effectScale quality*0.25, dimming only the
 	# directional term (engine/runtime/renderer/light_runtime.h
-	# sun_visibility_factor owns the witness; the ray walk is
-	# world::CollisionWorld::sun_visibility_blocked_rays). Contained and
-	# zero-source entities never appear here — they hold the 1.0 default.
+	# sun_visibility_factor owns the witness). Placed and wire identities share
+	# this triple feed; wire rays use the separately keyed 17-tick candidate
+	# arena, and WirePresentPass retains the value for cold bodies/weapons.
 	# [orig: setup_terrain_effect_for_entity @ 0x5c74a0, pushed per sector
 	# entity draw @ 0x5c7bff]
 	if env != null:
-		var sun_changes: PackedInt64Array = sim.get_entity_sun_visibility_changes(
+		var light_query_start := Time.get_ticks_usec() if timing else 0
+		var sun_changes: PackedInt64Array = sim.get_draw_lighting_changes(
 				env.get_light_direction())
-		for i in range(0, sun_changes.size(), 2):
-			var sun_node := _occlusion_node(registry, int(sun_changes[i]))
+		if timing:
+			light_query_us = Time.get_ticks_usec() - light_query_start
+		var light_apply_start := Time.get_ticks_usec() if timing else 0
+		var wire_present := runtime.get_wire_presenter()
+		for i in range(0, sun_changes.size(), 3):
+			var wire_handle := int(sun_changes[i])
+			var bms_id := int(sun_changes[i + 1])
+			# quality -> effectScale maps engine-side (one owner:
+			# renderer::sun_visibility_factor via sun_quality_factor).
+			var effect_scale := sim.sun_quality_factor(int(sun_changes[i + 2]))
+			if wire_handle >= 0:
+				if wire_present != null:
+					wire_present.set_entity_lighting_context(
+							wire_handle, effect_scale, false, 0.0)
+				continue
+			var sun_node := _occlusion_node(registry, bms_id)
 			if sun_node != null:
-				# quality -> effectScale maps engine-side (one owner:
-				# renderer::sun_visibility_factor via sun_quality_factor).
-				sun_node.set_entity_lighting_context(
-						sim.sun_quality_factor(int(sun_changes[i + 1])), false, 0.0)
+				sun_node.set_entity_lighting_context(effect_scale, false, 0.0)
+		if timing:
+			light_apply_us = Time.get_ticks_usec() - light_apply_start
 
 	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
 	# authored water letter suppressing (accum bit 0x8), the water still renders
 	# when the frame latched the exterior or a camera building straddles the
 	# water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
 	# @ 0x29ACE40]
+	var water_apply_start := Time.get_ticks_usec() if timing else 0
 	if water != null:
 		water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
+	if timing:
+		water_apply_us = Time.get_ticks_usec() - water_apply_start
 
 	if timing:
 		_perf_occl_native_us = native_end - native_start
@@ -255,6 +291,13 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
 		_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
 				maxi(_perf_occl_native_us - build_us - probe_us, 0))
+		_frame_stats.add(FrameStatsBoard.OCCL_BUILDING_QUERY, building_query_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_BUILDING_APPLY, building_apply_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_CULL_QUERY, cull_query_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_CULL_APPLY, cull_apply_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_LIGHT_QUERY, light_query_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_LIGHT_APPLY, light_apply_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_WATER_APPLY, water_apply_us)
 
 
 ## The probe A/B seam, entering the occlusion skip: restore the water to the

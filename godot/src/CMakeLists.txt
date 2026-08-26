@@ -42,7 +42,9 @@ add_library(${TARGET_NAME} SHARED
     env/nova_mission_environment.cpp
     mission/nova_mission_catalog.cpp
     mission/nova_mission_object_placer.cpp
+    mission/nova_mission_object_placer_static_sources.cpp
     env/nova_celestial.cpp
+    env/nova_environment_cube_capture.cpp
     env/nova_sky_dome.cpp
     env/nova_slot_shadow.cpp
     env/nova_sun_shadow.cpp
@@ -63,6 +65,7 @@ add_library(${TARGET_NAME} SHARED
     particle/nova_effect_scene.cpp
     particle/nova_particle_compositor.cpp
     particle/nova_particle_renderer.cpp
+    render/nova_framefx.cpp
     object/nova_entity_index.cpp
     object/nova_object_model.cpp
     object/nova_object_model_anim.cpp

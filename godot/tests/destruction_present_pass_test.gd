@@ -317,6 +317,54 @@ func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
 	presenter.teardown()
 
 
+func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child(world)
+	var container := Node3D.new()
+	container.name = "MissionObjects"
+	world.add_child(container)
+	var intact := ObjectModel.new()
+	container.add_child(intact)
+	var intact_data := ObjectData.new()
+	assert_eq(intact_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/Shed.3di")), OK)
+	assert_eq(intact_data.get_light_count(), 1)
+	intact.set_object_data(intact_data)
+	intact.set_meta("entity_ref", {
+		"bms_id": 41,
+		"wire_handle": 73,
+		"kind": MissionData.KIND_ITEM,
+	})
+	var director := EffectLightDirector.new()
+	director.setup(world, Callable(), Callable())
+	director.on_wire_node_spawned(intact, MissionData.KIND_ITEM, BUGGY_ITEM_ID)
+	assert_eq(director.get_report().live, 1,
+			"the intact graphic contributes its one authored LGHT")
+
+	var presenter := DestructionPresentPass.new()
+	presenter.setup(null, container, _index_of([_entry(intact, 41)]),
+			_husk_placer(), _item_db, CaptureAnchors.new(), Callable(), Callable(),
+			null, Callable())
+	presenter.present_drained({
+		"husk_swaps": [{"bms_id": 41, "item_id": BUGGY_ITEM_ID}],
+	}, [])
+	assert_eq(_husk_models(world).size(), 1,
+			"the production destruction pass built the authored husk graft")
+	assert_eq(director.get_report().live, 1,
+			"a husk swap leaves the intact spawn-fixed LGHT and scans no husk LGHT")
+	presenter.reset_runtime_state()
+	assert_eq(director.get_report().live, 1,
+			"restoring the intact graphic performs no authored-light respawn")
+	presenter.teardown()
+	intact.queue_free()
+	await get_tree().process_frame
+	assert_eq(director.get_report().live, 0,
+			"actual entity retirement clears its one cached EffectWorld handle")
+	world.queue_free()
+	await get_tree().process_frame
+
+
 func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()

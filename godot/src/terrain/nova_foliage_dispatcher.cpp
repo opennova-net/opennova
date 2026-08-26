@@ -1133,30 +1133,29 @@ void FoliageDispatcher::_apply_draw_list(
       draw->set_instance_shader_parameter(
           StringName("u_instance_tile_cache_layer"), 0.0f);
       draw->set_instance_shader_parameter(
-          StringName("u_instance_tile_cache_origin_span"), Vector4());
+          StringName("u_instance_tile_cache_projection"), Vector4());
       if (terrain_ != nullptr) {
         const Vector2 center = foliage_detail_cell_center(command.cell_key);
         const std::optional<opennova::TerrainTilePageBinding> page =
             terrain_->get_tile_cache_binding_for_world_point_native(
                 static_cast<float>(center.x), static_cast<float>(center.y));
         if (page.has_value() && page->ready) {
-          const int span =
-              opennova::TerrainTileCompositionCache::page_world_span(
-                  page->page.page_lod_level);
-          const float world_x = static_cast<float>(
-              page->page.sector_origin_x + page->page.page_local_x);
-          const float world_z = static_cast<float>(
-              page->page.sector_origin_z + page->page.page_local_z);
-          draw->set_instance_shader_parameter(
-              StringName("u_instance_tile_cache_ready"), true);
-          draw->set_instance_shader_parameter(
-              StringName("u_instance_tile_cache_layer"),
-              static_cast<float>(page->layer));
-          draw->set_instance_shader_parameter(
-              StringName("u_instance_tile_cache_origin_span"),
-              Vector4(world_x, world_z,
-                      span > 0 ? 1.0f / static_cast<float>(span) : 0.0f,
-                      static_cast<float>(span)));
+          const std::optional<opennova::TerrainTilePageProjection> projection =
+              opennova::TerrainTileCompositionCache::page_projection(
+                  page->page);
+          if (projection.has_value()) {
+            draw->set_instance_shader_parameter(
+                StringName("u_instance_tile_cache_ready"), true);
+            draw->set_instance_shader_parameter(
+                StringName("u_instance_tile_cache_layer"),
+                static_cast<float>(page->layer));
+            draw->set_instance_shader_parameter(
+                StringName("u_instance_tile_cache_projection"),
+                Vector4(projection->world_origin_x,
+                        projection->world_origin_z,
+                        projection->inverse_world_span,
+                        projection->world_span));
+          }
         }
       }
     }

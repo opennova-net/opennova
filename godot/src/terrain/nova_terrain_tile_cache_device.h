@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <terrain/terrain_frame.h>
+#include <terrain/terrain_scorch.h>
 #include <terrain/terrain_static_shadow_alpha.h>
 #include <terrain/terrain_static_shadow_planner.h>
 #include <terrain/terrain_tile_composer.h>
@@ -26,9 +27,11 @@ class TerrainData;
 class TerrainSurfaceInputs;
 class TerrainTileInfo;
 
-// Main-thread-owned provider state copied once per semantic shadow epoch.
-// Worker threads clone only the portable planner and keep the receiver storage
-// alive; no Godot Object or rendering API crosses the worker boundary.
+// Main-thread-owned provider state published once per semantic shadow epoch
+// (caster set, light quantum, receiver terrain, config — never material time,
+// which rides each work item). Worker threads clone only the portable planner,
+// whose immutable caster set is shared by pointer, and keep the receiver
+// storage alive; no Godot Object or rendering API crosses the worker boundary.
 struct TerrainStaticShadowReceiverStorage {
 	std::vector<uint16_t> heightmap;
 	std::array<int, 16 * 16> sector_grid{};
@@ -54,6 +57,11 @@ public:
 	// what workers compute from compilation_snapshot().
 	virtual opennova::terrain::TerrainStaticShadowPagePlanResult plan_page(
 			const opennova::TerrainTilePageKey &p_page) = 0;
+	// The frame-shared Render_ShaderTickMs the provider's begin_frame received.
+	// The device stamps it on every composition job it enqueues so a worker
+	// samples caster material animation at the requesting frame, exactly as
+	// retail evaluates tile-model materials inside the tile render.
+	virtual uint32_t material_time_ms() const noexcept = 0;
 	virtual void merge_async_diagnostics(
 			const opennova::terrain::TerrainStaticShadowPlannerDiagnostics
 					&p_diagnostics) noexcept = 0;
@@ -85,6 +93,13 @@ public:
 	void set_static_shadow_rasterizer(
 			TerrainStaticShadowPageRasterizer *p_rasterizer);
 	void invalidate_static_shadow_pages();
+	// Appends one already-resolved permanent record and retires exactly the
+	// occupied cache pages its inclusive Q16 bounds touch.
+	bool append_terrain_scorch(
+			const opennova::terrain::TerrainScorchEntry &p_entry);
+	// Mission/replay reset: remove the permanent list and make every resident
+	// page cold so no prior compiled scorch survives the lifecycle boundary.
+	void clear_terrain_scorches();
 
 	opennova::TerrainTilePageBinding request(
 			const opennova::TerrainPatchDraw &p_draw,
@@ -103,6 +118,8 @@ private:
 	bool _refresh_shadow_snapshot();
 	void _reset_shadow_epoch_diagnostics();
 	void _invalidate_page(const opennova::TerrainTilePageKey &p_page);
+	void _retire_ready_scorch_overlaps(
+			const opennova::terrain::TerrainScorchEntry &p_entry);
 	bool _allocate_texture();
 	void _record_frame_selected_ready(
 			const opennova::TerrainTilePageBinding &p_binding);
@@ -129,6 +146,10 @@ private:
 	uint64_t cache_hits_ = 0;
 	uint64_t cache_misses_ = 0;
 	uint64_t upload_failures_ = 0;
+	opennova::terrain::TerrainScorchRegistry scorch_registry_;
+	bool scorch_textures_ready_ = false;
+	uint64_t scorch_records_rejected_ = 0;
+	uint64_t scorch_page_invalidations_ = 0;
 	TerrainStaticShadowPageRasterizer *static_shadow_rasterizer_ = nullptr;
 	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
 			shadow_snapshot_;

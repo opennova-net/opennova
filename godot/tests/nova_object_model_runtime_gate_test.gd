@@ -153,6 +153,41 @@ func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
 			"runtime frames keep the local duplicate-light route disabled")
 
 
+func test_dynamic_material_typed_runtime_matches_public_evaluator() -> void:
+	# Armry material 3 is an authored FLICKER-controlled RGB generator. The
+	# runtime model now keeps the native result typed through the ShaderMaterial
+	# write; the public Dictionary evaluator remains the independent tooling
+	# boundary used as the exact-value oracle here.
+	var data := _object_data(ARMRY_3DI)
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	var material: ShaderMaterial = null
+	var indices := model.get_surface_material_indices()
+	var materials := model.get_surface_materials()
+	for index in range(indices.size()):
+		if int(indices[index]) == 3:
+			material = materials[index] as ShaderMaterial
+			break
+	assert_not_null(material, "the armory fixture submits dynamic material 3")
+	if material == null:
+		return
+	for flicker in [0x2000, 0xC000]:
+		model.set_ctrl_value("FLICKER", flicker)
+		var expected: Dictionary = data.eval_material_runtime(
+				3, 0, {"FLICKER": flicker})
+		assert_eq(material.get_shader_parameter("u_uv_transform_u"),
+				expected.get("uv_transform_u"))
+		assert_eq(material.get_shader_parameter("u_uv_transform_v"),
+				expected.get("uv_transform_v"))
+		assert_eq(material.get_shader_parameter("u_rgb_mod"),
+				expected.get("rgb_mod"),
+				"typed hot path preserves the controlled RGB result")
+		assert_eq(material.get_shader_parameter("u_alpha_mod"),
+				expected.get("alpha_mod"))
+
+
 func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
 	for child in root.get_children():
@@ -160,6 +195,184 @@ func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
 			out.append(child as MeshInstance3D)
 		out.append_array(_mesh_instances_below(child))
 	return out
+
+
+func _transparent_mesh_instances(root: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for mesh in _mesh_instances_below(root):
+		var material := mesh.material_override as ShaderMaterial
+		if material == null or material.shader == null:
+			continue
+		var path := material.shader.resource_path
+		if "/alpha" in path or "/additive" in path or "/multiplicative" in path:
+			out.append(mesh)
+	return out
+
+
+func _mesh_world_center(mesh: MeshInstance3D) -> Vector3:
+	return mesh.global_transform * mesh.mesh.get_aabb().get_center()
+
+
+func test_transparent_strips_bin_independently_on_both_camera_sides() -> void:
+	# The native importer preserves each 3DI strip as one MeshInstance3D. This
+	# fixture has transparent strips spread across the armory; rotate its widest
+	# center axis vertical, put the water plane through the spread, and prove
+	# each strip receives its own live Q1/Q2 material priority. A shared material
+	# or object-origin classifier cannot satisfy these assertions.
+	var model := _spy_model(ARMRY_3DI)
+	var transparent := _transparent_mesh_instances(model)
+	assert_gt(transparent.size(), 1, "the armory fixture carries multiple alpha strips")
+	if transparent.size() < 2:
+		return
+
+	var minimum := _mesh_world_center(transparent[0])
+	var maximum := minimum
+	for mesh in transparent:
+		var center := _mesh_world_center(mesh)
+		minimum = minimum.min(center)
+		maximum = maximum.max(center)
+	var span := maximum - minimum
+	if span.x >= span.y and span.x >= span.z:
+		model.basis = Basis(Vector3.FORWARD, PI * 0.5)
+	elif span.z >= span.y:
+		model.basis = Basis(Vector3.RIGHT, -PI * 0.5)
+
+	var low := INF
+	var high := -INF
+	for mesh in transparent:
+		var height := _mesh_world_center(mesh).y
+		low = minf(low, height)
+		high = maxf(high, height)
+	assert_gt(high - low, 0.01, "transparent strip centers span the water plane")
+	if high - low <= 0.01:
+		return
+
+	var cache := ObjectShaderCache.get_singleton()
+	var water_height := (low + high) * 0.5
+	cache.set_water_plane(water_height, true)
+	model.advance_runtime_frame(0.0)
+	var material_ids := {}
+	var above_count := 0
+	var below_count := 0
+	for mesh in transparent:
+		var material := mesh.material_override as ShaderMaterial
+		material_ids[material.get_instance_id()] = true
+		var height := _mesh_world_center(mesh).y
+		above_count += 1 if height >= water_height else 0
+		below_count += 1 if height < water_height else 0
+		assert_eq(material.render_priority, cache.alpha_rung_for_height(height),
+				"camera-above priority follows this strip's transformed center")
+	assert_eq(material_ids.size(), transparent.size(),
+			"each transparent strip owns the priority-bearing material")
+	assert_gt(above_count, 0)
+	assert_gt(below_count, 0)
+
+	cache.set_water_plane(water_height, false)
+	model.advance_runtime_frame(0.0)
+	for mesh in transparent:
+		var height := _mesh_world_center(mesh).y
+		var material := mesh.material_override as ShaderMaterial
+		assert_eq(material.render_priority, cache.alpha_rung_for_height(height),
+				"underwater camera mirrors the far/camera-side ladder")
+
+	# Moving the model across the plane re-classifies without a water change:
+	# the transform notification lands with the frame and re-runs the
+	# classifier in place (no runtime-walk wake).
+	var lowest_mesh: MeshInstance3D = transparent[0]
+	for mesh in transparent:
+		if _mesh_world_center(mesh).y < _mesh_world_center(lowest_mesh).y:
+			lowest_mesh = mesh
+	var lift := water_height - _mesh_world_center(lowest_mesh).y + 0.5
+	model.global_position += Vector3(0.0, lift, 0.0)
+	await get_tree().process_frame
+	for mesh in transparent:
+		var material := mesh.material_override as ShaderMaterial
+		assert_eq(material.render_priority,
+				cache.alpha_rung_for_height(_mesh_world_center(mesh).y),
+				"a moved model re-classifies its strips from the new centers")
+	cache.clear_water_plane()
+
+
+func test_classified_alpha_strips_do_not_keep_a_still_model_awake() -> void:
+	# The classifier is change-driven: once the plane and the model are still,
+	# a shared-clock model whose only runtime work was its strips parks again
+	# (retail recomputes per frame inside a walk it already runs; the result
+	# is the same, the per-frame server round trips are not). Any fixture
+	# with alpha strips and no live per-frame work serves; the static house
+	# is the parking fixture the clock tests already use.
+	var cache := ObjectShaderCache.get_singleton()
+	cache.clear_water_plane()
+	var model: ObjectModel = null
+	var transparent: Array = []
+	for path in [SHED_3DI, HOUSE_3DI, ARMRY_3DI]:
+		var candidate := _spy_model(path)
+		var clock := PanmClock.new()
+		clock.set_time_ms_for_test(0)
+		candidate.set_panm_clock(clock)
+		candidate.advance_runtime_frame(0.016)
+		var strips := _transparent_mesh_instances(candidate)
+		# A fixture that parks with no water plane and owns alpha strips.
+		if not candidate.is_runtime_frame_awake() and not strips.is_empty():
+			model = candidate
+			transparent = strips
+			break
+	if model == null:
+		pending("no committed fixture both parks and carries alpha strips")
+		return
+	cache.set_water_plane(_mesh_world_center(transparent[0]).y, true)
+	assert_true(model.is_runtime_frame_awake(),
+			"a water plane change wakes every model with alpha strips once")
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_runtime_frame_awake(),
+			"a still model with classified alpha strips parks after one frame")
+	for mesh in transparent:
+		var material := mesh.material_override as ShaderMaterial
+		assert_eq(material.render_priority,
+				cache.alpha_rung_for_height(_mesh_world_center(mesh).y))
+	# Re-publishing the same plane is not a change and wakes nothing.
+	cache.set_water_plane(_mesh_world_center(transparent[0]).y, true)
+	assert_false(model.is_runtime_frame_awake(),
+			"an unchanged water plane does not wake parked models")
+	cache.clear_water_plane()
+
+
+func test_bone_path_transparents_follow_the_entity_side_selector() -> void:
+	# The bone collector does not derive a deformed center for every strip. Its
+	# caller passes bit 0x20 when the ENTITY belongs below water, so every alpha
+	# strip of one skeletal submission joins the same Q1/Q2 queue.
+	var model := _spy_model(ARMRY_3DI)
+	model.set_skeletal_anim(_loaded_skeletal())
+	var transparent := _transparent_mesh_instances(model)
+	assert_gt(transparent.size(), 1, "skeletal armory retains alpha strips")
+	if transparent.size() < 2:
+		return
+
+	# Pick a plane between the entity origin and the most vertically displaced
+	# strip. A rigid per-strip classifier would put that strip on the other side;
+	# the retail bone path must keep every strip with the entity.
+	var entity_height := model.global_position.y
+	var displaced_height := entity_height
+	for mesh in transparent:
+		var height := _mesh_world_center(mesh).y
+		if absf(height - entity_height) > absf(displaced_height - entity_height):
+			displaced_height = height
+	assert_gt(absf(displaced_height - entity_height), 0.01,
+			"fixture has a strip center away from its skeletal entity origin")
+	if absf(displaced_height - entity_height) <= 0.01:
+		return
+
+	var cache := ObjectShaderCache.get_singleton()
+	var water_height := (entity_height + displaced_height) * 0.5
+	cache.set_water_plane(water_height, true)
+	model.advance_runtime_frame(0.0)
+	var expected := cache.alpha_rung_for_height(entity_height)
+	assert_ne(cache.alpha_rung_for_height(displaced_height), expected,
+			"the selected strip center is deliberately across the plane")
+	for mesh in transparent:
+		var material := mesh.material_override as ShaderMaterial
+		assert_eq(material.render_priority, expected,
+				"bone-path alpha follows the entity-side submit selector")
+	cache.clear_water_plane()
 
 
 func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -> void:
@@ -285,6 +498,31 @@ func test_scene_pass_transition_restamps_visible_model_synchronously() -> void:
 	assert_eq(int(material.get_shader_parameter("u_fog_type")), 1)
 
 
+func test_live_model_staggers_slow_environment_drift() -> void:
+	# Live PANM/material models stay in the shared awake set, so the environment
+	# signal's wake gate alone cannot stagger them. Sixteen consecutive process
+	# frames must still produce exactly one retained material restamp.
+	var model := _spy_model(PMP_3DI)
+	var material := _first_material(model)
+	var state := _fresh_env_state(Vector3(0.2, 0.3, 0.4))
+	model.set_environment_state(state)
+	var previous: Vector3 = material.get_shader_parameter("u_dir_light_color")
+	var restamps := 0
+	for step in range(16):
+		var values := EnvLightValues.retail_noon_defaults()
+		values.dir_color = Vector3(0.1 + step * 0.02, 0.6, 0.8)
+		state.publish(values)
+		model.advance_runtime_frame(0.0)
+		var current: Vector3 = material.get_shader_parameter("u_dir_light_color")
+		if not current.is_equal_approx(previous):
+			restamps += 1
+			previous = current
+		if step < 15:
+			await get_tree().process_frame
+	assert_eq(restamps, 1,
+			"an always-awake model shares the parked-model 16-frame TOD stagger")
+
+
 func test_clockless_playing_model_stays_awake() -> void:
 	# The OED-preview carve-out: no shared clock + playing means the private
 	# age accumulates per frame, so the model must keep processing.
@@ -407,8 +645,13 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	var part := _animated_part_node(model)
 	var material := _first_material(model)
 	var offscreen_color := Vector3(0.1, 0.2, 0.9)
-	model.set_environment_state(_fresh_env_state(offscreen_color))
+	var state := _fresh_env_state(offscreen_color)
+	model.set_environment_state(state)
 	model.set_on_screen(false)
+	var catchup_color := Vector3(0.7, 0.2, 0.1)
+	var catchup := EnvLightValues.retail_noon_defaults()
+	catchup.dir_color = catchup_color
+	state.publish(catchup)
 	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
 	part.transform = poison
 	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
@@ -428,7 +671,7 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	model.advance_runtime_frame(0.5)
 	assert_ne(part.transform, poison,
 			"the submitted frame re-derives transforms from the absolute clock")
-	assert_eq(material.get_shader_parameter("u_dir_light_color"), offscreen_color,
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), catchup_color,
 			"and catches up the environment restamp")
 
 

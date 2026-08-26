@@ -4,7 +4,9 @@ shader_type spatial;
 // alpha blending.
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 
-uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
+#include "res://shaders/nova_color.gdshaderinc"
+
+uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
 void fragment() {
@@ -16,6 +18,6 @@ void fragment() {
 		float r = length(centered) * 2.0;
 		base.a *= clamp(1.0 - r, 0.0, 1.0);
 	}
-	ALBEDO = base.rgb;
+	ALBEDO = nova_scene_output(base.rgb);
 	ALPHA = base.a;
 }

@@ -41,6 +41,9 @@ TERRAIN_QUERY_HEADERS = {
     "terrain_query/height_field.h",
     "terrain_query/surface_type_map.h",
     "terrain_query/terrain_raycast.h",
+    # The permanent scorch record + its two retail producers (ADR 0020 #5:
+    # world-owned interfaces grow here; the registry/textures stay behind).
+    "terrain_query/terrain_scorch_record.h",
 }
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*[<"]([^<>"]+)[>"]')

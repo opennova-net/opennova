@@ -1,9 +1,10 @@
 #include <terrain/terrain_static_shadow_alpha.h>
 
 // [orig: Terrain_CollectAndRenderTileModels temp-blue result
-// @0x60D5BF..0x60DA4F; PSDepthAlpha A-only page composite
+// @0x60D5BF..0x60DA4F; PSDepthAlpha zero-RGB ONE/ONE page composite
 // @0x60E0C6..0x60E19D]
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 
@@ -48,6 +49,21 @@ bool TerrainStaticShadowAlphaPage::is_valid() const noexcept {
 			pixel_count(width, height, count) && alpha.size() == count;
 }
 
+std::array<uint8_t, 4> composite_terrain_static_shadow_pixel(
+		const std::array<uint8_t, 4> &destination_rgba,
+		uint8_t temporary_blue) noexcept {
+	// PSDepthAlpha writes zero RGB and temp blue A; ONE/ONE adds that source
+	// to the destination in all four enabled channels.
+	return {
+			destination_rgba[0],
+			destination_rgba[1],
+			destination_rgba[2],
+			static_cast<uint8_t>(std::min(
+					255, static_cast<int>(destination_rgba[3]) +
+							temporary_blue)),
+	};
+}
+
 TerrainStaticShadowAlphaPage begin_terrain_static_shadow_alpha_page(
 		const TerrainTileCompositionJob &job,
 		const Rgba8Image &composed_page,
@@ -88,7 +104,19 @@ bool apply_terrain_static_shadow_alpha_page(
 		return false;
 	}
 	for (std::size_t pixel = 0; pixel < shadow_page.alpha.size(); ++pixel) {
-		composed_page.pixels[pixel * 4u + 3u] = shadow_page.alpha[pixel];
+		const std::size_t offset = pixel * 4u;
+		const std::array<uint8_t, 4> destination = {
+				composed_page.pixels[offset],
+				composed_page.pixels[offset + 1u],
+				composed_page.pixels[offset + 2u],
+				0,
+		};
+		const std::array<uint8_t, 4> result =
+				composite_terrain_static_shadow_pixel(
+						destination, shadow_page.alpha[pixel]);
+		for (std::size_t channel = 0; channel < result.size(); ++channel) {
+			composed_page.pixels[offset + channel] = result[channel];
+		}
 	}
 	return true;
 }

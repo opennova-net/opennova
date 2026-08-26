@@ -14,15 +14,6 @@
 extern "C" {
 #endif
 
-// Retail's waveform noise branch calls the process-wide CRT rand() once per
-// lookup. These helpers provide one MSVC-formula stream shared by the ported
-// PANM/material/light consumers, but not yet by unrelated OpenNova subsystems;
-// runtime call-order parity with retail's whole-process CRT stream is therefore
-// not claimed. The seed setter is primarily for deterministic unit tests.
-// [orig: wave_lookup @ 0x5DE6B0, low-nibble-6 branch]
-uint16_t threedi_wave_rand15(void);
-void threedi_wave_srand(uint32_t seed);
-
 // Sample a PANM transform and return the raw 24.8 fixed-point value used by the
 // original animation code. The caller supplies:
 // - time_ms: the frame-shared GetTickCount DWORD

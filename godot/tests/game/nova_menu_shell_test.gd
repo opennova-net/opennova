@@ -103,6 +103,23 @@ func _copy(res_path: String, dst: String) -> void:
 		f.close()
 
 
+func test_hidden_menu_suspends_shell_frame_processing() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp root unavailable in this environment")
+		return
+	assert_true(shell.is_processing(), "the visible menu drives its frame model")
+	shell.hide_menu()
+	assert_false(shell.is_processing(),
+			"a hidden gameplay menu does not remain in the process-frame remainder")
+	shell.show_menu()
+	assert_true(shell.is_processing(), "returning to the menu resumes its driver")
+	for name in ["main.mnu", "sp.mnu", "test.bms"]:
+		DirAccess.remove_absolute(dir.path_join(name))
+	DirAccess.remove_absolute(dir)
+
+
 # bms::AttribFlags game-mode bits (engine/formats/mission/bms.h).
 const BMS_ATTRIB_COOP := 0x1000000
 const BMS_ATTRIB_TDM := 0x20000000
@@ -149,8 +166,8 @@ func test_boots_into_main_menu_startup() -> void:
 
 
 # The shell seeds the five named Options sliders with the exact original
-# ranges/pages. Until OpenNova owns persisted render/audio/input settings, the
-# current value is deterministically clamped to each range minimum.
+# ranges/pages. Audio/input retain deterministic minimum fallbacks; gamma is
+# pinned to the registered high-quality retail comparison profile and locked.
 # [orig: options_screen_init @ 0x554800;
 # UI_PopulateRenderAndAudioSettings @ 0x55c830]
 func test_options_scrolls_seed_original_ranges() -> void:
@@ -164,7 +181,7 @@ func test_options_scrolls_seed_original_ranges() -> void:
 	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
 	var driver: MenuDriver = shell.get_driver()
 	var expected := [
-		["GAMMA", 5, 20, 2, 5],
+		["GAMMA", 5, 20, 2, 8],
 		["SOUNDFXVOLUME", 0, 255, 10, 0],
 		["DIALOGVOLUME", 0, 255, 10, 0],
 		["MUSICVOLUME", 0, 255, 10, 0],
@@ -179,6 +196,49 @@ func test_options_scrolls_seed_original_ranges() -> void:
 		assert_eq([scroll.minimum, scroll.maximum, scroll.page, scroll.value],
 				row.slice(1),
 				"%s receives its original range/page and min fallback" % control_name)
+	assert_true(driver.is_widget_disabled(driver.widget_id("GAMMA")),
+			"gamma is visible but locked to the comparison profile")
+	for unlocked_name in ["SOUNDFXVOLUME", "DIALOGVOLUME", "MUSICVOLUME",
+			"MOUSE_SENSITIVITY"]:
+		assert_false(driver.is_widget_disabled(driver.widget_id(unlocked_name)),
+				"%s remains an interactive non-video setting" % unlocked_name)
+	_cleanup(dir)
+
+
+func test_video_options_are_highest_quality_and_read_only() -> void:
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
+	var driver: MenuDriver = shell.get_driver()
+	var expected := {
+		"16x9DISPLAY": "1",
+		"TERRAINPOLY": "3",
+		"TERRAINTEX": "3",
+		"OBJECTPOLY": "3",
+		"OBJECTTEX": "3",
+		"ANTIALIAS": "2",
+		"SHADERUSAGE": "2",
+		"WATERQUALITY": "3",
+		"SHADOWQUALITY": "3",
+		"PARTICLES": "2",
+		"FBEFFECTS": "3",
+		"TEXFILTER": "3",
+		"TEXCOMPRESSION": "2",
+	}
+	for control_name in expected:
+		var id := driver.widget_id(control_name)
+		assert_gte(id, 0, "%s exists" % control_name)
+		assert_eq(driver.item_value(id, driver.selected_row(id)), expected[control_name],
+				"%s is pinned to the highest supported retail value" % control_name)
+		assert_true(driver.is_widget_disabled(id), "%s is read-only" % control_name)
+	for preset_name in ["VIDEODEFAULT", "VIDEOPERFORMANCE", "VIDEOQUALITY"]:
+		assert_true(driver.is_widget_disabled(driver.widget_id(preset_name)),
+				"obsolete retail preset %s is disabled" % preset_name)
 	_cleanup(dir)
 
 

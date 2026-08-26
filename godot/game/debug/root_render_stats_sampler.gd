@@ -4,16 +4,11 @@ extends RefCounted
 # Root-viewport render-time sampling for the F3 Stats tab, split out of the
 # game shell (the W4-6 oversize ratchet): measurement flips on only while the
 # tab captures (it is not free), then the previous frame's CPU/GPU times land
-# on the board each frame, together with the TRUE wall time between
-# consecutive host frames (matches fps exactly; Godot's TIME_PROCESS monitor
-# does not) — the number that exposes work outside the host's measured legs.
+# on the board each frame. RootFramePhaseSampler owns wall/process timing.
 
 var _board: FrameStatsBoard
 var _measured := false
 var _viewport_ref: WeakRef = null
-# Previous host-frame timestamp for the wall frame row (0 = no prior frame in
-# this capture window).
-var _last_frame_usec := 0
 
 
 ## Render-time measurement is RenderingServer state, not Node-owned state.
@@ -47,10 +42,6 @@ func sample(viewport: Viewport, stats_on: bool) -> void:
 		_viewport_ref = weakref(viewport)
 		RenderingServer.viewport_set_measure_render_time(
 				viewport.get_viewport_rid(), true)
-	var now_usec := Time.get_ticks_usec()
-	if _last_frame_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_WALL, now_usec - _last_frame_usec)
-	_last_frame_usec = now_usec
 	var rid := viewport.get_viewport_rid()
 	_board.add(FrameStatsBoard.RENDER_ROOT_CPU,
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
@@ -84,7 +75,6 @@ func stop() -> void:
 				(previous as Viewport).get_viewport_rid(), false)
 	_viewport_ref = null
 	_measured = false
-	_last_frame_usec = 0
 
 
 func _on_capture_changed(active: bool) -> void:

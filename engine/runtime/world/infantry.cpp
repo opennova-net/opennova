@@ -43,6 +43,7 @@
 //            Rides the combat pass with the rest of the targeting layer.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -64,6 +65,11 @@
 namespace opennova::world {
 
 namespace {
+
+uint64_t infantry_perf_now_us() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 
 // [orig: 0x4b9910 — body turn clamp ±69273360/tick (~5.8 deg)]
 constexpr int32_t kBodyTurnClamp = 69273360;
@@ -940,7 +946,8 @@ static bool entity_is_player_class(const World &world, EntityHandle handle) {
     return ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0;
 }
 
-void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
+void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
+                             AiTickPerf *perf) {
     // Recoil/dispersion live ahead of the network-snap motor exit. Received
     // shots are applied during the network pump, then decay in this frame's
     // body pass; locally generated shots happen later and first decay on the
@@ -979,7 +986,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // head @0x4B411B..0x4B4127; hard-snap test @0x4C207E..0x4C2091;
     // resolver call @0x4B7CE0..0x4B7CF4]
     if (e.net_is_remote_peer) {
-        if (is_authority) remote_player_body_anim(e, world, logic_tick);
+        if (is_authority) {
+            const uint64_t remote_start = perf != nullptr ? infantry_perf_now_us() : 0;
+            remote_player_body_anim(e, world, logic_tick);
+            if (perf != nullptr)
+                perf->infantry_remote_us += infantry_perf_now_us() - remote_start;
+        }
         return;
     }
 
@@ -1203,8 +1215,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // reaction/approach/aim layer per tick — its commits override the 16-tick gait pick,
     // matching the original's later-in-flow targetAnimState overrides.
     // [orig: Entity_UpdateInfantryAI @0x4b9910 §17.1-17.3/17.5 region]
-    if (!inf.is_local_player && is_authority && e.health > 0)
+    if (!inf.is_local_player && is_authority && e.health > 0) {
+        const uint64_t combat_start = perf != nullptr ? infantry_perf_now_us() : 0;
         infantry_combat_think(e, world, key);
+        if (perf != nullptr)
+            perf->infantry_combat_us += infantry_perf_now_us() - combat_start;
+    }
 
     // Mounted pose is a late phase, not an update bypass: death ran first and a
     // living NPC has already perceived, selected, and aimed. The mounted return
@@ -1236,6 +1252,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // updaters pass their out-array to AnimMap_UpdateDualChannels @0x40b8c0, so an AI
     // body's secondary channel promotes and steps like anyone's — but its SELECTION
     // writer @0x4b9a28 is unwitnessed, so its state is never re-selected here.
+    const uint64_t animation_start = perf != nullptr ? infantry_perf_now_us() : 0;
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
     else infantry_weapon_channel_advance(e);
 
@@ -1249,6 +1266,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.prev_capsule_bottom = frame.capsule_bottom;
     }
     inf.last_events = have_clip ? frame.events : 0;
+    if (perf != nullptr)
+        perf->infantry_animation_us += infantry_perf_now_us() - animation_start;
 
     // 3'. The eye-offset restamp (the entity+0x6C/+0x70/+0x74 triple).
     // Entity_UpdateInfantryPlayerBody restamps org2 bodies at two sites —
@@ -1406,13 +1425,24 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                                        inf.eye_offset_z};
         if ((key & 7u) == 0 && collision != nullptr) {
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
+            CollisionWorld::ResolvePerf resolve_perf;
+            const uint64_t collision_start =
+                    perf != nullptr ? infantry_perf_now_us() : 0;
             collision->resolve_entity(
                     world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                     entity_is_player_class(world, e.handle), is_authority,
                     logic_tick, inf.anim_state,
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
-                    &mounted_lio, eye_offset);
+                    &mounted_lio, eye_offset,
+                    perf != nullptr ? &resolve_perf : nullptr);
+            if (perf != nullptr) {
+                perf->infantry_collision_us +=
+                        infantry_perf_now_us() - collision_start;
+                perf->infantry_collision_contacts_us += resolve_perf.contacts_us;
+                perf->infantry_collision_repulsion_us += resolve_perf.repulsion_us;
+                perf->infantry_collision_ground_us += resolve_perf.ground_us;
+            }
         }
         finish_infantry_tick(e, world);
         return;
@@ -1751,12 +1781,23 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y,
                                            inf.eye_offset_z}; // [orig: +0x74, see above]
             const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
+            CollisionWorld::ResolvePerf resolve_perf;
+            const uint64_t collision_start =
+                    perf != nullptr ? infantry_perf_now_us() : 0;
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                 entity_is_player_class(world, e.handle), is_authority, logic_tick,
                 inf.anim_state, infantry_anim_flags(inf.anim_state), e.health,
-                nullptr, &lio, eye_offset);
+                nullptr, &lio, eye_offset,
+                perf != nullptr ? &resolve_perf : nullptr);
+            if (perf != nullptr) {
+                perf->infantry_collision_us +=
+                        infantry_perf_now_us() - collision_start;
+                perf->infantry_collision_contacts_us += resolve_perf.contacts_us;
+                perf->infantry_collision_repulsion_us += resolve_perf.repulsion_us;
+                perf->infantry_collision_ground_us += resolve_perf.ground_us;
+            }
             // The ladder legs may have written the view channels (the yaw
             // chase, the pitch restore); refresh the mouse-instant mirrors so
             // the render/aim pose and the embedder write-back see them.
@@ -2045,9 +2086,9 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             // Fire-origin -> fire-origin endpoints via the muzzle seam
             // [orig: Entity_CheckMutualLineOfSight @0x539be0].
             int32_t sa[3];
-            AiSystem::weapon_fire_origin(e, world.logic_tick, sa);
+            sys.weapon_fire_origin(world, e, sa);
             int32_t sb[3];
-            AiSystem::weapon_fire_origin(*c, world.logic_tick, sb);
+            sys.weapon_fire_origin(world, *c, sb);
             if (!sys.line_of_sight_clear(world, sa, sb, e.handle, h))
                 continue; // LOS last, in order
             best = h;
@@ -2094,9 +2135,9 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                     // The mutual-LOS fire-origin endpoints stand in here too —
                     // @0x53b130's own endpoint recipe is unwitnessed.
                     int32_t sa[3];
-                    weapon_fire_origin(e, world.logic_tick, sa);
+                    weapon_fire_origin(world, e, sa);
                     int32_t sb[3];
-                    weapon_fire_origin(*att, world.logic_tick, sb);
+                    weapon_fire_origin(world, *att, sb);
                     if (line_of_sight_clear(world, sa, sb, e.handle, inf.last_attacker))
                         found = inf.last_attacker;
                 }
@@ -2295,13 +2336,13 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // @0x4b2670 on bone +0x366, §21.1]; stampless rows keep the chest lift.
     // The horizontal eye components shift with the pose too, as retail's do.
     int32_t eye[3];
-    AiSystem::weapon_fire_origin(e, world.logic_tick, eye);
+    weapon_fire_origin(world, e, eye);
     // The aim TARGET point is the target's fire origin, not its ground origin
     // [orig: §17.5 — target chest point via Entity_ComputeWeaponFireOrigin
     // @0x43b4b0]. The lead stays computed over the raw positions (inf.aim_point
     // is also the movement sample); the origin offset is added on top.
     int32_t t_origin[3];
-    AiSystem::weapon_fire_origin(*tent, world.logic_tick, t_origin);
+    weapon_fire_origin(world, *tent, t_origin);
     const double adx = static_cast<double>(led[0]) + (t_origin[0] - tpos[0]) - eye[0];
     const double ady = static_cast<double>(led[1]) + (t_origin[1] - tpos[1]) - eye[1];
     const double adz = static_cast<double>(led[2]) + (t_origin[2] - tpos[2]) - eye[2];
@@ -2345,7 +2386,7 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     // userpoint's local position by the ANIMATED bone matrix, called from the
     // anim-event fire block @0x4bf326..0x4bf425]).
     int32_t origin[3];
-    AiSystem::weapon_fire_origin(e, logic_tick, origin);
+    weapon_fire_origin(world, e, logic_tick, origin);
     // Fire along the LAST computed aim, not the body heading: retail's
     // aimHeading is a persistent entity field (set from targetHeading while
     // engaging; only the dragged-body branch at animState 139 assigns it the
@@ -2434,51 +2475,6 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     // [orig: currentAction/nextAction @0x4bf583..0x4bf59e]
     if (mount->primary_weapon_slot.current != weapon_action::kIdle) return;
     mount->primary_weapon_slot.next = weapon_action::kFire;
-}
-
-// Mirror the motor-selected body-anim state + channel phase onto the world Entity — the store
-// snapshot_of reads for the 0x0A player record bytes 14/15 (emit reads pending ?: current
-// [orig: @0x4c0cc7]; ratio = elapsed ticks in the current loop pass, clamp 255 [orig:
-// AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). The LOCAL player additionally exports
-// its packed MoveOrder low byte (bits 0-2 dir, bit 3 moving) so its own record echoes real
-// input to the peers that motor-drive its avatar [orig: Player_PackInputStateToEntity
-// @0x4df68f-0x4df6a1 packs it; the record write reads entity+0x12C low @0x4c0c9c].
-void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
-    if (!e.inf.active) return;
-    Entity *ent = world.registry.get(e.handle);
-    if (ent == nullptr) return;
-    const InfantryState &inf = e.inf;
-    ent->net_anim_state = static_cast<uint8_t>(inf.anim_state);
-    ent->net_anim_pending = static_cast<uint8_t>(inf.anim_pending);
-    // The eye-offset mirror (entity+0x6C/+0x70/+0x74): the body tick's restamp
-    // reaches the registry entity the friendly-tag gather (z) and the retail
-    // camera consumer (full triple) walk [orig: the same entity fields the
-    // writers, HUD_DrawEntityLabel @0x5a3a84, and Camera_ComputeThirdPersonView
-    // @0x437fa5 share].
-    ent->eye_offset_x = inf.eye_offset_x;
-    ent->eye_offset_y = inf.eye_offset_y;
-    ent->eye_offset_z = inf.eye_offset_z;
-    ent->net_anim_phase =
-        static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));
-    if (inf.is_local_player) {
-        // Bits 0-2 dir, 3 moving, 5 the HELD jump key, 6/7 the lean keys — the
-        // MoveOrder LOW byte layout the uplink's byte 19 carries [orig: the
-        // packer @0x4df68f-0x4df741; jump bit 5 @0x4df6fa-0x4df701]. A retail
-        // host launches + stamps anim 30/31 from bit 5 [orig: the jump gate
-        // @0x4b7e8c-0x4b7f06], so omitting it made a joiner's jump invisible.
-        ent->net_move_input = static_cast<uint8_t>((inf.player_move_dir_index & 7) |
-                                                   (inf.player_moving ? 8 : 0) |
-                                                   (inf.jump_held ? Entity::kMoveOrderJump : 0) |
-                                                   (inf.lean_left ? 0x40 : 0) |
-                                                   (inf.lean_right ? 0x80 : 0));
-        // Local stance mirrors into the MoveOrder bits 8-9 model too (prone bit0/crouch bit1)
-        // so the host's own 0x0A tail echo carries it [orig: dword_B76484/dword_B76480 latch
-        // the same bits the packer writes @0x4df6a7-0x4df6cd].
-        ent->net_stance_bits = static_cast<uint8_t>(
-            inf.stance == InfantryState::Stance::kProne
-                ? 1u
-                : (inf.stance == InfantryState::Stance::kCrouch ? 2u : 0u));
-    }
 }
 
 // Authority org2 subset: C2S owns pose; the retail player-body function still

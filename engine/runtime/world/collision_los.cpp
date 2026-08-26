@@ -6,6 +6,7 @@
 // Line of sight and ground casts: the terrain raycast legs, raycast_clear, the
 // sound LOS/occlusion queries and the static-segment test.
 
+#include <chrono>
 #include <cmath>
 #include <terrain_query/height_field.h>
 #include <terrain_query/terrain_raycast.h>
@@ -19,52 +20,34 @@ namespace opennova::world {
 
 using namespace detail; // the shared fixed-point helpers, unqualified as before
 
-int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const int32_t pos[3],
-                                       int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
-                                       EntityHandle *out_hit_entity) {
-    // [orig: Entity_RaycastGroundHeight(AndObject) @ 0x4142c0/0x414320 ->
-    // raycast_entity_collision @ 0x413760]
-    CollisionRay ray;
-    ray.start[0] = pos[0] + dx;
-    ray.start[1] = pos[1] + dy;
-    ray.start[2] = pos[2] + z_up;
-    ray.end[0] = ray.start[0];
-    ray.end[1] = ray.start[1];
-    ray.end[2] = ray.start[2] - z_drop;
-    if (out_hit_entity) *out_hit_entity = EntityHandle{};
+EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
+        World &world, EntityHandle source, const int32_t start[3],
+        int32_t inout_end[3]) {
+    // [orig: raycast_entity_collision @ 0x413760]
+    EntityHandle nearest;
 
-    // Terrain clamp — skipped for an indoors source. [orig: the Flags & 0x800000
-    // gate @ 0x413785; vertical column == the hi-res down-raycast result —
-    // bilinear column height equals the @ 0x60e710 march for vertical rays,
-    // docs/world/world-wac-ai-re.md (D-COL-7)]
+    // Terrain clips the endpoint before the collision ray is built. An indoors
+    // source skips the heightfield because it has no representation of room
+    // floors. The invalid source key is reserved by resolve_replica; its staged
+    // Flags mirror drives the same gate.
     bool indoors = false;
     if (source.valid()) {
         if (const Entity *se = world.registry.get(source))
             indoors = (se->flags & kEntityFlagIndoors) != 0;
     } else if (replica_flags_ != nullptr) {
-        // A replica resolve probes under the invalid key; its staged flags
-        // mirror serves the same indoors gate [orig: @ 0x413785].
         indoors = (*replica_flags_ & kEntityFlagIndoors) != 0;
     }
     if (terrain != nullptr && terrain->valid() && !indoors) {
-        const float wx = static_cast<float>(ray.start[0]) / 65536.0f;
-        const float wz = -static_cast<float>(ray.start[1]) / 65536.0f; // engine Y -> sampler z
-        const float h = terrain::height_field_height_world_bilinear(*terrain, wx, wz);
-        const int32_t ground = static_cast<int32_t>(h * 65536.0f);
-        // The column height lands in the hit point UNCONDITIONALLY — including
-        // when it sits ABOVE the ray start (a body momentarily under the
-        // surface). The march's return value reports whether the ray was
-        // blocked; the hit point it writes is the terrain either way, and the
-        // caller passes ray_end and hitPoint as the SAME pointer, so the ground
-        // read is always the column height. Conditioning this on
-        // `ground <= start` (the previous reading) left a submerged body with
-        // its ground pinned a full drop-length beneath it every tick — it then
-        // fell forever instead of being lifted back onto the surface.
-        // [orig: Terrain_RaycastHeightmapLoRes @0x60CB80 — the vertical-ray
-        //  branch writes hitPoint[2] = Terrain_SampleHeightBilinear (the calls @0x60CC02/@0x60CDDE) before any
-        //  comparison; the callers pass rayEnd as hitPoint
-        //  @0x413785/Terrain_RaycastHeightmapHiRes_0]
-        ray.end[2] = ground;
+        // Retail aliases rayEnd and hitPoint. Besides clipping a crossing ray,
+        // that preserves the column shortcut's unconditional terrain-height
+        // write when a vertical probe begins below the surface.
+        (void)terrain_clip_segment(*terrain, start, inout_end, inout_end);
+    }
+
+    CollisionRay ray;
+    for (int axis = 0; axis < 3; ++axis) {
+        ray.start[axis] = start[axis];
+        ray.end[axis] = inout_end[axis];
     }
     ray.refresh();
 
@@ -94,7 +77,7 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
             // not require the live section-matrix provider.
             int32_t bound_pos[3];
             int32_t bound_radius = 0;
-            if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+            if (!target_solid_bound(world, ch, bound_pos, bound_radius)) continue;
             if (abs32(ray.mid[1] - bound_pos[1]) >
                     bound_radius + static_cast<int32_t>(ray.half[1]) ||
                 abs32(ray.mid[0] - bound_pos[0]) >
@@ -107,11 +90,26 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
             const CollisionTargetView *tv = target_view(world, ch, view, mats);
             if (tv == nullptr) continue;
             if (collision_raycast_model(*tv, ray)) {
-                if (out_hit_entity) *out_hit_entity = ch;
+                nearest = ch;
             }
         }
     }
-    return ray.end[2];
+
+    for (int axis = 0; axis < 3; ++axis) inout_end[axis] = ray.end[axis];
+    return nearest;
+}
+
+int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const int32_t pos[3],
+                                       int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
+                                       EntityHandle *out_hit_entity) {
+    // [orig: Entity_RaycastGroundHeight(AndObject) @ 0x4142c0/0x414320 ->
+    // raycast_entity_collision @ 0x413760]
+    const int32_t start[3] = {pos[0] + dx, pos[1] + dy, pos[2] + z_up};
+    int32_t end[3] = {start[0], start[1], start[2] - z_drop};
+    const EntityHandle hit =
+            clip_segment_to_nearest_collision(world, source, start, end);
+    if (out_hit_entity != nullptr) *out_hit_entity = hit;
+    return end[2];
 }
 
 // The LOS terrain leg [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 — now the
@@ -126,6 +124,25 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
 // @ 0x606720].
 namespace {
 
+uint64_t collision_los_perf_now_us() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+class ScopedCollisionLosPerf {
+public:
+    explicit ScopedCollisionLosPerf(uint64_t *target) : target_(target) {
+        if (target_ != nullptr) start_ = collision_los_perf_now_us();
+    }
+    ~ScopedCollisionLosPerf() {
+        if (target_ != nullptr) *target_ += collision_los_perf_now_us() - start_;
+    }
+
+private:
+    uint64_t *target_ = nullptr;
+    uint64_t start_ = 0;
+};
+
 // The LOS march calls the point sampler once per 4-unit texel step — up to
 // ~250 times per ray, three rays per re-probed entity per frame (§3.4) — so
 // the per-sample work must stay retail-cheap (the original's inner loop is a
@@ -133,16 +150,15 @@ namespace {
 // invariant across the ~128 steps a ray spends inside one 512 u sector, so
 // the context memoizes coords_resolve_sector and per sample only derives the
 // sector-local offset. The sector index comes from the EXACT fixed-point
-// coordinate (arithmetic >>25 == floor(world/512)); the local offset is a
-// <2^25 integer whose float form is exact to ~1e-5 u — at least as precise as
-// the previous whole-coordinate /65536.0f float path it replaces.
+// coordinate (arithmetic >>25 == floor(world/512)); the local offset remains
+// Q16 so nearest-texel selection is one exact integer add/shift per axis.
 struct LosSamplerCtx {
     const terrain::TerrainHeightField *field = nullptr;
     int32_t cached_sx = INT32_MIN;
     int32_t cached_sz = INT32_MIN;
     bool sector_valid = false;
-    float base_x = 0.0f; // quadrant offset (source/atlas units)
-    float base_z = 0.0f;
+    int32_t base_x = 0; // integer quadrant offset (source/atlas units)
+    int32_t base_z = 0;
 };
 
 terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t y) {
@@ -164,19 +180,26 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
         const terrain::CoordsSectorResolve sector = terrain::coords_resolve_sector(
             f.layout, sx, sz, terrain::coords_runtime_options());
         ctx.sector_valid = sector.valid && f.valid();
-        ctx.base_x = static_cast<float>(sector.quadrant_x);
-        ctx.base_z = static_cast<float>(sector.quadrant_z);
+        ctx.base_x = sector.quadrant_x;
+        ctx.base_z = sector.quadrant_z;
     }
     if (!ctx.sector_valid) return s; // height 0, matching the invalid-coords branch
     // This LOS variant reads the nearest render-cache texel and expands its
     // half-unit byte (raw16 >> 7, then sample << 15), not the generic
     // floor-sampled full-precision height-field point contract.
     // [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 point callback]
-    const float local_x = static_cast<float>(fx - (sx << 25)) / 65536.0f;
-    const float local_z = static_cast<float>(fy - (sz << 25)) / 65536.0f;
+    // quadrant_* is integral and the sector-local Q16 coordinate is always
+    // nonnegative, so floor(base + local + 0.5) is exactly the integer
+    // nearest-sample fold below. Besides avoiding two float conversions and
+    // floor calls per four-unit march step, the int64 sector product avoids a
+    // signed-left-shift edge for negative sector coordinates.
+    const int32_t local_x_q16 = static_cast<int32_t>(
+            static_cast<int64_t>(fx) - static_cast<int64_t>(sx) * (int64_t{1} << 25));
+    const int32_t local_z_q16 = static_cast<int32_t>(
+            static_cast<int64_t>(fy) - static_cast<int64_t>(sz) * (int64_t{1} << 25));
     const int mask = f.dim - 1;
-    const int hx = static_cast<int>(std::floor(ctx.base_x + local_x + 0.5f)) & mask;
-    const int hz = static_cast<int>(std::floor(ctx.base_z + local_z + 0.5f)) & mask;
+    const int hx = (ctx.base_x + ((local_x_q16 + 0x8000) >> 16)) & mask;
+    const int hz = (ctx.base_z + ((local_z_q16 + 0x8000) >> 16)) & mask;
     const uint8_t cache_height = static_cast<uint8_t>(f.heightmap[hz * f.dim + hx] >> 7);
     s.height_1616 = static_cast<int32_t>(cache_height) << 15;
     return s;
@@ -312,9 +335,24 @@ bool sound_segment_blocked(const CollisionTargetView &target, const CollisionRay
 
 bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle exclude_a, EntityHandle exclude_b) {
+    return raycast_clear_impl(world, a, b, exclude_a, exclude_b, false, nullptr);
+}
+
+bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
+                                          const int32_t b[3], EntityHandle exclude_a,
+                                          EntityHandle exclude_b, RaycastPerf *perf) {
+    return raycast_clear_impl(world, a, b, exclude_a, exclude_b, true, perf);
+}
+
+bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
+                                        const int32_t b[3], EntityHandle exclude_a,
+                                        EntityHandle exclude_b,
+                                        bool cache_target_views, RaycastPerf *perf) {
     // [orig: Physics_RaycastTerrainAndSectors @ 0x539910, TRUE = clear; the LOS
     // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
     // and volume inflation are no-ops and are folded out here.]
+    if (perf != nullptr) ++perf->calls;
+    const uint64_t terrain_start = perf != nullptr ? collision_los_perf_now_us() : 0;
     const Entity *ea = world.registry.get(exclude_a);
     const Entity *eb = world.registry.get(exclude_b);
 
@@ -325,9 +363,13 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
     const bool both_indoors = ea != nullptr && eb != nullptr &&
                               (ea->flags & kEntityFlagIndoors) != 0 &&
                               (eb->flags & kEntityFlagIndoors) != 0;
-    if (!both_indoors && terrain != nullptr && terrain->valid() &&
-        los_terrain_blocked(*terrain, a, b))
-        return false; // [orig: heightmap hit -> return 0 @ 0x539968]
+    const bool terrain_hit = !both_indoors && terrain != nullptr && terrain->valid() &&
+                             los_terrain_blocked(*terrain, a, b);
+    if (perf != nullptr)
+        perf->terrain_us += collision_los_perf_now_us() - terrain_start;
+    if (terrain_hit) return false; // [orig: heightmap hit -> return 0 @ 0x539968]
+
+    ScopedCollisionLosPerf sector_timer(perf != nullptr ? &perf->sector_us : nullptr);
 
     // Sector leg [orig: raycast_against_entity_pool @ 0x538720, pool 2 then pool 1
     // @ 0x539a3a]. Degenerate segments (< 1 u) skip the walk entirely
@@ -357,7 +399,8 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
     // volume convex clip (the shared @ 0x413060 core). A hit blocks — the
     // original keeps walking to clip the nearest point; the boolean result is
     // identical (@ 0x5390e6 miss_result = 0).
-    auto blocked_by = [&](const Entity &e) -> bool {
+    auto blocked_by_bound = [&](const Entity &e, const int32_t bp[3],
+                                int32_t br) -> bool {
         if ((e.flags & 1u) != 0) return false;
         if ((e.engine_flags & 0x8000000u) != 0) return false;
         if (e.handle == exclude_a || e.handle == exclude_b) return false;
@@ -369,9 +412,6 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
         // @ 0x5387c4-0x5389a4 gates first; the @ 0x413060 clip core only runs
         // for gate survivors]. Same pos/radius inputs as the old post-view
         // gate, so the reject set is unchanged.
-        int32_t bp[3];
-        int32_t br = 0;
-        if (!target_bound(world, e.handle, bp, br)) return false;
         if (abs32(ray.mid[0] - bp[0]) > br + static_cast<int32_t>(ray.half[0]) ||
             abs32(ray.mid[1] - bp[1]) > br + static_cast<int32_t>(ray.half[1]) ||
             abs32(ray.mid[2] - bp[2]) > br + static_cast<int32_t>(ray.half[2]))
@@ -379,11 +419,38 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
         if (ray_line_distance(ray.start, ray.dir, bp) > br) return false;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
-        const CollisionTargetView *tv = target_view(world, e.handle, view, mats);
+        const CollisionTargetView *tv = cache_target_views
+                ? trace_target_view(world, e.handle)
+                : target_view(world, e.handle, view, mats);
         if (tv == nullptr) return false;
         CollisionRay probe = ray; // model clip clips end in place; keep the walk ray whole
         return collision_raycast_model(*tv, probe);
     };
+
+    auto blocked_by = [&](const Entity &e) -> bool {
+        if (perf != nullptr) ++perf->sector_candidates;
+        int32_t bp[3];
+        int32_t br = 0;
+        if (!target_solid_bound(world, e.handle, bp, br)) return false;
+        return blocked_by_bound(e, bp, br);
+    };
+
+    // Replication declares a stable post-movement epoch and prepares an exact
+    // spatial index once. Candidate bounds were captured in that epoch; this
+    // changes only the broad-phase search, then runs the same flags,
+    // exclusions, sphere gate, live matrix view, and type-1 convex clip.
+    if (cache_target_views && stable_los_index_ready_) {
+        const std::vector<uint32_t> &indices = stable_los_candidates_for_ray(ray);
+        for (uint32_t index : indices) {
+            if (perf != nullptr) ++perf->sector_candidates;
+            const StableLosCandidate &candidate = stable_los_candidates_[index];
+            const Entity *e = world.registry.get(candidate.h);
+            if (e != nullptr &&
+                blocked_by_bound(*e, candidate.pos, candidate.radius))
+                return false;
+        }
+        return true;
+    }
 
     // Pool passes over the per-tick tables — the same membership the witnessed
     // pool walk covers (@ 0x539a3a pool 2 then pool 1), without a whole-registry
@@ -481,43 +548,38 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
             const Entity *ce = world.registry.get(ch);
             if (ce == nullptr) continue;
             if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
+            if ((ce->engine_flags & 0x8000000u) != 0) continue; // [orig: @ 0x5387b4]
             if (ce->kind != EntityKind::Building) continue; // [orig: itemDef+92 == 5]
             // Candidates standing on the listener/source are excluded (one
             // level). [orig: the +0x28 groundEntity checks @ 0x538843-0x538877]
             if (ce->ground_target == listener) continue;
             if (source.valid() && ce->ground_target == source) continue;
 
-            int32_t bound_pos[3];
-            int32_t bound_radius = 0;
-            if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
-            if (abs32(ray.mid[1] - bound_pos[1]) >
-                        bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-                abs32(ray.mid[0] - bound_pos[0]) >
-                        bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-                abs32(ray.mid[2] - bound_pos[2]) >
-                        bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
-                continue;
-            if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
-                continue;
-
-            CollisionTargetView view;
-            std::vector<CollisionMatrix> mats;
-            const CollisionTargetView *tv = target_view(world, ch, view, mats);
-            if (tv == nullptr) continue;
-            if (sound_segment_blocked(*tv, ray, clip_radius)) return false; // blocked
+            if (entity_blocks_segment(world, ch, ray, clip_radius, broad_r))
+                return false; // blocked
         }
     }
     return true;
 }
 
-bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
-                                         int32_t radius, EntityHandle exclude) {
+bool CollisionWorld::candidate_segment_hits_solid(
+        World &world, EntityHandle source, const int32_t a[3],
+        const int32_t b[3], int32_t radius) {
     // [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 1
-    // (the iris sun-ray caller @ 0x5c7784) -> raycast_against_entity_pool
-    // @ 0x538720 — the pool-2 statics walk with the same broad phase and
-    // radiused segment clip the sound leg ports; no building-kind gate. The
-    // entity walk skips the query entity's own entry (entry_entity !=
-    // entity_a @ the collision-entry loop head).]
+    // -> raycast_against_entity_pool @ 0x538720. entity_a and entity_b are both
+    // the local/query entity, and the walker consumes entity_a's fixed
+    // +0x1BC/+0x1C0 slice in stored order.]
+    int32_t slice_count = 0;
+    const EntityHandle *slice = candidate_slice(source, slice_count);
+    return candidate_slice_segment_hits_solid(
+            world, slice, slice_count, source, a, b, radius);
+}
+
+bool CollisionWorld::candidate_slice_segment_hits_solid(
+        World &world, const EntityHandle *slice, int32_t slice_count,
+        EntityHandle source_registry_twin, const int32_t a[3],
+        const int32_t b[3], int32_t radius) {
+    if (slice == nullptr || slice_count <= 0) return false;
     CollisionRay ray;
     ray.start[0] = a[0];
     ray.start[1] = a[1];
@@ -528,23 +590,32 @@ bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const
     ray.refresh();
     const int32_t broad_r = radius > 0 ? radius : 0; // [orig: @ 0x538752 clamp]
 
-    for (int32_t i = 0; i < static_count_; ++i) {
-        const StaticSlot &s = statics_[i];
-        if (s.h == exclude) continue;
-        if (static_slot_blocks_segment(world, s, ray, radius, broad_r)) return true;
+    for (int32_t i = 0; i < slice_count; ++i) {
+        const EntityHandle candidate = slice[i];
+        if (source_registry_twin.valid() && candidate == source_registry_twin)
+            continue;
+        const Entity *entity = world.registry.get(candidate);
+        if (entity == nullptr || (entity->flags & 1u) != 0) continue;
+        if ((entity->engine_flags & 0x8000000u) != 0) continue;
+        // raycast_find_collision_entity passes source as both exclusion
+        // entities, so a direct child standing on it is not a blocker.
+        if (source_registry_twin.valid() &&
+            entity->ground_target == source_registry_twin)
+            continue;
+        if (entity_blocks_segment(world, candidate, ray, radius, broad_r)) return true;
     }
     return false;
 }
 
-bool CollisionWorld::static_slot_blocks_segment(World &world, const StaticSlot &s,
-                                                const CollisionRay &ray,
-                                                int32_t radius, int32_t broad_r) {
+bool CollisionWorld::entity_blocks_segment(World &world, EntityHandle candidate,
+                                           const CollisionRay &ray,
+                                           int32_t radius, int32_t broad_r) {
     // The iris path can cast nine sun rays per rendered frame. Preserve the
     // witnessed walker order here too: reject on cheap entity metadata
     // before resolving live section matrices for the few gate survivors.
     int32_t bound_pos[3];
     int32_t bound_radius = 0;
-    if (!target_bound(world, s.h, bound_pos, bound_radius)) return false;
+    if (!target_bound(world, candidate, bound_pos, bound_radius)) return false;
     if (abs32(ray.mid[1] - bound_pos[1]) >
                 bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
         abs32(ray.mid[0] - bound_pos[0]) >
@@ -557,9 +628,81 @@ bool CollisionWorld::static_slot_blocks_segment(World &world, const StaticSlot &
 
     CollisionTargetView view;
     std::vector<CollisionMatrix> mats;
-    const CollisionTargetView *tv = target_view(world, s.h, view, mats);
+    const CollisionTargetView *tv = target_view(world, candidate, view, mats);
     if (tv == nullptr) return false;
     return sound_segment_blocked(*tv, ray, radius);
+}
+
+int CollisionWorld::candidate_slice_sun_blocked_rays(
+        World &world, const EntityHandle *slice, int32_t slice_count,
+        EntityHandle source_registry_twin, const int32_t a[3],
+        const int32_t b[3]) {
+    if (slice == nullptr || slice_count <= 0) return 0;
+
+    CollisionRay ray;
+    ray.start[0] = a[0];
+    ray.start[1] = a[1];
+    ray.start[2] = a[2];
+    ray.end[0] = b[0];
+    ray.end[1] = b[1];
+    ray.end[2] = b[2];
+    ray.refresh();
+
+    // The three retail casts share endpoints and candidate order. Walk that
+    // slice once and build each surviving target view once, while retaining a
+    // separate exact clip verdict for every witnessed radius. This changes no
+    // visibility result; it only removes three identical broad-phase walks and
+    // repeated section-matrix construction from the render-frame hot path.
+    bool blocked[3] = {false, false, false};
+    int blocked_count = 0;
+    CollisionTargetView view;
+    std::vector<CollisionMatrix> mats;
+    for (int32_t i = 0; i < slice_count && blocked_count < 3; ++i) {
+        const EntityHandle candidate = slice[i];
+        if (source_registry_twin.valid() && candidate == source_registry_twin)
+            continue;
+        const Entity *entity = world.registry.get(candidate);
+        if (entity == nullptr || (entity->flags & 1u) != 0) continue;
+        if ((entity->engine_flags & 0x8000000u) != 0) continue;
+        if (source_registry_twin.valid() &&
+            entity->ground_target == source_registry_twin)
+            continue;
+
+        int32_t bound_pos[3];
+        int32_t bound_radius = 0;
+        if (!target_bound(world, candidate, bound_pos, bound_radius)) continue;
+        const int32_t line_distance =
+                ray_line_distance(ray.start, ray.dir, bound_pos);
+        bool radius_survives[3] = {false, false, false};
+        bool any_survives = false;
+        for (int r = 0; r < 3; ++r) {
+            if (blocked[r]) continue;
+            const int32_t radius = kSunOcclusionClipRadii[r];
+            const int32_t broad_r = radius > 0 ? radius : 0;
+            if (abs32(ray.mid[1] - bound_pos[1]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - bound_pos[0]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - bound_pos[2]) >
+                        bound_radius + broad_r + static_cast<int32_t>(ray.half[2]) ||
+                line_distance > bound_radius + broad_r)
+                continue;
+            radius_survives[r] = true;
+            any_survives = true;
+        }
+        if (!any_survives) continue;
+
+        const CollisionTargetView *tv = target_view(world, candidate, view, mats);
+        if (tv == nullptr) continue;
+        for (int r = 0; r < 3; ++r) {
+            if (!radius_survives[r]) continue;
+            if (sound_segment_blocked(*tv, ray, kSunOcclusionClipRadii[r])) {
+                blocked[r] = true;
+                ++blocked_count;
+            }
+        }
+    }
+    return blocked_count;
 }
 
 int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
@@ -568,9 +711,9 @@ int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
     // whole statics table: retail's ray walker iterates entity_a's +0x1BC arena
     // slice bounded by the +0x1C0 count, so only candidates whose inflated
     // bounding sphere overlaps the entity's bubble (the slice build's
-    // radius + 4u/6u pad) can ever block its sun — a building shading the
+    // radius + 4u/6u pad) can ever block its sun — a solid shading the
     // entity from far across the map leaves it in full sun. An entity with no
-    // slice (statics, pool-1 rows the builder does not slice, the 16 sliceless
+    // slice (statics, ineligible pool-1 rows, or the 16 sliceless
     // mission-start ticks) blocks nothing and keeps quality 4, which is exactly
     // retail's +0x1C0 == 0 skip. [orig: Entity_ComputeSunVisibility @ 0x5c6800
     // — the +0x1C0 gate @ 0x5c6808; raycast_find_collision_entity @ 0x539a70 —
@@ -596,48 +739,40 @@ int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
                             origin[1] + sun_step_q16[1],
                             origin[2] + sun_step_q16[2]};
 
-    // Resolve the slice's static slots once. The slice also carries dynamic
-    // candidates — retail tests those too (allowAllTypes = 1 passes every
-    // solid type), but our casts stay statics-only, the documented D-RLIT-2
-    // posture. Slice build already excludes self; the exclude gate mirrors the
-    // walker's entry_entity != entity_a check. The walk carries no cap of its
-    // own — retail loops to the full +0x1C0 count. [orig: @ 0x539a70]
-    std::vector<int32_t> &slot_indices = sun_slot_scratch_;
-    slot_indices.clear();
-    for (int32_t i = 0; i < static_count_; ++i) {
-        const StaticSlot &s = statics_[i];
-        if (s.h == e.handle) continue;
-        for (int32_t k = 0; k < slice_count; ++k) {
-            if (slice[k] == s.h) {
-                slot_indices.push_back(i);
-                break;
-            }
-        }
-    }
-    if (slot_indices.empty()) return 0;
+    return candidate_slice_sun_blocked_rays(
+            world, slice, slice_count, e.handle, origin, end);
+}
 
-    CollisionRay ray;
-    ray.start[0] = origin[0];
-    ray.start[1] = origin[1];
-    ray.start[2] = origin[2];
-    ray.end[0] = end[0];
-    ray.end[1] = end[1];
-    ray.end[2] = end[2];
-    ray.refresh();
+int CollisionWorld::wire_sun_visibility_blocked_rays(
+        World &world, uint16_t wire_handle, const FixedVec3 &position_q16,
+        const FixedVec3 &bbox_center_q16,
+        const int32_t sun_step_q16[3]) {
+    int32_t slice_count = 0;
+    const EntityHandle *slice = wire_candidate_slice(wire_handle, slice_count);
+    if (slice == nullptr || slice_count <= 0) return 0;
 
-    int blocked = 0;
-    for (int r = 0; r < 3; ++r) {
-        const int32_t radius = kSunOcclusionClipRadii[r];
-        const int32_t broad_r = radius > 0 ? radius : 0;
-        for (const int32_t slot : slot_indices) {
-            if (static_slot_blocks_segment(world, statics_[slot], ray,
-                                           radius, broad_r)) {
-                ++blocked;
-                break;
-            }
+    const int32_t origin[3] = {
+        position_q16.x + bbox_center_q16.x,
+        position_q16.y + bbox_center_q16.y,
+        position_q16.z + bbox_center_q16.z};
+    const int32_t end[3] = {origin[0] + sun_step_q16[0],
+                            origin[1] + sun_step_q16[1],
+                            origin[2] + sun_step_q16[2]};
+
+    // A wire row may have an explicitly verified pool-1 registry twin. The
+    // packed number itself is insufficient evidence because H and L are
+    // independent domains (H=0 and L=0 are both valid at once).
+    EntityHandle registry_twin;
+    for (const WireDynamicCollisionProxy &dynamic : wire_dynamic_proxies_) {
+        if (dynamic.wire_handle == wire_handle) {
+            registry_twin = dynamic.registry_twin;
+            break;
         }
+        if (dynamic.wire_handle > wire_handle) break;
     }
-    return blocked;
+
+    return candidate_slice_sun_blocked_rays(
+            world, slice, slice_count, registry_twin, origin, end);
 }
 
 int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle listener,

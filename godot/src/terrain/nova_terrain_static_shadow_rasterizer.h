@@ -38,10 +38,12 @@ public:
 	Dictionary get_diagnostics() const;
 	// Direct Environment_GetLightDirectionFloat tuple. The portable projector
 	// owns its witnessed conversion into presentation-world axes.
-	void begin_frame(const Vector3 &p_environment_light_tuple);
+	void begin_frame(const Vector3 &p_environment_light_tuple,
+			uint32_t p_material_time_ms);
 
 	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
 	compilation_snapshot() const override;
+	uint32_t material_time_ms() const noexcept override;
 	opennova::terrain::TerrainStaticShadowPagePlanResult plan_page(
 			const opennova::TerrainTilePageKey &p_page) override;
 	void merge_async_diagnostics(

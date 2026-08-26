@@ -21,7 +21,8 @@ namespace godot {
 // current frame as one stretched quad in the fixed 800x600 design space,
 // anamorphically scaled and int-truncated like every widget. It sits UNDER
 // the MenuFrame surface, so the movies show through the regions the authored
-// custom appearances leave unpainted.
+// custom appearances leave unpainted. An invisible menu suspends decoding and
+// texture uploads while retaining the slots for an eventual return.
 //
 // The witnessed selection picks and plays the .bik directly through the
 // engine's portable BIKi decoder. A selected movie that cannot be opened or
@@ -44,6 +45,11 @@ public:
 	int get_active_slot_count() const;
 	int get_failed_count() const;
 	bool is_startup_layout() const;
+	// F3 Stats ownership: disabled in ordinary play, so decode carries no
+	// profiling clocks. The shell consumes the previous process sample once.
+	void set_runtime_profiling_enabled(bool p_enabled);
+	bool is_runtime_profiling_enabled() const { return runtime_profiling_enabled_; }
+	int64_t consume_process_us();
 	// The native .bik source an active slot plays (root-relative), "" when
 	// the slot is empty — the expansion-first pick, observable.
 	String get_slot_source(int p_slot) const;
@@ -65,10 +71,13 @@ private:
 	bool upload_frame_(Slot &p_slot);
 	bool advance_slot_(Slot &p_slot, double p_delta);
 	void fail_slot_(Slot &p_slot);
+	void update_process_state_();
 
 	std::array<Slot, opennova::menu::kMenuVideoSlotCount> slots_{};
 	int failed_ = 0;
 	bool startup_ = true;
+	bool runtime_profiling_enabled_ = false;
+	uint64_t last_process_us_ = 0;
 };
 
 }  // namespace godot

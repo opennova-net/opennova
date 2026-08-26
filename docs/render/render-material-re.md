@@ -23,13 +23,40 @@ this record.
 | Blend classification per tag (Opaque/AlphaBlend/Additive) | MATCHING | `RSAlphaMode` pass states per shipped `.fx` (`_FFP.fx` `BLEND_NONE/ALPHA/ADD` = FALSE,ONE,ZERO / SRCALPHA,INVSRCALPHA / ONE,ONE; Glass/SkGlass/Tracer = ONE,ONE only); Multiplicative (DESTCOLOR,SRCCOLOR) appears only in non-NORMAL techniques and no registry row claims it |
 | Depth policy for blended materials | MATCHING | blended FF variants force ZMODE_NOWRITE across technique slots `[orig: @ 0x5afc92..0x5afcaa]`; applied as `D3DRS_ZWRITEENABLE=0` `[orig: @ 0x5da320]` — mirrored by the typed descriptor and checked-in `depth_draw_never` policies for non-opaque, non-alpha-test techniques |
 | Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
-| Object lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | checked-in technique resources implement the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` pins 630 typed descriptors and the transitive-source golden pins all 104 checked-in resources |
-| Technique-class pass system (6 classes) | witnessed / reimpl-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the reimpl bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
+| Object lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | checked-in technique resources implement the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × SelfLumColor × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` pins the typed descriptors and the transitive-source golden pins all 132 object shader entry points (128 generated + four postmultiply auxiliaries) |
+| Technique-class pass system (6 classes) | MATCHING for the locked highest-quality path | all 57 typed declarations and 138 total pass declarations are decoded and pinned in `retail_effect_inventory.json`; NORMAL maps to 24 runtime techniques, CLIP to the live reflection plane/fallback rules, PROJSHAD to the twelve slot captures plus terrain-page silhouettes, MATCHTERRAIN to the skinned stance/page fold, and GLOW to LUM-copy plus Glass's rotated specular in the isolated Q3 camera. The exact PROJSHAD state audit preserves `_FFP` material blending, forces all 15 shader declarations opaque, and admits no fallback for tracer/flag/glass; the portable terrain raster also honors CCW culling, z writes, and skinned identical-matrix collapse. DEPTHMASK is correctly absent because its sole spot-projector producer is caller-less. `auxiliary_technique_validation.json` pins every disposition and D3D12 raster mode; `FrameFx` reproduces the Q3 target and FrameFX draw sequence directly |
 | UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]`; `ObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2 |
 | Controlled flipbook | MATCHING for the witnessed fractional and discrete-selector branches | `[orig: apply_shader_parameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16` when the adjacent state is zero; the retail image statically seeds `TEX_TEAM` and `TEX_CAMO1/2/3` state to one, selecting `value % frame_count`; `renderer_material_eval` pins exact generic `0x10000`/negative/wrap cases plus the RevX02 IndoArms selector `0/1/3 -> 0/1/1` |
 | RGB/alpha generators and point-light color | MATCHING deterministic/controlled math, live; stochastic lifetime partial | consumer-specific branches are preserved: RGB/light 113/114 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]`, alpha 113 `[orig: AlphaGen_EvaluateValue @ 0x5b2320]`, and waveform fallback otherwise. The signed/wrapping evaluator and live point-light CTRL feed are pinned by `renderer_material_eval`; noise samples retain D-3DI-2's process-wide RNG/order gap |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
-| Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-9 fixes; D-RMAT-8 blend-space residual permanent) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); reimpl mapping = raw sampling + gamma math + exact-inverse encode, calibrate-mode byte-identity proof 256/256; the shared checked-in fog math follows the re-witnessed table `[orig: @ 0x58a950 → @ 0x677960]` |
+| Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-8/-9 fixes) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); raw sampling and scene math/blends remain in gamma-domain numeric values until one terminal display decode. The D3D12 calibrate probe proves byte identity 256/256 plus exact SRCALPHA/INVSRCALPHA and ONE/ONE results; the shared checked-in fog math follows the re-witnessed table `[orig: @ 0x58a950 → @ 0x677960]` |
+
+**2026-08-22 highest-quality technique audit.** The former 104-wrapper
+prototype matrix is superseded by 128 generated object wrappers and 24 exact
+NORMAL-pass techniques. `godot/shaders/object/retail_effect_inventory.json`
+pins all 44 decoded effect sources, 59 technique declarations, and 138 pass
+declarations; it partitions all 30 NORMAL declarations into 19 selected
+highest-quality effects, ten lower-quality fallbacks, and the unregistered
+`leaves.FX` effect. `godot/shaders/object/technique_validation.json`
+binds each selector to decoded SCR `.fx` symbols and explicitly records RGB,
+alpha/material-data, normal-space, light-response, blend/depth, and fog
+semantics. Important corrections include: blended cutouts stay no-depth-write;
+Flag has no SELFLUM or point-light pass; BumpMirr and BmTxMirr are distinct;
+SkBasic does not inherit `_FFP`'s AlphaGen/SELFLUM behavior; fixed and skinned
+DOT3 T2 effects have different hemisphere/self-shadow/point topology; fixed
+and skinned Glass have distinct source-gain behavior; `_psPhong.fx` is
+pow-8 with Diffuse1.a brightness; mirror point specular is pow-16; and the
+skinned object-space `_psPhong2.fx` path uses Diffuse1.a to select the generated
+PhongMap's pow-4/pow-64 channels. `RgbGen` modulates only `_FFP` SELFLUM,
+`AlphaGenValue` modulates only `_FFP`, and coverage is selected per technique
+from diffuse alpha, normal-map alpha, vertex diffuse alpha, ReflectColor alpha,
+or zero. The PhongMap contents are proved at
+`Render_CreateSystemTextures @ 0x58aca0`; OpenNova generates the same 256×256
+RGBA8 bytes and samples them with the witnessed linear-clamp state. The
+transitive-source golden now pins all 132 object shader entry points: 128
+generated policy wrappers plus the four EnvironmentMirrorTextured P3
+postmultiply auxiliaries. GLOW is selected inside those production wrappers;
+there is no duplicate proxy shader family.
 
 ## Witness map
 
@@ -221,8 +248,8 @@ decoder is `renderer::decode_scar_strip_mode`
 `localres.pff` (SCR\x01-wrapped, key 0xA55B1EED), 20 `_`-prefixed includes +
 24 effect files → 19 tags (+3 `EffectAlt_UV` twins: VS_DOT3DIFF, VS_PHONGT,
 VS_SKBASIC). 24 FF + 18 table file-tags + 3 twins = OED's 45; the runtime
-registry additionally carries VS_TRACER (Tracer.fx: `EffectSpecial=true`,
-TECHNIQUE_NORMAL, `usevs`/no ps, TexDiffuse1, `RSAlphaMode(TRUE, ONE, ONE)`,
+registry additionally carries VS_TRACER. Tracer.fx exposes only TECHNIQUE_NORMAL
+(`EffectSpecial=true`, `usevs`/no ps, TexDiffuse1, `RSAlphaMode(TRUE, ONE, ONE)`,
 ZMODE_NOWRITE, unlit, `vsTracer` Diff = `|dot(eye, normal)|²` — the soft-edge
 facing falloff). Never committed — retail data; re-derive via `engine/formats/scr` +
 `engine/formats/pff` from a retail install.
@@ -285,6 +312,17 @@ AMODE_DEPTHTEST passes (the beam/soft-depth mechanism). Glass.fx
 TECHNIQUE_GLOW swaps `TexCubeEnvironment x MatCamToWorldRot` for
 `TexCubeRotSpecular x MatRotSpecular` (the sun-aligned specular cube) —
 the Q3 copy renders the sun glint for bloom.
+
+**NORMAL channel ownership (2026-08-22 correction).** `AlphaGenValue` is
+consumed only by `_FFP.fx` through MaterialDiffuse.a; shader-based effects read
+their texture/vertex alpha channels directly. Likewise `SelfLumColor`/RgbGen
+modulates only `_FFP` SELFLUM RGB. Consequently standard Phong reads raw
+Diffuse1.a as specular brightness, `_psPhong2.fx` reads raw Diffuse1.a as both
+brightness and PhongMap interpolation weight, BDiffT2 tests normal-map alpha,
+the PhongMap path tests vertex diffuse alpha, mirror/glass techniques use
+ReflectColor/cube alpha, and fixed Glass plus SELFLUM produce zero alpha. The
+compile-time `rgb_modulation`, `alpha_modulation`, and `coverage_source` fields
+in `pipeline_manifest.json` enforce these per-technique contracts.
 
 **Pass execution (FlushBatches pass loop, REN-4).** Pass blocks: +4 = pass
 count, +16+8i = rules/z/a flags, +20+8i = FOGMODE
@@ -419,23 +457,37 @@ and the framebuffer byte is the displayed value:
   slider `UI_OnGammaSliderChanged @ 0x55a3d0`, re-applied on display
   reset/lost-device).
 
-**Reimpl mapping (D-RMAT-7).** The reimpl renders linear HDR with an
-sRGB-encoding output blit, so the witnessed-FF shaders (the object composer,
-terrain/foliage/sky/water/celestial) sample textures RAW (no `source_color`
-hint), run the witnessed math on gamma-space values exactly as written in
-this record, and write `ALBEDO = nova_gamma_to_linear(result)` — the exact
-piecewise-sRGB inverse of the blit — so the displayed byte equals the
-computed gamma-space byte (`godot/shaders/nova_color.gdshaderinc`; the
-composer embeds the same body). The final [0,1] clamp is itself witnessed
-(the byte framebuffer saturates). Proof instrument: the swatch probe's
-**calibrate mode** renders the 0..255 gradient through the convention and
-asserts byte identity on the live engine build + driver (256/256 on Godot
-4.6.1 Forward+/D3D12 at land time); run it after any Godot or renderer
-change. Framebuffer BLENDING still occurs on the blit-encoded (linear)
-values — alpha/additive composites of translucent layers diverge boundedly
-from retail's gamma-byte blends while opaque and alpha-tested surfaces are
-byte-exact; that residual is **D-RMAT-8** (permanent, reimpl-structural,
-ADR 0022 register).
+**Reimpl mapping (D-RMAT-7/-8).** Retail spatial shaders sample textures RAW
+(no `source_color` hint), run the witnessed math on gamma-space values, and
+write those numeric values unchanged through `nova_scene_output` into
+the floating scene target. All opaque, source-over, additive, particle, and
+Q3 draws therefore blend before any color-space conversion. The terminal
+`FrameFxCompositorEffect`, ordered last at POST_TRANSPARENT, snapshots the
+finished scene and applies the sole piecewise-sRGB inverse immediately before
+Godot's host output encoding. Every offscreen device whose texture is
+consumed raw needs exactly one decode too (2026-08-23 correction — with an
+empty compositor those RGBA8 textures were sRGB-encoded a second time, which
+blew out the water reflection and the bloom source): the six
+environment-cube faces, the twelve slot-shadow captures, and the isolated Q3
+source render into **HDR 2D** targets (Godot skips its sRGB output encode, so
+the texture stores the gamma-domain numbers the shaders wrote); the water
+mirror keeps a plain RGBA8 target with a decode-only terminal effect on its
+camera, because its witnessed 0x40 dim is a canvas multiply over the
+finished BYTES and an HDR 2D canvas would run that multiply in linear space.
+The viewmodel's offscreen texture is a plain target and receives one
+explicit display decode in `viewmodel_composite.gdshader`. A 3D
+view with no `FrameFx` (ONED workspace previews, the menu avatar
+preview, probes) installs the decode-only `DisplayDecode` node, which
+is the same terminal effect without a Q3 source. The obsolete per-shader
+`nova_gamma_to_linear` / `nova_linear_to_gamma` API was deleted in this
+cutover.
+
+The final [0,1] clamp is itself witnessed (the byte framebuffer saturates).
+The swatch probe's **calibrate mode** runs on the production renderer and
+D3D12 driver: all 256 input bytes survive the terminal transfer exactly;
+the pinned SRCALPHA/INVSRCALPHA operands resolve to byte 128 and the selected
+ONE/ONE operands resolve to byte 96. Run it after any Godot or renderer
+change. This closes D-RMAT-8 rather than bounding it to opaque surfaces.
 
 ## Divergence catalog
 
@@ -446,9 +498,9 @@ ADR 0022 register).
 | D-RMAT-3 | Tag lookup case-SENSITIVE | `stricmp` (`[orig: HLSLEffect_FindByName @ 0x5ade70]`) | FIXED (case-insensitive exact-tag) |
 | D-RMAT-4 | File-effect capability/sort words carried verbatim from the OED dump | derived at load by the technique-usage probe, UNIONED over all techniques (`[orig: @ 0x5ae690]`) | **FIXED (REN-4)**: the probe replicated statically over the shipped localres text — 14/19 tags match; 5 drift rows corrected on `kMaterialDescriptorTable` (the OED dump in `oed/types.h` stays byte-faithful): FFP_GLASS `0xb000 → 0x10003000` (no VS ⇒ no TANGENT; GLOW technique uses TexCubeRotSpecular ⇒ GLOW), VS_SKBUMPDIFFT/PHONGT `0x6014 → 0xc014` and VS_SKBUMPDIFFT2 `0x601c → 0xc01c` (read `In.Tangent`, never ReflectColor ⇒ TANGENT not GLASS), VS_SKGLASS `0x7004 → 0x7000` (untextured ⇒ no DIFFUSE). The 0x10000000 dialect resolved = the glow-copy capability (flag renamed `MATERIAL_FLAG_GLOW`); `is_luminance` re-keyed on EMISSIVE. Cited re-dump + `renderer_material_classify` pins |
 | D-RMAT-5 | Composer lighting gains were prototype values (hemi fill + ×1.5/×1.6/spec 0.8) | witnessed uniform surface `HemiGroundColor/HemiSkyColor/DirLightVector/DirLightColor/AmbientColor/ColorSrcGlobalGain` with engine-fed values under the FF MODULATE2X model | **FIXED (REN-5)** — the composer emits the witnessed model (saturated hemi+dir ×2; SELFLUM × ColorSrcGlobalGain ×2; the ×1.5/×1.6/spec-0.8 constants deleted); uniforms renamed `u_hemi_sky_color`/`u_hemi_ground_color`/`u_color_src_global_gain` and engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); T1 re-dump: key set + classification rows identical, all 630 composed hashes re-hashed under this citation, sections 3/4 untouched; T2: 116/120 swatch cells moved, the 4 VS_TRACER cells (unlit MODULATE 1×) byte-identical. Residual reflection/phong stand-ins tracked as D-RLIT-5 |
-| D-RMAT-6 | Single-pass reimpl materials; no CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN technique classes | six pass classes selected per batch entry (`@ 0x5d9ff3`), CLIP falls back to NORMAL, LUM populates GLOW; the class CONTENT witnessed at REN-4 (§FF technique tables, §Pass execution) | WITNESSED-READY-DEFERRED — selection + NORMAL state ported (REN-3); the GLOW flag/classification landed at REN-4 (`is_glow_capable`); the remaining reimpl mappings (CLIP plane, PROJSHAD/DEPTHMASK passes, the glow BLOOM wiring with the specular cube) ride D-RORD-4/-5's residuals + REN-5 |
-| D-RMAT-7 | Textures decoded sRGB→linear (`source_color`), witnessed gamma-space formulas evaluated on mixed-space values, result re-encoded by the reimpl blit — an unwitnessed transform stack around every FF shader (compressed lighting contrast, washed color response) | gamma-space end to end: raw texel sampling, gamma-space combines, framebuffer byte = displayed byte, identity display ramp at default gamma 1.0 (§Color pipeline witness above) | **FIXED (2026-07-06, the model-parity slice)**: raw sampling + gamma-space math + the exact-inverse `nova_gamma_to_linear` output across the composer and the shader set; calibrate-mode identity proof 256/256; T1 re-dumped (key set identical, 630 hashes), T2 swatch 120/120 cells moved as the expected global response change, composite IDENTICAL (ordering untouched) |
-| D-RMAT-8 | Framebuffer blending happens on blit-encoded (linear) values | blending on gamma bytes (`out = src_g op dst_g` per the blend mode tables `@ 0x680f00`) | PERMANENT (reimpl-structural, ADR 0022 register): the reimpl cannot blend in gamma space without a gamma framebuffer; opaque + alpha-tested surfaces are byte-exact under D-RMAT-7, translucent composites diverge boundedly (alpha mixes shift midtones, additive accumulation runs dimmer); revisit only if a T3 scene shows an objectionable composite |
+| D-RMAT-6 | Single-pass reimpl materials lacked CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN technique-class behavior | six pass classes selected per batch entry (`@ 0x5d9ff3`), CLIP falls back to NORMAL, LUM populates GLOW; source content and execution are pinned in `retail_effect_inventory.json` / `auxiliary_technique_validation.json` | **FIXED (2026-08-22, highest-quality shader audit)** — CLIP, PROJSHAD, GLOW, and MATCHTERRAIN are live with per-technique compile-time contracts and D3D12 raster proofs. DEPTHMASK is source-validated but unreachable because `LightPool_SpawnSpotProjectorEffect @ 0x5a9fd0` has no caller, so omitting a runtime pass is the faithful result. GLOW executes in the isolated Q3 camera and exact native FrameFX sequence |
+| D-RMAT-7 | Textures decoded sRGB→linear (`source_color`), witnessed gamma-space formulas evaluated on mixed-space values, result re-encoded by the reimpl blit — an unwitnessed transform stack around every FF shader (compressed lighting contrast, washed color response) | gamma-space end to end: raw texel sampling, gamma-space combines, framebuffer byte = displayed byte, identity display ramp at default gamma 1.0 (§Color pipeline witness above) | **FIXED (2026-07-06; hard cut over 2026-08-22)**: raw sampling + gamma-space math remain, while the old per-shader inverse helpers are replaced by `nova_scene_output` and one terminal display decode; calibrate mode proves 256/256 byte identity plus live blend equations |
+| D-RMAT-8 | Framebuffer blending happened on per-shader blit-encoded (linear) values | blending on gamma bytes (`out = src_g op dst_g` per the blend mode tables `@ 0x680f00`) | **FIXED (2026-08-22)** — all retail 3D and particle passes now write and blend gamma-domain numeric values in the scene target; `FrameFxCompositorEffect` performs the only display decode after the final blend. The D3D12 calibration is zero-tolerance: 256/256 transfer bytes, SRCALPHA/INVSRCALPHA byte 128, ONE/ONE byte 96 |
 | D-RMAT-9 | Object composer fog was a linear ramp with an invented `smoothstep` for type 3 | the device fog table: type 0 exponential `ln(64)/end`, types 1/2/3 linear with start = 0.5 / `(1−density)·end·0.5` / `(1−density)·end·0.25` (`[orig: Render_SetFogState @ 0x58a950 → CD3DDevice_SetFogParameters @ 0x677960]`; env-tod-re.md §Fog policy) | **FIXED (2026-07-06, the model-parity slice)**: the composer emits the witnessed table (one text with `terrain_lighting.gdshaderinc`/`water.gdshader`); covered by the same T1 re-dump |
 | D-RMAT-10 | The `_MT` secondary (detail) stage ran HALF the witnessed combine: the composer emitted `base.rgb *= detail.rgb` — ×1, no alpha touch — so resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg 93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in detail regions, the REN-7 T3 "W_RCK1_O watch item"), and the stage never alpha-modulated; a missing secondary bound a white ×1 fallback (neutral then, a ×2 brightener under the fix) | stage 1 = `TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate, Texture, Current)` (§FF technique tables — "the same on stage 1 vs Current for `_MT`"), and the combine is CORPUS-UNIFORM across every second-diffuse family (REN-7 sweep, the .fx re-derived from retail `localres.pff` via `engine/formats/pff`+`engine/formats/scr`, never committed): `BDiffT2.fx` (`EffectTag "VS_DOT3DIFF2"`) carries the identical stage-1 pair, and `SkBDiffO2.fx` (`EffectTag "VS_SKBUMPDIFFOBJ2"`) applies BOTH diffuses in its NORMAL P3 "post multiply" pass — same TSS pair under `RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)` (the ×2-onto-framebuffer form); a NULL-texture stage is dropped; the sample set is the SECOND authored UV channel — the .3di v8 vertex carries TWO UV sets unconditionally (stride 40 = pos+normal+uv0+uv1; RckS05 uv1 distinct on 48/48 verts, FOUNTAIN M4 on 455/455; FVF 0x212 TEX2 corroborates the D3D FF stage-N→texcoord-N default) | **FIXED (REN-7, 2026-07-07)**: composer emits `base.rgb *= detail.rgb * 2.0; base.a *= detail.a;` `[orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1]`; the reimpl masks `OSCAP_DETAIL` off the composed key when the secondary fails to resolve (exact stage-drop identity, retail-shaped; the white fallback deleted; `classify()` stays pure — 0 classification rows moved). T1 re-dump: exactly the 224 OSCAP_DETAIL composed hashes moved (+27 bytes each = the two text edits), everything else byte-identical; handoff pins unchanged (`FF_MT_OP/base → 0x00001004`) |
 | D-RMAT-11 | Controlled flipbooks treated every CTRL as a state-zero signed 16.16 fraction, so RevX02 `IndoArms.3di` consumed raw `TEX_CAMO1 = 1` as frame zero (`A_Arm1st.tga`, tattooed) | the retail image statically seeds the adjacent state dwords for `TEX_TEAM` and `TEX_CAMO1/2/3` (ordinals 92–95) to one; `apply_shader_parameters` therefore uses signed `value % frame_count` for those four selectors `[orig: @ 0x58DC36..0x58DC42]` | **FIXED (2026-08-17, PR-503 adversarial T3)**: `compute_anim_frame` selects modulo only for exact ordinals 92–95 and preserves the generic 16.16 path; literal pins cover two-frame `IndoArms.3di` and three-frame `APLFP1.3DI` Jflag1/Jflag2/Jflag3, including the signed negative remainder |

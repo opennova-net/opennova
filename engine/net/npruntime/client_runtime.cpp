@@ -5,6 +5,7 @@
 #include <npwire/ingame_message_id.h>
 
 #include <utility>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +16,11 @@
 namespace opennova::np {
 
 namespace {
+
+uint64_t client_perf_now_us() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 
 // §5.44 housekeeping cadences/constants, witnessed in [orig: Client_ProcessNetworkFrame @0x42c180].
 constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks [orig @0x42c1c0]
@@ -546,8 +552,11 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
 	replay_mode_ = replay_mode;
 }
 
-std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedUplink *uplink,
-                                                           uint32_t now_tick) {
+std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
+		const PlayerExtendedUplink *uplink, uint32_t now_tick,
+		ClientFramePerf *perf) {
+	if (perf != nullptr) *perf = {};
+	uint64_t phase_start = perf != nullptr ? client_perf_now_us() : 0;
 	std::vector<std::vector<uint8_t>> outbound;
 	std::vector<ProtocolMessage> send_messages;
 	// Session loss is a terminal owner state, not only a receive-side event. A
@@ -580,6 +589,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		pre_send_queue_.push_back(
 				make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
 		last_keepalive_tick_ = current_tick_;
+	}
+	if (perf != nullptr) {
+		const uint64_t now = client_perf_now_us();
+		perf->setup_us = now - phase_start;
+		phase_start = now;
 	}
 
 	// (1) RECV pump — fold S2C into ClientState, recv-before-send [orig: PumpClientProtocolRecv
@@ -731,6 +745,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// deployed gate on a fresh death frame before this same client frame reaches its send block.
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
 	}
+	if (perf != nullptr) {
+		const uint64_t now = client_perf_now_us();
+		perf->receive_us = now - phase_start;
+		phase_start = now;
+	}
 	if (role_ == Role::Joiner) {
 		stage_reload_notifications_before_body_tick();
 		// The session var the 0x81 tone ladder reads, mirrored from the
@@ -772,6 +791,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
 		                                 ? joiner_->self_handle()
 		                                 : 0xFFFFu);
+	if (perf != nullptr) {
+		const uint64_t now = client_perf_now_us();
+		perf->maintenance_us = now - phase_start;
+		phase_start = now;
+	}
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
 
@@ -925,16 +949,20 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// every send_holdoff_ticks_ ticks (0 = per-tick).
 		send_holdoff_countdown_ = send_holdoff_ticks_;
 	}
+	if (perf != nullptr)
+		perf->send_us = client_perf_now_us() - phase_start;
 	return outbound;
 }
 
 std::vector<std::vector<uint8_t>>
-ClientRuntime::Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink, uint32_t now_tick) {
-	return run_frame(&uplink, now_tick);
+ClientRuntime::Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
+		uint32_t now_tick, ClientFramePerf *perf) {
+	return run_frame(&uplink, now_tick, perf);
 }
 
-std::vector<std::vector<uint8_t>> ClientRuntime::Client_ProcessNetworkFrame(uint32_t now_tick) {
-	return run_frame(nullptr, now_tick);
+std::vector<std::vector<uint8_t>> ClientRuntime::Client_ProcessNetworkFrame(
+		uint32_t now_tick, ClientFramePerf *perf) {
+	return run_frame(nullptr, now_tick, perf);
 }
 
 } // namespace opennova::np

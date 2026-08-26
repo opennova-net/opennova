@@ -97,6 +97,10 @@ enum class TerrainStaticShadowBlend : uint8_t {
 struct TerrainStaticShadowRasterTriangle {
 	std::array<TerrainStaticShadowRasterVertex, 3> vertices{};
 	TerrainStaticShadowBlend blend = TerrainStaticShadowBlend::Opaque;
+	// Retail uses CULLMODE CCW unless the authored material carries its
+	// two-sided flag. The static tile pass is not a reflection pass, so its
+	// mirror-winding override is never active.
+	bool two_sided = false;
 	// -1 means no texture-alpha sample. Alpha-blended or material-alpha-tested
 	// triangles name a view in TerrainStaticShadowRasterInput::alpha_textures.
 	int32_t alpha_texture_index = -1;

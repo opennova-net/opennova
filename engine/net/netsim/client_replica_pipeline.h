@@ -93,10 +93,11 @@ public:
 	struct ReplicaPeerSphere {
 		uint16_t handle = 0xFFFF;
 		int32_t x = 0, y = 0, z = 0;
-		int32_t radius = 0x10000;
+		int32_t radius = 0;
 	};
 	struct ReplicaContactQuery {
 		uint16_t row_handle = 0xFFFF;
+		uint16_t type_id = 0;
 		bool is_player_class = false; // org2 (player body) vs org1 (NPC) shape
 		int32_t pos[3] = {};          // in/out, 16.16 mission space
 		int32_t vel_xy[2] = {};       // this tick's planar root step (the
@@ -104,6 +105,7 @@ public:
 		int32_t vel_z = 0;            // in/out — the skip band reverts + zeroes
 		int32_t capsule_bottom = 0;   // anim-frame capsule extents
 		int32_t capsule_top = 0;
+		int32_t source_bound_radius_q16 = 0; // exact entity+0 init result
 		int32_t anim_state_id = 0;
 		uint32_t anim_state_flags = 0;
 		uint32_t tick = 0;
@@ -118,6 +120,10 @@ public:
 	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
 	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
 		replica_contact_resolver_ = std::move(resolver);
+	}
+	using ReplicaBoundRadiusResolver = std::function<int32_t(uint16_t type_id)>;
+	void set_replica_bound_radius_resolver(ReplicaBoundRadiusResolver resolver) {
+		replica_bound_radius_resolver_ = std::move(resolver);
 	}
 
 	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
@@ -344,6 +350,7 @@ private:
 	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
+	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
 	int32_t water_z_ = 0;
 	bool has_water_ = false;

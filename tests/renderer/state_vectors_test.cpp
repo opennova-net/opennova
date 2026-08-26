@@ -89,7 +89,6 @@ const char *depth_policy_name(renderer::ObjectDepthPolicy depth) {
 	switch (depth) {
 		case renderer::ObjectDepthPolicy::Opaque: return "opaque";
 		case renderer::ObjectDepthPolicy::TransparentNoWrite: return "transparent-no-write";
-		case renderer::ObjectDepthPolicy::AlphaPrepass: return "alpha-prepass";
 	}
 	return "?";
 }
@@ -113,6 +112,10 @@ const char *environment_source_name(renderer::ObjectEnvironmentSource source) {
 const char *specular_source_name(renderer::ObjectSpecularSource source) {
 	switch (source) {
 		case renderer::ObjectSpecularSource::None: return "none";
+		case renderer::ObjectSpecularSource::AnalyticPow8DiffuseAlpha:
+			return "analytic-pow8-diffuse-alpha";
+		case renderer::ObjectSpecularSource::PhongMapLookupDiffuseAlpha:
+			return "analytic-phong-map-diffuse-alpha";
 		case renderer::ObjectSpecularSource::AnalyticPow16: return "analytic-pow16";
 	}
 	return "?";
@@ -122,23 +125,29 @@ const char *technique_name(renderer::ObjectShaderTechnique technique) {
 	switch (technique) {
 		case renderer::ObjectShaderTechnique::Unsupported: return "unsupported";
 		case renderer::ObjectShaderTechnique::Fixed: return "fixed";
+		case renderer::ObjectShaderTechnique::FixedSkinned: return "fixed-skinned";
 		case renderer::ObjectShaderTechnique::FixedDetail: return "fixed-detail";
 		case renderer::ObjectShaderTechnique::SelfLit: return "self-lit";
 		case renderer::ObjectShaderTechnique::SelfLitDetail: return "self-lit-detail";
 		case renderer::ObjectShaderTechnique::Tracer: return "tracer";
 		case renderer::ObjectShaderTechnique::Flag: return "flag";
-		case renderer::ObjectShaderTechnique::FlagSelfLit: return "flag-self-lit";
 		case renderer::ObjectShaderTechnique::PhongTangentDiffuse: return "phong-tangent-diffuse";
 		case renderer::ObjectShaderTechnique::PhongTangentSpecular: return "phong-tangent-specular";
+		case renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned: return "phong-tangent-specular-skinned";
 		case renderer::ObjectShaderTechnique::PhongObjectDiffuse: return "phong-object-diffuse";
 		case renderer::ObjectShaderTechnique::PhongObjectSpecular: return "phong-object-specular";
+		case renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap: return "phong-object-specular-phong-map";
 		case renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3-tangent";
 		case renderer::ObjectShaderTechnique::Dot3TangentDetail: return "dot3-tangent-detail";
+		case renderer::ObjectShaderTechnique::Dot3TangentSkinned: return "dot3-tangent-skinned";
+		case renderer::ObjectShaderTechnique::Dot3TangentDetailSkinned: return "dot3-tangent-detail-skinned";
 		case renderer::ObjectShaderTechnique::Dot3Object: return "dot3-object";
 		case renderer::ObjectShaderTechnique::Dot3ObjectDetail: return "dot3-object-detail";
-		case renderer::ObjectShaderTechnique::EnvironmentTangent: return "environment-tangent";
-		case renderer::ObjectShaderTechnique::EnvironmentTangentSpecular: return "environment-tangent-specular";
-		case renderer::ObjectShaderTechnique::Glass: return "glass";
+		case renderer::ObjectShaderTechnique::EnvironmentMirror: return "environment-mirror";
+		case renderer::ObjectShaderTechnique::EnvironmentMirrorTextured: return "environment-mirror-textured";
+		case renderer::ObjectShaderTechnique::EnvironmentPhong: return "environment-phong";
+		case renderer::ObjectShaderTechnique::GlassFixed: return "glass-fixed";
+		case renderer::ObjectShaderTechnique::GlassSkinned: return "glass-skinned";
 	}
 	return "?";
 }
@@ -188,7 +197,7 @@ std::string generate() {
 						              "tag=%s flags=%02x em=%u gl=%u atb=%u | "
 						              "known=%d fam=%s blend=%s lum=%d emis=%d two=%d "
 						              "nmap=%d glass=%d env=%d atest=%d atinv=%d atval=%.6f "
-						              "det=%d skin=%d spec=%d nuv2=%d nspace=%s "
+						              "det=%d skin=%d spec=%d envtex=%d nuv2=%d nspace=%s "
 						              "glow=%d vfade=%d key=%08x\n",
 						              tag.empty() ? "<empty>" : tag.c_str(),
 						              flags, em, gl, atb,
@@ -207,6 +216,7 @@ std::string generate() {
 						              cls.has_detail ? 1 : 0,
 						              cls.is_skinned ? 1 : 0,
 						              cls.uses_specular ? 1 : 0,
+						              cls.environment_textured ? 1 : 0,
 						              cls.normal_uses_uv2 ? 1 : 0,
 						              normal_space_name(cls.normal_space),
 						              cls.is_glow_capable ? 1 : 0,
@@ -230,7 +240,7 @@ std::string generate() {
 		std::snprintf(line, sizeof(line),
 		              "key=%08x fam=%s technique=%s blend=%s depth=%s cull=%s alpha=%d "
 		              "atest=%d atinv=%d two=%d emis=%d lum=%d nmap=%d "
-		              "nuv2=%d nspace=%s detail=%d spec=%d glass=%d vfade=%d "
+		              "nuv2=%d nspace=%s detail=%d spec=%d skin=%d envtex=%d glass=%d vfade=%d "
 		              "envsrc=%s specsrc=%s\n",
 		              key,
 		              renderer::object_shader_family_name(pipeline.family),
@@ -249,6 +259,8 @@ std::string generate() {
 		              normal_space_name(pipeline.normal_space),
 		              pipeline.uses_detail ? 1 : 0,
 		              pipeline.uses_specular ? 1 : 0,
+		              pipeline.is_skinned ? 1 : 0,
+		              pipeline.environment_textured ? 1 : 0,
 		              pipeline.glass ? 1 : 0,
 		              pipeline.view_angle_fade ? 1 : 0,
 		              environment_source_name(pipeline.environment_source),

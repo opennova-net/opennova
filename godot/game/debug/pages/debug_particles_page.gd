@@ -131,7 +131,13 @@ func _refresh_draw_lists(world: EffectWorld) -> void:
 		_draw_list_label.visible = false
 		return
 	var lines := PackedStringArray()
-	for domain in [["world", "World"], ["first_person", "First person"]]:
+	for domain in [
+		["world_far_side", "World far side"],
+		["world_camera_side", "World camera side"],
+		["reflection_far_side", "Reflection far side"],
+		["reflection_camera_side", "Reflection camera side"],
+		["first_person", "First person"],
+	]:
 		var d: Dictionary = report.get(domain[0], {})
 		if d.is_empty():
 			lines.append("%s draw list: idle" % domain[1])
@@ -142,8 +148,11 @@ func _refresh_draw_lists(world: EffectWorld) -> void:
 			int(d.get("rendered_quad_count", 0)),
 			int(d.get("selected_emitters", 0)),
 			int(d.get("input_emitters", 0))])
-	var backend: Dictionary = report.get("world_backend", {})
-	lines.append("Backend: %s" % String(backend.get("backend", "unavailable")))
+	var far_backend: Dictionary = report.get("world_far_backend", {})
+	var camera_backend: Dictionary = report.get("world_camera_backend", {})
+	lines.append("Backends: far=%s | camera=%s" % [
+		String(far_backend.get("callback", "unavailable")),
+		String(camera_backend.get("callback", "unavailable"))])
 	var entry_count := int(report.get("atlas_entry_count", 0))
 	var resolved := int(report.get("atlas_resolved_entry_count", 0))
 	var rejected := int(report.get("atlas_rejected_entry_count", 0))

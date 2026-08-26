@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstring>
 
 namespace opennova::simassets {
@@ -51,6 +52,10 @@ void CollisionResolveState::clear() {
 	model_by_graphic.clear();
 	occlusion_by_graphic.clear();
 	radius_by_graphic.clear();
+	radius_q16_by_graphic.clear();
+	collision_block_by_graphic.clear();
+	half_xy_by_graphic.clear();
+	center_by_graphic.clear();
 	husk_kz_points_by_graphic.clear();
 	husk_dead_points_by_graphic.clear();
 	glass_points_by_graphic.clear();
@@ -84,13 +89,16 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	int32_t model_id = -1;
 	int32_t occlusion_id = -1;
 	float bound_radius = 0.0f;
+	int32_t bound_radius_q16 = 0;
+	bool has_collision_block = false;
 	std::pair<float, float> half_xy{0.0f, 0.0f};
-	std::array<float, 3> center{0.0f, 0.0f, 0.0f};
+	std::array<int32_t, 3> center{0, 0, 0};
 	if (deps.models.has_index()) {
 		// ADR 0028: the sim reads its own parse-once cache. The placer
 		// now supplies only the render-side pose sources (live-PANM
 		// object data + skeletal sets) — the S3 push-down target.
 		if (const Threedi3di3 *m3 = deps.models.model_for(graphic_key)) {
+			has_collision_block = m3->collision != nullptr;
 			world::CollisionModel model;
 			if (collision_model_from_3di(m3->collision, model,
 					model_has_collision(*m3))) {
@@ -106,7 +114,8 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 			world::OcclusionModel occ;
 			if (occlusion_model_from_3di(*m3, occ))
 				occlusion_id = deps.occlusion.add_model(std::move(occ));
-			bound_radius = model_bound_radius_from_3di(*m3);
+			bound_radius_q16 = model_bound_radius_q16_from_3di(*m3);
+			bound_radius = static_cast<float>(bound_radius_q16) / 65536.0f;
 			// The minimap blip-size source: the CMDL bound-block ground-axis
 			// half extents. [orig: draw_minimap_blip @0x5979a2..0x5979b8 —
 			//  model+176: half = (max - min) >> 1 per ground axis]
@@ -124,18 +133,83 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 				// it to the world position unrotated, and its own value is
 				// min + (max - min)/2 over the same collision bounds.
 				// [orig: Entity_InitFromModel @0x40df1e..0x40df4a]
-				center[0] = (bd.bbox[0] + bd.bbox[3]) * 0.5f;
-				center[1] = (bd.bbox[1] + bd.bbox[4]) * 0.5f;
-				center[2] = (bd.bbox[2] + bd.bbox[5]) * 0.5f;
+				const auto fixed = [](float value) {
+					return static_cast<int32_t>(
+							std::lround(static_cast<double>(value) * 65536.0));
+				};
+				for (int axis = 0; axis < 3; ++axis) {
+					const int32_t lo = fixed(bd.bbox[axis]);
+					const int32_t hi = fixed(bd.bbox[axis + 3]);
+					center[axis] = lo + ((hi - lo) >> 1);
+				}
 			}
 		}
 	}
 	state.model_by_graphic.emplace(graphic_key, model_id);
 	state.occlusion_by_graphic.emplace(graphic_key, occlusion_id);
 	state.radius_by_graphic.emplace(graphic_key, bound_radius);
+	state.radius_q16_by_graphic.emplace(graphic_key, bound_radius_q16);
+	state.collision_block_by_graphic.emplace(graphic_key, has_collision_block);
 	state.half_xy_by_graphic.emplace(graphic_key, half_xy);
 	state.center_by_graphic.emplace(graphic_key, center);
 	return model_id;
+}
+
+world::ResolvedCollisionShape collision_shape_for_runtime_type(
+		int runtime_item_id, const DefItemsFile &items,
+		CollisionResolveState &state, const CollisionResolveDeps &deps) {
+	world::ResolvedCollisionShape shape;
+	const int visual_item_id = visual_item_id_for_runtime_type(runtime_item_id, items);
+	const DefItemDef *def = find_item_def(items, visual_item_id);
+	if (def == nullptr) return shape;
+	shape.pool1_candidate_source_eligible =
+			(def->attrib & world::kItemAttribEweap) == 0 || def->type == 1;
+	if (def->graphic[0] == '\0') return shape;
+
+	const std::string key(def->graphic);
+	shape.model_id = collision_model_for_graphic(state, deps, key);
+	shape.uniform_scale_q16 = def->scale_q16;
+	shape.has_collision_block = state.collision_block_by_graphic[key];
+	if (!shape.has_collision_block) return shape;
+
+	int32_t bound_q16 = state.radius_q16_by_graphic[key];
+	if (shape.uniform_scale_q16 != 0)
+		bound_q16 = world::retail_q16_mul_rhu(
+				bound_q16, shape.uniform_scale_q16);
+
+	// Only the FIRST husk participates in Entity_InitFromModel's max. The
+	// huskFinal pointer belongs to the later piece/death chain and is not a
+	// compatibility substitute for a missing first husk here.
+	// [orig: Entity_InitFromModel @0x40dced..0x40de16]
+	if (def->husk[0] != '\0' && deps.models.has_index()) {
+		const std::string husk_key(def->husk);
+		auto radius_it = state.radius_q16_by_graphic.find(husk_key);
+		if (radius_it == state.radius_q16_by_graphic.end()) {
+			int32_t husk_bound_q16 = 0;
+			if (const Threedi3di3 *husk = deps.models.model_for(husk_key)) {
+				husk_bound_q16 = model_bound_radius_q16_from_3di(*husk);
+				state.radius_by_graphic.emplace(
+						husk_key, static_cast<float>(husk_bound_q16) / 65536.0f);
+			}
+			radius_it = state.radius_q16_by_graphic.emplace(
+					husk_key, husk_bound_q16).first;
+		}
+		bound_q16 = std::max(bound_q16, radius_it->second);
+	}
+	shape.bound_radius_q16 = bound_q16 + 0x1000;
+
+	if (!(def->type == 6 && (def->attrib & 0x20u) != 0)) {
+		const std::array<int32_t, 3> &center = state.center_by_graphic[key];
+		int32_t scaled[3] = {center[0], center[1], center[2]};
+		if (shape.uniform_scale_q16 != 0) {
+			for (int axis = 0; axis < 3; ++axis)
+				scaled[axis] = world::retail_q16_mul_rhu(
+						scaled[axis], shape.uniform_scale_q16);
+		}
+		shape.bbox_center_q16 = world::FixedVec3{
+				scaled[0], scaled[1], scaled[2]};
+	}
+	return shape;
 }
 
 int resolve_collision_instances(world::World &world, const DefItemsFile &items,
@@ -196,14 +270,23 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				traits != nullptr && traits->glass_points.empty() &&
 				!glass_it->second.empty())
 			traits->glass_points = glass_it->second;
-		// The bound-sphere radius (entity+0 boundRadius) comes from the .3di
-		// MODEL header bound, not the collision block — every placed item
-		// carries one, so collision-less props are still hittable by rounds and
-		// reachable by blasts. Raised to the husk model's bound below, then
-		// padded +0.0625 [orig: Entity_InitFromModel @ 0x40dc30 — boundRadius =
-		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
-		// not yet applied (tracked, D-COL-3)].
-		float entity_bound = state.radius_by_graphic[key];
+		// The bound-sphere radius (entity+0 boundRadius) comes from the exact
+		// GHDR model carrier, but the entire stamp is gated by the model's
+		// collision block. Raised to the FIRST husk model's unscaled bound below,
+		// then padded +0.0625 [orig: Entity_InitFromModel @ 0x40dc30 — boundRadius =
+		// max(scale*gpm[5], husk gpm[5]) + 0x1000. The base model bound is
+		// scaled BEFORE the signed compare with the first husk model; the husk
+		// operand itself is not multiplied in this initializer.
+		// [orig: Entity_InitFromModel @ 0x40dc30]
+		const bool has_collision_block = state.collision_block_by_graphic[key];
+		int32_t entity_bound_q16 = 0;
+		if (has_collision_block) {
+			entity_bound_q16 = state.radius_q16_by_graphic[key];
+			if (e->uniform_scale_q16 != 0) {
+				entity_bound_q16 = world::retail_q16_mul_rhu(
+						entity_bound_q16, e->uniform_scale_q16);
+			}
+		}
 		// Platform probe boxes (vehicle-client-movers-re.md §3, D-VEH-1):
 		// retail's load-time derivation, ported as threedi_3di3_collision_probe_boxes —
 		// box Z = the CMDL header bbox Z pair, box X/Y = the lower-half
@@ -257,7 +340,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					deps.pose.register_skeletal_entity(
 							h, e->registry_spawn_id, resolved_model,
 							strutil::to_lower(adm) + "|" + key,
-							adm, deps.models.model_for(key));
+							adm, deps.models.model_for(key),
+							def->launchups_closeattack);
 				}
 			}
 		}
@@ -300,31 +384,14 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			const Threedi3di3 *husk_m3 = first_husk_name.empty()
 					? final_husk_m3
 					: first_husk_m3;
-			auto hit = state.model_by_graphic.find(husk_key);
-			if (hit == state.model_by_graphic.end()) {
-				int32_t husk_model_id = -1;
-				if (husk_m3 != nullptr) {
-					world::CollisionModel hmodel;
-					const bool husk_spheres = model_has_collision(*husk_m3);
-					if (collision_model_from_3di(
-							husk_m3->collision, hmodel, husk_spheres)) {
-						husk_model_id = deps.collision.add_model(std::move(hmodel));
-						// S3b full: the provider poses husks from the sim
-						// cache's lifetime-stable parse (the provider drops
-						// registrations whenever the index switches).
-						if (threedi_panm_lod_has_live(*husk_m3, 0))
-							deps.pose.register_generic_model(
-									husk_model_id, husk_m3);
-					}
-					state.radius_by_graphic.emplace(husk_key,
-							model_bound_radius_from_3di(*husk_m3));
-				}
-				hit = state.model_by_graphic.emplace(
-						husk_key, husk_model_id).first;
-				state.occlusion_by_graphic.emplace(husk_key, -1);
-			}
-			if (hit->second >= 0 && resolved_model >= 0)
-				deps.collision.assign_entity_husk(h, hit->second);
+			// Main and husk graphics share one complete cache entry. A graphic
+			// first encountered as a husk must still retain its collision-block,
+			// exact GHDR, center, and occlusion metadata if it is later used as an
+			// intact model by another definition.
+			const int32_t husk_model_id = collision_model_for_graphic(
+					state, deps, husk_key);
+			if (husk_model_id >= 0 && resolved_model >= 0)
+				deps.collision.assign_entity_husk(h, husk_model_id);
 			// Retail's death-sound tail walks exact, case-insensitive "KZ"
 			// user points on the active FIRST husk, not the huskFinal piece
 			// model, and queues a radius-5 blast at every match. Cache this
@@ -447,9 +514,15 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				hs = state.husk_pieces_by_graphic.emplace(
 						piece_key, std::move(info)).first;
-				if (piece_m3 != nullptr)
-					state.radius_by_graphic.emplace(piece_key,
-							model_bound_radius_from_3di(*piece_m3));
+				if (piece_m3 != nullptr) {
+					const int32_t piece_bound_q16 =
+							model_bound_radius_q16_from_3di(*piece_m3);
+					state.radius_q16_by_graphic.emplace(
+							piece_key, piece_bound_q16);
+					state.radius_by_graphic.emplace(
+							piece_key,
+							static_cast<float>(piece_bound_q16) / 65536.0f);
+				}
 			}
 			if (world::ItemDeathTraits *t =
 						world.item_death_traits.get_mutable(e->item_id)) {
@@ -461,30 +534,48 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				t->husk_rest_min_z = info.rest_min_z;
 				t->husk_rest_max_z = info.rest_max_z;
 			}
-			// The husk model's bound joins the entity bound max [orig:
-			// Entity_InitFromModel @ 0x40dc30, the huskModel[5] compare].
-			entity_bound = std::max(
-					entity_bound, state.radius_by_graphic[husk_key]);
+			// Only entity+52's FIRST husk model joins this signed max. A
+			// huskFinal-only definition has no substitute operand here.
+			// [orig: Entity_InitFromModel @0x40dced..0x40de16]
+			if (first_husk_m3 != nullptr) {
+				const int32_t husk_bound_q16 =
+						model_bound_radius_q16_from_3di(*first_husk_m3);
+				entity_bound_q16 = std::max(entity_bound_q16, husk_bound_q16);
+			}
 		}
-		if (entity_bound > 0.0f && e->bound_radius <= 0.0f)
-			e->bound_radius = entity_bound + 0.0625f;  // the +0x1000 16.16 pad
+		if (has_collision_block && e->bound_radius <= 0.0f)
+			e->bound_radius = static_cast<float>(entity_bound_q16 + 0x1000) /
+					65536.0f;
 		const int32_t occ_id = state.occlusion_by_graphic[key];
 		// Entity_ClassifyForMinimap's ordinary-Building branch checks the
 		// live graphic model's +0xE0 portal/occlusion pointer. The parsed .3di
 		// and the collision/occlusion resolver are the portable ownership seam
 		// for that otherwise renderer-private fact.
 		e->has_minimap_model_marker = occ_id >= 0;
-		// The blip drawer's model half-extent feed rides the same seam.
+		// The blip drawer reads the raw model bound block rather than the entity
+		// placement matrix, so authored scale deliberately does not fold here.
+		// [orig: draw_minimap_blip @0x5979a2..0x5979b8]
 		const std::pair<float, float> &half_xy = state.half_xy_by_graphic[key];
 		e->minimap_half_x_q16 = static_cast<int32_t>(half_xy.first * 65536.0f);
 		e->minimap_half_y_q16 = static_cast<int32_t>(half_xy.second * 65536.0f);
 		// The +0x1FC LOS ray offset: zeroed for type-6 powerups with attrib
-		// bit 5, like retail; the def scale stays unapplied (D-COL-3, the
-		// bound_radius precedent). [orig: Entity_InitFromModel zero
-		//  @0x40defc..0x40df16, center stores @0x40df2e..0x40df4a]
-		const std::array<float, 3> &bc = state.center_by_graphic[key];
-		if (!(def->type == 6 && (def->attrib & 0x20u) != 0))
-			e->bbox_center = world::Vec3{bc[0], bc[1], bc[2]};
+		// bit 5; otherwise the raw fixed midpoint is multiplied by the same
+		// effective scale as the entity matrix, with retail's +0x8000 rule.
+		// [orig: Entity_InitFromModel @0x40defc..0x40df4a]
+		const std::array<int32_t, 3> &bc = state.center_by_graphic[key];
+		if (!(def->type == 6 && (def->attrib & 0x20u) != 0)) {
+			int32_t scaled[3] = {bc[0], bc[1], bc[2]};
+			if (e->uniform_scale_q16 != 0) {
+				for (int axis = 0; axis < 3; ++axis) {
+					scaled[axis] = world::retail_q16_mul_rhu(
+							scaled[axis], e->uniform_scale_q16);
+				}
+			}
+			e->bbox_center = world::Vec3{
+					static_cast<float>(scaled[0]) / 65536.0f,
+					static_cast<float>(scaled[1]) / 65536.0f,
+					static_cast<float>(scaled[2]) / 65536.0f};
+		}
 		if (occ_id >= 0 && e->kind == world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows

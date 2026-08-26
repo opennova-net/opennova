@@ -139,10 +139,14 @@ struct TerrainTileCacheDevice::AsyncState {
 		opennova::terrain::Rgba8Image tilestrip;
 		opennova::TilFile tile_info;
 		bool tile_overlay_ready = false;
+		std::array<opennova::terrain::TerrainScorchTexture,
+				opennova::terrain::kTerrainScorchTextureSlots>
+				scorch_textures;
 
 		opennova::terrain::TerrainTilePageSourceView view(
 				const std::array<float, 3> &tint,
-				const opennova::terrain::TerrainTileLightEpoch &light) const {
+				const opennova::terrain::TerrainTileLightEpoch &light,
+				const opennova::terrain::TerrainScorchPagePlan *scorch) const {
 			opennova::terrain::TerrainTilePageSourceView result;
 			result.colormap = &colormap;
 			result.heightfield_normal = &heightfield_normal;
@@ -152,6 +156,8 @@ struct TerrainTileCacheDevice::AsyncState {
 			}
 			result.tile_overlay_tint = tint;
 			result.light_bytes = light;
+			result.scorch_plan = scorch;
+			result.scorch_textures = &scorch_textures;
 			return result;
 		}
 	};
@@ -164,7 +170,11 @@ struct TerrainTileCacheDevice::AsyncState {
 		std::shared_ptr<const SourceSnapshot> sources;
 		std::array<float, 3> tint{};
 		opennova::terrain::TerrainTileLightEpoch light{};
+		opennova::terrain::TerrainScorchPagePlan scorch;
 		std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> shadow;
+		// The requesting frame's Render_ShaderTickMs: the shared snapshot
+		// never carries time, the job does.
+		uint32_t shadow_material_time_ms = 0;
 		bool capture_diagnostics = false;
 	};
 
@@ -230,9 +240,11 @@ struct TerrainTileCacheDevice::AsyncState {
 			const std::shared_ptr<const SourceSnapshot> &sources,
 			const std::array<float, 3> &tint,
 			const opennova::terrain::TerrainTileLightEpoch &light,
+			opennova::terrain::TerrainScorchPagePlan scorch,
 			uint64_t demand_frame,
 			const std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
 					&shadow,
+			uint32_t shadow_material_time_ms,
 			bool capture_diagnostics) {
 		if (sources == nullptr) return false;
 		{
@@ -266,8 +278,8 @@ struct TerrainTileCacheDevice::AsyncState {
 			}
 			if (!scheduled.accepted) return false;
 			work.push_back(WorkItem{epoch, demand_frame, sequence, job, sources,
-					tint, light,
-					shadow, capture_diagnostics});
+					tint, light, std::move(scorch),
+					shadow, shadow_material_time_ms, capture_diagnostics});
 		}
 		wake.notify_one();
 		return true;
@@ -353,17 +365,27 @@ private:
 			completion.job = item.job;
 			const auto started = std::chrono::steady_clock::now();
 			try {
+				// A page the registry cannot route carries no overlay: the
+				// base page still composes (the composer fails closed only on
+				// a DECLARED plan it cannot draw).
 				const opennova::terrain::TerrainTilePageSourceView view =
-						item.sources->view(item.tint, item.light);
+						item.sources->view(item.tint, item.light,
+								item.scorch.valid ? &item.scorch : nullptr);
 				completion.pixels = opennova::terrain::compose_terrain_tile_page(
 						item.job, view);
 				completion.success = completion.pixels.is_valid();
 				if (completion.success && item.shadow != nullptr) {
 					completion.shadow_attempted = true;
 					if (active_shadow != item.shadow) {
+						// Cheap: the planner shares its immutable caster set
+						// by pointer and copies only the per-page memo caches.
 						shadow_planner = item.shadow->planner;
 						active_shadow = item.shadow;
 					}
+					// Material animation samples the requesting frame's tick,
+					// as retail's tile render does for each model it submits.
+					shadow_planner.set_material_time(
+							item.shadow_material_time_ms);
 					shadow_planner.reset_frame_diagnostics();
 					const opennova::terrain::TerrainStaticShadowPagePlanResult
 							shadow_plan = shadow_planner.plan(
@@ -525,7 +547,39 @@ bool TerrainTileCacheDevice::rebuild(
 	if (!have_colormap || !have_normal) {
 		return false;
 	}
-
+	// Scorch decals are an OPTIONAL overlay source, not a base page source.
+	// A mission whose resource root does not carry the scorch TGAs (loose
+	// authoring roots, fixture terrains, tile-free missions) must still get a
+	// complete colormap/normal page cache -- terrain paging and the detail
+	// foliage that borrows its page binding both depend on it. Failing the
+	// rebuild here inverted that dependency and left foliage permanently on
+	// its analytic fallback. append_terrain_scorch() already gates every
+	// record on scorch_textures_ready_, so an unresolved set simply means "no
+	// scorch overlay this mission".
+	bool scorch_ready = true;
+	for (const uint8_t texture_index :
+			{uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{4}}) {
+		const std::string_view name =
+				opennova::terrain::terrain_scorch_texture_name(texture_index);
+		const Ref<Texture2D> texture = p_data->load_source_texture(
+				String::utf8(name.data(), static_cast<int>(name.size())));
+		opennova::terrain::Rgba8Image base;
+		if (!texture_to_rgba8(texture, base)) {
+			scorch_ready = false;
+			break;
+		}
+		snapshot->scorch_textures[texture_index] =
+				opennova::terrain::build_terrain_scorch_texture(base);
+		if (!snapshot->scorch_textures[texture_index].is_valid()) {
+			scorch_ready = false;
+			break;
+		}
+	}
+	if (!scorch_ready) {
+		for (auto &slot : snapshot->scorch_textures) {
+			slot = opennova::terrain::TerrainScorchTexture{};
+		}
+	}
 	Ref<TerrainTileInfo> tile_info = p_tile_info_override;
 	const bool tile_info_declared = tile_info.is_valid() ||
 			!p_data->get_tileinfo_filename().strip_edges().is_empty();
@@ -555,6 +609,9 @@ bool TerrainTileCacheDevice::rebuild(
 	sources_ready_ = _allocate_texture();
 	if (sources_ready_) {
 		async_->install_sources(std::move(snapshot));
+		// Only the scorch overlay is gated on its own sources resolving; the
+		// base page cache is ready either way.
+		scorch_textures_ready_ = scorch_ready;
 	}
 	return sources_ready_;
 }
@@ -574,6 +631,10 @@ void TerrainTileCacheDevice::clear() {
 	cache_hits_ = 0;
 	cache_misses_ = 0;
 	upload_failures_ = 0;
+	scorch_registry_.clear();
+	scorch_textures_ready_ = false;
+	scorch_records_rejected_ = 0;
+	scorch_page_invalidations_ = 0;
 	shadow_snapshot_.reset();
 	shadow_raster_jobs_ = 0;
 	shadow_raster_failures_ = 0;
@@ -670,6 +731,53 @@ void TerrainTileCacheDevice::_invalidate_page(
 		}
 		return;
 	}
+}
+
+void TerrainTileCacheDevice::_retire_ready_scorch_overlaps(
+		const opennova::terrain::TerrainScorchEntry &p_entry) {
+	for (std::size_t layer = 0; layer < ready_generations_.size(); ++layer) {
+		if (ready_generations_[layer] == 0 ||
+				!opennova::TerrainTileCompositionCache::page_overlaps_q16(
+						ready_page_keys_[layer], p_entry.minimum_x_q16,
+						p_entry.minimum_z_q16, p_entry.maximum_x_q16,
+						p_entry.maximum_z_q16)) {
+			continue;
+		}
+		ready_generations_[layer] = 0;
+		ready_page_output_hashes_[layer] = 0;
+		if (frame_selected_ready_layers_[layer]) {
+			frame_selected_ready_layers_[layer] = false;
+			--frame_selected_ready_pages_;
+		}
+	}
+}
+
+bool TerrainTileCacheDevice::append_terrain_scorch(
+		const opennova::terrain::TerrainScorchEntry &p_entry) {
+	if (!scorch_textures_ready_ || !scorch_registry_.append(p_entry)) {
+		++scorch_records_rejected_;
+		return false;
+	}
+	const std::size_t invalidated = cache_.invalidate_overlapping_q16(
+			p_entry.minimum_x_q16, p_entry.minimum_z_q16,
+			p_entry.maximum_x_q16, p_entry.maximum_z_q16);
+	scorch_page_invalidations_ += invalidated;
+	_retire_ready_scorch_overlaps(p_entry);
+	return true;
+}
+
+void TerrainTileCacheDevice::clear_terrain_scorches() {
+	if (scorch_registry_.size() == 0) return;
+	// A reset removes every record, so every compiled page's content identity
+	// changes. Cancel queued plans before invalidating their generations.
+	async_->cancel(false);
+	cache_.invalidate_all();
+	ready_generations_.fill(0);
+	ready_page_output_hashes_.fill(0);
+	frame_selected_ready_layers_.fill(false);
+	frame_selected_ready_pages_ = 0;
+	scorch_registry_.clear();
+	scorch_records_rejected_ = 0;
 }
 
 bool TerrainTileCacheDevice::_allocate_texture() {
@@ -850,7 +958,7 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 			async_->sources();
 	if (source_snapshot == nullptr) return unavailable;
 	opennova::terrain::TerrainTilePageSourceView sources =
-			source_snapshot->view({}, {});
+			source_snapshot->view({}, {}, nullptr);
 
 	opennova::TerrainTileCompositionRequest request;
 	request.page.sector_origin_x = p_draw.sector_x * 512;
@@ -895,6 +1003,17 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 				content, shadow_plan.content);
 	}
 	request.content = content;
+	// Permanent scorch identity: the page's insertion-ordered overlap stamp,
+	// walked from the registry's sector buckets with no entry list built.
+	// The entries are built only on the miss path below. A page the registry
+	// cannot route gets its base page with no overlay; scorch is an optional
+	// overlay and never a reason to drop the tile binding.
+	const opennova::terrain::TerrainScorchPageStamp scorch_stamp =
+			scorch_registry_.stamp(request.page);
+	if (scorch_stamp.valid) {
+		request.content.value = mix_value_bytes(
+				request.content.value, scorch_stamp.content_stamp);
+	}
 
 	++frame_requests_;
 	const std::optional<opennova::TerrainTileCompositionDecision> decision =
@@ -933,8 +1052,14 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 		ready_generations_[job.target.layer] = 0;
 		ready_page_output_hashes_[job.target.layer] = 0;
 	}
+	opennova::terrain::TerrainScorchPagePlan scorch_plan;
+	if (scorch_stamp.valid) scorch_plan = scorch_registry_.plan(request.page);
+	const uint32_t shadow_material_time = shadow_snapshot != nullptr
+			? static_shadow_rasterizer_->material_time_ms()
+			: 0u;
 	if (!async_->enqueue(job, source_snapshot, sources.tile_overlay_tint,
-			sources.light_bytes, diagnostic_frame_id_, shadow_snapshot,
+			sources.light_bytes, std::move(scorch_plan),
+			diagnostic_frame_id_, shadow_snapshot, shadow_material_time,
 			capture_diagnostics_)) {
 		cache_.invalidate(job.target.page);
 		++frame_capacity_fallbacks_;
@@ -998,6 +1123,14 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	diagnostics["cache_hits"] = static_cast<int64_t>(cache_hits_);
 	diagnostics["cache_misses"] = static_cast<int64_t>(cache_misses_);
 	diagnostics["upload_failures"] = static_cast<int64_t>(upload_failures_);
+	diagnostics["scorch_textures_ready"] = scorch_textures_ready_;
+	diagnostics["scorch_records"] = static_cast<int64_t>(scorch_registry_.size());
+	diagnostics["scorch_generation"] =
+			static_cast<int64_t>(scorch_registry_.generation());
+	diagnostics["scorch_records_rejected"] =
+			static_cast<int64_t>(scorch_records_rejected_);
+	diagnostics["scorch_page_invalidations"] =
+			static_cast<int64_t>(scorch_page_invalidations_);
 	diagnostics["shadow_raster_available"] =
 			static_shadow_rasterizer_ != nullptr;
 	diagnostics["shadow_raster_jobs"] =

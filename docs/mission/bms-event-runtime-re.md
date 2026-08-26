@@ -446,8 +446,9 @@ bit flip it.
      `+0x1FC/+0x200/+0x204` offset points — pos + the host-stamped model
      collision-bbox CENTER, `Entity_InitFromModel` min+((max−min)>>1)
      `@ 0x40df1e..0x40df4a` (powerup zero rule: `attrib & 0x20` && type 6
-     `@ 0x40df0a`; the def scale is left unapplied like `bound_radius` —
-     rides D-COL-3), stamped and used by the port — `p3 <= 20 u` uses the
+     `@ 0x40df0a`; the effective def/entity scale uses the same signed Q16
+     +0x8000 multiply as the matrix and bound), stamped and used by the port —
+     `p3 <= 20 u` uses the
      entity-aware `Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130`,
      `> 20 u` the terrain/sector-only `Physics_RaycastTerrainAndSectors
      @ 0x539910` — returning the ray's clear flag.

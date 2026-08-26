@@ -41,6 +41,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -53,6 +54,7 @@
 #include <renderer/particle_frame.h>
 
 #include "nova_particle_compositor.h"
+#include "render/nova_framefx.h"
 #include "util/texture_path_resolver.h"
 
 using namespace godot;
@@ -62,6 +64,17 @@ namespace {
 constexpr int kGraphicLayerCount = 4;
 constexpr std::uint32_t kFirstPersonVisibilityMask = 1u << 11;
 constexpr std::size_t kMissingEntry = std::numeric_limits<std::size_t>::max();
+
+enum ParticleDrawSlot : std::size_t {
+	kWorldFarSide = 0,
+	kWorldCameraSide = 1,
+	kReflectionFarSide = 2,
+	kReflectionCameraSide = 3,
+	kFirstPerson = 4,
+	kParticleDrawSlotCount = 5,
+};
+
+using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
 
 using opennova::particle::BlendMode;
 using opennova::particle::CurveRef;
@@ -269,27 +282,53 @@ AABB godot_aabb(const renderer::ParticleAabb &bounds) {
 	return AABB(minimum, maximum - minimum);
 }
 
-struct DrawListDiagnostics {
-	bool present = false;
-	std::uint64_t frame_id = 0;
-	renderer::ParticleFrameDebugCounters debug{};
-	std::vector<renderer::ParticleDrawCommand> commands;
-	std::vector<renderer::ParticleEmitterDrawBounds> emitter_bounds;
+struct ParticleCameraFrame {
+	Vector3 position{};
+	Vector3 right{1.0f, 0.0f, 0.0f};
+	Vector3 up{0.0f, 1.0f, 0.0f};
+	Vector3 forward{0.0f, 0.0f, 1.0f};
+	Basis view_basis{};
+	std::array<float, 16> projection{};
+	bool projection_valid = false;
 };
 
-void capture_draw_list_diagnostics(DrawListDiagnostics &destination,
-		const renderer::ParticleDrawList &draw_list) {
-	destination.present = true;
-	destination.frame_id = draw_list.frame_id;
-	destination.debug = draw_list.debug;
-	destination.commands = draw_list.commands;
-	destination.emitter_bounds = draw_list.emitter_bounds;
+ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
+	ParticleCameraFrame result;
+	if (camera == nullptr)
+		return result;
+	// get_camera_transform includes h_offset/v_offset, so classification and
+	// billboards use the eye that the viewport actually renders.
+	const Transform3D transform = camera->get_camera_transform();
+	result.position = transform.origin;
+	result.view_basis = transform.affine_inverse().basis;
+	result.right = transform.basis.get_column(0);
+	result.up = transform.basis.get_column(1);
+	result.forward = -transform.basis.get_column(2);
+	auto normalize_or = [](Vector3 value, const Vector3 &fallback) {
+		if (value.length_squared() > 0.0f)
+			return value.normalized();
+		return fallback;
+	};
+	result.right = normalize_or(result.right, Vector3(1.0f, 0.0f, 0.0f));
+	result.up = normalize_or(result.up, Vector3(0.0f, 1.0f, 0.0f));
+	result.forward = normalize_or(result.forward, Vector3(0.0f, 0.0f, 1.0f));
+	const Projection projection = camera->get_camera_projection();
+	for (int column = 0; column < 4; ++column) {
+		for (int row = 0; row < 4; ++row) {
+			result.projection[static_cast<std::size_t>(column * 4 + row)] =
+					projection.columns[column][row];
+		}
+	}
+	result.projection_valid = true;
+	return result;
 }
 
-Dictionary draw_list_report(const DrawListDiagnostics &draw_list) {
+// Diagnostics read each compiler's retained draw list in place: it stays
+// valid until that slot compiles again and nothing on the render thread
+// references it (World submissions are immutable copies), so no per-frame
+// capture copy and no opt-in flag are needed for the first report to be live.
+Dictionary draw_list_report(const renderer::ParticleDrawList &draw_list) {
 	Dictionary result;
-	if (!draw_list.present)
-		return result;
 	const renderer::ParticleFrameDebugCounters &debug = draw_list.debug;
 	result["frame_id"] = godot_token(draw_list.frame_id);
 	result["compile_index"] = godot_token(debug.compile_index);
@@ -298,12 +337,20 @@ Dictionary draw_list_report(const DrawListDiagnostics &draw_list) {
 	result["input_particles"] = static_cast<int64_t>(debug.input_particles);
 	result["domain_filtered_particles"] =
 			static_cast<int64_t>(debug.domain_filtered_particles);
+	result["water_filtered_emitters"] =
+			static_cast<int64_t>(debug.water_filtered_emitters);
+	result["water_filtered_particles"] =
+			static_cast<int64_t>(debug.water_filtered_particles);
 	result["invisible_particles"] = static_cast<int64_t>(debug.invisible_particles);
 	result["truncated_particles"] = static_cast<int64_t>(debug.truncated_particles);
 	result["rendered_quad_count"] = static_cast<int64_t>(debug.emitted_quads);
 	result["draw_command_count"] = static_cast<int64_t>(debug.draw_commands);
 	result["adjacent_state_merges"] =
 			static_cast<int64_t>(debug.adjacent_state_merges);
+	result["recursive_partition_calls"] =
+			static_cast<int64_t>(debug.recursive_partition_calls);
+	result["render_batch_leaves"] =
+			static_cast<int64_t>(debug.render_batch_leaves);
 	result["capacity_growths_this_compile"] =
 			static_cast<int64_t>(debug.capacity_growths_this_compile);
 	result["lifetime_capacity_growths"] =
@@ -456,8 +503,21 @@ bool refresh_camera_base(ParticleCameraCompositorState &state,
 void rebuild_camera_compositor(ParticleCameraCompositorState &state,
 		Camera3D *camera) {
 	TypedArray<Ref<CompositorEffect>> effects;
-	if (state.effective_base.is_valid())
-		effects = state.effective_base->get_compositor_effects();
+	TypedArray<Ref<CompositorEffect>> terminal_effects;
+	if (state.effective_base.is_valid()) {
+		const TypedArray<Ref<CompositorEffect>> base_effects =
+				state.effective_base->get_compositor_effects();
+		for (int64_t index = 0; index < base_effects.size(); ++index) {
+			Ref<CompositorEffect> effect = base_effects[index];
+			if (effect.is_valid() &&
+					Object::cast_to<FrameFxCompositorEffect>(
+							effect.ptr()) != nullptr) {
+				terminal_effects.push_back(effect);
+			} else {
+				effects.push_back(effect);
+			}
+		}
+	}
 	for (const auto &entry : state.effects) {
 		bool already_present = false;
 		for (int64_t index = 0; index < effects.size(); ++index) {
@@ -473,10 +533,37 @@ void rebuild_camera_compositor(ParticleCameraCompositorState &state,
 			effects.push_back(generic_effect);
 		}
 	}
+	// Retail particles are part of the D3D9 gamma framebuffer. FrameFX and
+	// the one terminal gamma-to-linear bridge must therefore run after every
+	// particle compositor targeting this camera.
+	for (int64_t index = 0; index < terminal_effects.size(); ++index) {
+		effects.push_back(terminal_effects[index]);
+	}
 	state.installed.instantiate();
 	state.installed->set_compositor_effects(effects);
 	camera->set_compositor(state.installed);
 }
+
+// A Bump/Bumpadd quad's DIFFUSE channel depends on the view basis, so the
+// mirror camera relights these quads in place instead of rebuilding the
+// whole snapshot.
+struct LitQuadInput {
+	std::size_t particle_index = 0;
+	float bump_scale = 0.0f;
+	float roll = 0.0f;
+	std::uint8_t alpha = 255;
+};
+
+// Retained FirstPerson upload scratch: one ArrayMesh whose surfaces are
+// rebuilt per frame, plus packed arrays whose storage survives across frames.
+struct FirstPersonUploadBuffers {
+	PackedVector3Array vertices;
+	PackedVector2Array uvs;
+	PackedColorArray colors;
+	PackedByteArray custom0;
+	PackedInt32Array indices;
+	Array arrays;
+};
 
 } // namespace
 
@@ -484,9 +571,13 @@ class ParticleRenderer::Impl {
 public:
 	MeshInstance3D *first_person_instance = nullptr;
 	Ref<ArrayMesh> first_person_mesh;
-	std::array<renderer::ParticleFrameCompiler, 2> compilers;
-	std::array<DrawListDiagnostics, 2> draw_lists;
+	FirstPersonUploadBuffers first_person_upload;
+	std::array<renderer::ParticleFrameCompiler, kParticleDrawSlotCount> compilers;
+	// A slot is present once it compiled for the current render and until
+	// clear_draws or a render without its camera retires it.
+	std::array<bool, kParticleDrawSlotCount> slot_present{};
 	renderer::ParticleFrameSnapshot render_snapshot;
+	std::vector<LitQuadInput> lit_quads;
 	std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> catalog_definitions;
 	std::vector<DefinitionVisual> definition_visuals;
 	std::vector<renderer::ParticleAtlasEntry> entries;
@@ -497,9 +588,12 @@ public:
 	std::map<std::uint64_t, Ref<ShaderMaterial>> materials;
 	std::vector<std::string> unresolved_names;
 	std::size_t rejected_atlas_entries = 0;
-	Ref<ParticleCompositorEffect> world_effect;
-	ObjectID attached_camera;
+	ParticleEffectPair world_effects;
+	ParticleEffectPair reflection_effects;
+	ObjectID attached_world_camera;
+	ObjectID attached_reflection_camera;
 	bool inherited_world_compositor = false;
+	bool inherited_reflection_compositor = false;
 	bool catalog_dirty = true;
 	ObjectID cached_environment_source;
 	std::int64_t cached_environment_generation =
@@ -510,11 +604,16 @@ public:
 	std::int32_t fog_type = 1;
 
 	Impl() {
-		world_effect.instantiate();
+		for (Ref<ParticleCompositorEffect> &effect : world_effects)
+			effect.instantiate();
+		for (Ref<ParticleCompositorEffect> &effect : reflection_effects)
+			effect.instantiate();
+		world_effects[0]->set_effect_callback_type(
+				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
 	}
 
 	~Impl() {
-		detach_compositor();
+		detach_compositors();
 	}
 
 	void invalidate_catalog() {
@@ -569,7 +668,8 @@ public:
 				std::numeric_limits<std::int64_t>::min();
 	}
 
-	void detach_compositor() {
+	void detach_compositor_group(ObjectID &attached_camera,
+			const ParticleEffectPair &effects, bool &inherited_compositor) {
 		if (!attached_camera.is_valid())
 			return;
 		const std::uint64_t camera_id =
@@ -580,12 +680,14 @@ public:
 				ObjectDB::get_instance(camera_id));
 		if (state_it != states.end()) {
 			ParticleCameraCompositorState &state = state_it->second;
-			const std::uint64_t effect_id =
-					world_effect->get_instance_id();
 			state.effects.erase(std::remove_if(
 					state.effects.begin(), state.effects.end(),
-					[effect_id](const auto &entry) {
-						return entry.first == effect_id;
+					[&effects](const auto &entry) {
+						return std::any_of(effects.begin(), effects.end(),
+								[&entry](const Ref<ParticleCompositorEffect> &effect) {
+									return effect.is_valid() && entry.first ==
+											effect->get_instance_id();
+								});
 					}), state.effects.end());
 			if (state.effects.empty()) {
 				if (camera != nullptr &&
@@ -599,19 +701,30 @@ public:
 			}
 		}
 		attached_camera = ObjectID();
-		inherited_world_compositor = false;
+		inherited_compositor = false;
 	}
 
-	void attach_compositor(Camera3D *camera, Viewport *viewport) {
+	void detach_compositors() {
+		detach_compositor_group(attached_world_camera, world_effects,
+				inherited_world_compositor);
+		detach_compositor_group(attached_reflection_camera, reflection_effects,
+				inherited_reflection_compositor);
+	}
+
+	void attach_compositor_group(Camera3D *camera, Viewport *viewport,
+			ObjectID &attached_camera, const ParticleEffectPair &effects,
+			bool &inherited_compositor) {
 		if (camera == nullptr) {
-			detach_compositor();
+			detach_compositor_group(attached_camera, effects,
+					inherited_compositor);
 			return;
 		}
 		const std::uint64_t camera_id = camera->get_instance_id();
 		const ObjectID camera_object_id(camera_id);
 		if (attached_camera.is_valid() &&
 				attached_camera != camera_object_id) {
-			detach_compositor();
+			detach_compositor_group(attached_camera, effects,
+					inherited_compositor);
 		}
 
 		auto &states = particle_camera_compositors();
@@ -631,20 +744,22 @@ public:
 			rebuild = true;
 		}
 
-		const std::uint64_t effect_id = world_effect->get_instance_id();
-		auto effect_it = std::find_if(state.effects.begin(),
-				state.effects.end(), [effect_id](const auto &entry) {
-					return entry.first == effect_id;
-				});
-		if (effect_it == state.effects.end()) {
-			state.effects.emplace_back(effect_id, world_effect);
-			rebuild = true;
-		} else if (effect_it->second != world_effect) {
-			effect_it->second = world_effect;
-			rebuild = true;
+		for (const Ref<ParticleCompositorEffect> &effect : effects) {
+			const std::uint64_t effect_id = effect->get_instance_id();
+			auto effect_it = std::find_if(state.effects.begin(),
+					state.effects.end(), [effect_id](const auto &entry) {
+						return entry.first == effect_id;
+					});
+			if (effect_it == state.effects.end()) {
+				state.effects.emplace_back(effect_id, effect);
+				rebuild = true;
+			} else if (effect_it->second != effect) {
+				effect_it->second = effect;
+				rebuild = true;
+			}
 		}
 		attached_camera = camera_object_id;
-		inherited_world_compositor = state.inherited_world_compositor;
+		inherited_compositor = state.inherited_world_compositor;
 		if (rebuild)
 			rebuild_camera_compositor(state, camera);
 	}
@@ -665,13 +780,20 @@ public:
 	}
 
 	void clear_draws() {
-		world_effect->clear_submission();
-		first_person_mesh.unref();
-		draw_lists = {};
-		if (first_person_instance != nullptr) {
-			first_person_instance->set_mesh(Ref<Mesh>());
+		for (Ref<ParticleCompositorEffect> &effect : world_effects)
+			effect->clear_submission();
+		for (Ref<ParticleCompositorEffect> &effect : reflection_effects)
+			effect->clear_submission();
+		if (first_person_mesh.is_valid())
+			first_person_mesh->clear_surfaces();
+		slot_present.fill(false);
+		if (first_person_instance != nullptr)
 			first_person_instance->set_visible(false);
-		}
+	}
+
+	bool first_person_has_surfaces() const {
+		return first_person_mesh.is_valid() &&
+				first_person_mesh->get_surface_count() > 0;
 	}
 
 	void rebuild_catalog(
@@ -849,15 +971,47 @@ public:
 		return material;
 	}
 
+	static std::uint32_t lit_primary_color(const LitQuadInput &lit,
+			const Basis &view_basis) {
+		constexpr float light_component = 0.5773503f;
+		const Vector3 seed = lit.bump_scale *
+				Vector3(light_component, light_component, light_component);
+		const Basis rotate_x(Vector3(1.0f, 0.0f, 0.0f), lit.roll);
+		// Literal retail operation: transpose(Rx(roll) * view).
+		const Vector3 light_local =
+				(rotate_x * view_basis).transposed().xform(seed);
+		// Exact FVF ordering for Bump/Bumpadd: DIFFUSE (Godot COLOR) carries
+		// encoded light + particle alpha; SPECULAR (CUSTOM0) keeps the original
+		// modulated RGB with opaque alpha.
+		return pack_argb_bytes(retail_low_byte(light_local.x),
+				retail_low_byte(light_local.y), retail_low_byte(light_local.z),
+				lit.alpha);
+	}
+
+	// Re-derives only the view-dependent Bump/Bumpadd DIFFUSE channel for a
+	// second camera; every other quad input is view-independent.
+	void relight_render_snapshot(const Basis &view_basis) {
+		for (const LitQuadInput &lit : lit_quads) {
+			render_snapshot.particles[lit.particle_index].primary_color =
+					lit_primary_color(lit, view_basis);
+		}
+	}
+
+	// Refills the retained flat snapshot (emitters + one particle run each)
+	// in the simulator's order. clear() keeps both vectors' capacity, so a
+	// steady-state frame allocates nothing here.
 	void build_render_snapshot(
 			const opennova::particle::ParticleFrameSnapshot &frame,
 			const Basis &view_basis) {
 		render_snapshot.frame_id = frame.frame_index;
 		render_snapshot.emitters.clear();
+		render_snapshot.particles.clear();
+		lit_quads.clear();
 		if (!frame.definitions ||
 				definition_visuals.size() != frame.definitions->size())
 			return;
 		render_snapshot.emitters.reserve(frame.emitters.size());
+		render_snapshot.particles.reserve(frame.particles.size());
 
 		for (const opennova::particle::EffectEmitterFrameSnapshot &source_emitter :
 				frame.emitters) {
@@ -871,6 +1025,8 @@ public:
 
 			renderer::ParticleEmitterSnapshot emitter;
 			emitter.emitter_id = source_emitter.id;
+			emitter.position = particle_vec(source_emitter.position);
+			emitter.first_particle = render_snapshot.particles.size();
 			if (source_emitter.group_index < frame.groups.size() &&
 					frame.groups[source_emitter.group_index].render_domain ==
 						opennova::particle::EffectRenderDomain::FirstPerson) {
@@ -891,7 +1047,6 @@ public:
 					frame.particles.size());
 			const std::size_t available = frame.particles.size() - first;
 			const std::size_t count = std::min(source_emitter.particle_count, available);
-			emitter.particles.reserve(count);
 			const std::uint32_t lod_divisor =
 					std::max<std::uint32_t>(1u, source_emitter.lod_divisor);
 
@@ -1033,34 +1188,28 @@ public:
 				}
 
 				if ((particle.flags & LitColor) != 0) {
-					constexpr float light_component = 0.5773503f;
-					const Vector3 seed = definition.bump_scale *
-							Vector3(light_component, light_component,
-									light_component);
-					const Basis rotate_x(Vector3(1.0f, 0.0f, 0.0f),
-							particle.rotation);
-					// Literal retail operation: transpose(Rx(roll) * view).
-					const Vector3 light_local =
-							(rotate_x * view_basis).transposed().xform(seed);
-					// Exact FVF ordering for Bump/Bumpadd: DIFFUSE (Godot COLOR)
-					// carries encoded light + particle alpha; SPECULAR (CUSTOM0)
-					// carries original modulated RGB with opaque alpha.
-					quad.primary_color = pack_argb_bytes(
-							retail_low_byte(light_local.x),
-							retail_low_byte(light_local.y),
-							retail_low_byte(light_local.z), unit_byte(alpha));
+					LitQuadInput lit;
+					lit.particle_index = render_snapshot.particles.size();
+					lit.bump_scale = definition.bump_scale;
+					lit.roll = particle.rotation;
+					lit.alpha = unit_byte(alpha);
+					quad.primary_color = lit_primary_color(lit, view_basis);
 					quad.secondary_color = pack_argb(red, green, blue, 1.0f);
+					lit_quads.push_back(lit);
 				} else {
 					quad.secondary_color = 0xffffffffu;
 				}
 
-				emitter.particles.push_back(quad);
+				render_snapshot.particles.push_back(quad);
 			}
-			render_snapshot.emitters.push_back(std::move(emitter));
+			emitter.particle_count =
+					render_snapshot.particles.size() - emitter.first_particle;
+			render_snapshot.emitters.push_back(emitter);
 		}
 	}
 
-	void publish_world_draw_list(const renderer::ParticleDrawList &draw_list,
+	void publish_world_draw_list(const Ref<ParticleCompositorEffect> &effect,
+			const renderer::ParticleDrawList &draw_list,
 			const Vector3 &camera_position, const Vector3 &camera_forward) {
 		auto submission = std::make_shared<NovaParticleWorldSubmission>();
 		submission->frame_id = draw_list.frame_id;
@@ -1099,25 +1248,23 @@ public:
 						quad_count * expanded_bytes_per_quad));
 				std::uint8_t *destination =
 						submission->triangle_vertices.ptrw();
-				constexpr std::array<std::size_t, 6> triangle_order{
-						0, 1, 2, 1, 3, 2};
+				// Retail's quad index pattern 0/1/2/1/3/2: the first triangle
+				// is the quad's contiguous first three vertices, so it copies
+				// as one block.
+				constexpr std::size_t stride = sizeof(renderer::ParticleVertex);
 				for (std::size_t quad = 0; quad < quad_count; ++quad) {
-					for (std::size_t triangle_vertex = 0;
-							triangle_vertex < triangle_order.size();
-							++triangle_vertex) {
-						const renderer::ParticleVertex &source =
-								draw_list.vertices[quad * 4u +
-										triangle_order[triangle_vertex]];
-						const std::size_t offset =
-								(quad * 6u + triangle_vertex) *
-								sizeof(renderer::ParticleVertex);
-						std::memcpy(destination + offset, &source,
-								sizeof(source));
-					}
+					const renderer::ParticleVertex *source =
+							draw_list.vertices.data() + quad * 4u;
+					std::uint8_t *target = destination +
+							quad * expanded_bytes_per_quad;
+					std::memcpy(target, source, 3u * stride);
+					std::memcpy(target + 3u * stride, source + 1, stride);
+					std::memcpy(target + 4u * stride, source + 3, stride);
+					std::memcpy(target + 5u * stride, source + 2, stride);
 				}
 			}
 		}
-		world_effect->publish(
+		effect->publish(
 				std::shared_ptr<const NovaParticleWorldSubmission>(
 						std::move(submission)));
 	}
@@ -1126,15 +1273,21 @@ public:
 			const renderer::ParticleDrawList &draw_list, bool hidden) {
 		if (first_person_instance == nullptr)
 			return;
+		// One retained ArrayMesh: surfaces are rebuilt per frame while the mesh
+		// RID, the instance binding, and the packed scratch arrays survive.
+		if (first_person_mesh.is_null())
+			first_person_mesh.instantiate();
+		if (first_person_instance->get_mesh().ptr() != first_person_mesh.ptr())
+			first_person_instance->set_mesh(first_person_mesh);
+		first_person_mesh->clear_surfaces();
 		if (draw_list.commands.empty() || draw_list.vertices.empty()) {
-			first_person_mesh.unref();
-			first_person_instance->set_mesh(Ref<Mesh>());
 			first_person_instance->set_visible(false);
 			return;
 		}
 
-		Ref<ArrayMesh> mesh;
-		mesh.instantiate();
+		FirstPersonUploadBuffers &upload = first_person_upload;
+		if (upload.arrays.size() != Mesh::ARRAY_MAX)
+			upload.arrays.resize(Mesh::ARRAY_MAX);
 		for (const renderer::ParticleDrawCommand &command : draw_list.commands) {
 			const std::size_t first_vertex =
 					static_cast<std::size_t>(command.first_quad) * 4u;
@@ -1144,27 +1297,24 @@ public:
 					vertex_count > draw_list.vertices.size() - first_vertex)
 				continue;
 
-			PackedVector3Array vertices;
-			PackedVector2Array uvs;
-			PackedColorArray colors;
-			PackedByteArray custom0;
-			PackedInt32Array indices;
-			vertices.resize(static_cast<int64_t>(vertex_count));
-			uvs.resize(static_cast<int64_t>(vertex_count));
-			colors.resize(static_cast<int64_t>(vertex_count));
-			custom0.resize(static_cast<int64_t>(vertex_count * 4u));
-			indices.resize(static_cast<int64_t>(command.quad_count) * 6);
-			std::uint8_t *custom_bytes = custom0.ptrw();
+			upload.vertices.resize(static_cast<int64_t>(vertex_count));
+			upload.uvs.resize(static_cast<int64_t>(vertex_count));
+			upload.colors.resize(static_cast<int64_t>(vertex_count));
+			upload.custom0.resize(static_cast<int64_t>(vertex_count * 4u));
+			upload.indices.resize(static_cast<int64_t>(command.quad_count) * 6);
+			Vector3 *vertices = upload.vertices.ptrw();
+			Vector2 *uvs = upload.uvs.ptrw();
+			Color *colors = upload.colors.ptrw();
+			std::uint8_t *custom_bytes = upload.custom0.ptrw();
+			std::int32_t *indices = upload.indices.ptrw();
 
 			for (std::size_t vertex_index = 0; vertex_index < vertex_count;
 					++vertex_index) {
 				const renderer::ParticleVertex &source =
 						draw_list.vertices[first_vertex + vertex_index];
-				vertices[static_cast<int64_t>(vertex_index)] =
-						Vector3(source.x, source.y, source.z);
-				uvs[static_cast<int64_t>(vertex_index)] = Vector2(source.u, source.v);
-				colors[static_cast<int64_t>(vertex_index)] =
-						unpack_argb(source.primary_color);
+				vertices[vertex_index] = Vector3(source.x, source.y, source.z);
+				uvs[vertex_index] = Vector2(source.u, source.v);
+				colors[vertex_index] = unpack_argb(source.primary_color);
 				const std::size_t byte_offset = vertex_index * 4u;
 				custom_bytes[byte_offset + 0] = static_cast<std::uint8_t>(
 						(source.secondary_color >> 16) & 0xffu);
@@ -1177,8 +1327,8 @@ public:
 			}
 
 			for (std::uint32_t quad = 0; quad < command.quad_count; ++quad) {
-				const int vertex = static_cast<int>(quad * 4u);
-				const int index = static_cast<int>(quad * 6u);
+				const std::int32_t vertex = static_cast<std::int32_t>(quad * 4u);
+				const std::size_t index = static_cast<std::size_t>(quad) * 6u;
 				indices[index + 0] = vertex + 0;
 				indices[index + 1] = vertex + 1;
 				indices[index + 2] = vertex + 2;
@@ -1187,26 +1337,26 @@ public:
 				indices[index + 5] = vertex + 2;
 			}
 
-			Array arrays;
-			arrays.resize(Mesh::ARRAY_MAX);
-			arrays[Mesh::ARRAY_VERTEX] = vertices;
-			arrays[Mesh::ARRAY_TEX_UV] = uvs;
-			arrays[Mesh::ARRAY_COLOR] = colors;
-			arrays[Mesh::ARRAY_CUSTOM0] = custom0;
-			arrays[Mesh::ARRAY_INDEX] = indices;
+			upload.arrays[Mesh::ARRAY_VERTEX] = upload.vertices;
+			upload.arrays[Mesh::ARRAY_TEX_UV] = upload.uvs;
+			upload.arrays[Mesh::ARRAY_COLOR] = upload.colors;
+			upload.arrays[Mesh::ARRAY_CUSTOM0] = upload.custom0;
+			upload.arrays[Mesh::ARRAY_INDEX] = upload.indices;
 			const std::uint64_t flags =
 					static_cast<std::uint64_t>(Mesh::ARRAY_FORMAT_CUSTOM0);
-			mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays,
+			first_person_mesh->add_surface_from_arrays(
+					Mesh::PRIMITIVE_TRIANGLES, upload.arrays,
 					TypedArray<Array>(), Dictionary(),
 					static_cast<Mesh::ArrayFormat>(flags));
-			const int surface = mesh->get_surface_count() - 1;
-			mesh->surface_set_material(surface, material_for(command));
+			// The surface owns a converted copy. Drop the Array's shares so the
+			// next frame's ptrw() writes in place instead of copying on write.
+			upload.arrays.fill(Variant());
+			const int surface = first_person_mesh->get_surface_count() - 1;
+			first_person_mesh->surface_set_material(surface, material_for(command));
 		}
 
-		first_person_mesh = mesh;
-		first_person_instance->set_mesh(mesh);
 		first_person_instance->set_visible(
-				!hidden && mesh->get_surface_count() > 0);
+				!hidden && first_person_mesh->get_surface_count() > 0);
 	}
 };
 
@@ -1245,6 +1395,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_environment_source);
 	ClassDB::bind_method(D_METHOD("get_environment_source"),
 			&ParticleRenderer::get_environment_source);
+	ClassDB::bind_method(D_METHOD("set_water_plane", "height", "reflection_camera"),
+			&ParticleRenderer::set_water_plane);
 	ClassDB::bind_method(D_METHOD("set_hidden", "hidden"),
 			&ParticleRenderer::set_hidden);
 	ClassDB::bind_method(D_METHOD("get_hidden"),
@@ -1289,7 +1441,7 @@ void ParticleRenderer::_notification(int p_what) {
 		render_now();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		if (impl_)
-			impl_->detach_compositor();
+			impl_->detach_compositors();
 	}
 }
 
@@ -1348,11 +1500,21 @@ Node *ParticleRenderer::get_environment_source() const {
 			static_cast<std::uint64_t>(environment_source_)));
 }
 
+void ParticleRenderer::set_water_plane(float p_height,
+		Camera3D *p_reflection_camera) {
+	water_height_ = p_height;
+	reflection_camera_ = p_reflection_camera != nullptr ?
+			ObjectID(p_reflection_camera->get_instance_id()) : ObjectID();
+}
+
 void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	clear_warm_pipelines();
 	if (!impl_)
 		return;
-	impl_->world_effect->request_pipeline_warm();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->request_pipeline_warm();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->request_pipeline_warm();
 	Ref<QuadMesh> quad;
 	quad.instantiate();
 	quad->set_size(Vector2(0.01f, 0.01f));
@@ -1376,8 +1538,12 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 }
 
 void ParticleRenderer::clear_warm_pipelines() {
-	if (impl_)
-		impl_->world_effect->cancel_pipeline_warm();
+	if (impl_) {
+		for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+			effect->cancel_pipeline_warm();
+		for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+			effect->cancel_pipeline_warm();
+	}
 	for (Node *node : warm_nodes_) {
 		if (node != nullptr)
 			node->queue_free();
@@ -1391,7 +1557,10 @@ void ParticleRenderer::set_hidden(bool p_hidden) {
 	hidden_ = p_hidden;
 	if (!impl_)
 		return;
-	impl_->world_effect->set_particles_hidden(hidden_);
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->set_particles_hidden(hidden_);
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->set_particles_hidden(hidden_);
 	if (hidden_) {
 		// The master switch is also a CPU switch: drop retained submissions once
 		// and let the next visible process rebuild from the latest scene frame.
@@ -1400,8 +1569,7 @@ void ParticleRenderer::set_hidden(bool p_hidden) {
 	}
 	if (impl_->first_person_instance != nullptr) {
 		impl_->first_person_instance->set_visible(
-				!hidden_ && impl_->first_person_mesh.is_valid() &&
-				impl_->first_person_mesh->get_surface_count() > 0);
+				!hidden_ && impl_->first_person_has_surfaces());
 	}
 }
 
@@ -1428,7 +1596,18 @@ void ParticleRenderer::render_now() {
 		return;
 	Viewport *viewport = get_viewport();
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
-	impl_->attach_compositor(camera, viewport);
+	Camera3D *reflection_camera = reflection_camera_.is_valid() ?
+			Object::cast_to<Camera3D>(ObjectDB::get_instance(
+					static_cast<std::uint64_t>(reflection_camera_))) : nullptr;
+	if (reflection_camera == camera)
+		reflection_camera = nullptr;
+	impl_->attach_compositor_group(camera, viewport,
+			impl_->attached_world_camera, impl_->world_effects,
+			impl_->inherited_world_compositor);
+	impl_->attach_compositor_group(reflection_camera,
+			reflection_camera != nullptr ? reflection_camera->get_viewport() : nullptr,
+			impl_->attached_reflection_camera, impl_->reflection_effects,
+			impl_->inherited_reflection_compositor);
 	if (scene_.is_null()) {
 		impl_->clear_draws();
 		return;
@@ -1442,49 +1621,78 @@ void ParticleRenderer::render_now() {
 				procedural_fallback_enabled_);
 	}
 
-	Vector3 camera_position;
-	Vector3 camera_right(1.0f, 0.0f, 0.0f);
-	Vector3 camera_up(0.0f, 1.0f, 0.0f);
-	Vector3 camera_forward(0.0f, 0.0f, 1.0f);
-	Basis camera_view_basis;
-	if (camera != nullptr) {
-		const Transform3D camera_transform = camera->get_global_transform();
-		camera_position = camera_transform.origin;
-		camera_view_basis = camera_transform.affine_inverse().basis;
-		camera_right = camera_transform.basis.get_column(0);
-		camera_up = camera_transform.basis.get_column(1);
-		camera_forward = -camera_transform.basis.get_column(2);
-		if (camera_right.length_squared() > 0.0f)
-			camera_right.normalize();
-		else
-			camera_right = Vector3(1.0f, 0.0f, 0.0f);
-		if (camera_up.length_squared() > 0.0f)
-			camera_up.normalize();
-		else
-			camera_up = Vector3(0.0f, 1.0f, 0.0f);
-		if (camera_forward.length_squared() > 0.0f)
-			camera_forward.normalize();
-		else
-			camera_forward = Vector3(0.0f, 0.0f, 1.0f);
-	}
-
+	const ParticleCameraFrame world_camera = particle_camera_frame(camera);
+	const bool camera_above_water = world_camera.position.y >= water_height_;
 	impl_->refresh_environment(get_environment_source());
-	impl_->build_render_snapshot(frame, camera_view_basis);
-	for (std::size_t domain = 0; domain < impl_->compilers.size(); ++domain) {
+	impl_->build_render_snapshot(frame, world_camera.view_basis);
+	auto compile_world = [&](ParticleDrawSlot slot,
+			renderer::ParticleWaterSubset subset,
+			const ParticleCameraFrame &view_camera,
+			const Ref<ParticleCompositorEffect> &effect) {
 		renderer::ParticleViewInput view;
-		view.domain = domain == 0 ? renderer::ParticleRenderDomain::World :
-				renderer::ParticleRenderDomain::FirstPerson;
-		view.position = particle_vec(camera_position);
-		view.right = particle_vec(camera_right);
-		view.up = particle_vec(camera_up);
-		view.forward = particle_vec(camera_forward);
+		view.domain = renderer::ParticleRenderDomain::World;
+		view.water_subset = subset;
+		view.water_height = water_height_;
+		view.position = particle_vec(view_camera.position);
+		view.right = particle_vec(view_camera.right);
+		view.up = particle_vec(view_camera.up);
+		view.forward = particle_vec(view_camera.forward);
+		std::copy(view_camera.projection.begin(), view_camera.projection.end(),
+				view.projection);
+		view.projection_valid = view_camera.projection_valid;
+		view.projection_near_is_one = true;
 		const renderer::ParticleDrawList &draw_list =
-				impl_->compilers[domain].compile(impl_->render_snapshot, view);
-		capture_draw_list_diagnostics(impl_->draw_lists[domain], draw_list);
-		if (domain == 0)
-			impl_->publish_world_draw_list(draw_list, camera_position, camera_forward);
-		else
-			impl_->upload_first_person_draw_list(draw_list, hidden_);
+				impl_->compilers[slot].compile(impl_->render_snapshot, view);
+		impl_->slot_present[slot] = true;
+		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
+				view_camera.forward);
+	};
+
+	compile_world(kWorldFarSide,
+			renderer::particle_water_subset_for_side(camera_above_water, false),
+			world_camera, impl_->world_effects[0]);
+	compile_world(kWorldCameraSide,
+			renderer::particle_water_subset_for_side(camera_above_water, true),
+			world_camera, impl_->world_effects[1]);
+
+	renderer::ParticleViewInput first_person_view;
+	first_person_view.domain = renderer::ParticleRenderDomain::FirstPerson;
+	first_person_view.water_subset = renderer::ParticleWaterSubset::All;
+	first_person_view.position = particle_vec(world_camera.position);
+	first_person_view.right = particle_vec(world_camera.right);
+	first_person_view.up = particle_vec(world_camera.up);
+	first_person_view.forward = particle_vec(world_camera.forward);
+	std::copy(world_camera.projection.begin(), world_camera.projection.end(),
+			first_person_view.projection);
+	first_person_view.projection_valid = world_camera.projection_valid;
+	first_person_view.projection_near_is_one = true;
+	const renderer::ParticleDrawList &first_person_draw =
+			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
+					first_person_view);
+	impl_->slot_present[kFirstPerson] = true;
+	impl_->upload_first_person_draw_list(first_person_draw, hidden_);
+
+	if (reflection_camera != nullptr) {
+		const ParticleCameraFrame mirror_camera =
+				particle_camera_frame(reflection_camera);
+		// LitColor/Bump channels transform through the active view basis while
+		// the water selector remains the emitter's main-camera side. Relight
+		// only those quads for the mirror before its two consecutive passes;
+		// the World draw lists above already hold their own vertex copies.
+		impl_->relight_render_snapshot(mirror_camera.view_basis);
+		compile_world(kReflectionFarSide,
+				renderer::particle_water_subset_for_side(
+						camera_above_water, false),
+				mirror_camera, impl_->reflection_effects[0]);
+		compile_world(kReflectionCameraSide,
+				renderer::particle_water_subset_for_side(
+						camera_above_water, true),
+				mirror_camera, impl_->reflection_effects[1]);
+	} else {
+		impl_->reflection_effects[0]->clear_submission();
+		impl_->reflection_effects[1]->clear_submission();
+		impl_->slot_present[kReflectionFarSide] = false;
+		impl_->slot_present[kReflectionCameraSide] = false;
 	}
 }
 
@@ -1492,9 +1700,10 @@ int64_t ParticleRenderer::get_rendered_quad_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const DrawListDiagnostics &draw_list : impl_->draw_lists) {
-		if (draw_list.present)
-			total += draw_list.debug.emitted_quads;
+	for (const ParticleDrawSlot slot : {
+			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+		if (impl_->slot_present[slot])
+			total += impl_->compilers[slot].draw_list().debug.emitted_quads;
 	}
 	return static_cast<int64_t>(total);
 }
@@ -1503,9 +1712,10 @@ int64_t ParticleRenderer::get_draw_command_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const DrawListDiagnostics &draw_list : impl_->draw_lists) {
-		if (draw_list.present)
-			total += draw_list.debug.draw_commands;
+	for (const ParticleDrawSlot slot : {
+			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+		if (impl_->slot_present[slot])
+			total += impl_->compilers[slot].draw_list().debug.draw_commands;
 	}
 	return static_cast<int64_t>(total);
 }
@@ -1514,14 +1724,35 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	Dictionary result;
 	if (!impl_)
 		return result;
-	result["world"] = draw_list_report(impl_->draw_lists[0]);
-	result["first_person"] = draw_list_report(impl_->draw_lists[1]);
-	result["world_backend"] = impl_->world_effect->get_backend_report();
+	auto slot_report = [this](ParticleDrawSlot slot) {
+		return impl_->slot_present[slot] ?
+				draw_list_report(impl_->compilers[slot].draw_list()) :
+				Dictionary();
+	};
+	result["world_far_side"] = slot_report(kWorldFarSide);
+	result["world_camera_side"] = slot_report(kWorldCameraSide);
+	result["reflection_far_side"] = slot_report(kReflectionFarSide);
+	result["reflection_camera_side"] = slot_report(kReflectionCameraSide);
+	result["first_person"] = slot_report(kFirstPerson);
+	result["world_far_backend"] =
+			impl_->world_effects[0]->get_backend_report();
+	result["world_camera_backend"] =
+			impl_->world_effects[1]->get_backend_report();
+	result["reflection_far_backend"] =
+			impl_->reflection_effects[0]->get_backend_report();
+	result["reflection_camera_backend"] =
+			impl_->reflection_effects[1]->get_backend_report();
 	result["first_person_backend"] = "array_mesh_fallback_tool_only";
-	result["world_compositor_attached"] = impl_->attached_camera.is_valid();
+	result["world_compositor_attached"] =
+			impl_->attached_world_camera.is_valid();
+	result["reflection_compositor_attached"] =
+			impl_->attached_reflection_camera.is_valid();
 	result["world_compositor_inherited_effects"] =
 			impl_->inherited_world_compositor;
+	result["reflection_compositor_inherited_effects"] =
+			impl_->inherited_reflection_compositor;
 	result["world_mesh_instance"] = false;
+	result["water_height"] = water_height_;
 	Dictionary environment_fog;
 	environment_fog["color"] = Vector3(impl_->fog_color[0],
 			impl_->fog_color[1], impl_->fog_color[2]);
@@ -1584,15 +1815,21 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 	Array result;
 	if (!impl_)
 		return result;
-	for (std::size_t domain = 0; domain < impl_->draw_lists.size(); ++domain) {
-		const DrawListDiagnostics &draw_list = impl_->draw_lists[domain];
-		if (!draw_list.present)
+	for (const ParticleDrawSlot slot : {
+			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+		if (!impl_->slot_present[slot])
 			continue;
 		for (const renderer::ParticleEmitterDrawBounds &bounds :
-				draw_list.emitter_bounds) {
+				impl_->compilers[slot].draw_list().emitter_bounds) {
 			Dictionary value;
 			value["emitter_id"] = godot_token(bounds.emitter_id);
-			value["render_domain"] = static_cast<int>(domain);
+			value["render_domain"] = slot == kFirstPerson ?
+					static_cast<int>(renderer::ParticleRenderDomain::FirstPerson) :
+					static_cast<int>(renderer::ParticleRenderDomain::World);
+			value["draw_scope"] = slot == kWorldFarSide ?
+					String("world_far_side") :
+					(slot == kWorldCameraSide ? String("world_camera_side") :
+							String("first_person"));
 			value["first_quad"] = static_cast<int64_t>(bounds.first_quad);
 			value["quad_count"] = static_cast<int64_t>(bounds.quad_count);
 			value["bounds_valid"] = bounds.bounds.valid;

@@ -133,7 +133,7 @@ func _dump(label: String, rows: Dictionary) -> void:
 			"destruction", "throwable", "occl", "occl_build",
 			"occl_probe", "occl_apply", "occl_glue", "env", "audio", "after", "hud",
 			"hud_scalars", "hud_attach", "hud_waypoint", "hud_info", "hud_flush",
-			"shell_residual",
+			"other_process", "physics_callbacks", "engine_frame",
 			"render", "render_root_cpu", "render_root_gpu", "render_water_cpu",
 			"render_water_gpu"]:
 		var row: Array = rows.get(id, ["-", "-", ""])

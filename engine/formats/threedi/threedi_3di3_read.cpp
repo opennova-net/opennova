@@ -167,7 +167,7 @@ static int parse_header_chunk(const ThreediChunk *chunk, ThreediHeader *out)
 
     out->mesh_type = (ThreediMeshType)read_s32_le(chunk->data + 16);
     out->lod_count_decl = read_s32_le(chunk->data + 20);
-    out->lod_distance = read_s32_le(chunk->data + 24);
+    out->max_radius_fp16 = read_s32_le(chunk->data + 24);
     out->has_header = 1;
     return 0;
 }

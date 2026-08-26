@@ -6,6 +6,8 @@ shader_type spatial;
 // SPECULAR is intentionally not consumed by this fixed-function program.
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 
+#include "res://shaders/nova_color.gdshaderinc"
+
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
@@ -21,6 +23,6 @@ void fragment() {
 	// Stage 0 DOT3(TEXTURE, DIFFUSE); stage 1 restores alpha as T.a*D.a.
 	// CUSTOM0 carries the retail SPECULAR dword but this combiner ignores it.
 	float dotv = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
-	ALBEDO = vec3(dotv);
+	ALBEDO = nova_scene_output(vec3(dotv));
 	ALPHA = texel.a * COLOR.a;
 }

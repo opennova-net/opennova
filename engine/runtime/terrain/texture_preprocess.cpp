@@ -226,4 +226,22 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 	return result;
 }
 
+std::vector<Rgba8Image> build_box_mip_chain_to_4x4(
+		const Rgba8Image &base) {
+	if (!base.is_valid() || !is_power_of_two(base.width) ||
+			!is_power_of_two(base.height)) {
+		return {};
+	}
+	std::vector<Rgba8Image> result;
+	Rgba8Image level = base;
+	for (uint32_t minimum_dimension = std::min(base.width, base.height);
+			minimum_dimension > 2; minimum_dimension >>= 1) {
+		result.push_back(level);
+		if ((minimum_dimension >> 1) > 2) {
+			level = downsample_2x2(level);
+		}
+	}
+	return result;
+}
+
 } // namespace opennova::terrain

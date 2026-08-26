@@ -45,4 +45,11 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 		const Rgba8Image &base,
 		const Rgba8Image &far_detail);
 
+// D3DXFilterTexture(D3DX_FILTER_BOX) level chain used by ordinary TGA
+// textures. Retail allocates while min(width,height)>2, so the terminal
+// level for the shipped power-of-two terrain scorch images is 4x4.
+// [orig: GTexture_CreateFromPixelData_0 @0x6876C0]
+std::vector<Rgba8Image> build_box_mip_chain_to_4x4(
+		const Rgba8Image &base);
+
 } // namespace opennova::terrain

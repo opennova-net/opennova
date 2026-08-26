@@ -1467,7 +1467,7 @@ static bool build_3di_model_multi_impl(
   model.header.mesh_type =
       any_skinned ? THREEDI_MESH_SKINNED : THREEDI_MESH_BASIC;
   model.header.lod_count_decl = static_cast<int32_t>(render_lod_count);
-  model.header.lod_distance = to_fixed_16_16(max_render_radius);
+  model.header.max_radius_fp16 = to_fixed_16_16(max_render_radius);
 
   // User points (USRP): from LOD 0 only.
   model.user_point_count = lod0.userPointCount;

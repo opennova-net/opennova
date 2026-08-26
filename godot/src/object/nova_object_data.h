@@ -25,6 +25,8 @@
 #include <threedi/threedi_3di3.h>
 #include <threedi/threedi_panm.h>
 
+#include <renderer/material_eval.h>
+
 #include "resource_index/nova_resource_root.h"
 
 namespace godot {
@@ -107,6 +109,16 @@ private:
 	mutable PanmEvalCache panm_cache_;
 	void _invalidate_panm_cache() { panm_cache_.valid = false; panm_cache_.lod = -1; }
 	bool _panm_cache_prepare(int p_lod_index) const;
+	// Material generator fixups depend only on the loaded document's local CTRL
+	// table. Cache their native names once instead of rebuilding a
+	// vector<string> for every material of every model on every render frame.
+	mutable std::vector<std::string> runtime_control_names_cache_;
+	mutable bool runtime_control_names_valid_ = false;
+	const std::vector<std::string> &_runtime_control_names() const;
+	void _invalidate_runtime_control_names() {
+		runtime_control_names_valid_ = false;
+		runtime_control_names_cache_.clear();
+	}
 
 	void _clear();
 	void _clear_oed_session();
@@ -335,6 +347,16 @@ public:
 			bool p_native_frame = false) const;
 	Dictionary eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	int compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
+	// Typed render hot path. The script-facing methods above remain the tooling
+	// boundary; ObjectModel converts its CTRL dictionary once per frame, then
+	// evaluates every dynamic material without Dictionary/Variant round trips.
+	static renderer::ControlRegisterValues runtime_control_values(
+			const Dictionary &p_ctrl_values);
+	bool eval_material_runtime_native(int p_index, int64_t p_time_ms,
+			const renderer::ControlRegisterValues &p_ctrl_values,
+			renderer::MaterialRuntime &r_runtime) const;
+	int compute_anim_frame_native(int p_index, int64_t p_time_ms,
+			const renderer::ControlRegisterValues &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	// The hot-path form of evaluate_panm: evaluates through the shared
 	// per-graphic frame cache and writes ONLY changed part transforms onto the

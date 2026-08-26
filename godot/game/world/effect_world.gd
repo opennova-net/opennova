@@ -1,7 +1,7 @@
 class_name EffectWorld
 extends Node3D
 
-## Compatibility facade for the portable effect scene and draw list renderer.
+## World-facing owner for the portable effect scene and draw-list renderer.
 ## Effects, emitters, and particles are values owned by EffectScene; this
 ## node owns one ParticleRenderer for both render domains.
 
@@ -28,6 +28,7 @@ var _texture_dir := ""
 var _environment_source: Node
 var _owner_position_provider := Callable()
 var _water_height := 0.0
+var _reflection_camera: Camera3D
 var _particles_disabled := false
 
 # Keys never become native tokens by hashing. A shared monotonic allocator and
@@ -60,6 +61,7 @@ func _ensure_renderer() -> void:
 	_renderer.set_texture_provider(_texture_provider)
 	_renderer.set_texture_dir(_texture_dir)
 	_renderer.set_environment_source(_environment_source)
+	_renderer.set_water_plane(_water_height, _reflection_camera)
 	_renderer.set_hidden(_particles_disabled)
 
 
@@ -108,8 +110,11 @@ func set_owner_position_provider(provider: Callable) -> void:
 	_owner_position_provider = provider
 
 
-func set_water_height(value: float) -> void:
+func set_water_plane(value: float, reflection_camera: Camera3D) -> void:
 	_water_height = value
+	_reflection_camera = reflection_camera
+	_ensure_renderer()
+	_renderer.set_water_plane(value, reflection_camera)
 
 
 ## Loads every mounted .ptl AND the active gore set in VFS order, then opens the
@@ -185,6 +190,9 @@ func clear_world() -> void:
 	_texture_dir = ""
 	_owner_position_provider = Callable()
 	_water_height = 0.0
+	_reflection_camera = null
+	if is_instance_valid(_renderer):
+		_renderer.set_water_plane(0.0, null)
 	_scene = EffectScene.new()
 	var empty_files: Array[ParticleFile] = []
 	_load_report = _scene.open(empty_files)

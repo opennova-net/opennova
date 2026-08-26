@@ -1,5 +1,7 @@
 #pragma once
 
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -9,6 +11,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -50,8 +53,13 @@ public:
 	int64_t spawn_glow(const Dictionary &p_config);
 	void despawn(int64_t p_handle);
 	void set_light_position(int64_t p_handle, const Vector3 &p_world);
-	// The witnessed instance re-arm setters (fade mode/duration, blend).
+	// The witnessed instance re-arm setters (fade mode/duration, owner group,
+	// position, blend). Entity_UpdateMuzzleGlowEffect applies all four to the
+	// one entity+0x1B4 lease; the witness lives with the engine pool in
+	// engine/runtime/renderer/light_scene.h (muzzle glow section).
 	void set_light_fade(int64_t p_handle, int p_mode, int p_duration);
+	void set_light_owner(int64_t p_handle, int64_t p_owner_entity,
+			int p_owner_section);
 	void set_light_blend(int64_t p_handle, float p_amount);
 	bool is_alive(int64_t p_handle) const;
 	void clear();
@@ -72,16 +80,34 @@ public:
 	// draw context, see docs/render/render-lighting-re.md): one draw context
 	// per visible ObjectModel, owner group = that model's entity id, interior
 	// group = the building it currently stands inside + that blink volume's
-	// section, then the selected <= 4 written as per-instance shader
-	// parameters on the model's surfaces. p_models, p_owner_entities,
-	// p_interior_owners and p_interior_sections are parallel arrays (interior
-	// owner 0 = outdoors). Returns the number of models that received at
-	// least one light.
+	// section. A nonzero p_robj_scoped row expands a building into one context
+	// per visible ROBJ: the building becomes its own interior group at section
+	// zero and owner_group_section names the current ROBJ, exactly matching the
+	// retail re-scope @0x5d8ff7. All arrays are parallel. Returns the number of
+	// models (not expanded draw contexts) that received at least one light.
 	int render_model_frame(const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
 			const PackedInt64Array &p_interior_owners,
 			const PackedInt32Array &p_interior_sections,
+			const PackedByteArray &p_robj_scoped,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
+
+	// The same witnessed per-draw selection for static MultiMesh rows. Bounds
+	// are position/size pairs in atlas-row order; the remaining arrays are
+	// parallel to rows. Inactive (destroyed/carved) rows stay zero so their
+	// stable INSTANCE_CUSTOM.x identity never has to move. The RGBAF atlas is
+	// published as opennova_static_point_light_rows: count in texel 0.x, then
+	// four (world position.xyz, attenuation2)/(color.rgb, range) pairs.
+	// Returns the number of active rows that received at least one light.
+	int render_static_frame(
+			const PackedVector3Array &p_bounds_position_size,
+			const PackedInt64Array &p_owner_entities,
+			const PackedInt32Array &p_owner_sections,
+			const PackedInt64Array &p_interior_owners,
+			const PackedInt32Array &p_interior_sections,
+			const PackedByteArray &p_active,
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+			int64_t p_rows_revision = -1);
 
 	// The procedural corona texture "texlightcrn" as RGBA8 bytes,
 	// corona_texture_size() square — renderer::corona_texture_argb carries
@@ -155,11 +181,22 @@ public:
 
 	int live_count() const;
 	Dictionary get_report() const;
+	// Read-only diagnostics snapshot of the last uploaded RGBAF atlas. The
+	// returned Image owns copied bytes; tests/tools cannot mutate render state.
+	Ref<Image> get_static_light_rows_image() const;
 
 protected:
 	static void _bind_methods();
 
 private:
+	static constexpr int STATIC_LIGHT_ROW_TEXELS = 9;
+	struct StaticCachedSelection {
+		int atlas_row = 0;
+		renderer::LightActiveGroups groups{};
+		std::array<renderer::LightHandle,
+				renderer::LightScene::kSelectLimit> handles{};
+		size_t count = 0;
+	};
 	renderer::LightScene scene_;
 	std::array<renderer::SelectedLight, renderer::LightScene::kSelectLimit>
 			selected_{};
@@ -168,6 +205,18 @@ private:
 	String owner_isolation_ = "none";
 	int last_models_ = 0;
 	int last_lit_models_ = 0;
+	Ref<Image> static_light_rows_image_;
+	Ref<ImageTexture> static_light_rows_texture_;
+	PackedByteArray static_light_rows_bytes_;
+	PackedByteArray static_light_rows_scratch_;
+	std::vector<StaticCachedSelection> static_cached_selections_;
+	uint64_t static_cached_scene_revision_ = 0;
+	int64_t static_cached_rows_revision_ = -1;
+	int static_cached_row_count_ = -1;
+	int static_cached_active_draws_ = 0;
+	int static_row_count_ = 0;
+	int last_static_draws_ = 0;
+	int last_lit_static_draws_ = 0;
 };
 
 } // namespace godot

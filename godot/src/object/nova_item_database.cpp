@@ -59,6 +59,8 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_render_function", "id"), &ItemDatabase::get_render_function);
 	ClassDB::bind_method(D_METHOD("get_disk_function", "id"), &ItemDatabase::get_disk_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &ItemDatabase::get_item_type);
+	ClassDB::bind_method(D_METHOD("get_model_scale_q16", "id"),
+			&ItemDatabase::get_model_scale_q16);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &ItemDatabase::get_light_transfer);
 	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &ItemDatabase::is_ai_capable);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &ItemDatabase::get_display_name);
@@ -247,6 +249,7 @@ ItemDatabase::Item ItemDatabase::item_from_entry(const ::DefItemDef &entry) {
 	item.armor_blast = entry.armor_blast;
 	item.armor_kz = entry.armor_kz;
 	item.kz = entry.kz;
+	item.model_scale_q16 = entry.scale_q16;
 	item.debris_scale = entry.debris_scale;
 	item.husk_sub_parts = entry.husk_sub_parts;
 	for (int s = 0; s < 16; ++s) {
@@ -376,6 +379,11 @@ int ItemDatabase::get_hp(int id) const {
 int ItemDatabase::get_item_type(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? static_cast<int>(TYPE_UNKNOWN) : it->second.type;
+}
+
+int32_t ItemDatabase::get_model_scale_q16(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0 : it->second.model_scale_q16;
 }
 
 float ItemDatabase::get_light_transfer(int id) const {
@@ -689,6 +697,7 @@ Dictionary ItemDatabase::item_dictionary(const Item &item) const {
 	out["display_name"] = item.display_name;
 	out["graphic"] = item.graphic;
 	out["anim_def"] = item.anim_def;
+	out["model_scale_q16"] = item.model_scale_q16;
 	out["light_transfer"] = item.light_transfer;
 	out["sound_profile"] = item.sound_profile;
 	out["soundloops"] = get_sound_loops(item.id);

@@ -214,10 +214,33 @@ Affine affine_from_panm_matrix(const ThreediMatrix4x4 &m) {
 
 } // namespace
 
+bool evaluate_model_mounted_pose_parts(
+		const Threedi3di3 &model, uint32_t time_ms,
+		const int32_t *ctrl_values, MountedPosePartMatrices &out) {
+	constexpr int lod_index = 0;
+	out.clear();
+	return threedi_panm_pose_parts(
+			model, lod_index, time_ms, ctrl_values, out, nullptr);
+}
+
 bool resolve_model_mounted_pose(const Threedi3di3 &model,
 		const world::Entity &carrier, const world::Seat &seat,
 		const int32_t *ctrl_values, uint32_t time_ms,
 		world::MountedPose &out) {
+	MountedPosePartMatrices rest_parts;
+	MountedPosePartMatrices live_parts;
+	if (!evaluate_model_mounted_pose_parts(model, 0u, nullptr, rest_parts) ||
+			!evaluate_model_mounted_pose_parts(
+					model, time_ms, ctrl_values, live_parts))
+		return false;
+	return resolve_model_mounted_pose_from_parts(
+			model, carrier, seat, rest_parts, live_parts, out);
+}
+
+bool resolve_model_mounted_pose_from_parts(
+		const Threedi3di3 &model, const world::Entity &carrier,
+		const world::Seat &seat, const MountedPosePartMatrices &rest_parts,
+		const MountedPosePartMatrices &live_parts, world::MountedPose &out) {
 	if (seat.type != world::SeatType::Gunner || seat.bone_index == 0)
 		return false;
 	const int userpoint_index = static_cast<int>(seat.bone_index) - 1;
@@ -239,14 +262,6 @@ bool resolve_model_mounted_pose(const Threedi3di3 &model,
 			static_cast<double>(up.rot_x) / 65536.0};
 	if (part_index < 0 || !v3_finite(authored_model_position)) return false;
 
-	constexpr int lod_index = 0;
-	std::vector<ThreediMatrix4x4> rest_parts;
-	std::vector<ThreediMatrix4x4> live_parts;
-	if (!threedi_panm_pose_parts(model, lod_index, 0u, nullptr, rest_parts,
-				nullptr) ||
-			!threedi_panm_pose_parts(model, lod_index, time_ms, ctrl_values,
-					live_parts, nullptr))
-		return false;
 	if (static_cast<size_t>(part_index) >= rest_parts.size() ||
 			static_cast<size_t>(part_index) >= live_parts.size())
 		return false;

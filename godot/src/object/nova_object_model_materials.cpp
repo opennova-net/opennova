@@ -6,12 +6,14 @@
 #include "object/nova_object_model.h"
 
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/core/math.hpp>
 
 #include "object/nova_object_shader_cache.h"
 
 #include <renderer/material_classify.h>
 #include <renderer/object_shader_template.h>
+#include <renderer/render_order.h>
 #include <threedi/threedi_3di3.h>
 
 namespace godot {
@@ -21,7 +23,35 @@ namespace {
 // index_hue.gd: golden-ratio conjugate hue spread.
 constexpr double kPhiConjugate = 0.618033988749895;
 
+const StringName &postmultiply_material_meta() {
+	static const StringName name("_opennova_postmultiply_material");
+	return name;
+}
+
+Ref<ShaderMaterial> auxiliary_for(const Ref<ShaderMaterial> &p_material,
+		const StringName &p_meta) {
+	if (p_material.is_null() ||
+			!p_material->has_meta(p_meta)) {
+		return Ref<ShaderMaterial>();
+	}
+	return p_material->get_meta(p_meta, Variant());
+}
+
 } // namespace
+
+void ObjectModel::set_material_and_auxiliary_parameter(
+		const Ref<ShaderMaterial> &p_material, const StringName &p_name,
+		const Variant &p_value) {
+	if (p_material.is_null()) {
+		return;
+	}
+	p_material->set_shader_parameter(p_name, p_value);
+	const Ref<ShaderMaterial> postmultiply = auxiliary_for(
+			p_material, postmultiply_material_meta());
+	if (postmultiply.is_valid()) {
+		postmultiply->set_shader_parameter(p_name, p_value);
+	}
+}
 
 void ObjectModel::build_material_defs() {
 	material_defs_.clear();
@@ -117,16 +147,35 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 		key &= ~renderer::OSCAP_DETAIL;
 	}
 	shader_cache->configure_material_for_key(material, key);
-	const int32_t blend_mode = shader_cache->blend_for_key(key);
-	if (blend_mode != static_cast<int32_t>(renderer::ObjectBlendMode::Opaque)) {
-		// Water-side rung applied by refresh_render_order() once placed.
-		alpha_materials_.push_back(material);
+	const renderer::ObjectShaderPipelineDescriptor pipeline =
+			renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
+	// BmTxMirrT.fx P3 is an independent raw-UV, regular-fogged draw with
+	// DESTCOLOR/SRCCOLOR (2*source*framebuffer). Keep it paired with the P0/P1
+	// material so animated Diffuse1 and environment state update atomically.
+	if (pipeline.technique ==
+			renderer::ObjectShaderTechnique::EnvironmentMirrorTextured) {
+		String proxy_path = "res://shaders/object/postmultiply/environment_textured";
+		if (pipeline.alpha_test) {
+			proxy_path += "_cutout";
+		}
+		if (pipeline.two_sided) {
+			proxy_path += "_double_sided";
+		}
+		proxy_path += ".gdshader";
+		const Ref<Shader> proxy_shader = ResourceLoader::get_singleton()->load(
+				proxy_path, "Shader");
+		ERR_FAIL_COND_V_MSG(proxy_shader.is_null(), Ref<ShaderMaterial>(),
+				String("Environment postmultiply shader failed to load: ") + proxy_path);
+		Ref<ShaderMaterial> proxy_material;
+		proxy_material.instantiate();
+		proxy_material->set_shader(proxy_shader);
+		proxy_material->set_render_priority(renderer::kRungObjectPostMultiply);
+		material->set_meta(postmultiply_material_meta(), proxy_material);
 	}
-
 	if (diffuse.is_valid()) {
-		material->set_shader_parameter("u_diffuse", diffuse);
+		set_material_and_auxiliary_parameter(material, "u_diffuse", diffuse);
 	} else {
-		material->set_shader_parameter("u_diffuse",
+		set_material_and_auxiliary_parameter(material, "u_diffuse",
 				solid_colour_texture(hash_color_for_index(p_index)));
 	}
 	if (detail.is_valid()) {
@@ -141,18 +190,18 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	if ((material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) {
 		// The ref byte feeds the compare exactly; the shader keeps a > ref
 		// (invert: a <= ref) [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0].
-		material->set_shader_parameter("u_alpha_test_threshold",
+		set_material_and_auxiliary_parameter(material, "u_alpha_test_threshold",
 				float(alpha_test_byte) / 255.0f);
-		material->set_shader_parameter("u_alpha_test_invert",
+		set_material_and_auxiliary_parameter(material, "u_alpha_test_invert",
 				(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0
 						? 1.0f
 						: 0.0f);
 	} else {
-		material->set_shader_parameter("u_alpha_test_threshold", 0.0f);
-		material->set_shader_parameter("u_alpha_test_invert", 0.0f);
+		set_material_and_auxiliary_parameter(material, "u_alpha_test_threshold", 0.0f);
+		set_material_and_auxiliary_parameter(material, "u_alpha_test_invert", 0.0f);
 	}
 	const Color reflect = info.get("reflect_color", Color(0.7f, 0.8f, 0.9f, 0.35f));
-	material->set_shader_parameter("u_reflect_color", reflect);
+	set_material_and_auxiliary_parameter(material, "u_reflect_color", reflect);
 	// The PANM evaluator supplies the complete two-row affine transform.
 	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
@@ -260,6 +309,9 @@ void ObjectModel::classify_materials() {
 	material_needs_eval_.clear();
 	PackedInt32Array dynamic_slots;
 	HashMap<int, bool> kind_cache;
+	HashSet<ObjectID> admitted_materials;
+	material_runtime_stamps_.assign(
+			static_cast<size_t>(surface_materials_.size()), MaterialRuntimeStamp());
 	for (int i = 0; i < surface_materials_.size(); ++i) {
 		const int material_index = surface_material_indices_[i];
 		bool needs_eval;
@@ -273,7 +325,14 @@ void ObjectModel::classify_materials() {
 		material_needs_eval_.push_back(needs_eval);
 		const Array *frames = anim_frames_by_mat_.getptr(material_index);
 		if (needs_eval || (frames != nullptr && frames->size() > 1)) {
-			dynamic_slots.append(i);
+			const Ref<ShaderMaterial> material = surface_materials_[i];
+			if (material.is_valid()) {
+				const ObjectID material_id(material->get_instance_id());
+				if (!admitted_materials.has(material_id)) {
+					admitted_materials.insert(material_id);
+					dynamic_slots.append(i);
+				}
+			}
 		}
 	}
 	dynamic_material_slots_ = dynamic_slots;
@@ -317,22 +376,25 @@ void ObjectModel::apply_environment_values(const Ref<ShaderMaterial> &p_material
 		return;
 	}
 	const EnvLightValues &v = **p_values;
-	p_material->set_shader_parameter("u_hemi_sky_color", v.hemi_sky);
-	p_material->set_shader_parameter("u_dir_light_dir", v.dir);
-	p_material->set_shader_parameter("u_dir_light_color", v.dir_color);
-	p_material->set_shader_parameter("u_hemi_ground_color", v.hemi_ground);
-	p_material->set_shader_parameter("u_color_src_global_gain", v.gain);
-	p_material->set_shader_parameter("u_fog_enabled", v.fog_enabled);
-	p_material->set_shader_parameter("u_fog_color", v.fog_color);
-	p_material->set_shader_parameter("u_fog_start", v.fog_start);
-	p_material->set_shader_parameter("u_fog_end", v.fog_end);
-	p_material->set_shader_parameter("u_fog_type", v.fog_type);
+	set_material_and_auxiliary_parameter(p_material, "u_hemi_sky_color", v.hemi_sky);
+	set_material_and_auxiliary_parameter(p_material, "u_dir_light_dir", v.dir);
+	set_material_and_auxiliary_parameter(p_material, "u_dir_light_color", v.dir_color);
+	set_material_and_auxiliary_parameter(p_material, "u_hemi_ground_color", v.hemi_ground);
+	set_material_and_auxiliary_parameter(p_material, "u_color_src_global_gain", v.gain);
+	set_material_and_auxiliary_parameter(p_material, "u_fog_enabled", v.fog_enabled);
+	set_material_and_auxiliary_parameter(p_material, "u_fog_color", v.fog_color);
+	set_material_and_auxiliary_parameter(p_material, "u_fog_start", v.fog_start);
+	set_material_and_auxiliary_parameter(p_material, "u_fog_end", v.fog_end);
+	set_material_and_auxiliary_parameter(p_material, "u_fog_type", v.fog_type);
 }
 
 // Stamp the current environment values onto every surface material, skipping
 // entirely when the published generation and the derived values are unchanged
 // (retained mode — an identical re-push is invisible).
 void ObjectModel::apply_environment_to_materials() {
+	// Any caller that reaches the exact apply seam has serviced a pending
+	// visibility/pass edge, even when the retained generation proves unchanged.
+	env_restamp_forced_ = false;
 	int64_t gen = -1;
 	Ref<EnvLightValues> world_values;
 	if (env_state_.is_valid()) {

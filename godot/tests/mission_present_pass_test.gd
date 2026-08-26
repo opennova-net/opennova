@@ -1052,10 +1052,11 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 	var replacement := _model()
 	snap.entities[0]["pos_x"] = 30.0
 
-	# A trusted layout revision no longer scans every ObjectID before the walk.
-	# The first null encounter may defer the rebind, but it must dirty the plan
-	# so the replacement is resolved on the following public presentation call.
+	# A trusted layout revision retains typed row references, but the model
+	# lifetime stamp invalidates that plan before a freed pointer can be read.
 	_present(p, snap)
+	assert_eq(_stat(p, "plan_rebuilds"), 2,
+			"freeing any cached model invalidates the typed row plan immediately")
 	assert_false(visibility_intent.has(21),
 			"a freed cached node releases its visibility intent immediately")
 	index.build([{ "model": replacement, "ref": {

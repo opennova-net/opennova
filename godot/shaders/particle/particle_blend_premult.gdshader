@@ -7,7 +7,9 @@ shader_type spatial;
 // source RGB by it. `blend_premul_alpha` is Godot's ONE/INVSRCALPHA pair.
 render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never;
 
-uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
+#include "res://shaders/nova_color.gdshaderinc"
+
+uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
 void fragment() {
@@ -22,6 +24,6 @@ void fragment() {
 		base.rgb *= radial;
 		base.a *= radial;
 	}
-	ALBEDO = base.rgb;
+	ALBEDO = nova_scene_output(base.rgb);
 	ALPHA = base.a;
 }

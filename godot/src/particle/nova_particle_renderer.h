@@ -17,10 +17,14 @@
 
 namespace godot {
 
+class Camera3D;
+
 // Thin Godot adapter for the portable particle scene/frame modules. World
-// draw lists are immutable values consumed by a POST_TRANSPARENT compositor
-// effect; only the explicitly diagnosed FirstPerson tool path uses ArrayMesh.
-// Effects, emitters, and particles remain values in EffectScene.
+// draw lists are immutable values consumed by the ordered compositor effects:
+// a water-far PRE_TRANSPARENT subset, a camera-side POST_TRANSPARENT subset,
+// and two consecutive POST_TRANSPARENT mirror subsets. Only the explicitly
+// diagnosed FirstPerson tool path uses ArrayMesh. Effects, emitters, and
+// particles remain values in EffectScene.
 class ParticleRenderer : public Node3D {
 	GDCLASS(ParticleRenderer, Node3D)
 
@@ -31,6 +35,8 @@ private:
 	Callable texture_provider_;
 	String texture_dir_;
 	ObjectID environment_source_;
+	ObjectID reflection_camera_;
+	float water_height_ = 0.0f;
 	bool hidden_ = false;
 	bool procedural_fallback_enabled_ = false;
 	std::vector<Node *> warm_nodes_;
@@ -60,6 +66,9 @@ public:
 	String get_texture_dir() const;
 	void set_environment_source(Node *p_source);
 	Node *get_environment_source() const;
+	// One exact render-plane handoff: the height partitions World emitters and
+	// the mirror camera receives its own camera-correct pair of submissions.
+	void set_water_plane(float p_height, Camera3D *p_reflection_camera);
 
 	void set_hidden(bool p_hidden);
 	bool get_hidden() const;
@@ -82,7 +91,10 @@ public:
 	void render_now();
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
-	// references escape through the F3/debug seam.
+	// references escape through the F3/debug seam. They are read from each
+	// compiler's retained draw list on demand, so a render spends nothing on
+	// them and the first report after render_now() is already live: no
+	// capture flag exists to forget.
 	int64_t get_rendered_quad_count() const;
 	int64_t get_draw_command_count() const;
 	Dictionary get_debug_draw_list_report() const;

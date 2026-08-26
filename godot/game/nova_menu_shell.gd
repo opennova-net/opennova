@@ -21,6 +21,7 @@ extends Control
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
+const RetailVideoQualityPolicy := preload("res://game/retail_video_quality_policy.gd")
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -155,6 +156,7 @@ var _root: ResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
 var _sound_profile: LwfData
+var _frame_stats: FrameStatsBoard = null
 
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
@@ -188,6 +190,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
+	var started := Time.get_ticks_usec() if stats_on else 0
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
@@ -196,6 +200,34 @@ func _process(delta: float) -> void:
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.FRAME_MENU_SHELL,
+				Time.get_ticks_usec() - started)
+
+
+func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	if board == _frame_stats:
+		return
+	if _frame_stats != null:
+		var old_edge := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(old_edge):
+			_frame_stats.capture_changed.disconnect(old_edge)
+	_frame_stats = board
+	if _frame_stats != null:
+		var edge := Callable(self, "_on_frame_stats_capture_changed")
+		if not _frame_stats.capture_changed.is_connected(edge):
+			_frame_stats.capture_changed.connect(edge)
+	_on_frame_stats_capture_changed(
+			_frame_stats != null and _frame_stats.is_capture_active())
+
+
+func _on_frame_stats_capture_changed(active: bool) -> void:
+	if _underlay != null:
+		_underlay.set_runtime_profiling_enabled(active)
+
+
+func consume_video_process_us() -> int:
+	return _underlay.consume_process_us() if _underlay != null else 0
 
 
 # Install a companion that owns game-specific menus the generic shell does not handle
@@ -254,6 +286,8 @@ func _assemble_assets() -> void:
 	_underlay.name = "MenuVideoUnderlay"
 	_underlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_underlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_underlay.set_runtime_profiling_enabled(
+			_frame_stats != null and _frame_stats.is_capture_active())
 	add_child(_underlay)
 
 	# The compiled surface: MenuFrame renders + pumps in the fixed 800x600
@@ -360,10 +394,12 @@ func open_menu(file: String, target_screen: String) -> bool:
 
 func show_menu() -> void:
 	visible = true
+	set_process(_driver != null)
 
 
 func hide_menu() -> void:
 	visible = false
+	set_process(false)
 
 
 ## Process-exit-only release for the retail menu cursor + the compiled menu's
@@ -430,6 +466,7 @@ func _wire_named_controls() -> void:
 	_named_handlers.clear()
 	_mission_rows.clear()
 	MenuOptionScrollPolicy.apply(_driver)
+	RetailVideoQualityPolicy.apply(_driver)
 	_seed_crosshair_style_controls()
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and

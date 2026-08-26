@@ -25,6 +25,67 @@ inline constexpr uint32_t CONTROL_REQUEST_LIVE_GATE_TICKS =
 inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS =
 		12u * uint32_t(JO_ENGINE_TICK_RATE);
 
+// Optional attribution for one authoritative Server_TickUpdate. Callers pass
+// nullptr outside an active diagnostics capture; the zero-initialized value is
+// flattened so adapters can forward it without depending on World internals.
+struct ServerTickPerf {
+	uint64_t input_us = 0;
+	uint64_t world_us = 0;
+	uint64_t world_setup_us = 0;
+	uint64_t world_scripts_us = 0;
+	uint64_t world_ai_us = 0;
+	uint64_t world_ai_reactions_us = 0;
+	uint64_t world_ai_collision_tables_us = 0;
+	uint64_t world_ai_entities_us = 0;
+	uint64_t world_ai_infantry_entities_us = 0;
+	uint64_t world_ai_infantry_remote_us = 0;
+	uint64_t world_ai_infantry_combat_us = 0;
+	uint64_t world_ai_infantry_animation_us = 0;
+	uint64_t world_ai_infantry_collision_us = 0;
+	uint64_t world_ai_infantry_collision_contacts_us = 0;
+	uint64_t world_ai_infantry_collision_repulsion_us = 0;
+	uint64_t world_ai_infantry_collision_ground_us = 0;
+	uint64_t world_ai_other_entities_us = 0;
+	uint64_t world_ai_authority_vehicles_us = 0;
+	uint64_t world_ai_vehicle_scan_us = 0;
+	uint64_t world_ai_vehicle_motors_us = 0;
+	uint64_t world_ai_vehicle_riders_us = 0;
+	uint64_t world_ai_client_vehicles_us = 0;
+	uint64_t world_ai_events_us = 0;
+	uint64_t world_attachments_us = 0;
+	uint64_t world_attachment_orphans_us = 0;
+	uint64_t world_attachment_child_pose_us = 0;
+	uint64_t world_attachment_riders_us = 0;
+	uint64_t world_throwables_us = 0;
+	uint64_t world_weapons_us = 0;
+	uint64_t world_projectiles_us = 0;
+	uint64_t world_destruction_us = 0;
+	uint64_t world_housekeeping_us = 0;
+	uint64_t match_us = 0;
+	uint64_t rules_us = 0;
+	uint64_t replication_us = 0;
+	uint64_t replication_query_prep_us = 0;
+	uint64_t replication_query_collect_us = 0;
+	uint64_t replication_query_grid_us = 0;
+	uint64_t replication_query_grid_span_us = 0;
+	uint64_t replication_query_grid_bucket_us = 0;
+	uint64_t replication_query_grid_workspace_us = 0;
+	uint64_t replication_snapshot_us = 0;
+	uint64_t replication_fan_us = 0;
+	uint64_t replication_fan_setup_us = 0;
+	uint64_t replication_round_selection_us = 0;
+	uint64_t replication_entity_selection_us = 0;
+	uint64_t replication_entity_setup_us = 0;
+	uint64_t replication_entity_scoring_us = 0;
+	uint64_t replication_entity_los_us = 0;
+	uint64_t replication_entity_los_terrain_us = 0;
+	uint64_t replication_entity_los_sector_us = 0;
+	uint64_t replication_entity_sort_us = 0;
+	uint64_t replication_entity_budget_us = 0;
+	uint64_t replication_encode_us = 0;
+	uint64_t replication_enqueue_us = 0;
+};
+
 // Stage retail's high-table H:0x03 LogPuntEvent record for one remote. The
 // first event wins and immediately closes that connection's gameplay gate;
 // HostOwner still flushes the reliable description on its next open boundary.
@@ -72,7 +133,7 @@ std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 // through Server_TickUpdate, or the C2S queue drains — and the sim advances — twice. The drain/emit
 // primitives (netsim::drain_connection_c2s / emit_connection_s2c, connection_fan.h) are invoked ONLY
 // from here over connection_list; the legacy NetSystem-as-ISystem was retired at P8.
-void Server_TickUpdate(NapiNPServerCtx &ctx);
+void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf = nullptr);
 
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
 // non-spawn-point sweep emit_minimap_overlay_state runs once per client

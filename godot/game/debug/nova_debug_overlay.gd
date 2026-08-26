@@ -59,6 +59,7 @@ var _page_help_label: Label
 var _unlock_edits: CheckButton
 var _copy_button: Button
 var _copy_feedback_timer: Timer
+var _frame_stats: FrameStatsBoard = null
 var _page_list: ItemList
 var _compact_page_picker: OptionButton
 var _page_mount: ScrollContainer
@@ -212,6 +213,7 @@ func close() -> void:
 
 ## The shell-owned FrameStatsBoard feeding the Stats page (null detaches).
 func set_frame_stats_board(board) -> void:
+	_frame_stats = board as FrameStatsBoard
 	_stats_pane.set_frame_stats_board(board)
 
 
@@ -708,6 +710,8 @@ func _restore_config() -> void:
 # --- Refresh ---------------------------------------------------------------
 
 func _refresh() -> void:
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
+	var refresh_start := Time.get_ticks_usec() if stats_on else 0
 	_session.sync()
 	var status := _runtime_status()
 	var has_sim := _ctx.sim() != null
@@ -749,6 +753,9 @@ func _refresh() -> void:
 	if _active_page != null:
 		_active_page.refresh()
 		_active_page.refresh_debug_controls()
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.FRAME_DEBUG_REFRESH,
+				Time.get_ticks_usec() - refresh_start)
 
 
 func _bind_builtin_targets() -> void:

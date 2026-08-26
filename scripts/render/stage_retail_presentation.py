@@ -251,7 +251,7 @@ def _running_process_image_names() -> set[str]:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=60,
             )
             rows = csv.reader(StringIO(result.stdout))
             return {
@@ -264,7 +264,7 @@ def _running_process_image_names() -> set[str]:
             check=True,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=60,
         )
         return {
             Path(line.strip()).name.casefold()

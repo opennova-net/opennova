@@ -93,8 +93,11 @@ struct ResolverCapture {
 	int32_t last_vel_z = 0;
 	int32_t last_pos_z = 0;
 	int32_t last_capsule_bottom = 0;
+	uint16_t last_type_id = 0;
+	int32_t last_source_bound = 0;
 	bool is_player = false;
 	std::vector<uint16_t> peer_handles;
+	std::vector<int32_t> peer_radii;
 	int32_t return_clearance = 1000; // small positive: hovering, no lift
 	uint16_t ground = 0xFFFF;
 	uint32_t last_flags_in = 0; // the row's flags mirror as the resolve sees it
@@ -113,6 +116,9 @@ int main() {
 	});
 	StillSource still;
 	view.set_root_motion_source(&still);
+	view.set_replica_bound_radius_resolver([](uint16_t type_id) {
+		return type_id == kPlayerType ? 0x23456 : 0;
+	});
 
 	ResolverCapture cap;
 	view.set_replica_contact_resolver(
@@ -121,10 +127,15 @@ int main() {
 				cap.last_vel_z = q.vel_z;
 				cap.last_pos_z = q.pos[2];
 				cap.last_capsule_bottom = q.capsule_bottom;
+				cap.last_type_id = q.type_id;
+				cap.last_source_bound = q.source_bound_radius_q16;
 				cap.is_player = q.is_player_class;
 				cap.peer_handles.clear();
-				for (int32_t i = 0; i < q.peer_count; ++i)
+				cap.peer_radii.clear();
+				for (int32_t i = 0; i < q.peer_count; ++i) {
 					cap.peer_handles.push_back(q.peers[i].handle);
+					cap.peer_radii.push_back(q.peers[i].radius);
+				}
 				cap.last_flags_in = q.entity_flags;
 				q.entity_flags |= cap.or_flags;
 				q.out_ground = cap.ground;
@@ -153,12 +164,19 @@ int main() {
 	view.tick_remote_motion(/*self_handle=*/0xFFFF);
 	ok &= expect(cap.calls == 2, "the resolver ran once per armed row");
 	ok &= expect(cap.is_player, "a Player row resolves with the org2 shape");
+	ok &= expect(cap.last_type_id == kPlayerType,
+	             "the resolver receives the decoded runtime type identity");
+	ok &= expect(cap.last_source_bound == 0x23456,
+	             "the resolver receives the exact authored source bound");
 	ok &= expect(cap.last_vel_z == -208,
 	             "first tick integrates exactly one org2 gravity step");
 	ok &= expect(row_a->rm_vel_z == -208 && row_b->rm_vel_z == -208,
 	             "the row keeps its vertical velocity (hover return, no zero)");
 	ok &= expect(cap.peer_handles.size() == 2,
 	             "the peer span carries every live organic row");
+	ok &= expect(cap.peer_radii.size() == 2 && cap.peer_radii[0] == 0x23456 &&
+	             cap.peer_radii[1] == 0x23456,
+	             "every replica peer sphere carries its authored bound");
 	ok &= expect(row_a->z == az - 208,
 	             "a positive clearance leaves the integrated fall in place");
 

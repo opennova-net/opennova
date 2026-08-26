@@ -35,6 +35,10 @@ public:
 	NodePath get_environment_path() const { return environment_path_; }
 	void set_weather_path(const NodePath &p_path);
 	NodePath get_weather_path() const { return weather_path_; }
+	void set_environment_capture_layer_mask(uint32_t p_mask);
+	uint32_t get_environment_capture_layer_mask() const {
+		return environment_capture_layer_mask_;
+	}
 
 	// Optional owner-supplied BG_COLOR resource. WorldContextPreview supplies
 	// this so the dome's faithful below-rim region clears to skyfog instead
@@ -77,6 +81,7 @@ private:
 	ObjectID env_node_id_;
 	ObjectID weather_node_id_;
 	ObjectID cached_cam_id_;
+	uint32_t environment_capture_layer_mask_ = 0;
 	// Standalone fallback (owners with no weather node): the engine-owned
 	// private scroll core + 62 Hz credit.
 	opennova::env::ScrollFallback fallback_scroll_;

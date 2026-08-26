@@ -58,7 +58,7 @@ class ThreediHeader(ctypes.Structure):
         ("name",           ctypes.c_char * 17),
         ("mesh_type",      ctypes.c_int),  # ThreediMeshType enum
         ("lod_count_decl", ctypes.c_int32),
-        ("lod_distance",   ctypes.c_int32),
+        ("max_radius_fp16", ctypes.c_int32),
     ]
 
 

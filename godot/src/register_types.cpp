@@ -18,6 +18,7 @@
 #include "env/nova_color_smoother.h"
 #include "env/nova_mission_environment.h"
 #include "env/nova_celestial.h"
+#include "env/nova_environment_cube_capture.h"
 #include "mission/nova_mission_object_placer.h"
 #include "env/nova_sky_dome.h"
 #include "env/nova_slot_shadow.h"
@@ -39,6 +40,7 @@
 #include "particle/nova_effect_scene.h"
 #include "particle/nova_particle_compositor.h"
 #include "particle/nova_particle_renderer.h"
+#include "render/nova_framefx.h"
 #include "world/nova_scar_presenter.h"
 #include "object/nova_entity_index.h"
 #include "object/nova_object_data.h"
@@ -111,6 +113,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SkyDome);
 	GDREGISTER_CLASS(Water);
 	GDREGISTER_CLASS(Celestial);
+	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotShadow);
@@ -170,6 +173,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
+	GDREGISTER_CLASS(FrameFxCompositorEffect);
+	GDREGISTER_CLASS(FrameFx);
+	GDREGISTER_CLASS(DisplayDecode);
 	GDREGISTER_CLASS(ScarPresenter);
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(SbfAudioStream);

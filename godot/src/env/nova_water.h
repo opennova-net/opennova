@@ -49,6 +49,11 @@ public:
 	enum {
 		VISUAL_LAYER_WORLD = 1 << 0,
 		VISUAL_LAYER_WATER = 1 << 10,
+		// The retail environment-cube callback draws sky + sun/moon only.
+		// All 20 Godot visual layers are allocated, so it aliases water's bit;
+		// water rejects capture-camera eyes in its shader while the admitted
+		// sky/celestial meshes carry this bit in addition to WORLD.
+		VISUAL_LAYER_ENVIRONMENT_CAPTURE = VISUAL_LAYER_WATER,
 		VISUAL_LAYER_VIEWMODEL = 1 << 11,
 		VISUAL_LAYER_FP_BODY_SHADOW_ONLY = 1 << 12,
 		VISUAL_LAYER_STATIC_SHADOW_CASTER = 1 << 13,

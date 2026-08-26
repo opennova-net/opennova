@@ -100,6 +100,8 @@ void add_shader_flag_fields(Dictionary &item, const char *shader_name, uint32_t 
 	item["uses_uv_generators"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
 	item["uses_environment"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
 	item["uses_specular"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
+	item["environment_textured"] =
+			(descriptor_flags & oed::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
 	item["uses_flag_animation"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_FLAG_ANIMATION) != 0;
 	item["shader_family"] = descriptor != nullptr ? from_native(shader_family_name(descriptor->family)) : String("unknown");
 	item["shader_blend"] = descriptor != nullptr ? from_native(shader_blend_name(descriptor->blend)) : String("opaque");

@@ -28,6 +28,18 @@ constexpr int32_t retail_signed_i16(int64_t value) noexcept {
                          : static_cast<int32_t>(low) - 0x10000;
 }
 
+// Retail's signed Q16.16 multiply used by Entity_InitFromModel when it folds
+// ItemDef/entity scale into the bbox midpoint and model bound. The x86 sequence
+// is `imul; add eax,0x8000; adc edx,0; shrd eax,edx,16`: the +0x8000 bias is
+// applied for both signs, then the signed product shifts arithmetically.
+// [orig: Entity_InitFromModel @ 0x40dc30]
+constexpr int32_t retail_q16_mul_rhu(int32_t value_q16,
+                                    int32_t scale_q16) noexcept {
+    const int64_t product = static_cast<int64_t>(value_q16) * scale_q16;
+    const int64_t shifted = (product + 0x8000LL) >> 16;
+    return static_cast<int32_t>(static_cast<uint32_t>(shifted));
+}
+
 // The retail signed-16 storage domain those fields live in (health, health_max,
 // armor classes, ...): the debug/edit surfaces clamp to it.
 inline constexpr int32_t kRetailI16Min = -32768;
@@ -151,6 +163,7 @@ enum class DeathMotionMode : uint8_t {
     Falling = 2,
     Static = 3,
     PiecePhysics = 4,
+    PiecePitchSettle = 5,
 };
 
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
@@ -255,8 +268,9 @@ struct Entity {
     // (unrotated) wherever retail offsets a ray endpoint by it — the cat-2
     // trigger LOS endpoints. Zero when unstamped (no collision block, or the
     // retail powerup rule attrib&0x20 && type 6) — the ray then leaves the
-    // raw position, matching retail's zeroed pool memory. The authored def
-    // scale is not yet applied here, like bound_radius (rides D-COL-3).
+    // raw position, matching retail's zeroed pool memory. The effective
+    // entity/item scale is already folded here with retail's signed-Q16
+    // +0x8000 multiply before any consumer sees the value.
     // [orig: Entity_InitFromModel center @0x40df1e..0x40df4a, powerup zero
     //  @0x40df0a, scale @0x40dfd6..0x40e018; the LOS reads
     //  @0x4f1880..0x4f18c5 (sub 45) and @0x4f1728..0x4f176f (sub 44)]

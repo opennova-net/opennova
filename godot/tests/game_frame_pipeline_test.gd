@@ -29,6 +29,7 @@ class FakeWorld:
 	var camera_generation := 0
 	var terrain_camera_generation := -1
 	var foliage_camera_generation := -1
+	var framefx_camera_generation := -1
 
 	func begin_device_frame(_camera_pos: Vector3, _camera_xform: Transform3D,
 			_delta: float) -> void:
@@ -40,10 +41,16 @@ class FakeWorld:
 	func render_foliage_frame() -> void:
 		foliage_camera_generation = camera_generation
 		trace.append("foliage")
+	func get_active_frame_stats_board() -> FrameStatsBoard: return null
+	func is_device_frame_timing_enabled() -> bool: return false
+	func record_runtime_frame(_elapsed_us: int) -> void: pass
 	func get_runtime() -> FakePresentation: return presentation
 	func present_local_view_frame() -> void:
 		camera_generation += 1
 		trace.append("local_view")
+	func sync_framefx_frame() -> void:
+		framefx_camera_generation = camera_generation
+		trace.append("framefx")
 	func apply_scene_environment_frame() -> void:
 		trace.append("scene_environment")
 	func drive_network_frame() -> bool:
@@ -61,6 +68,7 @@ class FakeWorld:
 	func mix_audio_frame(ticks_run: int) -> void:
 		trace.append("audio:%d" % ticks_run)
 	func update_clear_frame() -> void: trace.append("clear")
+	func render_environment_cube_frame() -> void: trace.append("environment_cube")
 	func finish_device_frame() -> void: trace.append("finish")
 	func session_frame_failed(_reason: String) -> void: trace.append("failed")
 
@@ -80,14 +88,20 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 			"the one sampled input object crosses the pipeline unchanged")
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
-		"begin", "session", "local_view", "scene_environment", "terrain", "foliage", "network",
+		"begin", "session", "local_view", "framefx", "scene_environment",
+		"terrain", "foliage", "network",
 		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "slot_shadows",
-		"particles", "audio:0", "clear", "finish",
+		"particles", "audio:0", "clear", "environment_cube", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,
 			"terrain samples the post-present camera generation")
 	assert_eq(world.foliage_camera_generation, 1,
 			"foliage samples the post-present camera generation")
+	# The renderer's auxiliary views restore their color into the beauty
+	# target, so a pose one generation stale shears every surface the beauty
+	# pass still owns (foliage, scars, coronas) whenever the view turns.
+	assert_eq(world.framefx_camera_generation, 1,
+			"the auxiliary render views sample the post-present camera generation")
 
 
 func test_network_install_failure_suppresses_every_later_device_phase() -> void:
@@ -101,4 +115,5 @@ func test_network_install_failure_suppresses_every_later_device_phase() -> void:
 			MissionFrameInput.new())
 
 	assert_eq(world.trace,
-			["begin", "session", "local_view", "scene_environment", "terrain", "foliage", "network"])
+			["begin", "session", "local_view", "framefx", "scene_environment",
+			"terrain", "foliage", "network"])

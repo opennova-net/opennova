@@ -384,17 +384,15 @@ struct AiEntity {
     // [orig: selector @0x4ba10f / @0x4b6d99]
     uint32_t def_attrib = 0;
 
-    // --- embedder-fed muzzle seam (D-AI-6) ---
-    // The posed muzzle world position (16.16 fixed, mission frame), pushed once per
-    // frame by the embedder's present layer: the model's gun-flash userpoint (US01
-    // "GFlash01", SASBODY1 "MFlash01"/"bullet") transformed by the ANIMATED skeleton.
+    // --- compatibility muzzle stamp (D-AI-6) ---
+    // Native mission assets resolve their gun-flash userpoint lazily through the
+    // world's muzzle-pose provider. Embedders without that native rig may push this
+    // posed position (16.16 fixed, mission frame) once per presented frame.
     // [orig: the anim-event fire transforms the fire-bone userpoint by the live pose —
     // Entity_GetAttachmentWorldPosition @0x4b2670 (userpoint local pos x posed bone
     // matrix, model userpoint table @model+0xC0) from the fire block @0x4bf326..0x4bf425;
-    // engine/runtime/world carries no skeletal pose, so the embedder feeds the result back.]
-    // muzzle_tick stamps the world logic tick of the push; the consumers (the fire
-    // pass, the LOS endpoints, and the aim-solution eye — AiSystem::weapon_fire_origin)
-    // use the value only while FRESH and otherwise fall back to the chest-lift stand-in.
+    // muzzle_tick stamps the world logic tick of the compatibility push. Consumers
+    // use it only while fresh and otherwise fall back to the chest-lift stand-in.
     int32_t muzzle_world[3] = {};
     uint32_t muzzle_tick = 0;
     bool muzzle_valid = false;
@@ -632,6 +630,30 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
                         int primary_max, int secondary_max, int cand_primary_max,
                         int cand_secondary_max, int visibility, int cand_flags);
 
+// Optional attribution for one AiSystem gameplay tick. World only supplies this
+// while the F3 capture window is active; ordinary ticks keep the original path
+// free of clock reads.
+struct AiTickPerf {
+    uint64_t reactions_us = 0;
+    uint64_t collision_tables_us = 0;
+    uint64_t entities_us = 0;
+    uint64_t infantry_entities_us = 0;
+    uint64_t infantry_remote_us = 0;
+    uint64_t infantry_combat_us = 0;
+    uint64_t infantry_animation_us = 0;
+    uint64_t infantry_collision_us = 0;
+    uint64_t infantry_collision_contacts_us = 0;
+    uint64_t infantry_collision_repulsion_us = 0;
+    uint64_t infantry_collision_ground_us = 0;
+    uint64_t other_entities_us = 0;
+    uint64_t authority_vehicles_us = 0;
+    uint64_t vehicle_scan_us = 0;
+    uint64_t vehicle_motors_us = 0;
+    uint64_t vehicle_riders_us = 0;
+    uint64_t client_vehicles_us = 0;
+    uint64_t events_us = 0;
+};
+
 // The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
 class AiSystem : public ISystem {
 public:
@@ -639,6 +661,7 @@ public:
 
     const char *name() const override { return "ai"; }
     void tick(World &world, const TickContext &ctx) override;
+    void tick_profiled(World &world, const TickContext &ctx, AiTickPerf *perf);
 
     // Re-seed every brain to the captured spawn baseline + clear the transient queues.
     // [Drives World::restore: load_systems() calls on_load on Play->Stop, so the AI
@@ -664,12 +687,9 @@ public:
     AiEntity *for_handle(EntityHandle h);
     int count() const { return static_cast<int>(entities_.size()); }
 
-    // Embedder muzzle seam (D-AI-6): stamp an entity's posed muzzle world position
-    // (16.16 fixed, mission frame) for the fire pass to consume while fresh.
-    // The embedder's present layer pushes this each frame from the model's gun-flash
-    // userpoint x the animated skeleton. [orig: Entity_GetAttachmentWorldPosition
-    // @0x4b2670 — computed inline in the original's fire block; ours is embedder-fed
-    // because engine/runtime/world carries no skeletal pose.]
+    // Compatibility muzzle seam (D-AI-6): embedders without the native pose
+    // provider can stamp a posed gun-flash userpoint for consumers to use while
+    // fresh. [orig: Entity_GetAttachmentWorldPosition @0x4b2670]
     void set_entity_muzzle(EntityHandle h, const int32_t pos[3], uint32_t logic_tick);
 
     AiScheduler scheduler;
@@ -776,9 +796,8 @@ public:
     // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
     void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
-    // The stamp freshness window shared by every muzzle-seam consumer: the present
-    // layer stamps once per rendered frame, so anything older means the pose stopped
-    // flowing (render-skipped rows, out-of-replication-range NPCs — D-AI-6 facet c).
+    // Freshness window for the compatibility presentation stamp. Native providers
+    // resolve against the current simulation pose and do not use this window.
     static constexpr uint32_t kMuzzleFreshTicks = 4;
 
     // The aim/LOS fire origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 —
@@ -792,6 +811,13 @@ public:
     // world-wac-ai-re §21.1/§21.4].
     static void weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]);
     static void weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]);
+    // Asset-aware live-pose form used by the simulation. It asks the world's
+    // native provider at the actual LOS/aim/fire call site, then preserves the
+    // fresh embedder stamp and chest-lift behavior as compatibility fallbacks.
+    void weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const;
+    void weapon_fire_origin(World &world, const AiEntity &e,
+                            uint32_t logic_tick, int32_t out[3]) const;
+    void weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const;
 
     // LOS between two EXACT 16.16 endpoints, true = clear — callers supply the
     // fire origins (weapon_fire_origin) or their own witnessed endpoints: the
@@ -805,6 +831,11 @@ public:
     // @0x539910, ray radius 0, 1 = clear]
     bool line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                              EntityHandle from, EntityHandle to) const;
+    // Snapshot-fan variant: identical LOS semantics, with collision target
+    // matrices reused inside a server-declared stable query epoch.
+    bool line_of_sight_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
+                                    EntityHandle from, EntityHandle to,
+                                    CollisionWorld::RaycastPerf *perf = nullptr) const;
 
     // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
     // brains) same-team, alive, non-building entities within `radius_units` (16.16):
@@ -954,7 +985,8 @@ public:
     // Order: anim root advance -> death edge -> ground resample (every 8) -> think +
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
-    void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
+    void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
+                       AiTickPerf *perf = nullptr);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
     // 32-tick staged perception -> target commit, then per-tick reactions (the attack
     // anims), move modes, and the lead+error aim solution. Authority + alive only.

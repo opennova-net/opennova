@@ -4,7 +4,9 @@ shader_type spatial;
 // SRC=DESTCOLOR, DST=ZERO, producing source * framebuffer.
 render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
 
-uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
+#include "res://shaders/nova_color.gdshaderinc"
+
+uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
 void fragment() {
@@ -18,6 +20,6 @@ void fragment() {
 		// White is the neutral value for destination multiplication.
 		base.rgb = mix(vec3(1.0), base.rgb, mask);
 	}
-	ALBEDO = base.rgb;
+	ALBEDO = nova_scene_output(base.rgb);
 	ALPHA = 1.0;
 }

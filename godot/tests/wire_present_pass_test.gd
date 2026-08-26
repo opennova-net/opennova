@@ -13,6 +13,7 @@ extends GutTest
 const TYPE_PUMP := 6100      # -> item 106100, Pmpjk01 (static, PANM channels)
 const TYPE_ARMORY := 6101    # -> item 106101, Armry01
 const TYPE_RIFLEMAN := 6102  # -> item 106102, Shed + soldier.adm (skeletal)
+const TYPE_SCALED := 6103    # -> item 106103, Pmpjk01 at authored scale 1.5
 const TYPE_UNRESOLVED := 555
 const TYPE_UNRESOLVED_B := 666
 
@@ -216,6 +217,24 @@ func _container() -> Node3D:
 	return container
 
 
+func _assert_dir_light(model: ObjectModel, expected: Vector3,
+		message: String) -> void:
+	var checked := 0
+	for value in model.get_surface_materials():
+		var material := value as ShaderMaterial
+		if material == null:
+			continue
+		var actual: Variant = material.get_shader_parameter("u_dir_light_color")
+		if not actual is Vector3:
+			continue
+		var color: Vector3 = actual
+		assert_almost_eq(color.x, expected.x, 0.0001, message + " (r)")
+		assert_almost_eq(color.y, expected.y, 0.0001, message + " (g)")
+		assert_almost_eq(color.z, expected.z, 0.0001, message + " (b)")
+		checked += 1
+	assert_gt(checked, 0, message + " (at least one lit surface)")
+
+
 func _wire_pass(sim: Simulation, placer: MissionObjectPlacer, container: Node3D,
 		defer_index: EntityIndex = null, options: Dictionary = {}) -> WirePresentPass:
 	var presenter := WirePresentPass.new()
@@ -323,6 +342,37 @@ func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
 	var model: ObjectModel = p.resolve_wire_handle(0)
 	assert_not_null(model)
 	assert_almost_eq(model.position.x, 3.0, 0.001)
+
+
+func test_wire_pose_preserves_authored_model_scale() -> void:
+	var container := _container()
+	var p := _wire_pass(_sim(), _placer(), container)
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"type_id": TYPE_SCALED,
+		"handle": 0x1004,
+		"x": 7.0,
+		"y": 2.0,
+		"z": -3.0,
+		"yaw": 37.0,
+	}]
+	_present(p, snap)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
+	assert_not_null(model)
+	assert_eq(model.get_entity_uniform_scale_q16(), 0x18000,
+			"items.def scale reaches the typed ObjectModel state")
+	var actual_scale := model.transform.basis.get_scale()
+	assert_true(actual_scale.is_equal_approx(Vector3.ONE * 1.5),
+			"wire presentation composes scale with the live pose")
+	assert_true(model.position.is_equal_approx(Vector3(7.0, 2.0, -3.0)))
+	# A subsequent transform write must retain scale; this is the overwrite bug
+	# the old position/rotation-only presenter had.
+	snap.entities[0]["x"] = 11.0
+	snap.entities[0]["yaw"] = 91.0
+	_present(p, snap, 2)
+	assert_true(model.transform.basis.get_scale().is_equal_approx(
+			Vector3.ONE * 1.5))
+	assert_almost_eq(model.position.x, 11.0, 0.001)
 
 
 func test_local_player_handle_is_filtered_from_the_wire_walk() -> void:
@@ -1214,6 +1264,12 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	for bone_index in range(PresentApplier.HELD_WEAPON_BONE_INDEX + 1):
 		skeleton.add_bone("Bone%d" % bone_index)
 	body.add_child(skeleton)
+	# Replica sun quality is cached by wire identity. It applies immediately to
+	# the body and must also reach a held weapon built AFTER this change.
+	var expected_dir := EnvLightValues.retail_noon_defaults().dir_color * 0.25
+	p.set_entity_lighting_context(0x1004, 0.25, false, 0.0)
+	_assert_dir_light(body, expected_dir,
+			"wire sun quality dims the body directional term")
 
 	# Now the peer is holding something the table can resolve.
 	snap.entities[0]["held_weapon_adm"] = 1
@@ -1221,6 +1277,8 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	var weapon: ObjectModel = p.held_weapon_node(0x1004)
 	assert_not_null(weapon, "the model is resolved from the ADM index the wire carries")
 	assert_true(weapon.visible)
+	_assert_dir_light(weapon, expected_dir,
+			"a late-built held weapon inherits its body's cached sun quality")
 	snap.entities[0]["hidden"] = 1
 	_present(p, snap)
 	assert_false(weapon.visible,
@@ -1229,6 +1287,10 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	_present(p, snap)
 	assert_true(weapon.visible,
 			"the caster and color model return on the same visible snapshot")
+	_assert_dir_light(body, expected_dir,
+			"a hidden-visible cycle preserves the last pushed body lighting")
+	_assert_dir_light(weapon, expected_dir,
+			"a hidden-visible cycle preserves the last pushed weapon lighting")
 
 	# Stowing it again retires the node rather than leaving a gun floating.
 	snap.entities[0]["held_weapon_adm"] = 0

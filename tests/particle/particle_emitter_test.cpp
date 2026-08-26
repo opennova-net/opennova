@@ -6,6 +6,7 @@
 #include <particle/parser.h>
 #include <particle/particle.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -304,13 +305,29 @@ bool test_lifetime_expires() {
 	emitter_advance(e, 0.1f);
 	const std::size_t after_first = e.particles.size();
 	if (!expect(after_first > 0, "particles spawn during emit window")) return false;
-	// Advance well past the lifetime. Retail leaves the particle in its
-	// terminal frame and reclaims it at the next AdvanceFrame expiry pass.
+	// Retail's expiry pass reclaims, before integrating, every slot whose
+	// remaining age is below this frame's dt: a frame that would carry the
+	// particles past their lifetime never draws them (age 0.4 < dt 2.0).
 	emitter_advance(e, 2.0f);
-	if (!expect(!e.particles.empty(), "terminal frame remains observable")) return false;
-	emitter_advance(e, 0.001f);
-	if (!expect(e.particles.empty(), "all particles expire after lifetime")) {
+	if (!expect(e.particles.empty(), "a frame past the lifetime reclaims first")) {
 		std::fprintf(stderr, "  still alive: %zu\n", e.particles.size());
+		return false;
+	}
+	// A frame that lands exactly on the lifetime keeps the terminal frame
+	// observable (dt == age is not reclaimed) and reclaims on the next pass.
+	Emitter f;
+	emitter_init(f, &def, {0, 0, 0}, 99);
+	emitter_advance(f, 0.1f);
+	if (!expect(!f.particles.empty(), "particles spawn during emit window")) return false;
+	float remaining = f.particles[0].age;
+	for (std::size_t i = 1; i < f.particles.size(); ++i) {
+		remaining = std::max(remaining, f.particles[i].age);
+	}
+	emitter_advance(f, remaining);
+	if (!expect(!f.particles.empty(), "terminal frame remains observable")) return false;
+	emitter_advance(f, 0.001f);
+	if (!expect(f.particles.empty(), "all particles expire after lifetime")) {
+		std::fprintf(stderr, "  still alive: %zu\n", f.particles.size());
 		return false;
 	}
 	return true;
@@ -330,6 +347,58 @@ bool test_terminal_frame_is_removed_on_next_advance() {
 	if (!expect(e.particles[0].age <= 0.0f, __func__)) return false;
 	emitter_advance(e, 0.001f);
 	return expect(e.particles.empty(), __func__);
+}
+
+// [orig: CParticleEmitter_AdvanceFrame @ 0x5e6840..0x5e68fb]: the expiry
+// pass runs before integration and reclaims a slot whose remaining age is
+// below this frame's dt, so a particle is never drawn past its lifetime.
+bool test_expiry_reclaims_before_the_crossing_frame() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.age = 0.020f;
+	def.age_adj = 0.0f;
+	def.emit_rate = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 99);
+	if (!expect(emitter_spawn_one(e), __func__)) return false;
+	emitter_advance(e, 0.016f);
+	if (!expect(e.particles.size() == 1, "age 0.004 survives a 0.016 frame")) return false;
+	// Remaining age 0.004 < the next dt: reclaimed at the start of that
+	// advance instead of being integrated to -0.012 and drawn once more.
+	emitter_advance(e, 0.016f);
+	return expect(e.particles.empty(), "a slot that would cross zero is reclaimed first");
+}
+
+// The reclaim copies the LAST slot into the hole and re-examines it
+// (memcpy @ 0x5e687e, --count @ 0x5e6883, re-examine @ 0x5e688c): the pool
+// order every later consumer walks is that move-last order, not a stable
+// erase. Five particles with lifetimes [long, short, long, short, long] must
+// end as [p0, p4, p2] after one reclaim pass.
+bool test_expiry_moves_the_last_slot_into_the_hole() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.age = 1.0f;
+	def.age_adj = 0.0f;
+	def.emit_rate = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 99);
+	for (int i = 0; i < 5; ++i) {
+		if (!expect(emitter_spawn_one(e), __func__)) return false;
+		e.particles.back().age = (i % 2 == 1) ? 0.001f : 1.0f + 0.1f * i;
+	}
+	const float keep0 = e.particles[0].age;
+	const float keep2 = e.particles[2].age;
+	const float keep4 = e.particles[4].age;
+	emitter_advance(e, 0.016f);
+	if (!expect(e.particles.size() == 3, "two expired slots reclaimed")) return false;
+	// Integration subtracts dt from every survivor; compare the pre-advance
+	// identities through their distinct lifetimes.
+	const float dt = 0.016f;
+	const bool order_ok =
+			std::fabs(e.particles[0].age - (keep0 - dt)) < 1e-6f &&
+			std::fabs(e.particles[1].age - (keep4 - dt)) < 1e-6f &&
+			std::fabs(e.particles[2].age - (keep2 - dt)) < 1e-6f;
+	return expect(order_ok, "slot 1 takes the last slot (p4), slot 3 is popped");
 }
 
 bool test_gravity_uses_retail_authored_units() {
@@ -1194,6 +1263,8 @@ int main() {
 	if (!test_extreme_rate_and_burst_stop_at_capacity()) ++failures;
 	if (!test_lifetime_expires())           ++failures;
 	if (!test_terminal_frame_is_removed_on_next_advance()) ++failures;
+	if (!test_expiry_reclaims_before_the_crossing_frame()) ++failures;
+	if (!test_expiry_moves_the_last_slot_into_the_hole()) ++failures;
 	if (!test_gravity_uses_retail_authored_units()) ++failures;
 	if (!test_drag_uses_retail_authored_units()) ++failures;
 	if (!test_determinism_same_seed())      ++failures;

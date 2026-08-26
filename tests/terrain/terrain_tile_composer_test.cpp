@@ -123,9 +123,9 @@ std::array<uint8_t, 4> overlay_render_target_pixel(
 				(destination[channel] / 255.0f) * (1.0f - alpha) +
 				(source[channel] / 255.0f) * tint[channel] * alpha);
 	}
-	destination[3] = quantized_byte(
-			alpha * alpha +
-			(destination[3] / 255.0f) * (1.0f - alpha));
+	// Alpha stays untouched: the overlay loops run with
+	// COLORWRITEENABLE = 7, so the SRCALPHA blend lands on RGB only.
+	// [orig: PolyTrn_RenderTile SetRenderState(0xA8, 7) @ 0x60DD6B..0x60DD73]
 	return destination;
 }
 
@@ -351,7 +351,7 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 			"combined flags map destination BR to source BR")) return false;
 	if (!expect(pixel(page, 80, 80)[3] ==
 			overlay_pixel(base, tile_tl, tint)[3],
-			"overlay target alpha is written before the additive DOT3 pass")) return false;
+			"overlay draws leave the page alpha to the DOT3 pass")) return false;
 
 	std::array<uint8_t, 4> overlay_target = base;
 	overlay_target[3] = 0;
@@ -421,11 +421,11 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 	opennova::TilFile single;
 	single.entries.push_back(entry);
 	const Rgba8Image colormap = solid_image(2, 2, {0, 0, 0, 255});
-	// A neutral normal/light pair quantizes the later DOT3 pass to zero. This
-	// isolates the alpha written by retail's preceding SRCALPHA/INVSRCALPHA
-	// overlay draw: with a zero-alpha cache target, one source texel writes
-	// source_alpha * source_alpha. The old RGB-only oracle could not see this
-	// render-target channel even though the terrain lighting pass consumes it.
+	// A neutral normal/light pair quantizes the later DOT3 pass to zero. The
+	// overlay draw itself must contribute NO alpha: retail runs the .til loop
+	// under COLORWRITEENABLE = 7, so the page alpha is exclusively the DOT3
+	// term the terrain lighting pass consumes.
+	// [orig: PolyTrn_RenderTile SetRenderState(0xA8, 7) @ 0x60DD6B..0x60DD73]
 	const Rgba8Image normal = solid_image(2, 2, {128, 128, 128, 128});
 	opennova::terrain::TerrainTilePageSourceView sources;
 	sources.colormap = &colormap;
@@ -479,8 +479,7 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 				hash = fnv_byte(hash, actual);
 			}
 			const uint8_t actual_alpha = page.pixels[actual_offset + 3];
-			const uint8_t retail_alpha = static_cast<uint8_t>(std::lround(
-					static_cast<float>(alpha) * alpha / 255.0f));
+			const uint8_t retail_alpha = 0;  // alpha write is masked off
 			actual_alpha_hash = fnv_byte(actual_alpha_hash, actual_alpha);
 			retail_alpha_hash = fnv_byte(retail_alpha_hash, retail_alpha);
 			if (actual_alpha != retail_alpha) ++alpha_mismatches;
@@ -569,10 +568,10 @@ bool test_optional_cp12_assets() {
 	const opennova::TerrainTilePageKey cp12_key{-512, -2048, 0, 256, 2};
 	return til_entry_oracle(entry_53, tilestrip, 53, cp12_key,
 			UINT64_C(0x2d98d83388a18b7f),
-			UINT64_C(0x3a3fe23216506883)) &&
+			UINT64_C(0xdce53c1df8560f83)) &&
 			til_entry_oracle(entry_1013, tilestrip, 1013, cp12_key,
 					UINT64_C(0x67c1b609d0d0ff60),
-					UINT64_C(0x3a3fe23216506883));
+					UINT64_C(0xdce53c1df8560f83));
 }
 
 // D-TIL-4 oracle: the 00TRa driving-course fork retail draws through the
@@ -624,22 +623,23 @@ bool test_optional_00tra_fork_oracle() {
 			entry_781.tile_index == 42 && entry_781.flags == 0x06,
 			"00TRa entry 781 matches the witnessed tile/flags/placement")) return false;
 	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
-	// The RGB pins are REGRESSION pins of the shipped rotate-then-flip order
-	// (the order itself is witnessed in til-re.md and pinned synthetically in
-	// til_render_uv_test; the bake comparison above shares
-	// til_transform_local_uv and cannot corroborate it): 0x05 -> T(x,z) =
-	// (z,x) hashes 5690c9449dabde0f and 0x06 -> (1-z,1-x) hashes
-	// a03140eb55c2e69d on the retail atlas. The pre-fix flip-then-rotate
-	// order rendered 0x05 as (1-z,1-x) — it produces a03140eb55c2e69d for
-	// entry 761 — which is how the two pins tell the orders apart. The
-	// constants this leg first shipped with (9bd9ceb8ff8a85b1 /
-	// 7c7aa42a36f35e03) matched neither order; re-pinned 2026-08-21.
+	// These are regression pins for the retail archive payload
+	// TRNTILE10.TGA (SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490).
+	// The transform itself is independently witnessed in render_water_quad
+	// and pinned synthetically by til_render_uv_test; the full-atlas bake
+	// comparison above shares til_transform_local_uv and therefore proves
+	// placement/channel parity, not transform independence. On that payload,
+	// 0x05 -> T(x,z)=(z,x) hashes 5690c9449dabde0f and
+	// 0x06 -> T(x,z)=(1-z,1-x) hashes a03140eb55c2e69d (re-verified against
+	// the live compose 2026-08-23; an earlier swap to 9bd9ceb8/7c7aa42a had
+	// re-broken the asset-gated leg). Alpha pins are the all-zero page hash:
+	// the overlay loops run under COLORWRITEENABLE = 7 and never write A.
 	return til_entry_oracle(entry_761, tilestrip, 761, fork_key,
 			UINT64_C(0x5690c9449dabde0f),
-			UINT64_C(0xd88858b8092111d7)) &&
+			UINT64_C(0xdce53c1df8560f83)) &&
 			til_entry_oracle(entry_781, tilestrip, 781, fork_key,
 					UINT64_C(0xa03140eb55c2e69d),
-					UINT64_C(0x7bc3040e0ef8c534));
+					UINT64_C(0xdce53c1df8560f83));
 }
 
 } // namespace

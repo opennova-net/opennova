@@ -1363,9 +1363,6 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 			(server != nullptr && server->get_rendering_device() != nullptr);
 	Dictionary result;
 	result["backend"] = "rendering_device_compositor";
-	result["callback"] = "post_transparent";
-	result["callback_type"] = static_cast<int>(
-			CompositorEffect::EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
 	result["forward_plus_mobile_only"] = true;
 	result["depth_test"] = true;
 	result["depth_write"] = false;
@@ -1523,7 +1520,12 @@ void ParticleCompositorEffect::cancel_pipeline_warm() {
 }
 
 Dictionary ParticleCompositorEffect::get_backend_report() const {
-	return impl_ ? impl_->report() : Dictionary();
+	Dictionary result = impl_ ? impl_->report() : Dictionary();
+	const EffectCallbackType callback_type = get_effect_callback_type();
+	result["callback_type"] = static_cast<int>(callback_type);
+	result["callback"] = callback_type == EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT ?
+			String("pre_transparent") : String("post_transparent");
+	return result;
 }
 
 void ParticleCompositorEffect::_render_callback(
@@ -1534,7 +1536,8 @@ void ParticleCompositorEffect::_render_callback(
 		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
 		impl_->diagnostics.callback_seen = true;
 	}
-	if (p_effect_callback_type != EFFECT_CALLBACK_TYPE_POST_TRANSPARENT) {
+	if (p_effect_callback_type != static_cast<int32_t>(
+			get_effect_callback_type())) {
 		impl_->set_failure("Particle compositor invoked at the wrong callback",
 				"callback_mismatch");
 		return;

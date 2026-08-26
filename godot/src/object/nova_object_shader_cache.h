@@ -5,6 +5,7 @@
 // embodies the descriptor; no runtime shader source is generated.
 
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -47,12 +48,16 @@ public:
 	PackedStringArray get_known_shader_tags() const;
 
 	// The water-plane transparent bracket (maturity REN-3,
-	// docs/render/render-order-re.md): the session's water height splits
-	// blended world materials into the far/camera-side priority rungs.
-	// Set by the water owner node when a water plane exists; cleared with it.
-	void set_water_split_height(float height);
-	void clear_water_split_height();
-	bool has_water_split_height() const;
+	// docs/render/render-order-re.md): the session's water height and current
+	// camera side split each blended strip into the far/camera-side priority
+	// rungs. Set once per scene frame; cleared when no water pass is active.
+	void set_water_plane(float height, bool camera_above);
+	void clear_water_plane();
+	bool has_water_plane() const;
+	// Advances only when the plane (height, camera side, presence) actually
+	// changes; strip classifiers compare it to skip frames where nothing the
+	// ladder depends on moved.
+	uint64_t get_water_plane_generation() const;
 	int32_t alpha_rung_for_height(float world_height) const;
 
 	void clear();
@@ -63,8 +68,11 @@ protected:
 private:
 	static ObjectShaderCache *singleton;
 	std::unordered_map<uint32_t, Ref<Shader>> cache;
+	Ref<ImageTexture> phong_map_texture;
 	float water_split_height = 0.0f;
+	bool water_camera_above = true;
 	bool water_split_set = false;
+	uint64_t water_plane_generation = 1;
 };
 
 } // namespace godot

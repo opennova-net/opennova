@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
@@ -48,10 +49,25 @@ public:
 		OUTPUT_ALL = OUTPUT_TRANSFORM | OUTPUT_PART_ANIM | OUTPUT_VISIBILITY |
 				OUTPUT_BODY_ANIM,
 	};
+	// Fixed packed layout returned only by profile_present_snapshot(). The
+	// ordinary present_snapshot() path takes no timestamps or result allocation.
+	enum MissionProfileSlot {
+		MISSION_PROFILE_CORE_US = 0,
+		MISSION_PROFILE_AIM_US,
+		MISSION_PROFILE_CONTROLS_US,
+		MISSION_PROFILE_VISIBILITY_US,
+		MISSION_PROFILE_BODY_US,
+		MISSION_PROFILE_MUZZLE_US,
+		MISSION_PROFILE_ROWS,
+		MISSION_PROFILE_SUBMITTED_ROWS,
+		MISSION_PROFILE_BODY_ROWS,
+		MISSION_PROFILE_MUZZLE_ROWS,
+		MISSION_PROFILE_SLOT_COUNT,
+	};
 
-	// `sim` feeds the muzzle-origin push back (typed Simulation; converted
-	// once at this boundary). `index` resolves rows to typed models — a real
-	// EntityIndex, in tests too.
+	// `sim` exposes native lazy muzzle resolution plus the compatibility push-back
+	// seam (typed Simulation; converted once at this boundary). `index` resolves
+	// rows to typed models — a real EntityIndex, in tests too.
 	void setup(Object *sim, Object *index,
 			const Ref<MissionObjectPlacer> &placer = Ref<MissionObjectPlacer>());
 	void set_output_channels(int channels);
@@ -68,6 +84,8 @@ public:
 	void present();
 	void present_snapshot(const PackedFloat32Array &snap, int stride,
 			int64_t layout_revision);
+	PackedInt64Array profile_present_snapshot(const PackedFloat32Array &snap,
+			int stride, int64_t layout_revision);
 
 	Dictionary get_stats() const;
 	Ref<class MissionPresentStats> get_stats_record() const;
@@ -156,6 +174,18 @@ protected:
 	static void _bind_methods();
 
 private:
+	struct MissionFrameProfile {
+		int64_t core_us = 0;
+		int64_t aim_us = 0;
+		int64_t controls_us = 0;
+		int64_t visibility_us = 0;
+		int64_t body_us = 0;
+		int64_t muzzle_us = 0;
+		int64_t rows = 0;
+		int64_t submitted_rows = 0;
+		int64_t body_rows = 0;
+		int64_t muzzle_rows = 0;
+	};
 	enum BodyDispatchMode {
 		BODY_NONE = 0,
 		BODY_CLIP_AT,
@@ -179,11 +209,18 @@ private:
 	struct Row {
 		int base = 0;
 		ObjectID node_id;
+		// Topology-stamped typed hot-path reference. ObjectModel's lifetime
+		// generation invalidates the plan before a freed pointer can be reused;
+		// node_id remains the cold release/fallback identity.
+		ObjectModel *model = nullptr;
 		int32_t entity_kind = -1;
 		int32_t entity_index = -1;
 		// Plan-time muzzle presence (the D-AI-6 fire-origin seam); re-checked
 		// live before each posed read.
 		bool has_muzzle = false;
+		// The native collision rig resolved the same def-authored userpoint, so
+		// AI owns lazy pose resolution and this row needs no shell readback.
+		bool has_native_muzzle = false;
 		int32_t bms_id = 0;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
@@ -266,6 +303,8 @@ private:
 
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
+	void present_snapshot_impl(const PackedFloat32Array &snap, int stride,
+			int64_t layout_revision, MissionFrameProfile *p_profile);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
 	void release_part_anim_outputs();
@@ -302,18 +341,6 @@ private:
 	int output_channels_ = OUTPUT_ALL;
 	Dictionary occlusion_hidden_ids_;
 	Dictionary present_visibility_;
-	// The camera-submission registry, shared BY REFERENCE with every resolved
-	// node that exposes set_submission_registry (ObjectModel): a node keyed
-	// by instance id is present exactly while its bounds notifier reports
-	// off-screen. Retail evaluates the presentation writers per SUBMITTED model
-	// [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes constants for the
-	// models the batch draws; cull/submit @ Entity_RenderVehicleModel
-	// @ 0x4407d0], so the walk skips the part/CTRL/aim dispatch legs for rows
-	// retail would not submit and re-applies from cold state on re-entry.
-	// Nodes without the seam (tests, third-party visuals) never register and
-	// keep today's every-row dispatch.
-	Dictionary submission_offscreen_ids_;
-
 	int64_t stat_moved_ = 0;
 	int64_t stat_posed_ = 0;
 	int64_t stat_hidden_ = 0;
@@ -331,6 +358,7 @@ private:
 	int plan_stride_ = 0;
 	int64_t plan_snapshot_size_ = -1;
 	int64_t plan_index_generation_ = -1;
+	uint64_t plan_model_lifetime_generation_ = 0;
 	bool plan_dirty_ = true;
 	std::vector<Row> rows_;
 
@@ -342,3 +370,4 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::PresentApplier::OutputChannels);
+VARIANT_ENUM_CAST(godot::PresentApplier::MissionProfileSlot);

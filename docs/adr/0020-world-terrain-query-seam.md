@@ -46,6 +46,10 @@ none of it (verified pre-move: zero terrain-family includes outside
    IHeightSampler/ITerrainCollision interfaces grow here (world keeps
    consuming the seam; providers implement it), rather than world ever
    re-linking the format stack.
+   2026-08-23: the permanent terrain-scorch RECORD and its two retail
+   producers (`terrain_query/terrain_scorch_record.h`) joined the seam the
+   same way — world's destruction/wreck events resolve records there, the
+   registry, textures, and page compile stay in `terrain/`.
 6. **The forbidden-edge check is permanent**:
    `scripts/lint/link_graph_check.py` asserts the TRANSITIVE link closure
    (graphviz dump of the configured tree, with a CMake-file walk fallback

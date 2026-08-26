@@ -177,6 +177,7 @@ private:
 		int armor_blast = 0;  // def+0x192
 		int armor_kz = 0;     // compatibility mirror of armor_blast
 		float kz = 0.0f;      // def+0x198 death-blast radius (units)
+		int32_t model_scale_q16 = 0; // def+0x1B8 signed Q16.16; 0 = unscaled
 		float debris_scale = 0.0f; // def+0x1BC (0 = unset -> 1.0)
 		int husk_sub_parts = 0;    // def+0x100
 		uint8_t husk_sub_part_types[16] = {}; // def+0x101[] debris-type rows
@@ -275,6 +276,11 @@ public:
 	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
 	int get_hp(int id) const;
 	int get_item_type(int id) const;
+	// Effective authored model scale source, signed Q16.16. Zero is retail's
+	// unscaled sentinel (a visual/collision scale of 1.0).
+	// (retail: ItemDef+0x1B8; Entity_InitFromModel @0x40dc30, see
+	// engine/runtime/simassets/model_builders.cpp)
+	int32_t get_model_scale_q16(int id) const;
 	// Building-interior daylight fraction from items.def light_transfer
 	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).
 	float get_light_transfer(int id) const;

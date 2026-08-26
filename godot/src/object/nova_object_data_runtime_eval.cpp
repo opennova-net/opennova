@@ -97,6 +97,9 @@ using GlobalCtrlValues = renderer::ControlRegisterValues;
 
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 	GlobalCtrlValues values = {};
+	if (dict.is_empty()) {
+		return values;
+	}
 	const Array keys = dict.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
@@ -210,14 +213,11 @@ PackedInt32Array ObjectData::get_effective_panm_targets(int p_lod_index) const {
 
 Dictionary ObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
+	renderer::MaterialRuntime runtime;
+	if (!eval_material_runtime_native(p_index, p_time_ms,
+				runtime_control_values(p_ctrl_values), runtime)) {
 		return out;
 	}
-	const std::vector<std::string> ctrl_names = control_register_names(source_model);
-	const GlobalCtrlValues ctrl_values =
-			global_control_values_from_dict(p_ctrl_values);
-	const renderer::MaterialRuntime runtime = renderer::eval_material_runtime(
-			source_model.materials[p_index], retail_runtime_time_ms(p_time_ms), ctrl_names, ctrl_values);
 	out["uv_transform_u"] = Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20);
 	out["uv_transform_v"] = Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21);
 	out["rgb_mod"] = Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b);
@@ -226,14 +226,44 @@ Dictionary ObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, con
 }
 
 int ObjectData::compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
+	return compute_anim_frame_native(p_index, p_time_ms,
+			runtime_control_values(p_ctrl_values));
+}
+
+const std::vector<std::string> &ObjectData::_runtime_control_names() const {
+	if (!runtime_control_names_valid_) {
+		runtime_control_names_cache_ = control_register_names(source_model);
+		runtime_control_names_valid_ = true;
+	}
+	return runtime_control_names_cache_;
+}
+
+renderer::ControlRegisterValues ObjectData::runtime_control_values(
+		const Dictionary &p_ctrl_values) {
+	return global_control_values_from_dict(p_ctrl_values);
+}
+
+bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,
+		const renderer::ControlRegisterValues &p_ctrl_values,
+		renderer::MaterialRuntime &r_runtime) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
+		return false;
+	}
+	r_runtime = renderer::eval_material_runtime(source_model.materials[p_index],
+			retail_runtime_time_ms(p_time_ms), _runtime_control_names(),
+			p_ctrl_values);
+	return true;
+}
+
+int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,
+		const renderer::ControlRegisterValues &p_ctrl_values) const {
+	if (!has_source_model || p_index < 0 ||
+			static_cast<size_t>(p_index) >= source_model.material_count) {
 		return 0;
 	}
-	const std::vector<std::string> ctrl_names = control_register_names(source_model);
-	const GlobalCtrlValues ctrl_values =
-			global_control_values_from_dict(p_ctrl_values);
 	return renderer::compute_anim_frame(source_model.materials[p_index], 0,
-			retail_runtime_time_ms(p_time_ms), ctrl_names, ctrl_values);
+			retail_runtime_time_ms(p_time_ms), _runtime_control_names(),
+			p_ctrl_values);
 }
 
 Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {

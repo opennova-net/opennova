@@ -62,7 +62,11 @@
   Model A (unannotated functions stay off the DLL under hidden default visibility).
   Adding a Model-A export is a deliberate decision: annotate it AND bump the
   `abi_export_identity` baseline in the same commit, logged in docs/maturity-program.md.
-- Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones — `opennova_formats`
+- Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
+  exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
+  thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
+  above formats, so both `opennova_formats` and `opennova_runtime` PUBLIC-link the
+  leaf directly) — `opennova_formats`
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
   pcapio), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,

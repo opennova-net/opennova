@@ -164,9 +164,12 @@ parity payoff.
   `renderer::opaque_sort_key`/`transparent_sort_key` remain the T1-pinned
   witnessed spec with no runtime caller.
 - REOPEN CONDITION: a divergence diagnosed to draw order or pass placement
-  that a scene demonstrates visibly — the standing candidates are the
-  water-boundary rows D-RORD-3/-7 — reopens R3 with that row's scene as the
-  new spike scene. (D-RORD-8 left the candidate list 2026-08-12: its
+  that a scene demonstrates visibly reopens R3 with that row's scene as the
+  new spike scene. D-RORD-7 triggered that condition 2026-08-22; its
+  auxiliary-view solution (a second full-resolution scene render per frame)
+  was withdrawn 2026-08-23 for the particle PRE/POST split alone, and the row
+  is OPEN again with the narrowed far-side-alpha residual — the next reopen
+  needs a scene that shows that residual. (D-RORD-8 left the candidate list 2026-08-12: its
   one-frame lag was the CAMERA phase, not the leg order — local-view placement
   now precedes terrain/foliage, and the post-present occlusion slot stands;
   render-order-re.md + the ledger closure.)

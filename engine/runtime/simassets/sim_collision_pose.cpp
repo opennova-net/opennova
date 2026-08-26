@@ -129,6 +129,8 @@ void SimCollisionPoseProvider::clear() {
 	generic_models_.clear();
 	skeletal_sources_.clear();
 	rig_cache_.clear();
+	muzzle_queries_ = 0;
+	muzzle_resolves_ = 0;
 }
 
 void SimCollisionPoseProvider::register_generic_model(int32_t model_id,
@@ -140,7 +142,8 @@ void SimCollisionPoseProvider::register_generic_model(int32_t model_id,
 bool SimCollisionPoseProvider::register_skeletal_entity(
 		world::EntityHandle entity, uint64_t registry_spawn_id,
 		int32_t model_id, const std::string &rig_key,
-		const std::string &adm_name, const Threedi3di3 *model) {
+		const std::string &adm_name, const Threedi3di3 *model,
+		const std::string &muzzle_userpoint) {
 	skeletal_sources_.erase(entity.packed);
 	if (index_ == nullptr || model == nullptr || adm_name.empty()) return false;
 	std::shared_ptr<const AdmSkeletalClips> rig;
@@ -165,6 +168,25 @@ bool SimCollisionPoseProvider::register_skeletal_entity(
 	source.model_id = model_id;
 	source.registry_spawn_id = registry_spawn_id;
 	source.rig = std::move(rig);
+	if (!muzzle_userpoint.empty() && model->user_points != nullptr) {
+		for (size_t i = 0; i < model->user_point_count; ++i) {
+			const ThreediUserPoint &point = model->user_points[i];
+			if (!strutil::iequals(point.name, muzzle_userpoint) ||
+					point.subobject_index < 0 ||
+					static_cast<size_t>(point.subobject_index) >=
+							source.rig->bone_count()) {
+				continue;
+			}
+			float position[3];
+			threedi_user_point_position(&point, position);
+			source.muzzle_bone = point.subobject_index;
+			for (int axis = 0; axis < 3; ++axis) {
+				source.muzzle_model_position[axis] = static_cast<int32_t>(
+						std::lround(position[axis] * 65536.0f));
+			}
+			break;
+		}
+	}
 	skeletal_sources_[entity.packed] = std::move(source);
 	return true;
 }
@@ -176,6 +198,12 @@ void SimCollisionPoseProvider::remove_entity(world::EntityHandle entity) {
 bool SimCollisionPoseProvider::has_skeletal_entity(
 		world::EntityHandle entity) const {
 	return skeletal_sources_.find(entity.packed) != skeletal_sources_.end();
+}
+
+bool SimCollisionPoseProvider::has_skeletal_muzzle_entity(
+		world::EntityHandle entity) const {
+	const auto found = skeletal_sources_.find(entity.packed);
+	return found != skeletal_sources_.end() && found->second.muzzle_bone >= 0;
 }
 
 bool SimCollisionPoseProvider::build_section_matrices(world::World &world,
@@ -197,6 +225,85 @@ bool SimCollisionPoseProvider::build_section_matrices(world::World &world,
 		return false;
 	return build_generic(world, *generic_found->second, entity, entity_world,
 			model, out);
+}
+
+bool SimCollisionPoseProvider::resolve_muzzle_pose(world::World &world,
+		world::EntityHandle entity, int32_t out[3]) {
+	++muzzle_queries_;
+	if (out == nullptr) return false;
+	const auto found = skeletal_sources_.find(entity.packed);
+	const world::Entity *registered = world.registry.get(entity);
+	if (found == skeletal_sources_.end() || registered == nullptr ||
+			found->second.registry_spawn_id !=
+					registered->registry_spawn_id) {
+		return false;
+	}
+	const SkeletalSource &source = found->second;
+	const AdmSkeletalClips *rig = source.rig.get();
+	const int32_t muzzle_bone = source.muzzle_bone;
+	if (muzzle_bone < 0 || rig == nullptr || !rig->loaded() ||
+			!rig->fk_valid() ||
+			static_cast<size_t>(muzzle_bone) >= rig->parents().size() ||
+			static_cast<size_t>(muzzle_bone) >=
+					rig->rest_global_inverse().size()) {
+		return false;
+	}
+
+	std::vector<anim::PoseBone> pose;
+	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
+	anim::AimOverlayInputs inputs;
+	const world::Entity *posed_entity = nullptr;
+	world::AiEntity *ai_entity = nullptr;
+	if (!eval_entity_pose(world, source, entity, pose, angles, inputs,
+			posed_entity, ai_entity) ||
+			static_cast<size_t>(muzzle_bone) >= pose.size()) {
+		return false;
+	}
+
+	// Accumulate only the muzzle bone's ancestor prefix. This is the same
+	// parent-local FK and bind-rest division build_skeletal() uses for every
+	// collision section, without constructing or publishing an entire matrix
+	// array for a single attachment-point query.
+	std::vector<AdmSkeletalClips::RestTransform> pose_global(
+			static_cast<size_t>(muzzle_bone) + 1);
+	const bool collapse_right_hand =
+			mount_collapses_right_hand_row(*posed_entity);
+	for (int32_t i = 0; i <= muzzle_bone; ++i) {
+		AdmSkeletalClips::RestTransform local;
+		anim::quat_to_mat3_rows(pose[static_cast<size_t>(i)].rotation,
+				local.rows);
+		local.origin = pose[static_cast<size_t>(i)].origin;
+		if (collapse_right_hand && i == kRightHandBoneIndex) {
+			std::memset(local.rows, 0, sizeof(local.rows));
+		}
+		const int parent = rig->parents()[static_cast<size_t>(i)];
+		pose_global[static_cast<size_t>(i)] = parent >= 0
+				? rest_mul(pose_global[static_cast<size_t>(parent)], local)
+				: local;
+	}
+	const AdmSkeletalClips::RestTransform deformation = rest_mul(
+			pose_global[static_cast<size_t>(muzzle_bone)],
+			rig->rest_global_inverse()[static_cast<size_t>(muzzle_bone)]);
+	float render_pose[16];
+	render_matrix_from_deformation(deformation, render_pose);
+	const int32_t position[3] = {
+			static_cast<int32_t>(posed_entity->position.x * 65536.0f),
+			static_cast<int32_t>(posed_entity->position.y * 65536.0f),
+			static_cast<int32_t>(posed_entity->position.z * 65536.0f),
+	};
+	const world::CollisionMatrix body_world =
+			world::collision_matrix_from_euler(
+					angles[anim::kOverlayBody].yaw,
+					angles[anim::kOverlayBody].pitch,
+					angles[anim::kOverlayBody].roll, position);
+	world::CollisionMatrix muzzle_world;
+	if (!world::collision_matrix_apply_render_pose(
+			body_world, render_pose, muzzle_world)) {
+		return false;
+	}
+	muzzle_world.transform_point(source.muzzle_model_position, out);
+	++muzzle_resolves_;
+	return true;
 }
 
 bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,

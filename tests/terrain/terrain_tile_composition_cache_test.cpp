@@ -51,6 +51,38 @@ int main() {
 				"a 16-unit .til entry keeps its level-dependent footprint")) return 1;
 	}
 
+	// The max-quality Foliage_WindSwayVS path uploads c7/c8 from the packed
+	// page record. After its D3D (Z,Y,X) model transform, those rows reduce to
+	// the same presentation-world projection used by terrain, foliage,
+	// MATCHTERRAIN, and the static-shadow raster.
+	const TerrainTilePageKey projected_page{1024, -512, 64, 128, 4};
+	const auto projection = TerrainTileCompositionCache::page_projection(
+			projected_page);
+	if (!expect(projection.has_value() &&
+			projection->world_origin_x == 1088.0f &&
+			projection->world_origin_z == -384.0f &&
+			projection->inverse_world_span == 1.0f / 64.0f &&
+			projection->world_span == 64.0f,
+			"retail c7/c8 decode preserves routed sector and packed local origin")) {
+		return 1;
+	}
+	if (!expect(projection->project(1088.0f, -384.0f) ==
+				std::array<float, 2>({0.0f, 0.0f}) &&
+			projection->project(1104.0f, -368.0f) ==
+				std::array<float, 2>({0.25f, 0.25f}) &&
+			projection->project(1152.0f, -320.0f) ==
+				std::array<float, 2>({1.0f, 1.0f}),
+			"c7/c8 projection maps page edges and interior without an axis swap")) {
+		return 1;
+	}
+	if (!expect(!TerrainTileCompositionCache::page_projection(
+			TerrainTilePageKey{0, 0, 0, 0, 0}).has_value() &&
+			!TerrainTileCompositionCache::page_projection(
+			TerrainTilePageKey{0, 0, 0, 0, 5}).has_value(),
+			"only active-quality retail page levels expose projection state")) {
+		return 1;
+	}
+
 	// A repeated source page at two routed world-sector origins is two cache
 	// identities. The compose job retains the exact atlas source selected by
 	// the terrain compiler for the renderer to draw.
@@ -427,6 +459,42 @@ int main() {
 	const auto after_bulk_dirty = edge_cache.request(edge_left);
 	if (!expect(after_bulk_dirty && after_bulk_dirty->job,
 			"bulk-invalidated page recompiles on its next exact request")) return 1;
+
+	// Permanent terrain scorch insertion uses the retail cache-record walk:
+	// inclusive AABB overlap retires ready AND pending generations spatially,
+	// while an unrelated resident page remains publishable/ready.
+	TerrainTileCompositionCache scorch_dirty_cache;
+	const TerrainTileCompositionRequest scorch_left{
+			TerrainTilePageKey{0, 0, 0, 0, 4},
+			1, 0, 0, TerrainTileContentStamp{10}};
+	const TerrainTileCompositionRequest scorch_right{
+			TerrainTilePageKey{0, 0, 64, 0, 4},
+			2, 64, 0, TerrainTileContentStamp{10}};
+	const TerrainTileCompositionRequest scorch_far{
+			TerrainTilePageKey{0, 0, 128, 0, 4},
+			3, 128, 0, TerrainTileContentStamp{10}};
+	const auto dirty_left = scorch_dirty_cache.request(scorch_left);
+	const auto dirty_right = scorch_dirty_cache.request(scorch_right);
+	const auto clean_far = scorch_dirty_cache.request(scorch_far);
+	if (!expect(dirty_left && dirty_left->job &&
+			dirty_right && dirty_right->job &&
+			clean_far && clean_far->job &&
+			scorch_dirty_cache.publish(*dirty_left->job) &&
+			scorch_dirty_cache.publish(*clean_far->job),
+			"scorch invalidation fixture has ready, pending, and far pages")) {
+		return 1;
+	}
+	if (!expect(scorch_dirty_cache.invalidate_overlapping_q16(
+				64 << 16, 8 << 16, 65 << 16, 9 << 16) == 2,
+			"shared-edge scorch retires both adjacent occupied records")) return 1;
+	if (!expect(!scorch_dirty_cache.can_publish(*dirty_right->job) &&
+			!scorch_dirty_cache.best_ready(
+					opennova::TerrainTileResidentPoint{0, 0, 32.0f, 8.5f}) &&
+			scorch_dirty_cache.best_ready(
+					opennova::TerrainTileResidentPoint{0, 0, 160.0f, 8.5f}),
+			"overlap-only invalidation kills pending work and preserves far readiness")) {
+		return 1;
+	}
 
 	// Mission/device replacement is a hard cache reset, including same-numbered
 	// frame pins, but must never let a pre-reset composition job publish into a

@@ -1,20 +1,11 @@
 #include "threedi/threedi_panm_runtime.h"
 
-#include <io/crt_rand.h>
+// The renderer/effects-side owner of the CRT recurrence (the simulation's
+// owner is World::crt_rand; both spell the same MSVC formula).
+#include "crt/crt_rng.h"
 
 #include <string.h>
 
-// The renderer-side owner of the CRT recurrence (the simulation's owner is
-// World::crt_rand); both spell the same MSVC formula from io/crt_rand.h.
-static opennova::io::CrtRand g_wave_rand;
-
-uint16_t threedi_wave_rand15(void) {
-    return (uint16_t)g_wave_rand.next();
-}
-
-void threedi_wave_srand(uint32_t seed) {
-    g_wave_rand.seed(seed);
-}
 
 // Retail uses two-operand 32-bit IMUL and keeps the low dword, then performs
 // an arithmetic shift. Spell both operations in unsigned bits so overflow is
@@ -46,7 +37,7 @@ static int32_t panm_wave_lookup(const uint8_t *table, uint8_t func, int16_t a3) 
         case 5:
             return ((int32_t)table[1280 + idx]) << 8;
         case 6:
-            return 16 * (int32_t)(threedi_wave_rand15() & 0x0FFF);
+            return 16 * (int32_t)(crt_rand15() & 0x0FFF);
         case 7: {
             int32_t v0 = table[1536 + idx];
             int32_t v1 = table[1536 + (uint8_t)(idx + 1)];

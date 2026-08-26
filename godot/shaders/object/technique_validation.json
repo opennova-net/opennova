@@ -1,0 +1,507 @@
+{
+  "schema": 2,
+  "description": "Audited NORMAL-pass object techniques reachable by the locked highest-quality retail profile. Every entry is cross-checked against pipeline_manifest.json and either decoded retail SCR effect source or a named binary/document witness.",
+  "quality_scope": {
+    "profile": "highest-quality-retail-path",
+    "fixture_catalog": "docs/render/render-fixtures-retail-v4.json",
+    "fixture_contract": "retail_reference_highest_retail_selectable_v2",
+    "shader_usage_level": 2,
+    "retail_pass_class": "TECHNIQUE_NORMAL",
+    "retail_effect_inventory": "godot/shaders/object/retail_effect_inventory.json",
+    "locked_menu_policy": "godot/game/retail_video_quality_policy.gd",
+    "excluded": [
+      "retail shader-usage levels 0 and 1",
+      "the two untyped fixed-function fallbacks selected only when pixel shaders are disabled"
+    ],
+    "pass_class_validation": "godot/shaders/object/auxiliary_technique_validation.json",
+    "audited_pass_classes": [
+      "TECHNIQUE_NORMAL",
+      "TECHNIQUE_PROJSHAD",
+      "TECHNIQUE_DEPTHMASK",
+      "TECHNIQUE_CLIP",
+      "TECHNIQUE_GLOW",
+      "TECHNIQUE_MATCHTERRAIN"
+    ],
+    "bounded_pass_class_residuals": []
+  },
+  "source_corpus": {
+    "path": "third_party/modsuperoed",
+    "commit": "bb49c06099782e5c8861ffed3422cfd5a09d0ed0",
+    "encoding": "NovaLogic SCR stream, decoded with the repository SCR algorithm and key 0xA55B1EED"
+  },
+  "parity_statuses": [
+    "matching",
+    "matching_with_bounded_residuals"
+  ],
+  "channel_contract": {
+    "machine_readable_source": "godot/shaders/object/pipeline_manifest.json",
+    "rgb_gen": "SelfLumColor/RgbGen modulates RGB only for _FFP SELFLUM techniques.",
+    "alpha_gen": "MaterialDiffuse.a/AlphaGenValue modulates alpha only for _FFP TBoringFFP techniques; shader-based NORMAL effects consume their authored texture/vertex channels directly.",
+    "specular_alpha": "Standard Phong reads raw Diffuse1.a as pow-8 brightness; PhongMap reads it as brightness and pow-4/pow-64 interpolation weight.",
+    "coverage": "Every runtime technique names diffuse, normal-map, vertex-diffuse, reflect-color, or zero coverage explicitly in pipeline_manifest.json."
+  },
+  "normal_pass_audit": {
+    "retail_technique_declarations": 30,
+    "retail_pass_declarations": 101,
+    "point_light_execution": "Reachable POINTLIGHT_VARIATIONS and ONCE_PER_POINTLIGHT passes are folded into the selected technique's bounded four-light sum while retaining each source stage's vertex/pixel split.",
+    "spotlight_execution": "ONCE_PER_SPOTLIGHT branches are source-audited but unreachable in the shipped JO runtime: LightPool_SpawnSpotProjectorEffect has no caller, and model LGHT falloff/rotation/view-projection never enter the pool.",
+    "spotlight_citation": "docs/render/render-lighting-re.md#effectworld-dynamic-point-lights",
+    "single_pass_limit": "Godot combines reachable NORMAL passes into one material. Independent source-pass alpha tests are exact where they share primary coverage; exceptional post-pass coverage is bounded per technique under D-RMAT-6."
+  },
+  "techniques": [
+    {
+      "engine_enum": "Fixed",
+      "implementation": "fixed",
+      "policies": ["opaque", "alpha", "additive", "cutout_mix", "cutout_alpha", "cutout_additive"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "_FFP.fx", "symbols": ["technique TBoringFFP", "TSSColor(0, Modulate2x", "TSSAlpha(0, Modulate"]}]
+      },
+      "channels": "Diffuse1.rgb is modulated by saturated vertex diffuse at 2x. MaterialDiffuse.a (AlphaGenValue) multiplies Diffuse1.a only on this _FFP path; the resulting alpha supplies blend/cutout coverage.",
+      "light_response": "Geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights, saturated before MODULATE2X.",
+      "state": "NORMAL pass; static policy table selects opaque/alpha/additive, cutout compare, culling, depth write, and regular/additive fog.",
+      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "FixedSkinned",
+      "implementation": "fixed",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBasic.fx", "symbols": ["technique TSkBasic", "VS_OUTPUT vsSkinBasic", "CalcSkinWorldPosAndNormal", "vsSkBasicArray[CurNumPointLights]", "TSSAlpha(0, Modulate"]}
+        ]
+      },
+      "channels": "Diffuse1 supplies RGB and coverage directly. Unlike _FFP, SkBasic never consumes MaterialDiffuse/AlphaGenValue and has no SELFLUM specialization.",
+      "light_response": "Skinned geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights.",
+      "state": "SkBasic NORMAL pass; opaque with optional alpha-test cutout, back-face culling, depth write, and regular fog.",
+      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "FixedDetail",
+      "implementation": "fixed",
+      "policies": ["opaque", "alpha", "additive", "cutout_mix", "cutout_alpha", "cutout_additive"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "_FFP.fx", "symbols": ["technique TBoringFFP", "TEX_MULTIPLE", "TSSColor(1, Modulate2x", "TSSAlpha(1, Modulate"]}]
+      },
+      "channels": "Diffuse2.rgb multiplies the lit Diffuse1 result at 2x and Diffuse2.a multiplies alpha. MaterialDiffuse.a (AlphaGenValue) also multiplies alpha on this _FFP path; a missing secondary texture drops the detail stage.",
+      "light_response": "Same geometric vertex-light response as Fixed; the detail stage changes material channels, not lighting.",
+      "state": "NORMAL pass with the same six static policies as Fixed.",
+      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "SelfLit",
+      "implementation": "self_lit",
+      "policies": ["opaque", "alpha", "additive", "cutout_mix", "cutout_alpha", "cutout_additive"],
+      "responses": {"directional": false, "hemisphere": false, "ambient": false, "point": false},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "_FFP.fx", "symbols": ["technique TBoringFFP", "#ifdef SELFLUM", "SelfLumColor*ColorSrcGlobalGain"]}]
+      },
+      "channels": "Diffuse1.rgb is multiplied by SelfLumColor (RgbGen) and saturated ColorSrcGlobalGain at 2x. Retail SELFLUM writes alpha zero; AlphaGenValue is not consumed.",
+      "light_response": "Unlit by world or point lights; responds only to ColorSrcGlobalGain as retail SELFLUM does.",
+      "state": "NORMAL SELFLUM specialization with the six static material policies.",
+      "shader_tokens": ["obj_self_lit", "u_color_src_global_gain"],
+      "forbidden_shader_tokens": ["obj_ff_lighting", "obj_bump_diffuse_lighting", "obj_phong_lighting"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "SelfLitDetail",
+      "implementation": "self_lit",
+      "policies": ["opaque", "alpha", "additive", "cutout_mix", "cutout_alpha", "cutout_additive"],
+      "responses": {"directional": false, "hemisphere": false, "ambient": false, "point": false},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "_FFP.fx", "symbols": ["#ifdef SELFLUM", "TEX_MULTIPLE", "TSSColor(1, Modulate2x", "TSSAlpha(1, Modulate"]}]
+      },
+      "channels": "Self-lit Diffuse1 is multiplied by SelfLumColor (RgbGen), global source gain, and Diffuse2.rgb at 2x stages. Retail SELFLUM still writes alpha zero; AlphaGenValue is not consumed.",
+      "light_response": "Unlit by world or point lights; responds only to the global source gain.",
+      "state": "NORMAL SELFLUM specialization with the six static material policies.",
+      "shader_tokens": ["obj_self_lit", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "forbidden_shader_tokens": ["obj_ff_lighting", "obj_bump_diffuse_lighting", "obj_phong_lighting"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Tracer",
+      "implementation": "tracer",
+      "policies": ["additive", "cutout_additive"],
+      "responses": {"directional": false, "hemisphere": false, "ambient": false, "point": false},
+      "evidence": {
+        "kind": "binary_documented",
+        "docs": ["docs/render/render-material-re.md"],
+        "symbols": ["Tracer.fx", "vsTracer", "|dot(eye, normal)|"]
+      },
+      "channels": "Diffuse1.rgb times squared absolute eye/normal facing; alpha is coverage only for optional cutout.",
+      "light_response": "Unlit and unaffected by directional, hemisphere, or point-light changes.",
+      "state": "Additive ONE/ONE, no depth write, additive fog attenuation; optional alpha cutout does not enable depth writes.",
+      "shader_tokens": ["abs(dot(geom_normal, view_dir))", "facing * facing"],
+      "forbidden_shader_tokens": ["obj_ff_lighting", "obj_point_light_sum", "obj_apply_fog"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Flag",
+      "implementation": "flag",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": false},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "Flag.fx", "symbols": ["VS_OUTPUT vsFlag", "technique TTracer", "TSSColor(0, Modulate2x", "CalcFogSegmented"]}]
+      },
+      "channels": "Diffuse1.rgb is MODULATE2X with the animated vertex diffuse; Diffuse1.a supplies optional cutout coverage.",
+      "light_response": "Animated/camera-oriented reconstructed normal responds to hemisphere and directional light only; Flag.fx has no point-light pass and no SELFLUM technique.",
+      "state": "Opaque NORMAL pass with regular shader fog and optional cutout coverage.",
+      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse is zero", "ca * 0.5 + 0.5", "-sa * 0.1", "abs(sa)"],
+      "raster_checks": {"directional_axis_reversal": false, "hemisphere_axis_reversal": false},
+      "raster_check_note": "Flag.fx reconstructs norm.x as ca*0.5+0.5 (never negative) and norm.y as -sa*0.1; response deltas are required, but a generic left/right or sky/ground spatial-lobe sign flip is not.",
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongTangentDiffuse",
+      "implementation": "phong_diffuse",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "Dot3DiffT.fx", "symbols": ["technique TSegTanDiff_Std", "ps11Diffuse"]},
+          {"file": "SkBDiffT.fx", "symbols": ["technique TSkinTanDiff_Std", "ps11Diffuse"]},
+          {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11Diffuse"]}
+        ]
+      },
+      "channels": "Tangent-space normal map drives per-pixel N.L; Diffuse1.rgb is the albedo and alpha is optional cutout coverage.",
+      "light_response": "Hemisphere plus mapped-normal directional and point diffuse, with the retail geometric-normal self-shadow multiplier on each lit pass.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongTangentSpecular",
+      "implementation": "phong_specular_shadow",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "PhongT.fx", "symbols": ["technique TSegTanPhong_Std", "ps11Phong", "vscTanPhongDir"]},
+          {"file": "_psPhong.fx", "symbols": ["shared PIXELSHADER ps11Phong", "mul_x2"]},
+          {"file": "_vsPhongT.fx", "symbols": ["vsTanPhongDir", "CalcSelfShadowTerm"]}
+        ]
+      },
+      "channels": "Diffuse1.rgb is albedo; Diffuse1.a is both coverage and pow-8 specular brightness on this unskinned tag.",
+      "light_response": "Mapped-normal Phong diffuse/specular for directional and point lights; all passes use geometric-normal self-shadow.",
+      "state": "Opaque NORMAL pass, optional cutout, regular base fog plus additive point-pass fog semantics.",
+      "shader_tokens": ["obj_phong_lighting", "base.a", "view_dir, 1.0", "obj_pow8", "obj_self_shadow"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongTangentSpecularSkinned",
+      "implementation": "phong_specular",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBPhongT.fx", "symbols": ["technique TSkTanPhong_Std", "vscTanSkinPhongDir", "ps11Phong"]},
+          {"file": "_psPhong.fx", "symbols": ["shared PIXELSHADER ps11Phong", "mul_x2"]},
+          {"file": "_vsSkPhT.fx", "symbols": ["vsTanSkinPhongDir"]}
+        ]
+      },
+      "channels": "Diffuse1.rgb is albedo; Diffuse1.a is coverage and pow-8 specular brightness.",
+      "light_response": "Skinned tangent-space mapped-normal Phong; pow-8 directional/point specular and retail point-pass self-shadow, with no directional self-shadow in the shipped skinned vertex program.",
+      "state": "Opaque NORMAL pass, optional cutout, regular base fog plus additive point-pass fog semantics.",
+      "shader_tokens": ["obj_phong_lighting", "base.a", "view_dir, 0.0", "obj_pow8"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongObjectDiffuse",
+      "implementation": "phong_diffuse",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "Dot3DiffO.fx", "symbols": ["technique TSegObjDiff_std", "ps11Diffuse"]},
+          {"file": "SkBDiffO.fx", "symbols": ["technique TSkinObjDiff_Std", "ps11Diffuse"]},
+          {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11Diffuse"]}
+        ]
+      },
+      "channels": "Object-space normal map drives per-pixel N.L; Diffuse1.rgb is albedo and alpha is optional cutout coverage.",
+      "light_response": "Hemisphere plus mapped-normal directional and point diffuse with geometric-normal self-shadow.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongObjectSpecular",
+      "implementation": "phong_specular",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "PhongO.fx", "symbols": ["technique TSegObjPhong", "ps11Phong", "vscObjPhongDir"]},
+          {"file": "_psPhong.fx", "symbols": ["shared PIXELSHADER ps11Phong", "mul_x2"]},
+          {"file": "_vsPhongO.fx", "symbols": ["vsObjPhongDir"]}
+        ]
+      },
+      "channels": "Diffuse1.rgb is albedo; Diffuse1.a controls both optional coverage and pow-8 specular brightness.",
+      "light_response": "Object-space mapped-normal pow-8 Phong for directional/point lights; point passes self-shadow, while the standard directional pass does not.",
+      "state": "Opaque NORMAL pass, optional cutout, regular base fog plus additive point-pass fog semantics.",
+      "shader_tokens": ["obj_phong_lighting", "base.a", "view_dir, 0.0", "obj_pow8"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongObjectSpecularPhongMap",
+      "implementation": "phong_map",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": false, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBPhongO.fx", "symbols": ["technique TSkObjPhong_Std", "ps11Phong2", "vscObjSkinPhongDir"]},
+          {"file": "_psPhong2.fx", "symbols": ["shared PIXELSHADER ps11Phong2", "lrp", "mad_x2"]},
+          {"file": "_vsSkPhO.fx", "symbols": ["vsObjSkinPhongDir"]}
+        ],
+        "binary_citations": [
+          {
+            "address": "0x58aca0",
+            "function": "Render_CreateSystemTextures",
+            "docs": ["docs/render/render-lighting-re.md", "docs/render/render-material-re.md"]
+          }
+        ]
+      },
+      "channels": "Diffuse1.rgb is albedo; raw Diffuse1.a is PhongMap gloss/brightness data alpha*mix(sampled pow4,sampled pow64,alpha). The lookup's sampled alpha supplies N.L. NORMAL cutout coverage comes from the vertex diffuse alpha/self-shadow channel, not Diffuse1.a; AlphaGenValue is ignored.",
+      "light_response": "Flat AmbientColor plus skinned object-space mapped-normal PhongMap for directional/point lights, including the geometric self-shadow multiplier; it does not consume the oriented hemisphere gradient.",
+      "state": "Opaque NORMAL pass; optional object cutout tests vertex diffuse alpha while the combined shader output alpha remains fixed because Diffuse1.a is gloss data.",
+      "shader_tokens": ["uniform sampler2D u_phong_map : filter_linear, repeat_disable", "obj_phong_map_lookup", "obj_phong_map_specular", "obj_phong_map_points", "mix(lookup.r, lookup.b, alpha)", "base.rgb * lookup.a", "OBJ_COVERAGE_VERTEX_DIFFUSE_ALPHA", "output_alpha = 1.0"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Dot3Tangent",
+      "implementation": "dot3",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "BDiffT2.fx", "symbols": ["technique TSegTanDiff_Std", "ps11DiffuseNoTex"]},
+          {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11DiffuseNoTex"]}
+        ]
+      },
+      "channels": "The tangent normal texture drives lighting and its alpha is NORMAL coverage. Diffuse1 supplies albedo only; a missing Diffuse2 drops the optional detail stage. AlphaGenValue is ignored.",
+      "light_response": "Mapped-normal hemisphere and directional diffuse with directional geometric self-shadow. The fixed-function encoded-vector point pass uses mapped N.L and interpolated attenuation without geometric self-shadow.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_dot3_lighting", "obj_dot3_points", "OBJ_COVERAGE_NORMAL_ALPHA"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Dot3TangentDetail",
+      "implementation": "dot3",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "BDiffT2.fx", "symbols": ["technique TSegTanDiff_Std", "TSSColor(1, Modulate2x", "TSSAlpha(1, Modulate"]}
+        ]
+      },
+      "channels": "Mapped Diffuse1 is post-multiplied by Diffuse2.rgb at 2x. Normal-map alpha is primary coverage and Diffuse2.a multiplies it; AlphaGenValue is ignored.",
+      "light_response": "Same tangent-space mapped-normal diffuse response as Dot3Tangent.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_dot3_lighting", "OBJ_COVERAGE_NORMAL_ALPHA", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Dot3TangentSkinned",
+      "implementation": "dot3_skinned",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBDiffT2.fx", "symbols": ["technique TSkTanDiff", "vscTanSkinDot3Dir", "TSSColor(0, DotProduct3"]}
+        ]
+      },
+      "channels": "Diffuse1 supplies albedo and coverage. The tangent normal map supplies the encoded DOT3 vector; AlphaGenValue is ignored.",
+      "light_response": "Skinned fixed-function DOT3: geometric-normal Gouraud hemisphere plus mapped directional/point N.L with attenuation and no CalcSelfShadowTerm multiplier.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Dot3TangentDetailSkinned",
+      "implementation": "dot3_skinned",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBDiffT2.fx", "symbols": ["technique TSkTanDiff", "TSSColor(0, DotProduct3", "TSSColor(1, Modulate2x", "TSSAlpha(1, Modulate"]}
+        ]
+      },
+      "channels": "Diffuse1 supplies albedo and primary coverage, then Diffuse2 post-multiplies RGB at 2x and alpha at 1x. AlphaGenValue is ignored.",
+      "light_response": "Same skinned fixed-function DOT3 light topology as Dot3TangentSkinned.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Dot3Object",
+      "implementation": "dot3_skinned",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBDiffO2.fx", "symbols": ["technique TSkObjDiff", "vscObjSkinDot3Dir"]}
+        ]
+      },
+      "channels": "Diffuse1 supplies albedo and coverage; the object-space normal map supplies the encoded DOT3 vector. A missing Diffuse2 drops the optional detail stage; AlphaGenValue is ignored.",
+      "light_response": "Skinned fixed-function DOT3: geometric-normal Gouraud hemisphere plus mapped directional/point N.L with attenuation and no CalcSelfShadowTerm multiplier.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "Dot3ObjectDetail",
+      "implementation": "dot3_skinned",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "SkBDiffO2.fx", "symbols": ["technique TSkObjDiff", "TSSColor(1, Modulate2x", "TSSAlpha(1, Modulate"]}]
+      },
+      "channels": "Diffuse1 supplies primary coverage; object-space mapped RGB is post-multiplied by Diffuse2.rgb at 2x and Diffuse2.a multiplies coverage. AlphaGenValue is ignored.",
+      "light_response": "Same object-space mapped-normal diffuse response as Dot3Object.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "EnvironmentMirror",
+      "implementation": "environment",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": false, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "BumpMirrT.fx", "symbols": ["technique TSegTanMirror", "ps11BumpEnvReflect", "ps11PhongSpecOnly"]},
+          {"file": "_psBmEnv.fx", "symbols": ["shared PIXELSHADER ps11BumpEnvReflect"]},
+          {"file": "_psPhong.fx", "symbols": ["ps11PhongSpecOnly"]}
+        ]
+      },
+      "channels": "Tangent normal reflects the view into TexCubeEnvironment, tinted by ReflectColor. NORMAL base coverage is ReflectColor.a times the sampled cube alpha (the hosted system cube is opaque); Diffuse1 and AlphaGenValue do not contribute.",
+      "light_response": "No diffuse lighting; each point light adds a pow-16 mapped-normal specular lobe with geometric self-shadow.",
+      "state": "Opaque NORMAL pass with optional cutout and regular fog.",
+      "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "obj_mirror_points", "obj_pow16"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "EnvironmentMirrorTextured",
+      "implementation": "environment_textured",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": false, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "BmTxMirrT.fx", "symbols": ["technique TSegTanTexMirror", "ps11BumpEnvReflect", "RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)"]},
+          {"file": "_psBmEnv.fx", "symbols": ["shared PIXELSHADER ps11BumpEnvReflect"]},
+          {"file": "_psPhong.fx", "symbols": ["ps11PhongSpecOnly"]}
+        ]
+      },
+      "channels": "P0 writes the mapped reflection with gray shader fog; P1 adds point-light pow-16 specular with black additive fog. Independent P3 samples raw Tex0, applies its own Diffuse1.a coverage test, and performs the retail DESTCOLOR/SRCCOLOR 2x postmultiply in gamma space.",
+      "light_response": "No diffuse lighting; point lights add pow-16 specular before the independent Diffuse1 postmultiply.",
+      "state": "P0 is opaque with optional reflect-alpha cutout; P1 is additive ONE/ONE; P3 is an independent depth-tested/no-write geometry pass with optional diffuse-alpha cutout and regular fog.",
+      "shader_tokens": ["obj_environment_cube_approx", "obj_mirror_points", "obj_pow16", "sampled.z * 4.0"],
+      "auxiliary_resources": [
+        "object/postmultiply/environment_textured.gdshader",
+        "object/postmultiply/environment_textured_double_sided.gdshader",
+        "object/postmultiply/environment_textured_cutout.gdshader",
+        "object/postmultiply/environment_textured_cutout_double_sided.gdshader"
+      ],
+      "auxiliary_shader_tokens": ["texture(u_diffuse, v_raw_uv)", "2.0 * source_gamma * destination_gamma", "u_alpha_test_invert"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "EnvironmentPhong",
+      "implementation": "environment_specular",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "EnvPhongT.fx", "symbols": ["technique TSegTanEnvPhong", "ps11Phong", "ps11BumpEnvReflect"]},
+          {"file": "_psPhong.fx", "symbols": ["shared PIXELSHADER ps11Phong"]},
+          {"file": "_psBmEnv.fx", "symbols": ["shared PIXELSHADER ps11BumpEnvReflect"]}
+        ]
+      },
+      "channels": "Ordinary Diffuse1.rgb/pow-8-alpha Phong plus TexCubeEnvironment tinted by ReflectColor; Diffuse1.a also supplies optional cutout coverage.",
+      "light_response": "Mapped-normal directional/point Phong plus the independent reflection term; unskinned directional self-shadow is retained.",
+      "state": "Opaque NORMAL pass with optional cutout and regular base/additive pass fog semantics.",
+      "shader_tokens": ["obj_phong_lighting", "base.a", "view_dir, 1.0", "obj_environment_cube_approx", "u_reflect_color.rgb"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "GlassFixed",
+      "implementation": "glass",
+      "policies": ["additive", "cutout_additive"],
+      "responses": {"directional": false, "hemisphere": true, "ambient": true, "point": false},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "Glass.fx", "symbols": ["technique TGlassFFP", "TexCubeEnvironment", "ReflectColor * ColorSrcGlobalGain", "ZMODE_NOWRITE", "RSAlphaMode(TRUE, ONE, ONE)"]}]
+      },
+      "channels": "Reflected environment is tinted by ReflectColor and ColorSrcGlobalGain under MODULATE2X; Diffuse1 is not sampled in RGB and retail MaterialDiffuse.a is zero, so NORMAL/GLOW coverage is zero.",
+      "light_response": "No direct diffuse/specular light response; appearance changes with the hosted environment cube and global source gain.",
+      "state": "Additive ONE/ONE, no depth write, additive fog; optional alpha cutout remains no-write.",
+      "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "u_color_src_global_gain", "* 2.0"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "GlassSkinned",
+      "implementation": "glass_skinned",
+      "policies": ["additive", "cutout_additive"],
+      "responses": {"directional": false, "hemisphere": true, "ambient": true, "point": false},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [{"file": "SkGlass.fx", "symbols": ["technique TSkGlass", "vsSkinGlass", "TexCubeEnvironment", "ZMODE_NOWRITE", "RSAlphaMode(TRUE, ONE, ONE)"]}]
+      },
+      "channels": "Skinned reflected environment is tinted by ReflectColor under MODULATE2X; it intentionally omits Diffuse1 and ColorSrcGlobalGain. Coverage is ReflectColor.a times sampled cube alpha.",
+      "light_response": "No direct diffuse/specular light response; appearance changes only with the hosted environment cube.",
+      "state": "Additive ONE/ONE, no depth write, additive shader fog; optional alpha cutout remains no-write.",
+      "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "* 2.0"],
+      "forbidden_shader_tokens": ["u_color_src_global_gain"],
+      "parity_status": "matching",
+      "exceptions": []
+    }
+  ]
+}

@@ -267,6 +267,7 @@ int main(void) {
 		source.recoil[2] = 511;
 		source.secondary_anim = 258;
 		source.kz_physics = -1;
+		source.scorch_id = 7;
 		DefAmmoFile af{&source, 1};
 		const world::AmmoTable ammo_table = np::build_ammo_table(af);
 		const world::AmmoTableEntry *baked = ammo_table.by_index(0);
@@ -275,6 +276,7 @@ int main(void) {
 		      baked->recoil[2] == 255);
 		CHECK(baked != nullptr && baked->secondary_anim == 2 &&
 		      baked->kz_physics == 255);
+		CHECK(baked != nullptr && baked->scorch_id == 7);
 	}
 
 	def_free_weapons(&wf);

@@ -21,9 +21,10 @@ old `PSShadow*` interpretation.
 `UNAUDITED` systems; this record establishes the tracked surface — the module
 map and the mixed-binary witness basis. The data/build path is byte-identical,
 and the top-tier base-surface texture derivation and shader math are now closed.
-The bounded runtime gap is the remaining tile-composition projection,
-ordering, and refresh detail enumerated by D-TERRAIN-7, plus CDEP/traversal
-documentation depth. The underwater water-noise modulation is FIXED by
+The bounded runtime gap is the remaining tile-composition ordered contributors,
+refresh cadence, and RT edge/address/mip detail enumerated by D-TERRAIN-7, plus
+CDEP/traversal documentation depth. The material-animation leg is closed by the
+shared live AlphaGen/UV/flipbook evaluator. The underwater water-noise modulation is FIXED by
 D-TERRAIN-8, including the 2026-08-17 coordinate correction.
 Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains a
 partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
@@ -199,6 +200,20 @@ tile render target made by `PolyTrn_RenderTile @ 0x60da70`. Its base draw
 produces `clamp(rawColormap.rgb × 256/255)`, while alpha `MODULATE` with
 diffuse A=0 clears authored colormap alpha. The bare base therefore leaves
 `t0.a = 0`, not a baked sun mask.
+
+**Overlay loops never write RT alpha (2026-08-23).** `PolyTrn_RenderTile`
+masks the alpha channel off for the whole overlay window:
+`SetRenderState(D3DRS_COLORWRITEENABLE, 7)` before the base draw
+(`0x60dd04..0x60dd12`) and again before the ordered `.til`/scorch loops
+(`0x60dd6b..0x60dd73`), restoring `0xF` only for the depth-alpha/DOT3 alpha
+passes (`0x60e0ea..0x60e0f2`, `0x60e1b6..0x60e1be`). The `.til` tile quads
+(view mode `0x631` = SRCALPHA/INVSRCALPHA with stage alpha SELECTARG1
+TEXTURE) and the scorch quads therefore blend RGB only; the final page alpha
+is exclusively the DOT3 light term (plus the static-projection passes). The
+reimpl composer briefly wrote `src.a x src.a` tile alpha here, which
+saturated heavily-tiled pages (03TR airfield ~0.85 mean alpha) and re-lit
+them with full sun ambient at dawn — lit terrain measured ~2x retail at
+06:30 while noon stayed within noise.
 
 `Terrain_GenerateNormalMap @ 0x603210` then supplies the alpha-lighting
 source. For uint16 height `H`, its loop (`0x603326..0x6034eb`) computes
@@ -494,6 +509,25 @@ The collector:
   `Render_SubmitEntity @ 0x5DAD80` with flag `0x2`, the PROJSHAD technique
   (`@ 0x60D960..0x60D971`).
 
+The complete shipped PROJSHAD source audit fixes the per-material draw law.
+`_FFP.fx::TBoringFFPProjShad` is the sole material-blend declaration: its
+`BLEND_NONE/ALPHA/ADD/MULT` variants select ONE/ZERO,
+SRCALPHA/INVSRCALPHA, ONE/ONE, and DESTCOLOR/SRCCOLOR respectively. The other
+15 declarations all force blending off with ONE/ZERO. Tracer, Flag, Glass,
+and SkGlass expose no PROJSHAD declaration and therefore cast no fallback
+silhouette. All live declarations retain normal z mode, so LESSEQUAL and z
+writes order overlapping surfaces even when an `_FFP` additive draw changes
+no color. Ordinary material culling also remains live: material flag bit 2
+selects CULLMODE NONE, otherwise the pass uses CULLMODE CCW
+[`orig: CRenderBatchQueue_FlushBatches @ 0x5DA3A9..0x5DA401`].
+
+Skinned selected LODs are exact in this pass rather than unsupported. The
+collector copies the same entity transform into all `renderObjectCount + 1`
+matrix slots (`@ 0x60D926..0x60D95E`); `_vsSkPost.fx::vsSkinPostBlackT1`
+calls `_BaseInc.fx::CalcSkinWorldPosAndNormal`, whose explicit weights plus
+computed final weight sum to one. Applying identical matrices therefore
+collapses exactly to the rigid source vertex, with no PANM pose input.
+
 That direct render-data submission includes every opaque and alpha strip in
 every ROBJ of the selected LOD. It does not consume
 `g_BuildingSectionVisMask` or `g_HiddenSectionMask @ 0xB7965C`; those masks
@@ -529,7 +563,24 @@ must never reach the page.) Whether the PROJSHAD pass touches
 clip is taken as the law. `PolyTrn_RenderTile` then selects the destination
 tile-cache RT at `0x60DCC5`, binds that temporary texture at
 `0x60E10A..0x60E112`, and composites it only when the collector returned a
-candidate (`0x60E0C6..0x60E19D`). The final cache is sampled as t0 by terrain
+candidate (`0x60E0C6..0x60E19D`). The final state is now closed rather than
+inferred from the packed mode id. A targeted D3D9 vtable probe on the pinned
+retail executable (`b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac`)
+matched the live pixel-shader handle to `PolyTrn_PSDepthAlpha` at the shared
+quad draw return `0x679005` and read
+`COLORWRITEENABLE=0xF`, alpha blend enabled, `SRCBLEND=ONE`,
+`DESTBLEND=ONE`, separate-alpha blend disabled, and Z/Z-write disabled. The
+last source/destination writes came from `GfxBlend_ApplyToDevice @
+0x6818E5/0x6818FB`; therefore the creator's nominal mode-6 decode must not be
+used as the draw-time state. `PSDepthAlpha` emits `(0,0,0,tempBlue)`, so the
+RGBA ONE/ONE draw is output-equivalent to an A-only copy because every prior
+destination-tile pass used RGB-only writes and left A=0. Eight live 256x256
+readbacks proved it: RGB sums were identical before/after every target draw;
+on the first page they remained `4479113/4532023/3283970` while A changed
+from sum 0 to `2278029`. The portable
+`composite_terrain_static_shadow_pixel` pins the general saturating equation,
+and the collapsed two-RT handoff supplies the witnessed zero destination A.
+The final cache is sampled as t0 by terrain
 and as t1 by `Foliage_LightmapBlendPS`; therefore terrain and foliage receive
 the projected/draped shadow, while an Ihq01 courtyard/interior floor mesh does
 not. Dynamic person/`DynamicShadow` render slots are a separate system
@@ -547,7 +598,7 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   truncated `(g2,g0,g1)` light-byte epoch: sub-byte TOD movement retains ready
   pages, while crossing an epoch boundary recomposes with the then-current raw
   projection vector. Static caster admission, selected-LOD/all-ROBJ submission,
-  destruction/husk/dynamic transforms, `TEX_TEAM` alpha flipbooks, and
+  destruction/husk/dynamic transforms, all diffuse-alpha flipbooks, and
   page-local unsupported attribution are explicit typed inputs rather than a
   global directional-light surrogate. The mission present pass republishes an
   admitted individual model's exact applied transform into that same source
@@ -567,10 +618,29 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   a nonempty resolved/override tile table sets `tile_overlay_required`; without
   a convertible tilestrip the device does not build a base-only cache. A
   mission with no authored entries remains a valid base-only case. The
-  remaining gaps are the exact general c7/c8
-  projection matrix, one-sided and unsupported animated/skinned material
-  cases, non-opaque inter-caster depth ordering, remaining ordered tile-model
-  contributions, and final RT edge/mip behavior. The analytic cold
+  max-quality c7/c8 projection is exact: the packed cache record and required
+  `Foliage_WindSwayVS` branch reduce to the shared presentation-world
+  `TerrainTilePageProjection`, used by every page consumer and the shadow
+  raster with no failed-VS fallback API. The projected-shadow material path
+  now calls the same signed CTRL-aware AlphaGen/full-matrix UV evaluator and
+  diffuse-frame selector as ordinary object rendering. It samples the
+  frame-shared millisecond tick, retains authored model-local CTRL names, and
+  resolves every diffuse alpha frame; selected missing frames still fail
+  closed. A mounted-game census covered all 2,501 `.3di` files (2,497 parsed;
+  the four known malformed/temp files were reported), including the 34
+  alpha-coverage rows with dynamic UV or non-team/team flipbooks. All four
+  dynamic-AlphaGen rows were additive and untested, so their alpha is correctly
+  unobservable in PROJSHAD. Retail's submission stamp and four-register batch
+  snapshot/restore are cited at `Render_SubmitEntity @ 0x5DAD9D`,
+  `collect_render_objects_for_batch @ 0x5D91AB..0x5D91DE`, and
+  `@ 0x5DA1B8..0x5DA1FD`; `apply_shader_parameters @ 0x58DB80` is the shared
+  consumer. Whole-process inherited CTRL/RNG ordering remains the renderer-wide
+  D-3DI-2 concern, not a guessed shadow-only evaluator. The remaining gaps are
+  scorch damage updates, remaining ordered tile-model contributions, retail
+  dirty cadence, and final RT edge/address/mip behavior. The final temporary-blue
+  composite equation/state and per-technique pass admission,
+  forced-opaque versus `_FFP` material blending, skinned rigid collapse,
+  one-sided culling, and non-opaque inter-caster z ordering are closed. The analytic cold
   fallback remains a lower-fidelity global overlay.
 
   **Retail refresh cadence — WITNESSED 2026-08-18, corrected 2026-08-22.**
@@ -821,7 +891,7 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-4 | C | **PERMANENT (runtime safety boundary)** | **Safe terrain-query bounds** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Game consumers use these guards. Returning no result outside valid data avoids inventing an edge hit; §Runtime terrain queries carries the retail forms for any consumer that specifically requires them. |
 | D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the reimpl incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are ported. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap source aPs14TexldR0T0T_0 @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; ordered `.til` color is composed before terrain lighting. The render-target-alpha recurrence within that order is cataloged separately as D-TIL-3 [`orig: render_terrain_sector_batch @ 0x6096f0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
-| D-TERRAIN-7 | A | **OPEN (narrowed 2026-08-20)** | **Tile-composition RT/update parity**: runtime hosts a current-frame 128-layer 256×256 page cache shared by terrain and foliage; exact bare RGBA, ordered `.til` RGBA, DOT3 alpha, and supported static selected-LOD/all-ROBJ A-only projections are composed per page. The former global directional static-shadow surrogate is retired. Static source lifecycle, `TEX_TEAM` alpha-frame selection, content stamps, LRU/generation safety, required-overlay source readiness, and page-local unsupported attribution are pinned. The fixture-output gate rejects incomplete/currently unavailable page results and inexact static-source realization; comparison registration is separate. The policy half is portable since 2026-08-18 (`engine/runtime/terrain/terrain_static_shadow_{geometry,planner}` own strip curation, material admission, receiver minima, page-job compile/classify, and the raster-input build; the Godot adapter marshals placer records, decodes alpha pyramids, and converts diagnostics), with page plans memoized under a state epoch and caster team in the transform revision. The composite ORDER is RESOLVED (2026-08-20): on tiles where the static collector ran, `PolyTrn_RenderTile` SKIPS its own DOT3 add — the `@ 0x60E1CE` gate tests the shadow-detail option AND the collector's return — because the collector already drew the Alt DOT3 pass (`PolyTrn_TileBakeDot3LightPassAlt`, `@ 0x60D794..0x60D7C0`, light bytes packed `@ 0x60D643..0x60D69D`) into the temporary RT BEFORE submitting the silhouettes, so the effective order is DOT3-then-silhouettes — exactly the composer's order (the earlier "silhouettes before DOT3" caveat had misread the scorch-decal rect loop `@ 0x60E02E..0x60E08E` as the silhouette loop). Newly open on the low-sun leg (the 03tr-sun-sky 06:30 fixture, sun y=0.1227): our page silhouettes remove the full sun term (~17% gamma-space darkening in the hangar-adjacent wedge) while retail's same-region silhouette effect measures ≤3-11% — the retail density mechanism (PROJSHAD material blend state, `PolyTrn_SunToBlendRatioColor`, or the composite tint 0xFF808080 selected by `dword_319FBB8` `@ 0x60E174..0x60E184`) is unwitnessed. The 2026-08-20 D-TIL-4 grill identified the composite's remaining sibling contributions: the second overlay loop (@ 0x60df71..0x60e0af) is the runtime scorch-decal rect pass (`Terrain_LoadScorchTextures @ 0x604ce0`, records at `unk_31A1870`; empty in a fresh session — unhosted by that rationale, see til-re.md), and the overlay atlas is the tile-set strip loaded through the misnomer'd `Terrain_LoadTileSetAtlas @ 0x604a90` (`Bms_TileSetName` + `.TGA` via `configData+0xD00`). Exact general c7/c8 projection, unsupported animated/skinned materials, one-sided/non-opaque overlap behavior, the scorch-decal pass (runtime damage state), retail dirty cadence, and final RT edge/mip behavior remain open `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; PolyTrn_RenderTile @ 0x60DA70]`. |
+| D-TERRAIN-7 | A | **OPEN (narrowed 2026-08-23)** | **Tile-composition RT/update parity**: runtime hosts a current-frame 128-layer 256×256 page cache shared by terrain and foliage; exact bare RGBA, ordered `.til` RGBA, DOT3 alpha, and static selected-LOD/all-ROBJ A-only projections are composed per page. The former global directional static-shadow surrogate is retired. Static source lifecycle, every diffuse-alpha animation frame, content stamps, LRU/generation safety, required-overlay source readiness, and page-local unsupported attribution are pinned. The fixture-output gate rejects incomplete/currently unavailable page results and inexact static-source realization; comparison registration is separate. The policy half is portable (`engine/runtime/terrain/terrain_static_shadow_{geometry,planner,raster}`), with page plans memoized under a state epoch and the full captured CTRL array in caster identity. The max-quality c7/c8 projection is RESOLVED: the packed cache record, D3D `(world Z,Y,world X)` foliage transform, and required `Foliage_WindSwayVS` branch reduce exactly to `((world X-origin X),(world Z-origin Z))/span`; one `TerrainTilePageProjection` now drives terrain, foliage, MATCHTERRAIN, and shadow raster consumers, and the old per-consumer uniform names are removed. The composite ORDER is RESOLVED: on tiles where the static collector ran, `PolyTrn_RenderTile` skips its own DOT3 add (`@ 0x60E1CE`) because the collector already drew `PolyTrn_TileBakeDot3LightPassAlt` (`@ 0x60D794..0x60D7C0`) before silhouettes, matching the composer. The final composite STATE is also RESOLVED by a live D3D9 state/readback probe: RGBA writes plus ONE/ONE blend and the `(0,0,0,tempBlue)` shader preserve RGB exactly and add temp blue to the zero destination alpha; `composite_terrain_static_shadow_pixel` pins that equation. The 2026-08-23 exhaustive PROJSHAD audit closes four false sources of low-sun divergence: only `_FFP.fx::TBoringFFPProjShad` honors material blend state; all 15 shader declarations force ONE/ZERO; Tracer/Flag/Glass/SkGlass have no pass; and skinned inputs reduce exactly to rigid geometry because the collector copies one transform into all matrix slots before the unit-sum skin blend. The portable raster also applies retail CULLMODE CCW/two-sided override and per-fragment LESSEQUAL z writes, including blended/no-op occluders. The material-animation leg is RESOLVED: the shared evaluator consumes the submission tick plus loader-mapped CTRL values for AlphaGen and the complete row-vector UV matrix, and the shared selector handles time- and control-driven diffuse frames (`Render_SubmitEntity @ 0x5DAD9D`; batch CTRL snapshot/restore `@ 0x5D91AB..0x5D91DE`, `@ 0x5DA1B8..0x5DA1FD`; consumer `apply_shader_parameters @ 0x58DB80`). Time updates publish immutable worker state without manufacturing a resident spatial-page miss, matching retail's sample-on-recompose behavior. Whole-process CTRL/RNG ordering is tracked once by D-3DI-2. No shipped PROJSHAD source has sun-angle opacity, `PolyTrn_SunToBlendRatioColor` belongs to the lower non-multitexture branch, and `dword_319FBB8` has no live writer, so the earlier speculative "density mechanism" is rejected; the old 03tr screenshot delta must be re-evaluated after these corrections, not preserved as an expected residual. The D-TIL-4 grill identified the second overlay loop (`@ 0x60DF71..0x60E0AF`) as runtime scorch decals and the overlay atlas as the tile-set strip loaded by `Terrain_LoadTileSetAtlas @ 0x604A90`. Scorch damage updates, remaining ordered contributions, retail dirty cadence, and final RT edge/address/mip behavior remain open `[orig: cache record @ 0x60DB67..0x60DC02; c7/c8 build @ 0x60A220..0x60A34F; uploads @ 0x6006AB..0x600704; Terrain_CollectAndRenderTileModels @ 0x60D250; PolyTrn_RenderTile @ 0x60DA70]`. |
 | D-TERRAIN-8 | A | **FIXED (2026-08-13; coordinate corrected 2026-08-17)** | **Underwater terrain water-noise modulation**: the engine terrain frame stamps `below_water` from the render eye vs the live water height (the bare unguarded strict `<` `@ 0x60fea5` — NO zero sentinel; the water height is plumbed unconditionally), and the shared surface include swaps the ps.1.4 stage-3 dp3 INPUT to the water module's per-frame regenerated noise texture at the swapped `source × 8/512` (`colormap_uv × 16` for the normalized 1024 atlas) texcoord — the witnessed TOP-TIER behavior (the 2026-08-13 selector decode above): the noise rides the PS14SplatNormalMap dp3 on detail2-authored maps, detail2-less splat maps faithfully render NO underwater modulation, and the `saturate(4·t3²)·t0.a` PSShadow pair belongs to the unported ps.1.1 tiers `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; texcoord @ 0x609786..0x6097D6]`. Tests: ctest `terrain_frame_compiler` (flag pins), GUT `terrain_shader_contract_test` (formula pins) + `terrain_underwater_modulation_test` (the Dvxi5 flip drive). |
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 | D-TERRAIN-11 | A | **FIXED (2026-08-17)** | **Terrain detail coordinate scale**: retail constructs mesh UV1 as `source × polytrn_detaildensity / 512`; OpenNova had multiplied normalized 1024-atlas UV by density, halving every detail frequency. Runtime mesh UVs, authored detail2, and the underwater stage-3 swap now share the exact source-grid conversion. Deterministic 00TRa A/B probes select 2× with the existing axis at high correlation and reject the UV-swap alternative [`orig: parser @ 0x60f993..0x60f9b3; config load @ 0x60e634..0x60e63b; density/512 write @ 0x6029a0..0x6029aa; UV1 @ 0x602db5..0x602dbe; stage-3 transforms @ 0x609786..0x609810`]. GUT `terrain_shader_contract_test` pins the surviving consumers. |
@@ -843,9 +913,8 @@ remains for a *full* (vs partial) R1 record:
   binding or final mesh-family selection. `cdep_read` / `cdep_roundtrip`
   already pin the header and encode/decode round-trip against `Dvxi5.cpt`.
 - **Tile-composition mechanics** — close D-TERRAIN-7 by matching the remaining
-  general patch/page c7/c8 projection details, unsupported animated/skinned
-  caster materials, one-sided/non-opaque overlap behavior, retail refresh
-  cadence, remaining ordered draws, and final RT edge/mip policy. The hosted
+  scorch updates, retail refresh cadence, remaining ordered draws, and final
+  RT edge/address/mip policy. The hosted
   128-page lifecycle, exact base/`.til`/DOT3 RGBA order, current-frame
   terrain/foliage binding, and supported static A-only projection are closed.
 - **Single-detail (BHD-era) `.trn` binding** — a pre-JO terrain authors only

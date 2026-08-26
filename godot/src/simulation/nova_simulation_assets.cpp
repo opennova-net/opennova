@@ -220,6 +220,7 @@ void Simulation::apply_collision_to_ai() {
 	if (world_) {
 		world_->collision = &collision_world_;
 		world_->mounted_pose_provider = this;
+		world_->muzzle_pose_provider = &collision_pose_native_;
 	}
 	if (ai_) ai_->collision = &collision_world_;
 }
@@ -282,14 +283,51 @@ bool Simulation::resolve_mounted_pose_native(
 		sources.emplaced_gun_yaw = emplaced.gun_yaw;
 		sources.emplaced_gun_pitch = emplaced.gun_pitch;
 	}
-	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
+	int32_t ctrl_bus[THREEDI_CTRL_REGISTER_COUNT] = {};
 	opennova::simassets::compose_mounted_pose_controls(
-			p_carrier.item_attrib, sources, ctrl_values);
-	const bool resolved = opennova::simassets::resolve_model_mounted_pose(
-			model, p_carrier, p_seat, ctrl_values,
-			opennova::simassets::mounted_pose_time_ms(
-					p_world.logic_tick, panm_time_override_ms_),
-			r_out);
+			p_carrier.item_attrib, sources, ctrl_bus);
+	std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT> ctrl_values{};
+	std::copy(std::begin(ctrl_bus), std::end(ctrl_bus), ctrl_values.begin());
+	const uint32_t time_ms = opennova::simassets::mounted_pose_time_ms(
+			p_world.logic_tick, panm_time_override_ms_);
+	if (mounted_pose_cache_logic_tick_ != p_world.logic_tick) {
+		mounted_pose_live_cache_.clear();
+		mounted_pose_cache_logic_tick_ = p_world.logic_tick;
+	}
+	auto rest_found = mounted_pose_rest_cache_.find(model_ptr);
+	if (rest_found == mounted_pose_rest_cache_.end()) {
+		MountedPoseRestCache rest;
+		if (!opennova::simassets::evaluate_model_mounted_pose_parts(
+				model, 0u, nullptr, rest.parts)) {
+			++mounted_native_declines_;
+			return false;
+		}
+		rest_found = mounted_pose_rest_cache_.emplace(
+				model_ptr, std::move(rest)).first;
+	}
+	std::vector<MountedPoseLiveCache> &model_live =
+			mounted_pose_live_cache_[model_ptr];
+	auto live_found = std::find_if(model_live.begin(), model_live.end(),
+			[&](const MountedPoseLiveCache &candidate) {
+				return candidate.time_ms == time_ms &&
+						candidate.controls == ctrl_values;
+			});
+	if (live_found == model_live.end()) {
+		MountedPoseLiveCache live;
+		live.time_ms = time_ms;
+		live.controls = ctrl_values;
+		live.valid = opennova::simassets::evaluate_model_mounted_pose_parts(
+				model, time_ms, ctrl_values.data(), live.parts);
+		model_live.push_back(std::move(live));
+		live_found = model_live.end() - 1;
+		++mounted_native_evaluations_;
+	} else {
+		++mounted_native_cache_hits_;
+	}
+	const bool resolved = live_found->valid &&
+			opennova::simassets::resolve_model_mounted_pose_from_parts(
+					model, p_carrier, p_seat, rest_found->second.parts,
+					live_found->parts, r_out);
 	if (!resolved) ++mounted_native_declines_;
 	return resolved;
 }
@@ -360,8 +398,16 @@ Dictionary Simulation::debug_native_pose_stats() const {
 	Dictionary out;
 	out["collision_queries"] = static_cast<int64_t>(collision_native_queries_);
 	out["collision_declines"] = static_cast<int64_t>(collision_native_declines_);
+	out["muzzle_queries"] = static_cast<int64_t>(
+			collision_pose_native_.muzzle_query_count());
+	out["muzzle_resolves"] = static_cast<int64_t>(
+			collision_pose_native_.muzzle_resolve_count());
 	out["mounted_queries"] = static_cast<int64_t>(mounted_native_queries_);
 	out["mounted_declines"] = static_cast<int64_t>(mounted_native_declines_);
+	out["mounted_evaluations"] = static_cast<int64_t>(mounted_native_evaluations_);
+	out["mounted_cache_hits"] = static_cast<int64_t>(mounted_native_cache_hits_);
+	out["mounted_rest_cache_entries"] =
+			static_cast<int64_t>(mounted_pose_rest_cache_.size());
 	out["mounted_graphic_sources"] =
 			static_cast<int64_t>(mounted_pose_native_graphics_.size());
 	return out;
@@ -370,6 +416,9 @@ Dictionary Simulation::debug_native_pose_stats() const {
 
 void Simulation::set_asset_root(const Ref<ResourceRoot> &p_root) {
 	asset_root_ = p_root;
+	mounted_pose_rest_cache_.clear();
+	mounted_pose_live_cache_.clear();
+	mounted_pose_cache_logic_tick_ = 0xFFFFFFFFu;
 	sim_models_.set_index(
 			p_root.is_valid() ? &p_root->native_index() : nullptr);
 	collision_pose_native_.set_resource_index(

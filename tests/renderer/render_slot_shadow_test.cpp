@@ -116,6 +116,39 @@ int main() {
 		CHECK(amb_rgb[2] > amb_rgb[0]);
 	}
 
+	// --- fixed-function silhouette composition [orig: @ 0x5d5ca0].
+	{
+		// White is the untouched RT clear and must remain a no-op.
+		const auto background = drape_silhouette_factor(
+				{1.0f, 1.0f, 1.0f}, {0.2f, 0.5f, 1.0f}, 0.0f, 0.0f);
+		CHECK(near_f(background[0], 1.0f) &&
+				near_f(background[1], 1.0f) &&
+				near_f(background[2], 1.0f));
+
+		// A fully black silhouette leaves only the per-channel ambient.
+		const auto full = drape_silhouette_factor(
+				{0.0f, 0.0f, 0.0f}, {0.2f, 0.5f, 1.0f}, 0.0f, 0.0f);
+		CHECK(near_f(full[0], 0.8f) && near_f(full[1], 0.5f) &&
+				near_f(full[2], 0.0f));
+
+		// At dawn a gray resolved/filter edge saturates back to lit. The old
+		// alpha product yielded 1 - 0.2*0.2 = 0.96 and created the faint tail.
+		const auto edge = drape_silhouette_factor(
+				{0.8f, 0.8f, 0.8f}, {0.2f, 0.2f, 0.2f}, 0.0f, 0.0f);
+		CHECK(near_f(edge[0], 1.0f) && near_f(edge[1], 1.0f) &&
+				near_f(edge[2], 1.0f));
+
+		// Distance fade raises the ambient; white shadowztex suppresses the
+		// silhouette entirely. The final stage saturates every channel.
+		const auto faded = drape_silhouette_factor(
+				{0.0f, 0.0f, 0.0f}, {0.4f, 0.4f, 0.4f}, 0.5f, 0.0f);
+		CHECK(near_f(faded[0], 0.8f));
+		const auto clipped = drape_silhouette_factor(
+				{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, 0.0f, 1.0f);
+		CHECK(near_f(clipped[0], 1.0f) && near_f(clipped[1], 1.0f) &&
+				near_f(clipped[2], 1.0f));
+	}
+
 	// --- slot lighting darkening constants
 	// [orig: RenderSlot_SetupNextLighting @ 0x5d73d3..0x5d740d].
 	{
@@ -185,6 +218,30 @@ int main() {
 		const auto at_start = march_shadow_anchor(
 				{3.0f, 2.0f, 4.0f}, {1.0f, -1.0f, 0.0f}, high);
 		CHECK(near_f(at_start[0], 3.0f) && near_f(at_start[1], 4.0f));
+
+		// 03TR's authored M939 stands seven Q16 ticks above a raw16 terrain
+		// sample (2.500107 vs 2.5). Retail's live vehicle has settled below
+		// the pad, so its march exits at step zero. The presentation-only
+		// caster must reconcile a sub-quantum gap before applying the same
+		// exact march; otherwise one planar step crosses the lod-20 4 u snap.
+		const float truck_y = 2.500107f;
+		const float pad_y = 2.5f;
+		const float grounded_y = slot_march_start_height(truck_y, pad_y,
+				kSlotTerrainHeightQuantumUnits);
+		CHECK(near_f(grounded_y, pad_y));
+		const auto truck_anchor = march_shadow_anchor(
+				{-587.4066f, grounded_y, 1070.15f},
+				{-0.910269f, -0.244322f, 0.334242f},
+				[pad_y](float, float) { return pad_y; });
+		const SlotPatch truck_patch =
+				slot_patch_bounds(truck_anchor[0], -truck_anchor[1], 20);
+		CHECK(near_f(truck_anchor[0], -587.4066f));
+		CHECK(near_f(truck_patch.min_x, -596.0f));
+		// A caster more than one height quantum above the same pad remains
+		// airborne and still enters the retail march.
+		CHECK(near_f(slot_march_start_height(2.51f, pad_y,
+						 kSlotTerrainHeightQuantumUnits),
+				2.51f));
 	}
 
 	// --- the drape patch [orig: RenderSlot_RebuildPatchVertexBuffer

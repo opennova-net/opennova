@@ -1,6 +1,7 @@
 #include "world/world.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -13,6 +14,15 @@
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
 namespace opennova::world {
+
+namespace {
+
+uint64_t logic_perf_now_us() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+} // namespace
 
 // Max distance (mission units) for mount_best's nearest-emplacement search — the proximity
 // proxy for the occupant-model+144 vehicle link the original resolves through the entity
@@ -281,7 +291,8 @@ void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
 // so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
 // Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
 // zero takes pose_mounted_occupant's parent-root/local fallback.
-static void pose_emplacement_attachments(World &world) {
+static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
+    uint64_t phase_start = perf != nullptr ? logic_perf_now_us() : 0;
     // Parent ownership ends when the carrier dies, even though ordinary item
     // destruction keeps that carrier resident as a husk. Peel orphan chains
     // without mutating registry slots during traversal.
@@ -309,6 +320,11 @@ static void pose_emplacement_attachments(World &world) {
             world.registry.despawn(orphan);
         }
     }
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->attachment_orphans_us = now - phase_start;
+        phase_start = now;
+    }
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.emplacement_parent.valid()) return;
         // A stock streamed child carries an exact absolute spawn pose, but its
@@ -331,6 +347,11 @@ static void pose_emplacement_attachments(World &world) {
         anchor.attachment_frame = true;
         pose_mounted_occupant(world, *child, *parent, anchor);
     });
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->attachment_child_pose_us = now - phase_start;
+        phase_start = now;
+    }
 
     // A gunner riding an attached child was posed earlier in the AI system loop,
     // before the carrier moved. Refresh those occupants from the child's fresh pose.
@@ -352,6 +373,8 @@ static void pose_emplacement_attachments(World &world) {
         pose_mounted_occupant(
                 world, *occupant, *target, target->seats[snapshot.mount_seat]);
     });
+    if (perf != nullptr)
+        perf->attachment_riders_us = logic_perf_now_us() - phase_start;
 }
 
 // ----------------------------------------------------------------------------
@@ -1498,7 +1521,10 @@ void World::load_systems() {
     for (ISystem *s : systems_) s->on_load(*this);
 }
 
-void World::run_logic_tick(bool is_authority, TickPhase phase) {
+void World::run_logic_tick(bool is_authority, TickPhase phase,
+                           LogicTickPerf *perf) {
+    if (perf != nullptr) *perf = {};
+    uint64_t phase_start = perf != nullptr ? logic_perf_now_us() : 0;
     // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
     // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
     // script evaluators read it. Deferred: the mission sim has no local-player avatar
@@ -1510,7 +1536,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     ctx.phase = phase;
     const bool pre_mission = phase == TickPhase::PreMission;
     const bool gameplay = phase == TickPhase::Gameplay;
-    vehicle_authority = is_authority;
+    logic_authority = is_authority;
     // The pending fire-sound countdown, before this tick's spawns: retail
     // drains after the client network frame (whose receive seeds our embedder
     // also applies pre-tick) and before the server/entity updates that seed
@@ -1524,6 +1550,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     round_sim.local_player = cached.local_player;
     if (const Entity *lp = registry.get(cached.local_player))
         round_sim.local_team = static_cast<uint8_t>(lp->team);
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->setup_us = now - phase_start;
+        phase_start = now;
+    }
     // The system loop runs on BOTH the authoritative host and a non-authority client
     // (the original client also runs a tick): each system self-gates on
     // ctx.is_authority. WacSystem / BmsEventSystem early-out on a client (scripting is
@@ -1533,8 +1564,55 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     if (phase != TickPhase::PreRound) {
-        for (ISystem *s : systems_) s->tick(*this, ctx);
-        pose_emplacement_attachments(*this);
+        for (ISystem *s : systems_) {
+            const uint64_t system_start =
+                    perf != nullptr ? logic_perf_now_us() : 0;
+            AiTickPerf ai_perf;
+            if (perf != nullptr && s == ai)
+                ai->tick_profiled(*this, ctx, &ai_perf);
+            else
+                s->tick(*this, ctx);
+            if (perf != nullptr) {
+                const uint64_t elapsed = logic_perf_now_us() - system_start;
+                if (s == ai) {
+                    perf->ai_us += elapsed;
+                    perf->ai_reactions_us += ai_perf.reactions_us;
+                    perf->ai_collision_tables_us += ai_perf.collision_tables_us;
+                    perf->ai_entities_us += ai_perf.entities_us;
+                    perf->ai_infantry_entities_us += ai_perf.infantry_entities_us;
+                    perf->ai_infantry_remote_us += ai_perf.infantry_remote_us;
+                    perf->ai_infantry_combat_us += ai_perf.infantry_combat_us;
+                    perf->ai_infantry_animation_us += ai_perf.infantry_animation_us;
+                    perf->ai_infantry_collision_us += ai_perf.infantry_collision_us;
+                    perf->ai_infantry_collision_contacts_us +=
+                            ai_perf.infantry_collision_contacts_us;
+                    perf->ai_infantry_collision_repulsion_us +=
+                            ai_perf.infantry_collision_repulsion_us;
+                    perf->ai_infantry_collision_ground_us +=
+                            ai_perf.infantry_collision_ground_us;
+                    perf->ai_other_entities_us += ai_perf.other_entities_us;
+                    perf->ai_authority_vehicles_us += ai_perf.authority_vehicles_us;
+                    perf->ai_vehicle_scan_us += ai_perf.vehicle_scan_us;
+                    perf->ai_vehicle_motors_us += ai_perf.vehicle_motors_us;
+                    perf->ai_vehicle_riders_us += ai_perf.vehicle_riders_us;
+                    perf->ai_client_vehicles_us += ai_perf.client_vehicles_us;
+                    perf->ai_events_us += ai_perf.events_us;
+                } else {
+                    perf->scripts_us += elapsed;
+                }
+            }
+        }
+        if (perf != nullptr) phase_start = logic_perf_now_us();
+        pose_emplacement_attachments(*this, perf);
+        // Static attachment poses can change after AI collision queries. The
+        // projectile/destruction half of the tick starts a fresh matrix-view
+        // epoch so it never inherits a pre-attachment target transform.
+        if (collision != nullptr) collision->reset_query_view_cache();
+    }
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->attachments_us = now - phase_start;
+        phase_start = now;
     }
     // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
     // prevents a newly converted charge from losing an arm-delay tick and lets
@@ -1544,6 +1622,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     if (is_authority && gameplay) {
         throwables.events.clear();
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
+    }
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->throwables_us = now - phase_start;
+        phase_start = now;
     }
     // The global weapon-action pump follows the complete entity/system update and
     // precedes projectile stepping. This is where an AI UseGun nextAction write can
@@ -1557,6 +1640,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
     if (phase != TickPhase::PreMission && ai != nullptr)
         ai->pump_mounted_weapon_slots(*this, logic_tick);
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->weapons_us = now - phase_start;
+        phase_start = now;
+    }
     // Live rounds step on the host and on an explicitly configured MP
     // non-authority client. The latter is the retail tag-2 visual re-sim path;
     // every decoded/predicted round carries VisualOnly through all consequence
@@ -1566,6 +1654,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     if (gameplay &&
         (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->projectiles_us = now - phase_start;
+        phase_start = now;
+    }
     if (gameplay &&
         (is_authority || (mp_session && !projectile_authority))) {
         // The explosion-queue drain runs once per frame after the projectile
@@ -1593,6 +1686,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
                            water_z, destruction);
         destruction_tick_dead_items(*this, terrain, water_z, destruction);
         death_pieces.tick(*this, terrain, water_z, destruction);
+    }
+    if (perf != nullptr) {
+        const uint64_t now = logic_perf_now_us();
+        perf->destruction_us = now - phase_start;
+        phase_start = now;
     }
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
@@ -1622,6 +1720,8 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
     sound_emitters.prune(logic_tick);
+    if (perf != nullptr)
+        perf->housekeeping_us = logic_perf_now_us() - phase_start;
 }
 
 // Shared semantic half of Server_ProcessRoundEnd @0x5164f0. The authority
@@ -1737,6 +1837,7 @@ void World::restore(const Snapshot &s) {
     death_pieces.reset();
     destruction_rng.reset();
     scars.reset();
+    terrain_scorches.reset();
     destruction = DestructionEvents{};
     // The baseline copy above restores the configured rules, roster, clock,
     // stats, and outcome together. This matters for SP-as-listen-server: its

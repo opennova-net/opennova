@@ -50,6 +50,12 @@ void project_client_replica_present_row(
 	if (entity.cls == EntityClass::Player) {
 		// A player's wire net_id IS its packed character id (entity+0x15C).
 		row[world::PF_CHARACTER_ID] = static_cast<float>(entity.net_id);
+		const uint32_t anim_flags =
+				world::infantry_anim_flags(entity.anim_state_id);
+		const uint32_t stance_bits =
+				((anim_flags & world::kAnimStanceFlagProne) != 0 ? 1u : 0u) |
+				((anim_flags & world::kAnimStanceFlagCrouched) != 0 ? 2u : 0u);
+		row[world::PF_STANCE_BITS] = static_cast<float>(stance_bits);
 	}
 	// Decoded wire position is mission (x,y,z) 16.16 -> present (x, z, -y)
 	// world units, the SAME remap the AI-pool present uses. On a joiner the

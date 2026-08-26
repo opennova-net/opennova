@@ -11,8 +11,9 @@ shader_type spatial;
 // black [orig: @ 0x677740 case 2]) are already folded in by the collect.
 render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
 
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+// Gamma-domain scene-target contract.
 #include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/nova_frame_pass.gdshaderinc"
 
 // The procedural 128x128 radial falloff "texlightcrn" [orig:
 // Lighting_InitTextures @ 0x5a94f0 — intensity = 255 x (0.4 - 0.45 x d),
@@ -33,8 +34,10 @@ void vertex() {
 }
 
 void fragment() {
-	// Gamma-space modulate + encoded output (D-RMAT-7); additive
-	// accumulation happens in the linear buffer (D-RMAT-8 residual).
-	ALBEDO = nova_gamma_to_linear(texture(u_corona_tex, UV).rgb * COLOR.rgb);
+	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+		discard;
+	}
+	// Gamma-space modulate and accumulation before the terminal transfer.
+	ALBEDO = nova_scene_output(texture(u_corona_tex, UV).rgb * COLOR.rgb);
 	ALPHA = 1.0;
 }

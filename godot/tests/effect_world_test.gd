@@ -454,7 +454,7 @@ func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
 	]
 	for entry in cases:
 		var world := _make_world()
-		world.set_water_height(12.5)
+		world.set_water_plane(12.5, null)
 		var file := _make_short_effect_file()
 		file.find_particle("puff dots").flags = entry.flag
 		world.load_particle_file(file)

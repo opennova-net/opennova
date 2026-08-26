@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -84,6 +85,10 @@ void PresentApplier::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("present_snapshot", "snap", "stride", "layout_revision"),
 			&PresentApplier::present_snapshot);
+	ClassDB::bind_method(
+			D_METHOD("profile_present_snapshot", "snap", "stride",
+					"layout_revision"),
+			&PresentApplier::profile_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PresentApplier::get_stats);
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&PresentApplier::get_stats_record);
@@ -169,6 +174,17 @@ void PresentApplier::_bind_methods() {
 	BIND_ENUM_CONSTANT(OUTPUT_VISIBILITY);
 	BIND_ENUM_CONSTANT(OUTPUT_BODY_ANIM);
 	BIND_ENUM_CONSTANT(OUTPUT_ALL);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_CORE_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_AIM_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_CONTROLS_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_VISIBILITY_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_BODY_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_MUZZLE_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_SUBMITTED_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_BODY_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_MUZZLE_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_SLOT_COUNT);
 }
 
 void PresentApplier::setup(Object *sim, Object *index,
@@ -592,7 +608,9 @@ bool PresentApplier::row_plan_is_current(int64_t size, int stride,
 		int64_t layout_revision) {
 	if (plan_dirty_ || plan_revision_ != layout_revision ||
 			plan_stride_ != stride || plan_snapshot_size_ != size ||
-			plan_index_generation_ != current_index_generation()) {
+			plan_index_generation_ != current_index_generation() ||
+			plan_model_lifetime_generation_ !=
+					ObjectModel::lifetime_generation()) {
 		return false;
 	}
 	return true;
@@ -610,12 +628,15 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 	plan_stride_ = stride;
 	plan_snapshot_size_ = size;
 	plan_index_generation_ = current_index_generation();
+	plan_model_lifetime_generation_ = ObjectModel::lifetime_generation();
 	plan_dirty_ = false;
 	if (index_.is_null()) {
 		plan_dirty_ = true;
 		return;
 	}
 	const int64_t count = size / stride;
+	Simulation *native_sim =
+			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
 	rows_.reserve(static_cast<size_t>(count));
 	for (int64_t r = 0; r < count; ++r) {
 		const int base = static_cast<int>(r * stride);
@@ -629,14 +650,14 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		Row row;
 		row.base = base;
 		row.node_id = model->get_instance_id();
+		row.model = model;
 		row.entity_kind = kind;
 		row.entity_index = idx;
 		row.bms_id = bms_id;
 		row.has_muzzle = model->has_muzzle();
-		// Camera-submission seam: the model publishes its off-screen edges into
-		// the shared registry so the hot walk gates on one native Dictionary
-		// lookup. Idempotent per plan rebuild.
-		model->set_submission_registry(submission_offscreen_ids_);
+		const int32_t net_id = field_i(p, base, Simulation::PF_NET_ID);
+		row.has_native_muzzle = row.has_muzzle && native_sim != nullptr &&
+				native_sim->has_native_ai_muzzle(net_id);
 		rows_.push_back(row);
 	}
 }
@@ -668,6 +689,30 @@ const String &PresentApplier::infantry_key(int state) {
 
 void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		int stride, int64_t layout_revision) {
+	present_snapshot_impl(snap, stride, layout_revision, nullptr);
+}
+
+PackedInt64Array PresentApplier::profile_present_snapshot(
+		const PackedFloat32Array &snap, int stride, int64_t layout_revision) {
+	MissionFrameProfile profile;
+	present_snapshot_impl(snap, stride, layout_revision, &profile);
+	PackedInt64Array result;
+	result.resize(MISSION_PROFILE_SLOT_COUNT);
+	result.set(MISSION_PROFILE_CORE_US, profile.core_us);
+	result.set(MISSION_PROFILE_AIM_US, profile.aim_us);
+	result.set(MISSION_PROFILE_CONTROLS_US, profile.controls_us);
+	result.set(MISSION_PROFILE_VISIBILITY_US, profile.visibility_us);
+	result.set(MISSION_PROFILE_BODY_US, profile.body_us);
+	result.set(MISSION_PROFILE_MUZZLE_US, profile.muzzle_us);
+	result.set(MISSION_PROFILE_ROWS, profile.rows);
+	result.set(MISSION_PROFILE_SUBMITTED_ROWS, profile.submitted_rows);
+	result.set(MISSION_PROFILE_BODY_ROWS, profile.body_rows);
+	result.set(MISSION_PROFILE_MUZZLE_ROWS, profile.muzzle_rows);
+	return result;
+}
+
+void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
+		int stride, int64_t layout_revision, MissionFrameProfile *p_profile) {
 	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
 		return;
 	}
@@ -679,18 +724,24 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 	Simulation *native_sim =
 			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
 	for (Row &row : rows_) {
-		ObjectModel *model =
-				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
-		if (model == nullptr) {
-			// Revisioned snapshots trust their topology stamp instead of
-			// pre-scanning every ObjectID. Rebind on the next frame and release
-			// this row's visibility intent immediately.
-			present_visibility_.erase(row.bms_id);
-			row.present_visible = -1;
+		// Main-thread Node destruction advances this stamp in PREDELETE. Rebind
+		// before touching another retained pointer if a model was freed by a
+		// notification dispatched during this walk.
+		if (plan_model_lifetime_generation_ !=
+				ObjectModel::lifetime_generation()) {
 			plan_dirty_ = true;
-			continue;
+			break;
 		}
+		ObjectModel *model = row.model;
 		const int base = row.base;
+		uint64_t profile_phase_start = p_profile != nullptr
+				? Time::get_singleton()->get_ticks_usec()
+				: 0;
+		if (p_profile != nullptr) {
+			++p_profile->rows;
+		}
+		model->set_match_terrain_enabled(
+				(field_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.
@@ -720,7 +771,7 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			// the node's tree, exactly like the GDScript live compare did.
 			if (!row.transform_stamp_valid ||
 					row.transform_stamp != next_stamp) {
-				const Transform3D next(
+				const Transform3D next = model->compose_entity_transform(
 						bms_to_godot_basis(
 								Vector3(next_stamp[3], next_stamp[4],
 										next_stamp[5])),
@@ -757,8 +808,15 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		// falling edges latched in the publish state still clear).
 		const bool submitted = present_visible &&
 				!occlusion_hidden_ids_.has(row.bms_id) &&
-				!submission_offscreen_ids_.has(
-						static_cast<int64_t>(row.node_id));
+				model->is_on_screen();
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->core_us += now - profile_phase_start;
+			profile_phase_start = now;
+			if (submitted) {
+				++p_profile->submitted_rows;
+			}
+		}
 		// Aim overlay with the capability lookups hoisted into the row plan and
 		// the no-overlay clear gated to the valid->invalid edge (the node-side
 		// setters no-op on repeats; these gates skip the dispatch itself).
@@ -810,6 +868,11 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			} else {
 				row.aim_valid = 0;
 			}
+		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->aim_us += now - profile_phase_start;
+			profile_phase_start = now;
 		}
 		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
 			const int32_t active1_code =
@@ -955,6 +1018,11 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			row.ctrl_publish_state = next_ctrl_publish_state;
 			row.ctrl_publish_state_valid = true;
 		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->controls_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
 		const int32_t present_visible_int = present_visible ? 1 : 0;
 		if (present_visible_int != row.present_visible) {
 			present_visibility_[row.bms_id] = present_visible;
@@ -1004,13 +1072,23 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				++stat_hidden_;
 			}
 		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->visibility_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
 		const int32_t net_id = field_i(p, base, Simulation::PF_NET_ID);
 		// Unsubmitted models (hidden, occlusion-held, off-screen) skip skeletal
 		// writes unless they own the authoritative posed-muzzle feedback seam
 		// (AI fire origins survive regardless of the camera; hidden non-weapon
 		// actors take the cheap path).
-		const bool body_eligible = submitted || (net_id > 0 && row.has_muzzle);
+		const bool legacy_muzzle_feedback = net_id > 0 && row.has_muzzle &&
+				!row.has_native_muzzle;
+		const bool body_eligible = submitted || legacy_muzzle_feedback;
 		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && body_eligible) {
+			if (p_profile != nullptr) {
+				++p_profile->body_rows;
+			}
 			// Main-body skeletal clip: infantry poses to the exact anim-state
 			// phase that produced root motion; PF_BODY_ANIM_SLOT is the coarse
 			// fallback for compatible non-infantry nodes.
@@ -1114,19 +1192,33 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			// ineligible. Keep the applied stamp dirty so visibility catches up.
 			row.body_stamp_valid = false;
 		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->body_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
 		if (net_id > 0 && row.has_muzzle) {
-			// The D-AI-6 muzzle seam: feed the posed bullet fire-origin userpoint back to
-			// the sim so AI rounds leave the GUN (one-frame staleness, ledgered)
-			// [orig: Entity_GetAttachmentWorldPosition @ 0x4b2670 — our sim has
-			// no skeletal pose, so the present layer pushes it back].
-			++stat_muzzle_queries_;
-			if (model->has_muzzle()) {
-				const Vector3 muzzle = model->get_muzzle_world_position();
-				if (native_sim != nullptr) {
-					native_sim->set_ai_muzzle_world(net_id, muzzle);
-					++stat_muzzles_;
+			if (p_profile != nullptr) {
+				++p_profile->muzzle_rows;
+			}
+			if (!row.has_native_muzzle) {
+				// Compatibility path for worlds without native model assets: feed the
+				// presented gun-flash userpoint back into the simulation. Native mission
+				// entities resolve the same authored point lazily at its AI consumer.
+				++stat_muzzle_queries_;
+				if (model->has_muzzle()) {
+					const Vector3 muzzle = model->get_muzzle_world_position();
+					if (native_sim != nullptr) {
+						native_sim->set_ai_muzzle_world(net_id, muzzle);
+						++stat_muzzles_;
+					}
 				}
 			}
+		}
+		if (p_profile != nullptr) {
+			p_profile->muzzle_us +=
+					Time::get_singleton()->get_ticks_usec() -
+					profile_phase_start;
 		}
 	}
 }

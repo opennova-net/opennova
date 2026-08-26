@@ -12,6 +12,7 @@
 #include <world/vehicle_mount.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace opennova::simassets {
 
@@ -37,6 +38,21 @@ void compose_mounted_pose_controls(
 // The resolver's PANM clock: retail's 16 ms logic-tick time, unless a debug
 // override (>= 0) pins it.
 uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms);
+
+using MountedPosePartMatrices = std::vector<ThreediMatrix4x4>;
+
+// Evaluate the complete LOD-0 part pose once. A carrier can expose several
+// attachment/seat userpoints; callers may reuse these matrices for every seat
+// instead of re-running PANM for each one.
+bool evaluate_model_mounted_pose_parts(
+        const Threedi3di3 &model, uint32_t time_ms,
+        const int32_t *ctrl_values, MountedPosePartMatrices &out);
+
+// Resolve one seat from already evaluated rest/live part matrices.
+bool resolve_model_mounted_pose_from_parts(
+        const Threedi3di3 &model, const world::Entity &carrier,
+        const world::Seat &seat, const MountedPosePartMatrices &rest_parts,
+        const MountedPosePartMatrices &live_parts, world::MountedPose &out);
 
 // Resolve the seat's live world pose from the carrier's parsed model:
 // the userpoint (seat.bone_index is the 1-based USRP row) is re-anchored into

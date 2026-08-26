@@ -11,26 +11,64 @@
 // disable flags folded to render flags 512/1024/2048 @ 0x56c8e7..0x56c91d].
 // The four witnessed transient spawners routed here are ammo impact
 // @ 0x40a2b3, death pieces @ 0x49351a, round spawn @ 0x4ec8da, and muzzle
-// glow @ 0x56c987. Powerup registration @ 0x442ce6 remains unhosted.
+// glow @ 0x56c987. The only late model-light call is powerup_respawn
+// @ 0x442b40/@0x442ba0, registered @ 0x442ce6; the wire-node spawn router
+// carries that replacement path.
 //
 // Per draw context retail queries the pool by AABB and takes the NEAREST
 // instances: overlap test + center-distance sort, at most 64 handles
 // [orig: collect_nearby_zones_by_aabb @ 0x5aa250 — distance metric
 // sum(((d*d + 0x8000) >> 16)) per axis, bubble sort, skip flag bit 2].
-// The live per-draw select then enables the FIRST FOUR as D3D lights
-// [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 — the > 4 clamp @ 0x5abbeb;
-// update_light_slots @ 0x5abc50 is its xref-less twin], and the group gate
-// is Light_PassesActiveGroups @ 0x5a9120 [owner entity at record dword 19,
-// section at dword 20; an owned light passes only for the active
+// THE DRAW IS ONE ENTITY, THE QUERY BOX IS THAT ENTITY'S OWN BOUND: both
+// sector walks build min/max = position -/+ boundRadius (entity+0, per axis)
+// and hand it to the live select [orig: setup_terrain_effect_for_entity
+// @ 0x5c74fb..0x5c753a; Terrain_RenderSectorModels @ 0x5c5ea6..0x5c5ee4 ->
+// @ 0x5c5f12 / @ 0x5c602e]. Light_SelectAndEnableForDraw @ 0x5ab9d0 runs the
+// same overlap + nearest sort into Light_VisibleHandles/Light_VisibleCount
+// and D3D-LightEnables the first <= 4 of them (the > 4 clamp @ 0x5abbeb;
+// update_light_slots @ 0x5abc50 is its xref-less twin) — that enable set is
+// the fixed-function fallback's only consumer and is torn down again per
+// batch entry (below). The lights a drawn strip actually receives come from
+// the BATCH ENTRY: each collector re-walks the sorted visible list in order,
+// gates Light_PassesActiveGroups @ 0x5a9120 [owner entity at record dword
+// 19, section at dword 20; an owned light passes only for the active
 // interior/owner group — called from collect_render_objects_for_batch
 // @ 0x5d91f8, collect_render_batches_for_entity @ 0x5d96b8,
 // render_terrain_sector_batch @ 0x60969f and RenderSlot_UpdateEntityLight
-// @ 0x5d6b89]. The per-light parameters are
+// @ 0x5d6b89] plus the objects-enable flag (render flag 0x800 clear
+// @ 0x5a9010, called @ 0x5d920c / @ 0x5d96cc), and stores AT MOST THREE
+// handles in entry dwords 5..7 with the count in dword 8 [orig: `cmp esi, 3;
+// jge` @ 0x5d9226..0x5d9229 in collect_render_objects_for_batch @ 0x5d8f20;
+// the twin @ 0x5d96e6..0x5d96e9 in collect_render_batches_for_entity
+// @ 0x5d94b0]. CRenderBatchQueue_FlushBatches @ 0x5d9f50 walks exactly those
+// three slots (`X[2] = 3` @ 0x5da26b), pushes the survivors as
+// PointLightCoordArray/ColorArray/AttenArray with CurNumPointLights = the
+// entry count for the shader pass [orig: Light_GetPointLightParams
+// @ 0x5da6a8; SetInt/SetVectorArray @ 0x5da6e7..0x5da766 through the handles
+// stored @ 0x5af51b..0x5af566], and for the fixed-function pass first
+// disables EVERY enabled D3D light (CEffectWorld_ClearActiveSamplerStates
+// @ 0x5da5de) and re-enables only the entry's (Light_ApplyAsD3DLight
+// @ 0x5da61a). The highest-quality object path therefore lights with at
+// most three dynamic lights per strip; the 4-light D3D enable never reaches
+// a shader-lit strip. The per-ROBJ gate re-uses the ENTITY query — retail
+// never re-collects per ROBJ (Lighting_SetOwnerLightGroup(0, robjIndex)
+// @ 0x5d8ff7 only moves the owner-group section between the two walks). The
+// per-light parameters are
 // [orig: Light_GetPointLightParams @ 0x5a9180]: color = record RGB (bytes
 // * 1/256 at spawn) x EffectWorld_AmbientScale x intensity, then the optional
 // RGB-gen multiply; attenuation {1, 0, 15/range^2, 1} with range =
 // radius_fixed * 1.25 / 65536; the D3D-light fill adds a 1.5x diffuse boost
 // [orig: Light_FillD3DPointLight @ 0x5aa450].
+//
+// FOLIAGE IS NOT A DELIVERY TARGET ON THE LOCKED HIGHEST-QUALITY PATH. The
+// far-patch loop does call Light_SelectAndEnableForDraw @ 0x60a5dc, but
+// Foliage_LoadDefAssets first creates Foliage_WindSwayVS @ 0x601278 and
+// Foliage_SetupFarSlotDraw installs it in the descriptor @ 0x60087a..0x600883.
+// The complete vs_1_1 literal @ 0x7de648 declares position/color/texcoord only,
+// never normal/light input, and writes oD0 = c6; Foliage_LightmapBlendPS then
+// uses that oD0 plus cached-tile c0/c1. SetLight/LightEnable can affect foliage
+// only when VS creation failed and the FVF fixed-function fallback runs. That
+// fallback is excluded by the highest-quality-retail-path capture contract.
 //
 // The flicker: reading an instance with a gen block first runs
 // Light_TickGenBlock, which hashes the light's fixed position into the
@@ -55,11 +93,12 @@
 //    WeaponSlot_FireAndSpawnEffects @ 0x53f597 (AI/authority fire, at the
 //    fire position) and ActionSlot_SpawnEffect @ 0x402080 (the action-row
 //    FIRE arm, at the action-transform muzzle point), both gated on the ammo
-//    `MF_Light` flag (+36)]: spawn-once per entity (handle at entity+436),
-//    radius 1.5 (98304), color 0xFFE0A0, then per shot re-armed to mode 4 /
-//    duration 5, owner = shooter, position + blend 1.0 — five ticks after the
-//    last shot the slot dies, and the cached handle means that entity never
-//    glows again this life (the flash particle masks it).
+//    `MF_Light` flag (+36)]: the handle at entity+436 is shared with model
+//    LGHT (Entity_SpawnGlowEffects overwrites it for every record
+//    @ 0x56c925..0x56c92c). A nonzero final model-light lease is re-armed and
+//    moved directly; only a zero word spawns radius 1.5/color 0xFFE0A0. Every
+//    shot sets mode 4/duration 5, owner=shooter/section 0, position and blend
+//    1.0. Five ticks later the slot dies while the cached word stays nonzero.
 //  - impact flash [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3]: ammo
 //    `light_impact` radius/color/ticks, spawned radius/2 above the impact,
 //    mode 2, gated on the impact-effect leg actually presenting; also sets
@@ -72,6 +111,12 @@
 //  - round glow [orig: RoundData_SpawnRound @ 0x4ec8da]: ammo `light_move`
 //    radius/color, mode 1 / duration -1, terrain disabled (flag 1024), handle
 //    at round+0x1B4, follows the round per tick and clears on release.
+// Model LGHT itself never follows. The spawner transforms its point with the
+// entity matrix once @ 0x56c82d..0x56c85d; `subobject` is first read later by
+// the owner-group branch @ 0x56c89a. SetPositionAndBounds @ 0x5a9070 has only
+// projectile and muzzle callers. No death/husk path calls the model spawner;
+// Entity_Destroy clears exactly the final entity+0x1B4 handle once
+// @ 0x43e903..0x43e916, leaving earlier authored instances for mission reset.
 // CORONAS (witnessed 2026-08-20): every alive, un-hidden instance without
 // render flag 512 draws additive camera-facing billboards
 // [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 (ex
@@ -110,9 +155,8 @@
 // (Light_IsSpotlight @ 0x5a9040 -> get_light_projection_info @ 0x5aa5c0)
 // are unreachable. LightSpawnParams therefore carries no spot fields.
 //
-// Divergences tracked on D-RLIT-4: retail's setters write through stale
-// handles into reused slots; OpenNova's generation lease intentionally
-// rejects those writes.
+// Intentional safety divergence: retail's setters write through stale handles
+// into reused slots; OpenNova's generation lease rejects those writes.
 //
 // The ambient scale the select multiplies (EffectWorld_AmbientScale{R,G,B}
 // @ 0x840b24..0x840b2c) is the fog/ambient modulator's packed colour x 1/64
@@ -127,8 +171,9 @@
 //
 // Reimpl shape: positions stay in mission space (the retail Y-negation is the
 // world->D3D fold the presenter replaces); the gen block is stored by value
-// (retail stores a pointer into the loaded model). Remaining residuals live
-// on the D-RLIT-4 row.
+// (retail stores a pointer into the loaded model). D-RLIT-4 is closed by the
+// live/static object, terrain, corona, lifecycle, and max-quality dead-foliage
+// proofs above.
 #pragma once
 
 #include <renderer/light_runtime.h>
@@ -219,7 +264,7 @@ enum class LightSelectionTarget {
 
 struct LightSelectionOptions {
 	// Target-disable flags are eligibility gates and are applied before the
-	// four-light cap. The default is the object/material pass.
+	// three-light cap. The default is the object/material pass.
 	LightSelectionTarget target = LightSelectionTarget::Objects;
 	// Retail supplies per-draw owner/interior groups. A camera-global adapter
 	// has no such draw context and must opt into this explicitly named
@@ -314,12 +359,24 @@ struct LightCoronaFrameInputs {
 	size_t owner_mask_count = 0;
 };
 
+// The batch-entry light cap: a drawn strip carries at most three dynamic
+// lights [orig: collect_render_objects_for_batch @ 0x5d9226..0x5d9229 and
+// collect_render_batches_for_entity @ 0x5d96e6..0x5d96e9 break the visible
+// walk at the third stored handle; CRenderBatchQueue_FlushBatches reads the
+// three entry slots @ 0x5da26b]. The 4 of Light_SelectAndEnableForDraw
+// @ 0x5abbeb is only the transient D3D LightEnable count the flush tears
+// down per entry (@ 0x5da5de) — never a shader-visible count.
+inline constexpr size_t kLightSelectLimit = 3;
+
 // One draw context for the per-draw selection pass: the draw's query AABB
 // (mission 16.16) plus its active owner/interior groups — the shape retail
 // hands the per-draw select per rendered entity [orig:
-// Light_SelectAndEnableForDraw @ 0x5ab9d0; the batch collectors consume
-// collect_nearby_zones_by_aabb @ 0x5aa250 and gate through
-// Light_PassesActiveGroups @ 0x5a9120].
+// Light_SelectAndEnableForDraw @ 0x5ab9d0 fed with position -/+ boundRadius
+// @ 0x5c74fb..0x5c753a; the batch collectors gate the resulting list through
+// Light_PassesActiveGroups @ 0x5a9120 and the objects-enable flag
+// @ 0x5d920c]. Retail collects ONCE per entity and only re-gates per ROBJ;
+// a per-ROBJ caller must therefore stamp the entity's query box on every
+// ROBJ draw it splits out (same box -> same ordered list, different groups).
 struct LightDrawContext {
 	std::array<int32_t, 3> aabb_min_fixed{};
 	std::array<int32_t, 3> aabb_max_fixed{};
@@ -327,7 +384,7 @@ struct LightDrawContext {
 };
 
 struct LightDrawSelection {
-	std::array<SelectedLight, 4> lights{};
+	std::array<SelectedLight, kLightSelectLimit> lights{};
 	size_t count = 0;
 };
 
@@ -335,7 +392,7 @@ class LightScene {
 public:
 	static constexpr size_t kCapacity = 4096;   // [orig: @ 0x5a8db1]
 	static constexpr size_t kQueryLimit = 64;   // [orig: @ 0x5aa384]
-	static constexpr size_t kSelectLimit = 4;   // [orig: the > 4 clamp @ 0x5abbeb]
+	static constexpr size_t kSelectLimit = kLightSelectLimit; // the 3-cap [orig: @ 0x5d9229]
 
 	LightHandle spawn(const LightSpawnParams &params);
 	void despawn(LightHandle handle);
@@ -374,10 +431,11 @@ public:
 			const std::array<int32_t, 3> &query_max_fixed,
 			std::array<LightHandle, kQueryLimit> &out_handles) const;
 
-	// Group-gate the ordered handles and produce the first <= 4 passers'
-	// witnessed parameters [orig: Light_PassesActiveGroups @ 0x5a9120; the
-	// 4-cap Light_SelectAndEnableForDraw @ 0x5abbeb; Light_GetPointLightParams
-	// @ 0x5a9180]. d3d_light_path applies the
+	// Group-gate the ordered handles and produce the first <= 3 passers'
+	// witnessed parameters [orig: Light_PassesActiveGroups @ 0x5a9120 and the
+	// objects-enable gate @ 0x5a9010 in the batch-entry walk
+	// @ 0x5d91e0..0x5d9229, which breaks at the third stored handle;
+	// Light_GetPointLightParams @ 0x5a9180]. d3d_light_path applies the
 	// 1.5x diffuse boost [orig: Light_FillD3DPointLight @ 0x5aa450].
 	size_t select(const LightHandle *handles, size_t handle_count,
 			const LightActiveGroups &groups,
@@ -390,7 +448,7 @@ public:
 	// The witnessed per-draw pass: for each draw context run the capped
 	// slot-order collect (first 64, then nearest sort — the exact
 	// @ 0x5aa250 shape) against a one-pass snapshot of the live pool, then
-	// the group-gated first-4 select with that draw's groups. The snapshot
+	// the group-gated first-3 select with that draw's groups. The snapshot
 	// carries only the collection inputs (retail's flag-bit-2 skip); target
 	// disables stay a select-stage gate exactly as retail applies them.
 	void select_for_draws(const LightDrawContext *draws, size_t draw_count,
@@ -399,6 +457,14 @@ public:
 			const LightFlickerInputs &flicker,
 			bool d3d_light_path,
 			LightDrawSelection *out) const;
+
+	// Monotonic identity for changes which can alter a draw's ordered handle
+	// selection: pool membership, position/AABB, owner groups, or hidden state.
+	// Color-only changes (fade blend, RGB-gen time/weather, ambient gain) do
+	// not advance it because callers can cheaply reevaluate parameters for an
+	// already-selected handle set. This lets retained render devices cache the
+	// expensive static-draw broadphase without freezing animated light color.
+	uint64_t selection_revision() const { return selection_revision_; }
 
 	// The corona billboard walk [orig: EffectWorld_RenderLightCoronas
 	// @ 0x5aaf40, called per world scene @ 0x5c96ad and per mirror scene
@@ -427,7 +493,7 @@ public:
 	// (collect_nearby_zones_by_aabb @0x5aa250 with the 16 cap @0x609658), the
 	// group gate with BOTH groups cleared (@0x60967c/@0x609685 — so every
 	// owned light fails), the alive + !terrain-disabled gate, and one row per
-	// survivor with NO four-light cap. Returns the total row count.
+	// survivor with NO three-light cap. Returns the total row count.
 	size_t collect_terrain_pass_rows(
 			const opennova::renderer::TerrainLightPatchBounds *patches,
 			size_t patch_count,
@@ -464,6 +530,7 @@ private:
 	// Never reset by clear(): a handle issued before clear must not alias the
 	// first occupant of the rebuilt slot vector.
 	uint32_t next_generation_ = 1;
+	uint64_t selection_revision_ = 1;
 	mutable LightSceneReport report_{};
 };
 

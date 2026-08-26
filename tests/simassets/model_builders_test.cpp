@@ -48,8 +48,11 @@ int main() {
         TEST_EXPECT(cm.sections.size() == 9);
         TEST_EXPECT(model_is_skinned(model, 0));
         TEST_EXPECT(model_has_collision(model));
-        TEST_EXPECT(model_bound_radius_from_3di(model) > 0.85f &&
-                model_bound_radius_from_3di(model) < 0.87f);
+        TEST_EXPECT(model.header.has_header);
+        TEST_EXPECT(model.header.max_radius_fp16 == 51963);
+        TEST_EXPECT(model_bound_radius_q16_from_3di(model) == 51963);
+        TEST_EXPECT(model_bound_radius_from_3di(model) ==
+                static_cast<float>(model.header.max_radius_fp16) / 65536.0f);
         std::printf("[simassets] Bird1: faces=%zu sections=%zu skinned=%d "
                     "has_collision=%d radius=%f\n",
                 cm.faces.size(), cm.sections.size(),

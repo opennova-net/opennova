@@ -55,6 +55,9 @@ struct ObjectMaterialClassification {
 	bool has_detail = false;
 	bool is_skinned = false;
 	bool uses_specular = false;
+	// BmTxMirrT's NORMAL pass post-multiplies environment/specular by
+	// Diffuse1; BumpMirrT is reflection-only.
+	bool environment_textured = false;
 	bool normal_uses_uv2 = false;
 	// The 0x10000000 capability: this material renders a duplicate into the
 	// glow/bloom queue (Q3), flushed by the bloom pass — the FF _LUM rows and

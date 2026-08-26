@@ -142,9 +142,20 @@ std::array<float, 3> drape_sun_ambient(const std::array<float, 3> &sun_rgb,
 
 // The same law expressed as the per-channel shadow term q_c =
 // sun_c*|dir_y| / (sun_c*|dir_y| + sky_c), so a projective drape shader can
-// evaluate ambient = 1 - (1 - fade) * q * silhouette_mask per pixel.
+// evaluate the fixed-function material ambient.
 std::array<float, 3> drape_shadow_term(const std::array<float, 3> &sun_rgb,
 		const std::array<float, 3> &sky_rgb, float dir_y);
+
+// The two fixed-function texture stages and framebuffer multiply used by a
+// silhouette drape. The slot RT is cleared white and the PROJSHAD pass draws
+// black, preserving its resolved/filter edge as RGB. Stage 0 ADDs that sample
+// to diffuse ambient = 1 - (1 - fade) * q; stage 1 ADDs shadowztex; each ADD
+// saturates [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0]. A white RT
+// sample or depth-clip sample therefore suppresses the shadow.
+std::array<float, 3> drape_silhouette_factor(
+		const std::array<float, 3> &capture_rgb,
+		const std::array<float, 3> &shadow_term, float fade,
+		float depth_clip);
 
 // Attached-light slots (the dominant point light won): the silhouette RT is
 // lit by D3D light 4 with NTSC-weighted negated colors
@@ -189,6 +200,16 @@ SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
 // ---------------------------------------------------------------------------
 // Anchor march [orig: RenderSlot_UpdateEntityLight @ 0x5d6c86..0x5d6d67]
 // ---------------------------------------------------------------------------
+
+// A caller-side contact reconciliation before the exact retail march. Retail
+// reads the live simulated entity position, while a presentation-only mission
+// caster can remain at its authored pose a handful of Q16 ticks above the
+// raw16 terrain surface. A gap no larger than one terrain-height quantum is
+// ground contact at the resolution of that height query; keeping it would
+// turn the tiny vertical gap into one whole planar march step.
+inline constexpr float kSlotTerrainHeightQuantumUnits = 1.0f / 256.0f;
+float slot_march_start_height(float caster_height, float terrain_height,
+		float contact_tolerance);
 
 // Marches from the entity position along the (downward) slot direction in
 // unit-planar steps until the terrain height reaches the ray; the vertical

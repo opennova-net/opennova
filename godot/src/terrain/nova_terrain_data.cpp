@@ -727,6 +727,16 @@ static Ref<Texture2D> _load_texture_from_dir(const String &dir, const String &fi
 	return opennova::load_texture_from_dir(dir, filename);
 }
 
+Ref<Texture2D> TerrainData::load_source_texture(
+		const String &p_filename) const {
+	if (p_filename.is_empty()) return {};
+	if (resource_root.is_valid() && !resource_root->get_root_dir().is_empty()) {
+		return resource_root->load_texture(p_filename);
+	}
+	if (trn_path.is_empty()) return {};
+	return _load_texture_from_dir(trn_path.get_base_dir(), p_filename);
+}
+
 // ---------------------------------------------------------------------------
 // Load
 // ---------------------------------------------------------------------------

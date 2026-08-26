@@ -1,4 +1,5 @@
 #include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/nova_frame_pass.gdshaderinc"
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
 
 // Expanded detail foliage. Retail emits the source model once per accepted
@@ -21,8 +22,9 @@ instance uniform float u_fade = 1.0;
 instance uniform float u_alpha_ref = 0.0;
 instance uniform bool u_instance_tile_cache_ready = false;
 instance uniform float u_instance_tile_cache_layer = 0.0;
-// XY is the page's world origin, Z is reciprocal world span, W is span.
-instance uniform vec4 u_instance_tile_cache_origin_span = vec4(0.0);
+// Exact max-quality retail c7/c8 reduction: world origin X/Z, inverse world
+// span, and span. Foliage_WindSwayVS projects the original pre-wind vertex.
+instance uniform vec4 u_instance_tile_cache_projection = vec4(0.0);
 // Nonzero only on the near LOW resubmission: retail selects strict
 // D3DCMP_LESS there, so identical geometry only lands where the preceding
 // HIGH draw rejected alpha and left no depth. Discarding texels the HIGH
@@ -34,6 +36,15 @@ instance uniform float u_high_pass_cutoff = 0.0;
 global uniform vec3 opennova_sky_ambient;
 global uniform vec3 opennova_sun_light;
 global uniform vec3 opennova_sun_direction;
+// Do not add EffectWorld point-light uniforms here. Retail does call
+// Light_SelectAndEnableForDraw for each patch @ 0x60a5dc, but the selected
+// highest-quality path binds Foliage_WindSwayVS @ 0x60087a..0x600883. Its
+// complete vs_1_1 source declares no normal/light input and writes oD0 = c6;
+// the blend PS therefore receives only the emitter/fade vertex color below.
+// D3D SetLight/LightEnable state can affect only the failed-VS fixed-function
+// fallback, which is outside the locked highest-quality profile.
+// [orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630;
+// Foliage_RenderFarPatches @ 0x609de0]
 global uniform vec3 opennova_fog_color;
 global uniform float opennova_fog_start;
 global uniform float opennova_fog_end;
@@ -92,8 +103,8 @@ void vertex() {
 	v_overlay_uv =
 		vec2(pre_wind_world_pos.x, -pre_wind_world_pos.z) * (1.0 / 1024.0);
 	v_tile_cache_uv =
-		(pre_wind_world_pos.xz - u_instance_tile_cache_origin_span.xy) *
-		u_instance_tile_cache_origin_span.z;
+		(pre_wind_world_pos.xz - u_instance_tile_cache_projection.xy) *
+		u_instance_tile_cache_projection.z;
 	v_heightfield_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	float eye_depth = max(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z, 0.0);
 	v_fog_distance = opennova_fog_type == 0
@@ -117,7 +128,14 @@ void fragment() {
 	if (u_high_pass_cutoff > 0.0 && retail_alpha > u_high_pass_cutoff) {
 		discard;
 	}
-
+	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+		#ifdef NOVA_Q3_DEPTH_OCCLUDER
+		ALBEDO = vec3(0.0);
+		ALPHA = 1.0;
+		#else
+		discard;
+		#endif
+	} else {
 	vec4 tile = vec4(0.5, 0.5, 0.5, 1.0);
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = v_tile_cache_uv;
@@ -171,8 +189,9 @@ void fragment() {
 	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
 	color = mix(opennova_fog_color, color, foliage_fog_factor(v_fog_distance));
-	ALBEDO = nova_gamma_to_linear(color);
+	ALBEDO = nova_scene_output(color);
 	// D3D fog folds into the source color before blending, so the blended
 	// weight is exactly the retail SRCALPHA term.
 	ALPHA = clamp(retail_alpha, 0.0, 1.0);
+	}
 }

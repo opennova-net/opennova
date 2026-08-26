@@ -174,6 +174,10 @@ enum PresentField : int {
 	PF_SECTION_MASK_VALID,
 	PF_SECTION_MASK_LO,
 	PF_SECTION_MASK_HI,
+	// Retail's MoveOrder crouch/prone bits (entity+300 & 0x300), normalized
+	// to bit0=prone, bit1=crouched for MATCHTERRAIN presentation. This tail
+	// field is zero-filled for non-organics and unsupported compact rows.
+	PF_STANCE_BITS,
 	PF_STRIDE
 };
 

@@ -268,9 +268,10 @@ bool project_terrain_static_shadow_vertex(
 	// [orig: clamp @0x60D33F..0x60D341; caster terrain-relative translation
 	// @0x60D8FA; page recenter @0x60D901..0x60D91A;
 	// setup_shadow_cascade_matrices_0 @0x58D4D3..0x58D618]
-	const int span = TerrainTileCompositionCache::page_world_span(
-			input.page.page_lod_level);
-	if (span <= 0 || !std::isfinite(input.surface_to_light.x) ||
+	const std::optional<TerrainTilePageProjection> page_projection =
+			TerrainTileCompositionCache::page_projection(input.page);
+	if (!page_projection.has_value() ||
+			!std::isfinite(input.surface_to_light.x) ||
 			!std::isfinite(input.surface_to_light.y) ||
 			!std::isfinite(input.surface_to_light.z) ||
 			!std::isfinite(input.caster_ground_y) ||
@@ -286,13 +287,11 @@ bool project_terrain_static_shadow_vertex(
 			height * input.surface_to_light.x / vertical;
 	const float shadow_z = world.z -
 			height * input.surface_to_light.z / vertical;
-	const float page_min_x = static_cast<float>(
-			input.page.sector_origin_x + input.page.page_local_x);
-	const float page_min_z = static_cast<float>(
-			input.page.sector_origin_z + input.page.page_local_z);
+	const std::array<float, 2> page_uv = page_projection->project(
+			shadow_x, shadow_z);
 	TerrainStaticShadowRasterVertex result;
-	result.page_u = (shadow_x - page_min_x) / static_cast<float>(span);
-	result.page_v = (shadow_z - page_min_z) / static_cast<float>(span);
+	result.page_u = page_uv[0];
+	result.page_v = page_uv[1];
 	result.depth = height * kProjectedDepthScale + kProjectedDepthBias;
 	result.texture_u = world.texture_u;
 	result.texture_v = world.texture_v;
@@ -311,9 +310,11 @@ bool rasterize_terrain_static_shadow_alpha(
 			static_cast<std::size_t>(high_width) * high_height;
 	std::vector<uint8_t> temporary;
 	std::vector<uint8_t> resolved;
+	std::vector<float> depth_buffer;
 	try {
 		temporary.resize(high_count);
 		resolved.resize(page.alpha.size());
+		depth_buffer.assign(high_count, input.receiver_depth);
 	} catch (const std::bad_alloc &) {
 		return false;
 	}
@@ -355,6 +356,11 @@ bool rasterize_terrain_static_shadow_alpha(
 		const float area = edge(vertices[0], vertices[1],
 				vertices[2].x, vertices[2].y);
 		if (std::abs(area) <= kDegenerateArea) continue;
+		// The ordinary tile-model pass uses CULLMODE CCW: in D3D screen
+		// coordinates (Y down), positive signed area is the retained clockwise
+		// front face. The material two-sided bit switches to CULLMODE NONE.
+		// [orig: CRenderBatchQueue_FlushBatches @0x5DA3E4..0x5DA401]
+		if (!triangle.two_sided && area < 0.0f) continue;
 		const float orientation = area > 0.0f ? 1.0f : -1.0f;
 		const TextureDerivatives derivatives =
 				texture_derivatives(vertices, area);
@@ -406,7 +412,12 @@ bool rasterize_terrain_static_shadow_alpha(
 				const float w2 = e2 * inverse_area;
 				const float depth = vertices[0].depth * w0 +
 						vertices[1].depth * w1 + vertices[2].depth * w2;
-				if (depth > input.receiver_depth) continue;
+				const std::size_t pixel =
+						static_cast<std::size_t>(y) * high_width + x;
+				// Every shipped PROJSHAD declaration has normal z mode. Retail
+				// therefore applies LESSEQUAL and writes depth even for alpha,
+				// additive, and multiplicative material-blend variants.
+				if (depth > depth_buffer[pixel]) continue;
 				float source_alpha = std::clamp(triangle.alpha_scale, 0.0f, 1.0f);
 				if (texture != nullptr) {
 					const float u = vertices[0].texture_u * w0 +
@@ -425,8 +436,8 @@ bool rasterize_terrain_static_shadow_alpha(
 							: alpha_byte > triangle.alpha_ref;
 					if (!admitted) continue;
 				}
-				uint8_t &destination = temporary[
-						static_cast<std::size_t>(y) * high_width + x];
+				depth_buffer[pixel] = depth;
+				uint8_t &destination = temporary[pixel];
 				destination = blend_fragment(
 						destination, triangle.blend, source_alpha);
 			}

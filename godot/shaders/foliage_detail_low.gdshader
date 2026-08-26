@@ -8,4 +8,5 @@ render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 // cutoff discard reproduces that texel selection.
 // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912;
 // Foliage_LoadDefAssets technique block @ 0x60141f..0x601427]
+#define NOVA_Q3_TRANSPARENT
 #include "res://shaders/foliage_detail.gdshaderinc"

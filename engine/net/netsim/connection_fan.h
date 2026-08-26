@@ -70,9 +70,27 @@ int view_distance_units();
 std::vector<std::vector<uint8_t>> build_water_cross_messages(
         const world::World &world);
 
+// Optional F3-only attribution for one recipient's 0x0A fan. The caller passes
+// nullptr during ordinary play, keeping selection and encoding free of timers.
+struct ConnectionS2CPerf {
+	uint64_t setup_us = 0;
+	uint64_t round_selection_us = 0;
+	uint64_t entity_selection_us = 0;
+	uint64_t entity_setup_us = 0;
+	uint64_t entity_scoring_us = 0;
+	uint64_t entity_los_us = 0;
+	uint64_t entity_los_terrain_us = 0;
+	uint64_t entity_los_sector_us = 0;
+	uint64_t entity_sort_us = 0;
+	uint64_t entity_budget_us = 0;
+	uint64_t encode_us = 0;
+	uint64_t enqueue_us = 0;
+};
+
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type = 0,
-                         std::size_t max_frame_body_bytes = 0);
+                         std::size_t max_frame_body_bytes = 0,
+                         ConnectionS2CPerf *perf = nullptr);
 
 } // namespace opennova::netsim

@@ -59,6 +59,12 @@ int main(void) {
         return 1;
     }
 
+    if (rocket->scorch_id != 2) {
+        fprintf(stderr, "FAIL: ROCKET scorch_id mismatch: %d\n", rocket->scorch_id);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+
     /* Fire-presentation fields (world-wac-ai-re §17.4): ai_launch sound-set name; a
        one-value `tracer_type rocket` fills BOTH slots (friendly copies into enemy). */
     if (strcmp(rocket->ai_launch, "GS_AT4") != 0) {
@@ -121,6 +127,12 @@ int main(void) {
 
     if (null_ammo->velocity != 0) {
         fprintf(stderr, "FAIL: AT_NULL velocity should be 0, got %d\n", null_ammo->velocity);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if (null_ammo->scorch_id != 0) {
+        fprintf(stderr, "FAIL: AT_NULL scorch_id should be 0, got %d\n",
+                null_ammo->scorch_id);
         def_free_ammo(&ammo);
         return 1;
     }

@@ -68,7 +68,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// The provider closures below persist on the pipeline across frames; they
 	// read this latched pointer at call time, never a per-call reference.
 	world_ = &ctx.world;
-	wire_frame_providers(ctx);
+	wire_frame_providers(ctx, hooks);
 	hooks.resolve_row_adm_ids();
 	send_hello_once(ctx.runtime, hooks.send);
 	hooks.deposit_inbound();
@@ -87,7 +87,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
 	// them here is the retail recv-before-actions boundary, not presentation work.
-	refresh_projectile_proxies(ctx, hooks);
+	refresh_wire_collision_proxies(ctx, hooks);
 	apply_gameplay_events(ctx);
 
 	const bool preround_active = ctx.world.preround_delay_seconds != 0;
@@ -128,7 +128,8 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	++now_tick_;
 }
 
-void JoinerWorldBridge::wire_frame_providers(const PumpContext &ctx) {
+void JoinerWorldBridge::wire_frame_providers(
+		const PumpContext &ctx, const PumpHooks &hooks) {
 	// The row-side root-motion leg (net-re §5.38e): hand the joiner's view the
 	// same per-model .adm registry the authority movers ground on, and resolve
 	// each decoded organic row's adm id once its type is known — the netsim
@@ -145,6 +146,15 @@ void JoinerWorldBridge::wire_frame_providers(const PumpContext &ctx) {
 	// water in this world).
 	ctx.runtime.view().set_water_z(
 			ctx.world.env.water_z, ctx.world.env.water_z != 0);
+	// Replica peer/source spheres are initialized from the exact same typed
+	// items.def/model result as projectile and lighting projections. Capture the
+	// std::function by value: the pipeline retains this callback past the
+	// stack-owned PumpHooks instance.
+	const auto wire_collision_shape = hooks.wire_collision_shape;
+	ctx.runtime.view().set_replica_bound_radius_resolver(
+			[wire_collision_shape](uint16_t type_id) -> int32_t {
+				return wire_collision_shape(type_id).bound_radius_q16;
+			});
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
 	// settle runs the ported movement collision resolver — candidate-model
@@ -182,7 +192,8 @@ void JoinerWorldBridge::wire_frame_providers(const PumpContext &ctx) {
 					world::EntityHandle ground;
 					const int32_t clearance = col->resolve_replica(
 							*world_, st, q.pos, q.vel_xy, q.vel_z,
-							q.capsule_bottom, q.capsule_top, q.is_player_class,
+							q.capsule_bottom, q.capsule_top,
+							q.source_bound_radius_q16, q.is_player_class,
 							q.tick, q.anim_state_id, q.anim_state_flags,
 							peers.data(), static_cast<int32_t>(peers.size()),
 							q.row_handle, &q.entity_flags, &ground);
@@ -943,11 +954,11 @@ void JoinerWorldBridge::mirror_predicted_vehicles(const PumpContext &ctx) {
 // their authored collision geometry at the decoded pose. Wire H remains
 // presentation identity; local World authority never receives a cloned
 // entity or an H->L owner mapping.
-void JoinerWorldBridge::refresh_projectile_proxies(
+void JoinerWorldBridge::refresh_wire_collision_proxies(
 		const PumpContext &ctx, const PumpHooks &hooks) {
 	if (ctx.world.ai == nullptr || ctx.world.ai->collision == nullptr) return;
-	std::vector<world::ProjectilePersonProxy> person_proxies;
-	std::vector<world::ProjectileDynamicProxy> dynamic_proxies;
+	std::vector<world::WirePersonCollisionProxy> person_proxies;
+	std::vector<world::WireDynamicCollisionProxy> dynamic_proxies;
 	uint16_t self_wire_handle = world::EntityHandle::kInvalid;
 	if (ctx.runtime.has_self_handle())
 		self_wire_handle = ctx.runtime.self_handle();
@@ -967,10 +978,15 @@ void JoinerWorldBridge::refresh_projectile_proxies(
 			// @ 0x4e4a30 over the client-built person table].
 			if (entity.cls == EntityClass::Player ||
 					entity.cls == EntityClass::Infantry) {
-				world::ProjectilePersonProxy proxy;
+				const world::ResolvedCollisionShape shape =
+						hooks.wire_collision_shape(entity.type_id);
+				world::WirePersonCollisionProxy proxy;
 				proxy.wire_handle = entity.handle;
 				proxy.position_q16 = world::FixedVec3{
 						entity.x, entity.y, entity.z};
+				proxy.bound_radius_q16 = shape.bound_radius_q16;
+				proxy.uniform_scale_q16 = shape.uniform_scale_q16;
+				proxy.bbox_center_q16 = shape.bbox_center_q16;
 				person_proxies.push_back(proxy);
 				continue;
 			}
@@ -980,13 +996,14 @@ void JoinerWorldBridge::refresh_projectile_proxies(
 			// statics keep colliding through the locally loaded mission set.
 			if (wire_handle::pool(entity.handle) != wire_handle::kPoolItem)
 				continue;
-			int32_t model_id = -1;
-			float bound_radius = 0.0f;
-			hooks.wire_collision_shape(entity.type_id, model_id, bound_radius);
-			if (model_id < 0 && bound_radius <= 0.0f) continue;
-			world::ProjectileDynamicProxy proxy;
+			const world::ResolvedCollisionShape shape =
+					hooks.wire_collision_shape(entity.type_id);
+			if (shape.model_id < 0 && shape.bound_radius_q16 == 0 &&
+					!shape.pool1_candidate_source_eligible)
+				continue;
+			world::WireDynamicCollisionProxy proxy;
 			proxy.wire_handle = entity.handle;
-			proxy.model_id = model_id;
+			proxy.model_id = shape.model_id;
 			proxy.position_q16 = world::FixedVec3{
 					entity.x, entity.y, entity.z};
 			// The decoded pose mirrors the retail client entity fields: the compact
@@ -996,9 +1013,16 @@ void JoinerWorldBridge::refresh_projectile_proxies(
 			proxy.heading_bam = entity.heading_bam;
 			proxy.pitch_bam = entity.pitch_bam;
 			proxy.roll_bam = entity.roll_bam;
-			proxy.bound_radius_q16 = bound_radius > 0.0f
-					? static_cast<int32_t>(bound_radius * 65536.0f)
-					: 0;
+			proxy.bound_radius_q16 = shape.bound_radius_q16;
+			proxy.uniform_scale_q16 = shape.uniform_scale_q16;
+			proxy.bbox_center_q16 = shape.bbox_center_q16;
+			proxy.candidate_source_eligible =
+					shape.pool1_candidate_source_eligible;
+			const world::EntityHandle possible_twin{entity.handle};
+			const world::Entity *twin = ctx.world.registry.get(possible_twin);
+			if (twin != nullptr &&
+					static_cast<uint16_t>(twin->item_id) == entity.type_id)
+				proxy.registry_twin = possible_twin;
 			dynamic_proxies.push_back(proxy);
 		}
 	}
@@ -1007,10 +1031,9 @@ void JoinerWorldBridge::refresh_projectile_proxies(
 	// Known-dead bit 1 is retained too: retail dead bodies remain person blockers
 	// and a destroyed vehicle's shell keeps blocking (husk-model substitution for
 	// wire proxies is a tracked residual).
-	ctx.world.ai->collision->replace_projectile_person_proxies(
-			std::move(person_proxies), self_wire_handle);
-	ctx.world.ai->collision->replace_projectile_dynamic_proxies(
-			std::move(dynamic_proxies));
+	ctx.world.ai->collision->replace_wire_collision_proxies(
+			std::move(person_proxies), std::move(dynamic_proxies),
+			self_wire_handle);
 }
 
 // Drain typed S2C gameplay events after the client recv pump: tag-2 fires

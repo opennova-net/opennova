@@ -614,10 +614,34 @@ func _present_entity_rows(stats_on := false) -> void:
 	var layout_revision := int(_sim.get_present_layout_revision())
 	if _present != null:
 		var mission_start := Time.get_ticks_usec() if stats_on else 0
-		_present.present_snapshot(snapshot, stride, layout_revision)
 		if stats_on:
+			var profile: PackedInt64Array = _present.profile_present_snapshot(
+					snapshot, stride, layout_revision)
+			if profile.size() >= PresentApplier.MISSION_PROFILE_SLOT_COUNT:
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_CORE,
+						profile[PresentApplier.MISSION_PROFILE_CORE_US])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_AIM,
+						profile[PresentApplier.MISSION_PROFILE_AIM_US])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_CONTROLS,
+						profile[PresentApplier.MISSION_PROFILE_CONTROLS_US])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_VISIBILITY,
+						profile[PresentApplier.MISSION_PROFILE_VISIBILITY_US])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_BODY,
+						profile[PresentApplier.MISSION_PROFILE_BODY_US])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_MUZZLE,
+						profile[PresentApplier.MISSION_PROFILE_MUZZLE_US])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_ROWS,
+						profile[PresentApplier.MISSION_PROFILE_ROWS])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS,
+						profile[PresentApplier.MISSION_PROFILE_SUBMITTED_ROWS])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_BODY_ROWS,
+						profile[PresentApplier.MISSION_PROFILE_BODY_ROWS])
+				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_MUZZLE_ROWS,
+						profile[PresentApplier.MISSION_PROFILE_MUZZLE_ROWS])
 			_frame_stats.add(FrameStatsBoard.PRESENT_MISSION,
 					Time.get_ticks_usec() - mission_start)
+		else:
+			_present.present_snapshot(snapshot, stride, layout_revision)
 	if _wire_present != null:
 		var wire_start := Time.get_ticks_usec() if stats_on else 0
 		_wire_present.present_snapshot(snapshot, stride, layout_revision)
@@ -727,7 +751,146 @@ func _read_frame_perf() -> void:
 	_ticks_last_frame = int(perf.get("ticks", 0))
 	if _ticks_last_frame > 0 and _stats_capture_on():
 		_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
-		_frame_stats.add(FrameStatsBoard.SIM_NET, int(perf.get("net_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_NET,
+				int(perf.get("client_decode_us", perf.get("net_us", 0))))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_PREP,
+				int(perf.get("host_prep_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_PUMP,
+				int(perf.get("host_pump_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_RECEIVE,
+				int(perf.get("host_receive_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_CONNECTIONS,
+				int(perf.get("host_connections_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_ADAPTER,
+				int(perf.get("host_adapter_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_SERVER_TICK,
+				int(perf.get("server_tick_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_SERVER_INPUT,
+				int(perf.get("server_input_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_SERVER_WORLD,
+				int(perf.get("server_world_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_SETUP,
+				int(perf.get("world_setup_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_SCRIPTS,
+				int(perf.get("world_scripts_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_AI,
+				int(perf.get("world_ai_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_REACTIONS,
+				int(perf.get("world_ai_reactions_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_COLLISION,
+				int(perf.get("world_ai_collision_tables_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_ENTITIES,
+				int(perf.get("world_ai_entities_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY,
+				int(perf.get("world_ai_infantry_entities_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_REMOTE,
+				int(perf.get("world_ai_infantry_remote_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_COMBAT,
+				int(perf.get("world_ai_infantry_combat_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_ANIMATION,
+				int(perf.get("world_ai_infantry_animation_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_COLLISION,
+				int(perf.get("world_ai_infantry_collision_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_COLLISION_CONTACTS,
+				int(perf.get("world_ai_infantry_collision_contacts_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_COLLISION_REPULSION,
+				int(perf.get("world_ai_infantry_collision_repulsion_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_INFANTRY_COLLISION_GROUND,
+				int(perf.get("world_ai_infantry_collision_ground_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_OTHER_ENTITIES,
+				int(perf.get("world_ai_other_entities_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_AUTH_VEHICLES,
+				int(perf.get("world_ai_authority_vehicles_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_VEHICLE_SCAN,
+				int(perf.get("world_ai_vehicle_scan_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_VEHICLE_MOTORS,
+				int(perf.get("world_ai_vehicle_motors_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_VEHICLE_RIDERS,
+				int(perf.get("world_ai_vehicle_riders_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_CLIENT_VEHICLES,
+				int(perf.get("world_ai_client_vehicles_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_AI_EVENTS,
+				int(perf.get("world_ai_events_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_ATTACHMENTS,
+				int(perf.get("world_attachments_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_ATTACHMENT_ORPHANS,
+				int(perf.get("world_attachment_orphans_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_ATTACHMENT_CHILDREN,
+				int(perf.get("world_attachment_child_pose_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_ATTACHMENT_RIDERS,
+				int(perf.get("world_attachment_riders_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_THROWABLES,
+				int(perf.get("world_throwables_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_WEAPONS,
+				int(perf.get("world_weapons_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_PROJECTILES,
+				int(perf.get("world_projectiles_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_DESTRUCTION,
+				int(perf.get("world_destruction_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_WORLD_HOUSEKEEPING,
+				int(perf.get("world_housekeeping_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_MATCH,
+				int(perf.get("match_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_SERVER_RULES,
+				int(perf.get("server_rules_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_SERVER_REPLICATION,
+				int(perf.get("server_replication_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_QUERY_PREP,
+				int(perf.get("replication_query_prep_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_QUERY_COLLECT,
+				int(perf.get("replication_query_collect_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_QUERY_GRID,
+				int(perf.get("replication_query_grid_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_QUERY_GRID_SPAN,
+				int(perf.get("replication_query_grid_span_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_QUERY_GRID_BUCKET,
+				int(perf.get("replication_query_grid_bucket_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_QUERY_GRID_WORKSPACE,
+				int(perf.get("replication_query_grid_workspace_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_SNAPSHOT,
+				int(perf.get("replication_snapshot_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_FAN,
+				int(perf.get("replication_fan_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_FAN_SETUP,
+				int(perf.get("replication_fan_setup_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ROUNDS,
+				int(perf.get("replication_round_selection_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITIES,
+				int(perf.get("replication_entity_selection_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_SETUP,
+				int(perf.get("replication_entity_setup_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_SCORE,
+				int(perf.get("replication_entity_scoring_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_LOS,
+				int(perf.get("replication_entity_los_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_LOS_TERRAIN,
+				int(perf.get("replication_entity_los_terrain_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_LOS_SECTOR,
+				int(perf.get("replication_entity_los_sector_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_SORT,
+				int(perf.get("replication_entity_sort_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENTITY_BUDGET,
+				int(perf.get("replication_entity_budget_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENCODE,
+				int(perf.get("replication_encode_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_REPLICATION_ENQUEUE,
+				int(perf.get("replication_enqueue_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_SEND,
+				int(perf.get("host_send_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_HOST_PLAYER,
+				int(perf.get("host_player_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_CLIENT_SETUP,
+				int(perf.get("client_setup_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_CLIENT_RECEIVE,
+				int(perf.get("client_receive_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_CLIENT_MAINTENANCE,
+				int(perf.get("client_maintenance_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_CLIENT_SEND,
+				int(perf.get("client_send_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_ADM_RESOLVE,
+				int(perf.get("adm_resolve_us", 0)))
+		_frame_stats.add(FrameStatsBoard.SIM_SINK,
+				int(perf.get("sink_us", 0)))
 		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
 		_frame_stats.add(FrameStatsBoard.SIM_TICKS, _ticks_last_frame)
 

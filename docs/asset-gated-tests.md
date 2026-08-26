@@ -38,6 +38,12 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 | `OPENNOVA_MODSUPEROED_DIR` | pytest modsuperoed automation smoke | third-party OED pack | already in CI (LFS submodule; the `modsuperoed-smoke` job) |
 | (LFS content, no env var) | pytest `test_retail_render_evidence.py` | the committed render-evidence store under `screenshots/parity/render-lighting-2026-08/` — the suite validates the repo's OWN published evidence (hashes, decodable PNGs, manifests), so its gate is LFS materialization, not an install: it skips as a PASS when the store holds LFS pointer stubs (e.g. `lfs.fetchexclude`d clones) | already in CI: the test job pulls full LFS and ctest's `opennova_python_pytest` wrapper (build.sh sets `-DOPENNOVA_ENABLE_PYTHON_TESTS=ON`) runs the whole pytest suite |
 
+The 00TRa tile-composer leg fingerprints the archived `TRNTILE10.TGA`
+payload (`SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490`)
+and pins the correct shipped-output RGB hashes for entries 761/781. This
+guards against repeating the 2026-08-21 test-only re-pin that left the
+asset-gated test permanently red without changing the renderer.
+
 Manual probes/tools share the gating pattern but are not CI-collected (see
 `godot/tests/CLAUDE.md`: `*_probe.gd` are uncollected): `NW_SP_MISSION` +
 `NW_RESOURCE_DIR` (the standalone-game probe pattern — boot straight into a

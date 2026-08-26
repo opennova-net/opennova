@@ -101,3 +101,31 @@ opennova_sun_veil_alpha={
 "type": "float",
 "value": 0.0
 }
+opennova_environment_cube={
+"type": "samplerCube",
+"value": ""
+}
+opennova_static_point_light_rows={
+"type": "sampler2D",
+"value": ""
+}
+opennova_environment_cube_ready={
+"type": "bool",
+"value": false
+}
+opennova_water_active={
+"type": "bool",
+"value": false
+}
+opennova_water_height={
+"type": "float",
+"value": 0.0
+}
+opennova_water_reflection_clip_active={
+"type": "bool",
+"value": false
+}
+opennova_water_reflection_eye={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}

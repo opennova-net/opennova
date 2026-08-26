@@ -154,7 +154,7 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 			"p_placer.is_valid() ? &static_shadow_rasterizer : nullptr"),
 		"The device must expose the producer only while a mission source is attached.")
 	var light_sample := source.find("cached_env_node->get_light_direction_render_tuple()")
-	var frame_raster := source.find("static_shadow_rasterizer.begin_frame(page_light_direction)")
+	var frame_raster := source.find("static_shadow_rasterizer.begin_frame(page_light_direction,")
 	var frame_cache := source.find("tile_cache_device.begin_frame(draw_list.frame_id)")
 	assert_gt(light_sample, 0,
 		"The page path must read the RAW getter tuple: its projector and DOT3 packs "
@@ -163,6 +163,8 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 		"The Godot-axes light vector must never feed the page path.")
 	assert_gt(frame_raster, light_sample,
 		"The producer must consume the same direct environment tuple as the page composer.")
+	assert_true(source.contains("static_cast<uint32_t>(light_time_ms)"),
+		"Projected-shadow material animation must share Terrain's retail millisecond clock.")
 	assert_gt(frame_cache, frame_raster,
 		"The caster/light snapshot must be final before any page plan is requested.")
 
@@ -194,7 +196,7 @@ func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> v
 	# STATIC silhouettes stay page-alpha only. The render-slot DRAPE next-pass
 	# on the terrain material serves the separate DYNAMIC entity ground
 	# shadows (retail drapes live silhouettes over terrain-following patches:
-	# RenderSlot_DrawAllDrapes @ 0x5d6e20 / render_sector_model @ 0x5d5ca0);
+	# RenderSlot_DrawAllDrapes @0x5d6e20 / render_sector_model @0x5d5ca0);
 	# it must be tied to that witness, and the static rasterizer must never
 	# route through it.
 	assert_true(device.contains("SlotShadow::get_drape_material()"),
@@ -344,17 +346,25 @@ func test_provider_uses_page_local_point_receiver_state_and_complete_raster_stam
 			"resolved.material_index",
 			"resolved.uvs",
 			"material.blend",
-			"material.alpha_scale",
+			"material.runtime_material",
+			"material.diffuse_alpha_frames",
+			"material_state.alpha_scale",
+			"material_state.uv.m00",
 			"pyramid->mips",
 			"pyramid->storage",
-			"material.team_alpha_frames",
 	]:
-		assert_true(geometry.contains(token),
+		assert_true(geometry.contains(token) or planner.contains(token),
 			"Raster-affecting input must participate in geometry content: %s" % token)
 	assert_true(planner.contains("hash_value(revision, record.team)"),
 		"Team selects TEX_TEAM alpha frames, so it must invalidate resident pages.")
-	assert_true(geometry.contains('strutil::iequals(anim_control_name, "TEX_TEAM")'),
-		"Only the witnessed discrete TEX_TEAM flipbook can select caster-local frames.")
+	assert_true(geometry.contains("::renderer::compute_anim_frame("),
+		"All time/control diffuse flipbooks must share ordinary object frame selection.")
+	assert_true(geometry.contains("::renderer::eval_material_runtime("),
+		"AlphaGen and the complete UV matrix must share ordinary object evaluation.")
+	assert_false(geometry.contains("team_alpha_frames"),
+		"The TEX_TEAM-only compatibility frame API must be removed by the cutover.")
+	assert_false(geometry.contains("UnsupportedDynamicAlpha"))
+	assert_false(geometry.contains("UnsupportedDynamicUv"))
 	assert_false(geometry.contains("UnsupportedLivePanmLod"),
 		"The retail tile pass submits entity transforms and does not evaluate PANM.")
 

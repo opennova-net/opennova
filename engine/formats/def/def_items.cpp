@@ -575,6 +575,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             else
                 current.husk_swap_at = (float)(parse_float_n(v, vl) * 62.0);
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "scale", 5)) {
+            /* Signed Q16.16, truncating toward zero after the multiply. Retail
+               temporarily selects x87 RC=truncate before fistp to def+0x1B8.
+               [orig: ItemDef_ParseProperty @ 0x49f6e0..0x49f73d;
+                multiplier dbl_7C3CC0 = 65536.0] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.scale_q16 = (int)(parse_float_n(v, vl) * 65536.0);
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "debris_scale", 12)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
             current.debris_scale = (float)parse_float_n(v, vl); /* -> def+0x1BC */

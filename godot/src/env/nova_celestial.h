@@ -48,6 +48,10 @@ public:
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
+	void set_environment_capture_layer_mask(uint32_t p_mask);
+	uint32_t get_environment_capture_layer_mask() const {
+		return environment_capture_layer_mask_;
+	}
 
 	// Whether a source surface uses additive blending that the celestial
 	// replacement material must preserve (the stock sun/moon models author
@@ -115,6 +119,7 @@ private:
 	Vector<Ref<ShaderMaterial>> _apply_material_override(Node3D *p_model,
 			const Ref<ShaderMaterial> &p_base_material);
 	static void _collect_meshes(Node *p_node, Vector<MeshInstance3D *> &r_out);
+	void _stamp_environment_capture_layer(Node3D *p_model);
 	void _build_star_field(const String &p_star_name);
 	void _update_star_field(const Vector3 &p_light_dir);
 	void _set_body_parameter(const Body &p_body, const StringName &p_parameter,
@@ -144,6 +149,7 @@ private:
 	ObjectID cached_cam_id_;
 	Ref<Shader> celestial_shader_;
 	Ref<Shader> celestial_additive_shader_;
+	uint32_t environment_capture_layer_mask_ = 0;
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
 	int sun_veil_stopdown_ = 0;

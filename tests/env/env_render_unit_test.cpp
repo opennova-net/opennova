@@ -944,15 +944,32 @@ int main() {
 		if (!expect(occ.brightness < 240, "brightness decays toward 0")) return 1;
 
 		// Glow alpha: dot^4/2 x brightness x folds. Full-on = 0x8000 (the /2).
-		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0, 0) == 0x8000,
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0, 0, false) == 0x8000,
 		            "glow alpha caps at dot^4/2 full brightness")) return 1;
-		if (!expect(glare_glow_alpha_fixed(0, 256, 0, 0) == 0, "glow off looking away")) return 1;
-		const int glow_half_dot = glare_glow_alpha_fixed(0x8000, 256, 0, 0);
+		if (!expect(glare_glow_alpha_fixed(0, 256, 0, 0, false) == 0, "glow off looking away")) return 1;
+		const int glow_half_dot = glare_glow_alpha_fixed(0x8000, 256, 0, 0, false);
 		if (!expect(glow_half_dot == 0x800, "glow at dot 0.5 = 0.5^4/2 = 1/32")) return 1;
-		if (!expect(glare_glow_alpha_fixed(0x10000, 128, 0, 0) == 0x4000,
+		if (!expect(glare_glow_alpha_fixed(0x10000, 128, 0, 0, false) == 0x4000,
 		            "brightness halves the glow")) return 1;
-		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0x8000, 0) == 0x4000,
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0x8000, 0, false) == 0x4000,
 		            "overcast halves the glow")) return 1;
+		// The FBEFFECTS >= 3 quarter [orig: sub_581F60 @ 0x581f6a;
+		// >>= 2 @ 0x5ad033..0x5ad03c] - the locked reimpl profile's form.
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0, 0, true) == 0x2000,
+		            "FBEFFECTS>=3 quarters the direct glow")) return 1;
+
+		// The Q3 (bloom source) law: no occlusion, (fog_km + 1) * 0.5 *
+		// dot_factor [orig: render_skybox_sun_glow(0, 0) no-occlusion
+		// brightness @ 0x5ad013..0x5ad027]. fog 1000 u -> fog_km = 1 ->
+		// scaled = 2 * 0.5 * 0x8000 = 0x8000; quartered = 0x2000.
+		if (!expect(glare_q3_alpha_fixed(0x10000, 1000.0f, 0, 0, true) == 0x2000,
+		            "q3 glow: fog 1 km quartered")) return 1;
+		if (!expect(glare_q3_alpha_fixed(0x10000, 1000.0f, 0, 0, false) == 0x8000,
+		            "q3 glow: fog 1 km unquartered")) return 1;
+		if (!expect(glare_q3_alpha_fixed(0, 1000.0f, 0, 0, true) == 0,
+		            "q3 glow off looking away")) return 1;
+		if (!expect(glare_q3_alpha_fixed(0x10000, 0.0f, 0, 0, false) == 0x4000,
+		            "q3 glow: zero fog keeps the +1 floor")) return 1;
 	}
 
 	// --- Water strip tessellation (env #29) [orig: render_water_strip_detailed

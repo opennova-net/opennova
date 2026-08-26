@@ -7,12 +7,22 @@
 #include <menu/menu_frame.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <string>
 
 namespace godot {
+
+namespace {
+
+uint64_t menu_video_perf_now_us() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+} // namespace
 
 using opennova::menu::MenuVideoSlotSpec;
 using opennova::menu::menu_video_resolve;
@@ -85,7 +95,7 @@ void MenuVideoUnderlay::set_source(
 			fail_slot_(slot);
 		}
 	}
-	set_process(get_active_slot_count() != 0);
+	update_process_state_();
 	queue_redraw();
 }
 
@@ -126,6 +136,17 @@ int MenuVideoUnderlay::get_failed_count() const {
 
 bool MenuVideoUnderlay::is_startup_layout() const {
 	return startup_;
+}
+
+void MenuVideoUnderlay::set_runtime_profiling_enabled(bool p_enabled) {
+	runtime_profiling_enabled_ = p_enabled;
+	last_process_us_ = 0;
+}
+
+int64_t MenuVideoUnderlay::consume_process_us() {
+	const uint64_t sample = last_process_us_;
+	last_process_us_ = 0;
+	return static_cast<int64_t>(sample);
 }
 
 String MenuVideoUnderlay::get_slot_source(int p_slot) const {
@@ -231,9 +252,26 @@ void MenuVideoUnderlay::draw_slots_() {
 	}
 }
 
+void MenuVideoUnderlay::update_process_state_() {
+	set_process(is_inside_tree() && is_visible_in_tree() &&
+			get_active_slot_count() != 0);
+}
+
 void MenuVideoUnderlay::_notification(int p_what) {
 	switch (p_what) {
+		case NOTIFICATION_ENTER_TREE:
+		case NOTIFICATION_VISIBILITY_CHANGED:
+			update_process_state_();
+			break;
 		case NOTIFICATION_PROCESS: {
+			const uint64_t process_start = runtime_profiling_enabled_
+					? menu_video_perf_now_us() : 0;
+			if (!is_visible_in_tree()) {
+				update_process_state_();
+				if (runtime_profiling_enabled_)
+					last_process_us_ = menu_video_perf_now_us() - process_start;
+				break;
+			}
 			const double delta = get_process_delta_time();
 			for (Slot &slot : slots_) {
 				if (slot.movie && !advance_slot_(slot, delta)) {
@@ -244,6 +282,8 @@ void MenuVideoUnderlay::_notification(int p_what) {
 				set_process(false);
 			}
 			queue_redraw();
+			if (runtime_profiling_enabled_)
+				last_process_us_ = menu_video_perf_now_us() - process_start;
 			break;
 		}
 		case NOTIFICATION_DRAW:
@@ -266,6 +306,12 @@ void MenuVideoUnderlay::_bind_methods() {
 			&MenuVideoUnderlay::get_failed_count);
 	ClassDB::bind_method(D_METHOD("is_startup_layout"),
 			&MenuVideoUnderlay::is_startup_layout);
+	ClassDB::bind_method(D_METHOD("set_runtime_profiling_enabled", "enabled"),
+			&MenuVideoUnderlay::set_runtime_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("is_runtime_profiling_enabled"),
+			&MenuVideoUnderlay::is_runtime_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("consume_process_us"),
+			&MenuVideoUnderlay::consume_process_us);
 	ClassDB::bind_method(D_METHOD("get_slot_source", "slot"),
 			&MenuVideoUnderlay::get_slot_source);
 }

@@ -148,6 +148,22 @@ std::array<float, 3> drape_sun_ambient(const std::array<float, 3> &sun_rgb,
 	return ambient;
 }
 
+std::array<float, 3> drape_silhouette_factor(
+		const std::array<float, 3> &capture_rgb,
+		const std::array<float, 3> &shadow_term, float fade,
+		float depth_clip) {
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0: stage 0 ADD
+	// (silhouette RT, DIFFUSE), stage 1 ADD (shadowztex, CURRENT), both
+	// saturating before DESTCOLOR/ZERO multiplies the framebuffer].
+	std::array<float, 3> factor{};
+	for (int c = 0; c < 3; ++c) {
+		const float ambient = 1.0f - (1.0f - fade) * shadow_term[c];
+		factor[c] = std::clamp(
+				capture_rgb[c] + ambient + depth_clip, 0.0f, 1.0f);
+	}
+	return factor;
+}
+
 static float ntsc_luminance(const std::array<float, 3> &rgb) {
 	// [orig: flt_7D4B34 = 0.3, flt_7D8B88 = 0.6, flt_7C69F4 = 0.1].
 	return 0.3f * rgb[0] + 0.6f * rgb[1] + 0.1f * rgb[2];
@@ -244,6 +260,15 @@ std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		y += step_y;
 	}
 	return {x, z};
+}
+
+float slot_march_start_height(float caster_height, float terrain_height,
+		float contact_tolerance) {
+	const float gap = caster_height - terrain_height;
+	if (gap > 0.0f && gap <= std::max(contact_tolerance, 0.0f)) {
+		return terrain_height;
+	}
+	return caster_height;
 }
 
 SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod) {

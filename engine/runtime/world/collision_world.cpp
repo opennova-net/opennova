@@ -7,6 +7,7 @@
 // — what the queries above are pointed at.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include "collision_detail.h"
@@ -16,6 +17,31 @@
 namespace opennova::world {
 
 using namespace detail; // the shared fixed-point helpers, unqualified as before
+
+namespace {
+
+constexpr int64_t kStableLosCellSpanQ16 = int64_t{64} << 16;
+constexpr uint64_t kStableLosMaxCandidateCells = 64;
+constexpr uint64_t kStableLosMaxQueryCells = 4096;
+constexpr uint64_t kStableLosMaxDenseCells = 65536;
+
+int32_t stable_los_cell_coord(int64_t q16) {
+    int64_t cell = q16 / kStableLosCellSpanQ16;
+    if (q16 < 0 && q16 % kStableLosCellSpanQ16 != 0) --cell;
+    return static_cast<int32_t>(cell);
+}
+
+uint64_t stable_los_cell_key(int32_t x, int32_t y) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) |
+           static_cast<uint32_t>(y);
+}
+
+uint64_t stable_los_perf_now_us() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+} // namespace
 
 // ----------------------------------------------------------------------------
 // CollisionWorld
@@ -124,6 +150,17 @@ const EntityHandle *CollisionWorld::candidate_slice(EntityHandle h, int32_t &cou
     return arena_.data() + it->second.start;
 }
 
+const EntityHandle *CollisionWorld::wire_candidate_slice(
+        uint16_t wire_handle, int32_t &count_out) const {
+    const auto it = wire_candidates_.find(wire_handle);
+    if (it == wire_candidates_.end() || it->second.count <= 0) {
+        count_out = 0;
+        return nullptr;
+    }
+    count_out = it->second.count;
+    return wire_arena_.data() + it->second.start;
+}
+
 CollisionWorld::StaticSlotView CollisionWorld::static_slot(int32_t i) const {
     StaticSlotView v;
     if (i < 0 || i >= static_count_) return v;
@@ -140,6 +177,13 @@ const CollisionModel *CollisionWorld::model_for(
         const World &world, EntityHandle h) const {
     const Instance *instance = live_instance(world, h);
     return instance != nullptr ? model(instance->model_id) : nullptr;
+}
+
+const CollisionModel *CollisionWorld::husk_model_for(
+        const World &world, EntityHandle h) const {
+    const Instance *instance = live_instance(world, h);
+    if (instance == nullptr || instance->husk_model_id < 0) return nullptr;
+    return model(instance->husk_model_id);
 }
 
 bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
@@ -199,38 +243,37 @@ int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
 
 } // namespace detail
 
-void CollisionWorld::replace_projectile_person_proxies(
-        std::vector<ProjectilePersonProxy> proxies,
+void CollisionWorld::replace_wire_collision_proxies(
+        std::vector<WirePersonCollisionProxy> persons,
+        std::vector<WireDynamicCollisionProxy> dynamics,
         uint16_t local_player_wire_handle) {
-    proxies.erase(
-        std::remove_if(proxies.begin(), proxies.end(),
-                       [](const ProjectilePersonProxy &proxy) {
+    persons.erase(
+        std::remove_if(persons.begin(), persons.end(),
+                       [](const WirePersonCollisionProxy &proxy) {
                            return proxy.wire_handle == EntityHandle::kInvalid;
                        }),
-        proxies.end());
+        persons.end());
     std::stable_sort(
-        proxies.begin(), proxies.end(),
-        [](const ProjectilePersonProxy &a, const ProjectilePersonProxy &b) {
+        persons.begin(), persons.end(),
+        [](const WirePersonCollisionProxy &a,
+           const WirePersonCollisionProxy &b) {
             return a.wire_handle < b.wire_handle;
         });
-    projectile_person_proxies_ = std::move(proxies);
-    projectile_local_player_wire_handle_ = local_player_wire_handle;
-}
-
-void CollisionWorld::replace_projectile_dynamic_proxies(
-        std::vector<ProjectileDynamicProxy> proxies) {
-    proxies.erase(
-        std::remove_if(proxies.begin(), proxies.end(),
-                       [](const ProjectileDynamicProxy &proxy) {
+    dynamics.erase(
+        std::remove_if(dynamics.begin(), dynamics.end(),
+                       [](const WireDynamicCollisionProxy &proxy) {
                            return proxy.wire_handle == EntityHandle::kInvalid;
                        }),
-        proxies.end());
+        dynamics.end());
     std::stable_sort(
-        proxies.begin(), proxies.end(),
-        [](const ProjectileDynamicProxy &a, const ProjectileDynamicProxy &b) {
+        dynamics.begin(), dynamics.end(),
+        [](const WireDynamicCollisionProxy &a,
+           const WireDynamicCollisionProxy &b) {
             return a.wire_handle < b.wire_handle;
         });
-    projectile_dynamic_proxies_ = std::move(proxies);
+    wire_person_proxies_ = std::move(persons);
+    wire_dynamic_proxies_ = std::move(dynamics);
+    wire_local_player_handle_ = local_player_wire_handle;
 }
 
 void CollisionWorld::set_trace_profile_enabled(bool enabled) {
@@ -241,10 +284,276 @@ void CollisionWorld::set_trace_profile_enabled(bool enabled) {
 
 void CollisionWorld::invalidate_trace_view(EntityHandle h) {
     if (h.valid()) trace_view_cache_.erase(h.packed);
+    invalidate_stable_los_index();
 }
 
 void CollisionWorld::invalidate_trace_views() {
     trace_view_cache_.clear();
+    invalidate_stable_los_index();
+}
+
+void CollisionWorld::invalidate_stable_los_index() {
+    stable_los_index_ready_ = false;
+    stable_los_candidates_.clear();
+    stable_los_cell_spans_.clear();
+    stable_los_large_candidates_.clear();
+    stable_los_query_candidates_.clear();
+    stable_los_query_marks_.clear();
+    stable_los_query_generation_ = 0;
+    stable_los_dense_enabled_ = false;
+}
+
+void CollisionWorld::reset_query_view_cache() {
+    invalidate_trace_views();
+}
+
+void CollisionWorld::prepare_cached_raycast_queries(World &world,
+                                                     RaycastPrepPerf *perf) {
+    if (perf != nullptr) *perf = {};
+    uint64_t phase_start = perf != nullptr ? stable_los_perf_now_us() : 0;
+    // This is a new stable-world epoch: no matrix view or positional index may
+    // survive from movement/destruction earlier in the logic tick.
+    invalidate_trace_views();
+    ++stable_los_index_epoch_;
+    if (stable_los_index_epoch_ == 0) {
+        // A wrap is practically unreachable, but stale cell epochs must never
+        // alias the new publication.
+        stable_los_cells_.clear();
+        stable_los_dense_cells_.clear();
+        stable_los_index_epoch_ = 1;
+    }
+
+    auto append = [&](const Entity &e) {
+        if ((e.flags & 1u) != 0 || (e.engine_flags & 0x8000000u) != 0) return;
+        StableLosCandidate candidate;
+        candidate.h = e.handle;
+        if (!target_solid_bound(world, e.handle, candidate.pos, candidate.radius)) return;
+        if (candidate.radius < 0) candidate.radius = 0;
+        stable_los_candidates_.push_back(candidate);
+    };
+
+    if (tick_tables_ready()) {
+        stable_los_candidates_.reserve(statics_.size() + dynamics_.size());
+        for (const StaticSlot &slot : statics_) {
+            const Entity *e = world.registry.get(slot.h);
+            if (e != nullptr) append(*e);
+        }
+        for (const DynSlot &slot : dynamics_) {
+            if (slot.h.pool() == 2) continue;
+            const Entity *e = world.registry.get(slot.h);
+            if (e != nullptr) append(*e);
+        }
+    } else {
+        // Match raycast_clear_impl's unticked compatibility membership and
+        // order exactly.
+        world.registry.for_each([&](const Entity &e) {
+            if (e.handle.pool() == 2) append(e);
+        });
+        world.registry.for_each([&](const Entity &e) {
+            if (e.handle.pool() != 2 && e.kind == EntityKind::Item) append(e);
+        });
+    }
+
+    if (perf != nullptr) {
+        const uint64_t now = stable_los_perf_now_us();
+        perf->candidate_collect_us = now - phase_start;
+        phase_start = now;
+    }
+
+    const uint64_t grid_start = phase_start;
+    stable_los_cell_spans_.reserve(stable_los_candidates_.size());
+    bool have_cell_span = false;
+    int32_t dense_min_x = 0;
+    int32_t dense_max_x = -1;
+    int32_t dense_min_y = 0;
+    int32_t dense_max_y = -1;
+    for (uint32_t index = 0;
+         index < static_cast<uint32_t>(stable_los_candidates_.size()); ++index) {
+        const StableLosCandidate &candidate = stable_los_candidates_[index];
+        const int64_t radius = candidate.radius;
+        const int32_t min_x = stable_los_cell_coord(
+                static_cast<int64_t>(candidate.pos[0]) - radius);
+        const int32_t max_x = stable_los_cell_coord(
+                static_cast<int64_t>(candidate.pos[0]) + radius);
+        const int32_t min_y = stable_los_cell_coord(
+                static_cast<int64_t>(candidate.pos[1]) - radius);
+        const int32_t max_y = stable_los_cell_coord(
+                static_cast<int64_t>(candidate.pos[1]) + radius);
+        const uint64_t width = static_cast<uint64_t>(
+                static_cast<int64_t>(max_x) - min_x + 1);
+        const uint64_t height = static_cast<uint64_t>(
+                static_cast<int64_t>(max_y) - min_y + 1);
+        if (width * height > kStableLosMaxCandidateCells) {
+            // Very large authored bounds stay exact without exploding the
+            // index: every query includes this deliberately tiny global set.
+            stable_los_large_candidates_.push_back(index);
+            continue;
+        }
+        stable_los_cell_spans_.push_back(
+                {min_x, max_x, min_y, max_y, index});
+        if (!have_cell_span) {
+            dense_min_x = min_x;
+            dense_max_x = max_x;
+            dense_min_y = min_y;
+            dense_max_y = max_y;
+            have_cell_span = true;
+        } else {
+            dense_min_x = std::min(dense_min_x, min_x);
+            dense_max_x = std::max(dense_max_x, max_x);
+            dense_min_y = std::min(dense_min_y, min_y);
+            dense_max_y = std::max(dense_max_y, max_y);
+        }
+    }
+    if (perf != nullptr) {
+        const uint64_t now = stable_los_perf_now_us();
+        perf->grid_span_us = now - phase_start;
+        phase_start = now;
+    }
+
+    stable_los_dense_enabled_ = false;
+    if (have_cell_span) {
+        const uint64_t dense_width = static_cast<uint64_t>(
+                static_cast<int64_t>(dense_max_x) - dense_min_x + 1);
+        const uint64_t dense_height = static_cast<uint64_t>(
+                static_cast<int64_t>(dense_max_y) - dense_min_y + 1);
+        // Ordinary mission extents use direct indexing. Extremely sparse or
+        // adversarial coordinates stay on the retained hash grid so memory is
+        // bounded independently of world-coordinate range.
+        stable_los_dense_enabled_ = dense_height != 0 &&
+                dense_width <= kStableLosMaxDenseCells / dense_height;
+        if (stable_los_dense_enabled_) {
+            const uint64_t dense_area = dense_width * dense_height;
+            stable_los_dense_min_x_ = dense_min_x;
+            stable_los_dense_max_x_ = dense_max_x;
+            stable_los_dense_min_y_ = dense_min_y;
+            stable_los_dense_max_y_ = dense_max_y;
+            stable_los_dense_height_ = static_cast<int32_t>(dense_height);
+            if (stable_los_dense_cells_.size() < dense_area)
+                stable_los_dense_cells_.resize(static_cast<size_t>(dense_area));
+        }
+    }
+    if (stable_los_dense_enabled_) {
+        for (const StableLosCellSpan &span : stable_los_cell_spans_) {
+            for (int32_t x = span.min_x; x <= span.max_x; ++x) {
+                const size_t row = static_cast<size_t>(
+                        static_cast<int64_t>(x) - stable_los_dense_min_x_) *
+                        static_cast<size_t>(stable_los_dense_height_);
+                for (int32_t y = span.min_y; y <= span.max_y; ++y) {
+                    StableLosCell &cell = stable_los_dense_cells_[
+                            row + static_cast<size_t>(
+                                    static_cast<int64_t>(y) - stable_los_dense_min_y_)];
+                    if (cell.epoch != stable_los_index_epoch_) {
+                        cell.candidates.clear();
+                        cell.epoch = stable_los_index_epoch_;
+                    }
+                    cell.candidates.push_back(span.candidate);
+                }
+            }
+        }
+    } else {
+        stable_los_cells_.reserve(stable_los_candidates_.size() * 2);
+        for (const StableLosCellSpan &span : stable_los_cell_spans_) {
+            for (int32_t x = span.min_x; x <= span.max_x; ++x) {
+                for (int32_t y = span.min_y; y <= span.max_y; ++y) {
+                    StableLosCell &cell =
+                            stable_los_cells_[stable_los_cell_key(x, y)];
+                    if (cell.epoch != stable_los_index_epoch_) {
+                        cell.candidates.clear();
+                        cell.epoch = stable_los_index_epoch_;
+                    }
+                    cell.candidates.push_back(span.candidate);
+                }
+            }
+        }
+    }
+    if (perf != nullptr) {
+        const uint64_t now = stable_los_perf_now_us();
+        perf->grid_bucket_us = now - phase_start;
+        phase_start = now;
+    }
+    stable_los_query_marks_.assign(stable_los_candidates_.size(), 0);
+    stable_los_query_candidates_.reserve(stable_los_candidates_.size());
+    stable_los_index_ready_ = true;
+    if (perf != nullptr) {
+        const uint64_t now = stable_los_perf_now_us();
+        perf->grid_workspace_us = now - phase_start;
+        perf->grid_publish_us = now - grid_start;
+    }
+}
+
+const std::vector<uint32_t> &CollisionWorld::stable_los_candidates_for_ray(
+        const CollisionRay &ray) {
+    stable_los_query_candidates_.clear();
+    if (!stable_los_index_ready_ || stable_los_candidates_.empty())
+        return stable_los_query_candidates_;
+
+    ++stable_los_query_generation_;
+    if (stable_los_query_generation_ == 0) {
+        std::fill(stable_los_query_marks_.begin(), stable_los_query_marks_.end(), 0);
+        stable_los_query_generation_ = 1;
+    }
+    const uint32_t generation = stable_los_query_generation_;
+    auto admit = [&](uint32_t index) {
+        if (stable_los_query_marks_[index] == generation) return;
+        stable_los_query_marks_[index] = generation;
+        stable_los_query_candidates_.push_back(index);
+    };
+
+    for (uint32_t index : stable_los_large_candidates_) admit(index);
+
+    const int32_t min_x = stable_los_cell_coord(
+            std::min<int64_t>(ray.start[0], ray.end[0]));
+    const int32_t max_x = stable_los_cell_coord(
+            std::max<int64_t>(ray.start[0], ray.end[0]));
+    const int32_t min_y = stable_los_cell_coord(
+            std::min<int64_t>(ray.start[1], ray.end[1]));
+    const int32_t max_y = stable_los_cell_coord(
+            std::max<int64_t>(ray.start[1], ray.end[1]));
+    const uint64_t width = static_cast<uint64_t>(
+            static_cast<int64_t>(max_x) - min_x + 1);
+    const uint64_t height = static_cast<uint64_t>(
+            static_cast<int64_t>(max_y) - min_y + 1);
+    if (width * height > kStableLosMaxQueryCells) {
+        // A pathological map-spanning ray remains exact by falling back to
+        // the prepared solid-only list.
+        stable_los_query_candidates_.resize(stable_los_candidates_.size());
+        for (uint32_t index = 0;
+             index < static_cast<uint32_t>(stable_los_candidates_.size()); ++index)
+            stable_los_query_candidates_[index] = index;
+        return stable_los_query_candidates_;
+    }
+
+    if (stable_los_dense_enabled_) {
+        const int32_t query_min_x = std::max(min_x, stable_los_dense_min_x_);
+        const int32_t query_max_x = std::min(max_x, stable_los_dense_max_x_);
+        const int32_t query_min_y = std::max(min_y, stable_los_dense_min_y_);
+        const int32_t query_max_y = std::min(max_y, stable_los_dense_max_y_);
+        for (int32_t x = query_min_x; x <= query_max_x; ++x) {
+            const size_t row = static_cast<size_t>(
+                    static_cast<int64_t>(x) - stable_los_dense_min_x_) *
+                    static_cast<size_t>(stable_los_dense_height_);
+            for (int32_t y = query_min_y; y <= query_max_y; ++y) {
+                const StableLosCell &cell = stable_los_dense_cells_[
+                        row + static_cast<size_t>(
+                                static_cast<int64_t>(y) - stable_los_dense_min_y_)];
+                if (cell.epoch != stable_los_index_epoch_) continue;
+                for (uint32_t index : cell.candidates) admit(index);
+            }
+        }
+    } else {
+        for (int32_t x = min_x; x <= max_x; ++x) {
+            for (int32_t y = min_y; y <= max_y; ++y) {
+                const auto bucket = stable_los_cells_.find(stable_los_cell_key(x, y));
+                if (bucket == stable_los_cells_.end() ||
+                    bucket->second.epoch != stable_los_index_epoch_)
+                    continue;
+                for (uint32_t index : bucket->second.candidates) admit(index);
+            }
+        }
+    }
+    std::sort(stable_los_query_candidates_.begin(),
+              stable_los_query_candidates_.end());
+    return stable_los_query_candidates_;
 }
 
 void CollisionWorld::build_tick_tables(World &world) {
@@ -346,13 +655,15 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         p.x = pf[0]; p.y = pf[1]; p.z = pf[2];
-        p.radius = 0x10000; // [orig: entity boundRadius; person capsule ~1u] (D-COL-3)
+        auto inst = instances_.find(e.handle.packed);
+        const CollisionModel *attached =
+            inst != instances_.end() ? model(inst->second.model_id) : nullptr;
+        p.radius = entity_proximity_radius(*this, e, attached);
         // A published live pose can place bones far from the feet (seated
         // poses, corpse spreads, the off-body pose regression test). Widen
         // the SLOT to the pose's own bone-sphere reach so the projectile
         // slot gate never excludes a posed bone; unposed persons keep the
         // capsule radius.
-        auto inst = instances_.find(e.handle.packed);
         if (inst != instances_.end() && !inst->second.section_matrices.empty()) {
             const CollisionModel *m = model(inst->second.model_id);
             if (m != nullptr &&
@@ -378,6 +689,11 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // buildings. Seat/armory carriers also belong in the proximity table when
     // their visual has no collision hull: attach scans consume this same slice,
     // and the old whole-registry fallback must not be their only discovery path.
+    // Retail also rejects dynamic records whose entity+0x114 carries ammo flag
+    // `noage` (0x4000). OpenNova's transient rounds live in RoundSim rather than
+    // the entity registry, and round-to-placed-device conversion clears noage
+    // before the pool-1 entity is materialized, so every registry item already
+    // satisfies that gate by construction.
     auto push_dynamic = [&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);
@@ -486,15 +802,87 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         const Entity *e = world.registry.get(person.h);
         if (e != nullptr) build_for(*e, 0x40000); // [orig: pool-0 +4.0u]
     }
-    // Pool-1 SOURCE slices for motor-driven vehicles (the hull contact query's
-    // candidate set). [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 — the
-    // pool-1 leg, radius +6.0u @ 0x4b902f]
+    // Pool-1 SOURCE slices for every retail-eligible active item, not merely
+    // motor-driven vehicles. A source needs an ItemDef; EWeap/attachable rows
+    // (attrib 0x20) are excluded unless the def's raw type is 1. This same
+    // slice drives vehicle contact, iris/sun rays, sound, and other candidate
+    // queries. [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 — the
+    // pool-1 loop head @ 0x4b9110: in-use word +0x1C @ 0x4b9127, ItemDef
+    // +0x20 non-null @ 0x4b9130..0x4b9135, Flags bit 0 skip @ 0x4b9137..
+    // 0x4b913b, def attrib 0x20 (+0x54) excluded unless def type (+0x5C)
+    // == 1 @ 0x4b913d..0x4b9147; radius +6.0u (0x60000) @ 0x4b9152]
     world.registry.for_each([&](const Entity &e) {
         if (e.handle.pool() != 1 || (e.flags & 1u) != 0) return;
-        const VehicleTraits *vt = world.vehicle_traits.get(e.item_id);
-        if (vt == nullptr || vt->physics == 0) return;
+        if (!e.has_item_def) return;
+        if ((e.item_attrib & kItemAttribEweap) != 0 && e.item_type != 1) return;
         build_for(e, 0x60000);
     });
+
+    // Decoded rows occupy a distinct identity domain, but retail gives them
+    // the same per-entity +0x1BC/+0x1C0 candidate pointer/count after the net
+    // client has materialized its pools. Rebuild the wire arena on this SAME
+    // 17-tick edge. Its entries remain registry collision targets because the
+    // joiner hosts streamed pool-1/pool-2 models locally; only the SOURCE key
+    // and pose are wire-owned. A verified registry_twin is the sole self-skip
+    // path -- equal packed numbers alone do not alias the domains.
+    wire_arena_.clear();
+    wire_candidates_.clear();
+    const auto build_wire_for = [&](uint16_t wire_handle,
+                                    const FixedVec3 &position_q16,
+                                    int32_t bound_radius_q16, int32_t pad,
+                                    EntityHandle registry_twin) {
+        const int32_t source_radius =
+                bound_radius_q16 > 0 ? bound_radius_q16 : 0x10000;
+        const int32_t range = source_radius + pad;
+        CandidateSlice slice;
+        slice.start = static_cast<int32_t>(wire_arena_.size());
+        slice.count = 0;
+        for (const DynSlot &d : dynamics_) {
+            if (registry_twin.valid() && d.h == registry_twin) continue;
+            const int32_t total = range + d.radius;
+            if (abs32(d.x - position_q16.x) > total ||
+                abs32(d.y - position_q16.y) > total ||
+                abs32(d.z - position_q16.z) > total)
+                continue;
+            if (vec_len_ftol(d.x - position_q16.x,
+                             d.y - position_q16.y,
+                             d.z - position_q16.z) > total)
+                continue;
+            if (wire_arena_.size() >= 3000) break;
+            wire_arena_.push_back(d.h);
+            ++slice.count;
+        }
+        for (const StaticSlot &s : statics_) {
+            if (registry_twin.valid() && s.h == registry_twin) continue;
+            const int32_t sx = static_slot_coord_q16(s.x);
+            const int32_t sy = static_slot_coord_q16(s.y);
+            const int32_t sz = static_slot_coord_q16(s.z);
+            const int32_t total =
+                    range + (static_cast<int32_t>(s.radius) << 16);
+            if (abs32(sx - position_q16.x) > total ||
+                abs32(sy - position_q16.y) > total ||
+                abs32(sz - position_q16.z) > total)
+                continue;
+            if (vec_len_ftol(sx - position_q16.x,
+                             sy - position_q16.y,
+                             sz - position_q16.z) > total)
+                continue;
+            if (wire_arena_.size() >= 3000) break;
+            wire_arena_.push_back(s.h);
+            ++slice.count;
+        }
+        wire_candidates_[wire_handle] = slice;
+    };
+    for (const WirePersonCollisionProxy &person : wire_person_proxies_) {
+        build_wire_for(person.wire_handle, person.position_q16,
+                       person.bound_radius_q16, 0x40000, EntityHandle{});
+    }
+    for (const WireDynamicCollisionProxy &dynamic : wire_dynamic_proxies_) {
+        if (!dynamic.candidate_source_eligible) continue;
+        build_wire_for(dynamic.wire_handle, dynamic.position_q16,
+                       dynamic.bound_radius_q16, 0x60000,
+                       dynamic.registry_twin);
+    }
 }
 
 void CollisionWorld::refresh_after_registry_change(World &world) {

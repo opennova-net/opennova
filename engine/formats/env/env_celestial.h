@@ -227,9 +227,24 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 
 // The glow submit alpha, 16.16: dot_view^4 / 2 scaled by the occlusion
 // brightness (>> 8), the overcast blend and the SunDim fold
-// [orig: @ 0x5acfb8..0x5ad0a9].
+// [orig: @ 0x5acfb8..0x5ad0a9]. frame_effects_quarter applies the
+// FBEFFECTS >= 3 quarter [orig: sub_581F60 @ 0x581f6a reads the quality
+// level; glow_intensity >>= 2 @ 0x5ad033..0x5ad03c] - the bloom pass
+// re-adds the glare, so the highest-quality program dims the direct draw.
+// The locked reimpl profile IS FBEFFECTS 3, so live callers pass true.
 int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
-                           int sun_dim_fixed);
+                           int sun_dim_fixed, bool frame_effects_quarter);
+
+// The BLOOM-SOURCE (Q3) glow alpha, 16.16: FrameFX_RenderBloomPass calls
+// render_skybox_sun_glow(0, 0) - no occlusion test - so the Q3 draw uses the
+// fog-based brightness (fog_km + 1) * 0.5 * dot_factor instead of the
+// occlusion accumulator [orig: @ 0x5ad013..0x5ad027; flt_7C3280 = 1.0,
+// flt_7C3B94 = 0.5, flt_7DA0C4 = 1/65536000], then the same quarter and
+// overcast x SunDim fold. The glare therefore blooms even when terrain
+// blocks the occlusion rays - the wide sunrise glow over a ridge.
+int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
+                         int overcast_blend_fixed, int sun_dim_fixed,
+                         bool frame_effects_quarter);
 
 // ---------------------------------------------------------------------------
 // Celestial + sky constants

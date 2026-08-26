@@ -214,9 +214,9 @@ float Simulation::sun_quality_factor(int p_quality) const {
 // @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md);
 // contained entities take the interior light group instead and the factor
 // stays 1.0. The blocked-ray count and eligibility gate are engine-side
-// (world::CollisionWorld); this walk mirrors the drawn-entity set and diffs
-// the quality per bms_id so a steady frame emits nothing.
-PackedInt64Array Simulation::get_entity_sun_visibility_changes(
+// (world::CollisionWorld); this walk mirrors both drawn identity domains and
+// diffs quality per BMS id or wire handle so a steady frame emits nothing.
+PackedInt64Array Simulation::get_draw_lighting_changes(
 		const Vector3 &p_light_dir) {
 	PackedInt64Array out;
 	if (!world_) return out;
@@ -230,6 +230,10 @@ PackedInt64Array Simulation::get_entity_sun_visibility_changes(
 
 	std::unordered_set<int32_t> culled(occlusion_culled_bms_.begin(),
 	                                   occlusion_culled_bms_.end());
+	if (sun_quality_present_layout_revision_ != present_layout_revision_) {
+		sun_quality_last_by_wire_.clear();
+		sun_quality_present_layout_revision_ = present_layout_revision_;
+	}
 
 	const auto entity_quality = [&](const opennova::world::Entity &e) {
 		// Contained entities route through the interior light group; the
@@ -255,19 +259,127 @@ PackedInt64Array Simulation::get_entity_sun_visibility_changes(
 		if (e.kind == opennova::world::EntityKind::Building ||
 		    e.kind == opennova::world::EntityKind::Marker)
 			return;
-		if (e.bms_id == 0) return; // wire avatars ride their own present path
+		// Only authored placements have a MissionPresentPass node addressed by
+		// BMS id. Runtime-spawned rows can also carry a nonzero bms_id (players
+		// use their net id), but WirePresentPass owns their rendering.
+		if (e.bms_id == 0 ||
+				e.spawn_origin == opennova::world::kSpawnOriginNone)
+			return;
 		if (e.handle == world_->cached.local_player) return;
 		// Retail only rays a drawn entity; a culled one keeps its last factor
 		// until it renders again (the stack slot is simply never pushed).
 		if (culled.count(e.bms_id) != 0) return;
 		const uint8_t quality = entity_quality(e);
-		const auto it = sun_quality_last_.find(e.bms_id);
-		const uint8_t last = it != sun_quality_last_.end() ? it->second : 4;
+		const auto it = sun_quality_last_by_bms_.find(e.bms_id);
+		const uint8_t last =
+				it != sun_quality_last_by_bms_.end() ? it->second : 4;
 		if (quality == last) return;
-		sun_quality_last_[e.bms_id] = quality;
+		sun_quality_last_by_bms_[e.bms_id] = quality;
+		out.push_back(-1);
 		out.push_back(e.bms_id);
 		out.push_back(quality);
 	});
+
+	// Every rendered role consumes ClientState. Placed rows above continue to
+	// address MissionPresentPass by BMS id; only rows without authored identity
+	// reach WirePresentPass and therefore need a wire-handle lighting update.
+	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
+	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
+	// check below. Host/SP rows use their authoritative exact-handle entity.
+	// Cadence: like the registry walk above, the three casts run per display
+	// frame. Retail casts inside the sector render walk for every drawn entity
+	// every frame; only the candidate SLICE the walker iterates refreshes on
+	// the 17-tick arena edge, which CollisionWorld::build_tick_tables already
+	// mirrors for wire rows (retail: Terrain_RenderSectorEntities @0x5c7bf1 /
+	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> setup_terrain_effect_for_entity
+	// @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800 per frame; the slice
+	// gate g_ProxSliceRefreshCounter >= 0x10 @0x4c240f ->
+	// Entity_BuildProximityListsFromPools @0x4c2418, see
+	// docs/render/render-lighting-re.md). Throttling the casts themselves to
+	// that cadence would hold a moving vehicle's sun factor stale for up to
+	// 16 ticks; the per-handle cache below only suppresses unchanged emits.
+	if (runtime_) {
+		for (const opennova::netsim::ClientEntityState &es :
+				runtime_->state().entities) {
+			const uint16_t handle = es.handle;
+			if (handle == opennova::world::EntityHandle::kInvalid ||
+					es.type_id == 0 ||
+					(runtime_->has_self_handle() &&
+					 handle == runtime_->self_handle())) {
+				sun_quality_last_by_wire_.erase(handle);
+				continue;
+			}
+			// A hidden row is not drawn, so retail does not push a new stack
+			// value. Preserve the last emitted quality: if it moves while hidden,
+			// the first visible frame must compare against that retained material
+			// state and emit the restoration instead of assuming default quality 4.
+			if (es.state_flags_known && (es.state_flags & 0x01u) != 0)
+				continue;
+
+			const opennova::world::EntityHandle h{handle};
+			const opennova::world::Entity *native = nullptr;
+			const opennova::world::Entity *joiner_twin = nullptr;
+			if (!joiner_) {
+				const opennova::world::Entity *candidate =
+						world_->registry.get(h);
+				if (candidate != nullptr &&
+						static_cast<uint16_t>(candidate->item_id) == es.type_id)
+					native = candidate;
+			} else if (h.pool() != 0) {
+				const opennova::world::Entity *candidate =
+						world_->registry.get(h);
+				if (candidate != nullptr &&
+						static_cast<uint16_t>(candidate->item_id) == es.type_id)
+					joiner_twin = candidate;
+			}
+			// WirePresentPass defers authored rows to their placed node (or
+			// static batch). Do not repeat the same native ray query and cache an
+			// update for a wire node that deliberately does not exist.
+			const opennova::world::Entity *placed =
+					native != nullptr ? native : joiner_twin;
+			if (h == world_->cached.local_player ||
+					(placed != nullptr && placed->spawn_origin !=
+							opennova::world::kSpawnOriginNone)) {
+				sun_quality_last_by_wire_.erase(handle);
+				continue;
+			}
+
+			const bool person_source = h.pool() == 0 &&
+					(es.cls == opennova::EntityClass::Player ||
+					 es.cls == opennova::EntityClass::Infantry);
+			const opennova::world::ResolvedCollisionShape shape =
+					wire_collision_shape_for_type(es.type_id);
+			const bool dynamic_source = h.pool() == 1 &&
+					shape.pool1_candidate_source_eligible;
+			if (!person_source && !dynamic_source) {
+				sun_quality_last_by_wire_.erase(handle);
+				continue;
+			}
+
+			uint8_t quality = 4;
+			if (native != nullptr) {
+				quality = entity_quality(*native);
+			} else if ((es.rm_entity_flags &
+					opennova::world::kEntityFlagIndoors) == 0 &&
+					(joiner_twin == nullptr ||
+					 joiner_twin->blink_hits[0] == 0)) {
+				const int blocked = collision_world_.wire_sun_visibility_blocked_rays(
+						*world_, handle,
+						opennova::world::FixedVec3{es.x, es.y, es.z},
+						shape.bbox_center_q16, sun);
+				quality = static_cast<uint8_t>(4 - blocked);
+			}
+
+			const auto it = sun_quality_last_by_wire_.find(handle);
+			const uint8_t last =
+					it != sun_quality_last_by_wire_.end() ? it->second : 4;
+			if (quality == last) continue;
+			sun_quality_last_by_wire_[handle] = quality;
+			out.push_back(handle);
+			out.push_back(0);
+			out.push_back(quality);
+		}
+	}
 	return out;
 }
 
@@ -289,8 +401,12 @@ bool Simulation::entity_present_visible(int p_bms_id) const {
 void Simulation::reset_occlusion_apply_baseline() {
 	occl_apply_building_last_.clear();
 	occl_apply_culled_last_.clear();
-	sun_quality_last_.clear();
+	sun_quality_last_by_bms_.clear();
+	sun_quality_last_by_wire_.clear();
+	sun_quality_present_layout_revision_ = -1;
 	local_sun_quality_ = 4;
+	iris_interior_group_entity_ = opennova::world::EntityHandle{};
+	iris_interior_group_section_ = 0;
 }
 
 bool Simulation::occlusion_water_visible() const {
@@ -429,6 +545,9 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
                                                       const Vector3 &p_light_dir) {
 	PackedInt32Array out;
 	if (!world_) return out;
+	const opennova::world::EntityHandle local_player =
+			world_->cached.local_player;
+	if (world_->registry.get(local_player) == nullptr) return out;
 
 	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
 	const int32_t cam[3] = {opennova::world::to_fixed(p_cam_pos.x),
@@ -440,17 +559,12 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 	                  cam[1] + opennova::world::to_fixed(-p_cam_forward.z * 8.0f),
 	                  cam[2] + opennova::world::to_fixed(p_cam_forward.y * 8.0f)};
 
-	// Terrain clip of the camera ray [orig: raycast_entity_collision @ 0x413760
-	// -> Terrain_RaycastHeightmapHiRes_0 @ 0x60e710, end clipped in place; the
-	// entity nearest-hit clip is a tracked D-RLIT-2 residual].
-	if (terrain_field_.valid()) {
-		int32_t hit[3];
-		if (opennova::world::terrain_clip_segment(terrain_field_, cam, end, hit)) {
-			end[0] = hit[0];
-			end[1] = hit[1];
-			end[2] = hit[2];
-		}
-	}
+	// The full retail clip: terrain first unless the local player is indoors,
+	// then every eligible solid in that player's candidate slice. The mutable
+	// endpoint retains the nearest hit across the complete walk.
+	// [orig: raycast_entity_collision @ 0x413760]
+	collision_world_.clip_segment_to_nearest_collision(
+			*world_, local_player, cam, end);
 
 	// Sun-ray direction in mission fixed: light_dir * 200 u
 	// [orig: end = sample + 200 * light_dir @ 0x5c776c..0x5c7780].
@@ -459,6 +573,8 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 	                        opennova::world::to_fixed(p_light_dir.y * 200.0f)};
 	// The three ray clip radii — the shared witnessed triple
 	// (world::CollisionWorld::kSunOcclusionClipRadii).
+	const int32_t local_candidate_count =
+			collision_world_.candidate_count(local_player);
 
 	// Samples at end, end + (cam-end)/3, end + 2(cam-end)/3 [orig: the thirds
 	// march @ 0x5c7ad8..0x5c7b30].
@@ -467,7 +583,8 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 	for (int s = 0; s < 3; ++s) {
 		const int32_t p[3] = {end[0] + step[0] * s, end[1] + step[1] * s, end[2] + step[2] * s};
 		opennova::world::BlinkAccum blink;
-		collision_world_.query_blink_boxes_at_point(*world_, p, blink);
+		collision_world_.query_candidate_blink_boxes_at_point(
+				*world_, local_player, p, blink);
 		if (blink.hits[0] != 0) {
 			// Indoor sample: the hit's pool-2 entity carries interior data or
 			// the curve runs on all-zero inputs (gain 255)
@@ -475,20 +592,40 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 			//  pool_entry[12] == 0 skip @ 0x5c7652].
 			const opennova::world::EntityHandle h = opennova::world::EntityHandle::make(
 					2, static_cast<int32_t>(blink.hits[0] >> 20));
-			out.append(occlusion_world_.has_instance(h)
-							? WeatherCore::kIrisSampleIndoor
-							: WeatherCore::kIrisSampleIndoorNoData);
+			if (occlusion_world_.has_instance(h)) {
+				// Lighting_SetInteriorLightGroup(building, section). The next
+				// sample may replace/clear it; an indoor-no-data sample does not.
+				iris_interior_group_entity_ = h;
+				iris_interior_group_section_ =
+						opennova::world::BlinkAccum::hit_section(blink.hits[0]);
+				out.append(WeatherCore::kIrisSampleIndoor);
+			} else {
+				out.append(WeatherCore::kIrisSampleIndoorNoData);
+			}
 			continue;
 		}
+		// Lighting_SetInteriorLightGroup(0, 0) on every outdoor sample.
+		iris_interior_group_entity_ = opennova::world::EntityHandle{};
+		iris_interior_group_section_ = 0;
 		// Outdoor sample: level = 8 minus one per blocked sun ray
-		// [orig: @ 0x5c7784..0x5c77d7; the player-sector entity-count ray gate
-		//  is a tracked D-RLIT-2 residual — with no statics the rays cannot hit].
+		// [orig: @ 0x5c7784..0x5c77d7; the local player's +0x1C0 count gates
+		// all three calls]. Each cast is the candidate-scoped walker with the
+		// local player as BOTH exclusion entities and allowAllTypes = 1: it
+		// iterates only that player's own +0x1BC/+0x1C0 slice (the 17-tick
+		// arena), skips candidates owner-linked to the player, requires an
+		// ItemDef, and reports BLOCKED on the first obstructed candidate
+		// (retail: raycast_find_collision_entity @0x539a70 — slice walk
+		// @0x539b5d..0x539bc4, pushed @0x5c7765..0x5c77c6 at radii
+		// -0x2000/-0x5000/-0x8000, see docs/render/render-lighting-re.md).
 		int32_t level = 8;
 		const int32_t ray_end[3] = {p[0] + sun[0], p[1] + sun[1], p[2] + sun[2]};
-		for (int r = 0; r < 3; ++r) {
-			if (collision_world_.segment_hits_static(*world_, p, ray_end,
-					opennova::world::CollisionWorld::kSunOcclusionClipRadii[r]))
-				--level;
+		if (local_candidate_count > 0) {
+			for (int r = 0; r < 3; ++r) {
+				if (collision_world_.candidate_segment_hits_solid(
+						*world_, local_player, p, ray_end,
+						opennova::world::CollisionWorld::kSunOcclusionClipRadii[r]))
+					--level;
+			}
 		}
 		out.append(level);
 	}
