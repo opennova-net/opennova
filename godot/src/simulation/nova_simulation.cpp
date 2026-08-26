@@ -1172,44 +1172,6 @@ Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 			: ERR_INVALID_PARAMETER;
 }
 
-// The no-native-rig half of the D-AI-6 muzzle seam. Native mission assets resolve
-// the authored gun-flash userpoint lazily in the simulation; rows without a native
-// skeletal rig push the presented position here once per frame instead. Godot
-// (x, up, z) -> mission (x, -gz, gy) in 16.16 fixed — the inverse of the present
-// mapping godot = (mx, mz, -my).
-// [orig: Entity_GetAttachmentWorldPosition @0x4b2670 from the anim-event fire block
-// @0x4bf326 — computed inline against the engine-side skeleton.]
-void Simulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos) {
-	if (!ai_ || !world_) return;
-	// Keyed by the row's PF_NET_ID (the authored SSN) — the wire handle is
-	// 0-ambiguous for pool-0 slot 0, and the row order is not the AI index.
-	// for_handle inside set_entity_muzzle drops non-AI entities.
-	if (p_net_id <= 0 || p_net_id > 0xFFFF) return;
-	const opennova::world::EntityHandle h =
-			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
-	if (!h.valid()) return;
-	const int32_t pos[3] = {
-		static_cast<int32_t>(p_godot_pos.x * 65536.0f),
-		static_cast<int32_t>(-p_godot_pos.z * 65536.0f),
-		static_cast<int32_t>(p_godot_pos.y * 65536.0f),
-	};
-	if (opennova::world::Entity *entity = world_->registry.get(h)) {
-		entity->posed_muzzle_world[0] = pos[0];
-		entity->posed_muzzle_world[1] = pos[1];
-		entity->posed_muzzle_world[2] = pos[2];
-		entity->posed_muzzle_tick = world_->logic_tick;
-		entity->posed_muzzle_valid = true;
-	}
-	ai_->set_entity_muzzle(h, pos, world_->logic_tick);
-}
-
-bool Simulation::has_native_ai_muzzle(int p_net_id) const {
-	if (world_ == nullptr || p_net_id <= 0 || p_net_id > 0xFFFF) return false;
-	const opennova::world::EntityHandle h =
-			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
-	return h.valid() && collision_pose_native_.has_skeletal_muzzle_entity(h);
-}
-
 // Probe seam beside debug_set_entity_health: teleport an AI entity through both
 // position stores (registry + motor copy) — mission-space coordinates. Lets
 // in-game probes bring a reachable victim to the player when the mission

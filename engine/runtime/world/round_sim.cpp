@@ -266,7 +266,6 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.primary_weapon_slot = WeaponSlotState{};
     piece.primary_weapon_slot_adm = kAdmSlotNone;
     piece.primary_weapon_owner = EntityHandle{};
-    piece.posed_muzzle_valid = false;
     piece.primary_occupant = EntityHandle{};
     piece.mount_target = EntityHandle{};
     piece.mount_target_net_id = 0;

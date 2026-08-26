@@ -247,6 +247,8 @@ class DefItemDef(ctypes.Structure):
         # items.def launchups_closeattack: the def-authored AI muzzle
         # userpoint name (world-wac-ai-re §21.2).
         ("launchups_closeattack", ctypes.c_char * 32),
+        # The twelve weapon userpoint names (def+0x61B..0x6CB; mirror def.h).
+        ("weapon_userpoints", (ctypes.c_char * 16) * 12),
         ("clipsize", ctypes.c_int),
         ("deathtime_ticks", ctypes.c_int),
         # Emplacement weapon link ('primary_weapon'; empty = key absent; mirror def.h).

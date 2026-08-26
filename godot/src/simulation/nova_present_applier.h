@@ -57,11 +57,9 @@ public:
 		MISSION_PROFILE_CONTROLS_US,
 		MISSION_PROFILE_VISIBILITY_US,
 		MISSION_PROFILE_BODY_US,
-		MISSION_PROFILE_MUZZLE_US,
 		MISSION_PROFILE_ROWS,
 		MISSION_PROFILE_SUBMITTED_ROWS,
 		MISSION_PROFILE_BODY_ROWS,
-		MISSION_PROFILE_MUZZLE_ROWS,
 		MISSION_PROFILE_SLOT_COUNT,
 	};
 
@@ -162,11 +160,9 @@ private:
 		int64_t controls_us = 0;
 		int64_t visibility_us = 0;
 		int64_t body_us = 0;
-		int64_t muzzle_us = 0;
 		int64_t rows = 0;
 		int64_t submitted_rows = 0;
 		int64_t body_rows = 0;
-		int64_t muzzle_rows = 0;
 	};
 	enum BodyDispatchMode {
 		BODY_NONE = 0,
@@ -197,12 +193,6 @@ private:
 		ObjectModel *model = nullptr;
 		int32_t entity_kind = -1;
 		int32_t entity_index = -1;
-		// Plan-time muzzle presence (the D-AI-6 fire-origin seam); re-checked
-		// live before each posed read.
-		bool has_muzzle = false;
-		// The native collision rig resolved the same def-authored userpoint, so
-		// AI owns lazy pose resolution and this row needs no shell readback.
-		bool has_native_muzzle = false;
 		int32_t bms_id = 0;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
@@ -327,7 +317,6 @@ private:
 	int64_t stat_moved_ = 0;
 	int64_t stat_posed_ = 0;
 	int64_t stat_hidden_ = 0;
-	int64_t stat_muzzles_ = 0;
 	int64_t stat_plan_rebuilds_ = 0;
 	int64_t stat_transform_builds_ = 0;
 	int64_t stat_aim_dispatches_ = 0;
@@ -335,7 +324,6 @@ private:
 	int64_t stat_part_dispatches_ = 0;
 	int64_t stat_control_dispatches_ = 0;
 	int64_t stat_body_dispatches_ = 0;
-	int64_t stat_muzzle_queries_ = 0;
 
 	int64_t plan_revision_ = -1;
 	int plan_stride_ = 0;

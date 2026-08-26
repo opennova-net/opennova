@@ -265,6 +265,16 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],
                                         CollisionMatrix &out);
 
+// The inverse of the euler builder: yaw/pitch/roll (BAM32) back out of a Q22
+// rotation — yaw from row 1 col 0 over row 0 col 0, then the yaw-unrotated
+// pitch from row 2 col 0, then roll. Every product is a 64-bit `>> 22` with no
+// rounding bias and every angle truncates toward zero, exactly as the x87 code.
+// The userpoint fire transform reports the posed bone's euler through it.
+// [orig: Math_FixedPointMatrixToEulerAngles @ 0x613310 (yaw @ 0x61332c..
+//  0x61335d, the A/B/C terms @ 0x61339a..0x613400, pitch @ 0x6133fa..0x613421,
+//  D + roll @ 0x61344a..0x61347b)]
+void collision_matrix_to_euler(const CollisionMatrix &m, int32_t out_yaw_pitch_roll[3]);
+
 // The terrain leg of the LOS segment query, TRUE = the segment hits terrain
 // (blocked). The ported heightmap raycast over the runtime height field; shared
 // by CollisionWorld::raycast_clear, the sound-occlusion LOS, and the
@@ -812,6 +822,9 @@ public:
     bool entity_section_matrix(const World &world, EntityHandle h, int section,
                                CollisionMatrix &out) const;
     bool has_instance(EntityHandle h) const;
+    // The attached collision model id for a live entity (-1 = no instance);
+    // the userpoint leg of the muzzle-pose provider keys its parsed model by it.
+    int32_t entity_model_id(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
     // --- the per-tick snapshot ---

@@ -19,12 +19,6 @@ namespace opennova::world {
 
 using namespace detail; // the shared AI helpers, unqualified as before
 
-// The stampless fire-origin fallback: 0.9 u above the entity origin — the
-// chest-height stand-in for retail's person-leg/userpoint vectors while their
-// writers stay unwalked (D-AI-6 facet d). [orig: the def+1350 muzzle bone /
-// entity+0x6C person-leg stand-in]
-constexpr int32_t kChestLift = 0xE666; // 0.9 u, 16.16
-
 // ----------------------------------------------------------------------------
 // P2: GROUND combat + targeting.
 // ----------------------------------------------------------------------------
@@ -171,7 +165,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     // The live feed's lazy LOS probe [orig: Entity_CheckMutualLineOfSight @0x539be0 —
     // fire-origin -> fire-origin, called only at the priority bypass / would-be-best
     // sites]. Endpoints ride the muzzle seam (weapon_fire_origin); an injected
-    // candidate with no live entity keeps the list's raw pos + chest lift.
+    // candidate with no live entity keeps the list's raw pos.
     struct LosCtx {
         AiSystem *sys;
         World *world;
@@ -180,14 +174,14 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     const LosBlockedFn probe = [](void *ctx, const AiCandidate &c) -> bool {
         LosCtx *lc = static_cast<LosCtx *>(ctx);
         int32_t sa[3];
-        lc->sys->weapon_fire_origin(*lc->world, *lc->scanner, lc->world->logic_tick, sa);
+        lc->sys->weapon_fire_origin(*lc->world, *lc->scanner, sa);
         int32_t sb[3];
         if (const Entity *te = lc->world->registry.get(c.handle)) {
             lc->sys->weapon_fire_origin(*lc->world, *te, sb);
         } else {
             sb[0] = c.pos[0];
             sb[1] = c.pos[1];
-            sb[2] = c.pos[2] + kChestLift;
+            sb[2] = c.pos[2];
         }
         return !lc->sys->line_of_sight_clear(*lc->world, sa, sb,
                                              lc->scanner->handle, c.handle);
@@ -306,40 +300,22 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
     }
 }
 
-// The aim/LOS fire origin (the header carries the witness): the fresh posed
-// muzzle stamp when the seam fed one, else the 0.9 u chest lift both the fire
-// pass and the LOS endpoints historically used. One helper, both jobs — the
-// LOS endpoints and the aim-solution eye share it (D-AI-6 residual (a)).
-// The stamp-or-chest-lift fold behind both static forms: the fresh posed
-// muzzle stamp when the seam fed one within kMuzzleFreshTicks, else the
-// entity position (16.16) with the 0.9 u chest lift.
-static void muzzle_stamp_fire_origin(bool stamp_valid, uint32_t stamp_tick,
-                                     const int32_t stamp_world[3],
-                                     uint32_t logic_tick, int32_t pos_x,
-                                     int32_t pos_y, int32_t pos_z,
-                                     int32_t out[3]) {
-    if (stamp_valid && logic_tick - stamp_tick <= AiSystem::kMuzzleFreshTicks) {
-        out[0] = stamp_world[0];
-        out[1] = stamp_world[1];
-        out[2] = stamp_world[2];
-        return;
-    }
-    out[0] = pos_x;
-    out[1] = pos_y;
-    out[2] = pos_z + kChestLift;
+// The fire/aim/LOS origin (the header carries the witness): the launch
+// userpoint on the entity's posed skeleton, resolved now by the world's
+// muzzle-pose provider; without a model, a userpoint table, or a resolvable
+// point retail copies the raw entity origin — no lift of any kind.
+// [orig: Entity_GetAttachmentWorldPosition @0x4b2670: the raw copy
+//  @0x4b2767..0x4b278e when index 0 / no graphicModel / no table]
+void AiSystem::weapon_fire_origin(const AiEntity &e, int32_t out[3]) {
+    out[0] = e.pos[0];
+    out[1] = e.pos[1];
+    out[2] = e.pos[2];
 }
 
-void AiSystem::weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]) {
-    muzzle_stamp_fire_origin(e.muzzle_valid, e.muzzle_tick, e.muzzle_world,
-                             logic_tick, e.pos[0], e.pos[1], e.pos[2], out);
-}
-
-void AiSystem::weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]) {
-    muzzle_stamp_fire_origin(e.posed_muzzle_valid, e.posed_muzzle_tick,
-                             e.posed_muzzle_world, logic_tick,
-                             static_cast<int32_t>(e.position.x * 65536.0f),
-                             static_cast<int32_t>(e.position.y * 65536.0f),
-                             static_cast<int32_t>(e.position.z * 65536.0f), out);
+void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
+    out[0] = static_cast<int32_t>(e.position.x * 65536.0f);
+    out[1] = static_cast<int32_t>(e.position.y * 65536.0f);
+    out[2] = static_cast<int32_t>(e.position.z * 65536.0f);
 }
 
 // The live-pose seam shared by both World& forms: the world's native muzzle
@@ -349,15 +325,14 @@ static bool provider_muzzle_origin(World &world, EntityHandle h, int32_t out[3])
            world.muzzle_pose_provider->resolve_muzzle_pose(world, h, out);
 }
 
-void AiSystem::weapon_fire_origin(World &world, const AiEntity &e,
-                                  uint32_t logic_tick, int32_t out[3]) const {
+void AiSystem::weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const {
     if (provider_muzzle_origin(world, e.handle, out)) return;
-    weapon_fire_origin(e, logic_tick, out);
+    weapon_fire_origin(e, out);
 }
 
 void AiSystem::weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const {
     if (provider_muzzle_origin(world, e.handle, out)) return;
-    weapon_fire_origin(e, world.logic_tick, out);
+    weapon_fire_origin(e, out);
 }
 
 // LOS between two EXACT 16.16 endpoints — true = clear. Callers supply the fire

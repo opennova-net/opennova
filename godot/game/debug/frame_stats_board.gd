@@ -188,11 +188,9 @@ enum {
 	PRESENT_MISSION_CONTROLS,# PANM phase and CTRL-bus publication
 	PRESENT_MISSION_VISIBILITY,# sim visibility + section-mask publication
 	PRESENT_MISSION_BODY,  # skeletal body-pose selection/publication
-	PRESENT_MISSION_MUZZLE,# posed muzzle readback into the simulation
 	PRESENT_MISSION_ROWS,  # VALUE: rows visited by the mission presenter
 	PRESENT_MISSION_SUBMITTED_ROWS,# VALUE: camera-submitted rows
 	PRESENT_MISSION_BODY_ROWS,# VALUE: rows eligible for a body pose
-	PRESENT_MISSION_MUZZLE_ROWS,# VALUE: rows requiring muzzle readback
 	PRESENT_WIRE,          # WirePresentPass.present_snapshot
 	PRESENT_FIRE,
 	PRESENT_DESTRUCTION,

@@ -129,7 +129,7 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"snapshot", &"mission_rows", &"mission_rows_core",
 			&"mission_rows_aim", &"mission_rows_controls",
 			&"mission_rows_visibility", &"mission_rows_body",
-			&"mission_rows_muzzle", &"mission_rows_remainder",
+			&"mission_rows_remainder",
 			&"wire_rows", &"fire",
 			&"destruction", &"throwable", &"runtime_overhead",
 			&"local_view", &"framefx", &"scene_env", &"terrain", &"network_frame",
@@ -187,7 +187,6 @@ func test_model_and_mission_row_info_cells_render_their_counts() -> void:
 	sums[FrameStatsBoard.PRESENT_MISSION_ROWS] = 40
 	sums[FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS] = 30
 	sums[FrameStatsBoard.PRESENT_MISSION_BODY_ROWS] = 20
-	sums[FrameStatsBoard.PRESENT_MISSION_MUZZLE_ROWS] = 10
 	pane.render_window(1, sums, window[1], counts, null, null)
 	var material := _find_tree_item(pane.stats_tree.get_root(), "Model runtime")
 	assert_not_null(material)
@@ -198,7 +197,7 @@ func test_model_and_mission_row_info_cells_render_their_counts() -> void:
 	assert_not_null(rows)
 	if rows != null:
 		assert_eq(rows.get_text(3),
-				"40 rows · 30 submitted · 20 body · 10 muzzle",
+				"40 rows · 30 submitted · 20 body",
 				"the mission-row cell averages per frame with the U+00B7 separator")
 
 

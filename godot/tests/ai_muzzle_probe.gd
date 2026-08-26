@@ -1,14 +1,15 @@
 extends SceneTree
 
-# D-AI-6 muzzle-seam in-game probe — NOT a GUT test (needs a retail PFF install;
-# *_probe.gd files are manual, never collected). Verifies the posed gun-flash
-# userpoint flows present-layer -> sim and lands where a rifle muzzle belongs:
+# D-AI-6 fire-origin in-game probe — NOT a GUT test (needs a retail PFF install;
+# *_probe.gd files are manual, never collected). Verifies the sim resolves the
+# launch userpoint on its OWN posed skeleton (the muzzle-pose provider; retail
+# Entity_GetAttachmentWorldPosition @0x4b2670) and it lands where a rifle
+# muzzle belongs:
 #
-#   * NPC infantry with a flash userpoint (EIndo bodies: MFlash01/bullet) get a
-#     FRESH binding-fed muzzle (`muzzle_valid`, get_entity_debug),
-#   * the muzzle sits at CHEST height forward of the body — NOT the old
-#     head-height chest-lift stand-in (pos + 0.9 u, zero lateral offset),
-#   * the present pass reports muzzle pushes flowing every frame.
+#   * NPC infantry with a flash userpoint (EIndo bodies: MFlash01/bullet)
+#     resolve a muzzle (`muzzle_valid`, get_entity_debug),
+#   * the muzzle sits at CHEST height forward of the body — never the raw
+#     entity origin (zero offset) or a head-height point.
 #
 #   NW_SP_MISSION=CP01.bms NW_RESOURCE_DIR=<retail install> "$GODOT_BIN" \
 #       --headless --path godot -s res://tests/ai_muzzle_probe.gd
@@ -134,11 +135,11 @@ func _run() -> void:
 	print("PROBE totals: infantry=%d stamped=%d good=%d head_height=%d" %
 			[checked, stamped, good, head_height])
 	if stamped == 0:
-		print("PROBE FAIL: no NPC received a binding-fed muzzle (the seam is not flowing)")
+		print("PROBE FAIL: no NPC resolved a muzzle (the provider is not registered)")
 		quit(1)
 		return
 	if head_height > 0:
-		print("PROBE FAIL: %d muzzles still at the head-height stand-in" % head_height)
+		print("PROBE FAIL: %d muzzles at a head-height point" % head_height)
 		quit(1)
 		return
 	if good < stamped / 2:

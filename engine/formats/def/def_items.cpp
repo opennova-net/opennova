@@ -248,6 +248,44 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "launchups_closeattack", 21)) {
             consume_value_str(trimmed, tlen, 21, current.launchups_closeattack, sizeof(current.launchups_closeattack));
             parsed = 1;
+        /* The twelve weapon userpoint names (def.h weapon_userpoints; the vehicle/eweap
+           fire/flash/casing anchors) [orig: ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301] */
+        } else if (lower_match_key(lower, ll, "weaplbup2", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[6], sizeof(current.weapon_userpoints[6]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaplmup2", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[7], sizeof(current.weapon_userpoints[7]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaplcup2", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[8], sizeof(current.weapon_userpoints[8]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaprbup2", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[9], sizeof(current.weapon_userpoints[9]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaprmup2", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[10], sizeof(current.weapon_userpoints[10]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaprcup2", 9)) {
+            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[11], sizeof(current.weapon_userpoints[11]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaplbup", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[0], sizeof(current.weapon_userpoints[0]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaplmup", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[1], sizeof(current.weapon_userpoints[1]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaplcup", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[2], sizeof(current.weapon_userpoints[2]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaprbup", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[3], sizeof(current.weapon_userpoints[3]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaprmup", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[4], sizeof(current.weapon_userpoints[4]));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "weaprcup", 8)) {
+            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[5], sizeof(current.weapon_userpoints[5]));
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "primary_weapon", 14)) {
             /* The ewep emplacement's mounted weapon.def entry (the gun entity's slot-0
                weapon; the attach label's text source) [orig: -> def+0x54B primaryWeapon,

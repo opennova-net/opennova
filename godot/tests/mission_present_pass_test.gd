@@ -381,44 +381,6 @@ func test_offscreen_falling_edge_releases_at_the_next_submission() -> void:
 			"the falling edge latched while off-screen releases on re-entry")
 
 
-func test_offscreen_muzzle_row_keeps_fire_origin_feedback_and_pose() -> void:
-	var muzzle_model := _muzzle_model()
-	var plain_model := _rigged_model()
-	var sim := Simulation.new()
-	var p := _make_pass(_index_of({ 5: muzzle_model, 6: plain_model }), sim)
-	var snap := Snapshot.new()
-	snap.entities = [
-		{ "bms_id": 5, "net_id": 9, "anim_state": 1, "anim_phase": 12 },
-		{ "bms_id": 6, "anim_state": 1, "anim_phase": 12 },
-	]
-	_present(p, snap)
-	var initial_pushes := _stat(p, "muzzles")
-	var initial_bodies := _stat(p, "body_dispatches")
-	assert_gt(initial_pushes, 0, "the posed muzzle sample reaches the simulation")
-	assert_eq(plain_model.get_active_body_clip(), "anim_walk_forward")
-
-	muzzle_model.set_on_screen(false)
-	plain_model.set_on_screen(false)
-	# Phase 14 stays inside the 8-frame walk clip's length, so the re-entry
-	# playhead assertion is wrap-free.
-	snap.entities[0]["anim_phase"] = 14
-	snap.entities[1]["anim_phase"] = 14
-	_present(p, snap)
-	assert_gt(_stat(p, "muzzles"), initial_pushes,
-			"the D-AI-6 fire-origin feedback survives off-screen (AI still shoot)")
-	assert_gt(_stat(p, "body_dispatches"), initial_bodies,
-			"the authoritative muzzle owner keeps posing off-screen")
-	assert_almost_eq(plain_model.get_animation_time(),
-			_clip_time(plain_model, "anim_walk_forward", 12), 0.0001,
-			"a non-muzzle row stops body dispatches while not submitted")
-
-	plain_model.set_on_screen(true)
-	_present(p, snap)
-	assert_almost_eq(plain_model.get_animation_time(),
-			_clip_time(plain_model, "anim_walk_forward", 14), 0.0001,
-			"re-entry re-poses the body to the live phase, not the missed one")
-
-
 func test_both_channels_posed() -> void:
 	var model := _model()
 	var p := _make_pass(_index_of({ 7: model }))
@@ -933,16 +895,12 @@ func test_stable_revisioned_snapshot_caches_pose_and_reasserts_live_publishers()
 	_present(p, snap)
 	var stats: MissionPresentStats = p.get_stats_record()
 
-	# Visibility and the AI muzzle seam are live outputs, so a stable snapshot
-	# must not short-circuit the entire row.
+	# Visibility is a live output, so a stable snapshot must not short-circuit
+	# the entire row.
 	model.visible = false
 	_present(p, snap)
 	var next_stats: MissionPresentStats = p.get_stats_record()
 	assert_true(model.visible, "live visibility ownership is reconciled every frame")
-	assert_eq(next_stats.muzzle_queries, stats.muzzle_queries + 1,
-			"the four-tick muzzle-freshness seam still samples every frame")
-	assert_eq(next_stats.muzzles, stats.muzzles + 1,
-			"the fresh muzzle sample still reaches the simulation")
 
 	assert_eq(next_stats.moved, stats.moved,
 			"stable transform inputs do not rebuild or write the root transform")

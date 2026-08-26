@@ -201,7 +201,6 @@ int AiSystem::attach_dismemberment_piece(
     piece.net_is_remote_peer = false;
     piece.net_interp_progress = 0;
     piece.net_interp_steps = 0;
-    piece.muzzle_valid = false;
     piece.inf.is_local_player = false;
     piece.inf.player_moving = false;
     piece.inf.move_mode = 0;
@@ -230,16 +229,6 @@ AiEntity *AiSystem::for_handle(EntityHandle h) {
     if (index < 0 || index >= static_cast<int>(entities_.size())) return nullptr;
     AiEntity &e = entities_[index];
     return e.handle == h ? &e : nullptr;
-}
-
-void AiSystem::set_entity_muzzle(EntityHandle h, const int32_t pos[3], uint32_t logic_tick) {
-    AiEntity *e = for_handle(h);
-    if (e == nullptr || pos == nullptr) return;
-    e->muzzle_world[0] = pos[0];
-    e->muzzle_world[1] = pos[1];
-    e->muzzle_world[2] = pos[2];
-    e->muzzle_tick = logic_tick;
-    e->muzzle_valid = true;
 }
 
 // [orig: AI_BeginUpdate @0x457b40] copy working fields, then the shared-budget gate.
@@ -814,28 +803,35 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         if (!weapon_events.fired || !is_authority) continue;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.
-        // Use the live chased look and the freshest posed muzzle available: the
-        // MOUNT's stamp first, then the gunner's own seam origin (stamp or the
-        // chest/seat fallback).
-        // [orig: slot owner path in WeaponAction_Fire @0x542b10;
-        //  Entity_CalcWeaponFirePosition parentSlot 3]
-        int32_t origin[3];
-        if (world.muzzle_pose_provider == nullptr ||
-            !world.muzzle_pose_provider->resolve_muzzle_pose(
-                    world, mount->handle, origin)) {
-            if (mount->posed_muzzle_valid &&
-                logic_tick - mount->posed_muzzle_tick <=
-                        AiSystem::kMuzzleFreshTicks) {
-                origin[0] = mount->posed_muzzle_world[0];
-                origin[1] = mount->posed_muzzle_world[1];
-                origin[2] = mount->posed_muzzle_world[2];
-            } else {
-                weapon_fire_origin(world, *gunner, logic_tick, origin);
-            }
+        // A UseGun shot leaves from the EMPLACEMENT's posed fire userpoint along
+        // that bone's euler (the barrel part under the EWEAP yaw/pitch CTRL
+        // registers), computed now from the sim's own part pose; byte 0 or no
+        // model copies the parent's raw position/euler.
+        // [orig: WeaponAction_Fire @0x542bf7 -> Entity_CalcWeaponFirePosition
+        //  @0x4dc750 parentSlot 3 -> Entity_ComputeUserpointWorldTransform
+        //  (out, NULL, mtx, parent, slot, NULL) @0x4dc7e6; raw copy @0x545e1f;
+        //  the fire command copies out[0..2] and out[3]/out[4]
+        //  @0x42be84..0x42bef2]. The point is the slot's FIRE field (b): the
+        // fire tick reaches @0x545c60 with currentAction FIRE and nextAction 0
+        // (the @0x545d17..0x545d3f select yields field 0) and the host's own
+        // re-derivation names field 0 outright [orig: Server_ClientFiredRound
+        // @0x50c1f4]; the m/c fields anchor the effect legs, not the round.
+        int32_t fire[6];
+        const uint8_t userpoint = weapon_userpoint_byte(*mount, /*slot=*/0, /*field=*/0);
+        const bool posed = userpoint != 0 && world.muzzle_pose_provider != nullptr &&
+                world.muzzle_pose_provider->resolve_userpoint_transform(
+                        world, mount->handle, userpoint, fire);
+        if (!posed) {
+            fire[0] = to_fixed(mount->position.x);
+            fire[1] = to_fixed(mount->position.y);
+            fire[2] = to_fixed(mount->position.z);
+            fire[3] = mount->veh.yaw_seeded
+                    ? mount->veh.yaw_bam
+                    : bam_heading_from_mission_yaw_deg(static_cast<double>(mount->yaw));
+            fire[4] = bam_from_degrees_wrapped(static_cast<double>(mount->pitch));
+            fire[5] = bam_from_degrees_wrapped(static_cast<double>(mount->roll));
         }
-        if (fire_ai_round(world, *gunner, origin, gunner->heading,
-                          io::bam_add(gunner->pitch, gunner->inf.recoil_pitch),
-                          weapon->ammo_index))
+        if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index))
             gunner->inf.aim_ref0 = gunner->inf.combat_target;
     }
 }
