@@ -147,6 +147,14 @@ func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> vo
 	assert_eq(terrain.get_light_rows_total(), 0)
 	assert_false(bool(material.get_shader_parameter("u_terrain_light_enabled")))
 
+	# Re-arming the same terrain pushes the enable again: the direct write of
+	# the null context is the latched value, not a stale open gate.
+	terrain.set_light_context(scene, 0)
+	terrain.render_frame()
+	assert_gt(terrain.get_light_rows_total(), 0)
+	assert_true(bool(material.get_shader_parameter("u_terrain_light_enabled")),
+			"a re-armed light scene re-opens the shader gate")
+
 
 func test_the_two_procedural_textures_have_the_witnessed_shape() -> void:
 	var size: int = LightScene.terrain_light_texture_size()
