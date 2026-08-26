@@ -84,6 +84,67 @@ struct ServerTickPerf {
 	uint64_t replication_entity_budget_us = 0;
 	uint64_t replication_encode_us = 0;
 	uint64_t replication_enqueue_us = 0;
+
+	// Sum another record into this one (a render frame consumes 0..N ticks;
+	// the shell keeps one summed record per frame).
+	ServerTickPerf &operator+=(const ServerTickPerf &o) {
+		input_us += o.input_us;
+		world_us += o.world_us;
+		world_setup_us += o.world_setup_us;
+		world_scripts_us += o.world_scripts_us;
+		world_ai_us += o.world_ai_us;
+		world_ai_reactions_us += o.world_ai_reactions_us;
+		world_ai_collision_tables_us += o.world_ai_collision_tables_us;
+		world_ai_entities_us += o.world_ai_entities_us;
+		world_ai_infantry_entities_us += o.world_ai_infantry_entities_us;
+		world_ai_infantry_remote_us += o.world_ai_infantry_remote_us;
+		world_ai_infantry_combat_us += o.world_ai_infantry_combat_us;
+		world_ai_infantry_animation_us += o.world_ai_infantry_animation_us;
+		world_ai_infantry_collision_us += o.world_ai_infantry_collision_us;
+		world_ai_infantry_collision_contacts_us += o.world_ai_infantry_collision_contacts_us;
+		world_ai_infantry_collision_repulsion_us += o.world_ai_infantry_collision_repulsion_us;
+		world_ai_infantry_collision_ground_us += o.world_ai_infantry_collision_ground_us;
+		world_ai_other_entities_us += o.world_ai_other_entities_us;
+		world_ai_authority_vehicles_us += o.world_ai_authority_vehicles_us;
+		world_ai_vehicle_scan_us += o.world_ai_vehicle_scan_us;
+		world_ai_vehicle_motors_us += o.world_ai_vehicle_motors_us;
+		world_ai_vehicle_riders_us += o.world_ai_vehicle_riders_us;
+		world_ai_client_vehicles_us += o.world_ai_client_vehicles_us;
+		world_ai_events_us += o.world_ai_events_us;
+		world_attachments_us += o.world_attachments_us;
+		world_attachment_orphans_us += o.world_attachment_orphans_us;
+		world_attachment_child_pose_us += o.world_attachment_child_pose_us;
+		world_attachment_riders_us += o.world_attachment_riders_us;
+		world_throwables_us += o.world_throwables_us;
+		world_weapons_us += o.world_weapons_us;
+		world_projectiles_us += o.world_projectiles_us;
+		world_destruction_us += o.world_destruction_us;
+		world_housekeeping_us += o.world_housekeeping_us;
+		match_us += o.match_us;
+		rules_us += o.rules_us;
+		replication_us += o.replication_us;
+		replication_query_prep_us += o.replication_query_prep_us;
+		replication_query_collect_us += o.replication_query_collect_us;
+		replication_query_grid_us += o.replication_query_grid_us;
+		replication_query_grid_span_us += o.replication_query_grid_span_us;
+		replication_query_grid_bucket_us += o.replication_query_grid_bucket_us;
+		replication_query_grid_workspace_us += o.replication_query_grid_workspace_us;
+		replication_snapshot_us += o.replication_snapshot_us;
+		replication_fan_us += o.replication_fan_us;
+		replication_fan_setup_us += o.replication_fan_setup_us;
+		replication_round_selection_us += o.replication_round_selection_us;
+		replication_entity_selection_us += o.replication_entity_selection_us;
+		replication_entity_setup_us += o.replication_entity_setup_us;
+		replication_entity_scoring_us += o.replication_entity_scoring_us;
+		replication_entity_los_us += o.replication_entity_los_us;
+		replication_entity_los_terrain_us += o.replication_entity_los_terrain_us;
+		replication_entity_los_sector_us += o.replication_entity_los_sector_us;
+		replication_entity_sort_us += o.replication_entity_sort_us;
+		replication_entity_budget_us += o.replication_entity_budget_us;
+		replication_encode_us += o.replication_encode_us;
+		replication_enqueue_us += o.replication_enqueue_us;
+		return *this;
+	}
 };
 
 // Stage retail's high-table H:0x03 LogPuntEvent record for one remote. The

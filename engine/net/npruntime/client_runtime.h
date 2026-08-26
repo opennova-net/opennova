@@ -52,6 +52,16 @@ struct ClientFramePerf {
 	uint64_t receive_us = 0;
 	uint64_t maintenance_us = 0;
 	uint64_t send_us = 0;
+
+	// Sum another record into this one (a render frame consumes 0..N ticks;
+	// the shell keeps one summed record per frame).
+	ClientFramePerf &operator+=(const ClientFramePerf &o) {
+		setup_us += o.setup_us;
+		receive_us += o.receive_us;
+		maintenance_us += o.maintenance_us;
+		send_us += o.send_us;
+		return *this;
+	}
 };
 
 class ClientRuntime {

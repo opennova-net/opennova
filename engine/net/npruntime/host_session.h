@@ -108,6 +108,19 @@ struct HostSessionPerf {
 	uint64_t server_us = 0;
 	uint64_t send_us = 0;
 	ServerTickPerf server;
+
+	// Sum another record into this one (a render frame consumes 0..N ticks;
+	// the shell keeps one summed record per frame).
+	HostSessionPerf &operator+=(const HostSessionPerf &o) {
+		total_us += o.total_us;
+		receive_us += o.receive_us;
+		connections_us += o.connections_us;
+		adapter_us += o.adapter_us;
+		server_us += o.server_us;
+		send_us += o.send_us;
+		server += o.server;
+		return *this;
+	}
 };
 
 void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,

@@ -30,12 +30,7 @@ void Simulation::_bind_methods() {
 			         "tod_fixed24", "tod_advance_per_tick", "quake_ticks", "cloud_scroll_rate_target",
 			         "rain_pct_current_q16", "overcast_blend_q16", "precipitation_kind"),
 			&Simulation::set_network_environment);
-	ClassDB::bind_method(D_METHOD("advance_network_environment_tick"),
-			&Simulation::advance_network_environment_tick);
-	ClassDB::bind_method(D_METHOD("initialize_network_environment_mission_start"),
-			&Simulation::initialize_network_environment_mission_start);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &Simulation::load_from_mission_data);
-	ClassDB::bind_method(D_METHOD("load_mission_file", "path"), &Simulation::load_mission_file);
 	ClassDB::bind_method(D_METHOD("boot_mission", "mission", "resource_root",
 			"item_db", "terrain", "terrain_til",
 			"wac_basename", "infantry_adm", "mission_file_basename", "playable"),
@@ -44,16 +39,10 @@ void Simulation::_bind_methods() {
 			&Simulation::get_mission_boot_debug);
 	ClassDB::bind_method(D_METHOD("build_demo_mission"), &Simulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
-	ClassDB::bind_method(D_METHOD("get_session_state"),
-			&Simulation::get_session_state);
-	ClassDB::bind_method(D_METHOD("get_session_error"),
-			&Simulation::get_session_error);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
 	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),
 			&Simulation::tick_dt);
-	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_per_second"),
-			&Simulation::ticks_per_second);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_from_ms", "ms"),
 			&Simulation::ticks_from_ms);
 	ClassDB::bind_method(D_METHOD("advance_session_frame", "input", "tick_sink"),
@@ -63,8 +52,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("pause_session"), &Simulation::pause_session);
 	ClassDB::bind_method(D_METHOD("resume_session"), &Simulation::resume_session);
 	ClassDB::bind_method(D_METHOD("reset_session"), &Simulation::reset_session);
-	ClassDB::bind_method(D_METHOD("fail_session", "reason"),
-			&Simulation::fail_session);
 	ClassDB::bind_method(D_METHOD("close_session"), &Simulation::close_session);
 	ClassDB::bind_method(D_METHOD("get_session_perf"),
 			&Simulation::get_session_perf);
@@ -93,7 +80,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_join_integrity_profile);
 	ClassDB::bind_method(D_METHOD("load_charattr_challenge", "resource_root"),
 	                     &Simulation::load_charattr_challenge);
-	ClassDB::bind_method(D_METHOD("leave_net_session"), &Simulation::leave_net_session);
 	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &Simulation::set_join_world_ready);
 	ClassDB::bind_method(D_METHOD("finalize_loaded_model_challenge_snapshot"),
 	                     &Simulation::finalize_loaded_model_challenge_snapshot);
@@ -145,7 +131,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_server_text);
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
-	ClassDB::bind_method(D_METHOD("get_end_round_lines"), &Simulation::get_end_round_lines);
 	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
 	                     &Simulation::get_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),
@@ -260,8 +245,6 @@ void Simulation::_bind_methods() {
 			&Simulation::get_local_player_character_id);
 	ClassDB::bind_method(D_METHOD("get_local_player_class"), &Simulation::get_local_player_class);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_name"), &Simulation::get_local_player_weapon_name);
-	ClassDB::bind_method(D_METHOD("get_weapon_third_person_model", "adm_index"),
-	                     &Simulation::get_weapon_third_person_model);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &Simulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&Simulation::drain_fire_presentation_events);
@@ -289,7 +272,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_slot_sounds"), &Simulation::drain_slot_sounds);
 	ClassDB::bind_method(D_METHOD("drain_sound_emitters"), &Simulation::drain_sound_emitters);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &Simulation::set_wac_program);
-	ClassDB::bind_method(D_METHOD("get_wac_program"), &Simulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &Simulation::compile_and_set_wac);
 	ClassDB::bind_method(D_METHOD("run_mission_start_wac"), &Simulation::run_mission_start_wac);
 	ClassDB::bind_method(D_METHOD("seal_mission_start_baseline"),
@@ -306,8 +288,6 @@ void Simulation::_bind_methods() {
 			&Simulation::get_last_projectile_trace_counts);
 	ClassDB::bind_method(D_METHOD("get_last_projectile_trace_faces"),
 			&Simulation::get_last_projectile_trace_faces);
-	ClassDB::bind_method(D_METHOD("get_last_sim_tick_us"), &Simulation::get_last_sim_tick_us);
-	ClassDB::bind_method(D_METHOD("get_last_net_tick_us"), &Simulation::get_last_net_tick_us);
 	ClassDB::bind_method(D_METHOD("get_last_present_snapshot_us"),
 			&Simulation::get_last_present_snapshot_us);
 	ClassDB::bind_method(D_METHOD("get_last_occlusion_build_us"),
@@ -363,9 +343,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation", D_METHOD("remote_body_state_defers", "current_flags", "next_flags"), &Simulation::remote_body_state_defers);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &Simulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &Simulation::get_entity_kind);
-	ClassDB::bind_method(D_METHOD("get_entity_index", "index"), &Simulation::get_entity_index);
 	ClassDB::bind_method(D_METHOD("get_entity_position", "index"), &Simulation::get_entity_position);
-	ClassDB::bind_method(D_METHOD("get_entity_yaw", "index"), &Simulation::get_entity_yaw);
 	ClassDB::bind_method(D_METHOD("get_entity_yaw_deg", "index"), &Simulation::get_entity_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_entity_state", "index"), &Simulation::get_entity_state);
 	ClassDB::bind_method(D_METHOD("get_entity_net_id", "index"), &Simulation::get_entity_net_id);
@@ -381,7 +359,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_present_effect_state_for_bms_id);
 	ClassDB::bind_method(D_METHOD("get_present_effect_state_for_origin", "kind", "index"),
 	                     &Simulation::get_present_effect_state_for_origin);
-	ClassDB::bind_method(D_METHOD("get_entity_bms_id", "index"), &Simulation::get_entity_bms_id);
 	ClassDB::bind_method(D_METHOD("get_entity_owner_connection_id", "index"),
 	                     &Simulation::get_entity_owner_connection_id);
 	ClassDB::bind_method(D_METHOD("get_entity_wire_handle", "index"),
@@ -392,8 +369,6 @@ void Simulation::_bind_methods() {
 			&Simulation::decode_present_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &Simulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &Simulation::get_entity_part_anim_active);
-	ClassDB::bind_method(D_METHOD("get_entity_body_anim_slot", "index"), &Simulation::get_entity_body_anim_slot);
-	ClassDB::bind_method(D_METHOD("get_entity_hidden", "index"), &Simulation::get_entity_hidden);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &Simulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_layout_revision"),
 			&Simulation::get_present_layout_revision);
@@ -441,8 +416,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::reset_occlusion_apply_baseline);
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &Simulation::occlusion_water_visible);
-	ClassDB::bind_method(D_METHOD("occlusion_camera_indoors"),
-	                     &Simulation::occlusion_camera_indoors);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &Simulation::get_occlusion_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
@@ -475,7 +448,6 @@ void Simulation::_bind_methods() {
 	                              "distance_q16", "source_bms_id"),
 	                     &Simulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
-	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("get_attach_labels"), &Simulation::get_attach_labels);
 	ClassDB::bind_method(D_METHOD("get_friendly_tags"), &Simulation::get_friendly_tags);
@@ -573,8 +545,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &Simulation::load_weapon_table, DEFVAL(String("weapon.def")));
-	ClassDB::bind_method(D_METHOD("load_score_config", "resource_root", "name"),
-	                     &Simulation::load_score_config, DEFVAL(String("score.ini")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
 	                     &Simulation::load_ammo_table, DEFVAL(String("ammo.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &Simulation::get_infantry_clip_count);
