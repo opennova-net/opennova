@@ -8,6 +8,10 @@ extends GutTest
 # Dictionary form (evaluate_panm) stays cache-neutral and is the reference.
 
 const PMP := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+# The pump jack with its LOD0 row 0 translation track re-styled to retail's
+# rand()-backed wave, minted once from the retired edit surface
+# (fixtures/threedi/synthetic/README.md).
+const PMP_NOISE := "res://../fixtures/threedi/synthetic/pmpjk01_anim0_noise_translation.3di"
 
 
 func _data() -> ObjectData:
@@ -49,6 +53,44 @@ func test_unchanged_evaluation_writes_nothing() -> void:
 	assert_eq(second, revision, "same time, same ctrl -> same revision")
 	assert_true((nodes[0] as Node3D).transform.is_equal_approx(poison),
 			"an up-to-date caller gets no writes (the poison survives)")
+
+
+func test_same_time_noise_calls_sample_each_graphic_instance_independently() -> void:
+	# Low nibble 6 is retail's rand()-backed wave lookup. The fixture carries the
+	# translation track authored as control 0x36 (control_param 0, rate 0,
+	# 0..32767); keep time, bus, and authored track identical across both calls
+	# so only the per-submission CRT sample can distinguish the two graphic
+	# instances. [orig: PANM_SampleTrack @ 0x5B2270; wave_lookup @ 0x5DE6B0]
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(PMP_NOISE)), OK)
+	assert_gt(data.get_part_anim_count(0), 0,
+			"the fixture carries the LOD0 row turned into a noise probe")
+	var anim := 0
+	var info: Dictionary = data.get_part_anim_info(0, anim)
+	var target_part := int(info.get("transform_as", -1))
+	var part_count := int(data.get_render_lod_info(0).get("part_count", 0))
+	assert_between(target_part, 0, part_count - 1)
+	if target_part < 0 or target_part >= part_count:
+		return
+	var translation: Dictionary = info.get("translation", {})
+	assert_eq(int(translation.get("control", 0)), 0x36,
+			"the fixture authors the translation track as the rand()-backed wave")
+	assert_eq(int(translation.get("end", 0)), 32767)
+
+	var first_nodes := _nodes(part_count)
+	var second_nodes := _nodes(part_count)
+	var serial_before := data.get_panm_evaluation_serial()
+	data.apply_panm_to_nodes(
+			0, 0, {}, first_nodes, 0)
+	var serial_after_first := data.get_panm_evaluation_serial()
+	data.apply_panm_to_nodes(
+			0, 0, {}, second_nodes, 0)
+	var serial_after_second := data.get_panm_evaluation_serial()
+
+	assert_eq(serial_after_first, serial_before + 1,
+			"the first graphic instance evaluates its noise track")
+	assert_eq(serial_after_second, serial_after_first + 1,
+			"same-time noise evaluates again for the second graphic instance")
 
 
 func test_time_advance_writes_only_moved_parts() -> void:
