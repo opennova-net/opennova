@@ -512,10 +512,16 @@ void Terrain::render_frame() {
 			last_transform[i] = xform;
 		}
 
-		rs->instance_geometry_set_shader_parameter(
-			patch_instances[i], "u_instance_source_quadrant",
-			Vector2(static_cast<float>(draw.quadrant_x),
-				static_cast<float>(draw.quadrant_z)));
+		// Per-instance uniforms: written on change only (the mesh/transform
+		// gates above already work that way).
+		const bool fresh = !patch_uniforms_stamped[i];
+		const Vector2 quadrant(static_cast<float>(draw.quadrant_x),
+				static_cast<float>(draw.quadrant_z));
+		if (fresh || quadrant != last_quadrant[i]) {
+			rs->instance_geometry_set_shader_parameter(
+				patch_instances[i], "u_instance_source_quadrant", quadrant);
+			last_quadrant[i] = quadrant;
+		}
 
 		const opennova::TerrainTilePageBinding page =
 				tile_cache_device.request(
@@ -524,19 +530,31 @@ void Terrain::render_frame() {
 				page.ready
 						? opennova::TerrainTileCompositionCache::page_projection(page.page)
 						: std::nullopt;
-		rs->instance_geometry_set_shader_parameter(
-				patch_instances[i], "u_instance_tile_cache_ready", projection.has_value());
-		if (projection.has_value()) {
+		const bool ready = projection.has_value();
+		if (fresh || ready != last_page_ready[i]) {
 			rs->instance_geometry_set_shader_parameter(
-					patch_instances[i], "u_instance_tile_cache_layer",
-					static_cast<float>(page.layer));
-			rs->instance_geometry_set_shader_parameter(
-					patch_instances[i], "u_instance_tile_cache_projection",
-					Vector4(projection->world_origin_x,
-							projection->world_origin_z,
-							projection->inverse_world_span,
-							projection->world_span));
+					patch_instances[i], "u_instance_tile_cache_ready", ready);
+			last_page_ready[i] = ready;
 		}
+		if (ready) {
+			const float layer = static_cast<float>(page.layer);
+			const Vector4 projection_row(projection->world_origin_x,
+					projection->world_origin_z,
+					projection->inverse_world_span,
+					projection->world_span);
+			if (fresh || layer != last_page_layer[i]) {
+				rs->instance_geometry_set_shader_parameter(
+						patch_instances[i], "u_instance_tile_cache_layer", layer);
+				last_page_layer[i] = layer;
+			}
+			if (fresh || projection_row != last_page_projection[i]) {
+				rs->instance_geometry_set_shader_parameter(
+						patch_instances[i], "u_instance_tile_cache_projection",
+						projection_row);
+				last_page_projection[i] = projection_row;
+			}
+		}
+		patch_uniforms_stamped[i] = true;
 
 		// Per-instance debug data (only set when a debug mode is active)
 		if (debug_mode > 0) {
@@ -661,6 +679,8 @@ void Terrain::_bind_light_textures() {
 	light_rows_image = Image::create_from_data(LIGHT_ROWS_TEXELS,
 			PATCH_POOL_SIZE, false, Image::FORMAT_RGBAF, light_rows_bytes);
 	light_rows_texture = ImageTexture::create_from_image(light_rows_image);
+	light_rows_uploaded = light_rows_bytes.duplicate();
+	light_rows_enabled_written = -1;
 	terrain_material->set_shader_parameter("u_terrain_light_disc",
 			light_disc_texture);
 	terrain_material->set_shader_parameter("u_terrain_light_strip",
@@ -751,11 +771,25 @@ void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
 			color[3] = static_cast<float>(rows.count);
 		}
 	}
-	light_rows_image->set_data(LIGHT_ROWS_TEXELS, PATCH_POOL_SIZE, false,
-			Image::FORMAT_RGBAF, light_rows_bytes);
-	light_rows_texture->update(light_rows_image);
-	terrain_material->set_shader_parameter("u_terrain_light_enabled",
-			light_rows_total > 0);
+	// Upload only when the rows moved: a still camera under steady lights
+	// rebuilds identical bytes every frame.
+	const int64_t byte_count = light_rows_bytes.size();
+	if (light_rows_uploaded.size() != byte_count ||
+			std::memcmp(light_rows_uploaded.ptr(), light_rows_bytes.ptr(),
+					static_cast<size_t>(byte_count)) != 0) {
+		light_rows_image->set_data(LIGHT_ROWS_TEXELS, PATCH_POOL_SIZE, false,
+				Image::FORMAT_RGBAF, light_rows_bytes);
+		light_rows_texture->update(light_rows_image);
+		light_rows_uploaded.resize(byte_count);
+		std::memcpy(light_rows_uploaded.ptrw(), light_rows_bytes.ptr(),
+				static_cast<size_t>(byte_count));
+	}
+	const int enabled = light_rows_total > 0 ? 1 : 0;
+	if (enabled != light_rows_enabled_written) {
+		terrain_material->set_shader_parameter("u_terrain_light_enabled",
+				enabled != 0);
+		light_rows_enabled_written = enabled;
+	}
 }
 
 void Terrain::_cache_env_weather_nodes() {
@@ -978,6 +1012,7 @@ void Terrain::build() {
 				"u_instance_light_slot", static_cast<float>(i));
 		patch_instances[i] = inst;
 		patch_visible[i] = false;
+		patch_uniforms_stamped[i] = false;
 	}
 
 	_load_textures();

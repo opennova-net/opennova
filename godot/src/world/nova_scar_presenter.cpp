@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/visual_instance3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -338,6 +339,17 @@ void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_o
 			instance = memnew(MeshInstance3D);
 			instance->set_name(String("Scars_") + String::num_int64(group.owner) +
 					"_s" + String::num_int64(group.section));
+			// The ring renders wherever its section renders: inherit the
+			// section mesh's layer stamps (mirror policy, the slot-capture
+			// bit SlotShadow stamps once per scene build) from a sibling.
+			for (int i = 0; i < mount->get_child_count(); ++i) {
+				VisualInstance3D *sibling =
+						Object::cast_to<VisualInstance3D>(mount->get_child(i));
+				if (sibling != nullptr) {
+					instance->set_layer_mask(sibling->get_layer_mask());
+					break;
+				}
+			}
 			mount->add_child(instance);
 		}
 		instance->set_mesh(group.mesh);

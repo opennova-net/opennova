@@ -12,6 +12,9 @@
 namespace godot {
 
 void ObjectModel::rebuild_scene() {
+	// Every retained child is recreated below: per-instance stamps other
+	// devices hold on this subtree (slot-capture layers) are stale from here.
+	++scene_build_serial_;
 	while (get_child_count() > 0) {
 		Node *child = get_child(0);
 		remove_child(child);

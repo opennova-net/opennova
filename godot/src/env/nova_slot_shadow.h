@@ -128,8 +128,11 @@ private:
 	Camera3D *cameras_[renderer::kSlotCaptureCount] = {};
 	// Slots set to UPDATE_ONCE by the latest advance_frame (bit = slot order).
 	uint32_t armed_capture_mask_ = 0;
-	// instance id -> applied capture bit (for removal on churn).
+	// instance id -> applied capture bit (for removal on churn), and the
+	// model's scene-build serial the bit was stamped over (a rebuilt subtree
+	// needs the stamp again; a steady one does not).
 	HashMap<uint64_t, uint32_t> applied_bits_;
+	HashMap<uint64_t, uint32_t> applied_scene_serials_;
 	HashMap<String, Ref<Texture2D>> blob_textures_;
 	// The per-slot dominant-light query buffer (reused across frames).
 	std::vector<renderer::SlotPointLight> slot_lights_;

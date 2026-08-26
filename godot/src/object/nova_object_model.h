@@ -463,6 +463,14 @@ private:
 	// --- retained-scene construction (nova_object_model_scene.cpp) ---
 	void rebuild_scene();
 	void build_skeleton();
+	// Bumped by every rebuild_scene(): a device that stamps this subtree's
+	// instances (SlotShadow's capture layers) re-stamps when it moves.
+	uint32_t scene_build_serial_ = 0;
+
+public:
+	uint32_t get_scene_build_serial() const { return scene_build_serial_; }
+
+private:
 	void sync_screen_notifier(const AABB &p_bounds);
 	AABB compute_transformed_mesh_bounds() const;
 

@@ -428,6 +428,7 @@ void SlotShadow::advance_frame() {
 			_apply_capture_layers(model, 0);
 		}
 		applied_bits_.erase(id);
+		applied_scene_serials_.erase(id);
 	}
 	if (!live) {
 		_clear_all_terms();
@@ -611,17 +612,22 @@ void SlotShadow::advance_frame() {
 		ObjectModel *model = info.model;
 		const bool captures =
 				assignment.draws_silhouette && !assignment.excluded;
-		// Capture-layer churn: re-stamp admitted models every frame
-		// (rebuild() resets children), clear once on the way out. A claimed
-		// child carries its parent's bit, never its own excluded row's zero.
+		// Capture-layer churn: stamp an admitted model when its bit changes
+		// or its scene was rebuilt since the last stamp (rebuild() recreates
+		// the mesh children), clear once on the way out. A claimed child
+		// carries its parent's bit, never its own excluded row's zero.
 		const uint32_t *claim = claimed.getptr(assignment.id);
 		const uint32_t want_bit = captures
 				? capture_layer_bit(assignment.capture_order)
 				: (claim != nullptr ? *claim : 0u);
 		uint32_t &applied = applied_bits_[assignment.id];
-		if (want_bit != 0 || applied != 0) {
+		uint32_t &applied_serial = applied_scene_serials_[assignment.id];
+		const uint32_t scene_serial = model->get_scene_build_serial();
+		if (want_bit != applied ||
+				(want_bit != 0 && scene_serial != applied_serial)) {
 			_apply_capture_layers(model, want_bit);
 			applied = want_bit;
+			applied_serial = scene_serial;
 		}
 		if (assignment.bound && !assignment.excluded) {
 			++report_bound_;
