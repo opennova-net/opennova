@@ -40,6 +40,13 @@ import/use_multiple_threads=false
 
 enabled=PackedStringArray("res://addons/gut/plugin.cfg")
 
+[physics]
+
+; Nothing in the game uses Godot physics: collision, traces, and movers are
+; the portable engine's. The Dummy server removes the 60 Hz empty-space step
+; (and its MessageQueue flushes) from every frame.
+3d/physics_engine="Dummy"
+
 [rendering]
 
 rendering_device/driver.windows="d3d12"
