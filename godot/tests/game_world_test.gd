@@ -1207,8 +1207,9 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"below-water particle visibility follows water murk")
 	assert_eq(int(particle_fog.get("type", -1)), 1,
 			"below-water particle submissions use linear fog")
-	# Weather writes shader globals directly after terrain/foliage in a live
-	# frame. Drive that tail explicitly in this paused harness and prove it
+	# Weather writes shader globals from its GameFramePipeline leg (the env
+	# nodes advance after the scene-environment classify, before terrain) in a
+	# live frame. Drive that leg explicitly in this paused harness and prove it
 	# cannot replace the selected shared payload with dry fog. The portable
 	# environment_state_test pins the exact pass-aware global block because
 	# RenderingServer global readback is nil under the headless renderer.
