@@ -815,7 +815,6 @@ public:
     // Asset-aware live-pose form used by the simulation. It asks the world's
     // native provider at the actual LOS/aim/fire call site, then the fresh
     // no-native-rig stamp, then the chest lift.
-    void weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const;
     void weapon_fire_origin(World &world, const AiEntity &e,
                             uint32_t logic_tick, int32_t out[3]) const;
     void weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const;
@@ -1146,6 +1145,10 @@ private:
     void mark_waypoint_visited(AiEntity &e, World &world, int32_t list, int32_t node);
     void clear_handle_index();
     void rebuild_handle_index();
+    // The one LOS body behind line_of_sight_clear / line_of_sight_clear_cached.
+    bool line_of_sight_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
+                                  EntityHandle from, EntityHandle to, bool cached,
+                                  CollisionWorld::RaycastPerf *perf) const;
 
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)

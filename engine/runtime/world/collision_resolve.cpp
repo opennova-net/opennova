@@ -90,7 +90,7 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
         }
         int32_t bound_pos[3];
         int32_t bound_radius = 0;
-        if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+        if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/false)) continue;
         if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
         const CollisionTargetView *tv = target_view(world, ch, view, mats);
         if (tv == nullptr) continue;
@@ -337,7 +337,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 const EntityHandle ch = arena_[slice.start + i];
                 int32_t bound_pos[3];
                 int32_t bound_radius = 0;
-                if (!target_bound(world, ch, bound_pos, bound_radius)) continue;
+                if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/false)) continue;
                 if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
                 const CollisionTargetView *tv = target_view(world, ch, view, mats);
                 if (tv == nullptr) continue;

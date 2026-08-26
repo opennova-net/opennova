@@ -310,8 +310,9 @@ void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int eve
         ev.f[0] = 1;
         ev.f[1] = 9 | (ai_index << 16); // channel 9 | entity index
         ev.set_timer(0.0f);
-        // [orig: ev.f[3] = sub_4E7000()[17] @0x458326] spawn payload from an unmodeled accessor;
-        // left 0 (TODO: model sub_4E7000). If a spawn event later reaches a ground combat-event
+        // [orig: ev.f[3] = Projectile_GetHitRecord()[17] @0x458326] spawn payload read from the current
+        // hit record (Projectile_GetHitRecord @0x4e7000 returns the hitRecord global; its field [17] is not
+        // modeled here, so f[3] is left 0). If a spawn event later reaches a ground combat-event
         // handler (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39] (kDamageInfo).
         events.queue(ev);
         finish();
@@ -804,7 +805,7 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
                 origin[1] = mount->posed_muzzle_world[1];
                 origin[2] = mount->posed_muzzle_world[2];
             } else {
-                weapon_fire_origin(world, *gunner, origin);
+                weapon_fire_origin(world, *gunner, logic_tick, origin);
             }
         }
         if (fire_ai_round(world, *gunner, origin, gunner->heading,

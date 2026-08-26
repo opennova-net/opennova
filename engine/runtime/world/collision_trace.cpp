@@ -266,11 +266,13 @@ static bool round_broad_phase(const float p0[3], const float p1[3], const float 
 }
 
 bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                                  int32_t &radius_out) const {
+                                  int32_t &radius_out, bool solid_only) const {
     // target_view's model selection (live identity, the husk swap, validity)
     // WITHOUT the section-matrix build — bound-gate metadata only, so callers
     // can run the witnessed cheap gate first and build the full view for gate
-    // survivors alone. Returns false exactly when target_view would return null.
+    // survivors alone. Returns false exactly when target_view would return
+    // null; `solid_only` additionally rejects models without a solid volume
+    // (the LOS / stable-candidate callers).
     const Instance *instance = live_instance(world, h);
     if (instance == nullptr) return false;
     const Entity *e = world.registry.get(h);
@@ -280,22 +282,7 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
     const CollisionModel *m =
             model(using_husk ? instance->husk_model_id : instance->model_id);
     if (m == nullptr || !m->valid()) return false;
-    entity_pos_fixed(*e, pos_out);
-    radius_out = entity_proximity_radius(*this, *e, m);
-    return true;
-}
-
-bool CollisionWorld::target_solid_bound(const World &world, EntityHandle h,
-                                        int32_t pos_out[3], int32_t &radius_out) const {
-    const Instance *instance = live_instance(world, h);
-    if (instance == nullptr) return false;
-    const Entity *e = world.registry.get(h);
-    if (e == nullptr) return false;
-    const bool using_husk =
-            (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
-    const CollisionModel *m =
-            model(using_husk ? instance->husk_model_id : instance->model_id);
-    if (m == nullptr || !m->valid() || !m->has_solid_volume) return false;
+    if (solid_only && !m->has_solid_volume) return false;
     entity_pos_fixed(*e, pos_out);
     radius_out = entity_proximity_radius(*this, *e, m);
     return true;
