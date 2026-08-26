@@ -326,24 +326,83 @@ void ObjectModel::set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabl
 		return;
 	}
 	shadow_caster_layers_ = next_layers;
-	apply_shadow_casting_below(this);
+	apply_presentation_layer_below(this);
 }
 
-void ObjectModel::apply_shadow_casting_below(Node *p_root) {
-	const GeometryInstance3D::ShadowCastingSetting setting =
-			shadow_caster_layers_ != 0 ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
-									   : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF;
+void ObjectModel::set_presentation_layer(PresentationLayer p_layer) {
+	if (presentation_layer_ == p_layer) {
+		return;
+	}
+	presentation_layer_ = p_layer;
+	apply_presentation_layer_below(this);
+}
+
+uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
+	uint32_t base = 0;
+	bool markers = true;
+	switch (presentation_layer_) {
+		case PRESENTATION_LAYER_WORLD:
+			// Mission placement has already resolved the engine's two-part
+			// building/vehicle reflection policy; this device leg only maps
+			// that typed decision to Godot visibility layers.
+			base = mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
+			markers = !p_auxiliary;
+			break;
+		case PRESENTATION_LAYER_LOCAL_BODY:
+			base = LAYER_WORLD;
+			break;
+		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
+			base = LAYER_FP_BODY_SHADOW_ONLY;
+			break;
+		case PRESENTATION_LAYER_VIEWMODEL:
+			base = LAYER_VIEWMODEL;
+			markers = false;
+			break;
+	}
+	return markers ? (base | shadow_caster_layers_) : base;
+}
+
+GeometryInstance3D::ShadowCastingSetting ObjectModel::presentation_cast_setting(
+		bool p_auxiliary) const {
+	switch (presentation_layer_) {
+		case PRESENTATION_LAYER_WORLD:
+			return !p_auxiliary && shadow_caster_layers_ != 0
+					? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
+					: GeometryInstance3D::SHADOW_CASTING_SETTING_OFF;
+		case PRESENTATION_LAYER_LOCAL_BODY:
+		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
+			// Camera-renderable and hidden by LAYER alone, so the render-slot
+			// capture cameras can photograph the silhouette (SHADOWS_ONLY
+			// geometry is invisible to every camera, capture viewports
+			// included).
+			return GeometryInstance3D::SHADOW_CASTING_SETTING_ON;
+		case PRESENTATION_LAYER_VIEWMODEL:
+			return GeometryInstance3D::SHADOW_CASTING_SETTING_OFF;
+	}
+	return GeometryInstance3D::SHADOW_CASTING_SETTING_OFF;
+}
+
+void ObjectModel::apply_presentation_layer_below(Node *p_root) {
+	// The render-slot capture channel bits are SlotShadow's per-slot stamp on
+	// this subtree (gated on its own bit/serial edges); a policy write keeps
+	// them.
+	const uint32_t preserved = SlotShadow::capture_layer_mask();
 	for (int i = 0; i < p_root->get_child_count(); ++i) {
 		Node *child = p_root->get_child(i);
-		GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
-		if (geometry != nullptr &&
-				!bool(geometry->get_meta("_opennova_auxiliary_draw", false))) {
-			geometry->set_cast_shadows_setting(setting);
-			geometry->set_layer_mask((geometry->get_layer_mask() &
-											 ~uint32_t(LAYER_SHADOW_CASTER_MASK)) |
-					shadow_caster_layers_);
+		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(child);
+		if (visual != nullptr) {
+			const bool auxiliary =
+					bool(visual->get_meta("_opennova_auxiliary_draw", false));
+			visual->set_layer_mask((visual->get_layer_mask() & preserved) |
+					presentation_layer_mask(auxiliary));
+			GeometryInstance3D *geometry =
+					Object::cast_to<GeometryInstance3D>(child);
+			if (geometry != nullptr) {
+				geometry->set_cast_shadows_setting(
+						presentation_cast_setting(auxiliary));
+			}
 		}
-		apply_shadow_casting_below(child);
+		apply_presentation_layer_below(child);
 	}
 }
 
@@ -381,10 +440,11 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // building is not an ordinary entity submission: its exterior shell (ROBJ 0)
 // always keeps effectScale 1 with no interior lerp, and only ROBJ 1+ takes
 // its own ItemDef light transfer. Re-stamped by rebuild_scene (fresh
-// instances) and on every context edge; never per frame.
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0;
-//  Terrain_RenderSectorModels @ 0x5c5d30 (the model+536 daylight push per
-//  visible building)]
+// instances) and on every context edge; never per frame (retail:
+// setup_entity_lighting_and_shader_constants @0x5d98a0 and the model+536
+// daylight push per visible building in Terrain_RenderSectorModels
+// @0x5c5d30, see docs/render/render-lighting-re.md; the math itself is
+// renderer::compute_entity_lighting).
 void ObjectModel::stamp_entity_lighting_instances() {
 	const StringName name("u_entity_light");
 	const Vector4 entity = interior_section_lighting_
@@ -1389,6 +1449,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_viewmodel_pass);
 	ClassDB::bind_method(D_METHOD("is_viewmodel_pass"),
 			&ObjectModel::is_viewmodel_pass);
+	ClassDB::bind_method(D_METHOD("set_presentation_layer", "layer"),
+			&ObjectModel::set_presentation_layer);
+	ClassDB::bind_method(D_METHOD("get_presentation_layer"),
+			&ObjectModel::get_presentation_layer);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
@@ -1533,6 +1597,10 @@ void ObjectModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_AWAKE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_RENDERABLE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_SLOT_COUNT);
+	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_WORLD);
+	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY);
+	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
+	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_VIEWMODEL);
 }
 
 } // namespace godot

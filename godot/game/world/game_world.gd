@@ -1891,6 +1891,10 @@ var _viewmodel_weapon_override := ""
 # NONE is distinct from the pre-armory empty override, which falls back to the
 # witnessed bring-up default until an equipped weapon is resolved.
 var _viewmodel_weapon_cleared := false
+# The decoded weapon.def view record and the resolved name it was built from
+# (the mounted slot's def pointer; re-decoded only when the name changes).
+var _viewmodel_def_name := ""
+var _viewmodel_def: PlayerViewmodelDef = null
 # A UseGun presentation rebuild follows a slot-pointer commit that has already
 # selected a persistent parent/personal slot. Both the dict-only install and the
 # later ADM-duration rebake must preserve that slot's action/ammo state.
@@ -2183,12 +2187,19 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = Simulation.viewmodel_bringup_fallback_weapon()
+	# Retail reads the equipped slot's def pointer, resolved when the slot was
+	# mounted; the decoded record is keyed on the name it resolved from, so
+	# the presenter's per-frame read costs one string compare.
+	if weapon_name == _viewmodel_def_name and _viewmodel_def != null:
+		return _viewmodel_def
 	var index: int = weapon_db.find_weapon(weapon_name)
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
 		return null
 	_local_weapon_dict = weapon_db.get_weapon(index)
-	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
+	_viewmodel_def_name = weapon_name
+	_viewmodel_def = PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
+	return _viewmodel_def
 
 
 # --- F3 debug views (world-space overlays + the pick stack) ------------------
