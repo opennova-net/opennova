@@ -78,6 +78,18 @@ target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_sample_test PRIVATE cxx_std_17)
 add_test(NAME anim_sample COMMAND anim_sample_test)
 
+# ANIM positions_from_model over the retail viewmodel corpus (the retail half of
+# the former tests/test_bad_pos_derivation.py; synthetic exactness stays in
+# anim_sample): healthy M16/M24/M21/Frag rigs reconstruct BadBone.position within
+# 5e-4 on >=30 norm-consistent bones each; ak47_1st's X-triplicated rows (>=20)
+# come back model-consistent. Asset-gated on OPENNOVA_JO_ASSETS; skip-as-pass
+# when unset.
+add_executable(anim_positions_from_model_corpus_test anim/anim_positions_from_model_corpus_test.cpp)
+target_link_libraries(anim_positions_from_model_corpus_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(anim_positions_from_model_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_positions_from_model_corpus_test PRIVATE cxx_std_17)
+add_test(NAME anim_positions_from_model_corpus COMMAND anim_positions_from_model_corpus_test)
+
 # ANIM aim overlay (the torso bend): bone-class map, BAM blend branches, compose
 # invariants. [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md s14]
 add_executable(aim_overlay_test anim/aim_overlay_test.cpp)
