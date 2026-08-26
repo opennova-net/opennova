@@ -1800,7 +1800,7 @@ void test_spinmap_medic_marker(const fnt_font_t *font) {
 // the first word, and the remainder (walked from 2 * 8 = 16) finds no space
 // before overflowing, so it stays whole. The first segment is a continuation
 // slot with timer 0; the last carries the 930 life.
-// [orig: sub_580980 @0x580980; Chat_AddMessageChannel1 @0x4985d0]
+// [orig: HUD_WordWrapText @0x580980; Chat_AddMessageChannel1 @0x4985d0]
 void test_chat_wrap_slots(const fnt_font_t *font) {
 	GameFont gf;
 	gf.set_font(font);

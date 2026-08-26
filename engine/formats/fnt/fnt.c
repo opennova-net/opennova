@@ -50,7 +50,7 @@ fnt_error_t fnt_parse_header(const uint8_t *data, size_t size,
 		return FNT_ERR_INVALID_MAGIC;
 	}
 	/* +4 is the DESIGN WIDTH, not a version — the engine reads it as the 800/dw
-	 * scale and never validates it [orig: sub_674740 @ 0x674740]. We match: no
+	 * scale and never validates it [orig: GameFont_LoadFromBlob @ 0x674740]. We match: no
 	 * equality gate here (a non-800 font is scaled by fnt_design_scale, D-FNT-1). */
 
 	uint32_t pages = read_u32_le(data + 8);

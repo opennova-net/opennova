@@ -64,7 +64,7 @@ MARKER_LINE = re.compile(r"\[orig:|\(retail:")
 PAIR = re.compile(r"(?<![\w.}])(?:([A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)\s*)?@\s*(0x[0-9A-Fa-f]{4,8})\b")
 CAMEL = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+$")
 QUALIFIER = re.compile(
-    r"dfx2med|ModSuperOed|modsuperoed|misldr|binkw32|bink\.dll|jodemo|dfvas|Dflw|ParticleEdit|\(\s*demo\s*\)|\.dll\b",
+    r"dfx2med|ModSuperOed|modsuperoed|misldr|binkw32|bink\.dll|jodemo|dfvas|Dflw|ParticleEdit|TrnGen|\(\s*demo\s*\)|\.dll\b",
     re.I,
 )
 RETAIL_TAG = re.compile(r"^\s*\(\s*(?:retail|Jointops(?:\.exe)?)\s*\)")

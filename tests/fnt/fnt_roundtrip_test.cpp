@@ -62,7 +62,7 @@ int main() {
 
 	// D-FNT-1/2: the +4 word is the DESIGN WIDTH, not a validated version. The
 	// engine reads it as the 800/dw glyph scale and never rejects a non-800 font
-	// [orig: sub_674740 @ 0x674740]. Our reader must match: accept + carry it.
+	// [orig: GameFont_LoadFromBlob @ 0x674740]. Our reader must match: accept + carry it.
 	{
 		std::vector<uint8_t> bytes =
 		    read_file(std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/Serpen24.fnt");

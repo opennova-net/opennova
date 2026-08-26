@@ -126,7 +126,7 @@ inline bool emplaced_weapon_controls_for_client(
 		// 0x100c streamed its spawn heading 140 deg while its gunner aimed
 		// 314 deg; unclamped, the "180 tripod" model wrapped the barrel
 		// visibly wrong).
-		// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+		// [orig: the per-update clamp @0x441228..0x44128c via Math_ClampAngleToBounds]
 		const world::TurretWindow window =
 				world::select_turret_window_bam(
 						arc != nullptr ? arc->down_limit_bam : 0,

@@ -158,7 +158,7 @@ all-zero assumption: RevX02 `IndoArms.3di` has two diffuse frames controlled
 by `TEX_CAMO1`, so raw avatar selector 1 must choose frame 1, not frame 0.
 
 The consumer fields do not index a private per-model value array. The on-disk
-CTRL list is model-local names; `[orig: sub_5B4640 @ 0x5B4640; ordinal store
+CTRL list is model-local names; `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; ordinal store
 @ 0x5B46E6]` resolves those names against the 96-entry global catalog, and
 `ThreediGp_LoadFromFile` patches the material/texture-animation references to
 the resolved global ordinals at `0x5B5C80..0x5B5DA2`. The resolver is

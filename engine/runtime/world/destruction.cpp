@@ -1061,7 +1061,7 @@ void destruction_tick_dead_items(World &world,
             if (e->death_motion == DeathMotionMode::None) continue;
 
             // The post-contact callback installed by DeathPiece_PhysicsUpdate
-            // [orig: sub_48F0B0 @0x48F0B0]. The forward slope target is kept
+            // [orig: DeathPiece_SettlePitch @0x48F0B0]. The forward slope target is kept
             // in the same +0xA8 register that previously held pitch rate.
             // It moves at most two degrees per tick, snaps inside four, and
             // performs the ground-death transition on the following tick.

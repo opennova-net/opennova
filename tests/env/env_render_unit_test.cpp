@@ -953,7 +953,7 @@ int main() {
 		            "brightness halves the glow")) return 1;
 		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0x8000, 0, false) == 0x4000,
 		            "overcast halves the glow")) return 1;
-		// The FBEFFECTS >= 3 quarter [orig: sub_581F60 @ 0x581f6a;
+		// The FBEFFECTS >= 3 quarter [orig: FrameFX_QualityAtLeast3 @ 0x581f6a;
 		// >>= 2 @ 0x5ad033..0x5ad03c] - the locked reimpl profile's form.
 		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0, 0, true) == 0x2000,
 		            "FBEFFECTS>=3 quarters the direct glow")) return 1;

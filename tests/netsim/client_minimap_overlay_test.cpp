@@ -107,7 +107,7 @@ int main() {
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
 			"the refreshed slot keeps its transient aging class and expires");
 	// A marker ALLOCATED with 0x10 lands in the persistent bank and never
-	// ages. [orig: sub_5BE970 @0x5be98e..0x5be998; timers skip slot_data]
+	// ages. [orig: MapOverlay_AllocSlot @0x5be98e..0x5be998; timers skip slot_data]
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
 			zone(entity.handle, 3, 0x09, 0x10));
 	for (int i = 0; i < ns::kMinimapOverlayLifetimeTicks + 2; ++i)
@@ -216,7 +216,7 @@ int main() {
 	// link keys strictly off its STORED slot, and a fresh link allocates a
 	// second special slot rather than stamping the badge (the allocator's
 	// free test skips active slots).
-	// [orig: link[6] @0x5bece4; sub_5BE970 free test @0x5be9b0]
+	// [orig: link[6] @0x5bece4; MapOverlay_AllocSlot free test @0x5be9b0]
 	view.state().upsert(0x2005).team = 2;
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2005, 12, 8, 0x40));
 	view.apply(opennova::s2c::MINIMAP_OVERLAY,

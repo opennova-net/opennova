@@ -4,6 +4,9 @@
 #include <cstdlib>
 #include <sstream>
 
+// [orig: PolyTrn_LoadTerrainConfig @0x60e3d0 -> Terrain_ParseConfigCallback @0x60f330 — the .trn
+//  key parser (foliage attribs: "forceon" @0x60f58b); Terrain_LoadEnvironmentConfig @0x610940]
+
 namespace opennova {
 
 namespace {

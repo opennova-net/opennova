@@ -5,7 +5,7 @@
  * Supports the exact Nova FNT dialect used by Joint Operations assets:
  * FNT0, glyphs 32..255, 256x256 RGBA pages. The header word at +4 is the font's
  * DESIGN WIDTH (the reader scales glyphs by 800/design_width) — NOT a version;
- * the engine never validates it [orig: sub_674740 @ 0x674740 / HUD_LoadFontIntoSlot @ 0x580400].
+ * the engine never validates it [orig: GameFont_LoadFromBlob @ 0x674740 / HUD_LoadFontIntoSlot @ 0x580400].
  */
 
 #ifndef OPENNOVA_FNT_H

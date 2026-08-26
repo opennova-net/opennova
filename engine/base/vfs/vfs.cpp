@@ -225,7 +225,7 @@ struct Vfs::Impl {
     std::vector<std::string> search_paths;                 // add order (highest precedence)
     // mount_game retains these even in Packed mode. Retail callers such as foliage/UI can
     // force one loose-first lookup without making loose data visible to the legacy index.
-    // [orig: Terrain_LoadFoliageFile @ 0x60a74e; FileSystem_OpenFile @ 0x75b1c0]
+    // [orig: Terrain_LoadTileInfoFile @ 0x60a74e; FileSystem_OpenFile @ 0x75b1c0]
     std::vector<std::string> retail_loose_probe_paths;
     std::unique_ptr<ArchiveMount> primary;
     std::vector<std::unique_ptr<ArchiveMount>> secondaries; // add order

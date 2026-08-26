@@ -1295,7 +1295,7 @@ struct FlatField {
 // one PRNG draw, short four-probe slope solve, landing presentation order,
 // dual authority blast, standard scorch, and the separate pitch-settle phase.
 // [orig: DeathPiece_PhysicsUpdate @0x48F500;
-// Entity_CalcSlopeForces @0x4B0B00; sub_48F0B0 @0x48F0B0]
+// Entity_CalcSlopeForces @0x4B0B00; DeathPiece_SettlePitch @0x48F0B0]
 void test_specialized_piece_physics_callback() {
     FlatField flat(0);
     auto w_heap = std::make_unique<World>();

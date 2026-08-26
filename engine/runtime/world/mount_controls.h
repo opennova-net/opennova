@@ -82,7 +82,7 @@ inline int32_t turret_limit_bam(int16_t degrees) {
 // The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
 // second write wins. Retail runs this every entity update so a phase implied
 // beyond the gun's arc pins AT the arc edge — a "180 tripod" barrel can never
-// present outside its authored traverse. [orig: sub_540CC0 @0x540cc0; caller
+// present outside its authored traverse. [orig: Math_ClampAngleToBounds @0x540cc0; caller
 // Entity_UpdateTransformAndTurret @0x441228..0x44128c]
 inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 		int32_t lower) {
@@ -129,7 +129,7 @@ inline bool emplaced_weapon_controls_for(
 	// map is on the helper). Per-seat clamps BOTH axes with the quartet
 	// verbatim (an authored zero pair pins); the weapon-def leg keeps the
 	// witnessed per-axis zero-means-no-window semantics.
-	// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+	// [orig: the per-update clamp @0x441228..0x44128c via Math_ClampAngleToBounds]
 	const TurretWindow window = select_turret_window(
 			mount.emplacement_down_limit_bam,
 			mount.emplacement_up_limit_bam,

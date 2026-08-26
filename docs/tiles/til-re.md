@@ -94,7 +94,7 @@ not a claim about an additional retail rendering rule.
 
 `Foliage_PathBlockedByPlacedTile @ 0x606490` consumes the same
 `g_TerrainTileArray` loaded from `<mission>.til` by
-`Terrain_LoadFoliageFile @ 0x60a740`. It linearly scans every 12-byte entry.
+`Terrain_LoadTileInfoFile @ 0x60a740`. It linearly scans every 12-byte entry.
 After decoding `x_fixed` and stored-negated `z_fixed`, the entry owns the
 inclusive world AABB `[min_x,min_x+16] x [min_z,min_z+16]`. A foliage
 candidate with radius `r` is blocked exactly when:
@@ -147,7 +147,7 @@ of which contributes authored `.til` content:
   D-TERRAIN-7's ordered-contributions item).
 - **`<tileset>.TSD`**: `configData+0xE00` holds the tileset name with the
   `TSD` extension (@ 0x7DF3E4); `PolyTrn_InitTextures` parses it via
-  `File_ParseASCIIFile` with callback `sub_604C00 @ 0x604c00`, mapping
+  `File_ParseASCIIFile` with callback `Terrain_ParseTsdRow @ 0x604c00`, mapping
   `INDEX_<n> <TSD_NAME>` lines into the 256-entry per-tile-index surface-type
   table `byte_319F7D8`. Surface classification only — no render contribution.
 

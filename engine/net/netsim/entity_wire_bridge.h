@@ -66,7 +66,7 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own = {});
 // pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: serialize_entity_pool_to_packet_0 @0x503940].
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
-// pool-2 static structures -> S2C 0x10 [orig: sub_5042F0]. Slot-aligned (start_index 0, empty-slot
+// pool-2 static structures -> S2C 0x10 [orig: serialize_pool2_static_to_buffer @0x5042f0]. Slot-aligned (start_index 0, empty-slot
 // sentinels for holes) because the 0x10 record carries no slot id — the client's slot = start+index.
 StaticEntityBatch build_pool2_static_batch(const world::World &w);
 // pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: serialize_entity_pool_to_packet @0x503460].

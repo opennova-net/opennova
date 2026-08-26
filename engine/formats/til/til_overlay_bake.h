@@ -11,9 +11,11 @@ namespace opennova {
 // RGBA atlas. Output coordinates follow the terrain colormap convention:
 // x = floor(world_x), y = floor(-world_z), both wrapped to the overlay size.
 //
-// Engine provenance:
-// - Terrain_RenderSectorTile@0x005CDAA0 iterates the .til entries per sector.
-// - sub_5C42B0@0x005C42B0 applies render-time half-texel UV correction.
+// [orig: PolyTrn_RenderTile @0x60df0d — the ordered .til entry loop @0x60ddd4..0x60df1b ->
+//  render_water_quad @0x604700 (flip/rotate flags + the +-half-texel bias); atlas cells from
+//  Terrain_LoadTileSetAtlas @0x604a90; docs/tiles/til-re.md]
+// (jodemo: Terrain_RenderSectorTile @0x5CDAA0 iterated the entries per sector and
+//  sub_5C42B0 @0x5C42B0 applied the half-texel correction.)
 bool til_bake_overlay_rgba(const TilFile &til,
                            const uint8_t *atlas_rgba,
                            int atlas_width,

@@ -181,7 +181,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 	return out;
 }
 
-// [orig: sub_5042F0] (the §5.2a world-stream phase-1 static serializer) — the inverse of
+// [orig: serialize_pool2_static_to_buffer @0x5042f0] (the §5.2a world-stream phase-1 static serializer) — the inverse of
 // decode_static_entity_batch (§5.9). Header `[u16 start_index][u16 count]`, then per record
 // `[u16 item_type_id]` (0 ⇒ empty-slot sentinel, record ends), else `[u16 field_flags]
 // [i32 x][i32 y][i32 z]`, the flag-gated optionals, the ALWAYS ammo_count, more flag-gated

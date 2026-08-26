@@ -2,7 +2,7 @@
 // the retail tokenizer's delimiters/comments, INDEX_ rows into the 256-entry
 // table, case-insensitive TSD-name resolution, unknown names -> 0.
 // [orig: File_ParseASCIIFile @ 0x53d810; Terrain_TokenizeConfigLine
-// @ 0x53cb60; sub_604C00 @ 0x604c00]
+// @ 0x53cb60; Terrain_ParseTsdRow @ 0x604c00]
 #include <til/til_tsd.h>
 
 #include <cstdio>

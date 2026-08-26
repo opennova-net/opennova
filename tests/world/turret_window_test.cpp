@@ -42,7 +42,7 @@ bool per_seat_quartet_wins_over_weapon_window() {
 
 bool per_seat_zero_pair_pins_that_axis() {
 	// An authored quartet with a zero azimuth pair still selects per-seat:
-	// retail's caller runs both sub_540CC0 calls on the returned values, so
+	// retail's caller runs both Math_ClampAngleToBounds calls on the returned values, so
 	// the zero pair pins the axis at zero rather than falling to the weapon
 	// window.
 	w::WeaponTableEntry entry;

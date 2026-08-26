@@ -113,7 +113,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 // sentinel) else the flag-driven body. The field_flags word is DERIVED from populated
 // fields (the original sets each gate bit inside `if (value) { flags |= bit; write }`), so
 // `StaticEntityRecord::field_flags` on the input is ignored and recomputed.
-// [orig: sub_5042F0 (write) / NapiNPClientMsg_0x010 @ 0x433400 (decode).]
+// [orig: serialize_pool2_static_to_buffer @0x5042f0 (write) / NapiNPClientMsg_0x010 @ 0x433400 (decode).]
 std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch);
 
 // Encode a §5.37 S2C 0x45 terrain-tile load chunk — the inverse of

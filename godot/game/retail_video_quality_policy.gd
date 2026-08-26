@@ -6,6 +6,11 @@ extends RefCounted
 # semantic item values, not row numbers. A future settings owner will replace
 # this policy with Godot-native quality tiers rather than reviving the obsolete
 # retail renderer switches.
+# [orig: the options.mnu VIDEO rows are populated by UI_PopulateRenderAndAudioSettings @0x55c830
+#  (TERRAINPOLY @0x55cddc, FBEFFECTS @0x55d009), synced by UI_SyncRenderSettingsToWidgets @0x55a140,
+#  the VIDEODEFAULT/VIDEOPERFORMANCE/VIDEOQUALITY presets registered at UI_RegisterOptionsCallbacks
+#  @0x55d697..0x55d6d3, and every value range pinned by Settings_ClampGraphicsOptions @0x54d4a0
+#  (0..3 rungs, ANTIALIAS 0..16 @0x54d575..0x54d584)]
 class QualityControl:
 	extends RefCounted
 

@@ -168,6 +168,8 @@ bool SimCollisionPoseProvider::register_skeletal_entity(
 	source.model_id = model_id;
 	source.registry_spawn_id = registry_spawn_id;
 	source.rig = std::move(rig);
+	// The gun-flash userpoint resolved on its posed bone [orig: Entity_GetAttachmentWorldPosition
+	//  @0x4b2670; docs/world/world-wac-ai-re.md §21 / D-AI-6].
 	if (!muzzle_userpoint.empty() && model->user_points != nullptr) {
 		for (size_t i = 0; i < model->user_point_count; ++i) {
 			const ThreediUserPoint &point = model->user_points[i];

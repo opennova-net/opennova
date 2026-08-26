@@ -2941,7 +2941,7 @@ flip to vehicle-LOCAL small-magnitude i32s — same wire shape, different host i
 
 ### 5.19 Tag 0x40 — minimap-overlay update / capture-zone state (controlled capture 2026-06-17)
 
-`[orig: NapiNPClientMsg_0x040 @ 0x425A50 → sub_425A54 @ 0x425A54 (reads count) → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte entry walker) → MapOverlay_UpdateOrCreateSlot @ 0x5BEA60]`. Refines the older
+`[orig: NapiNPClientMsg_0x040 @ 0x425A50 → NapiNPClientMsg_0x040_Impl @ 0x425A54 (reads count) → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte entry walker) → MapOverlay_UpdateOrCreateSlot @ 0x5BEA60]`. Refines the older
 "capture-zone state (1 B)" note — the 1 byte it meant is the per-zone icon/color byte; the packet
 itself is a general minimap-overlay update carrying N entries.
 
@@ -2987,7 +2987,7 @@ machinery 2026-08-13: `ClientReplicaPipeline` routes 0x40 rows by flags into
 the witnessed contiguous banks (transient 328 @`0x28E5620` → persistent 328
 @`0x28E7F20` → special 504 @`0x28EA820`; alloc routing `flags&0x40` special /
 `&0x10` persistent / else transient, free = handle `0xFFFF` OR lifetime 0, a
-full bank DROPS with no eviction [orig: `sub_5BE970 @0x5BE970`]), accepts any
+full bank DROPS with no eviction [orig: `MapOverlay_AllocSlot @0x5BE970`]), accepts any
 pool-0..4 handle whether or not the entity is decoded (retail reads the raw
 pool slot [orig: `MapOverlay_UpdateOrCreateSlot @0x5beac0`]), resolves colors
 through the full 32-entry table + the 33..42→[16..25] alias with the alpha-0
@@ -3877,7 +3877,7 @@ same-packet `0x41`/class-change ordering.
 The `0x3D` name is misleading: its source is **not** `ClientState` or any live entity
 enumeration. `NetPacket_WriteEntityIndexList @0x42D950` reads the frozen pointer/count
 returned by `@0x5B1560`; the normal mission path resets the shared `.3DI` model-def
-cache, loads entity/celestial/HUD render definitions, and calls `sub_5B3A80 @0x5871CF`
+cache, loads entity/celestial/HUD render definitions, and calls `CEffectWorld_RebuildAllModelBuffers @0x5871CF`
 once to snapshot unique definitions whose foliage marker (`node+0x3D4`) is clear.
 OpenNova models that lifecycle at the common `ObjectData.open_from_resource_root`
 boundary: mission load resets the registry before celestial/terrain work, successful
@@ -3927,7 +3927,7 @@ neutral color), and the link timer walk never consults the entity either:
 links die solely on their own lifetime, re-arming the slot's 1984-tick
 life while alive and freeing it (`flags |= 0x20`, lifetime 0, handle −1)
 on expiry [orig: `NapiNPClientMsg_0x06B @ 0x425520` →
-`update_minimap_overlay_entity @ 0x5BEC10`; alloc `sub_5BE970 @0x5BE970`;
+`update_minimap_overlay_entity @ 0x5BEC10`; alloc `MapOverlay_AllocSlot @0x5BE970`;
 timers `update_map_overlay_timers @0x5bfd3a..0x5bfe21`].
 (The census guess "objective/HUD countdown" was wrong — the `1e→1d` byte is
 the lifetime field's low byte counting down across resends.)
@@ -9145,7 +9145,7 @@ authority-side carrier-attachment writer. Two bounded seams remain:
 The implemented **world-model `HEAT_GLOW` CTRL register** is global ordinal 54 in the 96-entry,
    32-byte descriptor table (`aLodFrac @ 0x83dce8`; resolver
    `[orig: CtrlName_ToOrdinal @ 0x57b290]`; per-model ordinal store
-   `[orig: sub_5B4640 @ 0x5B4640; @ 0x5B46E6]`). `B50Cal.3di` carries
+   `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; @ 0x5B46E6]`). `B50Cal.3di` carries
    `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]` in local order, and the loader
    remaps those references to global 54/55/56. The world writer is
    `HUD_CacheWeaponSlotInfo @ 0x440930`; its only caller is the valid-bone branch

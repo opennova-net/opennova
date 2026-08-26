@@ -14,6 +14,8 @@ bool has_flag(ObjectShaderKey key, uint32_t bit) {
 
 } // namespace
 
+// [orig: Render_CreateSystemTextures @0x58aca0 — the 256x256 gsys_phong lookup: N.L in X/alpha,
+//  N.H in Y, RGB = trunc(255 * x^4 / x^16 / x^64) with the binary32 1/255 at 0x7D75E8]
 ObjectPhongMapTexel object_phong_map_texel(uint8_t ndotl, uint8_t ndoth) {
 	// This is the binary32 value at 0x7D75E8. Retail keeps the products on
 	// x87 while exponentiating by squaring, then _ftol2_sse truncates each
@@ -69,6 +71,9 @@ ObjectBlendMode decode_object_shader_blend(ObjectShaderKey key) {
 	return static_cast<ObjectBlendMode>(key & OSCAP_BLEND_MASK);
 }
 
+// Per-technique PROJSHAD pass presence, as the .fx technique-block probe at load finds it
+// [orig: HLSLEffect_LoadFromFile @0x5ae690 technique loop; the class-per-batch selection
+//  CRenderBatchQueue_FlushBatches @0x5d9ff3; docs/render/render-material-re.md]
 ObjectProjectedShadowPolicy object_projected_shadow_policy(
 		ObjectShaderTechnique technique) noexcept {
 	switch (technique) {

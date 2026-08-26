@@ -7,12 +7,12 @@ namespace opennova {
 
 // NAPI LSB-scatter CRC envelope.
 //
-// Witnessed byte-exact in jodemo.exe:
-//   NapiPacket_EncodeWithCRC@0x5f7540  (encoder)
-//   NapiPacket_DecodeWithCRC@0x5f7670  (decoder — also handles a variable-
-//     size header mode activated when the first dword is zero, with header
-//     size stored at byte offset +9. The port does not emit that form, but the
-//     decoder accepts it and retains retail's four-byte fallback.)
+// Witnessed byte-exact in the demo image
+// [orig: jodemo NapiPacket_EncodeWithCRC @0x5f7540 (encoder); jodemo NapiPacket_DecodeWithCRC @0x5f7670 (decoder)]
+// (the decoder also handles a variable-size header mode activated when the
+// first dword is zero, with header size stored at byte offset +9. The port does
+// not emit that form, but the decoder accepts it and retains retail's four-byte
+// fallback. The retail Jointops.exe twin of this envelope is not yet located.)
 //
 // Wire format (4-byte header mode):
 //   offset size   meaning

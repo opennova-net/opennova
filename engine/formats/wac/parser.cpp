@@ -5,6 +5,9 @@
 #include "wac/command.h"
 #include "wac/lexer.h"
 
+// [orig: Script_Compile @0x4f31f0 — the shunting-yard statement/expression parser (operator
+//  precedence via Script_GetOperatorPrecedence, parameters via WacScript_ResolveParameter @0x4f2920)]
+
 namespace opennova::wac {
 namespace {
 

@@ -101,7 +101,7 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 	// The wrap: width `x2 - (x1 - 4)` of the chat box, the bold label font AT
 	// ITS NATIVE (design) SIZE, current_x 0; a 0 count (no font) is 1
 	// [orig: @0x498673..0x4986c5]. The wrapper measures the FONT OBJECT, not
-	// the HUD slot with its scale pair: sub_580980 dereferences *fontPtr
+	// the HUD slot with its scale pair: HUD_WordWrapText dereferences *fontPtr
 	// @0x58098a and measures through CGameFont_GetTextExtent @0x5809ad /
 	// CGameFont_GetCharExtent (ex sub_674DC0) @0x5809db with no slot scale, against a width authored in
 	// design units — so the measure here is scale 1, never label_scale_. The
@@ -153,7 +153,7 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 
 int chat_wrap_text(const GameFont &font, float scale, std::string &text,
 		int max_width, int current_x) {
-	// [orig: sub_580980 @0x580980 — the recursion unrolled into a loop over
+	// [orig: HUD_WordWrapText @0x580980 — the recursion unrolled into a loop over
 	//  the remaining text; every test and step is the witnessed one]
 	if (font.font() == nullptr) {
 		return 0;

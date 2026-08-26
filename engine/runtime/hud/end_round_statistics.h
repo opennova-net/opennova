@@ -19,7 +19,7 @@ namespace opennova::hud {
 // [orig: HUD_DrawEndRoundStatistics @0x5b7600, called from the frame drawer
 //  HUD_DrawOverlayPanels @0x5c0092 while dword_24C18AC is set; the toggle is
 //  Input_HandleActionBinding jumptable case 422 @0x49bd29 (gated
-//  !is_in_session) -> sub_4993C0(&toggle) = Game_InitRespawnState keeping
+//  !is_in_session) -> Game_InitRespawnStateKeepingToggle @0x4993c0 (&toggle) = Game_InitRespawnState keeping
 //  *ptr @0x4993c0..0x4993db; cleared by Game_InitRespawnState @0x499381 and
 //  Game_DestroyAllEntitiesAndReset @0x5235c5. Controls catalog row 99
 //  "ShowScore" ("!Show Score"), default VK 0x74 = F5, handler id 422 at

@@ -149,7 +149,7 @@ void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t n
     if (was_active) {
         // The end-leg sound plays only when the phase byte was 2 (ACTIVE) at entry —
         // a phase-1 abort (the fire CanFire refusal) finishes silently.
-        // [orig: @ 0x53f7b9 phase==2 latch -> the end shim @ 0x53f7d6 (sub_401100
+        // [orig: @ 0x53f7b9 phase==2 latch -> the end shim @ 0x53f7d6 (ActionSlot_PlayEndSoundAndDupes @0x401100
         //  plays ActionDef+12); the shim's dupsound repeat loop (+44 count / +48
         //  interval) is data-dead in the JOX/REVX corpora]
         out.action_finished = desc.id;

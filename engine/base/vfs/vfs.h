@@ -24,7 +24,7 @@ enum class VfsMountMode { LooseOnly, Packed, PackedWithLooseOverride };
 // Per-query resolution order for the retail-faithful lookup overloads. Retail keeps a
 // session default (/d selects loose-first) but selected callers temporarily force the
 // loose or archive path for one open without changing that default.
-// [orig: FileSystem_OpenFile @ 0x75b1c0; Terrain_LoadFoliageFile @ 0x60a74e;
+// [orig: FileSystem_OpenFile @ 0x75b1c0; Terrain_LoadTileInfoFile @ 0x60a74e;
 // Mission_LoadBMSFromPFF @ 0x40d43c]
 enum class VfsLookupPolicy { SessionDefault, ForceLooseFirst, ForceArchiveOnly };
 

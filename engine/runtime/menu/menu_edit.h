@@ -53,7 +53,7 @@ enum class EditKeyResult {
 	kCommit,   // Enter: focus releases and the value commits
 };
 
-// Delete `count` chars at the caret [orig: sub_6622c0 via Backspace/Delete].
+// Delete `count` chars at the caret [orig: CUIEditWidget_DeleteChars @0x6622c0 via Backspace/Delete].
 inline bool edit_delete_at_caret(EditField &f, int count) {
 	if (count <= 0 || f.caret >= static_cast<int>(f.text.size())) {
 		return false;

@@ -177,7 +177,7 @@ var _named_handlers: Dictionary = {}
 var _companions: Array = []
 # The armed remap capture (Options -> Controls): -1 = idle. Retail arms on the
 # table activation, clears the Control cell, and consumes the next key/button
-# [orig: the arm handler sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c].
+# [orig: the arm handler UI_ControlsRemapArmHandler @ 0x55d560; the capture pump @ 0x55c67c].
 var _remap_table_id := -1
 var _remap_row := -1
 var _remap_action := -1
@@ -443,7 +443,7 @@ func _on_screen_changed(screen_name: String) -> void:
 	# per-screen pump state — otherwise a later keypress on ANY screen would
 	# assign to the stale action. The refill restores the blanked Control
 	# cell in the persisted table rows [orig: the pump state lives with the
-	# Options screen, sub_55D560 @ 0x55d560].
+	# Options screen, UI_ControlsRemapArmHandler @ 0x55d560].
 	_end_remap(true)
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
@@ -647,7 +647,7 @@ func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
 
 # Double-click on a mapping row arms the capture: the Control cell clears and
 # the next key (or mouse button, on the Mouse page) binds; Esc cancels
-# [orig: sub_55D560 @ 0x55d560 — pump state 1, row stored, cell cleared,
+# [orig: UI_ControlsRemapArmHandler @ 0x55d560 — pump state 1, row stored, cell cleared,
 #  focus taken; the joystick page's poll capture is not wired (D-CTRL-1)].
 func _arm_remap(table_id: int, row: int) -> void:
 	if _control_device == ControlsModel.DEVICE_JOYSTICK:

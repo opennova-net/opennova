@@ -3,6 +3,10 @@
 
 #include <cstring> // For std::strcmp
 
+// [orig: HLSLEffect_FindByName @0x5ade70 — the runtime name lookup over the effect registry]
+// ModSuperOed's FindMaterialIndexByName is the tool-side twin (exact strcmp over
+// gMaterialInfoTable, unknown -> row 0); its address is not pinned in the tracked records.
+
 namespace oed {
 
 MaterialInfoTypeFlags lookup_material_info_flags(const char *shader) {

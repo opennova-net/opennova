@@ -194,7 +194,7 @@ struct WaterGlintState {
 // step the brightness [orig: @ 0x5ad1cd..0x5ad356].
 void water_glint_tick(WaterGlintState &state, bool visible);
 
-// The reflected-sun point on the water plane [orig: sub_5AC040 — reflect the
+// The reflected-sun point on the water plane [orig: Water_ComputeReflectedSunPoint @0x5ac040 — reflect the
 // camera about the water height (view_z_jitter = 0.25 * (frame & 3), the
 // caller's per-frame lift), then interpolate along sun * 2048 to the
 // surface]. Mission axes (x, y ground plane, z = height), world units.
@@ -228,7 +228,7 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 // The glow submit alpha, 16.16: dot_view^4 / 2 scaled by the occlusion
 // brightness (>> 8), the overcast blend and the SunDim fold
 // [orig: @ 0x5acfb8..0x5ad0a9]. frame_effects_quarter applies the
-// FBEFFECTS >= 3 quarter [orig: sub_581F60 @ 0x581f6a reads the quality
+// FBEFFECTS >= 3 quarter [orig: FrameFX_QualityAtLeast3 @ 0x581f6a reads the quality
 // level; glow_intensity >>= 2 @ 0x5ad033..0x5ad03c] - the bloom pass
 // re-adds the glare, so the highest-quality program dims the direct draw.
 // The locked reimpl profile IS FBEFFECTS 3, so live callers pass true.

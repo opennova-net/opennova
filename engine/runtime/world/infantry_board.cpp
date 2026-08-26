@@ -60,7 +60,7 @@ int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
 // The chosen seat's world position through the carrier's FULL orientation
 // frame — the same provider-less frame pose_mounted_occupant uses. This is the
 // modeled seat APPROACH point.
-// [orig: the seat-point builder @0x434df0 feeding rayEnd, frame per
+// [orig: the seat-point builder Entity_GetBoneWorldPosition_0 @0x434df0 feeding rayEnd, frame per
 //  Entity_GetBoneTransformAndOrientation @0x4b0c50]
 void seat_world_position(const Entity &vehicle, const Seat &seat, int32_t out[3]) {
     const Vec3 p = entity_local_point_world(vehicle, seat.seat_local);
@@ -163,7 +163,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
     }
 
     // Walk goal: the filtered best seat's approach point when one resolves (the
-    // modeled @0x434df0), else the target origin. Arrive at 2.0u for a seat
+    // modeled at Entity_GetBoneWorldPosition_0 @0x434df0), else the target origin. Arrive at 2.0u for a seat
     // point [orig: 0x20000 @0x4bb32e]; the no-seat fallback stands off at 4.0u —
     // a stand-in for retail's bound-radius + 1.0u (entity+0 is unmodeled here).
     // [orig: the ring pick @0x4bb325..0x4bb34a: +0x369 clear -> 0x20000, set ->

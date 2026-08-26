@@ -5,6 +5,10 @@
 
 #include <io/strutil.h>
 
+// [orig: Script_Compile @0x4f31f0 — the tokenizer half: keywords IF/THEN/ELSE/ELSEIF/END,
+//  DO/DORND/DOSEQ/NEXT, PLOOP/GLOOP, VAR/ARRAY, RUN, ENTER/LEAVE and the operator set;
+//  docs/world/world-wac-ai-re.md]
+
 namespace opennova::wac {
 namespace {
 

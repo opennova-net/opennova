@@ -233,7 +233,7 @@ static int test_mount_game_modes() {
 // the loose-first flag around a single lookup. A normal packed mount is archive-first;
 // foliage/UI callers can force loose-first, and BMS-from-PFF can force archive-only even
 // when /d made loose-first the session default. [orig: FileSystem_OpenFile @ 0x75b1c0;
-// Terrain_LoadFoliageFile @ 0x60a74e; Mission_LoadBMSFromPFF @ 0x40d43c]
+// Terrain_LoadTileInfoFile @ 0x60a74e; Mission_LoadBMSFromPFF @ 0x40d43c]
 static int test_per_call_resolution_policy() {
     using opennova::VfsMountMode;
     fs::path root = fresh_dir("per_call_policy");

@@ -6,7 +6,7 @@ extends RefCounted
 ## per-frame select that feeds the technique shaders' global parameters.
 ## The witness map lives on engine/runtime/renderer/light_scene.h — mission
 ## start walks the placed pools spawning per-record instances
-## [orig: Game_StartMission @ 0x525d19 -> sub_5227B0 ->
+## [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
 ## Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
 ## group-passing four [orig: collect_nearby_zones_by_aabb @ 0x5aa250;
 ## update_light_slots @ 0x5abc50]. The object pass runs per rendered model:

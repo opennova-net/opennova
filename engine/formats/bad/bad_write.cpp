@@ -25,6 +25,9 @@
 
 #include "bad/bad.h"
 
+// [orig: BoneFile_Load @0x40fff0 — the on-disk layout is the loader's relocation table; retail
+//  ships no .bad writer, so this is the exact inverse of that reader]
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

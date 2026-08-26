@@ -7,8 +7,9 @@
 #include "env/nova_water.h"
 #include "mission/nova_mission_object_placer.h"
 
-// Engine: Jointops.exe Terrain_RenderSectorTile@0x5CDAA0,
-// Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
+// Retail: PolyTrn_RenderTile @0x60da70 (docs/terrain/terrain-re.md, docs/tiles/til-re.md);
+// the sector traversal names below are jodemo-era (Terrain_RenderSectorTile @0x5CDAA0,
+// Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120).
 // docs/engine_spec_terrain.md 7.1-7.2
 
 #include <godot_cpp/classes/image.hpp>
