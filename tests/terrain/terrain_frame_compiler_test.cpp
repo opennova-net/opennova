@@ -234,6 +234,17 @@ int main() {
 		// with the tile heights inside them when terrain is in view, absent
 		// when nothing survives [orig: Terrain_TraverseQuadtreeNode @ 0x608a00
 		// trackBounds leg; terrain_render_visible_sectors @ 0x609263].
+		// The g_WaterActive predicate over tracked bounds
+		// [orig: terrain_setup_view_and_lighting @0x60ff12..0x60ff31].
+		if (!expect(opennova::water_pass_active(false, 0.0f, 0.0f, 4.0f, false),
+						"untracked bounds keep the water pass live") ||
+				!expect(opennova::water_pass_active(true, 3.0f, 9.0f, 4.0f, false),
+						"lowest visible terrain at or below the water keeps it live") ||
+				!expect(!opennova::water_pass_active(true, 5.0f, 9.0f, 4.0f, false),
+						"terrain wholly above the water retires the pass") ||
+				!expect(opennova::water_pass_active(true, 5.0f, 9.0f, 4.0f, true),
+						"last frame's Blink water verdict forces the pass"))
+			return false;
 		if (!expect(!away.visible_bounds.valid,
 				"no visible terrain tracks no bounds")) return 1;
 		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 8.0f, 32.0f},

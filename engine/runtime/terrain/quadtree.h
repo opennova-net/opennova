@@ -127,6 +127,21 @@ struct VisibleBounds {
 	void include(const float wmin[3], const float wmax[3]);
 };
 
+// Retail's per-frame g_WaterActive: the water pass (reflection prerender,
+// noise pair, strip march) runs only while the lowest tracked visible terrain
+// sits at or below the water height, or the previous frame's Blink walk saw
+// the water; untracked bounds keep the pass live.
+// [orig: terrain_setup_view_and_lighting @ 0x60fe40 (compare
+//  @ 0x60ff12..0x60ff1a, the Blink force @ 0x60ff31); the tracked bounds
+//  come from terrain_render_visible_sectors @ 0x6090c0 with trackBounds = 1
+//  @ 0x609263]
+inline bool water_pass_active(bool bounds_valid, float min_height,
+                              float max_height, float water_height,
+                              bool blink_water_visible) {
+	return !bounds_valid || blink_water_visible || min_height <= water_height ||
+	       max_height <= water_height;
+}
+
 void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
                           int node_idx,
                           const Frustum& frustum,

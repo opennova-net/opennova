@@ -110,23 +110,13 @@ public:
 	bool is_water_render_active() const {
 		return world_rendering_enabled_ && is_water_active();
 	}
-	// Retail's per-frame g_WaterActive: the water pass (reflection prerender,
-	// noise pair, strip march) runs only while the lowest visible terrain
-	// sits at or below the water height, or last frame's Blink walk saw the
-	// water; a world with no tracked terrain bounds keeps the pass live.
-	// [orig: terrain_setup_view_and_lighting @ 0x60fe40 (compare
-	//  @ 0x60ff12..0x60ff1a, the Blink force @ 0x60ff31); the tracked
-	//  bounds come from terrain_render_visible_sectors @ 0x6090c0 with
-	//  trackBounds = 1 @ 0x609263]
+	// The frame's tracked visible-terrain bounds and last frame's Blink water
+	// verdict feed the engine's g_WaterActive predicate
+	// (terrain::water_pass_active, engine/runtime/terrain/quadtree.h).
 	void set_visible_terrain_bounds(bool p_valid, float p_min_height,
 			float p_max_height);
 	void set_blink_water_visible(bool p_visible);
-	bool is_water_pass_active() const {
-		return is_water_render_active() &&
-				(!terrain_bounds_valid_ || blink_water_visible_ ||
-						terrain_min_height_ <= water_height_ ||
-						terrain_max_height_ <= water_height_);
-	}
+	bool is_water_pass_active() const;
 
 	void build();
 	bool is_built() const { return built_; }
