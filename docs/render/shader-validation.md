@@ -1,9 +1,12 @@
 # Shader validation contract
 
-The checked-in shader set is a closed inventory: 156 `.gdshader` entry points
-and 40 `.gdshaderinc` implementation files (196 resources total). The executable
+The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
+and 41 `.gdshaderinc` implementation files (195 resources total). The executable
 contract is `godot/shaders/provenance.json`, validated by
-`tests/test_shader_resources.py`.
+`godot/tests/shader_resource_contract_test.gd` and
+`godot/tests/shader_provenance_pins_test.gd` (the textual contract) and by
+`godot/tests/shader_resource_validation_test.gd` (every resource loaded through
+Godot).
 
 Every resource must match exactly one provenance family, every include must
 resolve inside `res://shaders` without a cycle, every include must be reachable
@@ -41,9 +44,10 @@ explicit per-technique contracts and D3D12 raster probes; DEPTHMASK's two
 declarations are source-audited but intentionally have no runtime shader
 because their only spot-projector producer is caller-less in the shipped
 executable. The two untyped fixed-function fallbacks remain excluded by the
-locked shader-usage level. Tests fail if any decoded source, declaration,
+locked shader-usage level. Tests fail if any inventory count, declaration,
 pass, citation, selected technique, wrapper topology, pass-class disposition,
-or response contract drifts.
+or response contract drifts (the decoded-source symbol checks retired with the
+corpus).
 
 ## What “parity” means here
 
