@@ -17,6 +17,10 @@ extends SceneTree
 #   NW_MISSION_ROWS_PERF_WINDOWS
 #   NW_MISSION_ROWS_PERF_LABEL
 #   NW_MISSION_ROWS_PERF_OUTPUT
+#   NW_MISSION_ROWS_PERF_SHOW_OVERLAY=1  opens the F3 overlay on its Stats page
+#       for the whole run (the in-game reading condition: the page's own
+#       refresh and redraw then land in the deferred flush like they do for a
+#       player reading the numbers)
 # With no output override, JSON lands under the worktree's ignored
 # .scratch/perf/ directory.
 
@@ -50,6 +54,9 @@ const SHELL_LEG_SLOTS := [
 const ENGINE_SLOT_SAMPLES := {
 	"process_callbacks": FrameStatsBoard.FRAME_PROCESS_CALLBACKS,
 	"deferred_flush": FrameStatsBoard.FRAME_DEFERRED_FLUSH,
+	"flush_queued": FrameStatsBoard.FRAME_FLUSH_QUEUED,
+	"flush_tail": FrameStatsBoard.FRAME_FLUSH_TAIL,
+	"debug_draw": FrameStatsBoard.FRAME_DEBUG_DRAW,
 	"draw": FrameStatsBoard.FRAME_DRAW,
 	"pacing_input": FrameStatsBoard.FRAME_PACING_INPUT,
 	"hud_draw_compile": FrameStatsBoard.HUD_DRAW_COMPILE,
@@ -85,6 +92,8 @@ const WORLD_VALUE_SLOTS := [
 ]
 # Per-pass submission counts (objects), averaged per drained frame.
 const ENGINE_COUNT_SAMPLES := {
+	"nodes_freed": FrameStatsBoard.FRAME_NODES_FREED,
+	"nodes_added": FrameStatsBoard.FRAME_NODES_ADDED,
 	"render_main_objects": FrameStatsBoard.RENDER_MAIN_OBJECTS,
 	"render_main_draws": FrameStatsBoard.RENDER_MAIN_DRAWS,
 	"render_water_objects": FrameStatsBoard.RENDER_WATER_OBJECTS,
@@ -201,6 +210,18 @@ func _run() -> void:
 		push_error("[mrp] main game has no FrameStatsBoard")
 		_finish(1)
 		return
+	var show_overlay := _env_flag("NW_MISSION_ROWS_PERF_SHOW_OVERLAY")
+	if show_overlay:
+		# The reading condition: F3 open on the Stats page. Its refresh drains
+		# the board at its own cadence, which costs this probe at most one
+		# frame's sample every half second.
+		game.toggle_debug_overlay()
+		var overlay = game.get_debug_overlay()
+		if overlay == null or not overlay.select_page(&"Stats"):
+			push_error("[mrp] could not open the F3 overlay on the Stats page")
+			_finish(1)
+			return
+		print("[mrp] F3 overlay open on the Stats page for the whole run")
 
 	var warmup_seconds := _env_float(
 			"NW_MISSION_ROWS_PERF_WARMUP_SECONDS",
@@ -289,6 +310,7 @@ func _run() -> void:
 			"warmup_seconds": warmup_seconds,
 			"window_seconds": window_seconds,
 			"window_count": window_count,
+			"overlay_visible": show_overlay,
 			"capture": "FrameStatsBoard drained once per process frame",
 			"units": "raw samples are integer microseconds; summaries are milliseconds",
 		},
@@ -326,6 +348,10 @@ func _run() -> void:
 			float(mission_summary["max_ms"])])
 	print("[mrp] JSON %s" % output_path)
 	_finish(0)
+
+
+func _env_flag(name: String) -> bool:
+	return OS.get_environment(name).strip_edges().to_lower() in ["1", "true", "yes"]
 
 
 func _drain_for_seconds(seconds: float) -> void:

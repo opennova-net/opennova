@@ -146,7 +146,8 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"hud", &"stats_sample", &"shell_control", &"round_flow",
 			&"menu_shell", &"menu_video", &"debug_refresh", &"frame_overhead",
 			&"other_process", &"physics_callbacks", &"deferred_flush",
-			&"hud_draw_compile", &"hud_draw_emit", &"render_draw",
+			&"flush_queued", &"hud_draw_compile", &"hud_draw_emit", &"debug_draw",
+			&"flush_tail", &"render_draw",
 			&"pacing_input", &"engine_frame",
 			&"render", &"render_main", &"render_shadow",
 			&"render_water", &"render_q3", &"render_q3_cpu", &"render_q3_gpu",
@@ -166,6 +167,11 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 	assert_eq(_row(pane, &"other_process").label, "Other process callbacks")
 	assert_eq(_row(pane, &"deferred_flush").label,
 			"Deferred flush (draw callbacks, transforms)")
+	assert_eq(_row(pane, &"flush_queued").label,
+			"Queued by callbacks (deferred calls, draws)")
+	assert_eq(_row(pane, &"debug_draw").label, "F3 overlay redraw (observer cost)")
+	assert_eq(_row(pane, &"flush_tail").label,
+			"Flush tail (transforms, timers, node frees, RS sync)")
 	assert_eq(_row(pane, &"render_draw").label,
 			"RenderingServer draw (all viewports)")
 	assert_eq(_row(pane, &"pacing_input").label, "Servers/input/pacing")
@@ -307,6 +313,16 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	# 0.5 + 0.1 ms of the 1.0 ms residual are attributed, 0.1 ms is not.
 	sums[FrameStatsBoard.FRAME_DEFERRED_FLUSH] = 3_000
 	counts[FrameStatsBoard.FRAME_DEFERRED_FLUSH] = 10
+	sums[FrameStatsBoard.FRAME_FLUSH_QUEUED] = 2_000
+	counts[FrameStatsBoard.FRAME_FLUSH_QUEUED] = 10
+	sums[FrameStatsBoard.FRAME_DEBUG_DRAW] = 500
+	counts[FrameStatsBoard.FRAME_DEBUG_DRAW] = 2
+	sums[FrameStatsBoard.FRAME_FLUSH_TAIL] = 1_000
+	counts[FrameStatsBoard.FRAME_FLUSH_TAIL] = 10
+	sums[FrameStatsBoard.FRAME_NODES_FREED] = 30
+	counts[FrameStatsBoard.FRAME_NODES_FREED] = 10
+	sums[FrameStatsBoard.FRAME_NODES_ADDED] = 10
+	counts[FrameStatsBoard.FRAME_NODES_ADDED] = 10
 	sums[FrameStatsBoard.FRAME_DRAW] = 5_000
 	counts[FrameStatsBoard.FRAME_DRAW] = 10
 	sums[FrameStatsBoard.FRAME_PACING_INPUT] = 1_000
@@ -338,6 +354,13 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	assert_eq(_row(pane, &"physics_callbacks").info,
 			"server peak 0.20 ms · 1.5 iter/f")
 	assert_eq(_row(pane, &"deferred_flush").average, "0.30")
+	assert_eq(_row(pane, &"flush_queued").average, "0.20")
+	assert_eq(_row(pane, &"debug_draw").average, "0.05",
+			"a span sampled on two of ten frames still averages per frame")
+	assert_eq(_row(pane, &"flush_tail").average, "0.10")
+	assert_true(_row(pane, &"flush_tail").info.begins_with(
+			"3.0 freed · 1.0 added nodes/f · a11y "),
+			"the tail row carries the node churn and the assistive-client flag")
 	assert_eq(_row(pane, &"render_draw").average, "0.50")
 	assert_eq(_row(pane, &"pacing_input").average, "0.10")
 	assert_eq(_row(pane, &"engine_frame").average, "0.10",

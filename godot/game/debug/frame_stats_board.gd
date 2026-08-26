@@ -51,6 +51,12 @@ enum {
 	# The engine time outside every Node callback, split at Godot's draw
 	# signals (RootFramePhaseSampler): what used to be one residual row.
 	FRAME_DEFERRED_FLUSH,   # latest idle callback -> frame_pre_draw: MessageQueue flush (call_deferred, queue_redraw -> _draw), transform flush, SceneTree tail, RS sync
+	# The flush split at the deferred marker the late boundary queues (MessageQueue is FIFO):
+	FRAME_FLUSH_QUEUED,     # latest idle callback -> the marker: _flush_ugc + every call_deferred / queue_redraw -> _draw the callbacks queued (HUD overlay, F3 page, view effects)
+	FRAME_FLUSH_TAIL,       # the marker -> frame_pre_draw: draws/sorts the flush itself queued, transform notifications, timers/tweens, node frees, accessibility, RS sync
+	FRAME_DEBUG_DRAW,       # the F3 overlay's own redraw inside the flush (the draw-sentinel bracket around the page refresh): the observer's cost
+	FRAME_NODES_FREED,      # VALUE: SceneTree nodes gone since the previous frame (the delete-queue flush)
+	FRAME_NODES_ADDED,      # VALUE: SceneTree nodes added since the previous frame
 	FRAME_DRAW,             # frame_pre_draw -> frame_post_draw: RenderingServer.draw for every viewport (cull, draw lists, submit, present)
 	FRAME_PACING_INPUT,     # frame_post_draw -> next earliest idle callback: audio/script frame hooks, input pump, physics servers, SceneTree head
 	FRAME_TIME_PROCESS,     # VALUE (us): Performance.TIME_PROCESS (process + flush + sync + draw); Godot publishes it once per second as that second's worst iteration, so read the PEAK, never the mean
