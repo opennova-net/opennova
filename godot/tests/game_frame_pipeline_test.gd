@@ -53,6 +53,10 @@ class FakeWorld:
 		trace.append("framefx")
 	func apply_scene_environment_frame() -> void:
 		trace.append("scene_environment")
+	func render_environment_nodes_frame() -> void:
+		trace.append("environment_nodes")
+	func render_water_frame() -> void:
+		trace.append("water")
 	func drive_network_frame() -> bool:
 		trace.append("network")
 		return network_ok
@@ -89,7 +93,7 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
 		"begin", "session", "local_view", "framefx", "scene_environment",
-		"terrain", "foliage", "network",
+		"environment_nodes", "water", "terrain", "foliage", "network",
 		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "slot_shadows",
 		"particles", "audio:0", "clear", "environment_cube", "finish",
 	])
@@ -116,4 +120,4 @@ func test_network_install_failure_suppresses_every_later_device_phase() -> void:
 
 	assert_eq(world.trace,
 			["begin", "session", "local_view", "framefx", "scene_environment",
-			"terrain", "foliage", "network"])
+			"environment_nodes", "water", "terrain", "foliage", "network"])

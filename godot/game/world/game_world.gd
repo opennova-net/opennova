@@ -300,6 +300,14 @@ func _ready() -> void:
 	# Freeze the retained weather node until a load selects autonomous bare/net
 	# rendering or prepares a mission-owned fixed tick.
 	_set_weather_world_tick_driven(true)
+	# The env presenters self-clock through _process when they stand alone
+	# (tests, standalone scenes). Under this world GameFramePipeline drives
+	# their advance_frame at a defined ladder slot (render_environment_nodes_frame
+	# and render_water_frame), so their idle callbacks stay off here: a process
+	# callback races the camera placement and the legs that consume them.
+	for presenter in [_weather, _sun_shadow, _sky_dome, _celestial, _water]:
+		if presenter != null:
+			(presenter as Node).set_process(false)
 
 
 func _notification(what: int) -> void:
@@ -1325,6 +1333,30 @@ func present_local_view_frame() -> void:
 func sync_framefx_frame() -> void:
 	if _framefx != null:
 		_framefx.advance_frame()
+
+
+## The environment presenters' per-frame advance (ex-self-clocked _process
+## bodies): weather smoothing toward the fixed-tick targets, the sun's
+## direction law, the sky dome and the celestial bodies following the render
+## eye. Ordered after the scene-environment classify so the lit consumers
+## below (terrain, foliage, objects) read this frame's pushed globals.
+func render_environment_nodes_frame() -> void:
+	if _weather != null:
+		_weather.advance_frame(_frame_delta)
+	if _sun_shadow != null:
+		_sun_shadow.advance_frame(_frame_delta)
+	if _sky_dome != null:
+		_sky_dome.advance_frame(_frame_delta)
+	if _celestial != null:
+		_celestial.advance_frame(_frame_delta)
+
+
+## The water strip march + mirror camera for this frame's render eye
+## (ex-self-clocked Water._process), before terrain consumes the below-water
+## state and the live noise texture it publishes.
+func render_water_frame() -> void:
+	if _water != null:
+		_water.advance_frame(_frame_delta)
 
 
 # Select the main scene's per-pass fog after the local player has placed the
