@@ -3861,10 +3861,12 @@ int main() {
         CHECK(e->inf.vel[1] != 0);
     }
 
-    // ---- player slide damp: a GROUNDED player's horizontal slide decays by (63*v)>>6 each tick
-    //      (org2 block A, no deadzone), so a slope-slide impulse settles instead of drifting
-    //      forever — the player's slide was previously never damped. [orig: @0x4b7949;
-    //      D-INF-9]
+    // ---- player slide damp, CORRECTED SENSE (2026-08-26 kong differential): the selector
+    //      Flags&0x2000 is IN-AIR (pinned by the same function's jump set / landing clear /
+    //      selection skip @0x4b70b8). A GROUNDED player decays by (7v+4)>>3 with the abs<=8
+    //      snap [orig: @0x4b7982] -- ground kills a slide in ~10 ticks; the AIRBORNE arm is
+    //      the momentum-preserving (63*v)>>6, no deadzone [orig: @0x4b7949]. The previous
+    //      pin here asserted the arms SWAPPED (the old D-INF-9 reading).
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         TestSource src;
@@ -3885,13 +3887,13 @@ int main() {
 
         e->inf.vel[0] = 6400;
         e->inf.vel[1] = -6400;
-        run_ticks(ai, w, 1, 2); // one grounded tick: org2 (63*v)>>6, NOT the NPC (7v+4)>>3 (=5600)
-        CHECK(e->inf.vel[0] == (63 * 6400) >> 6);  // 6300
-        CHECK(e->inf.vel[1] == (63 * -6400) >> 6); // -6300
+        run_ticks(ai, w, 1, 2); // one grounded tick: (7v+4)>>3 [orig: @0x4b7982], NOT (63*v)>>6 (=6300)
+        CHECK(e->inf.vel[0] == (7 * 6400 + 4) >> 3);  // 5600
+        CHECK(e->inf.vel[1] == ((7 * -6400 + 4) >> 3)); // arithmetic shift floors: -5600
 
-        run_ticks(ai, w, 2, 300); // ...and it keeps decaying (the drift bug is fixed)
-        CHECK(e->inf.vel[0] >= 0 && e->inf.vel[0] < 100);
-        CHECK(e->inf.vel[1] <= 0 && e->inf.vel[1] > -100);
+        run_ticks(ai, w, 2, 80); // 6400*(7/8)^n <= 8 at n~50; the abs<=8 snap then ZEROES it
+        CHECK(e->inf.vel[0] == 0);
+        CHECK(e->inf.vel[1] == 0);
     }
 
     // ---- stance: crouch/prone select the stance gait + idle clips (player). The
