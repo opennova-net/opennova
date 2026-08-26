@@ -513,26 +513,26 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	# The FP viewmodel renders through the dedicated renderfov pass, never the
 	# player camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own
 	# projection + flush].
-	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_VIEWMODEL, 0,
-			"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
+	assert_ne(camera.cull_mask & Water.VISUAL_LAYER_VIEWMODEL, 0,
+			"setup() keeps the viewmodel layer on the player camera: the gun draws"
+			+ " inside the beauty pass through its shader-side projection")
 	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 			"the gameplay camera excludes the caster marker layers (the"
 			+ " camera-renderable hidden body must not leak through them)")
 	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, 0,
 			"the gameplay camera excludes the render-slot capture channels")
 	var rig: PlayerViewmodelRig = presenter.viewmodel_rig()
-	var pass_cam: Camera3D = rig.get("_vm_camera")
-	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
-	if pass_cam != null:
-		assert_eq(pass_cam.cull_mask, Water.VISUAL_LAYER_VIEWMODEL,
-				"the pass camera draws ONLY the viewmodel layer")
-		assert_almost_eq(pass_cam.near, 0.05, 0.0001,
-				"the pass near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
-	var pass_layer: CanvasLayer = rig.get("_vm_pass_layer")
-	assert_not_null(pass_layer, "setup() mounts the FP pass")
-	if pass_layer != null:
-		assert_eq(pass_layer.get_parent(), camera.get_viewport(),
-				"the pass composites into the camera's viewport")
+	# The witnessed FP projection rides one shader global: the renderfov focal
+	# ratio against the live beauty projection, the 0.05 near swap, the far
+	# plane [orig: @0x4dee29; Render_SetViewportDepth01 @0x58a7b0].
+	var feed := rig.projection_feed()
+	if feed == Vector4.ZERO:
+		pending("the headless viewport reports no size, so no projection feed was pushed")
+	else:
+		assert_almost_eq(feed.y, 0.05, 0.0001,
+				"the FP near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
+		assert_gt(feed.x, 0.0, "the renderfov focal ratio is positive")
+		assert_almost_eq(feed.z, camera.far, 0.001, "the far plane is the camera's")
 
 	var avatar := _local_avatar(world)
 	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
@@ -573,10 +573,15 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 					+ " for the slot capture (hidden by layer)")
 	for vi in vm_instances:
 		assert_eq(vi.layers, Water.VISUAL_LAYER_VIEWMODEL,
-				"the dedicated viewmodel pass clears every shadow-caster marker")
+				"the viewmodel layer clears every shadow-caster marker")
 		if vi is GeometryInstance3D:
-			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
-					"the dedicated viewmodel pass never casts into the world")
+			var geometry := vi as GeometryInstance3D
+			assert_eq(geometry.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+					"the viewmodel never casts into the world")
+			assert_true(bool(geometry.get_instance_shader_parameter("u_viewmodel_pass")),
+					"every gun instance applies the renderfov projection + depth band")
+			assert_almost_eq(geometry.extra_cull_margin, 8.0, 0.001,
+					"the cull margin keeps the eye inside every gun part's box")
 
 	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 1)
@@ -632,40 +637,6 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 # mount fails then, leaving the viewmodel layer masked off the player camera with
 # nothing drawing it: an invisible FP viewmodel in the runtime. The pass mount
 # is deferred for exactly this boot shape; this pins it.
-class BootTrigger:
-	extends Node
-	var presenter: LocalPlayerPresenter
-	var world: GameWorld
-	var camera: Camera3D
-
-	func _ready() -> void:
-		presenter.setup(world, camera)
-
-
-func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
-	var vp := SubViewport.new()  # the play viewport the pass composites into
-	var trigger := BootTrigger.new()
-	trigger.world = _bare_world()
-	trigger.camera = Camera3D.new()
-	trigger.presenter = LocalPlayerPresenter.new()
-	vp.add_child(trigger.world)
-	vp.add_child(trigger.camera)
-	vp.add_child(trigger.presenter)
-	vp.add_child(trigger)  # last: world/camera/presenter are in-tree when _ready fires
-	# Entering the tree makes vp's children ready — vp is "busy" exactly while
-	# BootTrigger's _ready runs setup(), the game shell's boot shape.
-	add_child_autofree(vp)
-	await get_tree().process_frame
-
-	var pass_layer: CanvasLayer = trigger.presenter.viewmodel_rig().get("_vm_pass_layer")
-	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
-	if pass_layer != null:
-		assert_true(pass_layer.is_inside_tree(),
-				"the FP pass mounted despite the busy boot (a failed add_child leaves it orphaned)")
-		assert_eq(pass_layer.get_parent(), vp,
-				"the pass composites into the camera's viewport, not this presenter's ancestor")
-
-
 func test_shared_presenter_teardown_releases_captured_mouse() -> void:
 	var world := _bare_world()
 	var camera := Camera3D.new()

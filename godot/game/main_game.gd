@@ -1060,7 +1060,7 @@ func _on_exit_to_desktop() -> void: request_quit()
 
 ## Keep the public adapter callback while the capture module owns mutation.
 func mcp_begin_world_only_capture() -> Error:
-	return _shell_presentation.begin_world_only_capture(_hud, _menu_layer, _camera)
+	return _shell_presentation.begin_world_only_capture(_hud, _menu_layer, _player_presenter)
 
 
 func mcp_end_world_only_capture() -> void: _shell_presentation.finish_world_only_capture()
@@ -1119,8 +1119,7 @@ func _process(delta: float) -> void:
 	var timing: bool = probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()
-	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell,
-			_player_presenter.viewmodel_rig().vm_viewport() if _player_presenter != null else null)
+	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell)
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \

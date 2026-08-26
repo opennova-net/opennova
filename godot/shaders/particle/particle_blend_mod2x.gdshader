@@ -6,6 +6,7 @@ shader_type spatial;
 // the same color equation (subject to the target framebuffer's normal clamp).
 render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
 
+#include "res://shaders/nova_viewmodel_pass.gdshaderinc"
 #include "res://shaders/nova_color.gdshaderinc"
 
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
@@ -24,4 +25,12 @@ void fragment() {
 	}
 	ALBEDO = nova_scene_output(base.rgb * 2.0);
 	ALPHA = 1.0;
+}
+
+// The first-person particle batch rides the viewmodel's renderfov projection
+// + depth band inside the beauty pass (nova_viewmodel_pass.gdshaderinc).
+void vertex() {
+	// Every path writes POSITION (see nova_viewmodel_pass.gdshaderinc).
+	POSITION = nova_viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
+			MODELVIEW_MATRIX * vec4(VERTEX, 1.0), PROJECTION_MATRIX);
 }

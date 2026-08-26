@@ -126,11 +126,11 @@ func setup(world: GameWorld, camera: Camera3D,
 	# body in first person, and the water mirror never draws persons either
 	# (its reflected entity waves collect only vehicles above water and it has
 	# no player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
-	# @ 0x5c90a0]) — the body stays a silhouette source only. It never draws
-	# the viewmodel layer either — the FP arms/weapon render through the
-	# dedicated renderfov pass the rig builds (deferred; see
-	# PlayerViewmodelRig.setup for the "parent busy" boot shape). The camera
-	# also excludes the render-slot capture channels (only the SlotShadow
+	# @ 0x5c90a0]) — the body stays a silhouette source only. The viewmodel
+	# layer stays ADMITTED: the FP arms/weapon draw inside the beauty pass
+	# through their shader-side renderfov projection + depth band (retail's
+	# "viewmodel first" step; PlayerViewmodelRig feeds the projection). The
+	# camera excludes the render-slot capture channels (only the SlotShadow
 	# capture cameras cull to them) AND the caster marker layers: the
 	# entity-shadow shadow map is retired (the slot pipeline owns entity
 	# shadows), so nothing needs the caster markers beauty-admitted any more —
@@ -139,9 +139,8 @@ func setup(world: GameWorld, camera: Camera3D,
 	# caster marker would leak them into the beauty pass.
 	if _camera != null:
 		_camera.cull_mask = (
-				_camera.cull_mask
+				(_camera.cull_mask | Water.VISUAL_LAYER_VIEWMODEL)
 				& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-						| Water.VISUAL_LAYER_VIEWMODEL
 						| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
 						| Water.VISUAL_LAYER_SHADOW_CASTER_MASK))
 	_viewmodel_rig.setup(world, self, camera)
@@ -270,10 +269,16 @@ func weapon_effects() -> PlayerWeaponEffects:
 	return _weapon_effects
 
 
-## The FP viewmodel/render-pass owner (tests and probes inspect the pass nodes
-## and sweep the placement tunables through it).
+## The FP viewmodel owner (tests and probes inspect the projection feed and
+## sweep the placement tunables through it).
 func viewmodel_rig() -> PlayerViewmodelRig:
 	return _viewmodel_rig
+
+
+## A world-only render capture hides the FP gun for its duration (the shell's
+## capture session latches it; the rig's per-frame submission gate ANDs it in).
+func set_viewmodel_capture_hidden(hidden: bool) -> void:
+	_viewmodel_rig.set_capture_hidden(hidden)
 
 
 ## The world this presenter was set up on (null before setup).

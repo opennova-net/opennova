@@ -46,7 +46,7 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 void SunShadow::_ready() {
 	// The light's OWN visual layer decides which views render it - and
 	// therefore which views re-render the directional shadow
-	// atlas. The beauty camera (0x18401) and the water mirror (0x8001) need
+	// atlas. The beauty camera (0x18C01) and the water mirror (0x8001) need
 	// it; the isolated Q3 bloom source (0x10401) is entirely unshaded black
 	// occluders + self-lit content and must NOT pay a per-frame shadow-atlas
 	// re-render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the first two

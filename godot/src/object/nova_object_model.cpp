@@ -642,8 +642,11 @@ void ObjectModel::refresh_render_order() {
 					? static_cast<float>(get_global_position().y)
 					: static_cast<float>(draw.instance->get_global_transform()
 							.xform(draw.local_center).y);
-			const int32_t rung =
-					shader_cache->alpha_rung_for_height(world_height);
+			// The viewmodel flushes whole before the sky pass; its depth band
+			// keeps later world alpha off it (renderer/render_order).
+			const int32_t rung = viewmodel_pass_
+					? renderer::kRungViewmodel
+					: shader_cache->alpha_rung_for_height(world_height);
 			if (rung != draw.rung) {
 				draw.rung = rung;
 				draw.material->set_render_priority(rung);
@@ -796,6 +799,41 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 				static_cast<Object *>(robj_dense_[entry])));
 	}
 	apply_to(skeleton_);
+}
+
+void ObjectModel::set_viewmodel_pass(bool p_enabled) {
+	if (viewmodel_pass_ == p_enabled &&
+			(!p_enabled || viewmodel_pass_stamped_serial_ == scene_build_serial_)) {
+		return;
+	}
+	viewmodel_pass_ = p_enabled;
+	viewmodel_pass_stamped_serial_ = scene_build_serial_;
+	const StringName pass_name("u_viewmodel_pass");
+	// Retail's gun sits within ~2 u of the eye; 8 u puts the eye inside every
+	// part's cull box under any beauty fov.
+	const float margin = p_enabled ? 8.0f : 0.0f;
+	const auto apply_to = [&](Node *p_parent) {
+		if (p_parent == nullptr) {
+			return;
+		}
+		const int children = p_parent->get_child_count();
+		for (int child = 0; child < children; ++child) {
+			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
+					p_parent->get_child(child));
+			if (instance == nullptr) {
+				continue;
+			}
+			instance->set_instance_shader_parameter(pass_name, p_enabled);
+			instance->set_extra_cull_margin(margin);
+		}
+	};
+	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
+		apply_to(Object::cast_to<Node>(
+				static_cast<Object *>(robj_dense_[entry])));
+	}
+	apply_to(skeleton_);
+	render_order_dirty_ = true;
+	refresh_render_order();
 }
 
 void ObjectModel::set_match_terrain_enabled(bool p_enabled) {
@@ -1418,6 +1456,10 @@ void ObjectModel::_bind_methods() {
 			"set_native_frame", "get_native_frame");
 	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
 			&ObjectModel::set_match_terrain_enabled);
+	ClassDB::bind_method(D_METHOD("set_viewmodel_pass", "enabled"),
+			&ObjectModel::set_viewmodel_pass);
+	ClassDB::bind_method(D_METHOD("is_viewmodel_pass"),
+			&ObjectModel::is_viewmodel_pass);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),

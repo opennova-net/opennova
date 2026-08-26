@@ -1281,7 +1281,7 @@ def test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() -
     assert "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT" in frame_renderer
     assert "framebuffer_blend_domain\"] = \"gamma\"" in frame_renderer
     for token in (
-        "kBeautyCameraMask = 0x00018401u",
+        "kBeautyCameraMask = 0x00018C01u",
         "kQ3CameraMask = 0x00010401u",
         "DATA_FORMAT_R8G8B8A8_UNORM",
         "direction_for_degrees(30.0f, 1.0f / 1024.0f)",
@@ -1298,8 +1298,13 @@ def test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() -
     ):
         assert token in frame_renderer
 
-    viewmodel = sources["viewmodel_composite.gdshader"]
-    assert "nova_display_decode_gamma" in viewmodel
+    # The first-person viewmodel draws inside the beauty pass through the
+    # shader-side renderfov projection + depth band; no composite shader.
+    assert "viewmodel_composite.gdshader" not in sources
+    viewmodel_pass = sources["nova_viewmodel_pass.gdshaderinc"]
+    assert "global uniform vec4 opennova_viewmodel_projection" in viewmodel_pass
+    assert "instance uniform bool u_viewmodel_pass" in viewmodel_pass
+    assert "NOVA_VIEWMODEL_DEPTH_WINDOW = 0.1" in viewmodel_pass
 
     probe = (GODOT_ROOT / "tests" / "render_swatch_probe.gd").read_text(
         encoding="utf-8"
