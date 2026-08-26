@@ -6,7 +6,6 @@
     "engine/formats/threedi/threedi_compare.h": "THREEDI_EXPORT C ABI consumed over the FFI (pyopennova threedi compare) and by tests/oed + tests/threedi",
     "engine/formats/ase/ase_parser.h": "pre-existing (2026-08-25 census): the ASE parser's declaration header; the lib's public surface is ase/ase.h and the parser TU, the header serves tests/ase and tests/common/ase_roundtrip_util.h",
     "engine/formats/ase/ase_writer.h": "pre-existing (2026-08-25 census): the ASE writer's declaration header, same shape as ase_parser.h",
-    "engine/base/io/bit_stream.h": "pre-existing (2026-08-25 census): the LSB-first bit codec copy shipped 'for NEW code'; no consumer yet and cpt keeps its own diverged copy (its header says so) - disposition owed: adopt or delete",
     "engine/net/netsim/serializing_sink.h": "pre-existing (2026-08-25 census): the serializing NetCommandSink only tests/netsim/loopback_identity_test.cpp drives - disposition owed",
     "engine/runtime/terrain/types.h": "pre-existing (2026-08-25 census): a Vec3 header nothing under engine/runtime/terrain includes any more - disposition owed: delete"
   }

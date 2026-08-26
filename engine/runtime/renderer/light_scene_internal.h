@@ -7,11 +7,35 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace renderer::detail {
 
 inline constexpr uint16_t kHandleFlag = 0x8000; // [orig: @ 0x5a8e94]
 inline constexpr uint16_t kHandleIndexMask = 0x7FFF;
+
+inline uint64_t saturating_add(uint64_t lhs, uint64_t rhs) {
+	if (rhs > std::numeric_limits<uint64_t>::max() - lhs) {
+		return std::numeric_limits<uint64_t>::max();
+	}
+	return lhs + rhs;
+}
+
+// The per-axis 16.16 squared-distance term the object select and the
+// terrain pass both sort by [orig: collect_nearby_zones_by_aabb @ 0x5aa37a —
+// ((d * d + 0x8000) >> 16) per axis, 16.16 squared distance in world^2].
+inline uint64_t axis_distance_term(int64_t delta) {
+	const uint64_t magnitude = delta < 0
+			? static_cast<uint64_t>(-delta)
+			: static_cast<uint64_t>(delta);
+	constexpr uint64_t kRound = 0x8000;
+	if (magnitude != 0 &&
+			magnitude >
+					(std::numeric_limits<uint64_t>::max() - kRound) / magnitude) {
+		return std::numeric_limits<uint64_t>::max() >> 16;
+	}
+	return (magnitude * magnitude + kRound) >> 16;
+}
 
 // The RgbGen multiply shared by the point-light select, the corona walk and
 // the terrain projected pass: tick the FLICKER register from the wave ring,

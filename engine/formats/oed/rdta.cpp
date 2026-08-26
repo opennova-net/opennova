@@ -679,9 +679,71 @@ StripifyResult stripify_triangles(const std::vector<uint16_t> &tris,
   return out;
 }
 
+namespace {
+
+// x87 FPU stores the accumulator as float each step (fld/fadd/fstp dword).
+// Emulate with: acc = (float)((double)acc + (double)value).
+void accumulate_x87(float acc[3], const float value[3]) {
+  acc[0] = static_cast<float>((double)acc[0] + (double)value[0]);
+  acc[1] = static_cast<float>((double)acc[1] + (double)value[1]);
+  acc[2] = static_cast<float>((double)acc[2] + (double)value[2]);
+}
+
+// One vertex of one face: accumulate the face bases of every face sharing the
+// vertex and a compatible smoothing mask (the face's own basis alone when it
+// carries no smoothing group), normalize each, and store. `skip_dollar` is
+// the float variant's $-face exclusion; the loop shape is otherwise the same
+// sub_457360 walk both compute_smoothed_vectors forms run.
+void smooth_vertex_basis(const SubObject &subobj, const Face &face,
+                         uint32_t vert_index, bool skip_dollar,
+                         SmoothedVertexVectors &dst) {
+  float normal[3]{};
+  float tangent[3]{};
+  float bitangent[3]{};
+
+  if (face.smoothingGroup != 0) {
+    for (int32_t k = 0; k < subobj.faceCount; ++k) {
+      const Face &other = subobj.faces[k];
+      if (skip_dollar && other.hasDollar) continue;
+      if ((face.smoothingGroup & other.smoothingGroup) == 0) {
+        continue;
+      }
+
+      if (other.vert[0] == vert_index || other.vert[1] == vert_index ||
+          other.vert[2] == vert_index) {
+        accumulate_x87(normal, other.faceBasis[0]);
+        accumulate_x87(tangent, other.faceBasis[1]);
+        accumulate_x87(bitangent, other.faceBasis[2]);
+      }
+    }
+  } else {
+    accumulate_x87(normal, face.faceBasis[0]);
+    accumulate_x87(tangent, face.faceBasis[1]);
+    accumulate_x87(bitangent, face.faceBasis[2]);
+  }
+
+  normalize_vec3_x87(normal);
+  normalize_vec3_x87(tangent);
+  normalize_vec3_x87(bitangent);
+
+  dst.normal[0] = normal[0];
+  dst.normal[1] = normal[1];
+  dst.normal[2] = normal[2];
+
+  dst.tangent[0] = tangent[0];
+  dst.tangent[1] = tangent[1];
+  dst.tangent[2] = tangent[2];
+
+  dst.bitangent[0] = bitangent[0];
+  dst.bitangent[1] = bitangent[1];
+  dst.bitangent[2] = bitangent[2];
+}
+
+} // namespace
+
 // Mirrors sub_457360: average per-face vectors across smoothing groups for faces sharing a
 // vertex and compatible smoothing masks. Outputs 9 floats per face (normal/tangent/bitangent
-// for each of the 3 vertices).
+// for each of the 3 vertices). The per-vertex walk is smooth_vertex_basis.
 std::vector<SmoothedFace> compute_smoothed_vectors(const SubObject &subobj) {
   std::vector<SmoothedFace> out;
   if (subobj.faceCount <= 0 || !subobj.faces) {
@@ -694,66 +756,8 @@ std::vector<SmoothedFace> compute_smoothed_vectors(const SubObject &subobj) {
     const Face &face = subobj.faces[face_idx];
 
     for (int v_idx = 0; v_idx < 3; ++v_idx) {
-      const uint32_t vert_index = face.vert[v_idx];
-
-      // x87 FPU stores accumulator as float each step (fld/fadd/fstp dword).
-      // Emulate with: acc = (float)((double)acc + (double)value).
-      float normal[3]{};
-      float tangent[3]{};
-      float bitangent[3]{};
-
-      if (face.smoothingGroup != 0) {
-        for (int32_t k = 0; k < subobj.faceCount; ++k) {
-          const Face &other = subobj.faces[k];
-          if ((face.smoothingGroup & other.smoothingGroup) == 0) {
-            continue;
-          }
-
-          if (other.vert[0] == vert_index || other.vert[1] == vert_index ||
-              other.vert[2] == vert_index) {
-            normal[0] = static_cast<float>((double)normal[0] + (double)other.faceBasis[0][0]);
-            normal[1] = static_cast<float>((double)normal[1] + (double)other.faceBasis[0][1]);
-            normal[2] = static_cast<float>((double)normal[2] + (double)other.faceBasis[0][2]);
-
-            tangent[0] = static_cast<float>((double)tangent[0] + (double)other.faceBasis[1][0]);
-            tangent[1] = static_cast<float>((double)tangent[1] + (double)other.faceBasis[1][1]);
-            tangent[2] = static_cast<float>((double)tangent[2] + (double)other.faceBasis[1][2]);
-
-            bitangent[0] = static_cast<float>((double)bitangent[0] + (double)other.faceBasis[2][0]);
-            bitangent[1] = static_cast<float>((double)bitangent[1] + (double)other.faceBasis[2][1]);
-            bitangent[2] = static_cast<float>((double)bitangent[2] + (double)other.faceBasis[2][2]);
-          }
-        }
-      } else {
-        normal[0] = static_cast<float>((double)normal[0] + (double)face.faceBasis[0][0]);
-        normal[1] = static_cast<float>((double)normal[1] + (double)face.faceBasis[0][1]);
-        normal[2] = static_cast<float>((double)normal[2] + (double)face.faceBasis[0][2]);
-
-        tangent[0] = static_cast<float>((double)tangent[0] + (double)face.faceBasis[1][0]);
-        tangent[1] = static_cast<float>((double)tangent[1] + (double)face.faceBasis[1][1]);
-        tangent[2] = static_cast<float>((double)tangent[2] + (double)face.faceBasis[1][2]);
-
-        bitangent[0] = static_cast<float>((double)bitangent[0] + (double)face.faceBasis[2][0]);
-        bitangent[1] = static_cast<float>((double)bitangent[1] + (double)face.faceBasis[2][1]);
-        bitangent[2] = static_cast<float>((double)bitangent[2] + (double)face.faceBasis[2][2]);
-      }
-
-      normalize_vec3_x87(normal);
-      normalize_vec3_x87(tangent);
-      normalize_vec3_x87(bitangent);
-
-      SmoothedVertexVectors &dst = out[static_cast<size_t>(face_idx)].verts[v_idx];
-      dst.normal[0] = normal[0];
-      dst.normal[1] = normal[1];
-      dst.normal[2] = normal[2];
-
-      dst.tangent[0] = tangent[0];
-      dst.tangent[1] = tangent[1];
-      dst.tangent[2] = tangent[2];
-
-      dst.bitangent[0] = bitangent[0];
-      dst.bitangent[1] = bitangent[1];
-      dst.bitangent[2] = bitangent[2];
+      smooth_vertex_basis(subobj, face, face.vert[v_idx], /*skip_dollar=*/false,
+                          out[static_cast<size_t>(face_idx)].verts[v_idx]);
     }
   }
 
@@ -771,53 +775,8 @@ std::vector<SmoothedFace> compute_smoothed_vectors_float(
     const Face &face = subobj.faces[face_idx];
     if (face.hasDollar) continue;
     for (int v_idx = 0; v_idx < 3; ++v_idx) {
-      const uint32_t vert_index = face.vert[v_idx];
-      float normal[3]{};
-      float tangent[3]{};
-      float bitangent[3]{};
-      if (face.smoothingGroup != 0) {
-        for (int32_t k = 0; k < subobj.faceCount; ++k) {
-          const Face &other = subobj.faces[k];
-          if (other.hasDollar) continue;
-          if ((face.smoothingGroup & other.smoothingGroup) == 0) continue;
-          if (other.vert[0] == vert_index || other.vert[1] == vert_index ||
-              other.vert[2] == vert_index) {
-            normal[0] = static_cast<float>((double)normal[0] + (double)other.faceBasis[0][0]);
-            normal[1] = static_cast<float>((double)normal[1] + (double)other.faceBasis[0][1]);
-            normal[2] = static_cast<float>((double)normal[2] + (double)other.faceBasis[0][2]);
-            tangent[0] = static_cast<float>((double)tangent[0] + (double)other.faceBasis[1][0]);
-            tangent[1] = static_cast<float>((double)tangent[1] + (double)other.faceBasis[1][1]);
-            tangent[2] = static_cast<float>((double)tangent[2] + (double)other.faceBasis[1][2]);
-            bitangent[0] = static_cast<float>((double)bitangent[0] + (double)other.faceBasis[2][0]);
-            bitangent[1] = static_cast<float>((double)bitangent[1] + (double)other.faceBasis[2][1]);
-            bitangent[2] = static_cast<float>((double)bitangent[2] + (double)other.faceBasis[2][2]);
-          }
-        }
-      } else {
-        normal[0] = static_cast<float>((double)normal[0] + (double)face.faceBasis[0][0]);
-        normal[1] = static_cast<float>((double)normal[1] + (double)face.faceBasis[0][1]);
-        normal[2] = static_cast<float>((double)normal[2] + (double)face.faceBasis[0][2]);
-        tangent[0] = static_cast<float>((double)tangent[0] + (double)face.faceBasis[1][0]);
-        tangent[1] = static_cast<float>((double)tangent[1] + (double)face.faceBasis[1][1]);
-        tangent[2] = static_cast<float>((double)tangent[2] + (double)face.faceBasis[1][2]);
-        bitangent[0] = static_cast<float>((double)bitangent[0] + (double)face.faceBasis[2][0]);
-        bitangent[1] = static_cast<float>((double)bitangent[1] + (double)face.faceBasis[2][1]);
-        bitangent[2] = static_cast<float>((double)bitangent[2] + (double)face.faceBasis[2][2]);
-      }
-      normalize_vec3_x87(normal);
-      normalize_vec3_x87(tangent);
-      normalize_vec3_x87(bitangent);
-
-      SmoothedVertexVectors &dst = out[static_cast<size_t>(face_idx)].verts[v_idx];
-      dst.normal[0] = normal[0];
-      dst.normal[1] = normal[1];
-      dst.normal[2] = normal[2];
-      dst.tangent[0] = tangent[0];
-      dst.tangent[1] = tangent[1];
-      dst.tangent[2] = tangent[2];
-      dst.bitangent[0] = bitangent[0];
-      dst.bitangent[1] = bitangent[1];
-      dst.bitangent[2] = bitangent[2];
+      smooth_vertex_basis(subobj, face, face.vert[v_idx], /*skip_dollar=*/true,
+                          out[static_cast<size_t>(face_idx)].verts[v_idx]);
     }
   }
   return out;

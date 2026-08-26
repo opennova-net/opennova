@@ -12,6 +12,7 @@
 // points the movers call at their witnessed call sites.
 
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
 
 #include "world/collision.h"
@@ -93,6 +94,103 @@ struct PlatProbeForce {
 int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
                            int32_t r, int32_t soft, int32_t hard,
                            PlatProbeForce &out);
+
+// The probe placement every contact solve shares: each model-space probe
+// rotated by the hull's Q22 euler basis, then offset by the hull position.
+template <int N>
+inline void place_probes(const VehicleEulerBasis &basis,
+                         const int32_t (&probes_model)[N][3], int32_t px,
+                         int32_t py, int32_t pz, int32_t (&probes)[N][3]) {
+    for (int i = 0; i < N; ++i) {
+        int32_t rotated[3];
+        basis.q22.rotate_point(probes_model[i], rotated);
+        probes[i][0] = px + rotated[0];
+        probes[i][1] = py + rotated[1];
+        probes[i][2] = pz + rotated[2];
+    }
+}
+
+// One force pass: every probe through plat_terrain_probe, the worst severity
+// retained (the shared terrain-leg sub-contract of every solve).
+template <int N>
+inline int32_t plat_probe_pass(const World &world, const int32_t (&probes)[N][3],
+                               const int32_t (&radii)[N], int32_t soft,
+                               int32_t hard, PlatProbeForce (&forces)[N]) {
+    int32_t sev = 0;
+    for (int i = 0; i < N; ++i)
+        sev = std::max(sev, plat_terrain_probe(world, probes[i][0], probes[i][1],
+                                               probes[i][2], radii[i], soft, hard,
+                                               forces[i]));
+    return sev;
+}
+
+// The sev-3 0.25-cut distance gate every solve runs: the STRONGEST planar
+// force among the first `scan` probes must sit > 0x8000 (0.5 u) from the
+// hull position in the plane.
+template <int N>
+inline bool strongest_probe_beyond_hull(const PlatProbeForce (&forces)[N],
+                                        const int32_t (&probes)[N][3], int scan,
+                                        int32_t px, int32_t py) {
+    int strongest = 0;
+    int64_t best = -1;
+    for (int i = 0; i < scan; ++i) {
+        const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
+        const int64_t mag2 = sfx * sfx + sfy * sfy;
+        if (mag2 > best) { best = mag2; strongest = i; }
+    }
+    const int64_t ddx = int64_t(probes[strongest][0]) - px;
+    const int64_t ddy = int64_t(probes[strongest][1]) - py;
+    return ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000;
+}
+
+// The second pass shared by the air, tracked and wheeled contact solves
+// (vehicle_contact_solve.cpp): re-probe the planar-shifted probes and, when
+// the shift still collides, average the second pass into the depths and the
+// push; then apply the X/Y push (the Z sum rides the deferred entity-mass
+// leg and is zero). The boat solve keeps its own copy: it mirrors the
+// second-pass forces into the shared zc[] buffer the grounded leg reads.
+template <int N>
+inline void plat_second_pass(const World &world, int32_t (&probes)[N][3],
+                             const int32_t (&radii)[N], int32_t soft, int32_t hard,
+                             const PlatProbeForce (&forces)[N], int32_t (&d)[N],
+                             int32_t &px, int32_t &py) {
+    int64_t dX = 0, dY = 0;
+    for (int i = 0; i < N; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
+    for (int i = 0; i < N; ++i) {
+        probes[i][0] += int32_t(dX);
+        probes[i][1] += int32_t(dY);
+    }
+    PlatProbeForce forces2[N];
+    const int32_t sev2 = plat_probe_pass(world, probes, radii, soft, hard, forces2);
+    if (sev2 != 0) {
+        int64_t dX2 = 0, dY2 = 0;
+        for (int i = 0; i < N; ++i) {
+            dX2 += forces2[i].fx;
+            dY2 += forces2[i].fy;
+        }
+        for (int i = 0; i < N; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
+        dX = (dX2 + dX) >> 1;
+        dY = (dY2 + dY) >> 1;
+    }
+    px += int32_t(dX);
+    py += int32_t(dY);
+}
+
+// The in-water flag with the r/2 hysteresis shared by the contact solves:
+// the four pad probes' average Z (lowered by r/2 while already in water)
+// against the hull-bottom reference and the world water plane. W == 0 = our
+// no-water-world sentinel (retail worlds always carry a plane).
+template <int N>
+inline void plat_water_flag(Entity &veh, const int32_t (&probes)[N][3], int32_t r,
+                            int32_t hull_bottom_neg, int32_t water_z) {
+    if (water_z == 0) return;
+    int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] + probes[3][2]) >> 2;
+    if ((veh.flags & 0x8000u) != 0u) avg -= r >> 1;
+    if (hull_bottom_neg + avg >= water_z)
+        veh.flags &= ~0x8000u;
+    else
+        veh.flags |= 0x8000u;
+}
 
 // The shared 4-normal plane fit [orig: identical in both solvers —
 // Entity_ComputeSuspensionOrientation @0x46CAB7.. / the wheeled twin

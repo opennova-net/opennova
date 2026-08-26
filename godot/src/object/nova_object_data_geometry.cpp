@@ -3,6 +3,7 @@
 #include "object/nova_object_data_internal.h"
 
 #include <simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
+#include <threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
 #include <world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
 
 #include <godot_cpp/classes/mesh.hpp>
@@ -15,18 +16,6 @@
 using namespace novaobj;
 
 namespace {
-
-int material_array_index_for_id(const Threedi3di3 &model, int32_t material_index) {
-	for (uint32_t i = 0; i < model.material_count; ++i) {
-		if (model.materials[i].index == material_index) {
-			return static_cast<int>(i);
-		}
-	}
-	if (material_index >= 0 && static_cast<uint32_t>(material_index) < model.material_count) {
-		return material_index;
-	}
-	return -1;
-}
 
 Vector3 godot_position(const ThreediVertex &v) {
 	return Vector3(-v.position[0], v.position[1], v.position[2]);
@@ -47,126 +36,10 @@ bool vertex_has_tangents(const ThreediVertex &v) {
 	return tangent_len > 0.000001f && bitangent_len > 0.000001f;
 }
 
-bool decode_strip_indices(const ThreediLod &lod, const ThreediTriangleStrip &strip, std::vector<uint16_t> &out) {
-	out.clear();
-	if (lod.indices.indices == nullptr || lod.vertices.items == nullptr ||
-			strip.num_indices == 0 || strip.num_vertices <= 0) {
-		return false;
-	}
-	if (strip.index_offset < 0 || strip.start_vertex < 0) {
-		return false;
-	}
-	const uint32_t index_offset = static_cast<uint32_t>(strip.index_offset);
-	const uint32_t index_count = strip.num_indices;
-	const uint32_t vertex_offset = static_cast<uint32_t>(strip.start_vertex);
-	const uint32_t vertex_count = static_cast<uint32_t>(strip.num_vertices);
-	if (index_offset + index_count > lod.indices.count ||
-			vertex_offset + vertex_count > lod.vertices.count) {
-		return false;
-	}
-
-	const uint16_t *raw = lod.indices.indices + index_offset;
-	uint16_t min_idx = 0xffffu;
-	uint16_t max_idx = 0;
-	for (uint32_t i = 0; i < index_count; ++i) {
-		const uint16_t idx = raw[i];
-		min_idx = std::min(min_idx, idx);
-		max_idx = std::max(max_idx, idx);
-	}
-	const bool relative_valid = max_idx < vertex_count;
-	const bool absolute_valid = min_idx >= vertex_offset &&
-			static_cast<uint32_t>(max_idx) - vertex_offset < vertex_count;
-	const bool use_absolute = absolute_valid && !relative_valid;
-
-	auto to_local = [&](uint16_t idx, bool &ok) -> uint16_t {
-		if (!use_absolute) {
-			if (idx >= vertex_count) {
-				ok = false;
-				return 0;
-			}
-			return idx;
-		}
-		if (idx < vertex_offset) {
-			ok = false;
-			return 0;
-		}
-		const uint32_t local = static_cast<uint32_t>(idx) - vertex_offset;
-		if (local >= vertex_count) {
-			ok = false;
-			return 0;
-		}
-		return static_cast<uint16_t>(local);
-	};
-
-	bool ok = true;
-	if (!strip.is_strip) {
-		out.reserve(index_count);
-		for (uint32_t i = 0; i + 2 < index_count; i += 3) {
-			const uint16_t a = to_local(raw[i], ok);
-			const uint16_t b = to_local(raw[i + 1], ok);
-			const uint16_t c = to_local(raw[i + 2], ok);
-			if (!ok) {
-				return false;
-			}
-			if (a == b || b == c || a == c) {
-				continue;
-			}
-			out.push_back(a);
-			out.push_back(b);
-			out.push_back(c);
-		}
-	} else {
-		out.reserve(static_cast<size_t>(index_count) * 3);
-		for (uint32_t i = 0; i + 2 < index_count; ++i) {
-			const bool odd = (i & 1u) != 0u;
-			const uint16_t a = to_local(raw[i], ok);
-			const uint16_t b = to_local(raw[i + (odd ? 2 : 1)], ok);
-			const uint16_t c = to_local(raw[i + (odd ? 1 : 2)], ok);
-			if (!ok) {
-				return false;
-			}
-			if (a == b || b == c || a == c) {
-				continue;
-			}
-			out.push_back(a);
-			out.push_back(b);
-			out.push_back(c);
-		}
-	}
-	return true;
-}
-
 } // namespace
 
 int ObjectData::get_light_count() const {
 	return has_source_model ? static_cast<int>(source_model.light_count) : 0;
-}
-
-Array ObjectData::get_lights() const {
-	Array result;
-	if (!has_source_model) {
-		return result;
-	}
-	for (size_t i = 0; i < source_model.light_count; ++i) {
-		const ThreediLight &light = source_model.lights[i];
-		Dictionary item;
-		item["index"] = static_cast<int64_t>(i);
-		item["part_index"] = static_cast<int>(light.subobj_index);
-		item["offset"] = godot_vec3(light.offset);
-		item["attenuation_start"] = light.atten_start;
-		item["attenuation_end"] = light.atten_end;
-		// Authored bytes are packed B,G,R.
-		item["color_start"] = Color(light.color_start[2] / 255.0f, light.color_start[1] / 255.0f, light.color_start[0] / 255.0f);
-		item["color_end"] = Color(light.color_end[2] / 255.0f, light.color_end[1] / 255.0f, light.color_end[0] / 255.0f);
-		item["style"] = light.style;
-		item["phase"] = light.phase;
-		item["rate"] = light.rate;
-		item["flags"] = light.flags;
-		item["falloff"] = static_cast<float>(light.falloff_byte);
-		item["type"] = (light.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0 ? 1 : 0;
-		result.push_back(item);
-	}
-	return result;
 }
 
 Dictionary ObjectData::get_light_info(int p_index) const {
@@ -483,7 +356,7 @@ Array ObjectData::get_lod_surfaces(int p_lod_index) const {
 			const size_t prim_index = strip_cursor;
 			const ThreediTriangleStrip &strip = lod.strips[prim_index];
 			std::vector<uint16_t> decoded_indices;
-			if (!decode_strip_indices(lod, strip, decoded_indices)) {
+			if (!threedi_decode_strip_indices(lod, strip, decoded_indices)) {
 				continue;
 			}
 
@@ -582,7 +455,7 @@ Array ObjectData::get_lod_surfaces(int p_lod_index) const {
 			Dictionary surface;
 			surface["primitive_index"] = static_cast<int64_t>(prim_index);
 			surface["material_index"] = strip.material_index;
-			surface["material_array_index"] = material_array_index_for_id(source_model, strip.material_index);
+			surface["material_array_index"] = threedi_material_array_index_for_id(source_model, strip.material_index);
 			surface["part_index"] = static_cast<int>(part_idx);
 			surface["abs"] = godot_vec3(ro.abs);
 			surface["is_alpha"] = s >= static_cast<size_t>(ro.num_strips);
@@ -739,17 +612,3 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 	return result.duplicate(true);
 }
 
-Error ObjectData::set_light_colors(int p_light_index, const Color &p_start, const Color &p_end) {
-	if (!has_source_model || p_light_index < 0 || static_cast<size_t>(p_light_index) >= source_model.light_count) {
-		return ERR_INVALID_PARAMETER;
-	}
-	ThreediLight &light = source_model.lights[p_light_index];
-	light.color_start[0] = to_u8_color(p_start.b);
-	light.color_start[1] = to_u8_color(p_start.g);
-	light.color_start[2] = to_u8_color(p_start.r);
-	light.color_end[0] = to_u8_color(p_end.b);
-	light.color_end[1] = to_u8_color(p_end.g);
-	light.color_end[2] = to_u8_color(p_end.r);
-	_notify_object_changed(UPDATE_LGHT);
-	return OK;
-}

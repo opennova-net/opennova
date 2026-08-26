@@ -13,30 +13,10 @@ namespace renderer {
 namespace {
 
 using detail::apply_rgb_gen;
+using detail::axis_distance_term; // [orig: collect_nearby_zones_by_aabb @ 0x5aa37a]
 using detail::kHandleFlag;
 using detail::kHandleIndexMask;
-
-uint64_t saturating_add(uint64_t lhs, uint64_t rhs) {
-	if (rhs > std::numeric_limits<uint64_t>::max() - lhs) {
-		return std::numeric_limits<uint64_t>::max();
-	}
-	return lhs + rhs;
-}
-
-uint64_t axis_distance_term(int64_t delta) {
-	// [orig: collect_nearby_zones_by_aabb @ 0x5aa37a —
-	// ((d * d + 0x8000) >> 16) per axis, 16.16 squared distance in world^2].
-	const uint64_t magnitude = delta < 0
-			? static_cast<uint64_t>(-delta)
-			: static_cast<uint64_t>(delta);
-	constexpr uint64_t kRound = 0x8000;
-	if (magnitude != 0 &&
-			magnitude >
-					(std::numeric_limits<uint64_t>::max() - kRound) / magnitude) {
-		return std::numeric_limits<uint64_t>::max() >> 16;
-	}
-	return (magnitude * magnitude + kRound) >> 16;
-}
+using detail::saturating_add;
 
 int32_t clamp_i32(int64_t value) {
 	return static_cast<int32_t>(std::clamp<int64_t>(value,

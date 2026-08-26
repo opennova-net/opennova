@@ -143,6 +143,39 @@ godot::Ref<godot::Texture2D> texture_from_image(godot::Ref<godot::Image> image) 
 // Decode a texture from raw on-disk bytes. Used ONLY for absolute/external paths
 // (original game assets) — res:// assets go through ResourceLoader instead, which
 // also resolves the imported .ctex that replaces the raw source in exported PCKs.
+// The DDS-by-magic then TGA-by-extension decode both raw-bytes loaders run.
+// True = the bytes were claimed by one of the two routes (r_texture is null
+// when that route's decode failed); false = neither route applies.
+bool decode_dds_or_tga(const godot::String &ext, const godot::PackedByteArray &bytes,
+		godot::Ref<godot::Texture2D> &r_texture) {
+	if (godot::bytes_look_like_dds(bytes)) {
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_dds_from_buffer(bytes) != godot::OK) {
+			r_texture = godot::Ref<godot::Texture2D>();
+			return true;
+		}
+		r_texture = texture_from_image(image);
+		return true;
+	}
+
+	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !godot::bytes_look_like_dds(bytes)) {
+		if (bytes.size() < 18) {
+			r_texture = godot::Ref<godot::Texture2D>();
+			return true;
+		}
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		if (image->load_tga_from_buffer(bytes) != godot::OK) {
+			r_texture = godot::Ref<godot::Texture2D>();
+			return true;
+		}
+		r_texture = texture_from_image(image);
+		return true;
+	}
+	return false;
+}
+
 godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &path) {
 	const godot::String ext = path.get_extension().to_lower();
 
@@ -157,28 +190,12 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 
 	// DDS (DXT/BC) payload by MAGIC, not extension: NovaLogic ships compressed
 	// textures under .tga (and .mdt) names, so a "KPier2.TGA" whose bytes begin
-	// with "DDS " must decode as DDS. Mirrors load_texture_from_bytes() below so the
-	// two raw-bytes decoders stay identical (the extension-gated version rendered
-	// these object textures white).
-	if (godot::bytes_look_like_dds(bytes)) {
-		godot::Ref<godot::Image> image;
-		image.instantiate();
-		if (image->load_dds_from_buffer(bytes) != godot::OK) {
-			return godot::Ref<godot::Texture2D>();
-		}
-		return texture_from_image(image);
-	}
-
-	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !godot::bytes_look_like_dds(bytes)) {
-		if (bytes.size() < 18) {
-			return godot::Ref<godot::Texture2D>();
-		}
-		godot::Ref<godot::Image> image;
-		image.instantiate();
-		if (image->load_tga_from_buffer(bytes) != godot::OK) {
-			return godot::Ref<godot::Texture2D>();
-		}
-		return texture_from_image(image);
+	// with "DDS " must decode as DDS. decode_dds_or_tga is the one decoder both
+	// raw-bytes loaders share (the extension-gated version rendered these
+	// object textures white).
+	godot::Ref<godot::Texture2D> claimed;
+	if (decode_dds_or_tga(ext, bytes, claimed)) {
+		return claimed;
 	}
 
 	godot::Ref<godot::Image> image;
@@ -316,26 +333,10 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 	// True DDS (DXT/BC payload): Godot 4.6 decodes it straight from the buffer, so a DDS
 	// that exists only inside a .pff (no filesystem path) still loads. Keyed on the magic,
 	// not the extension, so a mis-named entry still routes here. texture_from_image()
-	// decompresses the BC payload before generating mipmaps.
-	if (godot::bytes_look_like_dds(bytes)) {
-		godot::Ref<godot::Image> image;
-		image.instantiate();
-		if (image->load_dds_from_buffer(bytes) != godot::OK) {
-			return godot::Ref<godot::Texture2D>();
-		}
-		return texture_from_image(image);
-	}
-
-	if ((ext == "tga" || ext == "mdt" || ext == "dds") && !godot::bytes_look_like_dds(bytes)) {
-		if (bytes.size() < 18) {
-			return godot::Ref<godot::Texture2D>();
-		}
-		godot::Ref<godot::Image> image;
-		image.instantiate();
-		if (image->load_tga_from_buffer(bytes) != godot::OK) {
-			return godot::Ref<godot::Texture2D>();
-		}
-		return texture_from_image(image);
+	// decompresses the BC payload before generating mipmaps (decode_dds_or_tga).
+	godot::Ref<godot::Texture2D> claimed;
+	if (decode_dds_or_tga(ext, bytes, claimed)) {
+		return claimed;
 	}
 
 	if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp") {

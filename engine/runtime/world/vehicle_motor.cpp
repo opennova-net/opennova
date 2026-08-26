@@ -1093,23 +1093,13 @@ void watercraft_platform_solve(World &world, Entity &veh,
     const double *sidev = basis.side;
     const double *upv = basis.up;
     int32_t probes[7][3];
-    for (int i = 0; i < 7; ++i) {
-        int32_t rotated[3];
-        basis.q22.rotate_point(probes_model[i], rotated);
-        probes[i][0] = px + rotated[0];
-        probes[i][1] = py + rotated[1];
-        probes[i][2] = pz + rotated[2];
-    }
+    place_probes(basis, probes_model, px, py, pz, probes);
 
-    // ---- §4/§6 first force pass + severity response.
+    // ---- §4/§6 first force pass + severity response (plat_probe_pass).
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
     const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
     PlatProbeForce forces[7];
-    int32_t sev = 0;
-    for (int i = 0; i < 7; ++i)
-        sev = std::max(sev, plat_terrain_probe(world, probes[i][0], probes[i][1],
-                                               probes[i][2], radii[i], soft, hard,
-                                               forces[i]));
+    const int32_t sev = plat_probe_pass(world, probes, radii, soft, hard, forces);
     if (sev == 1) {
         m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4821E7]
     } else if (sev == 2) {
@@ -1122,17 +1112,8 @@ void watercraft_platform_solve(World &world, Entity &veh,
         // probe sitting > 0x8000 from Position in the plane, and fires only
         // with no hit entity (always true here -- entity-entity collision is a
         // deferral) [orig: the scan @0x482546..0x4825DD; the distance gate
-        // @0x4825E3..0x48262D; the cut @0x4826EB].
-        int strongest = 0;
-        int64_t best = -1;
-        for (int i = 0; i < 7; ++i) {
-            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
-            const int64_t mag2 = sfx * sfx + sfy * sfy;
-            if (mag2 > best) { best = mag2; strongest = i; }
-        }
-        const int64_t ddx = int64_t(probes[strongest][0]) - px;
-        const int64_t ddy = int64_t(probes[strongest][1]) - py;
-        if (ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
+        // @0x4825E3..0x48262D; the cut @0x4826EB] (strongest_probe_beyond_hull).
+        if (strongest_probe_beyond_hull(forces, probes, 7, px, py))
             m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x4826EB]
     }
 

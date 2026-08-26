@@ -60,7 +60,8 @@ void MissionObjectPlacer::_record_static_terrain_shadow_source(int p_kind,
 		int p_index, int p_bms_id, int p_team, uint32_t p_entity_attrib,
 		int p_item_id, const String &p_graphic,
 		const Transform3D &p_xform, const Ref<ObjectData> &p_data) {
-	// The retail collector walks only pool 2 then pool 1. Keeping rejected
+	// The retail collector walks only pool 2 then pool 1 (Terrain_CollectAndRenderTileModels
+	// @0x60d250, admission @0x60d421..0x60d450 - docs/terrain/terrain-re.md). Keeping rejected
 	// records from those pools preserves the exact policy inputs for the
 	// portable admission predicate and its diagnostics.
 	if (p_kind != opennova::mission::kEntityKindBuilding &&
@@ -568,13 +569,8 @@ bool MissionObjectPlacer::register_object_data(const String &p_graphic,
 	return true;
 }
 
-bool MissionObjectPlacer::register_static_batches(const String &p_graphic,
-		const Array &p_batches) {
-	_check_epoch();
-	if (p_graphic.is_empty() || p_batches.is_empty()) {
-		return false;
-	}
-	Vector<StaticBatch> retained;
+bool MissionObjectPlacer::_retain_static_batches(const Array &p_batches,
+		Vector<StaticBatch> &r_retained) {
 	for (int i = 0; i < p_batches.size(); ++i) {
 		if (p_batches[i].get_type() != Variant::DICTIONARY) {
 			return false;
@@ -590,13 +586,12 @@ bool MissionObjectPlacer::register_static_batches(const String &p_graphic,
 		retained_batch.offset = batch.get("offset", Transform3D());
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained_batch.robj_index = int(batch.get("robj_index", 0));
-		retained.push_back(retained_batch);
+		r_retained.push_back(retained_batch);
 		if (retained_batch.material.is_valid() &&
 				batch_materials_.find(retained_batch.material) < 0) {
 			batch_materials_.push_back(retained_batch.material);
 		}
 	}
-	static_batch_cache_[p_graphic] = retained;
 	return true;
 }
 
@@ -614,26 +609,8 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		return false;
 	}
 	Vector<StaticBatch> retained;
-	for (int i = 0; i < p_batches.size(); ++i) {
-		if (p_batches[i].get_type() != Variant::DICTIONARY) {
-			return false;
-		}
-		const Dictionary batch = p_batches[i];
-		const Ref<Mesh> mesh = batch.get("mesh", Variant());
-		if (mesh.is_null()) {
-			return false;
-		}
-		StaticBatch retained_batch;
-		retained_batch.mesh = mesh;
-		retained_batch.material = batch.get("material", Variant());
-		retained_batch.offset = batch.get("offset", Transform3D());
-		retained_batch.submesh = int(batch.get("submesh", 0));
-		retained_batch.robj_index = int(batch.get("robj_index", 0));
-		retained.push_back(retained_batch);
-		if (retained_batch.material.is_valid() &&
-				batch_materials_.find(retained_batch.material) < 0) {
-			batch_materials_.push_back(retained_batch.material);
-		}
+	if (!_retain_static_batches(p_batches, retained)) {
+		return false;
 	}
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;

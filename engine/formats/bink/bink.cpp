@@ -526,8 +526,13 @@ bool begin_refill(BitReader &bits, Bundle &bundle, uint32_t &count) {
 	return true;
 }
 
-bool refill_runs(BitReader &bits, Bundle &bundle) {
-	uint32_t count = 0;
+// The prologue refill_runs and refill_block_types share: the begin_refill
+// gate, then the repeat bit that fills the whole bundle from one 4-bit value.
+// `finished` set = the caller returns the result as-is; clear = decode
+// `count` Huffman values.
+bool refill_repeat_prologue(BitReader &bits, Bundle &bundle, uint32_t &count,
+		bool &finished) {
+	finished = true;
 	if (!begin_refill(bits, bundle, count) || count == 0) {
 		return bits.ok();
 	}
@@ -542,6 +547,17 @@ bool refill_runs(BitReader &bits, Bundle &bundle) {
 		}
 		bundle.values.assign(count, static_cast<int32_t>(value));
 		return true;
+	}
+	finished = false;
+	return true;
+}
+
+bool refill_runs(BitReader &bits, Bundle &bundle) {
+	uint32_t count = 0;
+	bool finished = false;
+	const bool prologue = refill_repeat_prologue(bits, bundle, count, finished);
+	if (finished) {
+		return prologue;
 	}
 	for (uint32_t i = 0; i < count; ++i) {
 		uint8_t value = 0;
@@ -615,20 +631,10 @@ bool refill_motion(BitReader &bits, Bundle &bundle) {
 
 bool refill_block_types(BitReader &bits, Bundle &bundle) {
 	uint32_t count = 0;
-	if (!begin_refill(bits, bundle, count) || count == 0) {
-		return bits.ok();
-	}
-	bool repeat = false;
-	if (!bits.read_bit(repeat)) {
-		return false;
-	}
-	if (repeat) {
-		uint32_t value = 0;
-		if (!bits.read(4, value)) {
-			return false;
-		}
-		bundle.values.assign(count, static_cast<int32_t>(value));
-		return true;
+	bool finished = false;
+	const bool prologue = refill_repeat_prologue(bits, bundle, count, finished);
+	if (finished) {
+		return prologue;
 	}
 	constexpr std::array<unsigned, 4> repeats = {4, 8, 12, 32};
 	uint8_t last = 0;

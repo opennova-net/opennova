@@ -113,25 +113,14 @@ void aircraft_contact_solve(World &world, Entity &veh,
     const VehicleEulerBasis basis = vehicle_euler_basis(
             m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
     int32_t probes[7][3];
-    for (int i = 0; i < 7; ++i) {
-        int32_t rotated[3];
-        basis.q22.rotate_point(probes_model[i], rotated);
-        probes[i][0] = px + rotated[0];
-        probes[i][1] = py + rotated[1];
-        probes[i][2] = pz + rotated[2];
-    }
+    place_probes(basis, probes_model, px, py, pz, probes);
 
     // ---- §6.4 the two force passes + severity (terrain leg; the shared
     // sub-contract with the platform solve) [orig: @0x47F855..0x480150].
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
     const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
     PlatProbeForce forces[7];
-    int32_t sev = 0;
-    for (int i = 0; i < 7; ++i)
-        sev = std::max(sev, plat_terrain_probe(world, probes[i][0],
-                                               probes[i][1], probes[i][2],
-                                               radii[i], soft, hard,
-                                               forces[i]));
+    const int32_t sev = plat_probe_pass(world, probes, radii, soft, hard, forces);
     if (sev == 1) {
         m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x47F905..]
     } else if (sev == 2) {
@@ -140,60 +129,23 @@ void aircraft_contact_solve(World &world, Entity &veh,
         m.speed -= m.speed >> ((traits.torque + 2) & 31);
         // Authority damage / unitType-3 kill / scrape sound / momentum
         // exchange = cited deferrals (§6.4). The 0.25 cut keeps its witnessed
-        // strongest-point distance gate; the no-hit-entity condition is
-        // vacuously true (entity collision deferred).
-        int strongest = 0;
-        int64_t best = -1;
-        for (int i = 0; i < 7; ++i) {
-            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
-            const int64_t mag2 = sfx * sfx + sfy * sfy;
-            if (mag2 > best) { best = mag2; strongest = i; }
-        }
-        const int64_t ddx = int64_t(probes[strongest][0]) - px;
-        const int64_t ddy = int64_t(probes[strongest][1]) - py;
-        if (ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
+        // strongest-point distance gate (strongest_probe_beyond_hull); the
+        // no-hit-entity condition is vacuously true (entity collision
+        // deferred).
+        if (strongest_probe_beyond_hull(forces, probes, 7, px, py))
             m.speed = int32_t(m.speed * 0.25); // [orig: @0x47FDF8 region]
     }
     int32_t d[7];
     for (int i = 0; i < 7; ++i) d[i] = forces[i].fz;
     if (sev >= 1) {
-        int64_t dX = 0, dY = 0;
-        for (int i = 0; i < 7; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
-        for (int i = 0; i < 7; ++i) {
-            probes[i][0] += int32_t(dX);
-            probes[i][1] += int32_t(dY);
-        }
-        PlatProbeForce forces2[7];
-        int32_t sev2 = 0;
-        for (int i = 0; i < 7; ++i)
-            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0],
-                                                     probes[i][1],
-                                                     probes[i][2], radii[i],
-                                                     soft, hard, forces2[i]));
-        if (sev2 != 0) {
-            int64_t dX2 = 0, dY2 = 0;
-            for (int i = 0; i < 7; ++i) {
-                dX2 += forces2[i].fx;
-                dY2 += forces2[i].fy;
-            }
-            for (int i = 0; i < 7; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
-            dX = (dX2 + dX) >> 1;
-            dY = (dY2 + dY) >> 1;
-        }
-        px += int32_t(dX); // the planar separation that keeps a remote
-        py += int32_t(dY); // aircraft out of hillsides [orig: @0x480143..]
+        // plat_second_pass: the planar separation that keeps a remote
+        // aircraft out of hillsides [orig: @0x480143..].
+        plat_second_pass(world, probes, radii, soft, hard, forces, d, px, py);
     }
 
-    // ---- §6.5 the in-water flag with the r/2 hysteresis
+    // ---- §6.5 the in-water flag with the r/2 hysteresis (plat_water_flag)
     // [orig: @0x48021A..0x48033D; splash FX = cited deferral].
-    if (world.env.water_z != 0) {
-        int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] +
-                       probes[3][2]) >> 2;
-        if ((veh.flags & 0x8000u) != 0u) avg -= r >> 1;
-        const int32_t test_z = avg + hull_bottom_neg;
-        if (test_z >= world.env.water_z) veh.flags &= ~0x8000u;
-        else veh.flags |= 0x8000u;
-    }
+    plat_water_flag(veh, probes, r, hull_bottom_neg, world.env.water_z);
 
     // ---- §6.10 branch select: any PAD depth = grounded.
     const bool pad_contact = d[0] > 0 || d[1] > 0 || d[2] > 0 || d[3] > 0;
@@ -354,13 +306,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     const VehicleEulerBasis basis = vehicle_euler_basis(
             m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
     int32_t probes[7][3];
-    for (int i = 0; i < 7; ++i) {
-        int32_t rotated[3];
-        basis.q22.rotate_point(probes_model[i], rotated);
-        probes[i][0] = px + rotated[0];
-        probes[i][1] = py + rotated[1];
-        probes[i][2] = pz + rotated[2];
-    }
+    place_probes(basis, probes_model, px, py, pz, probes);
 
     // ---- the two force passes + severity (the shared sub-contract with the
     // platform/air solves; terrain leg only) [orig: Entity_CheckCollisionState
@@ -368,12 +314,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
     const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
     PlatProbeForce forces[7];
-    int32_t sev = 0;
-    for (int i = 0; i < 7; ++i)
-        sev = std::max(sev, plat_terrain_probe(world, probes[i][0],
-                                               probes[i][1], probes[i][2],
-                                               radii[i], soft, hard,
-                                               forces[i]));
+    const int32_t sev = plat_probe_pass(world, probes, radii, soft, hard, forces);
     if (sev == 1) {
         m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x47CC31]
     } else if (sev == 2) {
@@ -382,20 +323,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
         m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x47CCA1]
         // Authority damage/kill + scrape sound + momentum exchange = cited
         // deferrals. The 0.25 cut keeps its witnessed strongest-point distance
-        // gate and fires only with no hit entity (vacuously true — entity
-        // collision is deferred); the deflection heading pair feeds a
-        // witnessed-dead yaw kick [orig: scan @0x47CF5E..0x47D038; cut
-        // @0x47D0DE..0x47D0EF].
-        int strongest = 0;
-        int64_t best = -1;
-        for (int i = 0; i < 7; ++i) {
-            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
-            const int64_t mag2 = sfx * sfx + sfy * sfy;
-            if (mag2 > best) { best = mag2; strongest = i; }
-        }
-        const int64_t ddx = int64_t(probes[strongest][0]) - px;
-        const int64_t ddy = int64_t(probes[strongest][1]) - py;
-        if (ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
+        // gate (strongest_probe_beyond_hull) and fires only with no hit
+        // entity (vacuously true — entity collision is deferred); the
+        // deflection heading pair feeds a witnessed-dead yaw kick [orig: scan
+        // @0x47CF5E..0x47D038; cut @0x47D0DE..0x47D0EF].
+        if (strongest_probe_beyond_hull(forces, probes, 7, px, py))
             m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x47D0DE]
     }
     int32_t d[7];
@@ -404,32 +336,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
         // Second pass over the planar-shifted probes, averaged in when it still
         // collides; the position push is X/Y only (the Z sum rides the deferred
         // entity-mass leg and is zero) [orig: @0x47D0F5..0x47D330; push
-        // @0x47D452..0x47D458].
-        int64_t dX = 0, dY = 0;
-        for (int i = 0; i < 7; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
-        for (int i = 0; i < 7; ++i) {
-            probes[i][0] += int32_t(dX);
-            probes[i][1] += int32_t(dY);
-        }
-        PlatProbeForce forces2[7];
-        int32_t sev2 = 0;
-        for (int i = 0; i < 7; ++i)
-            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0],
-                                                     probes[i][1],
-                                                     probes[i][2], radii[i],
-                                                     soft, hard, forces2[i]));
-        if (sev2 != 0) {
-            int64_t dX2 = 0, dY2 = 0;
-            for (int i = 0; i < 7; ++i) {
-                dX2 += forces2[i].fx;
-                dY2 += forces2[i].fy;
-            }
-            for (int i = 0; i < 7; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
-            dX = (dX2 + dX) >> 1;
-            dY = (dY2 + dY) >> 1;
-        }
-        px += int32_t(dX);
-        py += int32_t(dY);
+        // @0x47D452..0x47D458] (plat_second_pass).
+        plat_second_pass(world, probes, radii, soft, hard, forces, d, px, py);
     }
 
     // ---- water leg [orig: @0x47D45B..0x47D629]. Pad support forces raise the
@@ -447,16 +355,9 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // The in-water flag with the r/2 hysteresis [orig: @0x47D516..0x47D53A;
     // clear + emitter release @0x47D637..0x47D6BB; set + splash FX/overlay
     // @0x47D542..0x47D629 — FX/overlay are cited deferrals]. W == 0 = our
-    // no-water-world sentinel (retail worlds always carry a plane).
-    if (world.env.water_z != 0) {
-        int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] +
-                       probes[3][2]) >> 2;
-        if ((veh.flags & 0x8000u) != 0u) avg -= r >> 1;
-        if (hull_bottom_neg + avg >= world.env.water_z)
-            veh.flags &= ~0x8000u;
-        else
-            veh.flags |= 0x8000u;
-    }
+    // no-water-world sentinel (retail worlds always carry a plane)
+    // (plat_water_flag).
+    plat_water_flag(veh, probes, r, hull_bottom_neg, world.env.water_z);
 
     // ---- the contact byte the mover's yaw apply and velocity re-derive read
     // [orig: BYTE2(aiRef0) @0x47D7F4..0x47D8AF]: an upright hull grounds on a
@@ -698,13 +599,9 @@ void wheeled_contact_solve(World &world, Entity &veh,
     const VehicleEulerBasis basis = vehicle_euler_basis(
             m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
     int32_t probes[13][3];
-    for (int i = 0; i < 13; ++i) {
-        int32_t rotated[3];
-        basis.q22.rotate_point(probes_model[i], rotated);
-        probes[i][0] = px + rotated[0];
-        probes[i][1] = py + rotated[1];
-        probes[i][2] = pz + rotated[2];
-    }
+    place_probes(basis, probes_model, px, py, pz, probes);
+    int32_t radii[13]; // the 13 radius stores all copy suspensionOffset
+    for (int i = 0; i < 13; ++i) radii[i] = r;
 
     // ---- the two force passes + severity [orig: Entity_CheckCollisionState
     // calls @0x476897/@0x476F98; the shared terrain-leg sub-contract]. Same
@@ -717,27 +614,15 @@ void wheeled_contact_solve(World &world, Entity &veh,
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
     const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
     PlatProbeForce forces[13];
-    int32_t sev = 0;
-    for (int i = 0; i < 13; ++i)
-        sev = std::max(sev, plat_terrain_probe(world, probes[i][0],
-                                               probes[i][1], probes[i][2], r,
-                                               soft, hard, forces[i]));
+    const int32_t sev = plat_probe_pass(world, probes, radii, soft, hard, forces);
     if (sev == 1) {
         m.speed -= m.speed >> ((traits.torque + 2) & 31);
     } else if (sev == 2) {
         m.speed -= m.speed >> ((traits.torque + 1) & 31);
     } else if (sev == 3) {
         m.speed -= m.speed >> ((traits.torque + 2) & 31);
-        int strongest = 0;
-        int64_t best = -1;
-        for (int i = 0; i < 7; ++i) {
-            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
-            const int64_t mag2 = sfx * sfx + sfy * sfy;
-            if (mag2 > best) { best = mag2; strongest = i; }
-        }
-        const int64_t ddx = int64_t(probes[strongest][0]) - px;
-        const int64_t ddy = int64_t(probes[strongest][1]) - py;
-        if (ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
+        // strongest_probe_beyond_hull over the first SEVEN probes only.
+        if (strongest_probe_beyond_hull(forces, probes, 7, px, py))
             m.speed = int32_t(m.speed * 0.25);
     }
     int32_t d[13];
@@ -745,32 +630,9 @@ void wheeled_contact_solve(World &world, Entity &veh,
     if (sev >= 1) {
         // Second pass over the planar-shifted probes, averaged in when it
         // still collides; the push is X/Y only (the Z sum rides the deferred
-        // entity-mass leg) [orig: @0x476E19..0x476FF4; push @0x477149..].
-        int64_t dX = 0, dY = 0;
-        for (int i = 0; i < 13; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
-        for (int i = 0; i < 13; ++i) {
-            probes[i][0] += int32_t(dX);
-            probes[i][1] += int32_t(dY);
-        }
-        PlatProbeForce forces2[13];
-        int32_t sev2 = 0;
-        for (int i = 0; i < 13; ++i)
-            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0],
-                                                     probes[i][1],
-                                                     probes[i][2], r,
-                                                     soft, hard, forces2[i]));
-        if (sev2 != 0) {
-            int64_t dX2 = 0, dY2 = 0;
-            for (int i = 0; i < 13; ++i) {
-                dX2 += forces2[i].fx;
-                dY2 += forces2[i].fy;
-            }
-            for (int i = 0; i < 13; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
-            dX = (dX2 + dX) >> 1;
-            dY = (dY2 + dY) >> 1;
-        }
-        px += int32_t(dX);
-        py += int32_t(dY);
+        // entity-mass leg) [orig: @0x476E19..0x476FF4; push @0x477149..]
+        // (plat_second_pass).
+        plat_second_pass(world, probes, radii, soft, hard, forces, d, px, py);
     }
 
     // ---- the in-water flag with the r/2 hysteresis [orig: @0x477496..
@@ -778,16 +640,9 @@ void wheeled_contact_solve(World &world, Entity &veh,
     // per-wheel water-support forces ride the dispatcher's hasWaterLevel arg,
     // which the ctank dispatcher pins to 0 [orig: push 0 @0x48f004] — tanks
     // never float; the flag itself is unconditional. Splash FX + the overlay
-    // sends and the water-exit emitter release are cited deferrals.
-    if (world.env.water_z != 0) {
-        int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] +
-                       probes[3][2]) >> 2;
-        if ((veh.flags & 0x8000u) != 0u) avg -= r >> 1;
-        if (hull_bottom_neg + avg >= world.env.water_z)
-            veh.flags &= ~0x8000u;
-        else
-            veh.flags |= 0x8000u;
-    }
+    // sends and the water-exit emitter release are cited deferrals
+    // (plat_water_flag).
+    plat_water_flag(veh, probes, r, hull_bottom_neg, world.env.water_z);
 
     // ---- per-probe planar-contact + reverse flags [orig: the per-probe
     // walk @0x477BF4..0x477D0A]: a probe "contacts" when it produced a planar

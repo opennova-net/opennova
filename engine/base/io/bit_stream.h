@@ -3,16 +3,12 @@
 // The shape is lifted from engine/formats/cpt's CDEP bit codec (the proven consumer);
 // shipped here for NEW code.
 //
-// cpt still has its own copy, and the two have since DIVERGED. Both track a
-// high-water mark; what differs is the surface each grew for its own consumer:
-// cpt's writer has a normalizing set_position (a bit_offset > 8 folds into
-// byte+bit) and a write_to_file, and its reader has a remaining_bits used to
-// bound declared counts, while this one has byte_position instead. So they are
-// not interchangeable: adopting this header in cpt is a real migration that
-// has to be byte-diffed against the CPT corpus (tests/terrain's
-// parametric_parity_test does exactly that), not a swap. (Verified 2026-07-28,
-// quality campaign W2-4/W2-7 — the earlier "token-identical copy" note was
-// wrong, and so was W2-4's account of which class held what.)
+// The READER is now shared: cpt consumes io::BitReader (its remaining_bits
+// bound moved here). The WRITERS remain separate and have DIVERGED: cpt's
+// writer has a normalizing set_position (a bit_offset > 8 folds into
+// byte+bit) and a write_to_file, so adopting this writer in cpt would be a
+// real migration byte-diffed against the CPT corpus (tests/terrain's
+// parametric_parity_test), not a swap.
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).
@@ -88,6 +84,17 @@ public:
 
     bool at_end() const { return byte_pos_ >= size_; }
     size_t byte_position() const { return byte_pos_; }
+
+    // Bits still readable from the cursor. Lets a decoder reject a declared
+    // count the section cannot possibly encode BEFORE it allocates for it.
+    uint64_t remaining_bits() const
+    {
+        if (byte_pos_ >= size_) {
+            return 0;
+        }
+        return (static_cast<uint64_t>(size_ - byte_pos_) * 8u) -
+               static_cast<uint64_t>(bit_pos_);
+    }
 
 private:
     const uint8_t *data_;

@@ -1,5 +1,6 @@
 #include "lights/nova_light_scene.h"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -15,6 +16,37 @@
 namespace godot {
 
 namespace {
+
+// The objects-target select inputs both light legs (the point-light select
+// and the per-model draw select) build: the flicker ring from the weather
+// oscillator, the ambient scale, and the objects-target options.
+struct ObjectSelectInputs {
+	renderer::LightFlickerInputs flicker;
+	std::array<float, 3> ambient{};
+	renderer::LightSelectionOptions options;
+};
+
+ObjectSelectInputs object_select_inputs(int p_time_ms, const Weather *weather,
+		const Vector3 &p_ambient_scale) {
+	ObjectSelectInputs sel;
+	sel.flicker.time_ms = static_cast<uint32_t>(p_time_ms);
+	if (weather != nullptr) {
+		const opennova::env::WeatherOscillator &oscillator =
+				weather->runtime().core().oscillator;
+		sel.flicker.amp_ring = oscillator.amp_ring;
+		sel.flicker.amp_ring_size =
+				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
+		sel.flicker.ring_index = oscillator.ring_index;
+	}
+	sel.ambient = {
+		static_cast<float>(p_ambient_scale.x),
+		static_cast<float>(p_ambient_scale.y),
+		static_cast<float>(p_ambient_scale.z),
+	};
+	sel.options.target = renderer::LightSelectionTarget::Objects;
+	sel.options.admit_owned_unscoped = false;
+	return sel;
+}
 
 // godot (x, y, z) <-> mission (x, -z, y): the same conversion the mission
 // placer and the render fixtures use.
@@ -339,25 +371,11 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 	std::array<renderer::LightHandle, renderer::LightScene::kQueryLimit>
 			handles{};
 	const size_t found = scene_.query(qmin, qmax, handles);
-	renderer::LightFlickerInputs flicker;
-	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = p_weather;
-	if (weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				weather->runtime().core().oscillator;
-		flicker.amp_ring = oscillator.amp_ring;
-		flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		flicker.ring_index = oscillator.ring_index;
-	}
-	const std::array<float, 3> ambient = {
-		static_cast<float>(p_ambient_scale.x),
-		static_cast<float>(p_ambient_scale.y),
-		static_cast<float>(p_ambient_scale.z),
-	};
-	renderer::LightSelectionOptions options;
-	options.target = renderer::LightSelectionTarget::Objects;
-	options.admit_owned_unscoped = false;
+	// The shared objects-target select inputs (object_select_inputs).
+	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
+	const renderer::LightFlickerInputs &flicker = sel.flicker;
+	const std::array<float, 3> &ambient = sel.ambient;
+	const renderer::LightSelectionOptions &options = sel.options;
 	std::array<renderer::SelectedLight, renderer::LightScene::kSelectLimit>
 			selected{};
 	const size_t count = scene_.select(handles.data(), found,
@@ -385,25 +403,11 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const PackedInt32Array &p_interior_sections,
 		const PackedByteArray &p_robj_scoped,
 		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather) {
-	renderer::LightFlickerInputs flicker;
-	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = p_weather;
-	if (weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				weather->runtime().core().oscillator;
-		flicker.amp_ring = oscillator.amp_ring;
-		flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		flicker.ring_index = oscillator.ring_index;
-	}
-	const std::array<float, 3> ambient = {
-		static_cast<float>(p_ambient_scale.x),
-		static_cast<float>(p_ambient_scale.y),
-		static_cast<float>(p_ambient_scale.z),
-	};
-	renderer::LightSelectionOptions options;
-	options.target = renderer::LightSelectionTarget::Objects;
-	options.admit_owned_unscoped = false;
+	// The shared objects-target select inputs (object_select_inputs).
+	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
+	const renderer::LightFlickerInputs &flicker = sel.flicker;
+	const std::array<float, 3> &ambient = sel.ambient;
+	const renderer::LightSelectionOptions &options = sel.options;
 
 	struct DrawTarget {
 		ObjectModel *model = nullptr;

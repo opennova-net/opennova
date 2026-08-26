@@ -331,6 +331,12 @@ private:
                                    const OcclusionFrameCamera &cam);
     uint32_t traverse_from_exterior(World &world, EntityHandle h,
                                     const OcclusionFrameCamera &cam);
+    // The outside-in traversal of a building with an active open slot: bank
+    // the view-through run traverse_from_exterior emits, then patch that
+    // building's type-1 slots with the banked range (the indoor and outdoor
+    // batch walks share it).
+    void bank_open_building(World &world, EntityHandle entity, int32_t mask_index,
+                            const OcclusionFrameCamera &cam);
     // [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE = occluded]
     bool toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry,
                       const OcclusionFrameCamera &cam);

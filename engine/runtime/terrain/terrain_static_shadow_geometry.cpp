@@ -5,6 +5,7 @@
 #include <renderer/material_eval.h>
 #include <renderer/object_shader_template.h>
 #include <threedi/threedi_3di3.h>
+#include <threedi/threedi_strip_decode.h>
 
 #include <algorithm>
 #include <cstring>
@@ -62,6 +63,7 @@ uint64_t hash_alpha_pyramid(uint64_t hash,
 	return hash;
 }
 
+// The four framebuffer blend classes [orig: decode_blend_mode_to_d3d_states @0x680f00].
 TerrainStaticShadowBlend map_blend(::renderer::ObjectBlendMode blend) {
 	switch (blend) {
 		case ::renderer::ObjectBlendMode::Opaque:
@@ -107,107 +109,6 @@ std::vector<std::string> material_anim_frames(const ThreediMaterial &mat,
 		}
 	}
 	return out;
-}
-
-int material_array_index_for_id(const Threedi3di3 &model,
-		int32_t material_index) {
-	for (uint32_t i = 0; i < model.material_count; ++i) {
-		if (model.materials[i].index == material_index) {
-			return static_cast<int>(i);
-		}
-	}
-	if (material_index >= 0 &&
-			static_cast<uint32_t>(material_index) < model.material_count) {
-		return material_index;
-	}
-	return -1;
-}
-
-// The loader strip decode every renderer pass performs: pick the
-// relative/absolute index convention that stays in the strip's vertex
-// window, unroll with strip parity winding, and drop degenerates
-// [orig: STRP runtime decode — basic loop @ 0x474CAF, skinned @ 0x474B60;
-// record fields in docs/threedi/3di-gp-format-re.md STRP/ROBJ].
-bool decode_strip_indices(const ThreediLod &lod,
-		const ThreediTriangleStrip &strip, std::vector<uint16_t> &out) {
-	out.clear();
-	if (lod.indices.indices == nullptr || lod.vertices.items == nullptr ||
-			strip.num_indices == 0 || strip.num_vertices <= 0) {
-		return false;
-	}
-	if (strip.index_offset < 0 || strip.start_vertex < 0) {
-		return false;
-	}
-	const uint32_t index_offset = static_cast<uint32_t>(strip.index_offset);
-	const uint32_t index_count = strip.num_indices;
-	const uint32_t vertex_offset = static_cast<uint32_t>(strip.start_vertex);
-	const uint32_t vertex_count = static_cast<uint32_t>(strip.num_vertices);
-	if (index_offset + index_count > lod.indices.count ||
-			vertex_offset + vertex_count > lod.vertices.count) {
-		return false;
-	}
-
-	const uint16_t *raw = lod.indices.indices + index_offset;
-	uint16_t min_idx = 0xffffu;
-	uint16_t max_idx = 0;
-	for (uint32_t i = 0; i < index_count; ++i) {
-		const uint16_t idx = raw[i];
-		min_idx = std::min(min_idx, idx);
-		max_idx = std::max(max_idx, idx);
-	}
-	const bool relative_valid = max_idx < vertex_count;
-	const bool absolute_valid = min_idx >= vertex_offset &&
-			static_cast<uint32_t>(max_idx) - vertex_offset < vertex_count;
-	const bool use_absolute = absolute_valid && !relative_valid;
-
-	auto to_local = [&](uint16_t idx, bool &ok) -> uint16_t {
-		if (!use_absolute) {
-			if (idx >= vertex_count) {
-				ok = false;
-				return 0;
-			}
-			return idx;
-		}
-		if (idx < vertex_offset) {
-			ok = false;
-			return 0;
-		}
-		const uint32_t local = static_cast<uint32_t>(idx) - vertex_offset;
-		if (local >= vertex_count) {
-			ok = false;
-			return 0;
-		}
-		return static_cast<uint16_t>(local);
-	};
-
-	bool ok = true;
-	if (!strip.is_strip) {
-		out.reserve(index_count);
-		for (uint32_t i = 0; i + 2 < index_count; i += 3) {
-			const uint16_t a = to_local(raw[i], ok);
-			const uint16_t b = to_local(raw[i + 1], ok);
-			const uint16_t c = to_local(raw[i + 2], ok);
-			if (!ok) return false;
-			if (a == b || b == c || a == c) continue;
-			out.push_back(a);
-			out.push_back(b);
-			out.push_back(c);
-		}
-	} else {
-		out.reserve(static_cast<std::size_t>(index_count) * 3);
-		for (uint32_t i = 0; i + 2 < index_count; ++i) {
-			const bool odd = (i & 1u) != 0u;
-			const uint16_t a = to_local(raw[i], ok);
-			const uint16_t b = to_local(raw[i + (odd ? 2 : 1)], ok);
-			const uint16_t c = to_local(raw[i + (odd ? 1 : 2)], ok);
-			if (!ok) return false;
-			if (a == b || b == c || a == c) continue;
-			out.push_back(a);
-			out.push_back(b);
-			out.push_back(c);
-		}
-	}
-	return true;
 }
 
 void expand_bounds(TerrainStaticShadowResolvedGeometry &geometry,
@@ -628,7 +529,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 					const ThreediTriangleStrip &strip =
 							native_lod->strips[strip_cursor];
 					std::vector<uint16_t> decoded;
-					if (!decode_strip_indices(*native_lod, strip, decoded)) {
+					if (!threedi_decode_strip_indices(*native_lod, strip, decoded)) {
 						continue;
 					}
 					const uint32_t vertex_offset =
@@ -637,7 +538,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 					resolved.render_object = static_cast<uint16_t>(part_idx);
 					resolved.render_object_offset = {-robj.abs[0],
 							robj.abs[1], robj.abs[2]};
-					resolved.material_index = material_array_index_for_id(
+					resolved.material_index = threedi_material_array_index_for_id(
 							model, strip.material_index);
 					for (std::size_t i = 0; i + 2 < decoded.size(); i += 3) {
 						bool triangle_ok = true;
