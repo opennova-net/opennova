@@ -384,20 +384,6 @@ struct AiEntity {
     // [orig: selector @0x4ba10f / @0x4b6d99]
     uint32_t def_attrib = 0;
 
-    // --- the no-native-rig muzzle stamp fallback (D-AI-6) ---
-    // Native mission assets resolve their gun-flash userpoint lazily through the
-    // world's muzzle-pose provider. Rows without a native skeletal rig (embedders
-    // without mission assets, headless tests) push this posed position (16.16
-    // fixed, mission frame) once per presented frame instead.
-    // [orig: the anim-event fire transforms the fire-bone userpoint by the live pose —
-    // Entity_GetAttachmentWorldPosition @0x4b2670 (userpoint local pos x posed bone
-    // matrix, model userpoint table @model+0xC0) from the fire block @0x4bf326..0x4bf425;
-    // muzzle_tick stamps the world logic tick of that push. Consumers use it only
-    // while fresh and otherwise fall back to the chest-lift stand-in.
-    int32_t muzzle_world[3] = {};
-    uint32_t muzzle_tick = 0;
-    bool muzzle_valid = false;
-
     // --- network receive-apply: a remote peer's pose, read-applied on the host ---
     // The host stages a joiner's reported 0x0C pose into these engine-frame slots
     // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. Retail's
@@ -688,11 +674,6 @@ public:
     AiEntity *for_handle(EntityHandle h);
     int count() const { return static_cast<int>(entities_.size()); }
 
-    // The no-native-rig muzzle fallback (D-AI-6): rows the native pose provider
-    // cannot resolve stamp a posed gun-flash userpoint for consumers to use while
-    // fresh. [orig: Entity_GetAttachmentWorldPosition @0x4b2670]
-    void set_entity_muzzle(EntityHandle h, const int32_t pos[3], uint32_t logic_tick);
-
     AiScheduler scheduler;
     AiEventQueue events;
     NavNodeTable nav;         // channel/node table the waypoint mover walks
@@ -797,10 +778,6 @@ public:
     // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
     void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
-    // Freshness window for the no-native-rig presentation stamp. Native providers
-    // resolve against the current simulation pose and do not use this window.
-    static constexpr uint32_t kMuzzleFreshTicks = 4;
-
     // The aim/LOS fire origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 —
     // person leg pos + (entity+0x6C)/2 + jitter (the +0x6C writer is unwalked,
     // D-AI-6 facet d); non-person leg = the def "TARGET" userpoint by the entity
@@ -810,13 +787,13 @@ public:
     // aim anchor IS the posed bone the stamp carries
     // [orig: Entity_GetAttachmentWorldPosition @0x4b2670 on bone +0x366 —
     // world-wac-ai-re §21.1/§21.4].
-    static void weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]);
-    static void weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]);
+    static void weapon_fire_origin(const AiEntity &e, int32_t out[3]);
+    static void weapon_fire_origin(const Entity &e, int32_t out[3]);
     // Asset-aware live-pose form used by the simulation. It asks the world's
     // native provider at the actual LOS/aim/fire call site, then the fresh
     // no-native-rig stamp, then the chest lift.
     void weapon_fire_origin(World &world, const AiEntity &e,
-                            uint32_t logic_tick, int32_t out[3]) const;
+                            int32_t out[3]) const;
     void weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const;
 
     // LOS between two EXACT 16.16 endpoints, true = clear — callers supply the

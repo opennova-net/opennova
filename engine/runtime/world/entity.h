@@ -640,13 +640,15 @@ struct Entity {
     WeaponSlotState primary_weapon_slot;
     uint8_t primary_weapon_slot_adm = 0xFF;
     EntityHandle primary_weapon_owner;
-    // Host-fed posed muzzle/userpoint on this entity. For a UseGun shot this is
-    // sampled from the emplacement model, while primary_weapon_owner remains the
-    // organic shooter for damage/network attribution.
-    // [orig: Entity_CalcWeaponFirePosition parentSlot 3 from WeaponAction_Fire]
-    int32_t posed_muzzle_world[3] = {};
-    uint32_t posed_muzzle_tick = 0;
-    bool posed_muzzle_valid = false;
+    // The resolved weapon userpoint bytes (entity+0x327..0x332): four weapon
+    // slots x {b fire origin, m flash anchor, c casing anchor}, each a 1-based
+    // index into the model's userpoint table (0 = none). Resolved from the def's
+    // twelve weap[lr][bmc]up[2] names when the entity's model attaches; the
+    // fire tick reads them through weapon_userpoint_byte below.
+    // [orig: Entity_InitBoneReferences @0x441470 (slot 0 <- weapr?up, 1 <-
+    //  weapl?up, 2 <- weapr?up2, 3 <- weapl?up2) + the zero-fill
+    //  Entity_ResolveBoneUserpoints @0x545940]
+    uint8_t weapon_userpoint_bytes[4][3] = {};
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
     // ctrlx/drvrx (empty-or-same) and UseGun (only when empty), never by sitex; cleared only
     // when THE claimant detaches — a remaining second controller does not inherit it. This
@@ -873,6 +875,19 @@ struct Entity {
     };
     VehicleMotorState veh;
 };
+
+// Entity_GetWeaponSlotByte: the resolved userpoint byte for one weapon slot and
+// field (0 b/fire, 1 m/flash, 2 c/casing); 0 unless the def has weapon slots
+// (ItemDefAttrib 0x20) — the person layout (attrib 0x40, entity+0x4D8) is not
+// carried: person fire origins ride the anim-fire bone bytes (D-AI-5).
+// [orig: Entity_GetWeaponSlotByte @0x5459c0 (attrib test @0x5459d3, the
+//  +0x327 cluster read @0x5459ef..0x5459f9)]
+inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
+    if ((e.item_attrib & kItemAttribEweap) == 0u || slot < 0 || slot > 3 ||
+        field < 0 || field > 2)
+        return 0;
+    return e.weapon_userpoint_bytes[slot][field];
+}
 
 } // namespace opennova::world
 

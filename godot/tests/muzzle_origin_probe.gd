@@ -6,8 +6,8 @@ extends SceneTree
 # Reports, all in the character model's OWN frame (the body node sits at identity):
 #   * every userpoint authored on the player character model (0x14B9 -> its visual item),
 #   * which userpoint the model's muzzle resolver picks, and on which bone,
-#   * ObjectModel.get_muzzle_world_position() (what the mission presenter
-#     feeds Simulation.set_ai_muzzle_world),
+#   * ObjectModel.get_muzzle_world_position() (the presented muzzle-flash
+#     anchor; the SIM resolves its own fire origin, world/muzzle_pose.h),
 #   * the HEAD bone (LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX = 14) origin — the local
 #     player's EYE anchor, and the origin we put on the wire for our own shots,
 #   * bone 16 "BN17 R Hand" — the held-weapon joint,

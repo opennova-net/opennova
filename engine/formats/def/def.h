@@ -677,6 +677,14 @@ typedef struct DefItemDef {
        [orig: ItemDef_ParseProperty launchups_* stores @ def+0x5EB/+0x5FB;
        resolve Entity_ResolveBoneUserpoints (ex sub_545940) -> modelgpm_FindUserpointByName @ 0x5b2170] */
     char launchups_closeattack[32];
+    /* items.def weapon userpoint NAMES — the twelve 16-byte slots at def+0x61B..0x6CB
+       in parse order: weaplbup, weaplmup, weaplcup, weaprbup, weaprmup, weaprcup, then
+       the `2` variants (weaplbup2 .. weaprcup2). Field b = the FIRE ORIGIN point, m =
+       the muzzle-flash/action-effect anchor, c = the recoil/casing anchor; r -> weapon
+       slot 0, l -> slot 1, r2 -> slot 2, l2 -> slot 3 (world-wac-ai-re §21.2).
+       [orig: ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301 -> def+0x61B..0x6CB; resolved
+       on the entity model by Entity_InitBoneReferences @ 0x441470 -> entity+0x327] */
+    char weapon_userpoints[12][16];
     /* items.def 'clipsize', plain atol — the respawn magazine reseed source (word
        entity+0x35C = itemDef+0x894). [orig: ItemDef_ParseProperty @ 0x49fa1c ->
        def+0x894; consumer Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5] */

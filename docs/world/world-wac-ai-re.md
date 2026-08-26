@@ -4175,76 +4175,89 @@ Ground truth (retail JOX models): US01 = `GFlash01`@part15 + `Look`; EIndo01-08 
 `MFlash01`/`bullet` (+`GFlash01`/`bcasing` on some); CIndo civilians = `LOOK` only
 (no muzzle — civilians never fire).
 
-### 21.3 The port: the in-sim muzzle seam (the binding push as fallback)
+### 21.3 The port: the fire origin is computed at fire time from the sim's own pose
 
-The simulation resolves the muzzle itself (2026-08-25): `World::muzzle_pose_provider`
-(`IMuzzlePoseProvider`, `engine/runtime/world/muzzle_pose.h`) is the native collision rig,
-`SimCollisionPoseProvider::resolve_muzzle_pose` (`engine/runtime/simassets/sim_collision_pose.cpp`),
-which evaluates the entity's composed clip/blend/aim-overlay pose at the logic-tick call
-site, accumulates the launch bone's FK prefix against `rest_global_inverse`, and transforms
-the def's `launchups_closeattack` userpoint through `collision_matrix_from_euler(body
-overlay, position)` — the in-sim equivalent of `Entity_GetAttachmentWorldPosition @ 0x4b2670`.
-The present-pass push below remains only as the fallback for rows without a native
-skeletal rig (embedders without mission assets, headless tests):
+Retail never pushes a muzzle anywhere per frame: every consumer computes the userpoint
+synchronously at its own call site, on the logic tick that needs it, building the model pose
+on demand. The port does the same (2026-08-26; the present-pass push and its stamps are gone):
 
-- The DEF names the muzzle: `items.def launchups_closeattack` authors the launch
-  userpoint name (JO NPC riflemen: `mflash01`); the placer pushes it onto the
-  placed model (`set_muzzle_point_name`) and `ObjectModel` resolves it at
-  rebuild case-insensitively against the model userpoint table — retail's
-  by-name lookup (`modelgpm_FindUserpointByName @ 0x5b2170` via `Entity_ResolveBoneUserpoints`;
-  the rig is index-driven so the userpoint's subobject row IS the skeleton
-  bone). No authored name = no AI muzzle (civilians). The model exposes
-  `get_muzzle_world_position()` = `skeleton.global * bone_pose * bone_rest⁻¹ *
-  model_pos` — the same attachment transform the userpoint debug overlay uses.
-- The NATIVE present applier pushes it per presented row with `has_muzzle` and
-  no native rig (`!has_native_muzzle` — `Simulation::has_native_ai_muzzle`)
-  (`nova_present_applier.cpp` → `Simulation::set_ai_muzzle_world`; the earlier
-  `mission_present_pass._push_muzzle` GDScript leg was rewritten native —
-  wording corrected 2026-08-13), keyed by
-  **PF_NET_ID** (the authored SSN — the wire handle is 0-ambiguous for pool-0 slot 0,
-  and the present rows render the client WIRE VIEW, whose row order is not the AI
-  index and whose population is replication-range-gated).
-- `Simulation::set_ai_muzzle_world(net_id, pos)` converts Godot→mission 16.16
-  and stamps BOTH `Entity::posed_muzzle_*` and
-  `AiSystem::set_entity_muzzle(handle, pos, logic_tick)`.
-- The consumers share `AiSystem::weapon_fire_origin(World&, ...)` (2026-08-13, the
-  D-AI-6a slice; in-sim provider first since 2026-08-25): the fire pass spawns
-  rounds from it, the LOS endpoints (mutual-LOS acquire probe, threat scan,
-  lastAttacker, the D-EVT-3 sub-44/45 trigger rays) ray between two of them, and
-  the aim solution reads it for the EYE and the target chest point — the
-  provider's current-tick pose, else the stamp while FRESH (≤ `kMuzzleFreshTicks`
-  = 4), else the chest-lift stand-in (headless ctests). The corpse watch
-  (D-AI-9c), the USE-scan eye (D-AI-11), and the netsim priority ray keep
-  explicit 0.9 u lifts at their call sites — deliberately not fire origins.
+- `World::muzzle_pose_provider` (`IMuzzlePoseProvider`, `engine/runtime/world/muzzle_pose.h`)
+  is the native collision rig, `SimCollisionPoseProvider`
+  (`engine/runtime/simassets/sim_collision_pose.cpp`).
+- Persons — `resolve_muzzle_pose`: the composed clip/blend/aim-overlay pose of the current
+  tick, the launch bone's FK prefix against `rest_global_inverse`, the def's
+  `launchups_closeattack` userpoint through `collision_matrix_from_euler(body overlay,
+  position)` — the in-sim `Entity_GetAttachmentWorldPosition @ 0x4b2670`. Without a rig,
+  model, table, or resolvable point the consumers copy the RAW entity origin
+  (`@ 0x4b2767..0x4b278e`) — no lift of any kind.
+- Vehicles/emplacements — `resolve_userpoint_transform(entity, 1-based userpoint index,
+  out[6])`: the entity placement matrix (`collision_matrix_from_euler`; the Q16 scale on the
+  rotation diagonal when set, `Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+  @ 0x614210`), the userpoint's part matrix from the sim-clock PANM evaluation over the retail
+  CTRL bus (`panm_part_matrices`, shared with the generic collision leg), the record position
+  through it, and the posed bone's euler via `collision_matrix_to_euler` — the in-sim
+  `Entity_ComputeUserpointWorldTransform @ 0x545c60` -> `Userpoint_ComputeWorldTransform
+  @ 0x56c420`. A model without live PANM poses every part in the entity frame.
+- The DEF names the points: `launchups_closeattack` (persons) and the twelve
+  `weap[lr][bmc]up[2]` keys (vehicles/emplacements, §21.2) are parsed into `DefItemDef` and
+  the latter resolved on the entity model into `Entity::weapon_userpoint_bytes[4][3]` at the
+  collision sweep (`collision_resolve.cpp`); `weapon_userpoint_byte(entity, slot, field)` is
+  `Entity_GetWeaponSlotByte @ 0x5459c0`.
+- Consumers share `AiSystem::weapon_fire_origin(World&, ...)`: the fire pass spawns rounds
+  from it, the LOS endpoints ray between two of them, the aim solution reads it for the EYE
+  and the target point. `pump_mounted_weapon_slots` fires a UseGun shot from the
+  EMPLACEMENT's posed FIRE point (`weapon_userpoint_byte(mount, 0, 0)` — the fire tick
+  reaches `@ 0x545c60` with currentAction FIRE / nextAction 0, so the `@ 0x545d17..0x545d3f`
+  select yields field b, and `Server_ClientFiredRound @ 0x50c1f4` names field 0 outright; the
+  m/c fields anchor the effect legs) ALONG THAT BONE'S EULER — retail's
+  `Entity_CalcWeaponFirePosition @ 0x4dc750` parentSlot-3 leg; byte 0 / no model copies the
+  parent's raw position/euler. The presented `ObjectModel` muzzle userpoint survives only as
+  the muzzle-flash anchor.
 
-Evidence: `ai` ctest `test_fire_pass_uses_embedder_fed_muzzle` (stamp used when fresh,
-fallback when absent/stale); in-game `godot/tests/ai_muzzle_probe.gd` on CP01 —
-PASS: a posed EIndo muzzle at +0.51 u up / 0.93 u out from the entity origin
-(chest-height, along the aimed rifle), zero head-height origins.
+Evidence: `ai` ctest (`test_fire_pass_uses_embedder_fed_muzzle`, `test_weapon_fire_origin_fallback_chain`,
+the LOS band case, the aim-pitch case, the mounted UseGun case — all through a fake
+`IMuzzlePoseProvider`); in-game `godot/tests/ai_muzzle_probe.gd` reads the same provider
+through `get_entity_debug` (`muzzle_valid` / `muzzle`).
 
 ### 21.4 Divergences + open follow-ups
 
-D-AI-6 (ledger) updated: the FIRE-ORIGIN clause is LANDED via the binding seam.
-Residuals: (a) **LANDED 2026-08-13 with an approximation**: the LOS endpoints
-and the aim-solution eye point ride the binding muzzle stamp while fresh
-(`AiSystem::weapon_fire_origin`, chest-lift fallback — facet c). The aim EYE
-now matches the original exactly (the combat-pass aim anchor
-`Entity_GetAttachmentWorldPosition @ 0x4b2670` on bone +0x366, evaluated
-in-sim on the current tick since 2026-08-25); the LOS/aim-target endpoints substitute the posed muzzle for the
-person-leg vector (`Entity_ComputeWeaponFireOrigin @ 0x43b4b0` — the +0x6C
-writer stays unwalked, facet d), chest lift when stampless;
-(b) the def-authored userpoint NAME is plumbed for the closeattack family
-(2026-08-09: `launchups_closeattack` parse → ItemDatabase → placer →
-`set_muzzle_point_name`; the old flash-name preference is deleted) — the
-rocket/marker3 siblings and the full twelve-name clusters (def+0x61B..0x6CB)
-remain unsurfaced; (c) CLOSED 2026-08-25 for native-asset worlds: the origin is
-evaluated in-sim on the current tick, on- or off-screen (`resolve_muzzle_pose`);
-the one-frame-stale stamp survives only on the no-native-rig fallback. The
-provider re-evaluates the composed pose per query (no per-tick memo — an aim
-overlay written between two queries of one tick must be seen), a measured
-follow-up; (d) entity+0x6C (the person aim vector) and the
-+0x358..0x367 block writer are unwalked; (e) the vehicle userpoint path @ 0x545c60
-waits on D-AI-2.
+D-AI-6 (ledger): the fire origin is exact in-sim at fire time for persons with a rig and for
+UseGun shots. Residuals: (a) the LOS/aim-TARGET endpoint substitutes the posed muzzle for
+retail's `Entity_ComputeWeaponFireOrigin @ 0x43b4b0` person leg (`pos + entity+0x6C`; the
++0x6C writer stays unwalked); (b) the weapon-def userpoint (`+0x333 <- weaponDef+856`) and the
+person `+0x4D8` cluster are not carried; (c) the AI fire pitch adds `inf.recoil_pitch`, which
+the AI fire path was not seen to add (`@ 0x4b274b` copies entity Pitch); (d) the
+`ItemDef+0x144` pre-evaluation hook (the BoneCallback pair from `BoneCallback_LookupByTag
+@ 0x4e32b0`) is unwalked — our equivalent is the inline CTRL publish; (e) retail's vehicle
+part pose reads the render clock for flag-2 spinners, ours the logic clock (the documented
+PANM seam); (f) the SM bone-list filler (`Entity_InitVehicleAI @ 0x4603ba..0x460414`) rides
+D-AI-2.
+
+### 21.5 Witness map: the userpoint chain (grill 2026-08-26)
+
+Record layout (48 B, `gpm+0xC0` table, count `gpm+0xBC`, 1-based index `i` ->
+`table + 48*(i-1)` [`modelgpm_FindUserpointByName @ 0x5b21ef`, stricmp on `+32`]): `+0/+4/+8`
+local position 16.16, `+12/+16/+20` local direction (the point's local Z axis), `+24`
+subobject/bone row (-1 none), `+28` type, `+32` `char[16]` name — our `ThreediUserPoint`.
+
+| Function | Address | Role |
+|---|---|---|
+| `Entity_GetAttachmentWorldPosition` | `0x4b2670` | `(out[6], entity, u8 index)`: parentSlot 3 on an attrib-0x20 parent -> `Entity_ComputeUserpointWorldTransform(out, NULL, mtx, parent, NULL, NULL)` `@ 0x4b26b6`; index 0 / no model / no table -> raw `{pos, Yaw, Pitch, Roll}` `@ 0x4b2767..0x4b278e`; else the whole skeleton (`Entity_BuildBoneTransformMatrices @ 0x4b1290`), `Math_FloatMatrixToFixedPoint22` of the record's bone row, `Math_FixedPointTransformPoint22` of the record position `@ 0x4b272e..0x4b2743`, `out[3..5]` = entity Yaw/Pitch/Roll `@ 0x4b274b` |
+| `Entity_ComputeUserpointWorldTransform` | `0x545c60` | `(out[6], outDir, outMatrix, entity, slot, record)`: `ItemDef+0x144` hook `@ 0x545cae`; slot default `entity+0x2B4`; model/byte select `@ 0x545d06..0x545d55` (`WeaponDef+0x170` tpModel -> `+0x2D4`, else the graphic model + `Entity_GetWeaponSlotByte(entity, seatMask&3, field)` with field `(cur==2&&next==3)?1:(cur==3)?2:0` `@ 0x545d17..0x545d3f`); `slot+0x5D` caches the byte; byte 0 / no model -> raw copy `@ 0x545e1f`; placement `@ 0x545d91..0x545dec` (`+0x158` or def `+0x1B8` scale -> `@ 0x614210`, else `@ 0x613f40`; skipped under `Flags & 0x20000`) -> `Userpoint_ComputeWorldTransform` `@ 0x545e08` |
+| `Userpoint_ComputeWorldTransform` | `0x56c420` | bone clamp `@ 0x56c471..0x56c489`; `Math_FixedPointToFloatMatrix4x4_Swizzled` of the entity matrix replicated `info+0x34` times; `Model_TransformBoneMatrices(info, slots, 0)` `@ 0x56c4dd` (PANM current pose); `Math_FloatMatrixToFixedPoint22(parts[bone])` `@ 0x56c4ed`; point `@ 0x56c4f2..0x56c513`; optional direction `@ 0x56c524..0x56c5ef` (rotate `+12`, yaw/pitch from the local direction, `Math_BuildFixedPointRotationMatrixYXZ`); euler `Math_FixedPointMatrixToEulerAngles` `@ 0x56c604`; `out[0..2] = pos` `@ 0x56c618` |
+| `Entity_GetWeaponSlotByte` | `0x5459c0` | `(entity, slot, field)`: 0 unless `def+0x54 & 0x20`; `& 0x40` -> `entity+0x4D8+3*slot+field` `@ 0x5459e7`; else `entity+0x327+3*slot+field` `@ 0x5459ef..0x5459f9` |
+| `Entity_InitBoneReferences` | `0x441470` | resolves the twelve def names (§21.2) on the entity model into `entity+0x327`: slot 0 <- def[3..5] (`weapr?up`), 1 <- def[0..2] (`weapl?up`), 2 <- def[9..11] (`weapr?up2`), 3 <- def[6..8] (`weapl?up2`) `@ 0x4414e0..0x4415aa`; `+0x333 <- weaponDef+856` `@ 0x4415cd`; CAMERA/USEGUN bytes `+0x318/+0x31A` `@ 0x4414b4/0x4414c7` |
+| `Entity_ResolveBoneUserpoints` | `0x545940` | the zero-fill: `[3..5] <- [0..2]`, `[6..8] <- [0..2]`, `[9..11] <- [3..5]`, `[12] <- [6]` |
+| `Entity_CalcWeaponFirePosition` | `0x4dc750` | `(out[6], entity, slot)`: `slot+0x5E & 1` -> the latched `+0x40..0x54` transform `@ 0x4dc762..0x4dc786`; parentSlot 3 -> `Entity_ComputeUserpointWorldTransform(out, NULL, mtx, parent, slot, NULL)` `@ 0x4dc7e6` (the carrier-routed eweap case `@ 0x4dc7bb..0x4dc7d9`); parentSlot 2 on attrib-0x20 -> `Entity_ComputeUserpointTransform @ 0x545a40`; else `pos + CameraOffset(+0x6C)`, `out[4] += pitchBlend(+0x380)` `@ 0x4dc847..0x4dc880` |
+| `WeaponAction_Fire` | `0x542b10` | `Entity_CalcWeaponFirePosition` `@ 0x542bf7` -> `Entity_FireWeaponAndSendPacket` `@ 0x542c5e`; the fire command copies `out[0..2]` and `out[3]/out[4]` `@ 0x42be84..0x42bef2` — a mounted round leaves along the emplacement's posed bone euler |
+| `Math_FixedPointMatrixToEulerAngles` | `0x613310` | yaw = atan2(M4, M0) `@ 0x61332c..0x61335d`; `A = (-M6*cy + M2*sy)>>22`, `B = (M2*cy + M6*sy)>>22`, `C = (M0*cy + M4*sy)>>22` `@ 0x61339a..0x613400`; pitch = atan2(M8, C) `@ 0x6133fa..0x613421`; `D = (M10*cp - B*sp)>>22`, roll = atan2(A, D) `@ 0x61344a..0x61347b`; 64-bit shifts without bias, `ftol` truncation — `collision_matrix_to_euler` |
+| `Math_FloatMatrixToFixedPoint22` / `Math_FixedPointToFloatMatrix4x4_Swizzled` | `0x611140` / `0x611080` | the exact inverse pair (`d0=+s10*C, d1=-s2*C, d2=+s6*C, d3=+s14*65536; d4=-s8*C, d5=+s0*C, d6=-s4*C, d7=-s12*65536; d8=+s9*C, d9=-s1*C, d10=+s5*C, d11=+s13*65536`) — `collision_matrix_apply_render_pose` |
+
+The per-frame audit: `@ 0x4dc750`'s callers are the camera builders, the local body, the
+projectile preview, the crosshair, a sector-action message, and the fire tick;
+`@ 0x545c60`'s other callers are effect-gated (`WeaponAction_ProcessFrame @ 0x540e60` reads it
+only with a live action-effect tracker or an open heat window), the NVG laser, the joiner's
+round-event effect, and debug lines. Nothing per frame writes a muzzle the simulation reads.
 
 ## 22. Appendix: the org2 player-body physics grill (grill-ida, 2026-07-16 session 8)
 

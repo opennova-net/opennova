@@ -82,7 +82,6 @@ const WORLD_VALUE_SLOTS := [
 	"PRESENT_MISSION_ROWS",
 	"PRESENT_MISSION_SUBMITTED_ROWS",
 	"PRESENT_MISSION_BODY_ROWS",
-	"PRESENT_MISSION_MUZZLE_ROWS",
 ]
 # Per-pass submission counts (objects), averaged per drained frame.
 const ENGINE_COUNT_SAMPLES := {
@@ -102,11 +101,9 @@ const COUNTER_KEYS := [
 	"part_dispatches",
 	"control_dispatches",
 	"body_dispatches",
-	"muzzle_queries",
 	"moved",
 	"posed",
 	"hidden",
-	"muzzles",
 ]
 
 var _mount_guard = MountGuard.new()
@@ -533,11 +530,9 @@ func _counter_delta(before: MissionPresentStats,
 		"control_dispatches":
 				after.control_dispatches - before.control_dispatches,
 		"body_dispatches": after.body_dispatches - before.body_dispatches,
-		"muzzle_queries": after.muzzle_queries - before.muzzle_queries,
 		"moved": after.moved - before.moved,
 		"posed": after.posed - before.posed,
 		"hidden": after.hidden - before.hidden,
-		"muzzles": after.muzzles - before.muzzles,
 	}
 
 

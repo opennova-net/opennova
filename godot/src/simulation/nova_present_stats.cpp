@@ -13,7 +13,6 @@ void MissionPresentStats::_bind_methods() {
 	NOVA_STAT_BIND(MissionPresentStats, moved)
 	NOVA_STAT_BIND(MissionPresentStats, posed)
 	NOVA_STAT_BIND(MissionPresentStats, hidden)
-	NOVA_STAT_BIND(MissionPresentStats, muzzles)
 	NOVA_STAT_BIND(MissionPresentStats, plan_rebuilds)
 	NOVA_STAT_BIND(MissionPresentStats, transform_builds)
 	NOVA_STAT_BIND(MissionPresentStats, aim_dispatches)
@@ -21,7 +20,6 @@ void MissionPresentStats::_bind_methods() {
 	NOVA_STAT_BIND(MissionPresentStats, part_dispatches)
 	NOVA_STAT_BIND(MissionPresentStats, control_dispatches)
 	NOVA_STAT_BIND(MissionPresentStats, body_dispatches)
-	NOVA_STAT_BIND(MissionPresentStats, muzzle_queries)
 }
 
 Ref<WirePresentStats> WirePresentStats::create(int64_t p_live,

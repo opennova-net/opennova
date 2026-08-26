@@ -21,7 +21,6 @@ public:
 	NOVA_STAT_FIELD(moved)
 	NOVA_STAT_FIELD(posed)
 	NOVA_STAT_FIELD(hidden)
-	NOVA_STAT_FIELD(muzzles)
 	NOVA_STAT_FIELD(plan_rebuilds)
 	NOVA_STAT_FIELD(transform_builds)
 	NOVA_STAT_FIELD(aim_dispatches)
@@ -29,7 +28,6 @@ public:
 	NOVA_STAT_FIELD(part_dispatches)
 	NOVA_STAT_FIELD(control_dispatches)
 	NOVA_STAT_FIELD(body_dispatches)
-	NOVA_STAT_FIELD(muzzle_queries)
 
 protected:
 	static void _bind_methods();

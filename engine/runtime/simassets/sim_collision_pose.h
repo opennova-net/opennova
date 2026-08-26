@@ -97,6 +97,10 @@ public:
 	// adapter's has-live-PANM registration gate). The pointer must outlive the
 	// provider (SimModelCache retains its parses).
 	void register_generic_model(int32_t model_id, const Threedi3di3 *model);
+	// Register the parsed model behind a collision model id for the userpoint
+	// leg (every model with a userpoint table, PANM or not). The pointer must
+	// outlive the provider.
+	void register_userpoint_model(int32_t model_id, const Threedi3di3 *model);
 
 	// Register a person entity's skeletal source: the rig is the .adm clip
 	// set sampled against the MODEL's bone table (parent-relative pivots +
@@ -142,6 +146,9 @@ public:
 			std::vector<world::CollisionMatrix> &out) override;
 	bool resolve_muzzle_pose(world::World &world, world::EntityHandle entity,
 			int32_t out[3]) override;
+	bool resolve_userpoint_transform(world::World &world,
+			world::EntityHandle entity, int userpoint_index,
+			int32_t out[6]) override;
 	uint64_t muzzle_query_count() const { return muzzle_queries_; }
 	uint64_t muzzle_resolve_count() const { return muzzle_resolves_; }
 
@@ -171,9 +178,16 @@ private:
 			const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) const;
+	// The canonical first RLOD's PANM part pose at the sim clock over the
+	// retail CTRL bus (PLAYPARTANIM phases, HEAT_GLOW, EWEAP yaw/pitch).
+	// False when the LOD has no live PANM (every part is the entity frame).
+	bool panm_part_matrices(world::World &world, const Threedi3di3 &model3di,
+			world::EntityHandle entity,
+			std::vector<ThreediMatrix4x4> &r_part_matrices) const;
 
 	const ResourceIndex *index_ = nullptr;
 	std::unordered_map<int32_t, const Threedi3di3 *> generic_models_;
+	std::unordered_map<int32_t, const Threedi3di3 *> userpoint_models_;
 	std::unordered_map<uint64_t, SkeletalSource> skeletal_sources_;
 	std::unordered_map<std::string, std::shared_ptr<const AdmSkeletalClips>>
 			rig_cache_;

@@ -110,6 +110,8 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 				// could only mask a native decline.
 				if (threedi_panm_lod_has_live(*m3, 0))
 					deps.pose.register_generic_model(model_id, m3);
+				// Every parsed model serves the userpoint leg (PANM or not).
+				deps.pose.register_userpoint_model(model_id, m3);
 			}
 			world::OcclusionModel occ;
 			if (occlusion_model_from_3di(*m3, occ))
@@ -153,6 +155,45 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	state.half_xy_by_graphic.emplace(graphic_key, half_xy);
 	state.center_by_graphic.emplace(graphic_key, center);
 	return model_id;
+}
+
+// The def's twelve weapon userpoint names resolved on the entity's model into
+// the four slot x three field byte cluster: slot 0 <- weapr?up (def[3..5]),
+// 1 <- weapl?up (def[0..2]), 2 <- weapr?up2 (def[9..11]), 3 <- weapl?up2
+// (def[6..8]); then the zero-fill [3..5] <- [0..2], [6..8] <- [0..2],
+// [9..11] <- [3..5] in that order. Names match case-insensitively; a byte is
+// the 1-based table index (0 = none). The weapon-def userpoint (+0x333) is
+// not carried (weapon.def+856 is unparsed).
+// [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa);
+//  Entity_ResolveBoneUserpoints @0x545940; modelgpm_FindUserpointByName
+//  @0x5b21ef]
+static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *name) {
+	if (name == nullptr || name[0] == '\0' || model.user_points == nullptr) return 0;
+	for (size_t i = 0; i < model.user_point_count && i < 255; ++i) {
+		if (strutil::iequals(model.user_points[i].name, name))
+			return static_cast<uint8_t>(i + 1);
+	}
+	return 0;
+}
+
+static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
+		const Threedi3di3 &model, world::Entity &e) {
+	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
+	uint8_t bytes[12] = {};
+	for (int slot = 0; slot < 4; ++slot) {
+		for (int field = 0; field < 3; ++field) {
+			bytes[slot * 3 + field] = userpoint_index_by_name(
+					model, def.weapon_userpoints[kSlotDefBase[slot] + field]);
+		}
+	}
+	for (int field = 0; field < 3; ++field) {
+		if (bytes[3 + field] == 0) bytes[3 + field] = bytes[field];
+		if (bytes[6 + field] == 0) bytes[6 + field] = bytes[field];
+		if (bytes[9 + field] == 0) bytes[9 + field] = bytes[3 + field];
+	}
+	for (int slot = 0; slot < 4; ++slot)
+		for (int field = 0; field < 3; ++field)
+			e.weapon_userpoint_bytes[slot][field] = bytes[slot * 3 + field];
 }
 
 world::ResolvedCollisionShape collision_shape_for_runtime_type(
@@ -328,6 +369,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		if (resolved_model >= 0) {
 			deps.collision.assign_entity(h, resolved_model, e->registry_spawn_id);
 			++attached;
+			if (!is_organic && (def->attrib & world::kItemAttribEweap) != 0u) {
+				if (const Threedi3di3 *m3 = deps.models.model_for(key))
+					resolve_weapon_userpoint_bytes(*def, *m3, *e);
+			}
 			if (is_organic) {
 				deps.pose.remove_entity(h);
 				// S3 (ADR 0028): the native skeletal source resolves from

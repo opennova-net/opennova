@@ -133,11 +133,9 @@ void PresentApplier::_bind_methods() {
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_CONTROLS_US);
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_VISIBILITY_US);
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_BODY_US);
-	BIND_ENUM_CONSTANT(MISSION_PROFILE_MUZZLE_US);
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_ROWS);
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_SUBMITTED_ROWS);
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_BODY_ROWS);
-	BIND_ENUM_CONSTANT(MISSION_PROFILE_MUZZLE_ROWS);
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_SLOT_COUNT);
 }
 
@@ -207,7 +205,6 @@ Ref<MissionPresentStats> PresentApplier::get_stats_record() const {
 	stats->moved = stat_moved_;
 	stats->posed = stat_posed_;
 	stats->hidden = stat_hidden_;
-	stats->muzzles = stat_muzzles_;
 	stats->plan_rebuilds = stat_plan_rebuilds_;
 	stats->transform_builds = stat_transform_builds_;
 	stats->aim_dispatches = stat_aim_dispatches_;
@@ -215,7 +212,6 @@ Ref<MissionPresentStats> PresentApplier::get_stats_record() const {
 	stats->part_dispatches = stat_part_dispatches_;
 	stats->control_dispatches = stat_control_dispatches_;
 	stats->body_dispatches = stat_body_dispatches_;
-	stats->muzzle_queries = stat_muzzle_queries_;
 	return stats;
 }
 
@@ -540,8 +536,6 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		return;
 	}
 	const int64_t count = size / stride;
-	Simulation *native_sim =
-			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
 	rows_.reserve(static_cast<size_t>(count));
 	for (int64_t r = 0; r < count; ++r) {
 		const int base = static_cast<int>(r * stride);
@@ -560,10 +554,6 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		row.entity_kind = kind;
 		row.entity_index = idx;
 		row.bms_id = bms_id;
-		row.has_muzzle = model->has_muzzle();
-		const int32_t net_id = field_i(p, base, Simulation::PF_NET_ID);
-		row.has_native_muzzle = row.has_muzzle && native_sim != nullptr &&
-				native_sim->has_native_ai_muzzle(net_id);
 		rows_.push_back(row);
 	}
 }
@@ -609,11 +599,9 @@ PackedInt64Array PresentApplier::profile_present_snapshot(
 	result.set(MISSION_PROFILE_CONTROLS_US, profile.controls_us);
 	result.set(MISSION_PROFILE_VISIBILITY_US, profile.visibility_us);
 	result.set(MISSION_PROFILE_BODY_US, profile.body_us);
-	result.set(MISSION_PROFILE_MUZZLE_US, profile.muzzle_us);
 	result.set(MISSION_PROFILE_ROWS, profile.rows);
 	result.set(MISSION_PROFILE_SUBMITTED_ROWS, profile.submitted_rows);
 	result.set(MISSION_PROFILE_BODY_ROWS, profile.body_rows);
-	result.set(MISSION_PROFILE_MUZZLE_ROWS, profile.muzzle_rows);
 	return result;
 }
 
@@ -994,15 +982,10 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 			p_profile->visibility_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
-		const int32_t net_id = field_i(p, base, Simulation::PF_NET_ID);
 		// Unsubmitted models (hidden, occlusion-held, off-screen) skip skeletal
-		// writes unless they own the authoritative posed-muzzle feedback seam
-		// (AI fire origins survive regardless of the camera; hidden non-weapon
-		// actors take the cheap path).
-		const bool legacy_muzzle_feedback = net_id > 0 && row.has_muzzle &&
-				!row.has_native_muzzle;
-		const bool body_eligible = submitted || legacy_muzzle_feedback;
-		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && body_eligible) {
+		// writes: the simulation resolves AI fire origins from its own pose
+		// (world/muzzle_pose.h), never from a presented skeleton.
+		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && submitted) {
 			if (p_profile != nullptr) {
 				++p_profile->body_rows;
 			}
@@ -1113,29 +1096,6 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 			const uint64_t now = Time::get_singleton()->get_ticks_usec();
 			p_profile->body_us += now - profile_phase_start;
 			profile_phase_start = now;
-		}
-		if (net_id > 0 && row.has_muzzle) {
-			if (p_profile != nullptr) {
-				++p_profile->muzzle_rows;
-			}
-			if (!row.has_native_muzzle) {
-				// The no-native-rig fallback: feed the presented gun-flash userpoint
-				// back into the simulation. Native mission entities resolve the same
-				// authored point lazily at its AI consumer.
-				++stat_muzzle_queries_;
-				if (model->has_muzzle()) {
-					const Vector3 muzzle = model->get_muzzle_world_position();
-					if (native_sim != nullptr) {
-						native_sim->set_ai_muzzle_world(net_id, muzzle);
-						++stat_muzzles_;
-					}
-				}
-			}
-		}
-		if (p_profile != nullptr) {
-			p_profile->muzzle_us +=
-					Time::get_singleton()->get_ticks_usec() -
-					profile_phase_start;
 		}
 	}
 }

@@ -1087,9 +1087,17 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["clip_size"] = e->profile.clip_size;
 	out["magazine"] = static_cast<int>(e->inf.magazine);
 	out["combat_target_valid"] = e->inf.combat_target.valid();
-	// The D-AI-6 muzzle seam readback (probe surface): the shell-fed posed muzzle.
-	out["muzzle_valid"] = e->muzzle_valid;
-	out["muzzle"] = godot_from_fixed3(e->muzzle_world);
+	// The fire-origin readback (probe surface): the launch userpoint on this
+	// body's posed skeleton, resolved now by the sim's own provider — the same
+	// point the fire pass, LOS rays, and aim eye read (world/muzzle_pose.h).
+	{
+		int32_t muzzle[3] = {};
+		const bool muzzle_valid = world_->muzzle_pose_provider != nullptr &&
+				world_->muzzle_pose_provider->resolve_muzzle_pose(
+						*world_, e->handle, muzzle);
+		out["muzzle_valid"] = muzzle_valid;
+		out["muzzle"] = muzzle_valid ? godot_from_fixed3(muzzle) : Vector3();
+	}
 	// Death presentation (P1c): the damage-time selection still pending consume,
 	// the live corpse countdown, and the def traits behind them (world-wac-ai-re §19).
 	out["death_anim_state"] = ent ? ent->death_anim_state : 0;

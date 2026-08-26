@@ -314,8 +314,6 @@ const _ROWS := [
 			"kind": _KIND_SPAN, "slot": FrameStatsBoard.PRESENT_MISSION_VISIBILITY},
 	{"id": "mission_rows_body", "label": "Body pose", "depth": 5,
 			"kind": _KIND_SPAN, "slot": FrameStatsBoard.PRESENT_MISSION_BODY},
-	{"id": "mission_rows_muzzle", "label": "Muzzle feedback", "depth": 5,
-			"kind": _KIND_SPAN, "slot": FrameStatsBoard.PRESENT_MISSION_MUZZLE},
 	{"id": "mission_rows_remainder", "label": "Mission-row orchestration remainder",
 			"depth": 5, "kind": _KIND_RESIDUAL,
 			"base": FrameStatsBoard.PRESENT_MISSION,
@@ -323,8 +321,7 @@ const _ROWS := [
 					FrameStatsBoard.PRESENT_MISSION_AIM,
 					FrameStatsBoard.PRESENT_MISSION_CONTROLS,
 					FrameStatsBoard.PRESENT_MISSION_VISIBILITY,
-					FrameStatsBoard.PRESENT_MISSION_BODY,
-					FrameStatsBoard.PRESENT_MISSION_MUZZLE]},
+					FrameStatsBoard.PRESENT_MISSION_BODY]},
 	{"id": "wire_rows", "label": "Wire rows", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_WIRE},
 	{"id": "fire", "label": "Fire", "depth": 4, "kind": _KIND_SPAN,
@@ -827,11 +824,10 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 				roundi(float(sums[FrameStatsBoard.MODEL_RENDERABLE_MODELS]) / model_samples),
 		])
 	if frames > 0 and counts[FrameStatsBoard.PRESENT_MISSION_ROWS] > 0:
-		_set_info("mission_rows", "%d rows · %d submitted · %d body · %d muzzle" % [
+		_set_info("mission_rows", "%d rows · %d submitted · %d body" % [
 				roundi(float(sums[FrameStatsBoard.PRESENT_MISSION_ROWS]) / frames),
 				roundi(float(sums[FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS]) / frames),
 				roundi(float(sums[FrameStatsBoard.PRESENT_MISSION_BODY_ROWS]) / frames),
-				roundi(float(sums[FrameStatsBoard.PRESENT_MISSION_MUZZLE_ROWS]) / frames),
 		])
 
 	var world := _ctx.world() if _ctx != null else null

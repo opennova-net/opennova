@@ -197,6 +197,79 @@ void SimCollisionPoseProvider::remove_entity(world::EntityHandle entity) {
 	skeletal_sources_.erase(entity.packed);
 }
 
+void SimCollisionPoseProvider::register_userpoint_model(int32_t model_id,
+		const Threedi3di3 *model) {
+	if (model == nullptr || model_id < 0) return;
+	userpoint_models_[model_id] = model;
+}
+
+// The vehicle/eweap userpoint through the current part pose: the entity
+// placement matrix (with its Q16 scale when set), the userpoint's part matrix
+// from the sim-clock PANM evaluation, then the record position and the posed
+// bone's euler. A model without live PANM poses every part in the entity
+// frame (Model_TransformBoneMatrices leaves unanimated parts at their parent).
+// [orig: Entity_ComputeUserpointWorldTransform @0x545c60 (placement
+//  @0x545d91..0x545dec) -> Userpoint_ComputeWorldTransform @0x56c420 (part
+//  pose @0x56c4dd, point @0x56c4f2..0x56c513, euler @0x56c604)]
+bool SimCollisionPoseProvider::resolve_userpoint_transform(world::World &world,
+		world::EntityHandle entity, int userpoint_index, int32_t out[6]) {
+	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
+		return false;
+	const world::Entity *e = world.registry.get(entity);
+	if (e == nullptr) return false;
+	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+	if (found == userpoint_models_.end() || found->second == nullptr) return false;
+	const Threedi3di3 &model3di = *found->second;
+	if (model3di.user_points == nullptr ||
+			static_cast<size_t>(userpoint_index) > model3di.user_point_count)
+		return false;
+	const ThreediUserPoint &point = model3di.user_points[userpoint_index - 1];
+
+	const int32_t position[3] = {
+			static_cast<int32_t>(e->position.x * 65536.0f),
+			static_cast<int32_t>(e->position.y * 65536.0f),
+			static_cast<int32_t>(e->position.z * 65536.0f),
+	};
+	// entity+0x10 is the live heading: the vehicle motor's BAM mirror when it
+	// has run, else the whole-degree mission yaw every other row carries.
+	const int32_t heading = e->veh.yaw_seeded
+			? e->veh.yaw_bam
+			: world::bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
+	world::CollisionMatrix entity_world = world::collision_matrix_from_euler(
+			heading, world::bam_from_degrees_wrapped(static_cast<double>(e->pitch)),
+			world::bam_from_degrees_wrapped(static_cast<double>(e->roll)), position);
+	if (e->uniform_scale_q16 != 0) {
+		// Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
+		// the scale rides the rotation diagonal.
+		constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
+		for (int index : rotation_indices) {
+			entity_world.m[index] = static_cast<int32_t>(
+					(static_cast<int64_t>(entity_world.m[index]) * e->uniform_scale_q16) >> 16);
+		}
+	}
+
+	world::CollisionMatrix bone_world = entity_world;
+	std::vector<ThreediMatrix4x4> part_matrices;
+	if (point.subobject_index >= 0 &&
+			panm_part_matrices(world, model3di, entity, part_matrices) &&
+			static_cast<size_t>(point.subobject_index) < part_matrices.size()) {
+		if (!world::collision_matrix_apply_render_pose(entity_world,
+					part_matrices[static_cast<size_t>(point.subobject_index)].m,
+					bone_world))
+			return false;
+	}
+	float local[3];
+	threedi_user_point_position(&point, local);
+	const int32_t local_q16[3] = {
+			static_cast<int32_t>(std::lround(local[0] * 65536.0f)),
+			static_cast<int32_t>(std::lround(local[1] * 65536.0f)),
+			static_cast<int32_t>(std::lround(local[2] * 65536.0f)),
+	};
+	bone_world.transform_point(local_q16, out);
+	world::collision_matrix_to_euler(bone_world, out + 3);
+	return true;
+}
+
 bool SimCollisionPoseProvider::has_skeletal_entity(
 		world::EntityHandle entity) const {
 	return skeletal_sources_.find(entity.packed) != skeletal_sources_.end();
@@ -474,18 +547,13 @@ bool SimCollisionPoseProvider::build_skeletal(world::World &world,
 	return true;
 }
 
-bool SimCollisionPoseProvider::build_generic(world::World &world,
+bool SimCollisionPoseProvider::panm_part_matrices(world::World &world,
 		const Threedi3di3 &model3di, world::EntityHandle entity,
-		const world::CollisionMatrix &entity_world,
-		const world::CollisionModel &model,
-		std::vector<world::CollisionMatrix> &out) const {
+		std::vector<ThreediMatrix4x4> &r_part_matrices) const {
 	// Retail Generic collision always transforms the canonical first RLOD. It
 	// never follows the render-selected LOD or scans for another live PANM.
 	constexpr int lod_index = 0;
 	if (!threedi_panm_lod_has_live(model3di, lod_index)) return false;
-	std::vector<ThreediPartAnimation> effective;
-	threedi_panm_effective_for_lod(model3di, lod_index, effective);
-	if (effective.empty()) return false;
 	if (model3di.ctrl.count > 0 && model3di.ctrl.registers == nullptr)
 		return false;
 
@@ -534,11 +602,21 @@ bool SimCollisionPoseProvider::build_generic(world::World &world,
 	const uint32_t time_ms = panm_time_override_ms >= 0
 			? static_cast<uint32_t>(panm_time_override_ms)
 			: world.logic_tick * 16u;
+	return threedi_panm_pose_parts(model3di, lod_index, time_ms, ctrl_values,
+			r_part_matrices, nullptr);
+}
 
+bool SimCollisionPoseProvider::build_generic(world::World &world,
+		const Threedi3di3 &model3di, world::EntityHandle entity,
+		const world::CollisionMatrix &entity_world,
+		const world::CollisionModel &model,
+		std::vector<world::CollisionMatrix> &out) const {
+	constexpr int lod_index = 0;
+	std::vector<ThreediPartAnimation> effective;
+	threedi_panm_effective_for_lod(model3di, lod_index, effective);
+	if (effective.empty()) return false;
 	std::vector<ThreediMatrix4x4> part_matrices;
-	if (!threedi_panm_pose_parts(model3di, lod_index, time_ms, ctrl_values,
-				part_matrices, nullptr))
-		return false;
+	if (!panm_part_matrices(world, model3di, entity, part_matrices)) return false;
 
 	// Default every COBJ slot to the Simple callback. Override only PANM nodes
 	// whose target part ordinal exists as a collision section. This

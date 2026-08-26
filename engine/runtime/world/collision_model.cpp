@@ -181,6 +181,37 @@ void CollisionMatrix::transform_point(const int32_t in[3], int32_t out[3]) const
     out[2] = r[2] + m[11];
 }
 
+// [orig: Math_FixedPointMatrixToEulerAngles @ 0x613310]
+void collision_matrix_to_euler(const CollisionMatrix &mat, int32_t out[3]) {
+    constexpr double kBamPerRadian = 683565275.5764316; // 2^31 / pi (dbl_7C19D8)
+    constexpr double kRadPerBam = 1.4629627251502471e-9; // pi / 2^31 (dbl_7C3608)
+    constexpr double kQ22 = 4194304.0;
+    const int32_t *m = mat.m;
+    const auto trunc32 = [](double v) { return static_cast<int32_t>(v); }; // ftol: toward zero
+    const auto shr22 = [](int64_t v) { return static_cast<int32_t>(v >> 22); };
+    // yaw = atan2(M4, M0) (computed as atan2(-M4, M0) * -(2^31/pi) @ 0x61332c..0x61335d)
+    const int32_t yaw = trunc32(std::atan2(static_cast<double>(m[4]),
+                                           static_cast<double>(m[0])) * kBamPerRadian);
+    const int64_t sy = trunc32(std::sin(yaw * kRadPerBam) * kQ22);
+    const int64_t cy = trunc32(std::cos(yaw * kRadPerBam) * kQ22);
+    // @ 0x61339a..0x613400
+    const int64_t a = shr22(-static_cast<int64_t>(m[6]) * cy + static_cast<int64_t>(m[2]) * sy);
+    const int64_t b = shr22(static_cast<int64_t>(m[2]) * cy + static_cast<int64_t>(m[6]) * sy);
+    const int64_t c = shr22(static_cast<int64_t>(m[0]) * cy + static_cast<int64_t>(m[4]) * sy);
+    // pitch = atan2(M8, C) @ 0x6133fa..0x613421
+    const int32_t pitch = trunc32(std::atan2(static_cast<double>(m[8]),
+                                             static_cast<double>(c)) * kBamPerRadian);
+    const int64_t sp = trunc32(std::sin(pitch * kRadPerBam) * kQ22);
+    const int64_t cp = trunc32(std::cos(pitch * kRadPerBam) * kQ22);
+    // D = (M10*cp - B*sp) >> 22; roll = atan2(A, D) @ 0x61344a..0x61347b
+    const int64_t d = shr22(static_cast<int64_t>(m[10]) * cp - b * sp);
+    const int32_t roll = trunc32(std::atan2(static_cast<double>(a),
+                                            static_cast<double>(d)) * kBamPerRadian);
+    out[0] = yaw;
+    out[1] = pitch;
+    out[2] = roll;
+}
+
 // [orig: Math_TransformPointFixedPoint22 @ 0x412e90 — rotate only.]
 void CollisionMatrix::rotate_point(const int32_t in[3], int32_t out[3]) const {
     out[0] = static_cast<int32_t>((static_cast<int64_t>(in[1]) * m[1] +

@@ -2081,7 +2081,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             // Fire-origin -> fire-origin endpoints via the muzzle seam
             // [orig: Entity_CheckMutualLineOfSight @0x539be0].
             int32_t sa[3];
-            sys.weapon_fire_origin(world, e, world.logic_tick, sa);
+            sys.weapon_fire_origin(world, e, sa);
             int32_t sb[3];
             sys.weapon_fire_origin(world, *c, sb);
             if (!sys.line_of_sight_clear(world, sa, sb, e.handle, h))
@@ -2130,7 +2130,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                     // The mutual-LOS fire-origin endpoints stand in here too —
                     // @0x53b130's own endpoint recipe is unwitnessed.
                     int32_t sa[3];
-                    weapon_fire_origin(world, e, world.logic_tick, sa);
+                    weapon_fire_origin(world, e, sa);
                     int32_t sb[3];
                     weapon_fire_origin(world, *att, sb);
                     if (line_of_sight_clear(world, sa, sb, e.handle, inf.last_attacker))
@@ -2331,7 +2331,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // @0x4b2670 on bone +0x366, §21.1]; stampless rows keep the chest lift.
     // The horizontal eye components shift with the pose too, as retail's do.
     int32_t eye[3];
-    weapon_fire_origin(world, e, world.logic_tick, eye);
+    weapon_fire_origin(world, e, eye);
     // The aim TARGET point is the target's fire origin, not its ground origin
     // [orig: §17.5 — target chest point via Entity_ComputeWeaponFireOrigin
     // @0x43b4b0]. The lead stays computed over the raw positions (inf.aim_point
@@ -2381,7 +2381,7 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     // userpoint's local position by the ANIMATED bone matrix, called from the
     // anim-event fire block @0x4bf326..0x4bf425]).
     int32_t origin[3];
-    weapon_fire_origin(world, e, logic_tick, origin);
+    weapon_fire_origin(world, e, origin);
     // Fire along the LAST computed aim, not the body heading: retail's
     // aimHeading is a persistent entity field (set from targetHeading while
     // engaging; only the dragged-body branch at animState 139 assigns it the

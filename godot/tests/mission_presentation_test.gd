@@ -414,7 +414,6 @@ func test_mission_present_stats_are_a_typed_record() -> void:
 	assert_eq(stats.part_dispatches, 0)
 	assert_eq(stats.control_dispatches, 0)
 	assert_eq(stats.body_dispatches, 0)
-	assert_eq(stats.muzzle_queries, 0)
 
 
 func test_wire_presenter_resets_with_runtime_stop() -> void:

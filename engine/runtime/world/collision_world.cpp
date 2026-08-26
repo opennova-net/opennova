@@ -132,6 +132,11 @@ bool CollisionWorld::has_instance(EntityHandle h) const {
     return instances_.count(h.packed) != 0;
 }
 
+int32_t CollisionWorld::entity_model_id(EntityHandle h) const {
+    const auto it = instances_.find(h.packed);
+    return it == instances_.end() ? -1 : it->second.model_id;
+}
+
 int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     auto it = candidates_.find(h.packed);
     return it == candidates_.end() ? 0 : it->second.count;

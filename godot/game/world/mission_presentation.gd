@@ -629,16 +629,12 @@ func _present_entity_rows(stats_on := false) -> void:
 						profile[PresentApplier.MISSION_PROFILE_VISIBILITY_US])
 				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_BODY,
 						profile[PresentApplier.MISSION_PROFILE_BODY_US])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_MUZZLE,
-						profile[PresentApplier.MISSION_PROFILE_MUZZLE_US])
 				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_ROWS,
 						profile[PresentApplier.MISSION_PROFILE_ROWS])
 				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS,
 						profile[PresentApplier.MISSION_PROFILE_SUBMITTED_ROWS])
 				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_BODY_ROWS,
 						profile[PresentApplier.MISSION_PROFILE_BODY_ROWS])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_MUZZLE_ROWS,
-						profile[PresentApplier.MISSION_PROFILE_MUZZLE_ROWS])
 			_frame_stats.add(FrameStatsBoard.PRESENT_MISSION,
 					Time.get_ticks_usec() - mission_start)
 		else:

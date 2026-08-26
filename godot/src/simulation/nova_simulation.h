@@ -2127,14 +2127,6 @@ public:
 
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
-	// The D-AI-6 muzzle seam: per-frame posed bullet fire-origin userpoint push from the
-	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
-	// position; converted + stamped with the logic tick).
-	void set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos);
-	// True when the engine-side skeletal source resolved this entity's authored
-	// launch userpoint. The presenter can then avoid off-screen Godot posing;
-	// AI resolves the point lazily at its LOS/aim/fire call sites.
-	bool has_native_ai_muzzle(int p_net_id) const;
 	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
