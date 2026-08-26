@@ -311,9 +311,13 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	counts[FrameStatsBoard.FRAME_DRAW] = 10
 	sums[FrameStatsBoard.FRAME_PACING_INPUT] = 1_000
 	counts[FrameStatsBoard.FRAME_PACING_INPUT] = 10
+	# Godot's once-per-second monitors: the window carries the same value on
+	# every frame, so only the peak means anything.
 	sums[FrameStatsBoard.FRAME_TIME_PROCESS] = 930_000
+	peaks[FrameStatsBoard.FRAME_TIME_PROCESS] = 93_000
 	counts[FrameStatsBoard.FRAME_TIME_PROCESS] = 10
 	sums[FrameStatsBoard.FRAME_PHYSICS_SERVER] = 2_000
+	peaks[FrameStatsBoard.FRAME_PHYSICS_SERVER] = 200
 	counts[FrameStatsBoard.FRAME_PHYSICS_SERVER] = 10
 	sums[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS] = 15
 	counts[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS] = 10
@@ -332,14 +336,14 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	assert_eq(_row(pane, &"other_process").average, "1.00")
 	assert_eq(_row(pane, &"physics_callbacks").average, "0.50")
 	assert_eq(_row(pane, &"physics_callbacks").info,
-			"server max 0.20 ms · 1.5 iter/f")
+			"server peak 0.20 ms · 1.5 iter/f")
 	assert_eq(_row(pane, &"deferred_flush").average, "0.30")
 	assert_eq(_row(pane, &"render_draw").average, "0.50")
 	assert_eq(_row(pane, &"pacing_input").average, "0.10")
 	assert_eq(_row(pane, &"engine_frame").average, "0.10",
 			"the residual is what the three draw-signal spans did not bracket")
-	assert_true(_row(pane, &"frame").info.ends_with("· process 93.00 ms"),
-			"the frame row carries Godot's TIME_PROCESS cross-check")
+	assert_true(_row(pane, &"frame").info.ends_with("· godot process peak 93.00 ms"),
+			"the frame row carries Godot's once-per-second TIME_PROCESS peak, not a mean")
 
 
 func test_pass_count_cells_average_per_frame_and_clear_when_unsampled() -> void:

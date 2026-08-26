@@ -124,9 +124,13 @@ func _process(_delta: float) -> void:
 	_last_frame_usec = now
 	# The tail of the previous iteration: everything after its draw returned
 	# (audio/script frame hooks, pacing, input pump, this iteration's physics
-	# servers and SceneTree head) up to this earliest idle callback.
+	# servers and SceneTree head) up to this earliest idle callback, LESS the
+	# physics callback windows inside it: Main::iteration runs the physics
+	# loop before MainLoop.process, so those windows sit in this span and
+	# publish as their own row below.
 	if _post_draw_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_PACING_INPUT, now - _post_draw_usec)
+		_board.add(FrameStatsBoard.FRAME_PACING_INPUT,
+				maxi(now - _post_draw_usec - _pending_physics_usec, 0))
 	_post_draw_usec = 0
 	# Physics callbacks precede this idle frame. Publish their accumulated
 	# window here so FrameStatsBoard assigns them to the same render frame.
@@ -137,10 +141,11 @@ func _process(_delta: float) -> void:
 		_board.add(FrameStatsBoard.FRAME_PHYSICS_ITERATIONS,
 				physics_frames - _last_physics_frames)
 	_last_physics_frames = physics_frames
-	# Godot's own monitors for the previous iteration: TIME_PROCESS spans
-	# MainLoop.process + the deferred flush + RenderingServer sync/draw, so
-	# it cross-checks the callback + flush + draw rows; TIME_PHYSICS_PROCESS is
-	# the physics servers' window (max over the iterations, not a sum).
+	# Godot's own monitors: TIME_PROCESS spans MainLoop.process + the
+	# deferred flush + RenderingServer sync/draw, TIME_PHYSICS_PROCESS the
+	# physics servers' window. Main::iteration publishes both ONCE PER SECOND
+	# as that second's worst iteration (process_max in its FPS block), so the
+	# page reads them as peaks; the per-frame add only keeps the window fed.
 	_board.add(FrameStatsBoard.FRAME_TIME_PROCESS,
 			int(Performance.get_monitor(Performance.TIME_PROCESS) * 1_000_000.0))
 	_board.add(FrameStatsBoard.FRAME_PHYSICS_SERVER,

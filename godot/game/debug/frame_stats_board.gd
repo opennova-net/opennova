@@ -53,8 +53,8 @@ enum {
 	FRAME_DEFERRED_FLUSH,   # latest idle callback -> frame_pre_draw: MessageQueue flush (call_deferred, queue_redraw -> _draw), transform flush, SceneTree tail, RS sync
 	FRAME_DRAW,             # frame_pre_draw -> frame_post_draw: RenderingServer.draw for every viewport (cull, draw lists, submit, present)
 	FRAME_PACING_INPUT,     # frame_post_draw -> next earliest idle callback: audio/script frame hooks, input pump, physics servers, SceneTree head
-	FRAME_TIME_PROCESS,     # VALUE (us): Performance.TIME_PROCESS of the previous frame (process + flush + sync + draw), the split's cross-check
-	FRAME_PHYSICS_SERVER,   # VALUE (us): Performance.TIME_PHYSICS_PROCESS (max over the frame's physics iterations, servers included)
+	FRAME_TIME_PROCESS,     # VALUE (us): Performance.TIME_PROCESS (process + flush + sync + draw); Godot publishes it once per second as that second's worst iteration, so read the PEAK, never the mean
+	FRAME_PHYSICS_SERVER,   # VALUE (us): Performance.TIME_PHYSICS_PROCESS (physics servers' window), the same once-per-second peak
 	FRAME_PHYSICS_ITERATIONS,# VALUE: physics iterations run before this render frame
 	# GameWorld.tick legs
 	WORLD_FOLIAGE,
