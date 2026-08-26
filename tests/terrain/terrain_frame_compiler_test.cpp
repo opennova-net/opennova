@@ -244,7 +244,7 @@ int main() {
 						"terrain wholly above the water retires the pass") ||
 				!expect(opennova::water_pass_active(true, 5.0f, 9.0f, 4.0f, true),
 						"last frame's Blink water verdict forces the pass"))
-			return false;
+			return 1;
 		if (!expect(!away.visible_bounds.valid,
 				"no visible terrain tracks no bounds")) return 1;
 		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 8.0f, 32.0f},
