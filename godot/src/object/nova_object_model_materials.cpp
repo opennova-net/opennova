@@ -392,9 +392,6 @@ void ObjectModel::apply_environment_values(const Ref<ShaderMaterial> &p_material
 // entirely when the published generation and the derived values are unchanged
 // (retained mode — an identical re-push is invisible).
 void ObjectModel::apply_environment_to_materials() {
-	// Any caller that reaches the exact apply seam has serviced a pending
-	// visibility/pass edge, even when the retained generation proves unchanged.
-	env_restamp_forced_ = false;
 	int64_t gen = -1;
 	Ref<EnvLightValues> world_values;
 	if (env_state_.is_valid()) {

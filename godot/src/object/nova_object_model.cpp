@@ -139,7 +139,12 @@ ObjectModel::ObjectModel() {
 
 ObjectModel::~ObjectModel() {
 	// A model can be freed without a PREDELETE notification in some teardown
-	// paths; never leave a dangling pointer in the shared awake set.
+	// paths; never leave a dangling pointer in the shared awake set, and keep
+	// the row-plan stamp monotonic for a planned model (a second bump after
+	// PREDELETE is harmless).
+	if (present_planned_) {
+		++lifetime_generation_;
+	}
 	if (awake_) {
 		awake_ = false;
 		awake_models_.erase(this);
@@ -917,22 +922,6 @@ void ObjectModel::on_env_generation_changed() {
 	wake_runtime_frame();
 }
 
-bool ObjectModel::environment_restamp_due() const {
-	if (env_restamp_forced_ || last_env_values_.is_null() ||
-			(interior_section_lighting_ && last_section_env_values_.is_null())) {
-		return true;
-	}
-	if (env_state_.is_null() ||
-			env_state_->get_generation() == last_env_gen_) {
-		return false;
-	}
-	// A live PANM/material model never parks, so its environment signal cannot
-	// serve as the stagger gate. Apply the same per-model slot here instead of
-	// restamping every one of those models on every slowly changing TOD tick.
-	return (Engine::get_singleton()->get_process_frames() + env_stagger_slot_) %
-			kEnvRestampSpreadFrames == 0;
-}
-
 void ObjectModel::on_env_pass_changed() {
 	// Crossing the water plane changes fog by a large amount in one render
 	// pass. Unlike slow TOD/weather drift, it cannot ride the 16-frame stagger:
@@ -942,7 +931,6 @@ void ObjectModel::on_env_pass_changed() {
 		apply_environment_to_materials();
 	} else {
 		// Hidden/off-screen models catch up through the ordinary visibility gate.
-		env_restamp_forced_ = true;
 		wake_runtime_frame();
 	}
 }
@@ -956,9 +944,6 @@ void ObjectModel::_notification(int p_what) {
 		update_slot_shadow_group();
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible must re-check the env generation missed while hidden.
-		if (is_visible_in_tree()) {
-			env_restamp_forced_ = true;
-		}
 		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
@@ -968,11 +953,11 @@ void ObjectModel::_notification(int p_what) {
 		render_order_dirty_ = true;
 		refresh_render_order();
 	} else if (p_what == NOTIFICATION_PREDELETE) {
-		++lifetime_generation_;
-		// A freed model must not leave a stale off-screen claim in the shared
-		// submission registry (the walk would keep gating a reused id).
-		if (submission_registry_bound_) {
-			submission_registry_.erase(get_instance_id());
+		// Only a model a PresentApplier row plan retains by pointer moves the
+		// stamp: a throwable, viewmodel, wire-body, or preview model freeing
+		// must not force every mission row back through a cold plan rebuild.
+		if (present_planned_) {
+			++lifetime_generation_;
 		}
 		if (awake_) {
 			awake_ = false;
@@ -1196,9 +1181,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	const uint64_t environment_start = p_profile != nullptr
 			? Time::get_singleton()->get_ticks_usec()
 			: 0;
-	if (environment_restamp_due()) {
-		apply_environment_to_materials();
-	}
+	apply_environment_to_materials();
 	if (p_profile != nullptr) {
 		p_profile->environment_us +=
 				Time::get_singleton()->get_ticks_usec() - environment_start;
@@ -1243,37 +1226,8 @@ void ObjectModel::set_on_screen(bool p_value) {
 		return;
 	}
 	on_screen_ = p_value;
-	publish_submission_state();
 	if (p_value) {
-		env_restamp_forced_ = true;
 		wake_runtime_frame();
-	}
-}
-
-// Bind the present walk's shared camera-submission registry (owned by
-// PresentApplier, shared BY REFERENCE): this model's instance id is
-// present exactly while its bounds notifier reports off-screen.
-// [orig: Terrain_RenderSectorModels @ 0x5c5d30]
-void ObjectModel::set_submission_registry(const Dictionary &p_registry) {
-	if (submission_registry_bound_ && p_registry == submission_registry_) {
-		return;
-	}
-	if (submission_registry_bound_) {
-		submission_registry_.erase(get_instance_id());
-	}
-	submission_registry_ = p_registry;
-	submission_registry_bound_ = true;
-	publish_submission_state();
-}
-
-void ObjectModel::publish_submission_state() {
-	if (!submission_registry_bound_) {
-		return;
-	}
-	if (on_screen_) {
-		submission_registry_.erase(get_instance_id());
-	} else {
-		submission_registry_[get_instance_id()] = true;
 	}
 }
 
@@ -1556,8 +1510,7 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
-	ClassDB::bind_method(D_METHOD("set_submission_registry", "registry"),
-			&ObjectModel::set_submission_registry);
+	ClassDB::bind_method(D_METHOD("is_on_screen"), &ObjectModel::is_on_screen);
 
 	ClassDB::bind_method(D_METHOD("begin_ctrl_update"), &ObjectModel::begin_ctrl_update);
 	ClassDB::bind_method(D_METHOD("end_ctrl_update"), &ObjectModel::end_ctrl_update);

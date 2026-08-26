@@ -198,6 +198,20 @@ void PresentApplier::setup(Object *sim, Object *index,
 	placer_ = placer;
 	plan_revision_ = -1; // force a rebuild against the new wiring
 	plan_dirty_ = true;
+	release_planned_rows();
+}
+
+// Retained rows stop being "planned" the moment the plan drops them, so a model
+// that later leaves the mission (a despawned row kept alive as a preview) no
+// longer moves the lifetime stamp on death.
+void PresentApplier::release_planned_rows() {
+	for (const Row &row : rows_) {
+		ObjectModel *model =
+				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model != nullptr) {
+			model->set_present_planned(false);
+		}
+	}
 	rows_.clear();
 }
 
@@ -622,7 +636,7 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		release_part_anim_outputs();
 	}
 	++stat_plan_rebuilds_;
-	rows_.clear();
+	release_planned_rows();
 	present_visibility_.clear();
 	plan_revision_ = layout_revision;
 	plan_stride_ = stride;
@@ -651,6 +665,7 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		row.base = base;
 		row.node_id = model->get_instance_id();
 		row.model = model;
+		model->set_present_planned(true);
 		row.entity_kind = kind;
 		row.entity_index = idx;
 		row.bms_id = bms_id;
@@ -724,15 +739,26 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 	Simulation *native_sim =
 			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
 	for (Row &row : rows_) {
-		// Main-thread Node destruction advances this stamp in PREDELETE. Rebind
-		// before touching another retained pointer if a model was freed by a
-		// notification dispatched during this walk.
+		// Main-thread Node destruction advances this stamp in PREDELETE. Once
+		// a planned model was freed by a notification dispatched during this
+		// walk, no retained pointer is trusted for the rest of it: every later
+		// row resolves cold through ObjectDB (a freed row releases its
+		// visibility intent) and the plan rebinds on the next call, so one
+		// free never drops a frame of presentation for the surviving rows.
 		if (plan_model_lifetime_generation_ !=
 				ObjectModel::lifetime_generation()) {
 			plan_dirty_ = true;
-			break;
 		}
 		ObjectModel *model = row.model;
+		if (plan_dirty_) {
+			model = Object::cast_to<ObjectModel>(
+					ObjectDB::get_instance(row.node_id));
+			if (model == nullptr) {
+				present_visibility_.erase(row.bms_id);
+				row.present_visible = -1;
+				continue;
+			}
+		}
 		const int base = row.base;
 		uint64_t profile_phase_start = p_profile != nullptr
 				? Time::get_singleton()->get_ticks_usec()
@@ -1202,9 +1228,9 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 				++p_profile->muzzle_rows;
 			}
 			if (!row.has_native_muzzle) {
-				// Compatibility path for worlds without native model assets: feed the
-				// presented gun-flash userpoint back into the simulation. Native mission
-				// entities resolve the same authored point lazily at its AI consumer.
+				// The no-native-rig fallback: feed the presented gun-flash userpoint
+				// back into the simulation. Native mission entities resolve the same
+				// authored point lazily at its AI consumer.
 				++stat_muzzle_queries_;
 				if (model->has_muzzle()) {
 					const Vector3 muzzle = model->get_muzzle_world_position();

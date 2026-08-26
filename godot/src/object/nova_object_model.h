@@ -284,8 +284,6 @@ private:
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
 	int env_stagger_slot_ = 0;
-	Dictionary submission_registry_;
-	bool submission_registry_bound_ = false;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool native_frame_ = false;
@@ -387,9 +385,10 @@ private:
 	int64_t last_env_gen_ = -1;
 	Ref<EnvLightValues> last_env_values_;
 	Ref<EnvLightValues> last_section_env_values_;
-	// Visibility/pass edges bypass the slow-TOD stagger on the next submitted
-	// frame. Ordinary generation drift is spread by env_stagger_slot_.
-	bool env_restamp_forced_ = false;
+	// Set by a PresentApplier row plan that retains this model by pointer and
+	// cleared when that plan drops the row; only planned models advance
+	// lifetime_generation_ when they die.
+	bool present_planned_ = false;
 
 	// --- core (nova_object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
@@ -407,13 +406,11 @@ private:
 	void on_object_changed();
 	void on_env_generation_changed();
 	void on_env_pass_changed();
-	bool environment_restamp_due() const;
 	void wake_runtime_frame();
 	void sleep_runtime_frame_if_idle();
 	bool needs_runtime_frame_work() const;
 	void refresh_live_panm_classification();
 	int clamp_lod_index(int p_lod_index) const;
-	void publish_submission_state();
 	void stamp_match_terrain_instances(bool p_page_ready, float p_layer,
 			const Vector4 &p_projection);
 	void set_model_bounds(const AABB &p_bounds);
@@ -490,6 +487,7 @@ public:
 	static void refresh_awake_environment();
 	static int64_t awake_model_count();
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
+	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
 	bool is_runtime_frame_awake() const { return awake_; }
@@ -611,7 +609,6 @@ public:
 	void advance_runtime_frame(double p_delta);
 	void set_on_screen(bool p_value);
 	bool is_on_screen() const { return on_screen_; }
-	void set_submission_registry(const Dictionary &p_registry);
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();

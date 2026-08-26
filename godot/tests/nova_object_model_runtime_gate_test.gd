@@ -498,31 +498,6 @@ func test_scene_pass_transition_restamps_visible_model_synchronously() -> void:
 	assert_eq(int(material.get_shader_parameter("u_fog_type")), 1)
 
 
-func test_live_model_staggers_slow_environment_drift() -> void:
-	# Live PANM/material models stay in the shared awake set, so the environment
-	# signal's wake gate alone cannot stagger them. Sixteen consecutive process
-	# frames must still produce exactly one retained material restamp.
-	var model := _spy_model(PMP_3DI)
-	var material := _first_material(model)
-	var state := _fresh_env_state(Vector3(0.2, 0.3, 0.4))
-	model.set_environment_state(state)
-	var previous: Vector3 = material.get_shader_parameter("u_dir_light_color")
-	var restamps := 0
-	for step in range(16):
-		var values := EnvLightValues.retail_noon_defaults()
-		values.dir_color = Vector3(0.1 + step * 0.02, 0.6, 0.8)
-		state.publish(values)
-		model.advance_runtime_frame(0.0)
-		var current: Vector3 = material.get_shader_parameter("u_dir_light_color")
-		if not current.is_equal_approx(previous):
-			restamps += 1
-			previous = current
-		if step < 15:
-			await get_tree().process_frame
-	assert_eq(restamps, 1,
-			"an always-awake model shares the parked-model 16-frame TOD stagger")
-
-
 func test_clockless_playing_model_stays_awake() -> void:
 	# The OED-preview carve-out: no shared clock + playing means the private
 	# age accumulates per frame, so the model must keep processing.
@@ -610,31 +585,16 @@ func test_mirror_eligibility_selects_the_base_visual_layer() -> void:
 				"a vehicle model never rides the no-mirror layer")
 
 
-func test_submission_registry_tracks_offscreen_edges_and_frees_cleanly() -> void:
+func test_on_screen_edges_are_readable_by_the_present_walk() -> void:
 	var model := _clocked_spy_model()
-	var registry := {}
-	model.set_submission_registry(registry)
-	assert_false(registry.has(model.get_instance_id()),
-			"the on-screen default publishes no off-screen claim")
+	assert_true(model.is_on_screen(),
+			"the on-screen default reports submitted")
 	model.set_on_screen(false)
-	assert_true(registry.has(model.get_instance_id()),
-			"leaving the camera publishes this model's off-screen claim")
+	assert_false(model.is_on_screen(),
+			"leaving the camera reports the off-screen edge the walk gates on")
 	model.set_on_screen(true)
-	assert_false(registry.has(model.get_instance_id()),
-			"re-entering the camera withdraws the claim")
-
-	model.set_on_screen(false)
-	var replacement := {}
-	model.set_submission_registry(replacement)
-	assert_false(registry.has(model.get_instance_id()),
-			"rebinding erases the claim from the previous registry")
-	assert_true(replacement.has(model.get_instance_id()),
-			"rebinding republishes the current state into the new registry")
-
-	var id := model.get_instance_id()
-	model.free()
-	assert_false(replacement.has(id),
-			"a freed model leaves no stale off-screen claim behind")
+	assert_true(model.is_on_screen(),
+			"re-entering the camera reports submitted again")
 
 
 func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:

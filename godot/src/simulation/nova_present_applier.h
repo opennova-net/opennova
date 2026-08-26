@@ -65,8 +65,8 @@ public:
 		MISSION_PROFILE_SLOT_COUNT,
 	};
 
-	// `sim` exposes native lazy muzzle resolution plus the compatibility push-back
-	// seam (typed Simulation; converted once at this boundary). `index` resolves
+	// `sim` exposes native lazy muzzle resolution plus the no-native-rig push-back
+	// fallback (typed Simulation; converted once at this boundary). `index` resolves
 	// rows to typed models — a real EntityIndex, in tests too.
 	void setup(Object *sim, Object *index,
 			const Ref<MissionObjectPlacer> &placer = Ref<MissionObjectPlacer>());
@@ -307,6 +307,7 @@ private:
 			int64_t layout_revision, MissionFrameProfile *p_profile);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
+	void release_planned_rows();
 	void release_part_anim_outputs();
 	int64_t current_index_generation();
 	const String &infantry_key(int state);

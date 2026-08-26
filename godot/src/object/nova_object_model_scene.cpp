@@ -235,8 +235,8 @@ void ObjectModel::sync_screen_notifier(const AABB &p_bounds) {
 			screen_notifier_->queue_free();
 			screen_notifier_ = nullptr;
 		}
-		// Route through the public seam: the safe default must also clear any
-		// off-screen claim left in the shared submission registry.
+		// Route through the public seam so the on-screen edge wakes the
+		// runtime frame like a real notifier would.
 		set_on_screen(true);
 		return;
 	}
