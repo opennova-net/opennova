@@ -691,7 +691,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // OpenNova's transient rounds live in RoundSim rather than the entity registry,
     // and round-to-placed-device conversion clears noage before the pool-1 entity
     // is materialized, so every registry item already satisfies that gate by
-    // construction (ledger row pending: see the post-merge sign-off notes).
+    // construction (a D-COL row for the omitted gate is proposed for sign-off).
     auto push_dynamic = [&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);

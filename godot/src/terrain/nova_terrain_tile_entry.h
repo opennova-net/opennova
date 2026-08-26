@@ -41,7 +41,6 @@ public:
 
 	void set_cell(int cell_x, int cell_z);
 	bool has_flag(int flag) const;
-	void set_flag(int flag, bool enabled);
 
 	Dictionary to_dictionary() const;
 

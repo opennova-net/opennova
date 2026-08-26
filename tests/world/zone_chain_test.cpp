@@ -498,7 +498,8 @@ EntityHandle spawn_unnumbered_zone(World &w, uint8_t team, Vec3 pos) {
 // transaction. The active entry then reports unique presence and advances by
 // that rate until it changes the zone owner. [orig:
 // Entity_MovementCollisionResolver @0x4B2BD0 -> Server_OnPlayerTouchCaptureZone
-// @0x500BA0; CaptureCtx_* / Server_UpdateCaptureZones @0x53B340..0x53B8F0]
+// @0x500BA0; the CaptureCtx_* / Server_UpdateCaptureZones run from
+// CaptureCtx_RemoveQueueEntries @0x53B340 to 0x53B8F0]
 void test_unnumbered_timed_capture_and_presence() {
     AshFixture f;
     MatchRules rules = f.w.match.rules();

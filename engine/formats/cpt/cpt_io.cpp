@@ -11,8 +11,8 @@
 #include <io/le.h>
 #include <io/log.h>
 
-// [orig: Terrain_LoadLodStorage @0x603550 — the PCMT/PNMT/POLY chunk reader with the CBitStream
-//  variable-width tile-index codec; DPTH magic @0x6037b3, CDEP magic @0x603620]
+// [orig: Terrain_LoadLodStorage @0x603550 — the CDEP/DPTH/POLY/NMAP chunk reader with the CBitStream
+//  variable-width tile-index codec; DPTH magic @0x6037b2, CDEP magic @0x60361f]
 
 namespace opennova {
 

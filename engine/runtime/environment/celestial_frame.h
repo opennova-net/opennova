@@ -85,7 +85,7 @@ inline CelestialBodyFrame build_glare_frame(const EnvironmentState &env,
 	frame.tint = env.sun_color();
 	// The locked reimpl profile is FBEFFECTS 3, so the direct draw carries
 	// the witnessed quarter (the bloom re-adds the glare)
-	// [orig: FrameFX_QualityAtLeast3 @ 0x581f6a; >>= 2 @ 0x5ad033..0x5ad03c].
+	// [orig: FrameFX_QualityAtLeast3 @ 0x581f60; >>= 2 @ 0x5ad033..0x5ad03c].
 	frame.opacity = static_cast<float>(glare_glow_alpha_fixed(
 							detail::to_fixed_16_16(1.0f), occlusion_brightness,
 							detail::to_fixed_16_16(env.overcast_blend()),

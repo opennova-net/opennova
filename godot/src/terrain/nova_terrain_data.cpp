@@ -526,7 +526,6 @@ String TerrainData::get_terrain_name() const { return terrain_name; }
 
 void TerrainData::set_colormap(const Ref<Texture2D> &p_tex) {
 	colormap = p_tex;
-	_invalidate_colormap_cpu_cache();
 	_sync_trn_texture_filenames_from_refs();
 	_notify_terrain_changed();
 }
@@ -592,43 +591,6 @@ String TerrainData::_texture_to_filename(const Ref<Texture2D> &p_tex) {
 	String path = p_tex->get_path();
 	if (path.is_empty()) return "";
 	return path.get_file();
-}
-
-void TerrainData::_invalidate_colormap_cpu_cache() const {
-	colormap_cpu_image.unref();
-	colormap_cpu_width = 0;
-	colormap_cpu_height = 0;
-}
-
-bool TerrainData::_ensure_colormap_cpu_cache() const {
-	if (colormap_cpu_image.is_valid() && colormap_cpu_width > 0 && colormap_cpu_height > 0) {
-		return true;
-	}
-	if (colormap.is_null()) {
-		return false;
-	}
-
-	Ref<Image> image = colormap->get_image();
-	if (image.is_null() || image->is_empty()) {
-		return false;
-	}
-	if (image->is_compressed()) {
-		const Error err = image->decompress();
-		if (err != OK) {
-			return false;
-		}
-	}
-	if (image->get_format() != Image::FORMAT_RGBA8) {
-		image->convert(Image::FORMAT_RGBA8);
-	}
-	colormap_cpu_width = image->get_width();
-	colormap_cpu_height = image->get_height();
-	if (colormap_cpu_width <= 0 || colormap_cpu_height <= 0) {
-		_invalidate_colormap_cpu_cache();
-		return false;
-	}
-	colormap_cpu_image = image;
-	return true;
 }
 
 static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &target_field) {
@@ -915,7 +877,6 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	}
 	tilestrip_tex = load_tex("tilestrip", tilestrip_filename);
 	trn.tilestrip = tilestrip_filename.utf8().get_data();
-	_invalidate_colormap_cpu_cache();
 
 	// CPT is an export-time bake artefact; editor projects legitimately save
 	// a .trn without one (see plan: "Make CPT optional"). Missing/empty
@@ -1114,23 +1075,6 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 			Image::FORMAT_RG8, bytes);
 	return mask.is_valid() ? ImageTexture::create_from_image(mask)
 			: Ref<ImageTexture>();
-}
-
-Color TerrainData::get_colormap_color_world(float world_x, float world_z) const {
-	// sample_terrain_colormap_tinted @0x606030 indexes the colormap directly as
-	// x & 0x3FF, (-z) & 0x3FF (jodemo Terrain_GetModulatedColorAtPos @0x5C5FE0;
-	// docs/terrain/terrain-re.md). It does not go through sector-grid quadrant
-	// remapping; the foliage detail tier samples it four times around each
-	// vertex (generate_foliage_instances_0 @0x5ffdd0).
-	if (!_ensure_colormap_cpu_cache()) {
-		return Color(1.0f, 1.0f, 1.0f, 1.0f);
-	}
-
-	const int x = static_cast<int>(std::floor(world_x));
-	const int z = static_cast<int>(std::floor(-world_z));
-	const int sample_x = ((x % colormap_cpu_width) + colormap_cpu_width) % colormap_cpu_width;
-	const int sample_z = ((z % colormap_cpu_height) + colormap_cpu_height) % colormap_cpu_height;
-	return colormap_cpu_image->get_pixel(sample_x, sample_z);
 }
 
 Vector2 TerrainData::world_to_runtime_source_coords(float world_x, float world_z) const {

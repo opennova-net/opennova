@@ -125,7 +125,7 @@ func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void
 			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
 	water.advance_frame(TICK)
 	assert_eq(water.get_reflection_viewport().size, Vector2i(256, 256),
-			"retail detail 2 allocates a fixed square RTT [orig: sub_5C08B0 @ 0x5c08d1]")
+			"retail detail 2 allocates a fixed square RTT [orig: Water_CreateReflectionRenderTarget @ 0x5c08d1]")
 	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001,
 			"square projection preserves the source horizontal FOV")
 	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(

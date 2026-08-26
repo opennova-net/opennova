@@ -7,8 +7,8 @@
 // bound moved here). The WRITERS remain separate and have DIVERGED: cpt's
 // writer has a normalizing set_position (a bit_offset > 8 folds into
 // byte+bit) and a write_to_file, so adopting this writer in cpt would be a
-// real migration byte-diffed against the CPT corpus (tests/terrain's
-// parametric_parity_test), not a swap.
+// real migration byte-diffed against the CPT corpus (tests/cpt/cpt_roundtrip_test
+// plus the by-hand corpus byte diff), not a swap.
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).

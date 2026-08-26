@@ -251,7 +251,7 @@ int PffDocument::get_game() const {
 // Open / inspect
 // ---------------------------------------------------------------------------
 
-Error PffDocument::do_open(const String &path, bool legacy) {
+Error PffDocument::open(const String &path) {
 	last_error_ = String();
 	const String native = to_native_path(path).strip_edges();
 	if (native.is_empty()) {
@@ -260,9 +260,7 @@ Error PffDocument::do_open(const String &path, bool legacy) {
 	}
 	close_source();
 	entries_.clear();
-	const int rc = legacy
-			? pff_open_legacy(&source_, native.utf8().get_data())
-			: pff_open(&source_, native.utf8().get_data());
+	const int rc = pff_open(&source_, native.utf8().get_data());
 	if (rc != 0) {
 		last_error_ = "Not a readable PFF archive: " + native;
 		return ERR_FILE_UNRECOGNIZED;
@@ -275,9 +273,6 @@ Error PffDocument::do_open(const String &path, bool legacy) {
 	return OK;
 }
 
-Error PffDocument::open(const String &path) {
-	return do_open(path, false);
-}
 
 String PffDocument::get_source_path() const {
 	return String(source_path_.c_str());
@@ -588,7 +583,6 @@ void PffDocument::extract_worker() {
 	}
 	std::lock_guard<std::mutex> lock(extract_mutex_);
 	extract_state_.running = false;
-	extract_state_.finished = true;
 }
 
 Error PffDocument::extract_async(const PackedStringArray &names, const String &out_dir, bool decode) {

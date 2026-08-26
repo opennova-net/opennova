@@ -124,14 +124,6 @@ bool RtxtStringFile::has_string_in_section(const String &p_section, const String
 	return file_.find_in_section(gd_to_std(p_section), gd_to_std(String(p_key))) != nullptr;
 }
 
-Vector2i RtxtStringFile::get_position(const StringName &p_key) const {
-	const int idx = find_entry_by_key(p_key);
-	if (idx < 0) {
-		return Vector2i();
-	}
-	return get_entry_position(idx);
-}
-
 int RtxtStringFile::get_entry_count() const {
 	return static_cast<int>(file_.entries.size());
 }
@@ -171,22 +163,6 @@ PackedStringArray RtxtStringFile::get_section_keys(int p_section_index) const {
 String RtxtStringFile::get_entry_text(int p_index) const {
 	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), String());
 	return std_to_gd(file_.entries[p_index].text);
-}
-
-Vector2i RtxtStringFile::get_entry_position(int p_index) const {
-	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), Vector2i());
-	const auto &pos = file_.entries[p_index].position;
-	return Vector2i(pos.x, pos.y);
-}
-
-int RtxtStringFile::find_entry_by_key(const StringName &p_key) const {
-	const std::string upper = opennova::rtxt::to_upper(gd_to_std(String(p_key)));
-	for (size_t i = 0; i < file_.entries.size(); ++i) {
-		if (opennova::rtxt::to_upper(file_.entries[i].key) == upper) {
-			return static_cast<int>(i);
-		}
-	}
-	return -1;
 }
 
 // --- Entry mutations ---

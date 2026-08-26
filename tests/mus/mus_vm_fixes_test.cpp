@@ -117,7 +117,7 @@ int main(void) {
     mus_vm_destroy(vm4);
 
     /* ---- Script 5: inc_g/dec_g mutate bytes but do not fire dirty/var hooks ----
-       [orig: AudioVM_Op_IncGlobal/DecGlobal @ 0x672AE0/0x672AF0] only inc/dec
+       [orig: AudioVM_Op_IncGlobal @ 0x672AE0 / AudioVM_Op_DecGlobal @ 0x672AF0] only inc/dec
        globals[off] and CLC. The editor may poll vars for display, but the VM
        callback must remain tied to witnessed dirty writes such as pop_g. */
     uint8_t code5[] = { 0x01,10, 0x08,0x00, 0x28,0x00, 0x29,0x00, 0x3F };

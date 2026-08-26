@@ -57,7 +57,7 @@ func set_weapon_sights(sights: Array, root: ResourceRoot) -> void:
 		var y1 := float(e.get("y1", 0))
 		row.rect_v = Rect2(x1, y1, float(e.get("x2", 0)) - x1, float(e.get("y2", 0)) - y1)
 		# Blend token 1 is the additive entry of the original's blend-token map
-		# [orig: WeaponDef_CreateBlendNamedMaterial blend/add/...]; the full map is not ported yet, so
+		# [orig: WeaponDef_CreateBlendNamedMaterial @0x540180 blend/add/...]; the full map is not ported yet, so
 		# the token stays a literal here — no bound name exists until the
 		# WeaponDef_CreateBlendNamedMaterial blend-map port lands in the engine.
 		if int(e.get("blend", 0)) == 1:

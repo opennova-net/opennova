@@ -985,7 +985,7 @@ func test_multiple_companions_first_owner_drives_menu() -> void:
 # The Controls remap flow end-to-end at the shell seam: double-click arms the
 # capture (Control cell clears), the next key assigns through the witnessed
 # record semantics and persists, Esc cancels, and CLEAR_KEY/DEFAULTS drive the
-# same live model [orig: sub_55D560 @ 0x55d560; KeyBinding_HandleKeyAssignment
+# same live model [orig: UI_ControlsRemapArmHandler @ 0x55d560; KeyBinding_HandleKeyAssignment
 # @ 0x55bb20; CLEAR_KEY @ 0x55bfd0; DEFAULTS @ 0x55bd90].
 func test_control_mapping_remap_flow() -> void:
 	# before_each snapshots user://controls.cfg; after_each restores it and the
@@ -1056,7 +1056,7 @@ func test_control_mapping_remap_flow() -> void:
 # Leaving the screen while a capture is armed tears the capture down: a later
 # keypress must neither assign nor be swallowed as an invisible Esc target.
 # Retail cannot exhibit the stale capture — its pump state lives with the
-# Options screen [orig: sub_55D560 @ 0x55d560].
+# Options screen [orig: UI_ControlsRemapArmHandler @ 0x55d560].
 func test_control_mapping_capture_dies_on_screen_change() -> void:
 	ControlsBindings.model().restore_defaults()
 	var dir := OS.get_temp_dir().path_join("menu_shell_remap_nav_%d" % Time.get_ticks_usec())

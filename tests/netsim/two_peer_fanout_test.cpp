@@ -4,7 +4,7 @@
 // the host's own client (a LoopbackChannel, transport mode 1) plus a joiner (a socket-free
 // UdpSessionTransport, mode 2). This proves the netsim core ports the original's per-connection
 // fan [orig: NapiNPServer_SendFiltered @0x4C87E0 -> SendToConn @0x4c4f20] and per-connection
-// receive drain [orig: PumpRecvQueues / NapiNPConnection_ParseMessages @0x625BC0] WITHOUT any
+// receive drain [orig: PumpRecvQueues / CNapiNPConnection_ParseMessages @0x625BC0] WITHOUT any
 // Godot or OS sockets — the harness carries raw datagrams between the two transports the way a
 // real UDP socket pair would.
 //

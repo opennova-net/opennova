@@ -412,7 +412,7 @@ int check_S_6E_spawn_wave_status() {
 // S2C 0x81 — requester-local accumulated points. The payload is the signed
 // CRenderState field 0x1C, not the mode's primary scoreboard value.
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
-//        CRenderState_GetFieldByIndex @0x52D7D0;
+//        CPlayerStats_GetFieldPlusOne @0x52D7D0;
 //        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
 int check_S_81_score_delta_sound() {
 	LE w;
@@ -942,7 +942,7 @@ int check_S_18_full_entity_spawn() {
 // S2C 0x1D + C2S 0x2B -- the two-form header and requester offset that start
 // the end-round board pull. The form is session state, never length.
 // [orig: NapiNPClientMsg_0x01D @0x430840 -- form pick @0x43086c..0x430883;
-// NapiNPServerMsg_0x02B @0x514FE0]
+// NapiNPServerMsg_HandleReplayDataRequest @0x514FE0]
 int check_end_round_control_pair() {
 	const std::vector<uint8_t> header_body = {
 			2, 0x34, 0x12, 0xFE, 0xFF, 1, 0xFF};

@@ -41,7 +41,6 @@ public:
 	String get_decompiled_text_with_bank(const StringName &p_script_name,
 			const Ref<SbfBank> &p_bank);
 	Dictionary compile_text(const String &p_text);
-	void set_compiled_bytecode(const PackedByteArray &p_bytecode);
 	void set_compiled_file_bytes(const PackedByteArray &p_file_bytes);
 
 	const MusScript *raw_script(const String &p_name) const;
