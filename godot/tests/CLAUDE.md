@@ -29,3 +29,9 @@
   process exit when the class carries a `Transform3D`-typed member (Godot 4.6
   teardown quirk, bisected 2026-08-09) and GUT still reports green totals, so
   the crash only shows as a nonzero exit code.
+- `fixtures/threedi/synthetic/*.3di` are committed models with one authored edit each
+  (CTRL names, PANM rows, LGHT/material fields), minted ONCE on master `5820432c1`
+  through the `ObjectData` edit + export bindings ADR 0038 retired; the runtime cannot
+  re-author them. Tests that need an authored variant load one of these and assert its
+  content with the read-back getters. Recipes and the minting probe:
+  `fixtures/threedi/synthetic/README.md`.
