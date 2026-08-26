@@ -4,6 +4,7 @@
 #include "object/nova_object_data_internal.h"
 
 #include <renderer/material_classify.h>
+#include <renderer/material_descriptor.h>
 #include <threedi/threedi_ctrl_catalog.h>
 
 #include "util/texture_path_resolver.h"
@@ -34,37 +35,53 @@ const char *shader_normal_space_name(renderer::ObjectNormalSpace normal_space) {
 	return "none";
 }
 
+// Capability word for a shader tag: the descriptor table's shader_flags, or
+// the first row (FF_ST_OP, DIFFUSE only) for an unknown tag, the same fallback
+// the retail material-info registry gives an unregistered tag.
+uint32_t shader_flags_for_tag(const char *shader_name) {
+	if (const renderer::MaterialDescriptorRecord *descriptor =
+			renderer::find_material_descriptor(shader_name != nullptr ? shader_name : "")) {
+		return static_cast<uint32_t>(descriptor->shader_flags);
+	}
+	return static_cast<uint32_t>(renderer::kMaterialDescriptorTable[0].shader_flags);
+}
+
+// The boolean keys are the descriptor's capability word (shader_flags) and
+// descriptor_flags, bit for bit: what the TAG says the shader can do, not the
+// per-material runtime classification (which folds in MTRL overrides such as
+// is_glass and the authored UV generators). Family, blend and normal space
+// come from the runtime classification; they have no separate descriptor
+// meaning.
 void add_shader_classification_fields(Dictionary &item,
 		const ThreediMaterial &material) {
+	const renderer::MaterialDescriptorRecord *descriptor =
+			renderer::find_material_descriptor(material.shader_name);
+	const uint32_t flags = shader_flags_for_tag(material.shader_name);
+	const uint32_t descriptor_flags = descriptor != nullptr ? descriptor->descriptor_flags : 0;
 	const renderer::ObjectMaterialClassification classification =
 			renderer::classify_object_material(material.shader_name,
 					material.material_flags, material.emissive_type,
 					material.is_glass, material.alpha_test_value_byte);
-	bool has_diffuse = false;
-	for (uint32_t i = 0; i < material.texture_count && i < kMaxMaterialTextures; ++i) {
-		if (material.textures[i].slot == THREEDI_TEX_SLOT_DIFFUSE) {
-			has_diffuse = true;
-			break;
-		}
-	}
-	item["has_diffuse"] = has_diffuse;
-	item["has_secondary"] = classification.has_detail;
-	item["has_normal_a"] = classification.needs_normal_map;
-	item["has_normal_b"] = classification.normal_uses_uv2;
-	item["is_alpha"] = classification.blend == renderer::ObjectBlendMode::AlphaBlend;
+	item["shader_flags"] = static_cast<int64_t>(flags);
+	item["has_diffuse"] = (flags & renderer::MATERIAL_FLAG_DIFFUSE) != 0;
+	item["has_secondary"] = (flags & renderer::MATERIAL_FLAG_SECONDARY) != 0;
+	item["has_normal_a"] = (flags & renderer::MATERIAL_FLAG_NORMAL_A) != 0;
+	item["has_normal_b"] = (flags & renderer::MATERIAL_FLAG_NORMAL_B) != 0;
+	item["is_alpha"] = (flags & renderer::MATERIAL_FLAG_ALPHA) != 0;
 	// Self-lum keys on EMISSIVE; 0x10000000 is the separate glow/bloom-copy
 	// capability (REN-4, D-RMAT-4 — the two ride together on FF _LUM rows but
 	// FFP_GLASS carries only the capability).
-	item["is_luminance"] = classification.is_luminance;
-	item["is_glow_capable"] = classification.is_glow_capable;
-	item["is_glass_shader"] = classification.is_glass;
-	item["is_skinned_shader"] = classification.is_skinned;
-	item["is_blending_shader"] = classification.blend != renderer::ObjectBlendMode::Opaque;
-	item["uses_uv_generators"] = material.u_params.style != 0 || material.v_params.style != 0;
-	item["uses_environment"] = classification.uses_environment;
-	item["uses_specular"] = classification.uses_specular;
-	item["environment_textured"] = classification.environment_textured;
-	item["uses_flag_animation"] = classification.family == renderer::ObjectShaderFamily::Flag;
+	item["is_luminance"] = (flags & renderer::MATERIAL_FLAG_EMISSIVE) != 0;
+	item["is_glow_capable"] = (flags & renderer::MATERIAL_FLAG_GLOW) != 0;
+	item["is_glass_shader"] = (flags & renderer::MATERIAL_FLAG_GLASS) != 0;
+	item["is_skinned_shader"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_SKINNED) != 0;
+	item["is_blending_shader"] = (flags & renderer::MATERIAL_FLAG_BLENDING) != 0;
+	item["uses_uv_generators"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
+	item["uses_environment"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
+	item["uses_specular"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
+	item["environment_textured"] =
+			(descriptor_flags & renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
+	item["uses_flag_animation"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_FLAG_ANIMATION) != 0;
 	item["shader_family"] = from_native(
 			renderer::object_shader_family_name(classification.family));
 	item["shader_blend"] = from_native(shader_blend_name(classification.blend));
