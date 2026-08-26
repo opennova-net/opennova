@@ -81,6 +81,7 @@ var _frame_stats := FrameStatsBoard.new()
 # Root-viewport render-time sampling for the Stats tab; the sampler owns the
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
+var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
@@ -117,6 +118,8 @@ func _init() -> void:
 	# The sampler observes the board's capture close edge directly (render-time
 	# measurement is RenderingServer state, not Node-owned state).
 	_render_stats.setup(_frame_stats)
+	_frame_phase_sampler.setup(_frame_stats)
+	add_child(_frame_phase_sampler)
 	_world_load.load_failed.connect(_on_world_load_failed)
 
 
@@ -256,6 +259,7 @@ func _ready() -> void:
 	# presenter; the world re-hands it to each mission runtime it creates.
 	_world.set_frame_stats_board(_frame_stats)
 	_hud_presenter.set_frame_stats_board(_frame_stats)
+	_menu_shell.set_frame_stats_board(_frame_stats)
 	# The shell's own round-outcome tap (the HUD presenter keeps its separate connection
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
@@ -1105,17 +1109,17 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 func _process(delta: float) -> void:
 	if _shutdown_prepared:
 		return
+	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
 	if not _debug_pose_env.is_empty() and _state == State.WORLD:
 		_debug_pose_env = DebugPoseEnv.apply(_debug_pose_env,
 				_world.get_sim() if _world != null else null)
 	var probe_enabled := _perf_probe_enabled
-	var stats_on := _frame_stats.is_capture_active()
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
 	# the F3 Stats capture both consume the same measurements.
-	var timing := probe_enabled or stats_on
+	var timing: bool = probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()
-	_render_stats.sample(get_viewport(), stats_on)
+	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell)
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
@@ -1147,6 +1151,7 @@ func _process(delta: float) -> void:
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
+	_frame_phase_sampler.finish_shell_control(probe_t0)
 	var frame_input := MissionFrameInput.new()
 	frame_input.delta_seconds = delta
 	if _player_presenter != null:
@@ -1172,19 +1177,12 @@ func _process(delta: float) -> void:
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
+	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	_maybe_exit_round_cycle()
 	if timing:
-		var probe_t4 := Time.get_ticks_usec()
-		if probe_enabled:
-			_perf_probe_spans["before"] = probe_t1 - probe_t0
-			_perf_probe_spans["world"] = probe_t2 - probe_t1
-			_perf_probe_spans["after"] = probe_t3 - probe_t2
-			_perf_probe_spans["hud"] = probe_t4 - probe_t3
-		if stats_on:
-			_frame_stats.add(FrameStatsBoard.FRAME_PLAYER_BEFORE, probe_t1 - probe_t0)
-			_frame_stats.add(FrameStatsBoard.FRAME_WORLD, probe_t2 - probe_t1)
-			_frame_stats.add(FrameStatsBoard.FRAME_PLAYER_AFTER, probe_t3 - probe_t2)
-			_frame_stats.add(FrameStatsBoard.FRAME_HUD, probe_t4 - probe_t3)
+		_frame_phase_sampler.record_shell_spans(
+				probe_t0, probe_t1, probe_t2, probe_t3, probe_t4,
+				Time.get_ticks_usec(), _perf_probe_spans, probe_enabled)
 
 
 # Mouse-look rides the shared LocalPlayerPresenter (the yaw/pitch witnesses live there);

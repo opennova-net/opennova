@@ -6,7 +6,9 @@ shader_type spatial;
 // the same color equation (subject to the target framebuffer's normal clamp).
 render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
 
-uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;
+#include "res://shaders/nova_color.gdshaderinc"
+
+uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
 void fragment() {
@@ -20,6 +22,6 @@ void fragment() {
 		// Source 0.5 is neutral after the 2x destination modulation.
 		base.rgb = mix(vec3(0.5), base.rgb, mask);
 	}
-	ALBEDO = base.rgb * 2.0;
+	ALBEDO = nova_scene_output(base.rgb * 2.0);
 	ALPHA = 1.0;
 }

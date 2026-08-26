@@ -184,6 +184,11 @@ struct CollisionModel {
     // not host-stamped. Cached at finalize time; u64 retains the full unscaled
     // Q16 diagonal before per-entity scale and signed-runtime clamping.
     uint64_t fallback_bound_radius_q16 = 0x10000u;
+    // Precomputed membership for the TYPE-1-only LOS/ground segment walkers.
+    // Models containing only triggers, blink volumes, ladders, or vehicle
+    // volumes can never clip those rays and are rejected before entity/matrix
+    // work without changing contact-query behavior.
+    bool has_solid_volume = false;
     bool valid() const { return !sections.empty(); }
 
     // Derive section AABB/bound-sphere from its volumes (the loader precomputes
@@ -606,13 +611,36 @@ struct FixedVec3 {
     constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
 };
 
-// One decoded remote pool-0 person (player or non-player infantry) exposed only
-// to visual projectile collision. ClientWorldMaterializer deliberately excludes
-// pool 0, so this proxy must never alias the joiner's separate local-player
+// One items.def + model-header collision initialization result, shared by
+// locally materialized entities and decoded wire rows. Values already include
+// the retail collision-block gate, effective authored scale, first-husk max,
+// and +0x1000 bound pad. Zero scale is the ordinary unscaled sentinel.
+// [orig: Entity_InitFromModel @0x40dc30..0x40e078]
+struct ResolvedCollisionShape {
+    int32_t model_id = -1;
+    int32_t bound_radius_q16 = 0;
+    int32_t uniform_scale_q16 = 0;
+    FixedVec3 bbox_center_q16;
+    bool has_collision_block = false;
+    // Pool-1 rows receive a +6u proximity-source slice only when the ItemDef
+    // survives retail's source gates (EWeap is excluded unless raw type 1).
+    // [orig: Entity_BuildProximityListsFromPools — the pool-1 loop head
+    // @0x4b9127..0x4b9147 (in-use, ItemDef, Flags bit 0, attrib 0x20 unless
+    // type 1); +6.0u @0x4b9152]
+    bool pool1_candidate_source_eligible = false;
+};
+
+// One decoded remote pool-0 person (player or non-player infantry) projected
+// into client-side collision consumers. ClientWorldMaterializer deliberately
+// excludes pool 0, so this proxy must never alias the joiner's separate local
 // Entity or participate in movement, AI, explosions, or authoritative damage.
-struct ProjectilePersonProxy {
+// Projectile traces and per-draw sun visibility share this one typed row.
+struct WirePersonCollisionProxy {
     uint16_t wire_handle = 0xFFFF;
     FixedVec3 position_q16;
+    int32_t bound_radius_q16 = 0;
+    int32_t uniform_scale_q16 = 0;
+    FixedVec3 bbox_center_q16;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
@@ -623,14 +651,20 @@ struct ProjectilePersonProxy {
 // byte (entity+16 high byte) while entity+20/+24 retain the last spawn/dead
 // Euler sample [orig: the 0x0D spawn angle landings + the compact fold; the
 // collision placement matrix @ 0x613f40 reads those same three fields].
-struct ProjectileDynamicProxy {
+struct WireDynamicCollisionProxy {
     uint16_t wire_handle = 0xFFFF;
+    // Explicitly verified local materialization of this same decoded row.
+    // Numeric handle equality alone is never treated as identity.
+    EntityHandle registry_twin;
     int32_t model_id = -1;          // CollisionWorld model registry id; -1 = unresolved
     FixedVec3 position_q16;
     int32_t heading_bam = 0;        // reconstructed entity+16 (yaw_byte << 24)
     int32_t pitch_bam = 0;          // retained entity+20 spawn/dead sample
     int32_t roll_bam = 0;           // retained entity+24 spawn/dead sample
-    int32_t bound_radius_q16 = 0;   // broad-phase sphere (entity+0 boundRadius stand-in)
+    int32_t bound_radius_q16 = 0;   // exact entity+0 boundRadius
+    int32_t uniform_scale_q16 = 0;  // entity+0x158/itemDef+0x1B8 effective scale
+    FixedVec3 bbox_center_q16;       // entity+0x1FC..+0x204 sun/LOS origin offset
+    bool candidate_source_eligible = false;
 };
 
 enum class ProjectileHitClass : uint8_t {
@@ -720,6 +754,24 @@ public:
         int64_t static_faces = 0;
         int64_t dynamic_faces = 0;
     };
+    struct RaycastPerf {
+        uint64_t calls = 0;
+        uint64_t terrain_us = 0;
+        uint64_t sector_us = 0;
+        uint64_t sector_candidates = 0;
+    };
+    struct RaycastPrepPerf {
+        uint64_t candidate_collect_us = 0;
+        uint64_t grid_publish_us = 0;
+        uint64_t grid_span_us = 0;
+        uint64_t grid_bucket_us = 0;
+        uint64_t grid_workspace_us = 0;
+    };
+    struct ResolvePerf {
+        uint64_t contacts_us = 0;
+        uint64_t repulsion_us = 0;
+        uint64_t ground_us = 0;
+    };
     const TraceProfile &trace_profile() const { return trace_profile_; }
     bool trace_profile_enabled() const { return trace_profile_enabled_; }
     // Profiling is disabled by default. Each enable/disable edge clears the
@@ -768,25 +820,24 @@ public:
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0] per-entity candidate
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
-    // Mission-init pool snapshot for pre-logic consumers such as portal setup.
-    // Deliberately does not advance the 17-tick candidate-slice cadence.
+    // Mission-init pool snapshot and candidate slices for pre-logic consumers
+    // such as portal setup and first-tick grounding. The 17-tick cadence only
+    // governs steady-state rebuilds.
     void build_initial_tables(World &world);
-    // A spawn or registry rewind keeps an existing pool snapshot coherent. After
-    // the first candidate-slice epoch it also replaces slices immediately; before
-    // that epoch it preserves retail's initial 16 sliceless logic ticks.
+    // A spawn or registry rewind immediately republishes the existing pool
+    // snapshot and its candidate slices.
     void refresh_after_registry_change(World &world);
 
-    // Replace the persistent decoded-person collision projection. Sorting by
-    // wire handle gives the proxy-only subset deterministic order; no wire
-    // handle is ever converted to EntityHandle.
-    void replace_projectile_person_proxies(
-            std::vector<ProjectilePersonProxy> proxies,
+    // Atomically replace the persistent decoded collision projection. Sorting
+    // by wire handle gives both domains deterministic order; the wire-keyed
+    // candidate arena is separate from candidates_, so a numerically equal
+    // packed wire and registry handle can never alias. There is deliberately
+    // no projectile-only compatibility mutator: projectile traces and replica
+    // sun lighting consume this same snapshot.
+    void replace_wire_collision_proxies(
+            std::vector<WirePersonCollisionProxy> persons,
+            std::vector<WireDynamicCollisionProxy> dynamics,
             uint16_t local_player_wire_handle = 0xFFFF);
-
-    // Replace the decoded pool-1 mover projection (authored geometry at the
-    // decoded pose). Same ordering/aliasing rules as the person replace.
-    void replace_projectile_dynamic_proxies(
-            std::vector<ProjectileDynamicProxy> proxies);
 
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision
@@ -818,6 +869,17 @@ public:
     // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]
     void query_blink_boxes_at_point(World &world, const int32_t pos[3], BlinkAccum &accum);
 
+    // Iris/exposure point query: clear `accum`, then test only building-kind
+    // entries in `source`'s fixed proximity-candidate slice. This is a
+    // different retail function from query_blink_boxes_at_point: the latter
+    // walks the global building prefix for camera/occlusion callers, while
+    // terrain_sector_compute_lighting reuses the local player's
+    // entity+0x1BC/+0x1C0 slice for all three marched samples.
+    // [orig: terrain_sector_compute_lighting @ 0x5c7550, caller passes
+    // g_local_player_entity from Environment_ApplyFogAndAmbient @ 0x57e51d]
+    void query_candidate_blink_boxes_at_point(World &world, EntityHandle source,
+                                              const int32_t pos[3], BlinkAccum &accum);
+
     // Projectile face raycast against ONE entity's collision instance (the
     // husk-aware target view). kNoFaceMesh = no instance or the model carries
     // no face mesh — the caller's bound-sphere stand-in applies (the D-ITEM-1
@@ -835,17 +897,15 @@ public:
                                  const int32_t end[3], int32_t extra_radius,
                                  PersonSectionHit &out);
 
-    // Entity-only radiused segment test over the static collision prefix:
-    // TRUE = some static's type-1 solid clips the segment at `radius`
-    // (negative radius reads the planes thinner). The iris sun-occlusion ray
-    // primitive — the caller passes allowAllTypes = 1, so no building-kind
-    // gate. `exclude` skips one static slot: the query entity never blocks its
-    // own sun ray. [orig: raycast_find_collision_entity @ 0x539a70 (the iris
-    // caller @ 0x5c7784 pushes allowAllTypes 1; the entity walk skips
-    // entry_entity == entity_a) -> raycast_against_entity_pool @ 0x538720;
-    // pool-1 dynamics are a tracked D-RLIT-2 residual.]
-    bool segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
-                             int32_t radius, EntityHandle exclude = EntityHandle{});
+    // Entity-only radiused segment test over `source`'s candidate slice:
+    // TRUE = an eligible pool-1 dynamic or pool-2 static type-1 solid clips
+    // the segment at `radius` (negative radius reads the planes thinner). The
+    // iris/entity-sun callers use allowAllTypes=1, so there is no building-kind
+    // gate. [orig: raycast_find_collision_entity @ 0x539a70 ->
+    // raycast_against_entity_pool @ 0x538720]
+    bool candidate_segment_hits_solid(World &world, EntityHandle source,
+                                      const int32_t a[3], const int32_t b[3],
+                                      int32_t radius);
 
     // The three sun-occlusion clip radii, most permissive first — the same
     // segment recast with progressively thinner plane reads; each blocked cast
@@ -859,11 +919,11 @@ public:
     // Per-entity sun-visibility blocked-ray count for the drawn-entity lighting
     // factor: one segment from the entity position + raw collision-bbox
     // midpoint, 200 u along the active light direction, recast at the three
-    // clip radii — against the STATICS IN THE ENTITY'S OWN candidate slice
-    // (the +0x1BC arena block the ray walker iterates; only structures whose
+    // clip radii — against every eligible entry in the ENTITY'S OWN candidate
+    // slice (the +0x1BC arena block the ray walker iterates; only solids whose
     // inflated sphere overlaps the entity's bubble can block its sun). An
-    // entity with no slice — statics, unsliced pool-1 rows, the 16 sliceless
-    // mission-start ticks — returns 0, matching retail's +0x1C0 == 0 skip
+    // entity with no slice — statics, ineligible pool-1 rows, or the 16
+    // sliceless mission-start ticks — returns 0, matching retail's +0x1C0 == 0 skip
     // (quality stays 4, factor 1.0). The caller maps the count through
     // renderer::sun_visibility_factor ((4 - blocked) * 0.25).
     // [orig: Entity_ComputeSunVisibility @ 0x5c6800 — the +0x1C0 gate
@@ -874,6 +934,26 @@ public:
     // +0x1BC/+0x1C0 slice]
     int sun_visibility_blocked_rays(World &world, const Entity &e,
                                     const int32_t sun_step_q16[3]);
+
+    // Wire-identity twin of the entity query above. Membership comes from the
+    // decoded source's own separately keyed 17-tick slice; blockers remain the
+    // locally hosted pool-1/pool-2 collision instances. Position and bbox are
+    // live decoded Q16 values, while membership is intentionally stale for up
+    // to 16 ticks like retail's entity+0x1BC/+0x1C0 pointer/count.
+    int wire_sun_visibility_blocked_rays(
+            World &world, uint16_t wire_handle, const FixedVec3 &position_q16,
+            const FixedVec3 &bbox_center_q16,
+            const int32_t sun_step_q16[3]);
+
+    // Clip an arbitrary segment in place to the nearest terrain or eligible
+    // solid in `source`'s candidate slice. The returned handle identifies the
+    // nearest entity hit; invalid means terrain-only or no hit. Terrain is
+    // skipped for an indoors source. This is the single hosted form of
+    // raycast_entity_collision used by both the ground-column wrappers and the
+    // iris camera ray. [orig: raycast_entity_collision @ 0x413760]
+    EntityHandle clip_segment_to_nearest_collision(World &world, EntityHandle source,
+                                                   const int32_t start[3],
+                                                   int32_t inout_end[3]);
 
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
@@ -897,6 +977,21 @@ public:
     // don't exist in our world yet (organics are pool 0, unwalked, like retail).
     bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                        EntityHandle exclude_a, EntityHandle exclude_b);
+    // Same exact query with per-target section matrices retained for a caller-
+    // declared stable world phase. The server resets the cache after gameplay
+    // movement and again before snapshot fan-out; every recipient LOS ray can
+    // then reuse retail's entity-resident matrix equivalent without observing
+    // a pre-movement pose.
+    bool raycast_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
+                              EntityHandle exclude_a, EntityHandle exclude_b,
+                              RaycastPerf *perf = nullptr);
+    // Publish an exact broad-phase over the final live target bounds for a
+    // caller-declared stable world phase. The replication fan prepares once
+    // after movement/destruction, then every recipient ray queries only cells
+    // intersecting its segment while retaining the original exact solid clip.
+    void prepare_cached_raycast_queries(World &world,
+                                        RaycastPrepPerf *perf = nullptr);
+    void reset_query_view_cache();
 
     // Sound-occlusion distance inflation [orig: Sound_ApplyOcclusionDistance
     // @ 0x529970]: base = min(d/8, 10u); two LOS rays listener -> source
@@ -983,15 +1078,16 @@ public:
                            uint32_t anim_state_flags, int16_t &health,
                            EntityHandle *out_ground = nullptr,
                            const LadderResolveIO *ladder_io = nullptr,
-                           const int32_t *eye_offset = nullptr);
+                           const int32_t *eye_offset = nullptr,
+                           ResolvePerf *perf = nullptr);
 
     // The REPLICA seam (net-re §5.38e, D-NET-196): the same resolver for a
     // decoded remote row that has NO world entity — retail runs remote
     // organics through the ordinary org movers whose shared tail calls the
     // resolver ungated [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4;
     // Entity_UpdateInfantryAI @0x4BF7FA]. The candidate slice is built AD HOC
-    // at the query position with the pool-0 rule (source radius 0x10000 +
-    // 4.0 u pad — D-COL-3's boundRadius stand-in), person repulsion runs the
+    // at the query position with the pool-0 rule (the exact caller-supplied
+    // authored bound radius + 4.0 u pad), person repulsion runs the
     // world persons_ PLUS the caller-passed replica peer spheres through the
     // SAME witnessed loop (a ClientState peer's "live re-read" is its staged
     // snapshot — the row has no registry entity), and the Entity-side writes
@@ -999,7 +1095,7 @@ public:
     // is_authority is pinned false: a replica resolve never runs damage legs.
     struct ReplicaPeer {
         int32_t x = 0, y = 0, z = 0;
-        int32_t radius = 0x10000;
+        int32_t radius = 0;
         uint16_t handle = 0xFFFF; // wire handle, for self-exclusion only
     };
     // entity_flags (optional) is the row's persistent retail-Flags mirror — the
@@ -1016,6 +1112,7 @@ public:
     int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                             int32_t vel_xy[2], int32_t &vel_z,
                             int32_t capsule_bottom, int32_t capsule_top,
+                            int32_t source_bound_radius_q16,
                             bool is_player_class, uint32_t tick, int32_t anim_state_id,
                             uint32_t anim_state_flags, const ReplicaPeer *peers,
                             int32_t peer_count, uint16_t exclude_handle,
@@ -1115,6 +1212,12 @@ public:
     // The collision model attached to this exact live registry identity
     // (nullptr for an absent or recycled packed slot).
     const CollisionModel *model_for(const World &world, EntityHandle h) const;
+    // The husk-stage collision model attached to that identity (nullptr when
+    // the def authors no husk or the slot is absent/recycled). Retail keeps
+    // the husk model pointer at entity+0x34 beside the graphic at +0x30 and
+    // lets each consumer pick by Flags & 4 [orig: Entity_CalcSlopeForces
+    // @ 0x4b0c10..0x4b0c1b] — this is the husk half of that pair.
+    const CollisionModel *husk_model_for(const World &world, EntityHandle h) const;
 
     // Retail's per-section collision-triangle debris sampler. The transform
     // callback is resolved through the same target view as projectile traces;
@@ -1190,13 +1293,6 @@ public:
             int32_t max_entities);
 
 private:
-    // Scratch for sun_visibility_blocked_rays' slice->static-slot resolve —
-    // reused across calls (the collision world is single-threaded) so the
-    // walk carries no per-entity cap, matching the full +0x1C0-count walk
-    // [orig: raycast_find_collision_entity @ 0x539a70 loops to
-    // entity_a[+0x1C0] with no bound of its own].
-    std::vector<int32_t> sun_slot_scratch_;
-
     void build_tables(World &world, bool advance_candidate_slices);
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
@@ -1239,18 +1335,47 @@ private:
         int32_t start = 0;
         int32_t count = 0;
     };
+    struct StableLosCandidate {
+        EntityHandle h;
+        int32_t pos[3] = {};
+        int32_t radius = 0;
+    };
+    struct StableLosCell {
+        std::vector<uint32_t> candidates;
+        uint32_t epoch = 0;
+    };
+    struct StableLosCellSpan {
+        int32_t min_x = 0;
+        int32_t max_x = 0;
+        int32_t min_y = 0;
+        int32_t max_y = 0;
+        uint32_t candidate = 0;
+    };
 
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
-    // One static slot vs one radiused segment: the cheap-metadata broad phase,
-    // then live section matrices for the survivors (the shared walker body of
-    // segment_hits_static and the slice-scoped sun casts).
-    bool static_slot_blocks_segment(World &world, const StaticSlot &s,
-                                    const CollisionRay &ray, int32_t radius,
-                                    int32_t broad_r);
+    // One candidate entity vs one radiused segment: the cheap-metadata broad
+    // phase, then live section matrices for survivors (shared by sound and the
+    // slice-scoped iris/entity sun casts).
+    bool entity_blocks_segment(World &world, EntityHandle candidate,
+                               const CollisionRay &ray, int32_t radius,
+                               int32_t broad_r);
+    bool candidate_slice_segment_hits_solid(
+            World &world, const EntityHandle *slice, int32_t slice_count,
+            EntityHandle source_registry_twin, const int32_t a[3],
+            const int32_t b[3], int32_t radius);
+    int candidate_slice_sun_blocked_rays(
+            World &world, const EntityHandle *slice, int32_t slice_count,
+            EntityHandle source_registry_twin, const int32_t a[3],
+            const int32_t b[3]);
+    const EntityHandle *wire_candidate_slice(
+            uint16_t wire_handle, int32_t &count_out) const;
     void invalidate_trace_view(EntityHandle h);
     void invalidate_trace_views();
+    void invalidate_stable_los_index();
+    const std::vector<uint32_t> &stable_los_candidates_for_ray(
+            const CollisionRay &ray);
     // Per-logic-tick cache of projectile target views. Sustained automatic
     // fire re-traced the same structures per ROUND per tick, and every
     // broad-phase survivor rebuilt its per-section matrix vector (heap
@@ -1274,7 +1399,31 @@ private:
     // Cleared by every table epoch and collision model/instance/pose mutation,
     // so entries never outlive either their tick or their source identity.
     mutable std::unordered_map<uint16_t, TraceViewCacheEntry> trace_view_cache_;
+    // Exact stable-phase LOS broad phase. Candidates retain pool-2 then pool-1
+    // order; a bounded dense grid handles ordinary mission extents and the
+    // sparse hash grid handles pathological extents. Both bucket forms hold
+    // candidate indices, and each query sorts its small deduplicated result
+    // back into pool order before the exact clip.
+    std::vector<StableLosCandidate> stable_los_candidates_;
+    std::unordered_map<uint64_t, StableLosCell> stable_los_cells_;
+    std::vector<StableLosCell> stable_los_dense_cells_;
+    std::vector<StableLosCellSpan> stable_los_cell_spans_;
+    std::vector<uint32_t> stable_los_large_candidates_;
+    std::vector<uint32_t> stable_los_query_candidates_;
+    std::vector<uint32_t> stable_los_query_marks_;
+    uint32_t stable_los_query_generation_ = 0;
+    uint32_t stable_los_index_epoch_ = 0;
+    int32_t stable_los_dense_min_x_ = 0;
+    int32_t stable_los_dense_max_x_ = -1;
+    int32_t stable_los_dense_min_y_ = 0;
+    int32_t stable_los_dense_max_y_ = -1;
+    int32_t stable_los_dense_height_ = 0;
+    bool stable_los_dense_enabled_ = false;
+    bool stable_los_index_ready_ = false;
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
+    bool raycast_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
+                            EntityHandle exclude_a, EntityHandle exclude_b,
+                            bool cache_target_views, RaycastPerf *perf);
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,
                                         bool person_faces_only) const;
@@ -1286,6 +1435,8 @@ private:
     // False exactly when target_view would return null.
     bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
                       int32_t &radius_out) const;
+    bool target_solid_bound(const World &world, EntityHandle h, int32_t pos_out[3],
+                            int32_t &radius_out) const;
 
     // One sound-occlusion LOS ray (terrain + building legs); true = clear.
     // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
@@ -1313,13 +1464,17 @@ private:
 
     std::vector<DynSlot> dynamics_;     // [orig: g_DynProx*]
     std::vector<PersonSlot> persons_;   // [orig: g_PersonProx*]
-    std::vector<ProjectilePersonProxy> projectile_person_proxies_;
-    std::vector<ProjectileDynamicProxy> projectile_dynamic_proxies_;
+    std::vector<WirePersonCollisionProxy> wire_person_proxies_;
+    std::vector<WireDynamicCollisionProxy> wire_dynamic_proxies_;
     // Server H used solely as local L's ordering key during proxy-enabled
     // person walks. Geometry and ignore logic continue to use L.
-    uint16_t projectile_local_player_wire_handle_ = 0xFFFF;
+    uint16_t wire_local_player_handle_ = 0xFFFF;
     std::vector<EntityHandle> arena_;   // cap 3000 [orig: g_ProxCandidateArena]
     std::unordered_map<uint16_t, CandidateSlice> candidates_;
+    // A distinct identity domain for decoded rows. Using a second arena/map is
+    // structural: wire H=0 and a registry L=0 are both valid simultaneously.
+    std::vector<EntityHandle> wire_arena_;
+    std::unordered_map<uint16_t, CandidateSlice> wire_candidates_;
     // Staged only for the duration of one resolve_replica call: the replica
     // peer spheres the person-repulsion loop walks after persons_, and the
     // calling row's own wire handle (self-exclusion). Empty for every
@@ -1327,6 +1482,7 @@ private:
     const ReplicaPeer *replica_peers_ = nullptr;
     int32_t replica_peer_count_ = 0;
     uint16_t replica_exclude_handle_ = 0xFFFF;
+    int32_t replica_source_bound_radius_q16_ = 0;
     // Staged like replica_peers_: the calling row's retail-Flags mirror. The
     // resolver's flag latch sites and the ground probe's indoors gate read and
     // write it exactly where they read and write ent->flags on a registry row.

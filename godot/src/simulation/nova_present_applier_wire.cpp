@@ -252,6 +252,8 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 			"aim leg field table must match the row cache size");
 	const float *p = snap.ptr();
 	const int base = row.base;
+	model->set_match_terrain_enabled(
+			(wfield_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
 	const int32_t respawn_revision =
 			wfield_i(p, base, Simulation::PF_RESPAWN_REVISION);
 	const int32_t *seen_revision = wire_respawn_revisions_.getptr(row.handle);
@@ -267,7 +269,8 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// aim_root_basis is data-gated internally (PF_AIM_OVERLAY_VALID falls back
 	// to the entity rotation).
 	const Basis root_basis = aim_root_basis(snap, base, entity_basis);
-	const Transform3D next_transform(root_basis, pos);
+	const Transform3D next_transform =
+			model->compose_entity_transform(root_basis, pos);
 	if (model->get_transform() != next_transform) {
 		model->set_transform(next_transform);
 	}

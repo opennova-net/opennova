@@ -101,6 +101,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
@@ -111,6 +112,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_scorch_record.cpp
     # wac — the WAC compiler (binds names/vars against the live world) + the VM;
     # the language front end (lexer, parser/AST, command table, Program model)
     # is engine/formats/wac
@@ -141,6 +143,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_water.cpp          # the §29.1 water/float channel
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_weapon_channel.cpp # the secondary AnimMap channel (§14.8)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_wire.cpp            # replicated anim/input mirror
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
@@ -163,6 +166,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp  # the stng pursuit integrator (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_sim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/throwables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/spawn_select.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tracer_trails.cpp
@@ -188,7 +192,7 @@ target_include_directories(opennova_runtime
 )
 
 # The Shape A chain: runtime -> base -> formats -> io (all PUBLIC).
-target_link_libraries(opennova_runtime PUBLIC opennova_base)
+target_link_libraries(opennova_runtime PUBLIC opennova_base opennova_crt)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 
@@ -208,6 +212,7 @@ set(_opennova_terrain_fp_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp

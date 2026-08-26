@@ -1534,6 +1534,17 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         imp.direction = flight_direction(r.vel);
         imp.ammo_index = impact_ammo_index;
         if (collision.hit_class == ProjectileHitClass::Terrain) {
+            // Permanent terrain-cache scorch, before the ordinary impact
+            // presenter. Water and entity stops never enter this registry.
+            // [orig: Projectile_HandleTerrainImpact @0x4E9314 reads ammo word
+            // +0x74 and calls the standard scorch router @0x6060D0]
+            const AmmoTableEntry *scorch_ammo =
+                    world.ammo.by_index(impact_ammo_index);
+            if (scorch_ammo != nullptr) {
+                world.terrain_scorches.emit_standard(
+                        impact_q16.x, impact_q16.y,
+                        scorch_ammo->scorch_id, world.logic_tick);
+            }
             // Terrain hits sample the charmap surface type at the impact point,
             // shifted into the impact-effect table (no charmap -> 1 -> 5 dirt;
             // unmapped sector -> 7 -> 11 water). [orig:

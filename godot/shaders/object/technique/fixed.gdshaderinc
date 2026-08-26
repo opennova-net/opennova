@@ -5,6 +5,6 @@ void obj_evaluate_surface(vec3 camera_position_world, mat4 model_matrix,
 			base, view_dir, normal, geom_normal);
 	vec3 lit = obj_ff_lighting(base.rgb, normal);
 	lit = obj_add_local_light(lit, base.rgb, normal);
-	output_lit = obj_apply_fog(lit, camera_position_world);
+	output_lit = lit;
 	output_alpha = base.a;
 }

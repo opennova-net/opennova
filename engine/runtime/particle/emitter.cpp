@@ -445,11 +445,27 @@ bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	return true;
 }
 
-void expire_dead(Emitter &e) noexcept {
-	e.particles.erase(
-			std::remove_if(e.particles.begin(), e.particles.end(),
-					[](const Particle &p) { return p.age <= 0.0f; }),
-			e.particles.end());
+// The AdvanceFrame expiry pass, before integration: a slot whose remaining
+// age is below this frame's dt (fcomp dt vs age, keep on C0|C3 = dt <= age)
+// is reclaimed by copying the LAST slot into the hole, decrementing the
+// count, and re-examining the same index. The pool is therefore a dense
+// array in that move-last order - never a stable erase - and every later
+// consumer (the view-depth fill the batch quicksort runs over) walks slots
+// 0..count-1 in exactly this order.
+// [orig: CParticleEmitter_AdvanceFrame @ 0x5e6570 - compare @ 0x5e6840 /
+//  @ 0x5e68b0, memcpy(slot, last) @ 0x5e687e / @ 0x5e68d9, --count
+//  @ 0x5e6883 / @ 0x5e68de, re-examine @ 0x5e688c / @ 0x5e68e7;
+//  CParticleEmitter_ComputeViewDepths @ 0x5e75cf walks 0..count-1]
+void expire_dead(Emitter &e, float dt) noexcept {
+	std::size_t i = 0;
+	while (i < e.particles.size()) {
+		if (e.particles[i].age < dt) {
+			e.particles[i] = e.particles.back();
+			e.particles.pop_back();
+			continue;
+		}
+		++i;
+	}
 }
 
 } // namespace
@@ -565,10 +581,11 @@ void emitter_advance(Emitter &e, float dt) {
 		return;
 	}
 	const ParticleDef &def = *e.def;
-	// Retail's AdvanceFrame expiry pass runs before UpdateParticles. A particle
-	// that reaches age <= 0 during this integration remains observable for its
-	// terminal frame and is reclaimed at the beginning of the next advance.
-	expire_dead(e);
+	// Retail's AdvanceFrame expiry pass runs before UpdateParticles and
+	// reclaims every slot that would cross zero during THIS integration
+	// (age < dt); a particle is never integrated past its lifetime, and one
+	// that reaches exactly zero remains observable for that terminal frame.
+	expire_dead(e, dt);
 	e.age += dt;
 	e.prev_position = e.position;
 

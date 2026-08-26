@@ -83,12 +83,30 @@ inline CelestialBodyFrame build_glare_frame(const EnvironmentState &env,
 	CelestialBodyFrame frame;
 	frame.position = celestial_body_position(cam_pos, env.sun_direction());
 	frame.tint = env.sun_color();
+	// The locked reimpl profile is FBEFFECTS 3, so the direct draw carries
+	// the witnessed quarter (the bloom re-adds the glare)
+	// [orig: sub_581F60 @ 0x581f6a; >>= 2 @ 0x5ad033..0x5ad03c].
 	frame.opacity = static_cast<float>(glare_glow_alpha_fixed(
 							detail::to_fixed_16_16(1.0f), occlusion_brightness,
 							detail::to_fixed_16_16(env.overcast_blend()),
-							detail::to_fixed_16_16(env.sun_dim_pct()))) /
+							detail::to_fixed_16_16(env.sun_dim_pct()),
+							true)) /
 			65536.0f;
 	return frame;
+}
+
+// The glare's PEAK opacity in the isolated Q3 (bloom source) view:
+// FrameFX_RenderBloomPass draws the glow with NO occlusion test and the
+// fog-based brightness [orig: render_skybox_sun_glow(0, 0) called from
+// FrameFX_RenderBloomPass @ 0x582a77; the no-occlusion brightness
+// @ 0x5ad013..0x5ad027]. The shader applies the per-pass dot^4 factor, like
+// the main glare.
+inline float glare_q3_peak_opacity(const EnvironmentState &env) {
+	return static_cast<float>(glare_q3_alpha_fixed(
+				   detail::to_fixed_16_16(1.0f), env.fog_level(),
+				   detail::to_fixed_16_16(env.overcast_blend()),
+				   detail::to_fixed_16_16(env.sun_dim_pct()), true)) /
+			65536.0f;
 }
 
 } // namespace opennova::env

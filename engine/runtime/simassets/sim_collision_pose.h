@@ -13,6 +13,7 @@
 #include <simassets/adm_skeletal_clips.h>
 #include <threedi/threedi_3di3.h>
 #include <world/collision.h>
+#include <world/muzzle_pose.h>
 
 #include <cstdint>
 #include <memory>
@@ -75,7 +76,8 @@ inline constexpr float kHeldWeaponAttachNudgeZ = 0.051f;
 inline constexpr double kHeldWeaponHandFrameZRad = 0.5759761961496483;
 inline constexpr double kHeldWeaponHandFrameYRad = -1.3613982818082597;
 
-class SimCollisionPoseProvider : public world::ICollisionSectionMatrixProvider {
+class SimCollisionPoseProvider : public world::ICollisionSectionMatrixProvider,
+		public world::IMuzzlePoseProvider {
 public:
 	// The rig source for skeletal registrations (the same mounted index the
 	// SimModelCache reads). The provider never loads models itself — the
@@ -106,9 +108,11 @@ public:
 	bool register_skeletal_entity(world::EntityHandle entity,
 			uint64_t registry_spawn_id, int32_t model_id,
 			const std::string &rig_key, const std::string &adm_name,
-			const Threedi3di3 *model);
+			const Threedi3di3 *model,
+			const std::string &muzzle_userpoint = std::string());
 	void remove_entity(world::EntityHandle entity);
 	bool has_skeletal_entity(world::EntityHandle entity) const;
+	bool has_skeletal_muzzle_entity(world::EntityHandle entity) const;
 	// Whether a query for this model id has a registered pose source at all.
 	// A build_section_matrices false WITHOUT a source is the normal rigid
 	// path (CollisionWorld's identity sections); false WITH one is a real
@@ -136,12 +140,18 @@ public:
 			int32_t model_id, const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) override;
+	bool resolve_muzzle_pose(world::World &world, world::EntityHandle entity,
+			int32_t out[3]) override;
+	uint64_t muzzle_query_count() const { return muzzle_queries_; }
+	uint64_t muzzle_resolve_count() const { return muzzle_resolves_; }
 
 private:
 	struct SkeletalSource {
 		int32_t model_id = -1;
 		uint64_t registry_spawn_id = 0;
 		std::shared_ptr<const AdmSkeletalClips> rig;
+		int32_t muzzle_bone = -1;
+		int32_t muzzle_model_position[3] = {};
 	};
 
 	// The shared clip/blend/overlay/weapon-channel pose evaluation the
@@ -167,6 +177,8 @@ private:
 	std::unordered_map<uint64_t, SkeletalSource> skeletal_sources_;
 	std::unordered_map<std::string, std::shared_ptr<const AdmSkeletalClips>>
 			rig_cache_;
+	uint64_t muzzle_queries_ = 0;
+	uint64_t muzzle_resolves_ = 0;
 };
 
 } // namespace opennova::simassets

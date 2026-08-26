@@ -4,8 +4,8 @@
 // 3DI model. This is the policy half the Godot adapter formerly owned: strip
 // curation in authored ROBJ order with the loader's relative/absolute index
 // conventions, presentation-world (-x,y,z) extraction, PROJSHAD material
-// admission (alpha sources, AlphaGen, dynamic-UV rejection, TEX_TEAM
-// team-frame selection), per-ROBJ coverage accounting, conservative authored
+// admission (alpha sources plus exact runtime AlphaGen/UV/flipbook inputs),
+// per-ROBJ coverage accounting, conservative authored
 // bounds, and the FNV geometry key that feeds page content stamps. Texture
 // pixels stay device-side behind TerrainStaticShadowTextureProvider.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250 — admission
@@ -15,6 +15,8 @@
 #include <terrain/terrain_static_shadow.h>
 #include <terrain/terrain_static_shadow_raster.h>
 
+#include <renderer/material_eval.h>
+
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -22,23 +24,16 @@
 #include <string_view>
 #include <vector>
 
-struct Threedi3di3;
-
 namespace opennova::terrain {
 
-// Bit values are frozen: they participate in diagnostics and attribution
-// reported through the adapter and must not be renumbered.
 enum TerrainStaticShadowUnsupported : uint32_t {
 	kTerrainStaticShadowUnsupportedNone = 0,
 	kTerrainStaticShadowUnsupportedMissingAlphaTexture = 1u << 0,
-	kTerrainStaticShadowUnsupportedDynamicAlpha = 1u << 1,
-	kTerrainStaticShadowUnsupportedDynamicUv = 1u << 2,
-	kTerrainStaticShadowUnsupportedFlipbook = 1u << 3,
-	kTerrainStaticShadowUnsupportedSkinnedLod = 1u << 4,
-	kTerrainStaticShadowUnsupportedInvalidMaterial = 1u << 5,
-	kTerrainStaticShadowUnsupportedIncompleteGeometry = 1u << 6,
-	kTerrainStaticShadowUnsupportedMalformedIndices = 1u << 7,
-	kTerrainStaticShadowUnsupportedMissingRequiredUvs = 1u << 8,
+	kTerrainStaticShadowUnsupportedFlipbook = 1u << 1,
+	kTerrainStaticShadowUnsupportedInvalidMaterial = 1u << 2,
+	kTerrainStaticShadowUnsupportedIncompleteGeometry = 1u << 3,
+	kTerrainStaticShadowUnsupportedMalformedIndices = 1u << 4,
+	kTerrainStaticShadowUnsupportedMissingRequiredUvs = 1u << 5,
 };
 
 // Names for each set issue bit, in bit order. Stable spellings — they are the
@@ -63,17 +58,39 @@ public:
 };
 
 struct TerrainStaticShadowResolvedMaterial {
+	bool casts_projected_shadow = true;
 	TerrainStaticShadowBlend blend = TerrainStaticShadowBlend::Opaque;
 	bool alpha_test_enabled = false;
 	bool alpha_test_inverted = false;
 	uint8_t alpha_ref = 0;
-	float alpha_scale = 1.0f;
 	bool two_sided = false;
-	bool exact = true;
+	// The PROJSHAD pass samples diffuse alpha only for material alpha blend or
+	// alpha test. AlphaGen itself reaches the pass only through _FFP's
+	// material-driven declaration; the file-effect declarations force their
+	// own black/opaque source state.
+	bool samples_diffuse_alpha = false;
+	bool uses_material_alpha = false;
 	uint32_t unsupported_issues = kTerrainStaticShadowUnsupportedNone;
-	std::shared_ptr<const TerrainStaticShadowAlphaPyramid> alpha_texture;
+	// Immutable POD copy of the authored runtime inputs consumed by the shared
+	// material evaluator. The source model may be released after resolution.
+	ThreediMaterial runtime_material{};
+	// One entry for a static diffuse texture, or authored frame order for an
+	// animated diffuse slot. Missing entries remain null and fail only when
+	// that frame is selected.
 	std::vector<std::shared_ptr<const TerrainStaticShadowAlphaPyramid>>
-			team_alpha_frames;
+			diffuse_alpha_frames;
+};
+
+// Exact evaluated state for one caster/material at the frame-shared retail
+// GetTickCount value and global CTRL-bus snapshot. This is computed once and
+// then shared by draw classification and rasterization so stochastic/channel
+// evaluation cannot disagree within one page job.
+struct TerrainStaticShadowMaterialState {
+	::renderer::UvAnimTransform uv{};
+	float alpha_scale = 1.0f;
+	int32_t diffuse_frame = 0;
+	const TerrainStaticShadowAlphaPyramid *alpha_texture = nullptr;
+	uint32_t issues = kTerrainStaticShadowUnsupportedNone;
 };
 
 struct TerrainStaticShadowResolvedSurface {
@@ -92,30 +109,30 @@ struct TerrainStaticShadowResolvedGeometry {
 	// stamps. Zero is reserved (normalized to 1).
 	uint64_t key = 0;
 	std::array<uint16_t, 2> render_object_counts{};
-	std::array<bool, 2> lod_exact{{true, true}};
 	std::array<uint32_t, 2> lod_unsupported_issues{};
 	std::array<std::vector<TerrainStaticShadowResolvedSurface>, 2> surfaces;
 	std::array<std::vector<TerrainStaticShadowRenderObjectCoverage>, 2>
 			coverage;
 	std::vector<TerrainStaticShadowResolvedMaterial> materials;
+	// Model-local names retained because material parameter bytes are local
+	// indices until the retail loader maps them onto the global 96-slot bus.
+	std::vector<std::string> control_register_names;
 	std::array<float, 3> local_min{};
 	std::array<float, 3> local_max{};
 	bool has_bounds = false;
 	bool bounds_exact = true;
 };
 
-// The TEX_TEAM frame selection: team % frame_count into the material's frame
-// pyramids, or the static alpha when the material is not team-animated.
-// Null means the selected frame has no usable alpha.
-// [orig: Avatar camo ctrl consumers select frame = value % frame_count,
-// apply_shader_parameters @0x58DC36..0x58DC42]
-const TerrainStaticShadowAlphaPyramid *terrain_static_shadow_selected_alpha(
-		const TerrainStaticShadowResolvedMaterial &material, int team);
-
-// The material's admission issues for a caster of the given team (adds the
-// flipbook issue when the selected team frame is unusable).
-uint32_t terrain_static_shadow_caster_material_issues(
-		const TerrainStaticShadowResolvedMaterial &material, int team);
+// Evaluate the same AlphaGen, complete row-vector UV transform, and diffuse
+// animation selector used by ordinary object rendering. The caller supplies
+// the frame-shared tick and the already-snapshotted global CTRL values.
+// [orig: Render_SubmitEntity @0x5DAD80 tick stamp; batch CTRL snapshot
+// @0x5D91AB..0x5D91DE; apply_shader_parameters @0x58DB80]
+TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
+		const TerrainStaticShadowResolvedGeometry &geometry,
+		const TerrainStaticShadowResolvedMaterial &material,
+		uint32_t time_ms,
+		const ::renderer::ControlRegisterValues &control_values);
 
 // Resolves the full caster geometry/material description from the parsed
 // model. graphic feeds the geometry key (lowercased before hashing).

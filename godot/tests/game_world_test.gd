@@ -205,10 +205,13 @@ class ItemFxPlacerStub:
 	extends RefCounted
 	var item_db: ItemDatabase
 	var static_sources: Array = []
+	var static_light_draw_sources: Array = []
 	func get_item_db() -> ItemDatabase:
 		return item_db
 	func get_static_item_effect_sources() -> Array:
 		return static_sources.duplicate(true)
+	func get_static_light_draw_sources() -> Array:
+		return static_light_draw_sources.duplicate(true)
 
 
 # --- Real item-fx fixtures (ADR 0034): the item database is an authored
@@ -1447,7 +1450,8 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	camera.global_position = Vector3(2.0, 1.5, 12.0)
 	camera.look_at(Vector3(2.0, 1.0, 3.0))
 	world.render_particle_frame()
-	var before: Dictionary = effect_world.get_debug_draw_list_report().get("world", {})
+	var before: Dictionary = effect_world.get_debug_draw_list_report().get(
+			"world_camera_side", {})
 	assert_gt(int(before.get("rendered_quad_count", 0)), 0,
 			"the live emitter renders quads before the freeze")
 
@@ -1455,12 +1459,14 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	camera.global_position = Vector3(6.0, 3.0, 14.0)
 	camera.look_at(Vector3(2.0, 1.0, 3.0))
 	camera.make_current()
-	var stale: Dictionary = effect_world.get_debug_draw_list_report().get("world", {})
+	var stale: Dictionary = effect_world.get_debug_draw_list_report().get(
+			"world_camera_side", {})
 	assert_eq(stale.get("compile_index"), before.get("compile_index"),
 			"a frozen world leaves the particle draw list stale at the old pose")
 
 	assert_eq(world.debug_refresh_render_pose(camera), OK)
-	var after: Dictionary = effect_world.get_debug_draw_list_report().get("world", {})
+	var after: Dictionary = effect_world.get_debug_draw_list_report().get(
+			"world_camera_side", {})
 	assert_ne(after.get("compile_index"), before.get("compile_index"),
 			"the evidence seam rebuilds the particle draw list for the capture camera")
 	assert_gt(int(after.get("rendered_quad_count", 0)), 0,

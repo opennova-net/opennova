@@ -117,16 +117,17 @@ void compose_overlay_rgba(uint8_t *destination, RgbaF source,
 				destination_rgb[channel] * (1.0f - alpha) +
 				source_rgb[channel] * tint[channel] * alpha);
 	}
-	// The fixed-function SRCALPHA/INVSRCALPHA state applies to every render-
-	// target channel. Stage alpha selects the texture, so an overlay drawn into
-	// the base pass's zero alpha writes src.a * src.a (and attenuates any prior
-	// overlay alpha). The later DOT3 pass adds terrain light into A.
-	// [orig: overlay view mode 0x631 -> SRCALPHA/INVSRCALPHA @
-	// 0x680F2C..0x680F3A; no separate-alpha override, GfxBlend_ApplyToDevice
-	// @ 0x6817D0]
-	destination[3] = byte(
-			alpha * alpha +
-			(destination[3] * inverse_byte) * (1.0f - alpha));
+	// Overlays never touch the page alpha: retail masks the alpha channel
+	// off for the base pass and both ordered overlay loops
+	// (SetRenderState(D3DRS_COLORWRITEENABLE, 7)) and restores RGBA writes
+	// only for the DOT3/static alpha passes, so the blend's SRCALPHA math
+	// lands on RGB alone and the final page alpha is purely the terrain
+	// light term. Writing src.a * src.a here saturated tiled pages and
+	// re-lit them with full sun at dawn.
+	// [orig: PolyTrn_RenderTile SetRenderState(0xA8, 7) @ 0x60DD04..0x60DD12
+	// (pre-base) and @ 0x60DD6B..0x60DD73 (pre-overlay loops); 0xF restore
+	// @ 0x60E0EA..0x60E0F2 / 0x60E1B6..0x60E1BE; overlay view mode 0x631 ->
+	// SRCALPHA/INVSRCALPHA @ 0x680F2C..0x680F3A]
 }
 
 void add_dot3_alpha(Rgba8Image &output,
@@ -203,14 +204,10 @@ Rgba8Image compose_terrain_tile_page(
 		}
 	}
 
-	if (sources.tile_info == nullptr || sources.tilestrip == nullptr ||
-			!sources.tilestrip->is_valid()) {
-		add_dot3_alpha(output, dot3_alpha);
-		return output;
-	}
-
 	const float page_max_x = world_origin_x + job.layout.world_span;
 	const float page_max_z = world_origin_z + job.layout.world_span;
+	if (sources.tile_info != nullptr && sources.tilestrip != nullptr &&
+			sources.tilestrip->is_valid()) {
 	for (const TilOverlayEntry &entry : sources.tile_info->entries) {
 		const float entry_x = til_world_x_from_fixed(entry.x_fixed);
 		const float entry_z = til_world_z_from_fixed(entry.z_fixed);
@@ -251,6 +248,18 @@ Rgba8Image compose_terrain_tile_page(
 				compose_overlay_rgba(output.pixels.data() + offset, tile,
 						sources.tile_overlay_tint);
 			}
+		}
+	}
+	}
+	// Permanent terrain scorch quads are the second ordered overlay loop:
+	// after every mission .til entry and before the DOT3/static-model alpha
+	// contribution. Fail closed if a declared plan cannot be composed.
+	// [orig: PolyTrn_RenderTile @0x60DF39..0x60E0AF]
+	if (sources.scorch_plan != nullptr) {
+		if (sources.scorch_textures == nullptr ||
+				!compose_terrain_scorches(job, *sources.scorch_plan,
+						*sources.scorch_textures, output)) {
+			return {};
 		}
 	}
 	add_dot3_alpha(output, dot3_alpha);

@@ -47,6 +47,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
+#include <simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <inmatch/session.h>
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
@@ -205,6 +206,7 @@ public:
 		PF_SECTION_MASK_VALID = opennova::world::PF_SECTION_MASK_VALID,
 		PF_SECTION_MASK_LO = opennova::world::PF_SECTION_MASK_LO,
 		PF_SECTION_MASK_HI = opennova::world::PF_SECTION_MASK_HI,
+		PF_STANCE_BITS = opennova::world::PF_STANCE_BITS,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -404,6 +406,81 @@ private:
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
+	// Capture-window-only attribution summed across every fixed tick consumed by
+	// one render frame. Ordinary play leaves runtime_profiling_enabled_ false,
+	// so producers neither read clocks nor write these fields.
+	struct SessionPhasePerf {
+		int64_t host_prep_us = 0;
+		int64_t host_pump_us = 0;
+		int64_t host_receive_us = 0;
+		int64_t host_connections_us = 0;
+		int64_t host_adapter_us = 0;
+		int64_t server_tick_us = 0;
+		int64_t server_input_us = 0;
+		int64_t server_world_us = 0;
+		int64_t world_setup_us = 0;
+		int64_t world_scripts_us = 0;
+		int64_t world_ai_us = 0;
+		int64_t world_ai_reactions_us = 0;
+		int64_t world_ai_collision_tables_us = 0;
+		int64_t world_ai_entities_us = 0;
+		int64_t world_ai_infantry_entities_us = 0;
+		int64_t world_ai_infantry_remote_us = 0;
+		int64_t world_ai_infantry_combat_us = 0;
+		int64_t world_ai_infantry_animation_us = 0;
+		int64_t world_ai_infantry_collision_us = 0;
+		int64_t world_ai_infantry_collision_contacts_us = 0;
+		int64_t world_ai_infantry_collision_repulsion_us = 0;
+		int64_t world_ai_infantry_collision_ground_us = 0;
+		int64_t world_ai_other_entities_us = 0;
+		int64_t world_ai_authority_vehicles_us = 0;
+		int64_t world_ai_vehicle_scan_us = 0;
+		int64_t world_ai_vehicle_motors_us = 0;
+		int64_t world_ai_vehicle_riders_us = 0;
+		int64_t world_ai_client_vehicles_us = 0;
+		int64_t world_ai_events_us = 0;
+		int64_t world_attachments_us = 0;
+		int64_t world_attachment_orphans_us = 0;
+		int64_t world_attachment_child_pose_us = 0;
+		int64_t world_attachment_riders_us = 0;
+		int64_t world_throwables_us = 0;
+		int64_t world_weapons_us = 0;
+		int64_t world_projectiles_us = 0;
+		int64_t world_destruction_us = 0;
+		int64_t world_housekeeping_us = 0;
+		int64_t match_us = 0;
+		int64_t server_rules_us = 0;
+		int64_t server_replication_us = 0;
+		int64_t replication_query_prep_us = 0;
+		int64_t replication_query_collect_us = 0;
+		int64_t replication_query_grid_us = 0;
+		int64_t replication_query_grid_span_us = 0;
+		int64_t replication_query_grid_bucket_us = 0;
+		int64_t replication_query_grid_workspace_us = 0;
+		int64_t replication_snapshot_us = 0;
+		int64_t replication_fan_us = 0;
+		int64_t replication_fan_setup_us = 0;
+		int64_t replication_round_selection_us = 0;
+		int64_t replication_entity_selection_us = 0;
+		int64_t replication_entity_setup_us = 0;
+		int64_t replication_entity_scoring_us = 0;
+		int64_t replication_entity_los_us = 0;
+		int64_t replication_entity_los_terrain_us = 0;
+		int64_t replication_entity_los_sector_us = 0;
+		int64_t replication_entity_sort_us = 0;
+		int64_t replication_entity_budget_us = 0;
+		int64_t replication_encode_us = 0;
+		int64_t replication_enqueue_us = 0;
+		int64_t host_send_us = 0;
+		int64_t host_player_us = 0;
+		int64_t client_decode_us = 0;
+		int64_t client_setup_us = 0;
+		int64_t client_receive_us = 0;
+		int64_t client_maintenance_us = 0;
+		int64_t client_send_us = 0;
+		int64_t adm_resolve_us = 0;
+	};
+	SessionPhasePerf frame_phase_perf_;
 	opennova::inmatch::Role configured_session_role() const;
 	bool begin_session_load();
 	void complete_session_load();
@@ -418,14 +495,10 @@ private:
 	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
 	// registry sweep and the joiner's wire ghosts share one implementation.
 	opennova::simassets::CollisionResolveState collision_resolve_;
-	// Wire-side collision resolution for decoded pool-1 movers: runtime type id
-	// -> {model id, bound radius}, sharing the by-graphic caches above. -1 model
-	// with 0 radius latches an unresolvable type so it is attempted once.
-	struct WireCollisionShape {
-		int32_t model_id = -1;
-		float bound_radius = 0.0f;
-	};
-	std::unordered_map<uint16_t, WireCollisionShape> wire_collision_shape_by_type_;
+	// Wire-side collision initialization for decoded rows, sharing the exact
+	// typed engine result and by-graphic caches used by local entities.
+	std::unordered_map<uint16_t, opennova::world::ResolvedCollisionShape>
+			wire_collision_shape_by_type_;
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD. Direct/headless simulations use deterministic logic time.
 	int64_t panm_time_override_ms_ = -1;
@@ -443,6 +516,22 @@ private:
 	uint64_t collision_native_declines_ = 0;
 	uint64_t mounted_native_queries_ = 0;
 	uint64_t mounted_native_declines_ = 0;
+	uint64_t mounted_native_evaluations_ = 0;
+	uint64_t mounted_native_cache_hits_ = 0;
+	struct MountedPoseRestCache {
+		opennova::simassets::MountedPosePartMatrices parts;
+	};
+	struct MountedPoseLiveCache {
+		uint32_t time_ms = 0;
+		std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT> controls{};
+		opennova::simassets::MountedPosePartMatrices parts;
+		bool valid = false;
+	};
+	uint32_t mounted_pose_cache_logic_tick_ = 0xFFFFFFFFu;
+	std::unordered_map<const Threedi3di3 *, MountedPoseRestCache>
+			mounted_pose_rest_cache_;
+	std::unordered_map<const Threedi3di3 *, std::vector<MountedPoseLiveCache>>
+			mounted_pose_live_cache_;
 	bool ensure_collision_instance(opennova::world::World &p_world,
 			opennova::world::EntityHandle p_entity) override;
 	bool build_section_matrices(opennova::world::World &p_world,
@@ -483,11 +572,21 @@ private:
 	// re-emit).
 	std::unordered_map<uint32_t, int64_t> occl_apply_building_last_;
 	std::vector<int32_t> occl_apply_culled_last_;
-	// Per-entity sun-visibility quality (bms_id -> 1..4) last emitted to the
-	// shell, plus the local player's current quality for the presenter seam.
+	// Per-entity sun-visibility quality last emitted to the shell, split by
+	// identity domain. Wire handle zero and a placed BMS id zero are both valid
+	// sentinels in their own schemas, so they must never share one integer map.
 	// Unlisted entities are quality 4 (factor 1.0), the node default.
-	std::unordered_map<int32_t, uint8_t> sun_quality_last_;
+	std::unordered_map<int32_t, uint8_t> sun_quality_last_by_bms_;
+	std::unordered_map<uint16_t, uint8_t> sun_quality_last_by_wire_;
+	int64_t sun_quality_present_layout_revision_ = -1;
 	uint8_t local_sun_quality_ = 4;
+	// Mutable retail Lighting_SetInteriorLightGroup state left by the marched
+	// iris samples. Outdoor samples clear it, indoor samples with interior data
+	// replace it, and indoor-no-data samples intentionally retain the previous
+	// pair. OpenNova's actual draw selection carries groups explicitly, but this
+	// state preserves the witnessed sequence instead of erasing the side effect.
+	opennova::world::EntityHandle iris_interior_group_entity_;
+	int32_t iris_interior_group_section_ = 0;
 	// The pool-2 building a packed blink hit names, as a bms_id (0 = none).
 	int blink_hit_owner_bms_id(uint32_t p_hit) const;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
@@ -970,7 +1069,8 @@ private:
 	void joiner_pump();
 	// Wire-side authored-shape resolution for one decoded runtime type id
 	// (items.def graphic -> the shared by-graphic collision model cache).
-	WireCollisionShape wire_collision_shape_for_type(uint16_t type_id);
+	opennova::world::ResolvedCollisionShape wire_collision_shape_for_type(
+			uint16_t type_id);
 
 	// Terrain the AI grounds on. We own copies of the shell's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source TerrainData and survive
@@ -1630,6 +1730,9 @@ public:
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
 	// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; world/round_sim.h RoundImpact].
 	Array drain_round_impacts();
+	// Destructively drain permanent terrain-cache scorch insertions. Bounds are
+	// already folded from mission (x,y) to terrain/Godot horizontal (x,z).
+	Array drain_terrain_scorches();
 	// Drain this frame's folded S2C 0x1E game events as feed rows — one per
 	// line the original would post to its message feed (retail: the 0x426270
 	// handler). Each row carries the actor NAMES (resolved here, where the
@@ -2075,6 +2178,10 @@ public:
 	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
 	// position; converted + stamped with the logic tick).
 	void set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos);
+	// True when the engine-side skeletal source resolved this entity's authored
+	// launch userpoint. The presenter can then avoid off-screen Godot posing;
+	// AI resolves the point lazily at its LOS/aim/fire call sites.
+	bool has_native_ai_muzzle(int p_net_id) const;
 	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
@@ -2268,14 +2375,16 @@ public:
 	// Delta form of get_render_culled_bms_ids():
 	// [n_added, ids..., n_removed, ids...] since the last call.
 	PackedInt32Array get_render_culled_changes();
-	// Per-entity sun-visibility factor feed (D-RLIT-3): pairs
-	// [bms_id, quality 1..4] whose quality changed since the last call. The
-	// shell maps quality through sun_visibility_factor into
-	// ObjectModel.set_entity_lighting_context. The local player's quality is
+	// Per-draw sun-visibility feed (D-RLIT-3): triples
+	// [wire_handle_or_-1, bms_id_or_0, quality 1..4] whose quality changed.
+	// Exactly one identity is live per row. This is a cutover API: no bms-only
+	// pair form remains. The shell maps quality through sun_visibility_factor;
+	// the wire presenter applies it to late-built bodies and held weapons too.
+	// The local player's quality is
 	// computed but never emitted here — the presenter reads it via
 	// get_local_player_sun_quality() so the FP parts can keep their witnessed
 	// exemption while the third-person body dims.
-	PackedInt64Array get_entity_sun_visibility_changes(const Vector3 &p_light_dir);
+	PackedInt64Array get_draw_lighting_changes(const Vector3 &p_light_dir);
 	int get_local_player_sun_quality() const { return local_sun_quality_; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —
 	// engine-owned so the mapping has ONE writer (renderer::
@@ -2452,10 +2561,10 @@ public:
 	// data), else the outdoor sun level 8 minus one per blocked sun-occlusion
 	// ray (three entity-only rays, 200 u toward the light, clip radii
 	// -0x2000/-0x5000/-0x8000). Positions/directions in Godot world space.
-	// Empty when no world is loaded (the caller falls back to the outdoor
-	// sample). Residuals tracked on D-RLIT-2: the entity nearest-hit clip of
-	// the camera ray, pool-1 dynamics in the sun rays, and the player-sector
-	// entity-count ray gate.
+	// Empty when no world/local player is loaded (the caller falls back to the
+	// outdoor sample). All three samples reuse the local player's fixed
+	// proximity-candidate slice for blink classification, the nonzero-count sun
+	// gate, and both pool-1/pool-2 sun blockers.
 	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
 	//  terrain_sector_compute_lighting @ 0x5c7550;
 	//  raycast_entity_collision @ 0x413760]

@@ -29,6 +29,7 @@
 #include "npruntime/napi_np_connection.h"
 #include "npruntime/napi_np_protocol.h"  // HostAcceptEvent + the server protocol entry points
 #include "npruntime/napi_np_server_ctx.h"
+#include "npruntime/server_tick.h" // ServerTickPerf
 
 namespace opennova::np {
 
@@ -96,11 +97,25 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 // Advances owner.now_tick by 1.
 using HostBeforeServerTickFn = void (*)(void *context);
 using HostEventObserverFn = void (*)(void *context, const HostAcceptEvent &event);
+
+// Optional phase attribution for one host owner iteration. A null profile
+// keeps ordinary server/gameplay pumps free of diagnostic clock reads.
+struct HostSessionPerf {
+	uint64_t total_us = 0;
+	uint64_t receive_us = 0;
+	uint64_t connections_us = 0;
+	uint64_t adapter_us = 0;
+	uint64_t server_us = 0;
+	uint64_t send_us = 0;
+	ServerTickPerf server;
+};
+
 void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick = nullptr,
 		void *before_server_tick_context = nullptr,
 		HostEventObserverFn event_observer = nullptr,
-		void *event_observer_context = nullptr);
+		void *event_observer_context = nullptr,
+		HostSessionPerf *perf = nullptr);
 
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.

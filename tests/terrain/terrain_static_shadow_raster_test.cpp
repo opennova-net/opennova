@@ -111,8 +111,7 @@ bool test_depth_and_winding_admission() {
 			[](uint8_t value) { return value == 200; }),
 			"fragments behind the z=0.5 receiver quad do not shadow")) return false;
 
-	// Clockwise input must rasterize identically; retail's material may be
-	// two-sided and the portable raster receives already-admitted triangles.
+	// Reversed input still rasterizes when the authored material is two-sided.
 	input.triangles.clear();
 	input.triangles.push_back(triangle(
 			vertex(0.0f, 0.0f, 0.5f), vertex(0.0f, 1.0f, 0.5f),
@@ -120,11 +119,77 @@ bool test_depth_and_winding_admission() {
 	input.triangles.push_back(triangle(
 			vertex(0.0f, 0.0f, 0.5f), vertex(1.0f, 1.0f, 0.5f),
 			vertex(1.0f, 0.0f, 0.5f)));
+	for (TerrainStaticShadowRasterTriangle &draw : input.triangles) {
+		draw.two_sided = true;
+	}
 	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
 			"clockwise projection rasterizes")) return false;
 	return expect(std::all_of(result.alpha.begin(), result.alpha.end(),
 			[](uint8_t value) { return value == 0; }),
 			"clockwise fragments at the receiver depth are admitted");
+}
+
+bool test_one_sided_cull_and_two_sided_override() {
+	TerrainStaticShadowRasterInput input;
+	input.triangles.push_back(triangle(
+			vertex(0.0f, 0.0f, 0.25f), vertex(0.0f, 1.0f, 0.25f),
+			vertex(1.0f, 1.0f, 0.25f)));
+	input.triangles.push_back(triangle(
+			vertex(0.0f, 0.0f, 0.25f), vertex(1.0f, 1.0f, 0.25f),
+			vertex(1.0f, 0.0f, 0.25f)));
+	TerrainStaticShadowAlphaPage one_sided = alpha_page(1, 1, {200});
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, one_sided),
+			"one-sided reversed geometry is a valid raster job")) return false;
+	if (!expect(one_sided.alpha == std::vector<uint8_t>({200}),
+			"retail CULLMODE CCW rejects the reversed one-sided silhouette")) {
+		return false;
+	}
+	for (TerrainStaticShadowRasterTriangle &draw : input.triangles) {
+		draw.two_sided = true;
+	}
+	TerrainStaticShadowAlphaPage two_sided = alpha_page(1, 1, {200});
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, two_sided),
+			"the two-sided override rasterizes reversed geometry")) return false;
+	return expect(two_sided.alpha == std::vector<uint8_t>({0}),
+			"the authored two-sided flag switches the projected pass to cull-none");
+}
+
+bool test_projshad_depth_writes_order_overlapping_surfaces() {
+	TerrainStaticShadowRasterInput input;
+	const auto near_noop = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.2f);
+	const auto farther_opaque = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.4f);
+	input.triangles.assign(near_noop.begin(), near_noop.end());
+	for (TerrainStaticShadowRasterTriangle &draw : input.triangles) {
+		draw.blend = TerrainStaticShadowBlend::Additive;
+	}
+	input.triangles.insert(input.triangles.end(), farther_opaque.begin(),
+			farther_opaque.end());
+	TerrainStaticShadowAlphaPage result = alpha_page(1, 1, {200});
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"overlapping projected-shadow surfaces rasterize")) return false;
+	if (!expect(result.alpha == std::vector<uint8_t>({200}),
+			"a nearer additive no-op still depth-occludes a farther opaque caster")) {
+		return false;
+	}
+
+	// Alpha-test rejection happens before the z write, so a farther admitted
+	// caster remains visible through a cutout hole.
+	std::vector<uint8_t> storage;
+	std::vector<TerrainStaticShadowAlphaMipView> mips;
+	input.alpha_textures.push_back(constant_alpha_texture(0, storage, mips));
+	input.triangles.clear();
+	const auto rejected_near = rectangle(0.0f, 0.0f, 1.0f, 1.0f,
+			0.2f, 0, 64);
+	input.triangles.assign(rejected_near.begin(), rejected_near.end());
+	input.triangles.insert(input.triangles.end(), farther_opaque.begin(),
+			farther_opaque.end());
+	result = alpha_page(1, 1, {200});
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"alpha-rejected near geometry preserves later depth admission")) {
+		return false;
+	}
+	return expect(result.alpha == std::vector<uint8_t>({0}),
+			"a cutout hole does not hide the farther opaque silhouette");
 }
 
 bool test_near_plane_clip() {
@@ -326,6 +391,8 @@ bool test_retail_world_to_page_projection() {
 int main() {
 	if (!test_opaque_projection_preserves_outside_and_resolves_edges()) return 1;
 	if (!test_depth_and_winding_admission()) return 1;
+	if (!test_one_sided_cull_and_two_sided_override()) return 1;
+	if (!test_projshad_depth_writes_order_overlapping_surfaces()) return 1;
 	if (!test_near_plane_clip()) return 1;
 	if (!test_material_alpha_ref_64()) return 1;
 	if (!test_shared_diagonal_uses_single_fragment_ownership()) return 1;

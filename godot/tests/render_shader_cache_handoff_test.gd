@@ -19,10 +19,11 @@ const EXPECTED_KEYS := {
 	"VS_PHONGT/base": [["VS_PHONGT", 0x00, 0, 0, 128], 0x00002408],
 	"VS_DOT3DIFFOBJ/base": [["VS_DOT3DIFFOBJ", 0x00, 0, 0, 128], 0x00000c08],
 	"VS_DOT3DIFF2/base": [["VS_DOT3DIFF2", 0x00, 0, 0, 128], 0x00001410],
-	# 0x5410 -> 0x1410 at REN-4: the OED dump's GLASS bit on the SkB*T rows was
-	# table drift — the runtime capability probe never sets it (no ReflectColor
-	# reference) [orig: HLSLEffect_LoadFromFile probe @ 0x5ae690; D-RMAT-4].
-	"VS_SKBUMPDIFFT2/base": [["VS_SKBUMPDIFFT2", 0x00, 0, 0, 128], 0x00001410],
+	# 0x5410 -> 0x21410 at REN-4 + this audit: the OED dump's GLASS bit on the
+	# SkB*T rows was table drift (no ReflectColor reference), while the witnessed
+	# skinned vertex topology now has an explicit compile-time capability bit.
+	# [orig: HLSLEffect_LoadFromFile probe @ 0x5ae690; D-RMAT-4].
+	"VS_SKBUMPDIFFT2/base": [["VS_SKBUMPDIFFT2", 0x00, 0, 0, 128], 0x00021410],
 	"VS_FLAG/base": [["VS_FLAG", 0x00, 0, 0, 128], 0x0000000c],
 	"FF_ST_OP_LUM/em2": [["FF_ST_OP_LUM", 0x00, 2, 0, 128], 0x00000304],
 	"FF_ST_OP/all-flags": [["FF_ST_OP", 0x07, 0, 0, 200], 0x000000e4],
@@ -50,6 +51,21 @@ func test_known_shader_tag_table_reaches_gdscript() -> void:
 	assert_true("FFP_GLASS" in tags, "table carries FFP_GLASS")
 	assert_true("VS_TRACER" in tags, "table carries the runtime-only VS_TRACER row")
 	assert_false("VS_LEAVESWIND" in tags, "unshipped tags stay out of the table")
+
+
+func test_water_plane_handoff_mirrors_the_transparent_ladder_underwater() -> void:
+	var cache := ObjectShaderCache.get_singleton()
+	cache.set_water_plane(4.0, true)
+	assert_eq(cache.alpha_rung_for_height(3.0),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
+	assert_eq(cache.alpha_rung_for_height(5.0),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE)
+	cache.set_water_plane(4.0, false)
+	assert_eq(cache.alpha_rung_for_height(3.0),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE)
+	assert_eq(cache.alpha_rung_for_height(5.0),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
+	cache.clear_water_plane()
 
 
 func test_shader_for_key_selects_checked_in_resources() -> void:
@@ -94,15 +110,22 @@ func test_configure_material_selects_compile_time_techniques() -> void:
 	cache.configure_material_for_key(
 			detail, cache.classify("VS_SKBUMPDIFFT2", 0, 0, 0, 128))
 	assert_eq(detail.shader.resource_path,
-			"res://shaders/object/dot3_tangent_detail/opaque.gdshader",
-			"detail + tangent normal topology is selected structurally")
+			"res://shaders/object/dot3_tangent_detail_skinned/opaque.gdshader",
+			"skinned detail DOT3 keeps its fixed-function encoded-vector topology")
 	var no_detail_key: int = cache.classify("VS_SKBUMPDIFFT2", 0, 0, 0, 128)
 	no_detail_key &= ~ObjectShaderCache.CAP_DETAIL
 	var no_detail := ShaderMaterial.new()
 	cache.configure_material_for_key(no_detail, no_detail_key)
 	assert_eq(no_detail.shader.resource_path,
-			"res://shaders/object/dot3_tangent/opaque.gdshader",
+			"res://shaders/object/dot3_tangent_skinned/opaque.gdshader",
 			"missing detail texture selects the compiled single-stage downgrade")
+
+	var skinned_basic := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			skinned_basic, cache.classify("VS_SKBASIC", 0, 0, 0, 128))
+	assert_eq(skinned_basic.shader.resource_path,
+			"res://shaders/object/fixed_skinned/opaque.gdshader",
+			"SkBasic stays distinct from _FFP AlphaGen/SELFLUM topology")
 
 	var phong := ShaderMaterial.new()
 	cache.configure_material_for_key(phong, cache.classify("VS_PHONGT", 0, 0, 0, 128))
@@ -115,13 +138,49 @@ func test_configure_material_selects_compile_time_techniques() -> void:
 	assert_eq(object_normal.shader.resource_path,
 			"res://shaders/object/phong_object_diffuse/opaque.gdshader",
 			"object-space normal topology is a distinct resource")
+	var skinned_tangent_phong := ShaderMaterial.new()
+	cache.configure_material_for_key(skinned_tangent_phong,
+			cache.classify("VS_SKBUMPPHONGT", 0, 0, 0, 128))
+	assert_eq(skinned_tangent_phong.shader.resource_path,
+			"res://shaders/object/phong_tangent_specular_skinned/opaque.gdshader",
+			"skinned tangent Phong keeps its authored directional topology")
+	var phong_map := ShaderMaterial.new()
+	cache.configure_material_for_key(phong_map,
+			cache.classify("VS_SKBUMPPHONGOBJ", 0, 0, 0, 128))
+	assert_eq(phong_map.shader.resource_path,
+			"res://shaders/object/phong_object_specular_phong_map/opaque.gdshader",
+			"skinned object Phong selects the Diffuse1-alpha PhongMap path")
 
 	var environment := ShaderMaterial.new()
 	cache.configure_material_for_key(
 			environment, cache.classify("VS_ENVPHONGT", 0, 0, 0, 128))
 	assert_eq(environment.shader.resource_path,
 			"res://shaders/object/environment_tangent_specular/opaque.gdshader",
-			"environment + specular stand-ins are compiled into the technique")
+			"environment plus authored Phong passes are compiled into the technique")
+	var mirror := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			mirror, cache.classify("VS_BUMPMIRRT", 0, 0, 0, 128))
+	assert_eq(mirror.shader.resource_path,
+			"res://shaders/object/environment_tangent/opaque.gdshader",
+			"untextured mirror selects its exact reflection combine")
+	var textured_mirror := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			textured_mirror, cache.classify("VS_BMTXMIRRT", 0, 0, 0, 128))
+	assert_eq(textured_mirror.shader.resource_path,
+			"res://shaders/object/environment_tangent_textured/opaque.gdshader",
+			"textured mirror preserves the authored Diffuse1 post-multiply")
+	var skinned_glass := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			skinned_glass, cache.classify("VS_SKGLASS", 0, 0, 0, 128))
+	assert_eq(skinned_glass.shader.resource_path,
+			"res://shaders/object/glass_skinned/additive.gdshader",
+			"skinned glass selects its untextured vertex-color path")
+	var emissive_flag := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			emissive_flag, cache.classify("VS_FLAG", 0, 2, 0, 128))
+	assert_eq(emissive_flag.shader.resource_path,
+			"res://shaders/object/flag/opaque.gdshader",
+			"Flag.fx has no invented self-lit technique")
 
 	var luminance := ShaderMaterial.new()
 	cache.configure_material_for_key(

@@ -84,7 +84,7 @@ typedef struct ThreediHeader {
     char name[17];           // Null-terminated model name (from GHDR).
     ThreediMeshType mesh_type;
     int32_t lod_count_decl;  // Number of LODs reported in GHDR.
-    int32_t lod_distance;
+    int32_t max_radius_fp16; // GHDR +24: max derived LOD radius, unsigned Q16.16 on disk.
 } ThreediHeader;
 
 typedef struct ThreediInfo {

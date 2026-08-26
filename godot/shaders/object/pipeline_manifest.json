@@ -1,42 +1,80 @@
 {
   "schema": 1,
-  "resource_count": 104,
+  "resource_count": 128,
+  "auxiliary_resource_count": 4,
+  "total_resource_count": 132,
   "description": "Reachable object shader techniques and static render policies. Runtime selection must fail closed outside this table.",
+  "auxiliary_resources": [
+    {
+      "path": "postmultiply/environment_textured.gdshader",
+      "pass_class": "TECHNIQUE_NORMAL_P3",
+      "contract": "diffuse1_gamma_postmultiply",
+      "coverage": "full",
+      "cull": "back"
+    },
+    {
+      "path": "postmultiply/environment_textured_double_sided.gdshader",
+      "pass_class": "TECHNIQUE_NORMAL_P3",
+      "contract": "diffuse1_gamma_postmultiply",
+      "coverage": "full",
+      "cull": "disabled"
+    },
+    {
+      "path": "postmultiply/environment_textured_cutout.gdshader",
+      "pass_class": "TECHNIQUE_NORMAL_P3",
+      "contract": "diffuse1_gamma_postmultiply",
+      "coverage": "diffuse_alpha",
+      "cull": "back"
+    },
+    {
+      "path": "postmultiply/environment_textured_cutout_double_sided.gdshader",
+      "pass_class": "TECHNIQUE_NORMAL_P3",
+      "contract": "diffuse1_gamma_postmultiply",
+      "coverage": "diffuse_alpha",
+      "cull": "disabled"
+    }
+  ],
   "policies": {
     "opaque": {
       "blend": "mix",
       "depth": "opaque",
       "coverage": "full",
+      "fog": "regular",
       "writes_alpha": false
     },
     "alpha": {
       "blend": "mix",
       "depth": "never",
       "coverage": "full",
+      "fog": "regular",
       "writes_alpha": true
     },
     "additive": {
       "blend": "add",
       "depth": "never",
       "coverage": "full",
+      "fog": "additive",
       "writes_alpha": false
     },
     "cutout_mix": {
       "blend": "mix",
-      "depth": "alpha_prepass_opaque",
+      "depth": "opaque",
       "coverage": "cutout",
+      "fog": "regular",
       "writes_alpha": false
     },
     "cutout_alpha": {
       "blend": "mix",
-      "depth": "alpha_prepass_opaque",
+      "depth": "never",
       "coverage": "cutout",
+      "fog": "regular",
       "writes_alpha": true
     },
     "cutout_additive": {
       "blend": "add",
-      "depth": "alpha_prepass_opaque",
+      "depth": "never",
       "coverage": "cutout",
+      "fog": "additive",
       "writes_alpha": false
     }
   },
@@ -44,6 +82,117 @@
     "back",
     "disabled"
   ],
+  "specular_alpha_contracts": {
+    "PhongTangentSpecular": "pow8_brightness",
+    "PhongTangentSpecularSkinned": "pow8_brightness",
+    "PhongObjectSpecular": "pow8_brightness",
+    "PhongObjectSpecularPhongMap": "phong_map_brightness_and_exponent",
+    "EnvironmentPhong": "pow8_brightness"
+  },
+  "projected_shadow_contracts": {
+    "Fixed": "diffuse_alpha_ffp",
+    "FixedSkinned": "diffuse_alpha",
+    "FixedDetail": "diffuse_detail_alpha_ffp",
+    "SelfLit": "diffuse_alpha_ffp",
+    "SelfLitDetail": "diffuse_detail_alpha_ffp",
+    "Tracer": "no_pass",
+    "Flag": "no_pass",
+    "PhongTangentDiffuse": "diffuse_alpha",
+    "PhongTangentSpecular": "diffuse_alpha",
+    "PhongTangentSpecularSkinned": "diffuse_alpha",
+    "PhongObjectDiffuse": "diffuse_alpha",
+    "PhongObjectSpecular": "diffuse_alpha",
+    "PhongObjectSpecularPhongMap": "diffuse_alpha",
+    "Dot3Tangent": "diffuse_alpha",
+    "Dot3TangentDetail": "diffuse_alpha",
+    "Dot3TangentSkinned": "diffuse_alpha",
+    "Dot3TangentDetailSkinned": "diffuse_alpha",
+    "Dot3Object": "diffuse_alpha",
+    "Dot3ObjectDetail": "diffuse_alpha",
+    "EnvironmentMirror": "diffuse_alpha",
+    "EnvironmentMirrorTextured": "diffuse_alpha",
+    "EnvironmentPhong": "diffuse_alpha",
+    "GlassFixed": "no_pass",
+    "GlassSkinned": "no_pass"
+  },
+  "projected_shadow_state_contracts": {
+    "Fixed": "material_blend",
+    "FixedSkinned": "opaque",
+    "FixedDetail": "material_blend",
+    "SelfLit": "material_blend",
+    "SelfLitDetail": "material_blend",
+    "Tracer": "no_pass",
+    "Flag": "no_pass",
+    "PhongTangentDiffuse": "opaque",
+    "PhongTangentSpecular": "opaque",
+    "PhongTangentSpecularSkinned": "opaque",
+    "PhongObjectDiffuse": "opaque",
+    "PhongObjectSpecular": "opaque",
+    "PhongObjectSpecularPhongMap": "opaque",
+    "Dot3Tangent": "opaque",
+    "Dot3TangentDetail": "opaque",
+    "Dot3TangentSkinned": "opaque",
+    "Dot3TangentDetailSkinned": "opaque",
+    "Dot3Object": "opaque",
+    "Dot3ObjectDetail": "opaque",
+    "EnvironmentMirror": "opaque",
+    "EnvironmentMirrorTextured": "opaque",
+    "EnvironmentPhong": "opaque",
+    "GlassFixed": "no_pass",
+    "GlassSkinned": "no_pass"
+  },
+  "match_terrain_contracts": {
+    "Fixed": "no_pass",
+    "FixedSkinned": "skinned_stance",
+    "FixedDetail": "no_pass",
+    "SelfLit": "no_pass",
+    "SelfLitDetail": "no_pass",
+    "Tracer": "no_pass",
+    "Flag": "no_pass",
+    "PhongTangentDiffuse": "skinned_stance",
+    "PhongTangentSpecular": "no_pass",
+    "PhongTangentSpecularSkinned": "skinned_stance",
+    "PhongObjectDiffuse": "skinned_stance",
+    "PhongObjectSpecular": "no_pass",
+    "PhongObjectSpecularPhongMap": "skinned_stance",
+    "Dot3Tangent": "no_pass",
+    "Dot3TangentDetail": "no_pass",
+    "Dot3TangentSkinned": "skinned_stance",
+    "Dot3TangentDetailSkinned": "skinned_stance",
+    "Dot3Object": "skinned_stance",
+    "Dot3ObjectDetail": "skinned_stance",
+    "EnvironmentMirror": "no_pass",
+    "EnvironmentMirrorTextured": "no_pass",
+    "EnvironmentPhong": "no_pass",
+    "GlassFixed": "no_pass",
+    "GlassSkinned": "no_pass"
+  },
+  "glow_contracts": {
+    "Fixed": "no_pass",
+    "FixedSkinned": "no_pass",
+    "FixedDetail": "no_pass",
+    "SelfLit": "normal_copy",
+    "SelfLitDetail": "normal_copy",
+    "Tracer": "no_pass",
+    "Flag": "no_pass",
+    "PhongTangentDiffuse": "no_pass",
+    "PhongTangentSpecular": "no_pass",
+    "PhongTangentSpecularSkinned": "no_pass",
+    "PhongObjectDiffuse": "no_pass",
+    "PhongObjectSpecular": "no_pass",
+    "PhongObjectSpecularPhongMap": "no_pass",
+    "Dot3Tangent": "no_pass",
+    "Dot3TangentDetail": "no_pass",
+    "Dot3TangentSkinned": "no_pass",
+    "Dot3TangentDetailSkinned": "no_pass",
+    "Dot3Object": "no_pass",
+    "Dot3ObjectDetail": "no_pass",
+    "EnvironmentMirror": "no_pass",
+    "EnvironmentMirrorTextured": "no_pass",
+    "EnvironmentPhong": "no_pass",
+    "GlassFixed": "rotated_specular",
+    "GlassSkinned": "no_pass"
+  },
   "techniques": [
     {
       "engine_enum": "Fixed",
@@ -59,7 +208,29 @@
       "sampling": "single",
       "normal": "none",
       "vertex": "standard",
-      "implementation": "fixed"
+      "vertex_point_lights": "ffp_diffuse",
+      "implementation": "fixed",
+      "rgb_modulation": "none",
+      "alpha_modulation": "ffp",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "explicit"
+    },
+    {
+      "engine_enum": "FixedSkinned",
+      "directory": "fixed_skinned",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "standard",
+      "vertex_point_lights": "ffp_diffuse",
+      "implementation": "fixed",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "FixedDetail",
@@ -75,7 +246,12 @@
       "sampling": "detail",
       "normal": "none",
       "vertex": "standard",
-      "implementation": "fixed"
+      "vertex_point_lights": "ffp_diffuse",
+      "implementation": "fixed",
+      "rgb_modulation": "none",
+      "alpha_modulation": "ffp",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "explicit"
     },
     {
       "engine_enum": "SelfLit",
@@ -91,7 +267,12 @@
       "sampling": "single",
       "normal": "none",
       "vertex": "standard",
-      "implementation": "self_lit"
+      "vertex_point_lights": "none",
+      "implementation": "self_lit",
+      "rgb_modulation": "self_lum",
+      "alpha_modulation": "none",
+      "coverage_source": "zero",
+      "clip_class": "explicit"
     },
     {
       "engine_enum": "SelfLitDetail",
@@ -107,7 +288,12 @@
       "sampling": "detail",
       "normal": "none",
       "vertex": "standard",
-      "implementation": "self_lit"
+      "vertex_point_lights": "none",
+      "implementation": "self_lit",
+      "rgb_modulation": "self_lum",
+      "alpha_modulation": "none",
+      "coverage_source": "zero",
+      "clip_class": "explicit"
     },
     {
       "engine_enum": "Tracer",
@@ -119,7 +305,12 @@
       "sampling": "single",
       "normal": "none",
       "vertex": "standard",
-      "implementation": "tracer"
+      "vertex_point_lights": "none",
+      "implementation": "tracer",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "normal_fallback"
     },
     {
       "engine_enum": "Flag",
@@ -131,19 +322,12 @@
       "sampling": "single",
       "normal": "none",
       "vertex": "flag",
-      "implementation": "flag"
-    },
-    {
-      "engine_enum": "FlagSelfLit",
-      "directory": "flag_self_lit",
-      "policies": [
-        "opaque",
-        "cutout_mix"
-      ],
-      "sampling": "single",
-      "normal": "none",
-      "vertex": "flag",
-      "implementation": "flag_self_lit"
+      "vertex_point_lights": "none",
+      "implementation": "flag",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "normal_fallback"
     },
     {
       "engine_enum": "PhongTangentDiffuse",
@@ -155,7 +339,12 @@
       "sampling": "single",
       "normal": "tangent_uv1",
       "vertex": "standard",
-      "implementation": "phong_diffuse"
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_diffuse",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "explicit_unskinned_or_submit_skip_skinned"
     },
     {
       "engine_enum": "PhongTangentSpecular",
@@ -167,7 +356,29 @@
       "sampling": "single",
       "normal": "tangent_uv1",
       "vertex": "standard",
-      "implementation": "phong_specular"
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_specular_shadow",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "explicit"
+    },
+    {
+      "engine_enum": "PhongTangentSpecularSkinned",
+      "directory": "phong_tangent_specular_skinned",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_specular",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "PhongObjectDiffuse",
@@ -179,7 +390,12 @@
       "sampling": "single",
       "normal": "object_uv1",
       "vertex": "standard",
-      "implementation": "phong_diffuse"
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_diffuse",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "explicit_unskinned_or_submit_skip_skinned"
     },
     {
       "engine_enum": "PhongObjectSpecular",
@@ -191,7 +407,29 @@
       "sampling": "single",
       "normal": "object_uv1",
       "vertex": "standard",
-      "implementation": "phong_specular"
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_specular",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "normal_fallback"
+    },
+    {
+      "engine_enum": "PhongObjectSpecularPhongMap",
+      "directory": "phong_object_specular_phong_map",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "object_uv1",
+      "vertex": "standard",
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_map",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "vertex_diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "Dot3Tangent",
@@ -203,7 +441,12 @@
       "sampling": "single",
       "normal": "tangent_uv1",
       "vertex": "standard",
-      "implementation": "dot3"
+      "vertex_point_lights": "attenuation",
+      "implementation": "dot3",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "normal_alpha",
+      "clip_class": "explicit"
     },
     {
       "engine_enum": "Dot3TangentDetail",
@@ -215,7 +458,46 @@
       "sampling": "detail",
       "normal": "tangent_uv1",
       "vertex": "standard",
-      "implementation": "dot3"
+      "vertex_point_lights": "attenuation",
+      "implementation": "dot3",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "normal_alpha",
+      "clip_class": "explicit"
+    },
+    {
+      "engine_enum": "Dot3TangentSkinned",
+      "directory": "dot3_tangent_skinned",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "vertex_point_lights": "attenuation",
+      "implementation": "dot3_skinned",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
+    },
+    {
+      "engine_enum": "Dot3TangentDetailSkinned",
+      "directory": "dot3_tangent_detail_skinned",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "detail",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "vertex_point_lights": "attenuation",
+      "implementation": "dot3_skinned",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "Dot3Object",
@@ -227,7 +509,12 @@
       "sampling": "single",
       "normal": "object_uv1",
       "vertex": "standard",
-      "implementation": "dot3"
+      "vertex_point_lights": "attenuation",
+      "implementation": "dot3_skinned",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "Dot3ObjectDetail",
@@ -239,10 +526,15 @@
       "sampling": "detail",
       "normal": "object_uv1",
       "vertex": "standard",
-      "implementation": "dot3"
+      "vertex_point_lights": "attenuation",
+      "implementation": "dot3_skinned",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
-      "engine_enum": "EnvironmentTangent",
+      "engine_enum": "EnvironmentMirror",
       "directory": "environment_tangent",
       "policies": [
         "opaque",
@@ -251,10 +543,33 @@
       "sampling": "single",
       "normal": "tangent_uv1",
       "vertex": "standard",
-      "implementation": "environment"
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "environment",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "reflect_alpha",
+      "clip_class": "normal_fallback"
     },
     {
-      "engine_enum": "EnvironmentTangentSpecular",
+      "engine_enum": "EnvironmentMirrorTextured",
+      "directory": "environment_tangent_textured",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_raw_reflect",
+      "vertex": "standard",
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "environment_textured",
+      "fog": "passthrough",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "reflect_alpha",
+      "clip_class": "normal_fallback"
+    },
+    {
+      "engine_enum": "EnvironmentPhong",
       "directory": "environment_tangent_specular",
       "policies": [
         "opaque",
@@ -263,10 +578,15 @@
       "sampling": "single",
       "normal": "tangent_uv1",
       "vertex": "standard",
-      "implementation": "environment_specular"
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "environment_specular",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "normal_fallback"
     },
     {
-      "engine_enum": "Glass",
+      "engine_enum": "GlassFixed",
       "directory": "glass",
       "policies": [
         "additive",
@@ -275,7 +595,29 @@
       "sampling": "single",
       "normal": "none",
       "vertex": "standard",
-      "implementation": "glass"
+      "vertex_point_lights": "none",
+      "implementation": "glass",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "zero",
+      "clip_class": "explicit"
+    },
+    {
+      "engine_enum": "GlassSkinned",
+      "directory": "glass_skinned",
+      "policies": [
+        "additive",
+        "cutout_additive"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "standard",
+      "vertex_point_lights": "none",
+      "implementation": "glass_skinned",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "reflect_alpha",
+      "clip_class": "skinned_submit_skip"
     }
   ]
 }

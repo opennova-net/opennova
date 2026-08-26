@@ -285,6 +285,22 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
     return true;
 }
 
+bool CollisionWorld::target_solid_bound(const World &world, EntityHandle h,
+                                        int32_t pos_out[3], int32_t &radius_out) const {
+    const Instance *instance = live_instance(world, h);
+    if (instance == nullptr) return false;
+    const Entity *e = world.registry.get(h);
+    if (e == nullptr) return false;
+    const bool using_husk =
+            (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
+    const CollisionModel *m =
+            model(using_husk ? instance->husk_model_id : instance->model_id);
+    if (m == nullptr || !m->valid() || !m->has_solid_volume) return false;
+    entity_pos_fixed(*e, pos_out);
+    radius_out = entity_proximity_radius(*this, *e, m);
+    return true;
+}
+
 // The per-tick projectile view: build once per (entity, tick), reuse for
 // every round tracing it this tick. A hit revalidates the husk bit — retail
 // picks the model per query [orig: Flags & 4 pick @ 0x413086], and a round
@@ -769,10 +785,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     // proxy layer is the documented visual-only-client reimpl model
     // (docs/net/novaworld-net-re.md §5.60). Wire identities never become
     // registry handles: geometry_entity stays invalid on a proxy hit.
-    if (trace.include_wire_proxies && !projectile_dynamic_proxies_.empty()) {
+    if (trace.include_wire_proxies && !wire_dynamic_proxies_.empty()) {
         CollisionPolygonHit table_hit;
         bool table_found = false;
-        for (const ProjectileDynamicProxy &proxy : projectile_dynamic_proxies_) {
+        for (const WireDynamicCollisionProxy &proxy : wire_dynamic_proxies_) {
             // Self-site immunity: the shooter's own wire slot (a decoded
             // vehicle/item shooter never clips itself) and the mounted
             // shooter's own carrier, resolved from the decoded carrier_handle
@@ -804,12 +820,21 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 // placement matrix reads: live coarse heading (entity+16 high
                 // byte) plus the retained spawn/dead pitch/roll samples
                 // (entity+20/+24) [orig: the placement matrix @ 0x613f40].
-                const CollisionMatrix world_mat =
+                CollisionMatrix world_mat =
                     (proxy.pitch_bam != 0 || proxy.roll_bam != 0)
                         ? collision_matrix_from_euler(proxy.heading_bam,
                                                       proxy.pitch_bam,
                                                       proxy.roll_bam, pos)
                         : collision_matrix_from_heading(proxy.heading_bam, pos);
+                if (proxy.uniform_scale_q16 != 0) {
+                    constexpr int rotation_indices[] = {
+                        0, 1, 2, 4, 5, 6, 8, 9, 10};
+                    for (int index : rotation_indices) {
+                        world_mat.m[index] = static_cast<int32_t>(
+                            (static_cast<int64_t>(world_mat.m[index]) *
+                             proxy.uniform_scale_q16) >> 16);
+                    }
+                }
                 std::vector<CollisionMatrix> proxy_matrices(
                     proxy_model->sections.size(), world_mat);
                 CollisionTargetView view;
@@ -822,6 +847,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 view.pitch_bam = proxy.pitch_bam;
                 view.bound_radius = broad_radius;
                 view.pool_index = proxy.wire_handle & 0xFFF;
+                view.uniform_scale_q16 = proxy.uniform_scale_q16;
                 view.live_section_pose = false;
                 if (!narrow_phase(view, model_hit)) continue;
             } else {
@@ -883,10 +909,23 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     if (authority_fat_bullet)
         effective_radius = std::max(effective_radius, kProjectileAuthorityMinRadiusQ16);
     constexpr int32_t kFallbackAuthoredRadiusQ16 = 78642; // 1.2u
-    auto trace_torso_fallback = [&](const FixedVec3 &feet, ProjectileHit &eh,
+    auto trace_torso_fallback = [&](const FixedVec3 &feet, int32_t uniform_scale_q16,
+                                    ProjectileHit &eh,
                                     int32_t &hit_distance) {
+        const int32_t center_lift = uniform_scale_q16 != 0
+            ? retail_q16_mul_rhu(kOrganicCenterZQ16, uniform_scale_q16)
+            : kOrganicCenterZQ16;
+        const int64_t scale_magnitude = uniform_scale_q16 < 0
+            ? -static_cast<int64_t>(uniform_scale_q16)
+            : static_cast<int64_t>(uniform_scale_q16);
+        const int32_t radius_scale = uniform_scale_q16 == 0
+            ? 0x10000
+            : static_cast<int32_t>(
+                  std::min<int64_t>(scale_magnitude, 0x7fffffffLL));
+        const int32_t fallback_radius = retail_q16_mul_rhu(
+            kFallbackAuthoredRadiusQ16, radius_scale);
         const int32_t center[3] = {
-            feet.x, feet.y, feet.z + kOrganicCenterZQ16,
+            feet.x, feet.y, feet.z + center_lift,
         };
         const int32_t projection = static_cast<int32_t>(
             (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
@@ -902,9 +941,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
                          closest[2] - center[2]);
         const int32_t hit_radius = effective_radius + 3276 +
-                                   45 * kFallbackAuthoredRadiusQ16 / 100;
+                static_cast<int32_t>((45LL * fallback_radius) / 100);
         if (center_distance > hit_radius) return false;
-        hit_distance = projection - (kFallbackAuthoredRadiusQ16 >> 1);
+        hit_distance = projection - (fallback_radius >> 1);
         // No authored section identity exists. RoundSim maps this sentinel to
         // synthetic torso 1 for presentation/reactions while preserving a
         // neutral damage multiplier.
@@ -940,23 +979,23 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     std::vector<PersonWalkEntry> person_walk;
     if (trace.walk_persons && !person_faces_only) {
         const bool merge_proxies =
-            trace.include_wire_proxies && !projectile_person_proxies_.empty();
+            trace.include_wire_proxies && !wire_person_proxies_.empty();
         person_walk.reserve(persons_.size() +
-                            (merge_proxies ? projectile_person_proxies_.size()
+                            (merge_proxies ? wire_person_proxies_.size()
                                            : size_t{0}));
         for (size_t i = 0; i < persons_.size(); ++i) {
             const PersonSlot &slot = persons_[i];
             const uint16_t key =
-                (projectile_local_player_wire_handle_ != EntityHandle::kInvalid &&
+                (wire_local_player_handle_ != EntityHandle::kInvalid &&
                  slot.h == world.cached.local_player)
-                    ? projectile_local_player_wire_handle_
+                    ? wire_local_player_handle_
                     : slot.h.packed;
             person_walk.push_back({key, false, static_cast<uint32_t>(i)});
         }
         if (merge_proxies) {
-            for (size_t i = 0; i < projectile_person_proxies_.size(); ++i) {
+            for (size_t i = 0; i < wire_person_proxies_.size(); ++i) {
                 person_walk.push_back(
-                    {projectile_person_proxies_[i].wire_handle, true,
+                    {wire_person_proxies_[i].wire_handle, true,
                      static_cast<uint32_t>(i)});
             }
             // persons_ arrives in registry pool/slot order, which is the wire
@@ -973,8 +1012,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     }
     for (const PersonWalkEntry &entry : person_walk) {
         if (entry.is_proxy) {
-            const ProjectilePersonProxy &proxy =
-                projectile_person_proxies_[entry.index];
+            const WirePersonCollisionProxy &proxy =
+                wire_person_proxies_[entry.index];
             // The wire identity is used only for ordered projection and the
             // self gate. In particular it is never assigned to geometry_entity.
             if ((trace.ammo_flags & 4u) == 0 &&
@@ -985,14 +1024,17 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     static_cast<float>(proxy.position_q16.x) / 65536.0f,
                     static_cast<float>(proxy.position_q16.y) / 65536.0f,
                     static_cast<float>(proxy.position_q16.z) / 65536.0f};
-                const float r = static_cast<float>(0x20000 + effective_radius) /
+                const int32_t proxy_bound = std::max(proxy.bound_radius_q16, 0);
+                const float r = static_cast<float>(proxy_bound + 0x18000 +
+                                                   effective_radius) /
                                 65536.0f;
                 if (!round_broad_phase(p0f, p1f, sc, r)) continue;
             }
             if (profile_trace) trace_profile_.person_survivors++;
             ProjectileHit eh;
             int32_t hit_distance = 0;
-            if (!trace_torso_fallback(proxy.position_q16, eh, hit_distance))
+            if (!trace_torso_fallback(proxy.position_q16,
+                                      proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
             finish_person_hit(eh, hit_distance); // geometry_entity stays invalid
             break;
@@ -1101,6 +1143,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             !trace_torso_fallback(
                 FixedVec3{to_fixed(e->position.x), to_fixed(e->position.y),
                           to_fixed(e->position.z)},
+                e->uniform_scale_q16,
                 eh, hit_distance))
             continue;
 
@@ -1127,23 +1170,11 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     const int32_t radius = 0x8000; // [orig: searchRadius_fp = 0x8000]
 
     if (ent.kind == EntityKind::Organic) {
-        // Persons (and vehicles, once they get slices) walk their own candidate
-        // list testing building-kind candidates — no distance prefilter. [orig:
-        // the def type 1/3 branch @ 0x4b3e5f-0x4b3f93]
-        auto it = candidates_.find(ent.handle.packed);
-        if (it != candidates_.end()) {
-            const CandidateSlice slice = it->second;
-            for (int32_t i = 0; i < slice.count; ++i) {
-                const EntityHandle ch = arena_[slice.start + i];
-                if (ch == ent.handle) continue; // [orig: @ 0x4b3f73]
-                const Entity *ce = world.registry.get(ch);
-                if (ce == nullptr || ce->kind != EntityKind::Building) continue;
-                CollisionTargetView view;
-                std::vector<CollisionMatrix> mats;
-                if (const CollisionTargetView *tv = target_view(world, ch, view, mats))
-                    collision_test_blink(*tv, &pt, &radius, 1, accum);
-            }
-        }
+        // Persons walk their own candidate list testing building-kind entries
+        // with no distance prefilter. [orig: the def type 1/3 branch
+        // @ 0x4b3e5f-0x4b3f93]
+        const int32_t point[3] = {pt.x, pt.y, pt.z};
+        query_candidate_blink_boxes_at_point(world, ent.handle, point, accum);
     } else if (ent.kind != EntityKind::Building) {
         // Everything else non-building tests the building prefix of the static
         // table. [orig: the def-null / other-type loops @ 0x4b3e6b / 0x4b3fa0,
@@ -1198,6 +1229,36 @@ void CollisionWorld::query_blink_boxes_at_point(World &world, const int32_t pos[
         std::vector<CollisionMatrix> mats;
         if (const CollisionTargetView *tv = target_view(world, s.h, view, mats))
             collision_test_blink(*tv, &pt, &radius, 1, accum);
+    }
+}
+
+void CollisionWorld::query_candidate_blink_boxes_at_point(
+        World &world, EntityHandle source, const int32_t pos[3],
+        BlinkAccum &accum) {
+    // [orig: terrain_sector_compute_lighting @ 0x5c7550 — its first argument
+    // is g_local_player_entity, and +0x1BC/+0x1C0 name that entity's fixed
+    // candidate slice. The same walk appears in Entity_BuildProximityList's
+    // person branch @ 0x4b3e5f-0x4b3f93.]
+    accum.reset();
+    CollisionPoint pt;
+    pt.x = pos[0];
+    pt.y = pos[1];
+    pt.z = pos[2];
+    const int32_t radius = 0x8000;
+
+    int32_t count = 0;
+    const EntityHandle *slice = candidate_slice(source, count);
+    if (slice == nullptr) return;
+    for (int32_t i = 0; i < count; ++i) {
+        const EntityHandle candidate = slice[i];
+        if (candidate == source) continue;
+        const Entity *entity = world.registry.get(candidate);
+        if (entity == nullptr || entity->kind != EntityKind::Building) continue;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        if (const CollisionTargetView *target =
+                    target_view(world, candidate, view, mats))
+            collision_test_blink(*target, &pt, &radius, 1, accum);
     }
 }
 

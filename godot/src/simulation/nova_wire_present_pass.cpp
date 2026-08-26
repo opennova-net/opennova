@@ -99,6 +99,29 @@ ObjectModel *WirePresentPass::held_weapon_node(int p_handle) const {
 	return id != nullptr ? model_for_id(*id) : nullptr;
 }
 
+void WirePresentPass::set_entity_lighting_context(int p_handle,
+		float p_effect_scale, bool p_interior_lerp, float p_light_transfer) {
+	LightingContext context;
+	context.effect_scale = CLAMP(p_effect_scale, 0.0f, 1.0f);
+	context.interior_lerp = p_interior_lerp;
+	context.light_transfer = CLAMP(p_light_transfer, 0.0f, 1.0f);
+	lighting_contexts_[p_handle] = context;
+	apply_lighting_context(p_handle);
+}
+
+void WirePresentPass::apply_lighting_context(int p_handle) {
+	const LightingContext *context = lighting_contexts_.getptr(p_handle);
+	if (context == nullptr) return;
+	if (ObjectModel *body = resolve_wire_handle(p_handle)) {
+		body->set_entity_lighting_context(context->effect_scale,
+				context->interior_lerp, context->light_transfer);
+	}
+	if (ObjectModel *weapon = held_weapon_node(p_handle)) {
+		weapon->set_entity_lighting_context(context->effect_scale,
+				context->interior_lerp, context->light_transfer);
+	}
+}
+
 void WirePresentPass::free_wire_node(int p_handle) {
 	if (ObjectModel *node = resolve_wire_handle(p_handle)) {
 		node->queue_free();
@@ -108,6 +131,7 @@ void WirePresentPass::free_wire_node(int p_handle) {
 	if (applier_.is_valid()) {
 		applier_->release_wire_handle(p_handle);
 	}
+	lighting_contexts_.erase(p_handle);
 }
 
 void WirePresentPass::free_held_weapon(int p_handle) {
@@ -135,6 +159,7 @@ void WirePresentPass::reset_runtime_state() {
 	}
 	weapon_nodes_.clear();
 	weapon_graphics_.clear();
+	lighting_contexts_.clear();
 	nodes_.clear();
 	unresolved_.clear();
 	if (applier_.is_valid()) {
@@ -149,9 +174,11 @@ void WirePresentPass::reset_runtime_state() {
 void WirePresentPass::register_wire_node(int p_handle, ObjectModel *p_node) {
 	if (p_node == nullptr) {
 		nodes_.erase(p_handle);
+		lighting_contexts_.erase(p_handle);
 		return;
 	}
 	nodes_[p_handle] = ObjectID(p_node->get_instance_id());
+	apply_lighting_context(p_handle);
 }
 
 void WirePresentPass::set_node_spawned_callback(const Callable &p_callback) {
@@ -271,6 +298,7 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 				continue;
 			}
 			unresolved_.erase(handle);
+			lighting_contexts_.erase(handle);
 		}
 		ObjectModel *node = resolve_wire_handle(handle);
 		if (node != nullptr &&
@@ -313,6 +341,7 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 			ref["character_id"] = character_id;
 			node->set_meta("entity_ref", ref);
 			nodes_[handle] = node->get_instance_id();
+			apply_lighting_context(handle);
 			++stat_spawned_;
 			spawned_now = true;
 		}
@@ -351,6 +380,7 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 	}
 	for (int32_t handle : retired) {
 		unresolved_.erase(handle);
+		lighting_contexts_.erase(handle);
 	}
 	frame_spectator_camera();
 }
@@ -501,6 +531,7 @@ Node3D *WirePresentPass::rebuild_held_weapon(int p_handle, int p_adm) {
 			// docs/render/render-lighting-re.md) — never a slot of its own.
 			built->set_slot_shadow_capture_with(resolve_wire_handle(p_handle));
 			weapon_nodes_[p_handle] = built->get_instance_id();
+			apply_lighting_context(p_handle);
 		}
 	}
 	weapon_graphics_[p_handle] = graphic;
@@ -530,6 +561,9 @@ void WirePresentPass::_bind_methods() {
 			&WirePresentPass::resolve_wire_handle);
 	ClassDB::bind_method(D_METHOD("held_weapon_node", "wire_handle"),
 			&WirePresentPass::held_weapon_node);
+	ClassDB::bind_method(D_METHOD("set_entity_lighting_context", "wire_handle",
+			"effect_scale", "interior_lerp", "light_transfer"),
+			&WirePresentPass::set_entity_lighting_context);
 	ClassDB::bind_method(D_METHOD("muzzle_world_for", "handle", "userpoint"),
 			&WirePresentPass::muzzle_world_for);
 	ClassDB::bind_method(D_METHOD("entity_count"),

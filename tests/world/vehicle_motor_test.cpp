@@ -113,6 +113,7 @@ struct Rig {
         veh.spawn_origin = (1u << 24) | 3u;
         veh.kind = EntityKind::Item;
         veh.item_id = 1291; // wire type of the dune buggy (items.def id - 100000)
+        veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.yaw = 0;
         veh.health = 3000;

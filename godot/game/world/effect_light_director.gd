@@ -16,11 +16,9 @@ extends RefCounted
 ## glow, subobject records, interior room lights) light only what retail's
 ## update_light_slots admits. Corona billboards draw per frame from the
 ## portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
-## Remaining D-RLIT-4 residuals: the per-ROBJ owner section on a building's
-## OWN draw (retail re-scopes per render object [orig:
-## collect_render_objects_for_batch @ 0x5d8ff7]; our per-model draw admits all
-## of a building's own lights at once), terrain projected-texture light,
-## foliage sampling, and subobject bone following.
+## The remaining D-RLIT-4 residual is foliage sampling. Authored LGHT
+## positions/lifetimes are spawn-fixed; powerup respawn is routed, and a husk
+## swap neither moves nor rescans lights (retail call graph cited below).
 
 ## Model gather half-extent around the camera. Light ranges are authored
 ## small (atten_end 8 on the fire barrels), so any model a pool light could
@@ -36,16 +34,40 @@ const MUZZLE_COLOR := Color(255.0 / 255.0, 224.0 / 255.0, 160.0 / 255.0)
 const DEATH_COLOR := Color(255.0 / 255.0, 192.0 / 255.0, 128.0 / 255.0)
 const DEATH_TICKS := 31
 
+# Light owner zero is retail's unowned/world sentinel. A decoded wire handle
+# is an independent 16-bit domain in which zero is valid, so tag every wire
+# identity into a nonzero, non-ObjectID range before it reaches LightScene.
+const WIRE_OWNER_TAG := 1 << 48
+const STATIC_OWNER_TAG := 2 << 48
+
 var _world: GameWorld
 var _static_sources := Callable()
+var _static_draw_sources := Callable()
+var _static_draw_source_revision := Callable()
+# The packed static atlas rows, rebuilt only when the placer's draw-source
+# revision (rows appended, table reset, carve state) or the static source
+# snapshot changes. Rows are immutable identities; only the light SELECTION
+# over them runs per frame, as retail's per-batch select does.
+var _static_rows_revision := -1
+var _static_rows_bounds := PackedVector3Array()
+var _static_rows_owner_entities := PackedInt64Array()
+var _static_rows_owner_sections := PackedInt32Array()
+var _static_rows_interior_owners := PackedInt64Array()
+var _static_rows_interior_sections := PackedInt32Array()
+var _static_rows_active := PackedByteArray()
 var _scene: LightScene = LightScene.new()
 var _spawned_static: Dictionary = {}
+var _static_sources_snapshot: Array = []
+var _static_owner_by_bms: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
-# shooter wire handle -> pool light handle. Mirrors retail's entity+436 cache:
-# spawn once per shooter, re-arm per shot, and once the 5-tick fade kills the
-# slot the stale handle stays cached (that shooter's glow is gone for this
-# life — the witnessed behavior, light_scene.h map).
-var _muzzle_handles: Dictionary = {}
+# Entity owner id -> its ONE cached EffectWorld handle. Retail does not own a
+# model-light handle array: every LGHT spawn overwrites entity+0x1B4, the
+# MF_Light muzzle path reuses that same word, and Entity_Destroy clears only
+# its final value [orig: Entity_SpawnGlowEffects @0x56c925..0x56c92c;
+# Entity_UpdateMuzzleGlowEffect @0x56c965..0x56c9d5;
+# Entity_Destroy @0x43e903..0x43e916]. Earlier model lights intentionally
+# remain in the pool until mission teardown, matching retail's lifecycle.
+var _entity_effect_handles: Dictionary = {}
 # round presentation id -> pool light handle (the light_move follow).
 var _round_handles: Dictionary = {}
 # The corona billboard presenter: one MultiMesh of additive camera-facing
@@ -59,9 +81,14 @@ var _corona_frame := 0
 var _blink_owner_cache: Dictionary = {}
 
 
-func setup(world: GameWorld, static_sources: Callable) -> void:
+func setup(world: GameWorld, static_sources: Callable,
+		static_draw_sources: Callable,
+		static_draw_source_revision := Callable()) -> void:
 	_world = world
 	_static_sources = static_sources
+	_static_draw_sources = static_draw_sources
+	_static_draw_source_revision = static_draw_source_revision
+	_static_rows_revision = -1
 
 
 ## Mission teardown: disconnect live node retirement hooks, retire every pool
@@ -71,8 +98,11 @@ func reset() -> void:
 		_disconnect_wire_node_exit(_spawned_nodes[node_id_v])
 	_scene.clear()
 	_spawned_static.clear()
+	_static_sources_snapshot.clear()
+	_static_rows_revision = -1
+	_static_owner_by_bms.clear()
 	_spawned_nodes.clear()
-	_muzzle_handles.clear()
+	_entity_effect_handles.clear()
 	_round_handles.clear()
 	_blink_owner_cache.clear()
 	_clear_coronas()
@@ -89,30 +119,35 @@ func reattach() -> void:
 			if node == null or not node.has_meta("entity_ref"):
 				continue
 			on_wire_node_spawned(node, -1, 0)
-	var sources: Array = _static_sources.call() if _static_sources.is_valid() else []
-	for source_index in range(sources.size()):
-		var source: Dictionary = sources[source_index]
+	_static_sources_snapshot = _static_sources.call() \
+			if _static_sources.is_valid() else []
+	_static_rows_revision = -1
+	# Build every BMS identity before resolving any blink containment. A static
+	# item can spawn inside a batched building that appears later in the source
+	# walk, and retail still binds it to that building's owner group.
+	for source_index in range(_static_sources_snapshot.size()):
+		var mapped_source: Dictionary = _static_sources_snapshot[source_index]
+		var bms_id := int(mapped_source.get("bms_id", 0))
+		if bms_id != 0:
+			_static_owner_by_bms[bms_id] = owner_id_for_static_source(source_index)
+	for source_index in range(_static_sources_snapshot.size()):
+		var source: Dictionary = _static_sources_snapshot[source_index]
 		if _spawned_static.has(source_index):
 			continue
 		var data: ObjectData = source.get("object_data")
 		if data == null:
 			continue
-		# Batched statics are entities too: retail attaches the owner whenever
-		# the record's attach bone != 0, for every spawning entity kind
-		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae — SetOwnerGroup(entity,
-		# bone)]. There is no node to borrow an id from, so each static source
-		# owns a synthetic negative id (never issued by owner_id_for_node,
-		# never declared by a draw context) — its subobject-attached lights
-		# stay scoped to their building instead of leaking as unscoped world
-		# lights. Batch draws do not take per-draw light selections yet, so
-		# these lights reach nothing until that leg lands (D-RLIT-4 residual);
-		# retail scopes them to exactly the owner's draws.
+		# Batched statics are entities too: a subobject record binds to this
+		# tagged owner and the atlas draw row declares the same identity.
+		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
 		var xform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
-		# The batched sources are the placer's pool-1 item rows, so retail's
-		# ItemDef-type gate never suppresses their blink query [orig: the
-		# ItemType_Building gate @ 0x56c7ec].
-		var handles := _spawn_model_lights(data, xform, -(source_index + 1),
-				_blink_owner_at(xform.origin), false)
+		var is_building := int(source.get("kind", -1)) == \
+				MissionData.KIND_BUILDING
+		# Retail skips the blink query for a building's own records; every other
+		# static resolves containment once at its placement origin.
+		var blink_owner: Array = [] if is_building else _blink_owner_at(xform.origin)
+		var handles := _spawn_model_lights(data, xform,
+				owner_id_for_static_source(source_index), blink_owner, is_building)
 		if not handles.is_empty():
 			_spawned_static[source_index] = handles
 
@@ -126,8 +161,16 @@ func reattach() -> void:
 ## matches.
 static func owner_id_for_node(node: ObjectModel) -> int:
 	var ref: Dictionary = node.get_meta("entity_ref", {})
-	var wire := int(ref.get("wire_handle", 0))
-	return wire if wire != 0 else node.get_instance_id()
+	var wire := int(ref.get("wire_handle", -1))
+	return owner_id_for_wire(wire) if wire >= 0 else node.get_instance_id()
+
+
+static func owner_id_for_wire(wire_handle: int) -> int:
+	return WIRE_OWNER_TAG | (wire_handle & 0xffff) if wire_handle >= 0 else 0
+
+
+static func owner_id_for_static_source(source_index: int) -> int:
+	return STATIC_OWNER_TAG | source_index if source_index >= 0 else 0
 
 
 func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
@@ -148,16 +191,21 @@ func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
 	var blink_owner: Array = []
 	if not is_building:
 		blink_owner = _blink_owner_at(node.global_position)
-	var handles := _spawn_model_lights(data, node.global_transform,
-			owner_id_for_node(node), blink_owner, is_building)
-	if not handles.is_empty():
-		var on_exit := _on_wire_node_exiting.bind(node_id)
-		_spawned_nodes[node_id] = {
-			"node": weakref(node),
-			"handles": handles,
-			"tree_exiting": on_exit,
-		}
-		node.tree_exiting.connect(on_exit, Object.CONNECT_ONE_SHOT)
+	if data.get_light_count() <= 0:
+		return
+	var owner_id := owner_id_for_node(node)
+	_entity_effect_handles[owner_id] = _spawn_node_lights(
+			node, owner_id, blink_owner, is_building)
+	# Register even when pool exhaustion returned zero. Retail walks a given
+	# entity once; duplicate callback delivery must not turn a later free slot
+	# into an invented second spawn attempt.
+	var on_exit := _on_wire_node_exiting.bind(node_id)
+	_spawned_nodes[node_id] = {
+		"node": weakref(node),
+		"owner_id": owner_id,
+		"tree_exiting": on_exit,
+	}
+	node.tree_exiting.connect(on_exit, Object.CONNECT_ONE_SHOT)
 
 
 func _on_wire_node_exiting(node_id: int) -> void:
@@ -165,8 +213,14 @@ func _on_wire_node_exiting(node_id: int) -> void:
 	if record.is_empty():
 		return
 	_spawned_nodes.erase(node_id)
-	for handle_v in record.get("handles", []):
-		_scene.despawn(int(handle_v))
+	# Entity_Destroy has one 16-bit EffectWorld word, not an owned-light list.
+	# Clear exactly the lease currently cached there; a husk swap does not exit
+	# the node and therefore does not touch any authored light.
+	var owner_id := int(record.get("owner_id", 0))
+	var cached_handle := int(_entity_effect_handles.get(owner_id, 0))
+	if cached_handle != 0:
+		_scene.despawn(cached_handle)
+	_entity_effect_handles.erase(owner_id)
 
 
 func _disconnect_wire_node_exit(record: Dictionary) -> void:
@@ -193,6 +247,27 @@ func _spawn_model_lights(data: ObjectData, world_transform: Transform3D,
 	return handles
 
 
+## Live-node twin of the static source walk. Retail transforms every record's
+## model-space point by the ENTITY placement matrix once; `subobject` is read
+## only afterward as an owner-group section [orig: Entity_SpawnGlowEffects
+## @0x56c82d..0x56c84e, then @0x56c89a..0x56c8ae]. No node/ROBJ/bone position
+## follow exists. Return the final entity+0x1B4 value; retail retains no list.
+func _spawn_node_lights(node: ObjectModel, owner_id: int,
+		blink_owner: Array, spawner_is_building: bool) -> int:
+	if node == null:
+		return 0
+	var data: ObjectData = node.get_object_data()
+	if data == null:
+		return 0
+	var cached_handle := 0
+	for index in range(data.get_light_count()):
+		var info := data.get_light_info(index)
+		var handle := spawn_light_record(info, node.global_transform, owner_id,
+				blink_owner, spawner_is_building)
+		cached_handle = handle
+	return cached_handle
+
+
 ## One authored light record (the get_light_info dictionary shape) becomes one
 ## pool instance. Public: the GUT seam test feeds records directly. The owner
 ## attach is decided by the portable policy the config feeds
@@ -213,6 +288,13 @@ func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 		return 0
 	var world_pos: Vector3 = world_transform * Vector3(
 			info.get("position", Vector3.ZERO))
+	return _spawn_light_at(info, world_pos, owner_id, blink_owner,
+			spawner_is_building)
+
+
+func _spawn_light_at(info: Dictionary, world_pos: Vector3,
+		owner_id: int = 0, blink_owner: Array = [],
+		spawner_is_building: bool = false) -> int:
 	var has_blink := blink_owner.size() >= 2
 	return int(_scene.spawn_model_light({
 		"position": world_pos,
@@ -237,10 +319,9 @@ func spawn_light_record(info: Dictionary, world_transform: Transform3D,
 ## spawning entity's position before walking its LGHT records, and slot 0's hit
 ## names the containing building + section every unattached record binds to
 ## [orig: Entity_SpawnGlowEffects @ 0x56c7fc -> Entity_QueryBlinkBoxesAtPoint
-## @ 0x4af350]. Returns [owner id, section], or an empty array outdoors — and
-## also when the containing building has no presentation node to name, since a
-## batched building cannot be addressed in the per-model owner id space
-## (tracked on D-RLIT-4).
+## @ 0x4af350]. Returns [owner id, section], or an empty array outdoors. Both
+## individual ObjectModels and batched buildings resolve into the active-group
+## domain their respective draw contexts declare.
 func _blink_owner_at(world_pos: Vector3) -> Array:
 	var sim: Simulation = _sim()
 	if sim == null:
@@ -257,6 +338,8 @@ func _blink_owner_at(world_pos: Vector3) -> Array:
 func _owner_id_for_bms(bms_id: int) -> int:
 	if bms_id == 0:
 		return 0
+	if _static_owner_by_bms.has(bms_id):
+		return int(_static_owner_by_bms[bms_id])
 	var cached: Variant = _blink_owner_cache.get(bms_id)
 	if cached != null:
 		return int(cached)
@@ -295,6 +378,81 @@ func light_gain() -> Vector3:
 	return gain
 
 
+## Build the immutable-index static atlas rows. The placer owns row identity
+## and exact ROBJ bounds; this device supplies the same owner/interior groups
+## as the live-model pass, selects the witnessed nearest four, and publishes
+## the RGBAF payload consumed through INSTANCE_CUSTOM.x.
+func _render_static_light_rows(gain: Vector3, weather: Weather,
+		time_ms: int) -> void:
+	var revision := int(_static_draw_source_revision.call()) \
+			if _static_draw_source_revision.is_valid() else 0
+	if revision != _static_rows_revision:
+		_rebuild_static_light_rows()
+		_static_rows_revision = revision
+	_scene.render_static_frame(_static_rows_bounds,
+			_static_rows_owner_entities, _static_rows_owner_sections,
+			_static_rows_interior_owners, _static_rows_interior_sections,
+			_static_rows_active, gain, time_ms, weather, _static_rows_revision)
+
+
+func _rebuild_static_light_rows() -> void:
+	var descriptors: Array = _static_draw_sources.call() \
+			if _static_draw_sources.is_valid() else []
+	var row_count := 0
+	for descriptor_v in descriptors:
+		var descriptor: Dictionary = descriptor_v
+		row_count = max(row_count, int(descriptor.get("atlas_row", -1)) + 1)
+	var bounds_position_size := PackedVector3Array()
+	var owner_entities := PackedInt64Array()
+	var owner_sections := PackedInt32Array()
+	var interior_owners := PackedInt64Array()
+	var interior_sections := PackedInt32Array()
+	var active := PackedByteArray()
+	bounds_position_size.resize(row_count * 2)
+	owner_entities.resize(row_count)
+	owner_sections.resize(row_count)
+	interior_owners.resize(row_count)
+	interior_sections.resize(row_count)
+	active.resize(row_count)
+	for descriptor_v in descriptors:
+		var descriptor: Dictionary = descriptor_v
+		var atlas_row := int(descriptor.get("atlas_row", -1))
+		var source_index := int(descriptor.get("source_index", -1))
+		if atlas_row < 0 or atlas_row >= row_count or source_index < 0 or \
+				source_index >= _static_sources_snapshot.size():
+			continue
+		var source: Dictionary = _static_sources_snapshot[source_index]
+		var world_bounds: AABB = descriptor.get("world_bounds", AABB())
+		bounds_position_size[atlas_row * 2] = world_bounds.position
+		bounds_position_size[atlas_row * 2 + 1] = world_bounds.size
+		active[atlas_row] = 1 if bool(descriptor.get("active", false)) else 0
+		var static_owner := owner_id_for_static_source(source_index)
+		var is_building := int(descriptor.get("kind",
+				source.get("kind", -1))) == MissionData.KIND_BUILDING
+		if is_building:
+			# A building declares itself as interior section zero and re-scopes
+			# the owner section to this exact ROBJ.
+			owner_entities[atlas_row] = 0
+			owner_sections[atlas_row] = int(descriptor.get("robj_index", 0))
+			interior_owners[atlas_row] = static_owner
+			interior_sections[atlas_row] = 0
+		else:
+			owner_entities[atlas_row] = static_owner
+			owner_sections[atlas_row] = 0
+			var xform: Transform3D = source.get(
+					"world_transform", Transform3D.IDENTITY)
+			var interior := _blink_owner_at(xform.origin)
+			if interior.size() >= 2:
+				interior_owners[atlas_row] = int(interior[0])
+				interior_sections[atlas_row] = int(interior[1])
+	_static_rows_bounds = bounds_position_size
+	_static_rows_owner_entities = owner_entities
+	_static_rows_owner_sections = owner_sections
+	_static_rows_interior_owners = interior_owners
+	_static_rows_interior_sections = interior_sections
+	_static_rows_active = active
+
+
 ## The per-frame device leg (GameFramePipeline, after iris, before the
 ## material frame): one draw context per visible ObjectModel near the camera
 ## (owner group = that model's entity id) plus the first-person viewmodel
@@ -302,7 +460,7 @@ func light_gain() -> Vector3:
 ## The FLICKER phase reads the live weather wave ring; the ambient scale is
 ## the env light-state gain (the ported EffectWorld_AmbientScale channel).
 func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
-		viewmodel_owner: int = 0) -> void:
+		viewmodel_wire_handle: int = -1) -> void:
 	if camera == null:
 		_scene.clear_render_output()
 		_clear_coronas()
@@ -311,6 +469,7 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 	var env: MissionEnvironment = _world.get_environment_node()
 	var weather: Weather = _world.get_weather_node()
 	var cam_pos := camera.get_camera_transform().origin
+	var time_ms := Time.get_ticks_msec()
 	var models: Array[Node3D] = []
 	var owners := PackedInt64Array()
 	# The second witnessed group: the building each draw currently stands
@@ -319,7 +478,9 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 	# Lighting_SetInteriorLightGroup @ 0x5a90e0].
 	var interior_owners := PackedInt64Array()
 	var interior_sections := PackedInt32Array()
+	var robj_scoped := PackedByteArray()
 	_blink_owner_cache.clear()
+	_render_static_light_rows(gain, weather, time_ms)
 	var groups := _entity_interior_groups()
 	var container: Node = _world.get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
@@ -331,6 +492,9 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 				continue
 			models.append(model)
 			owners.append(owner_id_for_node(model))
+			var ref: Dictionary = model.get_meta("entity_ref", {})
+			robj_scoped.append(1 if int(ref.get("kind", -1)) == \
+					MissionData.KIND_BUILDING else 0)
 			var group := _interior_group_for_node(model, groups)
 			interior_owners.append(int(group[0]))
 			interior_sections.append(int(group[1]))
@@ -342,17 +506,17 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		if part == null or not part.is_visible_in_tree():
 			continue
 		models.append(part)
-		owners.append(viewmodel_owner if viewmodel_owner != 0
-				else part.get_instance_id())
+		owners.append(owner_id_for_wire(viewmodel_wire_handle)
+				if viewmodel_wire_handle >= 0 else part.get_instance_id())
+		robj_scoped.append(0)
 		interior_owners.append(int(viewmodel_interior[0]))
 		interior_sections.append(int(viewmodel_interior[1]))
 	# Census select first (report rows for F3 and the seam tests), then the
 	# gameplay per-model pass — its mode/isolation stamp is what the report
 	# ends the frame with.
-	_scene.render_frame(cam_pos, QUERY_RADIUS, gain, Time.get_ticks_msec(),
-			weather)
+	_scene.render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather)
 	_scene.render_model_frame(models, owners, interior_owners,
-			interior_sections, gain, Time.get_ticks_msec(), weather)
+			interior_sections, robj_scoped, gain, time_ms, weather)
 	_render_coronas(camera, gain, weather, models, owners, env)
 
 
@@ -508,8 +672,12 @@ func advance_fixed_tick() -> void:
 ## shooter, so the per-draw owner select (render_model_frame) admits the glow
 ## only on draws declaring that owner — the shooter's body, and the
 ## first-person parts the world tags with the local player's id (D-AI-8d).
+## The cache is deliberately shared with model LGHT: if mission-start spawn
+## left entity+0x1B4 nonzero, retail re-arms and moves that final authored
+## lease instead of allocating the 1.5-unit muzzle-color light.
 func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
-	var handle := int(_muzzle_handles.get(shooter_handle, 0))
+	var owner_id := owner_id_for_wire(shooter_handle)
+	var handle := int(_entity_effect_handles.get(owner_id, 0))
 	if handle == 0:
 		handle = int(_scene.spawn_glow({
 			"position": world_pos,
@@ -517,12 +685,13 @@ func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 			"color": MUZZLE_COLOR,
 			"fade_mode": 3,
 			"fade_duration": -1,
-			"owner_entity": shooter_handle,
+			"owner_entity": owner_id,
 		}))
 		if handle == 0:
 			return
-		_muzzle_handles[shooter_handle] = handle
+		_entity_effect_handles[owner_id] = handle
 	_scene.set_light_fade(handle, 4, 5)
+	_scene.set_light_owner(handle, owner_id, 0)
 	_scene.set_light_position(handle, world_pos)
 	_scene.set_light_blend(handle, 1.0)
 

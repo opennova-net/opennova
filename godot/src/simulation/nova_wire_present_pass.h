@@ -81,6 +81,11 @@ public:
 	ObjectModel *resolve_wire_handle(int p_handle) const;
 	// The live held-weapon model for a wire body (null when unarmed/freed).
 	ObjectModel *held_weapon_node(int p_handle) const;
+	// Cache and apply one wire draw's environment-lighting context to both its
+	// body and held weapon. The cache makes a quality change authoritative even
+	// when cold-spawn budgeting has not built either node yet.
+	void set_entity_lighting_context(int p_handle, float p_effect_scale,
+			bool p_interior_lerp, float p_light_transfer);
 	// World position of a named userpoint on this wire body's HELD WEAPON —
 	// the anchor retail's adm-arm fire effect spawns at. Falls back to the
 	// body's own origin, never the wire fire position (witness:
@@ -114,6 +119,7 @@ private:
 	Node3D *container() const;
 	void free_wire_node(int p_handle);
 	void free_held_weapon(int p_handle);
+	void apply_lighting_context(int p_handle);
 	bool wire_node_matches_row(ObjectModel *p_node,
 			const PackedFloat32Array &p_snap, int p_base, int p_type_id) const;
 	int consume_present_logic_tick_delta();
@@ -135,6 +141,12 @@ private:
 	HashMap<int32_t, int32_t> unresolved_;
 	HashMap<int32_t, ObjectID> weapon_nodes_;
 	HashMap<int32_t, String> weapon_graphics_;
+	struct LightingContext {
+		float effect_scale = 1.0f;
+		bool interior_lerp = false;
+		float light_transfer = 0.0f;
+	};
+	HashMap<int32_t, LightingContext> lighting_contexts_;
 	Callable node_spawned_callback_;
 	int pending_spawn_count_ = 0;
 	int64_t last_present_logic_tick_ = -1;

@@ -198,14 +198,16 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	return true;
 }
 
-// The model bound-sphere radius from the .3di itself — the union of the LOD-0
-// part bounding spheres seen from the model origin, with the strip boxes as
-// the degenerate-sphere fallback. This is the entity+0 boundRadius source: the
-// original reads it off the MODEL header (gpm[5]) for every placed item,
-// collision block or not, and the proximity/hit tests and blast ranges all
-// consume it [orig: Entity_InitFromModel @ 0x40dc30; world-wac-ai-re §24].
-float model_bound_radius_from_3di(const Threedi3di3 &model) {
-	if (model.lod_count == 0 || model.lods == nullptr) return 0.0f;
+// The model bound-sphere radius. Production files use GHDR's exact Q16 value;
+// only headerless in-memory fixtures derive it from LOD-0 part spheres (and,
+// for degenerate fixture models, strip boxes).
+int32_t model_bound_radius_q16_from_3di(const Threedi3di3 &model) {
+	// Production files retain GHDR's exact signed carrier (the on-disk field
+	// is authored as unsigned Q16.16). Retail stores this as MODEL gpm[5] and
+	// Entity_InitFromModel reads it behind the collision-block gate.
+	// [orig: ModSuperOed WriteGHDR @0x452B40; Entity_InitFromModel @0x40dcd7/@0x40de8f]
+	if (model.header.has_header) return model.header.max_radius_fp16;
+	if (model.lod_count == 0 || model.lods == nullptr) return 0;
 	const ThreediLod &lod = model.lods[0];
 	float r = 0.0f;
 	for (size_t i = 0; lod.render_objects != nullptr && i < lod.render_object_count; ++i) {
@@ -225,7 +227,11 @@ float model_bound_radius_from_3di(const Threedi3di3 &model) {
 			}
 		}
 	}
-	return r;
+	return static_cast<int32_t>(std::lround(static_cast<double>(r) * 65536.0));
+}
+
+float model_bound_radius_from_3di(const Threedi3di3 &model) {
+	return static_cast<float>(model_bound_radius_q16_from_3di(model)) / 65536.0f;
 }
 
 // Build the runtime occlusion model from the parsed OCCL tables — the 60 B

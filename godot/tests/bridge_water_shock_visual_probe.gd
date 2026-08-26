@@ -82,11 +82,13 @@ func _ready() -> void:
 		var candidate := await _capture_image()
 		var score := _changed_pixels(_before, candidate)
 		var draw_report := _fx.get_debug_draw_list_report()
-		var world_draw: Dictionary = draw_report.get("world", {})
+		var far_draw: Dictionary = draw_report.get("world_far_side", {})
+		var camera_draw: Dictionary = draw_report.get("world_camera_side", {})
 		print("[bridge-shock] tick=%d changed_pixels=%d groups=%d particles=%d draws=%d" % [
 				capture_tick, score, _fx.get_debug_group_report().size(),
-				int(world_draw.get("input_particles", 0)),
-				int(world_draw.get("draw_command_count", 0))])
+				int(far_draw.get("input_particles", 0)),
+				int(far_draw.get("draw_command_count", 0)) +
+						int(camera_draw.get("draw_command_count", 0))])
 		if score > best_score:
 			best_image = candidate
 			best_score = score

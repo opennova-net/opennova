@@ -40,6 +40,12 @@ MODE of the game (ADR 0015). OpenNova Launcher is outside that taxonomy.
 
 ## Close-out (2026-07-12)
 
+**2026-08-22 renderer amendment.** Rows below are historical landing snapshots,
+so their then-current `D-RMAT-8 PERMANENT` and `D-RORD-5 tracked` language is
+preserved as chronology, not current disposition. Both are now **FIXED** by the
+gamma-domain scene-target/terminal-display cutover and the isolated native
+Q3/FrameFX renderer; see the live divergence ledger and render RE records.
+
 The program closed at the post-trunk-2 boundary under the stop-anywhere
 property. Wave-2 exit-gate accounting, honestly:
 
@@ -551,8 +557,8 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   owner/interior group culling, ≤4 D3D lights) witnessed;
   `Lighting_InitTextures` (the last embedded shader — the DOT3 dynamic
   light) and the cubemap sources witnessed (CubeEnvironment = live scene per
-  128 frames; **CubeRotSpecular = the static sun-glint cube** — D-RORD-5's
-  answer); the render-slot (character shadow) lighting witnessed as
+  128 frames; **CubeRotSpecular = the static sun-glint cube** — the source
+  consumed by the now-fixed Q3 path); the render-slot (character shadow) lighting witnessed as
   out-of-scope. Landed [`render-lighting-re.md`](render/render-lighting-re.md)
   + D-RLIT-1..6; T1 section 5; audit track **1 → 0**.
 - **REN-6** (M) **the ENG-2 render leftovers**, libs/env-first. The witness

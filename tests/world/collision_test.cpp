@@ -19,6 +19,7 @@
 #include "terrain_query/height_field.h"
 #include "io/bam.h"
 #include "world/angle.h"
+#include "world/ai.h"
 #include "world/collision.h"
 #include "world/world.h"
 
@@ -202,6 +203,7 @@ struct Rig {
         s.kind = EntityKind::Organic;
         s.net_id = 1;
         s.position = {0.0f, 0.0f, 0.0f};
+        s.bound_radius = 1.0f; // production Entity_InitFromModel stamp
         s.alive = true;
         soldier = world.registry.spawn(0, s);
 
@@ -225,6 +227,12 @@ struct Rig {
 
 // ---------------------------------------------------------------------------
 void test_matrix_roundtrip() {
+    // Entity_InitFromModel's signed Q16 multiply biases BOTH signs by +0x8000
+    // before the arithmetic shift; it is not symmetric round-away-from-zero.
+    CHECK(retail_q16_mul_rhu(1, 0x8000) == 1);
+    CHECK(retail_q16_mul_rhu(-1, 0x8000) == 0);
+    CHECK(retail_q16_mul_rhu(fx(2.0), 0x18000) == fx(3.0));
+
     const int32_t pos[3] = {fx(5.0), fx(7.0), fx(2.0)};
     // Heading 1/4 turn (BAM 0x40000000): local +X -> world +Y.
     const CollisionMatrix m = collision_matrix_from_heading(0x40000000, pos);
@@ -424,6 +432,130 @@ void test_negative_static_slot_candidates_and_blink() {
     rig.cw.query_blink_boxes_at_point(rig.world, point, accum);
     CHECK(accum.hit_count == 1);
     CHECK((accum.flags & kBlinkIndoorsBit) != 0);
+}
+
+// ---------------------------------------------------------------------------
+void test_iris_candidate_blink_is_not_global_building_walk() {
+    // The arbitrary camera/occlusion query sees the global building prefix.
+    // The iris sampler instead reuses the local player's fixed candidate
+    // slice, even when the sample point itself sits inside a far building.
+    Rig rig(box_model(8, 0x3C, 4.0, 4.0, 3.0), 100.0, 100.0);
+    CHECK(rig.cw.candidate_count(rig.soldier) == 0);
+    const int32_t point[3] = {fx(100.0), fx(100.0), fx(0.5)};
+
+    BlinkAccum global;
+    rig.cw.query_blink_boxes_at_point(rig.world, point, global);
+    CHECK(global.hit_count == 1);
+
+    BlinkAccum iris;
+    rig.cw.query_candidate_blink_boxes_at_point(
+            rig.world, rig.soldier, point, iris);
+    CHECK(iris.hit_count == 0);
+    CHECK(iris.flags == 0);
+}
+
+// ---------------------------------------------------------------------------
+void test_clip_segment_uses_nearest_candidate_and_indoors_terrain_gate() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 2.0));
+    // Source proximity is independent of camera start; place the local player
+    // close enough that the fixed slice contains the building.
+    rig.move_soldier(5.0, 10.0, 1.0);
+
+    const int32_t start[3] = {fx(0.0), fx(10.0), fx(1.0)};
+    int32_t end[3] = {fx(20.0), fx(10.0), fx(1.0)};
+    const EntityHandle hit = rig.cw.clip_segment_to_nearest_collision(
+            rig.world, rig.soldier, start, end);
+    CHECK(hit == rig.building);
+    CHECK(std::abs(end[0] - fx(8.0)) < fx(0.02));
+
+    // Outside the building column, terrain clips an outdoor vertical segment.
+    const int32_t down_start[3] = {fx(30.0), fx(30.0), fx(5.0)};
+    int32_t down_end[3] = {fx(30.0), fx(30.0), fx(-5.0)};
+    CHECK(!rig.cw.clip_segment_to_nearest_collision(
+                   rig.world, rig.soldier, down_start, down_end).valid());
+    CHECK(std::abs(down_end[2]) < fx(0.02));
+
+    // The same source indoors skips the heightfield entirely.
+    rig.world.registry.get(rig.soldier)->flags |= kEntityFlagIndoors;
+    int32_t indoor_end[3] = {fx(30.0), fx(30.0), fx(-5.0)};
+    CHECK(!rig.cw.clip_segment_to_nearest_collision(
+                   rig.world, rig.soldier, down_start, indoor_end).valid());
+    CHECK(indoor_end[2] == fx(-5.0));
+}
+
+// ---------------------------------------------------------------------------
+void test_candidate_sun_segment_includes_pool1_dynamics() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    CollisionWorld collision;
+
+    Entity source_seed;
+    source_seed.kind = EntityKind::Organic;
+    source_seed.position = {0.0f, 0.0f, 1.0f};
+    source_seed.bound_radius = 1.0f;
+    source_seed.alive = true;
+    const EntityHandle source = world.registry.spawn(0, source_seed);
+
+    Entity blocker_seed;
+    blocker_seed.kind = EntityKind::Item;
+    blocker_seed.position = {5.0f, 0.0f, 0.0f};
+    blocker_seed.yaw = 90;
+    blocker_seed.alive = true;
+    const EntityHandle blocker = world.registry.spawn(1, blocker_seed);
+    const int32_t model =
+            collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+    collision.assign_entity(blocker, model);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(source) == 1);
+
+    const int32_t start[3] = {0, 0, fx(1.0)};
+    const int32_t end[3] = {fx(10.0), 0, fx(1.0)};
+    CHECK(collision.candidate_segment_hits_solid(
+            world, source, start, end, 0));
+    const Entity *source_entity = world.registry.get(source);
+    CHECK(source_entity != nullptr);
+    const int32_t sun_step[3] = {fx(10.0), 0, 0};
+    CHECK(collision.sun_visibility_blocked_rays(
+            world, *source_entity, sun_step) == 3);
+}
+
+// ---------------------------------------------------------------------------
+void test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits() {
+    World world;
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 4);
+    CollisionWorld collision;
+
+    Entity wall_seed;
+    wall_seed.kind = EntityKind::Building;
+    wall_seed.position = {2.0f, 0.0f, 0.0f};
+    wall_seed.alive = true;
+    const EntityHandle wall = world.registry.spawn(2, wall_seed);
+    collision.assign_entity(
+            wall, collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
+
+    auto spawn_source = [&](uint32_t attrib, uint8_t type, bool has_def) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.has_item_def = has_def;
+        seed.item_type = type;
+        seed.item_attrib = attrib;
+        seed.bound_radius = 1.0f;
+        seed.alive = true;
+        return world.registry.spawn(1, seed);
+    };
+    const EntityHandle ordinary = spawn_source(0, 6, true);
+    const EntityHandle eweap = spawn_source(kItemAttribEweap, 6, true);
+    const EntityHandle type1_exception =
+            spawn_source(kItemAttribEweap, 1, true);
+    const EntityHandle no_def = spawn_source(0, 1, false);
+
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(ordinary) > 0);
+    CHECK(collision.candidate_count(eweap) == 0);
+    CHECK(collision.candidate_count(type1_exception) > 0);
+    CHECK(collision.candidate_count(no_def) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +760,7 @@ void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     rider.alive = true;
     rider.net_id = 0x10;
     rider.position = Vec3{12.8f, 10.0f, 0.0f};
+    rider.bound_radius = 1.0f; // production Entity_InitFromModel stamp
     const EntityHandle rider_h = world.registry.spawn(0, rider);
 
     // One parent model carries both an ordinary solid and an armory trigger.
@@ -1232,6 +1365,8 @@ void test_proximity_tables_use_host_bound_radius() {
     Entity vehicle_seed;
     vehicle_seed.kind = EntityKind::Item;
     vehicle_seed.item_id = 900;
+    vehicle_seed.has_item_def = true;
+    vehicle_seed.item_type = 1;
     vehicle_seed.position = {40.0f, 40.0f, 0.0f};
     vehicle_seed.bound_radius = 8.0f;
     vehicle_seed.alive = true;
@@ -1253,6 +1388,25 @@ void test_proximity_tables_use_host_bound_radius() {
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
     CHECK(cw.candidate_count(vehicle) == 1);
+
+    // The pool-0 table stores each person's effective entity+0 radius too.
+    // At 2u separation a 1u+1u stand-in would not enter the 30% repulsion
+    // band, while the authored 8u peer must push the source away.
+    Entity peer_seed;
+    peer_seed.kind = EntityKind::Organic;
+    peer_seed.position = {2.0f, 0.0f, 0.0f};
+    peer_seed.bound_radius = 8.0f;
+    peer_seed.alive = true;
+    CHECK(world.registry.spawn(0, peer_seed).valid());
+    cw.build_tick_tables(world);
+    CollisionWorld::ResolveState resolve_state;
+    int32_t pos[3] = {0, 0, 0};
+    int32_t vel[2] = {0, 0};
+    int32_t vel_z = 0;
+    int16_t health = 100;
+    cw.resolve_entity(world, source, resolve_state, pos, vel, vel_z, 0,
+                      fx(1.8), 0, 0, false, false, 20, 43, 0, health);
+    CHECK(pos[0] < 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1787,7 +1941,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         int32_t vel_z = 0;
         EntityHandle ground;
         const int32_t clearance = rig.cw.resolve_replica(
-            rig.world, state, pos, vel, vel_z, 0, fx(1.8), true, 0, 43, 0u,
+            rig.world, state, pos, vel, vel_z, 0, fx(1.8), fx(1.0), true, 0, 43, 0u,
             nullptr, 0, 0xFFFF, nullptr, &ground);
         CHECK(ground == rig.building);
         CHECK(clearance > 0 && clearance <= fx(0.06)); // ~0.05 u over the top
@@ -1802,7 +1956,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         int32_t vel_z = 0;
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
                                nullptr, &ground);
         CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
     }
@@ -1818,9 +1972,10 @@ void test_replica_resolve_candidates_ground_and_peers() {
         peer.x = fx(30.2);
         peer.y = fx(30.0);
         peer.z = fx(1.0);
+        peer.radius = fx(1.0);
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), true, 0, 43, 0u, &peer, 1, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, &peer, 1, 0xFFFF,
                                nullptr, &ground);
         CHECK(pos[0] < fx(30.0)); // pushed away from the overlapping peer
         // The same peer marked as SELF must not push.
@@ -1829,7 +1984,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         int32_t vel2[2] = {0, 0};
         int32_t vel_z2 = 0;
         rig.cw.resolve_replica(rig.world, state2, pos2, vel2, vel_z2, fx(0.4),
-                               fx(1.8), true, 0, 43, 0u, &peer, 1,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, &peer, 1,
                                /*exclude_handle=*/0x0007, nullptr, &ground);
         CHECK(pos2[0] == fx(30.0));
     }
@@ -1852,7 +2007,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
                          kEntityFlagArmoryZone | kEntityFlagVehicleLoadoutZone |
                          0x40000000u; // an unrelated bit survives
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
                                &flags, &ground);
         CHECK(flags == 0x40000000u);
     }
@@ -1871,7 +2026,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         for (int i = 0; i < 25; ++i) {
             int32_t vel_z = -100; // inside the idle band (not < -420)
             rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                                   fx(1.8), true, static_cast<uint32_t>(i + 1),
+                                   fx(1.8), fx(1.0), true, static_cast<uint32_t>(i + 1),
                                    43, 0u, nullptr, 0, 0xFFFF, &flags, &ground);
             if (vel_z == 0) ever_skipped = true;
         }
@@ -1883,7 +2038,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         for (int i = 0; i < 25; ++i) {
             int32_t vel_z = -100;
             rig.cw.resolve_replica(rig.world, state2, pos2, vel, vel_z, fx(0.4),
-                                   fx(1.8), true, static_cast<uint32_t>(i + 1),
+                                   fx(1.8), fx(1.0), true, static_cast<uint32_t>(i + 1),
                                    43, 0u, nullptr, 0, 0xFFFF, &flags2, &ground);
             if (vel_z == 0) ever_skipped = true;
         }
@@ -2005,6 +2160,89 @@ void test_raycast_clear_table_readiness() {
         cw.build_tick_tables(world);
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
     }
+}
+
+void test_cached_raycast_spatial_candidates() {
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(2, 96);
+    const int32_t model_id = cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+
+    // Many valid solid models sit well outside the ray's horizontal cells.
+    // The final blocker is deliberately last in pool order so a full table
+    // walk must visit every one, while the stable index admits only the exact
+    // intersecting cell candidate.
+    for (int i = 0; i < 64; ++i) {
+        Entity seed;
+        seed.kind = EntityKind::Building;
+        seed.position = {static_cast<float>(i), 200.0f + i, 0.0f};
+        seed.yaw = 90;
+        seed.alive = true;
+        const EntityHandle h = world.registry.spawn(2, seed);
+        CHECK(h.valid());
+        cw.assign_entity(h, model_id);
+    }
+    Entity blocker_seed;
+    blocker_seed.kind = EntityKind::Building;
+    blocker_seed.position = {50.0f, 0.0f, 0.0f};
+    blocker_seed.yaw = 90;
+    blocker_seed.alive = true;
+    const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
+    CHECK(blocker.valid());
+    cw.assign_entity(blocker, model_id);
+    cw.build_tick_tables(world);
+
+    const int32_t a[3] = {0, 0, fx(1.0)};
+    const int32_t b[3] = {fx(100.0), 0, fx(1.0)};
+    CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
+
+    cw.prepare_cached_raycast_queries(world);
+    CollisionWorld::RaycastPerf perf;
+    CHECK(!cw.raycast_clear_cached(
+            world, a, b, EntityHandle{}, EntityHandle{}, &perf));
+    CHECK(perf.sector_candidates == 1);
+
+    // Resetting the stable epoch restores the ordinary live table path. A
+    // moved target is then observed immediately rather than through stale
+    // indexed bounds.
+    world.registry.get(blocker)->position.y = 200.0f;
+    cw.reset_query_view_cache();
+    CHECK(cw.raycast_clear_cached(
+            world, a, b, EntityHandle{}, EntityHandle{}, nullptr));
+}
+
+void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(2, 4);
+    const int32_t model_id = cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+
+    Entity near_seed;
+    near_seed.kind = EntityKind::Building;
+    near_seed.position = {-50.0f, 0.0f, 0.0f};
+    near_seed.yaw = 90;
+    near_seed.alive = true;
+    const EntityHandle near_blocker = world.registry.spawn(2, near_seed);
+    CHECK(near_blocker.valid());
+    cw.assign_entity(near_blocker, model_id);
+
+    // More than 65,536 64-unit cells span these two solids, forcing the sparse
+    // hash publication path. The distant solid must not enter the local ray's
+    // exact candidate set.
+    Entity far_seed = near_seed;
+    far_seed.position = {20000.0f, 20000.0f, 0.0f};
+    const EntityHandle far_blocker = world.registry.spawn(2, far_seed);
+    CHECK(far_blocker.valid());
+    cw.assign_entity(far_blocker, model_id);
+    cw.build_tick_tables(world);
+
+    const int32_t a[3] = {fx(-100.0), 0, fx(1.0)};
+    const int32_t b[3] = {0, 0, fx(1.0)};
+    cw.prepare_cached_raycast_queries(world);
+    CollisionWorld::RaycastPerf perf;
+    CHECK(!cw.raycast_clear_cached(
+            world, a, b, EntityHandle{}, EntityHandle{}, &perf));
+    CHECK(perf.sector_candidates == 1);
 }
 
 void test_raycast_uses_stamped_bound_for_live_section_pose() {
@@ -2278,6 +2516,8 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     Entity vehicle_seed;
     vehicle_seed.kind = EntityKind::Item;
     vehicle_seed.item_id = 900;
+    vehicle_seed.has_item_def = true;
+    vehicle_seed.item_type = 1;
     vehicle_seed.position = {13.0f, 10.0f, 0.0f};
     vehicle_seed.bound_radius = 1.0f;
     vehicle_seed.alive = true;
@@ -2341,6 +2581,8 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
         Entity seed;
         seed.kind = EntityKind::Item;
         seed.item_id = item_id;
+        seed.has_item_def = true;
+        seed.item_type = 1;
         seed.position = {x, y, z};
         seed.yaw = 90; // mission 90 = engine heading BAM 0, like the wall template
         seed.bound_radius = bound_radius;
@@ -2572,9 +2814,17 @@ void test_f3_debug_prefilters_before_building_section_matrices() {
 
 void test_iris_static_rays_prefilter_before_section_matrices() {
     World world;
+    world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 64);
     CollisionWorld collision;
     const int32_t model_id = collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+
+    Entity source_seed;
+    source_seed.kind = EntityKind::Organic;
+    source_seed.bound_radius = 1.0f;
+    source_seed.alive = true;
+    const EntityHandle source = world.registry.spawn(0, source_seed);
+    CHECK(source.valid());
 
     std::vector<EntityHandle> far_statics;
     for (int i = 0; i < 32; ++i) {
@@ -2596,13 +2846,14 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
     const EntityHandle near_static = world.registry.spawn(2, near_seed);
     CHECK(near_static.valid());
     collision.assign_entity(near_static, model_id);
-    collision.build_initial_tables(world);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(source) == 1);
 
     CountingMatrixProvider provider;
     collision.set_section_matrix_provider(&provider);
     const int32_t start[3] = {0, 0, fx(1.0)};
     const int32_t end[3] = {fx(10.0), 0, fx(1.0)};
-    CHECK(collision.segment_hits_static(world, start, end, 0));
+    CHECK(collision.candidate_segment_hits_solid(world, source, start, end, 0));
     CHECK(provider.calls_for(near_static) == 1);
     CHECK(provider.build_handles.size() == 1);
     for (const EntityHandle h : far_statics)
@@ -4556,8 +4807,8 @@ void test_idle_round_tick_clears_stale_terrain() {
 // The per-entity sun-visibility feed (D-RLIT-3): one segment from position +
 // raw bbox midpoint recast at the three witnessed clip radii, walking ONLY
 // the query entity's own proximity-candidate slice — an entity whose slice
-// is empty (or that never gets one: statics, the 16 sliceless mission-start
-// ticks) keeps full sun regardless of geometry.
+// is empty (or that never gets one, such as a static) keeps full sun regardless
+// of geometry.
 // [orig: Entity_ComputeSunVisibility @ 0x5c6800 — the +0x1C0 gate @ 0x5c6808;
 //  raycast_find_collision_entity @ 0x539a70 — the +0x1BC slice walk]
 void test_entity_sun_visibility_rays_and_eligibility() {
@@ -4615,6 +4866,29 @@ void test_entity_sun_visibility_rays_and_eligibility() {
     CHECK(pillar.valid());
     collision.assign_entity(pillar, pillar_model);
 
+    // Two decoded pool-0 sources share the same 17-tick builder without ever
+    // entering the registry identity domain. `alias` deliberately uses the
+    // local person's packed number at a DIFFERENT position: looking it up in
+    // candidates_ by numeric value would incorrectly inherit the roof slice.
+    WirePersonCollisionProxy alias;
+    alias.wire_handle = person.packed;
+    alias.position_q16 = FixedVec3{fx(50.0), 0, 0};
+    alias.bound_radius_q16 = fx(1.0);
+    WirePersonCollisionProxy shadowed;
+    shadowed.wire_handle = 7;
+    shadowed.position_q16 = FixedVec3{0, 0, 0};
+    shadowed.bound_radius_q16 = fx(1.0);
+    WireDynamicCollisionProxy eligible_item;
+    eligible_item.wire_handle = 0x1007;
+    eligible_item.position_q16 = FixedVec3{0, 0, 0};
+    eligible_item.bound_radius_q16 = fx(1.0);
+    eligible_item.candidate_source_eligible = true;
+    WireDynamicCollisionProxy excluded_eweap = eligible_item;
+    excluded_eweap.wire_handle = 0x1006;
+    excluded_eweap.candidate_source_eligible = false;
+    collision.replace_wire_collision_proxies(
+            {alias, shadowed}, {eligible_item, excluded_eweap});
+
     collision.build_initial_tables(world);
     CountingMatrixProvider provider;
     collision.set_section_matrix_provider(&provider);
@@ -4624,11 +4898,32 @@ void test_entity_sun_visibility_rays_and_eligibility() {
     Entity *p = world.registry.get(person);
     CHECK(p != nullptr);
     // Mission init builds the slices immediately (retail's load path calls
-    // the @0x4b8eb0 builder directly), so the roofed person's rays block
-    // from the first query — no sliceless boot window.
+    // the @0x4b8eb0 builder directly), so registry and decoded-wire sources
+    // both see their candidate slices from the first query.
+    provider.build_handles.clear();
     CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 3);
+    CHECK(provider.calls_for(roof) == 1);
+    provider.build_handles.clear();
+    CHECK(collision.wire_sun_visibility_blocked_rays(
+                  world, shadowed.wire_handle, shadowed.position_q16,
+                  shadowed.bbox_center_q16, sun) == 3);
+    CHECK(provider.calls_for(roof) == 1);
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
     CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 3);
+    CHECK(collision.wire_sun_visibility_blocked_rays(
+                  world, shadowed.wire_handle, shadowed.position_q16,
+                  shadowed.bbox_center_q16, sun) == 3);
+    CHECK(collision.wire_sun_visibility_blocked_rays(
+                  world, alias.wire_handle, alias.position_q16,
+                  alias.bbox_center_q16, sun) == 0);
+    CHECK(collision.wire_sun_visibility_blocked_rays(
+                  world, eligible_item.wire_handle,
+                  eligible_item.position_q16,
+                  eligible_item.bbox_center_q16, sun) == 3);
+    CHECK(collision.wire_sun_visibility_blocked_rays(
+                  world, excluded_eweap.wire_handle,
+                  excluded_eweap.position_q16,
+                  excluded_eweap.bbox_center_q16, sun) == 0);
     Entity *o = world.registry.get(open_person);
     CHECK(o != nullptr);
     CHECK(collision.sun_visibility_blocked_rays(world, *o, sun) == 0);
@@ -4651,11 +4946,87 @@ void test_entity_sun_visibility_rays_and_eligibility() {
     CHECK(collision.sun_visibility_blocked_rays(world, *r, sun) == 0);
 }
 
+// The replication fan's stable-phase LOS form keeps the endpoint carrier /
+// emplacement fold of line_of_sight_clear: a mounted recipient (or target)
+// sees through its own hull on both the live pool walk and the prepared
+// stable index, while an unmounted body at the same spot is occluded by it.
+// [orig: raycast_find_collision_entity @0x539a70 endpoint resolve
+//  @0x539aba..0x539b10; raycast_against_entity_pool @0x538720 skips
+//  entity_a/entity_b/parent_a/parent_b]
+void test_cached_los_excludes_the_endpoint_carrier() {
+    static Field flat(0);
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+
+    Entity hull{};
+    hull.kind = EntityKind::Item;
+    hull.has_item_def = true;
+    hull.health = 100;
+    hull.alive = true;
+    hull.net_id = 0x20;
+    hull.position = Vec3{10.0f, 10.0f, 0.0f};
+    hull.yaw = 90;
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    hull.seats.push_back(seat);
+    const EntityHandle hull_h = world.registry.spawn(1, hull);
+
+    Entity rider{};
+    rider.kind = EntityKind::Organic;
+    rider.health = 100;
+    rider.alive = true;
+    rider.net_id = 0x10;
+    rider.position = Vec3{10.0f, 10.0f, 0.0f};
+    rider.bound_radius = 1.0f;
+    const EntityHandle rider_h = world.registry.spawn(0, rider);
+
+    Entity walker = rider;
+    walker.net_id = 0x11;
+    const EntityHandle walker_h = world.registry.spawn(0, walker);
+
+    Entity target = rider;
+    target.net_id = 0x12;
+    target.position = Vec3{30.0f, 10.0f, 0.0f};
+    const EntityHandle target_h = world.registry.spawn(0, target);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(box_model(1, 0, 3.0, 3.0, 3.0));
+    collision.assign_entity(hull_h, model_id);
+    CHECK(world.commands.mount(0x10, 0x20));
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    const Entity *mounted = world.registry.get(rider_h);
+    CHECK(mounted != nullptr && mounted->mounted && mounted->mount_target == hull_h);
+
+    AiSystem sys;
+    sys.terrain = &flat.field;
+    sys.collision = &collision;
+
+    const int32_t a[3] = {fx(10.0), fx(10.0), fx(0.9)};
+    const int32_t b[3] = {fx(30.0), fx(10.0), fx(0.9)};
+    // The hull blocks an unmounted body standing inside it ...
+    CHECK(!sys.line_of_sight_clear(world, a, b, walker_h, target_h));
+    CHECK(!sys.line_of_sight_clear_cached(world, a, b, walker_h, target_h));
+    // ... but never its own rider, on the live walk or the stable index.
+    CHECK(sys.line_of_sight_clear(world, a, b, rider_h, target_h));
+    CHECK(sys.line_of_sight_clear_cached(world, a, b, rider_h, target_h));
+    collision.prepare_cached_raycast_queries(world);
+    CHECK(!sys.line_of_sight_clear_cached(world, a, b, walker_h, target_h));
+    CHECK(sys.line_of_sight_clear_cached(world, a, b, rider_h, target_h));
+    // The fold applies to the far endpoint too: a ray INTO a mounted target.
+    CHECK(sys.line_of_sight_clear_cached(world, b, a, target_h, rider_h));
+    CHECK(!sys.line_of_sight_clear_cached(world, b, a, target_h, walker_h));
+}
+
 int main() {
     test_matrix_roundtrip();
     test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();
     test_negative_static_slot_candidates_and_blink();
+    test_iris_candidate_blink_is_not_global_building_walk();
+    test_clip_segment_uses_nearest_candidate_and_indoors_terrain_gate();
+    test_candidate_sun_segment_includes_pool1_dynamics();
+    test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits();
     test_sound_occlusion();
     test_ray_clip();
     test_ground_probe_roof();
@@ -4683,7 +5054,10 @@ int main() {
     test_debug_seams();
     test_raycast_clear_los();
     test_raycast_clear_table_readiness();
+    test_cached_raycast_spatial_candidates();
+    test_cached_raycast_sparse_extent_uses_exact_hash_fallback();
     test_raycast_uses_stamped_bound_for_live_section_pose();
+    test_cached_los_excludes_the_endpoint_carrier();
     test_los_point_bias();
     test_proximity_tables_use_host_bound_radius();
     test_face_raycast();

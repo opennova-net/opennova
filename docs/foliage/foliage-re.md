@@ -28,7 +28,7 @@ remain in place; ONED's paint and eyedropper consumers were removed by ADR 0037.
 | Distant ground fit | four corners + four edge midpoints | portable fold vectors + CPU evaluation | matching |
 | Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask | matching effect/state; D-FOLIAGE-10 records bounded reimpl order/reflection limits |
 | `:fd` bake/sampling | `Foliage_LoadDefAssets @ 0x601260`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`, device sampler init | exact dual-source chain and anisotropic sampler selection; a conservative longest-gradient guard excludes Godot's synthetic terminal tail but can bias grazing footprints sharper than the device's minor-axis/maximum-anisotropy choice | matching chain/sampler, bounded terminal-LOD approximation; D-FOLIAGE-5 |
-| Detail lightmap input | composed per-tile render target | detail draws borrow the terrain frame's binding from the hosted 128-layer, 256x256 page cache; pages include exact base RGB/A0, ordered `.til` source-over RGBA, additive DOT3 alpha, and supported static A-only projections, while general c7/c8 projection and remaining ordered model/depth contributions are absent | partial; D-FOLIAGE-7 |
+| Detail lightmap input | composed per-tile render target | detail draws borrow the terrain frame's binding from the hosted 128-layer, 256x256 page cache; pages include exact base RGB/A0, ordered `.til` source-over RGBA, additive DOT3 alpha, and supported static A-only projections. The max-quality c7/c8 page projection is exact; remaining ordered model/depth contributions are absent | partial; D-FOLIAGE-7 |
 | Mission-tile exclusion | `Foliage_PathBlockedByPlacedTile @ 0x606490` | shared parsed `<mission>.til`, exact inclusive 16x16 AABB scan | matching; D-FOLIAGE-8 fixed |
 | MODEL-anchor selection | crouched/prone infantry on terrain (`MoveOrder & 0x300`, empty `groundEntity`) among visible sector entities | sim stance query + camera frustum | matching gate (D-FOLIAGE-11 FIXED 2026-07-16); occlusion membership partial, D-FOLIAGE-9 |
 
@@ -267,6 +267,23 @@ splat path, not a visual approximation; the fallback remains a distinct
 non-splat path. c6.a is still the distance/pass fade described above, and
 MODEL masks do not use this emitter factor.
 
+The apparent EffectWorld point-light hook is inert on that selected path.
+`Foliage_RenderFarPatches` does call `Light_SelectAndEnableForDraw` once per
+patch at `0x60a5dc`, after building the patch AABB, so the legacy device state
+really does select and enable up to four D3D lights. But asset load first
+creates `Foliage_WindSwayVS` unconditionally (`Foliage_LoadDefAssets
+@ 0x601278 -> Terrain_CreateFoliageVertexShaders @ 0x5ff630`), and
+`Foliage_SetupFarSlotDraw` installs that nonzero handle in every selected draw
+descriptor at `0x60087a..0x600883`. The complete `vs_1_1` literal at
+`0x7de648` declares only position, color, and texcoord; it has no normal or
+light input and emits `mov oD0,c6`. The `ps_1_1` blend then uses that vertex
+color only in `mul_x2 r0.rgb,r0,v0`; its lighting remains the cached-tile
+`t1.a*c1+c0` fold. Consequently `SetLight`/`LightEnable` has no shader consumer
+when the wind VS exists. It can affect only the failed-VS FVF fallback, which
+the locked highest-quality retail profile excludes. OpenNova therefore
+correctly has no foliage point-light uniforms; adding them would create a
+non-retail max-quality response.
+
 For the analytic t1 reconstruction, EnvFile preserves the direct
 `Environment_GetLightDirectionFloat @ 0x57d870` tuple `g=(g0,g1,g2)`, not a
 Godot/world XYZ vector. PolyTrn's D3DCOLOR pack (`0x60e201..0x60e331`) writes
@@ -276,9 +293,8 @@ those channels. The old `(x,z,y)` mapping swapped the horizontal DOT3 axes.
 The 08:00 oracle is light bytes `(231,83,187)`, with slope alphas
 `0.8987774/0.0794002`. Retail foliage itself does not compute this DOT3; its
 blend PS consumes the cached `t1.a`. The hosted static `.til` RGB/tint is also
-composed before lighting. General retail tile-cache projection and ordered
-tile-model/depth-alpha contributions remain open under D-FOLIAGE-7/
-D-TERRAIN-7.
+composed before lighting. Ordered tile-model/depth-alpha contributions remain
+open under D-FOLIAGE-7/D-TERRAIN-7.
 
 The tile projection is explicitly **pre-wind**. In the
 `Foliage_WindSwayVS` literal (`0x7de648`, copied at `0x5ff691`, assembled
@@ -291,11 +307,24 @@ derives overlay UV before displacing render Z. Its
 matches retail `.til` X/negated-Z axes (`0x60de23/0x60de28`), patch-local
 positioning (`0x60de7c..0x60debb`), and draw (`0x60df1b`).
 
-That closes the supported static `.til` component, not the general retail
-page/cache projection. The RT resolve at `0x60a1de`, c7/c8 construction at
-`0x60a220..0x60a34f`, uploads at `0x6006f0/0x600704`, and ordered
-tile-model/depth-alpha contributions remain part of the bounded D-FOLIAGE-7 /
-D-TERRAIN-7 producer gap.
+The max-quality page/cache projection is now closed as well. The cache record
+stores `lod`, packed local X/Z, routed sector X, and routed sector Z
+(`PolyTrn_RenderTile @ 0x60db67..0x60dc02`); `Terrain_FindSectorTileRT @
+0x6042a0` resolves that exact record for each detail patch. The live quality
+branch is not the inverse-view fallback: `Foliage_WindSwayVS != 0 @ 0x5ffbb0`
+is true after required shader creation, so `Foliage_RenderFarPatches @
+0x60a25d..0x60a297` builds c7/c8 from the packed page origin and
+`1/(1024>>lod)`. Its model translation is D3D `(world Z,0,world X)`
+(`@ 0x60a35c..0x60a3da`); the literal's `m4x3 r10,v0,c12` followed by c7/c8
+therefore reduces exactly to
+`((world X-origin X),(world Z-origin Z))/span`. The uploads at
+`Foliage_SetupVertexShaderConstants @ 0x6006ab..0x600704` pin the two rows
+(c7 upload `0x6006f0`, c8 upload `0x600704`).
+`TerrainTilePageProjection` is the single portable reduction used by terrain,
+detail foliage, MATCHTERRAIN, and the static-shadow page raster; the old
+per-consumer `origin_span` uniforms were removed, with no failed-VS compatibility
+projection retained. Ordered tile-model/depth-alpha contributions remain part
+of the bounded D-FOLIAGE-7 / D-TERRAIN-7 producer gap.
 
 ## Distant MODEL/depth-mask tier
 
@@ -582,7 +611,7 @@ claim or divergence.
 | D-FOLIAGE-4 | **SUPERSEDED/FIXED 2026-07-13.** The 2026-07-08 two-tier port was itself inverted and has been deleted. Fresh detail expansion and MODEL ground-fit paths replace it. |
 | D-FOLIAGE-5 | **FIXED for the authored chain and sampler selection; bounded terminal-LOD approximation.** The portable custom chain keeps authored RGB at mip 0, blends recursively downsampled later retail mips toward `0x808080` with `w=min(256,floor(320*i/N))`, preserves base-chain alpha, and supplies Godot's required terminal levels without generic mip regeneration. The round-4 filtering adjudication pins anisotropic sampling. The host's longest-gradient guard keeps the synthetic 2x2/1x1 tail out, but can choose a sharper grazing footprint than the device's minor-axis/maximum-anisotropy LOD selection. |
 | D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The reimpl now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
-| D-FOLIAGE-7 | **OPEN, narrowed by the shared page cache (2026-08-17).** Runtime detail borrows a ready binding selected by the same terrain frame from the hosted 128-layer, 256x256 composed-page array. That producer carries exact base RGB/A0, ordered `.til` source-over RGBA, additive heightfield-DOT3 alpha, and supported static A-only projections at the exact pre-wind coordinate; retained prior-frame pages are ineligible. The former terrain-only directional static-shadow surrogate is retired, so terrain and alpha-tested foliage now consume the same page result. Retail's exact general c7/c8 projection, unsupported animated/skinned caster materials, one-sided/non-opaque overlap behavior, remaining ordered contributions, refresh cadence, and final RT edge/mip behavior remain bounded. |
+| D-FOLIAGE-7 | **OPEN, narrowed by the shared page cache and complete c7/c8/PROJSHAD/composite state audit (2026-08-23).** Runtime detail borrows a ready binding selected by the same terrain frame from the hosted 128-layer, 256x256 composed-page array. That producer carries exact base RGB/A0, ordered `.til` source-over RGBA, additive heightfield-DOT3 alpha, and static A-only projections at the exact pre-wind coordinate; retained prior-frame pages are ineligible. The highest-quality c7/c8 branch is reduced exactly into the shared `TerrainTilePageProjection`; the failed-VS inverse-view fallback is intentionally absent. The former terrain-only directional static-shadow surrogate is retired, so terrain and alpha-tested foliage consume the same page result. Per-technique pass admission/blending, skinned rigid collapse, one-sided culling, overlap z ordering, the shared AlphaGen/full-UV/time-or-control diffuse-frame evaluator, and the live-probed zero-RGB ONE/ONE temporary-blue composite are exact. Remaining ordered contributions, refresh cadence, and final RT edge/address/mip behavior remain bounded; generic whole-process CTRL/RNG ordering is D-3DI-2. |
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadFoliageFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
 | D-FOLIAGE-9 | **OPEN, reimpl mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping reimpl `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing reimpl-only regeneration/upload storms while this membership gap remains open. |
 | D-FOLIAGE-11 | **FIXED 2026-07-16.** The reimpl fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query. The former ONED preview had no infantry and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |

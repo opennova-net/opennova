@@ -73,3 +73,73 @@ func test_tile_free_mission_keeps_base_page_cache_ready_without_tilestrip() -> v
 	assert_not_null(terrain.get_tile_cache_texture())
 	assert_true(bool(terrain.get_terrain_material().get_shader_parameter(
 		"u_has_tile_cache")))
+
+
+func _settle(terrain: Terrain) -> Dictionary:
+	var diagnostics: Dictionary = {}
+	for _attempt in range(2048):
+		terrain.render_frame()
+		diagnostics = terrain.get_tile_cache_diagnostics()
+		if int(diagnostics.get("pending_jobs", -1)) == 0 \
+				and int(diagnostics.get("frame_requests", 0)) > 0 \
+				and int(diagnostics.get("frame_ready_hits", -1)) \
+						== int(diagnostics.get("frame_requests", 0)):
+			return diagnostics
+		await get_tree().process_frame
+	assert_true(false, "the bounded terrain compiler must settle visible pages")
+	return diagnostics
+
+
+func test_unresolved_scorch_set_rejects_records_without_dropping_base_pages() -> void:
+	# The fixture root carries no trscrch/qburn decal TGAs, so the permanent
+	# scorch overlay is absent for the whole mission. That is an optional
+	# overlay source: the base colormap/normal page cache still publishes, a
+	# record the overlay cannot draw is rejected at append, and every visible
+	# page keeps resolving through a ready binding. Scorch state is never a
+	# reason to drop a tile binding.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	add_child_autofree(viewport)
+	var data := _loaded_data()
+	data.set_tileinfo_filename("")
+	data.set_tilestrip_tex(null)
+	var terrain := Terrain.new()
+	viewport.add_child(terrain)
+	terrain.set_terrain_data(data)
+	terrain.build()
+	terrain.set_debug_no_frustum(true)
+	var camera := Camera3D.new()
+	viewport.add_child(camera)
+	camera.global_position = Vector3(64.0, 27.0, 64.0)
+	camera.make_current()
+
+	var diagnostics := terrain.get_tile_cache_diagnostics()
+	assert_true(bool(diagnostics["available"]),
+		"an absent scorch set must not disable the base page cache")
+	assert_false(bool(diagnostics["scorch_textures_ready"]),
+		"the fixture resource root resolves no scorch decal textures")
+	var generation := int(diagnostics["scorch_generation"])
+	assert_false(terrain.append_terrain_scorch(0, 60 << 16, 60 << 16, 68 << 16, 68 << 16),
+		"a record the overlay cannot draw is rejected at append")
+	diagnostics = terrain.get_tile_cache_diagnostics()
+	assert_eq(int(diagnostics["scorch_records"]), 0)
+	assert_eq(int(diagnostics["scorch_records_rejected"]), 1)
+	assert_eq(int(diagnostics["scorch_generation"]), generation,
+		"a rejected record leaves the registry generation alone")
+	assert_true(bool(diagnostics["available"]),
+		"a rejected scorch record never drops the base page cache")
+
+	var settled := await _settle(terrain)
+	assert_gt(int(settled["frame_requests"]), 0)
+	assert_eq(int(settled["frame_ready_hits"]), int(settled["frame_requests"]),
+		"every visible page still resolves through a ready binding")
+	assert_eq(int(settled["upload_failures"]), 0)
+	assert_eq(int(settled["frame_capacity_fallbacks"]), 0)
+	terrain.clear_terrain_scorches()
+	terrain.render_frame()
+	var cleared := terrain.get_tile_cache_diagnostics()
+	assert_true(bool(cleared["available"]))
+	assert_eq(int(cleared["frame_ready_hits"]), int(cleared["frame_requests"]),
+		"clearing an empty registry keeps every resident page ready")
+	terrain.set_terrain_data(null)
+	viewport.free()

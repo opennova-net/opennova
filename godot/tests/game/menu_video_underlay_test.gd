@@ -153,3 +153,33 @@ func test_stop_clears_slots() -> void:
 	underlay.stop()
 	assert_eq(underlay.get_active_slot_count(), 0)
 	assert_eq(underlay.get_slot_source(1), "")
+
+
+func test_hidden_menu_suspends_and_resumes_movie_processing() -> void:
+	_write_white_biki("main.bik")
+	var menu := Control.new()
+	add_child_autofree(menu)
+	var underlay := MenuVideoUnderlay.new()
+	menu.add_child(underlay)
+	underlay.set_source(ProjectSettings.globalize_path(_root_dir), "")
+	assert_true(underlay.is_processing(), "a visible menu advances its movie")
+	menu.hide()
+	assert_false(underlay.is_processing(),
+			"an invisible menu cannot keep decoding and uploading Bink frames")
+	menu.show()
+	assert_true(underlay.is_processing(),
+			"showing the menu resumes the existing movie slots")
+
+
+func test_process_timing_is_opt_in_and_consumed_once() -> void:
+	var underlay := _make_underlay()
+	assert_false(underlay.is_runtime_profiling_enabled())
+	assert_eq(underlay.consume_process_us(), 0)
+	underlay.set_runtime_profiling_enabled(true)
+	assert_true(underlay.is_runtime_profiling_enabled())
+	assert_eq(underlay.consume_process_us(), 0,
+			"opening capture starts with no stale video sample")
+	underlay.set_runtime_profiling_enabled(false)
+	assert_false(underlay.is_runtime_profiling_enabled())
+	assert_eq(underlay.consume_process_us(), 0,
+			"closing capture clears the pending sample")

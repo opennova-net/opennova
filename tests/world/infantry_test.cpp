@@ -487,6 +487,9 @@ struct ClimbRig {
         body.position = {10.6f, 10.0f, 0.0f};
         body.health = 100;
         body.alive = true;
+        // The proximity query reads the exact entity boundRadius (910cc12f0
+        // retired the 1.0 u stand-in); a person carries its model bound.
+        body.bound_radius = 1.0f;
         // The player rig carries the retail player classifier; the org1 rig is
         // an NPC (the resolver keys its player legs on this bit, not on
         // local ownership).

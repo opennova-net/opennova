@@ -146,6 +146,10 @@ def test_item_air_family_params_present_in_both_mirrors():
                     "spring", "spring_comp", "shock", "top_heavy", "critical_hp"]
     # The AI engage-cap pair inserted 2026-08-13 (def+0x178/+0x17A radarsig/heatsig).
     sig_run = ["critical_hp", "critical_drain", "radar_sig", "heat_sig", "unit_type"]
+    # The model-scale field is a mid-struct native stride carrier, not the
+    # adjacent debris render scale. Pin it independently so both mirrors cannot
+    # agree on the same omission.
+    scale_run = ["husk_swap_at", "husk_swap_at_sec", "scale_q16", "debris_scale"]
     blender = _load_blender_def_ffi()
     for item_cls in (py_def.DefItemDef, blender.DefItemDef):
         names = [name for name, _ctype in item_cls._fields_]
@@ -157,6 +161,9 @@ def test_item_air_family_params_present_in_both_mirrors():
         assert names[start:start + len(platform_run)] == platform_run
         start = names.index("critical_hp")
         assert names[start:start + len(sig_run)] == sig_run
+        start = names.index("husk_swap_at")
+        assert names[start:start + len(scale_run)] == scale_run
+        assert item_cls.scale_q16.size == ctypes.sizeof(ctypes.c_int)
         for field in ("radar_sig", "heat_sig", "spring", "spring_comp", "shock",
                       "top_heavy"):
             assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)

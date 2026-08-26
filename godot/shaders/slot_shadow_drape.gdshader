@@ -1,6 +1,9 @@
 shader_type spatial;
 render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 
+#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/nova_frame_pass.gdshaderinc"
+
 // The render-slot entity ground-shadow drape, as a multiplicative next pass
 // over the hand-lit terrain surface. Retail drapes each bound shadow slot
 // over a 21x21 terrain-following patch: the per-entity silhouette RT is
@@ -8,7 +11,7 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 // with the per-channel ambient law and the 40..80 u distance fade — or, for
 // a bound slot without a silhouette RT, the authored items.def `shadow` blob
 // decal, heading-rotated (retail: RenderSlot_DrawAllDrapes @0x5d6e20,
-// render_sector_model @0x5d5ca0, blob @0x5d59d0 — see
+// RenderSlot_DrawSilhouetteDrape @0x5d5ca0, blob @0x5d59d0 — see
 // docs/render/render-lighting-re.md). The terrain surface itself stands in
 // for the patch mesh; the projection is evaluated per pixel.
 //
@@ -16,7 +19,7 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 //   u_slot_mat_i : world -> (u, v, depth01) projector matrix
 //   u_slot_term[i] : rgb = the per-channel shadow term
 //                    q_c = sun_c*|dir_y| / (sun_c*|dir_y| + sky_c)
-//                    (retail: render_sector_model @0x5d5f63..0x5d6008);
+//                    (retail: RenderSlot_DrawSilhouetteDrape @0x5d5f63..0x5d6008);
 //                    a = 0 off, 1 silhouette, 2 authored blob
 //   u_slot_patch[i] : the lod x lod terrain patch the slot is draped over,
 //                    as world (min_x, min_z, max_x, max_z) — retail builds a
@@ -47,18 +50,18 @@ uniform vec4 u_slot_clip_u[12];
 uniform vec4 u_slot_clip_v[12];
 // The 32x4 "shadowztex" step, CLAMP + bilinear like retail's sampler.
 uniform sampler2D u_shadowztex : filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_0 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_1 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_2 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_3 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_4 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_5 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_6 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_7 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_8 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_9 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_10 : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_slot_tex_11 : source_color, filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_0 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_1 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_2 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_3 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_4 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_5 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_6 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_7 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_8 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_9 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_10 : filter_linear, repeat_disable;
+uniform sampler2D u_slot_tex_11 : filter_linear, repeat_disable;
 uniform mat4 u_slot_mat_0;
 uniform mat4 u_slot_mat_1;
 uniform mat4 u_slot_mat_2;
@@ -113,6 +116,9 @@ mat4 slot_matrix(int i) {
 }
 
 void fragment() {
+	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+		discard;
+	}
 	// The drape distance fade (renderer::drape_fade: 0 inside the start
 	// distance, ramping to 1 over the range).
 	float fade = clamp((length(VERTEX) - u_drape_fade_range.x) /
@@ -136,13 +142,17 @@ void fragment() {
 		}
 		vec4 s = slot_sample(i, p.xy);
 		if (mode < 1.5) {
-			// Silhouette: mask = capture alpha; the multiply removes the
-			// faded sun term per channel — then the depth-clip stage ADDs
-			// shadowztex and saturates (retail stage 1 COLOROP ADD).
+			// Silhouette: retail stage 0 ADDs the black-on-white slot RT RGB
+			// to the faded ambient material; stage 1 ADDs shadowztex, and both
+			// stages saturate. Keeping the resolved/filter RGB is significant:
+			// an alpha-product approximation leaves faint partial-coverage
+			// tails at grazing sun angles (RenderSlot_DrawSilhouetteDrape
+			// @0x5d5ca0).
 			vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, v_world) + u_slot_clip_u[i].w,
 					dot(u_slot_clip_v[i].xyz, v_world) + u_slot_clip_v[i].w);
 			float ztex = texture(u_shadowztex, zuv).r;
-			vec3 shadowed = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb * s.a;
+			vec3 ambient = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb;
+			vec3 shadowed = s.rgb + ambient;
 			factor *= min(vec3(1.0), shadowed + vec3(ztex));
 		} else {
 			// Authored blob decal: retail multiplies the terrain by the
@@ -151,9 +161,7 @@ void fragment() {
 			factor *= mix(vec3(1.0), s.rgb, s.a);
 		}
 	}
-	// Retail's drape multiplies the 8-bit sRGB framebuffer directly (the
-	// D3D8-era fixed pipeline has no linear stage); Godot's blend_mul runs
-	// in LINEAR space, so the composed sRGB factor folds through the
-	// transfer curve to darken the displayed value by the same law.
-	ALBEDO = pow(factor, vec3(2.2));
+	// Retail's drape multiplies gamma-space framebuffer bytes directly. Both
+	// the sampled slot textures and scene target stay in that domain here.
+	ALBEDO = nova_scene_output(factor);
 }

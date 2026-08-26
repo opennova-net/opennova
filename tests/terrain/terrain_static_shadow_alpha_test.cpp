@@ -62,6 +62,20 @@ bool test_begin_copies_the_composed_light_term() {
 			"the raster starts from the already-composed DOT3 alpha bytes");
 }
 
+bool test_retail_additive_composite_contract() {
+	using namespace opennova::terrain;
+	const std::array<uint8_t, 4> destination = {10, 20, 30, 0};
+	if (!expect(composite_terrain_static_shadow_pixel(destination, 170) ==
+			std::array<uint8_t, 4>({10, 20, 30, 170}),
+			"zero-RGB ONE/ONE source preserves RGB and installs temp blue A")) {
+		return false;
+	}
+	return expect(composite_terrain_static_shadow_pixel(
+				std::array<uint8_t, 4>({40, 50, 60, 120}), 200) ==
+				std::array<uint8_t, 4>({40, 50, 60, 255}),
+			"the explicit ONE/ONE alpha equation saturates like RGBA8 retail");
+}
+
 bool test_apply_replaces_alpha_and_preserves_rgb() {
 	using namespace opennova;
 	using namespace opennova::terrain;
@@ -141,6 +155,7 @@ bool test_shadow_stamp_is_domain_separated() {
 
 int main() {
 	if (!test_begin_copies_the_composed_light_term()) return 1;
+	if (!test_retail_additive_composite_contract()) return 1;
 	if (!test_apply_replaces_alpha_and_preserves_rgb()) return 1;
 	if (!test_invalid_page_fails_atomically()) return 1;
 	if (!test_shadow_stamp_is_domain_separated()) return 1;

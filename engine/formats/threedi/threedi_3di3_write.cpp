@@ -326,7 +326,7 @@ static int build_ghdr_chunk(const ThreediHeader *header, ChunkBuilder *out)
     }
     if (buffer_append_s32_le(&out->payload, (int32_t)header->mesh_type) != 0 ||
         buffer_append_s32_le(&out->payload, header->lod_count_decl) != 0 ||
-        buffer_append_s32_le(&out->payload, header->lod_distance) != 0) {
+        buffer_append_s32_le(&out->payload, header->max_radius_fp16) != 0) {
         chunk_builder_free(out);
         return -1;
     }

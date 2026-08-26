@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "crt/crt_rng.h"
 #include "terrain_query/height_field.h"
 #include "world/angle.h"
 #include "world/collision.h"
@@ -26,10 +27,10 @@ static int failures = 0;
 
 namespace {
 
-// A minimal ammo table: [0] null, [1] a grenade-style kz round, [2] the
-// kz_OrganicBlast death-chain entry the InitDeathSounds leg resolves by name.
+// A minimal ammo table: [0] null, [1] a grenade-style kz round, then the two
+// named landing blasts resolved by the retail post-death callbacks.
 void seed_ammo(World &w) {
-    w.ammo.entries.resize(3);
+    w.ammo.entries.resize(4);
     AmmoTableEntry &null_e = w.ammo.entries[0];
     null_e.name = "AT_NULL";
     null_e.valid = true;
@@ -51,6 +52,13 @@ void seed_ammo(World &w) {
     // The death blast spares M/D items (the chain-explosion control the ammo
     // authors via NoMItems/NoDItems) — organics only.
     organic.flags = kAmmoFlagNoMItems | kAmmoFlagNoDItems;
+    AmmoTableEntry &mitem = w.ammo.entries[3];
+    mitem.name = "kz_MItemBlast";
+    mitem.valid = true;
+    mitem.kztype = ammo_kz::kStandard;
+    mitem.kz_damage = 40;
+    mitem.kz_minradius = 0.5f;
+    mitem.kz_maxradius = 5.0f;
 }
 
 ItemDeathTraits barrel_traits() {
@@ -109,6 +117,35 @@ CollisionModel solid_box_model(double half_extent, double height) {
     section.volume_count = 1;
     model.sections.push_back(section);
     return model;
+}
+
+// A one-section collision shell with an authored z range: the model-level
+// floor (`CollisionModel::min[2]`) stands in for the retail collision block's
+// +0x28 CMDL bbox z-lo that Entity_CalcSlopeForces reads off the picked model.
+CollisionModel wreck_shell_model(double z_lo, double z_hi) {
+    CollisionModel model;
+    CollisionSection section;
+    section.min_x = fixed16(-1.0);
+    section.max_x = fixed16(1.0);
+    section.min_y = fixed16(-1.0);
+    section.max_y = fixed16(1.0);
+    section.min_z = fixed16(z_lo);
+    section.max_z = fixed16(z_hi);
+    section.radius = fixed16(2.0);
+    section.authored_bounds = true;
+    model.sections.push_back(section);
+    return model;
+}
+
+// Bind an intact shell plus a husk-stage shell to one entity, the pair retail
+// keeps at entity+0x30/+0x34 and picks between by Flags & 4.
+void attach_wreck_shells(World &w, CollisionWorld &collision, EntityHandle h,
+                         double graphic_z_lo, double husk_z_lo) {
+    collision.assign_entity(h,
+            collision.add_model(wreck_shell_model(graphic_z_lo, 2.0)));
+    collision.assign_entity_husk(h,
+            collision.add_model(wreck_shell_model(husk_z_lo, 1.0)));
+    w.collision = &collision;
 }
 
 // One authored CFAC face for projectile fixtures. Pool-1 items reach this
@@ -1086,6 +1123,69 @@ void test_death_piece_water() {
     CHECK(std::abs(p.vel.z + 4096.0f / 65536.0f) < 1.0e-6f);
 }
 
+// Exhausted debris marks terrain with standard scorch 7 before its final
+// presentation events. The debris-type bit 1 suppresses only CACTUS_, while a
+// bounce and the underwater free leg emit nothing.
+// [orig: Entity_ProcessDeathPiecePhysics @0x492FDF..0x492FEC]
+void test_death_piece_ground_scorch_routing() {
+    constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap(kDim * kDim, 0);
+    std::vector<int> sector_grid(256, 1);
+    TerrainHeightField flat;
+    flat.heightmap = heightmap.data();
+    flat.dim = kDim;
+    flat.layout.sector_grid = sector_grid.data();
+    flat.layout.origin_x = 0;
+    flat.layout.origin_y = 0;
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.logic_tick = 91;
+    crt_srand(1);
+
+    auto ground_piece = [&](uint8_t type_index, uint32_t flags,
+                            int32_t bounces_left, float x) -> DeathPiece & {
+        DeathPiece &p = w.death_pieces.alloc();
+        p.active = true;
+        p.type_index = type_index;
+        p.flags = flags;
+        p.pos = Vec3{x, 8.0f, 0.001f};
+        p.vel = Vec3{0.0f, 0.0f, -1.0f};
+        p.bounces_left = bounces_left;
+        return p;
+    };
+
+    DeathPiece &exhausted = ground_piece(3, 0, 0, 8.0f); // CHUNK_M
+    w.death_pieces.tick(w, &flat, -1.0e9f, w.destruction);
+    CHECK(!exhausted.active);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+    if (w.terrain_scorches.pending().size() == 1) {
+        const TerrainScorchEvent &event = w.terrain_scorches.pending().front();
+        CHECK(event.tick == 91);
+        CHECK(event.mission_bounds.texture_index == 2); // srand(1): 41 % 3
+        CHECK(event.mission_bounds.minimum_x_q16 == fixed16(4.0));
+        CHECK(event.mission_bounds.maximum_x_q16 == fixed16(12.0));
+        CHECK(event.mission_bounds.minimum_z_q16 == fixed16(4.0));
+        CHECK(event.mission_bounds.maximum_z_q16 == fixed16(12.0));
+    }
+
+    DeathPiece &cactus = ground_piece(11, 0x2u, 0, 16.0f);
+    w.death_pieces.tick(w, &flat, -1.0e9f, w.destruction);
+    CHECK(!cactus.active);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+
+    DeathPiece &bouncing = ground_piece(3, 0, 1, 24.0f);
+    w.death_pieces.tick(w, &flat, -1.0e9f, w.destruction);
+    CHECK(bouncing.active);
+    CHECK(bouncing.bounces_left == 0);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+
+    DeathPiece &underwater = ground_piece(3, 0, 0, 32.0f);
+    underwater.pos.z = -0.01f;
+    w.death_pieces.tick(w, &flat, 1.0f, w.destruction);
+    CHECK(!underwater.active);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+}
+
 // The bullet armor gates [orig: Projectile_ProcessDamageOnTarget @0x4e7fb0].
 void test_bullet_gates() {
     auto w_heap = std::make_unique<World>();
@@ -1190,6 +1290,300 @@ struct FlatField {
     }
 };
 
+// The unitType-3 husk keeps its own DeathPiece_PhysicsUpdate callback rather
+// than borrowing either ordinary falling path. Pin its Q16 air/water motion,
+// one PRNG draw, short four-probe slope solve, landing presentation order,
+// dual authority blast, standard scorch, and the separate pitch-settle phase.
+// [orig: DeathPiece_PhysicsUpdate @0x48F500;
+// Entity_CalcSlopeForces @0x4B0B00; sub_48F0B0 @0x48F0B0]
+void test_specialized_piece_physics_callback() {
+    FlatField flat(0);
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 8);
+    w.logic_tick = 73;
+    ItemDeathTraits traits = barrel_traits();
+    traits.unit_type = 3;
+    traits.kz = 0.0f; // forces integer-truncated bound-radius fallback
+    traits.particlefire.clear(); // keep the callback's one PRNG draw isolated
+    traits.particlefinale = "Effect_PieceFinale";
+    w.item_death_traits.set(730, traits);
+    // The GRAPHIC probe-box floor sits at -2.0: a husked wreck must never read
+    // it [orig: Flags & 4 picks entity+0x34 huskModel @ 0x4b0c10..0x4b0c1b].
+    VehicleTraits model;
+    model.box_z_lo = -2 * 65536;
+    model.box_z_hi = 65536;
+    w.vehicle_traits.set(730, model);
+
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 730;
+    seed.health = 0;
+    seed.alive = false;
+    seed.position = Vec3{8.0f, 8.0f, 1.0f};
+    seed.bound_radius = 2.75f;
+    seed.yaw = 90; // engine heading BAM 0: forward probe is +mission X
+    seed.pitch = 10;
+    seed.roll = -3;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    Entity *piece = w.registry.get(h);
+    piece->engine_flags |=
+            kEntityFlagDead | kEntityFlagHusk | kEntityFlagBuilding;
+    // The HUSK shell floor at -1.0 is the witnessed source for a husked piece.
+    CollisionWorld wreck_collision;
+    attach_wreck_shells(w, wreck_collision, h, -2.0, -1.0);
+    piece->death_motion = DeathMotionMode::PiecePhysics;
+    piece->veh.vel_x = 65536;
+    piece->veh.vel_y = -32768;
+    piece->veh.slide_z = -65536;
+    piece->veh.air_pitch_rate = 0x00100000;
+    piece->veh.air_roll_rate = 0x00200000;
+
+    DestructionRng expected_rng = w.destruction_rng;
+    const uint16_t angle_roll = expected_rng.next16();
+    const int32_t initial_pitch = 10 * 11930464;
+    const int32_t initial_roll = -3 * 11930464;
+    const int32_t expected_pitch = (angle_roll & 1u) != 0
+            ? initial_pitch + 0x00100000
+            : initial_pitch;
+    const int32_t expected_roll = (angle_roll & 1u) != 0
+            ? initial_roll + 0x00200000
+            : initial_roll;
+    const int32_t expected_yaw = (angle_roll & 1u) != 0
+            ? 0
+            : 0x02D82D82;
+    crt_srand(1);
+    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
+
+    CHECK(w.destruction_rng.state == expected_rng.state);
+    CHECK(piece->veh.air_pitch_bam == expected_pitch);
+    CHECK(piece->veh.air_roll_bam == expected_roll);
+    CHECK(piece->veh.yaw_bam == expected_yaw);
+    CHECK(piece->death_motion == DeathMotionMode::PiecePitchSettle);
+    CHECK(piece->veh.air_pitch_rate == 0); // flat four-probe slope target
+    CHECK(piece->position.x == 9.0f);
+    CHECK(piece->position.y == 7.5f);
+    // avg ground 0 - ((240 * HUSK floor -65536) >> 8) = 0xF000, then -0x8000.
+    // (The graphic floor -2.0 would have produced 0x16000.)
+    CHECK(to_fixed(piece->position.z) == 0x7000);
+    CHECK((piece->engine_flags & kEntityFlagBuilding) == 0);
+
+    bool ground_hit = false;
+    for (const DestructionEffectEvent &fx : w.destruction.effects)
+        if (fx.effect == "Effect_HeloGroundHit") ground_hit = true;
+    CHECK(ground_hit);
+    bool landed_sound = false;
+    for (const DestructionSoundEvent &sound : w.destruction.sounds)
+        if (sound.sound == "EXPLO_VEHCL_LG") landed_sound = true;
+    CHECK(landed_sound);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+    if (w.terrain_scorches.pending().size() == 1) {
+        const auto &bounds =
+                w.terrain_scorches.pending().front().mission_bounds;
+        CHECK(bounds.minimum_x_q16 == fixed16(5.0));
+        CHECK(bounds.maximum_x_q16 == fixed16(13.0));
+        CHECK(bounds.minimum_z_q16 == fixed16(3.5));
+        CHECK(bounds.maximum_z_q16 == fixed16(11.5));
+    }
+    CHECK(w.explosions.queue.size() == 2);
+    if (w.explosions.queue.size() == 2) {
+        CHECK(w.explosions.queue[0].ammo_index == 2);
+        CHECK(w.explosions.queue[1].ammo_index == 3);
+        for (const ExplosionEntry &blast : w.explosions.queue) {
+            CHECK(blast.owner == h);
+            CHECK(blast.hit_word == 1);
+            CHECK(blast.radius_override == 2.0f);
+            CHECK(to_fixed(blast.pos.z) == 0x7000);
+        }
+    }
+
+    // Contact does not transition immediately. The replacement callback steps
+    // pitch toward the stored target, snaps inside four degrees, then calls
+    // Entity_TransitionToGroundDeath only on the next equal-pitch tick.
+    int settle_ticks = 0;
+    while (piece->death_motion == DeathMotionMode::PiecePitchSettle &&
+           settle_ticks < 12) {
+        const int32_t before = piece->veh.air_pitch_bam;
+        destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
+        ++settle_ticks;
+        if (piece->death_motion == DeathMotionMode::PiecePitchSettle) {
+            const int32_t moved = std::abs(before - piece->veh.air_pitch_bam);
+            CHECK(moved <= 0x016C16C0 || piece->veh.air_pitch_bam == 0);
+        }
+    }
+    CHECK(piece->death_motion == DeathMotionMode::Generic);
+    CHECK(piece->veh.air_pitch_bam == 0);
+    CHECK(piece->saved_live_valid);
+    CHECK(settle_ticks >= 2 && settle_ticks < 12);
+    int finale_count = 0;
+    for (const DestructionEffectEvent &fx : w.destruction.effects)
+        if (fx.effect == "Effect_PieceFinale") ++finale_count;
+    CHECK(finale_count == 1);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+    CHECK(w.explosions.queue.size() == 2);
+
+    // In the main callback the angle draw precedes the wreck-fire roll. In the
+    // equal-pitch settle branch the callback transitions directly and does not
+    // call Entity_UpdateDeadWreckEffects at all.
+    auto ordered_heap = std::make_unique<World>();
+    World &ordered = *ordered_heap;
+    ordered.registry.configure_pool(1, 4);
+    ItemDeathTraits burning = barrel_traits();
+    burning.unit_type = 3;
+    ordered.item_death_traits.set(733, burning);
+    seed.item_id = 733;
+    seed.position = Vec3{20.0f, 20.0f, 10.0f};
+    seed.yaw = 90;
+    seed.pitch = 0;
+    seed.roll = 0;
+    const EntityHandle ordered_h = ordered.registry.spawn(1, seed);
+    Entity *ordered_piece = ordered.registry.get(ordered_h);
+    ordered_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    ordered_piece->death_motion = DeathMotionMode::PiecePhysics;
+    ordered_piece->veh.air_pitch_rate = 0x00100000;
+    ordered_piece->veh.air_roll_rate = 0x00200000;
+    DestructionRng ordered_expected = ordered.destruction_rng;
+    const uint16_t ordered_angle_roll = ordered_expected.next16();
+    (void)ordered_expected.next16(); // Entity_UpdateDeadWreckEffects fire roll
+    destruction_tick_dead_items(
+            ordered, nullptr, -1.0e9f, ordered.destruction);
+    CHECK(ordered.destruction_rng.state == ordered_expected.state);
+    CHECK(ordered_piece->veh.yaw_bam ==
+            ((ordered_angle_roll & 1u) != 0 ? 0 : 0x02D82D82));
+    CHECK(ordered_piece->veh.air_pitch_bam ==
+            ((ordered_angle_roll & 1u) != 0 ? 0x00100000 : 0));
+    ordered_piece->death_motion = DeathMotionMode::PiecePitchSettle;
+    ordered_piece->veh.air_pitch_bam = 0;
+    ordered_piece->veh.air_pitch_rate = 0;
+    const uint32_t equal_pitch_rng = ordered.destruction_rng.state;
+    destruction_tick_dead_items(
+            ordered, nullptr, -1.0e9f, ordered.destruction);
+    CHECK(ordered_piece->death_motion == DeathMotionMode::Generic);
+    CHECK(ordered.destruction_rng.state == equal_pitch_rng);
+
+    // Below water, a strict surface crossing clears both angular rates,
+    // halves signed XY, floors only an overly-negative Z rate at -2048, and
+    // emits the resolved global medium splash plus the helo-water fallback.
+    auto wet_heap = std::make_unique<World>();
+    World &wet = *wet_heap;
+    wet.registry.configure_pool(1, 4);
+    ItemDeathTraits wet_traits = traits;
+    wet.item_death_traits.set(731, wet_traits);
+    seed.item_id = 731;
+    seed.position = Vec3{2.0f, 3.0f, -0.25f};
+    seed.pitch = 4;
+    seed.roll = 2;
+    const EntityHandle wet_h = wet.registry.spawn(1, seed);
+    Entity *submerged = wet.registry.get(wet_h);
+    submerged->engine_flags |=
+            kEntityFlagDead | kEntityFlagHusk | kEntityFlagBuilding;
+    submerged->death_motion = DeathMotionMode::PiecePhysics;
+    submerged->veh.vel_x = 65536;
+    submerged->veh.vel_y = -65535;
+    submerged->veh.slide_z = -65536;
+    submerged->veh.air_pitch_rate = 0x01000000;
+    submerged->veh.air_roll_rate = -0x01000000;
+    const uint32_t wet_rng_before = wet.destruction_rng.state;
+    destruction_tick_dead_items(wet, nullptr, 0.0f, wet.destruction);
+    CHECK(wet.destruction_rng.state == wet_rng_before);
+    CHECK(submerged->death_motion == DeathMotionMode::PiecePhysics);
+    CHECK(submerged->veh.vel_x == 32768);
+    CHECK(submerged->veh.vel_y == -32768);
+    CHECK(submerged->veh.slide_z == -2048);
+    CHECK(submerged->veh.air_pitch_rate == 0);
+    CHECK(submerged->veh.air_roll_rate == 0);
+    CHECK((submerged->engine_flags & kEntityFlagBuilding) == 0);
+    CHECK(to_fixed(submerged->position.z) == fixed16(-0.25) - 2048);
+    bool wet_effect = false;
+    for (const DestructionEffectEvent &fx : wet.destruction.effects) {
+        if (fx.effect != "Effect_MedSplash") continue;
+        wet_effect = true;
+        CHECK(fx.pos.z == 0.0f);
+    }
+    CHECK(wet_effect);
+    bool wet_sound = false;
+    for (const DestructionSoundEvent &sound : wet.destruction.sounds)
+        if (sound.sound == "EXPLO_HELO_WATER") wet_sound = true;
+    CHECK(wet_sound);
+    CHECK(wet.terrain_scorches.pending().empty());
+    CHECK(wet.explosions.queue.empty());
+
+    // The same visible landing runs on a non-authority simulation, but neither
+    // blast is queued. A shallow X ramp also proves the forward slope output is
+    // retained as the pitch target rather than discarded.
+    FlatField ramp(0);
+    for (int z = 0; z < FlatField::kDim; ++z)
+        for (int x = 0; x < FlatField::kDim; ++x)
+            ramp.heightmap[static_cast<size_t>(z) * FlatField::kDim + x] =
+                    static_cast<uint16_t>(x * 8);
+    auto client_heap = std::make_unique<World>();
+    World &client = *client_heap;
+    seed_ammo(client);
+    client.logic_authority = false;
+    client.registry.configure_pool(1, 4);
+    client.item_death_traits.set(732, traits);
+    client.vehicle_traits.set(732, model);
+    seed.item_id = 732;
+    seed.position = Vec3{64.0f, 8.0f,
+            opennova::terrain::height_field_height_world_bilinear(
+                    ramp.field, 64.0f, -8.0f) + 1.25f};
+    seed.yaw = 90;
+    seed.pitch = 0;
+    seed.roll = 0;
+    const EntityHandle client_h = client.registry.spawn(1, seed);
+    Entity *client_piece = client.registry.get(client_h);
+    client_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    client_piece->death_motion = DeathMotionMode::PiecePhysics;
+    client_piece->veh.slide_z = -65536;
+    CollisionWorld client_collision;
+    attach_wreck_shells(client, client_collision, client_h, -2.0, -1.0);
+    destruction_tick_dead_items(
+            client, &ramp.field, -1.0e9f, client.destruction);
+    CHECK(client_piece->death_motion == DeathMotionMode::PiecePitchSettle);
+    CHECK(client_piece->veh.air_pitch_rate > 0);
+    CHECK(client.terrain_scorches.pending().size() == 1);
+    CHECK(client.explosions.queue.empty());
+
+    // A husked piece whose def authors no husk shell has a null model pick:
+    // the rest correction is ZERO, never the graphic floor [orig: the null
+    // pick keeps ecx = 0 @ 0x4b0c0e..0x4b0c20]. With the graphic floor at
+    // -2.0 the old read would have landed this piece 1.875 u above ground.
+    auto bare_heap = std::make_unique<World>();
+    World &bare = *bare_heap;
+    seed_ammo(bare);
+    bare.registry.configure_pool(1, 4);
+    bare.item_death_traits.set(734, traits);
+    bare.vehicle_traits.set(734, model);
+    seed.item_id = 734;
+    seed.position = Vec3{8.0f, 8.0f, 0.5f};
+    seed.yaw = 90;
+    seed.pitch = 0;
+    seed.roll = 0;
+    const EntityHandle bare_h = bare.registry.spawn(1, seed);
+    Entity *bare_piece = bare.registry.get(bare_h);
+    bare_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    bare_piece->death_motion = DeathMotionMode::PiecePhysics;
+    // A gentle fall: the four probe rays reach 0.25 u above and 2.0 u below
+    // the piece [orig: lift 0x4000 / depth 0x20000 @ 0x4b0b73], so a tick
+    // that drops it straight through that window would never see ground.
+    bare_piece->veh.slide_z = -16384;
+    CollisionWorld bare_collision;
+    bare_collision.assign_entity(bare_h,
+            bare_collision.add_model(wreck_shell_model(-2.0, 2.0)));
+    bare.collision = &bare_collision;
+    // With a zero rest correction the ground target is the flat probe
+    // average itself (0): the piece must fall from 0.5 to below it before it
+    // lands; the husk-floor cases above start below their raised target.
+    for (int tick = 0; tick < 16 &&
+            bare_piece->death_motion == DeathMotionMode::PiecePhysics; ++tick) {
+        destruction_tick_dead_items(bare, &flat.field, -1.0e9f, bare.destruction);
+    }
+    CHECK(bare_piece->death_motion == DeathMotionMode::PiecePitchSettle);
+    // ground = avg 0 - 0, then the -0x8000 landing offset.
+    CHECK(to_fixed(bare_piece->position.z) == -0x8000);
+}
+
 // The landing split [orig: the generic leg 0x461d30 lands silently with motion
 // dead-stopped; the unitType-routed leg 0x493f70 adds the clunk @0x4941af and
 // the authority kz @0x4941be], and the section-0 ground-rest offset
@@ -1280,6 +1674,23 @@ void test_dead_item_landing_split() {
     }
     CHECK(finale);
     CHECK(wreck->saved_live_valid);
+    CHECK(w.terrain_scorches.pending().size() == 1);
+    if (w.terrain_scorches.pending().size() == 1) {
+        const TerrainScorchEvent &event = w.terrain_scorches.pending().front();
+        // The router reads the entity pose before the common tail commits its
+        // integrated x/y, matching [orig: @0x49416B..0x494174].
+        CHECK(event.mission_bounds.minimum_x_q16 == fixed16(4.0));
+        CHECK(event.mission_bounds.maximum_x_q16 == fixed16(12.0));
+        CHECK(event.mission_bounds.minimum_z_q16 == fixed16(4.0));
+        CHECK(event.mission_bounds.maximum_z_q16 == fixed16(12.0));
+    }
+
+    const size_t authority_blasts = w.explosions.queue.size();
+    w.logic_authority = false;
+    Entity *client_wreck = drop(702, tv);
+    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
+    CHECK(client_wreck->death_motion == DeathMotionMode::Generic);
+    CHECK(w.explosions.queue.size() == authority_blasts);
 }
 
 // Building-family rows install Entity_UpdateStaticDeathPhysics only after the
@@ -1457,6 +1868,15 @@ void test_dead_item_water_splash() {
         CHECK(std::abs(s.pos.z - water) < 1.0e-6f);
     }
     CHECK(splashed);
+    bool splash_effect = false;
+    for (const DestructionEffectEvent &fx : w.destruction.effects) {
+        if (fx.effect != "Effect_MedSplash") continue;
+        splash_effect = true;
+        CHECK(std::abs(fx.pos.x - 9.0f) < 1.0e-6f);
+        CHECK(std::abs(fx.pos.y - 7.5f) < 1.0e-6f);
+        CHECK(std::abs(fx.pos.z - water) < 1.0e-6f);
+    }
+    CHECK(splash_effect);
 }
 
 // Matched unitType dispatch rows OR the death bits and preserve the Building
@@ -1830,9 +2250,11 @@ int main() {
     test_death_piece_rng_is_world_local();
     test_death_piece_section_center();
     test_death_piece_water();
+    test_death_piece_ground_scorch_routing();
     test_bullet_gates();
     test_dead_item_settle();
     test_generic_staticdeath_freezes();
+    test_specialized_piece_physics_callback();
     test_dead_item_landing_split();
     test_static_dead_item_settle();
     test_dead_item_water_splash();

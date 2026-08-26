@@ -316,6 +316,8 @@ void Simulation::drain_host_client_gameplay_requests() {
 
 void Simulation::host_pump() {
 	namespace np = opennova::np;
+	const bool profiling = runtime_profiling_enabled_;
+	const uint64_t prep_start = profiling ? perf_now_us() : 0;
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
 	// and wraps against the current renderer viewport height [orig:
 	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
@@ -347,21 +349,161 @@ void Simulation::host_pump() {
 	drain_host_client_gameplay_requests();
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
+	if (profiling)
+		frame_phase_perf_.host_prep_us +=
+				static_cast<int64_t>(perf_now_us() - prep_start);
+	np::HostSessionPerf host_perf;
 	np::host_session_pump(host_owner_, sock,
-			&Simulation::resolve_infantry_adm_before_server_tick, this);
+			&Simulation::resolve_infantry_adm_before_server_tick, this,
+			nullptr, nullptr, profiling ? &host_perf : nullptr);
+	if (profiling) {
+		frame_phase_perf_.host_pump_us += static_cast<int64_t>(host_perf.total_us);
+		frame_phase_perf_.host_receive_us += static_cast<int64_t>(host_perf.receive_us);
+		frame_phase_perf_.host_connections_us +=
+				static_cast<int64_t>(host_perf.connections_us);
+		frame_phase_perf_.host_adapter_us += static_cast<int64_t>(host_perf.adapter_us);
+		frame_phase_perf_.server_tick_us += static_cast<int64_t>(host_perf.server_us);
+		frame_phase_perf_.server_input_us +=
+				static_cast<int64_t>(host_perf.server.input_us);
+		frame_phase_perf_.server_world_us +=
+				static_cast<int64_t>(host_perf.server.world_us);
+		frame_phase_perf_.world_setup_us +=
+				static_cast<int64_t>(host_perf.server.world_setup_us);
+		frame_phase_perf_.world_scripts_us +=
+				static_cast<int64_t>(host_perf.server.world_scripts_us);
+		frame_phase_perf_.world_ai_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_us);
+		frame_phase_perf_.world_ai_reactions_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_reactions_us);
+		frame_phase_perf_.world_ai_collision_tables_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_collision_tables_us);
+		frame_phase_perf_.world_ai_entities_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_entities_us);
+		frame_phase_perf_.world_ai_infantry_entities_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_infantry_entities_us);
+		frame_phase_perf_.world_ai_infantry_remote_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_infantry_remote_us);
+		frame_phase_perf_.world_ai_infantry_combat_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_infantry_combat_us);
+		frame_phase_perf_.world_ai_infantry_animation_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_infantry_animation_us);
+		frame_phase_perf_.world_ai_infantry_collision_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_infantry_collision_us);
+		frame_phase_perf_.world_ai_infantry_collision_contacts_us += static_cast<int64_t>(
+				host_perf.server.world_ai_infantry_collision_contacts_us);
+		frame_phase_perf_.world_ai_infantry_collision_repulsion_us += static_cast<int64_t>(
+				host_perf.server.world_ai_infantry_collision_repulsion_us);
+		frame_phase_perf_.world_ai_infantry_collision_ground_us += static_cast<int64_t>(
+				host_perf.server.world_ai_infantry_collision_ground_us);
+		frame_phase_perf_.world_ai_other_entities_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_other_entities_us);
+		frame_phase_perf_.world_ai_authority_vehicles_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_authority_vehicles_us);
+		frame_phase_perf_.world_ai_vehicle_scan_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_vehicle_scan_us);
+		frame_phase_perf_.world_ai_vehicle_motors_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_vehicle_motors_us);
+		frame_phase_perf_.world_ai_vehicle_riders_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_vehicle_riders_us);
+		frame_phase_perf_.world_ai_client_vehicles_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_client_vehicles_us);
+		frame_phase_perf_.world_ai_events_us +=
+				static_cast<int64_t>(host_perf.server.world_ai_events_us);
+		frame_phase_perf_.world_attachments_us +=
+				static_cast<int64_t>(host_perf.server.world_attachments_us);
+		frame_phase_perf_.world_attachment_orphans_us +=
+				static_cast<int64_t>(host_perf.server.world_attachment_orphans_us);
+		frame_phase_perf_.world_attachment_child_pose_us +=
+				static_cast<int64_t>(host_perf.server.world_attachment_child_pose_us);
+		frame_phase_perf_.world_attachment_riders_us +=
+				static_cast<int64_t>(host_perf.server.world_attachment_riders_us);
+		frame_phase_perf_.world_throwables_us +=
+				static_cast<int64_t>(host_perf.server.world_throwables_us);
+		frame_phase_perf_.world_weapons_us +=
+				static_cast<int64_t>(host_perf.server.world_weapons_us);
+		frame_phase_perf_.world_projectiles_us +=
+				static_cast<int64_t>(host_perf.server.world_projectiles_us);
+		frame_phase_perf_.world_destruction_us +=
+				static_cast<int64_t>(host_perf.server.world_destruction_us);
+		frame_phase_perf_.world_housekeeping_us +=
+				static_cast<int64_t>(host_perf.server.world_housekeeping_us);
+		frame_phase_perf_.match_us += static_cast<int64_t>(host_perf.server.match_us);
+		frame_phase_perf_.server_rules_us +=
+				static_cast<int64_t>(host_perf.server.rules_us);
+		frame_phase_perf_.server_replication_us +=
+				static_cast<int64_t>(host_perf.server.replication_us);
+		frame_phase_perf_.replication_query_prep_us +=
+				static_cast<int64_t>(host_perf.server.replication_query_prep_us);
+		frame_phase_perf_.replication_query_collect_us +=
+				static_cast<int64_t>(host_perf.server.replication_query_collect_us);
+		frame_phase_perf_.replication_query_grid_us +=
+				static_cast<int64_t>(host_perf.server.replication_query_grid_us);
+		frame_phase_perf_.replication_query_grid_span_us +=
+				static_cast<int64_t>(host_perf.server.replication_query_grid_span_us);
+		frame_phase_perf_.replication_query_grid_bucket_us +=
+				static_cast<int64_t>(host_perf.server.replication_query_grid_bucket_us);
+		frame_phase_perf_.replication_query_grid_workspace_us +=
+				static_cast<int64_t>(host_perf.server.replication_query_grid_workspace_us);
+		frame_phase_perf_.replication_snapshot_us +=
+				static_cast<int64_t>(host_perf.server.replication_snapshot_us);
+		frame_phase_perf_.replication_fan_us +=
+				static_cast<int64_t>(host_perf.server.replication_fan_us);
+		frame_phase_perf_.replication_fan_setup_us +=
+				static_cast<int64_t>(host_perf.server.replication_fan_setup_us);
+		frame_phase_perf_.replication_round_selection_us +=
+				static_cast<int64_t>(host_perf.server.replication_round_selection_us);
+		frame_phase_perf_.replication_entity_selection_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_selection_us);
+		frame_phase_perf_.replication_entity_setup_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_setup_us);
+		frame_phase_perf_.replication_entity_scoring_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_scoring_us);
+		frame_phase_perf_.replication_entity_los_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_los_us);
+		frame_phase_perf_.replication_entity_los_terrain_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_los_terrain_us);
+		frame_phase_perf_.replication_entity_los_sector_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_los_sector_us);
+		frame_phase_perf_.replication_entity_sort_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_sort_us);
+		frame_phase_perf_.replication_entity_budget_us +=
+				static_cast<int64_t>(host_perf.server.replication_entity_budget_us);
+		frame_phase_perf_.replication_encode_us +=
+				static_cast<int64_t>(host_perf.server.replication_encode_us);
+		frame_phase_perf_.replication_enqueue_us +=
+				static_cast<int64_t>(host_perf.server.replication_enqueue_us);
+		frame_phase_perf_.host_send_us += static_cast<int64_t>(host_perf.send_us);
+	}
+	const uint64_t player_start = profiling ? perf_now_us() : 0;
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
+	if (profiling)
+		frame_phase_perf_.host_player_us +=
+				static_cast<int64_t>(perf_now_us() - player_start);
 	// The host's measurable net leg for the F3 Stats board: the ClientState
 	// fold. The S2C serialize/emit half rides inside np::host_session_pump
 	// (fused with the logic tick) and stays inside the Sim step number until
 	// npruntime grows a phase seam.
-	const uint64_t net_start =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
-	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
-	if (runtime_profiling_enabled_)
+	const uint64_t net_start = profiling ? perf_now_us() : 0;
+	np::ClientFramePerf client_perf;
+	if (runtime_)
+		runtime_->Client_ProcessNetworkFrame(
+				now, profiling ? &client_perf : nullptr); // fold host_loop_ -> ClientState
+	if (profiling) {
 		last_net_tick_us_ = perf_now_us() - net_start;
+		frame_phase_perf_.client_decode_us +=
+				static_cast<int64_t>(last_net_tick_us_);
+		frame_phase_perf_.client_setup_us +=
+				static_cast<int64_t>(client_perf.setup_us);
+		frame_phase_perf_.client_receive_us +=
+				static_cast<int64_t>(client_perf.receive_us);
+		frame_phase_perf_.client_maintenance_us +=
+				static_cast<int64_t>(client_perf.maintenance_us);
+		frame_phase_perf_.client_send_us +=
+				static_cast<int64_t>(client_perf.send_us);
+	}
 }
 
 // host_pump's dispatch_event + admit_peer were promoted into engine/net/npruntime (np::dispatch_event /
@@ -546,11 +688,8 @@ void Simulation::joiner_pump() {
 		refresh_local_player_view_effects();
 		sync_local_mounted_input_heading();
 	};
-	hooks.wire_collision_shape = [this](uint16_t type_id, int32_t &model_id,
-			float &bound_radius) {
-		const WireCollisionShape shape = wire_collision_shape_for_type(type_id);
-		model_id = shape.model_id;
-		bound_radius = shape.bound_radius;
+	hooks.wire_collision_shape = [this](uint16_t type_id) {
+		return wire_collision_shape_for_type(type_id);
 	};
 	hooks.apply_input_pre_tick = [this] { apply_player_input_pre_tick(); };
 	hooks.sync_mounted_input_heading =
@@ -638,31 +777,18 @@ void Simulation::on_joiner_local_player_redeployed(int32_t p_look_heading_bam) {
 	respawn_local_player_loadout();
 }
 
-Simulation::WireCollisionShape Simulation::wire_collision_shape_for_type(
+opennova::world::ResolvedCollisionShape Simulation::wire_collision_shape_for_type(
 		uint16_t p_type_id) {
 	const auto cached = wire_collision_shape_by_type_.find(p_type_id);
 	if (cached != wire_collision_shape_by_type_.end()) return cached->second;
-	WireCollisionShape shape;
+	opennova::world::ResolvedCollisionShape shape;
 	if (collision_item_db_.is_valid()) {
-		// The same items.def graphic resolution the registry sweep runs
-		// (resolve_collision_instances), keyed by the WIRE type id. Sharing the
-		// by-graphic caches means a mission whose local load already registered
-		// this graphic reuses the exact model id the ghost had.
-		const int def_id =
-				static_cast<int>(p_type_id) + opennova::mission::kItemIdOffset;
-		const String graphic = collision_item_db_->get_graphic(def_id);
-		if (!graphic.is_empty()) {
-			const std::string key(graphic.utf8().get_data());
-			// ADR 0031: the joiner's wire ghosts register through the SAME engine
-			// leg as the registry sweep (simassets::collision_model_for_graphic)
-			// — one implementation, one cache, identical model ids.
-			const opennova::simassets::CollisionResolveDeps deps{
-					collision_world_, occlusion_world_, collision_pose_native_,
-					sim_models_};
-			shape.model_id = opennova::simassets::collision_model_for_graphic(
-					collision_resolve_, deps, key);
-			shape.bound_radius = collision_resolve_.radius_by_graphic[key];
-		}
+		const opennova::simassets::CollisionResolveDeps deps{
+				collision_world_, occlusion_world_, collision_pose_native_,
+				sim_models_};
+		shape = opennova::simassets::collision_shape_for_runtime_type(
+				static_cast<int>(p_type_id), collision_item_db_->native_items(),
+				collision_resolve_, deps);
 	}
 	wire_collision_shape_by_type_.emplace(p_type_id, shape);
 	return shape;

@@ -107,7 +107,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 		var layer := int(draw.get_instance_shader_parameter("u_instance_tile_cache_layer"))
 		assert_between(layer, 0, page_array.get_layers() - 1)
 		var page := draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_origin_span") as Vector4
+			"u_instance_tile_cache_projection") as Vector4
 		assert_true(page.w == 64.0 or page.w == 128.0 or page.w == 256.0 or page.w == 512.0)
 		if page.w == 64.0:
 			fine_ready_draws += 1
@@ -138,7 +138,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 				"u_instance_tile_cache_ready")):
 			continue
 		var transition_page := transition_draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_origin_span") as Vector4
+			"u_instance_tile_cache_projection") as Vector4
 		assert_ne(transition_page.w, 64.0,
 			"the transition frame must not borrow a stale fine page while coarse work is pending")
 	await _settle_tile_cache_with_foliage(terrain, dispatcher, camera)
@@ -153,7 +153,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 		if not bool(draw.get_instance_shader_parameter("u_instance_tile_cache_ready")):
 			continue
 		var page := draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_origin_span") as Vector4
+			"u_instance_tile_cache_projection") as Vector4
 		if page.w > 64.0:
 			current_coarse_draws += 1
 		elif page.w == 64.0:

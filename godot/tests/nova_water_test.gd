@@ -39,7 +39,7 @@ func _make_water_fixture(height: float = 7.0) -> Dictionary:
 
 func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	var cache := ObjectShaderCache.get_singleton()
-	cache.clear_water_split_height()
+	cache.clear_water_plane()
 	var fixture := _make_water_fixture(0.0)
 	var water: Node = fixture["water"]
 	water.advance_frame(TICK)
@@ -49,7 +49,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_DISABLED)
 	assert_false(bool(water.get_water_material().get_shader_parameter("u_has_reflection")))
-	assert_false(cache.has_water_split_height())
+	assert_false(cache.has_water_plane())
 
 	water.water_height = -2.0
 	water.advance_frame(TICK)
@@ -58,7 +58,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_true(water.get_mesh_instance().visible)
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_ALWAYS)
-	assert_true(cache.has_water_split_height())
+	assert_true(cache.has_water_plane())
 
 	water.set_world_rendering_enabled(false)
 	water.advance_frame(TICK)
@@ -69,7 +69,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_false(water.get_mesh_instance().visible)
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_DISABLED)
-	assert_false(cache.has_water_split_height())
+	assert_false(cache.has_water_plane())
 
 	water.set_world_rendering_enabled(true)
 	water.water_height = 0.0
@@ -77,7 +77,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_false(water.is_water_active())
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_DISABLED)
-	assert_false(cache.has_water_split_height())
+	assert_false(cache.has_water_plane())
 
 
 func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:

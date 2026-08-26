@@ -1,7 +1,7 @@
 #include "renderer/material_eval.h"
 
+#include "crt/crt_rng.h"
 #include "threedi/threedi_ctrl_catalog.h"
-#include "threedi/threedi_panm_runtime.h"
 
 #include <algorithm>
 #include <array>
@@ -119,7 +119,7 @@ static int32_t waveformFraction(uint8_t style,
                                 int16_t rate_word,
                                 uint32_t time_ms) {
     const uint16_t random =
-            (style & 0x0F) == 6 ? threedi_wave_rand15() : 0;
+            (style & 0x0F) == 6 ? crt_rand15() : 0;
     return uv_anim_wave_lookup(style, phase16(phase_byte, rate_word, time_ms), random);
 }
 
@@ -231,9 +231,9 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
     // Function-argument evaluation order is not portable. Consume the shared
     // CRT stream explicitly in retail's U-then-V order before dispatch.
     const uint16_t u_random =
-            u_uses_noise ? threedi_wave_rand15() : 0;
+            u_uses_noise ? crt_rand15() : 0;
     const uint16_t v_random =
-            v_uses_noise ? threedi_wave_rand15() : 0;
+            v_uses_noise ? crt_rand15() : 0;
     // The decoder exposes author-friendly floats; retail evaluates the packed
     // 8-byte channel blocks. Reconstruct those raw fields before entering the
     // exact transform port. [orig: compute_uv_transform_matrix @ 0x5B1990]

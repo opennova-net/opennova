@@ -1028,6 +1028,36 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 	assert_almost_eq(c.position.x, 30.0, 0.001)
 
 
+func test_freeing_an_unplanned_model_keeps_the_typed_plan() -> void:
+	var planned := ObjectModel.new()
+	add_child(planned)
+	planned.set_process(false)
+	var index := _index_of({ 21: planned })
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"bms_id": 21,
+		"handle": 2,
+		"type_id": 101,
+		"pos_x": 12.0,
+	}]
+	var p := _make_pass(index)
+	_present(p, snap)
+	var rebuilds := _stat(p, "plan_rebuilds")
+
+	# A throwable / viewmodel / preview model that no row plan retains dies
+	# without touching the plan: the lifetime stamp is scoped to planned rows.
+	var stray := ObjectModel.new()
+	add_child(stray)
+	stray.set_process(false)
+	stray.free()
+	snap.entities[0]["pos_x"] = 30.0
+	_present(p, snap)
+	assert_eq(_stat(p, "plan_rebuilds"), rebuilds,
+			"an unplanned model's death leaves the typed row plan intact")
+	assert_almost_eq(planned.position.x, 30.0, 0.001,
+			"the retained row keeps presenting through the same plan")
+
+
 func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 	var old_model := ObjectModel.new()
 	add_child(old_model)
@@ -1052,10 +1082,11 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 	var replacement := _model()
 	snap.entities[0]["pos_x"] = 30.0
 
-	# A trusted layout revision no longer scans every ObjectID before the walk.
-	# The first null encounter may defer the rebind, but it must dirty the plan
-	# so the replacement is resolved on the following public presentation call.
+	# A trusted layout revision retains typed row references, but the model
+	# lifetime stamp invalidates that plan before a freed pointer can be read.
 	_present(p, snap)
+	assert_eq(_stat(p, "plan_rebuilds"), 2,
+			"freeing any cached model invalidates the typed row plan immediately")
 	assert_false(visibility_intent.has(21),
 			"a freed cached node releases its visibility intent immediately")
 	index.build([{ "model": replacement, "ref": {

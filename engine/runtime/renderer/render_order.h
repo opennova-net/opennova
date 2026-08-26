@@ -107,6 +107,20 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // there naturally.
 constexpr int kRungSkyStars = -6;        // star field (sky pass, before bodies)
 constexpr int kRungSkyBody = -5;         // sun / moon bodies
+// BmTxMirrT's P3 post-multiply is a PASS of the strip's own technique, not a
+// second submit: FlushBatches runs every pass of one entry back to back
+// (the pass loop @ 0x5da20b..0x5da23d over technique+4 passes, fog/blend per
+// pass @ 0x5da2f7) inside the opaque queue flush, so retail draws it right
+// after that strip's P0/P1 within flush(1) [orig: CRenderBatchQueue_FlushBatches
+// @ 0x5d9f50; the Q0 flushes @ 0x5c9506..0x5c9581 and @ 0x5c9630..0x5c9647]
+// and never inside the Q1/Q2 transparent flushes [orig: @ 0x5c9596;
+// @ 0x5c967a]. Godot cannot interleave a blended pass into its opaque stage,
+// so the rung sits above every sky rung and below every world transparent —
+// after all opaques, before far-side alpha and the water. Residual: retail's
+// far-side opaque flush (and thus its P3) runs after the water surface
+// (@ 0x5c9630 follows Terrain_RenderWaterPass @ 0x5c95dc); this single rung
+// draws those P3s before the water instead.
+constexpr int kRungObjectPostMultiply = -3;
 constexpr int kRungAlphaFarSide = -2;    // world alpha on the water side AWAY from the camera
 constexpr int kRungWater = -1;           // the water surface (drawn between the side brackets)
 constexpr int kRungAlphaCameraSide = 0;  // world alpha on the camera's side (the default rung)
@@ -116,9 +130,8 @@ constexpr int kRungSunGlow = 2;          // the sun-glow lens glare, drawn last
 // The rung for a world transparent on a given water side. The original
 // flushes the far side first and the camera side last (mode camAbove?3:2
 // then 3-camAbove [orig: @ 0x5c9596; @ 0x5c967a]). The host applies the
-// camera-above case statically today (below -> far, above -> camera side);
-// the underwater-camera swap is a tracked residual
-// (docs/render/render-order-re.md D-RORD-3 note).
+// camera side is published from the adjusted render eye every frame, so the
+// ordering mirrors when that eye crosses below the water plane.
 int transparent_rung_for(TransparentQueue side, bool camera_above_water);
 
 } // namespace renderer

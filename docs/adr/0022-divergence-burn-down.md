@@ -18,6 +18,16 @@ citation and id still resolves under docs/ after a move. Nothing in the
 original decision changes — the zero-OPEN target, the vocabulary, and the
 PERMANENT register are as written below.
 
+## Amendment (2026-08-22) — D-RMAT-8 removed from the permanent register
+
+The renderer now exposes the required gamma-domain scene target by construction:
+retail shaders write and blend raw gamma numeric values, then a terminal
+`FrameFxCompositorEffect` performs the sole display decode after all 3D and
+particle draws. A live D3D12 probe pins all 256 transfer bytes and the exact
+source-over/additive blend results. D-RMAT-8 is therefore `FIXED`, not a
+structural exception. The superseded register entry was removed below; this
+amendment preserves why the original 2026-07-06 decision changed.
+
 ## Context
 
 OpenNova is a faithful reimplementation — parity, not reinterpretation
@@ -99,13 +109,6 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   effect index → fine depth) is a device-era mechanism; the reimpl's internal opaque
   ordering serves the same intent, with the key semantics preserved as T1-pinned pure
   functions. (Ratified at REN-3; entry back-filled here 2026-07-06.)
-- **D-RMAT-8** — framebuffer blending runs on the reimpl's blit-encoded (linear) values;
-  retail blends gamma bytes. Under D-RMAT-7's gamma-space convention, opaque and
-  alpha-tested surfaces display byte-exact; translucent composites diverge boundedly
-  (alpha midtone shift, additive accumulates dimmer). Blending in gamma space would
-  require a gamma framebuffer the reimpl does not expose; reopen only if a T3 scene shows
-  an objectionable composite.
-
 **Original-bug / garbage class** (basis:
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
 

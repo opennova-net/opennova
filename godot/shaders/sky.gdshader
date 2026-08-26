@@ -14,8 +14,9 @@ render_mode unshaded, cull_front;
 // D3DRS_AMBIENT 0xFFFFFF [orig: render_skybox @ 0x579b42..0x579bb6].
 // Full spec: docs/env/env-tod-re.md "Sky dome".
 
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+// Gamma-domain scene-target contract.
 #include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/nova_frame_pass.gdshaderinc"
 
 uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7); // c11 skybase
 uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9); // c11 + c12
@@ -119,6 +120,11 @@ void vertex() {
 
 
 void fragment() {
+	// FrameFX renders water, celestial bodies, and the skybox sun glow after
+	// the Q3 object queue; the ordinary sky dome is not in that source.
+	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+		discard;
+	}
 	vec3 col;
 	if (u_flat_pass) {
 		// advanced_clouds == 0: flat cloud-color dome, no texture
@@ -151,5 +157,5 @@ void fragment() {
 	// Gamma-space output (D-RMAT-7): the gradient/cloud/fog combine above ran
 	// on raw byte values (colors and cloud texels alike); encode once so the
 	// displayed dome bytes equal the computed ones.
-	ALBEDO = nova_gamma_to_linear(col);
+	ALBEDO = nova_scene_output(col);
 }

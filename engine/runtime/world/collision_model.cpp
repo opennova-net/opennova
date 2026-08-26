@@ -25,6 +25,13 @@ using namespace detail; // the shared fixed-point helpers, unqualified as before
 // read them at +68..+104.]
 // ----------------------------------------------------------------------------
 void CollisionModel::finalize_sections() {
+    has_solid_volume = false;
+    for (const CollisionVolume &volume : volumes) {
+        if (volume.type == 1) {
+            has_solid_volume = true;
+            break;
+        }
+    }
     for (CollisionSection &s : sections) {
         if (s.vehicle_volume_start < 0) {
             for (int32_t i = 0; i < s.volume_count; ++i) {

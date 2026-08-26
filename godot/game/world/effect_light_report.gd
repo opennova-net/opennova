@@ -46,6 +46,9 @@ var last_query := 0
 var selected := 0
 var selection_mode := ""
 var owner_isolation := ""
+var static_rows := 0
+var static_draws := 0
+var lit_static_draws := 0
 var rows: Array[Row] = []
 
 
@@ -57,6 +60,9 @@ static func from_ffi_dictionary(value: Dictionary) -> EffectLightReport:
 	report.selected = int(value.get("selected", 0))
 	report.selection_mode = String(value.get("selection_mode", ""))
 	report.owner_isolation = String(value.get("owner_isolation", ""))
+	report.static_rows = int(value.get("static_rows", 0))
+	report.static_draws = int(value.get("static_draws", 0))
+	report.lit_static_draws = int(value.get("lit_static_draws", 0))
 	for row_value in value.get("rows", []):
 		if row_value is Dictionary:
 			report.rows.append(Row.from_ffi_dictionary(row_value))
@@ -74,5 +80,8 @@ func to_json_value() -> Dictionary:
 		"selected": selected,
 		"selection_mode": selection_mode,
 		"owner_isolation": owner_isolation,
+		"static_rows": static_rows,
+		"static_draws": static_draws,
+		"lit_static_draws": lit_static_draws,
 		"rows": encoded_rows,
 	}

@@ -1,6 +1,8 @@
 class_name PlayerViewmodelRig
 extends RefCounted
 
+const VIEWMODEL_COMPOSITE_SHADER := preload("res://shaders/viewmodel_composite.gdshader")
+
 # The local player's first-person viewmodel presentation, split out of
 # LocalPlayerPresenter (W4-4): the FP render pass (SubViewport + renderfov camera),
 # the viewmodel node + parts lifetime, the weapon.def placement (pos/tpos ADS
@@ -185,6 +187,9 @@ func _build_viewmodel_pass() -> void:
 	container.stretch = true
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var composite_material := ShaderMaterial.new()
+	composite_material.shader = VIEWMODEL_COMPOSITE_SHADER
+	container.material = composite_material
 	_vm_viewport = SubViewport.new()
 	# Render the CAMERA's World3D: the pass re-renders the SAME scene, culled to the
 	# viewmodel layer [orig: one scene, second projection + depth window @0x4ded60].
@@ -196,6 +201,9 @@ func _build_viewmodel_pass() -> void:
 	_vm_viewport.handle_input_locally = false
 	_vm_camera = Camera3D.new()
 	_vm_camera.cull_mask = Water.VISUAL_LAYER_VIEWMODEL
+	# The world compositor is the terminal retail-frame transfer. The FP pass
+	# is composited later as Canvas and therefore must not inherit it.
+	_vm_camera.compositor = Compositor.new()
 	_vm_camera.near = Simulation.viewmodel_pass_near_z()  # [orig: Render_SwapProjectionNearZ(0.05) @0x4dee29]
 	_vm_viewport.add_child(_vm_camera)
 	container.add_child(_vm_viewport)

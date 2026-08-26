@@ -165,7 +165,7 @@ func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:
 		detail.contains("uniform sampler2DArray u_tile_cache") and
 			detail.contains("instance uniform bool u_instance_tile_cache_ready") and
 			detail.contains("instance uniform float u_instance_tile_cache_layer") and
-			detail.contains("instance uniform vec4 u_instance_tile_cache_origin_span"),
+			detail.contains("instance uniform vec4 u_instance_tile_cache_projection"),
 		"Detail foliage must expose the same composed-page array and per-draw page binding as terrain."
 	)
 	assert_true(
@@ -186,7 +186,7 @@ func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:
 	assert_true(
 		dispatcher.contains('"u_instance_tile_cache_ready"') and
 			dispatcher.contains('"u_instance_tile_cache_layer"') and
-			dispatcher.contains('"u_instance_tile_cache_origin_span"'),
+			dispatcher.contains('"u_instance_tile_cache_projection"'),
 		"The terrain-resident binding must reach every detail draw as instance state."
 	)
 	assert_true(

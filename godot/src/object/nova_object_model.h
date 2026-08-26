@@ -30,11 +30,18 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
+
+#include <cstdint>
+#include <vector>
 
 #include "object/nova_object_data.h"
 #include "object/nova_skeletal_anim.h"
 
 namespace godot {
+
+class Terrain;
+class MeshInstance3D;
 
 // The env-derived lighting/fog values the object shaders consume (ADR 0017's
 // typed record, native). Computed once per env change and stamped onto many
@@ -169,24 +176,60 @@ public:
 	// This model's fixed slot spread for staggered environment restamps.
 	static constexpr int kEnvRestampSpreadFrames = 16;
 
+	// Fixed layout returned by profile_awake_frame(delta). Keeping this a
+	// packed numeric record lets the F3 feed cross the script boundary once per
+	// frame without allocating Dictionaries or Strings on the render hot path.
+	enum AwakeFrameProfileSlot {
+		AWAKE_PROFILE_CLOCK_ANIMATION_US = 0,
+		AWAKE_PROFILE_PANM_US,
+		AWAKE_PROFILE_MATERIAL_US,
+		AWAKE_PROFILE_ENVIRONMENT_US,
+		AWAKE_PROFILE_ORDER_BOUNDS_US,
+		AWAKE_PROFILE_AWAKE_MODELS,
+		AWAKE_PROFILE_RENDERABLE_MODELS,
+		AWAKE_PROFILE_SLOT_COUNT,
+	};
+
 private:
+	struct AwakeFrameProfile {
+		int64_t clock_animation_us = 0;
+		int64_t panm_us = 0;
+		int64_t material_us = 0;
+		int64_t environment_us = 0;
+		int64_t order_bounds_us = 0;
+		int64_t awake_models = 0;
+		int64_t renderable_models = 0;
+	};
+	static void advance_awake_frame_impl(double p_delta,
+			AwakeFrameProfile *p_profile);
 	struct PartAnimChannel {
 		int dir = 0;
 		int rate = 0;
 		int64_t value = 0;
 	};
+	struct AlphaStripDraw {
+		MeshInstance3D *instance = nullptr;
+		Ref<ShaderMaterial> material;
+		Vector3 local_center;
+		bool bone_path = false;
+		// The rung last pushed to the material; Godot re-sorts on every
+		// render_priority write, so equal rungs are never re-pushed.
+		int32_t rung = INT32_MIN;
+	};
 
 	Ref<ObjectData> object_data_;
 	HashMap<int64_t, Ref<ShaderMaterial>> material_cache_;
-	Vector<Ref<ShaderMaterial>> alpha_materials_;
+	Vector<AlphaStripDraw> alpha_strip_draws_;
 	HashMap<int64_t, Dictionary> material_defs_;
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
 	bool env_has_generation_ = false;
-	// The last applied point-light selection (FNV over count + packed
-	// vectors); 0 = never applied.
-	uint64_t last_point_light_selection_hash_ = 0;
+	// Last applied point-light selections (FNV over count + packed vectors).
+	// Per-render-object selection hashes. Retail re-scopes a building's owner
+	// group for every ROBJ draw; a single model-wide hash cannot represent that
+	// state and also incorrectly survives a retained-scene rebuild.
+	HashMap<int32_t, uint64_t> point_light_selection_hashes_;
 	// Dense part-index -> Node3D array + the PANM revision this model last
 	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
 	// it directly).
@@ -230,6 +273,10 @@ private:
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
 	bool slot_shadow_person_ = false;
+	// Effective entity/model scale in signed Q16.16. Zero is retail's sentinel
+	// for an ordinary 1.0 matrix; kept on the model so every present writer
+	// composes the same scale instead of overwriting it with a pose transform.
+	int32_t entity_uniform_scale_q16_ = 0;
 	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
 	float entity_bound_radius_ = 0.0f;  // entity+0; 0 = none (no collision block)
 	ObjectID slot_shadow_capture_with_;
@@ -237,11 +284,10 @@ private:
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
 	int env_stagger_slot_ = 0;
-	Dictionary submission_registry_;
-	bool submission_registry_bound_ = false;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool native_frame_ = false;
+	bool match_terrain_enabled_ = false;
 	bool awake_ = false; // in the shared awake set below
 
 	// The one runtime-frame set: every model holding live per-frame work (PANM,
@@ -251,6 +297,23 @@ private:
 	// themselves on wake and drop out on park. Replaces the per-node _process
 	// clock so nothing self-clocks outside that one driver.
 	static HashSet<ObjectModel *> awake_models_;
+	// Monotonic invalidation stamp for native row plans that retain typed model
+	// pointers. Godot destroys Nodes on the main thread; PREDELETE advances this
+	// before any cached pointer can be observed by a later presentation walk.
+	static uint64_t lifetime_generation_;
+	// Every built model that owns at least one blended strip: the water-plane
+	// owner marks them all dirty when the ladder's inputs change.
+	static HashSet<ObjectModel *> alpha_strip_models_;
+	// Strip classification runs only when something the ladder reads moved:
+	// the model transform, a part/robj transform, a rebuild, or the water
+	// plane generation (retail recomputes every strip every frame because its
+	// batch walk already visits them; the result is identical).
+	bool render_order_dirty_ = true;
+	uint64_t render_order_generation_ = 0;
+	// Models currently submitted through retail's crouch/prone MATCHTERRAIN
+	// leg. GameWorld refreshes their resident terrain-page binding after the
+	// terrain cache has processed this frame's requests.
+	static HashSet<ObjectModel *> match_terrain_models_;
 
 	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
 	Ref<SkeletalAnim> skeletal_;
@@ -313,9 +376,19 @@ private:
 	bool has_live_panm_ = false;
 	Vector<bool> material_needs_eval_;
 	PackedInt32Array dynamic_material_slots_;
+	struct MaterialRuntimeStamp {
+		bool runtime_valid = false;
+		renderer::MaterialRuntime runtime;
+		int anim_frame = -1;
+	};
+	std::vector<MaterialRuntimeStamp> material_runtime_stamps_;
 	int64_t last_env_gen_ = -1;
 	Ref<EnvLightValues> last_env_values_;
 	Ref<EnvLightValues> last_section_env_values_;
+	// Set by a PresentApplier row plan that retains this model by pointer and
+	// cleared when that plan drops the row; only planned models advance
+	// lifetime_generation_ when they die.
+	bool present_planned_ = false;
 
 	// --- core (nova_object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
@@ -324,7 +397,10 @@ private:
 	static int64_t ctrl_dword(int64_t p_value);
 	void finish_ctrl_change(bool p_apply_now);
 	Node3D *get_or_create_robj_node(int p_robj_index);
-	void apply_runtime_state(double p_delta, bool p_renderable = true);
+	void apply_runtime_state(double p_delta, bool p_renderable = true,
+			AwakeFrameProfile *p_profile = nullptr);
+	void advance_runtime_frame_profiled(double p_delta,
+			AwakeFrameProfile *p_profile);
 	bool apply_robj_transforms();
 	int64_t last_object_update_mask() const;
 	void on_object_changed();
@@ -335,7 +411,8 @@ private:
 	bool needs_runtime_frame_work() const;
 	void refresh_live_panm_classification();
 	int clamp_lod_index(int p_lod_index) const;
-	void publish_submission_state();
+	void stamp_match_terrain_instances(bool p_page_ready, float p_layer,
+			const Vector4 &p_projection);
 	void set_model_bounds(const AABB &p_bounds);
 	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
 	Vector<ObjectModel *> live_presentation_links() const;
@@ -376,6 +453,9 @@ private:
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Color hash_color_for_index(int p_index);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
+	static void set_material_and_auxiliary_parameter(
+			const Ref<ShaderMaterial> &p_material, const StringName &p_name,
+			const Variant &p_value);
 	void apply_default_environment_to_material(const Ref<ShaderMaterial> &p_material);
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
@@ -401,10 +481,13 @@ public:
 	// loop. Models self-park out of the set the first frame they hold no live
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
+	static PackedInt64Array profile_awake_frame(double p_delta);
 	// Exact-pose capture tail: stamp current env values on awake visible models
 	// without advancing any clock-derived render state.
 	static void refresh_awake_environment();
 	static int64_t awake_model_count();
+	static uint64_t lifetime_generation() { return lifetime_generation_; }
+	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
 	bool is_runtime_frame_awake() const { return awake_; }
@@ -431,6 +514,12 @@ public:
 	// +0xA0 decal, see docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
+	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
+	int64_t get_entity_uniform_scale_q16() const;
+	// Compose a renderer-owned entity pose with the effective authored scale.
+	// All native and GDScript presentation owners use this one operation.
+	Transform3D compose_entity_transform(const Basis &p_basis,
+			const Vector3 &p_origin) const;
 	// The two radii retail's shadow slot reads, world units, stamped by the
 	// placer from the .3di: the MODEL SPHERE (the header's origin sphere,
 	// gpm[5] — simassets model_bound_radius_from_3di) sizes the silhouette
@@ -463,12 +552,40 @@ public:
 	// The model bounds in world space — the per-draw light query box
 	// (retail queries per draw context, see docs/render/render-lighting-re.md).
 	AABB get_world_bounds() const;
+	struct PointLightDrawPart {
+		int32_t robj_index = 0;
+		AABB world_bounds;
+	};
+	// Visible rigid ROBJ draws and their exact world bounds. The EffectWorld
+	// device leg uses these only for a building's per-ROBJ owner-section scope
+	// (retail: collect_render_objects_for_batch @0x5d8ff7, see
+	// docs/render/render-lighting-re.md).
+	void collect_point_light_draw_parts(
+			std::vector<PointLightDrawPart> &r_parts) const;
+	// The per-ROBJ world bounds are rebuilt only when a part/robj transform,
+	// the section mask, a rebuild, or the model transform changed; the
+	// EffectWorld device asks for them every frame per visible building.
+	mutable std::vector<PointLightDrawPart> point_light_draw_parts_cache_;
+	mutable Transform3D point_light_draw_parts_transform_;
+	mutable bool point_light_draw_parts_dirty_ = true;
 	// Write one frame's selected point lights (packed posr = xyz world +
 	// atten2, color = premultiplied rgb + range) as per-instance shader
 	// parameters on every surface instance. A selection hash gates redundant
 	// RenderingServer writes; count 0 clears.
 	void apply_point_light_selection(int p_count, const Vector4 *p_posr,
 			const Vector4 *p_color);
+	void apply_point_light_selection_to_robj(int p_robj_index, int p_count,
+			const Vector4 *p_posr, const Vector4 *p_color);
+	// One authored LGHT record's live world position. Record offsets are model
+	// space; a nonzero attach subobject follows the same rest-to-live transform
+	// as user points (retail: Entity_SpawnGlowEffects @0x56c836 plus the
+	// per-frame attachment mover, see docs/render/render-lighting-re.md).
+	Vector3 get_model_light_world_position(int p_index) const;
+	// Retail submits MATCHTERRAIN only for a skinned entity whose MoveOrder
+	// stance bits are crouch/prone. The live presentation row owns that gate.
+	void set_match_terrain_enabled(bool p_enabled);
+	bool is_match_terrain_enabled() const { return match_terrain_enabled_; }
+	static void refresh_match_terrain_frame(Terrain *p_terrain);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
 	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
@@ -488,9 +605,10 @@ public:
 	int get_active_lod() const { return active_lod_; }
 	void rebuild();
 	void refresh_render_order();
+	static void mark_render_order_dirty_all();
 	void advance_runtime_frame(double p_delta);
 	void set_on_screen(bool p_value);
-	void set_submission_registry(const Dictionary &p_registry);
+	bool is_on_screen() const { return on_screen_; }
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();
@@ -570,3 +688,4 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::ObjectModel::LightingContext);
+VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);

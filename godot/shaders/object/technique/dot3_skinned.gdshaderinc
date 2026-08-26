@@ -1,0 +1,12 @@
+// SkBDiffT2.fx / SkBDiffO2.fx: the highest shipped NORMAL technique is the
+// fixed-function encoded-vector DOT3 path, not BDiffT2's pixel-shader path.
+void obj_evaluate_surface(vec3 camera_position_world, mat4 model_matrix,
+		out vec3 output_lit, out float output_alpha) {
+	vec4 base; vec3 view_dir; vec3 normal; vec3 geom_normal;
+	obj_prepare_surface(camera_position_world, model_matrix,
+			base, view_dir, normal, geom_normal);
+	vec3 lit = obj_dot3_skinned_lighting(base.rgb, normal, geom_normal);
+	lit = obj_add_local_light(lit, base.rgb, normal);
+	output_lit = lit;
+	output_alpha = base.a;
+}

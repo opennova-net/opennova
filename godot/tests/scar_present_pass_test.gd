@@ -243,7 +243,13 @@ func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
 				"%s: raw texel sampling (D-RMAT-7)" % shader.resource_path)
 	assert_true(scorch.code.contains("depth_draw_never"), "scorch: z-write off (0x100000)")
 	assert_true(scorch.code.contains("cull_back"), "scorch: the CCW back-face cull")
-	assert_false(scorch.code.contains("discard"), "scorch: no alpha test")
+	# The only discard in the scorch decal is the retail pass gate (the Q3
+	# glow source never contains scars); there is no alpha test on its texel.
+	assert_eq(scorch.code.count("discard"), 1, "scorch: one pass-gate discard only")
+	assert_true(scorch.code.find("nova_is_q3_pass") < scorch.code.find("discard"),
+			"scorch: the discard is the retail pass gate, not an alpha test")
+	assert_false(scorch.code.contains("tex.a <") or scorch.code.contains("alpha <"),
+			"scorch: no alpha test")
 	assert_true(hole.code.contains("depth_draw_always"), "bhole: z-write on")
 	assert_true(hole.code.contains("cull_disabled"), "bhole: cull none (0x400000)")
 	assert_true(hole.code.contains("discard"), "bhole: the GREATER/128 alpha test")

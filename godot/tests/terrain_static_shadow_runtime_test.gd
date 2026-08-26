@@ -16,7 +16,11 @@ static func _terrain_light_epoch(raw_tuple: Vector3) -> Vector3i:
 
 func _settle_tile_cache(terrain: Terrain) -> Dictionary:
 	var diagnostics: Dictionary = {}
-	for _attempt in range(512):
+	# Exact material animation can make the two CPU workers rasterize every
+	# authored alpha surface instead of skipping an unsupported draw. Keep the
+	# loop frame-bounded, but leave enough headless Debug frames for all 61
+	# visible pages to publish on slower Windows CI runners.
+	for _attempt in range(2048):
 		terrain.render_frame()
 		diagnostics = terrain.get_tile_cache_diagnostics()
 		if int(diagnostics.get("pending_jobs", -1)) == 0 \
@@ -278,28 +282,18 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 
 	assert_true(object_data.set_material_field(0, "uv_u_style", 1),
 		"the fixture must expose a time/control-driven UV mutation")
-	var unsupported_uv := await _settle_tile_cache(terrain)
-	assert_eq(int(unsupported_uv["shadow_provider_epoch_plan_failures"]), 0,
-		"one unsupported caster draw must not reject the terrain page baseline")
-	assert_eq(int(unsupported_uv["ready_pages"]), int(unsuppressed["ready_pages"]),
-		"unsupported caster attribution must preserve every requested resident page")
-	assert_eq(int(unsupported_uv["shadow_raster_failures"]),
+	var animated_uv := await _settle_tile_cache(terrain)
+	assert_eq(int(animated_uv["shadow_provider_epoch_plan_failures"]), 0,
+		"the shared runtime evaluator must keep dynamic projected-shadow UV exact")
+	assert_eq(int(animated_uv["ready_pages"]), int(unsuppressed["ready_pages"]),
+		"dynamic UV evaluation must preserve every requested resident page")
+	assert_eq(int(animated_uv["shadow_raster_failures"]),
 		int(unsuppressed["shadow_raster_failures"]),
-		"an explicitly skipped unsupported draw is not a device raster failure")
-	assert_gt(int(unsupported_uv["shadow_provider_epoch_unsupported_draw_count"]), 0,
-		"the provider must count every page-local unsupported draw it skips")
-	var unsupported_rows: Array = unsupported_uv[
-			"shadow_provider_epoch_unsupported_attribution"]
-	var found_dynamic_uv := false
-	for row_v in unsupported_rows:
-		var row := row_v as Dictionary
-		if int(row.get("bms_id", 0)) == 100 \
-				and (row.get("reasons", PackedStringArray()) as PackedStringArray).has(
-						"dynamic_uv"):
-			found_dynamic_uv = true
-			break
-	assert_true(found_dynamic_uv,
-		"typed attribution must name the exact BMS and unsupported material state")
+		"dynamic UV evaluation must not create a device raster failure")
+	assert_eq(int(animated_uv["shadow_provider_epoch_unsupported_draw_count"]), 0,
+		"dynamic UV is a supported projected-shadow input, not skipped attribution")
+	assert_gt(int(animated_uv["shadow_provider_epoch_triangles"]), 0,
+		"the dynamically transformed material must still submit its silhouettes")
 	assert_true(object_data.set_material_field(0, "uv_u_style", 0))
 	var restored_material := await _settle_tile_cache(terrain)
 	assert_eq(int(restored_material["shadow_provider_epoch_plan_failures"]), 0,
@@ -415,6 +409,74 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	terrain_data = null
 
 
+func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames() -> void:
+	# Material animation is sampled at the tick of the frame that requests a
+	# page (retail evaluates tile-model materials inside the tile render), so
+	# a continuously scrolling caster material must not republish the shared
+	# worker snapshot every frame: the provider's epoch counters, which reset
+	# only when a new snapshot is published, hold across still frames whose
+	# millisecond clock keeps advancing, and no resident page recomposes.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	add_child_autofree(viewport)
+	var terrain_data := TerrainData.new()
+	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	assert_eq(terrain_data.load(), OK)
+	var terrain := Terrain.new()
+	viewport.add_child(terrain)
+	terrain.set_terrain_data(terrain_data)
+	terrain.build()
+	terrain.set_debug_no_frustum(true)
+	var camera := Camera3D.new()
+	viewport.add_child(camera)
+	camera.global_position = Vector3(64.0, 27.0, 64.0)
+	camera.make_current()
+
+	var object_data := ObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK)
+	# Retail's time-scroll UV mode (style 16) at one texture per second on an
+	# alpha-sampled material: the evaluated UV translation moves every 1/256 s.
+	assert_true(object_data.set_material_field(0, "alpha_test_enabled", true))
+	assert_true(object_data.set_material_field(0, "uv_u_style", 16))
+	assert_true(object_data.set_material_field(0, "uv_u_rate", 1.0))
+	var placer := MissionObjectPlacer.create(null, null)
+	assert_true(placer.register_object_data("House", object_data))
+	var origin := Vector3(64.0, 0.0, 64.0)
+	origin.y = terrain_data.get_height_world(origin)
+	placer.register_static_instance(100, "House", 0,
+			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
+	terrain.set_static_shadow_placer(placer)
+	var clock_ms := 1000
+	terrain.set_light_context(null, clock_ms)
+	var settled := await _settle_tile_cache(terrain)
+	assert_eq(int(settled["shadow_raster_failures"]), 0)
+	assert_eq(int(settled["shadow_provider_epoch_plan_failures"]), 0)
+	var epoch_plans := int(settled["shadow_provider_epoch_plan_count"])
+	assert_gt(epoch_plans, 0,
+		"resident pages must have planned through the shared worker snapshot")
+
+	for _frame in 3:
+		clock_ms += 16
+		terrain.set_light_context(null, clock_ms)
+		terrain.render_frame()
+		await get_tree().process_frame
+		var still := terrain.get_tile_cache_diagnostics()
+		assert_eq(int(still["frame_compose_jobs"]), 0,
+			"an advancing material clock must not recompose resident pages")
+		assert_eq(int(still["frame_ready_hits"]), int(still["frame_requests"]))
+		assert_eq(int(still["shadow_provider_epoch_plan_count"]), epoch_plans,
+			"an advancing material clock must not republish the worker snapshot")
+		assert_eq(int(still["shadow_provider_frame_plan_compiles"]), 0,
+			"an advancing material clock must reuse cached page plans outright")
+
+	terrain.set_static_shadow_placer(null)
+	terrain.set_terrain_data(null)
+	viewport.free()
+	placer = null
+	object_data = null
+	terrain_data = null
+
+
 func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> void:
 	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
 	if install_dir.is_empty():
@@ -483,19 +545,11 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 
 	assert_true(object_data.set_material_field(0, "alpha_gen_style", 1))
 	var time_alpha := await _settle_tile_cache(terrain)
-	assert_gt(int(time_alpha["shadow_provider_epoch_unsupported_draw_count"]), 0,
-		"a time-driven generator must remain fail-closed when alpha testing consumes it")
-	var found_dynamic_alpha := false
-	for row_v in time_alpha[
-			"shadow_provider_epoch_unsupported_attribution"] as Array:
-		var row := row_v as Dictionary
-		if int(row.get("bms_id", 0)) == 889 \
-				and (row.get("reasons", PackedStringArray()) \
-						as PackedStringArray).has("dynamic_alpha"):
-			found_dynamic_alpha = true
-			break
-	assert_true(found_dynamic_alpha,
-		"unsupported attribution must preserve the exact dynamic-alpha reason")
+	assert_eq(int(time_alpha["shadow_provider_epoch_unsupported_draw_count"]), 0,
+		"time-driven AlphaGen must use the shared exact material evaluator")
+	assert_eq(int(time_alpha["shadow_provider_epoch_plan_failures"]), 0)
+	assert_gt(int(time_alpha["shadow_provider_epoch_alpha_test_triangles"]), 0,
+		"the evaluated AlphaGen value must reach the live projected alpha test")
 
 	terrain.set_static_shadow_placer(null)
 	terrain.set_terrain_data(null)

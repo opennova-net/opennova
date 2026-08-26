@@ -1,6 +1,7 @@
 #include "npruntime/server_tick.h"
 #include "npruntime/end_round_protocol.h"
 #include "npruntime/server_message_dispatch.h" // build_player_list_message
+#include <io/perf_clock.h>
 
 #include <cmath>
 #include <cstdint>
@@ -14,6 +15,7 @@
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
+#include <world/collision.h>           // stable replication LOS view epoch
 #include <world/geom.h>                // to_fixed
 #include <world/infantry.h>            // drown death animation selection
 #include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
@@ -1167,7 +1169,8 @@ void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
 	}
 }
 
-void Server_TickUpdate(NapiNPServerCtx &ctx) {
+void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
+	if (perf != nullptr) *perf = {};
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
 	// tick runs under is_authority [orig: Game_ProcessMainFrame @0x5263f0 gates the call
@@ -1175,6 +1178,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// NOT the gate here — it gates the per-frame replicate/broadcast at step (3) [D-NET-120]; the
 	// C2S drain + sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
+	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
 	world::World &world = *ctx.world;
 	const bool round_was_announced = ctx.round_end_announced;
 	// Snapshot the phase at frame entry. Retail decrements the timer later on
@@ -1234,20 +1238,70 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_TickUpdate @0x51D8C4..0x51D8D7;
 	// Server_UpdateEntityIdleTimers gate @0x50D773]
 	if (!preround_active) tick_player_breath(ctx, world);
+	if (perf != nullptr) {
+		const uint64_t now = io::perf_now_us();
+		perf->input_us = now - phase_start;
+		phase_start = now;
+	}
 
 	// (2) one logic tick (the host is always authority here). WAC/BMS/AI advance the world.
 	// [D-NET-123] Server_TickUpdate OWNS this logic tick — the inverse of the legacy seam, where the
 	// C2S drain ran INSIDE run_logic_tick (a net ISystem, retired P8). A binding driving the runtime
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
+	world::LogicTickPerf world_perf;
 	world.run_logic_tick(
 			/*is_authority=*/true,
 			preround_active ? world::TickPhase::PreRound
-			                : world::TickPhase::Gameplay);
+			                : world::TickPhase::Gameplay,
+			perf != nullptr ? &world_perf : nullptr);
+	if (perf != nullptr) {
+		const uint64_t now = io::perf_now_us();
+		perf->world_us = now - phase_start;
+		perf->world_setup_us = world_perf.setup_us;
+		perf->world_scripts_us = world_perf.scripts_us;
+		perf->world_ai_us = world_perf.ai_us;
+		perf->world_ai_reactions_us = world_perf.ai_reactions_us;
+		perf->world_ai_collision_tables_us = world_perf.ai_collision_tables_us;
+		perf->world_ai_entities_us = world_perf.ai_entities_us;
+		perf->world_ai_infantry_entities_us = world_perf.ai_infantry_entities_us;
+		perf->world_ai_infantry_remote_us = world_perf.ai_infantry_remote_us;
+		perf->world_ai_infantry_combat_us = world_perf.ai_infantry_combat_us;
+		perf->world_ai_infantry_animation_us = world_perf.ai_infantry_animation_us;
+		perf->world_ai_infantry_collision_us = world_perf.ai_infantry_collision_us;
+		perf->world_ai_infantry_collision_contacts_us =
+				world_perf.ai_infantry_collision_contacts_us;
+		perf->world_ai_infantry_collision_repulsion_us =
+				world_perf.ai_infantry_collision_repulsion_us;
+		perf->world_ai_infantry_collision_ground_us =
+				world_perf.ai_infantry_collision_ground_us;
+		perf->world_ai_other_entities_us = world_perf.ai_other_entities_us;
+		perf->world_ai_authority_vehicles_us = world_perf.ai_authority_vehicles_us;
+		perf->world_ai_vehicle_scan_us = world_perf.ai_vehicle_scan_us;
+		perf->world_ai_vehicle_motors_us = world_perf.ai_vehicle_motors_us;
+		perf->world_ai_vehicle_riders_us = world_perf.ai_vehicle_riders_us;
+		perf->world_ai_client_vehicles_us = world_perf.ai_client_vehicles_us;
+		perf->world_ai_events_us = world_perf.ai_events_us;
+		perf->world_attachments_us = world_perf.attachments_us;
+		perf->world_attachment_orphans_us = world_perf.attachment_orphans_us;
+		perf->world_attachment_child_pose_us = world_perf.attachment_child_pose_us;
+		perf->world_attachment_riders_us = world_perf.attachment_riders_us;
+		perf->world_throwables_us = world_perf.throwables_us;
+		perf->world_weapons_us = world_perf.weapons_us;
+		perf->world_projectiles_us = world_perf.projectiles_us;
+		perf->world_destruction_us = world_perf.destruction_us;
+		perf->world_housekeeping_us = world_perf.housekeeping_us;
+		phase_start = now;
+	}
 	world.match.advance_tick(
 			world,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	if (perf != nullptr) {
+		const uint64_t now = io::perf_now_us();
+		perf->match_us = now - phase_start;
+		phase_start = now;
+	}
 	// Retail produces capture requests from exact Change Team Box contacts in
 	// the movement resolver, then drains that collision-owned stream here. The
 	// callback has no MoveOrder gate; snapshot-owned remote players run the same
@@ -1576,6 +1630,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 	}
 	world.water_crossings.clear();
+	if (perf != nullptr) {
+		const uint64_t now = io::perf_now_us();
+		perf->rules_us = now - phase_start;
+		phase_start = now;
+	}
 
 	// (3) serialize-after — SESSION-ONLY [D-NET-120]: the original's per-frame replicate/broadcast
 	// blocks are each gated on is_in_session (+0x58) inside Server_TickUpdate (@0x51d9ab..0x51e3f3),
@@ -1593,7 +1652,29 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
 	if (ctx.is_in_session && !world.match.outcome().ended) {
+		// Gameplay movement/destruction is complete. Replication LOS can retain
+		// each target's final section matrices across every entity and recipient;
+		// never inherit a view built during the earlier moving-world phases.
+		const uint64_t query_prep_start = perf != nullptr ? io::perf_now_us() : 0;
+		world::CollisionWorld::RaycastPrepPerf query_prep_perf;
+		if (world.collision != nullptr)
+			world.collision->prepare_cached_raycast_queries(
+					world, perf != nullptr ? &query_prep_perf : nullptr);
+		if (perf != nullptr) {
+			perf->replication_query_prep_us +=
+					io::perf_now_us() - query_prep_start;
+			perf->replication_query_collect_us +=
+					query_prep_perf.candidate_collect_us;
+			perf->replication_query_grid_us += query_prep_perf.grid_publish_us;
+			perf->replication_query_grid_span_us += query_prep_perf.grid_span_us;
+			perf->replication_query_grid_bucket_us += query_prep_perf.grid_bucket_us;
+			perf->replication_query_grid_workspace_us +=
+					query_prep_perf.grid_workspace_us;
+		}
+		const uint64_t snapshot_start = perf != nullptr ? io::perf_now_us() : 0;
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
+		if (perf != nullptr)
+			perf->replication_snapshot_us += io::perf_now_us() - snapshot_start;
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
 			// The host's type-2 loopback is an in-process presentation seam and
@@ -1601,11 +1682,27 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			// their configured S2C send boundary opens; queuing all intervening
 			// snapshots would burst stale frames at that boundary.
 			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
-			netsim::emit_connection_s2c(world, conn.link, ents,
-			                            ctx.config.game_type,
-			                            conn.type == 1
-						? kMaxFrameUpdateBodyBytes
-						: 0);
+			netsim::ConnectionS2CPerf fan_perf;
+			const uint64_t fan_start = perf != nullptr ? io::perf_now_us() : 0;
+			netsim::emit_connection_s2c(
+					world, conn.link, ents, ctx.config.game_type,
+					conn.type == 1 ? kMaxFrameUpdateBodyBytes : 0,
+					perf != nullptr ? &fan_perf : nullptr);
+			if (perf != nullptr) {
+				perf->replication_fan_us += io::perf_now_us() - fan_start;
+				perf->replication_fan_setup_us += fan_perf.setup_us;
+				perf->replication_round_selection_us += fan_perf.round_selection_us;
+				perf->replication_entity_selection_us += fan_perf.entity_selection_us;
+				perf->replication_entity_setup_us += fan_perf.entity_setup_us;
+				perf->replication_entity_scoring_us += fan_perf.entity_scoring_us;
+				perf->replication_entity_los_us += fan_perf.entity_los_us;
+				perf->replication_entity_los_terrain_us += fan_perf.entity_los_terrain_us;
+				perf->replication_entity_los_sector_us += fan_perf.entity_los_sector_us;
+				perf->replication_entity_sort_us += fan_perf.entity_sort_us;
+				perf->replication_entity_budget_us += fan_perf.entity_budget_us;
+				perf->replication_encode_us += fan_perf.encode_us;
+				perf->replication_enqueue_us += fan_perf.enqueue_us;
+			}
 		}
 	}
 
@@ -1620,6 +1717,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		--ctx.round_end_linger_ticks;
 		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
 	}
+	if (perf != nullptr)
+		perf->replication_us = io::perf_now_us() - phase_start;
 
 	// (4) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
 	// reads it via client_recv / ClientReplicaPipeline::pump; a remote peer's transport outbound_ is popped +

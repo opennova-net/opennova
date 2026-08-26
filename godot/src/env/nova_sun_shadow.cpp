@@ -44,6 +44,15 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 }
 
 void SunShadow::_ready() {
+	// The light's OWN visual layer decides which views render it - and
+	// therefore which views re-render the directional shadow
+	// atlas. The beauty camera (0x18401) and the water mirror (0x8001) need
+	// it; the isolated Q3 bloom source (0x10401) is entirely unshaded black
+	// occluders + self-lit content and must NOT pay a per-frame shadow-atlas
+	// re-render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the first two
+	// masks, so the light lives there (a plumbing bit, like the mask values
+	// themselves).
+	set_layer_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
 	// One-time Godot shadow-map quality tuning (device knobs, not witnessed
 	// retail constants).
 	set_shadow(true);
@@ -83,7 +92,7 @@ void SunShadow::_apply_projection_masks() {
 		// The SlotShadow capture pipeline renders the live entity ground
 		// shadows (retail's per-slot RT + terrain drape, see
 		// docs/render/render-lighting-re.md); the dynamic light keeps the
-		// direction law but no longer needs its own shadow map.
+		// direction law but does not allocate a second shadow map.
 		set_shadow(false);
 	}
 }

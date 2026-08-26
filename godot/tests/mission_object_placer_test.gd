@@ -146,9 +146,10 @@ func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
 		"mesh": mesh, "material": batch_material, "offset": offset, "submesh": 0,
 	}]))
 
-	assert_false(mission.add_entity(
-			MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5),
-			Vector3.ZERO).is_empty())
+	var record := mission.add_entity(
+			MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
+	assert_false(record.is_empty())
+	var index := int(record.get("index", -1))
 	var stats: Dictionary = placer.place(mission, parent)
 	assert_eq(int(stats.get("placed", -1)), 1, "the static entity is placed")
 	assert_eq(int(stats.get("batched", -1)), 1, "via the static-batch branch")
@@ -171,6 +172,11 @@ func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
 			"presentation batching does not promote an item into the sector-building pass")
 	var mm: MultiMesh = mmi.multimesh
 	assert_eq(mm.instance_count, 1, "the runtime static has one MultiMesh slot")
+	assert_true(mm.use_custom_data,
+			"static batches expose their per-ROBJ light-atlas identity")
+	# The dummy headless RenderingServer does not persist instance buffers (the
+	# same limitation as transforms below). The rendered shader probe verifies
+	# that atlas row zero arrives as INSTANCE_CUSTOM.x == 1.0.
 	assert_true(mmi.is_inside_tree(), "the batch instance is in the runtime container")
 	placer.update_environment()
 	var batch_fog: Variant = batch_material.get_shader_parameter("u_fog_color")
@@ -207,9 +213,29 @@ func test_runtime_static_batch_relights_and_publishes_effect_source() -> void:
 	var actual_transform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
 	assert_true(actual_transform.is_equal_approx(expected_transform),
 			"the descriptor carries the BASE entity transform, not a submesh offset")
+	var light_draws: Array = placer.get_static_light_draw_sources()
+	assert_eq(light_draws.size(), 1,
+			"one retained ROBJ owns one point-light selection row")
+	var light_draw: Dictionary = light_draws[0]
+	assert_eq(int(light_draw.get("atlas_row", -1)), 0)
+	assert_eq(int(light_draw.get("source_index", -1)), 0,
+			"the draw row points at its exact static effect source")
+	assert_eq(int(light_draw.get("kind", -1)), MissionData.KIND_ITEM)
+	assert_eq(int(light_draw.get("entity_index", -1)), index)
+	assert_eq(int(light_draw.get("bms_id", 0)), int(record.get("bms_id", 0)))
+	assert_eq(int(light_draw.get("item_id", 0)), 105004)
+	assert_eq(int(light_draw.get("robj_index", -1)), 0)
+	assert_true(bool(light_draw.get("active", false)))
+	var expected_bounds: AABB = (expected_transform * offset) * mesh.get_aabb()
+	var actual_bounds: AABB = light_draw.get("world_bounds", AABB())
+	assert_true(actual_bounds.position.is_equal_approx(expected_bounds.position))
+	assert_true(actual_bounds.size.is_equal_approx(expected_bounds.size),
+			"selection uses the exact transformed bounds of that ROBJ's surfaces")
 	# Getter rows are copies; callers cannot rewrite the placer's retained identity.
 	source["item_id"] = 0
 	assert_eq(int(placer.get_static_item_effect_sources()[0].get("item_id", 0)), 105004)
+	light_draw["atlas_row"] = 99
+	assert_eq(int(placer.get_static_light_draw_sources()[0].get("atlas_row", -1)), 0)
 
 
 func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
@@ -478,16 +504,42 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 	assert_false(item_batch_key.is_empty())
 	assert_ne(building_batch_key, item_batch_key,
 			"destruction routing retains the reflection-population split")
+	var static_light_draws: Array = placer.get_static_light_draw_sources()
+	assert_eq(static_light_draws.size(), 2,
+			"each placed entity/ROBJ keeps an independent atlas row")
+	var building_light_row := -1
+	var item_light_row := -1
+	for row_index in static_light_draws.size():
+		var row: Dictionary = static_light_draws[row_index]
+		if int(row.get("bms_id", 0)) == building_bms_id:
+			building_light_row = row_index
+		elif int(row.get("bms_id", 0)) == item_bms_id:
+			item_light_row = row_index
+	assert_gte(building_light_row, 0)
+	assert_gte(item_light_row, 0)
+	assert_ne(building_light_row, item_light_row)
 	assert_false(placer.hide_static_instance(building_bms_id) == null)
 	assert_true(placer.is_static_instance_hidden(building_bms_id))
 	assert_false(placer.is_static_instance_hidden(item_bms_id),
 			"carving the building population leaves its same-graphic item live")
+	static_light_draws = placer.get_static_light_draw_sources()
+	assert_false(bool(static_light_draws[building_light_row].get("active", true)),
+			"the carved building no longer participates in atlas selection")
+	assert_true(bool(static_light_draws[item_light_row].get("active", false)),
+			"carving one population cannot darken its same-graphic peer")
 	assert_true(placer.show_static_instance(building_bms_id))
 	assert_false(placer.hide_static_instance(item_bms_id) == null)
 	assert_true(placer.is_static_instance_hidden(item_bms_id))
 	assert_false(placer.is_static_instance_hidden(building_bms_id),
 			"carving the item population leaves its same-graphic building live")
+	static_light_draws = placer.get_static_light_draw_sources()
+	assert_true(bool(static_light_draws[building_light_row].get("active", false)))
+	assert_false(bool(static_light_draws[item_light_row].get("active", true)))
 	assert_true(placer.show_static_instance(item_bms_id))
+	static_light_draws = placer.get_static_light_draw_sources()
+	assert_true(bool(static_light_draws[building_light_row].get("active", false)))
+	assert_true(bool(static_light_draws[item_light_row].get("active", false)),
+			"restoring the batch re-admits its original stable atlas row")
 	assert_true(placer.static_instance_is_mirror_reflected(building_bms_id),
 			"destruction bookkeeping carries the authored reflection policy")
 	assert_false(placer.static_instance_is_mirror_reflected(item_bms_id))

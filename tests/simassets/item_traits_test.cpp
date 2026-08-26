@@ -222,6 +222,7 @@ int main() {
     tank->pitch_velocity = 218;
     tank->bob = 219;
     tank->flip = 220;
+    tank->scale_q16 = 0x18000;
     std::strcpy(tank->sound_profile, "SP_Tank");
     std::strcpy(tank->soundloops[0], "LP_TANK");
     std::strcpy(rifle->ammo_closeattack, "AT_RIFLE");
@@ -291,6 +292,7 @@ int main() {
     CHECK(tank_e->health_max == -25536);
     CHECK(tank_e->health == -25536);
     CHECK(tank_e->item_unit_type == 7);
+    CHECK(tank_e->uniform_scale_q16 == 0x18000);
 
     const Entity *rifle_e = w.registry.get(rifle_h);
     CHECK(rifle_e != nullptr);
@@ -316,6 +318,7 @@ int main() {
     CHECK(unknown_e != nullptr);
     CHECK(!unknown_e->has_item_def);
     CHECK(unknown_e->item_type == 0);
+    CHECK(unknown_e->uniform_scale_q16 == 0);
     CHECK(unknown_e->item_attrib == 0u);
     CHECK(unknown_e->net_class_code == 0);
     CHECK(unknown_e->health == 100);

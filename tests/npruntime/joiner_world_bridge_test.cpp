@@ -94,9 +94,8 @@ struct Harness {
 		h.on_local_player_redeployed =
 				[this](int32_t) { calls.push_back("redeployed"); };
 		h.on_mount_changed = [this] { calls.push_back("mount_changed"); };
-		h.wire_collision_shape = [](uint16_t, int32_t &model_id, float &radius) {
-			model_id = -1;
-			radius = 0.0f;
+		h.wire_collision_shape = [](uint16_t) {
+			return world::ResolvedCollisionShape{};
 		};
 		h.apply_input_pre_tick = [this] { calls.push_back("input"); };
 		h.sync_mounted_input_heading =

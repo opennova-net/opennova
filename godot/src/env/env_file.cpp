@@ -662,9 +662,13 @@ float EnvFile::celestial_moon_alpha(float p_fog_distance, float p_overcast_blend
 
 float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 		float p_overcast_blend, float p_sun_dim_pct) {
+	// The base law (no FBEFFECTS quarter): the inspector surface shows the
+	// unscaled fold; the runtime frame builder owns the locked-profile
+	// quarter (celestial_frame.h).
 	return static_cast<float>(opennova::env::glare_glow_alpha_fixed(
 			to_fixed_16_16(p_view_dot_sun), p_brightness,
-			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
+			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct),
+			false)) / 65536.0f;
 }
 
 float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {

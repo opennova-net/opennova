@@ -40,6 +40,7 @@ MainGame._process
           per-tick Godot presentation sink  effects + fixed-tick listeners
         present entity/effect rows once
       present local view                    camera/viewmodel placement (D-RORD-8)
+      FrameFx.advance_frame                 the isolated Q3 glow view takes this frame's pose
       Terrain.render_frame                  compiled TerrainDrawList
       FoliageDispatcher.render_frame        compiled FoliageDrawList
       drive network session edges

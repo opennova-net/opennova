@@ -1,12 +1,16 @@
 // Item destruction — see world/destruction.h for the witness map.
 #include "world/destruction.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
+#include "io/bam.h"
+#include "crt/crt_rng.h"
 #include "terrain_query/height_field.h"
 #include "world/angle.h"
 #include "world/collision.h"
+#include "world/dir_table.h"
 #include "world/infantry.h"
 #include "world/vehicle_motor.h"
 #include "world/world.h"
@@ -65,6 +69,175 @@ const DeathPieceType kDeathPieceTypes[kDeathPieceTypeCount] = {
 // g_ammo_kz_OrganicBlast @ 0x24E7DBC etc.]. Resolved per queue push against
 // World::ammo (the host loads ammo.def before missions run).
 constexpr const char *kAmmoKzOrganicBlast = "kz_OrganicBlast";
+constexpr const char *kAmmoKzMItemBlast = "kz_MItemBlast";
+
+constexpr int32_t kPiecePhysicsGravityQ16 = 334;
+constexpr int32_t kPiecePhysicsWaterFallFloorQ16 = -2048;
+constexpr int32_t kPiecePhysicsProbeLiftQ16 = 0x4000;
+constexpr int32_t kPiecePhysicsProbeDepthQ16 = 0x20000;
+constexpr int32_t kPiecePhysicsProbeDistanceQ16 = 0x58000;
+constexpr int32_t kPiecePhysicsLandingOffsetQ16 = 0x8000;
+constexpr int32_t kPiecePhysicsYawStepBam = 0x02D82D82;
+constexpr int32_t kPiecePitchSnapThresholdBam = 0x02D82D80;
+constexpr int32_t kPiecePitchStepBam = 0x016C16C0;
+
+int32_t death_water_q16(float water_height) {
+    return water_height <= -1.0e8f ? INT32_MIN : to_fixed(water_height);
+}
+
+int16_t death_angle_degrees_from_bam(int32_t bam) {
+    return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
+}
+
+void seed_piece_physics_angles(Entity &entity) {
+    Entity::VehicleMotorState &motion = entity.veh;
+    if (motion.yaw_seeded) return;
+    motion.yaw_bam =
+            bam_heading_from_mission_yaw_deg(static_cast<double>(entity.yaw));
+    motion.air_pitch_bam = static_cast<int32_t>(
+            static_cast<uint32_t>(static_cast<int32_t>(entity.pitch)) * 11930464u);
+    motion.air_roll_bam = static_cast<int32_t>(
+            static_cast<uint32_t>(static_cast<int32_t>(entity.roll)) * 11930464u);
+    motion.yaw_seeded = true;
+}
+
+void publish_piece_physics_angles(Entity &entity) {
+    const Entity::VehicleMotorState &motion = entity.veh;
+    entity.yaw = static_cast<int16_t>(std::lround(
+            mission_yaw_deg_from_bam_heading(motion.yaw_bam)));
+    entity.pitch = death_angle_degrees_from_bam(motion.air_pitch_bam);
+    entity.roll = death_angle_degrees_from_bam(motion.air_roll_bam);
+}
+
+// Entity_RaycastGroundHeight @0x4142c0 casts a short vertical segment from
+// entity Z + 0.25 down by 2.0 units. The portable terrain field supplies the
+// terrain half of that query; the object-collision half remains D-ITEM-9.
+int32_t piece_physics_ground_probe_q16(
+        const terrain::TerrainHeightField *terrain, int32_t entity_x_q16,
+        int32_t entity_y_q16, int32_t entity_z_q16, int32_t offset_x_q16,
+        int32_t offset_y_q16) {
+    const int32_t start_z =
+            io::bam_add(entity_z_q16, kPiecePhysicsProbeLiftQ16);
+    const int32_t end_z = io::bam_sub(start_z, kPiecePhysicsProbeDepthQ16);
+    if (terrain == nullptr || !terrain->valid()) return end_z;
+    const int32_t query_x = io::bam_add(entity_x_q16, offset_x_q16);
+    const int32_t query_y = io::bam_add(entity_y_q16, offset_y_q16);
+    const int32_t terrain_z = to_fixed(
+            terrain::height_field_height_world_bilinear(
+                    *terrain, static_cast<float>(from_fixed(query_x)),
+                    static_cast<float>(-from_fixed(query_y))));
+    return terrain_z <= start_z && terrain_z >= end_z ? terrain_z : end_z;
+}
+
+struct PiecePhysicsSlope {
+    int32_t forward_bam = 0;
+    int32_t lateral_bam = 0;
+    int32_t ground_q16 = 0;
+};
+
+// The Z-low rest correction's source model [orig: Entity_CalcSlopeForces
+// @ 0x4b0c10..0x4b0c31]: `test byte ptr [entity+0x24], 4` picks the HUSK
+// model (entity+0x34) when the entity is husked and the graphic model
+// (entity+0x30) otherwise; a null pick leaves the offset at zero (no fallback
+// to the other model); the value is the picked model's collision block
+// (+0xB0) floor (+0x28 = the CMDL header bbox z-lo) x 240 >> 8. The port keeps
+// the two halves of that pair where it stores them: the graphic floor is the
+// vehicle probe box (VehicleTraits::box_z_lo, the CMDL z pair verbatim) and
+// the husk floor is the husk-stage collision model's z-lo bound.
+int32_t piece_physics_rest_floor_q16(const World &world, const Entity &entity) {
+    if ((entity.engine_flags & kEntityFlagHusk) != 0) {
+        const CollisionModel *husk = world.collision != nullptr
+                ? world.collision->husk_model_for(world, entity.handle)
+                : nullptr;
+        return husk != nullptr ? husk->min[2] : 0;
+    }
+    const VehicleTraits *vehicle = world.vehicle_traits.get(entity.item_id);
+    return vehicle != nullptr ? vehicle->box_z_lo : 0;
+}
+
+// Entity_CalcSlopeForces @0x4B0B00: four table-quantized probes around the
+// wreck, two independent slope clamps, then the picked model's Z-low rest
+// correction. Only the forward result is retained by DeathPiece_PhysicsUpdate,
+// but both lateral probes participate in the returned ground average.
+PiecePhysicsSlope piece_physics_slope(
+        const World &world, const Entity &entity,
+        const terrain::TerrainHeightField *terrain, int32_t x_q16,
+        int32_t y_q16, int32_t z_q16) {
+    int32_t cos22 = 0;
+    int32_t sin22 = 0;
+    quantized_dir(entity.veh.yaw_bam, cos22, sin22);
+    const int32_t forward_x = static_cast<int32_t>(
+            (static_cast<int64_t>(kPiecePhysicsProbeDistanceQ16) * cos22) >> 22);
+    const int32_t forward_y = static_cast<int32_t>(
+            (static_cast<int64_t>(kPiecePhysicsProbeDistanceQ16) * sin22) >> 22);
+    const int32_t height_forward = piece_physics_ground_probe_q16(
+            terrain, x_q16, y_q16, z_q16, forward_x, forward_y);
+    const int32_t height_backward = piece_physics_ground_probe_q16(
+            terrain, x_q16, y_q16, z_q16, -forward_x, -forward_y);
+    const int32_t lateral_x = io::bam_sar(forward_y, 2);
+    const int32_t lateral_y = io::bam_sar(forward_x, 2);
+    const int32_t height_left = piece_physics_ground_probe_q16(
+            terrain, x_q16, y_q16, z_q16, -lateral_x, lateral_y);
+    const int32_t height_right = piece_physics_ground_probe_q16(
+            terrain, x_q16, y_q16, z_q16, lateral_x, -lateral_y);
+
+    PiecePhysicsSlope out;
+    const int32_t forward_delta = std::clamp(
+            io::bam_sub(height_forward, height_backward), -655360, 655360);
+    const int32_t lateral_delta = std::clamp(
+            io::bam_sub(height_left, height_right), -163840, 163840);
+    out.forward_bam = static_cast<int32_t>(
+            static_cast<uint32_t>(forward_delta) << 10);
+    out.lateral_bam = static_cast<int32_t>(
+            static_cast<uint32_t>(lateral_delta) << 12);
+
+    int32_t sum = io::bam_add(height_backward, height_left);
+    sum = io::bam_add(sum, height_right);
+    sum = io::bam_add(sum, height_forward);
+    sum = io::bam_add(sum, 2);
+    // [orig: imul ecx, 0F0h; sar ecx, 8 @ 0x4b0c2b..0x4b0c31 on the picked
+    // model's floor — a null pick keeps zero @ 0x4b0c0e/@ 0x4b0c20]
+    const int32_t product = static_cast<int32_t>(
+            static_cast<uint32_t>(piece_physics_rest_floor_q16(world, entity)) *
+            240u);
+    const int32_t speed_offset = io::bam_sar(product, 8);
+    out.ground_q16 = io::bam_sub(io::bam_sar(sum, 2), speed_offset);
+    return out;
+}
+
+void queue_named_landing_blast(World &world, const Entity &entity,
+                               const char *ammo_name, float radius) {
+    const int ammo_index = world.ammo.index_of(ammo_name);
+    if (ammo_index < 0) return;
+    ExplosionEntry blast;
+    if (const AmmoTableEntry *ammo = world.ammo.by_index(ammo_index))
+        blast.type = ammo->kztype;
+    blast.ammo_index = ammo_index;
+    blast.owner = entity.handle;
+    blast.hit_word = 1;
+    blast.pos = entity.position;
+    blast.radius_override = radius;
+    world.explosions.queue_explosion(world, blast);
+}
+
+// One collapsed origin-anchored pass for Entity_UpdateDeadWreckEffects
+// @0x493140. The caller chooses its retail callback site; keeping that site
+// explicit matters for unitType 3 because its angle PRNG draw precedes this
+// fire roll, and its equal-pitch transition does not call the function.
+void update_dead_wreck_effects(World &world, Entity &entity,
+                               const ItemDeathTraits *traits,
+                               float water_height, DestructionEvents &events) {
+    if (traits == nullptr || traits->particlefire.empty()) return;
+    if (world.destruction_rng.next16() >= kFireCrackleThreshold) return;
+    if (entity.position.z <
+            (water_height <= -1.0e8f ? 0.0f : water_height))
+        return;
+    events.effects.push_back(DestructionEffectEvent{
+            kFireCrackleEffect, entity.position, Vec3{0.0f, 0.0f, 1.0f}});
+    world.fire_sounds.play_with_distance_delay(
+            kFireCrackleSound, entity.position, entity.bms_id);
+    ++events.crackles;
+}
 
 float vec_len(const Vec3 &v) {
     return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -308,7 +481,11 @@ void shatter_glass_points(World &world, Entity &target, const Vec3 &blast_pos,
         const Vec3 world_dir =
                 rotate_authored_point(orientation, point.local_dir);
         for (size_t effect_index = 0; effect_index < 4; ++effect_index) {
-            (void)death_rand16(world); // retail seeds the intermediate CRT roll
+            // Effect_RollSurfaceEffectProbability reseeds the process CRT from
+            // the first PRNG_Next16 draw even though its percentage roll comes
+            // from the second PRNG draw. Later scorch texture selection sees
+            // this side effect. [orig: @0x5CC1F0]
+            crt_srand(death_rand16(world));
             const uint16_t roll = death_rand16(world) % 100u;
             if (static_cast<int>(roll) <= static_cast<int>(
                         kGlassShatterAltProbability[effect_index] * 100.0f))
@@ -868,35 +1045,134 @@ void destruction_tick_dead_items(World &world,
             Entity *e = world.registry.get(EntityHandle::make(pool, static_cast<int>(s)));
             if (e == nullptr) continue;
             if ((e->engine_flags & kEntityFlagHusk) == 0) continue;
+            const ItemDeathTraits *traits = world.item_death_traits.get(e->item_id);
             // The wreck-fire random crackle (S12b), one roll per burning wreck
             // per tick on the engine PRNG stream — the draw is consumed BEFORE
             // the water gate, retail's evaluation order. The sound rides the
             // fire-sound distance-delay queue at the entity position.
+            // UnitType 3 calls it at the callback-specific sites below so its
+            // angle draw and equal-pitch transition keep retail ordering.
             // [orig: Entity_UpdateDeadWreckEffects @ 0x493140 — the roll
             //  @ 0x4932bf, the effect @ 0x4932d1, the sound @ 0x4932e2]
-            {
-                const ItemDeathTraits *fire_traits =
-                        world.item_death_traits.get(e->item_id);
-                if (fire_traits != nullptr && !fire_traits->particlefire.empty() &&
-                        world.destruction_rng.next16() < kFireCrackleThreshold &&
-                        e->position.z >=
-                                (water_height <= -1.0e8f ? 0.0f : water_height)) {
-                    events.effects.push_back(DestructionEffectEvent{
-                            kFireCrackleEffect, e->position, Vec3{0.0f, 0.0f, 1.0f}});
-                    world.fire_sounds.play_with_distance_delay(
-                            kFireCrackleSound, e->position, e->bms_id);
-                    ++events.crackles;
-                }
-            }
+            if (e->death_motion != DeathMotionMode::PiecePhysics &&
+                    e->death_motion != DeathMotionMode::PiecePitchSettle)
+                update_dead_wreck_effects(
+                        world, *e, traits, water_height, events);
             if (e->death_motion == DeathMotionMode::None) continue;
-            // unitType 3 installs DeathPiece_PhysicsUpdate @ 0x48f500. Its
-            // specialized callback remains a documented D-ITEM residual; do
-            // not silently substitute the generic falling callback.
-            if (e->death_motion == DeathMotionMode::PiecePhysics) continue;
+
+            // The post-contact callback installed by DeathPiece_PhysicsUpdate
+            // [orig: sub_48F0B0 @0x48F0B0]. The forward slope target is kept
+            // in the same +0xA8 register that previously held pitch rate.
+            // It moves at most two degrees per tick, snaps inside four, and
+            // performs the ground-death transition on the following tick.
+            if (e->death_motion == DeathMotionMode::PiecePitchSettle) {
+                seed_piece_physics_angles(*e);
+                Entity::VehicleMotorState &motion = e->veh;
+                const int32_t delta = io::bam_sub(
+                        motion.air_pitch_bam, motion.air_pitch_rate);
+                if (delta == 0) {
+                    e->death_motion = DeathMotionMode::Generic;
+                    transition_to_ground_death(*e, traits, events);
+                } else if (io::bam_abs(delta) < kPiecePitchSnapThresholdBam) {
+                    motion.air_pitch_bam = motion.air_pitch_rate;
+                    update_dead_wreck_effects(
+                            world, *e, traits, water_height, events);
+                } else {
+                    const int32_t step =
+                            std::clamp(delta, -kPiecePitchStepBam,
+                                       kPiecePitchStepBam);
+                    motion.air_pitch_bam =
+                            io::bam_sub(motion.air_pitch_bam, step);
+                    update_dead_wreck_effects(
+                            world, *e, traits, water_height, events);
+                }
+                publish_piece_physics_angles(*e);
+                continue;
+            }
+
+            // The unitType-3 main-entity mover [orig:
+            // DeathPiece_PhysicsUpdate @0x48F500]. This is intentionally its
+            // own callback: water drag, angle integration, short slope probes,
+            // landing pose, presentation, and blast routing are all distinct.
+            if (e->death_motion == DeathMotionMode::PiecePhysics) {
+                seed_piece_physics_angles(*e);
+                Entity::VehicleMotorState &motion = e->veh;
+                int32_t x_q16 = to_fixed(e->position.x);
+                int32_t y_q16 = to_fixed(e->position.y);
+                int32_t z_q16 = to_fixed(e->position.z);
+                const int32_t water_q16 = death_water_q16(water_height);
+                if (z_q16 >= water_q16) {
+                    motion.slide_z = io::bam_sub(
+                            motion.slide_z, kPiecePhysicsGravityQ16);
+                    if ((death_rand16(world) & 1u) != 0) {
+                        motion.air_pitch_bam = io::bam_add(
+                                motion.air_pitch_bam, motion.air_pitch_rate);
+                        motion.air_roll_bam = io::bam_add(
+                                motion.air_roll_bam, motion.air_roll_rate);
+                    } else {
+                        motion.yaw_bam = io::bam_add(
+                                motion.yaw_bam, kPiecePhysicsYawStepBam);
+                    }
+                } else {
+                    if (io::bam_sub(z_q16, motion.slide_z) >= water_q16) {
+                        motion.air_pitch_rate = 0;
+                        motion.air_roll_rate = 0;
+                        events.effects.push_back(DestructionEffectEvent{
+                                "Effect_MedSplash",
+                                Vec3{e->position.x, e->position.y, water_height},
+                                Vec3{0.0f, 0.0f, 1.0f}});
+                        events.sounds.push_back(DestructionSoundEvent{
+                                "EXPLO_HELO_WATER", e->position});
+                    }
+                    motion.vel_x = io::bam_sar(motion.vel_x, 1);
+                    motion.vel_y = io::bam_sar(motion.vel_y, 1);
+                    if (motion.slide_z < kPiecePhysicsWaterFallFloorQ16)
+                        motion.slide_z = kPiecePhysicsWaterFallFloorQ16;
+                }
+
+                x_q16 = io::bam_add(x_q16, motion.vel_x);
+                y_q16 = io::bam_add(y_q16, motion.vel_y);
+                z_q16 = io::bam_add(z_q16, motion.slide_z);
+                e->position = Vec3{
+                        static_cast<float>(from_fixed(x_q16)),
+                        static_cast<float>(from_fixed(y_q16)),
+                        static_cast<float>(from_fixed(z_q16))};
+                update_dead_wreck_effects(
+                        world, *e, traits, water_height, events);
+                const PiecePhysicsSlope slope = piece_physics_slope(
+                        world, *e, terrain, x_q16, y_q16, z_q16);
+                if (z_q16 > water_q16 && z_q16 < slope.ground_q16) {
+                    e->death_motion = DeathMotionMode::PiecePitchSettle;
+                    z_q16 = io::bam_sub(
+                            slope.ground_q16, kPiecePhysicsLandingOffsetQ16);
+                    e->position.z = static_cast<float>(from_fixed(z_q16));
+                    motion.air_pitch_rate = slope.forward_bam;
+                    events.effects.push_back(DestructionEffectEvent{
+                            "Effect_HeloGroundHit", e->position,
+                            Vec3{0.0f, 0.0f, 1.0f}});
+                    world.terrain_scorches.emit_standard(
+                            x_q16, y_q16, 7, world.logic_tick);
+                    if (world.logic_authority) {
+                        const float radius =
+                                traits != nullptr && traits->kz != 0.0f
+                                ? traits->kz
+                                : static_cast<float>(
+                                          static_cast<int32_t>(e->bound_radius));
+                        queue_named_landing_blast(
+                                world, *e, kAmmoKzOrganicBlast, radius);
+                        queue_named_landing_blast(
+                                world, *e, kAmmoKzMItemBlast, radius);
+                    }
+                    events.sounds.push_back(DestructionSoundEvent{
+                            "EXPLO_VEHCL_LG", e->position});
+                }
+                e->engine_flags &= ~kEntityFlagBuilding;
+                publish_piece_physics_angles(*e);
+                continue;
+            }
             if (e->death_motion != DeathMotionMode::Static &&
                 e->veh.slide_z == 0 && e->veh.vel_x == 0 && e->veh.vel_y == 0)
                 continue;
-            const ItemDeathTraits *traits = world.item_death_traits.get(e->item_id);
             if (e->death_motion == DeathMotionMode::Generic &&
                 traits != nullptr && traits->static_death) {
                 e->veh.slide_z = 0;
@@ -986,10 +1262,12 @@ void destruction_tick_dead_items(World &world,
             // to the separate static-death branch above @ 0x4942f7].
             // The water-crossing splash [orig: @ 0x49409f-0x494100 — the def
             // water-impact sound slot (+156) is unported, the fallback plays;
-            // the splash effect slot (dword_2C25C64) is unresolved —
-            // world-wac-ai-re.md D-ITEM-10].
+            // dword_2C25C64 resolves to Effect_MedSplash].
             if (routed_falling && new_z + e->bound_radius < water_height &&
                 old_top > water_height) {
+                events.effects.push_back(DestructionEffectEvent{
+                        "Effect_MedSplash", Vec3{new_x, new_y, water_height},
+                        Vec3{0.0f, 0.0f, 1.0f}});
                 world.destruction.sounds.push_back(DestructionSoundEvent{
                         "IMP_DEBLRG_WATER",
                         Vec3{new_x, new_y, water_height}});
@@ -1005,6 +1283,18 @@ void destruction_tick_dead_items(World &world,
                     e->death_motion = DeathMotionMode::Generic;
                     // [orig: Entity_UpdateFallingDeathPhysics call @ 0x494113]
                     transition_to_ground_death(*e, traits, events);
+                    // A routed wreck marks bare terrain before its landing
+                    // sound and authority blast. Retail suppresses this call
+                    // when the ground trace returned another entity; this
+                    // portable pass currently has only a terrain height field,
+                    // so every reachable routed contact is the null-entity leg.
+                    // The router reads the entity's pre-tail x/y, not the
+                    // integrated pose committed at @0x49421C.
+                    // [orig: ground-entity test @0x49414E; scorch 7 call
+                    // @0x49416B..0x494179]
+                    world.terrain_scorches.emit_standard(
+                            to_fixed(e->position.x), to_fixed(e->position.y),
+                            7, world.logic_tick);
                 } else {
                     e->position = old_position;
                     e->veh.slide_z = 0;
@@ -1018,21 +1308,14 @@ void destruction_tick_dead_items(World &world,
                 if (routed_falling) {
                     world.destruction.sounds.push_back(
                             DestructionSoundEvent{"IMP_VCL_DROP", e->position});
-                    const int kz_ammo = world.ammo.index_of(kAmmoKzOrganicBlast);
-                    if (kz_ammo >= 0) {
-                        ExplosionEntry blast;
-                        if (const AmmoTableEntry *a = world.ammo.by_index(kz_ammo))
-                            blast.type = a->kztype;
-                        blast.ammo_index = kz_ammo;
-                        blast.owner = e->handle;
-                        blast.hit_word = 1;
-                        blast.pos = e->position;
-                        blast.radius_override =
+                    if (world.logic_authority) {
+                        const float radius =
                                 (traits != nullptr && traits->kz > 0.0f)
-                                        ? traits->kz
-                                        : (e->bound_radius > 0.0f ? e->bound_radius
-                                                                  : 1.0f);
-                        world.explosions.queue_explosion(world, blast);
+                                ? traits->kz
+                                : (e->bound_radius > 0.0f ? e->bound_radius
+                                                          : 1.0f);
+                        queue_named_landing_blast(
+                                world, *e, kAmmoKzOrganicBlast, radius);
                     }
                 }
             } else if (!routed_falling) {
@@ -1062,7 +1345,6 @@ DeathPiece &DeathPieceSim::alloc() {
 
 void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                          float water_height, DestructionEvents &events) {
-    (void)world;
     // [orig: DeathPiece_TickAll @ 0x57b900 -> Entity_ProcessDeathPiecePhysics
     // @ 0x492dd0]
     constexpr float kGravity = 334.0f / 65536.0f; // the falling-death gravity
@@ -1126,9 +1408,18 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
             if (speed > 20480.0f / 65536.0f && tp.bounce_snd != nullptr)
                 events.sounds.push_back(DestructionSoundEvent{tp.bounce_snd, p.pos});
         } else {
-            // Exhausted [orig: @ 0x492edb-0x493048]: final effect/sound, then
-            // persist as ground debris (flags bit 0) or free.
+            // Exhausted [orig: @0x492EDB..0x493048]: release the trail, add a
+            // permanent scorch unless the debris row carries bit 1 (CACTUS_),
+            // then final effect/sound and persist (bit 0) or free. Scorch
+            // texture selection therefore advances the shared CRT before the
+            // presentation events below. [orig: flag test @0x492FDF; scorch 7
+            // call @0x492FE7]
             p.pos.z = ground;
+            if ((p.flags & 0x2u) == 0) {
+                world.terrain_scorches.emit_standard(
+                        to_fixed(p.pos.x), to_fixed(p.pos.y),
+                        7, world.logic_tick);
+            }
             if (tp.final_fx != nullptr)
                 events.effects.push_back(
                         DestructionEffectEvent{tp.final_fx, p.pos, Vec3{}, 0, 0});

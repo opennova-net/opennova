@@ -138,10 +138,14 @@ opennova::inmatch::TickOutcome Simulation::advance_mission_tick(
 		request_local_player_medic();
 	}
 
-	const int64_t sim_start = Time::get_singleton()->get_ticks_usec();
+	const bool profiling = runtime_profiling_enabled_;
+	const int64_t sim_start =
+			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
 	const bool did_tick = advance_world_tick();
-	frame_sim_us_ += Time::get_singleton()->get_ticks_usec() - sim_start;
-	frame_net_us_ += static_cast<int64_t>(get_last_net_tick_us());
+	if (profiling) {
+		frame_sim_us_ += Time::get_singleton()->get_ticks_usec() - sim_start;
+		frame_net_us_ += static_cast<int64_t>(get_last_net_tick_us());
+	}
 	if (!did_tick) return {};
 	// The dead-player map-mode clear rides every advanced tick — retail's
 	// render-frame gate, observed before the presenters read the mode.
@@ -160,9 +164,11 @@ opennova::inmatch::TickOutcome Simulation::advance_mission_tick(
 		Ref<MissionTickOutcome> value;
 		value.instantiate();
 		value->assign(tick);
-		const int64_t sink_start = Time::get_singleton()->get_ticks_usec();
+		const int64_t sink_start =
+				profiling ? Time::get_singleton()->get_ticks_usec() : 0;
 		const Variant accepted = session_tick_sink_.call(value);
-		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
+		if (profiling)
+			frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
 		if (accepted.get_type() == Variant::BOOL && !static_cast<bool>(accepted)) {
 			tick.status = opennova::inmatch::TickStatus::SessionLost;
 			tick.error = {opennova::inmatch::SessionErrorCode::SessionLost,
@@ -178,6 +184,7 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
+	frame_phase_perf_ = {};
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) input = p_input->native_value();
 	if (input.camera.listener_valid) {
@@ -196,6 +203,7 @@ Ref<MissionFrameOutcome> Simulation::step_session_frame(
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
+	frame_phase_perf_ = {};
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) input = p_input->native_value();
 	if (input.camera.listener_valid) {
@@ -233,6 +241,81 @@ Dictionary Simulation::get_session_perf() const {
 	out["sim_us"] = frame_sim_us_;
 	out["sink_us"] = frame_sink_us_;
 	out["net_us"] = frame_net_us_;
+	out["host_prep_us"] = frame_phase_perf_.host_prep_us;
+	out["host_pump_us"] = frame_phase_perf_.host_pump_us;
+	out["host_receive_us"] = frame_phase_perf_.host_receive_us;
+	out["host_connections_us"] = frame_phase_perf_.host_connections_us;
+	out["host_adapter_us"] = frame_phase_perf_.host_adapter_us;
+	out["server_tick_us"] = frame_phase_perf_.server_tick_us;
+	out["server_input_us"] = frame_phase_perf_.server_input_us;
+	out["server_world_us"] = frame_phase_perf_.server_world_us;
+	out["world_setup_us"] = frame_phase_perf_.world_setup_us;
+	out["world_scripts_us"] = frame_phase_perf_.world_scripts_us;
+	out["world_ai_us"] = frame_phase_perf_.world_ai_us;
+	out["world_ai_reactions_us"] = frame_phase_perf_.world_ai_reactions_us;
+	out["world_ai_collision_tables_us"] = frame_phase_perf_.world_ai_collision_tables_us;
+	out["world_ai_entities_us"] = frame_phase_perf_.world_ai_entities_us;
+	out["world_ai_infantry_entities_us"] = frame_phase_perf_.world_ai_infantry_entities_us;
+	out["world_ai_infantry_remote_us"] = frame_phase_perf_.world_ai_infantry_remote_us;
+	out["world_ai_infantry_combat_us"] = frame_phase_perf_.world_ai_infantry_combat_us;
+	out["world_ai_infantry_animation_us"] = frame_phase_perf_.world_ai_infantry_animation_us;
+	out["world_ai_infantry_collision_us"] = frame_phase_perf_.world_ai_infantry_collision_us;
+	out["world_ai_infantry_collision_contacts_us"] =
+			frame_phase_perf_.world_ai_infantry_collision_contacts_us;
+	out["world_ai_infantry_collision_repulsion_us"] =
+			frame_phase_perf_.world_ai_infantry_collision_repulsion_us;
+	out["world_ai_infantry_collision_ground_us"] =
+			frame_phase_perf_.world_ai_infantry_collision_ground_us;
+	out["world_ai_other_entities_us"] = frame_phase_perf_.world_ai_other_entities_us;
+	out["world_ai_authority_vehicles_us"] = frame_phase_perf_.world_ai_authority_vehicles_us;
+	out["world_ai_vehicle_scan_us"] = frame_phase_perf_.world_ai_vehicle_scan_us;
+	out["world_ai_vehicle_motors_us"] = frame_phase_perf_.world_ai_vehicle_motors_us;
+	out["world_ai_vehicle_riders_us"] = frame_phase_perf_.world_ai_vehicle_riders_us;
+	out["world_ai_client_vehicles_us"] = frame_phase_perf_.world_ai_client_vehicles_us;
+	out["world_ai_events_us"] = frame_phase_perf_.world_ai_events_us;
+	out["world_attachments_us"] = frame_phase_perf_.world_attachments_us;
+	out["world_attachment_orphans_us"] = frame_phase_perf_.world_attachment_orphans_us;
+	out["world_attachment_child_pose_us"] = frame_phase_perf_.world_attachment_child_pose_us;
+	out["world_attachment_riders_us"] = frame_phase_perf_.world_attachment_riders_us;
+	out["world_throwables_us"] = frame_phase_perf_.world_throwables_us;
+	out["world_weapons_us"] = frame_phase_perf_.world_weapons_us;
+	out["world_projectiles_us"] = frame_phase_perf_.world_projectiles_us;
+	out["world_destruction_us"] = frame_phase_perf_.world_destruction_us;
+	out["world_housekeeping_us"] = frame_phase_perf_.world_housekeeping_us;
+	out["match_us"] = frame_phase_perf_.match_us;
+	out["server_rules_us"] = frame_phase_perf_.server_rules_us;
+	out["server_replication_us"] = frame_phase_perf_.server_replication_us;
+	out["replication_query_prep_us"] = frame_phase_perf_.replication_query_prep_us;
+	out["replication_query_collect_us"] = frame_phase_perf_.replication_query_collect_us;
+	out["replication_query_grid_us"] = frame_phase_perf_.replication_query_grid_us;
+	out["replication_query_grid_span_us"] = frame_phase_perf_.replication_query_grid_span_us;
+	out["replication_query_grid_bucket_us"] = frame_phase_perf_.replication_query_grid_bucket_us;
+	out["replication_query_grid_workspace_us"] =
+			frame_phase_perf_.replication_query_grid_workspace_us;
+	out["replication_snapshot_us"] = frame_phase_perf_.replication_snapshot_us;
+	out["replication_fan_us"] = frame_phase_perf_.replication_fan_us;
+	out["replication_fan_setup_us"] = frame_phase_perf_.replication_fan_setup_us;
+	out["replication_round_selection_us"] = frame_phase_perf_.replication_round_selection_us;
+	out["replication_entity_selection_us"] = frame_phase_perf_.replication_entity_selection_us;
+	out["replication_entity_setup_us"] = frame_phase_perf_.replication_entity_setup_us;
+	out["replication_entity_scoring_us"] = frame_phase_perf_.replication_entity_scoring_us;
+	out["replication_entity_los_us"] = frame_phase_perf_.replication_entity_los_us;
+	out["replication_entity_los_terrain_us"] =
+			frame_phase_perf_.replication_entity_los_terrain_us;
+	out["replication_entity_los_sector_us"] =
+			frame_phase_perf_.replication_entity_los_sector_us;
+	out["replication_entity_sort_us"] = frame_phase_perf_.replication_entity_sort_us;
+	out["replication_entity_budget_us"] = frame_phase_perf_.replication_entity_budget_us;
+	out["replication_encode_us"] = frame_phase_perf_.replication_encode_us;
+	out["replication_enqueue_us"] = frame_phase_perf_.replication_enqueue_us;
+	out["host_send_us"] = frame_phase_perf_.host_send_us;
+	out["host_player_us"] = frame_phase_perf_.host_player_us;
+	out["client_decode_us"] = frame_phase_perf_.client_decode_us;
+	out["client_setup_us"] = frame_phase_perf_.client_setup_us;
+	out["client_receive_us"] = frame_phase_perf_.client_receive_us;
+	out["client_maintenance_us"] = frame_phase_perf_.client_maintenance_us;
+	out["client_send_us"] = frame_phase_perf_.client_send_us;
+	out["adm_resolve_us"] = frame_phase_perf_.adm_resolve_us;
 	out["ticks"] = perf.ticks;
 	return out;
 }

@@ -259,6 +259,8 @@ class DefItemDef(ctypes.Structure):
         ("kz", ctypes.c_float),
         ("husk_swap_at", ctypes.c_float),
         ("husk_swap_at_sec", ctypes.c_float),
+        # items.def scale: signed Q16.16 model scale (0 = unscaled sentinel).
+        ("scale_q16", ctypes.c_int),
         ("debris_scale", ctypes.c_float),
         ("husk_sub_parts", ctypes.c_int),
         ("husk_sub_part_types", ctypes.c_ubyte * 16),

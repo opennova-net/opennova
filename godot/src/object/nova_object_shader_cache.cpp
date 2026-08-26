@@ -1,5 +1,7 @@
 #include "object/nova_object_shader_cache.h"
 
+#include "object/nova_object_model.h"
+
 #include "oed/material_descriptor.h"
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
@@ -7,6 +9,8 @@
 #include "threedi/threedi_3di3.h"
 
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 
@@ -18,31 +22,42 @@ const char *shader_technique_directory(renderer::ObjectShaderTechnique technique
 	switch (technique) {
 		case renderer::ObjectShaderTechnique::Unsupported: return nullptr;
 		case renderer::ObjectShaderTechnique::Fixed: return "fixed";
+		case renderer::ObjectShaderTechnique::FixedSkinned: return "fixed_skinned";
 		case renderer::ObjectShaderTechnique::FixedDetail: return "fixed_detail";
 		case renderer::ObjectShaderTechnique::SelfLit: return "self_lit";
 		case renderer::ObjectShaderTechnique::SelfLitDetail: return "self_lit_detail";
 		case renderer::ObjectShaderTechnique::Tracer: return "tracer";
 		case renderer::ObjectShaderTechnique::Flag: return "flag";
-		case renderer::ObjectShaderTechnique::FlagSelfLit: return "flag_self_lit";
 		case renderer::ObjectShaderTechnique::PhongTangentDiffuse:
 			return "phong_tangent_diffuse";
 		case renderer::ObjectShaderTechnique::PhongTangentSpecular:
 			return "phong_tangent_specular";
+		case renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned:
+			return "phong_tangent_specular_skinned";
 		case renderer::ObjectShaderTechnique::PhongObjectDiffuse:
 			return "phong_object_diffuse";
 		case renderer::ObjectShaderTechnique::PhongObjectSpecular:
 			return "phong_object_specular";
+		case renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap:
+			return "phong_object_specular_phong_map";
 		case renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3_tangent";
 		case renderer::ObjectShaderTechnique::Dot3TangentDetail:
 			return "dot3_tangent_detail";
+		case renderer::ObjectShaderTechnique::Dot3TangentSkinned:
+			return "dot3_tangent_skinned";
+		case renderer::ObjectShaderTechnique::Dot3TangentDetailSkinned:
+			return "dot3_tangent_detail_skinned";
 		case renderer::ObjectShaderTechnique::Dot3Object: return "dot3_object";
 		case renderer::ObjectShaderTechnique::Dot3ObjectDetail:
 			return "dot3_object_detail";
-		case renderer::ObjectShaderTechnique::EnvironmentTangent:
+		case renderer::ObjectShaderTechnique::EnvironmentMirror:
 			return "environment_tangent";
-		case renderer::ObjectShaderTechnique::EnvironmentTangentSpecular:
+		case renderer::ObjectShaderTechnique::EnvironmentMirrorTextured:
+			return "environment_tangent_textured";
+		case renderer::ObjectShaderTechnique::EnvironmentPhong:
 			return "environment_tangent_specular";
-		case renderer::ObjectShaderTechnique::Glass: return "glass";
+		case renderer::ObjectShaderTechnique::GlassFixed: return "glass";
+		case renderer::ObjectShaderTechnique::GlassSkinned: return "glass_skinned";
 	}
 	return nullptr;
 }
@@ -78,8 +93,11 @@ bool technique_supports_blend(renderer::ObjectShaderTechnique technique,
 					blend == renderer::ObjectBlendMode::AlphaBlend ||
 					blend == renderer::ObjectBlendMode::Additive;
 		case renderer::ObjectShaderTechnique::Tracer:
-		case renderer::ObjectShaderTechnique::Glass:
+		case renderer::ObjectShaderTechnique::GlassFixed:
+		case renderer::ObjectShaderTechnique::GlassSkinned:
 			return blend == renderer::ObjectBlendMode::Additive;
+		case renderer::ObjectShaderTechnique::FixedSkinned:
+			return blend == renderer::ObjectBlendMode::Opaque;
 		case renderer::ObjectShaderTechnique::Unsupported:
 			return false;
 		default:
@@ -100,6 +118,32 @@ String shader_resource_path(
 			: "";
 	return String("res://shaders/object/") + technique + "/" + policy +
 			cull_suffix + ".gdshader";
+}
+
+// Render_CreateSystemTextures builds gsys_phong as a 256x256 RGBA8 lookup.
+// X is N.L (also copied verbatim to alpha); Y is N.H; RGB are the truncated
+// 255*x^(4,16,64) curves. The source multiplier is the exact binary32
+// 0x3b808081 value loaded by retail rather than an idealized 1/255.
+// renderer/object_shader_template owns the byte-exact cited contract.
+Ref<ImageTexture> create_retail_phong_map_texture() {
+	constexpr int kSize = 256;
+	PackedByteArray pixels;
+	pixels.resize(kSize * kSize * 4);
+	for (int y = 0; y < kSize; ++y) {
+		for (int x_coord = 0; x_coord < kSize; ++x_coord) {
+			const renderer::ObjectPhongMapTexel texel =
+					renderer::object_phong_map_texel(
+							static_cast<uint8_t>(x_coord), static_cast<uint8_t>(y));
+			const int offset = (y * kSize + x_coord) * 4;
+			pixels.set(offset + 0, texel.red_pow4);
+			pixels.set(offset + 1, texel.green_pow16);
+			pixels.set(offset + 2, texel.blue_pow64);
+			pixels.set(offset + 3, texel.alpha_ndotl);
+		}
+	}
+	const Ref<Image> image = Image::create_from_data(
+			kSize, kSize, false, Image::FORMAT_RGBA8, pixels);
+	return ImageTexture::create_from_image(image);
 }
 
 } // namespace
@@ -133,6 +177,7 @@ ObjectShaderCache::~ObjectShaderCache() {
 
 void ObjectShaderCache::clear() {
 	cache.clear();
+	phong_map_texture.unref();
 }
 
 void ObjectShaderCache::_bind_methods() {
@@ -144,9 +189,11 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("blend_for_key", "key"), &ObjectShaderCache::blend_for_key);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &ObjectShaderCache::get_known_shader_tags);
 	ClassDB::bind_method(D_METHOD("clear"), &ObjectShaderCache::clear);
-	ClassDB::bind_method(D_METHOD("set_water_split_height", "height"), &ObjectShaderCache::set_water_split_height);
-	ClassDB::bind_method(D_METHOD("clear_water_split_height"), &ObjectShaderCache::clear_water_split_height);
-	ClassDB::bind_method(D_METHOD("has_water_split_height"), &ObjectShaderCache::has_water_split_height);
+	ClassDB::bind_method(D_METHOD("set_water_plane", "height", "camera_above"), &ObjectShaderCache::set_water_plane);
+	ClassDB::bind_method(D_METHOD("clear_water_plane"), &ObjectShaderCache::clear_water_plane);
+	ClassDB::bind_method(D_METHOD("has_water_plane"), &ObjectShaderCache::has_water_plane);
+	ClassDB::bind_method(D_METHOD("get_water_plane_generation"),
+			&ObjectShaderCache::get_water_plane_generation);
 	ClassDB::bind_method(D_METHOD("alpha_rung_for_height", "world_height"), &ObjectShaderCache::alpha_rung_for_height);
 
 	// The per-material 3DI flag byte, single-sourced from engine/formats/threedi so
@@ -207,6 +254,17 @@ void ObjectShaderCache::configure_material_for_key(
 	const Ref<Shader> shader = get_shader_for_key(key);
 	ERR_FAIL_COND_MSG(shader.is_null(), "Object shader resource is unavailable");
 	material->set_shader(shader);
+	const renderer::ObjectShaderPipelineDescriptor pipeline =
+			renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
+	if (pipeline.technique ==
+			renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap) {
+		if (phong_map_texture.is_null()) {
+			phong_map_texture = create_retail_phong_map_texture();
+		}
+		ERR_FAIL_COND_MSG(phong_map_texture.is_null(),
+				"Retail PhongMap texture could not be created");
+		material->set_shader_parameter("u_phong_map", phong_map_texture);
+	}
 }
 
 int32_t ObjectShaderCache::classify(const String &shader_tag,
@@ -232,30 +290,46 @@ int32_t ObjectShaderCache::blend_for_key(int32_t key) const {
 	return static_cast<int32_t>(renderer::decode_object_shader_blend(static_cast<uint32_t>(key)));
 }
 
-void ObjectShaderCache::set_water_split_height(float height) {
+void ObjectShaderCache::set_water_plane(float height, bool camera_above) {
+	if (water_split_set && water_split_height == height &&
+			water_camera_above == camera_above) {
+		return;
+	}
 	water_split_height = height;
+	water_camera_above = camera_above;
 	water_split_set = true;
+	++water_plane_generation;
+	ObjectModel::mark_render_order_dirty_all();
 }
 
-void ObjectShaderCache::clear_water_split_height() {
+void ObjectShaderCache::clear_water_plane() {
+	if (!water_split_set) {
+		return;
+	}
 	water_split_set = false;
+	++water_plane_generation;
+	ObjectModel::mark_render_order_dirty_all();
 }
 
-bool ObjectShaderCache::has_water_split_height() const {
+bool ObjectShaderCache::has_water_plane() const {
 	return water_split_set;
+}
+
+uint64_t ObjectShaderCache::get_water_plane_generation() const {
+	return water_plane_generation;
 }
 
 int32_t ObjectShaderCache::alpha_rung_for_height(float world_height) const {
 	// The water-plane transparent bracket [orig: @ 0x5d932e..0x5d9354 vs
 	// g_WaterSplitHeightFloat @ 0x8437C4]. No water in the session -> the
-	// default camera-side rung. The reimpl applies the camera-above case
-	// statically (docs/render/render-order-re.md D-RORD-3 note).
+	// default camera-side rung. The frame owner publishes the effective render
+	// eye side after camera placement, so the ladder mirrors underwater.
 	if (!water_split_set) {
 		return renderer::kRungAlphaCameraSide;
 	}
 	const renderer::TransparentQueue side =
 			renderer::transparent_queue_for(world_height, water_split_height);
-	return renderer::transparent_rung_for(side, /*camera_above_water=*/true);
+	return renderer::transparent_rung_for(side, water_camera_above);
 }
 
 PackedStringArray ObjectShaderCache::get_known_shader_tags() const {

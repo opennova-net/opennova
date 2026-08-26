@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "crt/crt_rng.h"
 #include "terrain_query/height_field.h"
 #include "world/collision.h"
 #include "world/world.h"
@@ -419,81 +420,81 @@ void test_posed_head_zone_multiplier() {
 
 void test_item_type_zone_domain_and_attrib_0200_sections() {
     {
-        PosedDamageRig r(0);
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
-        CHECK(r.world.round_sim.hits[0].damage == 775); // person zone 0: 620 * 1.25
-        CHECK(r.target_entity()->health == 4225);
-        CHECK((r.target_entity()->flags & 0x800u) == 0);
+        auto r = std::make_unique<PosedDamageRig>(0);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        CHECK(r->world.round_sim.hits[0].damage == 775); // person zone 0: 620 * 1.25
+        CHECK(r->target_entity()->health == 4225);
+        CHECK((r->target_entity()->flags & 0x800u) == 0);
     }
     {
-        PosedDamageRig r(0);
-        r.target_entity()->item_type = 5;
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
-        CHECK(r.world.round_sim.hits[0].damage == 620); // zones are type-3-only
-        CHECK(r.target_entity()->health == 4380);
+        auto r = std::make_unique<PosedDamageRig>(0);
+        r->target_entity()->item_type = 5;
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        CHECK(r->world.round_sim.hits[0].damage == 620); // zones are type-3-only
+        CHECK(r->target_entity()->health == 4380);
     }
     {
-        PosedDamageRig r(0);
-        r.target_entity()->item_attrib = 0x200u;
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
+        auto r = std::make_unique<PosedDamageRig>(0);
+        r->target_entity()->item_attrib = 0x200u;
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
         // The 0x200 branch uses its own section-code domain; section 0 is not
         // interpreted as an ordinary person head zone.
-        CHECK(r.world.round_sim.hits[0].damage == 620);
-        CHECK((r.target_entity()->flags & 0x800u) == 0);
+        CHECK(r->world.round_sim.hits[0].damage == 620);
+        CHECK((r->target_entity()->flags & 0x800u) == 0);
     }
 
     {
-        PosedDamageRig r(13);
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
-        CHECK(r.world.round_sim.hits[0].damage == 1860); // ordinary critical zone: x3
-        CHECK((r.target_entity()->flags & 0x800u) == 0); // cause is not an Entity Flags bit
-        CHECK(r.world.round_sim.deaths.empty());
+        auto r = std::make_unique<PosedDamageRig>(13);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        CHECK(r->world.round_sim.hits[0].damage == 1860); // ordinary critical zone: x3
+        CHECK((r->target_entity()->flags & 0x800u) == 0); // cause is not an Entity Flags bit
+        CHECK(r->world.round_sim.deaths.empty());
     }
     {
-        PosedDamageRig r(13);
-        r.target_entity()->health = 1000;
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.deaths.size() == 1);
-        CHECK((r.world.round_sim.deaths[0].event_flags & 0x800u) != 0);
-        CHECK((r.target_entity()->flags & 0x800u) == 0);
+        auto r = std::make_unique<PosedDamageRig>(13);
+        r->target_entity()->health = 1000;
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.deaths.size() == 1);
+        CHECK((r->world.round_sim.deaths[0].event_flags & 0x800u) != 0);
+        CHECK((r->target_entity()->flags & 0x800u) == 0);
     }
 
     // ItemDefAttrib 0x200 selects the retail section-code switch. These four
     // codes receive 6.0x; the literal cases prevent a range approximation.
     const int special_sections[] = {2, 3, 6, 7};
     for (int section : special_sections) {
-        PosedDamageRig r(section);
-        r.target_entity()->item_attrib = 0x200u;
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
-        CHECK(r.world.round_sim.hits[0].damage == 3720); // 620 * 6.0
-        CHECK(r.target_entity()->health == 1280);
-        CHECK((r.target_entity()->flags & 0x800u) == 0);
+        auto r = std::make_unique<PosedDamageRig>(section);
+        r->target_entity()->item_attrib = 0x200u;
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        CHECK(r->world.round_sim.hits[0].damage == 3720); // 620 * 6.0
+        CHECK(r->target_entity()->health == 1280);
+        CHECK((r->target_entity()->flags & 0x800u) == 0);
     }
 
     // A walk crossing TWO spheres splits the channels: ray[31] keeps the first/
     // highest overlap (7) while ray[32] ends at the final/lowest (4). The
     // attrib-0x200 seat switch reads ray[31] (hitZoneData+124 @0x4ec977).
     {
-        PosedDamageRig r(7, 4);
-        r.target_entity()->item_attrib = 0x200u;
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
-        CHECK(r.world.round_sim.hits[0].damage == 3720); // seat code 7 via ray[31]
-        CHECK((r.target_entity()->flags & 0x800u) == 0);
+        auto r = std::make_unique<PosedDamageRig>(7, 4);
+        r->target_entity()->item_attrib = 0x200u;
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        CHECK(r->world.round_sim.hits[0].damage == 3720); // seat code 7 via ray[31]
+        CHECK((r->target_entity()->flags & 0x800u) == 0);
     }
     // The normal-infantry table keeps reading ray[32] (@0x4ec9bf): final zone 4
     // takes 1.25x even though the primary bone 7 sits in the 1.0x band.
     {
-        PosedDamageRig r(7, 4);
-        r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.size() == 1);
-        CHECK(r.world.round_sim.hits[0].damage == 775); // 620 * 1.25 via ray[32]
-        CHECK((r.target_entity()->flags & 0x800u) == 0);
+        auto r = std::make_unique<PosedDamageRig>(7, 4);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        CHECK(r->world.round_sim.hits[0].damage == 775); // 620 * 1.25 via ray[32]
+        CHECK((r->target_entity()->flags & 0x800u) == 0);
     }
 }
 
@@ -750,12 +751,12 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     // aliases local L's packed value: excluding owners by casting H -> L would
     // drop the actual remote target and make this trace miss.
     constexpr uint16_t self_h = 0;
-    std::vector<ProjectilePersonProxy> proxies{
-        ProjectilePersonProxy{self_h, FixedVec3{2 * 65536, 0, 0}},
-        ProjectilePersonProxy{local_l.packed, FixedVec3{5 * 65536, 0, 0}},
+    std::vector<WirePersonCollisionProxy> proxies{
+        WirePersonCollisionProxy{self_h, FixedVec3{2 * 65536, 0, 0}},
+        WirePersonCollisionProxy{local_l.packed, FixedVec3{5 * 65536, 0, 0}},
     };
     CollisionWorld collision;
-    collision.replace_projectile_person_proxies(proxies, self_h);
+    collision.replace_wire_collision_proxies(proxies, {}, self_h);
     collision.build_tick_tables(world);
     world.collision = &collision;
 
@@ -1049,12 +1050,12 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     // The decoded wire pose: the same authored geometry at X=12. The quad
     // plane sits at proxy-local z=1, so a ray descending through world
     // z=1 over (12, 0) crosses it.
-    ProjectileDynamicProxy proxy;
+    WireDynamicCollisionProxy proxy;
     proxy.wire_handle = 0x1002; // host pool-1 slot 2
     proxy.model_id = model_id;
     proxy.position_q16 = FixedVec3{12 * 65536, 0, 0};
     proxy.bound_radius_q16 = 3 * 65536;
-    collision.replace_projectile_dynamic_proxies({proxy});
+    collision.replace_wire_collision_proxies({}, {proxy});
 
     auto trace_down_at = [&](int32_t x_q16, bool include) {
         ProjectileTrace trace;
@@ -1086,14 +1087,29 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
           ProjectileHitClass::DynamicEntity);
     world.projectile_authority = false;
 
+    // The wire projection consumes the SAME effective items.def scale as its
+    // visual and local collision twin. A ray 1.5u off-center misses the
+    // unscaled +-1 quad, then hits after the exact 2x basis is installed; the
+    // local z=1 face moves to world z=2 as well.
+    CHECK(!trace_down_at(12 * 65536 + 0x18000, true).hit());
+    WireDynamicCollisionProxy scaled = proxy;
+    scaled.uniform_scale_q16 = 0x20000;
+    scaled.bound_radius_q16 = 6 * 65536;
+    collision.replace_wire_collision_proxies({}, {scaled});
+    const ProjectileHit scaled_hit =
+        trace_down_at(12 * 65536 + 0x18000, true);
+    CHECK(scaled_hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(scaled_hit.position_q16.z > 0x1F000);
+    CHECK(scaled_hit.position_q16.z < 0x21000);
+
     // The decoded heading rotates the authored geometry with the visual: at
     // heading 90 deg the (+-1, +-1) quad still spans the section origin, but a
     // proxy REPOSED under pitch 90 deg turns the z=1 plane vertical and the
     // descending ray at its center now passes through where the flat plane
     // would have stopped it.
-    ProjectileDynamicProxy pitched = proxy;
+    WireDynamicCollisionProxy pitched = proxy;
     pitched.pitch_bam = 0x40000000;
-    collision.replace_projectile_dynamic_proxies({pitched});
+    collision.replace_wire_collision_proxies({}, {pitched});
     CHECK(!trace_down_at(12 * 65536, true).hit());
 
     // A horizontal ray across the now-vertical plane hits it instead.
@@ -1131,16 +1147,16 @@ void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
     collision.build_tick_tables(world);
     world.collision = &collision;
 
-    ProjectileDynamicProxy carrier;
+    WireDynamicCollisionProxy carrier;
     carrier.wire_handle = 0x1004;
     carrier.model_id = model_id;
     carrier.position_q16 = FixedVec3{6 * 65536, 0, 0};
     carrier.pitch_bam = 0x40000000; // vertical plane across the lane
     carrier.bound_radius_q16 = 3 * 65536;
-    ProjectileDynamicProxy behind = carrier;
+    WireDynamicCollisionProxy behind = carrier;
     behind.wire_handle = 0x1007;
     behind.position_q16 = FixedVec3{10 * 65536, 0, 0};
-    collision.replace_projectile_dynamic_proxies({carrier, behind});
+    collision.replace_wire_collision_proxies({}, {carrier, behind});
 
     ProjectileTrace trace;
     trace.start = FixedVec3{0, 0, 0};
@@ -1159,12 +1175,12 @@ void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
     CHECK(hit.position_q16.x < 12 * 65536);
 
     // Retail cannot enter the ordinary pool-1 face walk with this state.
-    ProjectileDynamicProxy unresolved;
+    WireDynamicCollisionProxy unresolved;
     unresolved.wire_handle = 0x1009;
     unresolved.model_id = -1;
     unresolved.position_q16 = FixedVec3{5 * 65536, 0, 0};
     unresolved.bound_radius_q16 = 0x18000; // 1.5 u
-    collision.replace_projectile_dynamic_proxies({unresolved});
+    collision.replace_wire_collision_proxies({}, {unresolved});
     bool raised = false;
     try {
         (void)collision.trace_projectile(world, trace);
@@ -1196,16 +1212,16 @@ void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
     collision.build_tick_tables(world);
     world.collision = &collision;
 
-    ProjectileDynamicProxy self;
+    WireDynamicCollisionProxy self;
     self.wire_handle = 0x1004; // the decoded shooter's own pool-1 slot
     self.model_id = model_id;
     self.position_q16 = FixedVec3{6 * 65536, 0, 0};
     self.pitch_bam = 0x40000000; // vertical plane across the lane
     self.bound_radius_q16 = 3 * 65536;
-    ProjectileDynamicProxy behind = self;
+    WireDynamicCollisionProxy behind = self;
     behind.wire_handle = 0x1007;
     behind.position_q16 = FixedVec3{10 * 65536, 0, 0};
-    collision.replace_projectile_dynamic_proxies({self, behind});
+    collision.replace_wire_collision_proxies({}, {self, behind});
 
     ProjectileTrace trace;
     trace.start = FixedVec3{0, 0, 0};
@@ -1243,16 +1259,16 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
     collision.build_tick_tables(world);
     world.collision = &collision;
 
-    ProjectileDynamicProxy carrier;
+    WireDynamicCollisionProxy carrier;
     carrier.wire_handle = 0x1004; // the decoded shooter's own carrier
     carrier.model_id = model_id;
     carrier.position_q16 = FixedVec3{6 * 65536, 0, 0};
     carrier.pitch_bam = 0x40000000; // vertical plane across the lane
     carrier.bound_radius_q16 = 3 * 65536;
-    ProjectileDynamicProxy target = carrier;
+    WireDynamicCollisionProxy target = carrier;
     target.wire_handle = 0x1007;
     target.position_q16 = FixedVec3{10 * 65536, 0, 0};
-    collision.replace_projectile_dynamic_proxies({carrier, target});
+    collision.replace_wire_collision_proxies({}, {carrier, target});
 
     AmmoTableEntry nade;
     nade.name = "VISUAL_NADE";
@@ -1337,10 +1353,10 @@ void test_visual_infantry_proxy_joins_person_walk() {
     collision.build_tick_tables(world);
     world.collision = &collision;
 
-    std::vector<ProjectilePersonProxy> proxies{
-        ProjectilePersonProxy{ai_h.packed, FixedVec3{9 * 65536, 0, -58982}},
+    std::vector<WirePersonCollisionProxy> proxies{
+        WirePersonCollisionProxy{ai_h.packed, FixedVec3{9 * 65536, 0, -58982}},
     };
-    collision.replace_projectile_person_proxies(proxies, /*self H*/ 0x0002);
+    collision.replace_wire_collision_proxies(proxies, {}, /*self H*/ 0x0002);
 
     ProjectileTrace trace;
     trace.start = FixedVec3{0, 0, 0};
@@ -1397,10 +1413,10 @@ void test_person_walk_orders_local_player_by_its_server_handle() {
 
         // One decoded remote, FARTHER down the lane than L, holding a handle
         // between L's two test identities.
-        std::vector<ProjectilePersonProxy> proxies{
-            ProjectilePersonProxy{0x0002, FixedVec3{9 * 65536, 0, -58982}},
+        std::vector<WirePersonCollisionProxy> proxies{
+            WirePersonCollisionProxy{0x0002, FixedVec3{9 * 65536, 0, -58982}},
         };
-        collision.replace_projectile_person_proxies(proxies, local_wire_h);
+        collision.replace_wire_collision_proxies(proxies, {}, local_wire_h);
 
         ProjectileTrace trace;
         trace.start = FixedVec3{0, 0, 0};
@@ -1917,6 +1933,69 @@ void test_terrain_impact_samples_charmap_surface() {
     }
 }
 
+// A physical terrain stop resolves ammo word +0x74 into the permanent terrain
+// cache registry before presenting the ordinary impact. The record remains in
+// mission x/y here; the Simulation drain owns the one Godot x/-z fold.
+// [orig: Projectile_HandleTerrainImpact @0x4E9314 -> sub_6060D0]
+void test_terrain_impact_emits_permanent_scorch() {
+    crt_srand(1);
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    shooter.position = {0.0f, 0.0f, 10.0f};
+    const EntityHandle owner = world.registry.spawn(0, shooter);
+
+    AmmoTableEntry ammo;
+    ammo.name = "SCORCH";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.scorch_id = 2;
+    world.ammo.entries.push_back(ammo);
+
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    RoundSpawnParams params;
+    params.owner = owner;
+    params.shooter_handle = owner.packed;
+    params.origin = {10.0f, -20.0f, 2.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel =
+        Vec3{0.0f, 0.0f, -10.0f};
+    world.round_sim.tick(world, &flat, &collision);
+
+    CHECK(world.terrain_scorches.pending().size() == 1);
+    if (world.terrain_scorches.pending().empty()) return;
+    const TerrainScorchEvent &event = world.terrain_scorches.pending()[0];
+    CHECK(event.mission_bounds.texture_index == 2); // first CRT rand = 41
+    CHECK(event.mission_bounds.minimum_x_q16 == 6 * 65536);
+    CHECK(event.mission_bounds.maximum_x_q16 == 14 * 65536);
+    CHECK(event.mission_bounds.minimum_z_q16 == -24 * 65536);
+    CHECK(event.mission_bounds.maximum_z_q16 == -16 * 65536);
+    CHECK(event.tick == world.logic_tick);
+
+    world.terrain_scorches.reset();
+    ammo.scorch_id = 0;
+    // No second active round remains, so an inert route can be pinned directly
+    // without manufacturing a renderer record.
+    CHECK(!world.terrain_scorches.emit_standard(0, 0, ammo.scorch_id, 1));
+    CHECK(world.terrain_scorches.pending().empty());
+}
+
 // The ordinary BULLET path never remaps a building's CFAC material 1 to the
 // flesh bank: retail's ballistic entity impact passes material + 4
 // unconditionally; the 1 -> 23 remap belongs to the knife's PERSON leg alone.
@@ -2071,6 +2150,7 @@ int main() {
     test_knife_instant_kill_zone_raycast();
     test_bullet_building_material_is_plain_plus_four();
     test_terrain_impact_samples_charmap_surface();
+    test_terrain_impact_emits_permanent_scorch();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();
     test_visual_dynamic_proxy_excludes_shooter_self_slot();

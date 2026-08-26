@@ -309,6 +309,13 @@ public:
 			record.entity_kind = source.entity_kind;
 			record.entity_index = source.entity_index;
 			record.team = source.team;
+			// The sector-model submit writes TEX_TEAM immediately before the
+			// object enters the retail batch queue. This collector has no other
+			// explicit CTRL writer; inherited process-global ordering remains
+			// tracked by D-3DI-2 instead of being misrepresented as caster-local.
+			// The submit-site witness lives with the present row contract in
+			// engine/runtime/world/present_rows.h (TEX_TEAM control value).
+			record.control_values[THREEDI_CTRL_TEX_TEAM] = source.team;
 			record.entity_attrib = source.entity_attrib;
 			record.item_attrib = source.item_attrib;
 			record.item_attrib2 = source.item_attrib2;
@@ -599,7 +606,8 @@ Dictionary TerrainStaticShadowRasterizer::get_diagnostics() const {
 }
 
 void TerrainStaticShadowRasterizer::begin_frame(
-		const Vector3 &p_environment_light_tuple) {
+		const Vector3 &p_environment_light_tuple,
+		uint32_t p_material_time_ms) {
 	impl_->planner.reset_frame_diagnostics();
 	impl_->async_diagnostics = {};
 	impl_->async_diagnostics.snapshot_exact =
@@ -610,6 +618,7 @@ void TerrainStaticShadowRasterizer::begin_frame(
 					static_cast<float>(p_environment_light_tuple.x),
 					static_cast<float>(p_environment_light_tuple.y),
 					static_cast<float>(p_environment_light_tuple.z)));
+	impl_->planner.set_material_time(p_material_time_ms);
 	const uint64_t terrain_revision = impl_->terrain_data.is_valid()
 			? impl_->terrain_data->get_change_revision()
 			: 0;
@@ -642,6 +651,11 @@ TerrainStaticShadowRasterizer::plan_page(
 
 std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
 TerrainStaticShadowRasterizer::compilation_snapshot() const {
+	// The revision moves only on a structural change (caster set, light
+	// quantum, receiver terrain, config); material time is per job, so a
+	// steady world shares one snapshot across frames. The planner copy below
+	// shares the immutable caster set by pointer and duplicates only the
+	// per-page memo caches.
 	const uint64_t revision = impl_->planner.state_revision();
 	if (impl_->compilation_snapshot == nullptr ||
 			impl_->compilation_snapshot->revision != revision) {
@@ -658,6 +672,10 @@ TerrainStaticShadowRasterizer::compilation_snapshot() const {
 				impl_->planner.caster_count();
 	}
 	return impl_->compilation_snapshot;
+}
+
+uint32_t TerrainStaticShadowRasterizer::material_time_ms() const noexcept {
+	return impl_->planner.material_time_ms();
 }
 
 void TerrainStaticShadowRasterizer::merge_async_diagnostics(

@@ -28,7 +28,11 @@ void ObjectModel::rebuild_scene() {
 	surface_material_indices_.clear();
 	surface_materials_.clear();
 	surface_lighting_contexts_.clear();
-	alpha_materials_.clear();
+	alpha_strip_draws_.clear();
+	alpha_strip_models_.erase(this);
+	render_order_dirty_ = true;
+	point_light_draw_parts_dirty_ = true;
+	set_notify_transform(false);
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
 	material_defs_.clear();
@@ -37,9 +41,11 @@ void ObjectModel::rebuild_scene() {
 	has_live_panm_ = false;
 	material_needs_eval_.clear();
 	dynamic_material_slots_ = PackedInt32Array();
+	material_runtime_stamps_.clear();
 	last_env_gen_ = -1;
 	last_env_values_.unref();
 	last_section_env_values_.unref();
+	point_light_selection_hashes_.clear();
 	robj_dense_ = Array();
 	panm_applied_revision_ = 0;
 	if (object_data_.is_null() || !object_data_->has_document()) {
@@ -89,8 +95,17 @@ void ObjectModel::rebuild_scene() {
 		instance->set_layer_mask(
 				(mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR) |
 				shadow_caster_layers_);
-		const Ref<ShaderMaterial> material =
+		Ref<ShaderMaterial> material =
 				material_for_index(material_index, lighting_context);
+		// One imported submesh is one retail strip. Transparent strips must own
+		// their material instance because Godot stores render_priority on the
+		// material, while retail chooses Q1/Q2 independently for every strip on
+		// every frame (renderer/render_order owns the cited queue contract).
+		// Opaque strips may keep sharing their retained
+		// material cache entry.
+		if (bool(submesh.get("is_alpha", false)) && material.is_valid()) {
+			material = material->duplicate();
+		}
 		instance->set_material_override(material);
 		// Skinned + rigid-fake-skinned submeshes bind to the shared
 		// Skeleton3D; everything else stays under its Robj part node so PANM
@@ -104,6 +119,53 @@ void ObjectModel::rebuild_scene() {
 			Node3D *node = get_or_create_robj_node(robj_index);
 			node->add_child(instance);
 		}
+		if (bool(submesh.get("is_alpha", false)) && material.is_valid()) {
+			AlphaStripDraw draw;
+			draw.instance = instance;
+			draw.material = material;
+			draw.local_center = mesh->get_aabb().get_center();
+			draw.bone_path = skeletal_mode &&
+					bool(submesh.get("is_skinned", false));
+			alpha_strip_draws_.push_back(draw);
+		}
+		// Retail multi-pass effects retain one logical material but submit the
+		// same strip geometry again. Pair those auxiliary materials through
+		// metadata and duplicate geometry only; never duplicate logical rows.
+		auto add_auxiliary_draw = [&](const StringName &p_material_meta,
+				const String &p_name, const StringName &p_kind_meta) {
+			if (!material->has_meta(p_material_meta)) {
+				return;
+			}
+			const Ref<ShaderMaterial> auxiliary_material = material->get_meta(
+					p_material_meta, Variant());
+			if (auxiliary_material.is_null()) {
+				return;
+			}
+			MeshInstance3D *auxiliary_instance = memnew(MeshInstance3D);
+			auxiliary_instance->set_name(p_name);
+			auxiliary_instance->set_mesh(mesh);
+			auxiliary_instance->set_material_override(auxiliary_material);
+			auxiliary_instance->set_cast_shadows_setting(
+					GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+			auxiliary_instance->set_layer_mask(
+					mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR);
+			auxiliary_instance->set_meta("_opennova_auxiliary_draw", true);
+			auxiliary_instance->set_meta(p_kind_meta, true);
+			Node *surface_parent = instance->get_parent();
+			if (surface_parent == nullptr) {
+				memdelete(auxiliary_instance);
+				return;
+			}
+			surface_parent->add_child(auxiliary_instance);
+			if (skeletal_mode && skeleton_ != nullptr &&
+					bool(submesh.get("is_skinned", false))) {
+				auxiliary_instance->set_skin(skeleton_skin_);
+				auxiliary_instance->set_skeleton_path(
+						auxiliary_instance->get_path_to(skeleton_));
+			}
+		};
+		add_auxiliary_draw("_opennova_postmultiply_material", "PostMultiply",
+				"_opennova_postmultiply_proxy");
 		surface_material_indices_.append(material_index);
 		surface_materials_.push_back(material);
 		surface_lighting_contexts_.append(static_cast<uint8_t>(lighting_context));
@@ -112,6 +174,14 @@ void ObjectModel::rebuild_scene() {
 
 	classify_materials();
 	apply_runtime_state(0.0);
+	// Newly rebuilt GeometryInstance3Ds have default instance uniforms. Keep
+	// the stance gate immediately correct; the terrain-frame leg supplies the
+	// resident page after Terrain has serviced its cache requests.
+	stamp_match_terrain_instances(false, 0.0f, Vector4());
+	if (!alpha_strip_draws_.is_empty()) {
+		alpha_strip_models_.insert(this);
+		set_notify_transform(true);
+	}
 	refresh_render_order();
 }
 
@@ -165,8 +235,8 @@ void ObjectModel::sync_screen_notifier(const AABB &p_bounds) {
 			screen_notifier_->queue_free();
 			screen_notifier_ = nullptr;
 		}
-		// Route through the public seam: the safe default must also clear any
-		// off-screen claim left in the shared submission registry.
+		// Route through the public seam so the on-screen edge wakes the
+		// runtime frame like a real notifier would.
 		set_on_screen(true);
 		return;
 	}

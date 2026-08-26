@@ -1482,23 +1482,62 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 	state.brightness = glare_brightness_step(state.brightness, target);
 }
 
-int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
-                           int sun_dim_fixed) {
-	// [orig: render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9] — dot^4 / 2 in
-	// 16.16, scaled by brightness >> 8, then the overcast x SunDim fold.
-	int dot_factor = 0;
-	if (view_dot_fixed > 0) {
-		const int squared = static_cast<int>(
-				(static_cast<int64_t>(view_dot_fixed) * view_dot_fixed + 0x8000) >> 16);
-		dot_factor = static_cast<int>(
-				(static_cast<int64_t>(squared) * squared + 0x8000) >> 16) >> 1;
+namespace {
+
+// dot_view^4 / 2 in 16.16 [orig: render_skybox_sun_glow @ 0x5acfb8..0x5acff7].
+int glare_dot_factor(int view_dot_fixed) {
+	if (view_dot_fixed <= 0) {
+		return 0;
 	}
-	const int scaled = (brightness * dot_factor) >> 8;
+	const int squared = static_cast<int>(
+			(static_cast<int64_t>(view_dot_fixed) * view_dot_fixed + 0x8000) >> 16);
+	return static_cast<int>(
+				   (static_cast<int64_t>(squared) * squared + 0x8000) >> 16) >>
+			1;
+}
+
+// The shared submit-alpha tail: the FBEFFECTS >= 3 quarter
+// [orig: sub_581F60 @ 0x581f6a; >>= 2 @ 0x5ad033..0x5ad03c], then the
+// overcast x SunDim fold and the 16.16 clamp [orig: @ 0x5ad084..0x5ad0a9].
+int glare_alpha_tail(int scaled, int overcast_blend_fixed, int sun_dim_fixed,
+		bool frame_effects_quarter) {
+	if (frame_effects_quarter) {
+		scaled >>= 2;
+	}
 	const int64_t dim_fold = static_cast<int64_t>(scaled) *
 			((0x640000 - sun_dim_fixed) >> 8) / 25600;
 	const int alpha = static_cast<int>(
 			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) * dim_fold + 0x8000) >> 16);
 	return clamp_int(alpha, 0, 0x10000);
+}
+
+} // namespace
+
+int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
+                           int sun_dim_fixed, bool frame_effects_quarter) {
+	// [orig: render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9] — dot^4 / 2 in
+	// 16.16, scaled by the occlusion brightness >> 8.
+	const int scaled = (brightness * glare_dot_factor(view_dot_fixed)) >> 8;
+	return glare_alpha_tail(scaled, overcast_blend_fixed, sun_dim_fixed,
+			frame_effects_quarter);
+}
+
+int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
+                         int overcast_blend_fixed, int sun_dim_fixed,
+                         bool frame_effects_quarter) {
+	// The no-occlusion path FrameFX_RenderBloomPass drives
+	// (render_skybox_sun_glow(0, 0)): brightness = (fog_km + 1.0) * 0.5 *
+	// dot_factor [orig: @ 0x5ad013..0x5ad027 - fog_km = Env_FogDistCurrent *
+	// flt_7DA0C4 (1/65536000) @ 0x5acd8e..0x5acd98; flt_7C3280 = 1.0;
+	// flt_7C3B94 = 0.5]. fog in float world units like glare_occlusion_tick:
+	// world * 65536 * (1/65536000) == world / 1000.
+	const double fog_km = static_cast<double>(fog_distance_world) * 65536.0 *
+			static_cast<double>(1.525878978725359e-08f);
+	const int scaled = static_cast<int>(
+			(fog_km + 1.0) * 0.5 *
+			static_cast<double>(glare_dot_factor(view_dot_fixed)));
+	return glare_alpha_tail(scaled, overcast_blend_fixed, sun_dim_fixed,
+			frame_effects_quarter);
 }
 
 // ---------------------------------------------------------------------------

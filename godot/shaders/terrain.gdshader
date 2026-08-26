@@ -4,8 +4,9 @@ render_mode unshaded;
 // Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
 // u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
 #include "res://shaders/terrain_lighting.gdshaderinc"
-// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+// Gamma-domain scene-target contract.
 #include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/nova_frame_pass.gdshaderinc"
 
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
@@ -24,8 +25,9 @@ instance uniform float u_instance_sector_z = 0.0;
 instance uniform vec2 u_instance_source_quadrant = vec2(0.0);
 instance uniform bool u_instance_tile_cache_ready = false;
 instance uniform float u_instance_tile_cache_layer = 0.0;
-// world origin X/Z, inverse world span, world span (diagnostic mirror).
-instance uniform vec4 u_instance_tile_cache_origin_span = vec4(0.0);
+// Exact max-quality retail c7/c8 reduction: world origin X/Z, inverse world
+// span, and span (diagnostic mirror). No failed-VS fallback matrix is carried.
+instance uniform vec4 u_instance_tile_cache_projection = vec4(0.0);
 // The pool slot this patch instance reads its light-pool rows from (draw-list
 // index == pool slot, fixed per instance; terrain_lighting.gdshaderinc).
 instance uniform float u_instance_light_slot = 0.0;
@@ -78,11 +80,16 @@ vec3 sector_color(float sx, float sz) {
 }
 
 void fragment() {
+	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+		// Ordinary opaque Q3 queue entries retain depth while contributing
+		// black to the isolated color target.
+		ALBEDO = vec3(0.0);
+	} else {
 	vec4 colormap;
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = (v_world_pos.xz -
-			u_instance_tile_cache_origin_span.xy) *
-			u_instance_tile_cache_origin_span.z;
+			u_instance_tile_cache_projection.xy) *
+			u_instance_tile_cache_projection.z;
 		vec2 half_texel = vec2(0.5 / 256.0);
 		page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
 		colormap = texture(u_tile_cache,
@@ -126,5 +133,6 @@ void fragment() {
 	// The witnessed math above ran in gamma space; encode once so the display
 	// shows exactly those bytes (D-RMAT-7). Debug overlays ride the same
 	// transform (diagnostic-only).
-	ALBEDO = nova_gamma_to_linear(result);
+	ALBEDO = nova_scene_output(result);
+	}
 }

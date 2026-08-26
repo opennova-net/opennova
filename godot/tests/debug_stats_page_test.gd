@@ -82,13 +82,65 @@ func _find_tree_item(item: TreeItem, label: String) -> TreeItem:
 
 func test_rows_cover_major_systems_and_label_units() -> void:
 	var pane := _make_pane()
-	for id in [&"frame", &"world", &"foliage", &"runtime", &"sim", &"net",
+	for id in [&"frame", &"world", &"foliage", &"runtime", &"sim",
+			&"host_prep", &"host_pump", &"host_receive", &"host_connections",
+			&"host_adapter", &"server_tick", &"server_input", &"server_world",
+			&"world_setup", &"world_scripts", &"world_ai", &"ai_reactions",
+			&"ai_collision", &"ai_entities", &"ai_infantry",
+			&"ai_infantry_remote", &"ai_infantry_combat",
+			&"ai_infantry_animation", &"ai_infantry_collision",
+			&"ai_infantry_collision_contacts", &"ai_infantry_collision_repulsion",
+			&"ai_infantry_collision_ground", &"ai_infantry_collision_unattributed",
+			&"ai_infantry_unattributed", &"ai_other_entities",
+			&"ai_entities_unattributed", &"ai_auth_vehicles", &"ai_vehicle_scan",
+			&"ai_vehicle_motors", &"ai_vehicle_riders", &"ai_vehicles_unattributed",
+			&"ai_client_vehicles", &"ai_events", &"ai_unattributed",
+			&"world_attachments", &"attachment_orphans", &"attachment_children",
+			&"attachment_riders", &"attachment_unattributed",
+			&"world_throwables", &"world_weapons", &"world_projectiles",
+			&"world_destruction", &"world_housekeeping", &"world_unattributed",
+			&"match", &"server_rules", &"server_replication",
+			&"replication_query_prep", &"replication_query_collect",
+			&"replication_query_grid", &"replication_query_grid_span",
+			&"replication_query_grid_bucket", &"replication_query_grid_workspace",
+			&"replication_query_grid_unattributed", &"replication_query_unattributed",
+			&"replication_snapshot",
+			&"replication_fan", &"replication_fan_setup", &"replication_rounds",
+			&"replication_entities", &"replication_entity_setup",
+			&"replication_entity_score", &"replication_entity_los",
+			&"replication_entity_los_terrain", &"replication_entity_los_sector",
+			&"replication_entity_los_unattributed",
+			&"replication_entity_score_math", &"replication_entity_sort",
+			&"replication_entity_budget", &"replication_entity_unattributed",
+			&"replication_encode", &"replication_enqueue",
+			&"replication_fan_unattributed", &"replication_unattributed",
+			&"server_unattributed", &"host_send", &"host_unattributed",
+			&"host_player", &"net", &"client_setup", &"client_receive",
+			&"client_maintenance", &"client_send", &"client_unattributed",
+			&"adm_resolve", &"sim_unattributed", &"sim_sink",
 			&"trace", &"trace_terrain", &"trace_static", &"trace_dynamic",
 			&"trace_person", &"effects_drain", &"effects", &"present",
-			&"snapshot", &"mission_rows", &"wire_rows", &"fire",
-			&"destruction", &"throwable", &"occl", &"occl_build",
-			&"occl_probe", &"occl_apply", &"occl_glue", &"env", &"audio",
-			&"hud", &"render", &"render_main", &"render_shadow",
+			&"snapshot", &"mission_rows", &"mission_rows_core",
+			&"mission_rows_aim", &"mission_rows_controls",
+			&"mission_rows_visibility", &"mission_rows_body",
+			&"mission_rows_muzzle", &"mission_rows_remainder",
+			&"wire_rows", &"fire",
+			&"destruction", &"throwable", &"runtime_overhead",
+			&"local_view", &"framefx", &"scene_env", &"terrain", &"network_frame",
+			&"occl", &"occl_build",
+			&"occl_probe", &"occl_apply", &"occl_glue",
+			&"occl_building_query", &"occl_building_apply",
+			&"occl_cull_query", &"occl_cull_apply", &"occl_light_query",
+			&"occl_light_apply", &"occl_water_apply", &"occl_apply_remainder",
+			&"env", &"sun_veil", &"light", &"material",
+			&"model_clock_animation", &"model_panm", &"model_material",
+			&"model_environment", &"model_order_bounds",
+			&"model_runtime_remainder", &"slot_shadow",
+			&"particles", &"audio", &"clear", &"env_cube", &"world_remainder",
+			&"hud", &"stats_sample", &"shell_control", &"round_flow",
+			&"menu_shell", &"menu_video", &"debug_refresh", &"frame_overhead",
+			&"other_process", &"physics_callbacks", &"engine_frame",
+			&"render", &"render_main", &"render_shadow",
 			&"render_water"]:
 		assert_not_null(_row(pane, id), "the Stats tab carries a '%s' row" % id)
 	assert_eq(pane.stats_tree.get_column_title(0), "System")
@@ -101,6 +153,39 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			"Peak milliseconds in one frame")
 	assert_eq(_row(pane, &"trace").label, "Projectile trace (attributed)",
 			"the group does not claim the intentionally uncharged setup/water time")
+	assert_eq(_row(pane, &"other_process").label, "Other process callbacks")
+	assert_eq(_row(pane, &"engine_frame").label,
+			"Engine/render/frame pacing")
+
+
+func test_model_and_mission_row_info_cells_render_their_counts() -> void:
+	var pane: DebugStatsPage = PaneScript.new()
+	pane.setup(DebugContext.new())
+	add_child_autofree(pane)
+	var window := _blank_window()
+	var sums: PackedInt64Array = window[0]
+	var counts: PackedInt32Array = window[2]
+	counts[FrameStatsBoard.MODEL_AWAKE_MODELS] = 2
+	sums[FrameStatsBoard.MODEL_AWAKE_MODELS] = 24
+	counts[FrameStatsBoard.MODEL_RENDERABLE_MODELS] = 2
+	sums[FrameStatsBoard.MODEL_RENDERABLE_MODELS] = 16
+	counts[FrameStatsBoard.PRESENT_MISSION_ROWS] = 1
+	sums[FrameStatsBoard.PRESENT_MISSION_ROWS] = 40
+	sums[FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS] = 30
+	sums[FrameStatsBoard.PRESENT_MISSION_BODY_ROWS] = 20
+	sums[FrameStatsBoard.PRESENT_MISSION_MUZZLE_ROWS] = 10
+	pane.render_window(1, sums, window[1], counts, null, null)
+	var material := _find_tree_item(pane.stats_tree.get_root(), "Model runtime")
+	assert_not_null(material)
+	if material != null:
+		assert_eq(material.get_text(3), "12 awake · 8 renderable",
+				"the model cell averages per sample with the U+00B7 separator")
+	var rows := _find_tree_item(pane.stats_tree.get_root(), "Mission rows")
+	assert_not_null(rows)
+	if rows != null:
+		assert_eq(rows.get_text(3),
+				"40 rows · 30 submitted · 20 body · 10 muzzle",
+				"the mission-row cell averages per frame with the U+00B7 separator")
 
 
 func test_narrow_tree_stays_inside_the_page_and_tooltips_keep_full_text() -> void:
@@ -157,6 +242,35 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	sums[FrameStatsBoard.SIM_STEP] = 20_000
 	peaks[FrameStatsBoard.SIM_STEP] = 5_000
 	counts[FrameStatsBoard.SIM_STEP] = 10
+	var sim_parts := {
+		FrameStatsBoard.SIM_HOST_PREP: 1_000,
+		FrameStatsBoard.SIM_HOST_PUMP: 12_000,
+		FrameStatsBoard.SIM_HOST_RECEIVE: 1_000,
+		FrameStatsBoard.SIM_HOST_CONNECTIONS: 1_000,
+		FrameStatsBoard.SIM_HOST_ADAPTER: 1_000,
+		FrameStatsBoard.SIM_SERVER_TICK: 7_000,
+		FrameStatsBoard.SIM_SERVER_INPUT: 1_000,
+		FrameStatsBoard.SIM_SERVER_WORLD: 3_000,
+		FrameStatsBoard.SIM_WORLD_SETUP: 250,
+		FrameStatsBoard.SIM_WORLD_SCRIPTS: 250,
+		FrameStatsBoard.SIM_WORLD_AI: 1_500,
+		FrameStatsBoard.SIM_WORLD_ATTACHMENTS: 100,
+		FrameStatsBoard.SIM_WORLD_THROWABLES: 100,
+		FrameStatsBoard.SIM_WORLD_WEAPONS: 100,
+		FrameStatsBoard.SIM_WORLD_PROJECTILES: 100,
+		FrameStatsBoard.SIM_WORLD_DESTRUCTION: 50,
+		FrameStatsBoard.SIM_WORLD_HOUSEKEEPING: 50,
+		FrameStatsBoard.SIM_MATCH: 500,
+		FrameStatsBoard.SIM_SERVER_RULES: 1_000,
+		FrameStatsBoard.SIM_SERVER_REPLICATION: 1_000,
+		FrameStatsBoard.SIM_HOST_SEND: 1_000,
+		FrameStatsBoard.SIM_HOST_PLAYER: 1_000,
+		FrameStatsBoard.SIM_NET: 1_000,
+		FrameStatsBoard.SIM_ADM_RESOLVE: 1_000,
+	}
+	for slot in sim_parts:
+		sums[slot] = sim_parts[slot]
+		counts[slot] = 10
 	sums[FrameStatsBoard.OCCL_BUILD] = 2_000
 	sums[FrameStatsBoard.OCCL_PROBE] = 3_000
 	sums[FrameStatsBoard.OCCL_APPLY] = 4_000
@@ -170,15 +284,27 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	counts[FrameStatsBoard.FRAME_WORLD] = 10
 	sums[FrameStatsBoard.FRAME_HUD] = 10_000
 	counts[FrameStatsBoard.FRAME_HUD] = 10
+	sums[FrameStatsBoard.FRAME_SHELL_CONTROL] = 5_000
+	counts[FrameStatsBoard.FRAME_SHELL_CONTROL] = 10
+	sums[FrameStatsBoard.FRAME_PROCESS_CALLBACKS] = 85_000
+	counts[FrameStatsBoard.FRAME_PROCESS_CALLBACKS] = 10
+	sums[FrameStatsBoard.FRAME_PHYSICS_CALLBACKS] = 5_000
+	counts[FrameStatsBoard.FRAME_PHYSICS_CALLBACKS] = 10
 
 	pane.render_window(10, sums, peaks, counts, null, null)
 	assert_eq(_row(pane, &"sim").average, "2.00")
 	assert_eq(_row(pane, &"sim").peak, "5.00")
+	assert_eq(_row(pane, &"sim_unattributed").average, "0.40")
+	assert_eq(_row(pane, &"host_unattributed").average, "0.10")
+	assert_eq(_row(pane, &"server_unattributed").average, "0.05")
+	assert_eq(_row(pane, &"world_unattributed").average, "0.05")
 	assert_eq(_row(pane, &"hud_attach").average, "-")
 	assert_eq(_row(pane, &"occl").average, "1.00",
 			"the group includes build, probe, apply, and binding glue")
 	assert_eq(_row(pane, &"occl_glue").average, "0.10")
-	assert_eq(_row(pane, &"shell_residual").average, "3.00")
+	assert_eq(_row(pane, &"other_process").average, "1.00")
+	assert_eq(_row(pane, &"physics_callbacks").average, "0.50")
+	assert_eq(_row(pane, &"engine_frame").average, "1.00")
 
 
 func test_pass_count_cells_average_per_frame_and_clear_when_unsampled() -> void:

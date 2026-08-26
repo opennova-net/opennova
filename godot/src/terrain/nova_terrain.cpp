@@ -75,6 +75,11 @@ void Terrain::_bind_methods() {
 		&Terrain::get_tile_cache_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
 		&Terrain::get_tile_cache_diagnostics);
+	ClassDB::bind_method(D_METHOD("append_terrain_scorch", "texture_index",
+			"minimum_x_q16", "minimum_z_q16", "maximum_x_q16",
+			"maximum_z_q16"), &Terrain::append_terrain_scorch);
+	ClassDB::bind_method(D_METHOD("clear_terrain_scorches"),
+			&Terrain::clear_terrain_scorches);
 	ClassDB::bind_method(
 		D_METHOD("set_tile_cache_capture_diagnostics", "enabled"),
 		&Terrain::set_tile_cache_capture_diagnostics);
@@ -226,6 +231,28 @@ Dictionary Terrain::get_tile_cache_diagnostics() const {
 		diagnostics[String("shadow_provider_") + String(key)] = provider[key];
 	}
 	return diagnostics;
+}
+
+bool Terrain::append_terrain_scorch(int64_t p_texture_index,
+		int64_t p_minimum_x_q16, int64_t p_minimum_z_q16,
+		int64_t p_maximum_x_q16, int64_t p_maximum_z_q16) {
+	if (p_texture_index < 0 || p_texture_index > UINT8_MAX ||
+			p_minimum_x_q16 < INT32_MIN || p_minimum_x_q16 > INT32_MAX ||
+			p_minimum_z_q16 < INT32_MIN || p_minimum_z_q16 > INT32_MAX ||
+			p_maximum_x_q16 < INT32_MIN || p_maximum_x_q16 > INT32_MAX ||
+			p_maximum_z_q16 < INT32_MIN || p_maximum_z_q16 > INT32_MAX) {
+		return false;
+	}
+	return tile_cache_device.append_terrain_scorch({
+			static_cast<uint8_t>(p_texture_index),
+			static_cast<int32_t>(p_minimum_x_q16),
+			static_cast<int32_t>(p_minimum_z_q16),
+			static_cast<int32_t>(p_maximum_x_q16),
+			static_cast<int32_t>(p_maximum_z_q16)});
+}
+
+void Terrain::clear_terrain_scorches() {
+	tile_cache_device.clear_terrain_scorches();
 }
 
 std::optional<opennova::TerrainTilePageBinding>
@@ -448,7 +475,8 @@ void Terrain::render_frame() {
 		page_light_direction =
 				cached_env_node->get_light_direction_render_tuple();
 	}
-	static_shadow_rasterizer.begin_frame(page_light_direction);
+	static_shadow_rasterizer.begin_frame(page_light_direction,
+			light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
 	tile_cache_device.begin_frame(draw_list.frame_id);
 
 	// Apply the draw list onto the instance pool: draw-list index == pool slot.
@@ -491,23 +519,22 @@ void Terrain::render_frame() {
 		const opennova::TerrainTilePageBinding page =
 				tile_cache_device.request(
 					draw, page_tile_tint, page_light_direction);
+		const std::optional<opennova::TerrainTilePageProjection> projection =
+				page.ready
+						? opennova::TerrainTileCompositionCache::page_projection(page.page)
+						: std::nullopt;
 		rs->instance_geometry_set_shader_parameter(
-				patch_instances[i], "u_instance_tile_cache_ready", page.ready);
-		if (page.ready) {
-			const int span = opennova::TerrainTileCompositionCache::page_world_span(
-					page.page.page_lod_level);
-			const float world_x = static_cast<float>(
-					page.page.sector_origin_x + page.page.page_local_x);
-			const float world_z = static_cast<float>(
-					page.page.sector_origin_z + page.page.page_local_z);
+				patch_instances[i], "u_instance_tile_cache_ready", projection.has_value());
+		if (projection.has_value()) {
 			rs->instance_geometry_set_shader_parameter(
 					patch_instances[i], "u_instance_tile_cache_layer",
 					static_cast<float>(page.layer));
 			rs->instance_geometry_set_shader_parameter(
-					patch_instances[i], "u_instance_tile_cache_origin_span",
-					Vector4(world_x, world_z,
-						span > 0 ? 1.0f / static_cast<float>(span) : 0.0f,
-						static_cast<float>(span)));
+					patch_instances[i], "u_instance_tile_cache_projection",
+					Vector4(projection->world_origin_x,
+							projection->world_origin_z,
+							projection->inverse_world_span,
+							projection->world_span));
 		}
 
 		// Per-instance debug data (only set when a debug mode is active)

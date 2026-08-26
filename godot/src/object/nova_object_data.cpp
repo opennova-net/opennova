@@ -212,6 +212,7 @@ void ObjectData::_clear() {
 	_clear_source_project();
 	submesh_cache.clear();
 	_invalidate_panm_cache();
+	_invalidate_runtime_control_names();
 	source_kind = SourceKind::Empty;
 	source_path = String();
 	source_dir = String();
@@ -254,6 +255,7 @@ void ObjectData::_notify_object_changed(uint8_t p_update_mask) {
 	// they were built from, and the PANM frame cache re-arms a full re-apply.
 	submesh_cache.clear();
 	_invalidate_panm_cache();
+	_invalidate_runtime_control_names();
 	++change_revision_;
 	if (change_revision_ == 0) ++change_revision_;
 	global_change_counter_.fetch_add(1, std::memory_order_relaxed);

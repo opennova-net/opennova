@@ -8,6 +8,39 @@ const NATIVE_RUNTIME_TIMING_KEYS := [
 	"occlusion_probe_us",
 ]
 
+const SESSION_PHASE_TIMING_KEYS := [
+	"host_prep_us", "host_pump_us", "host_receive_us", "host_connections_us",
+	"host_adapter_us", "server_tick_us", "server_input_us", "server_world_us",
+	"world_setup_us", "world_scripts_us", "world_ai_us",
+	"world_ai_reactions_us", "world_ai_collision_tables_us", "world_ai_entities_us",
+	"world_ai_infantry_entities_us", "world_ai_infantry_remote_us",
+	"world_ai_infantry_combat_us", "world_ai_infantry_animation_us",
+	"world_ai_infantry_collision_us", "world_ai_infantry_collision_contacts_us",
+	"world_ai_infantry_collision_repulsion_us", "world_ai_infantry_collision_ground_us",
+	"world_ai_other_entities_us",
+	"world_ai_authority_vehicles_us", "world_ai_vehicle_scan_us",
+	"world_ai_vehicle_motors_us", "world_ai_vehicle_riders_us",
+	"world_ai_client_vehicles_us", "world_ai_events_us",
+	"world_attachments_us", "world_attachment_orphans_us",
+	"world_attachment_child_pose_us", "world_attachment_riders_us",
+	"world_throwables_us", "world_weapons_us", "world_projectiles_us",
+	"world_destruction_us", "world_housekeeping_us", "match_us",
+	"server_rules_us", "server_replication_us", "replication_query_prep_us",
+	"replication_query_collect_us", "replication_query_grid_us",
+	"replication_query_grid_span_us", "replication_query_grid_bucket_us",
+	"replication_query_grid_workspace_us",
+	"replication_snapshot_us",
+	"replication_fan_us", "replication_fan_setup_us", "replication_round_selection_us",
+	"replication_entity_selection_us", "replication_entity_setup_us",
+	"replication_entity_scoring_us", "replication_entity_los_us",
+	"replication_entity_los_terrain_us", "replication_entity_los_sector_us",
+	"replication_entity_sort_us",
+	"replication_entity_budget_us", "replication_encode_us", "replication_enqueue_us",
+	"host_send_us", "host_player_us", "client_decode_us", "client_setup_us",
+	"client_receive_us", "client_maintenance_us", "client_send_us",
+	"adm_resolve_us", "sink_us",
+]
+
 # Simulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
 # This is the in-Godot end of step 1 (promotion) + step 2 (locomotion).
@@ -483,6 +516,20 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 		sampled_us += int(counters.get(key, 0))
 	assert_gt(sampled_us, 0,
 			"the enabled gate records at least one native runtime span")
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = Simulation.tick_dt()
+	var frame_outcome := sim.step_session_frame(frame_input, Callable())
+	assert_not_null(frame_outcome)
+	var session_perf: Dictionary = sim.get_session_perf()
+	for key in SESSION_PHASE_TIMING_KEYS:
+		assert_true(session_perf.has(key), "the session exports the '%s' F3 phase" % key)
+	var world_phase_us := 0
+	for key in ["world_setup_us", "world_scripts_us", "world_ai_us",
+			"world_attachments_us", "world_throwables_us", "world_weapons_us",
+			"world_projectiles_us", "world_destruction_us", "world_housekeeping_us"]:
+		world_phase_us += int(session_perf.get(key, 0))
+	assert_gt(world_phase_us, 0,
+			"an enabled direct tick attributes work below the world-update box")
 
 	# Mission reload rebuilds CollisionWorld, so this pins reapplication of the
 	# one profiling request as well as the cleared timing snapshot.
@@ -505,6 +552,12 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	counters = sim.get_runtime_perf_counters()
 	_assert_native_runtime_timings_zero(counters)
 	assert_false(bool(counters.get("trace_profiling_enabled", true)))
+	frame_outcome = sim.step_session_frame(frame_input, Callable())
+	assert_not_null(frame_outcome)
+	session_perf = sim.get_session_perf()
+	for key in SESSION_PHASE_TIMING_KEYS:
+		assert_eq(int(session_perf.get(key, -1)), 0,
+				"%s stays zero while F3/native profiling is closed" % key)
 	sim.free()
 
 

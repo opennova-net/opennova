@@ -249,18 +249,6 @@ inline uint8_t yaw_byte_from_bam(int32_t bam) {
 	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
 }
 
-// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
-// recoil-yaw sign; preserve the complete state because decoded rows share one
-// stream rather than owning one generator each. Other process-global retail
-// consumers remain outside this view's bounded call-history seam.
-inline int32_t prng_next16(uint32_t &state) {
-	const uint32_t rol11 = (state << 11) | (state >> 21);
-	uint32_t next = state + rol11;
-	next = ((next << 4) | (next >> 28)) ^ 1u;
-	state = next;
-	return static_cast<int32_t>(next);
-}
-
 inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
 	const int32_t target = static_cast<int32_t>(
 			static_cast<uint32_t>(target_byte) << 24);
@@ -329,39 +317,6 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 //  −0x3000000/tick) / @0x4b7dd6 (bit 7 right +0x3000000/tick)]
 // The producer's ramp gates (alive/prone, and the seated ±0x1400000 variant) are not
 // applied here: the decoded row carries no honest stance/seat state for them (D-INF-17).
-void ClientReplicaPipeline::tick_lean() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		es.lean_angle = io::bam_sub(es.lean_angle,
-				io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
-		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
-			es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
-		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
-			es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
-	}
-}
-
-// The remote arms-dip integrator: the exact block AiSystem::infantry_weapon_channel
-// runs for authoritative bodies, applied here to wire-decoded peers. The window byte
-// decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
-// [orig: @0x4b5cab..0x4b5ce7]
-void ClientReplicaPipeline::tick_arms_dip() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		if (es.arms_dip_ticks > 0) {
-			--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
-			es.pitch_kick_accum = io::bam_sub(
-					es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
-		}
-		es.pitch_kick_accum = io::bam_sub(
-				es.pitch_kick_accum,
-				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
-		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
-	}
-}
-
 void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
 		bool force_live_snap) {
@@ -793,6 +748,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const terrain::TerrainHeightField *terrain,
                           uint32_t key, bool is_self,
                           const ClientReplicaPipeline::ReplicaContactResolver *resolver,
+                          const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
                           bool has_water) {
@@ -1041,6 +997,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 				? es.rm_vel_z : 2 * es.rm_vel_z);
 		ClientReplicaPipeline::ReplicaContactQuery q;
 		q.row_handle = es.handle;
+		q.type_id = es.type_id;
 		q.is_player_class = es.cls == EntityClass::Player;
 		q.pos[0] = es.x;
 		q.pos[1] = es.y;
@@ -1050,6 +1007,9 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.vel_z = es.rm_vel_z;
 		q.capsule_bottom = frame.capsule_bottom;
 		q.capsule_top = frame.capsule_top;
+		q.source_bound_radius_q16 = bound_resolver != nullptr && *bound_resolver
+				? (*bound_resolver)(es.type_id)
+				: 0;
 		q.anim_state_id = es.anim_state_id;
 		q.anim_state_flags = world::infantry_anim_flags(es.anim_state_id);
 		q.tick = tick;
@@ -1167,6 +1127,9 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			p.x = pe.x;
 			p.y = pe.y;
 			p.z = pe.z;
+			p.radius = replica_bound_radius_resolver_
+					? replica_bound_radius_resolver_(pe.type_id)
+					: 0;
 			contact_peers.push_back(p);
 		}
 	}
@@ -1311,6 +1274,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			if (root_motion_ != nullptr)
 				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
 				                     rm_key, is_self, &replica_contact_resolver_,
+				                     &replica_bound_radius_resolver_,
 				                     contact_peers.data(),
 				                     static_cast<int32_t>(contact_peers.size()),
 				                     rm_key, water_z_, has_water_);
@@ -1384,6 +1348,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			if (root_motion_ != nullptr)
 				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
 				                     rm_key, is_self, &replica_contact_resolver_,
+				                     &replica_bound_radius_resolver_,
 				                     contact_peers.data(),
 				                     static_cast<int32_t>(contact_peers.size()),
 				                     rm_key, water_z_, has_water_);
@@ -1488,22 +1453,6 @@ std::vector<uint16_t> ClientReplicaPipeline::drain_carrier_repair_requests() {
 	std::vector<uint16_t> out;
 	out.swap(carrier_repair_requests_);
 	return out;
-}
-
-void ClientReplicaPipeline::tick_recoil() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		const int32_t random16 = prng_next16(prng16_); // unconditional [orig: body updater]
-		const int32_t step = io::bam_sar(io::bam_add(es.recoil_pitch, 4), 3);
-		const int32_t half = io::bam_sar(step, 1);
-		es.recoil_pitch = io::bam_sub(es.recoil_pitch, half);
-		if (es.recoil_pitch <= 0x300) es.recoil_pitch = 0;
-		es.pitch_bam = io::bam_add(es.pitch_bam, io::bam_sar(step, 3));
-		es.heading_bam = (random16 & 1) == 0
-				? io::bam_add(es.heading_bam, half)
-				: io::bam_sub(es.heading_bam, half);
-	}
 }
 
 void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {

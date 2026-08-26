@@ -1,0 +1,190 @@
+{
+  "schema": 1,
+  "description": "Exact declaration inventory decoded from every shipped retail SCR .fx file. Declaration order and duplicate names are intentional and source-significant.",
+  "source_file_count": 44,
+  "technique_declaration_count": 59,
+  "typed_technique_declaration_count": 57,
+  "pass_declaration_count": 138,
+  "source_files": [
+    "_BaseInc.fx",
+    "_FFP.fx",
+    "_psBmEnv.fx",
+    "_psDiff.fx",
+    "_psPhong.fx",
+    "_psPhong2.fx",
+    "_tDepth.fx",
+    "_tSkDepth.fx",
+    "_tSkFolg.fx",
+    "_vsBmEnv.fx",
+    "_vsDepth.fx",
+    "_vsDiffO.fx",
+    "_vsDiffT.fx",
+    "_vsFlat.fx",
+    "_vsPhongO.fx",
+    "_vsPhongT.fx",
+    "_vsPost.fx",
+    "_vsSkDep.fx",
+    "_vsSkDfO.fx",
+    "_vsSkDfT.fx",
+    "_vsSkFlat.fx",
+    "_vsSkFolg.fx",
+    "_vsSkPhO.fx",
+    "_vsSkPhT.fx",
+    "_vsSkPost.fx",
+    "BDiffT2.fx",
+    "BmTxMirrT.fx",
+    "BumpMirrT.fx",
+    "Dot3DiffO.fx",
+    "Dot3DiffT.fx",
+    "EnvPhongT.fx",
+    "Flag.fx",
+    "Glass.fx",
+    "leaves.FX",
+    "PhongO.fx",
+    "PhongT.fx",
+    "SkBasic.fx",
+    "SkBDiffO.fx",
+    "SkBDiffO2.fx",
+    "SkBDiffT.fx",
+    "SkBDiffT2.fx",
+    "SkBPhongO.fx",
+    "SkBPhongT.fx",
+    "SkGlass.fx"
+  ],
+  "classes": {
+    "TECHNIQUE_NORMAL": {
+      "declaration_count": 30,
+      "pass_declaration_count": 101,
+      "disposition": "ported_to_24_runtime_techniques_d3d12_raster_validated",
+      "highest_quality_selected": [
+        {"file": "_FFP.fx", "ordinal": 0, "name": "TBoringFFP", "runtime_techniques": ["Fixed", "FixedDetail", "SelfLit", "SelfLitDetail"]},
+        {"file": "BDiffT2.fx", "ordinal": 0, "name": "TSegTanDiff_Std", "runtime_techniques": ["Dot3Tangent", "Dot3TangentDetail"]},
+        {"file": "BmTxMirrT.fx", "ordinal": 0, "name": "TSegTanTexMirror", "runtime_techniques": ["EnvironmentMirrorTextured"]},
+        {"file": "BumpMirrT.fx", "ordinal": 0, "name": "TSegTanMirror", "runtime_techniques": ["EnvironmentMirror"]},
+        {"file": "Dot3DiffO.fx", "ordinal": 0, "name": "TSegObjDiff_std", "runtime_techniques": ["PhongObjectDiffuse"]},
+        {"file": "Dot3DiffT.fx", "ordinal": 0, "name": "TSegTanDiff_Std", "runtime_techniques": ["PhongTangentDiffuse"]},
+        {"file": "EnvPhongT.fx", "ordinal": 0, "name": "TSegTanEnvPhong", "runtime_techniques": ["EnvironmentPhong"]},
+        {"file": "Flag.fx", "ordinal": 0, "name": "TTracer", "runtime_techniques": ["Flag"]},
+        {"file": "Glass.fx", "ordinal": 0, "name": "TGlassFFP", "runtime_techniques": ["GlassFixed"]},
+        {"file": "PhongO.fx", "ordinal": 0, "name": "TSegObjPhong", "runtime_techniques": ["PhongObjectSpecular"]},
+        {"file": "PhongT.fx", "ordinal": 0, "name": "TSegTanPhong_Std", "runtime_techniques": ["PhongTangentSpecular"]},
+        {"file": "SkBasic.fx", "ordinal": 0, "name": "TSkBasic", "runtime_techniques": ["FixedSkinned"]},
+        {"file": "SkBDiffO.fx", "ordinal": 0, "name": "TSkinObjDiff_Std", "runtime_techniques": ["PhongObjectDiffuse"]},
+        {"file": "SkBDiffO2.fx", "ordinal": 0, "name": "TSkObjDiff", "runtime_techniques": ["Dot3Object", "Dot3ObjectDetail"]},
+        {"file": "SkBDiffT.fx", "ordinal": 0, "name": "TSkinTanDiff_Std", "runtime_techniques": ["PhongTangentDiffuse"]},
+        {"file": "SkBDiffT2.fx", "ordinal": 0, "name": "TSkTanDiff", "runtime_techniques": ["Dot3TangentSkinned", "Dot3TangentDetailSkinned"]},
+        {"file": "SkBPhongO.fx", "ordinal": 0, "name": "TSkObjPhong_Std", "runtime_techniques": ["PhongObjectSpecularPhongMap"]},
+        {"file": "SkBPhongT.fx", "ordinal": 0, "name": "TSkTanPhong_Std", "runtime_techniques": ["PhongTangentSpecularSkinned"]},
+        {"file": "SkGlass.fx", "ordinal": 0, "name": "TSkGlass", "runtime_techniques": ["GlassSkinned"]}
+      ],
+      "excluded_declarations": [
+        {"file": "BDiffT2.fx", "ordinal": 1, "name": "TSegTanDiff_Std", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "Dot3DiffO.fx", "ordinal": 1, "name": "TSegObjDiff_std", "reason": "lower_quality_fixed_function_fallback"},
+        {"file": "Dot3DiffT.fx", "ordinal": 1, "name": "TSegTanDiff_Std", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "EnvPhongT.fx", "ordinal": 1, "name": "TSegTanEnvDiff", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "leaves.FX", "ordinal": 0, "name": "TLeavesWind", "reason": "not_registered_by_the_shipped_OED_or_runtime_material_tag_table"},
+        {"file": "PhongO.fx", "ordinal": 1, "name": "TSegObjPhong", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "PhongT.fx", "ordinal": 1, "name": "TSegTanDiff_Std", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "SkBDiffO.fx", "ordinal": 1, "name": "TSkObjDiff", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "SkBDiffT.fx", "ordinal": 1, "name": "TSkTanDiff", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "SkBPhongO.fx", "ordinal": 1, "name": "TSkObjDiff", "reason": "lower_quality_no_pixel_shader_fallback"},
+        {"file": "SkBPhongT.fx", "ordinal": 1, "name": "TSkObjDiff", "reason": "lower_quality_no_pixel_shader_fallback"}
+      ],
+      "external_runtime_techniques": [
+        {"runtime_technique": "Tracer", "evidence": "runtime-only VS_TRACER binary/document witness"}
+      ],
+      "evidence": {
+        "_FFP.fx": ["TBoringFFP"],
+        "BDiffT2.fx": ["TSegTanDiff_Std", "TSegTanDiff_Std"],
+        "BmTxMirrT.fx": ["TSegTanTexMirror"],
+        "BumpMirrT.fx": ["TSegTanMirror"],
+        "Dot3DiffO.fx": ["TSegObjDiff_std", "TSegObjDiff_std"],
+        "Dot3DiffT.fx": ["TSegTanDiff_Std", "TSegTanDiff_Std"],
+        "EnvPhongT.fx": ["TSegTanEnvPhong", "TSegTanEnvDiff"],
+        "Flag.fx": ["TTracer"],
+        "Glass.fx": ["TGlassFFP"],
+        "leaves.FX": ["TLeavesWind"],
+        "PhongO.fx": ["TSegObjPhong", "TSegObjPhong"],
+        "PhongT.fx": ["TSegTanPhong_Std", "TSegTanDiff_Std"],
+        "SkBasic.fx": ["TSkBasic"],
+        "SkBDiffO.fx": ["TSkinObjDiff_Std", "TSkObjDiff"],
+        "SkBDiffO2.fx": ["TSkObjDiff"],
+        "SkBDiffT.fx": ["TSkinTanDiff_Std", "TSkTanDiff"],
+        "SkBDiffT2.fx": ["TSkTanDiff"],
+        "SkBPhongO.fx": ["TSkObjPhong_Std", "TSkObjDiff"],
+        "SkBPhongT.fx": ["TSkTanPhong_Std", "TSkObjDiff"],
+        "SkGlass.fx": ["TSkGlass"]
+      }
+    },
+    "TECHNIQUE_PROJSHAD": {
+      "declaration_count": 16,
+      "pass_declaration_count": 16,
+      "disposition": "ported_d3d12_raster_validated",
+      "evidence": {
+        "_FFP.fx": ["TBoringFFPProjShad"],
+        "BDiffT2.fx": ["TSegTanDiff_Proj"],
+        "BmTxMirrT.fx": ["TSegTexMirror_Proj"],
+        "BumpMirrT.fx": ["TSegMirror_Proj"],
+        "Dot3DiffO.fx": ["TSegObjDiff_Proj"],
+        "Dot3DiffT.fx": ["TSegTanDiff_Proj"],
+        "EnvPhongT.fx": ["TSegTanEnv_Proj"],
+        "PhongO.fx": ["TSegObjPhong_Proj"],
+        "PhongT.fx": ["TSegTanPhong_Proj"],
+        "SkBasic.fx": ["TSkBasic_Proj"],
+        "SkBDiffO.fx": ["TSkObjDiff_Proj"],
+        "SkBDiffO2.fx": ["TSkObjDiff_Proj"],
+        "SkBDiffT.fx": ["TSkTanDiff_Proj"],
+        "SkBDiffT2.fx": ["TSkTanDiff_Proj"],
+        "SkBPhongO.fx": ["TSkObjPhong_Proj"],
+        "SkBPhongT.fx": ["TSkTanPhong_Proj"]
+      }
+    },
+    "TECHNIQUE_DEPTHMASK": {
+      "declaration_count": 2,
+      "pass_declaration_count": 2,
+      "disposition": "validated_unreachable_dead_spot_projector_producer",
+      "evidence": {
+        "_tDepth.fx": ["Simple_DepthMask"],
+        "_tSkDepth.fx": ["Simple_DepthMask"]
+      }
+    },
+    "TECHNIQUE_CLIP": {
+      "declaration_count": 6,
+      "pass_declaration_count": 14,
+      "disposition": "ported_d3d12_raster_validated",
+      "evidence": {
+        "_FFP.fx": ["TBoringFFPClip"],
+        "BDiffT2.fx": ["TSegTanDiff_Clip"],
+        "Dot3DiffO.fx": ["TSegObjDiff_clip"],
+        "Dot3DiffT.fx": ["TSegTanDiff_Clip"],
+        "Glass.fx": ["TGlassFFP_clip"],
+        "PhongT.fx": ["TSegTanDiff_Clip"]
+      }
+    },
+    "TECHNIQUE_GLOW": {
+      "declaration_count": 1,
+      "pass_declaration_count": 1,
+      "disposition": "ported_isolated_q3_framefx_d3d12_raster_validated",
+      "evidence": {
+        "Glass.fx": ["TGlassFFP"]
+      }
+    },
+    "TECHNIQUE_MATCHTERRAIN": {
+      "declaration_count": 2,
+      "pass_declaration_count": 2,
+      "disposition": "ported_d3d12_raster_validated",
+      "evidence": {
+        "_tSkFolg.fx": ["Simple_MatchTerrain_PS", "Simple_MatchTerrain"]
+      }
+    },
+    "UNSPECIFIED": {
+      "declaration_count": 2,
+      "pass_declaration_count": 2,
+      "disposition": "excluded_pixel_shader_disabled_fallback",
+      "evidence": {
+        "BmTxMirrT.fx": ["TSegTexMirrorFFP"],
+        "BumpMirrT.fx": ["TSegMirrorFFP"]
+      }
+    }
+  }
+}

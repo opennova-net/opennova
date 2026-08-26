@@ -114,6 +114,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->has_item_def = def != nullptr;
         e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
         e->item_attrib2 = def != nullptr ? def->attrib2 : 0u;
+        e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
         e->is_ai_capable =
                 def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_AIDATA) != 0;
         // The injected catalog supplies both the authoritative host stamp and

@@ -81,6 +81,10 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _terrain: Terrain = $Terrain
 @onready var _env: MissionEnvironment = get_node_or_null("MissionEnvironment")
 @onready var _water: Water = get_node_or_null("Water")
+@onready var _environment_cube: EnvironmentCubeCapture = \
+		get_node_or_null("EnvironmentCubeCapture")
+@onready var _framefx: FrameFx = \
+		get_node_or_null("FrameFx")
 @onready var _weather: Weather = get_node_or_null("Weather")
 @onready var _celestial: Celestial = get_node_or_null("Celestial")
 @onready var _sky_dome: SkyDome = get_node_or_null("SkyDome")
@@ -252,7 +256,12 @@ func _init() -> void:
 	_light_director = EffectLightDirector.new()
 	_light_director.setup(self,
 			func() -> Array:
-				return _placer.get_static_item_effect_sources() if _placer != null else [])
+				return _placer.get_static_item_effect_sources() if _placer != null else [],
+			func() -> Array:
+				return _placer.get_static_light_draw_sources() if _placer != null else [],
+			func() -> int:
+				return int(_placer.get_static_light_draw_source_revision()) \
+						if _placer != null else 0)
 
 
 func _ready() -> void:
@@ -277,6 +286,11 @@ func _ready() -> void:
 	# engine/runtime/renderer/render_slot_shadow.h carries the witness map).
 	_slot_shadow = SlotShadow.new()
 	_slot_shadow.name = "SlotShadow"
+	# The highest selectable retail profile is SHADOWQUALITY=3. Detail 4 is an
+	# internal oversample tier (1024px slot 0 and all slots every frame), not the
+	# shipped maximum; profile 3 uses 512px captures and retail's half-rate
+	# stagger for non-player slots.
+	_slot_shadow.set_shadow_detail(3)
 	add_child(_slot_shadow)
 	_slot_shadow.set_environment_node(_env)
 	# The retained water renderer starts dormant until a successful load chooses
@@ -773,6 +787,8 @@ func _load_environment(env_path: String) -> bool:
 		weather.resync_colors()
 	if _celestial != null:
 		_celestial.set_resource_root(_resource_root)
+	if _environment_cube != null:
+		_environment_cube.force_capture()
 	return true
 
 
@@ -1017,6 +1033,8 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.build()
 	if _water != null:
 		_water.terrain_data = data
+	if _environment_cube != null:
+		_environment_cube.terrain_data = data
 	if _celestial != null:
 		# The glare occlusion rays march this terrain (env #14).
 		_celestial.terrain_data = data
@@ -1124,6 +1142,23 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 		_runtime.set_frame_stats_board(board)
 
 
+## GameFramePipeline's capture-only timing seam. The active value is latched by
+## begin_device_frame(), so every leg in one frame writes to the same board even
+## if the overlay changes page during that frame.
+func get_active_frame_stats_board() -> FrameStatsBoard:
+	return _frame_stats if _frame_stats_on else null
+
+
+func is_device_frame_timing_enabled() -> bool:
+	return _frame_timing
+
+
+func record_runtime_frame(elapsed_us: int) -> void:
+	_perf_runtime_us = elapsed_us
+	if _frame_stats_on:
+		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, elapsed_us)
+
+
 func _on_frame_stats_capture_changed(active: bool) -> void:
 	if not active:
 		_stop_water_render_stats()
@@ -1180,6 +1215,10 @@ func render_terrain_frame() -> void:
 	# camera inside render_frame (D-RORD-8).
 	if _world_ready and _terrain != null:
 		_terrain.render_frame()
+		# MATCHTERRAIN consumes the same composed-page generation Terrain just
+		# published. Refreshing here preserves retail's terrain-before-entity
+		# order and prevents a moving crouched body from sampling a stale page.
+		ObjectModel.refresh_match_terrain_frame(_terrain)
 
 
 func render_foliage_frame() -> void:
@@ -1260,6 +1299,16 @@ func present_local_view_frame() -> void:
 		_local_view_presenter.after_world_tick()
 
 
+## Copy the just-placed beauty camera onto the renderer's auxiliary views. This
+## MUST run after present_local_view_frame() and before any auxiliary viewport
+## draws: those views share the world and their color is restored into the
+## beauty target, so a pose taken from the previous frame shears foliage,
+## scars and coronas against the ground while the view turns (D-RORD-8).
+func sync_framefx_frame() -> void:
+	if _framefx != null:
+		_framefx.advance_frame()
+
+
 # Select the main scene's per-pass fog after the local player has placed the
 # camera, and before every rendered consumer submits. Camera offsets are part
 # of the render transform, so a v_offset-only waterline crossing must flip the
@@ -1279,6 +1328,15 @@ func apply_scene_environment_frame() -> void:
 			eye_y = cam.get_camera_transform().origin.y
 	_env.apply_render_eye(eye_y,
 			float(_water.water_height) if water_active else 0.0, water_active)
+	# Publish the same adjusted render eye to the per-strip Q1/Q2 classifier.
+	# This frame leg runs after camera placement and before ObjectModel's
+	# retained material walk, so water crossings flip the ladder immediately.
+	var shader_cache := ObjectShaderCache.get_singleton()
+	if water_active:
+		var water_height := float(_water.water_height)
+		shader_cache.set_water_plane(water_height, eye_y >= water_height)
+	else:
+		shader_cache.clear_water_plane()
 
 
 ## One-time handoff from the shell that owns the local-player presenter.
@@ -1355,6 +1413,20 @@ func render_slot_shadow_frame() -> void:
 		_slot_shadow.advance_frame()
 
 
+## Retail refreshes TexCubeEnvironment during the offscreen preparation leg:
+## all six 256-square faces together initially/when forced and every 128 render
+## frames, centered on the simulation player and clamped above terrain.
+## [orig: update_environment_cubemap @ 0x6106a0].
+func render_environment_cube_frame() -> void:
+	if not _world_ready or _environment_cube == null:
+		return
+	var capture_position := _render_camera_xform().origin
+	var capture_sim := get_sim()
+	if capture_sim != null:
+		capture_position = capture_sim.get_local_player_position()
+	_environment_cube.advance_frame(capture_position)
+
+
 func mix_audio_frame(ticks_run: int) -> void:
 	var audio_start := Time.get_ticks_usec()
 	if _world_ready and _mission_audio != null:
@@ -1406,14 +1478,8 @@ func begin_device_frame(camera_pos: Vector3, camera_xform: Transform3D,
 
 func finish_device_frame() -> void:
 	_perf_tick_us = Time.get_ticks_usec() - _device_frame_start_us
-	if _runtime != null:
-		var runtime_perf: Dictionary = _runtime.get_perf_counters()
-		_perf_runtime_us = int(runtime_perf.get("sim_us", 0)) \
-				+ int(runtime_perf.get("present_us", 0)) \
-				+ int(runtime_perf.get("effects_us", 0))
 	if _frame_stats_on:
 		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
-		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, _perf_runtime_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
 	_sample_water_render_stats(_frame_stats_on)
 
@@ -1425,7 +1491,26 @@ func render_material_frame() -> void:
 	# (after occlusion resolves visibility, before the particle composite)
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes model runtime
 	# constants during the render sector walk].
-	ObjectModel.advance_awake_frame(_frame_delta)
+	if not _frame_stats_on:
+		ObjectModel.advance_awake_frame(_frame_delta)
+		return
+	var profile := ObjectModel.profile_awake_frame(_frame_delta)
+	if profile.size() < ObjectModel.AWAKE_PROFILE_SLOT_COUNT:
+		return
+	_frame_stats.add(FrameStatsBoard.MODEL_CLOCK_ANIMATION,
+			profile[ObjectModel.AWAKE_PROFILE_CLOCK_ANIMATION_US])
+	_frame_stats.add(FrameStatsBoard.MODEL_PANM,
+			profile[ObjectModel.AWAKE_PROFILE_PANM_US])
+	_frame_stats.add(FrameStatsBoard.MODEL_MATERIAL,
+			profile[ObjectModel.AWAKE_PROFILE_MATERIAL_US])
+	_frame_stats.add(FrameStatsBoard.MODEL_ENVIRONMENT,
+			profile[ObjectModel.AWAKE_PROFILE_ENVIRONMENT_US])
+	_frame_stats.add(FrameStatsBoard.MODEL_ORDER_BOUNDS,
+			profile[ObjectModel.AWAKE_PROFILE_ORDER_BOUNDS_US])
+	_frame_stats.add(FrameStatsBoard.MODEL_AWAKE_MODELS,
+			profile[ObjectModel.AWAKE_PROFILE_AWAKE_MODELS])
+	_frame_stats.add(FrameStatsBoard.MODEL_RENDERABLE_MODELS,
+			profile[ObjectModel.AWAKE_PROFILE_RENDERABLE_MODELS])
 
 
 func render_particle_frame() -> void:
@@ -1445,7 +1530,7 @@ func render_light_frame() -> void:
 	var viewmodel_parts: Array[ObjectModel] = []
 	if _local_view_presenter != null:
 		viewmodel_parts = _local_view_presenter.vm_parts()
-	var viewmodel_owner := 0
+	var viewmodel_owner := -1
 	var sim: Simulation = get_sim()
 	if sim != null and sim.has_local_player():
 		viewmodel_owner = sim.get_local_player_wire_handle()
@@ -2214,6 +2299,23 @@ func _route_round_impacts() -> void:
 					int(row.get("light_ticks", 10)))
 
 
+# Install simulation-resolved permanent scorch records into the terrain page
+# compiler before this source tick's ordinary impact presentation. Bounds are
+# exact 16.16 terrain x/z; Terrain owns selective page invalidation.
+func _route_terrain_scorches() -> void:
+	var sim := get_sim()
+	if sim == null or _terrain == null:
+		return
+	for row_v in sim.drain_terrain_scorches():
+		var row: Dictionary = row_v
+		_terrain.append_terrain_scorch(
+				int(row.get("texture_index", -1)),
+				int(row.get("minimum_x_q16", 0)),
+				int(row.get("minimum_z_q16", 0)),
+				int(row.get("maximum_x_q16", 0)),
+				int(row.get("maximum_z_q16", 0)))
+
+
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
 # placed MissionObjects, and each tick applies every entity's transform + part animations (PLAYPARTANIM,
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
@@ -2396,6 +2498,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	# mission render Nodes remain batched until the session frame returns.
 	if _local_player_weapon_tick_consumer.is_valid():
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
+	_route_terrain_scorches()
 	_route_round_impacts()
 	# The light-pool lifecycle decay + the light_move round-glow follow, on
 	# the witnessed 62 Hz cadence [orig: EffectWorld_TickInstancesAndLightScale
@@ -2423,6 +2526,8 @@ func _on_runtime_simulation_restarted() -> void:
 	if _local_player_weapon_tick_consumer.is_valid():
 		_local_player_weapon_tick_consumer.call(
 				drain_local_player_weapon_events())
+	if _terrain != null:
+		_terrain.clear_terrain_scorches()
 	if _effect_world == null:
 		_republish_network_environment()
 		return
@@ -2566,7 +2671,8 @@ func _start_effect_world() -> void:
 		_effect_world.set_particles_hidden(true)
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
-		_effect_world.set_water_height(float(_water.water_height))
+		_effect_world.set_water_plane(float(_water.water_height),
+				_water.get_reflection_camera())
 		# The sim-side water plane (env.water_z): the footstep water pick, the
 		# landing legs, AND the destruction paths (submerged wrecks skip pieces,
 		# the wreck fire steams out) all gate on it [orig: Env_WaterHeightFixed

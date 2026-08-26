@@ -52,14 +52,22 @@ struct CollisionResolveState {
 	std::unordered_map<std::string, int32_t> model_by_graphic;
 	std::unordered_map<std::string, int32_t> occlusion_by_graphic;
 	std::unordered_map<std::string, float> radius_by_graphic;
+	// The same GHDR carrier without a float round-trip. This is the arithmetic
+	// source for Entity_InitFromModel scale/max/pad and every wire projection.
+	std::unordered_map<std::string, int32_t> radius_q16_by_graphic;
+	// Whether the loaded GPM carries the +0xB0 collision-bound block. Retail
+	// does not stamp entity+0/bboxCenter/bboxRadius at all when this pointer is
+	// null, even though the model header still has a render sphere.
+	// [orig: Entity_InitFromModel @0x40de8f..0x40e078]
+	std::unordered_map<std::string, bool> collision_block_by_graphic;
 	// The graphic's CMDL bound-block XY half-extents (wu; the minimap blip
 	// size source). first = ground X, second = ground Y; {0,0} = no bound.
 	// [orig: draw_minimap_blip @0x5979a2..0x5979b8 model+176 pairs]
 	std::unordered_map<std::string, std::pair<float, float>> half_xy_by_graphic;
-	// The graphic's CMDL collision-bbox center in MODEL-LOCAL axes (wu) —
-	// the entity +0x1FC LOS ray offset. {0,0,0} = no collision block.
+	// The graphic's CMDL collision-bbox center in MODEL-LOCAL axes (signed
+	// Q16.16) — the entity +0x1FC LOS ray offset. {0,0,0} = no collision block.
 	// [orig: Entity_InitFromModel @0x40df1e..0x40df4a]
-	std::unordered_map<std::string, std::array<float, 3>> center_by_graphic;
+	std::unordered_map<std::string, std::array<int32_t, 3>> center_by_graphic;
 	// First-stage husk KZ points in mission-local axes. Kept independently
 	// from the collision-model cache because a husk graphic may already have
 	// been registered as another entity's main graphic.
@@ -91,11 +99,20 @@ struct CollisionResolveDeps {
 };
 
 // Register-or-look-up ONE graphic key: collision model (+ native pose
-// registration), occlusion model, bound radius. The shared leg between the
+// registration), occlusion model, render sphere, and collision-block gate. The shared leg between the
 // registry sweep below and the joiner's wire-ghost resolution — one
 // implementation, one cache.
 int32_t collision_model_for_graphic(CollisionResolveState &state,
 		const CollisionResolveDeps &deps, const std::string &graphic_key);
+
+// Resolve the complete authored collision initialization for one runtime item
+// type. The player runtime-only id follows the same visual-item mapping as the
+// local entity sweep. This is the sole wire-shape API; callers consume the
+// typed result directly (there is no model/radius out-parameter compatibility
+// form).
+world::ResolvedCollisionShape collision_shape_for_runtime_type(
+		int runtime_item_id, const DefItemsFile &items,
+		CollisionResolveState &state, const CollisionResolveDeps &deps);
 
 // The full registry sweep: every non-marker entity resolves its graphic (and
 // husk chain) into collision/occlusion instances, bound radius, vehicle probe

@@ -45,6 +45,15 @@
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
 namespace opennova::np {
 
+// Optional attribution for one Client_ProcessNetworkFrame call. It is supplied
+// only while the F3 capture window is open.
+struct ClientFramePerf {
+	uint64_t setup_us = 0;
+	uint64_t receive_us = 0;
+	uint64_t maintenance_us = 0;
+	uint64_t send_us = 0;
+};
+
 class ClientRuntime {
 public:
 	enum class Role : uint8_t { Joiner, HostClient };
@@ -161,9 +170,11 @@ public:
 	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
 	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
-	                                                             uint32_t now_tick = 0);
+	                                                             uint32_t now_tick = 0,
+	                                                             ClientFramePerf *perf = nullptr);
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
-	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
+	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(
+			uint32_t now_tick = 0, ClientFramePerf *perf = nullptr);
 
 	// Typed gameplay seams used by the simulation; protocol tags/framing remain
 	// owned here. Fire is predicted locally before queueing C2S 0x06. The spent clip
@@ -464,7 +475,9 @@ public:
 private:
 	// Shared body for both Client_ProcessNetworkFrame overloads. `uplink` is nullptr for a no-uplink
 	// frame.
-	std::vector<std::vector<uint8_t>> run_frame(const PlayerExtendedUplink *uplink, uint32_t now_tick);
+	std::vector<std::vector<uint8_t>> run_frame(
+			const PlayerExtendedUplink *uplink, uint32_t now_tick,
+			ClientFramePerf *perf);
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
 	void apply_zone_timer_value(const ZoneTimerValue &value);

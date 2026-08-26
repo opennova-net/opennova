@@ -151,6 +151,11 @@ typedef struct DefAmmoDef {
     int light_impact_radius_fp16; /* +132 */
     int light_impact_color;       /* +128: packed 0xRRGGBB */
     int light_impact_ticks;       /* +136: authored seconds * 62; 0 -> 10 */
+    /* The permanent terrain scorch selector, 'scorch_id <n>' (appended; FFI
+     * mirror stability). Projectile terrain impacts route this word through
+     * the permanent terrain-cache scorch registry. [orig: word +0x74;
+     * Projectile_HandleTerrainImpact @0x4E9314 -> sub_6060D0] */
+    int scorch_id;               /* word +0x74 */
     /* The impact scar kind, 'scar_type <n>' (appended; FFI mirror stability):
      * 0 = no mark, 1 = the ordinary ring scar, 2 = glass-only (the projected
      * glass decal leg without the ring fallback). [orig: AmmoDef_ParseProperty
@@ -714,6 +719,12 @@ typedef struct DefItemDef {
        [orig: parse @ 0x49f1ce-0x49f2c2; scales dbl 62.0 @ 0x7c88c0 / flt 0.01 @ 0x7c56a8] */
     float husk_swap_at;
     float husk_swap_at_sec;
+    int scale_q16;          /* 'scale' -> +0x1B8 signed Q16.16 model scale. The
+                               parser multiplies atof(value) by 65536 and truncates
+                               toward zero under the temporary x87 control word.
+                               Zero is the runtime's unscaled sentinel.
+                               [orig: ItemDef_ParseProperty @ 0x49f6e0..0x49f73d;
+                               Entity_InitFromModel @ 0x40dc30] */
     float debris_scale;     /* 'debris_scale' -> +0x1BC piece render scale (0 = unset;
                                pieces render at 1.0) [orig: piece[34] = def+0x1BC ?: 1.0
                                @ 0x4936f1] */

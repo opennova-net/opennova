@@ -7,6 +7,12 @@
 // placer records, decoding alpha textures, and converting diagnostics.
 // Plans are memoized per page under a state epoch: an unchanged epoch makes
 // plan() a lookup (no caster walk) and rasterize() reuse the compiled job.
+// The caster snapshot is an immutable set shared by pointer, so copying a
+// planner (the adapter's worker snapshot) shares the casters and copies only
+// the per-instance memo caches; replace_casters publishes a fresh set.
+// Material animation is sampled from the planner's tick only when a page is
+// classified or rasterized — exactly retail, which evaluates the tile models'
+// materials inside the tile render, never per frame for resident tiles.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; PROJSHAD submit
 // @0x60D960..0x60D97D; see docs/terrain/terrain-re.md]
 
@@ -34,6 +40,11 @@ struct TerrainStaticShadowPlannerCaster {
 	int32_t entity_kind = 0;
 	int32_t entity_index = 0;
 	int32_t team = -1;
+	// Retail's signed 96-slot global CTRL value bus as captured for this
+	// submission. Static sector casters publish TEX_TEAM; every other slot is
+	// retained explicitly so controlled material inputs can be wired without
+	// changing the planner contract.
+	::renderer::ControlRegisterValues control_values{};
 	uint32_t entity_attrib = 0;
 	uint32_t item_attrib = 0;
 	uint32_t item_attrib2 = 0;
@@ -107,6 +118,16 @@ public:
 	}
 	void set_light(const TerrainStaticShadowLightDirection &world_light,
 			const TerrainTileLightEpoch &light_epoch);
+	// Frame-shared Render_ShaderTickMs. Stored only: animated material state
+	// (AlphaGen, the UV transform, diffuse flipbook frame) is evaluated from
+	// this tick when a page is classified or rasterized, so advancing time
+	// never walks the casters, never changes the state revision, and never
+	// alters resident page content identity — retail cache hits key only on
+	// the spatial tile, and animations are sampled when a tile is actually
+	// recomposed. The adapter carries the requesting frame's tick with each
+	// composition job and sets it on the worker's planner copy.
+	void set_material_time(uint32_t time_ms) { material_time_ms_ = time_ms; }
+	uint32_t material_time_ms() const { return material_time_ms_; }
 	// The receiver height field must stay valid until replaced or cleared.
 	// A terrain revision change clears the per-page receiver-minimum cache.
 	void set_receiver_terrain(const TerrainHeightField &field,
@@ -121,15 +142,17 @@ public:
 			bool admitted_geometry_missing);
 
 	bool has_receiver_terrain() const { return receiver_valid_; }
-	bool snapshot_exact() const { return snapshot_exact_; }
+	bool snapshot_exact() const { return casters_->exact; }
 	std::size_t candidate_count() const {
-		return collector_.candidate_count();
+		return casters_->collector.candidate_count();
 	}
-	std::size_t admitted_count() const { return collector_.admitted_count(); }
-	std::size_t caster_count() const { return casters_.size(); }
+	std::size_t admitted_count() const {
+		return casters_->collector.admitted_count();
+	}
+	std::size_t caster_count() const { return casters_->records.size(); }
 	// Monotonic identity for the immutable planner state consumed by page
 	// compilation. Diagnostic resets, sub-byte light motion, identical caster
-	// snapshots, and repeated receiver clears do not change it.
+	// snapshots, repeated receiver clears, and material time do not change it.
 	uint64_t state_revision() const { return state_revision_; }
 
 	void reset_frame_diagnostics();
@@ -142,9 +165,19 @@ public:
 			TerrainStaticShadowAlphaPage &page_alpha);
 
 private:
-	struct PlannerCaster {
-		TerrainStaticShadowPlannerCaster record;
+	// The adopted caster snapshot. Immutable once published: every planner copy
+	// (and every worker holding one) shares it by pointer.
+	struct CasterSet {
+		std::unordered_map<uint64_t, TerrainStaticShadowPlannerCaster> records;
+		TerrainStaticShadowCollector collector;
+		bool exact = true;
 	};
+	// Per-call memo of evaluated material states, keyed by caster: one page
+	// job references a caster once per selected ROBJ, and classification and
+	// rasterization must see one evaluation per caster within a call.
+	using CasterMaterialStates = std::vector<TerrainStaticShadowMaterialState>;
+	using MaterialStateTable =
+			std::unordered_map<uint64_t, CasterMaterialStates>;
 	struct CachedPlan {
 		TerrainStaticShadowPageJob job;
 		std::vector<uint8_t> supported;
@@ -164,14 +197,17 @@ private:
 	std::optional<float> page_receiver_minimum(const TerrainTilePageKey &page);
 	bool compile(const TerrainTilePageKey &page,
 			TerrainStaticShadowPageJob &job);
+	const CasterMaterialStates &caster_material_states(
+			MaterialStateTable &table, uint64_t caster_key,
+			const TerrainStaticShadowPlannerCaster &caster) const;
 	struct DrawSupport {
 		bool structurally_valid = true;
 		bool supported = true;
 		int material_index = -1;
 		uint32_t issues = kTerrainStaticShadowUnsupportedNone;
 	};
-	DrawSupport classify_draw(
-			const TerrainStaticShadowProjectionDraw &draw) const;
+	DrawSupport classify_draw(const TerrainStaticShadowProjectionDraw &draw,
+			MaterialStateTable &material_states) const;
 	bool classify_page_job(const TerrainStaticShadowPageJob &job,
 			std::vector<uint8_t> *r_supported, bool record_unsupported);
 	void record_unsupported_draw(const TerrainTilePageKey &page,
@@ -183,15 +219,14 @@ private:
 	std::vector<int32_t> suppressed_ids_;
 	TerrainStaticShadowLightDirection world_light_{};
 	TerrainTileLightEpoch light_epoch_ = kDefaultTerrainTileLightEpoch;
+	uint32_t material_time_ms_ = 0;
 	uint64_t config_stamp_ = 0;
 	TerrainHeightField receiver_field_{};
 	bool receiver_valid_ = false;
 	uint64_t terrain_revision_ = 0;
-	TerrainStaticShadowCollector collector_;
-	std::unordered_map<uint64_t, PlannerCaster> casters_;
+	std::shared_ptr<const CasterSet> casters_;
 	// Stamp of the last adopted caster snapshot; 0 = none adopted yet.
 	uint64_t caster_set_stamp_ = 0;
-	bool snapshot_exact_ = true;
 	std::unordered_map<TerrainTilePageKey, float, PageKeyHash, PageKeyEq>
 			receiver_minimum_cache_;
 	std::unordered_map<TerrainTilePageKey, CachedPlan, PageKeyHash, PageKeyEq>

@@ -84,6 +84,31 @@ int TerrainTilePageLayout::texel_footprint(int world_units) const noexcept {
 			std::lround(static_cast<float>(world_units) * texels_per_world_unit));
 }
 
+std::array<float, 2> TerrainTilePageProjection::project(
+		float world_x, float world_z) const noexcept {
+	return {
+			(world_x - world_origin_x) * inverse_world_span,
+			(world_z - world_origin_z) * inverse_world_span,
+	};
+}
+
+std::optional<TerrainTilePageProjection>
+TerrainTileCompositionCache::page_projection(
+		const TerrainTilePageKey &page) noexcept {
+	const int span = page_world_span(page.page_lod_level);
+	if (span <= 0) return std::nullopt;
+	const int64_t origin_x = static_cast<int64_t>(page.sector_origin_x) +
+			page.page_local_x;
+	const int64_t origin_z = static_cast<int64_t>(page.sector_origin_z) +
+			page.page_local_z;
+	return TerrainTilePageProjection{
+			static_cast<float>(origin_x),
+			static_cast<float>(origin_z),
+			1.0f / static_cast<float>(span),
+			static_cast<float>(span),
+	};
+}
+
 void TerrainTileCompositionCache::begin_frame(uint64_t frame_id) noexcept {
 	if (frame_active_ && frame_id_ == frame_id) {
 		return;
@@ -254,6 +279,49 @@ bool TerrainTileCompositionCache::invalidate(
 		return true;
 	}
 	return false;
+}
+
+bool TerrainTileCompositionCache::page_overlaps_q16(
+		const TerrainTilePageKey &page,
+		int32_t minimum_x_q16, int32_t minimum_z_q16,
+		int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept {
+	const int span = page_world_span(page.page_lod_level);
+	if (span == 0 || minimum_x_q16 > maximum_x_q16 ||
+			minimum_z_q16 > maximum_z_q16) {
+		return false;
+	}
+	const int64_t page_minimum_x =
+			(static_cast<int64_t>(page.sector_origin_x) + page.page_local_x) << 16;
+	const int64_t page_minimum_z =
+			(static_cast<int64_t>(page.sector_origin_z) + page.page_local_z) << 16;
+	const int64_t page_maximum_x = page_minimum_x +
+			(static_cast<int64_t>(span) << 16);
+	const int64_t page_maximum_z = page_minimum_z +
+			(static_cast<int64_t>(span) << 16);
+	return static_cast<int64_t>(minimum_x_q16) <= page_maximum_x &&
+			static_cast<int64_t>(maximum_x_q16) >= page_minimum_x &&
+			static_cast<int64_t>(minimum_z_q16) <= page_maximum_z &&
+			static_cast<int64_t>(maximum_z_q16) >= page_minimum_z;
+}
+
+std::size_t TerrainTileCompositionCache::invalidate_overlapping_q16(
+		int32_t minimum_x_q16, int32_t minimum_z_q16,
+		int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept {
+	std::size_t invalidated = 0;
+	for (uint16_t layer = 0; layer < used_; ++layer) {
+		Slot &slot = slots_[layer];
+		if (!slot.occupied || !page_overlaps_q16(slot.page,
+				minimum_x_q16, minimum_z_q16,
+				maximum_x_q16, maximum_z_q16)) {
+			continue;
+		}
+		slot.ready = false;
+		slot.pending = false;
+		slot.stale = false;
+		++slot.generation;
+		++invalidated;
+	}
+	return invalidated;
 }
 
 void TerrainTileCompositionCache::invalidate_all() noexcept {

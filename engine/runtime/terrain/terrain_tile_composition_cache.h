@@ -34,6 +34,22 @@ struct TerrainTilePageLayout {
 	int texel_footprint(int world_units) const noexcept;
 };
 
+// Highest-quality retail c7/c8 page projection reduced into presentation
+// world. Foliage_WindSwayVS transforms the original (pre-wind) vertex into
+// D3D world (Godot Z, Y, X), then c7/c8 undo the packed page origin and scale
+// by 1/(1024 >> lod). The reduced result is therefore exactly
+// ((world_x-origin_x), (world_z-origin_z)) * inverse_world_span.
+// [orig: Foliage_RenderFarPatches @0x60A1DE..0x60A34F; c7/c8 uploads
+// @0x6006AB..0x600704; Foliage_WindSwayVS source @0x7DE648 (assembled @0x5ff691)]
+struct TerrainTilePageProjection {
+	float world_origin_x = 0.0f;
+	float world_origin_z = 0.0f;
+	float inverse_world_span = 0.0f;
+	float world_span = 0.0f;
+
+	std::array<float, 2> project(float world_x, float world_z) const noexcept;
+};
+
 struct TerrainTilePageBinding {
 	TerrainTilePageKey page;
 	uint16_t layer = 0;
@@ -127,6 +143,11 @@ public:
 				: 0;
 	}
 
+	// Returns the sole max-quality page projection. The retail failed-vertex-
+	// shader fallback that used inverse-view rows is deliberately not exposed.
+	static std::optional<TerrainTilePageProjection> page_projection(
+			const TerrainTilePageKey &page) noexcept;
+
 	// Starts the binding lifetime for one deferred render frame. Repeating the
 	// same id is idempotent; a different id releases the prior frame's pins.
 	// Successful request()/best_ready() bindings are protected from layer
@@ -149,6 +170,15 @@ public:
 	bool can_publish(const TerrainTileCompositionJob &job) const noexcept;
 	bool publish(const TerrainTileCompositionJob &job) noexcept;
 	bool invalidate(const TerrainTilePageKey &page) noexcept;
+	// Inclusive fixed-point rectangle overlap used by the retail permanent-
+	// scorch invalidator. A record exactly on a shared page edge retires both
+	// cache records even though half-open raster coverage affects only one.
+	static bool page_overlaps_q16(const TerrainTilePageKey &page,
+			int32_t minimum_x_q16, int32_t minimum_z_q16,
+			int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept;
+	std::size_t invalidate_overlapping_q16(
+			int32_t minimum_x_q16, int32_t minimum_z_q16,
+			int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept;
 	void invalidate_all() noexcept;
 	// Drops every resident identity and frame pin for mission/device changes.
 	// Per-layer generations advance so outstanding pre-clear jobs stay stale.

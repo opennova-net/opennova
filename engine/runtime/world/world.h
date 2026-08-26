@@ -20,6 +20,7 @@
 #include "world/destruction.h"
 #include "world/entity.h"
 #include "world/match.h"
+#include "world/muzzle_pose.h"
 #include "world/entity_commands.h"
 #include "world/entity_registry.h"
 #include "world/net_command_sink.h"
@@ -30,6 +31,7 @@
 #include "world/fire_sound.h"
 #include "world/sound_emitter_mailbox.h"
 #include "world/spawn_select.h"
+#include "world/terrain_scorch_events.h"
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
 #include "world/ammo_table.h"
@@ -47,6 +49,44 @@ struct TerrainHeightField;
 }
 
 namespace opennova::world {
+
+// Optional attribution for one World::run_logic_tick call. The caller owns the
+// value and passes nullptr during ordinary play, so the production hot path has
+// no clock reads or counter writes. Mission registration is WAC -> BMS -> AI;
+// the World can identify its explicit AiSystem pointer and groups every other
+// registered system under authored scripts.
+struct LogicTickPerf {
+    uint64_t setup_us = 0;
+    uint64_t scripts_us = 0;
+    uint64_t ai_us = 0;
+    uint64_t ai_reactions_us = 0;
+    uint64_t ai_collision_tables_us = 0;
+    uint64_t ai_entities_us = 0;
+    uint64_t ai_infantry_entities_us = 0;
+    uint64_t ai_infantry_remote_us = 0;
+    uint64_t ai_infantry_combat_us = 0;
+    uint64_t ai_infantry_animation_us = 0;
+    uint64_t ai_infantry_collision_us = 0;
+    uint64_t ai_infantry_collision_contacts_us = 0;
+    uint64_t ai_infantry_collision_repulsion_us = 0;
+    uint64_t ai_infantry_collision_ground_us = 0;
+    uint64_t ai_other_entities_us = 0;
+    uint64_t ai_authority_vehicles_us = 0;
+    uint64_t ai_vehicle_scan_us = 0;
+    uint64_t ai_vehicle_motors_us = 0;
+    uint64_t ai_vehicle_riders_us = 0;
+    uint64_t ai_client_vehicles_us = 0;
+    uint64_t ai_events_us = 0;
+    uint64_t attachments_us = 0;
+    uint64_t attachment_orphans_us = 0;
+    uint64_t attachment_child_pose_us = 0;
+    uint64_t attachment_riders_us = 0;
+    uint64_t throwables_us = 0;
+    uint64_t weapons_us = 0;
+    uint64_t projectiles_us = 0;
+    uint64_t destruction_us = 0;
+    uint64_t housekeeping_us = 0;
+};
 
 class CollisionWorld;
 
@@ -386,6 +426,8 @@ public:
                                          // the host owns the mission CollisionWorld.
     IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
                                                            // null/false keeps static geometry.
+    IMuzzlePoseProvider *muzzle_pose_provider = nullptr; // non-owning authored muzzle seam;
+                                                         // null/false keeps stamp fallback.
 
     // Session + game-option state the BMS Teammate trigger family reads. Hosts
     // stamp these at bring-up; the SP defaults hold otherwise.
@@ -394,13 +436,12 @@ public:
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
     bool teammates_disabled = false;
-    // The per-tick authority role the vehicle solves consult for their
-    // role-picked constants (the suspension disable-rate pick reads
-    // g_napi_np_ctx.is_authority once when the parked latch sets
-    // [orig: @0x46B1B9..0x46B1DB]). Stamped from run_logic_tick's argument
-    // so the solves — which take only World& — see the same role the tick
-    // was run with.
-    bool vehicle_authority = true;
+    // The per-tick authority role consulted by World&-only callbacks. The
+    // suspension role pick and both post-death blast writers read the same
+    // g_napi_np_ctx.is_authority bit in retail
+    // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
+    // run_logic_tick stamps it once so every callback sees the tick's role.
+    bool logic_authority = true;
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
     // authoritative multiplayer FatBullets trace owned by a remote player.
     // These explicit host-fed gates keep that option out of ordinary/SP rays.
@@ -505,6 +546,9 @@ public:
     // state — the shell compiles it into quads each frame; it is NOT part of the
     // snapshot (retail's caches live beside the renderer, not the entity pools).
     ScarCache scars;
+    // Permanent ground scorch insertions share retail's CRT rand stream with
+    // animated material noise and keep their 4096-row lifetime across drains.
+    TerrainScorchEvents terrain_scorches;
 
     // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
     // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.
@@ -678,7 +722,8 @@ public:
     // pre-mission seam so no caller can mistake a pre-round freeze for a script
     // initialization pass.
     void run_logic_tick(bool is_authority = true,
-                        TickPhase phase = TickPhase::Gameplay);
+                        TickPhase phase = TickPhase::Gameplay,
+                        LogicTickPerf *perf = nullptr);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed

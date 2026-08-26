@@ -52,6 +52,14 @@ void Celestial::_bind_methods() {
 			"set_terrain_data", "get_terrain_data");
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
 			&Celestial::set_resource_root);
+	ClassDB::bind_method(D_METHOD("set_environment_capture_layer_mask", "mask"),
+			&Celestial::set_environment_capture_layer_mask);
+	ClassDB::bind_method(D_METHOD("get_environment_capture_layer_mask"),
+			&Celestial::get_environment_capture_layer_mask);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "environment_capture_layer_mask",
+			PROPERTY_HINT_LAYERS_3D_RENDER),
+			"set_environment_capture_layer_mask",
+			"get_environment_capture_layer_mask");
 	ClassDB::bind_static_method("Celestial",
 			D_METHOD("source_material_uses_additive", "source"),
 			&Celestial::source_material_uses_additive);
@@ -84,6 +92,16 @@ void Celestial::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	resource_root_ = p_root;
 	loaded_names_.clear();
 	_rebuild_if_needed();
+}
+
+void Celestial::set_environment_capture_layer_mask(uint32_t p_mask) {
+	environment_capture_layer_mask_ = p_mask;
+	for (const String &key : { String("sun"), String("moon") }) {
+		Body *body = bodies_.getptr(key);
+		if (body != nullptr) {
+			_stamp_environment_capture_layer(body->model);
+		}
+	}
 }
 
 MissionEnvironment *Celestial::_env_node() {
@@ -197,12 +215,37 @@ void Celestial::_rebuild_if_needed() {
 		// world entities (the witness rides the water mirror record).
 		model->set_mirror_reflected(true);
 		model->set_object_data(data);
+		// Every celestial submit uses the IDENTITY world rotation in RENDER
+		// axes (render_celestial_bodies @ 0x5acaa0 sun/moon,
+		// render_skybox_sun_glow @ 0x5acd00 + update_sun_glare @ 0x5ad130
+		// glare/glint - docs/env/env-tod-re.md): the authored quads face
+		// render +Z = EAST. The importer bakes model (x, y, z) as Godot
+		// (-x, y, z) (nova_object_data_geometry.cpp godot_position), which
+		// under an identity basis leaves the quad facing Godot +Z (south) -
+		// edge-on at a sunrise/sunset pose, the "squashed oval sun". The
+		// +90 degree yaw about +Y is the exact composition
+		// R * import(v) == render_float_to_godot(v) (env_axes.h), restoring
+		// the retail east-facing placement. Positive axis on purpose:
+		// godot-cpp Basis(axis, angle) diverges from core for negative axes.
+		model->set_basis(Basis(Vector3(0.0f, 1.0f, 0.0f),
+				static_cast<real_t>(Math_PI) * 0.5f));
 		Ref<ShaderMaterial> material =
 				_make_celestial_material(spec.additive, spec.priority);
 		Body body;
 		body.model = model;
 		body.materials = _apply_material_override(model, material);
 		body.tint = spec.tint;
+		if (spec.key == "sun" || spec.key == "moon") {
+			_stamp_environment_capture_layer(model);
+			// The disc bodies far-pin in BOTH shaders: the authored sun/moon
+			// materials are additive, so their surfaces render through
+			// celestial_additive (the shader carries the witness note).
+			for (const Ref<ShaderMaterial> &surface_material :
+					body.materials) {
+				surface_material->set_shader_parameter("u_depth_far_pin",
+						true);
+			}
+		}
 		if (spec.key == "glare") {
 			for (const Ref<ShaderMaterial> &surface_material : body.materials) {
 				surface_material->set_shader_parameter("u_glare_view_fade",
@@ -322,6 +365,18 @@ void Celestial::_collect_meshes(Node *p_node,
 	}
 }
 
+void Celestial::_stamp_environment_capture_layer(Node3D *p_model) {
+	if (p_model == nullptr || environment_capture_layer_mask_ == 0) {
+		return;
+	}
+	Vector<MeshInstance3D *> meshes;
+	_collect_meshes(p_model, meshes);
+	for (MeshInstance3D *mesh : meshes) {
+		mesh->set_layer_mask(mesh->get_layer_mask() |
+				environment_capture_layer_mask_);
+	}
+}
+
 void Celestial::_process(double p_delta) {
 	advance_frame(p_delta);
 }
@@ -435,7 +490,17 @@ void Celestial::advance_frame(double p_delta) {
 			glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
 			frame = opennova::env::build_glare_frame(state, cam_rf,
 					glare_occlusion_->get_brightness());
-			body.model->set_visible(frame.opacity > 0.0f);
+			// The isolated Q3 (bloom source) view draws the glare with NO
+			// occlusion test and the fog-based brightness - the glow still
+			// blooms over a ridge that blocks the occlusion rays
+			// (render_skybox_sun_glow(0, 0) from FrameFX_RenderBloomPass
+			// @ 0x582a77 - docs/env/env-tod-re.md). The shader picks this
+			// opacity when the pass camera is the Q3 signature.
+			const float q3_opacity =
+					opennova::env::glare_q3_peak_opacity(state);
+			_set_body_parameter(body, "u_q3_opacity", q3_opacity);
+			body.model->set_visible(
+					frame.opacity > 0.0f || q3_opacity > 0.0f);
 			_set_body_parameter(body, "u_glare_direction", sun_dir);
 		} else {
 			frame = opennova::env::build_sun_frame(state, cam_rf);

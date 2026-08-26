@@ -91,6 +91,8 @@ Simulation::~Simulation() {
 
 void Simulation::reset_world() {
 	joiner_bridge_.reset_world_stream();
+	mounted_pose_live_cache_.clear();
+	mounted_pose_cache_logic_tick_ = 0xFFFFFFFFu;
 	invalidate_present_effect_pose_cache();
 	local_weapon_.events.clear();
 	local_weapon_.anim_advance_ticks = 0;
@@ -799,21 +801,53 @@ bool Simulation::advance_world_tick() {
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
+		const uint64_t adm_start =
+				runtime_profiling_enabled_ ? perf_now_us() : 0;
 		resolve_new_infantry_adm_ids();
-		if (runtime_profiling_enabled_)
+		if (runtime_profiling_enabled_) {
+			frame_phase_perf_.adm_resolve_us +=
+					static_cast<int64_t>(perf_now_us() - adm_start);
 			last_sim_tick_us_ = perf_now_us() - sim_start;
+		}
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
 		joiner_pump();
-		resolve_new_infantry_adm_ids();
 		if (runtime_profiling_enabled_)
+			frame_phase_perf_.client_decode_us +=
+					static_cast<int64_t>(last_net_tick_us_);
+		const uint64_t adm_start =
+				runtime_profiling_enabled_ ? perf_now_us() : 0;
+		resolve_new_infantry_adm_ids();
+		if (runtime_profiling_enabled_) {
+			frame_phase_perf_.adm_resolve_us +=
+					static_cast<int64_t>(perf_now_us() - adm_start);
 			last_sim_tick_us_ = perf_now_us() - sim_start;
+		}
 		return true;
 	}
 	// No-net editor/unit path: one authoritative logic tick, no replication.
 	apply_player_input_pre_tick();
-	world_->run_logic_tick(/*is_authority=*/true);
+	opennova::world::LogicTickPerf world_perf;
+	world_->run_logic_tick(/*is_authority=*/true,
+			opennova::world::TickPhase::Gameplay,
+			runtime_profiling_enabled_ ? &world_perf : nullptr);
+	if (runtime_profiling_enabled_) {
+		frame_phase_perf_.world_setup_us += static_cast<int64_t>(world_perf.setup_us);
+		frame_phase_perf_.world_scripts_us += static_cast<int64_t>(world_perf.scripts_us);
+		frame_phase_perf_.world_ai_us += static_cast<int64_t>(world_perf.ai_us);
+		frame_phase_perf_.world_attachments_us +=
+				static_cast<int64_t>(world_perf.attachments_us);
+		frame_phase_perf_.world_throwables_us +=
+				static_cast<int64_t>(world_perf.throwables_us);
+		frame_phase_perf_.world_weapons_us += static_cast<int64_t>(world_perf.weapons_us);
+		frame_phase_perf_.world_projectiles_us +=
+				static_cast<int64_t>(world_perf.projectiles_us);
+		frame_phase_perf_.world_destruction_us +=
+				static_cast<int64_t>(world_perf.destruction_us);
+		frame_phase_perf_.world_housekeeping_us +=
+				static_cast<int64_t>(world_perf.housekeeping_us);
+	}
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
@@ -1008,6 +1042,10 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	last_present_snapshot_us_ = 0;
 	last_occlusion_build_us_ = 0;
 	last_occlusion_probe_us_ = 0;
+	frame_net_us_ = 0;
+	frame_sim_us_ = 0;
+	frame_sink_us_ = 0;
+	frame_phase_perf_ = {};
 	collision_world_.set_trace_profile_enabled(p_enabled);
 }
 
@@ -1154,12 +1192,13 @@ Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 			: ERR_INVALID_PARAMETER;
 }
 
-// The D-AI-6 muzzle seam: the present layer pushes each posed model's gun-flash
-// userpoint world position back to the sim once per frame; the AI fire pass spawns
-// rounds from it while fresh. Godot (x, up, z) -> mission (x, -gz, gy) in 16.16
-// fixed — the inverse of the present mapping godot = (mx, mz, -my).
+// The no-native-rig half of the D-AI-6 muzzle seam. Native mission assets resolve
+// the authored gun-flash userpoint lazily in the simulation; rows without a native
+// skeletal rig push the presented position here once per frame instead. Godot
+// (x, up, z) -> mission (x, -gz, gy) in 16.16 fixed — the inverse of the present
+// mapping godot = (mx, mz, -my).
 // [orig: Entity_GetAttachmentWorldPosition @0x4b2670 from the anim-event fire block
-// @0x4bf326 — computed inline against the engine-side skeleton; ours is shell-fed.]
+// @0x4bf326 — computed inline against the engine-side skeleton.]
 void Simulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos) {
 	if (!ai_ || !world_) return;
 	// Keyed by the row's PF_NET_ID (the authored SSN) — the wire handle is
@@ -1182,6 +1221,13 @@ void Simulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos) {
 		entity->posed_muzzle_valid = true;
 	}
 	ai_->set_entity_muzzle(h, pos, world_->logic_tick);
+}
+
+bool Simulation::has_native_ai_muzzle(int p_net_id) const {
+	if (world_ == nullptr || p_net_id <= 0 || p_net_id > 0xFFFF) return false;
+	const opennova::world::EntityHandle h =
+			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
+	return h.valid() && collision_pose_native_.has_skeletal_muzzle_entity(h);
 }
 
 // Probe seam beside debug_set_entity_health: teleport an AI entity through both

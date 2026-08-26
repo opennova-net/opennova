@@ -55,6 +55,14 @@ uint64_t hash_transform(uint64_t hash,
 	return hash;
 }
 
+uint64_t hash_control_values(uint64_t hash,
+		const ::renderer::ControlRegisterValues &values) {
+	for (const int32_t value : values) {
+		hash = hash_value(hash, value);
+	}
+	return hash;
+}
+
 uint64_t mix_content(uint64_t content, uint64_t config) {
 	uint64_t hash = content;
 	const uint8_t domain[] = {'s', 't', 'a', 't', 'i', 'c', '-', 'p', 'a',
@@ -88,6 +96,7 @@ uint64_t caster_set_stamp(
 		hash = hash_value(hash, record.entity_kind);
 		hash = hash_value(hash, record.entity_index);
 		hash = hash_value(hash, record.team);
+		hash = hash_control_values(hash, record.control_values);
 		hash = hash_value(hash, record.entity_attrib);
 		hash = hash_value(hash, record.item_attrib);
 		hash = hash_value(hash, record.item_attrib2);
@@ -165,7 +174,8 @@ TerrainStaticShadowBounds terrain_static_shadow_transformed_bounds(
 	return result;
 }
 
-TerrainStaticShadowPlanner::TerrainStaticShadowPlanner() {
+TerrainStaticShadowPlanner::TerrainStaticShadowPlanner() :
+		casters_(std::make_shared<CasterSet>()) {
 	update_config_stamp();
 }
 
@@ -249,8 +259,10 @@ void TerrainStaticShadowPlanner::replace_casters(
 		return;
 	}
 	caster_set_stamp_ = incoming_stamp;
-	casters_.clear();
-	snapshot_exact_ = !admitted_geometry_missing;
+	// Copy-on-write: the previous set stays alive for every worker snapshot
+	// still holding it; this planner (and later copies) adopt the new one.
+	auto next = std::make_shared<CasterSet>();
+	next->exact = !admitted_geometry_missing;
 	std::vector<TerrainStaticShadowCandidate> candidates;
 	candidates.reserve(casters.size());
 	for (TerrainStaticShadowPlannerCaster &record : casters) {
@@ -267,7 +279,7 @@ void TerrainStaticShadowPlanner::replace_casters(
 			// Without conservative authored bounds we cannot know which page
 			// should carry the unsupported draw attribution. Reject planning
 			// globally instead of publishing a false exact baseline.
-			snapshot_exact_ = false;
+			next->exact = false;
 		}
 		const uint64_t key = terrain_static_shadow_caster_key(
 				record.entity_kind, record.entity_index, record.bms_id);
@@ -294,17 +306,18 @@ void TerrainStaticShadowPlanner::replace_casters(
 		// Team participates: TEX_TEAM flipbooks select alpha frames by team,
 		// so a team change must invalidate the caster's resident pages.
 		revision = hash_value(revision, record.team);
+		revision = hash_control_values(revision, record.control_values);
 		// Ground height participates: the raster subtracts caster_ground_y, so
 		// a terrain edit under the caster must recompose its resident pages.
 		revision = hash_value(revision, record.ground_y);
 		candidate.transform_revision = revision == 0 ? 1 : revision;
 		candidates.push_back(candidate);
-
-		casters_[key] = PlannerCaster{std::move(record)};
+		next->records[key] = std::move(record);
 	}
-	collector_.replace(std::move(candidates));
-	diagnostics_.snapshot_exact = snapshot_exact_;
-	diagnostics_.caster_count = casters_.size();
+	next->collector.replace(std::move(candidates));
+	casters_ = std::move(next);
+	diagnostics_.snapshot_exact = casters_->exact;
+	diagnostics_.caster_count = casters_->records.size();
 	bump_epoch();
 }
 
@@ -364,27 +377,54 @@ bool TerrainStaticShadowPlanner::compile(const TerrainTilePageKey &page,
 	input.surface_to_light = world_light_;
 	input.light_epoch = light_epoch_;
 	input.receiver_height = *receiver;
-	job = collector_.compile(input);
+	job = casters_->collector.compile(input);
 	job.content.value = mix_content(job.content.value, config_stamp_);
 	return true;
 }
 
+// Retail evaluates a tile model's materials (AlphaGen, the complete UV
+// transform, the diffuse flipbook frame) only inside the tile render: each
+// visible model is submitted and flushed on the spot, and that flush samples
+// the frame-shared tick. Resident tiles are never re-evaluated. The same
+// evaluator runs here once per caster per classification or raster, from the
+// tick the adapter stamped on this planner for the job.
+// [orig: Terrain_CollectAndRenderTileModels — Render_SubmitEntity @0x60D971
+// then CRenderBatchQueue_SortAndFlush @0x60D97D per visible model;
+// apply_shader_parameters @0x58DB80 inside that flush]
+const TerrainStaticShadowPlanner::CasterMaterialStates &
+TerrainStaticShadowPlanner::caster_material_states(MaterialStateTable &table,
+		uint64_t caster_key,
+		const TerrainStaticShadowPlannerCaster &caster) const {
+	const auto cached = table.find(caster_key);
+	if (cached != table.end()) return cached->second;
+	const TerrainStaticShadowResolvedGeometry &geometry = *caster.geometry;
+	CasterMaterialStates states;
+	states.reserve(geometry.materials.size());
+	for (const TerrainStaticShadowResolvedMaterial &material :
+			geometry.materials) {
+		states.push_back(terrain_static_shadow_evaluate_material(geometry,
+				material, material_time_ms_, caster.control_values));
+	}
+	return table.emplace(caster_key, std::move(states)).first->second;
+}
+
 TerrainStaticShadowPlanner::DrawSupport
 TerrainStaticShadowPlanner::classify_draw(
-		const TerrainStaticShadowProjectionDraw &draw) const {
+		const TerrainStaticShadowProjectionDraw &draw,
+		MaterialStateTable &material_states) const {
 	DrawSupport support;
-	const auto caster_it = casters_.find(draw.caster_key);
+	const auto caster_it = casters_->records.find(draw.caster_key);
 	// lod_index caps at 1: retail models carry exactly two shadow-mesh slots
 	// [orig: modelData[8]/modelData[9] @ 0x60d889..0x60d894].
-	if (caster_it == casters_.end() ||
-			caster_it->second.record.geometry == nullptr ||
+	if (caster_it == casters_->records.end() ||
+			caster_it->second.geometry == nullptr ||
 			draw.geometry.lod_index > 1) {
 		support.structurally_valid = false;
 		support.supported = false;
 		return support;
 	}
 	const TerrainStaticShadowResolvedGeometry &geometry =
-			*caster_it->second.record.geometry;
+			*caster_it->second.geometry;
 	if (geometry.key != draw.geometry.geometry_key) {
 		support.structurally_valid = false;
 		support.supported = false;
@@ -409,6 +449,10 @@ TerrainStaticShadowPlanner::classify_draw(
 	if (state.missing_required_uvs) {
 		support.issues |= kTerrainStaticShadowUnsupportedMissingRequiredUvs;
 	}
+	// One evaluation per caster per classification; every material index the
+	// geometry resolver validated has a state (sizes match by construction).
+	const CasterMaterialStates &states = caster_material_states(
+			material_states, draw.caster_key, caster_it->second);
 	for (const TerrainStaticShadowResolvedSurface &surface :
 			geometry.surfaces[draw.geometry.lod_index]) {
 		if (surface.render_object != draw.geometry.render_object_index) {
@@ -426,9 +470,11 @@ TerrainStaticShadowPlanner::classify_draw(
 		const TerrainStaticShadowResolvedMaterial &material =
 				geometry.materials[static_cast<std::size_t>(
 						surface.material_index)];
-		const uint32_t material_issues =
-				terrain_static_shadow_caster_material_issues(material,
-						caster_it->second.record.team);
+		if (!material.casts_projected_shadow) {
+			continue;
+		}
+		const uint32_t material_issues = states[
+				static_cast<std::size_t>(surface.material_index)].issues;
 		if (material_issues != kTerrainStaticShadowUnsupportedNone &&
 				support.material_index < 0) {
 			support.material_index = surface.material_index;
@@ -458,9 +504,9 @@ void TerrainStaticShadowPlanner::record_unsupported_draw(
 	row.render_object_index = draw.geometry.render_object_index;
 	row.material_index = support.material_index;
 	row.issues = support.issues;
-	const auto caster_it = casters_.find(draw.caster_key);
-	if (caster_it != casters_.end()) {
-		row.graphic = caster_it->second.record.graphic;
+	const auto caster_it = casters_->records.find(draw.caster_key);
+	if (caster_it != casters_->records.end()) {
+		row.graphic = caster_it->second.graphic;
 	}
 	diagnostics_.frame_unsupported_attribution.push_back(std::move(row));
 }
@@ -468,13 +514,14 @@ void TerrainStaticShadowPlanner::record_unsupported_draw(
 bool TerrainStaticShadowPlanner::classify_page_job(
 		const TerrainStaticShadowPageJob &job,
 		std::vector<uint8_t> *r_supported, bool record_unsupported) {
-	if (!snapshot_exact_) return false;
+	if (!casters_->exact) return false;
 	if (r_supported != nullptr) {
 		r_supported->assign(job.draws.size(), 0);
 	}
+	MaterialStateTable material_states;
 	for (std::size_t index = 0; index < job.draws.size(); ++index) {
 		const auto &draw = job.draws[index];
-		const DrawSupport support = classify_draw(draw);
+		const DrawSupport support = classify_draw(draw, material_states);
 		if (!support.structurally_valid) return false;
 		if (support.supported) {
 			if (r_supported != nullptr) (*r_supported)[index] = 1;
@@ -558,25 +605,27 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 		TerrainStaticShadowRasterInput input;
 		std::unordered_map<const TerrainStaticShadowAlphaPyramid *, int32_t>
 				texture_indices;
+		MaterialStateTable material_states;
 		for (std::size_t draw_index = 0; draw_index < page_job.draws.size();
 				++draw_index) {
 			if (supported[draw_index] == 0) continue;
 			const TerrainStaticShadowProjectionDraw &draw =
 					page_job.draws[draw_index];
-			const auto caster_it = casters_.find(draw.caster_key);
-			if (caster_it == casters_.end() ||
-					caster_it->second.record.geometry == nullptr ||
-					caster_it->second.record.geometry->key !=
+			const auto caster_it = casters_->records.find(draw.caster_key);
+			if (caster_it == casters_->records.end() ||
+					caster_it->second.geometry == nullptr ||
+					caster_it->second.geometry->key !=
 							draw.geometry.geometry_key ||
 					// Same two-slot cap as classify_draw
 					// [orig: @ 0x60d889..0x60d894].
 					draw.geometry.lod_index > 1) {
 				return false;
 			}
-			const TerrainStaticShadowPlannerCaster &caster =
-					caster_it->second.record;
+			const TerrainStaticShadowPlannerCaster &caster = caster_it->second;
 			const TerrainStaticShadowResolvedGeometry &geometry =
 					*caster.geometry;
+			const CasterMaterialStates &states = caster_material_states(
+					material_states, draw.caster_key, caster);
 			TerrainStaticShadowProjectionInput projection;
 			projection.page = page_job.page;
 			projection.surface_to_light = world_light_;
@@ -597,14 +646,18 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 				const TerrainStaticShadowResolvedMaterial &material =
 						geometry.materials[static_cast<std::size_t>(
 								surface.material_index)];
-				if (terrain_static_shadow_caster_material_issues(material,
-						caster.team) != kTerrainStaticShadowUnsupportedNone) {
+				if (!material.casts_projected_shadow) {
+					continue;
+				}
+				const TerrainStaticShadowMaterialState &material_state =
+						states[static_cast<std::size_t>(surface.material_index)];
+				if (material_state.issues !=
+						kTerrainStaticShadowUnsupportedNone) {
 					return false;
 				}
 				int32_t texture_index = -1;
 				const TerrainStaticShadowAlphaPyramid *identity =
-						terrain_static_shadow_selected_alpha(material,
-								caster.team);
+						material_state.alpha_texture;
 				if (identity != nullptr) {
 					const auto existing = texture_indices.find(identity);
 					if (existing != texture_indices.end()) {
@@ -624,12 +677,13 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 						index + 2 < surface.indices.size(); index += 3) {
 					TerrainStaticShadowRasterTriangle triangle;
 					triangle.blend = material.blend;
+					triangle.two_sided = material.two_sided;
 					triangle.alpha_texture_index = texture_index;
 					triangle.alpha_test_enabled = material.alpha_test_enabled;
 					triangle.alpha_test_inverted =
 							material.alpha_test_inverted;
 					triangle.alpha_ref = material.alpha_ref;
-					triangle.alpha_scale = material.alpha_scale;
+					triangle.alpha_scale = material_state.alpha_scale;
 					++diagnostics_.frame_triangles;
 					if (material.alpha_test_enabled) {
 						++diagnostics_.frame_alpha_test_triangles;
@@ -655,8 +709,19 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 						source.x = world[0];
 						source.y = world[1];
 						source.z = world[2];
-						source.texture_u = uv[0];
-						source.texture_v = uv[1];
+						if (material.samples_diffuse_alpha) {
+							source.texture_u =
+									uv[0] * material_state.uv.m00 +
+									uv[1] * material_state.uv.m10 +
+									material_state.uv.m20;
+							source.texture_v =
+									uv[0] * material_state.uv.m01 +
+									uv[1] * material_state.uv.m11 +
+									material_state.uv.m21;
+						} else {
+							source.texture_u = uv[0];
+							source.texture_v = uv[1];
+						}
 						if (!project_terrain_static_shadow_vertex(projection,
 								source, triangle.vertices[corner])) {
 							return false;

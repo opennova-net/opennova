@@ -5,6 +5,8 @@ shader_type spatial;
 // to Bump, but this exact program remains reachable through numeric type 6.
 render_mode unshaded, cull_disabled, blend_add, depth_draw_never;
 
+#include "res://shaders/nova_color.gdshaderinc"
+
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
 
@@ -18,6 +20,6 @@ void fragment() {
 		texel.a = clamp(1.0 - r, 0.0, 1.0);
 	}
 	float dotv = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
-	ALBEDO = vec3(dotv);
+	ALBEDO = nova_scene_output(vec3(dotv));
 	ALPHA = texel.a * COLOR.a;
 }

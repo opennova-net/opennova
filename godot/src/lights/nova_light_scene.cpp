@@ -2,8 +2,12 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <unordered_set>
 #include <vector>
+
+#include <godot_cpp/classes/rendering_server.hpp>
 
 #include "env/nova_weather.h"
 #include "object/nova_object_model.h"
@@ -47,6 +51,32 @@ std::array<int32_t, 3> mission_fixed_from_godot(const Vector3 &world) {
 
 Vector3 godot_from_mission_float(const std::array<float, 3> &mission) {
 	return Vector3(mission[0], mission[2], -mission[1]);
+}
+
+void stamp_draw_bounds(const AABB &world_bounds,
+		renderer::LightDrawContext &draw) {
+	const std::array<int32_t, 3> min_fixed = mission_fixed_from_godot(
+			world_bounds.position);
+	const std::array<int32_t, 3> max_fixed = mission_fixed_from_godot(
+			world_bounds.position + world_bounds.size);
+	for (int axis = 0; axis < 3; ++axis) {
+		// The godot->mission fold negates one axis; re-order per axis.
+		draw.aabb_min_fixed[axis] = MIN(min_fixed[axis], max_fixed[axis]);
+		draw.aabb_max_fixed[axis] = MAX(min_fixed[axis], max_fixed[axis]);
+	}
+}
+
+void fill_flicker(renderer::LightFlickerInputs &flicker, int p_time_ms,
+		const Weather *p_weather) {
+	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
+	if (p_weather != nullptr) {
+		const opennova::env::WeatherOscillator &oscillator =
+				p_weather->runtime().core().oscillator;
+		flicker.amp_ring = oscillator.amp_ring;
+		flicker.amp_ring_size =
+				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
+		flicker.ring_index = oscillator.ring_index;
+	}
 }
 
 uint8_t color_byte(float channel) {
@@ -166,6 +196,13 @@ void LightScene::set_light_fade(int64_t p_handle, int p_mode, int p_duration) {
 	scene_.set_fade(decode_handle(p_handle), p_mode, p_duration);
 }
 
+void LightScene::set_light_owner(int64_t p_handle, int64_t p_owner_entity,
+		int p_owner_section) {
+	scene_.set_owner(decode_handle(p_handle),
+			static_cast<uint64_t>(p_owner_entity),
+			static_cast<int32_t>(p_owner_section));
+}
+
 void LightScene::set_light_blend(int64_t p_handle, float p_amount) {
 	scene_.set_blend(decode_handle(p_handle), p_amount);
 }
@@ -194,6 +231,18 @@ void LightScene::clear_render_output() {
 	owner_isolation_ = "none";
 	last_models_ = 0;
 	last_lit_models_ = 0;
+	static_row_count_ = 0;
+	last_static_draws_ = 0;
+	last_lit_static_draws_ = 0;
+	if (static_light_rows_image_.is_valid() &&
+			static_light_rows_texture_.is_valid()) {
+		static_light_rows_bytes_.fill(0);
+		static_light_rows_image_->set_data(
+				static_light_rows_image_->get_width(),
+				static_light_rows_image_->get_height(), false,
+				Image::FORMAT_RGBAF, static_light_rows_bytes_);
+		static_light_rows_texture_->update(static_light_rows_image_);
+	}
 }
 
 int LightScene::render_frame(const Vector3 &p_camera_world,
@@ -334,6 +383,7 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_owner_entities,
 		const PackedInt64Array &p_interior_owners,
 		const PackedInt32Array &p_interior_sections,
+		const PackedByteArray &p_robj_scoped,
 		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather) {
 	renderer::LightFlickerInputs flicker;
 	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
@@ -355,57 +405,88 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 	options.target = renderer::LightSelectionTarget::Objects;
 	options.admit_owned_unscoped = false;
 
+	struct DrawTarget {
+		ObjectModel *model = nullptr;
+		int32_t robj_index = 0;
+		bool robj_scoped = false;
+	};
 	const int64_t model_count = p_models.size();
-	std::vector<ObjectModel *> models;
+	std::vector<DrawTarget> targets;
 	std::vector<renderer::LightDrawContext> draws;
-	models.reserve(static_cast<size_t>(model_count));
+	targets.reserve(static_cast<size_t>(model_count));
 	draws.reserve(static_cast<size_t>(model_count));
+	int filtered_models = 0;
+	bool any_robj_scoped = false;
 	for (int64_t i = 0; i < model_count; ++i) {
 		ObjectModel *model = Object::cast_to<ObjectModel>(
 				static_cast<Object *>(p_models[i]));
 		if (model == nullptr) {
 			continue;
 		}
-		const AABB world_bounds = model->get_world_bounds();
-		renderer::LightDrawContext draw;
-		const std::array<int32_t, 3> min_fixed = mission_fixed_from_godot(
-				world_bounds.position);
-		const std::array<int32_t, 3> max_fixed = mission_fixed_from_godot(
-				world_bounds.position + world_bounds.size);
-		for (int axis = 0; axis < 3; ++axis) {
-			// The godot->mission fold negates one axis; re-order per axis.
-			draw.aabb_min_fixed[axis] = MIN(min_fixed[axis], max_fixed[axis]);
-			draw.aabb_max_fixed[axis] = MAX(min_fixed[axis], max_fixed[axis]);
-		}
-		// Owners are parallel to the INPUT array, not the filtered list.
-		draw.groups.owner_group_entity = i < p_owner_entities.size()
+		++filtered_models;
+		// Owners are parallel to the INPUT array, not the filtered draw list.
+		const uint64_t owner_entity = i < p_owner_entities.size()
 				? static_cast<uint64_t>(
 						static_cast<int64_t>(p_owner_entities[i]))
 				: 0;
-		// The interior group: the building this model currently stands inside
-		// plus that blink volume's section, so an interior room light reaches
-		// exactly the draws in its own room (retail:
-		// setup_terrain_effect_for_entity @0x5c74a0 ->
-		// Lighting_SetInteriorLightGroup @0x5a90e0, see
-		// docs/render/render-lighting-re.md). Zero = outdoors.
-		draw.groups.interior_group_entity = i < p_interior_owners.size()
+		const uint64_t interior_owner = i < p_interior_owners.size()
 				? static_cast<uint64_t>(
 						static_cast<int64_t>(p_interior_owners[i]))
 				: 0;
-		draw.groups.interior_group_section = i < p_interior_sections.size()
+		const int32_t interior_section = i < p_interior_sections.size()
 				? static_cast<int32_t>(p_interior_sections[i])
 				: 0;
-		models.push_back(model);
+		const bool robj_scoped = i < p_robj_scoped.size() &&
+				p_robj_scoped[i] != 0;
+		if (robj_scoped) {
+			any_robj_scoped = true;
+			std::vector<ObjectModel::PointLightDrawPart> parts;
+			model->collect_point_light_draw_parts(parts);
+			// A rigid building has one row per visible ROBJ. Retain a section-0
+			// fallback for malformed/skinned building data so it never falls back
+			// to the broader entity-owner admission rule.
+			if (parts.empty()) {
+				parts.push_back(ObjectModel::PointLightDrawPart{
+						0, model->get_world_bounds()});
+			}
+			for (const ObjectModel::PointLightDrawPart &part : parts) {
+				renderer::LightDrawContext draw;
+				stamp_draw_bounds(part.world_bounds, draw);
+				// A building draw declares itself as interior section zero, then
+				// the model collector re-scopes the OWNER section per ROBJ. The
+				// group gate falls back from interior section zero to this value.
+				// (retail: Terrain_RenderSectorModels @0x5c5e07;
+				// collect_render_objects_for_batch @0x5d8ff7, see
+				// docs/render/render-lighting-re.md)
+				draw.groups.owner_group_entity = 0;
+				draw.groups.owner_group_section = part.robj_index;
+				draw.groups.interior_group_entity = owner_entity;
+				draw.groups.interior_group_section = 0;
+				draws.push_back(draw);
+				targets.push_back(DrawTarget{
+						model, part.robj_index, true});
+			}
+			continue;
+		}
+
+		renderer::LightDrawContext draw;
+		stamp_draw_bounds(model->get_world_bounds(), draw);
+		draw.groups.owner_group_entity = owner_entity;
+		// The interior group: the building this model currently stands inside
+		// plus that blink volume's section. Zero = outdoors.
+		draw.groups.interior_group_entity = interior_owner;
+		draw.groups.interior_group_section = interior_section;
 		draws.push_back(draw);
+		targets.push_back(DrawTarget{model, 0, false});
 	}
 	std::vector<renderer::LightDrawSelection> selections(draws.size());
 	scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
 			flicker, /*d3d_light_path=*/true, selections.data());
-	int lit_models = 0;
-	for (size_t i = 0; i < models.size(); ++i) {
+	std::unordered_set<ObjectModel *> lit_model_set;
+	for (size_t i = 0; i < targets.size(); ++i) {
 		const renderer::LightDrawSelection &selection = selections[i];
-		Vector4 posr[renderer::LightScene::kSelectLimit];
-		Vector4 color[renderer::LightScene::kSelectLimit];
+		Vector4 posr[renderer::LightScene::kSelectLimit]{};
+		Vector4 color[renderer::LightScene::kSelectLimit]{};
 		for (size_t light = 0; light < selection.count; ++light) {
 			const renderer::SelectedLight &selected = selection.lights[light];
 			const Vector3 world = godot_from_mission_float(selected.position);
@@ -414,17 +495,197 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 			color[light] = Vector4(selected.color[0], selected.color[1],
 					selected.color[2], selected.range);
 		}
-		models[i]->apply_point_light_selection(
-				static_cast<int>(selection.count), posr, color);
+		if (targets[i].robj_scoped) {
+			targets[i].model->apply_point_light_selection_to_robj(
+					targets[i].robj_index,
+					static_cast<int>(selection.count), posr, color);
+		} else {
+			targets[i].model->apply_point_light_selection(
+					static_cast<int>(selection.count), posr, color);
+		}
 		if (selection.count > 0) {
-			++lit_models;
+			lit_model_set.insert(targets[i].model);
 		}
 	}
 	selection_mode_ = "per_model_objects";
-	owner_isolation_ = "per_model";
-	last_models_ = static_cast<int>(models.size());
+	owner_isolation_ = any_robj_scoped ? "per_robj_buildings" : "per_model";
+	last_models_ = filtered_models;
+	const int lit_models = static_cast<int>(lit_model_set.size());
 	last_lit_models_ = lit_models;
 	return lit_models;
+}
+
+int LightScene::render_static_frame(
+		const PackedVector3Array &p_bounds_position_size,
+		const PackedInt64Array &p_owner_entities,
+		const PackedInt32Array &p_owner_sections,
+		const PackedInt64Array &p_interior_owners,
+		const PackedInt32Array &p_interior_sections,
+		const PackedByteArray &p_active,
+		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+		int64_t p_rows_revision) {
+	// Rows are immutable identities stamped into MultiMesh INSTANCE_CUSTOM.x.
+	// Their expensive AABB/light overlap and owner-group selection changes only
+	// when either the placer row revision or the pool's selection topology does.
+	// Cache those selected handles; live fade/RGB-gen/weather/ambient color is
+	// still reevaluated below every frame for the handful of lit rows. A carved
+	// entity remains a zero row rather than shifting later atlas identities.
+	const int64_t row_count = p_bounds_position_size.size() / 2;
+	static_row_count_ = static_cast<int>(row_count);
+	renderer::LightFlickerInputs flicker;
+	fill_flicker(flicker, p_time_ms, p_weather);
+	const std::array<float, 3> ambient = {
+		static_cast<float>(p_ambient_scale.x),
+		static_cast<float>(p_ambient_scale.y),
+		static_cast<float>(p_ambient_scale.z),
+	};
+	renderer::LightSelectionOptions options;
+	options.target = renderer::LightSelectionTarget::Objects;
+	options.admit_owned_unscoped = false;
+
+	std::vector<int> atlas_rows;
+	std::vector<renderer::LightDrawSelection> selections;
+	const uint64_t scene_revision = scene_.selection_revision();
+	const bool cacheable = p_rows_revision >= 0;
+	const bool rebuild_selection = !cacheable ||
+			static_cached_scene_revision_ != scene_revision ||
+			static_cached_rows_revision_ != p_rows_revision ||
+			static_cached_row_count_ != row_count;
+	if (rebuild_selection) {
+		std::vector<renderer::LightDrawContext> draws;
+		atlas_rows.reserve(static_cast<size_t>(row_count));
+		draws.reserve(static_cast<size_t>(row_count));
+		for (int64_t row = 0; row < row_count; ++row) {
+			if (row >= p_active.size() || p_active[row] == 0) {
+				continue;
+			}
+			renderer::LightDrawContext draw;
+			stamp_draw_bounds(AABB(p_bounds_position_size[row * 2],
+					p_bounds_position_size[row * 2 + 1]), draw);
+			draw.groups.owner_group_entity = row < p_owner_entities.size()
+					? static_cast<uint64_t>(
+							static_cast<int64_t>(p_owner_entities[row]))
+					: 0;
+			draw.groups.owner_group_section = row < p_owner_sections.size()
+					? static_cast<int32_t>(p_owner_sections[row])
+					: 0;
+			draw.groups.interior_group_entity = row < p_interior_owners.size()
+					? static_cast<uint64_t>(
+							static_cast<int64_t>(p_interior_owners[row]))
+					: 0;
+			draw.groups.interior_group_section =
+					row < p_interior_sections.size()
+					? static_cast<int32_t>(p_interior_sections[row])
+					: 0;
+			atlas_rows.push_back(static_cast<int>(row));
+			draws.push_back(draw);
+		}
+		selections.resize(draws.size());
+		scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
+				flicker, /*d3d_light_path=*/true, selections.data());
+		last_static_draws_ = static_cast<int>(draws.size());
+		if (cacheable) {
+			static_cached_selections_.clear();
+			static_cached_selections_.reserve(selections.size());
+			for (size_t i = 0; i < selections.size(); ++i) {
+				const renderer::LightDrawSelection &selection = selections[i];
+				if (selection.count == 0) {
+					continue;
+				}
+				StaticCachedSelection cached;
+				cached.atlas_row = atlas_rows[i];
+				cached.groups = draws[i].groups;
+				cached.count = selection.count;
+				for (size_t light = 0; light < selection.count; ++light) {
+					cached.handles[light] = selection.lights[light].handle;
+				}
+				static_cached_selections_.push_back(cached);
+			}
+			static_cached_scene_revision_ = scene_revision;
+			static_cached_rows_revision_ = p_rows_revision;
+			static_cached_row_count_ = static_cast<int>(row_count);
+			static_cached_active_draws_ = last_static_draws_;
+		}
+	} else {
+		// Broadphase and group gating are unchanged. Re-evaluate the selected
+		// handles so fades, flicker, weather, and ambient gain remain live.
+		last_static_draws_ = static_cached_active_draws_;
+		atlas_rows.reserve(static_cached_selections_.size());
+		selections.resize(static_cached_selections_.size());
+		for (size_t i = 0; i < static_cached_selections_.size(); ++i) {
+			const StaticCachedSelection &cached = static_cached_selections_[i];
+			atlas_rows.push_back(cached.atlas_row);
+			selections[i].count = scene_.select(cached.handles.data(), cached.count,
+					cached.groups, options, ambient, flicker,
+					/*d3d_light_path=*/true, selections[i].lights);
+		}
+	}
+
+	const int texture_rows = MAX(static_cast<int>(row_count), 1);
+	// Build the frame's rows in the scratch buffer and upload only when the
+	// payload differs from the resident texture: with no flickering or moving
+	// light in range, the selection resolves to the same bytes every frame.
+	PackedByteArray &previous = static_light_rows_bytes_;
+	static_light_rows_scratch_.resize(
+			static_cast<int64_t>(STATIC_LIGHT_ROW_TEXELS) * texture_rows * 16);
+	static_light_rows_scratch_.fill(0);
+	float *texels = reinterpret_cast<float *>(static_light_rows_scratch_.ptrw());
+	int lit_draws = 0;
+	for (size_t i = 0; i < selections.size(); ++i) {
+		const renderer::LightDrawSelection &selection = selections[i];
+		float *atlas = texels + static_cast<size_t>(atlas_rows[i]) *
+				STATIC_LIGHT_ROW_TEXELS * 4;
+		atlas[0] = static_cast<float>(selection.count);
+		if (selection.count > 0) {
+			++lit_draws;
+		}
+		for (size_t light = 0; light < selection.count; ++light) {
+			const renderer::SelectedLight &selected = selection.lights[light];
+			const Vector3 world = godot_from_mission_float(selected.position);
+			float *posr = atlas + (1 + light * 2) * 4;
+			float *color = posr + 4;
+			posr[0] = world.x;
+			posr[1] = world.y;
+			posr[2] = world.z;
+			posr[3] = selected.attenuation[2];
+			color[0] = selected.color[0];
+			color[1] = selected.color[1];
+			color[2] = selected.color[2];
+			color[3] = selected.range;
+		}
+	}
+
+	const bool recreate = static_light_rows_image_.is_null() ||
+			static_light_rows_image_->get_width() != STATIC_LIGHT_ROW_TEXELS ||
+			static_light_rows_image_->get_height() != texture_rows ||
+			static_light_rows_texture_.is_null();
+	const bool changed = recreate ||
+			previous.size() != static_light_rows_scratch_.size() ||
+			memcmp(previous.ptr(), static_light_rows_scratch_.ptr(),
+					static_cast<size_t>(previous.size())) != 0;
+	if (changed) {
+		previous = static_light_rows_scratch_;
+	}
+	if (recreate) {
+		static_light_rows_image_ = Image::create_from_data(
+				STATIC_LIGHT_ROW_TEXELS, texture_rows, false,
+				Image::FORMAT_RGBAF, static_light_rows_bytes_);
+		static_light_rows_texture_ =
+				ImageTexture::create_from_image(static_light_rows_image_);
+	} else if (changed) {
+		static_light_rows_image_->set_data(STATIC_LIGHT_ROW_TEXELS,
+				texture_rows, false, Image::FORMAT_RGBAF,
+				static_light_rows_bytes_);
+		static_light_rows_texture_->update(static_light_rows_image_);
+	}
+	if (recreate) {
+		if (RenderingServer *rs = RenderingServer::get_singleton()) {
+			rs->global_shader_parameter_set("opennova_static_point_light_rows",
+					static_light_rows_texture_);
+		}
+	}
+	last_lit_static_draws_ = lit_draws;
+	return lit_draws;
 }
 
 TypedArray<Dictionary> LightScene::collect_corona_rows(
@@ -513,23 +774,6 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	}
 	return rows;
 }
-
-namespace {
-
-void fill_flicker(renderer::LightFlickerInputs &flicker, int p_time_ms,
-		const Weather *p_weather) {
-	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	if (p_weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				p_weather->runtime().core().oscillator;
-		flicker.amp_ring = oscillator.amp_ring;
-		flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		flicker.ring_index = oscillator.ring_index;
-	}
-}
-
-} // namespace
 
 size_t LightScene::collect_terrain_light_rows(
 		const opennova::renderer::TerrainLightPatchBounds *p_patches,
@@ -659,6 +903,9 @@ Dictionary LightScene::get_report() const {
 	out["owner_isolation"] = owner_isolation_;
 	out["models"] = last_models_;
 	out["lit_models"] = last_lit_models_;
+	out["static_rows"] = static_row_count_;
+	out["static_draws"] = last_static_draws_;
+	out["lit_static_draws"] = last_lit_static_draws_;
 	TypedArray<Dictionary> rows;
 	for (size_t i = 0; i < selected_count_; ++i) {
 		const renderer::SelectedLight &light = selected_[i];
@@ -675,6 +922,15 @@ Dictionary LightScene::get_report() const {
 	return out;
 }
 
+Ref<Image> LightScene::get_static_light_rows_image() const {
+	if (static_light_rows_image_.is_null()) {
+		return Ref<Image>();
+	}
+	return Image::create_from_data(static_light_rows_image_->get_width(),
+			static_light_rows_image_->get_height(), false, Image::FORMAT_RGBAF,
+			static_light_rows_bytes_);
+}
+
 void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_model_light", "config"),
 			&LightScene::spawn_model_light);
@@ -685,6 +941,8 @@ void LightScene::_bind_methods() {
 			&LightScene::set_light_position);
 	ClassDB::bind_method(D_METHOD("set_light_fade", "handle", "mode", "duration"),
 			&LightScene::set_light_fade);
+	ClassDB::bind_method(D_METHOD("set_light_owner", "handle", "owner_entity",
+			"owner_section"), &LightScene::set_light_owner);
 	ClassDB::bind_method(D_METHOD("set_light_blend", "handle", "amount"),
 			&LightScene::set_light_blend);
 	ClassDB::bind_method(D_METHOD("is_alive", "handle"), &LightScene::is_alive);
@@ -698,8 +956,13 @@ void LightScene::_bind_methods() {
 			&LightScene::render_frame);
 	ClassDB::bind_method(D_METHOD("render_model_frame", "models",
 			"owner_entities", "interior_owners", "interior_sections",
-			"ambient_scale", "time_ms", "weather"),
+			"robj_scoped", "ambient_scale", "time_ms", "weather"),
 			&LightScene::render_model_frame);
+	ClassDB::bind_method(D_METHOD("render_static_frame",
+			"bounds_position_size", "owner_entities", "owner_sections",
+			"interior_owners", "interior_sections", "active",
+			"ambient_scale", "time_ms", "weather", "rows_revision"),
+			&LightScene::render_static_frame, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("collect_corona_rows", "camera_pos",
 			"camera_forward", "ambient_scale", "time_ms", "frame_index",
 			"weather", "models", "owner_entities", "fog"),
@@ -726,6 +989,8 @@ void LightScene::_bind_methods() {
 			&LightScene::terrain_light_strip_rgba8);
 	ClassDB::bind_method(D_METHOD("live_count"), &LightScene::live_count);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
+	ClassDB::bind_method(D_METHOD("get_static_light_rows_image"),
+			&LightScene::get_static_light_rows_image);
 }
 
 } // namespace godot

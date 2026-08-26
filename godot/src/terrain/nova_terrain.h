@@ -169,6 +169,10 @@ public:
 	Ref<Texture2D> get_tile_overlay_texture() const;
 	Ref<Texture2DArray> get_tile_cache_texture() const;
 	Dictionary get_tile_cache_diagnostics() const;
+	bool append_terrain_scorch(int64_t p_texture_index,
+			int64_t p_minimum_x_q16, int64_t p_minimum_z_q16,
+			int64_t p_maximum_x_q16, int64_t p_maximum_z_q16);
+	void clear_terrain_scorches();
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);

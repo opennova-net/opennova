@@ -2,7 +2,8 @@
 // semantics pinned against the witnessed originals —
 // [orig: LightPool_SpawnGlowEffect @ 0x5a8d50;
 //  collect_nearby_zones_by_aabb @ 0x5aa250; Light_PassesActiveGroups @ 0x5a9120;
-//  Light_SelectAndEnableForDraw @ 0x5ab9d0;
+//  Light_SelectAndEnableForDraw @ 0x5ab9d0; the batch-entry 3-cap
+//  collect_render_objects_for_batch @ 0x5d9229;
 //  Light_GetPointLightParams @ 0x5a9180; Light_TickGenBlock @ 0x5a8ae0].
 #include "renderer/light_scene.h"
 
@@ -245,8 +246,15 @@ int main() {
                "attenuation = {1, 0, 15/range^2, 1}");
     }
 
-    // Select cap: exactly four of six pass [orig: the > 4 clamp @ 0x5abbeb].
+    // Select cap: exactly three of six pass — the batch entry stores three
+    // handles and breaks the visible walk there [orig:
+    // collect_render_objects_for_batch @ 0x5d9226..0x5d9229;
+    // collect_render_batches_for_entity @ 0x5d96e6..0x5d96e9]. The > 4 clamp
+    // @ 0x5abbeb is the transient D3D LightEnable count FlushBatches tears
+    // down per entry (@ 0x5da5de), never a lit-strip count.
     {
+        expect(LightScene::kSelectLimit == 3 && kLightSelectLimit == 3,
+               "the select cap is the witnessed batch-entry three");
         LightScene scene;
         std::array<LightHandle, LightScene::kQueryLimit> handles{};
         for (int i = 0; i < 6; ++i) {
@@ -257,11 +265,17 @@ int main() {
         const size_t selected = scene.select(handles.data(), 6,
                 LightActiveGroups{}, LightSelectionOptions{},
                 {1.0f, 1.0f, 1.0f}, LightFlickerInputs{}, false, out);
-        expect(selected == 4, "at most four lights select");
+        expect(selected == 3, "at most three lights select");
+        for (size_t i = 0; i < selected; ++i) {
+            expect(out[i].handle == handles[i],
+                   "the three survivors are the first three in walk order");
+        }
     }
 
-    // Target-disable flags filter before the four-light cap. A disabled near
-    // light must not starve the fourth eligible light behind it.
+    // Target-disable flags filter before the three-light cap. A disabled near
+    // light must not starve the third eligible light behind it
+    // [orig: the objects-enable gate @ 0x5a9010 runs inside the walk
+    // @ 0x5d920c, before the store that counts toward the cap @ 0x5d921f].
     {
         LightScene scene;
         std::array<LightHandle, 5> handles{};
@@ -278,7 +292,7 @@ int main() {
         size_t selected = scene.select(handles.data(), handles.size(),
                 LightActiveGroups{}, object_options, {1.0f, 1.0f, 1.0f},
                 LightFlickerInputs{}, false, out);
-        expect(selected == 4, "four eligible object lights survive pre-cap filtering");
+        expect(selected == 3, "three eligible object lights survive pre-cap filtering");
         for (const SelectedLight &light : out) {
             expect(light.handle != handles[0],
                    "disable_objects excludes a light from the object pass");
@@ -576,7 +590,7 @@ int main() {
     }
 
     // select_for_draws: target disables gate at select, hidden slots gate at
-    // collection, and the per-draw 4-cap applies after the owner filter.
+    // collection, and the per-draw 3-cap applies after the owner filter.
     {
         LightScene scene;
         LightSpawnParams hidden_light = barrel_params(0, 0, 0);
@@ -587,7 +601,7 @@ int main() {
         no_objects.disable_objects = true;
         scene.spawn(no_objects);
         // Five world lights at increasing distance from the draw center; the
-        // farthest must lose the 4-cap.
+        // two farthest must lose the 3-cap.
         std::array<LightHandle, 5> world{};
         for (int i = 0; i < 5; ++i) {
             LightSpawnParams params = barrel_params((i + 1) << 16, 0, 0);
@@ -604,20 +618,83 @@ int main() {
         const std::array<float, 3> ambient = {1.0f, 1.0f, 1.0f};
         scene.select_for_draws(&draw, 1, options, ambient,
                                LightFlickerInputs{}, false, &out);
-        expect(out.count == LightScene::kSelectLimit,
-               "the per-draw cap is the witnessed four");
+        expect(out.count == LightScene::kSelectLimit && out.count == 3,
+               "the per-draw cap is the witnessed three");
         for (size_t i = 0; i < out.count; ++i) {
             expect(out.lights[i].handle != hidden_handle,
                    "hidden slots never collect");
             expect(out.lights[i].lights_objects,
                    "object-disabled lights never pass the object select");
-            expect(out.lights[i].handle != world[4],
-                   "nearest-first ordering drops the farthest light at the cap");
+            expect(out.lights[i].handle != world[3] &&
+                           out.lights[i].handle != world[4],
+                   "nearest-first ordering drops the farthest lights at the cap");
         }
         // Nearest ordering: selections come back ascending by distance.
         for (size_t i = 1; i < out.count; ++i) {
             expect(out.lights[i - 1].position[0] <= out.lights[i].position[0],
                    "selection preserves the nearest-first order");
+        }
+    }
+
+    // select_for_draws: the witnessed two-level shape — ONE collect per drawn
+    // entity (its own position -/+ boundRadius box @ 0x5c74fb..0x5c753a,
+    // nearest-first) and then a per-ROBJ re-gate of that same ordered list
+    // through the owner group + the 3-cap [orig: Lighting_SetOwnerLightGroup
+    // (0, robjIndex) @ 0x5d8ff7 then the walk @ 0x5d91e0..0x5d9229]. Two ROBJ
+    // draws stamped with the entity box must see the same world order and
+    // differ only by their owned light; a cap-displaced world light proves the
+    // owned light competes in nearest order, not as an extra slot.
+    {
+        LightScene scene;
+        // World lights at 1, 2, 4 wu; owned lights per ROBJ section at 3 wu.
+        const LightHandle w1 = scene.spawn(barrel_params(1 << 16, 0, 0));
+        const LightHandle w2 = scene.spawn(barrel_params(2 << 16, 0, 0));
+        const LightHandle w4 = scene.spawn(barrel_params(4 << 16, 0, 0));
+        LightSpawnParams sec1 = barrel_params(3 << 16, 0, 0);
+        sec1.has_gen = false;
+        sec1.owner_entity = 500;
+        sec1.owner_section = 1;
+        const LightHandle owned1 = scene.spawn(sec1);
+        LightSpawnParams sec2 = sec1;
+        sec2.owner_section = 2;
+        const LightHandle owned2 = scene.spawn(sec2);
+
+        // The building's entity box (position 0, boundRadius 16) stamped on
+        // BOTH ROBJ draws; interior group = the building at section 0, owner
+        // group = (0, robjIndex) — the Terrain_RenderSectorModels shape.
+        std::array<LightDrawContext, 2> draws{};
+        for (size_t d = 0; d < draws.size(); ++d) {
+            draws[d].aabb_min_fixed = {-(16 << 16), -(16 << 16), -(16 << 16)};
+            draws[d].aabb_max_fixed = {16 << 16, 16 << 16, 16 << 16};
+            draws[d].groups.interior_group_entity = 500;
+            draws[d].groups.interior_group_section = 0;
+            draws[d].groups.owner_group_entity = 0;
+            draws[d].groups.owner_group_section = static_cast<int32_t>(d + 1);
+        }
+        std::array<LightDrawSelection, 2> out{};
+        LightSelectionOptions options;
+        options.target = LightSelectionTarget::Objects;
+        options.admit_owned_unscoped = false;
+        const std::array<float, 3> ambient = {1.0f, 1.0f, 1.0f};
+        scene.select_for_draws(draws.data(), draws.size(), options, ambient,
+                               LightFlickerInputs{}, false, out.data());
+        expect(out[0].count == 3 && out[1].count == 3,
+               "each ROBJ draw fills the three-light cap");
+        expect(out[0].lights[0].handle == w1 && out[0].lights[1].handle == w2,
+               "ROBJ 1 sees the entity-box nearest order first");
+        expect(out[0].lights[2].handle == owned1,
+               "ROBJ 1's third slot is its own section light (3 wu beats 4 wu)");
+        expect(out[1].lights[0].handle == w1 && out[1].lights[1].handle == w2,
+               "ROBJ 2 sees the same entity-box order");
+        expect(out[1].lights[2].handle == owned2,
+               "ROBJ 2's third slot is ITS section light");
+        for (size_t d = 0; d < out.size(); ++d) {
+            for (size_t i = 0; i < out[d].count; ++i) {
+                expect(out[d].lights[i].handle != w4,
+                       "the 4 wu world light loses the cap to the owned 3 wu light");
+                expect(out[d].lights[i].handle != (d == 0 ? owned2 : owned1),
+                       "a section light never reaches the other ROBJ");
+            }
         }
     }
 

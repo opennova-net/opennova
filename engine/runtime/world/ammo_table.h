@@ -170,6 +170,10 @@ struct AmmoTableEntry {
     // 0 = the integrator default).
     int32_t turnrate_maxpit = 0;      // +80
     int32_t turnrate_maxyaw = 0;      // +84
+    // Permanent terrain-cache scorch selector (`scorch_id`, word +0x74).
+    // The highest-quality terrain impact path resolves ids 1/2/7/8 through
+    // world::TerrainScorchEvents before presenting the ordinary impact.
+    int32_t scorch_id = 0;
     // The impact scar kind (`scar_type`): 0 = no mark, 1 = the ring scar,
     // 2 = glass-only [orig: word +0x76 -> Impact_SpawnGlassEffectsOrScar
     // @0x5cf1b0's kind argument; world/impact_scar.h].

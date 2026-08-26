@@ -175,9 +175,11 @@ public:
 		std::function<void()> on_mount_changed;
 		// Wire-side authored-shape resolution for one decoded runtime type id
 		// (items.def graphic -> the shell's by-graphic collision model cache).
-		// Unresolvable = model_id -1 with radius 0 (the caller skips the row).
-		std::function<void(uint16_t type_id, int32_t &model_id,
-				float &bound_radius)> wire_collision_shape;
+		// Unresolvable rows return the default shape. This typed value is the
+		// cutover API: model, exact effective bound/scale, and bbox center stay
+		// inseparable for movement, projectiles, and lighting.
+		std::function<world::ResolvedCollisionShape(uint16_t type_id)>
+				wire_collision_shape;
 		// Device input -> L's body input, before the local World tick
 		// (net-before-logic, ADR 0009).
 		std::function<void()> apply_input_pre_tick;
@@ -260,7 +262,7 @@ public:
 private:
 	FrameSignals run_client_net_frame(
 			const PumpContext &ctx, const PumpHooks &hooks);
-	void wire_frame_providers(const PumpContext &ctx);
+	void wire_frame_providers(const PumpContext &ctx, const PumpHooks &hooks);
 	void materialize_replica_world(
 			const PumpContext &ctx, const PumpHooks &hooks);
 	void spawn_and_arm_local_player(
@@ -272,7 +274,7 @@ private:
 	void apply_mounted_ammo_update(const PumpContext &ctx);
 	void mirror_mission_entities(const PumpContext &ctx);
 	void mirror_predicted_vehicles(const PumpContext &ctx);
-	void refresh_projectile_proxies(
+	void refresh_wire_collision_proxies(
 			const PumpContext &ctx, const PumpHooks &hooks);
 	void apply_gameplay_events(const PumpContext &ctx);
 

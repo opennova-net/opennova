@@ -1,4 +1,5 @@
 #include "world/collision.h"
+#include <io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -116,7 +117,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        uint32_t anim_state_flags, int16_t &health,
                                        EntityHandle *out_ground,
                                        const LadderResolveIO *ladder_io,
-                                          const int32_t *eye_offset) {
+                                       const int32_t *eye_offset,
+                                       ResolvePerf *perf) {
+    if (perf != nullptr) *perf = {};
     // [orig: movement collision resolver @ 0x4b2bd0]
     // heading/body_pitch feed the on-ladder 2-point capsule's body-axis sincos
     // chain — which retail multiplies by a constant-zero length (see the capsule
@@ -286,6 +289,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         local_resolve_debug.capsule_top = capsule_top;
     }
 
+    // Production entities carry the exact Entity_InitFromModel stamp; replica
+    // rows arrive with the same typed result staged by resolve_replica. A row
+    // without either has no invented compatibility radius.
+    const int32_t source_bound_radius_q16 =
+        ent != nullptr && ent->bound_radius > 0.0f
+            ? to_fixed(ent->bound_radius)
+            : replica_source_bound_radius_q16_;
+
     ContactQuery q;
     q.points = points;
     q.radii = radii;
@@ -293,7 +304,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     q.prev_pos[0] = state.prev_pos[0];
     q.prev_pos[1] = state.prev_pos[1];
     q.prev_pos[2] = state.prev_pos[2];
-    q.source_bound_radius = 0x10000; // [orig: entity boundRadius] (D-COL-3)
+    q.source_bound_radius = source_bound_radius_q16;
     // Mask bit 0x1 arms the inflated CL recontact test while the ladder latch
     // rides; retail recomputes the arg per query, so a mid-loop fresh entry
     // upgrades the remaining candidates. [orig: v137 + 2*v130 @ 0x4b2f7c/0x4b35af]
@@ -308,6 +319,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // ticks, where no org1 climber runs anyway.
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
+    const uint64_t contacts_start =
+            perf != nullptr ? io::perf_now_us() : 0;
     auto it = candidates_.find(source.packed);
     dbg_last_contact = EntityHandle{};
     dbg_last_contact_item = 0;
@@ -563,6 +576,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[0] += total_force[0];
     pos[1] += total_force[1];
     pos[2] += total_force[2];
+    if (perf != nullptr)
+        perf->contacts_us += io::perf_now_us() - contacts_start;
 
     // The CL latch bookkeeping (motor callers already set the flag inline at
     // the latch site; this keeps the replica/harness channel and the transient
@@ -594,6 +609,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // Inter-entity sphere repulsion (no model contact only). [orig: @ 0x4b3a5c-0x4b3c52 —
     // threshold 30% of summed radii, push (thr - dist)/4 along the atan2 direction
     // via the quantized table with the (0x200000 - bam) index.]
+    const uint64_t repulsion_start =
+            perf != nullptr ? io::perf_now_us() : 0;
     const bool had_model_contact =
         total_force[0] != 0 || total_force[1] != 0 || total_force[2] != 0;
     // [orig: @ 0x4b3a77-0x4b3aa1 — the dragger/carry anim states skip repulsion]
@@ -605,7 +622,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         (ent != nullptr && (ent->flags & 0x43u) != 0) ||
         (replica_flags_ != nullptr && (*replica_flags_ & 0x43u) != 0);
     if (!had_model_contact && !repulse_exempt_state && !repulse_exempt_flags) {
-        int32_t my_radius = 0x10000; // [orig: entity boundRadius] (D-COL-3)
+        int32_t my_radius = source_bound_radius_q16;
         if ((ent != nullptr && (ent->flags & kEntityFlagParachute) != 0) ||
             (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagParachute) != 0))
             my_radius += 0x20000;
@@ -673,6 +690,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         }
     }
 
+    if (perf != nullptr)
+        perf->repulsion_us += io::perf_now_us() - repulsion_start;
+
     // Leaving the ladder: latched at resolve start, nothing re-latched, a live
     // class-bit body — push 0.375u along +bodyHeading (over the lip on a natural
     // top-out; @ 0x4b3c78) and, for the LOCAL entity only (@ 0x4b3cdc), arm the
@@ -732,8 +752,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const int32_t feet_z = pos[2] - capsule_bottom;
     pos[2] = (pos[2] + 6143) & ~0x17FF;
     EntityHandle ground_hit;
+    const uint64_t ground_start =
+            perf != nullptr ? io::perf_now_us() : 0;
     const int32_t ground =
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
+    if (perf != nullptr)
+        perf->ground_us += io::perf_now_us() - ground_start;
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
     // even a same-resolve CL latch. Generic ground is still resolved only by
@@ -767,15 +791,16 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                                         int32_t vel_xy[2], int32_t &vel_z,
                                         int32_t capsule_bottom, int32_t capsule_top,
+                                        int32_t source_bound_radius_q16,
                                         bool is_player_class, uint32_t tick, int32_t anim_state_id,
                                         uint32_t anim_state_flags, const ReplicaPeer *peers,
                                         int32_t peer_count, uint16_t exclude_handle,
                                         uint32_t *entity_flags, EntityHandle *out_ground) {
     // The ad-hoc candidate slice at the query position — the pool-0 rule of
-    // the 17th-tick builder (source radius 0x10000 + 4.0 u pad)
+    // the 17th-tick builder (exact source bound + 4.0 u pad)
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0, pool-0 leg].
     const size_t arena_mark = arena_.size();
-    const int32_t range = 0x10000 + 0x40000;
+    const int32_t range = source_bound_radius_q16 + 0x40000;
     CandidateSlice slice;
     slice.start = static_cast<int32_t>(arena_.size());
     slice.count = 0;
@@ -807,6 +832,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_peers_ = peers;
     replica_peer_count_ = peer_count;
     replica_exclude_handle_ = exclude_handle;
+    replica_source_bound_radius_q16_ = source_bound_radius_q16;
     replica_flags_ = entity_flags;
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const int32_t clearance = resolve_entity(
@@ -817,6 +843,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_peers_ = nullptr;
     replica_peer_count_ = 0;
     replica_exclude_handle_ = 0xFFFF;
+    replica_source_bound_radius_q16_ = 0;
     replica_flags_ = nullptr;
     candidates_.erase(replica_key.packed);
     arena_.resize(arena_mark);

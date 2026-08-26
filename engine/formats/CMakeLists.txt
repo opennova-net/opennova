@@ -145,7 +145,7 @@ target_include_directories(opennova_formats
 )
 
 # io/export.h (and for some libs io/le.h) is used from public headers.
-target_link_libraries(opennova_formats PUBLIC opennova_io)
+target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
 
 # Link math library (needed for sin/cos/floorf in pure C builds; not needed on
 # Windows/MSVC) — carried over from the threedi lib.

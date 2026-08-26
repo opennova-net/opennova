@@ -574,6 +574,14 @@ int main(void) {
         def_free_items(&items);
         return 1;
     }
+    /* scale 1.1 -> trunc(1.1 * 65536) = 72089, not round-to-nearest.
+       [orig: temporary x87 RC=truncate + fistp @ 0x49f6e0..0x49f73d] */
+    if (barrel->scale_q16 != 72089) {
+        fprintf(stderr, "FAIL: barrel scale_q16 mismatch: %d\n",
+                barrel->scale_q16);
+        def_free_items(&items);
+        return 1;
+    }
 
     /* Find "Player #1, Single player" by id */
     const DefItemDef *player1 = NULL;

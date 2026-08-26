@@ -12,8 +12,9 @@ easier to relay than to rediscover.
   `opennova`, unchanged). Four groups — the directories and, since ADR 0029, the CMake
   build targets too (five STATIC group targets: `opennova_base`, `opennova_formats`,
   `opennova_runtime`, `opennova_net`, plus the separate `opennova_novaworld_service`;
-  header-only `opennova_io`; no per-lib targets):
-  `base/` (io, vfs, resource_index, gameprofile, pcapio),
+  header-only `opennova_io`; no per-lib targets except the `opennova_crt`
+  STATIC leaf — the shared CRT rand stream both formats and runtime link):
+  `base/` (io, crt, vfs, resource_index, gameprofile, pcapio),
   `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,

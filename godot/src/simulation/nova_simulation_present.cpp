@@ -433,6 +433,31 @@ Array Simulation::drain_round_impacts() {
 	return out;
 }
 
+Array Simulation::drain_terrain_scorches() {
+	Array out;
+	if (!world_) return out;
+	for (const opennova::world::TerrainScorchEvent &event :
+			world_->terrain_scorches.pending()) {
+		const opennova::terrain::TerrainScorchEntry &mission =
+				event.mission_bounds;
+		Dictionary row;
+		row["texture_index"] = static_cast<int64_t>(mission.texture_index);
+		row["minimum_x_q16"] = static_cast<int64_t>(mission.minimum_x_q16);
+		row["maximum_x_q16"] = static_cast<int64_t>(mission.maximum_x_q16);
+		// mission (x,y,z) -> Godot (x,z,-y): negation swaps the ordered
+		// extrema on the second ground-plane axis.
+		row["minimum_z_q16"] =
+				-static_cast<int64_t>(mission.maximum_z_q16);
+		row["maximum_z_q16"] =
+				-static_cast<int64_t>(mission.minimum_z_q16);
+		row["source_tick"] = static_cast<int64_t>(event.tick);
+		row["source_order"] = static_cast<int64_t>(event.source_order);
+		out.push_back(row);
+	}
+	world_->terrain_scorches.clear_pending();
+	return out;
+}
+
 Array Simulation::drain_effects() {
 	Array out;
 	if (!world_installed_) return out;
@@ -1606,6 +1631,10 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+			// The authority owns the exact MoveOrder stance latch. The compact
+			// projection above reconstructs this from animation flags for joiners;
+			// host/SP must prefer the source byte used by retail's gate.
+			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
 			write_present_section_mask(r, ent->section_mask);
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;

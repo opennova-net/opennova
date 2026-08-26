@@ -4,19 +4,23 @@
 #include <godot_cpp/classes/canvas_item_material.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/color_rect.hpp>
+#include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 
 #include "env/env_render_camera.h"
 #include "env/nova_mission_environment.h"
 #include "env/nova_weather.h"
+#include "render/nova_framefx.h"
 #include "object/nova_object_shader_cache.h"
 
 #include <renderer/render_order.h>
 #include <godot_cpp/classes/viewport_texture.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 namespace godot {
 
@@ -81,6 +85,9 @@ void Water::_bind_methods() {
 			"VISUAL_LAYER_WORLD", VISUAL_LAYER_WORLD);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_WATER", VISUAL_LAYER_WATER);
+	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_ENVIRONMENT_CAPTURE",
+			VISUAL_LAYER_ENVIRONMENT_CAPTURE);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_VIEWMODEL", VISUAL_LAYER_VIEWMODEL);
 	ClassDB::bind_integer_constant(get_class_static(), "",
@@ -180,6 +187,10 @@ void Water::set_world_rendering_enabled(bool p_value) {
 void Water::release_runtime_renderer_resources() {
 	set_process(false);
 	world_rendering_enabled_ = false;
+	RenderingServer::get_singleton()->global_shader_parameter_set(
+			"opennova_water_active", false);
+	RenderingServer::get_singleton()->global_shader_parameter_set(
+			"opennova_water_reflection_clip_active", false);
 	has_drawable_surface_ = false;
 	if (reflection_viewport_ != nullptr) {
 		reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
@@ -225,11 +236,23 @@ void Water::_push_water_split_height() {
 	if (!built_ || !is_inside_tree()) {
 		return;
 	}
-	if (is_water_render_active() && is_visible_in_tree()) {
-		ObjectShaderCache::get_singleton()->set_water_split_height(
-				water_height_);
+	const bool active = is_water_render_active() && is_visible_in_tree();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_water_active", active);
+	rs->global_shader_parameter_set("opennova_water_height", water_height_);
+	if (!active) {
+		rs->global_shader_parameter_set(
+				"opennova_water_reflection_clip_active", false);
+	}
+	if (active) {
+		Camera3D *cam = Object::cast_to<Camera3D>(
+				ObjectDB::get_instance(cached_cam_id_));
+		const bool camera_above = cam == nullptr ||
+				cam->get_camera_transform().get_origin().y >= water_height_;
+		ObjectShaderCache::get_singleton()->set_water_plane(
+				water_height_, camera_above);
 	} else {
-		ObjectShaderCache::get_singleton()->clear_water_split_height();
+		ObjectShaderCache::get_singleton()->clear_water_plane();
 	}
 }
 
@@ -274,7 +297,11 @@ void Water::_exit_tree() {
 	// singleton during scene teardown on every quit — the never-freed
 	// extension object behind the packaging boot-smoke teardown AV.
 	if (built_) {
-		ObjectShaderCache::get_singleton()->clear_water_split_height();
+		ObjectShaderCache::get_singleton()->clear_water_plane();
+		RenderingServer::get_singleton()->global_shader_parameter_set(
+				"opennova_water_active", false);
+		RenderingServer::get_singleton()->global_shader_parameter_set(
+				"opennova_water_reflection_clip_active", false);
 	}
 	// Reflection teardown: stop the offscreen renders and disarm the shader's
 	// reflection branch — the u_water_color fallback takes over if the
@@ -401,6 +428,24 @@ void Water::build() {
 		add_child(reflection_viewport_);
 		reflection_camera_ = memnew(Camera3D);
 		reflection_camera_->set_name("WaterReflectionCamera");
+		// Every retail pass writes gamma-domain numeric values, so this RTT
+		// needs exactly one display decode before Godot's sRGB output encode
+		// for its stored bytes to be the retail gamma texels the water shader
+		// samples raw - and the witnessed dim quad below multiplies those
+		// BYTES. A decode-only terminal effect on the mirror camera (no Q3
+		// source, so no FrameFX composite) provides it; the camera must not
+		// inherit the beauty WorldEnvironment's chain. An HDR 2D target would
+		// skip the encode but run the canvas dim in linear space (0x40/255
+		// becomes ~0.05), which is the wrong domain for that multiply.
+		Ref<FrameFxCompositorEffect> decode_effect;
+		decode_effect.instantiate();
+		Ref<Compositor> capture_compositor;
+		capture_compositor.instantiate();
+		TypedArray<Ref<CompositorEffect>> capture_effects;
+		Ref<CompositorEffect> generic_decode = decode_effect;
+		capture_effects.push_back(generic_decode);
+		capture_compositor->set_compositor_effects(capture_effects);
+		reflection_camera_->set_compositor(capture_compositor);
 		// The witnessed mirror scene: sky/terrain/celestials/foliage plus the
 		// flag-0x400 world population — vehicles by item type and records
 		// whose BMS attribute authors Reflective. It has no water surface, FP
@@ -601,6 +646,11 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 	const auto to_v3 = [](const opennova::env::Vec3 &v) {
 		return Vector3(v.x, v.y, v.z);
 	};
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_water_reflection_eye",
+			to_v3(view.origin));
+	rs->global_shader_parameter_set("opennova_water_reflection_clip_active",
+			!view.below_water);
 	reflection_camera_->set_global_transform(Transform3D(
 			Basis(to_v3(view.basis_x), to_v3(view.basis_y), to_v3(view.basis_z)),
 			to_v3(view.origin)));

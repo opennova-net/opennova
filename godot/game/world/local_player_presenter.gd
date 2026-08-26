@@ -680,7 +680,12 @@ func _update_scope_camera() -> void:
 func _update_avatar(pos: Vector3) -> void:
 	if _avatar == null or not is_instance_valid(_avatar) or _world == null:
 		return
-	_avatar.global_position = pos
+	# MATCHTERRAIN follows the simulation's exact MoveOrder stance latch. The
+	# body stays submitted as a shadow source in first person, so keep this
+	# independent of the camera-visible layer verdict below.
+	var stance_sim = _sim()
+	_avatar.set_match_terrain_enabled(
+			stance_sim != null and stance_sim.get_local_player_stance_latch() != 0)
 	# The avatar node carries the BODY frame (the lagged body heading), not the aim yaw:
 	# the aim/body split is what the per-segment overlay renders as the torso twist, and
 	# the body-class delta is identity by construction so the hips stay glued to the node.
@@ -691,7 +696,7 @@ func _update_avatar(pos: Vector3) -> void:
 			if runtime != null else null
 	if overlay != null:
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay.body_angles)
-		_avatar.global_basis = body_basis
+		_avatar.global_transform = _avatar.compose_entity_transform(body_basis, pos)
 		var inv := body_basis.inverse()
 		var deltas: Array = []
 		for a in overlay.segment_angles:
@@ -699,8 +704,9 @@ func _update_avatar(pos: Vector3) -> void:
 		_avatar.set_aim_overlay(deltas)
 	else:
 		var sim_yaw = _sim()
-		_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
+		var body_basis := MissionObjectPlacer.bms_to_godot_basis(
 			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
+		_avatar.global_transform = _avatar.compose_entity_transform(body_basis, pos)
 		_avatar.set_aim_overlay([])
 	# The body renders only in third person; first person hides it from every
 	# camera by LAYER, not by visible = false, so it stays a live shadow

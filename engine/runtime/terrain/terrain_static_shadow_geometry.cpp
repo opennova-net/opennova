@@ -2,9 +2,9 @@
 
 #include <io/strutil.h>
 #include <renderer/material_classify.h>
-#include <simassets/model_builders.h>
+#include <renderer/material_eval.h>
+#include <renderer/object_shader_template.h>
 #include <threedi/threedi_3di3.h>
-#include <threedi/threedi_ctrl_catalog.h>
 
 #include <algorithm>
 #include <cstring>
@@ -62,32 +62,18 @@ uint64_t hash_alpha_pyramid(uint64_t hash,
 	return hash;
 }
 
-TerrainStaticShadowBlend map_blend(renderer::ObjectBlendMode blend) {
+TerrainStaticShadowBlend map_blend(::renderer::ObjectBlendMode blend) {
 	switch (blend) {
-		case renderer::ObjectBlendMode::Opaque:
+		case ::renderer::ObjectBlendMode::Opaque:
 			return TerrainStaticShadowBlend::Opaque;
-		case renderer::ObjectBlendMode::AlphaBlend:
+		case ::renderer::ObjectBlendMode::AlphaBlend:
 			return TerrainStaticShadowBlend::Alpha;
-		case renderer::ObjectBlendMode::Additive:
+		case ::renderer::ObjectBlendMode::Additive:
 			return TerrainStaticShadowBlend::Additive;
-		case renderer::ObjectBlendMode::Multiplicative:
+		case ::renderer::ObjectBlendMode::Multiplicative:
 			return TerrainStaticShadowBlend::Multiply;
 	}
 	return TerrainStaticShadowBlend::Opaque;
-}
-
-// The exact global slot retail's loader fixup selects for an authored ctrl
-// name [orig: sub_5B4640 ordinal store @ 0x5B46E6; CtrlName_ToOrdinal
-// @ 0x57B290].
-std::string runtime_control_register_name(const Threedi3di3 &model,
-		int32_t reg) {
-	if (reg < 0 || static_cast<uint32_t>(reg) >= model.ctrl.count) {
-		return {};
-	}
-	const uint8_t ordinal = threedi_ctrl_register_loader_ordinal(
-			model.ctrl.registers[reg].name);
-	const char *name = threedi_ctrl_register_name(ordinal);
-	return name != nullptr ? std::string(name) : std::string();
 }
 
 // First frame-zero texture name in the diffuse slot — the adapter's
@@ -298,17 +284,8 @@ std::vector<const char *> terrain_static_shadow_unsupported_reason_names(
 	if ((issues & kTerrainStaticShadowUnsupportedMissingAlphaTexture) != 0) {
 		names.push_back("missing_alpha_texture");
 	}
-	if ((issues & kTerrainStaticShadowUnsupportedDynamicAlpha) != 0) {
-		names.push_back("dynamic_alpha");
-	}
-	if ((issues & kTerrainStaticShadowUnsupportedDynamicUv) != 0) {
-		names.push_back("dynamic_uv");
-	}
 	if ((issues & kTerrainStaticShadowUnsupportedFlipbook) != 0) {
 		names.push_back("flipbook");
-	}
-	if ((issues & kTerrainStaticShadowUnsupportedSkinnedLod) != 0) {
-		names.push_back("skinned_lod");
 	}
 	if ((issues & kTerrainStaticShadowUnsupportedInvalidMaterial) != 0) {
 		names.push_back("invalid_material");
@@ -325,26 +302,48 @@ std::vector<const char *> terrain_static_shadow_unsupported_reason_names(
 	return names;
 }
 
-const TerrainStaticShadowAlphaPyramid *terrain_static_shadow_selected_alpha(
-		const TerrainStaticShadowResolvedMaterial &material, int team) {
-	if (material.team_alpha_frames.empty()) {
-		return material.alpha_texture.get();
+TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
+		const TerrainStaticShadowResolvedGeometry &geometry,
+		const TerrainStaticShadowResolvedMaterial &material,
+		uint32_t time_ms,
+		const ::renderer::ControlRegisterValues &control_values) {
+	TerrainStaticShadowMaterialState state;
+	state.issues = material.unsupported_issues;
+	if (!material.casts_projected_shadow ||
+			!material.samples_diffuse_alpha) {
+		return state;
 	}
-	const int frame_count = static_cast<int>(
-			material.team_alpha_frames.size());
-	if (team < 0 || frame_count <= 0) return nullptr;
-	const int frame = team % frame_count;
-	return material.team_alpha_frames[static_cast<std::size_t>(frame)].get();
-}
 
-uint32_t terrain_static_shadow_caster_material_issues(
-		const TerrainStaticShadowResolvedMaterial &material, int team) {
-	uint32_t issues = material.unsupported_issues;
-	if (!material.team_alpha_frames.empty() &&
-			terrain_static_shadow_selected_alpha(material, team) == nullptr) {
-		issues |= kTerrainStaticShadowUnsupportedFlipbook;
+	const ::renderer::MaterialRuntime runtime = ::renderer::eval_material_runtime(
+			material.runtime_material, time_ms,
+			geometry.control_register_names, control_values);
+	state.uv = runtime.uv;
+	if (material.uses_material_alpha) {
+		state.alpha_scale = runtime.alpha;
 	}
-	return issues;
+
+	if (material.diffuse_alpha_frames.empty()) {
+		state.issues |= kTerrainStaticShadowUnsupportedMissingAlphaTexture;
+		return state;
+	}
+	if (material.diffuse_alpha_frames.size() > 1) {
+		state.diffuse_frame = ::renderer::compute_anim_frame(
+				material.runtime_material,
+				static_cast<uint32_t>(material.diffuse_alpha_frames.size()),
+				time_ms, geometry.control_register_names, control_values);
+	}
+	if (state.diffuse_frame < 0 ||
+			static_cast<std::size_t>(state.diffuse_frame) >=
+					material.diffuse_alpha_frames.size()) {
+		state.issues |= kTerrainStaticShadowUnsupportedFlipbook;
+		return state;
+	}
+	state.alpha_texture = material.diffuse_alpha_frames[
+			static_cast<std::size_t>(state.diffuse_frame)].get();
+	if (state.alpha_texture == nullptr) {
+		state.issues |= kTerrainStaticShadowUnsupportedMissingAlphaTexture;
+	}
+	return state;
 }
 
 std::shared_ptr<TerrainStaticShadowResolvedGeometry>
@@ -353,7 +352,20 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		TerrainStaticShadowTextureProvider &textures) {
 	auto geometry = std::make_shared<TerrainStaticShadowResolvedGeometry>();
 	uint64_t hash = hash_lowered_string(kFnvOffset, graphic);
+	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr) {
+		return {};
+	}
+	geometry->control_register_names.reserve(model.ctrl.count);
+	for (uint32_t index = 0; index < model.ctrl.count; ++index) {
+		geometry->control_register_names.emplace_back(
+				model.ctrl.registers[index].name);
+		hash = hash_lowered_string(hash,
+				geometry->control_register_names.back());
+	}
 
+	if (model.material_count > 0 && model.materials == nullptr) {
+		return {};
+	}
 	const int material_count = static_cast<int>(model.material_count);
 	geometry->materials.reserve(static_cast<std::size_t>(
 			std::max(material_count, 0)));
@@ -386,109 +398,112 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		const std::string shader_tag =
 				mat.shader_name[0] != '\0' ? std::string(mat.shader_name)
 										   : std::string("FF_ST_OP");
-		const renderer::ObjectMaterialClassification classification =
-				renderer::classify_object_material(shader_tag,
+		const ::renderer::ObjectMaterialClassification classification =
+				::renderer::classify_object_material(shader_tag,
 						static_cast<uint8_t>(material_flags),
 						mat.emissive_type == THREEDI_EMISSIVE_FULL
 								? THREEDI_EMISSIVE_FULL
 								: 0,
 						mat.is_glass != 0 ? 1 : 0,
 						static_cast<uint8_t>(alpha_ref));
+		const ::renderer::ObjectShaderPipelineDescriptor pipeline =
+				::renderer::describe_object_shader_pipeline(
+						::renderer::build_object_shader_key(classification));
+		const ::renderer::ObjectProjectedShadowPolicy projected_policy =
+				::renderer::object_projected_shadow_policy(pipeline.technique);
 		TerrainStaticShadowResolvedMaterial material;
-		material.blend = map_blend(classification.blend);
+		material.casts_projected_shadow = projected_policy !=
+				::renderer::ObjectProjectedShadowPolicy::NoPass;
+		material.blend = projected_policy ==
+				::renderer::ObjectProjectedShadowPolicy::MaterialBlend
+				? map_blend(classification.blend)
+				: TerrainStaticShadowBlend::Opaque;
 		material.alpha_test_enabled =
+				material.casts_projected_shadow &&
 				(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0;
 		material.alpha_test_inverted =
+				material.alpha_test_enabled &&
 				(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0;
 		material.alpha_ref = static_cast<uint8_t>(alpha_ref);
 		material.two_sided =
+				material.casts_projected_shadow &&
 				(material_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED) != 0;
 		const bool needs_alpha = material.alpha_test_enabled ||
 				material.blend == TerrainStaticShadowBlend::Alpha;
-		const int alpha_gen_style = static_cast<int>(mat.alpha_gen.style);
-		// AlphaGen style 24 is a static constant: the evaluator takes fraction
-		// zero and returns `start` [orig: AlphaGen_EvaluateValue @ 0x5B234C].
-		// Preserve that value when PROJSHAD blending or alpha testing can
-		// observe source alpha. Opaque, non-alpha-tested PROJSHAD writes black
-		// RGB with blending disabled, so its material alpha is not a raster
-		// dependency at all (Scrate1 is the mounted witness). See
-		// docs/render/render-material-re.md for AlphaGen evaluation and
-		// docs/terrain/terrain-re.md for the page-alpha pass.
-		if (needs_alpha && alpha_gen_style == 24) {
-			material.alpha_scale = static_cast<float>(std::clamp(
-					static_cast<int>(mat.alpha_gen.start), 0, 255)) / 255.0f;
-		}
+		material.samples_diffuse_alpha = needs_alpha;
+		material.uses_material_alpha = needs_alpha && projected_policy ==
+				::renderer::ObjectProjectedShadowPolicy::MaterialBlend;
+		material.runtime_material = mat;
 		const int anim_frames = static_cast<int>(mat.animation.num_frames);
 		const int anim_type = static_cast<int>(mat.animation.animation_type);
-		const int anim_control =
-				static_cast<int>(mat.animation.cycle_frame_time);
-		const std::string anim_control_name =
-				runtime_control_register_name(model, anim_control);
-		if (needs_alpha && anim_frames > 1 && anim_type == 1 &&
-				strutil::iequals(anim_control_name, "TEX_TEAM")) {
+		const int anim_control = static_cast<int>(
+				mat.animation.cycle_frame_time);
+		if (needs_alpha && anim_frames > 1) {
 			const std::vector<std::string> frames = material_anim_frames(
 					mat, THREEDI_TEX_SLOT_DIFFUSE);
 			if (static_cast<int>(frames.size()) != anim_frames) {
 				material.unsupported_issues |=
 						kTerrainStaticShadowUnsupportedFlipbook;
 			} else {
-				material.team_alpha_frames.reserve(
+				material.diffuse_alpha_frames.reserve(
 						static_cast<std::size_t>(anim_frames));
 				for (const std::string &frame : frames) {
 					std::shared_ptr<const TerrainStaticShadowAlphaPyramid>
 							alpha = textures.load_alpha(frame);
-					if (alpha == nullptr) {
-						material.unsupported_issues |=
-							kTerrainStaticShadowUnsupportedMissingAlphaTexture;
-					}
-					material.team_alpha_frames.push_back(std::move(alpha));
+					material.diffuse_alpha_frames.push_back(std::move(alpha));
 				}
 			}
 		} else if (needs_alpha) {
-			material.alpha_texture = textures.load_alpha(
-					static_diffuse_name(mat));
-			if (material.alpha_texture == nullptr) {
-				material.unsupported_issues |=
-						kTerrainStaticShadowUnsupportedMissingAlphaTexture;
-			}
+			material.diffuse_alpha_frames.push_back(textures.load_alpha(
+					static_diffuse_name(mat)));
 		}
-		// Time/control-driven alpha that reaches blending/testing would
-		// require the frame's material bus. Reject that observable case
-		// rather than baking a guessed sample; irrelevant opaque alpha
-		// remains supported.
-		if (needs_alpha && alpha_gen_style != 0 && alpha_gen_style != 24) {
-			material.unsupported_issues |=
-					kTerrainStaticShadowUnsupportedDynamicAlpha;
-		}
-		if (static_cast<int>(mat.u_params.style) != 0 ||
-				static_cast<int>(mat.v_params.style) != 0) {
-			material.unsupported_issues |=
-					kTerrainStaticShadowUnsupportedDynamicUv;
-		}
-		if (needs_alpha && anim_frames > 1 &&
-				material.team_alpha_frames.empty()) {
-			material.unsupported_issues |=
-					kTerrainStaticShadowUnsupportedFlipbook;
-		}
-		material.exact = material.unsupported_issues ==
-				kTerrainStaticShadowUnsupportedNone;
 		hash = hash_lowered_string(hash, shader_tag);
 		hash = hash_value(hash, material_flags);
 		hash = hash_value(hash, alpha_ref);
+		hash = hash_value(hash, material.casts_projected_shadow);
 		hash = hash_value(hash, material.blend);
 		hash = hash_value(hash, material.alpha_test_enabled);
 		hash = hash_value(hash, material.alpha_test_inverted);
-		hash = hash_value(hash, material.alpha_scale);
 		hash = hash_value(hash, material.two_sided);
-		hash = hash_value(hash, material.exact);
+		hash = hash_value(hash, material.samples_diffuse_alpha);
+		hash = hash_value(hash, material.uses_material_alpha);
 		hash = hash_value(hash, material.unsupported_issues);
+		hash = hash_value(hash, mat.alpha_gen.style);
+		hash = hash_value(hash, mat.alpha_gen.phase);
+		hash = hash_value(hash, mat.alpha_gen.reg);
+		hash = hash_value(hash, mat.alpha_gen.rate);
+		hash = hash_value(hash, mat.alpha_gen.start);
+		hash = hash_value(hash, mat.alpha_gen.end);
+		// RGB itself is forced black in PROJSHAD, but retail evaluates RgbGen
+		// between AlphaGen and UV. A noise RgbGen therefore advances the shared
+		// waveform stream before a noise UV channel and remains a runtime input.
+		hash = hash_value(hash, mat.rgb_gen.style);
+		hash = hash_value(hash, mat.rgb_gen.phase);
+		hash = hash_value(hash, mat.rgb_gen.reg);
+		hash = hash_value(hash, mat.rgb_gen.rate);
+		for (const float component : mat.rgb_gen.start_color) {
+			hash = hash_value(hash, component);
+		}
+		for (const float component : mat.rgb_gen.end_color) {
+			hash = hash_value(hash, component);
+		}
+		hash = hash_value(hash, mat.u_params.style);
+		hash = hash_value(hash, mat.u_params.phase);
+		hash = hash_value(hash, mat.u_params.reg);
+		hash = hash_value(hash, mat.u_params.gen_rate);
+		hash = hash_value(hash, mat.u_params.start);
+		hash = hash_value(hash, mat.u_params.end);
+		hash = hash_value(hash, mat.v_params.style);
+		hash = hash_value(hash, mat.v_params.phase);
+		hash = hash_value(hash, mat.v_params.reg);
+		hash = hash_value(hash, mat.v_params.gen_rate);
+		hash = hash_value(hash, mat.v_params.start);
+		hash = hash_value(hash, mat.v_params.end);
 		hash = hash_value(hash, anim_frames);
 		hash = hash_value(hash, anim_type);
 		hash = hash_value(hash, anim_control);
-		hash = hash_lowered_string(hash, anim_control_name);
-		hash = hash_alpha_pyramid(hash, material.alpha_texture);
-		hash = hash_value(hash, material.team_alpha_frames.size());
-		for (const auto &alpha : material.team_alpha_frames) {
+		hash = hash_value(hash, material.diffuse_alpha_frames.size());
+		for (const auto &alpha : material.diffuse_alpha_frames) {
 			hash = hash_alpha_pyramid(hash, alpha);
 		}
 		geometry->materials.push_back(std::move(material));
@@ -498,16 +513,15 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 	for (int lod = 0; lod < 2; ++lod) {
 		if (lod >= lod_count) continue;
 		uint32_t lod_issues = kTerrainStaticShadowUnsupportedNone;
-		if (simassets::model_is_skinned(model, lod)) {
-			lod_issues |= kTerrainStaticShadowUnsupportedSkinnedLod;
-		}
-		// Terrain_CollectAndRenderTileModels submits the same entity transform
-		// for every selected ROBJ; PANM matrices are not consulted in PROJSHAD
-		// [orig: @0x60D926..0x60D971, see docs/terrain/terrain-re.md].
+		// Terrain_CollectAndRenderTileModels copies the same entity transform
+		// into all ROBJ/bone matrix slots before the PROJSHAD submit. The shipped
+		// skinned vertex path computes a weight sum whose weights total one, so
+		// identical matrices collapse exactly to this rigid source geometry;
+		// PANM is not an input to this pass.
+		// [orig: @0x60D926..0x60D971; _vsSkPost.fx
+		// vsSkinPostBlackT1; _BaseInc.fx CalcSkinWorldPosAndNormal]
 		geometry->lod_unsupported_issues[static_cast<std::size_t>(lod)] =
 				lod_issues;
-		geometry->lod_exact[static_cast<std::size_t>(lod)] =
-				lod_issues == kTerrainStaticShadowUnsupportedNone;
 		const ThreediLod *native_lod =
 				static_cast<std::size_t>(lod) < model.lod_count &&
 						model.lods != nullptr
@@ -706,6 +720,8 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 			const bool material_requires_uvs = resolved.material_index >= 0 &&
 					resolved.material_index <
 							static_cast<int>(geometry->materials.size()) &&
+					geometry->materials[static_cast<std::size_t>(
+							resolved.material_index)].casts_projected_shadow &&
 					(geometry->materials[static_cast<std::size_t>(
 							resolved.material_index)].alpha_test_enabled ||
 							geometry->materials[static_cast<std::size_t>(

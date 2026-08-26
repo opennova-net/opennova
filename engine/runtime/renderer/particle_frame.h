@@ -31,6 +31,20 @@ enum class ParticleRenderDomain : std::uint8_t {
 	FirstPerson = 1,
 };
 
+// Retail's two World particle submissions classify the emitter origin, not
+// each generated quad. The below subset is strict; equality belongs to Above.
+// All is reserved for domains/passes that do not use the water partition.
+enum class ParticleWaterSubset : std::uint8_t {
+	All = 0,
+	Below = 1,
+	Above = 2,
+};
+
+// Converts the frame-level far/camera-side bracket into the manager's raw
+// below/above selector. Underwater views reverse the two submissions.
+ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
+		bool camera_side);
+
 // Exact PTL graphic type values. Retail atlas pages are partitioned by type.
 enum class ParticlePipeline : std::uint8_t {
 	Blend = 0,
@@ -95,8 +109,18 @@ static_assert(std::is_standard_layout<ParticleVertex>::value,
 static_assert(std::is_trivially_copyable<ParticleVertex>::value,
 		"particle vertex must be directly uploadable");
 
-// Input vector order is the stable registration/emission order and is retained
-// when sort depths tie. Positive camera_pull moves the center camera-ward.
+// One quad's inputs. Positive camera_pull moves the center camera-ward.
+//
+// Input order contract: the compiler never reorders a producer's particle run
+// before the witnessed per-leaf quicksort, so the run must already be the
+// emitter's dense particle array order. In retail that array is spawn order
+// perturbed by expiry: SpawnParticle appends at slot `count`
+// [orig: CParticleEmitter_SpawnParticle @ 0x5e80c7], AdvanceFrame reclaims an
+// expired slot by copying the LAST live particle into it and shrinking the
+// count [orig: CParticleEmitter_AdvanceFrame @ 0x5e687e, 0x5e68d9], and
+// ComputeViewDepths then walks slots 0..count-1 into the batch buffer
+// [orig: CParticleEmitter_ComputeViewDepths @ 0x5e75cf]. The manager's in-place
+// quicksort consumes exactly that order (including its equal-key swaps).
 struct ParticleQuadSnapshot {
 	ParticleVec3 center{};
 	float half_width = 0.0f;
@@ -115,23 +139,44 @@ struct ParticleQuadSnapshot {
 struct ParticleEmitterSnapshot {
 	std::uint64_t emitter_id = 0;
 	ParticleRenderDomain domain = ParticleRenderDomain::World;
+	// The emitter's live world origin is the water-pass selector. Bounds and
+	// individual particle positions deliberately do not participate.
+	ParticleVec3 position{};
 	ParticleAabb bounds{};
-	std::vector<ParticleQuadSnapshot> particles;
+	// This emitter's run inside ParticleFrameSnapshot::particles. A run that
+	// overruns the flat array is clamped by the compiler.
+	std::size_t first_particle = 0;
+	std::size_t particle_count = 0;
 };
 
+// Flat frame input. Emitters are in retail registration order and every
+// emitter's quads form one contiguous run, so a producer refills both vectors
+// with clear() each frame and keeps their capacity instead of rebuilding one
+// inner vector per emitter.
 struct ParticleFrameSnapshot {
 	std::uint64_t frame_id = 0;
 	std::vector<ParticleEmitterSnapshot> emitters;
+	std::vector<ParticleQuadSnapshot> particles;
 };
 
 // Orthonormal camera basis in world space. forward points in the viewing
 // direction; the compiler deliberately does not normalize producer input.
 struct ParticleViewInput {
 	ParticleRenderDomain domain = ParticleRenderDomain::World;
+	ParticleWaterSubset water_subset = ParticleWaterSubset::All;
+	float water_height = 0.0f;
 	ParticleVec3 position{};
 	ParticleVec3 right{1.0f, 0.0f, 0.0f};
 	ParticleVec3 up{0.0f, 1.0f, 0.0f};
 	ParticleVec3 forward{0.0f, 0.0f, 1.0f};
+	// Column-major camera projection. Retail projects each emitter AABB's
+	// bounding sphere into viewport space before its z/x/y recursive interval
+	// partition [orig: CEffectWorld_RegisterRenderObject @ 0x5e44c0;
+	// CParticleManager_TransformToViewSpace @ 0x5ecc50]. Godot's reverse-Z
+	// projection already has near=1/far=0, matching retail after its `1-z`.
+	float projection[16]{};
+	bool projection_valid = false;
+	bool projection_near_is_one = true;
 };
 
 struct ParticleDrawCommand {
@@ -163,11 +208,15 @@ struct ParticleFrameDebugCounters {
 	std::size_t selected_emitters = 0;
 	std::size_t input_particles = 0;
 	std::size_t domain_filtered_particles = 0;
+	std::size_t water_filtered_emitters = 0;
+	std::size_t water_filtered_particles = 0;
 	std::size_t invisible_particles = 0;
 	std::size_t truncated_particles = 0;
 	std::size_t emitted_quads = 0;
 	std::size_t draw_commands = 0;
 	std::size_t adjacent_state_merges = 0;
+	std::size_t recursive_partition_calls = 0;
+	std::size_t render_batch_leaves = 0;
 	std::size_t capacity_growths_this_compile = 0;
 	std::uint64_t lifetime_capacity_growths = 0;
 	std::size_t vertex_capacity = 0;
@@ -175,6 +224,8 @@ struct ParticleFrameDebugCounters {
 	std::size_t emitter_bounds_capacity = 0;
 	std::size_t emitter_sort_capacity = 0;
 	std::size_t particle_sort_capacity = 0;
+	// Retained explicit-recursion stack shared by every quicksort of a compile.
+	std::size_t sort_stack_capacity = 0;
 };
 
 struct ParticleDrawList {
@@ -186,9 +237,10 @@ struct ParticleDrawList {
 	ParticleFrameDebugCounters debug{};
 };
 
-// Deep in-process module: one call filters a domain, globally orders visible
-// particles by depth, builds quads, forms adjacent state runs, calculates
-// bounds, and accounts for retained allocations.
+// Deep in-process module: one call filters a domain, reproduces retail's
+// projected z/x/y recursive emitter partition and per-leaf particle quicksort,
+// builds quads, forms adjacent state runs, calculates bounds, and accounts for
+// retained allocations.
 //
 // The returned draw list remains valid until the next compile call. Reusing one
 // compiler per render domain makes no-allocation-after-warmup observable.
@@ -204,6 +256,10 @@ public:
 
 	const ParticleDrawList &compile(const ParticleFrameSnapshot &snapshot,
 			const ParticleViewInput &view);
+
+	// The retained result of the most recent compile (default-empty before the
+	// first). Diagnostics read it in place instead of copying it per frame.
+	const ParticleDrawList &draw_list() const;
 
 private:
 	class Impl;

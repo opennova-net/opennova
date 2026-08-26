@@ -77,6 +77,9 @@ def test_packed_struct_sizes_pin_native_abi():
     assert ctypes.sizeof(py_threedi.ThreediCollisionObject) == 88
     assert ctypes.sizeof(py_threedi.ThreediCollisionFace) == 44
     assert ctypes.sizeof(py_threedi.ThreediCollisionNormal) == 14
+    assert [name for name, _ctype in py_threedi.ThreediHeader._fields_][-2:] == [
+        "lod_count_decl", "max_radius_fp16"
+    ]
 
 
 def test_collision_face_runtime_cfac_layout():

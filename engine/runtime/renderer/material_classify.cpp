@@ -108,6 +108,8 @@ ObjectMaterialClassification classify_object_material(const std::string &shader_
 	c.has_detail = (info_flags & ::oed::MATERIAL_FLAG_SECONDARY) != 0;
 	c.is_skinned = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_SKINNED) != 0;
 	c.uses_specular = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
+	c.environment_textured =
+			(descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
 	c.normal_uses_uv2 = (info_flags & ::oed::MATERIAL_FLAG_NORMAL_B) != 0;
 	c.normal_space = c.needs_normal_map ? map_normal_space(descriptor->normal_space)
 	                                    : ObjectNormalSpace::None;

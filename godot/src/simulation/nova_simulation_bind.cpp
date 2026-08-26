@@ -235,6 +235,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
+	ClassDB::bind_method(D_METHOD("drain_terrain_scorches"),
+			&Simulation::drain_terrain_scorches);
 	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
 	ClassDB::bind_method(D_METHOD("drain_chat_lines"), &Simulation::drain_chat_lines);
 	ClassDB::bind_method(D_METHOD("get_vehicle_panel_view"),
@@ -427,8 +429,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_building_visibility_changes);
 	ClassDB::bind_method(D_METHOD("get_render_culled_changes"),
 	                     &Simulation::get_render_culled_changes);
-	ClassDB::bind_method(D_METHOD("get_entity_sun_visibility_changes", "light_dir"),
-	                     &Simulation::get_entity_sun_visibility_changes);
+	ClassDB::bind_method(D_METHOD("get_draw_lighting_changes", "light_dir"),
+	                     &Simulation::get_draw_lighting_changes);
 	ClassDB::bind_method(D_METHOD("get_local_player_sun_quality"),
 	                     &Simulation::get_local_player_sun_quality);
 	ClassDB::bind_method(D_METHOD("sun_quality_factor", "quality"),
@@ -652,6 +654,7 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_SECTION_MASK_VALID);
 	BIND_ENUM_CONSTANT(PF_SECTION_MASK_LO);
 	BIND_ENUM_CONSTANT(PF_SECTION_MASK_HI);
+	BIND_ENUM_CONSTANT(PF_STANCE_BITS);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);

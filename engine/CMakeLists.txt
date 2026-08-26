@@ -4,6 +4,7 @@
 # only the CMake target granularity collapsed (2026-08 Shape A decision).
 #
 #   opennova_io                 INTERFACE  base/io (byte/bit IO, fixed-point, strutil)
+#   opennova_crt                STATIC     base/crt (retail-parity MSVC CRT rand stream)
 #   opennova_formats            STATIC     formats/* + the mission_format half of
 #                                          runtime/mission (see engine/formats/CMakeLists.txt)
 #   opennova_base               STATIC     base/{vfs,resource_index,gameprofile,pcapio}
@@ -21,6 +22,7 @@
 # the service target links it.
 
 add_subdirectory(base/io)
+add_subdirectory(base/crt)
 add_subdirectory(formats)
 add_subdirectory(base)
 add_subdirectory(runtime)

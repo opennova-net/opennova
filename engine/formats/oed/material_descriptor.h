@@ -40,6 +40,11 @@ inline constexpr uint32_t MATERIAL_DESCRIPTOR_UV_TRANSFORM = 0x00000010u;
 // [orig: vsTracer in Tracer.fx (localres.pff): lum = abs(dot(eye_vec,
 // worldnormal)), Out.Diff = lum*lum, TSS MODULATE(Texture, Diffuse)].
 inline constexpr uint32_t MATERIAL_DESCRIPTOR_VIEW_FADE = 0x00000020u;
+// VS_BMTXMIRRT's NORMAL technique post-multiplies the reflection/light result
+// by Diffuse1; VS_BUMPMIRRT does not. The runtime capability union marks both
+// rows DIFFUSE, so this semantic cannot be recovered from shader_flags.
+// [orig: BmTxMirrT.fx TSegTanTexMirror P3 vs BumpMirrT.fx TSegTanMirror].
+inline constexpr uint32_t MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED = 0x00000040u;
 
 struct MaterialDescriptorRecord {
   const char name[24];
@@ -109,7 +114,7 @@ inline constexpr MaterialDescriptorRecord kMaterialDescriptorTable[] = {
     {"VS_PHONGT", material_info_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SPECULAR},
     {"VS_PHONGT#UV", material_info_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SPECULAR | MATERIAL_DESCRIPTOR_UV_TRANSFORM},
     {"VS_DOT3DIFF2", material_info_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY), MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, 0},
-    {"VS_BMTXMIRRT", material_info_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT},
+    {"VS_BMTXMIRRT", material_info_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT | MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED},
     {"VS_BUMPMIRRT", material_info_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT},
     {"VS_ENVPHONGT", material_info_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT | MATERIAL_DESCRIPTOR_SPECULAR},
     {"VS_SKBASIC", material_info_flags(MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED},

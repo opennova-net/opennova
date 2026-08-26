@@ -179,12 +179,11 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     } los_ctx{this, &world, &e};
     const LosBlockedFn probe = [](void *ctx, const AiCandidate &c) -> bool {
         LosCtx *lc = static_cast<LosCtx *>(ctx);
-        const uint32_t tick = lc->world->logic_tick;
         int32_t sa[3];
-        weapon_fire_origin(*lc->scanner, tick, sa);
+        lc->sys->weapon_fire_origin(*lc->world, *lc->scanner, sa);
         int32_t sb[3];
         if (const Entity *te = lc->world->registry.get(c.handle)) {
-            weapon_fire_origin(*te, tick, sb);
+            lc->sys->weapon_fire_origin(*lc->world, *te, sb);
         } else {
             sb[0] = c.pos[0];
             sb[1] = c.pos[1];
@@ -335,6 +334,31 @@ void AiSystem::weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t 
     out[2] = static_cast<int32_t>(e.position.z * 65536.0f) + kChestLift;
 }
 
+void AiSystem::weapon_fire_origin(
+		World &world, const AiEntity &e, int32_t out[3]) const {
+	weapon_fire_origin(world, e, world.logic_tick, out);
+}
+
+void AiSystem::weapon_fire_origin(World &world, const AiEntity &e,
+		uint32_t logic_tick, int32_t out[3]) const {
+	if (world.muzzle_pose_provider != nullptr &&
+			world.muzzle_pose_provider->resolve_muzzle_pose(
+					world, e.handle, out)) {
+		return;
+	}
+	weapon_fire_origin(e, logic_tick, out);
+}
+
+void AiSystem::weapon_fire_origin(
+		World &world, const Entity &e, int32_t out[3]) const {
+	if (world.muzzle_pose_provider != nullptr &&
+			world.muzzle_pose_provider->resolve_muzzle_pose(
+					world, e.handle, out)) {
+		return;
+	}
+	weapon_fire_origin(e, world.logic_tick, out);
+}
+
 // LOS between two EXACT 16.16 endpoints — true = clear. Callers supply the fire
 // origins via weapon_fire_origin (or their own witnessed endpoints: the corpse
 // watch and USE scan keep their explicit lifts at the call sites). The terrain
@@ -344,31 +368,51 @@ void AiSystem::weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t 
 // @0x43b4b0 results into Physics_RaycastTerrainAndSectors @0x539910, radius 0,
 // 1 = clear.] No terrain wired -> clear, the headless-test default; no collision
 // world wired (terrain-only unit tests) -> terrain leg alone.
+// The endpoint fold shared by both LOS forms: a mounted body excludes its
+// carrier, an emplaced weapon its parent (retail resolves entity[154] /
+// entity[91] before the model walk), so a rider's own vehicle never occludes
+// its sight. Persons carry no collision instance, so substituting the carrier
+// keeps the effective exclusion identical. One link level; the two-level
+// gunner-on-emplaced-child chain is a tracked follow-up.
+// [orig: raycast_find_collision_entity @0x539a70 endpoint resolve
+//  @0x539aba..0x539b10; raycast_against_entity_pool @0x538720 skips
+//  entity_a/entity_b/parent_a/parent_b]
+static EntityHandle los_exclude_handle(const World &world, EntityHandle h) {
+    const Entity *ent = world.registry.get(h);
+    if (ent != nullptr) {
+        if (ent->mounted && ent->mount_target.valid()) return ent->mount_target;
+        if (ent->emplacement_parent.valid()) return ent->emplacement_parent;
+    }
+    return h;
+}
+
 bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle from, EntityHandle to) const {
     if (terrain == nullptr || !terrain->valid()) return true;
     if (collision != nullptr) {
-        // Retail resolves each LOS endpoint through its parent links (the
-        // +0x268 link, then the +0x16C carrier overriding) so a rider's own
-        // vehicle never occludes its sight — a boat passenger sees and is seen
-        // through its own hull. Persons carry no collision instance, so
-        // substituting the carrier keeps the effective exclusion identical.
-        // One link level (carrier, else emplacement parent); the two-level
-        // gunner-on-emplaced-child chain is a tracked follow-up.
-        // [orig: raycast_find_collision_entity endpoint resolve — the
-        //  entity[154] / entity[91] folds before the model walk]
-        const auto resolve_exclude = [&](EntityHandle h) {
-            const Entity *ent = world.registry.get(h);
-            if (ent != nullptr) {
-                if (ent->mounted && ent->mount_target.valid())
-                    return ent->mount_target;
-                if (ent->emplacement_parent.valid()) return ent->emplacement_parent;
-            }
-            return h;
-        };
-        return collision->raycast_clear(world, a, b, resolve_exclude(from),
-                                        resolve_exclude(to));
+        // Each endpoint folds through los_exclude_handle (the +0x268 link,
+        // then the +0x16C carrier overriding) before the model walk.
+        return collision->raycast_clear(world, a, b,
+                                        los_exclude_handle(world, from),
+                                        los_exclude_handle(world, to));
     }
+    return !los_terrain_blocked(*terrain, a, b);
+}
+
+// The stable-phase replication form of line_of_sight_clear: identical
+// semantics (the same endpoint carrier/emplacement fold, then the cached
+// exact clip), so a mounted recipient or target still sees through its own
+// hull [orig: the same raycast_find_collision_entity endpoint resolve].
+bool AiSystem::line_of_sight_clear_cached(World &world, const int32_t a[3],
+                                          const int32_t b[3], EntityHandle from,
+                                          EntityHandle to,
+                                          CollisionWorld::RaycastPerf *perf) const {
+    if (terrain == nullptr || !terrain->valid()) return true;
+    if (collision != nullptr)
+        return collision->raycast_clear_cached(world, a, b,
+                                               los_exclude_handle(world, from),
+                                               los_exclude_handle(world, to),
+                                               perf);
     return !los_terrain_blocked(*terrain, a, b);
 }
 

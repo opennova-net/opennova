@@ -22,7 +22,9 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
                               bool allow_sphere_only = false);
 
 // The model bound-sphere radius from the .3di itself — the entity+0
-// boundRadius source [orig: Entity_InitFromModel @ 0x40dc30].
+// boundRadius source [orig: Entity_InitFromModel @ 0x40dc30]. Production
+// GHDR files retain the exact Q16 carrier; the float form is presentation-only.
+int32_t model_bound_radius_q16_from_3di(const Threedi3di3 &model);
 float model_bound_radius_from_3di(const Threedi3di3 &model);
 
 // Build the runtime occlusion model from the parsed OCCL tables
