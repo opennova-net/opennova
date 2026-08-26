@@ -481,12 +481,28 @@ const _ROWS := [
 					FrameStatsBoard.FRAME_MENU_VIDEO, FrameStatsBoard.FRAME_DEBUG_REFRESH]},
 	{"id": "physics_callbacks", "label": "Physics callbacks", "depth": 2,
 			"kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_PHYSICS_CALLBACKS},
-	# What remains between host frames after both Node callback windows: engine
-	# frame work, render synchronization, and configured pacing/wait.
-	{"id": "engine_frame", "label": "Engine/render/frame pacing", "depth": 2,
+	# The engine time between host frames outside both Node callback windows,
+	# split at RenderingServer's draw signals (RootFramePhaseSampler).
+	{"id": "deferred_flush", "label": "Deferred flush (draw callbacks, transforms)",
+			"depth": 2, "kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_DEFERRED_FLUSH},
+	# HudOverlay._draw is the one every-frame _draw in a live mission.
+	{"id": "hud_draw_compile", "label": "HUD draw compile", "depth": 3,
+			"kind": _KIND_SPAN, "slot": FrameStatsBoard.HUD_DRAW_COMPILE},
+	{"id": "hud_draw_emit", "label": "HUD draw emit", "depth": 3,
+			"kind": _KIND_SPAN, "slot": FrameStatsBoard.HUD_DRAW_EMIT},
+	{"id": "render_draw", "label": "RenderingServer draw (all viewports)",
+			"depth": 2, "kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_DRAW},
+	{"id": "pacing_input", "label": "Servers/input/pacing", "depth": 2,
+			"kind": _KIND_SPAN, "slot": FrameStatsBoard.FRAME_PACING_INPUT},
+	# Whatever the three spans above did not bracket (signal latency, the
+	# first frame of a window).
+	{"id": "engine_frame", "label": "Unattributed engine time", "depth": 2,
 			"kind": _KIND_RESIDUAL, "base": FrameStatsBoard.FRAME_WALL,
 			"minus": [FrameStatsBoard.FRAME_PROCESS_CALLBACKS,
-					FrameStatsBoard.FRAME_PHYSICS_CALLBACKS]},
+					FrameStatsBoard.FRAME_PHYSICS_CALLBACKS,
+					FrameStatsBoard.FRAME_DEFERRED_FLUSH,
+					FrameStatsBoard.FRAME_DRAW,
+					FrameStatsBoard.FRAME_PACING_INPUT]},
 	{"id": "render", "label": "Render", "depth": 0, "kind": _KIND_HEADER},
 	# Per-pass submission counts (info cells): what the main view, the shadow
 	# maps, and the water mirror each rendered last frame — pass attribution is
@@ -502,6 +518,24 @@ const _ROWS := [
 			"slot": FrameStatsBoard.RENDER_WATER_CPU},
 	{"id": "render_water_gpu", "label": "Water RTT GPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_WATER_GPU},
+	# The other per-frame scene renders: FrameFx's shared-world Q3 view (the
+	# glow/envmap source), the first-person viewmodel pass, and the slot-shadow
+	# capture chain (only the slots that rendered are counted).
+	{"id": "render_q3", "label": "FrameFX Q3 view", "depth": 1, "kind": _KIND_HEADER},
+	{"id": "render_q3_cpu", "label": "Q3 CPU", "depth": 2, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.RENDER_Q3_CPU},
+	{"id": "render_q3_gpu", "label": "Q3 GPU", "depth": 2, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.RENDER_Q3_GPU},
+	{"id": "render_viewmodel", "label": "Viewmodel pass", "depth": 1, "kind": _KIND_HEADER},
+	{"id": "render_viewmodel_cpu", "label": "Viewmodel CPU", "depth": 2,
+			"kind": _KIND_SPAN, "slot": FrameStatsBoard.RENDER_VIEWMODEL_CPU},
+	{"id": "render_viewmodel_gpu", "label": "Viewmodel GPU", "depth": 2,
+			"kind": _KIND_SPAN, "slot": FrameStatsBoard.RENDER_VIEWMODEL_GPU},
+	{"id": "render_slot", "label": "Slot-shadow captures", "depth": 1, "kind": _KIND_HEADER},
+	{"id": "render_slot_cpu", "label": "Captures CPU", "depth": 2, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.RENDER_SLOT_CPU},
+	{"id": "render_slot_gpu", "label": "Captures GPU", "depth": 2, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.RENDER_SLOT_GPU},
 ]
 
 var status_label: Label
@@ -751,9 +785,22 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 	# counters from the previous world.
 	for id in ["sim", "net", "trace", "effects", "fire", "destruction",
 			"throwable", "mission_rows", "wire_rows", "occl", "material",
-			"render_main", "render_shadow", "render_water"]:
+			"render_main", "render_shadow", "render_water", "render_q3",
+			"render_viewmodel", "render_slot", "physics_callbacks"]:
 		_set_info(id, "")
-	_set_info("frame", "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS)))
+	var frame_info := "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS))
+	# Godot's own TIME_PROCESS (process + deferred flush + RS sync + draw):
+	# the cross-check for the callback + flush + draw rows above.
+	if frames > 0 and counts[FrameStatsBoard.FRAME_TIME_PROCESS] > 0:
+		frame_info += " · process %.2f ms" % (
+				float(sums[FrameStatsBoard.FRAME_TIME_PROCESS]) / 1000.0 / frames)
+	_set_info("frame", frame_info)
+	if frames > 0 and counts[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS] > 0:
+		# The servers' window is a per-frame max, the callbacks a sum: the
+		# difference bounds the empty-space step tax, it is not a measurement.
+		_set_info("physics_callbacks", "server max %.2f ms · %.1f iter/f" % [
+				float(sums[FrameStatsBoard.FRAME_PHYSICS_SERVER]) / 1000.0 / frames,
+				float(sums[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS]) / frames])
 	_set_info("render", "%d draws · %d objs · %s prims · %d nodes" % [
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
@@ -767,6 +814,17 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 			FrameStatsBoard.RENDER_SHADOW_OBJECTS, FrameStatsBoard.RENDER_SHADOW_DRAWS)
 	_set_pass_counts("render_water", sums, counts, frames,
 			FrameStatsBoard.RENDER_WATER_OBJECTS, FrameStatsBoard.RENDER_WATER_DRAWS)
+	_set_pass_counts("render_q3", sums, counts, frames,
+			FrameStatsBoard.RENDER_Q3_OBJECTS, FrameStatsBoard.RENDER_Q3_DRAWS)
+	_set_pass_counts("render_viewmodel", sums, counts, frames,
+			FrameStatsBoard.RENDER_VIEWMODEL_OBJECTS,
+			FrameStatsBoard.RENDER_VIEWMODEL_DRAWS)
+	if frames > 0 and counts[FrameStatsBoard.RENDER_SLOT_VIEWPORTS] > 0:
+		_set_info("render_slot", "%d objs · %d draws · %.1f captures/f" % [
+			int(float(sums[FrameStatsBoard.RENDER_SLOT_OBJECTS]) / frames),
+			int(float(sums[FrameStatsBoard.RENDER_SLOT_DRAWS]) / frames),
+			float(sums[FrameStatsBoard.RENDER_SLOT_VIEWPORTS]) / frames,
+		])
 	if counts[FrameStatsBoard.MODEL_AWAKE_MODELS] > 0:
 		var model_samples := counts[FrameStatsBoard.MODEL_AWAKE_MODELS]
 		_set_info("material", "%d awake · %d renderable" % [

@@ -145,9 +145,14 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"particles", &"audio", &"clear", &"env_cube", &"world_remainder",
 			&"hud", &"stats_sample", &"shell_control", &"round_flow",
 			&"menu_shell", &"menu_video", &"debug_refresh", &"frame_overhead",
-			&"other_process", &"physics_callbacks", &"engine_frame",
+			&"other_process", &"physics_callbacks", &"deferred_flush",
+			&"hud_draw_compile", &"hud_draw_emit", &"render_draw",
+			&"pacing_input", &"engine_frame",
 			&"render", &"render_main", &"render_shadow",
-			&"render_water"]:
+			&"render_water", &"render_q3", &"render_q3_cpu", &"render_q3_gpu",
+			&"render_viewmodel", &"render_viewmodel_cpu",
+			&"render_viewmodel_gpu", &"render_slot", &"render_slot_cpu",
+			&"render_slot_gpu"]:
 		assert_not_null(_row(pane, id), "the Stats tab carries a '%s' row" % id)
 	assert_eq(pane.stats_tree.get_column_title(0), "System")
 	assert_eq(pane.stats_tree.get_column_title(1), "Avg")
@@ -160,8 +165,12 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 	assert_eq(_row(pane, &"trace").label, "Projectile trace (attributed)",
 			"the group does not claim the intentionally uncharged setup/water time")
 	assert_eq(_row(pane, &"other_process").label, "Other process callbacks")
-	assert_eq(_row(pane, &"engine_frame").label,
-			"Engine/render/frame pacing")
+	assert_eq(_row(pane, &"deferred_flush").label,
+			"Deferred flush (draw callbacks, transforms)")
+	assert_eq(_row(pane, &"render_draw").label,
+			"RenderingServer draw (all viewports)")
+	assert_eq(_row(pane, &"pacing_input").label, "Servers/input/pacing")
+	assert_eq(_row(pane, &"engine_frame").label, "Unattributed engine time")
 
 
 func test_model_and_mission_row_info_cells_render_their_counts() -> void:
@@ -296,6 +305,20 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	counts[FrameStatsBoard.FRAME_PROCESS_CALLBACKS] = 10
 	sums[FrameStatsBoard.FRAME_PHYSICS_CALLBACKS] = 5_000
 	counts[FrameStatsBoard.FRAME_PHYSICS_CALLBACKS] = 10
+	# The engine time outside the callbacks, split at the draw signals: 0.3 +
+	# 0.5 + 0.1 ms of the 1.0 ms residual are attributed, 0.1 ms is not.
+	sums[FrameStatsBoard.FRAME_DEFERRED_FLUSH] = 3_000
+	counts[FrameStatsBoard.FRAME_DEFERRED_FLUSH] = 10
+	sums[FrameStatsBoard.FRAME_DRAW] = 5_000
+	counts[FrameStatsBoard.FRAME_DRAW] = 10
+	sums[FrameStatsBoard.FRAME_PACING_INPUT] = 1_000
+	counts[FrameStatsBoard.FRAME_PACING_INPUT] = 10
+	sums[FrameStatsBoard.FRAME_TIME_PROCESS] = 930_000
+	counts[FrameStatsBoard.FRAME_TIME_PROCESS] = 10
+	sums[FrameStatsBoard.FRAME_PHYSICS_SERVER] = 2_000
+	counts[FrameStatsBoard.FRAME_PHYSICS_SERVER] = 10
+	sums[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS] = 15
+	counts[FrameStatsBoard.FRAME_PHYSICS_ITERATIONS] = 10
 
 	pane.render_window(10, sums, peaks, counts, null, null)
 	assert_eq(_row(pane, &"sim").average, "2.00")
@@ -310,7 +333,15 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	assert_eq(_row(pane, &"occl_glue").average, "0.10")
 	assert_eq(_row(pane, &"other_process").average, "1.00")
 	assert_eq(_row(pane, &"physics_callbacks").average, "0.50")
-	assert_eq(_row(pane, &"engine_frame").average, "1.00")
+	assert_eq(_row(pane, &"physics_callbacks").info,
+			"server max 0.20 ms · 1.5 iter/f")
+	assert_eq(_row(pane, &"deferred_flush").average, "0.30")
+	assert_eq(_row(pane, &"render_draw").average, "0.50")
+	assert_eq(_row(pane, &"pacing_input").average, "0.10")
+	assert_eq(_row(pane, &"engine_frame").average, "0.10",
+			"the residual is what the three draw-signal spans did not bracket")
+	assert_true(_row(pane, &"frame").info.ends_with("· process 93.00 ms"),
+			"the frame row carries Godot's TIME_PROCESS cross-check")
 
 
 func test_pass_count_cells_average_per_frame_and_clear_when_unsampled() -> void:

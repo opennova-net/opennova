@@ -300,6 +300,7 @@ var _perf_probe_spans: Dictionary = {}
 # The shared F3 frame-stats board (null outside the game shell): while its
 # Stats tab captures, the tick's phase spans land there as HUD_* slots.
 var _frame_stats: FrameStatsBoard = null
+var _hud_draw_timing_armed := false
 
 
 func set_frame_stats_board(board: FrameStatsBoard) -> void:
@@ -330,6 +331,17 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_ensure_game_hud()
 	if _game_hud == null:
 		return
+	if stats_on:
+		# HudOverlay._draw runs in Godot's deferred flush after this tick; the
+		# previous frame's compile + canvas emit land here. Timing arms only
+		# while the board captures (the setter is edge-gated natively).
+		_game_hud.set_draw_timing_enabled(true)
+		var draw_us: PackedInt64Array = _game_hud.consume_draw_timing_us()
+		_frame_stats.add(FrameStatsBoard.HUD_DRAW_COMPILE, int(draw_us[0]))
+		_frame_stats.add(FrameStatsBoard.HUD_DRAW_EMIT, int(draw_us[1]))
+	elif _hud_draw_timing_armed:
+		_game_hud.set_draw_timing_enabled(false)
+	_hud_draw_timing_armed = stats_on
 	var max_h: int = sim.get_local_player_max_health()
 	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
 	# The stance icon from the sim's authoritative body state (0=stand,

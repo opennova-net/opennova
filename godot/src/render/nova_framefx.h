@@ -73,6 +73,11 @@ private:
 	void uninstall_compositor();
 	void restore_synced_camera_mask();
 
+public:
+	// The shared-world Q3 view, for the F3 render samplers (measured render
+	// time + visible-pass counts); null until the node is ready.
+	SubViewport *get_q3_viewport() const { return q3_viewport_; }
+
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);

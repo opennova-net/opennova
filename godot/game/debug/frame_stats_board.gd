@@ -48,6 +48,14 @@ enum {
 	FRAME_DEBUG_REFRESH,   # active F3 page refresh at the overlay timer cadence
 	FRAME_PROCESS_CALLBACKS,# earliest-to-latest idle Node callback window
 	FRAME_PHYSICS_CALLBACKS,# summed earliest-to-latest physics callback windows
+	# The engine time outside every Node callback, split at Godot's draw
+	# signals (RootFramePhaseSampler): what used to be one residual row.
+	FRAME_DEFERRED_FLUSH,   # latest idle callback -> frame_pre_draw: MessageQueue flush (call_deferred, queue_redraw -> _draw), transform flush, SceneTree tail, RS sync
+	FRAME_DRAW,             # frame_pre_draw -> frame_post_draw: RenderingServer.draw for every viewport (cull, draw lists, submit, present)
+	FRAME_PACING_INPUT,     # frame_post_draw -> next earliest idle callback: audio/script frame hooks, input pump, physics servers, SceneTree head
+	FRAME_TIME_PROCESS,     # VALUE (us): Performance.TIME_PROCESS of the previous frame (process + flush + sync + draw), the split's cross-check
+	FRAME_PHYSICS_SERVER,   # VALUE (us): Performance.TIME_PHYSICS_PROCESS (max over the frame's physics iterations, servers included)
+	FRAME_PHYSICS_ITERATIONS,# VALUE: physics iterations run before this render frame
 	# GameWorld.tick legs
 	WORLD_FOLIAGE,
 	WORLD_RUNTIME,
@@ -195,11 +203,21 @@ enum {
 	HUD_WAYPOINT,
 	HUD_INFO,
 	HUD_FLUSH,
+	# HudOverlay._draw runs in the deferred flush, not the HUD tick: the native
+	# compile + canvas emit of the previous frame's redraw (consumed per tick).
+	HUD_DRAW_COMPILE,
+	HUD_DRAW_EMIT,
 	# Measured render times (RenderingServer, previous frame), stored as us
 	RENDER_ROOT_CPU,
 	RENDER_ROOT_GPU,
 	RENDER_WATER_CPU,
 	RENDER_WATER_GPU,
+	RENDER_Q3_CPU,         # FrameFx's shared-world Q3 view
+	RENDER_Q3_GPU,
+	RENDER_VIEWMODEL_CPU,  # the first-person viewmodel pass
+	RENDER_VIEWMODEL_GPU,
+	RENDER_SLOT_CPU,       # summed over the slot-shadow captures that rendered
+	RENDER_SLOT_GPU,
 	# Per-pass render counts (RenderingServer per-viewport render info for the
 	# previous frame). VALUE slots: what each pass actually submitted, so pass
 	# cost attribution (main view vs shadow maps vs the water mirror) is read
@@ -210,6 +228,13 @@ enum {
 	RENDER_SHADOW_DRAWS,   # VALUE: root viewport shadow-pass draw calls
 	RENDER_WATER_OBJECTS,  # VALUE: water mirror visible-pass objects
 	RENDER_WATER_DRAWS,    # VALUE: water mirror visible-pass draw calls
+	RENDER_Q3_OBJECTS,     # VALUE: Q3 view visible-pass objects
+	RENDER_Q3_DRAWS,       # VALUE: Q3 view visible-pass draw calls
+	RENDER_VIEWMODEL_OBJECTS, # VALUE: viewmodel pass visible-pass objects
+	RENDER_VIEWMODEL_DRAWS,   # VALUE: viewmodel pass visible-pass draw calls
+	RENDER_SLOT_OBJECTS,   # VALUE: slot captures' visible-pass objects (rendered slots only)
+	RENDER_SLOT_DRAWS,     # VALUE: slot captures' visible-pass draw calls
+	RENDER_SLOT_VIEWPORTS, # VALUE: slot captures that rendered
 	SLOT_COUNT,
 }
 

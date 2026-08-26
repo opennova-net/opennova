@@ -1119,7 +1119,8 @@ func _process(delta: float) -> void:
 	var timing: bool = probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()
-	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell)
+	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell,
+			_player_presenter.viewmodel_rig().vm_viewport() if _player_presenter != null else null)
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
