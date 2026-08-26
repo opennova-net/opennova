@@ -53,7 +53,7 @@ void add_shader_classification_fields(Dictionary &item,
 	item["has_normal_b"] = classification.normal_uses_uv2;
 	item["is_alpha"] = classification.blend == renderer::ObjectBlendMode::AlphaBlend;
 	// Self-lum keys on EMISSIVE; 0x10000000 is the separate glow/bloom-copy
-	// capability (REN-4, D-RMAT-4 â€” the two ride together on FF _LUM rows but
+	// capability (REN-4, D-RMAT-4 — the two ride together on FF _LUM rows but
 	// FFP_GLASS carries only the capability).
 	item["is_luminance"] = classification.is_luminance;
 	item["is_glow_capable"] = classification.is_glow_capable;
