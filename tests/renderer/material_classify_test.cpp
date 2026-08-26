@@ -1,11 +1,15 @@
 // Unit tests for renderer::classify_object_material + its typed pipeline
 // descriptor in engine/runtime/renderer. Verifies the static shader_tag -> family/blend table without
-// `.fx` parsing matches the canonical runtime classifications.
+// `.fx` parsing matches the canonical runtime classifications for every
+// shader_tag in the original OED's gMaterialInfoTable (relocated as the test
+// oracle tests/renderer/material_info_oracle.h).
 
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
 #include "renderer/material_descriptor.h"
 #include "threedi/threedi_3di3.h"
+
+#include "renderer/material_info_oracle.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -41,15 +45,91 @@ int main() {
 	expect(object_phong_map_texel(255, 255) == ObjectPhongMapTexel{255, 255, 255, 255},
 	       "PhongMap white endpoint");
 
-	// The renderer-owned registry is the canonical enumeration interface used
-	// by runtime shader probes.
-	expect(kMaterialDescriptorTableCount > 0, "material registry is populated");
-	for (size_t i = 0; i < kMaterialDescriptorTableCount; ++i) {
-		const auto &descriptor = kMaterialDescriptorTable[i];
-		expect(find_material_descriptor(descriptor.name) == &descriptor,
-		       std::string("exact descriptor lookup for ") + descriptor.name);
-		expect(classify_object_material(descriptor.name, 0, 0, 0, 128).known_shader,
-		       std::string("classifier recognizes ") + descriptor.name);
+	// 0. The renderer descriptor table is exact and complete for the OED dump
+	// (tests/renderer/material_info_oracle.h, the relocated gMaterialInfoTable).
+	// The shader_flags column matches the OED dump EXCEPT the five rows where
+	// the runtime derivation is witnessed to differ (D-RMAT-4,
+	// docs/render/render-material-re.md): retail probes every technique at
+	// .fx load [orig: HLSLEffect_LoadFromFile @ 0x5ae690], and the descriptor
+	// table carries those runtime words.
+	{
+		// The oracle's bit vocabulary is the dump's own; the descriptor table
+		// must agree on every value or the row comparison below means nothing.
+		static_assert(kMaterialDescriptorTableCount == material_oracle::kMaterialInfoTableCount,
+		              "material descriptor table must mirror the OED material-info dump row for row");
+#define OPENNOVA_ORACLE_BIT(bit) \
+		static_assert(static_cast<uint32_t>(MATERIAL_FLAG_##bit) == \
+		              static_cast<uint32_t>(material_oracle::MATERIAL_FLAG_##bit), \
+		              "MATERIAL_FLAG_" #bit " must keep the dump's bit value")
+		OPENNOVA_ORACLE_BIT(EMISSIVE); OPENNOVA_ORACLE_BIT(ALPHA); OPENNOVA_ORACLE_BIT(DIFFUSE);
+		OPENNOVA_ORACLE_BIT(SECONDARY); OPENNOVA_ORACLE_BIT(NORMAL_A); OPENNOVA_ORACLE_BIT(NORMAL_B);
+		OPENNOVA_ORACLE_BIT(BLENDING); OPENNOVA_ORACLE_BIT(GLASS); OPENNOVA_ORACLE_BIT(SKINNED);
+		OPENNOVA_ORACLE_BIT(TANGENT); OPENNOVA_ORACLE_BIT(UVGEN); OPENNOVA_ORACLE_BIT(GLOW);
+#undef OPENNOVA_ORACLE_BIT
+
+		struct RuntimeFlagFix { const char *tag; uint32_t dump_flags; uint32_t flags; };
+		const RuntimeFlagFix runtime_fixes[] = {
+			// no VS => no TANGENT; the GLOW technique uses TexCubeRotSpecular
+			{ "FFP_GLASS", 0xb000u, MATERIAL_FLAG_GLASS | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_GLOW },
+			// tangent-space skinned bump: In.Tangent read, ReflectColor absent
+			{ "VS_SKBUMPDIFFT", 0x6014u, MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED |
+			                             MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE },
+			{ "VS_SKBUMPPHONGT", 0x6014u, MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED |
+			                              MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE },
+			{ "VS_SKBUMPDIFFT2", 0x601cu, MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED |
+			                              MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE |
+			                              MATERIAL_FLAG_SECONDARY },
+			// untextured glass: no TexDiffuse1 reference
+			{ "VS_SKGLASS", 0x7004u, MATERIAL_FLAG_GLASS | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_BLENDING },
+		};
+		expect(kMaterialDescriptorTableCount == material_oracle::kMaterialInfoTableCount,
+		       "descriptor table count matches OED material table count");
+		size_t fixes_seen = 0;
+		for (size_t i = 0; i < material_oracle::kMaterialInfoTableCount; ++i) {
+			const auto &info = material_oracle::kMaterialInfoTable[i];
+			const auto *descriptor = find_material_descriptor(info.name);
+			expect(descriptor != nullptr, std::string("descriptor exists for ") + info.name);
+			expect(std::string(descriptor->name) == info.name,
+			       std::string("descriptor exact-name lookup for ") + info.name);
+			uint32_t expected_flags = static_cast<uint32_t>(info.flags);
+			for (const RuntimeFlagFix &fix : runtime_fixes) {
+				if (std::string(info.name) == fix.tag) {
+					expect(expected_flags == fix.dump_flags,
+					       std::string("the OED dump word for ") + info.name +
+					               " is the one D-RMAT-4 witnessed");
+					expected_flags = fix.flags;
+					++fixes_seen;
+					break;
+				}
+			}
+			expect(static_cast<uint32_t>(descriptor->shader_flags) == expected_flags,
+			       std::string("descriptor flags match the runtime derivation for ") + info.name);
+			const auto cls = classify_object_material(info.name, 0, 0, 0, 128);
+			expect(cls.known_shader, std::string("classifier recognizes descriptor tag ") + info.name);
+		}
+		expect(fixes_seen == 5, "the dump carries all five D-RMAT-4 rows");
+		// The corrected words themselves, as D-RMAT-4 lists them.
+		expect(find_material_descriptor("FFP_GLASS")->shader_flags == 0x10003000u,
+		       "FFP_GLASS 0xb000 -> 0x10003000");
+		expect(find_material_descriptor("VS_SKBUMPDIFFT")->shader_flags == 0xc014u,
+		       "VS_SKBUMPDIFFT 0x6014 -> 0xc014");
+		expect(find_material_descriptor("VS_SKBUMPPHONGT")->shader_flags == 0xc014u,
+		       "VS_SKBUMPPHONGT 0x6014 -> 0xc014");
+		expect(find_material_descriptor("VS_SKBUMPDIFFT2")->shader_flags == 0xc01cu,
+		       "VS_SKBUMPDIFFT2 0x601c -> 0xc01c");
+		expect(find_material_descriptor("VS_SKGLASS")->shader_flags == 0x7000u,
+		       "VS_SKGLASS 0x7004 -> 0x7000");
+		for (size_t i = 0; i < kMaterialDescriptorTableCount; ++i) {
+			const auto &descriptor = kMaterialDescriptorTable[i];
+			bool found = false;
+			for (size_t j = 0; j < material_oracle::kMaterialInfoTableCount; ++j) {
+				if (std::string(descriptor.name) == material_oracle::kMaterialInfoTable[j].name) {
+					found = true;
+					break;
+				}
+			}
+			expect(found, std::string("descriptor references known OED tag ") + descriptor.name);
+		}
 	}
 
 	// 1. Plain FF_ST_OP - opaque fixed-function diffuse.
