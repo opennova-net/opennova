@@ -180,7 +180,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     const LosBlockedFn probe = [](void *ctx, const AiCandidate &c) -> bool {
         LosCtx *lc = static_cast<LosCtx *>(ctx);
         int32_t sa[3];
-        lc->sys->weapon_fire_origin(*lc->world, *lc->scanner, sa);
+        lc->sys->weapon_fire_origin(*lc->world, *lc->scanner, lc->world->logic_tick, sa);
         int32_t sb[3];
         if (const Entity *te = lc->world->registry.get(c.handle)) {
             lc->sys->weapon_fire_origin(*lc->world, *te, sb);
@@ -310,53 +310,54 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
 // muzzle stamp when the seam fed one, else the 0.9 u chest lift both the fire
 // pass and the LOS endpoints historically used. One helper, both jobs — the
 // LOS endpoints and the aim-solution eye share it (D-AI-6 residual (a)).
-void AiSystem::weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]) {
-    if (e.muzzle_valid && logic_tick - e.muzzle_tick <= kMuzzleFreshTicks) {
-        out[0] = e.muzzle_world[0];
-        out[1] = e.muzzle_world[1];
-        out[2] = e.muzzle_world[2];
+// The stamp-or-chest-lift fold behind both static forms: the fresh posed
+// muzzle stamp when the seam fed one within kMuzzleFreshTicks, else the
+// entity position (16.16) with the 0.9 u chest lift.
+static void muzzle_stamp_fire_origin(bool stamp_valid, uint32_t stamp_tick,
+                                     const int32_t stamp_world[3],
+                                     uint32_t logic_tick, int32_t pos_x,
+                                     int32_t pos_y, int32_t pos_z,
+                                     int32_t out[3]) {
+    if (stamp_valid && logic_tick - stamp_tick <= AiSystem::kMuzzleFreshTicks) {
+        out[0] = stamp_world[0];
+        out[1] = stamp_world[1];
+        out[2] = stamp_world[2];
         return;
     }
-    out[0] = e.pos[0];
-    out[1] = e.pos[1];
-    out[2] = e.pos[2] + kChestLift;
+    out[0] = pos_x;
+    out[1] = pos_y;
+    out[2] = pos_z + kChestLift;
+}
+
+void AiSystem::weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]) {
+    muzzle_stamp_fire_origin(e.muzzle_valid, e.muzzle_tick, e.muzzle_world,
+                             logic_tick, e.pos[0], e.pos[1], e.pos[2], out);
 }
 
 void AiSystem::weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]) {
-    if (e.posed_muzzle_valid && logic_tick - e.posed_muzzle_tick <= kMuzzleFreshTicks) {
-        out[0] = e.posed_muzzle_world[0];
-        out[1] = e.posed_muzzle_world[1];
-        out[2] = e.posed_muzzle_world[2];
-        return;
-    }
-    out[0] = static_cast<int32_t>(e.position.x * 65536.0f);
-    out[1] = static_cast<int32_t>(e.position.y * 65536.0f);
-    out[2] = static_cast<int32_t>(e.position.z * 65536.0f) + kChestLift;
+    muzzle_stamp_fire_origin(e.posed_muzzle_valid, e.posed_muzzle_tick,
+                             e.posed_muzzle_world, logic_tick,
+                             static_cast<int32_t>(e.position.x * 65536.0f),
+                             static_cast<int32_t>(e.position.y * 65536.0f),
+                             static_cast<int32_t>(e.position.z * 65536.0f), out);
 }
 
-void AiSystem::weapon_fire_origin(
-		World &world, const AiEntity &e, int32_t out[3]) const {
-	weapon_fire_origin(world, e, world.logic_tick, out);
+// The live-pose seam shared by both World& forms: the world's native muzzle
+// provider resolves against the current simulation pose first.
+static bool provider_muzzle_origin(World &world, EntityHandle h, int32_t out[3]) {
+    return world.muzzle_pose_provider != nullptr &&
+           world.muzzle_pose_provider->resolve_muzzle_pose(world, h, out);
 }
 
 void AiSystem::weapon_fire_origin(World &world, const AiEntity &e,
-		uint32_t logic_tick, int32_t out[3]) const {
-	if (world.muzzle_pose_provider != nullptr &&
-			world.muzzle_pose_provider->resolve_muzzle_pose(
-					world, e.handle, out)) {
-		return;
-	}
-	weapon_fire_origin(e, logic_tick, out);
+                                  uint32_t logic_tick, int32_t out[3]) const {
+    if (provider_muzzle_origin(world, e.handle, out)) return;
+    weapon_fire_origin(e, logic_tick, out);
 }
 
-void AiSystem::weapon_fire_origin(
-		World &world, const Entity &e, int32_t out[3]) const {
-	if (world.muzzle_pose_provider != nullptr &&
-			world.muzzle_pose_provider->resolve_muzzle_pose(
-					world, e.handle, out)) {
-		return;
-	}
-	weapon_fire_origin(e, world.logic_tick, out);
+void AiSystem::weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const {
+    if (provider_muzzle_origin(world, e.handle, out)) return;
+    weapon_fire_origin(e, world.logic_tick, out);
 }
 
 // LOS between two EXACT 16.16 endpoints — true = clear. Callers supply the fire
@@ -388,15 +389,7 @@ static EntityHandle los_exclude_handle(const World &world, EntityHandle h) {
 
 bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle from, EntityHandle to) const {
-    if (terrain == nullptr || !terrain->valid()) return true;
-    if (collision != nullptr) {
-        // Each endpoint folds through los_exclude_handle (the +0x268 link,
-        // then the +0x16C carrier overriding) before the model walk.
-        return collision->raycast_clear(world, a, b,
-                                        los_exclude_handle(world, from),
-                                        los_exclude_handle(world, to));
-    }
-    return !los_terrain_blocked(*terrain, a, b);
+    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/false, nullptr);
 }
 
 // The stable-phase replication form of line_of_sight_clear: identical
@@ -407,12 +400,24 @@ bool AiSystem::line_of_sight_clear_cached(World &world, const int32_t a[3],
                                           const int32_t b[3], EntityHandle from,
                                           EntityHandle to,
                                           CollisionWorld::RaycastPerf *perf) const {
+    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/true, perf);
+}
+
+// One body for both LOS forms; `cached` picks the raycast_clear /
+// raycast_clear_cached sector leg.
+bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
+                                        const int32_t b[3], EntityHandle from,
+                                        EntityHandle to, bool cached,
+                                        CollisionWorld::RaycastPerf *perf) const {
     if (terrain == nullptr || !terrain->valid()) return true;
-    if (collision != nullptr)
-        return collision->raycast_clear_cached(world, a, b,
-                                               los_exclude_handle(world, from),
-                                               los_exclude_handle(world, to),
-                                               perf);
+    if (collision != nullptr) {
+        // Each endpoint folds through los_exclude_handle (the +0x268 link,
+        // then the +0x16C carrier overriding) before the model walk.
+        const EntityHandle from_h = los_exclude_handle(world, from);
+        const EntityHandle to_h = los_exclude_handle(world, to);
+        return cached ? collision->raycast_clear_cached(world, a, b, from_h, to_h, perf)
+                      : collision->raycast_clear(world, a, b, from_h, to_h);
+    }
     return !los_terrain_blocked(*terrain, a, b);
 }
 

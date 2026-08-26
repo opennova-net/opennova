@@ -77,7 +77,7 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
             // not require the live section-matrix provider.
             int32_t bound_pos[3];
             int32_t bound_radius = 0;
-            if (!target_solid_bound(world, ch, bound_pos, bound_radius)) continue;
+            if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/true)) continue;
             if (abs32(ray.mid[1] - bound_pos[1]) >
                     bound_radius + static_cast<int32_t>(ray.half[1]) ||
                 abs32(ray.mid[0] - bound_pos[0]) >
@@ -429,7 +429,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
         if (perf != nullptr) ++perf->sector_candidates;
         int32_t bp[3];
         int32_t br = 0;
-        if (!target_solid_bound(world, e.handle, bp, br)) return false;
+        if (!target_bound(world, e.handle, bp, br, /*solid_only=*/true)) return false;
         return blocked_by_bound(e, bp, br);
     };
 
@@ -573,6 +573,29 @@ bool CollisionWorld::candidate_segment_hits_solid(
             world, slice, slice_count, source, a, b, radius);
 }
 
+// The candidate-walk skip gate shared by the sound and sun ray walkers:
+// the query entity itself, dead rows, flag-27 rows, and (because
+// raycast_find_collision_entity passes source as both exclusion entities) a
+// direct child standing on the source are never blockers.
+static bool segment_candidate_skipped(World &world, EntityHandle candidate,
+                                      EntityHandle source_registry_twin) {
+    if (source_registry_twin.valid() && candidate == source_registry_twin) return true;
+    const Entity *entity = world.registry.get(candidate);
+    if (entity == nullptr || (entity->flags & 1u) != 0) return true;
+    if ((entity->engine_flags & 0x8000000u) != 0) return true;
+    return source_registry_twin.valid() && entity->ground_target == source_registry_twin;
+}
+
+// The bound-sphere AABB reject both walkers run on cheap entity metadata
+// before any section matrix resolves: the ray's midpoint against the
+// candidate bound inflated by the broad radius, Y first as witnessed.
+static bool segment_bound_aabb_rejects(const CollisionRay &ray, const int32_t bound_pos[3],
+                                       int32_t reach) {
+    return abs32(ray.mid[1] - bound_pos[1]) > reach + static_cast<int32_t>(ray.half[1]) ||
+           abs32(ray.mid[0] - bound_pos[0]) > reach + static_cast<int32_t>(ray.half[0]) ||
+           abs32(ray.mid[2] - bound_pos[2]) > reach + static_cast<int32_t>(ray.half[2]);
+}
+
 bool CollisionWorld::candidate_slice_segment_hits_solid(
         World &world, const EntityHandle *slice, int32_t slice_count,
         EntityHandle source_registry_twin, const int32_t a[3],
@@ -590,16 +613,7 @@ bool CollisionWorld::candidate_slice_segment_hits_solid(
 
     for (int32_t i = 0; i < slice_count; ++i) {
         const EntityHandle candidate = slice[i];
-        if (source_registry_twin.valid() && candidate == source_registry_twin)
-            continue;
-        const Entity *entity = world.registry.get(candidate);
-        if (entity == nullptr || (entity->flags & 1u) != 0) continue;
-        if ((entity->engine_flags & 0x8000000u) != 0) continue;
-        // raycast_find_collision_entity passes source as both exclusion
-        // entities, so a direct child standing on it is not a blocker.
-        if (source_registry_twin.valid() &&
-            entity->ground_target == source_registry_twin)
-            continue;
+        if (segment_candidate_skipped(world, candidate, source_registry_twin)) continue;
         if (entity_blocks_segment(world, candidate, ray, radius, broad_r)) return true;
     }
     return false;
@@ -613,16 +627,11 @@ bool CollisionWorld::entity_blocks_segment(World &world, EntityHandle candidate,
     // before resolving live section matrices for the few gate survivors.
     int32_t bound_pos[3];
     int32_t bound_radius = 0;
-    if (!target_bound(world, candidate, bound_pos, bound_radius)) return false;
-    if (abs32(ray.mid[1] - bound_pos[1]) >
-                bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-        abs32(ray.mid[0] - bound_pos[0]) >
-                bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-        abs32(ray.mid[2] - bound_pos[2]) >
-                bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+    if (!target_bound(world, candidate, bound_pos, bound_radius, /*solid_only=*/false))
         return false;
-    if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
-        return false;
+    const int32_t reach = bound_radius + broad_r;
+    if (segment_bound_aabb_rejects(ray, bound_pos, reach)) return false;
+    if (ray_line_distance(ray.start, ray.dir, bound_pos) > reach) return false;
 
     CollisionTargetView view;
     std::vector<CollisionMatrix> mats;
@@ -631,6 +640,8 @@ bool CollisionWorld::entity_blocks_segment(World &world, EntityHandle candidate,
     return sound_segment_blocked(*tv, ray, radius);
 }
 
+// [orig: Entity_ComputeSunVisibility @0x5c6800 — three rays toward the light over the entity's
+//  candidate slice, (4 - blocked) * 0.25; slice source Terrain_RenderSectorEntitiesBySide @0x5c7fa5]
 int CollisionWorld::candidate_slice_sun_blocked_rays(
         World &world, const EntityHandle *slice, int32_t slice_count,
         EntityHandle source_registry_twin, const int32_t a[3],
@@ -657,18 +668,12 @@ int CollisionWorld::candidate_slice_sun_blocked_rays(
     std::vector<CollisionMatrix> mats;
     for (int32_t i = 0; i < slice_count && blocked_count < 3; ++i) {
         const EntityHandle candidate = slice[i];
-        if (source_registry_twin.valid() && candidate == source_registry_twin)
-            continue;
-        const Entity *entity = world.registry.get(candidate);
-        if (entity == nullptr || (entity->flags & 1u) != 0) continue;
-        if ((entity->engine_flags & 0x8000000u) != 0) continue;
-        if (source_registry_twin.valid() &&
-            entity->ground_target == source_registry_twin)
-            continue;
+        if (segment_candidate_skipped(world, candidate, source_registry_twin)) continue;
 
         int32_t bound_pos[3];
         int32_t bound_radius = 0;
-        if (!target_bound(world, candidate, bound_pos, bound_radius)) continue;
+        if (!target_bound(world, candidate, bound_pos, bound_radius, /*solid_only=*/false))
+            continue;
         const int32_t line_distance =
                 ray_line_distance(ray.start, ray.dir, bound_pos);
         bool radius_survives[3] = {false, false, false};
@@ -677,13 +682,10 @@ int CollisionWorld::candidate_slice_sun_blocked_rays(
             if (blocked[r]) continue;
             const int32_t radius = kSunOcclusionClipRadii[r];
             const int32_t broad_r = radius > 0 ? radius : 0;
-            if (abs32(ray.mid[1] - bound_pos[1]) >
-                        bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-                abs32(ray.mid[0] - bound_pos[0]) >
-                        bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-                abs32(ray.mid[2] - bound_pos[2]) >
-                        bound_radius + broad_r + static_cast<int32_t>(ray.half[2]) ||
-                line_distance > bound_radius + broad_r)
+            // The same reject entity_blocks_segment runs, once per witnessed
+            // radius over the one line distance computed above.
+            const int32_t reach = bound_radius + broad_r;
+            if (segment_bound_aabb_rejects(ray, bound_pos, reach) || line_distance > reach)
                 continue;
             radius_survives[r] = true;
             any_survives = true;

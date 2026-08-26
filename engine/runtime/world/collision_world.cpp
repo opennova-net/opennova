@@ -322,7 +322,8 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
         if ((e.flags & 1u) != 0 || (e.engine_flags & 0x8000000u) != 0) return;
         StableLosCandidate candidate;
         candidate.h = e.handle;
-        if (!target_solid_bound(world, e.handle, candidate.pos, candidate.radius)) return;
+        if (!target_bound(world, e.handle, candidate.pos, candidate.radius,
+                          /*solid_only=*/true)) return;
         stable_los_candidates_.push_back(candidate);
     };
 
@@ -683,11 +684,14 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // buildings. Seat/armory carriers also belong in the proximity table when
     // their visual has no collision hull: attach scans consume this same slice,
     // and the old whole-registry fallback must not be their only discovery path.
-    // Retail also rejects dynamic records whose entity+0x114 carries ammo flag
-    // `noage` (0x4000). OpenNova's transient rounds live in RoundSim rather than
-    // the entity registry, and round-to-placed-device conversion clears noage
-    // before the pool-1 entity is materialized, so every registry item already
-    // satisfies that gate by construction.
+    // Retail also rejects dynamic CANDIDATES whose entity+0x114 carries ammo flag
+    // `noage` (0x4000) when it builds the per-entity slices [orig:
+    // Entity_BuildProximityListsFromPools @0x4b8fd4 (pool-0 sources) / @0x4b9214
+    // (pool-1 sources); the pool-1 table build itself @0x4b9340 has no such test].
+    // OpenNova's transient rounds live in RoundSim rather than the entity registry,
+    // and round-to-placed-device conversion clears noage before the pool-1 entity
+    // is materialized, so every registry item already satisfies that gate by
+    // construction (ledger row pending: see the post-merge sign-off notes).
     auto push_dynamic = [&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);

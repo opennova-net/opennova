@@ -1432,11 +1432,10 @@ private:
     mutable TraceProfile trace_profile_;
     // target_view's model selection without the section-matrix build: fills the
     // entity position and bound radius for the witnessed gate-before-view order.
-    // False exactly when target_view would return null.
+    // False exactly when target_view would return null; solid_only also
+    // rejects models without a solid volume.
     bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                      int32_t &radius_out) const;
-    bool target_solid_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                            int32_t &radius_out) const;
+                      int32_t &radius_out, bool solid_only) const;
 
     // One sound-occlusion LOS ray (terrain + building legs); true = clear.
     // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
