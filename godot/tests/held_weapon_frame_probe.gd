@@ -309,7 +309,7 @@ func _report_character(placer, mount: Node3D) -> void:
 	print("================================================================")
 	print("CHARACTER runtime type 0x14B9 (build_player_animated_model)")
 	print("================================================================")
-	var body: Node3D = placer.build_player_animated_model(0x14B9, mount, null)
+	var body: Node3D = placer.build_player_animated_model(0x14B9, mount, 0)
 	if body == null:
 		print("  <player character model did not build>")
 		return

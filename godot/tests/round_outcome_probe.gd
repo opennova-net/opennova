@@ -33,12 +33,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _tap_key(keycode: Key) -> void:
 	var down := InputEventKey.new()
 	down.keycode = keycode
@@ -154,11 +148,11 @@ func _run() -> void:
 		return
 	var yaw0 := cam.global_rotation.y
 	world.get_sim().add_local_player_look(50.0, 0.0)
-	await _mission_wait(0.2)
+	await ProbeClock.mission_wait(self, 0.2, TIME_SCALE)
 	var yaw_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.y - yaw0, -PI, PI))
 	var pitch0 := cam.global_rotation.x
 	world.get_sim().add_local_player_look(0.0, 50.0)
-	await _mission_wait(0.2)
+	await ProbeClock.mission_wait(self, 0.2, TIME_SCALE)
 	var pitch_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.x - pitch0, -PI, PI))
 	print("PROBE aim gains: yaw %.1f pitch %.1f px/deg" % [yaw_gain, pitch_gain])
 	if not is_finite(yaw_gain) or not is_finite(pitch_gain) \
@@ -180,7 +174,7 @@ func _run() -> void:
 		var target_index := -1
 		_forward = true
 		while seconds < MAX_MISSION_SECONDS:
-			await _mission_wait(1.0)
+			await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 			seconds += 1
 			var npc := _pick_victim(sim, world)
 			if npc.is_empty():
@@ -286,7 +280,7 @@ func _run() -> void:
 	var expected_key := "STRMISC_KILLEDGREEN" if target_team == 0 else "STRMISC_KILLEDBLUE"
 	var ended := false
 	for i in range(10):
-		await _mission_wait(1.0)
+		await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 		seconds += 1
 		var oc: Dictionary = sim.get_round_outcome_debug()
 		print("PROBE outcome t=%ds: %s" % [seconds, str(oc)])
@@ -323,7 +317,7 @@ func _run() -> void:
 	# with the banner line composed; ESC then leaves to the menu.
 	var screen: Node = null
 	for i in range(12):
-		await _mission_wait(0.5)
+		await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 		screen = game.get_node_or_null("HUD/MissionEndScreen")
 		if screen != null:
 			break
@@ -350,7 +344,7 @@ func _run() -> void:
 		return
 
 	_tap_key(KEY_ESCAPE) # [orig: ESC -> g_mission_exit_reason=1 -> Post Menu]
-	await _mission_wait(1.0)
+	await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 	if world.is_loaded():
 		print("PROBE FAIL: ESC did not tear the world down to the menu")
 		quit(1)

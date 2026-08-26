@@ -504,21 +504,6 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 	return attached
 
 
-# Convert the authored userpoint forward vector into the same local pose used by
-# EffectWorld.spawn_effect_attached. Static sources then compose this once
-# with their placement transform and submit it as a World-bound request.
-func _item_effect_local_pose(position: Vector3, forward_value: Vector3) -> Transform3D:
-	if forward_value.length_squared() <= 0.000001:
-		return Transform3D(Basis.IDENTITY, position)
-	var forward := forward_value.normalized()
-	var up_hint := Vector3.UP
-	if absf(forward.dot(up_hint)) > 0.999:
-		up_hint = Vector3.RIGHT
-	var right := up_hint.cross(forward).normalized()
-	var up := forward.cross(right).normalized()
-	return Transform3D(Basis(right, up, forward), position)
-
-
 func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
 	var effect_world: EffectWorld = _world.get_effect_world()
 	var receipt: Dictionary = effect_world.spawn_effect_request(effect, transform, {
@@ -566,7 +551,9 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 			if (mask & (1 << i)) == 0:
 				continue
 			var info: Dictionary = data.get_user_point_info(i)
-			var local_pose := _item_effect_local_pose(
+			# The same local pose EffectWorld.spawn_effect_attached uses; static
+			# sources compose it once with their placement transform.
+			var local_pose := EffectWorld.forward_pose(
 					Vector3(info.get("position", Vector3.ZERO)),
 					Vector3(info.get("rotation", Vector3.ZERO)))
 			if _spawn_static_item_effect(effect, entity_transform * local_pose):

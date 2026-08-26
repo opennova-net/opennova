@@ -354,7 +354,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	assert_not_null(voice, "the full-gain idle voice displaces a quieter ambient marker")
 	if voice == null:
 		audio.teardown()
-		_remove_dir_recursive(fixture_dir)
+		TestFs.remove_dir_recursive(fixture_dir)
 		return
 	var first_stream := voice.stream
 	assert_true(voice.playing)
@@ -390,7 +390,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 		"the released channel is reused by the displaced ambient marker")
 
 	audio.teardown()
-	_remove_dir_recursive(fixture_dir)
+	TestFs.remove_dir_recursive(fixture_dir)
 
 
 func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> void:
@@ -452,7 +452,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 		"retired dynamic IDs stay float-exact by recycling after channel release")
 
 	audio.teardown()
-	_remove_dir_recursive(fixture_dir)
+	TestFs.remove_dir_recursive(fixture_dir)
 
 
 func test_setup_dispatches_envs_items_across_entity_kinds() -> void:
@@ -520,7 +520,7 @@ end
 	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
 		"setup retains the authored emitter identity through the ambient LOS call")
 	audio.teardown()
-	_remove_dir_recursive(fixture_dir)
+	TestFs.remove_dir_recursive(fixture_dir)
 
 
 func test_lazy_decode_failure_is_counted_and_falls_through_to_playable_candidate() -> void:
@@ -584,7 +584,7 @@ end
 	assert_eq(_players(container).size(), 1,
 		"the next-ranked playable candidate receives the physical channel")
 	audio.teardown()
-	_remove_dir_recursive(fixture_dir)
+	TestFs.remove_dir_recursive(fixture_dir)
 
 
 func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
@@ -636,7 +636,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	if old_wac != null:
 		assert_false(old_wac.playing, "the previous mission's WAC channel is stopped")
 	audio.teardown()
-	_remove_dir_recursive(fixture_dir)
+	TestFs.remove_dir_recursive(fixture_dir)
 
 
 func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
@@ -658,7 +658,7 @@ func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
 	audio.teardown()
 	assert_eq(_reverb_count(ambient_bus), 0,
 		"unloading the mission cannot leave its global bus effect in the menu/next world")
-	_remove_dir_recursive(fixture_dir)
+	TestFs.remove_dir_recursive(fixture_dir)
 
 
 func _write_text(path: String, value: String) -> void:
@@ -692,20 +692,3 @@ func _reverb_count(bus_idx: int) -> int:
 		if AudioServer.get_bus_effect(bus_idx, i) is AudioEffectReverb:
 			count += 1
 	return count
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)

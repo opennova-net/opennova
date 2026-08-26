@@ -64,10 +64,10 @@ func _run() -> void:
 			quit(1)
 			return
 	print("[sw] mission=%s loaded" % bms)
-	await _settle_ms(5000)
+	await ProbeClock.settle_ms(self, 5000)
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
-	await _settle_ms(1000)
+	await ProbeClock.settle_ms(self, 1000)
 
 	# --- Enumerate processing groups. ---
 	var groups: Dictionary = {}  # key -> {nodes: [], phys: int, proc: int}
@@ -118,7 +118,7 @@ func _run() -> void:
 		var saved: float = base.avg - st.avg
 		results.append({key = key, avg = st.avg, saved = saved})
 		print("[sw] off:%-46s avg=%7.2fms saved=%+7.2fms" % [key, st.avg, saved])
-		await _settle_ms(300)
+		await ProbeClock.settle_ms(self, 300)
 
 	# --- Render-side bounds. ---
 	var vp := root.get_viewport()
@@ -178,9 +178,3 @@ func _restore_mount() -> Error:
 	if err != OK:
 		push_error("[sw] failed to restore the shared mount config (error %d)" % err)
 	return err
-
-
-func _settle_ms(ms: int) -> void:
-	var deadline := Time.get_ticks_msec() + ms
-	while Time.get_ticks_msec() < deadline:
-		await process_frame

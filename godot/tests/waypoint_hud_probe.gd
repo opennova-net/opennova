@@ -21,12 +21,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _run() -> void:
 	if OS.get_environment("NW_SP_MISSION").is_empty():
 		push_error("waypoint_hud_probe: set NW_SP_MISSION=<mission.bms>")
@@ -63,7 +57,7 @@ func _run() -> void:
 		push_error("waypoint_hud_probe: no sim after player spawn")
 		quit(1)
 		return
-	await _mission_wait(SETTLE_MISSION_SECONDS)
+	await ProbeClock.mission_wait(self, SETTLE_MISSION_SECONDS, TIME_SCALE)
 
 	var wp: Dictionary = sim.get_waypoint_hud_view()
 	print("PROBE track: show=%s count=%d current=%d" %
@@ -111,7 +105,7 @@ func _run() -> void:
 		quit(1)
 		return
 	sim.debug_set_entity_position(player_idx, mission_pos)
-	await _mission_wait(1.0)
+	await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 	wp = sim.get_waypoint_hud_view()
 	var now := int(wp.get("current", -1))
 	print("PROBE advance: current %d -> %d (count %d)" % [cur, now, count])

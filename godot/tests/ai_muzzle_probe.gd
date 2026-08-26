@@ -21,12 +21,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _run() -> void:
 	if OS.get_environment("NW_SP_MISSION").is_empty():
 		push_error("ai_muzzle_probe: set NW_SP_MISSION=<mission.bms>")
@@ -79,7 +73,7 @@ func _run() -> void:
 	print("PROBE teleported %d NPCs into replication range" % moved)
 
 	# Let the wire view decode them and a few present -> sim pushes flow.
-	await _mission_wait(6.0)
+	await ProbeClock.mission_wait(self, 6.0, TIME_SCALE)
 
 	# Diagnostic: what did the models resolve?
 	var dumped := 0

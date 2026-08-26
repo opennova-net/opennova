@@ -248,7 +248,10 @@ func _owner_token_for(key: Variant) -> int:
 	return token
 
 
-func _pose(position: Vector3, forward_value: Vector3) -> Transform3D:
+# The effect pose for an authored forward vector: Z along the forward, an
+# up hint of UP (RIGHT when the forward is vertical). Shared with the static
+# item-effect sources (ItemEffectDirector).
+static func forward_pose(position: Vector3, forward_value: Vector3) -> Transform3D:
 	if forward_value.length_squared() <= 0.000001:
 		return Transform3D(Basis.IDENTITY, position)
 	var forward := forward_value.normalized()
@@ -391,7 +394,7 @@ func spawn_effect_transient(name: String, position: Vector3,
 		orientation: Vector3 = Vector3.ZERO, initial_age_ticks: int = 0,
 		render_domain: int = RENDER_DOMAIN_WORLD, source_tick: int = 0,
 		source_order: int = 0) -> int:
-	var receipt := spawn_effect_request(name, _pose(position, orientation), {
+	var receipt := spawn_effect_request(name, forward_pose(position, orientation), {
 		"initial_age_ticks": initial_age_ticks,
 		"render_domain": render_domain,
 		"source_tick": source_tick,
@@ -409,7 +412,7 @@ func spawn_effect_owned_request(owner_key: Variant, name: String, position: Vect
 		orientation: Vector3 = Vector3.ZERO) -> Dictionary:
 	if _particles_disabled:
 		return _disabled_receipt()
-	var initial_transform := _pose(position, orientation)
+	var initial_transform := forward_pose(position, orientation)
 	return spawn_effect_request(name, initial_transform, {
 		"admission": ADMISSION_REPLACE_OWNED,
 		"binding": BINDING_FOLLOW_OWNER,
@@ -431,7 +434,7 @@ func spawn_effect_attached_request(owner_key: Variant, name: String,
 		local_dir: Vector3) -> Dictionary:
 	if _particles_disabled:
 		return _disabled_receipt()
-	var local_transform := _pose(local_pos, local_dir)
+	var local_transform := forward_pose(local_pos, local_dir)
 	return spawn_effect_request(name,
 			initial_transform * local_transform, {
 		"binding": BINDING_FOLLOW_OWNER,
@@ -455,7 +458,7 @@ func spawn_effect_unless_alive(owner_key: Variant, name: String,
 		position: Vector3, orientation: Vector3 = Vector3.ZERO) -> int:
 	if _particles_disabled:
 		return 0
-	var receipt := spawn_effect_request(name, _pose(position, orientation), {
+	var receipt := spawn_effect_request(name, forward_pose(position, orientation), {
 		"admission": ADMISSION_SUPPRESS_WHILE_OWNED,
 		"slot_key": owner_key,
 	})
@@ -468,7 +471,7 @@ func spawn_effect_by_handle(handle: int, position: Vector3,
 		return false
 	var receipt: Dictionary = _scene.spawn({
 		"effect_handle": handle,
-		"transform": _pose(position, orientation),
+		"transform": forward_pose(position, orientation),
 		"kill_plane_y": _water_height,
 	})
 	return bool(receipt.get("spawned", false))

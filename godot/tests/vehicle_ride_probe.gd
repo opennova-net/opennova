@@ -35,12 +35,6 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 
-func _mission_wait(seconds: float) -> void:
-	var t0 := Time.get_ticks_msec()
-	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < seconds * 1000.0:
-		await process_frame
-
-
 func _find_local_player_index(sim, world) -> int:
 	var pp: Vector3 = world.get_sim().get_local_player_position()
 	for i in AI_SCAN_CAP:
@@ -130,12 +124,12 @@ func _run() -> void:
 		_fail("no sim after player spawn")
 		return
 	presenter.set_input_source(func() -> Dictionary: return {"forward": _forward})
-	await _mission_wait(1.0)
+	await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 	# A windowed run sits under the SP start-mission splash (black captures,
 	# see scar_wall_probe.gd); enter gameplay through the production seam.
 	if DisplayServer.get_name() != "headless":
 		game.dismiss_start_mission_splash()
-		await _mission_wait(0.5)
+		await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 	if not await _camera_check(sim, "on_foot", false):
 		return
 
@@ -156,13 +150,13 @@ func _run() -> void:
 	# ground and the truck's authored list-2 route starts there).
 	var tpos0: Vector3 = truck.get("position", Vector3.ZERO)
 	sim.debug_set_entity_position(player_idx, Vector3(tpos0.x + 1.6, -tpos0.z, tpos0.y))
-	await _mission_wait(0.5)
+	await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 
 	# --- Toggle mount: the player must end up seated on SSN 11.
 	if not sim.local_player_toggle_mount():
 		_fail("toggle_mount refused (no seat within the 4 u scan gate?)")
 		return
-	await _mission_wait(0.5)
+	await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 	var pd: Dictionary = sim.get_entity_debug(player_idx)
 	if not bool(pd.get("mounted", false)):
 		_fail("player not mounted after toggle")
@@ -179,7 +173,7 @@ func _run() -> void:
 	# --- Event 2 (PLYRATTACHED 11 -> the ride kickoff) fires within a few event quanta.
 	var fired := false
 	for i in 10:
-		await _mission_wait(1.0)
+		await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 		# Per-event fired FLAGS (index = event number, byte = fired).
 		var events: PackedByteArray = sim.get_fired_events_snapshot()
 		if events.size() > 2 and events[2] != 0:
@@ -195,7 +189,7 @@ func _run() -> void:
 	var t_ride0: Vector3 = sim.get_world_entity_debug(TRUCK_SSN).get("position", Vector3.ZERO)
 	var ride_dist := 0.0
 	for i in 30:
-		await _mission_wait(1.0)
+		await ProbeClock.mission_wait(self, 1.0, TIME_SCALE)
 		var tnow: Vector3 = sim.get_world_entity_debug(TRUCK_SSN).get("position", Vector3.ZERO)
 		ride_dist = tnow.distance_to(t_ride0)
 		if ride_dist > 8.0:
@@ -227,9 +221,9 @@ func _run() -> void:
 	pd = sim.get_entity_debug(player_idx)
 	var here: Vector3 = pd.get("position", Vector3.ZERO)
 	sim.debug_set_world_entity_position(TRUCK_SSN, Vector3(here.x + 200.0, -here.z, here.y))
-	await _mission_wait(0.3)
+	await ProbeClock.mission_wait(self, 0.3, TIME_SCALE)
 	sim.local_player_toggle_mount() # seat scan dry (the truck left) -> detach
-	await _mission_wait(0.3)
+	await ProbeClock.mission_wait(self, 0.3, TIME_SCALE)
 	if bool(sim.get_entity_debug(player_idx).get("mounted", false)):
 		print("PROBE dismount failed after the truck left; drive leg skipped")
 		print("PROBE PASS: mount + event 2 + AI ride + carry")
@@ -241,9 +235,9 @@ func _run() -> void:
 	pd = sim.get_entity_debug(player_idx)
 	here = pd.get("position", Vector3.ZERO)
 	sim.debug_set_world_entity_position(ATV_SSN, Vector3(here.x + 1.5, -here.z, here.y))
-	await _mission_wait(0.3)
+	await ProbeClock.mission_wait(self, 0.3, TIME_SCALE)
 	sim.local_player_toggle_mount() # mount the ATV
-	await _mission_wait(0.5)
+	await ProbeClock.mission_wait(self, 0.5, TIME_SCALE)
 	pd = sim.get_entity_debug(player_idx)
 	if not bool(pd.get("mounted", false)) or int(pd.get("mount_target_net_id", -1)) != ATV_SSN:
 		print("PROBE atv mount not reached (mounted=%s target=%d); drive leg skipped" %
@@ -258,7 +252,7 @@ func _run() -> void:
 	if seat_type == 2 or seat_type == 5:
 		var a0: Vector3 = sim.get_world_entity_debug(ATV_SSN).get("position", Vector3.ZERO)
 		_forward = true
-		await _mission_wait(4.0)
+		await ProbeClock.mission_wait(self, 4.0, TIME_SCALE)
 		_forward = false
 		var a1: Vector3 = sim.get_world_entity_debug(ATV_SSN).get("position", Vector3.ZERO)
 		pd = sim.get_entity_debug(player_idx)

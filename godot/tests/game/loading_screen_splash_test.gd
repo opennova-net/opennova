@@ -22,7 +22,7 @@ class UnhandledProbe:
 
 func after_each() -> void:
 	for dir in _temp_dirs:
-		_remove_dir_recursive(dir)
+		TestFs.remove_dir_recursive(dir)
 	_temp_dirs.clear()
 
 
@@ -372,23 +372,6 @@ func _make_temp_dir(name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(dir)
 	_temp_dirs.append(dir)
 	return dir
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var child := path.path_join(entry)
-		if dir.current_is_dir():
-			_remove_dir_recursive(child)
-		else:
-			DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
 
 
 # A minimal valid 8-bit palettized PCX (2x2), mirrored from

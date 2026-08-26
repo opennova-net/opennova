@@ -52,7 +52,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 
-	await _settle(8)
+	await ProbeClock.settle(get_tree(), 8)
 	_before = await _capture()
 
 	_caption.text = "AFTER  •  3 x %s at flesh-hit anchors" % EFFECT_NAME
@@ -119,11 +119,6 @@ func _build_stage() -> void:
 	_caption.add_theme_font_size_override("font_size", 22)
 	_caption.add_theme_color_override("font_color", Color.BLACK)
 	layer.add_child(_caption)
-
-
-func _settle(frames: int) -> void:
-	for _i in range(frames):
-		await get_tree().process_frame
 
 
 func _capture() -> Image:

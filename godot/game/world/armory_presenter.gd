@@ -401,34 +401,13 @@ func _register_text_tables(root: ResourceRoot) -> void:
 
 # The canonical menu stylesheet name the original engine looks for.
 func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	var bytes := root.read_file(STYLESHEET_FILE)
-	if bytes.is_empty():
-		return null
-	var s := MnsStyleSheet.new()
-	return s if s.load_from_bytes(bytes) == OK and s.is_runtime_valid() else null
+	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 
 
 func _connect_layout_source() -> void:
-	if _layout_control != null:
-		if not _layout_control.resized.is_connected(_recompute_fit):
-			_layout_control.resized.connect(_recompute_fit)
-		return
-	var viewport := _ui_parent.get_viewport() if _ui_parent != null else null
-	if viewport != null and not viewport.size_changed.is_connected(_recompute_fit):
-		viewport.size_changed.connect(_recompute_fit)
+	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func _recompute_fit() -> void:
-	if _frame == null or not is_instance_valid(_frame):
-		return
-	var target_size := Vector2.ZERO
-	if _layout_control != null:
-		target_size = _layout_control.size
-	elif _ui_parent != null and _ui_parent.get_viewport() != null:
-		target_size = _ui_parent.get_viewport().get_visible_rect().size
-	if target_size.x <= 1.0 or target_size.y <= 1.0:
-		return
-	# The frame maps the 800x600 design space to its own rect internally
-	# [orig: CUIScene_SetScreenScale @0x639480] — no Control scale math here.
-	_frame.position = Vector2.ZERO
-	_frame.size = target_size
+	# MenuFrameSurface.fit_frame (shared with the other presenters).
+	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)

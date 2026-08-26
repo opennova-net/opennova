@@ -22,7 +22,7 @@ func _ready() -> void:
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
 	WindowState.set_fullscreen(get_window(), true)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
@@ -33,51 +33,51 @@ func _ready() -> void:
 		push_error("[leantp] " + String(session.error)); get_tree().quit(1); return
 
 	_world = session.world
-	_presenter = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	_presenter = ProbeNodeSearch.find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	_cam = session.camera
 	print("[leantp] world=%s presenter=%s cam=%s" % [str(_world != null), str(_presenter != null), str(_cam != null)])
 	if _world == null or _presenter == null or _cam == null:
 		get_tree().quit(1); return
 
 	# Walk clear of the spawn tents.
-	_hold(KEY_W, true)
-	await _settle(200)
-	_hold(KEY_W, false)
-	await _settle(30)
+	ProbeInput.hold(KEY_W, true)
+	await ProbeClock.settle(get_tree(), 200)
+	ProbeInput.hold(KEY_W, false)
+	await ProbeClock.settle(get_tree(), 30)
 
 	# --- Phase A: standing FP lean (hold Q) --------------------------------
 	print("[leantp] --- A: standing lean, holding Q ---")
 	_dump("A pre")
-	_hold(KEY_Q, true)
+	ProbeInput.hold(KEY_Q, true)
 	for i in 5:
-		await _settle(10)
+		await ProbeClock.settle(get_tree(), 10)
 		_dump("A hold+%d" % ((i + 1) * 10))
 	await _capture("A_lean_fp.png")
-	_hold(KEY_Q, false)
-	await _settle(40)
+	ProbeInput.hold(KEY_Q, false)
+	await ProbeClock.settle(get_tree(), 40)
 	_dump("A released")
 
 	# --- Phase B: prone roll (Z then hold Q) --------------------------------
 	print("[leantp] --- B: prone, then hold Q (roll) ---")
 	_press(KEY_Z)
-	await _settle(100)
+	await ProbeClock.settle(get_tree(), 100)
 	_dump("B prone settled")
-	_hold(KEY_Q, true)
+	ProbeInput.hold(KEY_Q, true)
 	for i in 6:
-		await _settle(10)
+		await ProbeClock.settle(get_tree(), 10)
 		_dump("B roll+%d" % ((i + 1) * 10))
 	await _capture("B_prone_roll_fp.png")
-	_hold(KEY_Q, false)
-	await _settle(60)
+	ProbeInput.hold(KEY_Q, false)
+	await ProbeClock.settle(get_tree(), 60)
 	_press(KEY_C)
-	await _settle(120)
+	await ProbeClock.settle(get_tree(), 120)
 	_dump("B stood back up")
 
 	# --- Phase C: FP->TP aim continuity -------------------------------------
 	print("[leantp] --- C: FP aim -> F4 -> TP aim ---")
 	# Pitch down a touch so the ray hits terrain at a testable distance.
-	_look(Vector2(0, 120))
-	await _settle(20)
+	ProbeInput.look(Vector2(0, 120))
+	await ProbeClock.settle(get_tree(), 20)
 	_dump("C fp aimed")
 	# Capture world points ALONG THE FP AIM from the live FP camera (its forward
 	# IS the aim ray; the 0.1875u eye pull-back moves the origin along the same
@@ -88,8 +88,8 @@ func _ready() -> void:
 	await _capture("C_fp_aim.png")
 	# On-foot third person is the debug override (no gameplay key resolves it).
 	_presenter.set_debug_third_person(true)
-	await _settle(10)
-	await _settle(50)
+	await ProbeClock.settle(get_tree(), 10)
+	await ProbeClock.settle(get_tree(), 50)
 	_dump("C tp settled")
 	_project_points("C tp", ray_points)
 	var aim: Vector2 = _presenter.aim_screen_point()
@@ -97,7 +97,7 @@ func _ready() -> void:
 	print("[leantp] C tp aim_screen_point=%s viewport=%s center=%s" % [str(aim), str(vp_size), str(vp_size * 0.5)])
 	await _capture("C_tp_aim.png")
 	_presenter.set_debug_third_person(false)
-	await _settle(10)
+	await ProbeClock.settle(get_tree(), 10)
 
 	print("[leantp] done -> ", _out_abs)
 	get_tree().quit()
@@ -138,44 +138,11 @@ func _project_points(tag: String, points: Array) -> void:
 		print("[leantp] %s ray@%.0f -> screen %s" % [tag, float(pair[0]), s])
 
 
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame
-
-
 func _capture(name: String) -> void:
-	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
-	if img != null:
-		img.save_png(_out_abs.path_join(name))
+	if await ProbeCapture.save_viewport_png(get_viewport(), _out_abs.path_join(name)):
 		print("[leantp] wrote ", name)
 
 
-func _hold(k: Key, down: bool) -> void:
-	var e := InputEventKey.new()
-	e.keycode = k
-	e.physical_keycode = k
-	e.pressed = down
-	Input.parse_input_event(e)
-
-
 func _press(k: Key) -> void:
-	_hold(k, true)
-	_hold(k, false)
-
-
-func _look(total: Vector2) -> void:
-	for _i in 10:
-		var mm := InputEventMouseMotion.new()
-		mm.relative = total / 10.0
-		Input.parse_input_event(mm)
+	ProbeInput.hold(k, true)
+	ProbeInput.hold(k, false)

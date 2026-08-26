@@ -945,39 +945,9 @@ func _rm_runtime_dir(dir: String) -> void:
 	DirAccess.remove_absolute(dir)
 
 
-# Minimal PFF3 writer (mirrors resource_root_contract_test._write_pff): 20-byte
-# header, 36-byte entries with a 16-byte name field, then the payloads.
+# The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "PFF fixture should be writable: %s" % path)
-	if file == null:
-		return
-	var header_size := 20
-	var entry_size := 36
-	var next_payload_offset := header_size + entries.size() * entry_size
-	file.store_32(header_size)
-	file.store_32(0x33464650)  # "PFF3"
-	file.store_32(entries.size())
-	file.store_32(entry_size)
-	file.store_32(header_size)
-	for entry in entries:
-		var bytes := _entry_bytes(entry)
-		file.store_32(0)
-		file.store_32(next_payload_offset)
-		file.store_32(bytes.size())
-		file.store_32(0)
-		var name_bytes := String(entry.name).to_utf8_buffer()
-		for i in range(16):
-			file.store_8(name_bytes[i] if i < name_bytes.size() else 0)
-		file.store_32(0)
-		next_payload_offset += bytes.size()
-	for entry in entries:
-		file.store_buffer(_entry_bytes(entry))
-	file.close()
-
-
-func _entry_bytes(entry: Dictionary) -> PackedByteArray:
-	return entry.bytes if entry.bytes is PackedByteArray else String(entry.bytes).to_utf8_buffer()
+	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 # A throwaway companion: claims the menu (or not) and records whether it was driven.

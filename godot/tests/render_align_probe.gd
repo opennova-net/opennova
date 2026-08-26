@@ -62,10 +62,10 @@ func _ready() -> void:
 
 	var walk := int(OS.get_environment("NOVA_WALK_FRAMES"))
 	if walk > 0:
-		_hold(KEY_W, true)
-		await _settle(walk)
-		_hold(KEY_W, false)
-		await _settle(30)
+		ProbeInput.hold(KEY_W, true)
+		await ProbeClock.settle(get_tree(), walk)
+		ProbeInput.hold(KEY_W, false)
+		await ProbeClock.settle(get_tree(), 30)
 
 	await _measure_gains()
 
@@ -81,7 +81,7 @@ func _ready() -> void:
 	await _capture("%s_pitchB.png" % prefix)
 
 	print("[rendercmp] done -> ", _out_abs)
-	await _settle(10)
+	await ProbeClock.settle(get_tree(), 10)
 	get_tree().quit(0)
 
 
@@ -123,13 +123,13 @@ func _dump_env_state() -> void:
 # the sim, so the aim loop needs no convention assumptions.
 func _measure_gains() -> void:
 	var y0: float = _world.get_sim().get_local_player_yaw_deg()
-	_look(Vector2(200, 0))
-	await _settle(6)
+	ProbeInput.look(Vector2(200, 0))
+	await ProbeClock.settle(get_tree(), 6)
 	var y1: float = _world.get_sim().get_local_player_yaw_deg()
 	_yaw_gain = _wrap_deg(y1 - y0) / 200.0
 	var p0: float = _world.get_sim().get_local_player_pitch_deg()
-	_look(Vector2(0, 200))
-	await _settle(6)
+	ProbeInput.look(Vector2(0, 200))
+	await ProbeClock.settle(get_tree(), 6)
 	var p1: float = _world.get_sim().get_local_player_pitch_deg()
 	_pitch_gain = (p1 - p0) / 200.0
 	print("[rendercmp] yaw_gain=%.5f pitch_gain=%.5f" % [_yaw_gain, _pitch_gain])
@@ -145,8 +145,8 @@ func _aim(target_yaw: float, target_pitch: float) -> void:
 			break
 		var dx := clampf(yaw_err / _yaw_gain, -400.0, 400.0) if absf(yaw_err) >= 0.5 else 0.0
 		var dy := clampf(pitch_err / _pitch_gain, -400.0, 400.0) if absf(pitch_err) >= 0.5 else 0.0
-		_look(Vector2(dx, dy))
-		await _settle(4)
+		ProbeInput.look(Vector2(dx, dy))
+		await ProbeClock.settle(get_tree(), 4)
 
 
 func _wrap_deg(a: float) -> float:
@@ -154,41 +154,8 @@ func _wrap_deg(a: float) -> float:
 
 
 func _capture(name: String) -> void:
-	await _settle(6)
-	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
-	if img != null:
-		img.save_png(_out_abs.path_join(name))
+	await ProbeClock.settle(get_tree(), 6)
+	await ProbeCapture.save_viewport_png(get_viewport(), _out_abs.path_join(name))
 	print("[rendercmp] wrote %s yaw=%.1f pitch=%.1f pos=%s" % [
 		name, _world.get_sim().get_local_player_yaw_deg(), _world.get_sim().get_local_player_pitch_deg(),
 		str(_world.get_sim().get_local_player_position())])
-
-
-func _find_by_method(node: Node, method: String) -> Node:
-	if node.has_method(method):
-		return node
-	for ch in node.get_children():
-		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame
-
-
-func _hold(k: Key, down: bool) -> void:
-	var e := InputEventKey.new()
-	e.keycode = k
-	e.physical_keycode = k
-	e.pressed = down
-	Input.parse_input_event(e)
-
-
-func _look(total: Vector2) -> void:
-	for _i in 10:
-		var mm := InputEventMouseMotion.new()
-		mm.relative = total / 10.0
-		Input.parse_input_event(mm)

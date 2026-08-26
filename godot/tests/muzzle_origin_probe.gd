@@ -73,7 +73,7 @@ func _run() -> void:
 	print("player runtime type 0x%X -> visual item %d -> graphic '%s'"
 			% [PLAYER_RUNTIME_TYPE_ID, visual_item, _body_graphic])
 
-	_body = _placer.build_player_animated_model(PLAYER_RUNTIME_TYPE_ID, _presenter, null)
+	_body = _placer.build_player_animated_model(PLAYER_RUNTIME_TYPE_ID, _presenter, 0)
 	if _body == null:
 		print("FAIL: the player character model did not build")
 		quit(1)

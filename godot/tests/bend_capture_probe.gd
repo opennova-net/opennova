@@ -39,7 +39,7 @@ func _ready() -> void:
 	# set_fullscreen tool route here too) — the play viewport fills the display.
 	if OS.get_environment("NOVA_FULLSCREEN") != "0":
 		WindowState.set_fullscreen(get_window(), true)
-		await _settle(6)
+		await ProbeClock.settle(get_tree(), 6)
 
 	var bms_name := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms_name.is_empty():
@@ -65,7 +65,7 @@ func _ready() -> void:
 			]
 			for i in candidates.size():
 				presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT = candidates[i]
-				await _settle(8)
+				await ProbeClock.settle(get_tree(), 8)
 				await _capture("vm_rot_%d_%s.png" % [i, str(candidates[i]).replace(" ", "")])
 		print("[bend] sweep done -> ", _out_abs)
 		get_tree().quit()
@@ -78,31 +78,31 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	tp_presenter.set_debug_third_person(true)
-	await _settle(20)
+	await ProbeClock.settle(get_tree(), 20)
 	await _capture("02_tp_level.png")
 	# Fast 180 flick: the aim swings instantly, the body chases (~5.8 deg/tick) and the
 	# legs re-plant behind it — the lag IS the twist (D-INF-12 chase math).
-	_look(Vector2(1500, 0))
-	await _settle(3)
+	ProbeInput.look(Vector2(1500, 0))
+	await ProbeClock.settle(get_tree(), 3)
 	await _capture("03_tp_flick.png")
-	await _settle(90)
+	await ProbeClock.settle(get_tree(), 90)
 	await _capture("04_tp_settled.png")
 	# Walk out into the open, away from the spawn tent, then face the open field
 	# (away from the rock wall the road runs beside).
 	_hold_key(KEY_W, true)
-	await _settle(260)
+	await ProbeClock.settle(get_tree(), 260)
 	_hold_key(KEY_W, false)
-	await _settle(20)
-	_look(Vector2(750, 0))            # fast ~90 deg flick on open ground
-	await _settle(3)
+	await ProbeClock.settle(get_tree(), 20)
+	ProbeInput.look(Vector2(750, 0))            # fast ~90 deg flick on open ground
+	await ProbeClock.settle(get_tree(), 3)
 	await _capture("05_tp_flick_open.png")
-	await _settle(80)
+	await ProbeClock.settle(get_tree(), 80)
 	await _capture("06_tp_open_level.png")
-	_look(Vector2(0, 420))            # ~50 deg down at 0.12 deg/px
-	await _settle(30)
+	ProbeInput.look(Vector2(0, 420))            # ~50 deg down at 0.12 deg/px
+	await ProbeClock.settle(get_tree(), 30)
 	await _capture("07_tp_down.png")
-	_look(Vector2(0, -790))           # ~45 deg up (orbit stays under vertical)
-	await _settle(30)
+	ProbeInput.look(Vector2(0, -790))           # ~45 deg up (orbit stays under vertical)
+	await ProbeClock.settle(get_tree(), 30)
 	await _capture("08_tp_up.png")
 
 	# Debug experiments (the F3 View-tab toggles): back to first person with the
@@ -112,22 +112,17 @@ func _ready() -> void:
 		presenter.set_debug_third_person(false)  # back to first person
 		presenter.set_debug_body_in_first_person(true)
 		presenter.set_debug_force_viewmodel(true)
-		_look(Vector2(0, 380))        # level-ish again
-		await _settle(20)
+		ProbeInput.look(Vector2(0, 380))        # level-ish again
+		await ProbeClock.settle(get_tree(), 20)
 		await _capture("09_fp_body_level.png")
-		_look(Vector2(0, 580))        # ~70 deg down
-		await _settle(30)
+		ProbeInput.look(Vector2(0, 580))        # ~70 deg down
+		await ProbeClock.settle(get_tree(), 30)
 		await _capture("10_fp_feet.png")
 	else:
 		push_warning("[bend] no LocalPlayerPresenter found for the FP-body captures")
 
 	print("[bend] done -> ", _out_abs)
 	get_tree().quit()
-
-
-func _settle(frames: int) -> void:
-	for _i in frames:
-		await get_tree().process_frame
 
 
 # The game shell owns a LocalPlayerPresenter; find it by capability.
@@ -164,20 +159,9 @@ func _press_key(keycode: Key) -> void:
 
 # Feed relative mouse-look in small steps so per-frame handling matches a real
 # drag (the presenter clamps pitch per event batch either way).
-func _look(total: Vector2) -> void:
-	const STEPS := 10
-	for _i in STEPS:
-		var mm := InputEventMouseMotion.new()
-		mm.relative = total / STEPS
-		Input.parse_input_event(mm)
-
-
 func _capture(filename: String) -> void:
-	await RenderingServer.frame_post_draw
 	var vp: Viewport = _play_viewport if _play_viewport != null else get_viewport()
-	var img: Image = vp.get_texture().get_image()
-	if img == null:
+	if not await ProbeCapture.save_viewport_png(vp, _out_abs.path_join(filename)):
 		push_error("[bend] capture failed for %s" % filename)
 		return
-	img.save_png(_out_abs.path_join(filename))
 	print("[bend] wrote ", filename)

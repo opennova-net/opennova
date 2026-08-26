@@ -27,7 +27,7 @@ func _ready() -> void:
 	var weapon := OS.get_environment("NOVA_VM_WEAPON").strip_edges()
 	if weapon.is_empty():
 		weapon = "WPN_M16BURST"
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 	var saved := OS.get_environment("NOVA_MISSION_PATH").strip_edges()
 	var session: Dictionary = await StandaloneProbe.boot(self, root, bms, expansion, saved)
 	if not String(session.get("error", "")).is_empty():
@@ -41,7 +41,7 @@ func _ready() -> void:
 		push_error("[vmbone] presenter/world missing")
 		get_tree().quit(1)
 		return
-	await _settle(30)
+	await ProbeClock.settle(get_tree(), 30)
 	world.set_local_player_weapon_by_name(weapon)
 	presenter.viewmodel_rig().refresh_viewmodel()
 	# Let the rebuild + a few idle ticks run.
@@ -49,10 +49,10 @@ func _ready() -> void:
 		await get_tree().process_frame
 		if presenter.viewmodel_rig().viewmodel() != null and presenter.viewmodel_rig().vm_parts().size() > 0:
 			break
-	await _settle(90)
+	await ProbeClock.settle(get_tree(), 90)
 	_dump(presenter)
 	_sweep_dump(presenter)
-	await _settle(2)
+	await ProbeClock.settle(get_tree(), 2)
 	get_tree().quit()
 
 
@@ -165,8 +165,3 @@ func _sweep_dump(presenter: LocalPlayerPresenter) -> void:
 						print("[vmsweep] part=%s key=%s variant=%d frame=%d bone=%d name=%s origin=(%.5f, %.5f, %.5f)" % [
 								part.name, key, variant, f, i, skel.get_bone_name(i),
 								g.origin.x, g.origin.y, g.origin.z])
-
-
-func _settle(n: int) -> void:
-	for _i in n:
-		await get_tree().process_frame

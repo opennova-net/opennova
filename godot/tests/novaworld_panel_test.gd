@@ -16,26 +16,8 @@ var _root_dirs: Array[String] = []
 
 func after_each() -> void:
 	for dir in _root_dirs:
-		_remove_dir_recursive(dir)
+		TestFs.remove_dir_recursive(dir)
 	_root_dirs.clear()
-
-
-func _remove_dir_recursive(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while not entry.is_empty():
-		if entry != "." and entry != "..":
-			var child := path.path_join(entry)
-			if dir.current_is_dir():
-				_remove_dir_recursive(child)
-			else:
-				DirAccess.remove_absolute(child)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
 
 
 func _real_root(missions: PackedStringArray) -> ResourceRoot:

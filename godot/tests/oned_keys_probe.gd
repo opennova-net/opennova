@@ -39,31 +39,31 @@ func _ready() -> void:
 	# override is the one on-foot third person.
 	var tp_before := bool(presenter.is_third_person())
 	_tap(KEY_F4)
-	await _settle(4)
+	await ProbeClock.settle(get_tree(), 4)
 	var tp_after_key := bool(presenter.is_third_person())
 	_check(tp_after_key == tp_before, "F4 does not flip the camera mode on foot (%s -> %s)" % [tp_before, tp_after_key])
 	presenter.set_debug_third_person(true)
-	await _settle(4)
+	await ProbeClock.settle(get_tree(), 4)
 	var tp_after := bool(presenter.is_third_person())
 	_check(tp_after and not tp_before, "the debug override enters third person on foot")
 	presenter.set_debug_third_person(false)
-	await _settle(4)
+	await ProbeClock.settle(get_tree(), 4)
 
 	# F3: the game debug overlay opens.
 	var overlay_before: bool = game.is_debug_overlay_open()
 	_tap(KEY_F3)
-	await _settle(4)
+	await ProbeClock.settle(get_tree(), 4)
 	var overlay_after: bool = game.is_debug_overlay_open()
 	_check(overlay_after and not overlay_before, "F3 opens the game debug overlay")
 	if overlay_after:
 		_tap(KEY_F3)
-		await _settle(4)
+		await ProbeClock.settle(get_tree(), 4)
 		_check(not game.is_debug_overlay_open(), "F3 again closes it")
 
 	# C: stance crouch toggles on the presenter.
 	var crouch_before := bool(presenter.get("_crouch"))
 	_tap(KEY_C)
-	await _settle(4)
+	await ProbeClock.settle(get_tree(), 4)
 	_check(bool(presenter.get("_crouch")) != crouch_before, "C toggles crouch")
 
 	# Shift: the armory — the USE-ITEM key (action 177, retail default SHIFT), via
@@ -75,12 +75,12 @@ func _ready() -> void:
 	var armory = game.find_child("ArmoryPresenter", true, false)
 	_check(armory != null, "the game mounts the shared armory presenter")
 	_tap(KEY_SHIFT)
-	await _settle(6)
+	await ProbeClock.settle(get_tree(), 6)
 	if armory != null:
 		if in_zone:
 			_check(bool(armory.is_open()), "Shift opens the WEAPON overlay in an armory zone")
 			_tap(KEY_ESCAPE)
-			await _settle(4)
+			await ProbeClock.settle(get_tree(), 4)
 			_check(not bool(armory.is_open()), "Esc closes the armory overlay")
 		else:
 			_check(not bool(armory.is_open()), "Shift out of zone stays ignored [orig: @0x4e0b4d]")
@@ -110,8 +110,3 @@ func _tap(k: Key) -> void:
 	up.physical_keycode = k
 	up.pressed = false
 	Input.parse_input_event(up)
-
-
-func _settle(frames: int) -> void:
-	for _i in frames:
-		await get_tree().process_frame
