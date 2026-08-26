@@ -94,6 +94,10 @@ void Simulation::reset_world() {
 	mounted_pose_live_cache_.clear();
 	mounted_pose_cache_logic_tick_ = 0xFFFFFFFFu;
 	invalidate_present_effect_pose_cache();
+	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
+	// dead/respawn mirrors cannot tell the next mission's occupant apart
+	// from this one's by epoch: the lifecycle table dies with the world.
+	pool_present_lifecycle_.clear();
 	local_weapon_.events.clear();
 	local_weapon_.anim_advance_ticks = 0;
 	local_weapon_.round_sequence = 0;
