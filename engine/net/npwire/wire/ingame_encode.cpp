@@ -494,8 +494,10 @@ std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec) {
 // (tag=1 per-entity compact via the §5.10b class dispatch, tag=2 fired-round) and the
 // tag=0 terminator. Known null-callback classes deliberately emit a header-only
 // tag=1 record; Guided/Unknown records are skipped because they have no fixed
-// 0x0A compact width.
-std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
+// 0x0A compact width. The listen host's own player gets the 14/25-byte
+// header-only form (see the declaration) [orig: @0x4ff9cd / @0x50f07e].
+std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
+                                         bool authority_recipient) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	auto append = [&](const std::vector<uint8_t> &v) {
@@ -507,6 +509,20 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	w.u32(uint32_t(fu.anchor_z));
 	w.u8(fu.flags1);
 	w.u8(fu.flags2);
+
+	if (authority_recipient) {
+		// The local gate: only the phase-0 weapon/reload/uniform block survives
+		// [orig: NetPacket_WritePlayerState @0x4ff81b writes it before the
+		//  local test @0x4ff9cd returns; serialize_entity_states_to_packet
+		//  @0x50f07e writes nothing for the local player].
+		if ((fu.flags2 & kFrameFlags2SubBlockCycleMask) == 0) {
+			w.u8(fu.weapon.preround_timer); w.u8(fu.weapon.slot_state360); w.u8(fu.weapon.slot_state368);
+			w.u8(fu.weapon.slot_state364); w.u8(fu.weapon.slot_state356); w.u8(fu.weapon.slot_state460);
+			w.u8(fu.weapon.reload_seconds);
+			w.u32(uint32_t(fu.weapon.uniform_team_mask));
+		}
+		return out;
+	}
 
 	switch (fu.flags2 & kFrameFlags2SubBlockCycleMask) {
 	case 0: // weapon/reload/uniform (11 B) [orig: NetPacket_WritePlayerState @0x4ff81b]

@@ -279,6 +279,14 @@ public:
 	// listen host's loopback replica passes world.mp_session (retail SP never
 	// runs this client path at all). [orig: NapiNPClientMsg_0x01D @0x43086c]
 	void set_mp_session(bool mp_session) { mp_session_ = mp_session; }
+	// The listen host's own local client: its loopback 0x0A is the retail
+	// header-only frame (anchor, flags1, phase byte, phase-0 block) and the fold
+	// returns where retail's parser does [orig: NapiNPClientMsg_0x00A @0x430174].
+	// Entities are presented from the host's own pools, never from this view.
+	void set_authority_recipient(bool authority_recipient) {
+		authority_recipient_ = authority_recipient;
+	}
+	bool authority_recipient() const { return authority_recipient_; }
 	bool mp_session() const { return mp_session_; }
 
 	// Recipient context for S2C 0x59's friend/foe item selection. Retail
@@ -366,6 +374,7 @@ private:
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
 	bool mp_session_ = false;
+	bool authority_recipient_ = false;
 	uint16_t viewer_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this

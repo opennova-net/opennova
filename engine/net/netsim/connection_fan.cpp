@@ -68,7 +68,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
                                     const FrameHeaderState &hdr,
                                     uint32_t game_type,
                                     const world::World::SubgoalState &subgoals,
-                                    std::vector<RoundEventRecord> round_events = {}) {
+                                    std::vector<RoundEventRecord> round_events = {},
+                                    bool authority_recipient = false) {
 	FrameUpdate fu;
 	const int32_t ax = int32_t(ctx.spawn_x);
 	const int32_t ay = int32_t(ctx.spawn_y);
@@ -360,7 +361,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// Tag-2 fired-round events, already recipient-selected + wire-converted by
 	// select_round_events [orig: the g_round_event_refs interleave @0x50f312].
 	fu.round_events = std::move(round_events);
-	return encode_frame_update(fu);
+	return encode_frame_update(fu, authority_recipient);
 }
 
 // Resolve the one legal S2C 0x0A anchor: this connection's live player
@@ -1061,14 +1062,33 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 		}
 	}
 
+	// The LISTEN HOST's OWN player takes the header-only frame: no priority
+	// build (@0x517c1b), no records/rounds/terminator (@0x50f07e) — its local
+	// client presents from the pools the host already owns (D-NET-140 closed;
+	// ADR 0011 Decision 1). The recipient is local iff its owned entity IS
+	// g_local_player_entity [orig: Server_SendEntityStateToPlayer @0x517c11
+	// compares the recipient entity against g_local_player_entity].
+	const bool local_recipient = w.cached.local_player.valid() &&
+			conn.owned_entity == w.cached.local_player;
+	if (local_recipient) {
+		std::vector<uint8_t> frame = build_0a_frame(
+				anchor, {}, flags2, hs, game_type, w.subgoals, {},
+				/*authority_recipient=*/true);
+		if (perf != nullptr) {
+			const uint64_t now = io::perf_now_us();
+			perf->encode_us = now - phase_start;
+			phase_start = now;
+		}
+		conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
+		                          /*reliable=*/false);
+		if (perf != nullptr)
+			perf->enqueue_us = io::perf_now_us() - phase_start;
+		return true;
+	}
+
 	// Priority + aging + byte-budget selection of this frame's tag-1 records [orig:
 	// Server_BuildEntityPriorityList @ 0x50e590 + the serialize_entity_states_to_packet
-	// @ 0x50f070 budget loop]. NOT ported: the original writes NO entity records to the
-	// LISTEN HOST's OWN local player (@0x50f07e early return; the priority build is also
-	// skipped @0x517c1b) — its local client reads process memory. Our serve-and-play local
-	// view RENDERS FROM the loopback 0x0A fold (ADR 0011), so the loopback connection gets
-	// the full record set; that frame never leaves the process, so retail interop is
-	// unaffected (D-NET-140).
+	// @ 0x50f070 budget loop].
 	const std::size_t header_bytes = frame_header_bytes(flags2, game_type, hs);
 	const std::size_t hard_event_bytes = max_frame_body_bytes == 0
 			? std::numeric_limits<std::size_t>::max()

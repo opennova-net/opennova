@@ -207,8 +207,11 @@ struct GameConfig {
 	uint32_t entity_send_budget = 600;
 	// The send-holdoff period this host dictates to each joiner (H:0x00 mask 8 /
 	// CS field 3) AND runs itself — the per-session-type "tick rate" divider
-	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0 — SP/loopback 1,
-	// NovaWorld 12 (~5.2 Hz), LAN authority g_LanMode 1..4 -> 12/6/4/3].
+	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0 — 1 only for
+	// transport mode 0 (SP/none), 12 for modes 1/3 (NovaWorld), LAN authority
+	// g_LanMode 1..4 -> 12/6/4/3; the loopback's per-tick cadence is the
+	// NapiNPServer_UpdateHoldoffTicks @0x4c5f40 else-branch @0x4c5f63/@0x4c5f69,
+	// not a GetSendHoldoffTicks case].
 	// `send_holdoff_ticks` is an explicit override; absent means select the
 	// witnessed value from session_channel and lan_mode. Retail's invalid
 	// lanmode fallback is mode 2 (period 6). Loopback connections themselves

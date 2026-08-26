@@ -226,14 +226,14 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	assert_true(host_handle != -1,
 		"the host player is identified by its ownerConnectionId (dcb), not an SSN (D-NET-112)")
 
-	# One host frame: Server_TickUpdate fans the host loopback its whole-world S2C 0x0A; the host's
-	# own ClientRuntime folds it into the ClientState the present pass now reads.
+	# One host frame: Server_TickUpdate fans the host loopback retail's header-only S2C 0x0A
+	# (D-NET-140 closed); the present pass reads the host's own pools.
 	sim.step()
 
 	var stride: int = sim.get_present_stride()
 	var snap: PackedFloat32Array = sim.get_present_snapshot()
 	var records: int = snap.size() / stride
-	assert_eq(records, 3, "both organics + the host player replicated through the wire")
+	assert_eq(records, 3, "both organics + the host player presented from the pools")
 
 	var matched := 0
 	for rec in range(records):
@@ -248,10 +248,9 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 		var p := Vector3(snap[base + Simulation.PF_POS_X],
 			snap[base + Simulation.PF_POS_Y],
 			snap[base + Simulation.PF_POS_Z])
-		# Position rides the wire compressed (lossy); the reconstruction lands within a
-		# codec quantization step of the authoritative value.
+		# The host presents its own registry: the pose is the authoritative value.
 		assert_lt(p.distance_to(truth[wh]["pos"]), 0.5,
-			"decoded position round-trips within codec tolerance")
+			"presented position is the authoritative pool position")
 		matched += 1
 	assert_eq(matched, 3, "every decoded entity matched a sim entity")
 	sim.free()
@@ -477,26 +476,33 @@ func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> vo
 			break
 	assert_gt(admitted_handle, 0, "the new authoritative peer has a wire identity")
 
-	# Admission mutates the authoritative World immediately, but the local
-	# ClientRuntime does not see that row until the next host pump. Both calls
-	# therefore hit the same stable missing-owner epoch; the second is served by
-	# the native negative cache rather than walking the decoded entity vector.
+	# A handle nothing owns misses, and the repeat is served by the native
+	# negative cache for the current epoch rather than a registry walk.
+	var absent_handle := 0x0FFF
 	assert_true(sim.get_present_effect_state_for_wire_handle(
-			admitted_handle).is_empty())
+			absent_handle).is_empty())
 	assert_true(sim.get_present_effect_state_for_wire_handle(
-			admitted_handle).is_empty(),
-			"a repeated missing owner stays absent for the current client epoch")
+			absent_handle).is_empty(),
+			"a repeated missing owner stays absent for the current epoch")
 
-	# The next host tick folds the admitted row. Epoch invalidation must discard
-	# the remembered miss so the same identity can resolve immediately.
-	sim.step()
+	# The listen host presents its own pools (D-NET-140 closed): admission
+	# mutates the authoritative World and the effect lookup resolves the new
+	# row at once, before any loopback pump — retail's local client reads
+	# process memory.
 	var admitted_state: PackedVector3Array = \
 			sim.get_present_effect_state_for_wire_handle(admitted_handle)
 	assert_eq(admitted_state.size(), Simulation.EFFECT_STATE_COUNT,
-			"a new decoded-client epoch retries a formerly missing identity")
+			"the host resolves an admitted peer from its pools immediately")
 	if admitted_state.size() == Simulation.EFFECT_STATE_COUNT:
 		assert_lt(admitted_state[Simulation.EFFECT_STATE_POSITION].distance_to(
 				admitted_pos), 0.5)
+
+	# The next host tick opens a new epoch; the remembered miss is discarded and
+	# the same identity is looked up again (still absent here).
+	sim.step()
+	assert_true(sim.get_present_effect_state_for_wire_handle(
+			absent_handle).is_empty(),
+			"a new epoch retries a formerly missing identity")
 	sim.free()
 
 

@@ -40,11 +40,22 @@ this, so MP/co-op is the same loop with the transport swapped rather than a late
 1. **SP runs through the seam, not around it.** This **supersedes ADR 0009's "single-player keeps
    `LocalSink` and pays nothing."** Single-player stands up the in-process listen server: the
    authoritative `World` tick (the host = `Server_TickUpdate` equivalent) serializes real entity state
-   through `NetSystem`/the per-class callbacks, an in-process channel loops the datagrams back, a local
-   client decodes them via `libs/novaworld/ingame_decode`, and **the present pass reads the
-   client-decoded state** — not `Simulation::get_present_snapshot()` directly. `is_authority`
+   through `NetSystem`/the per-class callbacks, an in-process channel loops the datagrams back, and a
+   local client decodes them via `libs/novaworld/ingame_decode`. `is_authority`
    stays the authority seam; `INetCommandSink` stays the outbound boundary, now backed by a serializing
    sink for SP rather than `LocalSink`.
+
+   *Amended 2026-08-26 (D-NET-140 closed).* The original text made the present pass read the
+   client-decoded state on every role. Retail does not: the listen host's own player receives a
+   **header-only** 0x0A (anchor, flags1, phase byte, and the phase-0 block when `phase & 3 == 0`;
+   no priority build `@0x517c1b`, no records/rounds/terminator `@0x50f07e`, parser return
+   `@0x430174`) and its local client **reads process memory** (`collect_visible_entities_for_terrain
+   @0x5c8c60` walks the pools). The port now does the same: the host's loopback carries the
+   session/lifecycle stream (the 0x0C/0x0D/0x10/0x20 spawn batches, 0x50, kill feed, chat, timers)
+   plus that header-only 0x0A, and **the host's present pass reads its own pools**
+   (`Simulation::present_snapshot_from_world`); a joiner presents the state its
+   `ClientReplicaPipeline` decoded. `Server_TickUpdate` builds the priority snapshot only when some
+   in-match recipient takes entity records.
 
 2. **The in-process channel is transport mode 1: byte serialize + loopback, socket bypassed.** The
    reimpl mirrors the witnessed path — host queues wire messages, the channel delivers the serialized
@@ -76,7 +87,8 @@ this, so MP/co-op is the same loop with the transport swapped rather than a late
   encoders synthesized from `bms::File` + `World` state, per ADR 0003 (no raw passthrough).
 - SP costs the serialize/parse round-trip it pays in the original — the price of parity and of MP being
   a transport swap, not a rewrite. The previously-assumed "SP pays nothing" optimization is given up
-  deliberately.
+  deliberately. That round-trip is the session/lifecycle stream plus the header-only 0x0A; entity
+  records are not part of it (retail's local player receives none — the 2026-08-26 amendment).
 - The player is an authoritative pool-0 `World` entity spawned by the §5.2a host machine (see the
   companion ADR 0012); SP player input feeds it through the same `entity+286`/`entity+36` gates the
   wire path uses.

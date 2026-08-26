@@ -3241,13 +3241,20 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	                    carrier->y == w::to_fixed(gun_live->position.y) &&
 	                    carrier->z == w::to_fixed(gun_live->position.z),
 	            "host-local carrier row retains its absolute spawn pose")) return false;
+	// The host's own client takes the header-only 0x0A (D-NET-140 closed): the
+	// startup 0x0C organic row streams, but no compact record ever folds — the
+	// host presents the mounted child from its own pools, where the attach
+	// already lifted it through the load-time no-callback carrier
+	// [orig: serialize_entity_states_to_packet @0x50f07e].
 	const ns::ClientEntityState *child = host_view.view().state().find(infantry_h.packed);
-	if (!expect(child != nullptr && child->carrier_handle == gun_h.packed &&
-	                    child->mount_bone == 6,
-	            "mounted child compact retains its B50Cal carrier and raw Usegun bone"))
+	if (!expect(child != nullptr && child->type_id == 5311,
+	            "production host startup streams the infantry 0x0C row")) return false;
+	if (!expect(host_view.state().compact_records_applied == 0,
+	            "the host's own view folds no compact records")) return false;
+	if (!expect(infantry_live->mounted && infantry_live->mount_target == gun_h &&
+	                    infantry_live->mount_bone == 6,
+	            "the host's pool row retains its B50Cal carrier and raw Usegun bone"))
 		return false;
-	if (!expect(child->x == carrier->x && child->y == carrier->y && child->z == carrier->z,
-	            "host-local mounted child lifts through the load-time no-callback carrier")) return false;
 
 	const np::NapiNPConnection *self = nullptr;
 	for (const np::NapiNPConnection &conn : owner.ctx.np_protocol.connection_list)

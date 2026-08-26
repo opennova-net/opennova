@@ -321,14 +321,18 @@ uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient
 // self-heals any UNMATCHED net_id — NapiNPClientMsg_0x00C @0x42eadb reallocates and overwrites
 // entity->NetId when MinimapSlot_HasEntity fails. Faithful port = minimap slot-array alloc;
 // docs/net/novaworld-net-re.md (D-NET-137). [golden diff + minimap grill 2026-07-01]
-uint16_t player_minimap_net_id(const world::Entity &e) {
+} // namespace
+
+static uint16_t player_minimap_net_id(const world::Entity &e) {
 	return static_cast<uint16_t>((e.team == 2 ? 0x8000u : 0u) | 0x0200u |
 	                             (e.handle.slot() & 0x1Fu));
 }
 
 // player_class_for_wire (the [5,9]-else-8 clamp) lives above snapshot_of, which shares it.
 
-} // namespace
+uint16_t player_wire_net_id(const world::Entity &e) {
+	return e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e);
+}
 
 OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own) {
 	OrganicSpawnBatch batch;
@@ -364,7 +368,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		// Players: the per-team minimap/char-slot id picked at add (CI0/CI1 join vars) when present,
 		// else the D-NET-137 encoding shim (host's own player / var-less peers).
 		rec.net_id = (e.item_id == kPlayerPersonTypeId)
-				? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
+				? player_wire_net_id(e)
 				: e.net_id;
 		rec.player_class = player_class_for_wire(e);
 		batch.records.push_back(std::move(rec));
@@ -429,7 +433,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// (see build_pool0_organic_batch; D-NET-146/137).
 	rec.anim_slot = e.anim_slot;
 	rec.net_id = (e.item_id == kPlayerPersonTypeId)
-			? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
+			? player_wire_net_id(e)
 			: e.net_id;
 	rec.player_class = player_class_for_wire(e);
 	// The wire struct retains its early alert_level name, but the grilled source is refNum.

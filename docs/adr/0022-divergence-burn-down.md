@@ -102,9 +102,6 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   `_controlfp(_PC_24, _MCW_PC)` parity sub-build for when byte-exactness is needed.
 - **D-MNU-4** — the original truncates each scaled quad rect to int per element; the
   reimpl applies one float `CanvasItem` scale. A sub-pixel cosmetic difference.
-- **D-NET-140** — the listen host's own loopback gets the full 0x0A record set (retail
-  sends its local player header-only frames); the frame never leaves the process
-  ([ADR 0011](0011-single-player-in-process-listen-server.md)).
 - **D-RORD-2** — retail's per-frame CPU opaque quicksort (alpha-test bit → depth slabs →
   effect index → fine depth) is a device-era mechanism; the reimpl's internal opaque
   ordering serves the same intent, with the key semantics preserved as T1-pinned pure

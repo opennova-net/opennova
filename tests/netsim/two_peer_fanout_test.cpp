@@ -102,6 +102,12 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
 // then anchors to that allocation and rejects a later same-slot lifetime.
 // [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient eye
 // reference @0x517BF5..0x517C13, phase increment @0x517BE8]
+// Recipient convention: the record-content cases below bind their connection
+// to a REMOTE peer's player (spawn_remote_player). The listen host's OWN player
+// (spawn_player publishes cached.local_player) takes retail's header-only 0x0A
+// — no priority build, no records, no terminator — which only the first case
+// pins [orig: Server_SendEntityStateToPlayer @0x517c1b;
+// serialize_entity_states_to_packet @0x50f07e] (D-NET-140 closed).
 bool run_fanout_and_per_connection_anchor() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -149,6 +155,11 @@ bool run_fanout_and_per_connection_anchor() {
 
 	ns::Datagram self_dg;
 	if (!expect(self_ch.client_recv(self_dg), "loopback S2C dequeued")) return false;
+	// Phase 1 (server-status) for a remote peer; for the host's own player the
+	// frame stops after the phase byte: 12-B anchor + flags1 + flags2 = 14 B
+	// [orig: NetPacket_WritePlayerState local gate @0x4ff9cd].
+	if (!expect(self_dg.tag == nw::s2c::PER_FRAME_UPDATE && self_dg.body.size() == 14,
+	            "the host's own 0x0A is the 14-byte header-only frame")) return false;
 
 	// --- sub-case a2: per-connection anchor. Admit the joiner -> conn_join now owns joiner_h
 	//     and anchors to ITS position; conn_self stays anchored to host_h. ---
@@ -164,28 +175,31 @@ bool run_fanout_and_per_connection_anchor() {
 	carry(udp_host, udp_join);
 
 	ns::ClientReplicaPipeline self_view, join_view;
+	// The host's own client parses the header-only frame where retail's parser
+	// returns [orig: NapiNPClientMsg_0x00A @0x430174].
+	self_view.set_authority_recipient(true);
 	self_view.pump(self_ch);
 	join_view.pump(udp_join);
 	if (!expect(self_view.frames_applied() == 1 && join_view.frames_applied() == 1,
 	            "each view applied one frame")) return false;
-	if (!expect(self_view.state().entities.size() == 2 && join_view.state().entities.size() == 2,
-	            "each view decoded both players")) return false;
+	// The listen host's OWN player takes no entity records (it presents from
+	// the pools); the joiner decodes both players.
+	if (!expect(self_view.state().entities.empty() &&
+	                    self_view.state().compact_records_applied == 0,
+	            "self view decodes no entity records")) return false;
+	if (!expect(join_view.state().entities.size() == 2,
+	            "join view decoded both players")) return false;
 
 	const uint16_t host_handle = host_h.packed;
 	const uint16_t joiner_handle = joiner_h.packed;
 	const int32_t hx = w::to_fixed(5.0), hy = w::to_fixed(10.0), hz = w::to_fixed(-3.0);
 	const int32_t jx = w::to_fixed(50.0), jy = w::to_fixed(60.0), jz = w::to_fixed(-20.0);
 
-	// In the HOST's own view (anchored to the host), the HOST entity reconstructs exactly
-	// (delta 0); the joiner reconstructs against the host anchor.
-	const ns::ClientEntityState *sh = self_view.state().find(host_handle);
-	const ns::ClientEntityState *sj = self_view.state().find(joiner_handle);
-	if (!expect(sh != nullptr && sj != nullptr, "self view has both entities")) return false;
-	if (!expect(sh->x == hx && sh->y == hy && sh->z == hz,
-	            "self view: host entity exact (anchored to host)")) return false;
-	if (!expect(sj->x == codec_recon(jx, hx) && sj->y == codec_recon(jy, hy) &&
-	                    sj->z == codec_recon(jz, hz),
-	            "self view: joiner reconstructed against the host anchor")) return false;
+	// The host's own header still anchors to the host's live position
+	// [orig: recipient eye stores @0x517bf5..0x517c13].
+	if (!expect(self_view.state().anchor_x == hx && self_view.state().anchor_y == hy &&
+	                    self_view.state().anchor_z == hz,
+	            "self view: header anchored to the host")) return false;
 
 	// In the JOINER's view (anchored to the joiner), the JOINER entity reconstructs exactly.
 	const ns::ClientEntityState *jh = join_view.state().find(host_handle);
@@ -197,10 +211,10 @@ bool run_fanout_and_per_connection_anchor() {
 	                    jh->z == codec_recon(hz, jz),
 	            "join view: host reconstructed against the joiner anchor")) return false;
 
-	// The proof of PER-connection anchoring: each view reconstructs its OWN player exactly, which
-	// is only possible if the two frames carried different anchors.
-	if (!expect(sh->x == hx && jj->x == jx,
-	            "per-connection anchor: each view exact on its own player")) return false;
+	// The proof of PER-connection anchoring: the joiner reconstructs its OWN player exactly
+	// while the host's header anchors to the host — the two frames carried different anchors.
+	if (!expect(self_view.state().anchor_x == hx && jj->x == jx,
+	            "per-connection anchor: each frame anchored to its own recipient")) return false;
 
 	// A packed pool/slot can be reused, but the retail player slot's live
 	// entity pointer does not silently retarget to the new allocation. Preserve
@@ -472,7 +486,7 @@ bool run_0a_subblock_phase_cycle() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 
 	std::vector<ns::Connection> conns;
@@ -660,7 +674,7 @@ bool run_0a_health_class_byte_packed() {
 	world.ai = &ai;
 	world.player_item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 
 	std::vector<ns::Connection> conns;
@@ -708,7 +722,7 @@ bool run_0a_vehicle_budget_round_robin() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 
 	// 40 pool-1 vehicles clustered at one spot (uniform distance -> deterministic ordering:
@@ -849,7 +863,7 @@ bool run_0a_priority_view_terms() {
 	world.ai = &ai;
 	// Recipient at (100,100) facing +x (mission yaw 90 -> engine heading BAM 0).
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 	world.registry.get(host_h)->team = 1;
 
@@ -956,7 +970,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 	world.ai = &ai;
 	// Recipient at (100,100) facing +x, team 1, ALIVE for frame 1.
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 	world.registry.get(host_h)->team = 1;
 
@@ -1051,7 +1065,7 @@ bool run_0a_player_record_field_sources() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *e = world.registry.get(host_h);
 	if (!expect(e != nullptr, "host entity resolvable")) return false;
 	w::AiEntity *ae = ai.for_handle(host_h);
@@ -1126,7 +1140,7 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle h =
-			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *e = world.registry.get(h);
 	if (!expect(e != nullptr, "player entity resolvable")) return false;
 
@@ -1236,7 +1250,7 @@ bool run_0x26_attach_mounted_echo() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle ph =
-			w::spawn_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *player = world.registry.get(ph);
 	if (!expect(player != nullptr, "player entity resolvable")) return false;
 
@@ -1273,7 +1287,7 @@ bool run_0x26_attach_mounted_echo() {
 	if (!expect((player->flags & 0x40u) != 0, "mounted flag 0x40 set")) return false;
 	// A second occupant cannot take the held seat [orig: @0x435ba9].
 	const w::EntityHandle ph2 =
-			w::spawn_player(world, player_spawn({11.0f, 20.0f, 3.0f}, 1, 0xFFF1));
+			w::spawn_remote_player(world, player_spawn({11.0f, 20.0f, 3.0f}, 1, 0xFFF1));
 	if (!expect(!w::entity_process_vehicle_attach(world, ph2, vh, 1), "occupied seat rejects"))
 		return false;
 
@@ -1344,7 +1358,7 @@ bool run_mounted_g_slot_route_echo() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle ph =
-			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
 	w::Entity *player = world.registry.get(ph);
 	if (!expect(player != nullptr, "route-echo player spawned")) return false;
 
@@ -1559,7 +1573,7 @@ bool run_round_event_fanout() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	const w::EntityHandle host_h =
-			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	const w::EntityHandle peer_h =
 			w::spawn_remote_player(world, player_spawn({4.0f, 5.0f, 6.0f}, 0, 0xFFF1));
 	if (!expect(host_h.valid() && peer_h.valid(), "host + peer spawned")) return false;

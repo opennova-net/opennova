@@ -623,6 +623,8 @@ private:
 	void ensure_present_effect_pose_cache() const;
 	bool cache_present_effect_pose(
 			const opennova::netsim::ClientEntityState &p_entity_state) const;
+	// The host's pool row (D-NET-140: the listen host never presents from ClientState).
+	bool cache_present_effect_pose(const opennova::world::Entity &p_entity) const;
 	PackedVector3Array cached_present_effect_state_for_handle(uint16_t p_handle) const;
 	PackedVector3Array present_effect_state_for_handle(uint16_t p_handle) const;
 
@@ -660,8 +662,23 @@ private:
 	// (retail: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; the witnessed
 	// resolve lives engine-side in promote.cpp).
 	std::unordered_map<int32_t, std::string> mission_people_names_;
-	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
+	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()):
+	// the joiner's view of the host's stream.
 	PackedFloat32Array present_snapshot_from_client_replicas() const;
+	// Build the PF_* present buffer from the host's own pools: retail's listen
+	// host/SP local client reads process memory and its loopback 0x0A carries no
+	// entity records (retail: serialize_entity_states_to_packet @0x50f07e;
+	// collect_visible_entities_for_terrain @0x5c8c60; D-NET-140 closed).
+	PackedFloat32Array present_snapshot_from_world() const;
+	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
+	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
+	struct HostPresentLifecycle {
+		uint64_t registry_spawn_id = 0;
+		uint32_t respawn_revision = 0;
+		bool dead_known = false;
+		bool dead = false;
+	};
+	mutable std::unordered_map<uint16_t, HostPresentLifecycle> host_present_lifecycle_;
 
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
 	// finish_load; the runtime_ member is declared in the P7 block below). joiner_pump drives the

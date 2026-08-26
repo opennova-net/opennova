@@ -1652,34 +1652,53 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
 	if (ctx.is_in_session && !world.match.outcome().ended) {
-		// Gameplay movement/destruction is complete. Replication LOS can retain
-		// each target's final section matrices across every entity and recipient;
-		// never inherit a view built during the earlier moving-world phases.
-		const uint64_t query_prep_start = perf != nullptr ? io::perf_now_us() : 0;
-		world::CollisionWorld::RaycastPrepPerf query_prep_perf;
-		if (world.collision != nullptr)
-			world.collision->prepare_cached_raycast_queries(
-					world, perf != nullptr ? &query_prep_perf : nullptr);
-		if (perf != nullptr) {
-			perf->replication_query_prep_us +=
-					io::perf_now_us() - query_prep_start;
-			perf->replication_query_collect_us +=
-					query_prep_perf.candidate_collect_us;
-			perf->replication_query_grid_us += query_prep_perf.grid_publish_us;
-			perf->replication_query_grid_span_us += query_prep_perf.grid_span_us;
-			perf->replication_query_grid_bucket_us += query_prep_perf.grid_bucket_us;
-			perf->replication_query_grid_workspace_us +=
-					query_prep_perf.grid_workspace_us;
+		// The priority build runs only for recipients that take entity records:
+		// the listen host's own player gets the header-only frame and never
+		// walks the pools [orig: Server_SendEntityStateToPlayer @0x517c1b skips
+		// Server_BuildEntityPriorityList for g_local_player_entity]. Type-1 peers
+		// take one only at their open send boundary (see the fan below).
+		bool any_record_recipient = false;
+		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn)) continue;
+			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
+			if (world.cached.local_player.valid() &&
+					conn.link.owned_entity == world.cached.local_player)
+				continue;
+			any_record_recipient = true;
+			break;
 		}
-		const uint64_t snapshot_start = perf != nullptr ? io::perf_now_us() : 0;
-		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
-		if (perf != nullptr)
-			perf->replication_snapshot_us += io::perf_now_us() - snapshot_start;
+		std::vector<GameEntitySnapshot> ents;
+		if (any_record_recipient) {
+			// Gameplay movement/destruction is complete. Replication LOS can retain
+			// each target's final section matrices across every entity and recipient;
+			// never inherit a view built during the earlier moving-world phases.
+			const uint64_t query_prep_start = perf != nullptr ? io::perf_now_us() : 0;
+			world::CollisionWorld::RaycastPrepPerf query_prep_perf;
+			if (world.collision != nullptr)
+				world.collision->prepare_cached_raycast_queries(
+						world, perf != nullptr ? &query_prep_perf : nullptr);
+			if (perf != nullptr) {
+				perf->replication_query_prep_us +=
+						io::perf_now_us() - query_prep_start;
+				perf->replication_query_collect_us +=
+						query_prep_perf.candidate_collect_us;
+				perf->replication_query_grid_us += query_prep_perf.grid_publish_us;
+				perf->replication_query_grid_span_us += query_prep_perf.grid_span_us;
+				perf->replication_query_grid_bucket_us += query_prep_perf.grid_bucket_us;
+				perf->replication_query_grid_workspace_us +=
+						query_prep_perf.grid_workspace_us;
+			}
+			const uint64_t snapshot_start = perf != nullptr ? io::perf_now_us() : 0;
+			ents = netsim::snapshot_world(world);
+			if (perf != nullptr)
+				perf->replication_snapshot_us += io::perf_now_us() - snapshot_start;
+		}
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
-			// The host's type-2 loopback is an in-process presentation seam and
-			// remains full-rate. Type-1 peers receive one fresh 0x0A only when
-			// their configured S2C send boundary opens; queuing all intervening
+			// The host's type-2 loopback is an in-process seam and remains
+			// full-rate (its own player takes the header-only frame inside the
+			// fan). Type-1 peers receive one fresh 0x0A only when their
+			// configured S2C send boundary opens; queuing all intervening
 			// snapshots would burst stale frames at that boundary.
 			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
 			netsim::ConnectionS2CPerf fan_perf;

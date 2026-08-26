@@ -45,7 +45,7 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 	// per-type cache would index the rebuilt registry with old ids. Re-arm
 	// every decoded organic row for a fresh resolve + channel.
 	client_row_adm_by_type_.clear();
-	if (runtime_ != nullptr) {
+	if (runtime_ != nullptr && joiner_) {
 		for (opennova::netsim::ClientEntityState &es :
 				runtime_->state().entities) {
 			if (es.rm_adm_id != -2) {
