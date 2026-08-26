@@ -170,7 +170,7 @@ working size (256 high, beauty aspect, 8x MSAA standing in for the
 StretchRect box filter, an HDR 2D target so the gamma-domain numbers are
 stored unencoded) rather than at full resolution, and copies the live camera
 transform/projection each frame. The beauty camera is standardized to mask
-`0x18401`; Q3 uses `0x10401`. Production shaders compare the fragment-stage
+`0x18C01` (the viewmodel layer folded in, 2026-08-26); Q3 uses `0x10401`. Production shaders compare the fragment-stage
 `CAMERA_VISIBLE_LAYERS` value against that exact signature: ordinary
 opaque/cutout surfaces write black depth occluders, transparent no-pass
 surfaces discard, LUM techniques copy their NORMAL result, Glass evaluates
