@@ -381,9 +381,11 @@ Items parse_items(const mnu_xml::Node *items_node) {
   return items;
 }
 
-// Parse LIST_BOX SCROLLBAR element.
-ListBoxScrollbar parse_listbox_scrollbar(const mnu_xml::Node *node) {
-  ListBoxScrollbar scrollbar;
+// The SCROLLBAR element parse the LIST_BOX and TABLE scrollbars share
+// (ListBoxScrollbar and TableScrollbar carry the same members).
+template <typename Scrollbar>
+Scrollbar parse_scrollbar_element(const mnu_xml::Node *node) {
+  Scrollbar scrollbar;
   if (!node) return scrollbar;
 
   scrollbar.present = true;
@@ -408,6 +410,11 @@ ListBoxScrollbar parse_listbox_scrollbar(const mnu_xml::Node *node) {
   }
 
   return scrollbar;
+}
+
+// Parse LIST_BOX SCROLLBAR element (parse_scrollbar_element).
+ListBoxScrollbar parse_listbox_scrollbar(const mnu_xml::Node *node) {
+  return parse_scrollbar_element<ListBoxScrollbar>(node);
 }
 
 // Parse LIST_BOX element.
@@ -581,33 +588,9 @@ TableColumn parse_table_column(const mnu_xml::Node *node) {
   return col;
 }
 
-// Parse table SCROLLBAR element.
+// Parse table SCROLLBAR element (parse_scrollbar_element).
 TableScrollbar parse_table_scrollbar(const mnu_xml::Node *node) {
-  TableScrollbar scrollbar;
-  if (!node) return scrollbar;
-
-  scrollbar.present = true;
-
-  for (const auto &child : node->children) {
-    if (!child->is_element()) continue;
-    std::string tag = opennova::strutil::to_lower(child->tag);
-
-    if (tag == "position") {
-      scrollbar.position = parse_position(child.get());
-    } else if (tag == "appearance") {
-      scrollbar.track.push_back(parse_appearance(child.get()));
-    } else if (tag == "shuttle") {
-      scrollbar.shuttle.push_back(parse_appearance(child.get()));
-    } else if (tag == "scrollup") {
-      scrollbar.scrollup.push_back(parse_appearance(child.get()));
-    } else if (tag == "scrolldown") {
-      scrollbar.scrolldown.push_back(parse_appearance(child.get()));
-    } else if (tag == "sound") {
-      scrollbar.sounds.push_back(parse_sound(child.get()));
-    }
-  }
-
-  return scrollbar;
+  return parse_scrollbar_element<TableScrollbar>(node);
 }
 
 // Forward declaration.

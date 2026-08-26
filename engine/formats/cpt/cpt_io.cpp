@@ -7,8 +7,12 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
+#include <io/bit_stream.h>
 #include <io/le.h>
 #include <io/log.h>
+
+// [orig: Terrain_LoadLodStorage @0x603550 — the PCMT/PNMT/POLY chunk reader with the CBitStream
+//  variable-width tile-index codec; DPTH magic @0x6037b3, CDEP magic @0x603620]
 
 namespace opennova {
 
@@ -22,76 +26,8 @@ static constexpr uint32_t DPTH_MAGIC = 0x48545044; // "DPTH"
 static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
 static constexpr uint32_t POLY_MAGIC = 0x594C4F50; // "POLY"
 
-class BitReader {
-public:
-	BitReader(const uint8_t *data, size_t size) : data_(data), size_(size) {}
-
-	uint32_t read_bits(int num_bits) {
-		if (num_bits <= 0) {
-			return 0;
-		}
-		if (byte_pos_ + 4 <= size_) {
-			uint32_t value = 0;
-			std::memcpy(&value, data_ + byte_pos_, sizeof(uint32_t));
-			const uint32_t mask = (num_bits < 32) ? ((1u << num_bits) - 1u) : 0xFFFFFFFFu;
-			const uint32_t result = (value >> bit_pos_) & mask;
-			const uint32_t total = bit_pos_ + static_cast<uint32_t>(num_bits);
-			byte_pos_ += total >> 3;
-			bit_pos_ = static_cast<int>(total & 7u);
-			return result;
-		}
-
-		uint32_t result = 0;
-		int shift = 0;
-		int remaining = num_bits;
-		while (remaining > 0 && byte_pos_ < size_) {
-			const int available = 8 - bit_pos_;
-			const int take = std::min(remaining, available);
-			const uint32_t mask = (1u << take) - 1u;
-			result |= ((data_[byte_pos_] >> bit_pos_) & mask) << shift;
-			shift += take;
-			remaining -= take;
-			byte_pos_ += static_cast<size_t>((bit_pos_ + take) / 8);
-			bit_pos_ = (bit_pos_ + take) % 8;
-		}
-		return result;
-	}
-
-	void advance_byte() {
-		if (bit_pos_) {
-			bit_pos_ = 0;
-			++byte_pos_;
-		}
-	}
-
-	void align_dword() {
-		if (bit_pos_) {
-			bit_pos_ = 0;
-			++byte_pos_;
-		}
-		if (byte_pos_ & 3u) {
-			byte_pos_ = (byte_pos_ + 3u) & ~static_cast<size_t>(3);
-		}
-	}
-
-	bool at_end() const { return byte_pos_ >= size_; }
-
-	// Bits still readable from the cursor. Lets a decoder reject a declared
-	// count the section cannot possibly encode BEFORE it allocates for it.
-	uint64_t remaining_bits() const {
-		if (byte_pos_ >= size_) {
-			return 0;
-		}
-		return (static_cast<uint64_t>(size_ - byte_pos_) * 8u) -
-		       static_cast<uint64_t>(bit_pos_);
-	}
-
-private:
-	const uint8_t *data_;
-	size_t size_;
-	size_t byte_pos_ = 0;
-	int bit_pos_ = 0;
-};
+// The CDEP/POLY bit reader is the shared io::BitReader (engine/base/io/bit_stream.h).
+using io::BitReader;
 
 class BitWriter {
 public:

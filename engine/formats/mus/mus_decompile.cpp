@@ -81,6 +81,25 @@ static void decompile_block(Buf *out,
                             const char *const *sbf_names,
                             uint32_t sbf_name_count);
 
+/* Resolve a branch/call code-offset target to its section name, else the
+   "@XXXX" fallback (Python: entry_points.get(target, f"@{target:04X}") with
+   entry_points = {section_offsets} at top level). Recursive bodies pass
+   suppress_entries and never name sections. Shared by goto/brfalse/brtrue/
+   callv. */
+static const char *resolve_branch_target(const MusScript *script, int target,
+                                         int suppress_entries,
+                                         char *fb, size_t fb_size) {
+    if (!suppress_entries) {
+        for (uint32_t s = 0; s < script->section_count; ++s) {
+            if ((int)script->sections[s].code_offset == target) {
+                return script->sections[s].name;
+            }
+        }
+    }
+    snprintf(fb, fb_size, "@%04X", (unsigned)target);
+    return fb;
+}
+
 static void decompile_block(Buf *out,
                             const Instruction *insts, int begin_idx, int end_idx,
                             const MusScript *script,
@@ -273,21 +292,10 @@ static void decompile_block(Buf *out,
         }
         else if (strcmp(m, "goto") == 0) {
             int target = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            /* Resolve label name: Python uses entry_points.get(target, f"@{target:04X}").
-               At top-level, entry_points = {section_offsets}. We pass the same. */
-            const char *target_name = NULL;
+            /* Resolve label name (resolve_branch_target). */
             char fb[32];
-            if (!suppress_entries) {
-                for (uint32_t s = 0; s < script->section_count; ++s) {
-                    if ((int)script->sections[s].code_offset == target) {
-                        target_name = script->sections[s].name; break;
-                    }
-                }
-            }
-            if (!target_name) {
-                snprintf(fb, sizeof(fb), "@%04X", (unsigned)target);
-                target_name = fb;
-            }
+            const char *target_name = resolve_branch_target(
+                script, target, suppress_entries, fb, sizeof(fb));
             emit_indent(out, indent);
             buf_printf(out, "goto %s\n", target_name);
         }
@@ -299,19 +307,9 @@ static void decompile_block(Buf *out,
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
             reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
-            const char *target_name = NULL;
             char fb[32];
-            if (!suppress_entries) {
-                for (uint32_t s = 0; s < script->section_count; ++s) {
-                    if ((int)script->sections[s].code_offset == target) {
-                        target_name = script->sections[s].name; break;
-                    }
-                }
-            }
-            if (!target_name) {
-                snprintf(fb, sizeof(fb), "@%04X", (unsigned)target);
-                target_name = fb;
-            }
+            const char *target_name = resolve_branch_target(
+                script, target, suppress_entries, fb, sizeof(fb));
             emit_indent(out, indent);
             buf_printf(out, "// if !(%s) goto %s\n", expr, target_name);
         }
@@ -320,19 +318,9 @@ static void decompile_block(Buf *out,
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
             reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
-            const char *target_name = NULL;
             char fb[32];
-            if (!suppress_entries) {
-                for (uint32_t s = 0; s < script->section_count; ++s) {
-                    if ((int)script->sections[s].code_offset == target) {
-                        target_name = script->sections[s].name; break;
-                    }
-                }
-            }
-            if (!target_name) {
-                snprintf(fb, sizeof(fb), "@%04X", (unsigned)target);
-                target_name = fb;
-            }
+            const char *target_name = resolve_branch_target(
+                script, target, suppress_entries, fb, sizeof(fb));
             emit_indent(out, indent);
             buf_printf(out, "// if (%s) goto %s\n", expr, target_name);
         }
@@ -374,19 +362,9 @@ static void decompile_block(Buf *out,
         }
         else if (strcmp(m, "callv") == 0) {
             int target = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            const char *target_name = NULL;
             char fb[32];
-            if (!suppress_entries) {
-                for (uint32_t s = 0; s < script->section_count; ++s) {
-                    if ((int)script->sections[s].code_offset == target) {
-                        target_name = script->sections[s].name; break;
-                    }
-                }
-            }
-            if (!target_name) {
-                snprintf(fb, sizeof(fb), "@%04X", (unsigned)target);
-                target_name = fb;
-            }
+            const char *target_name = resolve_branch_target(
+                script, target, suppress_entries, fb, sizeof(fb));
             emit_indent(out, indent);
             buf_printf(out, "call %s\n", target_name);
         }

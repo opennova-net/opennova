@@ -14,6 +14,36 @@
 
 namespace opennova {
 
+namespace {
+
+// The 22-bit fixed-point euler trig both transforms sample: each BAM angle
+// through the x87 sin/cos scaled by 2^22 (fild loads the dword signed; ftol
+// truncates), roll/pitch/yaw.
+struct EulerQ22 {
+	int32_t sr, cr, sp, cp, sy, cy;
+};
+
+EulerQ22 euler_q22(uint32_t yaw_bam, uint32_t pitch_bam, uint32_t roll_bam) {
+	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
+	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
+		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
+		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
+		c = int32_t(std::cos(a) * 4194304.0);
+	};
+	EulerQ22 t;
+	q(roll_bam, t.sr, t.cr);
+	q(pitch_bam, t.sp, t.cp);
+	q(yaw_bam, t.sy, t.cy);
+	return t;
+}
+
+// (a*b) >> 22 (imul + shrd ,22)
+inline int32_t mul_q22(int32_t a, int32_t b) {
+	return int32_t((int64_t(a) * int64_t(b)) >> 22);
+}
+
+} // namespace
+
 // [orig: Entity_TransformLocalToWorld @ 0x43BD00] — see ingame_decode.h. Euler
 // roll(X)->pitch(Y)->yaw(Z) rotation of the local offset in 22-bit fixed-point,
 // then add the parent's world position. The intermediate assignments mirror the
@@ -23,17 +53,8 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam) {
-	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
-	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
-		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
-		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
-		c = int32_t(std::cos(a) * 4194304.0);
-	};
-	int32_t sr, cr, sp, cp, sy, cy;
-	q(roll_bam, sr, cr); q(pitch_bam, sp, cp); q(yaw_bam, sy, cy);
-	auto m = [](int32_t a, int32_t b) -> int32_t { // (a*b) >> 22 (imul + shrd ,22)
-		return int32_t((int64_t(a) * int64_t(b)) >> 22);
-	};
+	const auto [sr, cr, sp, cp, sy, cy] = euler_q22(yaw_bam, pitch_bam, roll_bam);
+	const auto m = mul_q22;
 	const int32_t ry = m(ly, cr) - m(lz, sr);  // after roll about X: y'
 	const int32_t rz = m(ly, sr) + m(lz, cr);  //                     z'
 	const int32_t pxr = m(lx, cp) - m(rz, sp); // after pitch about Y: x''
@@ -55,17 +76,8 @@ WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam) {
-	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
-	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
-		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
-		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
-		c = int32_t(std::cos(a) * 4194304.0);
-	};
-	int32_t sr, cr, sp, cp, sy, cy;
-	q(roll_bam, sr, cr); q(pitch_bam, sp, cp); q(yaw_bam, sy, cy);
-	auto m = [](int32_t a, int32_t b) -> int32_t { // (a*b) >> 22 (imul + shrd ,22)
-		return int32_t((int64_t(a) * int64_t(b)) >> 22);
-	};
+	const auto [sr, cr, sp, cp, sy, cy] = euler_q22(yaw_bam, pitch_bam, roll_bam);
+	const auto m = mul_q22;
 	const int32_t dx = wx - px;                // @0x43bb65-0x43bb78: delta first
 	const int32_t dy = wy - py;
 	const int32_t dz = wz - pz;

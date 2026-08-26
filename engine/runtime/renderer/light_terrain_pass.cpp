@@ -153,32 +153,11 @@ TerrainLightPatchBounds terrain_patch_light_bounds(const float aabb_min[3],
 
 namespace renderer {
 
-namespace {
-
-uint64_t saturating_add(uint64_t lhs, uint64_t rhs) {
-	if (rhs > std::numeric_limits<uint64_t>::max() - lhs) {
-		return std::numeric_limits<uint64_t>::max();
-	}
-	return lhs + rhs;
-}
-
 // [orig: collect_nearby_zones_by_aabb @0x5aa37a — ((d * d + 0x8000) >> 16)
 //  per axis, 16.16 squared distance in world^2] — the same metric the object
-// pass sorts by (light_scene.cpp).
-uint64_t axis_distance_term(int64_t delta) {
-	const uint64_t magnitude = delta < 0
-			? static_cast<uint64_t>(-delta)
-			: static_cast<uint64_t>(delta);
-	constexpr uint64_t kRound = 0x8000;
-	if (magnitude != 0 &&
-			magnitude >
-					(std::numeric_limits<uint64_t>::max() - kRound) / magnitude) {
-		return std::numeric_limits<uint64_t>::max() >> 16;
-	}
-	return (magnitude * magnitude + kRound) >> 16;
-}
-
-} // namespace
+// pass sorts by (light_scene.cpp); both live in light_scene_internal.h.
+using detail::axis_distance_term;
+using detail::saturating_add;
 
 size_t LightScene::collect_terrain_pass_rows(
 		const opennova::renderer::TerrainLightPatchBounds *patches,

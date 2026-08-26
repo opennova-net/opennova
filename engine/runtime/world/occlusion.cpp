@@ -1194,6 +1194,29 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
 // ----------------------------------------------------------------------------
 
 // [orig: build_sector_visibility_masks @ 0x5c8610]
+// [orig: the indoor walk's open-building leg @ 0x5c8a4e-0x5c8aab; the
+//  outdoor twin @ 0x5c871f-0x5c87d1]
+void OcclusionWorld::bank_open_building(World &world, EntityHandle entity,
+                                        int32_t mask_index,
+                                        const OcclusionFrameCamera &cam) {
+    const int32_t saved = static_cast<int32_t>(viewthru_groups_.size());
+    bank_viewthru_ = true; // [orig: @ 0x5c8a4e]
+    masks_[mask_index] |= traverse_from_exterior(world, entity, cam);
+    bank_viewthru_ = false;
+    // Patch this building's type-1 slots with the banked run.
+    // [orig: @ 0x5c8a79-0x5c8aab]
+    const int32_t banked = static_cast<int32_t>(viewthru_groups_.size()) - saved;
+    for (Slot &s : slots_) {
+        const Instance *inst = instance(s.entity);
+        const OcclusionModel *m = inst ? model(inst->model_id) : nullptr;
+        if (s.entity == entity && m != nullptr &&
+            m->records[s.record_index].type == kOccRecOpen) {
+            s.viewthru_start = saved;
+            s.viewthru_count = banked;
+        }
+    }
+}
+
 void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision,
                                          const OcclusionFrameCamera &cam) {
     masks_.assign(kMaskSlots, 0u);
@@ -1278,22 +1301,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
             if ((masks_[mi] & 0xFFFFFFFu) != 0) continue;
             if (toc_occluded(world, collision, b, cam)) continue;
             if (b.open_flag) {
-                const int32_t saved = static_cast<int32_t>(viewthru_groups_.size());
-                bank_viewthru_ = true; // [orig: @ 0x5c8a4e]
-                masks_[mi] |= traverse_from_exterior(world, b.entity, cam);
-                bank_viewthru_ = false;
-                // Patch this building's type-1 slots with the banked run.
-                // [orig: @ 0x5c8a79-0x5c8aab]
-                const int32_t banked = static_cast<int32_t>(viewthru_groups_.size()) - saved;
-                for (Slot &s : slots_) {
-                    const Instance *inst = instance(s.entity);
-                    const OcclusionModel *m = inst ? model(inst->model_id) : nullptr;
-                    if (s.entity == b.entity && m != nullptr &&
-                        m->records[s.record_index].type == kOccRecOpen) {
-                        s.viewthru_start = saved;
-                        s.viewthru_count = banked;
-                    }
-                }
+                bank_open_building(world, b.entity, mi, cam); // [orig: @ 0x5c8a4e-0x5c8aab]
             } else {
                 masks_[mi] = 0xFFFFFFFu; // [orig: @ 0x5c8ab4]
             }
@@ -1314,20 +1322,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
             if (!b.entity.valid()) continue;
             const int32_t mi = b.entity.slot() & (kMaskSlots - 1);
             if ((masks_[mi] & 0x40000000u) == 0) continue;
-            const int32_t saved = static_cast<int32_t>(viewthru_groups_.size());
-            bank_viewthru_ = true;
-            masks_[mi] |= traverse_from_exterior(world, b.entity, cam);
-            bank_viewthru_ = false;
-            const int32_t banked = static_cast<int32_t>(viewthru_groups_.size()) - saved;
-            for (Slot &s : slots_) {
-                const Instance *inst = instance(s.entity);
-                const OcclusionModel *m = inst ? model(inst->model_id) : nullptr;
-                if (s.entity == b.entity && m != nullptr &&
-                    m->records[s.record_index].type == kOccRecOpen) {
-                    s.viewthru_start = saved;
-                    s.viewthru_count = banked;
-                }
-            }
+            bank_open_building(world, b.entity, mi, cam);
         }
         // Everything else: TOC, then exterior-only unless the building has
         // window portals. [orig: @ 0x5c87d7-0x5c8830]

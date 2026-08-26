@@ -16,6 +16,22 @@ namespace opennova::menu {
 
 namespace {
 
+// The per-node shown gate the draw walk, the hit walk and the ancestor
+// query (widget_shown_) share: the authored hidden flag, overridden by a
+// widget state's hide and then its show.
+bool node_shown(const mnu::Window &w, const MenuWidgetState *ws) {
+	bool shown = !w.hidden;
+	if (ws != nullptr) {
+		if (ws->hide) {
+			shown = false;
+		}
+		if (ws->show) {
+			shown = true;
+		}
+	}
+	return shown;
+}
+
 bool iequals(const std::string &a, const char *b) {
 	return opennova::strutil::iequals(a, b);
 }
@@ -1355,17 +1371,9 @@ int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
 	const mnu::Window &w = *node.window;
 	const MenuWidgetState *ws = state_for(state, index);
 	int next = index + 1;
-	// The same shown gate as the draw walk; a hidden subtree never hits.
-	bool shown = !w.hidden;
-	if (ws != nullptr) {
-		if (ws->hide) {
-			shown = false;
-		}
-		if (ws->show) {
-			shown = true;
-		}
-	}
-	if (!shown) {
+	// The same shown gate as the draw walk (node_shown); a hidden subtree
+	// never hits.
+	if (!node_shown(w, ws)) {
 		for (size_t c = 0; c < w.children.size(); ++c) {
 			next = skip_widget(next);
 		}
@@ -1517,17 +1525,7 @@ bool MenuFrameCompiler::widget_shown_(int index, const MenuFrameState &state) co
 	int i = index;
 	while (i >= 0) {
 		const WidgetNode &node = nodes_[static_cast<size_t>(i)];
-		bool shown = !node.window->hidden;
-		const MenuWidgetState *ws = state_for(state, i);
-		if (ws != nullptr) {
-			if (ws->hide) {
-				shown = false;
-			}
-			if (ws->show) {
-				shown = true;
-			}
-		}
-		if (!shown) {
+		if (!node_shown(*node.window, state_for(state, i))) {
 			return false;
 		}
 		i = node.parent;
@@ -1991,18 +1989,9 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 	const mnu::Window &w = *node.window;
 	const MenuWidgetState *ws = state_for(state, index);
 	int next = index + 1;
-	// The shown gate [orig: every Draw impl early-outs on the shown flag
-	// +224]. A hidden widget's subtree still consumes its indices.
-	bool shown = !w.hidden;
-	if (ws != nullptr) {
-		if (ws->hide) {
-			shown = false;
-		}
-		if (ws->show) {
-			shown = true;
-		}
-	}
-	if (!shown) {
+	// The shown gate (node_shown) [orig: every Draw impl early-outs on the
+	// shown flag +224]. A hidden widget's subtree still consumes its indices.
+	if (!node_shown(w, ws)) {
 		for (size_t c = 0; c < w.children.size(); ++c) {
 			next = skip_widget(next);
 		}
@@ -2148,8 +2137,8 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		case mnu::WindowType::Scroll: {
 			// The track COLOR/OUTLINE use the full widget, its IMAGE uses the
 			// middle span, and the two arrow children plus shuttle share this rect.
-			// [orig: CScrollWnd_Render @ 0x64c5c0; scroll COLOR sink @ 0x64ce70;
-			// scroll IMAGE sink @ 0x64cf70; CUIScrollbar_CalcThumbRect
+			// [orig: CScrollWnd_Render @ 0x64c5c0; scroll COLOR sink CUIWidget_DrawFullUVQuad @ 0x64ce70;
+			// scroll IMAGE sink CUIWidget_DrawInsetImageQuad @ 0x64cf70; CUIScrollbar_CalcThumbRect
 			// @ 0x64cba0]
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);

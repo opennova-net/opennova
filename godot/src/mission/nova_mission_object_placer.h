@@ -170,8 +170,6 @@ public:
 	Array get_static_terrain_shadow_source_diagnostics();
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
-	Ref<SkeletalAnim> skeletal_anim_for(int p_item_id,
-			const String &p_graphic);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
 	Variant get_static_instance_transform(int p_bms_id) const;
@@ -212,10 +210,6 @@ public:
 	// classification seam: live-PANM routing reads the injected data).
 	bool register_object_data(const String &p_graphic,
 			const Ref<ObjectData> &p_data);
-	// Cache-inject render batches for a graphic without object data (callers
-	// that own render geometry only).
-	bool register_static_batches(const String &p_graphic,
-			const Array &p_batches);
 	// Pre-fill the per-item occlusion verdict (isolates the PANM routing
 	// rule from a fixture's independent portal payload).
 	void register_occlusion_verdict(int p_item_id, bool p_has_occlusion);
@@ -234,6 +228,9 @@ private:
 	};
 
 	void _check_epoch();
+	// Retains a batch-Dictionary list as StaticBatch rows (false on a
+	// malformed row); the static-graphic registration's shared leg.
+	bool _retain_static_batches(const Array &p_batches, Vector<StaticBatch> &r_retained);
 	void _ensure_item_db();
 	void _ensure_avatar_db();
 	String _graphic_for(int p_item_id) const;

@@ -5,6 +5,7 @@
 
 #include <renderer/light_runtime.h>
 #include <renderer/material_eval.h>
+#include <threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
 #include <threedi/threedi_panm_runtime.h>
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -17,64 +18,6 @@
 using namespace novaobj;
 
 namespace {
-
-template <typename Animation>
-bool panm_animation_is_live(const Animation &anim) {
-	const auto track_is_live = [](const auto &track) {
-		return (track.control & 0xF0u) != 0;
-	};
-	const uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
-	// Spinner and the two view-derived modes are evaluated without sampling a
-	// conventional track. In particular, spinner coefficients reinterpret raw
-	// PANM bytes as floats and may have a zero control high nibble.
-	if (rotation_type == 1 || rotation_type == 3 || rotation_type == 4)
-		return true;
-	if (rotation_type == 2 &&
-			(track_is_live(anim.rotation_x) ||
-			 track_is_live(anim.rotation_y) ||
-			 track_is_live(anim.rotation_z)))
-		return true;
-
-	const uint8_t scale_type = threedi_panm_scale_type(anim.flags);
-	if (scale_type == 1 && track_is_live(anim.scale_x))
-		return true;
-	if (scale_type == 2 &&
-			(track_is_live(anim.scale_x) ||
-			 track_is_live(anim.scale_y) ||
-			 track_is_live(anim.scale_z)))
-		return true;
-
-	return threedi_panm_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
-			track_is_live(anim.translation);
-}
-
-template <typename Animation>
-bool panm_animation_uses_noise(const Animation &anim) {
-	const auto track_uses_noise = [](const auto &track) {
-		return (track.control & 0xF0u) != 0 &&
-				(track.control & 0x0Fu) == 6;
-	};
-	const uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
-	if (rotation_type == 2 &&
-			(track_uses_noise(anim.rotation_x) ||
-			 track_uses_noise(anim.rotation_y) ||
-			 track_uses_noise(anim.rotation_z)))
-		return true;
-	const uint8_t scale_type = threedi_panm_scale_type(anim.flags);
-	if (scale_type == 1 && track_uses_noise(anim.scale_x))
-		return true;
-	if (scale_type == 2 &&
-			(track_uses_noise(anim.scale_x) ||
-			 track_uses_noise(anim.scale_y) ||
-			 track_uses_noise(anim.scale_z)))
-		return true;
-	return threedi_panm_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
-			track_uses_noise(anim.translation);
-}
-
-uint32_t retail_runtime_time_ms(int64_t time_ms) {
-	return time_ms < 0 ? 0u : static_cast<uint32_t>(time_ms);
-}
 
 std::vector<std::string> control_register_names(const Threedi3di3 &model) {
 	std::vector<std::string> names;
@@ -186,7 +129,7 @@ bool ObjectData::has_live_panm_for_lod(int p_lod_index) const {
 	std::vector<ThreediPartAnimation> nodes;
 	_effective_panm_for_lod(p_lod_index, nodes);
 	for (const ThreediPartAnimation &node : nodes)
-		if (panm_animation_is_live(node)) return true;
+		if (threedi_panm_animation_is_live(node)) return true;
 	return false;
 }
 
@@ -225,11 +168,6 @@ Dictionary ObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, con
 	return out;
 }
 
-int ObjectData::compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
-	return compute_anim_frame_native(p_index, p_time_ms,
-			runtime_control_values(p_ctrl_values));
-}
-
 const std::vector<std::string> &ObjectData::_runtime_control_names() const {
 	if (!runtime_control_names_valid_) {
 		runtime_control_names_cache_ = control_register_names(source_model);
@@ -250,7 +188,7 @@ bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,
 		return false;
 	}
 	r_runtime = renderer::eval_material_runtime(source_model.materials[p_index],
-			retail_runtime_time_ms(p_time_ms), _runtime_control_names(),
+			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 	return true;
 }
@@ -262,7 +200,7 @@ int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,
 		return 0;
 	}
 	return renderer::compute_anim_frame(source_model.materials[p_index], 0,
-			retail_runtime_time_ms(p_time_ms), _runtime_control_names(),
+			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 }
 
@@ -315,7 +253,7 @@ Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const D
 				nullptr,
 				base_transforms.data(),
 				nullptr,
-				retail_runtime_time_ms(p_time_ms),
+				threedi_panm_runtime_time_ms(p_time_ms),
 				ctrl_table.data(),
 				panm_matrices.data());
 		if (rc == 0) {
@@ -379,7 +317,7 @@ bool ObjectData::_panm_cache_prepare(int p_lod_index) const {
 	resolve_panm_registers(source_model, c.anims);
 	c.has_noise = false;
 	for (const ThreediPartAnimation &anim : c.anims) {
-		c.has_noise = c.has_noise || panm_animation_uses_noise(anim);
+		c.has_noise = c.has_noise || threedi_panm_animation_uses_noise(anim);
 	}
 	size_t input_count = std::max(static_cast<size_t>(lod.render_object_count), c.anims.size());
 	for (const ThreediPartAnimation &anim : c.anims) {
@@ -429,7 +367,7 @@ int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 		if (!c.anims.empty()) {
 			threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(),
 					c.pivots.data(), nullptr, c.base_transforms.data(), nullptr,
-					retail_runtime_time_ms(p_time_ms), ctrl_table.data(),
+					threedi_panm_runtime_time_ms(p_time_ms), ctrl_table.data(),
 					c.node_matrices.data());
 		}
 		bool any_changed = false;
@@ -522,7 +460,7 @@ Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_va
 				runtime_light.rate,
 				color_start,
 				color_end,
-				retail_runtime_time_ms(p_time_ms),
+				threedi_panm_runtime_time_ms(p_time_ms),
 				ctrl_value);
 		Dictionary entry;
 		entry["position"] = godot_vec3(light.offset);

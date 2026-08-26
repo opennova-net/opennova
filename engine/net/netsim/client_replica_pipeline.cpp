@@ -1106,6 +1106,29 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 
 } // namespace
 
+// The chase tail the org2 and org1 legs share: the position step while the
+// bucket runs, then the 512-progress cap with the starved idle force — a
+// movement state parked past the progress cap walks its root motion forever,
+// so retail reads AND writes the arbitration current (+0x2BC)
+// [orig: @0x4b464f/@0x4b465f, g_animStateFlagsTable bit0 gate; the org1
+//  twin is §5.38a cap 512 -> idle 43, the same shape].
+static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
+	if (progress < es.net_interp_steps) {
+		es.x += es.net_smooth_target[0];
+		es.y += es.net_smooth_target[1];
+		es.z += es.net_smooth_target[2];
+	}
+	if (progress < 512) {
+		es.net_interp_progress = progress + 1;
+	} else if ((world::infantry_anim_flags(es.net_anim_current >= 0
+						   ? es.net_anim_current
+						   : es.anim_state_id) &
+				   0x1u) != 0u) {
+		es.net_anim_current = world::anim_state::kIdle;
+		es.anim_state_id = world::anim_state::kIdle;
+	}
+}
+
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	const uint32_t rm_key = ++rm_tick_counter_;
@@ -1133,6 +1156,22 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			contact_peers.push_back(p);
 		}
 	}
+	// The deck-ride + root-motion pair every organic chase leg ends with: the
+	// deck-ride runs at the witnessed mover position — after the chase, before
+	// root motion — for every armed org row with a grounded carrier, clip or no
+	// clip [orig: org2 ride @0x4b52a0 between the chase @0x4b4470 and the
+	// integrate @0x4b7cbf].
+	auto organic_chase_tail = [&](ClientEntityState &es, bool is_self) {
+		if (!is_self && carrier_pose_provider_)
+			row_deck_ride(es, carrier_pose_provider_);
+		if (root_motion_ != nullptr)
+			row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
+			                     rm_key, is_self, &replica_contact_resolver_,
+			                     &replica_bound_radius_resolver_,
+			                     contact_peers.data(),
+			                     static_cast<int32_t>(contact_peers.size()),
+			                     rm_key, water_z_, has_water_);
+	};
 	for (ClientEntityState &es : state_.entities) {
 		if (!es.net_has_compact) continue;
 		const bool chased_class = es.cls == EntityClass::Player ||
@@ -1247,37 +1286,11 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				es.heading_bam = io::bam_add(es.heading_bam, es.net_smooth_heading);
 				es.pitch_bam = io::bam_add(es.pitch_bam, es.net_smooth_pitch);
 			}
-			if (progress < es.net_interp_steps) {
-				es.x += es.net_smooth_target[0];
-				es.y += es.net_smooth_target[1];
-				es.z += es.net_smooth_target[2];
-			}
-			if (progress < 512) {
-				es.net_interp_progress = progress + 1;
-			} else if ((world::infantry_anim_flags(es.net_anim_current >= 0
-								   ? es.net_anim_current
-								   : es.anim_state_id) &
-							   0x1u) != 0u) {
-				// The starved idle force: a movement state parked past the
-				// progress cap walks its root motion forever — retail reads
-				// AND writes the arbitration current (+0x2BC) [orig:
-				// @0x4b464f/@0x4b465f, g_animStateFlagsTable bit0 gate].
-				es.net_anim_current = world::anim_state::kIdle;
-				es.anim_state_id = world::anim_state::kIdle;
-			}
-			// The deck-ride runs at the witnessed mover position — after the
-			// chase, before root motion — for every armed org row with a
-			// grounded carrier, clip or no clip [orig: org2 ride @0x4b52a0
-			// between the chase @0x4b4470 and the integrate @0x4b7cbf].
-			if (!is_self && carrier_pose_provider_)
-				row_deck_ride(es, carrier_pose_provider_);
-			if (root_motion_ != nullptr)
-				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
-				                     rm_key, is_self, &replica_contact_resolver_,
-				                     &replica_bound_radius_resolver_,
-				                     contact_peers.data(),
-				                     static_cast<int32_t>(contact_peers.size()),
-				                     rm_key, water_z_, has_water_);
+			// The position step + progress cap + starved idle force
+			// [orig: @0x4b464f/@0x4b465f] (row_chase_step_and_cap), then the
+			// deck-ride/root-motion tail (organic_chase_tail).
+			row_chase_step_and_cap(es, progress);
+			organic_chase_tail(es, is_self);
 			break;
 		}
 		case EntityClass::Infantry: {
@@ -1307,22 +1320,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				}
 			}
 			const int16_t progress = es.net_interp_progress;
-			if (progress < es.net_interp_steps) {
-				es.x += es.net_smooth_target[0];
-				es.y += es.net_smooth_target[1];
-				es.z += es.net_smooth_target[2];
-			}
-			if (progress < 512) {
-				es.net_interp_progress = progress + 1;
-			} else if ((world::infantry_anim_flags(es.net_anim_current >= 0
-								   ? es.net_anim_current
-								   : es.anim_state_id) &
-							   0x1u) != 0u) {
-				// The org1 starved idle force — the same +0x2BC read/write
-				// [orig: §5.38a cap 512 -> idle 43; @0x4b464f/@0x4b465f shape].
-				es.net_anim_current = world::anim_state::kIdle;
-				es.anim_state_id = world::anim_state::kIdle;
-			}
+			// The org1 position step + cap + starved idle force — the same
+			// +0x2BC read/write [orig: §5.38a cap 512 -> idle 43;
+			// @0x4b464f/@0x4b465f shape] (row_chase_step_and_cap).
+			row_chase_step_and_cap(es, progress);
 			// Heading: the promoted target chased with the org1 body
 			// quarter-step — the witnessed (d + 2) >> 2 rounding, clamped
 			// [orig: the body chase @0x4be8fd — (target - body + 2) >> 2 then
@@ -1339,19 +1340,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				if (step < -69273360) step = -69273360;
 				es.heading_bam = io::bam_add(es.heading_bam, step);
 			}
-			// The deck-ride runs at the witnessed mover position — after the
-			// chase, before root motion — for every armed org row with a
-			// grounded carrier, clip or no clip [orig: org2 ride @0x4b52a0
-			// between the chase @0x4b4470 and the integrate @0x4b7cbf].
-			if (!is_self && carrier_pose_provider_)
-				row_deck_ride(es, carrier_pose_provider_);
-			if (root_motion_ != nullptr)
-				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
-				                     rm_key, is_self, &replica_contact_resolver_,
-				                     &replica_bound_radius_resolver_,
-				                     contact_peers.data(),
-				                     static_cast<int32_t>(contact_peers.size()),
-				                     rm_key, water_z_, has_water_);
+			organic_chase_tail(es, is_self);
 			break;
 		}
 		case EntityClass::Vehicle: {
