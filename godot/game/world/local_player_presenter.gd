@@ -275,6 +275,14 @@ func viewmodel_rig() -> PlayerViewmodelRig:
 	return _viewmodel_rig
 
 
+# Node3D.global_transform never compares: an unchanged write still dirties
+# the avatar's whole subtree (ROBJ nodes, mesh instances, the skeleton) into
+# the deferred flush's transform notifications. A still player writes nothing.
+func _set_avatar_transform(next: Transform3D) -> void:
+	if _avatar.global_transform != next:
+		_avatar.global_transform = next
+
+
 ## A world-only render capture hides the FP gun for its duration (the shell's
 ## capture session latches it; the rig's per-frame submission gate ANDs it in).
 func set_viewmodel_capture_hidden(hidden: bool) -> void:
@@ -573,7 +581,10 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	if attach == null:
 		_held_weapon.visible = false
 		return
-	_held_weapon.global_transform = attach as Transform3D
+	# Gated like the avatar: an unchanged attach pose writes nothing.
+	var attach_transform := attach as Transform3D
+	if _held_weapon.global_transform != attach_transform:
+		_held_weapon.global_transform = attach_transform
 	_held_weapon.visible = true
 	# Same layer rule as the body: first person hides it from every camera by
 	# LAYER while keeping it a shadow source (the witnessed mirror never draws
@@ -701,7 +712,7 @@ func _update_avatar(pos: Vector3) -> void:
 			if runtime != null else null
 	if overlay != null:
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay.body_angles)
-		_avatar.global_transform = _avatar.compose_entity_transform(body_basis, pos)
+		_set_avatar_transform(_avatar.compose_entity_transform(body_basis, pos))
 		var inv := body_basis.inverse()
 		var deltas: Array = []
 		for a in overlay.segment_angles:
@@ -711,7 +722,7 @@ func _update_avatar(pos: Vector3) -> void:
 		var sim_yaw = _sim()
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(
 			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
-		_avatar.global_transform = _avatar.compose_entity_transform(body_basis, pos)
+		_set_avatar_transform(_avatar.compose_entity_transform(body_basis, pos))
 		_avatar.set_aim_overlay([])
 	# The body renders only in third person; first person hides it from every
 	# camera by LAYER, not by visible = false, so it stays a live shadow

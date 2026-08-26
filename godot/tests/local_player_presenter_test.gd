@@ -790,6 +790,7 @@ func test_the_world_only_capture_latch_hides_the_viewmodel_without_a_frame() -> 
 	# The frozen-fixture path: the camera moves without a frame, and the
 	# restamp seam re-places the gun at it (the fold draws the world pose).
 	var before: Transform3D = presenter.viewmodel().global_transform
+	var old_relative: Transform3D = camera.global_transform.affine_inverse() * before
 	camera.global_transform = Transform3D(Basis.from_euler(Vector3(0.0, PI * 0.5, 0.0)),
 			camera.global_position + Vector3(40.0, 0.0, 0.0))
 	assert_eq(presenter.viewmodel().global_transform, before,
@@ -797,12 +798,10 @@ func test_the_world_only_capture_latch_hides_the_viewmodel_without_a_frame() -> 
 	presenter.restamp_viewmodel_at_camera()
 	var relative: Transform3D = camera.global_transform.affine_inverse() \
 			* presenter.viewmodel().global_transform
-	var previous_relative: Transform3D = camera.global_transform.affine_inverse() \
-			* before
 	assert_false(presenter.viewmodel().global_transform == before,
 			"the restamp moves the gun with the camera")
-	assert_true(relative.origin.distance_to(previous_relative.origin) < 30.0,
-			"the restamped gun sits in front of the moved camera")
+	assert_true(relative.origin.distance_to(old_relative.origin) < 0.01,
+			"the restamped gun keeps its camera-relative offset at the moved camera")
 
 
 func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:

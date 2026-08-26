@@ -62,6 +62,14 @@ func finish_world_load(
 	_set_layer_children_visible(hud, true)
 
 
+## The frozen-shell capture seam: after a fixture moves the beauty camera with
+## processing disabled, the FP viewmodel (drawn inside the beauty pass at its
+## world pose) is re-placed at the camera without a frame.
+func restamp_viewmodel_for_capture(player_presenter: LocalPlayerPresenter) -> void:
+	if player_presenter != null and is_instance_valid(player_presenter):
+		player_presenter.restamp_viewmodel_at_camera()
+
+
 func begin_world_only_capture(
 		hud: CanvasLayer,
 		menu_layer: CanvasLayer,

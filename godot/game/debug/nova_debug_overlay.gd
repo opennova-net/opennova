@@ -755,27 +755,22 @@ func _refresh() -> void:
 		# to a host/local role never silently restores mutation access.
 		_session.set_edit_unlocked(false)
 	var unlocked := _session.is_edit_unlocked()
+	var status_text := "READ ONLY · Enable Live edits to change the running mission."
+	var status_color := Color(0.68, 0.72, 0.76)
 	if not has_sim:
-		_status_label.text = \
-				"NO MISSION · Host-wide diagnostics remain available."
-		_status_label.add_theme_color_override(
-				"font_color", Color(0.68, 0.72, 0.76))
+		status_text = "NO MISSION · Host-wide diagnostics remain available."
 	elif not has_authority:
-		_status_label.text = \
-				"READ ONLY · Authoritative mission changes are host-only."
-		_status_label.add_theme_color_override(
-				"font_color", Color(0.68, 0.72, 0.76))
+		status_text = "READ ONLY · Authoritative mission changes are host-only."
 	elif unlocked:
-		_status_label.text = \
-				"LIVE EDITS · Changes apply immediately and are not undoable."
-		_status_label.add_theme_color_override(
-				"font_color", Color(1.0, 0.72, 0.34))
-	else:
-		_status_label.text = \
-				"READ ONLY · Enable Live edits to change the running mission."
-		_status_label.add_theme_color_override(
-				"font_color", Color(0.68, 0.72, 0.76))
-	_status_label.tooltip_text = _status_label.text
+		status_text = "LIVE EDITS · Changes apply immediately and are not undoable."
+		status_color = Color(1.0, 0.72, 0.34)
+	# A theme override write re-notifies the label (a redraw and a deferred
+	# minimum-size update inside the flush) even with the same colour, so the
+	# text and its colour are written on the text edge only.
+	if _status_label.text != status_text:
+		_status_label.text = status_text
+		_status_label.tooltip_text = status_text
+		_status_label.add_theme_color_override("font_color", status_color)
 	_runtime_status_label.text = String(status.get("label", "No mission"))
 	var runtime_detail := String(status.get("detail", ""))
 	_runtime_status_label.tooltip_text = "%s%s" % [
