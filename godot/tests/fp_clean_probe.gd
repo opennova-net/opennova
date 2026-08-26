@@ -43,22 +43,13 @@ func _ready() -> void:
 	if OS.get_environment("NOVA_VM_SWEEP") == "1":
 		var sweep_presenter := ProbeNodeSearch.find_by_method(get_tree().root, "set_debug_force_viewmodel")
 		if sweep_presenter != null:
-			var pvp: SubViewport = sweep_presenter.viewmodel_rig().get("_vm_viewport")
-			var pcam: Camera3D = sweep_presenter.viewmodel_rig().get("_vm_camera")
-			print("[fp] pass: vp=%s size=%s cam=%s current=%s fov=%.1f cull=%d world_shared=%s" % [
-				str(pvp != null), str(pvp.size) if pvp != null else "-", str(pcam != null),
-				str(pcam.current) if pcam != null else "-", pcam.fov if pcam != null else -1.0,
-				pcam.cull_mask if pcam != null else -1,
-				str(pvp.world_3d == pcam.get_world_3d()) if pvp != null and pcam != null else "-"])
+			# The gun draws inside the beauty pass through the renderfov
+			# projection feed (x = focal ratio, y = near, z = far).
+			print("[fp] projection feed=%s" % str(
+					sweep_presenter.viewmodel_rig().projection_feed()))
 			var vm_models := _viewmodel_models(get_tree().root)
 			for m in vm_models:
 				print("[fp] vm model %s visible=%s inside_tree=%s" % [m.name, str(m.visible), str(m.is_inside_tree())])
-			if pvp != null:
-				await RenderingServer.frame_post_draw
-				var pimg: Image = pvp.get_texture().get_image()
-				if pimg != null:
-					pimg.save_png(_out_abs.path_join("pass_view.png"))
-					print("[fp] wrote pass_view.png")
 			var restore: Vector3 = sweep_presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT
 			for y in [0, 90, 180, 270]:
 				sweep_presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT = Vector3(0, y, 0)

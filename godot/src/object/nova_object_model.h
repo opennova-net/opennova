@@ -233,6 +233,8 @@ private:
 	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
 	// it directly).
 	Array robj_dense_;
+	bool viewmodel_pass_ = false;
+	uint32_t viewmodel_pass_stamped_serial_ = 0;
 	int64_t panm_applied_revision_ = 0;
 	int64_t section_visibility_mask_ = -1;
 	PackedInt32Array surface_material_indices_;
@@ -589,6 +591,14 @@ public:
 	// Retail submits MATCHTERRAIN only for a skinned entity whose MoveOrder
 	// stance bits are crouch/prone. The live presentation row owns that gate.
 	void set_match_terrain_enabled(bool p_enabled);
+	// The first-person viewmodel drawn inside the beauty pass: every mesh
+	// instance takes the shader-side renderfov projection + depth band
+	// (u_viewmodel_pass, shaders/nova_viewmodel_pass.gdshaderinc), a cull
+	// margin that keeps the eye inside its AABB (a narrowed ADS beauty frustum
+	// must not cull gun parts the wider renderfov shows), and its alpha strips
+	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.
+	void set_viewmodel_pass(bool p_enabled);
+	bool is_viewmodel_pass() const { return viewmodel_pass_; }
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);

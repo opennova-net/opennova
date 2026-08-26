@@ -474,8 +474,10 @@ the texture stores the gamma-domain numbers the shaders wrote); the water
 mirror keeps a plain RGBA8 target with a decode-only terminal effect on its
 camera, because its witnessed 0x40 dim is a canvas multiply over the
 finished BYTES and an HDR 2D canvas would run that multiply in linear space.
-The viewmodel's offscreen texture is a plain target and receives one
-explicit display decode in `viewmodel_composite.gdshader`. A 3D
+The first-person viewmodel draws inside the beauty pass (its instances
+apply the retail renderfov projection + depth band in the vertex stage,
+`nova_viewmodel_pass.gdshaderinc`), so it shares the beauty target's one
+terminal transfer and needs no composite of its own. A 3D
 view with no `FrameFx` (ONED workspace previews, the menu avatar
 preview, probes) installs the decode-only `DisplayDecode` node, which
 is the same terminal effect without a Q3 source. The obsolete per-shader

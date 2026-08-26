@@ -60,8 +60,6 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_water_gpu": FrameStatsBoard.RENDER_WATER_GPU,
 	"render_q3_cpu": FrameStatsBoard.RENDER_Q3_CPU,
 	"render_q3_gpu": FrameStatsBoard.RENDER_Q3_GPU,
-	"render_viewmodel_cpu": FrameStatsBoard.RENDER_VIEWMODEL_CPU,
-	"render_viewmodel_gpu": FrameStatsBoard.RENDER_VIEWMODEL_GPU,
 	"render_slot_cpu": FrameStatsBoard.RENDER_SLOT_CPU,
 	"render_slot_gpu": FrameStatsBoard.RENDER_SLOT_GPU,
 }
@@ -72,7 +70,6 @@ const ENGINE_COUNT_SAMPLES := {
 	"render_water_objects": FrameStatsBoard.RENDER_WATER_OBJECTS,
 	"render_q3_objects": FrameStatsBoard.RENDER_Q3_OBJECTS,
 	"render_q3_draws": FrameStatsBoard.RENDER_Q3_DRAWS,
-	"render_viewmodel_objects": FrameStatsBoard.RENDER_VIEWMODEL_OBJECTS,
 	"render_slot_objects": FrameStatsBoard.RENDER_SLOT_OBJECTS,
 	"render_slot_viewports": FrameStatsBoard.RENDER_SLOT_VIEWPORTS,
 }
@@ -597,8 +594,7 @@ func _print_window(index: int, count: int, frames: int,
 	var engine_parts := PackedStringArray()
 	for key in ["process_callbacks", "deferred_flush", "draw", "pacing_input",
 			"hud_draw_compile", "hud_draw_emit", "render_root_cpu",
-			"render_root_gpu", "render_q3_cpu", "render_q3_gpu",
-			"render_viewmodel_cpu", "render_viewmodel_gpu", "render_water_cpu",
+			"render_root_gpu", "render_q3_cpu", "render_q3_gpu", "render_water_cpu",
 			"render_water_gpu", "render_slot_cpu", "render_slot_gpu"]:
 		var part: Dictionary = summaries[key]
 		if int(part["samples"]) > 0:

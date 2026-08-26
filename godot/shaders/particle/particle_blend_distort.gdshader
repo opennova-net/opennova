@@ -5,6 +5,7 @@ shader_type spatial;
 // the captured scene. SCREEN_UV is the Godot projective-position equivalent.
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 
+#include "res://shaders/nova_viewmodel_pass.gdshaderinc"
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
 uniform bool has_texture = false;
@@ -28,4 +29,13 @@ void fragment() {
 	scene_uv.y = normal.x * (alpha * wave_y) + normal.y * (alpha * wave_z) + normal.z * SCREEN_UV.y;
 	ALBEDO = texture(screen_tex, scene_uv).rgb;
 	ALPHA = alpha * texel.a;
+}
+
+// The first-person particle batch rides the viewmodel's renderfov projection
+// + depth band inside the beauty pass (nova_viewmodel_pass.gdshaderinc).
+void vertex() {
+	if (u_viewmodel_pass && !IN_SHADOW_PASS) {
+		POSITION = nova_viewmodel_clip(MODELVIEW_MATRIX * vec4(VERTEX, 1.0),
+				PROJECTION_MATRIX);
+	}
 }

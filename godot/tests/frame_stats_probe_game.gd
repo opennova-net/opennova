@@ -139,7 +139,6 @@ func _dump(label: String, rows: Dictionary) -> void:
 			"render", "render_main", "render_shadow", "render_root_cpu",
 			"render_root_gpu", "render_water", "render_water_cpu",
 			"render_water_gpu", "render_q3", "render_q3_cpu", "render_q3_gpu",
-			"render_viewmodel", "render_viewmodel_cpu", "render_viewmodel_gpu",
 			"render_slot", "render_slot_cpu", "render_slot_gpu"]:
 		var row: Array = rows.get(id, ["-", "-", ""])
 		print("[fsp] %-16s avg=%-8s max=%-8s %s" % [id, row[0], row[1], row[2]])

@@ -150,9 +150,8 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"pacing_input", &"engine_frame",
 			&"render", &"render_main", &"render_shadow",
 			&"render_water", &"render_q3", &"render_q3_cpu", &"render_q3_gpu",
-			&"render_viewmodel", &"render_viewmodel_cpu",
-			&"render_viewmodel_gpu", &"render_slot", &"render_slot_cpu",
-			&"render_slot_gpu"]:
+			&"render_slot", &"render_slot_cpu", &"render_slot_gpu",
+			&"env_nodes", &"water"]:
 		assert_not_null(_row(pane, id), "the Stats tab carries a '%s' row" % id)
 	assert_eq(pane.stats_tree.get_column_title(0), "System")
 	assert_eq(pane.stats_tree.get_column_title(1), "Avg")

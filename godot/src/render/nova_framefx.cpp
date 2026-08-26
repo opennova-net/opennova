@@ -43,11 +43,15 @@ using namespace godot;
 namespace {
 
 // A normal gameplay camera keeps precisely the beauty layers left after the
-// player/fly camera removes FP, shadow-only, and the twelve slot-capture bits.
-// Q3 omits the otherwise-unused TERRAIN_SHADOW_RECEIVER plumbing bit. That
-// gives shaders a collision-free exact-mask signature without admitting any
-// hidden viewmodel, caster, or slot-capture geometry into the isolated pass.
-constexpr std::uint32_t kBeautyCameraMask = 0x00018401u;
+// player/fly camera removes the FP body, shadow-only, and the twelve
+// slot-capture bits: world, water, the terrain-shadow receiver plumbing bit,
+// the no-mirror world layer, and the first-person viewmodel (bit 11 — the gun
+// draws inside the beauty pass through its shader-side renderfov projection
+// and depth band, retail's "viewmodel first" step). Q3 omits the plumbing bit
+// and the viewmodel (retail's Q3 copies of gun strips against the depth band
+// are unwitnessed, D-RORD-10). That gives shaders a collision-free exact-mask
+// signature without admitting caster or slot-capture geometry anywhere.
+constexpr std::uint32_t kBeautyCameraMask = 0x00018C01u;
 constexpr std::uint32_t kQ3CameraMask = 0x00010401u;
 // FrameFX's working size: the 256-square blur targets, and the height of the
 // shared-world Q3 view. Retail draws its Q3 flush into a backbuffer-sized

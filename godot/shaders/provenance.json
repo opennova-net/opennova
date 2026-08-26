@@ -164,13 +164,15 @@
       "exceptions": ["NVG-four-frame-history", "D-AI-12f"]
     },
     {
-      "id": "viewmodel-display-transfer",
-      "patterns": ["viewmodel_composite.gdshader"],
-      "light_behavior": "offscreen_gamma_to_canvas_display_transfer",
+      "id": "viewmodel-beauty-pass-projection",
+      "patterns": ["nova_viewmodel_pass.gdshaderinc"],
+      "light_behavior": "beauty_pass_renderfov_projection_and_depth_band",
       "parity_status": "matching",
       "docs": ["docs/render/render-order-re.md"],
       "retail_citations": [
-        { "address": "0x4ded60", "function": "Player_RenderFirstPersonViewModel", "function_start": "0x4ded60" }
+        { "address": "0x4ded60", "function": "Player_RenderFirstPersonViewModel", "function_start": "0x4ded60" },
+        { "address": "0x58a8f0", "function": "Render_SwapProjectionNearZ", "function_start": "0x58a8f0" },
+        { "address": "0x58a7b0", "function": "Render_SetViewportDepth01", "function_start": "0x58a7b0" }
       ],
       "exceptions": []
     }

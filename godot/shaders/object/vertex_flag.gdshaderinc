@@ -26,4 +26,10 @@ void vertex() {
 	v_dir_self_shadow = 1.0;
 	v_pixel_point_factor = vec4(0.0);
 	v_pixel_point_attenuation = vec4(0.0);
+	// The first-person viewmodel: retail's renderfov projection + depth band
+	// (nova_viewmodel_pass.gdshaderinc). Never inside a shadow pass.
+	if (u_viewmodel_pass && !IN_SHADOW_PASS) {
+		POSITION = nova_viewmodel_clip(MODELVIEW_MATRIX * vec4(VERTEX, 1.0),
+				PROJECTION_MATRIX);
+	}
 }

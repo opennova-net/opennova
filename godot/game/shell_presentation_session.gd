@@ -18,6 +18,8 @@ class SavedVisibility extends RefCounted:
 
 var _capture_active := false
 var _saved_visibility: Array[SavedVisibility] = []
+# The presenter whose FP gun a world-only capture hid (restored on finish).
+var _capture_presenter: LocalPlayerPresenter = null
 var _hud_hidden_capture_active := false
 var _saved_fps_label: CanvasItem = null
 var _saved_fps_visible := false
@@ -63,7 +65,7 @@ func finish_world_load(
 func begin_world_only_capture(
 		hud: CanvasLayer,
 		menu_layer: CanvasLayer,
-		camera: Camera3D) -> Error:
+		player_presenter: LocalPlayerPresenter) -> Error:
 	if _capture_active:
 		return ERR_BUSY
 	if hud == null or not is_instance_valid(hud) \
@@ -74,9 +76,6 @@ func begin_world_only_capture(
 	var layers: Array[CanvasLayer] = []
 	_append_layer_tree(hud, layers)
 	_append_layer_tree(menu_layer, layers)
-	var viewmodel_layer := _find_viewmodel_layer(camera)
-	if viewmodel_layer != null:
-		_append_layer_tree(viewmodel_layer, layers)
 	for layer in layers:
 		_saved_visibility.append(SavedVisibility.new(layer))
 
@@ -86,6 +85,11 @@ func begin_world_only_capture(
 		# (notably DebugOverlay) while leaving descendant state free to follow a
 		# real menu/HUD transition during the asynchronous capture.
 		saved.layer.visible = false
+	# The FP gun draws inside the beauty pass; the presenter's capture latch
+	# keeps it out of a world-only frame.
+	_capture_presenter = player_presenter
+	if player_presenter != null and is_instance_valid(player_presenter):
+		player_presenter.set_viewmodel_capture_hidden(true)
 	return OK
 
 
@@ -97,6 +101,9 @@ func finish_world_only_capture() -> void:
 		if is_instance_valid(saved.layer):
 			saved.layer.visible = saved.visible
 	_saved_visibility.clear()
+	if _capture_presenter != null and is_instance_valid(_capture_presenter):
+		_capture_presenter.set_viewmodel_capture_hidden(false)
+	_capture_presenter = null
 	_capture_active = false
 
 
@@ -185,13 +192,3 @@ static func _collect_nested_layers(
 		_collect_nested_layers(child, out)
 
 
-static func _find_viewmodel_layer(camera: Camera3D) -> CanvasLayer:
-	# The rig parents ViewmodelPass to the CAMERA's viewport, always
-	# (player_viewmodel_rig._build_viewmodel_pass) — the viewport lookup is
-	# authoritative and needs no name-search fallback. No camera means the
-	# pass was never built.
-	if camera != null and is_instance_valid(camera) \
-			and camera.get_viewport() != null:
-		return camera.get_viewport().get_node_or_null(
-				"ViewmodelPass") as CanvasLayer
-	return null

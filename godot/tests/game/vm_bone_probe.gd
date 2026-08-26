@@ -82,17 +82,10 @@ func _dump(presenter: LocalPlayerPresenter) -> void:
 		print("[vmbone] camera: ", _fmt_t(cam.global_transform), " fov=", cam.fov,
 				" keep_aspect=", cam.keep_aspect, " near=", cam.near,
 				" viewport=", cam.get_viewport().get_visible_rect().size)
-	var pvp: SubViewport = rig.vm_viewport()
-	var pcam: Camera3D = rig.vm_camera()
-	if pvp != null and pcam != null:
-		var container := pvp.get_parent() as SubViewportContainer
-		print("[vmbone] vm pass: viewport size=", pvp.size, " cam fov=", pcam.fov,
-				" keep_aspect=", pcam.keep_aspect, " near=", pcam.near, " far=", pcam.far,
-				" container rect=", container.get_rect() if container != null else Rect2(),
-				" container stretch=", container.stretch if container != null else false,
-				" stretch_shrink=", container.stretch_shrink if container != null else -1,
-				" window=", get_window().size,
-				" pass cam (rel gameplay cam)=", _fmt_t(cam.global_transform.affine_inverse() * pcam.global_transform))
+	# The gun draws inside the beauty pass through the renderfov projection
+	# feed (x = focal ratio vs the beauty projection, y = near, z = far).
+	print("[vmbone] vm projection feed=", rig.projection_feed(),
+			" window=", get_window().size)
 	if vm == null or cam == null:
 		print("[vmbone] no viewmodel/camera")
 		return
