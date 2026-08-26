@@ -17,8 +17,6 @@ const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
 const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_witness.gd")
-const RootFramePhaseSamplerScript := preload(
-		"res://game/debug/root_frame_phase_sampler.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
@@ -83,7 +81,7 @@ var _frame_stats := FrameStatsBoard.new()
 # Root-viewport render-time sampling for the Stats tab; the sampler owns the
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
-var _frame_phase_sampler: Node = RootFramePhaseSamplerScript.new()
+var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen

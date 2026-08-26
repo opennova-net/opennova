@@ -158,6 +158,36 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			"Engine/render/frame pacing")
 
 
+func test_model_and_mission_row_info_cells_render_their_counts() -> void:
+	var pane: DebugStatsPage = PaneScript.new()
+	pane.setup(DebugContext.new())
+	add_child_autofree(pane)
+	var window := _blank_window()
+	var sums: PackedInt64Array = window[0]
+	var counts: PackedInt32Array = window[2]
+	counts[FrameStatsBoard.MODEL_AWAKE_MODELS] = 2
+	sums[FrameStatsBoard.MODEL_AWAKE_MODELS] = 24
+	counts[FrameStatsBoard.MODEL_RENDERABLE_MODELS] = 2
+	sums[FrameStatsBoard.MODEL_RENDERABLE_MODELS] = 16
+	counts[FrameStatsBoard.PRESENT_MISSION_ROWS] = 1
+	sums[FrameStatsBoard.PRESENT_MISSION_ROWS] = 40
+	sums[FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS] = 30
+	sums[FrameStatsBoard.PRESENT_MISSION_BODY_ROWS] = 20
+	sums[FrameStatsBoard.PRESENT_MISSION_MUZZLE_ROWS] = 10
+	pane.render_window(1, sums, window[1], counts, null, null)
+	var material := _find_tree_item(pane.stats_tree.get_root(), "Model runtime")
+	assert_not_null(material)
+	if material != null:
+		assert_eq(material.get_text(3), "12 awake · 8 renderable",
+				"the model cell averages per sample with the U+00B7 separator")
+	var rows := _find_tree_item(pane.stats_tree.get_root(), "Mission rows")
+	assert_not_null(rows)
+	if rows != null:
+		assert_eq(rows.get_text(3),
+				"40 rows · 30 submitted · 20 body · 10 muzzle",
+				"the mission-row cell averages per frame with the U+00B7 separator")
+
+
 func test_narrow_tree_stays_inside_the_page_and_tooltips_keep_full_text() -> void:
 	var mount := Control.new()
 	mount.size = Vector2(252, 480)

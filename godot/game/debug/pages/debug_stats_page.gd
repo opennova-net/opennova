@@ -769,7 +769,7 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 			FrameStatsBoard.RENDER_WATER_OBJECTS, FrameStatsBoard.RENDER_WATER_DRAWS)
 	if counts[FrameStatsBoard.MODEL_AWAKE_MODELS] > 0:
 		var model_samples := counts[FrameStatsBoard.MODEL_AWAKE_MODELS]
-		_set_info("material", "%d awake Â· %d renderable" % [
+		_set_info("material", "%d awake · %d renderable" % [
 				roundi(float(sums[FrameStatsBoard.MODEL_AWAKE_MODELS]) / model_samples),
 				roundi(float(sums[FrameStatsBoard.MODEL_RENDERABLE_MODELS]) / model_samples),
 		])

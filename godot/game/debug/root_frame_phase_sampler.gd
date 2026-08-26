@@ -64,7 +64,7 @@ func begin_shell_control() -> bool:
 ## Sample the previous render frame and the menu-video callback as one F3
 ## bookkeeping phase. Render measurement still receives the inactive edge.
 func sample_render(render_stats: RootRenderStatsSampler, viewport: Viewport,
-		menu_shell) -> void:
+		menu_shell: MenuShell) -> void:
 	var active := _board != null and _board.is_capture_active()
 	_stats_sample_start_usec = Time.get_ticks_usec() if active else 0
 	render_stats.sample(viewport, active)
