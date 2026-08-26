@@ -2178,6 +2178,31 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	await get_tree().process_frame
 
 
+func test_unload_forgets_the_viewmodel_def_memo() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../assets")), OK)
+	world.set_resource_root(root)
+	var old_debug_weapon := OS.get_environment("NOVA_VM_WEAPON")
+	OS.set_environment("NOVA_VM_WEAPON", "WPN_M4")
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	assert_not_null(world.local_player_viewmodel_def())
+	assert_eq(world.local_player_weapon_name(), "WPN_M4",
+			"the first decode installs the weapon dict")
+	world.unload()
+	# The same resolved name in the next mission must re-decode from that
+	# mission's weapon.def instead of returning the memo over an empty dict.
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	var again: PlayerViewmodelDef = world.local_player_viewmodel_def()
+	OS.set_environment("NOVA_VM_WEAPON", old_debug_weapon)
+	assert_not_null(again)
+	assert_eq(world.local_player_weapon_name(), "WPN_M4",
+			"a reload with the same weapon name repopulates the weapon dict")
+	world.unload()
+
+
 func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

@@ -760,6 +760,11 @@ func unload() -> void:
 	_placer = null
 	_weapon_db = null  # re-resolves against the next load's mounted root
 	_local_weapon_dict = {}
+	# The decoded view record is keyed on the resolved name; the next mission
+	# re-decodes from ITS weapon.def even when the name repeats, or the memo
+	# would short-circuit with the dict above left empty.
+	_viewmodel_def_name = ""
+	_viewmodel_def = null
 	_local_weapon_preserve_slot_state = false
 	# Armory selections belong to the entity from the mission being torn down.
 	# A new spawn must resolve from its own equipped AdmDef instead of inheriting
@@ -2003,6 +2008,8 @@ func clear_local_player_weapon() -> void:
 	_viewmodel_weapon_override = ""
 	_viewmodel_weapon_cleared = true
 	_local_weapon_dict = {}
+	_viewmodel_def_name = ""
+	_viewmodel_def = null
 	_local_weapon_preserve_slot_state = false
 	var sim := get_sim()
 	if sim != null:
