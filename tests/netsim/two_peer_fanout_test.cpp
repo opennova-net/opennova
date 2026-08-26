@@ -160,6 +160,32 @@ bool run_fanout_and_per_connection_anchor() {
 	// [orig: NetPacket_WritePlayerState local gate @0x4ff9cd].
 	if (!expect(self_dg.tag == nw::s2c::PER_FRAME_UPDATE && self_dg.body.size() == 14,
 	            "the host's own 0x0A is the 14-byte header-only frame")) return false;
+	// The phase-0 form: the 11-byte weapon/reload/uniform block survives the
+	// local gate (25 B in all) and the host's own parser reads it, then stops
+	// [orig: NetPacket_WritePlayerState @0x4ff81b..0x4ff9cd; NapiNPClientMsg_0x00A
+	// @0x430174].
+	conns[conn_self].s2c_phase = 3; // the next emit's flags2 = 4 -> sub-block 0
+	ns::test::emit_all(world, conns);
+	ns::Datagram self_dg0;
+	if (!expect(self_ch.client_recv(self_dg0), "phase-0 loopback S2C dequeued")) return false;
+	if (!expect(self_dg0.tag == nw::s2c::PER_FRAME_UPDATE && self_dg0.body.size() == 25,
+	            "the host's own phase-0 0x0A is the 25-byte header + weapon block")) return false;
+	{
+		const auto player_class = [](uint16_t) { return nw::EntityClass::Player; };
+		nw::FrameUpdate phase0;
+		nw::decode_frame_update(self_dg0.body.data(), self_dg0.body.size(), player_class,
+		                        phase0, false, /*authority_recipient=*/true);
+		if (!expect(phase0.complete && phase0.weapon.present && phase0.records.empty() &&
+		                    phase0.round_events.empty() && !phase0.local_tail_present,
+		            "the local parser folds the phase-0 block and reads nothing after it"))
+			return false;
+		nw::FrameUpdate phase1;
+		nw::decode_frame_update(self_dg.body.data(), self_dg.body.size(), player_class,
+		                        phase1, false, /*authority_recipient=*/true);
+		if (!expect(phase1.complete && !phase1.weapon.present && phase1.records.empty() &&
+		                    !phase1.local_tail_present,
+		            "the 14-byte frame decodes complete with no sub-block")) return false;
+	}
 
 	// --- sub-case a2: per-connection anchor. Admit the joiner -> conn_join now owns joiner_h
 	//     and anchors to ITS position; conn_self stays anchored to host_h. ---
