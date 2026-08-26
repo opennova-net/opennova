@@ -1,6 +1,7 @@
 extends GutTest
 
-## Device-side companion to tests/test_shader_resources.py. Loading every
+## Device-side companion to shader_resource_contract_test.gd and
+## shader_provenance_pins_test.gd (the textual contract). Loading every
 ## checked-in wrapper and include through Godot catches parser/import/include
 ## failures that a textual graph walk cannot. The windowed swatch lighting mode
 ## then forces the object wrappers through the actual rasterizer.

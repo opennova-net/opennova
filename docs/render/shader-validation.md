@@ -20,10 +20,12 @@ The validation target is deliberately singular: the retail fixture catalog's
 `shader_usage_level = 2`. OpenNova's authored retail video controls are kept
 visible but locked to that profile by `retail_video_quality_policy.gd`.
 Lower shader-usage/fallback surface techniques are not a port target. The
-audit nevertheless decodes all 44 SCR `.fx` files and inventories all 59
+2026-08-23 audit, run against the then-vendored `third_party/modsuperoed`
+corpus (removed by ADR 0038), decoded all 44 SCR `.fx` files and inventoried all 59
 technique declarations (57 typed across all six retail classes plus two
 untyped fixed-function fallbacks) and all 138 pass declarations in
-`object/retail_effect_inventory.json`. For `TECHNIQUE_NORMAL`, 19 declarations
+`object/retail_effect_inventory.json`; the tests pin that inventory's counts and
+dispositions, the decode is not re-run. For `TECHNIQUE_NORMAL`, 19 declarations
 are selected by the highest-quality profile, ten are lower-quality fallbacks,
 and `leaves.FX` is explicitly excluded because its tag is absent from the
 shipped OED/runtime registry. Those 19 declarations plus the runtime-only
@@ -123,6 +125,6 @@ semantic derivations stay in the cited RE documents.
 | Gamma/display path | `0x679c1b`, `0x677be0` | `CD3DDevice_InitializeDisplay` (`0x679890`), `GLib_SetGammaRamp` |
 | NVG lighting constants | `0x5c8090` | `CTerrainRenderer_BuildLightingShaderConstants` |
 
-Re-run the static contract, focused native renderer tests, full GUT suite, and
+Re-run the GUT contract tests, focused native renderer tests, full GUT suite, and
 windowed probe whenever a shader, shader owner, lighting producer, renderer,
 or Godot version changes.
