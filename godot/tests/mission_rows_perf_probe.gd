@@ -18,13 +18,17 @@ extends SceneTree
 #   NW_MISSION_ROWS_PERF_LABEL
 #   NW_MISSION_ROWS_PERF_OUTPUT
 #   NW_MISSION_ROWS_PERF_SHOW_OVERLAY=1  opens the F3 overlay on its Stats page
-#       for the whole run (the in-game reading condition: the page's own
-#       refresh and redraw then land in the deferred flush like they do for a
-#       player reading the numbers)
+#       for the whole run (the in-game reading condition). The probe drains the
+#       board every frame, so the page's own timer refresh would find nothing
+#       to render; the probe renders the page itself from its drains at the
+#       page's cadence (every OVERLAY_RENDER_FRAMES drains), so the Tree
+#       re-shape/redraw lands in the deferred flush exactly like in-game.
 # With no output override, JSON lands under the worktree's ignored
 # .scratch/perf/ directory.
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
+# The Stats page renders a ~0.5 s window in-game (0.25 s timer x divider 2).
+const OVERLAY_RENDER_FRAMES := 30
 const DEFAULT_WARMUP_SECONDS := 6.0
 const DEFAULT_WINDOW_SECONDS := 10.0
 const DEFAULT_WINDOW_COUNT := 5
@@ -115,9 +119,38 @@ const COUNTER_KEYS := [
 	"hidden",
 ]
 
+# The probe's process_frame continuation runs BEFORE the frame's _process
+# callbacks, and MessageQueue is flushed once right after that signal: a
+# window rendered there would repaint the Tree in the pacing span, not the
+# deferred flush a player's timer-driven refresh lands in. This node renders
+# the armed window from _process, where the in-game refresh runs.
+class OverlayRenderDriver:
+	extends Node
+
+	var probe: SceneTree = null
+	var armed := false
+
+	func _process(_delta: float) -> void:
+		if armed:
+			armed = false
+			probe.call("_render_overlay_window")
+
+
 var _mount_guard = MountGuard.new()
 var _requested_exit_code := 1
+var _overlay_driver: OverlayRenderDriver = null
 var _board: FrameStatsBoard = null
+# Overlay mode: the Stats page the probe renders from its own drains. Untyped
+# on purpose: a static DebugStatsPage reference would compile the game-world
+# script chain (its autoload references) before -s mode registers autoloads.
+var _overlay_pane = null
+var _overlay = null  # the DebugOverlay whose sentinel bracket renders the window
+var _overlay_world = null
+var _overlay_sums := PackedInt64Array()
+var _overlay_peaks := PackedInt64Array()
+var _overlay_counts := PackedInt32Array()
+var _overlay_frames := 0
+var _overlay_drains := 0
 # ENGINE_SLOT_SAMPLES + every prefixed world span slot (key = lower-cased slot
 # name), and ENGINE_COUNT_SAMPLES + the world VALUE slots.
 var _slot_samples: Dictionary = {}
@@ -221,6 +254,14 @@ func _run() -> void:
 			push_error("[mrp] could not open the F3 overlay on the Stats page")
 			_finish(1)
 			return
+		_overlay_pane = overlay.get_page(&"Stats")
+		_overlay = overlay
+		_overlay_world = world
+		_overlay_driver = OverlayRenderDriver.new()
+		_overlay_driver.name = "OverlayRenderDriver"
+		_overlay_driver.probe = self
+		root.add_child(_overlay_driver)
+		_reset_overlay_window()
 		print("[mrp] F3 overlay open on the Stats page for the whole run")
 
 	var warmup_seconds := _env_float(
@@ -354,17 +395,54 @@ func _env_flag(name: String) -> bool:
 	return OS.get_environment(name).strip_edges().to_lower() in ["1", "true", "yes"]
 
 
+func _reset_overlay_window() -> void:
+	_overlay_sums.resize(FrameStatsBoard.SLOT_COUNT)
+	_overlay_sums.fill(0)
+	_overlay_peaks.resize(FrameStatsBoard.SLOT_COUNT)
+	_overlay_peaks.fill(0)
+	_overlay_counts.resize(FrameStatsBoard.SLOT_COUNT)
+	_overlay_counts.fill(0)
+	_overlay_frames = 0
+	_overlay_drains = 0
+
+
+# Overlay mode: fold every drain into the page's window and render it at the
+# page's cadence, so the observer's Tree work lands in the flush as in-game.
+func _feed_overlay(captured: FrameStatsBoard.CaptureWindow) -> void:
+	if _overlay_pane == null:
+		return
+	for slot in range(FrameStatsBoard.SLOT_COUNT):
+		_overlay_sums[slot] += captured.sums[slot]
+		_overlay_peaks[slot] = maxi(_overlay_peaks[slot], captured.peaks[slot])
+		_overlay_counts[slot] += captured.sample_frames[slot]
+	_overlay_frames += captured.frames
+	_overlay_drains += 1
+	if _overlay_drains < OVERLAY_RENDER_FRAMES or _overlay_frames <= 0:
+		return
+	_overlay_driver.armed = true
+
+
+func _render_overlay_window() -> void:
+	if _overlay_frames <= 0:
+		return
+	var runtime = _overlay_world.get_runtime() if _overlay_world != null else null
+	var sim = _overlay_world.get_sim() if _overlay_world != null else null
+	_overlay.render_stats_window(_overlay_frames, _overlay_sums, _overlay_peaks,
+			_overlay_counts, runtime, sim)
+	_reset_overlay_window()
+
+
 func _drain_for_seconds(seconds: float) -> void:
 	var deadline := Time.get_ticks_usec() + int(seconds * 1_000_000.0)
 	while Time.get_ticks_usec() < deadline:
 		await process_frame
-		_board.drain()
+		_feed_overlay(_board.drain())
 
 
 func _drain_frames(count: int) -> void:
 	for _i in range(count):
 		await process_frame
-		_board.drain()
+		_feed_overlay(_board.drain())
 
 
 func _measure_window(seconds: float) -> Dictionary:
@@ -377,6 +455,7 @@ func _measure_window(seconds: float) -> Dictionary:
 	while Time.get_ticks_usec() < deadline:
 		await process_frame
 		var captured = _board.drain()
+		_feed_overlay(captured)
 		drains += 1
 		if captured.frames > 1:
 			coalesced_drains += 1
