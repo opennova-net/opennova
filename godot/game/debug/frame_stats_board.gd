@@ -66,6 +66,8 @@ enum {
 	WORLD_LOCAL_VIEW,       # local-player camera/viewmodel publication
 	WORLD_FRAMEFX,          # auxiliary-view pose synchronization
 	WORLD_SCENE_ENV,        # render-eye fog/ambient + water classifier
+	WORLD_ENV_NODES,        # weather smoothing, sun direction, sky dome, celestial bodies
+	WORLD_WATER,            # water strip march + mirror camera
 	WORLD_TERRAIN,          # terrain draw-list and MATCHTERRAIN publication
 	WORLD_NETWORK_FRAME,    # net-session edge observation/environment apply
 	WORLD_SUN_VEIL,         # celestial exposure feed
