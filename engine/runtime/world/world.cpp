@@ -1,7 +1,7 @@
 #include "world/world.h"
+#include <io/perf_clock.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -14,15 +14,6 @@
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
 namespace opennova::world {
-
-namespace {
-
-uint64_t logic_perf_now_us() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-
-} // namespace
 
 // Max distance (mission units) for mount_best's nearest-emplacement search — the proximity
 // proxy for the occupant-model+144 vehicle link the original resolves through the entity
@@ -292,7 +283,7 @@ void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
 // Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
 // zero takes pose_mounted_occupant's parent-root/local fallback.
 static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
-    uint64_t phase_start = perf != nullptr ? logic_perf_now_us() : 0;
+    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
     // Parent ownership ends when the carrier dies, even though ordinary item
     // destruction keeps that carrier resident as a husk. Peel orphan chains
     // without mutating registry slots during traversal.
@@ -321,7 +312,7 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
         }
     }
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->attachment_orphans_us = now - phase_start;
         phase_start = now;
     }
@@ -348,7 +339,7 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
         pose_mounted_occupant(world, *child, *parent, anchor);
     });
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->attachment_child_pose_us = now - phase_start;
         phase_start = now;
     }
@@ -374,7 +365,7 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
                 world, *occupant, *target, target->seats[snapshot.mount_seat]);
     });
     if (perf != nullptr)
-        perf->attachment_riders_us = logic_perf_now_us() - phase_start;
+        perf->attachment_riders_us = io::perf_now_us() - phase_start;
 }
 
 // ----------------------------------------------------------------------------
@@ -1524,7 +1515,7 @@ void World::load_systems() {
 void World::run_logic_tick(bool is_authority, TickPhase phase,
                            LogicTickPerf *perf) {
     if (perf != nullptr) *perf = {};
-    uint64_t phase_start = perf != nullptr ? logic_perf_now_us() : 0;
+    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
     // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
     // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
     // script evaluators read it. Deferred: the mission sim has no local-player avatar
@@ -1551,7 +1542,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     if (const Entity *lp = registry.get(cached.local_player))
         round_sim.local_team = static_cast<uint8_t>(lp->team);
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->setup_us = now - phase_start;
         phase_start = now;
     }
@@ -1566,14 +1557,14 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     if (phase != TickPhase::PreRound) {
         for (ISystem *s : systems_) {
             const uint64_t system_start =
-                    perf != nullptr ? logic_perf_now_us() : 0;
+                    perf != nullptr ? io::perf_now_us() : 0;
             AiTickPerf ai_perf;
             if (perf != nullptr && s == ai)
                 ai->tick_profiled(*this, ctx, &ai_perf);
             else
                 s->tick(*this, ctx);
             if (perf != nullptr) {
-                const uint64_t elapsed = logic_perf_now_us() - system_start;
+                const uint64_t elapsed = io::perf_now_us() - system_start;
                 if (s == ai) {
                     perf->ai_us += elapsed;
                     perf->ai_reactions_us += ai_perf.reactions_us;
@@ -1602,7 +1593,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
                 }
             }
         }
-        if (perf != nullptr) phase_start = logic_perf_now_us();
+        if (perf != nullptr) phase_start = io::perf_now_us();
         pose_emplacement_attachments(*this, perf);
         // Static attachment poses can change after AI collision queries. The
         // projectile/destruction half of the tick starts a fresh matrix-view
@@ -1610,7 +1601,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         if (collision != nullptr) collision->reset_query_view_cache();
     }
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->attachments_us = now - phase_start;
         phase_start = now;
     }
@@ -1624,7 +1615,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     }
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->throwables_us = now - phase_start;
         phase_start = now;
     }
@@ -1641,7 +1632,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     if (phase != TickPhase::PreMission && ai != nullptr)
         ai->pump_mounted_weapon_slots(*this, logic_tick);
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->weapons_us = now - phase_start;
         phase_start = now;
     }
@@ -1655,7 +1646,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->projectiles_us = now - phase_start;
         phase_start = now;
     }
@@ -1688,7 +1679,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         death_pieces.tick(*this, terrain, water_z, destruction);
     }
     if (perf != nullptr) {
-        const uint64_t now = logic_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->destruction_us = now - phase_start;
         phase_start = now;
     }
@@ -1721,7 +1712,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     // occupy mailbox admission indefinitely.
     sound_emitters.prune(logic_tick);
     if (perf != nullptr)
-        perf->housekeeping_us = logic_perf_now_us() - phase_start;
+        perf->housekeeping_us = io::perf_now_us() - phase_start;
 }
 
 // Shared semantic half of Server_ProcessRoundEnd @0x5164f0. The authority

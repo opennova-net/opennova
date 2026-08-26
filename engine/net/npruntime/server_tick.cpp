@@ -1,8 +1,8 @@
 #include "npruntime/server_tick.h"
 #include "npruntime/end_round_protocol.h"
 #include "npruntime/server_message_dispatch.h" // build_player_list_message
+#include <io/perf_clock.h>
 
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -30,11 +30,6 @@
 namespace opennova::np {
 
 namespace {
-
-uint64_t server_perf_now_us() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 
 // Pool-0 index byte for the S2C 0x1E kill-feed actor fields (§5.26: u8 pool-0 index,
 // 0xFF = none).
@@ -1183,7 +1178,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 	// NOT the gate here — it gates the per-frame replicate/broadcast at step (3) [D-NET-120]; the
 	// C2S drain + sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
-	uint64_t phase_start = perf != nullptr ? server_perf_now_us() : 0;
+	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
 	world::World &world = *ctx.world;
 	const bool round_was_announced = ctx.round_end_announced;
 	// Snapshot the phase at frame entry. Retail decrements the timer later on
@@ -1244,7 +1239,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 	// Server_UpdateEntityIdleTimers gate @0x50D773]
 	if (!preround_active) tick_player_breath(ctx, world);
 	if (perf != nullptr) {
-		const uint64_t now = server_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->input_us = now - phase_start;
 		phase_start = now;
 	}
@@ -1261,7 +1256,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 			                : world::TickPhase::Gameplay,
 			perf != nullptr ? &world_perf : nullptr);
 	if (perf != nullptr) {
-		const uint64_t now = server_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->world_us = now - phase_start;
 		perf->world_setup_us = world_perf.setup_us;
 		perf->world_scripts_us = world_perf.scripts_us;
@@ -1303,7 +1298,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
 	if (perf != nullptr) {
-		const uint64_t now = server_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->match_us = now - phase_start;
 		phase_start = now;
 	}
@@ -1636,7 +1631,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 	}
 	world.water_crossings.clear();
 	if (perf != nullptr) {
-		const uint64_t now = server_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->rules_us = now - phase_start;
 		phase_start = now;
 	}
@@ -1660,14 +1655,14 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 		// Gameplay movement/destruction is complete. Replication LOS can retain
 		// each target's final section matrices across every entity and recipient;
 		// never inherit a view built during the earlier moving-world phases.
-		const uint64_t query_prep_start = perf != nullptr ? server_perf_now_us() : 0;
+		const uint64_t query_prep_start = perf != nullptr ? io::perf_now_us() : 0;
 		world::CollisionWorld::RaycastPrepPerf query_prep_perf;
 		if (world.collision != nullptr)
 			world.collision->prepare_cached_raycast_queries(
 					world, perf != nullptr ? &query_prep_perf : nullptr);
 		if (perf != nullptr) {
 			perf->replication_query_prep_us +=
-					server_perf_now_us() - query_prep_start;
+					io::perf_now_us() - query_prep_start;
 			perf->replication_query_collect_us +=
 					query_prep_perf.candidate_collect_us;
 			perf->replication_query_grid_us += query_prep_perf.grid_publish_us;
@@ -1676,10 +1671,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 			perf->replication_query_grid_workspace_us +=
 					query_prep_perf.grid_workspace_us;
 		}
-		const uint64_t snapshot_start = perf != nullptr ? server_perf_now_us() : 0;
+		const uint64_t snapshot_start = perf != nullptr ? io::perf_now_us() : 0;
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		if (perf != nullptr)
-			perf->replication_snapshot_us += server_perf_now_us() - snapshot_start;
+			perf->replication_snapshot_us += io::perf_now_us() - snapshot_start;
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
 			// The host's type-2 loopback is an in-process presentation seam and
@@ -1688,13 +1683,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 			// snapshots would burst stale frames at that boundary.
 			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
 			netsim::ConnectionS2CPerf fan_perf;
-			const uint64_t fan_start = perf != nullptr ? server_perf_now_us() : 0;
+			const uint64_t fan_start = perf != nullptr ? io::perf_now_us() : 0;
 			netsim::emit_connection_s2c(
 					world, conn.link, ents, ctx.config.game_type,
 					conn.type == 1 ? kMaxFrameUpdateBodyBytes : 0,
 					perf != nullptr ? &fan_perf : nullptr);
 			if (perf != nullptr) {
-				perf->replication_fan_us += server_perf_now_us() - fan_start;
+				perf->replication_fan_us += io::perf_now_us() - fan_start;
 				perf->replication_fan_setup_us += fan_perf.setup_us;
 				perf->replication_round_selection_us += fan_perf.round_selection_us;
 				perf->replication_entity_selection_us += fan_perf.entity_selection_us;
@@ -1723,7 +1718,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
 	}
 	if (perf != nullptr)
-		perf->replication_us = server_perf_now_us() - phase_start;
+		perf->replication_us = io::perf_now_us() - phase_start;
 
 	// (4) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
 	// reads it via client_recv / ClientReplicaPipeline::pump; a remote peer's transport outbound_ is popped +

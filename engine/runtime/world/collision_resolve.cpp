@@ -1,4 +1,5 @@
 #include "world/collision.h"
+#include <io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -8,7 +9,6 @@
 
 #include "world/angle.h"
 #include "world/dir_table.h"
-#include <chrono>
 #include <cmath>
 
 #include <io/bam.h>
@@ -20,15 +20,6 @@
 namespace opennova::world {
 
 using namespace detail; // the shared fixed-point helpers, unqualified as before
-
-namespace {
-
-uint64_t collision_resolve_perf_now_us() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-
-} // namespace
 
 // See collision.h — the vehicle hull contact. [orig: Entity_CheckCollisionState
 // @ 0x462a30, the entity-collision half; the per-wheel terrain half rides the
@@ -329,7 +320,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
     const uint64_t contacts_start =
-            perf != nullptr ? collision_resolve_perf_now_us() : 0;
+            perf != nullptr ? io::perf_now_us() : 0;
     auto it = candidates_.find(source.packed);
     dbg_last_contact = EntityHandle{};
     dbg_last_contact_item = 0;
@@ -586,7 +577,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[1] += total_force[1];
     pos[2] += total_force[2];
     if (perf != nullptr)
-        perf->contacts_us += collision_resolve_perf_now_us() - contacts_start;
+        perf->contacts_us += io::perf_now_us() - contacts_start;
 
     // The CL latch bookkeeping (motor callers already set the flag inline at
     // the latch site; this keeps the replica/harness channel and the transient
@@ -619,7 +610,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // threshold 30% of summed radii, push (thr - dist)/4 along the atan2 direction
     // via the quantized table with the (0x200000 - bam) index.]
     const uint64_t repulsion_start =
-            perf != nullptr ? collision_resolve_perf_now_us() : 0;
+            perf != nullptr ? io::perf_now_us() : 0;
     const bool had_model_contact =
         total_force[0] != 0 || total_force[1] != 0 || total_force[2] != 0;
     // [orig: @ 0x4b3a77-0x4b3aa1 — the dragger/carry anim states skip repulsion]
@@ -700,7 +691,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     if (perf != nullptr)
-        perf->repulsion_us += collision_resolve_perf_now_us() - repulsion_start;
+        perf->repulsion_us += io::perf_now_us() - repulsion_start;
 
     // Leaving the ladder: latched at resolve start, nothing re-latched, a live
     // class-bit body — push 0.375u along +bodyHeading (over the lip on a natural
@@ -762,11 +753,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[2] = (pos[2] + 6143) & ~0x17FF;
     EntityHandle ground_hit;
     const uint64_t ground_start =
-            perf != nullptr ? collision_resolve_perf_now_us() : 0;
+            perf != nullptr ? io::perf_now_us() : 0;
     const int32_t ground =
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
     if (perf != nullptr)
-        perf->ground_us += collision_resolve_perf_now_us() - ground_start;
+        perf->ground_us += io::perf_now_us() - ground_start;
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
     // even a same-resolve CL latch. Generic ground is still resolved only by

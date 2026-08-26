@@ -1,11 +1,11 @@
 #include "npruntime/client_runtime.h"
+#include <io/perf_clock.h>
 
 #include <npwire/wire_handle.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
 
 #include <utility>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -16,11 +16,6 @@
 namespace opennova::np {
 
 namespace {
-
-uint64_t client_perf_now_us() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 
 // §5.44 housekeeping cadences/constants, witnessed in [orig: Client_ProcessNetworkFrame @0x42c180].
 constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks [orig @0x42c1c0]
@@ -556,7 +551,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		const PlayerExtendedUplink *uplink, uint32_t now_tick,
 		ClientFramePerf *perf) {
 	if (perf != nullptr) *perf = {};
-	uint64_t phase_start = perf != nullptr ? client_perf_now_us() : 0;
+	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
 	std::vector<std::vector<uint8_t>> outbound;
 	std::vector<ProtocolMessage> send_messages;
 	// Session loss is a terminal owner state, not only a receive-side event. A
@@ -591,7 +586,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		last_keepalive_tick_ = current_tick_;
 	}
 	if (perf != nullptr) {
-		const uint64_t now = client_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->setup_us = now - phase_start;
 		phase_start = now;
 	}
@@ -746,7 +741,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
 	}
 	if (perf != nullptr) {
-		const uint64_t now = client_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->receive_us = now - phase_start;
 		phase_start = now;
 	}
@@ -792,7 +787,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		                                 ? joiner_->self_handle()
 		                                 : 0xFFFFu);
 	if (perf != nullptr) {
-		const uint64_t now = client_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->maintenance_us = now - phase_start;
 		phase_start = now;
 	}
@@ -950,7 +945,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		send_holdoff_countdown_ = send_holdoff_ticks_;
 	}
 	if (perf != nullptr)
-		perf->send_us = client_perf_now_us() - phase_start;
+		perf->send_us = io::perf_now_us() - phase_start;
 	return outbound;
 }
 

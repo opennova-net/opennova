@@ -1,6 +1,6 @@
 #include "inmatch/session.h"
+#include <io/perf_clock.h>
 
-#include <chrono>
 #include <utility>
 
 namespace opennova::inmatch {
@@ -21,9 +21,7 @@ Session::Session(TickTarget &target, Role role)
 		: target_(target), role_(role) {}
 
 int64_t Session::now_us() {
-	using Clock = std::chrono::steady_clock;
-	return std::chrono::duration_cast<std::chrono::microseconds>(
-			Clock::now().time_since_epoch()).count();
+	return static_cast<int64_t>(io::perf_now_us());
 }
 
 TransitionResult Session::transition(State to) {

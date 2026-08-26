@@ -43,10 +43,10 @@
 //            Rides the combat pass with the rest of the targeting layer.
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <io/perf_clock.h>
 
 #include "audio/footstep_slot.h"
 #include <io/bam.h>
@@ -65,11 +65,6 @@
 namespace opennova::world {
 
 namespace {
-
-uint64_t infantry_perf_now_us() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 
 // [orig: 0x4b9910 — body turn clamp ±69273360/tick (~5.8 deg)]
 constexpr int32_t kBodyTurnClamp = 69273360;
@@ -987,10 +982,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     // resolver call @0x4B7CE0..0x4B7CF4]
     if (e.net_is_remote_peer) {
         if (is_authority) {
-            const uint64_t remote_start = perf != nullptr ? infantry_perf_now_us() : 0;
+            const uint64_t remote_start = perf != nullptr ? io::perf_now_us() : 0;
             remote_player_body_anim(e, world, logic_tick);
             if (perf != nullptr)
-                perf->infantry_remote_us += infantry_perf_now_us() - remote_start;
+                perf->infantry_remote_us += io::perf_now_us() - remote_start;
         }
         return;
     }
@@ -1216,10 +1211,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     // matching the original's later-in-flow targetAnimState overrides.
     // [orig: Entity_UpdateInfantryAI @0x4b9910 §17.1-17.3/17.5 region]
     if (!inf.is_local_player && is_authority && e.health > 0) {
-        const uint64_t combat_start = perf != nullptr ? infantry_perf_now_us() : 0;
+        const uint64_t combat_start = perf != nullptr ? io::perf_now_us() : 0;
         infantry_combat_think(e, world, key);
         if (perf != nullptr)
-            perf->infantry_combat_us += infantry_perf_now_us() - combat_start;
+            perf->infantry_combat_us += io::perf_now_us() - combat_start;
     }
 
     // Mounted pose is a late phase, not an update bypass: death ran first and a
@@ -1252,7 +1247,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     // updaters pass their out-array to AnimMap_UpdateDualChannels @0x40b8c0, so an AI
     // body's secondary channel promotes and steps like anyone's — but its SELECTION
     // writer @0x4b9a28 is unwitnessed, so its state is never re-selected here.
-    const uint64_t animation_start = perf != nullptr ? infantry_perf_now_us() : 0;
+    const uint64_t animation_start = perf != nullptr ? io::perf_now_us() : 0;
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
     else infantry_weapon_channel_advance(e);
 
@@ -1267,7 +1262,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     }
     inf.last_events = have_clip ? frame.events : 0;
     if (perf != nullptr)
-        perf->infantry_animation_us += infantry_perf_now_us() - animation_start;
+        perf->infantry_animation_us += io::perf_now_us() - animation_start;
 
     // 3'. The eye-offset restamp (the entity+0x6C/+0x70/+0x74 triple).
     // Entity_UpdateInfantryPlayerBody restamps org2 bodies at two sites —
@@ -1427,7 +1422,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
             CollisionWorld::ResolvePerf resolve_perf;
             const uint64_t collision_start =
-                    perf != nullptr ? infantry_perf_now_us() : 0;
+                    perf != nullptr ? io::perf_now_us() : 0;
             collision->resolve_entity(
                     world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
@@ -1438,7 +1433,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
                     perf != nullptr ? &resolve_perf : nullptr);
             if (perf != nullptr) {
                 perf->infantry_collision_us +=
-                        infantry_perf_now_us() - collision_start;
+                        io::perf_now_us() - collision_start;
                 perf->infantry_collision_contacts_us += resolve_perf.contacts_us;
                 perf->infantry_collision_repulsion_us += resolve_perf.repulsion_us;
                 perf->infantry_collision_ground_us += resolve_perf.ground_us;
@@ -1783,7 +1778,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
             const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
             CollisionWorld::ResolvePerf resolve_perf;
             const uint64_t collision_start =
-                    perf != nullptr ? infantry_perf_now_us() : 0;
+                    perf != nullptr ? io::perf_now_us() : 0;
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
@@ -1793,7 +1788,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
                 perf != nullptr ? &resolve_perf : nullptr);
             if (perf != nullptr) {
                 perf->infantry_collision_us +=
-                        infantry_perf_now_us() - collision_start;
+                        io::perf_now_us() - collision_start;
                 perf->infantry_collision_contacts_us += resolve_perf.contacts_us;
                 perf->infantry_collision_repulsion_us += resolve_perf.repulsion_us;
                 perf->infantry_collision_ground_us += resolve_perf.ground_us;

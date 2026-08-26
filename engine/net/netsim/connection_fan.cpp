@@ -1,7 +1,7 @@
 #include "netsim/connection_fan.h"
+#include <io/perf_clock.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -21,11 +21,6 @@
 namespace opennova::netsim {
 
 namespace {
-
-uint64_t fan_perf_now_us() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 
 // The per-connection 0x0A header state emit_connection_s2c derives from the RECIPIENT — the
 // flags1 signal byte and the 7-byte local-player tail's stance/mount fields.
@@ -479,7 +474,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       std::size_t header_bytes,
                                                       std::size_t hard_frame_limit,
                                                       ConnectionS2CPerf *perf) {
-	uint64_t phase_start = perf != nullptr ? fan_perf_now_us() : 0;
+	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
 	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
 	for (uint8_t &a : conn.s2c_entity_age) {
 		if (a != 0xFF) ++a;
@@ -524,7 +519,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	const bool self_dead_or_spectator =
 			self != nullptr && (self->state_flags & 0x02) != 0;
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->entity_setup_us = now - phase_start;
 		phase_start = now;
 	}
@@ -636,12 +631,12 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				const int32_t b3[3] = {e.x, e.y, e.z + kSightLift};
 				// The ray's collision scratch is write-only bookkeeping; the world is
 				// otherwise untouched (the AiSystem method itself is const).
-				const uint64_t los_start = perf != nullptr ? fan_perf_now_us() : 0;
+				const uint64_t los_start = perf != nullptr ? io::perf_now_us() : 0;
 				los = w.ai->line_of_sight_clear_cached(
 						const_cast<world::World &>(w), a3, b3, conn.owned_entity,
 						world::EntityHandle{e.wire_handle},
 						perf != nullptr ? &los_perf : nullptr);
-				if (perf != nullptr) los_us += fan_perf_now_us() - los_start;
+				if (perf != nullptr) los_us += io::perf_now_us() - los_start;
 			}
 			const bool is_carrier = e.wire_handle == carrier_handle;
 
@@ -688,7 +683,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		scored.push_back({key, &e});
 	}
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->entity_scoring_us = now - phase_start;
 		perf->entity_los_us = los_us;
 		perf->entity_los_terrain_us = los_perf.terrain_us;
@@ -700,7 +695,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	std::stable_sort(scored.begin(), scored.end(),
 	                 [](const Scored &a, const Scored &b) { return a.key > b.key; });
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->entity_sort_us = now - phase_start;
 		phase_start = now;
 	}
@@ -726,7 +721,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
 	if (perf != nullptr)
-		perf->entity_budget_us = fan_perf_now_us() - phase_start;
+		perf->entity_budget_us = io::perf_now_us() - phase_start;
 	return selected;
 }
 
@@ -993,7 +988,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          std::size_t max_frame_body_bytes,
                          ConnectionS2CPerf *perf) {
 	if (perf != nullptr) *perf = {};
-	uint64_t phase_start = perf != nullptr ? fan_perf_now_us() : 0;
+	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
 	if (owned == nullptr) return false;
@@ -1081,7 +1076,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 					? max_frame_body_bytes - header_bytes
 					: 0);
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->setup_us = now - phase_start;
 		phase_start = now;
 	}
@@ -1102,7 +1097,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->round_selection_us = now - phase_start;
 		phase_start = now;
 	}
@@ -1111,7 +1106,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 					w, conn, ents, anchor, header_bytes + rounds_bytes,
 					max_frame_body_bytes, perf);
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->entity_selection_us = now - phase_start;
 		phase_start = now;
 	}
@@ -1120,14 +1115,14 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 			anchor, selected, flags2, hs, game_type, w.subgoals,
 			std::move(rounds));
 	if (perf != nullptr) {
-		const uint64_t now = fan_perf_now_us();
+		const uint64_t now = io::perf_now_us();
 		perf->encode_us = now - phase_start;
 		phase_start = now;
 	}
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 	                          /*reliable=*/false);
 	if (perf != nullptr)
-		perf->enqueue_us = fan_perf_now_us() - phase_start;
+		perf->enqueue_us = io::perf_now_us() - phase_start;
 	return true;
 }
 

@@ -1,4 +1,5 @@
 #include "menu_video_underlay.h"
+#include <io/perf_clock.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -7,22 +8,12 @@
 #include <menu/menu_frame.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <string>
 
 namespace godot {
-
-namespace {
-
-uint64_t menu_video_perf_now_us() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-
-} // namespace
 
 using opennova::menu::MenuVideoSlotSpec;
 using opennova::menu::menu_video_resolve;
@@ -265,11 +256,11 @@ void MenuVideoUnderlay::_notification(int p_what) {
 			break;
 		case NOTIFICATION_PROCESS: {
 			const uint64_t process_start = runtime_profiling_enabled_
-					? menu_video_perf_now_us() : 0;
+					? opennova::io::perf_now_us() : 0;
 			if (!is_visible_in_tree()) {
 				update_process_state_();
 				if (runtime_profiling_enabled_)
-					last_process_us_ = menu_video_perf_now_us() - process_start;
+					last_process_us_ = opennova::io::perf_now_us() - process_start;
 				break;
 			}
 			const double delta = get_process_delta_time();
@@ -283,7 +274,7 @@ void MenuVideoUnderlay::_notification(int p_what) {
 			}
 			queue_redraw();
 			if (runtime_profiling_enabled_)
-				last_process_us_ = menu_video_perf_now_us() - process_start;
+				last_process_us_ = opennova::io::perf_now_us() - process_start;
 			break;
 		}
 		case NOTIFICATION_DRAW:

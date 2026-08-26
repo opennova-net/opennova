@@ -1,4 +1,5 @@
 #include "world/ai.h"
+#include <io/perf_clock.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -14,7 +15,6 @@
 #include "world/vehicle_part_anim.h"
 #include "world/vehicle_sound.h"
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -28,18 +28,13 @@ using namespace detail; // the shared AI helpers, unqualified as before
 
 namespace {
 
-uint64_t ai_perf_now_us() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-
 class ScopedAiPerfTimer {
 public:
     explicit ScopedAiPerfTimer(uint64_t *target) : target_(target) {
-        if (target_ != nullptr) start_ = ai_perf_now_us();
+        if (target_ != nullptr) start_ = io::perf_now_us();
     }
     ~ScopedAiPerfTimer() {
-        if (target_ != nullptr) *target_ += ai_perf_now_us() - start_;
+        if (target_ != nullptr) *target_ += io::perf_now_us() - start_;
     }
 
 private:
@@ -367,7 +362,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     // AI does not run during the BMS pre-mission script pass: that invocation only
     // settles initial scripted state (EventFlags PreMission), it does not step brains.
     if (ctx.phase != TickPhase::Gameplay) return;
-    uint64_t phase_start = perf != nullptr ? ai_perf_now_us() : 0;
+    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain
@@ -408,7 +403,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     }
     world.round_sim.hits.clear();
     if (perf != nullptr) {
-        const uint64_t now = ai_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->reactions_us = now - phase_start;
         phase_start = now;
     }
@@ -427,7 +422,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         collision->build_tick_tables(world);
     }
     if (perf != nullptr) {
-        const uint64_t now = ai_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->collision_tables_us = now - phase_start;
         phase_start = now;
     }
@@ -496,7 +491,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
     }
     if (perf != nullptr) {
-        const uint64_t now = ai_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->entities_us = now - phase_start;
         phase_start = now;
     }
@@ -512,7 +507,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
     // authority drive gates @0x48b0ff / @0x48DF8C]
     if (is_authority && !world.vehicle_traits.empty()) {
-        uint64_t vehicle_phase_start = perf != nullptr ? ai_perf_now_us() : 0;
+        uint64_t vehicle_phase_start = perf != nullptr ? io::perf_now_us() : 0;
         vehicle_pass_handles_.clear();
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != 1) return;
@@ -526,7 +521,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             vehicle_pass_handles_.push_back(e.handle);
         });
         if (perf != nullptr) {
-            const uint64_t now = ai_perf_now_us();
+            const uint64_t now = io::perf_now_us();
             perf->vehicle_scan_us = now - vehicle_phase_start;
             vehicle_phase_start = now;
         }
@@ -644,7 +639,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             }
         }
         if (perf != nullptr) {
-            const uint64_t now = ai_perf_now_us();
+            const uint64_t now = io::perf_now_us();
             perf->vehicle_motors_us = now - vehicle_phase_start;
             vehicle_phase_start = now;
         }
@@ -657,10 +652,10 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         for (int i = 0; i < count(); ++i)
             refresh_mounted_pose(*at(i), world);
         if (perf != nullptr)
-            perf->vehicle_riders_us = ai_perf_now_us() - vehicle_phase_start;
+            perf->vehicle_riders_us = io::perf_now_us() - vehicle_phase_start;
     }
     if (perf != nullptr) {
-        const uint64_t now = ai_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->authority_vehicles_us = now - phase_start;
         phase_start = now;
     }
@@ -739,13 +734,13 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         }
     }
     if (perf != nullptr) {
-        const uint64_t now = ai_perf_now_us();
+        const uint64_t now = io::perf_now_us();
         perf->client_vehicles_us = now - phase_start;
         phase_start = now;
     }
     events.process_timed(*this, world);
     if (perf != nullptr)
-        perf->events_us = ai_perf_now_us() - phase_start;
+        perf->events_us = io::perf_now_us() - phase_start;
 }
 
 void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {

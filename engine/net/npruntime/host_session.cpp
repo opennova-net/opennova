@@ -1,4 +1,5 @@
 #include "npruntime/host_session.h"
+#include <io/perf_clock.h>
 
 #include "npruntime/server_session.h" // set_connection_mode / set_transport_mode / create_session / ...
 #include "npruntime/server_spawn.h"   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
@@ -52,11 +53,6 @@ uint32_t monotonic_milliseconds() {
 					std::chrono::steady_clock::now().time_since_epoch()).count());
 	const uint32_t low = static_cast<uint32_t>(value);
 	return low != 0 ? low : 1u;
-}
-
-uint64_t host_perf_now_us() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
@@ -356,7 +352,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HostEventObserverFn event_observer, void *event_observer_context,
 		HostSessionPerf *perf) {
 	if (perf != nullptr) *perf = {};
-	const uint64_t total_start = perf != nullptr ? host_perf_now_us() : 0;
+	const uint64_t total_start = perf != nullptr ? io::perf_now_us() : 0;
 	uint64_t phase_start = total_start;
 	const uint32_t now = owner.now_tick;
 	// S2C 0x58 reports elapsed session milliseconds, while gameplay producers
@@ -430,7 +426,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 			send_or_stage_established_datagram(owner, sock, t.peer, dg);
 	}
 	if (perf != nullptr) {
-		const uint64_t at = host_perf_now_us();
+		const uint64_t at = io::perf_now_us();
 		perf->receive_us = at - phase_start;
 		phase_start = at;
 	}
@@ -457,13 +453,13 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// Retail's AnimMap_RegisterEntity runs at entity creation; adapters with external
 	// animation registries use this boundary to preserve the same lifetime.
 	if (perf != nullptr) {
-		const uint64_t at = host_perf_now_us();
+		const uint64_t at = io::perf_now_us();
 		perf->connections_us = at - phase_start;
 		phase_start = at;
 	}
 	if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
 	if (perf != nullptr) {
-		const uint64_t at = host_perf_now_us();
+		const uint64_t at = io::perf_now_us();
 		perf->adapter_us = at - phase_start;
 		phase_start = at;
 	}
@@ -472,7 +468,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// already-advanced per-connection boundary only for fresh remote 0x0A.
 	Server_TickUpdate(owner.ctx, perf != nullptr ? &perf->server : nullptr);
 	if (perf != nullptr) {
-		const uint64_t at = host_perf_now_us();
+		const uint64_t at = io::perf_now_us();
 		perf->server_us = at - phase_start;
 		phase_start = at;
 	}
@@ -563,7 +559,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 
 	++owner.now_tick;
 	if (perf != nullptr) {
-		const uint64_t at = host_perf_now_us();
+		const uint64_t at = io::perf_now_us();
 		perf->send_us = at - phase_start;
 		perf->total_us = at - total_start;
 	}
