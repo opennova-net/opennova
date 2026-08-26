@@ -19,6 +19,7 @@
 #include "object/nova_object_shader_cache.h"
 
 #include <renderer/render_order.h>
+#include <terrain/quadtree.h> // water_pass_active (retail's g_WaterActive)
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -268,6 +269,12 @@ void Water::set_visible_terrain_bounds(bool p_valid, float p_min_height,
 	terrain_bounds_valid_ = p_valid;
 	terrain_min_height_ = p_min_height;
 	terrain_max_height_ = p_max_height;
+}
+
+bool Water::is_water_pass_active() const {
+	return is_water_render_active() &&
+			opennova::water_pass_active(terrain_bounds_valid_, terrain_min_height_,
+					terrain_max_height_, water_height_, blink_water_visible_);
 }
 
 void Water::set_blink_water_visible(bool p_visible) {
