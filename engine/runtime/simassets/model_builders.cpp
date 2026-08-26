@@ -205,7 +205,7 @@ int32_t model_bound_radius_q16_from_3di(const Threedi3di3 &model) {
 	// Production files retain GHDR's exact signed carrier (the on-disk field
 	// is authored as unsigned Q16.16). Retail stores this as MODEL gpm[5] and
 	// Entity_InitFromModel reads it behind the collision-block gate.
-	// [orig: WriteGHDR @0x452B40; Entity_InitFromModel @0x40dcd7/@0x40de8f]
+	// [orig: ModSuperOed WriteGHDR @0x452B40; Entity_InitFromModel @0x40dcd7/@0x40de8f]
 	if (model.header.has_header) return model.header.max_radius_fp16;
 	if (model.lod_count == 0 || model.lods == nullptr) return 0;
 	const ThreediLod &lod = model.lods[0];

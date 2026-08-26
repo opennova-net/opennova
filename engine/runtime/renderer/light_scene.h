@@ -44,8 +44,9 @@
 // three slots (`X[2] = 3` @ 0x5da26b), pushes the survivors as
 // PointLightCoordArray/ColorArray/AttenArray with CurNumPointLights = the
 // entry count for the shader pass [orig: Light_GetPointLightParams
-// @ 0x5da6a8; SetInt/SetVectorArray @ 0x5da6e7..0x5da766 through the handles
-// stored @ 0x5af51b..0x5af566], and for the fixed-function pass first
+// @ 0x5da6a8; the ID3DXEffect count-setter vtable call @ 0x5da6ed and the
+// three vector-array vtable calls @ 0x5da71a/@ 0x5da740/@ 0x5da766 through
+// the handles stored @ 0x5af51b..0x5af566], and for the fixed-function pass first
 // disables EVERY enabled D3D light (CEffectWorld_ClearActiveSamplerStates
 // @ 0x5da5de) and re-enables only the entry's (Light_ApplyAsD3DLight
 // @ 0x5da61a). The highest-quality object path therefore lights with at

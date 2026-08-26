@@ -11,7 +11,7 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 // with the per-channel ambient law and the 40..80 u distance fade — or, for
 // a bound slot without a silhouette RT, the authored items.def `shadow` blob
 // decal, heading-rotated (retail: RenderSlot_DrawAllDrapes @0x5d6e20,
-// render_sector_model @0x5d5ca0, blob @0x5d59d0 — see
+// RenderSlot_DrawSilhouetteDrape @0x5d5ca0, blob @0x5d59d0 — see
 // docs/render/render-lighting-re.md). The terrain surface itself stands in
 // for the patch mesh; the projection is evaluated per pixel.
 //
@@ -19,7 +19,7 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 //   u_slot_mat_i : world -> (u, v, depth01) projector matrix
 //   u_slot_term[i] : rgb = the per-channel shadow term
 //                    q_c = sun_c*|dir_y| / (sun_c*|dir_y| + sky_c)
-//                    (retail: render_sector_model @0x5d5f63..0x5d6008);
+//                    (retail: RenderSlot_DrawSilhouetteDrape @0x5d5f63..0x5d6008);
 //                    a = 0 off, 1 silhouette, 2 authored blob
 //   u_slot_patch[i] : the lod x lod terrain patch the slot is draped over,
 //                    as world (min_x, min_z, max_x, max_z) — retail builds a

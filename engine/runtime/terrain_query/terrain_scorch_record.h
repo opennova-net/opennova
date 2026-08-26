@@ -9,10 +9,10 @@
 // max x/z} rows. The standard router selects the texture and extent from the
 // scorch id, the sized router takes a caller-authored half extent.
 // [orig: Terrain_AddScorchRecord @0x605c90 (the 4096 cap @0x605c9f, the
-//  20-byte row @0x605cc7..0x605cef); standard router @0x6060d0 (case 1
-//  @0x606105 = 0x4000, cases 2/7 @0x606130 = 0x40000, case 8 @0x60614f =
-//  0xC0000 x 0x140000; the IDB label Render_RestoreDeviceState is stale);
-//  sized router @0x606180 (ids 1/2/7 @0x6061b8, id 8 @0x6061d3)]
+//  20-byte row @0x605cc7..0x605cef); Terrain_AddScorchForEffectKind @0x6060d0
+//  (case 1 @0x606105 = 0x4000, cases 2/7 @0x606130 = 0x40000, case 8
+//  @0x60614f = 0xC0000 x 0x140000); Terrain_AddScorchSized @0x606180
+//  (ids 1/2/7 @0x6061b8, id 8 @0x6061d3)]
 
 #include <cstddef>
 #include <cstdint>

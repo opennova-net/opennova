@@ -40,7 +40,7 @@ struct TerrainTilePageLayout {
 // by 1/(1024 >> lod). The reduced result is therefore exactly
 // ((world_x-origin_x), (world_z-origin_z)) * inverse_world_span.
 // [orig: Foliage_RenderFarPatches @0x60A1DE..0x60A34F; c7/c8 uploads
-// @0x6006AB..0x600704; Foliage_WindSwayVS @0x7DE648]
+// @0x6006AB..0x600704; Foliage_WindSwayVS source @0x7DE648 (assembled @0x5ff691)]
 struct TerrainTilePageProjection {
 	float world_origin_x = 0.0f;
 	float world_origin_z = 0.0f;

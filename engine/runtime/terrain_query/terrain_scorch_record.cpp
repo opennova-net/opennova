@@ -44,9 +44,9 @@ bool terrain_scorch_texture_index_valid(uint8_t texture_index) noexcept {
 
 // The standard router: ids 1/2/7 roll one of the three dirt textures with the
 // CRT stream, id 8 is the fixed burn texture with the 12x20 unit extent
-// [orig: scorch router @ 0x6060d0 (IDB label Render_RestoreDeviceState is
-// stale) — case 1 @ 0x606105 (0x4000), cases 2/7 @ 0x606130 (0x40000),
-// case 8 @ 0x60614f (0xC0000 x 0x140000)].
+// [orig: Terrain_AddScorchForEffectKind @ 0x6060d0 — case 1 @ 0x606105
+// (0x4000), cases 2/7 @ 0x606130 (0x40000), case 8 @ 0x60614f
+// (0xC0000 x 0x140000)].
 TerrainScorchResolved resolve_standard_terrain_scorch(
 		int32_t center_x_q16, int32_t center_z_q16,
 		int scorch_id, uint16_t crt_roll) noexcept {
@@ -72,7 +72,7 @@ TerrainScorchResolved resolve_standard_terrain_scorch(
 }
 
 // The sized router: the caller supplies one half extent for both axes
-// [orig: sized scorch router @ 0x606180 — ids 1/2/7 @ 0x6061b8, id 8
+// [orig: Terrain_AddScorchSized @ 0x606180 — ids 1/2/7 @ 0x6061b8, id 8
 // @ 0x6061d3].
 TerrainScorchResolved resolve_sized_terrain_scorch(
 		int32_t center_x_q16, int32_t center_z_q16,

@@ -8,7 +8,8 @@
 // texture loading and page upload; this module owns the portable record,
 // routing, overlap, mip, and content-identity rules.
 // [orig: Terrain_LoadScorchTextures @0x604CE0; Terrain_AddScorchRecord
-// @0x605C90; scorch routers @0x6060D0/@0x606180; PolyTrn_RenderTile
+// @0x605C90; Terrain_AddScorchForEffectKind @0x6060D0; Terrain_AddScorchSized
+// @0x606180; PolyTrn_RenderTile
 // @0x60DF39..0x60E0AF]
 
 #include <terrain/terrain_tile_composition_cache.h>

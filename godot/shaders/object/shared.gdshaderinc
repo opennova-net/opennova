@@ -596,7 +596,7 @@ vec3 obj_environment_cube_approx(vec3 reflection_ws) {
 			vec3(0.0), vec3(1.0));
 	// render_sky_mesh binds Env_LightBlock and the fixed-function MODULATE2X
 	// descriptor, then submits the rotated CubeRotSpecular sphere additively.
-	// [orig: render_sky_mesh @ 0x5ac680; descriptor @ 0x5ac600].
+	// [orig: render_sky_mesh @ 0x5ac680; sub_5AC600 (the sky-mesh descriptor)].
 	return clamp(dimmed_sky + static_lobe * opennova_sun_light * 2.0,
 			vec3(0.0), vec3(1.0));
 }
