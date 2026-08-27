@@ -53,12 +53,10 @@ signal join_deploy_pick_required()
 ## [orig: CNapiNetwork_Init @ 0x4ca4a0 (timeout stores @ 0x4caa81/@ 0x4cab54) ->
 ##  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0]
 signal session_lost(reason: String)
-# Mission-load progress, 0..100, emitted at the stage boundaries below and
-# pulsed (at the stage's constant value) from inside the object-placement loop.
-# The values are the witnessed schedule's anchor points; the original pumps its
-# loading screen the same way — constant per-stage percentages, re-presented
-# from inside the model-load loops [orig: Game_StartMission's
-# LoadingScreen_UpdateAndPresent calls @ 0x52498f..0x525d29].
+# Mission-load progress, 0..100, emitted when each stage of the engine's
+# mission load plan starts (MissionData.load_progress_percent — the
+# witnessed per-stage anchors, engine/runtime/mission/mission_load_plan.h)
+# and pulsed at the object stage's value from inside the placement loop.
 signal load_progress(percent: int)
 # Presentation side effects drained from the mission runtime's EffectLog each tick
 # (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog").
@@ -487,22 +485,16 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# Keep stage attribution stable so load timelines remain comparable.
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
-	# Game_StartMission destroys the previous shared .3DI definition cache before
-	# reloading this mission's render resources. Reset before environment/terrain:
-	# Celestial resolves its models from _load_environment, and foliage loaded
-	# by terrain must remain present-but-excluded in the same generation.
-	# [orig: EffectWorld_DestroyAllAndInitDeviceCaps @0x524A6F]
+	# The shared .3DI definition cache resets before the environment and
+	# terrain stages (the load plan's first order witness): Celestial resolves
+	# its models from _load_environment, and foliage loaded by terrain must
+	# remain present-but-excluded in the same generation.
 	ObjectData.reset_network_challenge_model_registry()
 	_load_mission_tile_info(
 			bms_name, resource_root, PackedByteArray(),
 			mission.is_wire_header_only())
-	# Progress values are anchor points from the witnessed schedule (2..100);
-	# our pipeline has fewer stages than the original's ~30 call sites, so each
-	# boundary reports the nearest witnessed value
-	# (docs/interface/loading-screen-re.md D-LOADSCR-1)
-	# [orig: Game_StartMission @ 0x524360 progress schedule
-	# 2,3,4,6,20,26,...,41,45,50,60,70,90,95,100].
-	load_progress.emit(2)
+	# Each stage below presents the plan's anchor when it starts.
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_ENVIRONMENT))
 	timeline.span("environment")
 	if not _load_environment(env_name):
 		load_failed.emit("failed to load %s" % env_name)
@@ -520,14 +512,14 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 						"minutes_per_day", MissionEnvironment.DEFAULT_MINUTES_PER_DAY)))
 	_prepare_world_driven_weather()
 	timeline.end_span()
-	load_progress.emit(6)
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_TERRAIN))
 	timeline.span("terrain")
 	if not _load_terrain(trn):
 		load_failed.emit("failed to load %s" % trn)
 		timeline.finish()
 		return ERR_CANT_OPEN
 	timeline.end_span()
-	load_progress.emit(26)
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 
 	_loaded_mission = mission
 	# The mission attribute that forces the indoors accum bit every frame.
@@ -536,7 +528,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
-	load_progress.emit(41)
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_RUNTIME))
 	timeline.span("runtime")
 	var runtime_error := _start_runtime(mission, bms_name)
 	timeline.end_span()
@@ -544,21 +536,20 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 		timeline.finish()
 		unload()
 		return runtime_error
-	# Retail freezes its non-foliage loaded-.3DI page once, after the entity,
-	# celestial, HUD, and renderer resource loads and before the loading screen
-	# drops. MissionPresentation.setup has now resolved the placed/wire mission models
-	# (including collision/husk definitions); late network spawns must not change
-	# this page. [orig: CEffectWorld_RebuildAllModelBuffers @0x5871CF from Game_StartMission @0x525A6E]
+	# The non-foliage loaded-.3DI page freezes once here (the load plan's
+	# freeze witness): MissionPresentation.setup has now resolved the placed/wire
+	# mission models (including collision/husk definitions); late network spawns
+	# must not change this page.
 	var challenge_sim: Simulation = _runtime.get_sim()
 	if challenge_sim != null and not wire_header_join:
 		if challenge_sim.is_joiner():
 			_prewarm_loaded_model_challenge_definitions()
 		challenge_sim.finalize_loaded_model_challenge_snapshot()
-	load_progress.emit(70)
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_AUDIO))
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
-	load_progress.emit(90)
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_EFFECTS))
 	timeline.span("effects")
 	_start_effect_world()
 	timeline.end_span()
@@ -566,18 +557,17 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# the first live spawn otherwise pays the deferred texture resolves + the
 	# renderer's first-draw pipeline compiles as a ~90 ms hitch on the player's
 	# first shot (measured: first-fire tap 92.9 ms -> repeat 12.5 ms). Retail
-	# pays this at load [orig: CEffectSystem_Init @ 0x5f6070 loads every .ptl
-	# and its textures at Game_StartMission].
+	# pays this at load (the load plan's effect-system witness).
 	timeline.span("effects_warm")
 	_warm_effect_world_catalog()
 	timeline.end_span()
-	load_progress.emit(95)
+	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_FINISH))
 	timeline.finish()
 	_loaded_mission_file = bms_name
 	_world_ready = true
 	_set_water_world_rendering_enabled(true)
 	_build_minimap_water_mask()
-	load_progress.emit(100)
+	load_progress.emit(MissionData.LOAD_PROGRESS_COMPLETE)
 	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
@@ -631,11 +621,9 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	if timeline != null:
 		options["timeline"] = timeline
 	# Pulse the load-progress screen from inside the model-load loop at the
-	# stage's constant value — the original re-presents its loading screen the
-	# same way, with a constant percentage from within the per-model loops
-	# [orig: the paired constant-value LoadingScreen_UpdateAndPresent calls
-	# inside Game_StartMission's model loops @ 0x524d9c/0x524e09, 0x524f32/0x524fe0].
-	options["progress"] = func() -> void: load_progress.emit(26)
+	# object stage's constant value (the load plan's per-model pulse witness).
+	options["progress"] = func() -> void: load_progress.emit(
+			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 	_mission_stats = _placer.place(mission, self, options)
 	# Static tile shadows are composed from the placer's resolved ObjectData and
 	# exact entity transforms. Attach only after place() has finished building

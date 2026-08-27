@@ -15,6 +15,7 @@
 
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
+#include <runtime/mission/mission_load_plan.h>
 
 namespace godot {
 
@@ -58,6 +59,13 @@ private:
 	opennova::mission::MissionActionRecord action_from_dictionary(const Dictionary &dict, const opennova::mission::MissionActionRecord &seed) const;
 
 protected:
+public:
+	// The loading-screen percentage a mission load stage presents when it
+	// starts (engine/runtime/mission/mission_load_plan.h, the witnessed
+	// Game_StartMission schedule); LOAD_PROGRESS_COMPLETE is the finished value.
+	static int load_progress_percent(int p_stage);
+
+protected:
 	static void _bind_methods();
 
 public:
@@ -96,6 +104,17 @@ public:
 		ATTRIB_TEAM_KING_OF_THE_HILL = 0x40000000,
 		ATTRIB_SEARCH_AND_DESTROY = 0x80000000,
 		ATTRIB_GAME_MODE_MASK = 0xFF830000,
+		// Mirrors opennova::mission::MissionLoadStage (engine/runtime/mission/
+		// mission_load_plan.h), pinned in the .cpp: the load stages the shell walks,
+		// each presenting load_progress_percent(stage) when it starts.
+		LOAD_STAGE_ENVIRONMENT = 0,
+		LOAD_STAGE_TERRAIN = 1,
+		LOAD_STAGE_OBJECTS = 2,
+		LOAD_STAGE_RUNTIME = 3,
+		LOAD_STAGE_AUDIO = 4,
+		LOAD_STAGE_EFFECTS = 5,
+		LOAD_STAGE_FINISH = 6,
+		LOAD_PROGRESS_COMPLETE = 100,
 		// items.def id = wire type id + this offset (engine/runtime/mission kItemIdOffset;
 		// pinned by static_assert in the .cpp). Bound so GDScript never
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
