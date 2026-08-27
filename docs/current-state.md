@@ -51,8 +51,10 @@ push-down campaign** opened by [ADR 0040](adr/0040-the-engine-is-one-namespace.m
 (2026-08-26, PR #580): with the names and include roots settled, the witnessed
 behavior still living Godot-side moves home — `godot/src/simulation/` (the
 `adapter_cpp_orig_cites_pushdown` ratchet) and the game-level GDScript (the new
-`gd_orig_cites` ratchet) are the gauges; the ranked queue is in
-[`TODO.md`](../TODO.md) § "Push-down campaign". It subsumes the structural slot earlier programs
+`gd_orig_cites` ratchet) are the gauges. It runs as one commit per slice in
+PR #580 — the pattern-setting moves first, then `godot/src/simulation/`, the
+game-level GDScript presentation math, `object/` and the holdouts — and is
+finished when both counters hold only documented seam contracts. It subsumes the structural slot earlier programs
 held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
 residue stays tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification
 backlog"), and the 2026-08-08 adapter-shape round (#451–#456) was this
