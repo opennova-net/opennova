@@ -54,7 +54,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 # Where the files-mode walk looks for CMake files. Vendored submodules are
-# excluded except the two the net stack actually builds (sqlite/bcrypt).
+# excluded except the ones the tree actually builds (sqlite/bcrypt/imgui).
 SCAN_ROOTS = (
     "CMakeLists.txt",
     "engine",
@@ -64,6 +64,7 @@ SCAN_ROOTS = (
     "godot/src",
     "third_party/sqlite",
     "third_party/bcrypt",
+    "third_party/imgui",
 )
 
 # --- The rules -------------------------------------------------------------

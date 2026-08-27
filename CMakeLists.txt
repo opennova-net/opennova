@@ -5,6 +5,13 @@ project(opennova LANGUAGES C CXX)
 add_subdirectory(third_party/sqlite)
 add_subdirectory(third_party/bcrypt)
 
+# Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour: they
+# host ONED's run surface. OPENNOVA_DEVTOOLS adds the game's debug-only dev-tool
+# windows (godot/src turns it off for template_release); ON here so the root
+# ctest build always covers them.
+add_subdirectory(third_party/imgui)
+option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
+
 # Native engine group libraries.
 add_subdirectory(engine)
 

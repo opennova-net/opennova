@@ -18,6 +18,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
+    # devtools — the ImGui pass, ONED's run surface and the frame-stats board
+    # (every flavour); the game's dev-tool windows are added below under
+    # OPENNOVA_DEVTOOLS (ADR 0039)
+    ${CMAKE_CURRENT_SOURCE_DIR}/devtools/frame_stats_board.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/devtools/oned_ui.cpp
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
@@ -195,6 +201,23 @@ target_include_directories(opennova_runtime
 target_link_libraries(opennova_runtime PUBLIC opennova_base opennova_crt)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
+
+# Dear ImGui (ADR 0039) links PRIVATE so no ImGui header reaches a consumer: the
+# shell hands the context over as plain pointers (devtools/imgui_abi.h). The
+# game's dev-tool windows compile only when the including root leaves
+# OPENNOVA_DEVTOOLS on (every build but the release GDExtension flavour); the
+# define is PUBLIC so the shell gates its DevTools node on it.
+target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
+if(OPENNOVA_DEVTOOLS)
+    target_sources(opennova_runtime PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/stats_window.cpp
+    )
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_DEVTOOLS=1)
+else()
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_DEVTOOLS=0)
+endif()
 
 set_target_properties(opennova_runtime PROPERTIES
     POSITION_INDEPENDENT_CODE ON
