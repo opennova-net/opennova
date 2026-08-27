@@ -7,6 +7,8 @@
 #include <net/netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
 #include <runtime/renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
 #include <runtime/world/occlusion_camera.h> // the camera hand-over
+#include <runtime/world/iris_march.h> // the iris exposure march
+#include <runtime/world/presentation_frame.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
 #include <unordered_set>
@@ -558,92 +560,35 @@ opennova::world::EntityHandle Simulation::handle_for_bms_id(int p_bms_id) const 
 PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
                                                       const Vector3 &p_cam_forward,
                                                       const Vector3 &p_light_dir) {
+	// The march is the engine's (runtime/world/iris_march.h); this converts
+	// the presentation-frame vectors to mission fixed and mirrors the interior
+	// light group the last sample named.
 	PackedInt32Array out;
 	if (!world_) return out;
-	const opennova::world::EntityHandle local_player =
-			world_->cached.local_player;
-	if (world_->registry.get(local_player) == nullptr) return out;
+	auto mission_fixed = [](const Vector3 &v, float scale, int32_t fixed[3]) {
+		const float pres[3] = { static_cast<float>(v.x) * scale,
+			static_cast<float>(v.y) * scale, static_cast<float>(v.z) * scale };
+		float mission[3];
+		opennova::world::mission_from_presentation(pres, mission);
+		fixed[0] = opennova::world::to_fixed(mission[0]);
+		fixed[1] = opennova::world::to_fixed(mission[1]);
+		fixed[2] = opennova::world::to_fixed(mission[2]);
+	};
+	int32_t cam[3];
+	mission_fixed(p_cam_pos, 1.0f, cam);
+	int32_t reach[3];
+	mission_fixed(p_cam_forward, opennova::world::kIrisMarchReachUnits, reach);
+	int32_t end[3] = { cam[0] + reach[0], cam[1] + reach[1], cam[2] + reach[2] };
+	int32_t sun[3];
+	mission_fixed(p_light_dir, opennova::world::kIrisSunRayUnits, sun);
 
-	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
-	const int32_t cam[3] = {opennova::world::to_fixed(p_cam_pos.x),
-	                        opennova::world::to_fixed(-p_cam_pos.z),
-	                        opennova::world::to_fixed(p_cam_pos.y)};
-	// end = camera + forward * 8.0 [orig: the (0x80000, 0, 0) forward vector
-	// rotated through the camera matrix @ 0x5c7a56..0x5c7a6f].
-	int32_t end[3] = {cam[0] + opennova::world::to_fixed(p_cam_forward.x * 8.0f),
-	                  cam[1] + opennova::world::to_fixed(-p_cam_forward.z * 8.0f),
-	                  cam[2] + opennova::world::to_fixed(p_cam_forward.y * 8.0f)};
-
-	// The full retail clip: terrain first unless the local player is indoors,
-	// then every eligible solid in that player's candidate slice. The mutable
-	// endpoint retains the nearest hit across the complete walk.
-	// [orig: raycast_entity_collision @ 0x413760]
-	collision_world_.clip_segment_to_nearest_collision(
-			*world_, local_player, cam, end);
-
-	// Sun-ray direction in mission fixed: light_dir * 200 u
-	// [orig: end = sample + 200 * light_dir @ 0x5c776c..0x5c7780].
-	const int32_t sun[3] = {opennova::world::to_fixed(p_light_dir.x * 200.0f),
-	                        opennova::world::to_fixed(-p_light_dir.z * 200.0f),
-	                        opennova::world::to_fixed(p_light_dir.y * 200.0f)};
-	// The three ray clip radii — the shared witnessed triple
-	// (world::CollisionWorld::kSunOcclusionClipRadii).
-	const int32_t local_candidate_count =
-			collision_world_.candidate_count(local_player);
-
-	// Samples at end, end + (cam-end)/3, end + 2(cam-end)/3 [orig: the thirds
-	// march @ 0x5c7ad8..0x5c7b30].
-	const int32_t step[3] = {(cam[0] - end[0]) / 3, (cam[1] - end[1]) / 3,
-	                         (cam[2] - end[2]) / 3};
-	for (int s = 0; s < 3; ++s) {
-		const int32_t p[3] = {end[0] + step[0] * s, end[1] + step[1] * s, end[2] + step[2] * s};
-		opennova::world::BlinkAccum blink;
-		collision_world_.query_candidate_blink_boxes_at_point(
-				*world_, local_player, p, blink);
-		if (blink.hits[0] != 0) {
-			// Indoor sample: the hit's pool-2 entity carries interior data or
-			// the curve runs on all-zero inputs (gain 255)
-			// [orig: Pool_GetEntryUnchecked(2, hit >> 20) @ 0x5c7646; the
-			//  pool_entry[12] == 0 skip @ 0x5c7652].
-			const opennova::world::EntityHandle h = opennova::world::EntityHandle::make(
-					2, static_cast<int32_t>(blink.hits[0] >> 20));
-			if (occlusion_world_.has_instance(h)) {
-				// Lighting_SetInteriorLightGroup(building, section). The next
-				// sample may replace/clear it; an indoor-no-data sample does not.
-				iris_interior_group_entity_ = h;
-				iris_interior_group_section_ =
-						opennova::world::BlinkAccum::hit_section(blink.hits[0]);
-				out.append(WeatherCore::kIrisSampleIndoor);
-			} else {
-				out.append(WeatherCore::kIrisSampleIndoorNoData);
-			}
-			continue;
-		}
-		// Lighting_SetInteriorLightGroup(0, 0) on every outdoor sample.
-		iris_interior_group_entity_ = opennova::world::EntityHandle{};
-		iris_interior_group_section_ = 0;
-		// Outdoor sample: level = 8 minus one per blocked sun ray
-		// [orig: @ 0x5c7784..0x5c77d7; the local player's +0x1C0 count gates
-		// all three calls]. Each cast is the candidate-scoped walker with the
-		// local player as BOTH exclusion entities and allowAllTypes = 1: it
-		// iterates only that player's own +0x1BC/+0x1C0 slice (the 17-tick
-		// arena), skips candidates owner-linked to the player, requires an
-		// ItemDef, and reports BLOCKED on the first obstructed candidate
-		// (retail: raycast_find_collision_entity @0x539a70 — slice walk
-		// @0x539b5d..0x539bc4, pushed @0x5c7765..0x5c77c6 at radii
-		// -0x2000/-0x5000/-0x8000, see docs/render/render-lighting-re.md).
-		int32_t level = 8;
-		const int32_t ray_end[3] = {p[0] + sun[0], p[1] + sun[1], p[2] + sun[2]};
-		if (local_candidate_count > 0) {
-			for (int r = 0; r < 3; ++r) {
-				if (collision_world_.candidate_segment_hits_solid(
-						*world_, local_player, p, ray_end,
-						opennova::world::CollisionWorld::kSunOcclusionClipRadii[r]))
-					--level;
-			}
-		}
-		out.append(level);
-	}
+	opennova::world::IrisMarch march;
+	opennova::world::compute_iris_march(*world_, collision_world_, occlusion_world_,
+			cam, end, sun, march);
+	if (march.count == 0) return out;
+	iris_interior_group_entity_ = march.interior_group_entity;
+	iris_interior_group_section_ = march.interior_group_section;
+	for (int i = 0; i < march.count; ++i) out.append(march.samples[i]);
 	return out;
 }
 
