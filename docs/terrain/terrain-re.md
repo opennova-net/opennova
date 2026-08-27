@@ -263,7 +263,7 @@ seam (`0x60327a..0x6032ec`). These values are not `polytrn_wrapx/y`.
 `TrnConfig`, the TPJ build flow, and `TerrainData` preserve all four pairs;
 at runtime `height_field_apply_trn` stamps them onto every `TerrainHeightField`
 (the `TerrainData` samplers/raycast and `Simulation`'s grounding field),
-and `build_heightfield_normal_map` plus the `nova_terrain.cpp` render mesh and
+and `build_heightfield_normal_map` plus the `terrain.cpp` render mesh and
 seam normals tap the same `CoordsTaps` kernel. The former Godot-physics
 heightfield consumer was removed (#330; range-find rides the ported raycast).
 
@@ -839,7 +839,7 @@ runs opposite world y (samplers negate y internally).
 - **`Terrain_RaycastLoResNoNormal @ 0x610860`** — the LoRes core with
   `hit = NULL` (pure boolean clear test). Callers:
   `render_skybox_sun_glow @ 0x5acd00`, `update_sun_glare @ 0x5ad130` — the
-  glare-occlusion path `nova_celestial.gd::_glare_ray_clear` stands in for
+  glare-occlusion path `celestial.gd::_glare_ray_clear` stands in for
   (env #14; the stand-in adopts the B1 port).
 - **`Terrain_RaycastHeightmapHiRes @ 0x60c760`** — a SIBLING full
   implementation, **witnessed 2026-07-16** (the occlusion slice) and ported as
@@ -869,7 +869,7 @@ height-0 floor, and the odd refine guard's zero-step no-op-walk interplay),
 bound as `TerrainData.raycast_terrain(from, to)` over both reimpl
 substrates (an optional height image or baked CPT — the existing slice-A
 sampler cores reused). The surviving adopter is the celestial glare ray
-(`nova_celestial._glare_ray_clear`, the 32-unit stand-in retired); the former
+(`celestial._glare_ray_clear`, the 32-unit stand-in retired); the former
 ONED mission-picker adopter was removed by ADR 0037. The safe-query guard
 divergences (OOB no-terrain vs retail clamp-to-edge,
 no-data NAN vs retail return-HIT, contiguous-atlas bilinear vs the seam
@@ -923,7 +923,7 @@ remains for a *full* (vs partial) R1 record:
   `PSBasic` (`colormap ×4 t1`), but WHAT `PolyTrn_InitTextures @ 0x60aaa0` /
   `PolyTrn_BindStageTextures @ 0x604330` put in stage 1 when no splat layer
   is authored — the single detail, or nothing — is unwitnessed, and the
-  runtime port (`nova_terrain_surface_inputs.cpp`) is splat-only. Until it is
+  runtime port (`terrain_surface_inputs.cpp`) is splat-only. Until it is
   witnessed, the former ONED terrain workspace promoted such a map on open
   (Detail A/B/C + far target seeded from the single detail, blend map all-A,
   name from the file stem) so a JO/DFX export resolved to `colormap × detail`
@@ -932,7 +932,7 @@ remains for a *full* (vs partial) R1 record:
   no-blend-map tier — a null `u_blendmap` samples Godot's WHITE default, so
   `c1+c2+c3` (×3, then the ×4 stage) blows the terrain out white/yellow. The
   retired workspace seeded an all-A blend map into `TerrainData` for such
-  maps; the runtime (`nova_terrain_surface_inputs.cpp` `get_blend_texture`)
+  maps; the runtime (`terrain_surface_inputs.cpp` `get_blend_texture`)
   still binds null for a raw blend-map-less `.trn`, so loading a BHD terrain
   straight into the game renders the blow-out until the
   PSBasic tier is witnessed and ported.

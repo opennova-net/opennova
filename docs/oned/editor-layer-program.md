@@ -113,8 +113,8 @@ live in this doc's git history; the outcome per phase:
   `CbinCreditsResource` `to_text()`/`from_text()` snapshot pair
   (`credits_editor_undo_test.gd`).
 - **B3 — native object snapshots**: `ObjectData.snapshot_edit_state()` /
-  `apply_edit_state()` in `godot/src/object/nova_object_data.h` +
-  `nova_object_data_state.cpp`.
+  `apply_edit_state()` in `godot/src/object/object_data.h` +
+  `object_data_state.cpp`.
 - **B4/B5 — Object undo**: equal-gated shadow steps recorded at the
   `object_changed` funnel against a cached baseline, with focus-bracketed
   session coalescing (typing/dragging = one step).

@@ -1,5 +1,5 @@
-#include "res://shaders/nova_color.gdshaderinc"
-#include "res://shaders/nova_frame_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
 
 // Expanded detail foliage. Retail emits the source model once per accepted
@@ -128,7 +128,7 @@ void fragment() {
 	if (u_high_pass_cutoff > 0.0 && retail_alpha > u_high_pass_cutoff) {
 		discard;
 	}
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		#ifdef NOVA_Q3_DEPTH_OCCLUDER
 		ALBEDO = vec3(0.0);
 		ALPHA = 1.0;
@@ -189,7 +189,7 @@ void fragment() {
 	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
 	color = mix(opennova_fog_color, color, foliage_fog_factor(v_fog_distance));
-	ALBEDO = nova_scene_output(color);
+	ALBEDO = scene_output(color);
 	// D3D fog folds into the source color before blending, so the blended
 	// weight is exactly the retail SRCALPHA term.
 	ALPHA = clamp(retail_alpha, 0.0, 1.0);

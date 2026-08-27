@@ -1,4 +1,4 @@
-#include "env/nova_weather_core.h"
+#include "env/weather_core.h"
 
 #include <formats/env/env_water_render.h> // water_uv_state rides the layer-1 cloud accumulators
 

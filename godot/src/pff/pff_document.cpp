@@ -1,4 +1,4 @@
-#include "pff/nova_pff_archive.h"
+#include "pff/pff_document.h"
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/vfs/vfs_decode.h>
@@ -38,7 +38,7 @@ PffFormat PffDocument::format_from_magic(uint32_t magic) {
 uint32_t PffDocument::container_key() const {
 	// Unknown game id -> the universal named default (engine/base/gameprofile
 	// carries the witness); every resolved profile ships the same key today.
-	const NovaGameProfile *p = gameprofile_by_id(game_id_);
+	const GameProfile *p = gameprofile_by_id(game_id_);
 	return p ? p->container_key : GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT;
 }
 
@@ -133,7 +133,7 @@ bool PffDocument::read_entry_bytes(const Entry &entry, bool decode, std::vector<
 		// container-decrypted fallback (so the file still extracts) and report it via out_decoded.
 		// The SCR key follows the selected game's profile: the version byte alone can't tell the JO
 		// Demo (DEFAULT-keyed) from retail JO/DFX2 (JO_DFX2-keyed), so the dropdown choice matters.
-		const NovaGameProfile *profile = gameprofile_by_id(game_id_);
+		const GameProfile *profile = gameprofile_by_id(game_id_);
 		const int scr_policy = profile ? profile->scr_policy : SCR_POLICY_VERSION_DETECT;
 		std::vector<uint8_t> decoded(out);
 		if (opennova::vfs_decode_payload(decoded, scr_policy)) {
@@ -225,7 +225,7 @@ void PffDocument::_bind_methods() {
 Array PffDocument::list_games() {
 	Array out;
 	for (int i = 0; i < gameprofile_count(); ++i) {
-		const NovaGameProfile *p = gameprofile_at(i);
+		const GameProfile *p = gameprofile_at(i);
 		if (p == nullptr) {
 			continue;
 		}

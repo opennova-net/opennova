@@ -18,33 +18,33 @@ static int failed = 0;
 } while (0)
 
 static int test_count(void) {
-    CHECK(gameprofile_count() == NOVA_GAME_COUNT, "count == NOVA_GAME_COUNT");
+    CHECK(gameprofile_count() == GAME_COUNT, "count == GAME_COUNT");
     CHECK(gameprofile_count() == 5, "five shipping profiles");
     return 1;
 }
 
 static int test_by_id(void) {
-    const NovaGameProfile *jo = gameprofile_by_id(NOVA_GAME_JO);
-    const NovaGameProfile *bhd = gameprofile_by_id(NOVA_GAME_BHD);
+    const GameProfile *jo = gameprofile_by_id(GAME_JO);
+    const GameProfile *bhd = gameprofile_by_id(GAME_BHD);
     CHECK(jo != NULL, "JO profile exists");
-    CHECK(jo->id == NOVA_GAME_JO, "JO id");
-    CHECK(bhd != NULL && bhd->id == NOVA_GAME_BHD, "BHD profile exists");
+    CHECK(jo->id == GAME_JO, "JO id");
+    CHECK(bhd != NULL && bhd->id == GAME_BHD, "BHD profile exists");
     CHECK(gameprofile_by_id(-1) == NULL, "unknown id -> NULL");
-    CHECK(gameprofile_by_id(NOVA_GAME_COUNT) == NULL, "out-of-range id -> NULL");
+    CHECK(gameprofile_by_id(GAME_COUNT) == NULL, "out-of-range id -> NULL");
     return 1;
 }
 
 static int test_at_bounds(void) {
     CHECK(gameprofile_at(-1) == NULL, "negative index -> NULL");
     CHECK(gameprofile_at(gameprofile_count()) == NULL, "past-end index -> NULL");
-    CHECK(gameprofile_at(0) != NULL && gameprofile_at(0)->id == NOVA_GAME_JO, "index 0 is JO");
+    CHECK(gameprofile_at(0) != NULL && gameprofile_at(0)->id == GAME_JO, "index 0 is JO");
     return 1;
 }
 
 static int test_universal_key_and_labels(void) {
     int i;
     for (i = 0; i < gameprofile_count(); ++i) {
-        const NovaGameProfile *p = gameprofile_at(i);
+        const GameProfile *p = gameprofile_at(i);
         CHECK(p != NULL, "profile not null");
         CHECK(p->container_key == 0x0312A4CEu, "container key is the universal 0x0312A4CE");
         CHECK(p->bfc1_compress == 0, "no bfc1 compression");
@@ -64,10 +64,10 @@ static int test_universal_key_and_labels(void) {
 
 /* gameprofile_by_code + the game-to-policy seam used by native runtime loaders. */
 static int test_by_code_and_policy(void) {
-    const NovaGameProfile *demo = gameprofile_by_code("jodemo");
-    CHECK(demo != NULL && demo->id == NOVA_GAME_JO_DEMO, "by_code jodemo -> demo");
+    const GameProfile *demo = gameprofile_by_code("jodemo");
+    CHECK(demo != NULL && demo->id == GAME_JO_DEMO, "by_code jodemo -> demo");
     CHECK(gameprofile_by_code("JODEMO") == demo, "by_code is case-insensitive");
-    CHECK(gameprofile_by_code("jo")->id == NOVA_GAME_JO, "by_code jo -> JO");
+    CHECK(gameprofile_by_code("jo")->id == GAME_JO, "by_code jo -> JO");
     CHECK(gameprofile_by_code(NULL) == NULL, "NULL code -> NULL");
     CHECK(gameprofile_by_code("nope") == NULL, "unknown code -> NULL");
 
@@ -82,13 +82,13 @@ static int test_by_code_and_policy(void) {
    byte selects), so they version-detect. The JO Demo keys the same version byte with the DEFAULT
    key, so it must force that key. */
 static int test_scr_policy_per_game(void) {
-    const NovaGameProfile *demo = gameprofile_by_id(NOVA_GAME_JO_DEMO);
+    const GameProfile *demo = gameprofile_by_id(GAME_JO_DEMO);
     CHECK(demo != NULL, "demo profile exists");
     CHECK(demo->scr_policy == SCR_POLICY_FORCE_DEFAULT, "JO Demo forces the DEFAULT key");
-    CHECK(gameprofile_by_id(NOVA_GAME_JO)->scr_policy == SCR_POLICY_VERSION_DETECT, "retail JO version-detect");
-    CHECK(gameprofile_by_id(NOVA_GAME_DFX)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX version-detect");
-    CHECK(gameprofile_by_id(NOVA_GAME_DFX2)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX2 version-detect");
-    CHECK(gameprofile_by_id(NOVA_GAME_BHD)->scr_policy == SCR_POLICY_VERSION_DETECT, "BHD version-detect");
+    CHECK(gameprofile_by_id(GAME_JO)->scr_policy == SCR_POLICY_VERSION_DETECT, "retail JO version-detect");
+    CHECK(gameprofile_by_id(GAME_DFX)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX version-detect");
+    CHECK(gameprofile_by_id(GAME_DFX2)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX2 version-detect");
+    CHECK(gameprofile_by_id(GAME_BHD)->scr_policy == SCR_POLICY_VERSION_DETECT, "BHD version-detect");
     return 1;
 }
 

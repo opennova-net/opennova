@@ -3,7 +3,7 @@
 // A NovaLogic sound set (.lwf Multi) has one or more layers, each holding a list of member
 // sounds and selection flags that decide which member plays when the set is triggered. This is
 // the faithful port of the engine's per-layer member selection, pulled out of the Godot layer
-// (godot/game/world/nova_sound_bank.gd) so the engine core stays C++ and a headless server can
+// (godot/game/world/sound_bank.gd) so the engine core stays C++ and a headless server can
 // resolve the same member without Godot. The embedder keeps the lwf data access and the
 // AudioStreamPlayer spawning; this only decides WHICH member index plays.
 //

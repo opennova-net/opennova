@@ -1,4 +1,4 @@
-#include "util/nova_paths.h"
+#include "util/paths.h"
 
 #include "util/texture_path_resolver.h"
 

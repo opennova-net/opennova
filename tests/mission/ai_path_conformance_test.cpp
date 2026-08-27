@@ -252,7 +252,7 @@ int main() {
 	// "does not reproduce headless, therefore the sim is exonerated" against
 	// this rig, which had no ground under either of them.
 	// Same pipeline the game uses, mirroring Simulation::set_terrain_height_field
-	// and godot::height_field_apply_trn (nova_terrain_data.cpp:388-402).
+	// and godot::height_field_apply_trn (terrain_data.cpp:388-402).
 	opennova::CptFile cpt;
 	opennova::TrnConfig trn;
 	std::vector<uint16_t> heightmap;

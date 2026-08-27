@@ -1,4 +1,4 @@
-#include "env/nova_slot_shadow.h"
+#include "env/slot_shadow.h"
 
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -17,13 +17,13 @@
 #include <utility>
 #include <vector>
 
-#include "env/nova_mission_environment.h"
-#include "env/nova_water.h"
-#include "env/nova_weather.h"
-#include "lights/nova_light_scene.h"
-#include "object/nova_object_model.h"
-#include "resource_index/nova_resource_root.h"
-#include "terrain/nova_terrain_data.h"
+#include "env/mission_environment.h"
+#include "env/water.h"
+#include "env/weather.h"
+#include "lights/light_scene.h"
+#include "object/object_model.h"
+#include "resource_index/resource_root.h"
+#include "terrain/terrain_data.h"
 
 namespace godot {
 
@@ -45,7 +45,7 @@ static_assert(((1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) |
 		"the capture layer bits must match the Water layer table");
 
 const StringName &SlotShadow::caster_group() {
-	static const StringName group("nova_slot_shadow_casters");
+	static const StringName group("slot_shadow_casters");
 	return group;
 }
 

@@ -9,11 +9,11 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 
-#include "nova_present_applier.h"
-#include "nova_present_stats.h"
-#include "object/nova_entity_index.h"
-#include "object/nova_object_model.h"
-#include "mission/nova_mission_object_placer.h"
+#include "simulation/present_applier.h"
+#include "simulation/present_stats.h"
+#include "object/entity_index.h"
+#include "object/object_model.h"
+#include "mission/mission_object_placer.h"
 
 namespace godot {
 
@@ -35,7 +35,7 @@ class Simulation;
 // This class is the COLD path: spawn/defer/unresolved bookkeeping, the
 // liveness prune, held-weapon builds, spawn callbacks and stats. It owns a
 // private PresentApplier whose wire walk carries plan validity and the
-// per-frame per-row hot path (nova_present_applier_wire.cpp) — the behavioral
+// per-frame per-row hot path (present_applier_wire.cpp) — the behavioral
 // semantics and witnesses are documented there and at the engine headers
 // (npruntime/wire_present.h for the pool->kind projection).
 class WirePresentPass : public RefCounted {

@@ -1,6 +1,6 @@
 extends GutTest
 
-# UdpPump (engine/network/nova_udp_pump.{h,cpp}) — the raw-UDP socket plumbing for the
+# UdpPump (engine/network/udp_pump.{h,cpp}) — the raw-UDP socket plumbing for the
 # co-op-LAN net path (Increment B). No sim, no protocol framing: this proves that a host can
 # bind, a joiner can dial, and raw datagrams move BOTH directions over localhost with the
 # correct source address surfaced (the address the host later keys a connection by).

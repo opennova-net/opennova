@@ -1,6 +1,6 @@
-#include "nova_world_client.h"
+#include "network/novaworld_client.h"
 
-#include "nova_world_identity.h"
+#include "network/novaworld_identity.h"
 
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>

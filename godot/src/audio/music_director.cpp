@@ -8,11 +8,11 @@
 //                                                  -> _on_volume_changed
 //   Jointops.exe!Intrinsic_GEcho @ 0x6720C0            -> _on_echo
 
-#include "nova_music_director.h"
+#include "audio/music_director.h"
 
-#include "nova_music_script.h"
-#include "nova_sbf_audio_stream.h"
-#include "nova_sbf_bank.h"
+#include "audio/music_script.h"
+#include "audio/sbf_audio_stream.h"
+#include "audio/sbf_bank.h"
 
 #include <godot_cpp/classes/audio_stream.hpp>
 #include <godot_cpp/core/class_db.hpp>

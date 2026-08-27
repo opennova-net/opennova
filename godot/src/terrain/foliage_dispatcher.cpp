@@ -1,9 +1,9 @@
-#include "nova_foliage_dispatcher.h"
+#include "terrain/foliage_dispatcher.h"
 
-#include "nova_terrain.h"
-#include "nova_terrain_data.h"
-#include "nova_terrain_tile_info.h"
-#include "nova_terrain_foliage_def.h"
+#include "terrain/terrain.h"
+#include "terrain/terrain_data.h"
+#include "terrain/terrain_tile_info.h"
+#include "terrain/terrain_foliage_def.h"
 
 #include <runtime/terrain/foliage_detail_collector.h>
 

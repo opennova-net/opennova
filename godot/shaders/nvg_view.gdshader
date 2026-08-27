@@ -1,7 +1,7 @@
 shader_type canvas_item;
 render_mode unshaded;
 
-#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
 
 // The NVG post follows the retail luma/tint/glow constants documented
 // with the first-person NVG path in docs/net/novaworld-net-re.md section 5.40.
@@ -13,7 +13,7 @@ render_mode unshaded;
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
 
 void fragment() {
-	vec3 scene = nova_display_encode_gamma(
+	vec3 scene = display_encode_gamma(
 			textureLod(screen_texture, SCREEN_UV, 0.0).rgb);
 
 	// Retail first converts each captured frame to 4x luma, then averages four
@@ -30,5 +30,5 @@ void fragment() {
 	float lum = dot(history_sum, vec3(0.30, 0.60, 0.10));
 	float bright = clamp(lum - 0.15, 0.0, 1.0);
 	vec3 glow = bright * vec3(0.20, 0.60, 0.20);
-	COLOR = vec4(nova_display_decode_gamma(tinted + glow * 0.16), 1.0);
+	COLOR = vec4(display_decode_gamma(tinted + glow * 0.16), 1.0);
 }

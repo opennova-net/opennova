@@ -1,10 +1,10 @@
 // MUS interactive-music script wrapper. The underlying parser is engine/formats/mus
 // (mus_open_memory). Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
 
-#include "nova_music_script.h"
+#include "audio/music_script.h"
 
-#include "nova_sbf_bank.h"
-#include "util/nova_data_format.h"
+#include "audio/sbf_bank.h"
+#include "util/data_format.h"
 
 #include <formats/mus/mus.h>
 

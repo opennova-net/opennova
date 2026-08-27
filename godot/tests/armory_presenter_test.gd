@@ -50,7 +50,7 @@ class CapturePlayerPresenter:
 
 func before_each() -> void:
 	Strings.clear()
-	NovaMusicService.set_var(2, 0)
+	MusicService.set_var(2, 0)
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
 	if not DirAccess.dir_exists_absolute(dir):
 		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
@@ -206,7 +206,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	assert_eq(driver.get_widget_text(cancel), menutxt.get_string("WD_NOHOT_CANCEL"),
 		"standalone weapon.mnu resolves button IDs through menutxt")
 	assert_ne(driver.get_widget_text(cancel), "WD_NOHOT_CANCEL", "raw RTXT IDs are never shown")
-	assert_eq(NovaMusicService.get_var(2), 14, "WEAPON MUSICVAR drives retail menu Var2")
+	assert_eq(MusicService.get_var(2), 14, "WEAPON MUSICVAR drives retail menu Var2")
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_has(_loadout_names(sim), equipped,

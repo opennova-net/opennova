@@ -82,6 +82,6 @@ in the managed standalone game from saved loose assets.
 ## Verification
 
 `tests/mission_present_pass_test.gd` (transform/PANM/visibility/fallback/options), additions to
-`nova_simulation_test.gd` (snapshot shape + scalar-parity), `mission_entity_registry_test.gd`. Full GUT
+`simulation_test.gd` (snapshot shape + scalar-parity), `mission_entity_registry_test.gd`. Full GUT
 suite green (730 passing). End-to-end: game NPCs walk + PANM poses + dialog audio fires; editor Play
 moves + poses, Stop restores, selection/drag/undo intact, single-action preview works.

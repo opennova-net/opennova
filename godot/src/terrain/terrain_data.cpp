@@ -1,8 +1,8 @@
-#include "nova_terrain_data.h"
+#include "terrain/terrain_data.h"
 
-#include "nova_terrain_foliage_def.h"
-#include "nova_terrain_foliage_map.h"
-#include "nova_terrain_tile_info.h"
+#include "terrain/terrain_foliage_def.h"
+#include "terrain/terrain_foliage_map.h"
+#include "terrain/terrain_tile_info.h"
 
 #include <formats/til/til_io.h>
 #include <runtime/terrain_query/coords.h>
@@ -18,7 +18,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "util/pcx_texture_bridge.h"
-#include "util/nova_data_format.h"
+#include "util/data_format.h"
 #include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -664,8 +664,8 @@ void TerrainData::_notify_terrain_changed() {
 
 // ---------------------------------------------------------------------------
 // Texture loading helper — delegates to shared util/texture_path_resolver.h.
-// res:// textures load through ResourceLoader (imported .ctex / NovaTexture
-// loader), so they survive export; absolute paths decode raw bytes.
+// res:// textures load through ResourceLoader (the imported .ctex), so they
+// survive export; absolute paths decode raw bytes.
 // ---------------------------------------------------------------------------
 
 static Ref<Texture2D> _load_texture_from_dir(const String &dir, const String &filename) {
@@ -881,8 +881,8 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	// CPT is an export-time bake artefact; editor projects legitimately save
 	// a .trn without one (see plan: "Make CPT optional"). Missing/empty
 	// polydata is not an error — load() still succeeds, cpt stays empty, and
-	// consumers that need CPT (Terrain::_build_terrain @ nova_terrain.cpp:571,
-	// get_height* guards @ nova_terrain_data.cpp:714/739/758) already early-out
+	// consumers that need CPT (Terrain::_build_terrain @ terrain.cpp:571,
+	// get_height* guards @ terrain_data.cpp:714/739/758) already early-out
 	// gracefully.
 	if (trn.polydata.empty()) {
 		loaded = true;

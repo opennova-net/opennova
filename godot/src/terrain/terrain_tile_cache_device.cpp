@@ -4,11 +4,11 @@
 // terrain_tile_composition_cache.{h,cpp}, held here as a member (see the
 // class header's witness block and docs/terrain/terrain-re.md; retail's
 // device-side twin is the D3D tile-texture pool the record maps).
-#include "nova_terrain_tile_cache_device.h"
+#include "terrain/terrain_tile_cache_device.h"
 
-#include "nova_terrain_data.h"
-#include "nova_terrain_surface_inputs.h"
-#include "nova_terrain_tile_info.h"
+#include "terrain/terrain_data.h"
+#include "terrain/terrain_surface_inputs.h"
+#include "terrain/terrain_tile_info.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>

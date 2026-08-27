@@ -89,7 +89,7 @@ var _queued_sound_emitters: Array = []
 var _dynamic_emitter_states: Dictionary = {}
 # Latched once a world-driven logic tick arrives (advance_ticks): the world tick owns
 # the eval clock; until then tick(delta) free-runs an autonomous 62.5 Hz clock
-# (editor-idle owners — the nova_weather world-driven/autonomous split).
+# (editor-idle owners — the weather world-driven/autonomous split).
 var _world_driven_ticks := false
 var _world_driven_tick_offset := 0
 # At most MIX_CHANNELS entries: [{player:AudioStreamPlayer3D, candidate_id:int}].

@@ -3110,7 +3110,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 	# map no fixture model carries, the entity render gates need blink boxes,
 	# and the g_BlinkWaterVisible override needs an authored water letter —
 	# the native verdict/delta contracts behind them are pinned on the real sim
-	# in nova_simulation_test.gd.)
+	# in simulation_test.gd.)
 	var root_dir := _stage_building_fixture("occl_frame")
 	var world := _make_world()
 	add_child_autofree(world)
@@ -3151,7 +3151,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 # runtime/sim doubles: its subject — an occlusion RELEASE landing on the sim's
 # CURRENT present intent — needed a sim that hides an entity mid-release, which
 # only the deleted doubles could stage. The release-consult contract itself is
-# pinned on the real sim by nova_simulation_test.gd's
+# pinned on the real sim by simulation_test.gd's
 # test_occlusion_delta_calls_emit_changes_only (entity_present_visible) and the
 # shared present-visibility dictionary contract in mission_present_pass_test.)
 
@@ -3212,7 +3212,7 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 # doubles: counting section-mask dispatches needed the recording node stub. The
 # churn contract it pinned — steady verdicts emit no deltas, so steady frames
 # walk nothing — is the native delta contract, pinned on the real sim by
-# nova_simulation_test.gd's test_occlusion_delta_calls_emit_changes_only.)
+# simulation_test.gd's test_occlusion_delta_calls_emit_changes_only.)
 
 
 func test_occlusion_debug_view_builds_and_frees() -> void:

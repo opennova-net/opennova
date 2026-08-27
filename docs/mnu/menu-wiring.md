@@ -53,7 +53,7 @@ same hook drives the mission browser and the Options → Mods expansion list.
 ## Shell wiring: Commands by control NAME
 
 Game behavior the format cannot express (launch a mission, mount an expansion, quit)
-is a **Command**, supplied by the Menu Shell (`godot/game/nova_menu_shell.gd`) by matching
+is a **Command**, supplied by the Menu Shell (`godot/game/menu_shell.gd`) by matching
 a control's NAME — never written in the `.mnu` (ADR 0001). The shell holds exported
 name sets and connects/sees them after each (re)build:
 

@@ -85,7 +85,7 @@ func test_game_world_exposes_an_exact_json_safe_render_snapshot() -> void:
 	assert_true(value["shadows"].has("static_terrain"))
 	var static_terrain_shadow := value["shadows"]["static_terrain"] as Dictionary
 	assert_eq(static_terrain_shadow["implementation"], "terrain_page_alpha")
-	assert_false(world.has_node("NovaStaticSunShadow"),
+	assert_false(world.has_node("StaticSunShadow"),
 		"Diagnostics must not preserve a stale static DirectionalLight witness.")
 	assert_true(static_terrain_shadow.has("enabled"))
 	assert_true(static_terrain_shadow.has("active"))

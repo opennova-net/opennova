@@ -18,26 +18,26 @@ namespace godot {
 
 // Immutable, upload-ready atlas catalog. The main thread builds this only
 // when the mounted PTL catalog changes; render callbacks retain it by value.
-struct NovaParticleAtlasPageSnapshot {
+struct ParticleAtlasPageSnapshot {
 	std::uint8_t type = 0;
 	std::uint32_t side = 0;
 	PackedByteArray rgba8;
 };
 
-struct NovaParticleAtlasSnapshot {
+struct ParticleAtlasSnapshot {
 	std::uint64_t generation = 0;
-	std::vector<NovaParticleAtlasPageSnapshot> pages;
+	std::vector<ParticleAtlasPageSnapshot> pages;
 };
 
 // One immutable World-domain submission. ParticleFrameCompiler remains the
 // ordering authority. Vertices are the compiler's quads expanded to triangles
 // so every adjacent-state command can bind a byte offset into one retained GPU
 // buffer without allocating command-local arrays or index slices.
-struct NovaParticleWorldSubmission {
+struct ParticleWorldSubmission {
 	std::uint64_t frame_id = 0;
 	PackedByteArray triangle_vertices;
 	std::vector<renderer::ParticleDrawCommand> commands;
-	std::shared_ptr<const NovaParticleAtlasSnapshot> atlas;
+	std::shared_ptr<const ParticleAtlasSnapshot> atlas;
 	std::array<float, 3> camera_position{};
 	std::array<float, 3> camera_forward{0.0f, 0.0f, 1.0f};
 	std::array<float, 3> fog_color{};
@@ -66,7 +66,7 @@ public:
 	ParticleCompositorEffect();
 	~ParticleCompositorEffect() override;
 
-	void publish(const std::shared_ptr<const NovaParticleWorldSubmission> &p_submission);
+	void publish(const std::shared_ptr<const ParticleWorldSubmission> &p_submission);
 	void clear_submission();
 	void set_particles_hidden(bool p_hidden);
 	// The real World path owns RenderingDevice pipelines whose framebuffer

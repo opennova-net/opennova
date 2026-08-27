@@ -1,5 +1,5 @@
 // The water reflection mirror view (env #30) — the witnessed offscreen
-// prerender's camera derivation as a typed record, ported from nova_water.gd
+// prerender's camera derivation as a typed record, ported from water.gd
 // (2026-08-10 de-scripting). Retail prerenders the mirrored scene into
 // Water_ReflectionTexture BEFORE the main frame [orig: Render_TerrainScene
 // @ 0x610c80 -> Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene

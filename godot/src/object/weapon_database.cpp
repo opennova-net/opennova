@@ -1,6 +1,6 @@
-#include "nova_weapon_database.h"
+#include "object/weapon_database.h"
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <godot_cpp/variant/packed_float32_array.hpp>
 

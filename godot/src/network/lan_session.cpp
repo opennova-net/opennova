@@ -1,4 +1,4 @@
-#include "network/nova_lan_session.h"
+#include "network/lan_session.h"
 
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>

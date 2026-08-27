@@ -18,7 +18,7 @@
 // Godot-free: no HTTPRequest, no Variant. The owner ships each HttpRequestSpec over its transport and
 // feeds the (code, headers, body) back in.
 //
-// Faithful port of nova_world_client.cpp's login()/send_login_post()/on_login_request_completed(),
+// Faithful port of novaworld_client.cpp's login()/send_login_post()/on_login_request_completed(),
 // gsb_url()/request_server_list()/on_gsb_request_completed(), join()/on_join_request_completed(), and
 // http_base()/request_headers()/merge_response_cookies(). The URL/.dll/form-field literals are
 // byte-preserved [orig: the retail jop_2_* template + NWLogin/NWStart/NWJoin query strings].
@@ -76,7 +76,7 @@ public:
 	void reset(); // start()/stop() equivalent: clears the jar + both machines (keeps the context)
 
 	// The derived base "http://host[:port]" for the lobby HTTP endpoint (empty until the gate replies).
-	// [orig: nova_world_client.cpp http_base() @0x...]
+	// (see godot/src/network/novaworld_client.cpp http_base())
 	std::string http_base() const;
 	// The concrete login prepare URL with the [domainname]/[VER1]/[VER2]/[CC]/[GT] template filled.
 	std::string resolve_startup_url() const;

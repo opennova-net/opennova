@@ -1,6 +1,6 @@
-#include "nova_credits_player.h"
+#include "cbin/credits_player.h"
 
-#include "fnt/nova_fnt_resource.h"
+#include "fnt/fnt_resource.h"
 
 #include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/label.hpp>
@@ -386,9 +386,9 @@ void CreditsPlayer::_rebuild_content() {
 			if (font_res.is_valid()) {
 				Ref<Font> font = font_res;
 				if (!font.is_valid()) {
-					Ref<FntResource> nova_fnt = font_res;
-					if (nova_fnt.is_valid()) {
-						font = nova_fnt->to_font_file();
+					Ref<FntResource> fnt_res = font_res;
+					if (fnt_res.is_valid()) {
+						font = fnt_res->to_font_file();
 					}
 				}
 				if (font.is_valid()) {

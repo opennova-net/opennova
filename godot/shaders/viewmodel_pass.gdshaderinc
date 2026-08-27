@@ -20,7 +20,7 @@ instance uniform bool u_viewmodel_pass = false;
 // is reversed-Z on [0, 1] (near -> 1), so the band is NDC [0.9, 1.0].
 const float NOVA_VIEWMODEL_DEPTH_WINDOW = 0.1;
 
-vec4 nova_viewmodel_clip(vec4 view_pos, mat4 projection) {
+vec4 viewmodel_clip(vec4 view_pos, mat4 projection) {
 	vec4 clip = projection * view_pos;
 	float n = opennova_viewmodel_projection.y;
 	float f = opennova_viewmodel_projection.z;
@@ -38,8 +38,8 @@ vec4 nova_viewmodel_clip(vec4 view_pos, mat4 projection) {
 // POSITION override for the WHOLE shader as soon as POSITION is written
 // anywhere, so a path that does not write it leaves the clip position zero
 // and the object vanishes: the plain projection is written explicitly here.
-vec4 nova_viewmodel_position(bool viewmodel_pass, vec4 view_pos,
+vec4 viewmodel_position(bool viewmodel_pass, vec4 view_pos,
 		mat4 projection) {
-	return viewmodel_pass ? nova_viewmodel_clip(view_pos, projection)
+	return viewmodel_pass ? viewmodel_clip(view_pos, projection)
 			: projection * view_pos;
 }

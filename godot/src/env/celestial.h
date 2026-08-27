@@ -15,11 +15,11 @@
 #include <runtime/environment/celestial_frame.h>
 
 #include "env/env_file.h"
-#include "env/nova_glare_occlusion.h"
-#include "env/nova_star_field.h"
-#include "object/nova_object_data.h"
-#include "resource_index/nova_resource_root.h"
-#include "terrain/nova_terrain_data.h"
+#include "env/glare_occlusion.h"
+#include "env/star_field.h"
+#include "object/object_data.h"
+#include "resource_index/resource_root.h"
+#include "terrain/terrain_data.h"
 
 namespace godot {
 
@@ -35,7 +35,7 @@ class MissionEnvironment;
 // MultiMesh, per-frame shader-parameter pushes, and the two terrain
 // line-of-sight rays the glare occlusion window consumes. The 3DI diffuse
 // stays; bodies are tinted and dimmed by the TOD sun/moon color. Ported from
-// nova_celestial.gd (2026-08-10 de-scripting); RE record:
+// celestial.gd (2026-08-10 de-scripting); RE record:
 // docs/env/env-tod-re.md "Celestial bodies".
 class Celestial : public Node3D {
 	GDCLASS(Celestial, Node3D)

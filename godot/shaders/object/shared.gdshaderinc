@@ -2,9 +2,9 @@
 // (coverage, texture stages, normal source, self-lighting, family) lives in
 // statically selected includes; this file contains no capability switches.
 
-#include "res://shaders/nova_color.gdshaderinc"
-#include "res://shaders/nova_frame_pass.gdshaderinc"
-#include "res://shaders/nova_viewmodel_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
+#include "res://shaders/viewmodel_pass.gdshaderinc"
 
 uniform vec3 u_uv_transform_u = vec3(1.0, 0.0, 0.0);
 uniform vec3 u_uv_transform_v = vec3(0.0, 1.0, 0.0);
@@ -39,7 +39,7 @@ global uniform vec3 opennova_sun_direction;
 // Diffuse1.a (plus _FFP's optional Diffuse2.a and AlphaGenValue) before the
 // terrain drape samples it. Each of SlotShadow's twelve capture cameras culls
 // to exactly one reserved visual layer (Water::VISUAL_LAYER_SLOT_CAPTURE_MASK,
-// assigned per render order by nova_slot_shadow.cpp kCaptureLayerBits), a
+// assigned per render order by slot_shadow.cpp kCaptureLayerBits), a
 // device signature no beauty, Q3, mirror, viewmodel, or environment-capture
 // camera carries, so the ordinary scene keeps NORMAL shading while those
 // viewports encode the same black-on-white coverage for the reimpl drape.
@@ -205,7 +205,7 @@ void obj_apply_water_reflection_clip(vec3 camera_position_world) {
 // uint test replaces twelve per-fragment eye distances. Godot leaves
 // CAMERA_VISIBLE_LAYERS unset for light shadow passes (RenderSceneDataRD
 // camera_visible_layers is never assigned in _render_shadow_append), the
-// same exposure nova_is_q3_pass already carries there.
+// same exposure is_q3_pass already carries there.
 bool obj_is_slot_shadow_capture(uint camera_visible_layers,
 		bool in_shadow_pass) {
 	if (in_shadow_pass) {

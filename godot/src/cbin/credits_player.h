@@ -5,7 +5,7 @@
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 
-#include "cbin_credits_resource.h"
+#include "cbin/cbin_credits_resource.h"
 
 namespace godot {
 

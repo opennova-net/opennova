@@ -1,4 +1,4 @@
-#include "nova_net_protocol.h"
+#include "network/net_protocol.h"
 
 #include <net/npruntime/game_config.h>
 #include <net/npwire/game_type.h>

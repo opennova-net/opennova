@@ -4,11 +4,11 @@
 // world/player_weapon.h); this TU marshals installs and inputs, drains the
 // event queue, snapshots the per-frame state dictionary, and routes the two
 // wire request records (net-re §5.62).
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
-using namespace novasim;
+using namespace sim_internal;
 
 // The world-side flag mirrors must stay the def parser's exact bits.
 static_assert(opennova::world::weapon_flag::kNoClipsNoDraw ==

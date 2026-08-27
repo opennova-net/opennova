@@ -1,10 +1,10 @@
-#include "env/nova_weather.h"
+#include "env/weather.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/object.hpp>
 
-#include "env/nova_mission_environment.h"
-#include "simulation/nova_simulation.h"
+#include "env/mission_environment.h"
+#include "simulation/simulation.h"
 
 namespace godot {
 

@@ -1,7 +1,7 @@
-#include "nova_terrain_surface_inputs.h"
+#include "terrain/terrain_surface_inputs.h"
 
-#include "nova_terrain_data.h"
-#include "nova_terrain_tile_info.h"
+#include "terrain/terrain_data.h"
+#include "terrain/terrain_tile_info.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>

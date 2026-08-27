@@ -6,7 +6,7 @@
 // zone-timer table and minimap banks, and the replica pipeline's chat drain
 // for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape).
 
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
@@ -15,7 +15,7 @@
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/vehicle_panel_feed.h>
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace godot {
 

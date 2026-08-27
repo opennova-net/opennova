@@ -282,7 +282,7 @@ func _ensure_menu() -> bool:
 	_ui_parent.add_child(_audio)
 	_driver = MenuDriver.new()
 	_driver.attach(_frame, _audio)
-	_driver.set_music_director(NovaMusicService.director())
+	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
 	var style := _load_style(root)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")

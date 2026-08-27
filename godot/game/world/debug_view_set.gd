@@ -24,8 +24,8 @@ const OcclusionDebugView := preload("res://game/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://game/debug/particle_debug_view.gd")
 const RoundDebugView := preload("res://game/debug/round_debug_view.gd")
 const HitboxDebugView := preload("res://game/debug/hitbox_debug_view.gd")
-const NovaDebugViewStatus := preload(
-		"res://game/debug/nova_debug_view_status.gd")
+const DebugViewStatus := preload(
+		"res://game/debug/debug_view_status.gd")
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
@@ -86,8 +86,8 @@ func _view_live(view: Node) -> bool:
 ## installed view currently has anything it can draw are deliberately separate
 ## facts. A retained toggle can be enabled while its mission-owned view is
 ## detached during unload/reload.
-func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
-	var statuses: Array[NovaDebugViewStatus] = []
+func get_debug_view_statuses() -> Array[DebugViewStatus]:
+	var statuses: Array[DebugViewStatus] = []
 	statuses.append(_view_status(
 			&"show_skeletons", _skeleton_debug, _view_live(_skeleton_view),
 			_skeleton_view.get_debug_drawable_count() \
@@ -128,7 +128,7 @@ func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
 
 func _view_status(id: StringName, enabled: bool, installed: bool,
 		drawable_count: int, empty_reason: String, singular: String,
-		plural: String) -> NovaDebugViewStatus:
+		plural: String) -> DebugViewStatus:
 	var reason := "Disabled"
 	if enabled and not installed:
 		reason = "Waiting for a loaded world"
@@ -139,7 +139,7 @@ func _view_status(id: StringName, enabled: bool, installed: bool,
 			drawable_count,
 			singular if drawable_count == 1 else plural,
 		]
-	return NovaDebugViewStatus.new(
+	return DebugViewStatus.new(
 			id, enabled, installed, drawable_count, reason)
 
 

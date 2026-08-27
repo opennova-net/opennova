@@ -1,10 +1,10 @@
-#include "audio/nova_ambient_mixer.h"
+#include "audio/ambient_mixer.h"
 
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/audio/bank_chain.h>
-#include "simulation/nova_simulation.h"
+#include "simulation/simulation.h"
 
 #include <string>
 #include <utility>

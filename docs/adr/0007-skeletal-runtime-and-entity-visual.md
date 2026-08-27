@@ -165,7 +165,7 @@ the outgoing root sample and enters death at weight zero), `tests/world/infantry
 (exact float32 10/15-tick weights, independent playheads, A→B→C retargeting, target-only
 events, and death during an active blend), GUT `skeletal_anim_test`/`object_editor_test`/
 `mission_present_pass_test`. Native `mount_test` pins the exact non-cardinal seat-heading conversion,
-remote seat-frame state, and the local look/body split. Focused GUT `nova_simulation_test` test
+remote seat-frame state, and the local look/body split. Focused GUT `simulation_test` test
 `test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun` fires a local-owned round through a
 rotated mounted enemy's posed section and confirms authoritative damage. Native `collision_test`
 additionally pins a moved posed head (section 14),
@@ -178,7 +178,7 @@ invalidation. F3 omits the local avatar and bounds posed/fallback remote targets
 96-actor diagnostic cap. Headless dump confirms US01 and C4Ground (40+ clips, compressed) pose as humanoids
 with no collapse. User-validated US01 walk/idle in the object preview.
 
-GUT `nova_simulation_test::test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose`
+GUT `simulation_test::test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose`
 reproduces the multiplayer spawn order and pins B50 `phrase_set=4` selecting US01's
 `anim_emplaced_5`; it may not silently fall back to the generic `anim_emplaced` pose.
 

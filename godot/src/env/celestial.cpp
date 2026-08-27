@@ -1,4 +1,4 @@
-#include "env/nova_celestial.h"
+#include "env/celestial.h"
 
 #include <cmath>
 
@@ -13,9 +13,9 @@
 
 #include "env/env_axes.h"
 #include "env/env_render_camera.h"
-#include "env/nova_mission_environment.h"
-#include "object/nova_object_data.h"
-#include "object/nova_object_model.h"
+#include "env/mission_environment.h"
+#include "object/object_data.h"
+#include "object/object_model.h"
 
 namespace godot {
 
@@ -220,7 +220,7 @@ void Celestial::_rebuild_if_needed() {
 		// render_skybox_sun_glow @ 0x5acd00 + update_sun_glare @ 0x5ad130
 		// glare/glint - docs/env/env-tod-re.md): the authored quads face
 		// render +Z = EAST. ObjectData maps model (x, y, z) into Godot
-		// (-x, y, z) (nova_object_data_geometry.cpp godot_position), which
+		// (-x, y, z) (object_data_geometry.cpp godot_position), which
 		// under an identity basis leaves the quad facing Godot +Z (south) -
 		// edge-on at a sunrise/sunset pose, the "squashed oval sun". The
 		// +90 degree yaw about +Y is the exact composition

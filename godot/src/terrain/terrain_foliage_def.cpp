@@ -1,4 +1,4 @@
-#include "nova_terrain_foliage_def.h"
+#include "terrain/terrain_foliage_def.h"
 
 #include <algorithm>
 

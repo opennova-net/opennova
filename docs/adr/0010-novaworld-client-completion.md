@@ -9,10 +9,10 @@ OpenNova Launcher's hosts redirect (see `launcher/`). We want **our Godot client
 at OpenNova *or* `gs.novaworld.net` — and, over time, implement the full client flow: browse, account
 login, host, join.
 
-Today the client (`godot/engine/network/nova_world_client.cpp`) does only the gate probe and the
+Today the client (`godot/engine/network/novaworld_client.cpp`) does only the gate probe and the
 session HELLO; the rest is stubbed:
 
-- session AUTH hardcodes the server host-key (`send_session_join(/*server_hk=*/0)`, `nova_world_client.cpp:384`);
+- session AUTH hardcodes the server host-key (`send_session_join(/*server_hk=*/0)`, `novaworld_client.cpp:384`);
 - the in-session layer-4 handler (opcode `0x83`) is an empty keep-alive note;
 - the panel calls non-existent `get_server_rows()` / `host_game()` (`godot/game/novaworld_panel.gd`).
 

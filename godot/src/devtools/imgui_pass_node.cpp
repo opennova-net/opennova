@@ -1,4 +1,4 @@
-#include "imgui_pass_node.h"
+#include "devtools/imgui_pass_node.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>

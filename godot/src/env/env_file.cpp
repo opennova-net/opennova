@@ -4,7 +4,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include "util/nova_data_format.h"
+#include "util/data_format.h"
 #include "util/pcx_texture_bridge.h"
 #include "util/texture_path_resolver.h"
 

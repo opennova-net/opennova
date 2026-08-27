@@ -16,7 +16,7 @@ shader-tag table (`libs/oed/include/oed/material_descriptor.h`, static_assert-lo
 to the raw `gMaterialInfoTable` dump in `oed/types.h`) and its consumption chain —
 `libs/renderer` `classify_object_material()` → `ObjectMaterialClassification` →
 runtime-composed Godot shader source → `ObjectShaderCache` → the ShaderMaterials
-`nova_object_model.gd` builds — carried only ModSuperOed-side `[orig]` citations. Not
+`object_model.gd` builds — carried only ModSuperOed-side `[orig]` citations. Not
 one Jointops runtime render address is cited anywhere in `libs/` outside `libs/env`,
 no RE record covers the runtime material path, batching/draw order, the runtime TSS
 stage tables, or lighting application, and draw order has no reimplementation at all
@@ -111,7 +111,7 @@ that `libs/renderer` (4 files dodging one oed header) "folds" is REVERSED
 tables, sort-key/pass ordering rules, lighting scalar math — in `libs/renderer`,
 Godot-agnostic, C++-static-link only (Model B, like `libs/env`; no C ABI additions
 planned). REN-2 also subsumes ENG-4's `MATERIAL_FLAG_*` single-sourcing leg for the
-engine-side flag spaces (`nova_object_model.gd` ↔ `threedi` ↔ `oed`/`renderer`);
+engine-side flag spaces (`object_model.gd` ↔ `threedi` ↔ `oed`/`renderer`);
 `OED_UPDATE_*` and the Python/DCC mirrors stay with ENG-4.
 
 ## Consequences

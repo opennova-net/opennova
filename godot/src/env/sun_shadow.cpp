@@ -1,4 +1,4 @@
-#include "env/nova_sun_shadow.h"
+#include "env/sun_shadow.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
 
@@ -6,8 +6,8 @@
 
 #include <runtime/renderer/render_slot_shadow.h>
 
-#include "env/nova_mission_environment.h"
-#include "env/nova_water.h"
+#include "env/mission_environment.h"
+#include "env/water.h"
 
 namespace godot {
 

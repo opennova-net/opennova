@@ -18,12 +18,12 @@
 #define PFF_CONTAINER_KEY_DEFAULT GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT
 #define GAMEPROFILE_FORMAT_PFF3   0  /* mirrors PffFormat in pff/pff.h */
 
-static const NovaGameProfile k_profiles[] = {
-    { NOVA_GAME_JO,      "jo",     "Joint Operations",             PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
-    { NOVA_GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_FORCE_DEFAULT,   0, GAMEPROFILE_FORMAT_PFF3 },
-    { NOVA_GAME_DFX,     "dfx",    "Delta Force: Xtreme",          PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
-    { NOVA_GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
-    { NOVA_GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
+static const GameProfile k_profiles[] = {
+    { GAME_JO,      "jo",     "Joint Operations",             PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
+    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_FORCE_DEFAULT,   0, GAMEPROFILE_FORMAT_PFF3 },
+    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
+    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
+    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
 };
 
 /* Case-insensitive ASCII compare of two NUL-terminated strings. */
@@ -42,14 +42,14 @@ int gameprofile_count(void) {
     return (int)(sizeof(k_profiles) / sizeof(k_profiles[0]));
 }
 
-const NovaGameProfile *gameprofile_at(int index) {
+const GameProfile *gameprofile_at(int index) {
     if (index < 0 || index >= gameprofile_count()) {
         return NULL;
     }
     return &k_profiles[index];
 }
 
-const NovaGameProfile *gameprofile_by_id(int game_id) {
+const GameProfile *gameprofile_by_id(int game_id) {
     int i;
     for (i = 0; i < gameprofile_count(); ++i) {
         if (k_profiles[i].id == game_id) {
@@ -59,7 +59,7 @@ const NovaGameProfile *gameprofile_by_id(int game_id) {
     return NULL;
 }
 
-const NovaGameProfile *gameprofile_by_code(const char *code) {
+const GameProfile *gameprofile_by_code(const char *code) {
     int i;
     if (code == NULL) {
         return NULL;
@@ -73,6 +73,6 @@ const NovaGameProfile *gameprofile_by_code(const char *code) {
 }
 
 int gameprofile_scr_policy_for_code(const char *code) {
-    const NovaGameProfile *p = gameprofile_by_code(code);
+    const GameProfile *p = gameprofile_by_code(code);
     return p ? p->scr_policy : SCR_POLICY_VERSION_DETECT;
 }

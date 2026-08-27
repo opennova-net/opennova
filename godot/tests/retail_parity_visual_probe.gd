@@ -106,7 +106,7 @@ func _build_attach_stage() -> bool:
 		return false
 
 	var fixture_dir := OS.get_cache_dir().path_join(
-			"nova_attach_visual_%d" % Time.get_ticks_usec())
+			"attach_visual_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
 	if not _write_bytes(fixture_dir.path_join("labelgun.3di"),
 			FileAccess.get_file_as_bytes(

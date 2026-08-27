@@ -5,8 +5,8 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "fnt/nova_fnt_resource.h"
-#include "util/nova_data_format.h"
+#include "fnt/fnt_resource.h"
+#include "util/data_format.h"
 #include "util/texture_path_resolver.h"
 
 namespace godot {

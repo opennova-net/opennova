@@ -3,7 +3,7 @@
 // submission notifier, and transformed-mesh bounds. Ported during the
 // 2026-08-09 de-scripting.
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>

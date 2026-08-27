@@ -158,7 +158,7 @@ Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: caden
 delay, signed wrap, cooldown window, reset_after=0 refire, pre-pass exclusivity, cat-3
 window, ResetEvent), `tests/wac/wac_behavior_test.cpp` (`test_execution_cadence`),
 `tests/mission/promote_test.cpp` (authored SSNs, pool-3 markers, find_by_net_id),
-GUT `nova_simulation_test.gd` / `mission_presentation_test.gd`.
+GUT `simulation_test.gd` / `mission_presentation_test.gd`.
 
 ## 2a. Fixed-timestep accumulator landed (2026-06-22, nw-merge)
 

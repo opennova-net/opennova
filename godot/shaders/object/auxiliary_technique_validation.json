@@ -30,7 +30,7 @@
       "runtime_evidence": [
         {"path": "godot/shaders/object/technique_validation.json", "tokens": ["\"engine_enum\": \"Fixed\"", "\"engine_enum\": \"GlassSkinned\"", "\"specular_alpha\""]},
         {"path": "godot/tests/render_swatch_probe.gd", "tokens": ["directional_axis_reversal", "specular_alpha_low", "coverage_high"]},
-        {"path": "godot/src/env/nova_environment_cube_capture.cpp", "tokens": ["kCaptureSize", "kRefreshFrames", "set_use_hdr_2d(true)", "SubViewport::UPDATE_ONCE", "kCubemapImageToCapture"]},
+        {"path": "godot/src/env/environment_cube_capture.cpp", "tokens": ["kCaptureSize", "kRefreshFrames", "set_use_hdr_2d(true)", "SubViewport::UPDATE_ONCE", "kCubemapImageToCapture"]},
         {"path": "godot/tests/environment_cube_capture_probe.gd", "tokens": ["Forward+ RenderingDevice", "publish on the following advance", "0x60 gamma-byte dim"]}
       ],
       "raster_probes": ["lighting", "channels"],
@@ -55,8 +55,8 @@
         {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["NOVA_SLOT_CAPTURE_LAYER_MASK", "obj_is_slot_shadow_capture(uint camera_visible_layers,"]},
         {"path": "godot/shaders/object/output_opaque.gdshaderinc", "tokens": ["obj_is_slot_shadow_capture(CAMERA_VISIBLE_LAYERS,", "ALBEDO = vec3(0.0);"]},
         {"path": "godot/shaders/object/sampling/single.gdshaderinc", "tokens": ["obj_proj_shadow_coverage"]},
-        {"path": "godot/src/env/nova_slot_shadow.cpp", "tokens": ["kCaptureLayerBits[renderer::kSlotCaptureCount]", "camera->set_cull_mask(kCaptureLayerBits[i])"]},
-        {"path": "godot/src/env/nova_water.h", "tokens": ["VISUAL_LAYER_SLOT_CAPTURE_MASK", "only the slot capture cameras cull to them"]},
+        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["kCaptureLayerBits[renderer::kSlotCaptureCount]", "camera->set_cull_mask(kCaptureLayerBits[i])"]},
+        {"path": "godot/src/env/water.h", "tokens": ["VISUAL_LAYER_SLOT_CAPTURE_MASK", "only the slot capture cameras cull to them"]},
         {"path": "godot/tests/render_swatch_probe.gd", "tokens": ["black-on-white coverage", "capture_darkness", "PROJSHAD Diffuse1.a", "invented a PROJSHAD pass"]}
       ],
       "raster_probes": ["projshadow"],
@@ -95,7 +95,7 @@
       "runtime_evidence": [
         {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED", "opennova_water_height - 0.1"]},
         {"path": "godot/shaders/object/pipeline_manifest.json", "tokens": ["\"clip_class\": \"normal_fallback\"", "\"clip_class\": \"skinned_submit_skip\""]},
-        {"path": "godot/src/env/nova_water.cpp", "tokens": ["opennova_water_reflection_eye", "opennova_water_reflection_clip_active"]},
+        {"path": "godot/src/env/water.cpp", "tokens": ["opennova_water_reflection_eye", "opennova_water_reflection_clip_active"]},
         {"path": "godot/tests/render_swatch_probe.gd", "tokens": ["object-water-reflection-clip", "reflection CLIP"]}
       ],
       "raster_probes": ["clip"],
@@ -114,8 +114,8 @@
       "runtime_evidence": [
         {"path": "docs/render/render-material-re.md", "tokens": ["LUM effects copy their NORMAL pass block into the GLOW slot"]},
         {"path": "godot/shaders/object/glow.gdshaderinc", "tokens": ["pow(aligned, 800.0)", "pow(aligned, 40.0)", "obj_glass_glow"]},
-        {"path": "godot/shaders/object/output_opaque.gdshaderinc", "tokens": ["nova_is_q3_pass", "OBJ_GLOW_NO_PASS", "OBJ_GLOW_ROTATED_SPECULAR", "OBJ_GLOW_NORMAL_COPY"]},
-        {"path": "godot/src/render/nova_framefx.cpp", "tokens": ["FramePass::AverageFour", "FramePass::WeightedFour", "FramePass::FinalAverage", "BlendMode::SourceAlphaAdd"]},
+        {"path": "godot/shaders/object/output_opaque.gdshaderinc", "tokens": ["is_q3_pass", "OBJ_GLOW_NO_PASS", "OBJ_GLOW_ROTATED_SPECULAR", "OBJ_GLOW_NORMAL_COPY"]},
+        {"path": "godot/src/render/frame_fx.cpp", "tokens": ["FramePass::AverageFour", "FramePass::WeightedFour", "FramePass::FinalAverage", "BlendMode::SourceAlphaAdd"]},
         {"path": "godot/game/world/game_world.tscn", "tokens": ["type=\"FrameFx\""]},
         {"path": "godot/tests/render_swatch_probe.gd", "tokens": ["glow_off_away", "sun glint", "no-pass contracts"]}
       ],
@@ -134,7 +134,7 @@
       ],
       "runtime_evidence": [
         {"path": "godot/shaders/object/match_terrain.gdshaderinc", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready", "(obj_hemi_sky_color() + tile.a * obj_dir_light_color()) * 2.0"]},
-        {"path": "godot/src/object/nova_object_model.cpp", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready"]},
+        {"path": "godot/src/object/object_model.cpp", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready"]},
         {"path": "godot/tests/render_swatch_probe.gd", "tokens": ["MATCHTERRAIN stance/page gate", "has no MATCHTERRAIN contract"]}
       ],
       "raster_probes": ["matchterrain"],

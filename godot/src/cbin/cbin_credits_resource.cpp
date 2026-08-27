@@ -1,4 +1,4 @@
-#include "cbin_credits_resource.h"
+#include "cbin/cbin_credits_resource.h"
 
 #include <cstdio>
 #include <cstring>
@@ -10,8 +10,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include "cbin_asset_lookup.h"
-#include "util/nova_data_format.h"
+#include "cbin/cbin_asset_lookup.h"
+#include "util/data_format.h"
 
 #include <formats/cbin/cbin.h>
 

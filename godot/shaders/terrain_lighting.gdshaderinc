@@ -22,7 +22,7 @@
 // --- Shared uniforms: terrain surface inputs + lighting + fog -----------------
 // Textures sample RAW (no source_color): retail never enables sRGB sampling -
 // texel bytes enter the ps.1.4 math as-is. The gamma-space convention
-// (D-RMAT-7) lives in nova_color.gdshaderinc; consumers encode the final
+// (D-RMAT-7) lives in color.gdshaderinc; consumers encode the final
 // color once at their ALBEDO write.
 // The device-global texfilter mode applies to EVERY active stage
 // [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],

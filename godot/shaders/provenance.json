@@ -46,7 +46,7 @@
     },
     {
       "id": "gamma-transfer",
-      "patterns": ["nova_color.gdshaderinc", "nova_frame_pass.gdshaderinc"],
+      "patterns": ["color.gdshaderinc", "frame_pass.gdshaderinc"],
       "light_behavior": "gamma_framebuffer_transfer_and_q3_device_signature",
       "parity_status": "matching",
       "docs": ["docs/render/render-material-re.md", "docs/render/render-order-re.md"],
@@ -165,7 +165,7 @@
     },
     {
       "id": "viewmodel-beauty-pass-projection",
-      "patterns": ["nova_viewmodel_pass.gdshaderinc"],
+      "patterns": ["viewmodel_pass.gdshaderinc"],
       "light_behavior": "beauty_pass_renderfov_projection_and_depth_band",
       "parity_status": "matching",
       "docs": ["docs/render/render-order-re.md"],

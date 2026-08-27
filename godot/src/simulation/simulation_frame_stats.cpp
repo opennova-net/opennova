@@ -1,4 +1,4 @@
-#include "nova_simulation.h"
+#include "simulation/simulation.h"
 
 namespace godot {
 

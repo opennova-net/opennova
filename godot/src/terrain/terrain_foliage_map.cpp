@@ -1,4 +1,4 @@
-#include "nova_terrain_foliage_map.h"
+#include "terrain/terrain_foliage_map.h"
 
 #include <cmath>
 #include <limits>

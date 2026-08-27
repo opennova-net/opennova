@@ -223,7 +223,7 @@ static func _aggregate_lod0_submeshes(submeshes: Array) -> ArrayMesh:
 
 
 ## Load the diffuse (slot 1, falling back to detail slot 2) texture for a .3di
-## material, mirroring nova_object_model._load_texture_for_slot. Returns null if
+## material, mirroring object_model._load_texture_for_slot. Returns null if
 ## the material has no resolvable texture.
 static func _load_diffuse_texture(data: ObjectData, material_index: int) -> Texture2D:
 	var material_defs := {}

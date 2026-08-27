@@ -1,7 +1,7 @@
 // Simulation — presentation reads: entity/pose getters, the present-effect
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 #include <net/npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cmath>
@@ -18,7 +18,7 @@
 #include <runtime/renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace {
 

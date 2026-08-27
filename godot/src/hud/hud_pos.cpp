@@ -1,7 +1,7 @@
-#include "nova_hud_pos.h"
+#include "hud/hud_pos.h"
 
-#include "resource_index/nova_resource_root.h"
-#include "util/nova_data_format.h"
+#include "resource_index/resource_root.h"
+#include "util/data_format.h"
 
 #include <formats/def/def.h>
 #include <runtime/hud/hud_math.h>

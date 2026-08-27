@@ -246,7 +246,7 @@ func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
 	# The only discard in the scorch decal is the retail pass gate (the Q3
 	# glow source never contains scars); there is no alpha test on its texel.
 	assert_eq(scorch.code.count("discard"), 1, "scorch: one pass-gate discard only")
-	assert_true(scorch.code.find("nova_is_q3_pass") < scorch.code.find("discard"),
+	assert_true(scorch.code.find("is_q3_pass") < scorch.code.find("discard"),
 			"scorch: the discard is the retail pass gate, not an alpha test")
 	assert_false(scorch.code.contains("tex.a <") or scorch.code.contains("alpha <"),
 			"scorch: no alpha test")

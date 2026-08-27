@@ -1,4 +1,4 @@
-#include "env/nova_color_smoother.h"
+#include "env/color_smoother.h"
 
 #include <algorithm>
 

@@ -26,10 +26,10 @@ hardening, and project health. Divergences from the original engine belong in
       remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
       (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
-      the native walks (`nova_present_applier.{h,cpp}` 12, the wire walk +
-      cold path `godot/src/simulation/nova_present_applier_wire.cpp`, the
+      the native walks (`present_applier.{h,cpp}` 12, the wire walk +
+      cold path `godot/src/simulation/present_applier_wire.cpp`, the
       held-weapon reference math `engine/net/npruntime/client_replica_present.h`) —
-      but the native `EntityIndex` (`godot/src/object/nova_entity_index.cpp` —
+      but the native `EntityIndex` (`godot/src/object/entity_index.cpp` —
       the registry's successor) still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`

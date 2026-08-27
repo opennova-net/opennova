@@ -1,4 +1,4 @@
-#include "mission/nova_mission_object_placer.h"
+#include "mission/mission_object_placer.h"
 
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -7,9 +7,9 @@
 #include <runtime/simassets/model_builders.h>
 #include <runtime/world/entity.h>
 
-#include "env/nova_water.h"
-#include "mission/nova_mission_data.h"
-#include "mission/nova_mission_object_placer_keys.h"
+#include "env/water.h"
+#include "mission/mission_data.h"
+#include "mission/mission_object_placer_keys.h"
 
 namespace godot {
 

@@ -7,7 +7,7 @@ container). Implementing code: `engine/formats/adm` (parser), `engine/formats/ba
 retired 2026-08-26 (ADR 0038); runtime consumers
 `engine/runtime/anim` (clip sampling), `engine/runtime/simassets` (clip
 index / root motion / skeletal clip resolution), and
-`godot/src/object/nova_skeletal_anim.cpp`.
+`godot/src/object/skeletal_anim.cpp`.
 Binary: retail Jointops.exe; all addresses are that binary's.
 
 This is a CONSOLIDATION record (2026-08-08): the findings below were witnessed

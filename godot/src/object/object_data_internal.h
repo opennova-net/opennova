@@ -1,14 +1,14 @@
 // Internal header for the ObjectData translation-unit family
-// (nova_object_data*.cpp) ONLY — one class, several TUs, split along the
+// (object_data*.cpp) ONLY — one class, several TUs, split along the
 // file's concern seams (load / bind / inspection / materials / geometry /
 // PANM inspection / runtime eval). Carries the family's common includes plus every
 // helper more than one TU uses, in namespace novaobj (each TU opens it with
 // `using`). Not part of the engine's public include surface.
 #pragma once
 
-#include "object/nova_object_data.h"
+#include "object/object_data.h"
 
-#include "util/nova_string_convert.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/project_settings.hpp>
 

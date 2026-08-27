@@ -1,4 +1,4 @@
-#include "lights/nova_light_scene.h"
+#include "lights/light_scene.h"
 
 #include <array>
 #include <cmath>
@@ -10,8 +10,8 @@
 
 #include <godot_cpp/classes/rendering_server.hpp>
 
-#include "env/nova_weather.h"
-#include "object/nova_object_model.h"
+#include "env/weather.h"
+#include "object/object_model.h"
 
 namespace godot {
 

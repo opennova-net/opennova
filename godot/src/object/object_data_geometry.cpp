@@ -1,6 +1,6 @@
 // ObjectData — geometry views: LOD surfaces and memoized submesh builds,
 // bones/skinning, collision volumes, lights and user points.
-#include "object/nova_object_data_internal.h"
+#include "object/object_data_internal.h"
 
 #include <runtime/simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <formats/threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)

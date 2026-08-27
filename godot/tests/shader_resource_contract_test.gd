@@ -289,7 +289,7 @@ func test_every_wrapper_declares_one_shader_type_and_inherits_a_citation() -> vo
 func test_object_shader_runtime_does_not_compose_source_strings() -> void:
 	var engine_header := _read(_repo_path("engine/runtime/renderer/object_shader_template.h"))
 	var engine_source := _read(_repo_path("engine/runtime/renderer/object_shader_template.cpp"))
-	var godot_cache := _read(_repo_path("godot/src/object/nova_object_shader_cache.cpp"))
+	var godot_cache := _read(_repo_path("godot/src/object/object_shader_cache.cpp"))
 	assert_false((engine_header + engine_source + godot_cache).contains("compose_object_shader_glsl"))
 	assert_false(godot_cache.contains("set_code("))
 
@@ -305,8 +305,8 @@ func test_object_shader_topology_is_compile_time_not_uniform_driven() -> void:
 		assert_false(implementation.contains(removed), "%s left the object includes" % removed)
 
 	var bindings := "\n".join(PackedStringArray([
-		_read(_repo_path("godot/src/object/nova_object_shader_cache.cpp")),
-		_read(_repo_path("godot/src/object/nova_object_model_materials.cpp")),
+		_read(_repo_path("godot/src/object/object_shader_cache.cpp")),
+		_read(_repo_path("godot/src/object/object_model_materials.cpp")),
 		_read("res://tests/render_swatch_probe.gd"),
 	]))
 	for removed in ["u_cap_", "u_object_family", "u_environment_source",
@@ -357,7 +357,7 @@ func test_manifest_covers_every_resource_and_selector_technique() -> void:
 		uid_targets.append(String(uid).trim_suffix(".uid"))
 	assert_eq(_sorted(uid_targets), _sorted(actual + actual_includes))
 
-	var cache_source := _read(_repo_path("godot/src/object/nova_object_shader_cache.cpp"))
+	var cache_source := _read(_repo_path("godot/src/object/object_shader_cache.cpp"))
 	var engine_header := _read(_repo_path("engine/runtime/renderer/object_shader_template.h"))
 	for technique in manifest["techniques"]:
 		assert_true(cache_source.contains("ObjectShaderTechnique::%s" % technique["engine_enum"]))
@@ -419,7 +419,7 @@ func test_auxiliary_shader_resources_match_their_manifest_contracts() -> void:
 	var output := _read(OBJECT_ROOT.path_join("output_opaque.gdshaderinc"))
 	for token in ["obj_glass_glow(CAMERA_POSITION_WORLD)", "obj_apply_additive_fog",
 			"OBJ_GLOW_ROTATED_SPECULAR", "OBJ_GLOW_NORMAL_COPY", "OBJ_GLOW_NO_PASS",
-			"nova_is_q3_pass"]:
+			"is_q3_pass"]:
 		assert_true((glow + output).contains(token), token)
 	assert_false((glow + output).contains("u_glow_hdr_scale"))
 
@@ -575,7 +575,7 @@ func test_slot_capture_camera_signature_pins_the_water_layer_table() -> void:
 	# shader constant to the Water layer table and keep the signature disjoint
 	# from the beauty/Q3 device masks so a layer reallocation cannot silently
 	# re-route the NORMAL pass into the silhouette pass.
-	var water_header := _read(_repo_path("godot/src/env/nova_water.h"))
+	var water_header := _read(_repo_path("godot/src/env/water.h"))
 	var table_re := RegEx.create_from_string("(?s)VISUAL_LAYER_SLOT_CAPTURE_MASK\\s*=\\s*([^,]+?),\\n")
 	var table := table_re.search(water_header)
 	assert_not_null(table, "Water must publish the slot capture layer table")
@@ -596,7 +596,7 @@ func test_slot_capture_camera_signature_pins_the_water_layer_table() -> void:
 	assert_true(shared.contains("bool obj_is_slot_shadow_capture(uint camera_visible_layers,"))
 	assert_true(shared.contains("~NOVA_SLOT_CAPTURE_LAYER_MASK"))
 
-	var retail_pass := _normalized(SHADER_ROOT.path_join("nova_frame_pass.gdshaderinc"))
+	var retail_pass := _normalized(SHADER_ROOT.path_join("frame_pass.gdshaderinc"))
 	for name in ["NOVA_BEAUTY_CAMERA_MASK", "NOVA_Q3_CAMERA_MASK"]:
 		var device_mask := RegEx.create_from_string(
 				"const uint %s = (\\d+)u;" % name).search(retail_pass)
@@ -604,7 +604,7 @@ func test_slot_capture_camera_signature_pins_the_water_layer_table() -> void:
 		if device_mask != null:
 			assert_eq(int(device_mask.get_string(1)) & expected_mask, 0, name)
 
-	var slot_shadow := _read(_repo_path("godot/src/env/nova_slot_shadow.cpp"))
+	var slot_shadow := _read(_repo_path("godot/src/env/slot_shadow.cpp"))
 	for token in ["camera->set_cull_mask(kCaptureLayerBits[i]);",
 			"viewport->set_transparent_background(true);",
 			"capture_environment->set_bg_color(Color(1.0f, 1.0f, 1.0f));",

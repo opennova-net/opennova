@@ -1,6 +1,6 @@
-#include "dbf/nova_dbf_data.h"
+#include "dbf/dbf_data.h"
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>

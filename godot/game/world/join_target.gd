@@ -21,7 +21,7 @@ var game_type := -1    ## numeric g_GameType hint; -1 = unknown before authentic
 
 
 ## Decode a LanSession discovery row (a transport edge; keys from
-## nova_lan_session.cpp's row builder). Map identity is deliberately absent here:
+## lan_session.cpp's row builder). Map identity is deliberately absent here:
 ## retail LAN enumeration has not joined the session yet, so the mission arrives
 ## in the normal post-auth 0x7B stream.
 static func from_lan_row(row: Dictionary) -> JoinTarget:

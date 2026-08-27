@@ -2,11 +2,11 @@
 // Lifecycle, input deposit, fixed cadence, catch-up, and cancellation stay in
 // engine/net/inmatch. Godot supplies one synchronous typed tick sink so its
 // presentation devices consume a tick before the next catch-up tick runs.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <godot_cpp/classes/time.hpp>
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace {
 

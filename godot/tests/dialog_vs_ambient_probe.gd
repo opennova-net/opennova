@@ -14,7 +14,6 @@ extends SceneTree
 # Use: godot --headless --path godot -s res://tests/dialog_vs_ambient_probe.gd \
 #        -- <dir> <expansion> <mission.bms> [--no-ambient] [--lines N]
 
-const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const SILENCE_FLOOR_DB := -50.0
 const LINE_TIMEOUT_SLACK_S := 3.0
@@ -95,11 +94,11 @@ func _run() -> void:
 
 	var container := Node3D.new()
 	get_root().add_child(container)
-	var audio = NovaMissionAudioScript.new(root, item_db)
+	var audio = MissionAudio.new(root, item_db)
 	if not ambient:
 		# STRATEGY_TARGET_ID resolves no marker names -> banks + .DBF still load,
 		# zero ambient candidates resolve. This is the "ambient sounds disabled" arm.
-		audio.set_resolution_strategy(NovaMissionAudioScript.STRATEGY_TARGET_ID)
+		audio.set_resolution_strategy(MissionAudio.STRATEGY_TARGET_ID)
 	var stats: Dictionary = audio.setup(mission, mission_name, container)
 	print("[dlgprobe] setup: %s" % str(stats))
 

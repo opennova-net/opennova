@@ -1,7 +1,7 @@
 // Simulation — the net roles (ADR 0009/0011/0012): per-load listen-host
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <cmath>
 #include <cstring>
@@ -31,7 +31,7 @@
 #include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace {
 
@@ -202,9 +202,9 @@ namespace {
 // the old host_listen_-gated code did. PeerAddr <-> "a.b.c.d" uses the LE octet packing PeerAddr
 // documents (octet 0 in the low byte; 127.0.0.1 -> 0x0100007F) — the conversion formerly in
 // peer_from_addr / send_datagram.
-class NovaUdpPumpDatagramSocket : public opennova::netsim::IDatagramSocket {
+class UdpPumpDatagramSocket : public opennova::netsim::IDatagramSocket {
 public:
-	explicit NovaUdpPumpDatagramSocket(UdpPump *pump) : pump_(pump) {}
+	explicit UdpPumpDatagramSocket(UdpPump *pump) : pump_(pump) {}
 
 	int recv_from(uint8_t *buf, std::size_t cap, opennova::PeerAddr &from) override {
 		if (pump_ == nullptr || !pump_->is_open()) return 0;
@@ -348,7 +348,7 @@ void Simulation::host_pump() {
 	const uint32_t now = host_owner_.now_tick;
 	drain_host_client_gameplay_requests();
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
-	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
+	UdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	if (profiling)
 		frame_phase_perf_.host_prep_us +=
 				static_cast<int64_t>(opennova::io::perf_now_us() - prep_start);

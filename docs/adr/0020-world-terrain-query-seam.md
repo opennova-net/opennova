@@ -67,7 +67,7 @@ none of it (verified pre-move: zero terrain-family includes outside
   compile-time canary that the seam surface stays reachable through world.
 - `opennova_terrain_query` is registered in both CMake roots (the
   top-level build and `godot/engine`'s standalone tree); the GDExtension
-  links it explicitly since `nova_terrain_data`/`nova_simulation` include
+  links it explicitly since `terrain_data`/`simulation` include
   its headers directly (the ADR 0019 no-free-riding precedent).
 - terrain_query is NOT added to `OPENNOVA_CORE_TARGETS`: it has no C ABI
   exports (C++ namespaced functions only), so the FFI DLL's export

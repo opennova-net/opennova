@@ -1,10 +1,10 @@
-#include "nova_terrain_tile_info.h"
+#include "terrain/terrain_tile_info.h"
 
-#include "nova_terrain_tile_entry.h"
+#include "terrain/terrain_tile_entry.h"
 
 #include <formats/til/til_io.h>
 
-#include "util/nova_data_format.h"
+#include "util/data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 

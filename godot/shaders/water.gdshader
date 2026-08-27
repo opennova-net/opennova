@@ -56,9 +56,9 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 //   diffuse), s1 MOD2X(noise, current), alpha MOD(noise.a, diffuse.a).
 
 // Gamma-domain scene-target contract.
-#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
 // The isolated Q3 (FrameFX bloom source) camera signature.
-#include "res://shaders/nova_frame_pass.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
 
 // Env_WaterColorLit — since env #30 this is only the reflection-LESS
 // stand-in for the t2 sample (headless owners/tests, u_has_reflection false).
@@ -92,7 +92,7 @@ uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 // layer. Reject those six pass eyes by their exact camera mask — the capture
 // cameras cull to the aliased layer ALONE (EnvironmentCubeCapture
 // set_cull_mask), while the beauty/mirror/Q3 masks are wider — the same
-// signature pattern as nova_is_q3_pass. IN_SHADOW_PASS guards the read:
+// signature pattern as is_q3_pass. IN_SHADOW_PASS guards the read:
 // shadow passes leave CAMERA_VISIBLE_LAYERS unset.
 const uint NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u; // 0x00000400
 // The underwater pass swaps to the OPAQUE material — blend OFF, flags 0x20000
@@ -225,7 +225,7 @@ void fragment() {
 	// the far water renders to the full march extent, converging to the fog color.
 	float alpha = alpha_dist;
 
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		// FrameFX redraws the surface into the isolated bloom source with the
 		// NV material pair: the same 4-texture chain and blend states plus a
 		// bright pass on the specular-added result, and the device fog color
@@ -245,7 +245,7 @@ void fragment() {
 		float luma = dot(color, vec3(0.25, 0.60, 0.15));
 		float bright = clamp(luma * luma - 0.15, 0.0, 1.0);
 		color = color * bright * v_fog;
-		ALBEDO = nova_scene_output(color);
+		ALBEDO = scene_output(color);
 		ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
 	} else {
 		// Scene fog toward u_fog_color by the witnessed per-row factor (see v_fog).
@@ -257,7 +257,7 @@ void fragment() {
 		// multiplied by a — retail's SrcBlend is ONE.
 		// Both source and destination remain gamma-domain numeric values until the
 		// terminal compositor, so this blend matches the retail framebuffer.
-		ALBEDO = nova_scene_output(color);
+		ALBEDO = scene_output(color);
 		ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
 	}
 }

@@ -3,7 +3,7 @@
 // The wire entity-handle bit layout: the original entity pool rides the high
 // nibble and the pool slot the low 12 bits — handle = pool << 12 | slot.
 // This is the ONE home for that decode (the Godot layer consumes it through
-// the NetProtocol binding, godot/src/network/nova_net_protocol.h).
+// the NetProtocol binding, godot/src/network/net_protocol.h).
 // engine/runtime/world's EntityHandle carries the same packing for
 // the sim-side registry — world stays net-agnostic, so the two are pinned
 // against each other where both are visible (engine/net/netsim, entity_wire_bridge.cpp).

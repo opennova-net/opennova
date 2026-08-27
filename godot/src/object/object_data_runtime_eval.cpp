@@ -1,7 +1,7 @@
 // ObjectData — runtime evaluation: the per-graphic PANM node-matrix cache
 // behind apply_panm_to_nodes, material/anim-frame runtime, and light
 // evaluation on the retail clock.
-#include "object/nova_object_data_internal.h"
+#include "object/object_data_internal.h"
 
 #include <runtime/renderer/light_runtime.h>
 #include <runtime/renderer/material_eval.h>

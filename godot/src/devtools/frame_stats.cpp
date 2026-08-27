@@ -1,4 +1,4 @@
-#include "nova_frame_stats.h"
+#include "devtools/frame_stats.h"
 
 #include <godot_cpp/classes/engine.hpp>
 

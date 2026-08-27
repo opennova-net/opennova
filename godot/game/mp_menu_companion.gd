@@ -2,7 +2,7 @@ class_name MpMenuCompanion
 extends MenuCompanion
 
 # Drives the multiplayer menu (mp.mnu) by control NAME for the LAN co-op path. It is a
-# companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates to: when the shell
+# companion the game-agnostic MenuShell (menu_shell.gd) delegates to: when the shell
 # loads a menu the companion owns (the JO mp.mnu LAN browser + host-settings screens),
 # the shell hands the whole menu over here instead of running its generic
 # launch/mission wiring, so START_GAME on the host screen means "host a game" rather

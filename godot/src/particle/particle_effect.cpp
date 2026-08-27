@@ -1,4 +1,4 @@
-#include "nova_particle_effect.h"
+#include "particle/particle_effect.h"
 
 using namespace godot;
 

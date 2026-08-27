@@ -1,6 +1,6 @@
-#include "object/nova_skeletal_anim.h"
+#include "object/skeletal_anim.h"
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/variant/basis.hpp>

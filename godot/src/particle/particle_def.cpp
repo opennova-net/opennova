@@ -1,4 +1,4 @@
-#include "nova_particle_def.h"
+#include "particle/particle_def.h"
 
 #include <algorithm>
 #include <cstdint>

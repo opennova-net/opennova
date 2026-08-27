@@ -1,15 +1,15 @@
 // ObjectModel: material factory + classification and environment-lighting
-// application. Ported verbatim from nova_object_materials.gd (2026-08-09
+// application. Ported verbatim from object_materials.gd (2026-08-09
 // de-scripting); the environment pull became the typed EnvLightState
 // channel — the model never touches the environment object.
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/core/math.hpp>
 
-#include "object/nova_object_shader_cache.h"
+#include "object/object_shader_cache.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/object_shader_template.h>

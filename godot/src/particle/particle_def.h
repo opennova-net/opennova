@@ -12,8 +12,8 @@
 
 #include <formats/particle/particle.h>
 
-#include "nova_particle_curve_ref.h"
-#include "nova_particle_graphic_layer.h"
+#include "particle/particle_curve_ref.h"
+#include "particle/particle_graphic_layer.h"
 
 namespace godot {
 

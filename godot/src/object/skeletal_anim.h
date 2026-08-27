@@ -1,5 +1,4 @@
-#ifndef NOVA_SKELETAL_ANIM_H
-#define NOVA_SKELETAL_ANIM_H
+#pragma once
 
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -279,4 +278,3 @@ public:
 
 } // namespace godot
 
-#endif // NOVA_SKELETAL_ANIM_H

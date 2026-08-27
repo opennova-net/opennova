@@ -1,11 +1,11 @@
 // ObjectModel: main-body skeletal channels (.bad/.adm), the retail
 // remote body-state arbitration, the muzzle userpoint, PLAYPARTANIM part
 // channels, aim overlay / weapon channel, and pose evaluation.
-// Ported verbatim from nova_object_body_anim.gd (2026-08-09 de-scripting);
+// Ported verbatim from object_body_anim.gd (2026-08-09 de-scripting);
 // the skeletal reference is typed (Ref<SkeletalAnim>) so the former
 // script-double eval fallbacks are gone.
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 #include <godot_cpp/core/math.hpp>
 

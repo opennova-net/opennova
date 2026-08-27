@@ -1,8 +1,8 @@
-#include "nova_menu_audio.h"
+#include "mnu/menu_audio.h"
 
-#include "lwf/nova_lwf_data.h"
-#include "lwf/nova_wav_loader.h"
-#include "resource_index/nova_resource_root.h"
+#include "lwf/lwf_data.h"
+#include "lwf/wav_loader.h"
+#include "resource_index/resource_root.h"
 
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>

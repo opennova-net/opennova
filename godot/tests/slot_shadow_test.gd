@@ -53,10 +53,10 @@ func _fresh_shadow(environment: MissionEnvironment) -> SlotShadow:
 
 func test_caster_flag_joins_and_leaves_the_slot_group() -> void:
 	var model := _caster_at(5.0)
-	assert_true(model.is_in_group("nova_slot_shadow_casters"),
+	assert_true(model.is_in_group("slot_shadow_casters"),
 			"an enabled dynamic caster registers for slot planning")
 	model.set_shadow_caster_enabled(false)
-	assert_false(model.is_in_group("nova_slot_shadow_casters"),
+	assert_false(model.is_in_group("slot_shadow_casters"),
 			"disabling the caster releases the slot registration")
 
 

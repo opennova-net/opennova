@@ -1177,7 +1177,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// NetPacket_WriteSlotAssignment @0x502b30]. It is NOT cosmetic: the client
 			// packs it into the high 7 bits of every fired round's hit_part word, which
 			// is how the host attributes the shot. Latching 0 makes every shot we send
-			// read as SLOT 0 — the host's own — see nova_simulation's hit_part builder.
+			// read as SLOT 0 — the host's own — see simulation's hit_part builder.
 			if (m.payload.size() >= 24) {
 				local_player_slot_ = m.payload[17];
 				max_player_slot_ = m.payload[18];

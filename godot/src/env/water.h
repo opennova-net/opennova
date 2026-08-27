@@ -16,8 +16,8 @@
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/water_mirror.h>
 
-#include "env/nova_water_core.h"
-#include "terrain/nova_terrain_data.h"
+#include "env/water_core.h"
+#include "terrain/terrain_data.h"
 
 namespace godot {
 
@@ -35,7 +35,7 @@ class Weather;
 // SAME World3D (Godot renders SubViewports ahead of the sampling viewport,
 // preserving the witnessed prerender order), shader-parameter pushes, the
 // visual-layer allocation, and the ObjectShaderCache water-split
-// publication. Ported from nova_water.gd (2026-08-10 de-scripting);
+// publication. Ported from water.gd (2026-08-10 de-scripting);
 // RE record: docs/env/env-tod-re.md (env #28/#29/#30).
 class Water : public Node3D {
 	GDCLASS(Water, Node3D)
@@ -64,7 +64,7 @@ public:
 				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
 		// Per-slot silhouette-capture channels for the render-slot entity
 		// ground shadows (12 = the retail RT budget; SlotShadow assigns the
-		// per-order bits — env/nova_slot_shadow.h). Every beauty/mirror
+		// per-order bits — env/slot_shadow.h). Every beauty/mirror
 		// camera excludes them; only the slot capture cameras cull to them.
 		VISUAL_LAYER_SLOT_CAPTURE_MASK = (1 << 1) | (1 << 2) | (1 << 3) |
 				(1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) |

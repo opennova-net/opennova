@@ -177,7 +177,7 @@ void test_basis() {
 	// cross, @0x5CCAE6..0x5CCB37 the tangent-only flip]. This is what makes the
 	// quad's coordinate winding face the struck side once retail's Y-negated
 	// upload (a reflection into D3D's left-handed frame) is applied, and what
-	// the Godot packer's winding fold relies on (nova_simulation_scars.cpp —
+	// the Godot packer's winding fold relies on (simulation_scars.cpp —
 	// the rotation fold keeps the order, the entity-local reflection re-winds).
 	const auto triple = [](const int32_t n_[3], const int32_t a_[3], const int32_t b_[3]) {
 		const int64_t cx = (int64_t(a_[1]) * b_[2] - int64_t(a_[2]) * b_[1]) >> 16;

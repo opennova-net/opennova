@@ -17,7 +17,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <formats/trn/trn_io.h>
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <cstdint>
 #include <string>

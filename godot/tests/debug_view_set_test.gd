@@ -1,7 +1,7 @@
 extends GutTest
 
-const NovaDebugViewStatus := preload(
-		"res://game/debug/nova_debug_view_status.gd")
+const DebugViewStatus := preload(
+		"res://game/debug/debug_view_status.gd")
 
 
 func test_world_reports_overlay_installation_and_drawable_state() -> void:
@@ -10,7 +10,7 @@ func test_world_reports_overlay_installation_and_drawable_state() -> void:
 	await get_tree().process_frame
 
 	var initial := _status_by_id(world.get_debug_view_statuses())
-	var initial_skeleton: NovaDebugViewStatus = initial[&"show_skeletons"]
+	var initial_skeleton: DebugViewStatus = initial[&"show_skeletons"]
 	assert_false(initial_skeleton.enabled)
 	assert_false(initial_skeleton.installed)
 	assert_eq(initial_skeleton.drawable_count, 0)
@@ -22,7 +22,7 @@ func test_world_reports_overlay_installation_and_drawable_state() -> void:
 	world.set_skeleton_debug(true)
 	await get_tree().process_frame
 	var enabled := _status_by_id(world.get_debug_view_statuses())
-	var enabled_skeleton: NovaDebugViewStatus = enabled[&"show_skeletons"]
+	var enabled_skeleton: DebugViewStatus = enabled[&"show_skeletons"]
 	assert_true(enabled_skeleton.enabled)
 	assert_true(enabled_skeleton.installed)
 	assert_eq(enabled_skeleton.drawable_count, 1)
@@ -30,7 +30,7 @@ func test_world_reports_overlay_installation_and_drawable_state() -> void:
 
 	world.unload()
 	var waiting := _status_by_id(world.get_debug_view_statuses())
-	var waiting_skeleton: NovaDebugViewStatus = waiting[&"show_skeletons"]
+	var waiting_skeleton: DebugViewStatus = waiting[&"show_skeletons"]
 	assert_true(waiting_skeleton.enabled)
 	assert_false(waiting_skeleton.installed)
 	assert_eq(waiting_skeleton.drawable_count, 0)
@@ -64,7 +64,7 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 	assert_eq(status.size(), expected_empty_reasons.size(),
 			"every F3 world-overlay option has one status row")
 	for option_id in expected_empty_reasons:
-		var row: NovaDebugViewStatus = status[StringName(option_id)]
+		var row: DebugViewStatus = status[StringName(option_id)]
 		assert_true(row.enabled, "%s reflects toggle intent" % option_id)
 		assert_true(row.installed, "%s has an installed view" % option_id)
 		assert_eq(row.drawable_count, 0,
@@ -89,7 +89,7 @@ func _make_world() -> GameWorld:
 	return world
 
 
-func _status_by_id(rows: Array[NovaDebugViewStatus]) -> Dictionary:
+func _status_by_id(rows: Array[DebugViewStatus]) -> Dictionary:
 	var result := {}
 	for row in rows:
 		result[row.id] = row

@@ -10,7 +10,7 @@ that binary's. The consumer engine is **PORTED** (2026-07-17):
 the `CollisionWorld` camera blink query, and the reimpl wiring
 (`Simulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/game/world/occlusion_frame_pass.gd)`,
 the placer de-batch + `ObjectModel.set_section_visibility_mask`); ctest
-`occlusion` + GUT `game_world_test` / `nova_object_model_section_mask_test`
+`occlusion` + GUT `game_world_test` / `object_model_section_mask_test`
 cover it. The *producer* side (blink volume queries, the indoors bit,
 per-entity blink hits) is §15 of
 [world-wac-ai-re.md](../world/world-wac-ai-re.md); this record is the

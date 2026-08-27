@@ -1,15 +1,15 @@
 // ObjectModel core: lifecycle, data wiring, CTRL registers, the
 // event-driven runtime frame, and the class registration surface.
-// Ported verbatim from nova_object_model.gd (2026-08-09 de-scripting).
+// Ported verbatim from object_model.gd (2026-08-09 de-scripting).
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 
 #include <algorithm>
 
-#include "env/nova_slot_shadow.h"
-#include "terrain/nova_terrain.h"
+#include "env/slot_shadow.h"
+#include "terrain/terrain.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -18,7 +18,7 @@
 #include <godot_cpp/templates/local_vector.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include "object/nova_object_shader_cache.h"
+#include "object/object_shader_cache.h"
 #include <runtime/renderer/render_order.h>
 
 namespace godot {
@@ -27,24 +27,24 @@ void EnvLightValues::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("equals", "other"), &EnvLightValues::equals);
 	ClassDB::bind_static_method("EnvLightValues", D_METHOD("retail_noon_defaults"),
 			&EnvLightValues::retail_noon_defaults);
-#define NOVA_ENV_PROP(m_type, m_name)                                             \
+#define ENV_PROP(m_type, m_name)                                             \
 	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"),                       \
 			&EnvLightValues::set_##m_name);                                   \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &EnvLightValues::get_##m_name); \
 	ADD_PROPERTY(PropertyInfo(m_type, #m_name), "set_" #m_name, "get_" #m_name)
-	NOVA_ENV_PROP(Variant::VECTOR3, hemi_sky);
-	NOVA_ENV_PROP(Variant::VECTOR3, dir);
-	NOVA_ENV_PROP(Variant::VECTOR3, dir_color);
-	NOVA_ENV_PROP(Variant::VECTOR3, hemi_ground);
-	NOVA_ENV_PROP(Variant::VECTOR3, ceiling);
-	NOVA_ENV_PROP(Variant::VECTOR3, floor_color);
-	NOVA_ENV_PROP(Variant::VECTOR3, gain);
-	NOVA_ENV_PROP(Variant::BOOL, fog_enabled);
-	NOVA_ENV_PROP(Variant::VECTOR3, fog_color);
-	NOVA_ENV_PROP(Variant::FLOAT, fog_start);
-	NOVA_ENV_PROP(Variant::FLOAT, fog_end);
-	NOVA_ENV_PROP(Variant::INT, fog_type);
-#undef NOVA_ENV_PROP
+	ENV_PROP(Variant::VECTOR3, hemi_sky);
+	ENV_PROP(Variant::VECTOR3, dir);
+	ENV_PROP(Variant::VECTOR3, dir_color);
+	ENV_PROP(Variant::VECTOR3, hemi_ground);
+	ENV_PROP(Variant::VECTOR3, ceiling);
+	ENV_PROP(Variant::VECTOR3, floor_color);
+	ENV_PROP(Variant::VECTOR3, gain);
+	ENV_PROP(Variant::BOOL, fog_enabled);
+	ENV_PROP(Variant::VECTOR3, fog_color);
+	ENV_PROP(Variant::FLOAT, fog_start);
+	ENV_PROP(Variant::FLOAT, fog_end);
+	ENV_PROP(Variant::INT, fog_type);
+#undef ENV_PROP
 }
 
 bool EnvLightValues::equals(const Ref<EnvLightValues> &p_other) const {
@@ -1379,7 +1379,7 @@ void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
 void ObjectModel::apply_point_light_selection(int p_count,
 		const Vector4 *p_posr, const Vector4 *p_color) {
 	// Surface instances are direct children of their Robj part node or the
-	// shared skeleton (nova_object_model_scene.cpp attach split).
+	// shared skeleton (object_model_scene.cpp attach split).
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
 		apply_point_light_selection_to_robj(
 				kv.key, p_count, p_posr, p_color);

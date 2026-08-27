@@ -1,7 +1,7 @@
 // EntityIndex — ported verbatim from mission_entity_registry.gd
 // (2026-08-09 de-scripting).
 
-#include "object/nova_entity_index.h"
+#include "object/entity_index.h"
 
 namespace godot {
 

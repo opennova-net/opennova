@@ -4,7 +4,6 @@ extends GutTest
 ## the grilled name-keyed model) and WavLoader RIFF decode incl. the 8-bit
 ## unsigned -> signed conversion. Self-contained (no real game data required).
 
-const NovaSoundBankScript = preload("res://game/world/nova_sound_bank.gd")
 
 
 # A REAL ResourceRoot over a per-test temp dir (ADR 0034 typed seam): the
@@ -68,7 +67,7 @@ func _profile_with_set(set_name: String, wav: String) -> LwfData:
 
 
 func test_bank_indexing_case_insensitive() -> void:
-	var bank = NovaSoundBankScript.new(null)
+	var bank = SoundBank.new(null)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	assert_true(bank.has_set("Z00AMB1"), "exact name resolves")
 	assert_true(bank.has_set("z00amb1"), "lookup is case-insensitive")
@@ -77,7 +76,7 @@ func test_bank_indexing_case_insensitive() -> void:
 
 
 func test_spawn_unknown_or_unresolvable_returns_null() -> void:
-	var bank = NovaSoundBankScript.new(null)  # no resource root -> no wav decode
+	var bank = SoundBank.new(null)  # no resource root -> no wav decode
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -95,7 +94,7 @@ func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
 	var samples := PackedByteArray()
 	samples.resize(32)  # 16 mono 16-bit frames
 	var root := _real_root({"z00ar100.wav": _build_wav(samples, 1, 22050, 16)})
-	var bank = NovaSoundBankScript.new(root)
+	var bank = SoundBank.new(root)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -122,7 +121,7 @@ func test_ambient_description_defers_and_caches_wav_decode() -> void:
 	var samples := PackedByteArray()
 	samples.resize(32)
 	var root := _real_root({"z00ar100.wav": _build_wav(samples, 1, 22050, 16)})
-	var bank = NovaSoundBankScript.new(root)
+	var bank = SoundBank.new(root)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 
 	var descriptors: Array = bank.describe_ambient("Z00AMB1")
@@ -139,7 +138,7 @@ func test_ambient_description_defers_and_caches_wav_decode() -> void:
 # ceilinged by clamp_volume. Expectations are hand-computed from the formula.
 
 func test_calc_distance_volume_curve() -> void:
-	var S := NovaSoundBankScript
+	var S := SoundBank
 	# d = 0: inv = 0xFFFF -> ((255*255)>>8) * 0xFFFF^2 >> 32 = 253.
 	assert_eq(S.calc_distance_volume(0, 200 << 16, 255, 255), 253, "full volume at the emitter")
 	# d = r/2: inv = 0x7FFF -> quadratic quarter -> 63.
@@ -156,7 +155,7 @@ func test_calc_distance_volume_curve() -> void:
 
 
 func test_emitter_layer_volume_two_radius_model() -> void:
-	var S := NovaSoundBankScript
+	var S := SoundBank
 	# Bare falloff radius [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5286df]:
 	# vol_in = (255*255)>>8 = 254 -> d=0 gives 252, half gives 63.
 	assert_eq(S.emitter_layer_volume(0, 200, 0, 255, 255, 255), 252)
@@ -181,7 +180,7 @@ func test_emitter_layer_volume_two_radius_model() -> void:
 
 
 func test_oneshot_distance_volume_is_not_rebased() -> void:
-	var bank = NovaSoundBankScript.new(null)
+	var bank = SoundBank.new(null)
 	var layer := {"falloff_radius": 200, "min_distance": 0}
 	var member := {"volume": 255, "clamp_volume": 255}
 	# One-shots run the plain falloff over 0..r [orig: SoundBank_PlayTriggerEntries
@@ -192,7 +191,7 @@ func test_oneshot_distance_volume_is_not_rebased() -> void:
 
 
 func test_oneshot_no_falloff_plays_at_emitter_volume() -> void:
-	var bank = NovaSoundBankScript.new(null)
+	var bank = SoundBank.new(null)
 	# A layer with NO falloff radius plays at the RAW emitter volume — the
 	# member volume is not consulted [orig: SoundBank_PlayTriggerEntries
 	# @ 0x75cf88 stores emitter_info[2], reimpl emitter = full 255].
@@ -211,7 +210,7 @@ func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
 	var root := _real_root({"tone.wav": _build_wav(samples, 1, 22050, 16)})
 	var profile := _profile_with_set("POINT_ONLY", "tone.wav")
 	profile.set_set_field(0, "target_id", 0)
-	var bank = NovaSoundBankScript.new(root)
+	var bank = SoundBank.new(root)
 	bank.add_bank(profile)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -232,7 +231,7 @@ func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
 	profile.set_set_field(0, "target_id", 200)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
 	var provider := OcclusionRecorder.new(100 << 16)
-	var bank = NovaSoundBankScript.new(root)
+	var bank = SoundBank.new(root)
 	bank.occlusion_override = provider.occlude
 	bank.add_bank(profile)
 	var parent := Node3D.new()
@@ -259,7 +258,7 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 	profile.set_set_field(0, "target_id", 120)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
 	var provider := OcclusionRecorder.new(130 << 16)
-	var bank = NovaSoundBankScript.new(root)
+	var bank = SoundBank.new(root)
 	bank.occlusion_override = provider.occlude
 	bank.add_bank(profile)
 	var parent := Node3D.new()
@@ -272,7 +271,7 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 
 
 func test_crossfade_volume_byte_rounding() -> void:
-	var A := preload("res://game/world/nova_mission_audio.gd")
+	var A := preload("res://game/world/mission_audio.gd")
 	# The register volume word is (0xFFFF * blend + 0x8000) >> 16, ROUNDED, and
 	# the mixer reads its high byte [orig: Entity_UpdateEnvSoundEmitter
 	# @ 0x4a81c6]. Full blend (the 0xFFFF sentinel) -> 255; half -> 128 (the
@@ -283,7 +282,7 @@ func test_crossfade_volume_byte_rounding() -> void:
 
 
 func test_time_of_day_regions_and_blend() -> void:
-	var A := preload("res://game/world/nova_mission_audio.gd")
+	var A := preload("res://game/world/mission_audio.gd")
 	# Region cuts [orig: Entity_CalcTimeOfDayRegion @ 0x408110]:
 	# [4,10) morning, [10,17) day, [17,21) evening, else night.
 	assert_eq(int(A.time_of_day_region(6.0).region), 0)

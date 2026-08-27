@@ -5,7 +5,6 @@ extends GutTest
 ## writes. Asserts on volume_db — the headless dummy audio driver ignores
 ## stream_paused (always reads back false), so volume is the observable.
 
-const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const SILENT_DB := -80.0
 
@@ -98,7 +97,7 @@ func test_native_mixer_rows_carry_pitch() -> void:
 
 
 func test_only_the_loudest_eight_candidates_mix() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var markers: Array = []
@@ -124,7 +123,7 @@ func test_only_the_loudest_eight_candidates_mix() -> void:
 
 
 func test_beyond_falloff_radius_is_hard_silent() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	audio.set_markers([_marker(
@@ -138,7 +137,7 @@ func test_beyond_falloff_radius_is_hard_silent() -> void:
 func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 	# Two active layers on one audible marker share one two-ray result. A second
 	# active marker is already silent by raw falloff and must not spend a query.
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var provider := OcclusionRecorder.new()
 	audio.set_occlusion_override(provider.occlude)
 	var holder := Node3D.new()
@@ -161,7 +160,7 @@ func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 
 
 func test_time_of_day_slot_selects_the_active_set() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	# Night-only marker (a flourescent light): soundloop_4 filled, 1..3 empty.
@@ -180,7 +179,7 @@ func test_time_of_day_slot_selects_the_active_set() -> void:
 
 
 func test_region_crossfade_scales_volume() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var markers := [_marker(
@@ -202,7 +201,7 @@ func test_region_crossfade_scales_volume() -> void:
 
 
 func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	# The same set in every slot (a marker whose soundloop_1..4 all name one set).
@@ -222,7 +221,7 @@ func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
 
 
 func test_tick_writes_only_on_change() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	audio.set_markers([_marker(
@@ -264,7 +263,7 @@ func test_tick_writes_only_on_change() -> void:
 
 
 func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
-	var audio = NovaMissionAudioScript.new(null, null)
+	var audio = MissionAudio.new(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var markers: Array = []
@@ -317,7 +316,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, null)
+	var audio = MissionAudio.new(root, null)
 	audio.setup(mission, "vehicle_probe.bms", container)
 
 	# Dynamic engine voices share retail's loudest-eight emitter budget with
@@ -348,7 +347,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	audio.apply_sound_emitters([idle])
 	audio.tick(vehicle_pos, 0.2)
 
-	assert_eq(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS,
+	assert_eq(_players(container).size(), MissionAudio.MIX_CHANNELS,
 		"the vehicle voice competes inside the same bounded emitter pool")
 	var voice := _player_at_position(container, vehicle_pos)
 	assert_not_null(voice, "the full-gain idle voice displaces a quieter ambient marker")
@@ -386,7 +385,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	audio.tick(refreshed_pos, 0.2)
 	assert_null(_player_at_position(container, refreshed_pos),
 		"the zeroed source/lane update removes the vehicle emitter immediately")
-	assert_eq(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS,
+	assert_eq(_players(container).size(), MissionAudio.MIX_CHANNELS,
 		"the released channel is reused by the displaced ambient marker")
 
 	audio.teardown()
@@ -412,7 +411,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, null)
+	var audio = MissionAudio.new(root, null)
 	audio.setup(mission, "vehicle_catchup.bms", container)
 
 	var idle := {
@@ -501,7 +500,7 @@ end
 	mission.add_entity(MissionData.KIND_MARKER, 100002, Vector3(20, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, item_db)
+	var audio = MissionAudio.new(root, item_db)
 	var provider := OcclusionRecorder.new()
 	audio.set_occlusion_override(provider.occlude)
 	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
@@ -515,7 +514,7 @@ end
 	assert_eq(_players(container).size(), 0,
 		"mission setup stores marker/layer data without creating candidate nodes")
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_lte(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS)
+	assert_lte(_players(container).size(), MissionAudio.MIX_CHANNELS)
 	assert_eq(int(audio.get_stats().get("physical_channels", -1)), _players(container).size())
 	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
 		"setup retains the authored emitter identity through the ambient LOS call")
@@ -570,7 +569,7 @@ end
 		MissionData.KIND_BUILDING, 100002, Vector3(10, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, item_db)
+	var audio = MissionAudio.new(root, item_db)
 	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
 
 	assert_eq(int(stats.get("ambient_candidates", 0)), 2)
@@ -608,7 +607,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	mission.create_default()
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, null)
+	var audio = MissionAudio.new(root, null)
 	audio.setup(mission, "first.bms", container)
 	assert_eq(audio.resolve_dialog_set(1), "Z00gR100")
 	assert_true(audio.play_dialog(1))
@@ -649,7 +648,7 @@ func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
 	mission.set_header_int("reverb", 1)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, null)
+	var audio = MissionAudio.new(root, null)
 	var ambient_bus := AudioServer.get_bus_index(&"Ambient")
 	assert_gte(ambient_bus, 0)
 	audio.setup(mission, "reverb_probe.bms", container)

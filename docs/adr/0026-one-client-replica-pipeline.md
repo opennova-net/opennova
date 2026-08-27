@@ -7,13 +7,13 @@
 
 ## Amendment (2026-08-05)
 
-The replay/spectate consumer named throughout — `NovaNetClient`,
+The replay/spectate consumer named throughout — `NovaWorldClient`,
 `ReplicaHistory`, and the batch `build_replay_timeline` — was deleted as unused
 dev scaffolding (it never shipped and no live path consumed it; the capture
 DECODE chain that feeds parity tests is untouched). The decision itself is
 unchanged and now reads simpler: `ClientReplicaPipeline` is the sole S2C entity
 reducer and `WirePresentPass` its sole presenter (then `wire_present_pass.gd`;
-native `godot/src/simulation/nova_present_applier_wire.cpp` since the #460
+native `godot/src/simulation/present_applier_wire.cpp` since the #460
 rework), with the live joiner
 (`ClientRuntime`) as the one consumer. Mentions of the replay consumer below
 are the original decision text, left as written.
@@ -23,7 +23,7 @@ are the original decision text, left as written.
 Live play and replay/spectate used the same `npwire` decoders but built two
 different client worlds. `Simulation` folded S2C messages into
 `NetClientView` and presented its flat snapshot through `WirePresentPass`.
-`NovaNetClient` retained every decoded message, periodically rebuilt a
+`NovaWorldClient` retained every decoded message, periodically rebuilt a
 `ReplayTimeline`, and rendered that model through `NetWorldView`. The two paths
 could disagree about spawn identity, compact record widths, Person animation,
 Vehicle orientation, lifecycle, and model resolution even when the wire bytes
@@ -39,7 +39,7 @@ physical kind of either entity.
 ## Decision
 
 1. **`ClientReplicaPipeline` is the sole runtime S2C entity reducer.** Both the
-   live `ClientRuntime` adapter and `NovaNetClient` feed decoded server messages
+   live `ClientRuntime` adapter and `NovaWorldClient` feed decoded server messages
    through it. It owns the current `ClientState`, including Person and Vehicle
    compact records, lifecycle, mounts, environment state, and transient
    animation edges.
@@ -73,7 +73,7 @@ physical kind of either entity.
    available for later retail evidence.
 6. **NovaWorld is not a second entity stack.** `NovaWorldClient` owns
    matchmaking, lobby identity, and the handoff to an in-match endpoint.
-   `npruntime`/`npwire` own gameplay replication. `NovaNetClient` is a
+   `npruntime`/`npwire` own gameplay replication. `NovaWorldClient` is a
    capture/replay transport adapter over that same gameplay replica pipeline.
 
 ## Consequences

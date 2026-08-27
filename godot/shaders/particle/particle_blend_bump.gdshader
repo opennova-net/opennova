@@ -6,8 +6,8 @@ shader_type spatial;
 // SPECULAR is intentionally not consumed by this fixed-function program.
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 
-#include "res://shaders/nova_viewmodel_pass.gdshaderinc"
-#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/viewmodel_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
 
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
@@ -24,14 +24,14 @@ void fragment() {
 	// Stage 0 DOT3(TEXTURE, DIFFUSE); stage 1 restores alpha as T.a*D.a.
 	// CUSTOM0 carries the retail SPECULAR dword but this combiner ignores it.
 	float dotv = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
-	ALBEDO = nova_scene_output(vec3(dotv));
+	ALBEDO = scene_output(vec3(dotv));
 	ALPHA = texel.a * COLOR.a;
 }
 
 // The first-person particle batch rides the viewmodel's renderfov projection
-// + depth band inside the beauty pass (nova_viewmodel_pass.gdshaderinc).
+// + depth band inside the beauty pass (viewmodel_pass.gdshaderinc).
 void vertex() {
-	// Every path writes POSITION (see nova_viewmodel_pass.gdshaderinc).
-	POSITION = nova_viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
+	// Every path writes POSITION (see viewmodel_pass.gdshaderinc).
+	POSITION = viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
 			MODELVIEW_MATRIX * vec4(VERTEX, 1.0), PROJECTION_MATRIX);
 }

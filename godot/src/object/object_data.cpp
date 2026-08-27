@@ -1,7 +1,7 @@
 // ObjectData: immutable .3di runtime loading plus the retail network-challenge
 // model registry fed by mounted model-definition loads. Inspection, geometry,
 // and runtime evaluation live in the sibling translation units.
-#include "object/nova_object_data_internal.h"
+#include "object/object_data_internal.h"
 
 #include <cstring>
 #include <unordered_set>

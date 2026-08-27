@@ -7,7 +7,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
-#include "terrain/nova_terrain_data.h"
+#include "terrain/terrain_data.h"
 
 namespace godot {
 

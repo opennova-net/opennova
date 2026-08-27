@@ -1,13 +1,13 @@
 // Simulation — core lifecycle: construction/reset, mission load + step,
 // finish_load, restart, WAC install/state, mission variables, perf counters.
-// The class spans several TUs; see nova_simulation_internal.h for the map.
-#include "simulation/nova_simulation_internal.h"
+// The class spans several TUs; see simulation_internal.h for the map.
+#include "simulation/simulation_internal.h"
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace {
 

@@ -12,7 +12,7 @@
 
 #include <runtime/particle/effect_scene.h>
 
-#include "nova_particle_file.h"
+#include "particle/particle_file.h"
 
 namespace godot {
 

@@ -1,5 +1,5 @@
 void fragment() {
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		#ifdef OBJ_GLOW_NO_PASS
 			#ifdef OBJ_Q3_DEPTH_OCCLUDER
 			obj_apply_q3_coverage(CAMERA_POSITION_WORLD);
@@ -10,7 +10,7 @@ void fragment() {
 		#endif
 		#ifdef OBJ_GLOW_ROTATED_SPECULAR
 		obj_apply_q3_coverage(CAMERA_POSITION_WORLD);
-		ALBEDO = nova_scene_output(obj_apply_additive_fog(
+		ALBEDO = scene_output(obj_apply_additive_fog(
 				obj_glass_glow(CAMERA_POSITION_WORLD), CAMERA_POSITION_WORLD));
 		#endif
 		#ifdef OBJ_GLOW_NORMAL_COPY
@@ -18,7 +18,7 @@ void fragment() {
 		vec3 q3_lit;
 		obj_evaluate_surface(CAMERA_POSITION_WORLD, MODEL_MATRIX,
 				q3_lit, q3_alpha);
-		ALBEDO = nova_scene_output(
+		ALBEDO = scene_output(
 				obj_apply_policy_fog(q3_lit, CAMERA_POSITION_WORLD));
 		#endif
 	} else if (obj_is_slot_shadow_capture(CAMERA_VISIBLE_LAYERS,
@@ -36,13 +36,13 @@ void fragment() {
 	} else {
 		vec3 lit;
 		if (obj_match_terrain_replaces_normal(lit)) {
-			ALBEDO = nova_scene_output(
+			ALBEDO = scene_output(
 					obj_apply_policy_fog(lit, CAMERA_POSITION_WORLD));
 		} else {
 			float alpha;
 			obj_evaluate_surface(CAMERA_POSITION_WORLD, MODEL_MATRIX, lit, alpha);
 			vec3 fogged = obj_apply_policy_fog(lit, CAMERA_POSITION_WORLD);
-			ALBEDO = nova_scene_output(fogged);
+			ALBEDO = scene_output(fogged);
 		}
 	}
 }

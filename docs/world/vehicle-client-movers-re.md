@@ -6,7 +6,7 @@ cbik (bike) mover, and the aircraft contact solve. Implementing code:
 `engine/runtime/world/src/vehicle_motor.cpp` (the family `*_client_tick` movers +
 `watercraft_platform_solve`), `engine/net/netsim/src/client_replica_pipeline.cpp` (the
 per-class row chases), with the joiner wiring in
-`godot/src/simulation/nova_simulation_net.cpp`. Binary: retail
+`godot/src/simulation/simulation_net.cpp`. Binary: retail
 `Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64` — every
 address below is absolute in that image. The between-update mover architecture
 (stage-only reads, the class table, the chase templates) is
@@ -3493,7 +3493,7 @@ mover tail and, for the host's helicopters whose mover is the unported HELO
 movement physics, from the authority pass at the missing tail site;
 `vehicle_ctrl_registers` publishes rotor/tail_rotor/wheels beside
 steering/speed; `present_rows.h` `PF_VEHICLE_ROTOR/_TAIL_ROTOR/_WHEELS` →
-`nova_present_applier` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
+`present_applier` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
 VEHICLE_WHEELS, the ctrl leg 18 → 21 fields, append-only) →
 `ObjectModel::set_ctrl_override`; the seed in `entity_spawn.cpp`. Pinned by
 ctest `vehicle_part_anim` (the pure pins; a player-control buggy spins only

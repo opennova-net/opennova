@@ -210,7 +210,7 @@ func _finish(code: int, failure: String) -> void:
 		await process_frame
 	# `-s` SceneTree scripts compile before autoload names enter the global scope;
 	# resolve the two cleanup services through the public root nodes instead.
-	var music_service := root.get_node_or_null("NovaMusicService")
+	var music_service := root.get_node_or_null("MusicService")
 	if music_service != null and music_service.has_method("stop_context"):
 		music_service.stop_context()
 	var strings := root.get_node_or_null("Strings")

@@ -76,7 +76,7 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `cloudedge` | `SkyDome` → `u_cloud_edge` | HONORED | |
 
 **Why the six dome colors are HONORED (flipped by C7).** `sky.gdshader` +
-`nova_sky.gd` are now a structural port of the recovered combine (C6 grill, G1; spec in
+`sky.gd` are now a structural port of the recovered combine (C6 grill, G1; spec in
 [env-tod-re.md](env-tod-re.md) §Sky dome), folded into one Godot pass: the textureless
 gradient (`oD0 = lerp(skybase + (skybright−skybase)·(0.5·dot(N,sunDir)+0.5),
 skyhighlight, prox⁸)`) under the dual-layer cloud combine (`rgb = density·cloudRamp +
@@ -107,7 +107,7 @@ is the fix wave's (C7) work-order list:
 
 | Target | Disposition | Where | C7 work order |
 |---|---|---|---|
-| G1 sky dome combine | **closed — recovered**, then **ported by C7** (embedded vs_1_1 sources + TSS tables; cloud_rgb = fixed-function-only) | env-tod-re.md §Sky dome + C7 addendum | DONE: `sky.gdshader` + `nova_sky.gd` rewritten from the spec; keyframed-path `u_cloud_tint` deleted; dead c25 not replicated; dome rows flipped HONORED |
+| G1 sky dome combine | **closed — recovered**, then **ported by C7** (embedded vs_1_1 sources + TSS tables; cloud_rgb = fixed-function-only) | env-tod-re.md §Sky dome + C7 addendum | DONE: `sky.gdshader` + `sky.gd` rewritten from the spec; keyframed-path `u_cloud_tint` deleted; dead c25 not replicated; dome rows flipped HONORED |
 | G2 iris curve | **closed — recovered** (global auto-exposure, 64 = identity) | env-tod-re.md §Iris auto-exposure | Spec ready; requires the modulator chain — defer implementation, keep UNCONSUMED badge |
 | G3 terrain_rgb consumers | **closed — refuted terrain-inert** (bake / water quads / foliage all live) | env-tod-re.md §iris/terrain_rgb | Row stays PARTIAL with the real gap named; per-consumer port decisions ride the terrain/foliage work, not C7 |
 | G4 ApplyFogAndAmbient walk | **closed — complete** (8-row walk; exposure → `Render_LightScaleRGB` shader constant) | env-tod-re.md §…walk | Ceiling/floor: **keep** (live exposure inputs + effects indoor ambient); badge as deferred-consumer, do not delete |

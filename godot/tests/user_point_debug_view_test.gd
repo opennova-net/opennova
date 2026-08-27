@@ -81,7 +81,7 @@ func test_world_view_tracks_grouped_static_instances_and_live_model_lifecycle() 
 			"one overlay is built per static entity, never per submesh")
 	assert_eq(view.get_live_overlay_count(), 0)
 
-	# Discovery is typed: live sources ARE NovaObjectModels.
+	# Discovery is typed: live sources ARE ObjectModels.
 	var live := ObjectModel.new()
 	root.add_child(live)
 	live.set_process(false)

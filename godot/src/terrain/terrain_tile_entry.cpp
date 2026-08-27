@@ -1,4 +1,4 @@
-#include "nova_terrain_tile_entry.h"
+#include "terrain/terrain_tile_entry.h"
 
 #include <algorithm>
 

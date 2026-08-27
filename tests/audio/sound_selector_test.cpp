@@ -1,5 +1,5 @@
 // opennova::audio::SoundSelector: the sound-set member-selection state machine pushed down from the
-// Godot layer (nova_sound_bank.gd _pick_member). Grilled vs Jointops.exe 2026-06-09: the selection
+// Godot layer (sound_bank.gd _pick_member). Grilled vs Jointops.exe 2026-06-09: the selection
 // shapes AND the random stream are asserted against the engine algorithm
 // [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0, PRNG_ScaledRandom @ 0x75be50, seed @ 0x85A3DC]:
 //   state = ROL32(state + ROL32(state, 11), 3); pick = (count * (state & 0xFF)) >> 8;

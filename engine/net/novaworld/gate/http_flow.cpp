@@ -64,7 +64,7 @@ void LobbyHttpFlow::reset() {
 	join_rid_ = 0;
 }
 
-// [orig: nova_world_client.cpp http_base()] — three derivation tiers.
+// (see godot/src/network/novaworld_client.cpp http_base()) — three derivation tiers.
 std::string LobbyHttpFlow::http_base() const {
 	const bool templated = !ctx_.startup_url.empty() && ctx_.startup_url.find("[domainname]") != std::string::npos;
 	if (templated && !ctx_.web_domain.empty()) {

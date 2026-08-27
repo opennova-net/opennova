@@ -1,6 +1,6 @@
 // CaptureDecoder streaming-equivalence regression.
 //
-// The in-engine net client (godot NovaNetClient) cannot re-run the whole-capture
+// The in-engine net client (godot NovaWorldClient) cannot re-run the whole-capture
 // decode_capture_to_messages() over a growing buffer every frame — that is
 // O(n^2) on a multi-MB session. CaptureDecoder is the resumable form: push()
 // one datagram, get the messages that completed on it, with the per-session SCRK

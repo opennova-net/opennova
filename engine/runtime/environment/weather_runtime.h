@@ -1,5 +1,5 @@
 // The weather/light smoothing owner — the orchestration half of the witnessed
-// weather tick, ported verbatim from nova_weather.gd (2026-08-09
+// weather tick, ported verbatim from weather.gd (2026-08-09
 // de-scripting). env::WeatherCore (engine/formats/env) owns the witnessed
 // state cluster of [orig: Environment_UpdateWeatherTick @ 0x57e9b0]: the wind
 // PRNG/sway oscillator, both lightning flash sequencers

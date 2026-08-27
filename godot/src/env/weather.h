@@ -24,7 +24,7 @@ class MissionEnvironment;
 // env::WeatherCore in engine/formats/env). This node keeps only device work:
 // the environment NodePath resolution, the _process hook, the iris-sample
 // property the in-world shell stamps, and the opennova_* global shader
-// parameter pushes. Ported from nova_weather.gd (2026-08-09 de-scripting);
+// parameter pushes. Ported from weather.gd (2026-08-09 de-scripting);
 // RE record: docs/env/env-tod-re.md.
 class Weather : public Node3D {
 	GDCLASS(Weather, Node3D)

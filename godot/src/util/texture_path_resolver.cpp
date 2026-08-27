@@ -1,6 +1,6 @@
-#include "texture_path_resolver.h"
+#include "util/texture_path_resolver.h"
 
-#include "util/nova_data_format.h"
+#include "util/data_format.h"
 #include "util/pcx_texture_bridge.h"
 
 #include <godot_cpp/classes/dir_access.hpp>
@@ -275,8 +275,8 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 
 	if (is_resource_dir(dir)) {
 		// res://: ResourceLoader resolves the imported CompressedTexture2D (.ctex)
-		// for .tga and routes .pcx/.mdt through ResourceFormatLoaderNovaTexture —
-		// the only path that survives export (raw .tga sources are not packed).
+		// for .tga — the only path that survives export (raw .tga sources are not
+		// packed); a candidate ResourceLoader cannot see is skipped.
 		godot::ResourceLoader *loader = godot::ResourceLoader::get_singleton();
 		for (const godot::String &file : candidates) {
 			const godot::String path = dir.path_join(file);

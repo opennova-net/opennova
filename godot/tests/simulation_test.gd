@@ -76,7 +76,7 @@ const SYN_PANM_LIVENESS_DIR := "res://../fixtures/threedi/synthetic/"
 
 
 func _native_fixture_dir() -> String:
-	var dir := OS.get_cache_dir().path_join("nova_sim_native_%d_%d" % [
+	var dir := OS.get_cache_dir().path_join("sim_native_%d_%d" % [
 			Time.get_ticks_usec(), _native_fixture_dirs.size()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 	_native_fixture_dirs.append(dir)
@@ -2549,7 +2549,7 @@ end
 	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 0.0, 0.01,
 		"the forward-facing ctrlx13 point carries a zero yaw offset")
 	# The mounted anim state (89 = anim_sit_13) is asserted via the debug card below; the present
-	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
+	# snapshot is the listen-server ClientState now (covered by listen_server_test).
 	var card: Dictionary = sim.get_entity_debug(soldier_idx)
 	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
 	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
@@ -3686,7 +3686,7 @@ end
 	for _board_tick in range(48):
 		sim.step()
 	# The mounted anim state (67 = anim_emplaced) is asserted via the debug card below; the present
-	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
+	# snapshot is the listen-server ClientState now (covered by listen_server_test).
 	var card: Dictionary = sim.get_entity_debug(0)
 	assert_true(bool(card["mounted"]), "debug card marks UseGun occupant mounted")
 	assert_eq(int(card["mount_type"]), 3, "seat type is UseGun/gunner")
@@ -3700,7 +3700,7 @@ end
 
 
 # (P7: the 3 no-net AI-pool present-snapshot tests were deleted — the present is now the listen-
-#  server ClientState, covered by nova_listen_server_test; the editor no-net preview is retired.)
+#  server ClientState, covered by listen_server_test; the editor no-net preview is retired.)
 
 
 
@@ -4132,7 +4132,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	# use huskFinal for pieces (and our legacy collision fallback), but it must not
 	# mine that model for KZ anchors; the empty bank selects the origin fallback.
 	var final_only_path := ProjectSettings.globalize_path(
-			"user://nova_simulation_final_only_husk_items.def")
+			"user://simulation_final_only_husk_items.def")
 	var final_only_file := FileAccess.open(final_only_path, FileAccess.WRITE)
 	assert_not_null(final_only_file)
 	if final_only_file == null:

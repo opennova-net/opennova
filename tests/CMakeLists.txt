@@ -221,7 +221,7 @@ target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 
 # Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
-# pushed down from nova_sound_bank.gd into engine/runtime/audio.
+# pushed down from sound_bank.gd into engine/runtime/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)
 target_link_libraries(sound_selector_test PRIVATE opennova_runtime)
 target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -238,7 +238,7 @@ add_test(NAME footstep_slot COMMAND footstep_slot_test)
 
 # Ambient marker emitter system: the staggered tick&7 registration cadence, tick-unit
 # slot keep-alives, and the per-frame live-slot mix, pushed down from
-# nova_mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
+# mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
 add_executable(ambient_mixer_test audio/ambient_mixer_test.cpp)
 target_link_libraries(ambient_mixer_test PRIVATE opennova_runtime)
 

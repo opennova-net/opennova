@@ -12,7 +12,7 @@
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 namespace godot {
 

@@ -1,7 +1,7 @@
 # Mission loading screen — reverse-engineering record
 
-Validation record for the mission loading screen (`godot/game/ui/nova_loading_screen.gd`,
-progress wiring in `godot/game/world/game_world.gd` + `godot/src/mission/nova_mission_object_placer.cpp`,
+Validation record for the mission loading screen (`godot/game/ui/loading_screen.gd`,
+progress wiring in `godot/game/world/game_world.gd` + `godot/src/mission/mission_object_placer.cpp`,
 shell lifecycle in `godot/game/main_game.gd`) against the original engine as witnessed in IDA
 Pro. Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses below are
 that binary's. This file is the committed home for the divergence catalog that code comments
@@ -280,7 +280,7 @@ call), then queues deploy event 12 and sets
 not ported; recorded as a residual rather than blocking the load-end port.
 
 **Port mapping** (2026-08-15): the splash is a mode of `LoadingScreen`
-(`godot/game/ui/nova_loading_screen.gd` — `begin_start_mission_splash`,
+(`godot/game/ui/loading_screen.gd` — `begin_start_mission_splash`,
 `_input`/`_process` dismissal edges, the CLOSING background-only frame, the
 `splash_dismissed` signal); `WorldLoadCoordinator` owns the gate + device legs
 (`maybe_begin_start_mission_splash` — the session/custom-bg gate, the OS-cursor
@@ -296,7 +296,7 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 
 ## Port notes (the structural translation)
 
-- `LoadingScreen` (godot/game/ui/nova_loading_screen.gd) draws the texture stretched
+- `LoadingScreen` (godot/game/ui/loading_screen.gd) draws the texture stretched
   over the display and the MP text in image space under the image's scale transform — the
   same net composite the original gets by rendering glyphs into the texture then
   stretching. The bar arithmetic, colors, throttle and creep are ported integer-exact.

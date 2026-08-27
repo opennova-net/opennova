@@ -1,6 +1,6 @@
 // Simulation — the LOCAL PLAYER view cluster: view effects (NVG /
 // binoculars / scope), camera mode, and the composed view read.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
@@ -10,7 +10,7 @@
 #include <climits>
 #include <cmath>
 
-using namespace novasim;
+using namespace sim_internal;
 
 void Simulation::reset_local_player_view_effects() {
 	player_view_.binoculars_requested = false;

@@ -13,12 +13,12 @@
 
 #include <runtime/mission/placement_traits.h>
 
-#include "object/nova_item_database.h"
-#include "object/nova_avatar_database.h"
-#include "object/nova_object_data.h"
-#include "object/nova_object_model.h"
-#include "object/nova_skeletal_anim.h"
-#include "resource_index/nova_resource_root.h"
+#include "object/item_database.h"
+#include "object/avatar_database.h"
+#include "object/object_data.h"
+#include "object/object_model.h"
+#include "object/skeletal_anim.h"
+#include "resource_index/resource_root.h"
 
 namespace godot {
 

@@ -63,14 +63,14 @@ Gotchas:
   mission-load regression hid here; do not call it casually. `list_files()` is
   kind-curated: load known filenames via `read_file`/`has_file`; don't expect them listed.
 - Bind native C++ engine APIs directly. Do not introduce a parallel flat FFI surface.
-- Net bindings (`network/nova_world_client`, `network/nova_lan_session`) are thin pumps
+- Net bindings (`network/novaworld_client`, `network/lan_session`) are thin pumps
   over the wire-compatible codecs — `engine/net/npwire` for the in-game codec + capture decode
   (ADR 0019), `engine/net/novaworld` for matchmaking — sockets and signals here, protocol and
   crypto in `engine/` (ADR 0010). Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
 - Decoded in-match entities have one runtime fold and one presenter (ADR 0026):
   `ClientReplicaPipeline` owns `ClientState`, and the native `WirePresentPass`
-  (`simulation/nova_wire_present_pass.cpp`; the hot row walk lives in
-  `nova_present_applier_wire.cpp`) renders it for live joiners.
+  (`simulation/wire_present_pass.cpp`; the hot row walk lives in
+  `present_applier_wire.cpp`) renders it for live joiners.
   Nothing may grow another entity reducer or presenter. `NovaWorldClient` is matchmaking/handoff, not a
   gameplay-replication stack.

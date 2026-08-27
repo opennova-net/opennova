@@ -77,16 +77,16 @@ the adapter's total):
 | TU | Verdict |
 |---|---|
 | `client_replica_present_projection.*` | **Moved** to `engine/net/npruntime` with its composition helpers (`client_replica_present.h`); the `PF_*` row layout became the engine contract `world/present_rows.h` and `Simulation`'s bound enum is a value-assigned re-export. |
-| `nova_simulation_assets.cpp` | **Re-opened** (maintainer decision 2026-08-08, overriding the S7b "render-coupled asset resolution" leg): the collision/occlusion resolution loops and the seat-spec install family move to `engine/runtime/simassets` beside the receptacles that already exist; the adapter keeps thin model-loading hooks. The shape-C2 round also moved the mounted-pose CTRL-bus composition and PANM clock into `simassets/mounted_pose`. |
-| `nova_simulation_player_loadout.cpp` | **Split re-opened** (same decision): the joiner 0x2F kit pushes and session-kit seed/reseed move engine-side; the dict conversion + playersav profile READING stay, per the S7b seam shape. The shape-C2 round moved the remaining live math: the mount-toggle gate/candidate (`world/vehicle_attach`), the mission chunk-tuple stash (`mission/promote`), and the 0x5A grant→kit conversion (`npruntime/loadout_submit`). |
-| `nova_simulation_net.cpp` | Stays: socket + signal pumps over the npruntime state machines. Its cites document bring-up sequencing at the seam. |
-| `nova_simulation.cpp` | Stays: lifecycle binding — construct/reset, the mission-boot step wiring (the ORDER contract lives engine-side in `mission/runtime_boot`), WAC install, mission vars. |
-| `nova_simulation_occlusion.cpp` | Stays: verified a binding over `world::occlusion` — camera marshalling in, `occlusion_world_` calls through, debug dictionaries out. Its cites document call order at the binding site. |
-| `nova_simulation_player*.cpp` (player / view / weapon) | Stay: the local-player pumps delegating to `world::local_*` (the S6a/S7a/S22 close-outs); dict/device legs per the seam band. |
-| `nova_simulation_present.cpp` | Stays: presentation reads — packed snapshot assembly plus role/world enrichment over the engine projection. |
-| `nova_present_applier*.cpp` | Stay: presentation — packed rows onto `Node3D`/`Skeleton3D` via cached StringName dispatch. |
-| `nova_simulation_bind.cpp` | Stays: pure ClassDB registration. |
-| `nova_simulation_internal.h` | Stays: the family's Godot-type packers and the using-declaration re-exports over moved engine helpers (the S4b/S10a house pattern). |
+| `simulation_assets.cpp` | **Re-opened** (maintainer decision 2026-08-08, overriding the S7b "render-coupled asset resolution" leg): the collision/occlusion resolution loops and the seat-spec install family move to `engine/runtime/simassets` beside the receptacles that already exist; the adapter keeps thin model-loading hooks. The shape-C2 round also moved the mounted-pose CTRL-bus composition and PANM clock into `simassets/mounted_pose`. |
+| `simulation_player_loadout.cpp` | **Split re-opened** (same decision): the joiner 0x2F kit pushes and session-kit seed/reseed move engine-side; the dict conversion + playersav profile READING stay, per the S7b seam shape. The shape-C2 round moved the remaining live math: the mount-toggle gate/candidate (`world/vehicle_attach`), the mission chunk-tuple stash (`mission/promote`), and the 0x5A grant→kit conversion (`npruntime/loadout_submit`). |
+| `simulation_net.cpp` | Stays: socket + signal pumps over the npruntime state machines. Its cites document bring-up sequencing at the seam. |
+| `simulation.cpp` | Stays: lifecycle binding — construct/reset, the mission-boot step wiring (the ORDER contract lives engine-side in `mission/runtime_boot`), WAC install, mission vars. |
+| `simulation_occlusion.cpp` | Stays: verified a binding over `world::occlusion` — camera marshalling in, `occlusion_world_` calls through, debug dictionaries out. Its cites document call order at the binding site. |
+| `simulation_player*.cpp` (player / view / weapon) | Stay: the local-player pumps delegating to `world::local_*` (the S6a/S7a/S22 close-outs); dict/device legs per the seam band. |
+| `simulation_present.cpp` | Stays: presentation reads — packed snapshot assembly plus role/world enrichment over the engine projection. |
+| `present_applier*.cpp` | Stay: presentation — packed rows onto `Node3D`/`Skeleton3D` via cached StringName dispatch. |
+| `simulation_bind.cpp` | Stays: pure ClassDB registration. |
+| `simulation_internal.h` | Stays: the family's Godot-type packers and the using-declaration re-exports over moved engine helpers (the S4b/S10a house pattern). |
 
 ### 4. The growth mechanism, stated once
 

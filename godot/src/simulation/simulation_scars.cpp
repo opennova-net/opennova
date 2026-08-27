@@ -3,12 +3,12 @@
 // packed arrays ScarPresenter uploads. The sim stays render-free; the device
 // inputs (camera, fog distance, the terrain light colour) arrive from the shell
 // per present frame.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/impact_scar.h>
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace {
 

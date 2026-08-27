@@ -179,7 +179,7 @@ func _fsm_str(v) -> String:
 		v.reload_serial, v.play_serial, v.anim_key]
 
 
-# The two NovaObjectModels under the PlayerViewmodel container (arms + gun).
+# The two ObjectModels under the PlayerViewmodel container (arms + gun).
 func _viewmodel_models(node: Node) -> Array:
 	if node.name == "PlayerViewmodel":
 		var out: Array = []

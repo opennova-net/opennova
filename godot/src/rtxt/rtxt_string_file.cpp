@@ -1,7 +1,7 @@
-#include "rtxt_string_file.h"
+#include "rtxt/rtxt_string_file.h"
 
-#include "util/nova_cp1252.h"
-#include "util/nova_data_format.h"
+#include "util/cp1252.h"
+#include "util/data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/error_macros.hpp>

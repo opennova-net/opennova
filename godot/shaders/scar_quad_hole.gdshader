@@ -13,8 +13,8 @@ render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
 
 // Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
 // the exact inverse of the blit's transfer curve on the way out.
-#include "res://shaders/nova_color.gdshaderinc"
-#include "res://shaders/nova_frame_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
 
 uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
 
@@ -31,7 +31,7 @@ void vertex() {
 }
 
 void fragment() {
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		discard;
 	}
 	vec4 tex = texture(albedo_tex, UV);
@@ -41,6 +41,6 @@ void fragment() {
 		discard;
 	}
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating.
-	ALBEDO = nova_scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
+	ALBEDO = scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
 	ALPHA = alpha;
 }

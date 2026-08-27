@@ -1,4 +1,4 @@
-#include "env/nova_water_core.h"
+#include "env/water_core.h"
 
 #include <cmath>
 
@@ -60,8 +60,8 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	// Godot world axes coincide COMPONENTWISE with the render (d3d) basis:
 	// both are (-engY, engZ, engX) of the engine axes [orig:
 	// Math_FixedPointToFloat3_YNegated @ 0x611210] — the same identity
-	// nova_star_field.cpp serves its godot-space buffers under, and the one
-	// nova_water.gd already relies on when it feeds get_water_uv_state with
+	// star_field.cpp serves its godot-space buffers under, and the one
+	// water.gd already relies on when it feeds get_water_uv_state with
 	// godot cam x/z. Positions and directions therefore carry over UNCHANGED;
 	// only the matrix conventions differ (D3D row-vector v' = v * M vs
 	// Godot's column-vector transforms).

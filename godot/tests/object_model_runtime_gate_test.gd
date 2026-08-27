@@ -473,7 +473,7 @@ func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 
 
 # --- Event-driven runtime scheduling: models self-park while idle -----------
-# A joiner streams the whole mission (800+ live NovaObjectModels); the fix
+# A joiner streams the whole mission (800+ live ObjectModels); the fix
 # stops idle models from paying a per-frame _process. Every mutator that can
 # create per-frame work re-arms processing, and one runtime frame with no
 # live work parks the model again. Placed mission/wire models always carry the

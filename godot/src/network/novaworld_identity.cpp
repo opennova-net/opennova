@@ -1,4 +1,4 @@
-#include "nova_world_identity.h"
+#include "network/novaworld_identity.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX

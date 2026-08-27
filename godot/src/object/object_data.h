@@ -25,7 +25,7 @@
 
 #include <runtime/renderer/material_eval.h>
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 namespace godot {
 

@@ -9,7 +9,6 @@ extends SceneTree
 # Use: godot --headless --path godot -s res://tests/mission_audio_probe.gd -- <dir> <expansion> [mission.bms ...]
 # With no missions listed, probes every .bms the mount's index lists (cap 12).
 
-const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 
 func _initialize() -> void:
@@ -56,7 +55,7 @@ func _run() -> void:
 			continue
 		var container := Node3D.new()
 		get_root().add_child(container)
-		var audio = NovaMissionAudioScript.new(root, item_db)
+		var audio = MissionAudio.new(root, item_db)
 		var stats: Dictionary = audio.setup(mission, m, container)
 		print("[probe] %-28s resolved %3d/%3d markers, %d banks, %d candidates, %d dialogs" % [
 			m, int(stats.get("markers_resolved", 0)), int(stats.get("markers_total", 0)),

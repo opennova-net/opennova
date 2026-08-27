@@ -1,4 +1,4 @@
-#include "env/nova_glare_occlusion.h"
+#include "env/glare_occlusion.h"
 
 using namespace godot;
 

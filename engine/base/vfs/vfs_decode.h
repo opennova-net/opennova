@@ -7,7 +7,7 @@
 namespace opennova {
 
 // How the SCR key is chosen when decoding. The values mirror ScrPolicy in
-// gameprofile.h one-for-one (same ordinals) so a caller holding a NovaGameProfile can pass
+// gameprofile.h one-for-one (same ordinals) so a caller holding a GameProfile can pass
 // profile->scr_policy straight through, but the enum is duplicated here to keep engine/base/vfs free
 // of a gameprofile dependency (vfs is the lower layer). The version byte alone cannot tell the
 // JO Demo (DEFAULT-keyed) from retail JO/DFX2 (JO_DFX2-keyed) — both stamp version 1 — so a

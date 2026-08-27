@@ -1,6 +1,6 @@
-#include "lwf/nova_lwf_data.h"
+#include "lwf/lwf_data.h"
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <runtime/audio/sound_selector.h>
 
@@ -19,7 +19,7 @@ namespace godot {
 
 namespace {
 
-// The class-constant mirrors (nova_lwf_data.h) are pinned to their engine
+// The class-constant mirrors (lwf_data.h) are pinned to their engine
 // homes here so they can never drift: selection modes to
 // opennova::audio::SelectionMode, flags to opennova::lwf::PlaylistFlags.
 static_assert(LwfData::SELECTION_FIRST == opennova::audio::kFirst);
