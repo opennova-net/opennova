@@ -422,7 +422,7 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 		_debug_adapter.set_probe_seams(ProbeShellSeams.for_shell(self,
 				func(): return _world, func(): return _player_presenter,
 				func(): return _hud_presenter, func(): return _menu_shell,
-				func(): return _armory_presenter))
+				func(): return _armory_presenter, func(): return _deploy_presenter))
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
 	return _frame_stats

@@ -65,6 +65,10 @@ func armory_presenter() -> ArmoryPresenter:
 	return _supply(seams.armory_presenter_source if seams != null else Callable()) as ArmoryPresenter
 
 
+func deploy_presenter() -> DeployScreenPresenter:
+	return _supply(seams.deploy_presenter_source if seams != null else Callable()) as DeployScreenPresenter
+
+
 func dev_tools() -> DevTools:
 	return _supply(seams.dev_tools_source if seams != null else Callable()) as DevTools
 

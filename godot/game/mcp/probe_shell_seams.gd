@@ -21,6 +21,8 @@ var hud_presenter_source := Callable()
 var menu_shell_source := Callable()
 ## func() -> ArmoryPresenter (the shell's in-world armory surface)
 var armory_presenter_source := Callable()
+## func() -> DeployScreenPresenter (the joiner's deploy-map screen)
+var deploy_presenter_source := Callable()
 ## func() -> DevTools
 var dev_tools_source := Callable()
 ## func() -> FrameStats
@@ -46,7 +48,7 @@ var return_to_menu := Callable()
 ## return_to_menu); the runtime rides the world's get_runtime().
 static func for_shell(shell: Node, world: Callable, presenter: Callable,
 		hud_presenter: Callable, menu_shell: Callable,
-		armory_presenter := Callable()) -> ProbeShellSeams:
+		armory_presenter := Callable(), deploy_presenter := Callable()) -> ProbeShellSeams:
 	var seams := ProbeShellSeams.new()
 	seams.game_source = func() -> Node: return shell
 	seams.world_source = world
@@ -57,6 +59,7 @@ static func for_shell(shell: Node, world: Callable, presenter: Callable,
 	seams.hud_presenter_source = hud_presenter
 	seams.menu_shell_source = menu_shell
 	seams.armory_presenter_source = armory_presenter
+	seams.deploy_presenter_source = deploy_presenter
 	seams.dev_tools_source = Callable(shell, "get_dev_tools")
 	seams.frame_stats_source = Callable(shell, "get_frame_stats")
 	seams.viewport_source = Callable(shell, "get_viewport")

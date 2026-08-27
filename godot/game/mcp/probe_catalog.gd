@@ -11,6 +11,7 @@ const PERF := "res://probes/perf/"
 const RENDER := "res://probes/render/"
 const STAGE := "res://probes/stage/"
 const RUNTIME := "res://probes/runtime/"
+const NET := "res://probes/net/"
 
 # Built once: the runner and the tool look definitions up by identity.
 static var _definitions: Array[ProbeDef] = []
@@ -244,6 +245,43 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"animtrace": { "type": "boolean", "default": false },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 900_000),
+		ProbeDef.make("parity_joiner_ready",
+				"Wait until this --lan-join joiner reaches `readiness_mode` (in_match: a "
+				+ "live local player in the InMatch phase, the default deployment pick sent "
+				+ "with `auto_deploy`; deploy_hold: the pick pending on a granted handle with "
+				+ "the DEATH screen presented) and return the readiness witness the parity "
+				+ "runner classifies; published as progress every heartbeat while waiting.",
+				NET + "parity_joiner_ready_probe.gd", {
+					"readiness_mode": { "type": "string", "enum": ["in_match", "deploy_hold"],
+							"default": "in_match" },
+					"auto_deploy": { "type": "boolean", "default": false },
+					"exercise_motion": { "type": "boolean", "default": false },
+					"run_id": { "type": "string", "minLength": 1 },
+					"topology": { "type": "string", "enum": ["RO", "OO"] },
+				}, ["run_id", "topology"], false, false, 250_000),
+		ProbeDef.make("parity_joiner_motion",
+				"The joiner's walk/strafe/turn witness inside the runner's steady window: "
+				+ "pre-roll, then W 1.8 s / D 1.2 s / A 0.9 s with the look fed in twenty "
+				+ "samples per phase; the completed exercise (gate metadata echoed) is the "
+				+ "verdict's witness.",
+				NET + "parity_joiner_motion_probe.gd", {
+					"run_id": { "type": "string", "minLength": 1 },
+					"topology": { "type": "string", "enum": ["RO", "OO"] },
+					"steady_started_utc": { "type": "string", "minLength": 1 },
+					"readiness_mode": { "type": "string", "enum": ["in_match", "deploy_hold"],
+							"default": "in_match" },
+					"auto_deploy": { "type": "boolean", "default": false },
+				}, ["run_id", "topology", "steady_started_utc"], false, true, 60_000),
+		ProbeDef.make("parity_joiner_state",
+				"This joiner's readiness witness right now (one synchronous read): the "
+				+ "runner's initial/final snapshots around a steady window, carrying the "
+				+ "deployment pick and motion exercise the process witnessed earlier.",
+				NET + "parity_joiner_state_probe.gd", {
+					"readiness_mode": { "type": "string", "enum": ["in_match", "deploy_hold"],
+							"default": "in_match" },
+					"auto_deploy": { "type": "boolean", "default": false },
+					"exercise_motion": { "type": "boolean", "default": false },
+				}, [], false, false, 30_000),
 	]
 
 
