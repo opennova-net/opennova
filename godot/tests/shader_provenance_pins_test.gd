@@ -166,14 +166,20 @@ func test_validation_scope_is_the_locked_highest_quality_retail_profile() -> voi
 	assert_eq(String(retail_profile["id"]), String(scope["fixture_contract"]))
 	assert_eq(int(retail_profile["required_values"]["shader_usage_level"]), 2)
 
+	# The pinned values are the engine's (runtime/menu/options_policy.h);
+	# the shell script only selects and locks the authored widgets.
 	var policy := _read_repo(String(scope["locked_menu_policy"]))
 	_contains_all(policy, [
-		"QualityControl.new(&\"SHADERUSAGE\", \"2\")",
-		"QualityControl.new(&\"TERRAINPOLY\", \"3\")",
-		"QualityControl.new(&\"OBJECTTEX\", \"3\")",
-		"QualityControl.new(&\"SHADOWQUALITY\", \"3\")",
-		"driver.set_widget_disabled(id, true)",
+		"{\"SHADERUSAGE\", \"2\"}",
+		"{\"TERRAINPOLY\", \"3\"}",
+		"{\"OBJECTTEX\", \"3\"}",
+		"{\"SHADOWQUALITY\", \"3\"}",
 	], "the locked menu policy")
+	var shell := _read_repo(String(scope["locked_menu_shell"]))
+	_contains_all(shell, [
+		"MenuFrame.video_quality_controls()",
+		"driver.set_widget_disabled(id, true)",
+	], "the locked menu shell")
 
 
 func test_provenance_contracts_are_reviewable_and_citations_resolve_to_docs() -> void:
